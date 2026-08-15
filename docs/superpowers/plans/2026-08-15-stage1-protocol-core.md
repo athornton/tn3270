@@ -2936,21 +2936,6 @@ describe('command recognition', () => {
     expect(parseRecord(Uint8Array.of(Cmd.EAU)).command).toBe('EraseAllUnprotected');
   });
 
-  it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
-    // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
-    // disambiguates: commandOf only ever sees the command byte. x3270 accepts
-    // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750). Rejecting the
-    // non-SNA form would raise a program check on a host that sends structured
-    // fields that way — the exact desync that skipping WSF exists to avoid.
-    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
-      .toBe('WriteStructuredField');
-    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
-      .toBe('WriteStructuredField');
-    // And 0x11 in ORDER position is still SBA, not a nested WSF.
-    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));
-    expect(r.tokens[0]).toEqual({ kind: 'sba', address: 0 });
-  });
-
   it('parses the read commands, which carry no WCC', () => {
     expect(parseRecord(Uint8Array.of(SnaCmd.RB)).command).toBe('ReadBuffer');
     expect(parseRecord(Uint8Array.of(SnaCmd.RM)).command).toBe('ReadModified');
@@ -2972,6 +2957,19 @@ describe('command recognition', () => {
       kind: 'structuredFields',
       data: Uint8Array.of(0x00, 0x05, 0x01, 0xff, 0x02),
     });
+  });
+
+  it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
+    // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
+    // disambiguates: commandOf only ever sees the command byte. x3270 accepts
+    // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750).
+    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    // And 0x11 in ORDER position is still SBA, not a nested WSF.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));
+    expect(r.tokens[0]).toEqual({ kind: 'sba', address: 0 });
   });
 
   it('rejects an empty record', () => {
@@ -3348,7 +3346,7 @@ export function describeRecord(record: Uint8Array): string {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/parse.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 23 tests.
 
 - [ ] **Step 5: Commit**
 
