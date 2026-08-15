@@ -51,41 +51,65 @@ preferences UI.
 2. TN3270E: negotiated screen size, extended attributes
 3. IND$FILE file transfer
 4. Printer sessions (LU1/LU3, 3287 emulation)
+5. **Programmable Symbol Sets** — host-loadable glyph bitmaps, and with them the
+   first real images on the display (see *3279 Graphics* below)
+
+PS is a committed deliverable, not a maybe. It is placed after TN3270E because
+it depends on it: PS is loaded via structured fields, and the host will not send
+those until Query Reply has advertised the capability. Its position relative to
+IND$FILE and printer sessions is a preference, not a constraint — it can move
+earlier if wanted, so long as it stays after TN3270E.
 
 Multi-session support and additional EBCDIC code pages are not staged
 separately; stage 1 leaves stubs (see *Forward-Compatibility Stubs*) so they
 become incremental work whenever wanted.
 
-### A Later Dimension — 3279 Graphics / GDDM
+### 3279 Graphics — Programmable Symbol Sets, and later GDDM
 
-Not scheduled, but an explicit long-term goal, and therefore a constraint on
-stage 1 and 2 decisions. Eventually the emulator should reach the fidelity of
-what real 3279 hardware could display — the reference point being the primitive
-GIF viewer Rick Troth wrote for his own 3279 around 1992.
+The emulator should reach the fidelity of what real 3279 hardware could display.
+The reference point is the primitive GIF viewer Rick Troth wrote for his own 3279
+around 1992.
 
-What it entails, roughly in order of increasing effort:
+**Programmable Symbol Sets are in scope as stage 4 item 5** (above). GDDM vector
+graphics remain unscheduled beyond that.
 
-- **WSF Query Reply** advertising graphics capability (usage, character sets,
-  implicit partition, alphanumeric/graphic partitions).
-- **Programmable Symbol Sets (PS)** — host-loadable character cell bitmaps.
-  This is precisely how a GIF viewer on real hardware worked: the image was
-  loaded as custom glyphs and then "typed" onto the screen. It is the cheapest
-  path to real images and the one with actual historical fidelity.
+Components, in dependency order:
+
+- **WSF Query Reply** advertising capability (usage, character sets, implicit
+  partition, alphanumeric/graphic partitions). Required first: the host sends
+  nothing graphical until the terminal has said it can receive it. Lands with
+  TN3270E.
+- **Programmable Symbol Sets (PS)** — host-loadable character cell bitmaps,
+  delivered by the Load Programmable Symbols structured field. This is exactly
+  how a GIF viewer on real hardware worked: the image was decomposed into custom
+  glyphs, loaded into PS stores, then "typed" onto the screen as characters
+  selected via `GE`. Cheapest path to real images and the historically faithful
+  one. **Committed.**
 - **GDF (Graphics Data Format) order parsing** — the vector primitives GDDM
-  emits inside structured fields.
-- **Raster/vector rendering** into the display.
+  emits inside structured fields. Not scheduled.
+- **Vector rendering** into the display. Not scheduled; follows GDF.
 
-Honest limitation: on real hardware this was bounded by 3279 resolutions and a
-small number of loadable character sets. Troth's viewer was primitive because
-the terminal was. Matching that fidelity is achievable; exceeding it
-substantially means going beyond what the hardware did, which is a separate
-conversation.
+What PS support concretely requires, once Query Reply exists: parsing the Load
+PS structured field; PS *stores* as a session-level resource (multiple loadable
+sets, selected per-cell); the renderer drawing a cell from a loaded bitmap rather
+than the font — which is precisely what the tagged cell-content variant in
+*Forward-Compatibility Stubs* preserves; and `GE`-prefixed character references
+resolving to a PS store rather than the codepage. Cell bitmaps are small
+monochrome or 4-color rasters at the 3279's cell resolution, so rendering them is
+a `putImageData`-class operation, not a new graphics pipeline.
 
-Nothing in stage 1 precludes this. Two stage-1 decisions actively enable it:
-`GE` (0x08) is parsed rather than rejected, so the graphic-escape path exists;
-and `WSF` (0xF3) is recognized, skipped, and traced, so the bytes that carry
-GDDM graphics already route to a known place instead of desynchronizing the
-stream. That stub is the future entry point.
+Honest limitation: on real hardware this was bounded by 3279 cell resolution and
+a small number of loadable sets. Troth's viewer was primitive because the
+terminal was. Matching that fidelity is achievable; exceeding it substantially
+means going beyond what the hardware did, which is a separate conversation.
+
+Nothing in stage 1 precludes this. Three stage-1 and stage-2 decisions actively
+enable it: `GE` (0x08) is parsed rather than rejected, so the graphic-escape path
+exists and is exactly how PS glyphs get selected; `WSF` (0xF3) is recognized,
+skipped, and traced, so the bytes carrying both PS loads and GDDM graphics
+already route to a known place instead of desynchronizing the stream; and cell
+content is a tagged variant, so a cell can later hold a loaded bitmap without
+rewriting the renderer. Those stubs are the future entry points.
 
 ### Out of Scope
 
@@ -252,7 +276,7 @@ cleanly does not.
 Extended attributes (SFE/MF/SA), color and highlighting on the wire, graphic
 escapes beyond skipping, TN3270E headers and device-name negotiation, printer
 LUs, TLS, alternate screen sizes, and all graphics — Query Reply, Programmable
-Symbol Sets, and GDF (see *A Later Dimension*).
+Symbol Sets, and GDF (see *3279 Graphics*).
 
 ## Error Handling
 
@@ -390,10 +414,12 @@ Three, all cheap now and expensive to retrofit:
   the font."** In stages 1–2 the only variant is `{kind: 'char', codepoint}`,
   and no other variant need be implemented — but the renderer must dispatch on
   `kind` rather than assuming every cell indexes the font by character. This is
-  the one genuine retrofit risk for graphics: Programmable Symbol Sets make a
-  cell's content a host-loaded glyph bitmap, and GDF makes it a pixel region.
-  Dispatching from the start makes those additions; assuming codepoints makes
-  them a renderer rewrite. Cost now is one `switch` with a single case.
+  the one genuine retrofit risk for graphics, and since Programmable Symbol Sets
+  are a committed deliverable (stage 4 item 5), the second variant
+  `{kind: 'ps', store, index}` is a known future addition rather than a
+  hypothetical one; GDF would later add a pixel-region variant. Dispatching from
+  the start makes those additions; assuming codepoints makes them a renderer
+  rewrite. Cost now is one `switch` with a single case.
 - **Query Reply is generated from a capability list, not a hardcoded byte
   blob** (relevant from the TN3270E stage onward). Advertising graphics later
   then means adding a capability entry rather than editing opaque bytes.
