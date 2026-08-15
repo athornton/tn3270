@@ -128,7 +128,7 @@ export const AID = {
   SF: 0x88,
 } as const;
 
-/** PF key number (1-24) to AID byte. */
+/** PF key number 1-24, at index n-1, to its AID byte. */
 export const PF_AIDS: readonly number[] = [
   AID.PF1, AID.PF2, AID.PF3, AID.PF4, AID.PF5, AID.PF6,
   AID.PF7, AID.PF8, AID.PF9, AID.PF10, AID.PF11, AID.PF12,
@@ -136,7 +136,7 @@ export const PF_AIDS: readonly number[] = [
   AID.PF19, AID.PF20, AID.PF21, AID.PF22, AID.PF23, AID.PF24,
 ];
 
-/** PA key number (1-3) to AID byte. */
+/** PA key number 1-3, at index n-1, to its AID byte. */
 export const PA_AIDS: readonly number[] = [AID.PA1, AID.PA2, AID.PA3];
 
 /**

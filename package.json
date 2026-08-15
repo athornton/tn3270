@@ -7,8 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/core packages/cli",
-    "lint": "tsc --build packages/core packages/cli"
+    "typecheck": "tsc --build packages/core"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

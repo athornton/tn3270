@@ -3,6 +3,7 @@ import {
   TelnetCmd, TelnetOpt, TelnetSubopt,
   Cmd, SnaCmd, Order, AID, FA, WCC,
   ADDRESS_CODE_TABLE, isShortReadAID,
+  PF_AIDS, PA_AIDS,
 } from '../src/constants.js';
 
 describe('telnet constants', () => {
@@ -95,6 +96,23 @@ describe('AID constants', () => {
     expect(isShortReadAID(AID.ENTER)).toBe(false);
     expect(isShortReadAID(AID.PF1)).toBe(false);
     expect(isShortReadAID(AID.SELECT)).toBe(false);
+  });
+});
+
+describe('PF_AIDS and PA_AIDS', () => {
+  it('index PF key n at n-1', () => {
+    expect(PF_AIDS).toHaveLength(24);
+    expect(PF_AIDS[0]).toBe(AID.PF1);
+    expect(PF_AIDS[8]).toBe(AID.PF9);
+    expect(PF_AIDS[9]).toBe(AID.PF10);
+    expect(PF_AIDS[23]).toBe(AID.PF24);
+  });
+
+  it('index PA key n at n-1', () => {
+    expect(PA_AIDS).toHaveLength(3);
+    expect(PA_AIDS[0]).toBe(AID.PA1);
+    expect(PA_AIDS[1]).toBe(AID.PA2);
+    expect(PA_AIDS[2]).toBe(AID.PA3);
   });
 });
 
