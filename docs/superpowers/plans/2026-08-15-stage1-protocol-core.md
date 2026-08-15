@@ -1243,7 +1243,7 @@ Create `packages/core/test/telnet.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { TelnetLayer, MAX_RECORD_BYTES } from '../src/telnet.js';
+import { TelnetLayer, MAX_RECORD_BYTES, MAX_SUBNEG_BYTES } from '../src/telnet.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
 
 /** Collects what the layer wants to transmit and the records it produces. */
@@ -1444,10 +1444,14 @@ describe('record framing', () => {
     // would otherwise consume everything after it and present as a hang.
     const { layer, records } = in3270();
     layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
-    layer.receive(new Uint8Array(2048).fill(0x41)); // never terminated
+    // Exactly the cap, not more: once the subnegotiation is abandoned the layer
+    // is back in St.Data, so any filler BEYOND the cap is ordinary record data
+    // and would legitimately land in the next record. Overshooting here would
+    // be a broken test, not a broken framer.
+    layer.receive(new Uint8Array(MAX_SUBNEG_BYTES).fill(0x41));
     layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
-    expect(records.length).toBeGreaterThanOrEqual(1);
-    expect(Array.from(records[records.length - 1]!)).toEqual([0xf5, 0xc3]);
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
   });
 
   it('drops an over-long record rather than growing without bound', () => {
