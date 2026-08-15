@@ -230,6 +230,19 @@ attributes on the wire.
   than plain telnet.
 - Refuse all other options with DONT/WONT — notably `TN3270E` in stage 1, so a
   host offering more still yields a clean basic-mode session.
+- Four options and commands per RFC 1576 need explicit handling rather than a
+  blanket refusal, because real hosts use them mid-session:
+  `3270-REGIME` → WONT (few servers support it; the host then falls back to the
+  normal TERMINAL-TYPE path); `TIMING-MARK` → WONT (hosts use it as a liveness
+  probe, and a *response* of some kind is what they need);
+  `SUPPRESS-GO-AHEAD` → WILL; and `IAC NOP` → ignored silently, no reply.
+  `ECHO` may be negotiated repeatedly during a pre-3270 NVT-mode login; stage 1
+  answers WILL/DONT as asked without implementing NVT-mode local echo.
+- Telnet option numbers (RFC 1576 §3): `BINARY` 0, `TERMINAL-TYPE` 24,
+  `EOR` 25. Commands (RFC 854): `SE` 240, `NOP` 241, `BREAK` 243, `SB` 250,
+  `WILL` 251, `WONT` 252, `DO` 253, `DONT` 254, `IAC` 255; `EOR` is 239.
+  Subnegotiation codes (RFC 1091): `IS` 0, `SEND` 1 — so the terminal-type reply
+  is `IAC SB 24 0 'I' 'B' 'M' '-' '3' '2' '7' '8' '-' '2' IAC SE` in ASCII.
 - IAC doubling on output; `IAC IAC` → single `0xFF` on input; records delimited
   by `IAC EOR`.
 - **Records may arrive split across TCP segments, so framing must be buffered.**
@@ -243,10 +256,34 @@ Commands: `Write` (0xF1), `Erase/Write` (0xF5), `Erase/Write Alternate` (0x7E),
 `Read Modified All` (0x6E). WCC bits: reset, keyboard restore, reset MDT, alarm.
 
 Orders: `SF` (0x1D), `SBA` (0x11), `IC` (0x13), `PT` (0x05), `RA` (0x3C),
-`EUA` (0x12), `GE` (0x08 — parsed and skipped).
+`EUA` (0x12), `GE` (0x08 — parsed and skipped). Deferred orders, recognized so
+they can be skipped by length rather than mis-executed: `SA` (0x28),
+`SFE` (0x29), `MF` (0x2C).
+
+All command and order codes above are verified against the hexadecimal index in
+GA23-0059-07 Appendix F.
+
+Field attribute bits (GA23-0059-07 Table 4-4), which drive both protection logic
+and the base-color mapping: bit 2 protected; bit 3 numeric (bits 2+3 both set →
+auto-skip); bits 4–5 `00` normal / `01` selector-pen detectable / `10`
+intensified / `11` nondisplay; bit 6 reserved, always 0; bit 7 MDT.
+
+WCC bits (Table 3-2): bit 1 reset, bit 4 start-printer, bit 5 sound-alarm,
+bit 6 keyboard-restore, bit 7 reset-MDT. Bits 2–3 are printer-only. Stage 1
+honors reset-MDT, keyboard-restore, and alarm; start-printer returns no printer
+available.
 
 Buffer addresses in **both 12-bit and 14-bit forms**; the encoding depends on
-buffer size and hosts mix them.
+buffer size and hosts mix them. Per GA23-0059-07, the top two bits of the first
+address byte are flags: `00` → a 14-bit binary address in the remaining 14 bits;
+`01` or `11` → a 12-bit address formed from the low 6 bits of each byte;
+`10` → **reserved, and receipt must reject the datastream** (i.e. a program
+check, per *Error Handling*).
+
+Outbound, addresses are generated 14-bit when the buffer exceeds 4096 cells and
+12-bit otherwise — for an 80×24 screen (1920 cells) that means 12-bit, with the
+6-bit values mapped through the standard 64-entry code table (`0x40, 0xC1…0xC9,
+0x4A…0x4F, 0x50, 0xD1…`), matching x3270's `ENCODE_BADDR` and `code_table`.
 
 For a 3278-2 the alternate screen size equals the default, so in stage 1
 `Erase/Write Alternate` behaves identically to `Erase/Write`. It is implemented
@@ -257,8 +294,28 @@ as a distinct command anyway, since TN3270E gives the two different behavior.
 AID byte + 12-bit cursor address + for each modified field an `SBA` + address +
 field contents. `Read Buffer` returns the entire buffer with attributes.
 
-**Short-read AIDs** (Clear, PA1–PA3) send AID + cursor only, with no field data.
-Getting this wrong hangs sessions.
+AID values (GA23-0059-07 Table 3-4, cross-checked against x3270's `3270ds.h`):
+Enter 0x7D; PF1–9 0xF1–0xF9; PF10–12 0x7A/0x7B/0x7C; PF13–21 0xC1–0xC9;
+PF22–24 0x4A/0x4B/0x4C; PA1 0x6C, PA2 0x6E, PA3 0x6B; Clear 0x6D;
+SysReq 0xF0; Selector pen 0x7E; no-AID 0x60; Query Reply 0x61;
+structured field inbound 0x88.
+
+Note that the field address sent in an `SBA` is the address of the **field
+attribute + 1** — the first data cell, not the attribute itself.
+
+Attn is not an AID at all: per RFC 1576 §8 it is sent as **Telnet `IAC BREAK`**,
+so it belongs to the telnet layer rather than `inbound.ts`.
+
+**Short-read AIDs** (Clear, PA1–PA3) send **the AID byte alone** — no cursor
+address and no field data. Verified against GA23-0059-07 ("only an AID byte is
+transferred to the application program") and against x3270's
+`ctlr_read_modified`, which emits the AID and jumps straight to the end for
+`AID_PA1/PA2/PA3/CLEAR`. Getting this wrong hangs sessions.
+
+Two adjacent cases that are *not* the same thing: `Read Modified All` suppresses
+the short read (x3270 sets `short_read` only when `!all`), so under RMA those
+same AIDs send AID + cursor + fields; and Selector-Pen `SELECT` (0x7E) sends
+AID + cursor but no field data — cursor present, data absent.
 
 ### Structured Fields
 
@@ -405,7 +462,10 @@ menu trace toggle writing the same format the CLI produces.
 Three, all cheap now and expensive to retrofit:
 
 - **`codepage.ts` is table-driven from the start.** CP037 is merely the first
-  table, so CP285/297/500 become data files rather than code changes.
+  table, so CP285/297/500 become data files rather than code changes. The CP037
+  table is generated once as a build-time artifact from Python's built-in `cp037`
+  codec (verified to round-trip all 256 byte values) and checked in, rather than
+  transcribed by hand.
 - **`Session` is instantiable more than once, with no module-level state**, so
   multi-session tabs are a UI change rather than a core rewrite.
 - **The renderer takes screen dimensions as parameters, never hardcoded 80/24**,
@@ -472,6 +532,11 @@ the buffer.
 
 - *IBM 3270 Data Stream Programmer's Reference*, GA23-0059-07 —
   https://dn790003.ca.archive.org/0/items/bitsavers_ibm3270GA2amProgrammersReference199206_26297005/GA23-0059-07_3270_Data_Stream_Programmers_Reference_199206.pdf
+  Downloaded to `~/3270/ref/ga23-0059-07.pdf` (26 MB, 436 pages, with a usable
+  text layer — `pypdf` extracts it; Appendix F is the hexadecimal index and the
+  fastest way to check a code). All wire constants in this spec were verified
+  against it. Note the OCR mangles some hex digits in tables (`F8`→`FB`,
+  `7A`→`?A`), so cross-check anything surprising against x3270's `3270ds.h`.
 - GDDM reference — https://publibfp.dhe.ibm.com/epubs/pdf/admk1a00.pdf
 - RFC 854 (Telnet), RFC 1091 (Terminal-Type), RFC 1576 (TN3270 current
   practices), RFC 2355 (TN3270E)
