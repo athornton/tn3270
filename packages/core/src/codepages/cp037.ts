@@ -2,7 +2,7 @@
  * CP037 (EBCDIC US/Canada) to Unicode.
  *
  * GENERATED FILE - do not edit by hand.
- * Regenerate with: node tools/gen-cp037.mjs > src/codepages/cp037.ts
+ * Regenerate with: node tools/gen-cp037.mjs src/codepages/cp037.ts
  */
 
 /** EBCDIC byte -> Unicode code point. */

@@ -16,11 +16,20 @@ export class CodePage {
     if (toUnicodeTable.length !== 256) {
       throw new Error(`code page ${name}: table must have 256 entries, got ${toUnicodeTable.length}`);
     }
+    for (let b = 0; b < 256; b++) {
+      const cp = toUnicodeTable[b]!;
+      if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) {
+        throw new Error(
+          `code page ${name}: entry for byte 0x${b.toString(16).padStart(2, '0')} is not a valid code point: ${cp}`,
+        );
+      }
+    }
     this.name = name;
     this.toUni = toUnicodeTable;
     this.fromUni = new Map();
-    // Build the reverse map low byte first, so the lowest EBCDIC byte wins for
-    // any Unicode char with more than one representation. Deterministic.
+    // Iterate high to low so the lowest EBCDIC byte is written last and
+    // therefore wins, for any Unicode char with more than one representation.
+    // Deterministic.
     for (let b = 255; b >= 0; b--) {
       this.fromUni.set(toUnicodeTable[b]!, b);
     }
@@ -46,7 +55,11 @@ export class CodePage {
   }
 
   encode(text: string): Uint8Array {
-    const chars = Array.from(text);
+    // Normalize to NFC first: decomposed input (e.g. macOS keyboard/paste
+    // delivering 'e' + combining acute instead of precomposed 'e-acute')
+    // would otherwise expand to two cells for one visible character and
+    // shift every following column.
+    const chars = Array.from(text.normalize('NFC'));
     const out = new Uint8Array(chars.length);
     for (let i = 0; i < chars.length; i++) out[i] = this.fromUnicode(chars[i]!);
     return out;
