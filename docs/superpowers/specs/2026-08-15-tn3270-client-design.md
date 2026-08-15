@@ -54,11 +54,15 @@ preferences UI.
 5. **Programmable Symbol Sets** — host-loadable glyph bitmaps, and with them the
    first real images on the display (see *3279 Graphics* below)
 
-PS is a committed deliverable, not a maybe. It is placed after TN3270E because
-it depends on it: PS is loaded via structured fields, and the host will not send
-those until Query Reply has advertised the capability. Its position relative to
-IND$FILE and printer sessions is a preference, not a constraint — it can move
-earlier if wanted, so long as it stays after TN3270E.
+PS is a committed deliverable, not a maybe. Two things fix its position:
+
+- **It must follow TN3270E** — a hard dependency. PS is loaded via structured
+  fields, and the host sends none until Query Reply has advertised the
+  capability.
+- **It must follow IND$FILE** — an explicit decision by the user, not a guess.
+  File transfer is the more useful capability and ships first.
+
+So item 5 is where PS belongs, and it should not be moved earlier.
 
 Multi-session support and additional EBCDIC code pages are not staged
 separately; stage 1 leaves stubs (see *Forward-Compatibility Stubs*) so they
