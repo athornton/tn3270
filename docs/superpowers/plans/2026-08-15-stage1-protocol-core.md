@@ -2930,6 +2930,25 @@ describe('command recognition', () => {
     expect(parseRecord(Uint8Array.of(Cmd.EW, 0xc3)).command).toBe('EraseWrite');
     expect(parseRecord(Uint8Array.of(Cmd.W, 0x00)).command).toBe('Write');
     expect(parseRecord(Uint8Array.of(Cmd.EWA, 0x00)).command).toBe('EraseWriteAlternate');
+    expect(parseRecord(Uint8Array.of(Cmd.RB)).command).toBe('ReadBuffer');
+    expect(parseRecord(Uint8Array.of(Cmd.RM)).command).toBe('ReadModified');
+    expect(parseRecord(Uint8Array.of(Cmd.RMA)).command).toBe('ReadModifiedAll');
+    expect(parseRecord(Uint8Array.of(Cmd.EAU)).command).toBe('EraseAllUnprotected');
+  });
+
+  it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
+    // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
+    // disambiguates: commandOf only ever sees the command byte. x3270 accepts
+    // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750). Rejecting the
+    // non-SNA form would raise a program check on a host that sends structured
+    // fields that way — the exact desync that skipping WSF exists to avoid.
+    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    // And 0x11 in ORDER position is still SBA, not a nested WSF.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));
+    expect(r.tokens[0]).toEqual({ kind: 'sba', address: 0 });
   });
 
   it('parses the read commands, which carry no WCC', () => {
@@ -3150,7 +3169,10 @@ function commandOf(byte: number): CommandName | null {
     case SnaCmd.RB: case Cmd.RB: return 'ReadBuffer';
     case SnaCmd.RM: case Cmd.RM: return 'ReadModified';
     case SnaCmd.RMA: case Cmd.RMA: return 'ReadModifiedAll';
-    case SnaCmd.WSF: return 'WriteStructuredField';
+    // Both WSF encodings, like every other command. Cmd.WSF is 0x11, the same
+    // value as Order.SBA — safe here because this function is only ever called
+    // on the command byte, never on an order byte.
+    case SnaCmd.WSF: case Cmd.WSF: return 'WriteStructuredField';
     case Cmd.NOP: return 'NoOp';
     default: return null;
   }
