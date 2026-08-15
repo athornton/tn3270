@@ -3003,7 +3003,20 @@ describe('order parsing', () => {
 
   it('parses RA with its address and fill character', () => {
     const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0xc2, 0x60, 0x5c));
-    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c }]);
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c, ge: false }]);
+  });
+
+  it('parses RA with a Graphic Escape before the fill character', () => {
+    // x3270 ctlr.c:1739-1746 consumes the GE and takes the NEXT byte as the
+    // fill. Without this, fill would be 0x08 and the real character would leak
+    // out as a stray data token.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE, 0xf1));
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 5, fill: 0xf1, ge: true }]);
+  });
+
+  it('rejects RA whose GE has no following character', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE)))
+      .toThrow(ParseError);
   });
 
   it('parses EUA with its stop address', () => {
@@ -3138,7 +3151,7 @@ export type Token =
   | { kind: 'sf'; attr: number }
   | { kind: 'ic' }
   | { kind: 'pt' }
-  | { kind: 'ra'; stop: number; fill: number }
+  | { kind: 'ra'; stop: number; fill: number; ge: boolean }
   | { kind: 'eua'; stop: number }
   | { kind: 'ge'; ebcdic: number }
   /** SA/SFE/MF: recognized so they can be skipped by length, not executed. */
@@ -3257,8 +3270,20 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
         flushRun();
         i++;
         const stop = address('RA');
+        // RA may carry a Graphic Escape before its fill character, in which case
+        // the fill is the byte AFTER the GE. x3270 checks for this explicitly
+        // (ctlr.c:1739-1746). Taking the byte after the address unconditionally
+        // would store 0x08 as the fill and leak the real character out as a
+        // stray data byte — filling the screen with the wrong glyph and writing
+        // one extra character at the cursor.
         need(1, 'RA fill character');
-        tokens.push({ kind: 'ra', stop, fill: record[i++]! });
+        let ge = false;
+        if (record[i] === Order.GE) {
+          ge = true;
+          i++;
+          need(1, 'RA GE fill character');
+        }
+        tokens.push({ kind: 'ra', stop, fill: record[i++]!, ge });
         break;
       }
       case Order.EUA: {
@@ -3332,7 +3357,7 @@ export function describeRecord(record: Uint8Array): string {
       case 'sf': parts.push(`SF(0x${t.attr.toString(16).padStart(2, '0')})`); break;
       case 'ic': parts.push('IC'); break;
       case 'pt': parts.push('PT'); break;
-      case 'ra': parts.push(`RA(->${t.stop},0x${t.fill.toString(16).padStart(2, '0')})`); break;
+      case 'ra': parts.push(`RA(->${t.stop},${t.ge ? 'GE ' : ''}0x${t.fill.toString(16).padStart(2, '0')})`); break;
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
@@ -3507,6 +3532,20 @@ describe('orders', () => {
     // 14-bit form so we can express an address beyond 1919.
     expect(() => run(s, SnaCmd.W, 0x00, Order.RA, 0x0f, 0xff, 0x5c))
       .toThrow(ExecuteError);
+  });
+
+  it('EUA rejects a stop address past the end of the screen', () => {
+    // Same guard as RA, but exercised separately so a change to one cannot
+    // silently drop the other.
+    const s = new Screen();
+    expect(() => run(s, SnaCmd.W, 0x00, Order.EUA, 0x0f, 0xff)).toThrow(ExecuteError);
+  });
+
+  it('RA with a Graphic Escape fills with the escaped character, not 0x08', () => {
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE, 0xf1);
+    for (let a = 0; a < 5; a++) expect(s.cellAt(a).ebcdic).toBe(0xf1);
+    expect(s.cellAt(5).ebcdic).toBe(0x00);
   });
 
   it('EUA nulls unprotected cells in a range and leaves protected ones', () => {
@@ -3752,7 +3791,13 @@ function applyToken(
 
     case 'ra': {
       requireOnScreen(screen, token.stop, 'RA');
-      // do-while: stop === addr fills the whole buffer, matching x3270.
+      // do-while: stop === addr fills the whole buffer, matching x3270
+      // (ctlr.c:1781 `} while (buffer_addr != baddr);`).
+      //
+      // token.ge is carried but not acted on: stage 1 has no loadable character
+      // sets, so a graphic-escaped fill is stored as the ordinary byte it is.
+      // When Programmable Symbol Sets land, this is where the cell becomes
+      // {kind:'ps',...} instead — the flag exists so that change is local.
       let a = addr;
       do {
         screen.setChar(a, token.fill);
@@ -3823,7 +3868,7 @@ function requireOnScreen(screen: Screen, addr: number, what: string): void {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/execute.test.ts`
-Expected: PASS, 25 tests.
+Expected: PASS, 27 tests.
 
 - [ ] **Step 5: Commit**
 
