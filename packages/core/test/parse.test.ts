@@ -87,7 +87,17 @@ describe('order parsing', () => {
 
   it('parses RA with its address and fill character', () => {
     const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0xc2, 0x60, 0x5c));
-    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c }]);
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c, ge: false }]);
+  });
+
+  it('parses RA with a GE before the fill character', () => {
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE, 0xf1));
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 5, fill: 0xf1, ge: true }]);
+  });
+
+  it('rejects RA whose GE has no following fill character', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE)))
+      .toThrow(ParseError);
   });
 
   it('parses EUA with its stop address', () => {

@@ -31,7 +31,7 @@ export type Token =
   | { kind: 'sf'; attr: number }
   | { kind: 'ic' }
   | { kind: 'pt' }
-  | { kind: 'ra'; stop: number; fill: number }
+  | { kind: 'ra'; stop: number; fill: number; ge: boolean }
   | { kind: 'eua'; stop: number }
   | { kind: 'ge'; ebcdic: number }
   /** SA/SFE/MF: recognized so they can be skipped by length, not executed. */
@@ -150,8 +150,19 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
         flushRun();
         i++;
         const stop = address('RA');
+        // RA may carry a Graphic Escape before its fill character, in which case
+        // the fill is the byte AFTER the GE. x3270 checks for this explicitly
+        // (ctlr.c:1739-1746). Taking the byte after the address unconditionally
+        // would store 0x08 as the fill and leak the real character out as a
+        // stray data byte.
         need(1, 'RA fill character');
-        tokens.push({ kind: 'ra', stop, fill: record[i++]! });
+        let ge = false;
+        if (record[i] === Order.GE) {
+          ge = true;
+          i++;
+          need(1, 'RA GE fill character');
+        }
+        tokens.push({ kind: 'ra', stop, fill: record[i++]!, ge });
         break;
       }
       case Order.EUA: {
@@ -225,7 +236,7 @@ export function describeRecord(record: Uint8Array): string {
       case 'sf': parts.push(`SF(0x${t.attr.toString(16).padStart(2, '0')})`); break;
       case 'ic': parts.push('IC'); break;
       case 'pt': parts.push('PT'); break;
-      case 'ra': parts.push(`RA(->${t.stop},0x${t.fill.toString(16).padStart(2, '0')})`); break;
+      case 'ra': parts.push(`RA(->${t.stop},${t.ge ? 'GE ' : ''}0x${t.fill.toString(16).padStart(2, '0')})`); break;
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
