@@ -99,8 +99,7 @@ Expected: failure — either "Cannot find module" or npm reporting no test scrip
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/core packages/cli",
-    "lint": "tsc --build packages/core packages/cli"
+    "typecheck": "tsc --build packages/core"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
@@ -133,6 +132,8 @@ Expected: failure — either "Cannot find module" or npm reporting no test scrip
 ```
 
 `noUncheckedIndexedAccess` matters here: this codebase indexes byte arrays constantly, and it forces the undefined checks that catch off-by-one buffer reads.
+
+Note `typecheck` names only `packages/core`, because `packages/cli` does not exist until Task 13 — `tsc --build` fails hard on a missing project reference, which would leave the project's own verification command broken for eleven tasks. **Task 13 adds `packages/cli` to this script.** There is deliberately no `lint` script: nothing here lints, and a `lint` that only runs `tsc` is a lie.
 
 `vitest.config.ts`:
 
@@ -560,7 +561,7 @@ export const TERMINAL_TYPE = 'IBM-3278-2';
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/constants.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -743,12 +744,17 @@ Create `packages/core/tools/gen-cp037.mjs`:
 ```javascript
 /**
  * Regenerates src/codepages/cp037.ts from Python's built-in cp037 codec.
- * Run: node tools/gen-cp037.mjs > src/codepages/cp037.ts
+ * Run: node tools/gen-cp037.mjs src/codepages/cp037.ts
  *
  * Python's codec is the authority here; hand-transcribing 256 values invites
  * silent errors. Requires python3 on PATH.
+ *
+ * Takes an output PATH rather than writing to stdout on purpose: `> target`
+ * truncates the target before node starts, so a missing python3 would leave the
+ * checked-in table empty. Validates the codec output before writing anything.
  */
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 
 const json = execFileSync('python3', [
   '-c',
@@ -756,6 +762,9 @@ const json = execFileSync('python3', [
 ], { encoding: 'utf8' });
 
 const chars = JSON.parse(json);
+if (chars.length !== 256 || chars.some((c) => Array.from(c).length !== 1)) {
+  throw new Error(`codec produced ${chars.length} entries, or a multi-code-point entry`);
+}
 const codepoints = chars.map((c) => c.codePointAt(0));
 
 const rows = [];
@@ -763,11 +772,17 @@ for (let i = 0; i < 256; i += 8) {
   rows.push('  ' + codepoints.slice(i, i + 8).map((n) => `0x${n.toString(16).padStart(4, '0')}`).join(', ') + ',');
 }
 
-process.stdout.write(`/**
+const outPath = process.argv[2];
+if (!outPath) {
+  process.stderr.write('usage: gen-cp037.mjs <output path>\n');
+  process.exit(2);
+}
+
+writeFileSync(outPath, `/**
  * CP037 (EBCDIC US/Canada) to Unicode.
  *
  * GENERATED FILE - do not edit by hand.
- * Regenerate with: node tools/gen-cp037.mjs > src/codepages/cp037.ts
+ * Regenerate with: node tools/gen-cp037.mjs src/codepages/cp037.ts
  */
 
 /** EBCDIC byte -> Unicode code point. */
@@ -782,7 +797,7 @@ ${rows.join('\n')}
 ```bash
 cd packages/core
 mkdir -p src/codepages
-node tools/gen-cp037.mjs > src/codepages/cp037.ts
+node tools/gen-cp037.mjs src/codepages/cp037.ts
 grep -c '0x' src/codepages/cp037.ts
 ```
 
@@ -4646,7 +4661,20 @@ describe('parseCommand', () => {
 Run: `npx vitest run packages/cli`
 Expected: FAIL — the `packages/cli` sources do not exist.
 
-- [ ] **Step 3: Create the cli package files**
+- [ ] **Step 3: Add the cli package to the typecheck script**
+
+Task 1 deliberately left `packages/cli` out of the root `typecheck` script because
+`tsc --build` fails on a missing project reference. Now that the package exists,
+add it back. In the root `package.json`:
+
+```json
+    "typecheck": "tsc --build packages/core packages/cli"
+```
+
+Verify with `npm run typecheck` — it must exit 0 silently once Step 4 and Step 5
+have created the sources.
+
+- [ ] **Step 4: Create the cli package files**
 
 `packages/cli/package.json`:
 
@@ -4672,7 +4700,7 @@ Expected: FAIL — the `packages/cli` sources do not exist.
 }
 ```
 
-- [ ] **Step 4: Write the status formatter**
+- [ ] **Step 5: Write the status formatter**
 
 Create `packages/cli/src/status.ts`:
 
@@ -4727,7 +4755,7 @@ export function formatStatus(
 }
 ```
 
-- [ ] **Step 5: Write the command parser**
+- [ ] **Step 6: Write the command parser**
 
 Create `packages/cli/src/commands.ts`:
 
@@ -4811,14 +4839,14 @@ function splitArgs(rest: string): string[] {
 }
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 7: Run the tests**
 
 Run: `npm install && npx vitest run packages/cli`
 Expected: PASS, 16 tests (9 command-parser, 7 status).
 
 `npm install` is needed again so the workspace links `@tn3270/core` into `packages/cli/node_modules`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/cli
