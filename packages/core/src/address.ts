@@ -42,14 +42,15 @@ export function decodeAddress(b1: number, b2: number): number {
  * binary. x3270's ENCODE_BADDR switches on `(ROWS * COLS) > 0x1000`.
  */
 export function encodeAddress(addr: number, bufferSize: number): Uint8Array {
-  if (bufferSize > 0x1000) {
+  const use14Bit = bufferSize > 0x1000;
+  const limit = use14Bit ? 0x4000 : 0x1000;
+  if (!Number.isInteger(addr) || addr < 0 || addr >= limit) {
+    throw new AddressError(`address ${addr} out of range for ${limit}-cell encoding`);
+  }
+  if (use14Bit) {
     return Uint8Array.of((addr >> 8) & 0x3f, addr & 0xff);
   }
-  const hi = ADDRESS_CODE_TABLE[(addr >> 6) & 0x3f];
-  const lo = ADDRESS_CODE_TABLE[addr & 0x3f];
-  /* istanbul ignore if - indexes are masked to 0-63, so both are defined */
-  if (hi === undefined || lo === undefined) {
-    throw new AddressError(`address ${addr} out of encodable range`);
-  }
+  const hi = ADDRESS_CODE_TABLE[(addr >> 6) & 0x3f]!;
+  const lo = ADDRESS_CODE_TABLE[addr & 0x3f]!;
   return Uint8Array.of(hi, lo);
 }

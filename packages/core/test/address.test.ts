@@ -47,6 +47,21 @@ describe('encodeAddress', () => {
     expect(Array.from(encodeAddress(300, 8000))).toEqual([0x01, 0x2c]);
   });
 
+  it('pins the 12/14-bit threshold at exactly 0x1000 cells', () => {
+    // bufferSize 4096 (0x1000) is NOT > 0x1000, so it still uses 12-bit form.
+    expect(Array.from(encodeAddress(4095, 4096))).toEqual([0x7f, 0x7f]);
+    // bufferSize 4097 is > 0x1000, so it switches to 14-bit form.
+    expect(Array.from(encodeAddress(4095, 4097))).toEqual([0x0f, 0xff]);
+  });
+
+  it('rejects addresses out of range for the chosen encoding', () => {
+    // 12-bit form: valid range is 0..4095 (0x1000 cells).
+    expect(() => encodeAddress(4096, 1920)).toThrow(AddressError);
+    expect(() => encodeAddress(-1, 1920)).toThrow(AddressError);
+    // 14-bit form: valid range is 0..16383 (0x4000).
+    expect(() => encodeAddress(16384, 20000)).toThrow(AddressError);
+  });
+
   it('round-trips every address on an 80x24 screen', () => {
     for (let a = 0; a < 1920; a++) {
       const [hi, lo] = encodeAddress(a, 1920);
