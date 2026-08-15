@@ -33,6 +33,14 @@ export interface Field {
   start: number;
   /** Data cells in the field, excluding the attribute byte. */
   length: number;
+  /**
+   * The raw, unnormalized attribute byte exactly as the host sent it. Real
+   * hosts set bits beyond the ones this module names (the base architecture
+   * requires the top two bits on, so a plain "unprotected" byte arrives as
+   * 0xC0, not 0x00). Consume this only via `&` with `FA.*` masks — never
+   * `===` — or normalization differences will make an identical-looking
+   * field compare unequal.
+   */
   attr: number;
   protected: boolean;
   numeric: boolean;
@@ -47,8 +55,8 @@ export interface ScreenSnapshot {
   rows: number;
   cols: number;
   cursor: number;
-  cells: readonly Cell[];
-  fields: readonly Field[];
+  cells: readonly Readonly<Cell>[];
+  fields: readonly Readonly<Field>[];
   formatted: boolean;
 }
 
@@ -75,23 +83,44 @@ export class Screen {
   constructor(opts: ScreenOptions = {}) {
     this.rows = opts.rows ?? MODEL_2.rows;
     this.cols = opts.cols ?? MODEL_2.cols;
+    if (!Number.isInteger(this.rows) || this.rows <= 0) {
+      throw new RangeError(`rows must be a positive integer, got ${this.rows}`);
+    }
+    if (!Number.isInteger(this.cols) || this.cols <= 0) {
+      throw new RangeError(`cols must be a positive integer, got ${this.cols}`);
+    }
     this.size = this.rows * this.cols;
     this.chars = new Uint8Array(this.size);
     this.attrs = new Int16Array(this.size).fill(NOT_ATTR);
     this.codePage = opts.codePage ?? cp037;
   }
 
+  /** Throws if `addr` is not an integer in [0, size). */
+  private check(addr: number): void {
+    if (!Number.isInteger(addr) || addr < 0 || addr >= this.size) {
+      throw new RangeError(`address ${addr} out of range for a ${this.size}-cell buffer`);
+    }
+  }
+
   // ---- geometry ----
 
   /** Display row/column, 1-based, as the OIA and s3270 report them. */
   toRowCol(addr: number): { row: number; col: number } {
+    this.check(addr);
     return {
       row: Math.floor(addr / this.cols) + 1,
       col: (addr % this.cols) + 1,
     };
   }
 
+  /** Row and column are both 1-based. Throws if the result would be out of range. */
   fromRowCol(row: number, col: number): number {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
+    if (!Number.isInteger(col) || col < 1 || col > this.cols) {
+      throw new RangeError(`col ${col} out of range for a ${this.cols}-col screen`);
+    }
     return (row - 1) * this.cols + (col - 1);
   }
 
@@ -108,6 +137,7 @@ export class Screen {
   // ---- cells ----
 
   cellAt(addr: number): Cell {
+    this.check(addr);
     return { kind: 'char', ebcdic: this.chars[addr]! };
   }
 
@@ -117,20 +147,24 @@ export class Screen {
    * changes as a result.
    */
   setChar(addr: number, ebcdic: number): void {
+    this.check(addr);
     this.chars[addr] = ebcdic & 0xff;
     this.attrs[addr] = NOT_ATTR;
   }
 
   isFieldAttribute(addr: number): boolean {
+    this.check(addr);
     return this.attrs[addr]! >= 0;
   }
 
   attributeAt(addr: number): number | null {
+    this.check(addr);
     const a = this.attrs[addr]!;
     return a >= 0 ? a : null;
   }
 
   setFieldAttribute(addr: number, attr: number): void {
+    this.check(addr);
     this.attrs[addr] = attr & 0xff;
     // An attribute position displays as a blank and holds no character.
     this.chars[addr] = 0x00;
@@ -145,6 +179,7 @@ export class Screen {
 
   /** The field governing `addr`, found by scanning backwards for an attribute. */
   fieldAt(addr: number): Field | null {
+    this.check(addr);
     let a = addr;
     for (let n = 0; n < this.size; n++) {
       if (this.attrs[a]! >= 0) return this.makeField(a);
@@ -187,7 +222,15 @@ export class Screen {
     };
   }
 
+  /**
+   * Set the MDT bit on the field attribute at `attrAddr`. `attrAddr` must be
+   * the attribute's own address (`field.attrAddr`), not any address inside
+   * the field — unlike x3270's `mdt_set`, this does not resolve an arbitrary
+   * in-field address for you. Passing a non-attribute address is a silent
+   * no-op; callers that have a `Field` should always pass its `attrAddr`.
+   */
   setMDT(attrAddr: number): void {
+    this.check(attrAddr);
     if (this.attrs[attrAddr]! >= 0) {
       this.attrs[attrAddr] = this.attrs[attrAddr]! | FA.MODIFY;
     }
@@ -291,6 +334,8 @@ export class Screen {
     stop: number,
     cb: (addr: number, field: Field | null, isAttr: boolean) => void,
   ): void {
+    this.check(start);
+    this.check(stop);
     let field = this.fieldAt(start);
     let a = start;
     do {
@@ -304,13 +349,16 @@ export class Screen {
 
   // ---- output ----
 
-  /** Raw buffer contents, for Read Buffer and for tests. */
+  /** Raw buffer contents, for tests and diagnostics. */
   readBuffer(): Uint8Array {
     return Uint8Array.from(this.chars);
   }
 
   /** One display row as text, 1-based. Nulls and attributes render as spaces. */
   rowText(row: number): string {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
     let out = '';
     const base = (row - 1) * this.cols;
     for (let c = 0; c < this.cols; c++) {
@@ -331,17 +379,26 @@ export class Screen {
     return lines.join('\n');
   }
 
-  /** An immutable view for the UI or for assertions. */
+  /**
+   * An immutable view for the UI or for assertions. The `Readonly<Cell>` /
+   * `Readonly<Field>` element types make `snap.cells[0].ebcdic = ...` a
+   * compile error, and each array and element is also `Object.freeze`d so the
+   * same mutation fails at runtime too (e.g. from plain JS callers).
+   */
   snapshot(): ScreenSnapshot {
-    const cells: Cell[] = new Array(this.size);
-    for (let i = 0; i < this.size; i++) cells[i] = { kind: 'char', ebcdic: this.chars[i]! };
+    const cells: Readonly<Cell>[] = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      cells[i] = Object.freeze({ kind: 'char' as const, ebcdic: this.chars[i]! });
+    }
+    const fields = this.fields().map((f) => Object.freeze(f));
+    const formatted = fields.length > 0;
     return {
       rows: this.rows,
       cols: this.cols,
       cursor: this.cursor,
-      cells,
-      fields: this.fields(),
-      formatted: this.isFormatted(),
+      cells: Object.freeze(cells),
+      fields: Object.freeze(fields),
+      formatted,
     };
   }
 }
