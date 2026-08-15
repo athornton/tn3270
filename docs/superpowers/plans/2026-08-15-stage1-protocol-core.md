@@ -1218,13 +1218,32 @@ git commit -m "feat(core): add byte-level trace with replayable text format"
 
 This is the module the spec singles out as the most common source of "works on localhost, fails on a real network" bugs, because records split across TCP segments. The framer is therefore a byte-at-a-time state machine with no assumption that a chunk boundary means anything — the same shape as x3270's `telnet_fsm`.
 
+**Three non-obvious requirements, each of which was a real bug caught in review:**
+
+1. **Data accumulation is gated on 3270 mode.** Hosts print an NVT banner or a
+   session-manager prompt before going 3270. Those bytes must not enter the
+   record accumulator, or they get prepended to the first real record and the
+   parser reads a banner character as the command byte — reproduced as a 40-byte
+   first record beginning `45 6e 74 65 72` ("Enter…") with the real `f5 c3`
+   buried at the end. x3270 gates it at `telnet.c:1773`; EOR outside 3270 mode
+   discards the accumulator at `telnet.c:1848-1859`.
+2. **Every accepted option answers at most once.** RFC 854: a request to enter a
+   mode we are already in must go unacknowledged, "essential to prevent endless
+   loops in the negotiation." This applies to `ECHO` as much as to the desired
+   options.
+3. **Both per-byte accumulators are bounded.** They are `number[]`, so each wire
+   byte costs ~32 bytes of heap; unbounded, a host that never sends `IAC EOR`
+   grows the heap 32x the wire rate. `St.Sb` is additionally a trap — it is left
+   only on `IAC SE`, so an unterminated subnegotiation silently eats the rest of
+   the session and presents as a hang.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `packages/core/test/telnet.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { TelnetLayer } from '../src/telnet.js';
+import { TelnetLayer, MAX_RECORD_BYTES } from '../src/telnet.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
 
 /** Collects what the layer wants to transmit and the records it produces. */
@@ -1384,6 +1403,62 @@ describe('record framing', () => {
     layer.receive(Uint8Array.of(T.IAC, T.SB, 77, 1, 2, 3, T.IAC, T.SE, 0xf5, T.IAC, T.EOR));
     expect(Array.from(records[0]!)).toEqual([0xf5]);
   });
+
+  it('does not leak an NVT logon banner into the first 3270 record', () => {
+    // THE regression test for this module. Hosts print a banner or a session
+    // manager prompt before going 3270 — VM/ESA, TSO behind a session manager,
+    // most Hercules configurations. Those bytes must never reach the record
+    // accumulator, or the parser reads a banner character as the command byte.
+    const { layer, records } = harness();
+    const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    layer.receive(ascii('Enter terminal type: '));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(ascii('\r\nVM/ESA ONLINE\r\n'));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('discards a record terminated before 3270 mode was negotiated', () => {
+    const { layer, records } = harness();
+    layer.receive(Uint8Array.of(0x68, 0x69, T.IAC, T.EOR));
+    expect(records).toHaveLength(0);
+  });
+
+  it('answers a repeated DO ECHO only once, per RFC 854', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual([T.IAC, T.WILL, O.ECHO]);
+  });
+
+  it('abandons an unterminated subnegotiation instead of eating the stream', () => {
+    // St.Sb is left only on IAC SE, so a malformed or truncated subnegotiation
+    // would otherwise consume everything after it and present as a hang.
+    const { layer, records } = in3270();
+    layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
+    layer.receive(new Uint8Array(2048).fill(0x41)); // never terminated
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(records.length).toBeGreaterThanOrEqual(1);
+    expect(Array.from(records[records.length - 1]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('drops an over-long record rather than growing without bound', () => {
+    const { layer, records } = in3270();
+    layer.receive(new Uint8Array(MAX_RECORD_BYTES + 16).fill(0x41));
+    layer.receive(Uint8Array.of(T.IAC, T.EOR));
+    expect(records).toHaveLength(0);
+    // And the layer recovers for the next record.
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
 });
 
 describe('transmission', () => {
@@ -1434,6 +1509,19 @@ enum St { Data, Iac, Will, Wont, Do, Dont, Sb, SbIac }
 /** Options we actively want. */
 const DESIRED = new Set<number>([O.BINARY, O.TERMINAL_TYPE, O.EOR, O.SUPPRESS_GO_AHEAD]);
 
+/**
+ * Ceilings on the two per-byte accumulators.
+ *
+ * A record has no length field, so neither can be pre-sized — but both are
+ * `number[]`, which boxes each byte at roughly 32 bytes of heap. Without a
+ * ceiling, a host that never sends IAC EOR (or a stream desynchronized so that
+ * EOR is consumed as an option byte) grows the heap ~32x the wire rate until the
+ * process dies. A full 3278-2 rewrite is a few KB, so 64 KB is generous.
+ */
+export const MAX_RECORD_BYTES = 65536;
+/** x3270 uses a 1024-byte sbbuf (telnet.c:1876); it does not bounds-check, we do. */
+export const MAX_SUBNEG_BYTES = 1024;
+
 export class TelnetLayer {
   private readonly write: (bytes: Uint8Array) => void;
   private readonly onRecord: (record: Uint8Array) => void;
@@ -1443,6 +1531,8 @@ export class TelnetLayer {
   private state = St.Data;
   private record: number[] = [];
   private sb: number[] = [];
+  /** Set when the current record blew the ceiling; suppresses its delivery. */
+  private overlongRecord = false;
 
   /** Options we have told the host WE will do. */
   private readonly myOpts = new Set<number>();
@@ -1495,8 +1585,23 @@ export class TelnetLayer {
   private step(c: number): void {
     switch (this.state) {
       case St.Data:
-        if (c === T.IAC) this.state = St.Iac;
-        else this.record.push(c);
+        if (c === T.IAC) {
+          this.state = St.Iac;
+        } else if (this.is3270Mode()) {
+          if (this.record.length >= MAX_RECORD_BYTES) {
+            this.trace?.note(`record exceeded ${MAX_RECORD_BYTES} bytes, discarded`);
+            this.record = [];
+            this.overlongRecord = true;
+          } else {
+            this.record.push(c);
+          }
+        }
+        // Outside 3270 mode the byte is NVT text — a logon banner or a session
+        // manager prompt. It must NOT enter the record accumulator, or it gets
+        // prepended to the first real 3270 record and the parser reads a banner
+        // character as the command byte. x3270 gates this at telnet.c:1773
+        // (`if (IN_NVT && !IN_E) ... else store3270in(c)`). Stage 1 renders no
+        // NVT text, so dropping it is correct.
         return;
 
       case St.Iac:
@@ -1544,8 +1649,18 @@ export class TelnetLayer {
         return;
 
       case St.Sb:
-        if (c === T.IAC) this.state = St.SbIac;
-        else this.sb.push(c);
+        if (c === T.IAC) {
+          this.state = St.SbIac;
+        } else if (this.sb.length >= MAX_SUBNEG_BYTES) {
+          // Unterminated subnegotiation. St.Sb is left only on IAC SE, so
+          // without this the rest of the session is silently consumed and the
+          // client looks hung.
+          this.trace?.note(`subnegotiation exceeded ${MAX_SUBNEG_BYTES} bytes, abandoned`);
+          this.sb = [];
+          this.state = St.Data;
+        } else {
+          this.sb.push(c);
+        }
         return;
 
       case St.SbIac:
@@ -1571,9 +1686,15 @@ export class TelnetLayer {
     }
     if (opt === O.ECHO) {
       // Some hosts renegotiate ECHO repeatedly during a pre-3270 NVT login.
-      // Answer as asked; stage 1 implements no NVT-mode local echo.
-      this.myOpts.add(opt);
-      this.reply(T.WILL, opt);
+      // Answer as asked, but only on a real change: RFC 854 requires that a
+      // request to enter a mode we are already in go unacknowledged, "essential
+      // to prevent endless loops in the negotiation". x3270 guards every
+      // accepted option the same way (telnet.c:2000, `if (!myopts[c])`).
+      // Stage 1 implements no NVT-mode local echo.
+      if (!this.myOpts.has(opt)) {
+        this.myOpts.add(opt);
+        this.reply(T.WILL, opt);
+      }
       return;
     }
     // Everything else, including TN3270E, TIMING-MARK and 3270-REGIME.
@@ -1607,6 +1728,22 @@ export class TelnetLayer {
   }
 
   private flushRecord(): void {
+    if (!this.is3270Mode()) {
+      // EOR before negotiation completed. x3270 logs and discards the
+      // accumulator (telnet.c:1848-1859, `ibptr = ibuf`); so do we.
+      if (this.record.length > 0) {
+        this.trace?.note(`EOR received outside 3270 mode, ${this.record.length} bytes discarded`);
+        this.record = [];
+      }
+      return;
+    }
+    if (this.overlongRecord) {
+      // The record already exceeded MAX_RECORD_BYTES and was dropped; deliver
+      // nothing rather than a truncated tail, and resync for the next one.
+      this.overlongRecord = false;
+      this.record = [];
+      return;
+    }
     if (this.record.length === 0) return; // nothing to deliver
     const rec = Uint8Array.from(this.record);
     this.record = [];
@@ -1624,7 +1761,7 @@ export class TelnetLayer {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/telnet.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 23 tests.
 
 - [ ] **Step 5: Commit**
 
