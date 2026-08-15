@@ -192,6 +192,13 @@ describe('record framing', () => {
     expect(Array.from(records[0]!)).toEqual([0xf5]);
   });
 
+  it('notes an empty subnegotiation as such instead of a fabricated option number', () => {
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({ write: () => {}, onRecord: () => {}, trace });
+    layer.receive(Uint8Array.of(T.IAC, T.SB, T.IAC, T.SE));
+    expect(trace.lines()).toContain('0.000 = # ignored subnegotiation for option (empty)');
+  });
+
   it('does not leak an NVT logon banner into the first 3270 record', () => {
     // THE regression test for this module. Hosts print a banner or a session
     // manager prompt before going 3270 — VM/ESA, TSO behind a session manager,
