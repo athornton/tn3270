@@ -133,6 +133,14 @@ describe('orders', () => {
       .toThrow(ExecuteError);
   });
 
+  it('RA with a GE before the fill fills with the escaped character, not 0x08', () => {
+    const s = new Screen();
+    const [h, l] = [0xc0 | (5 >> 6), 0xc0 | (5 & 0x3f)];
+    run(s, SnaCmd.W, 0x00, Order.RA, h, l, Order.GE, 0xf1);
+    for (let a = 0; a < 5; a++) expect(s.cellAt(a).ebcdic).toBe(0xf1);
+    expect(s.cellAt(5).ebcdic).toBe(0x00);
+  });
+
   it('EUA nulls unprotected cells in a range and leaves protected ones', () => {
     const s = new Screen();
     run(s, SnaCmd.W, 0x00,
@@ -145,6 +153,13 @@ describe('orders', () => {
     expect(s.cellAt(1).ebcdic).toBe(0x00);
     expect(s.cellAt(2).ebcdic).toBe(0x00);
     expect(s.cellAt(11).ebcdic).toBe(0xc3);
+  });
+
+  it('EUA rejects a stop address past the end of the screen', () => {
+    const s = new Screen();
+    // 14-bit form so we can express an address beyond 1919.
+    expect(() => run(s, SnaCmd.W, 0x00, Order.EUA, 0x0f, 0xff))
+      .toThrow(ExecuteError);
   });
 
   it('PT advances to the first data cell of the next unprotected field', () => {

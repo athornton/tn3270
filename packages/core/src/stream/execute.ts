@@ -149,6 +149,11 @@ function applyToken(
     case 'ra': {
       requireOnScreen(screen, token.stop, 'RA');
       // do-while: stop === addr fills the whole buffer, matching x3270.
+      // token.ge is deliberately carried and not acted on here: stage 1 has no
+      // loadable character sets, so a graphic-escaped fill is stored as the
+      // ordinary byte it is. Programmable Symbol Sets (a committed stage 4
+      // deliverable) is where the cell would become {kind:'ps',...} instead,
+      // and the flag exists so that change stays local to this case.
       let a = addr;
       do {
         screen.setChar(a, token.fill);
