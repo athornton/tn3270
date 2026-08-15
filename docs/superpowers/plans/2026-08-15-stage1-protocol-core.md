@@ -2036,6 +2036,47 @@ describe('geometry', () => {
     expect(s.inc(1919)).toBe(0);
     expect(s.dec(0)).toBe(1919);
   });
+
+  it('rejects degenerate geometry', () => {
+    expect(() => new Screen({ rows: 0, cols: 80 })).toThrow(RangeError);
+    expect(() => new Screen({ rows: 24, cols: 0 })).toThrow(RangeError);
+    expect(() => new Screen({ rows: 24.5, cols: 80 })).toThrow(RangeError);
+  });
+
+  it('rejects out-of-range and non-integer addresses in the public accessors', () => {
+    const s = new Screen();
+    expect(() => s.cellAt(-1)).toThrow(RangeError);
+    expect(() => s.cellAt(1920)).toThrow(RangeError);
+    expect(() => s.cellAt(5.5)).toThrow(RangeError);
+    expect(() => s.setChar(1920, 0xc1)).toThrow(RangeError);
+    expect(() => s.setFieldAttribute(1920, 0)).toThrow(RangeError);
+    expect(() => s.attributeAt(1920)).toThrow(RangeError);
+    expect(() => s.isFieldAttribute(1920)).toThrow(RangeError);
+    expect(() => s.fieldAt(1920)).toThrow(RangeError);
+    expect(() => s.setMDT(1920)).toThrow(RangeError);
+    expect(() => s.rowText(0)).toThrow(RangeError);
+    expect(() => s.rowText(25)).toThrow(RangeError);
+  });
+
+  it('rejects out-of-range row/col in fromRowCol, which is where CLI input becomes an address', () => {
+    const s = new Screen();
+    expect(() => s.fromRowCol(0, 1)).toThrow(RangeError);
+    expect(() => s.fromRowCol(25, 1)).toThrow(RangeError);
+    expect(() => s.fromRowCol(1, 0)).toThrow(RangeError);
+    expect(() => s.fromRowCol(1, 81)).toThrow(RangeError);
+  });
+
+  it('handles a non-24x80 geometry across row/col conversion, text rendering and field wrap', () => {
+    const s = new Screen({ rows: 43, cols: 80 });
+    expect(s.toRowCol(3439)).toEqual({ row: 43, col: 80 });
+    expect(s.fromRowCol(43, 80)).toBe(3439);
+    expect(s.rowText(43)).toHaveLength(80);
+    s.setFieldAttribute(3439, FA.PROTECT);
+    const f = s.fieldAt(0);
+    expect(f!.attrAddr).toBe(3439);
+    expect(f!.start).toBe(0);
+    expect(f!.length).toBe(3439);
+  });
 });
 
 describe('cells', () => {
@@ -2081,6 +2122,15 @@ describe('field attributes', () => {
     expect(s.rowText(1)[0]).toBe(' ');
   });
 
+  it('rowText blanks every attribute position in the row, not just the first', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setFieldAttribute(1, FA.PROTECT);
+    s.setChar(2, 0xc2);
+    s.setFieldAttribute(3, 0);
+    expect(s.rowText(1).slice(0, 4)).toBe('A B ');
+  });
+
   it('finds the field governing a cell by scanning backwards', () => {
     const s = new Screen();
     s.setFieldAttribute(10, FA.PROTECT);
@@ -2113,6 +2163,19 @@ describe('field attributes', () => {
     expect(s.isFormatted()).toBe(false);
   });
 
+  it('overwriting a field attribute with a character collapses two fields into one', () => {
+    const s = new Screen();
+    s.setFieldAttribute(10, FA.PROTECT);
+    s.setFieldAttribute(20, 0);
+    expect(s.fields()).toHaveLength(2);
+    s.setChar(10, 0xc1); // destroys the boundary between the two fields
+    const fs = s.fields();
+    expect(fs).toHaveLength(1);
+    expect(fs[0]!.attrAddr).toBe(20);
+    // The merged field now spans everything except the one attribute at 20.
+    expect(fs[0]!.length).toBe(1919);
+  });
+
   it('lists fields in address order with derived extents', () => {
     const s = new Screen();
     s.setFieldAttribute(0, FA.PROTECT);
@@ -2125,6 +2188,57 @@ describe('field attributes', () => {
     expect(fs[1]!.length).toBe(9);
     // The last field wraps around to the first attribute.
     expect(fs[2]!.length).toBe(1920 - 21);
+  });
+
+  it('a single field attribute governs the entire rest of the buffer', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    const fs = s.fields();
+    expect(fs).toHaveLength(1);
+    expect(fs[0]!.length).toBe(1919);
+  });
+
+  it('an attribute at the last address governs address 0, wrapped', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1919, FA.PROTECT);
+    const f = s.fieldAt(0);
+    expect(f!.attrAddr).toBe(1919);
+    expect(f!.start).toBe(0);
+    expect(f!.length).toBe(1919);
+  });
+
+  it('two adjacent attributes produce a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(1, 0);
+    const f = s.fieldAt(0)!; // fieldAt on the attribute address itself
+    expect(f.attrAddr).toBe(0);
+    expect(f.length).toBe(0);
+    // start points AT the next attribute, not at a data cell.
+    expect(f.start).toBe(1);
+    expect(s.isFieldAttribute(f.start)).toBe(true);
+  });
+
+  it('fieldAt on an attribute position returns that attribute\'s own field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(10, FA.PROTECT);
+    s.setFieldAttribute(20, 0);
+    const f = s.fieldAt(10);
+    expect(f!.attrAddr).toBe(10);
+  });
+
+  it('isFormatted and fields stay in agreement across a series of mutations', () => {
+    const s = new Screen();
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setFieldAttribute(5, FA.PROTECT);
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setFieldAttribute(50, 0);
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setChar(5, 0xc1); // destroys one of the two attributes
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setChar(50, 0xc2); // destroys the last attribute
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    expect(s.isFormatted()).toBe(false);
   });
 });
 
@@ -2147,6 +2261,16 @@ describe('attribute predicates', () => {
     expect(s.fieldAt(301)!.modified).toBe(true);
   });
 
+  it('autoSkip requires protected AND numeric, not either alone', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT); // protected only
+    s.setFieldAttribute(10, FA.NUMERIC); // numeric only
+    s.setFieldAttribute(20, FA.PROTECT | FA.NUMERIC); // both
+    expect(s.fieldAt(1)!.autoSkip).toBe(false);
+    expect(s.fieldAt(11)!.autoSkip).toBe(false);
+    expect(s.fieldAt(21)!.autoSkip).toBe(true);
+  });
+
   it('sets and clears the modified data tag', () => {
     const s = new Screen();
     s.setFieldAttribute(0, 0);
@@ -2157,14 +2281,44 @@ describe('attribute predicates', () => {
     expect(s.fieldAt(1)!.modified).toBe(false);
   });
 
-  it('clearAllMDT leaves protected fields alone', () => {
-    // Erase Input and WCC reset-MDT act on unprotected fields.
+  it('setMDT is a no-op on an address that is not a field attribute', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0);
+    s.setMDT(5); // not an attribute address
+    expect(s.fieldAt(1)!.modified).toBe(false);
+  });
+
+  it('clearAllMDT resets MDT unconditionally, including protected fields (WCC reset-MDT)', () => {
+    // Read Modified filters on MDT alone, with no protection check, so a
+    // protected field left carrying MDT would leak data to the host.
     const s = new Screen();
     s.setFieldAttribute(0, FA.MODIFY);
     s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
     s.clearAllMDT();
     expect(s.fieldAt(1)!.modified).toBe(false);
+    expect(s.fieldAt(101)!.modified).toBe(false);
+  });
+
+  it('clearUnprotectedMDT leaves protected fields alone (Erase Input)', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.MODIFY);
+    s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
+    s.clearUnprotectedMDT();
+    expect(s.fieldAt(1)!.modified).toBe(false);
     expect(s.fieldAt(101)!.modified).toBe(true);
+  });
+
+  it('decodes attribute bits from a realistic host byte with the high bits set', () => {
+    // Real hosts set the base-architecture "printable" bits (0xC0); a clean
+    // FA.PROTECT constant never exercises that. 0xE1 = printable | protect | MDT.
+    const s = new Screen();
+    s.setFieldAttribute(0, 0xe1);
+    const f = s.fieldAt(1)!;
+    expect(f.protected).toBe(true);
+    expect(f.modified).toBe(true);
+    expect(f.numeric).toBe(false);
+    // The raw byte is preserved unnormalized.
+    expect(f.attr).toBe(0xe1);
   });
 });
 
@@ -2195,6 +2349,28 @@ describe('clearing', () => {
     expect(s.isFieldAttribute(0)).toBe(true);
     expect(s.isFieldAttribute(10)).toBe(true);
   });
+
+  it('Erase All Unprotected clears an unformatted screen entirely', () => {
+    // An unformatted buffer is, by definition, entirely unprotected (x3270
+    // ctlr.c:1443-1445): a host that prints a banner before its first SF (as
+    // VM/370 does) still expects EAU to blank the screen.
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.cursor = 42;
+    s.eraseAllUnprotected();
+    expect(s.cellAt(5)!.ebcdic).toBe(0x00);
+    expect(s.isFormatted()).toBe(false);
+  });
+
+  it('Erase All Unprotected nulls a field that wraps past the end of the buffer', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1918, 0); // unprotected, wraps: start=1919, then 0
+    s.setChar(1919, 0xc1);
+    s.setChar(0, 0xc2);
+    s.eraseAllUnprotected();
+    expect(s.cellAt(1919)!.ebcdic).toBe(0x00);
+    expect(s.cellAt(0)!.ebcdic).toBe(0x00);
+  });
 });
 
 describe('snapshot', () => {
@@ -2210,6 +2386,88 @@ describe('snapshot', () => {
     s.setChar(0, 0xc2);
     // The snapshot must not have changed underneath its holder.
     expect(snap.cells[0]!.ebcdic).toBe(0xc1);
+  });
+
+  it('isolates cursor, fields and formatted from later mutation, not just cells', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.cursor = 3;
+    const snap = s.snapshot();
+    s.cursor = 999;
+    s.setFieldAttribute(50, 0); // adds a field
+    s.setChar(0, 0xc1); // destroys the field the snapshot saw
+    expect(snap.cursor).toBe(3);
+    expect(snap.fields).toHaveLength(1);
+    expect(snap.fields[0]!.attrAddr).toBe(0);
+    expect(snap.formatted).toBe(true);
+  });
+
+  it('freezes cell and field objects so mutation throws or is a no-op', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    const snap = s.snapshot();
+    expect(Object.isFrozen(snap.cells)).toBe(true);
+    expect(Object.isFrozen(snap.cells[0])).toBe(true);
+    expect(Object.isFrozen(snap.fields)).toBe(true);
+    expect(Object.isFrozen(snap.fields[0])).toBe(true);
+  });
+});
+
+describe('cursor placement helpers', () => {
+  it('firstUnprotectedStart skips zero-length fields', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0); // unprotected, but zero-length (next is attr 1)
+    s.setFieldAttribute(1, FA.PROTECT); // protected
+    s.setFieldAttribute(10, 0); // unprotected, has room
+    expect(s.firstUnprotectedStart()).toBe(11);
+  });
+
+  it('firstUnprotectedStart returns null when nothing is typable', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    expect(s.firstUnprotectedStart()).toBeNull();
+    expect(new Screen().firstUnprotectedStart()).toBeNull();
+  });
+
+  it('typableFields excludes protected, auto-skip and zero-length fields', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT); // excluded: protected
+    s.setFieldAttribute(10, FA.PROTECT | FA.NUMERIC); // excluded: auto-skip
+    s.setFieldAttribute(20, 0); // included
+    s.setFieldAttribute(1919, 0); // excluded: zero-length (wraps to attr 0)
+    const fs = s.typableFields();
+    expect(fs.map((f) => f.attrAddr)).toEqual([20]);
+  });
+});
+
+describe('forEachCellWithField', () => {
+  it('carries the governing field forward across the swept range', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(10, 0);
+    const seen: { addr: number; attrAddr: number | null; isAttr: boolean }[] = [];
+    s.forEachCellWithField(0, 20, (addr, field, isAttr) => {
+      seen.push({ addr, attrAddr: field?.attrAddr ?? null, isAttr });
+    });
+    expect(seen).toHaveLength(20);
+    expect(seen[0]).toEqual({ addr: 0, attrAddr: 0, isAttr: true });
+    expect(seen[5]).toEqual({ addr: 5, attrAddr: 0, isAttr: false });
+    expect(seen[10]).toEqual({ addr: 10, attrAddr: 10, isAttr: true });
+    expect(seen[15]).toEqual({ addr: 15, attrAddr: 10, isAttr: false });
+  });
+
+  it('reports a null field on an unformatted screen', () => {
+    const s = new Screen();
+    const fields: (number | null)[] = [];
+    s.forEachCellWithField(0, 3, (_addr, field) => fields.push(field?.attrAddr ?? null));
+    expect(fields).toEqual([null, null, null]);
+  });
+
+  it('wraps past the end of the buffer', () => {
+    const s = new Screen();
+    const addrs: number[] = [];
+    s.forEachCellWithField(1918, 2, (addr) => addrs.push(addr));
+    expect(addrs).toEqual([1918, 1919, 0, 1]);
   });
 });
 ```
@@ -2249,10 +2507,24 @@ export type Cell = { kind: 'char'; ebcdic: number };
 export interface Field {
   /** Address of the field attribute byte itself. */
   attrAddr: number;
-  /** Address of the first data cell (attrAddr + 1, wrapped). */
+  /**
+   * Address of the first data cell (attrAddr + 1, wrapped). For a
+   * zero-length field — one attribute immediately followed by another — this
+   * IS the next attribute's address, not a data cell. Callers that park the
+   * cursor here must check `length > 0` first; use `firstUnprotectedStart()`
+   * or `typableFields()`, which already do.
+   */
   start: number;
   /** Data cells in the field, excluding the attribute byte. */
   length: number;
+  /**
+   * The raw, unnormalized attribute byte exactly as the host sent it. Real
+   * hosts set bits beyond the ones this module names (the base architecture
+   * requires the top two bits on, so a plain "unprotected" byte arrives as
+   * 0xC0, not 0x00). Consume this only via `&` with `FA.*` masks — never
+   * `===` — or normalization differences will make an identical-looking
+   * field compare unequal.
+   */
   attr: number;
   protected: boolean;
   numeric: boolean;
@@ -2267,8 +2539,8 @@ export interface ScreenSnapshot {
   rows: number;
   cols: number;
   cursor: number;
-  cells: readonly Cell[];
-  fields: readonly Field[];
+  cells: readonly Readonly<Cell>[];
+  fields: readonly Readonly<Field>[];
   formatted: boolean;
 }
 
@@ -2295,23 +2567,44 @@ export class Screen {
   constructor(opts: ScreenOptions = {}) {
     this.rows = opts.rows ?? MODEL_2.rows;
     this.cols = opts.cols ?? MODEL_2.cols;
+    if (!Number.isInteger(this.rows) || this.rows <= 0) {
+      throw new RangeError(`rows must be a positive integer, got ${this.rows}`);
+    }
+    if (!Number.isInteger(this.cols) || this.cols <= 0) {
+      throw new RangeError(`cols must be a positive integer, got ${this.cols}`);
+    }
     this.size = this.rows * this.cols;
     this.chars = new Uint8Array(this.size);
     this.attrs = new Int16Array(this.size).fill(NOT_ATTR);
     this.codePage = opts.codePage ?? cp037;
   }
 
+  /** Throws if `addr` is not an integer in [0, size). */
+  private check(addr: number): void {
+    if (!Number.isInteger(addr) || addr < 0 || addr >= this.size) {
+      throw new RangeError(`address ${addr} out of range for a ${this.size}-cell buffer`);
+    }
+  }
+
   // ---- geometry ----
 
   /** Display row/column, 1-based, as the OIA and s3270 report them. */
   toRowCol(addr: number): { row: number; col: number } {
+    this.check(addr);
     return {
       row: Math.floor(addr / this.cols) + 1,
       col: (addr % this.cols) + 1,
     };
   }
 
+  /** Row and column are both 1-based. Throws if the result would be out of range. */
   fromRowCol(row: number, col: number): number {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
+    if (!Number.isInteger(col) || col < 1 || col > this.cols) {
+      throw new RangeError(`col ${col} out of range for a ${this.cols}-col screen`);
+    }
     return (row - 1) * this.cols + (col - 1);
   }
 
@@ -2328,6 +2621,7 @@ export class Screen {
   // ---- cells ----
 
   cellAt(addr: number): Cell {
+    this.check(addr);
     return { kind: 'char', ebcdic: this.chars[addr]! };
   }
 
@@ -2337,20 +2631,24 @@ export class Screen {
    * changes as a result.
    */
   setChar(addr: number, ebcdic: number): void {
+    this.check(addr);
     this.chars[addr] = ebcdic & 0xff;
     this.attrs[addr] = NOT_ATTR;
   }
 
   isFieldAttribute(addr: number): boolean {
+    this.check(addr);
     return this.attrs[addr]! >= 0;
   }
 
   attributeAt(addr: number): number | null {
+    this.check(addr);
     const a = this.attrs[addr]!;
     return a >= 0 ? a : null;
   }
 
   setFieldAttribute(addr: number, attr: number): void {
+    this.check(addr);
     this.attrs[addr] = attr & 0xff;
     // An attribute position displays as a blank and holds no character.
     this.chars[addr] = 0x00;
@@ -2365,6 +2663,7 @@ export class Screen {
 
   /** The field governing `addr`, found by scanning backwards for an attribute. */
   fieldAt(addr: number): Field | null {
+    this.check(addr);
     let a = addr;
     for (let n = 0; n < this.size; n++) {
       if (this.attrs[a]! >= 0) return this.makeField(a);
@@ -2407,14 +2706,38 @@ export class Screen {
     };
   }
 
+  /**
+   * Set the MDT bit on the field attribute at `attrAddr`. `attrAddr` must be
+   * the attribute's own address (`field.attrAddr`), not any address inside
+   * the field — unlike x3270's `mdt_set`, this does not resolve an arbitrary
+   * in-field address for you. Passing a non-attribute address is a silent
+   * no-op; callers that have a `Field` should always pass its `attrAddr`.
+   */
   setMDT(attrAddr: number): void {
+    this.check(attrAddr);
     if (this.attrs[attrAddr]! >= 0) {
       this.attrs[attrAddr] = this.attrs[attrAddr]! | FA.MODIFY;
     }
   }
 
-  /** Reset MDT in unprotected fields (WCC reset-MDT, Erase Input). */
+  /**
+   * Reset MDT in EVERY field, protected or not. This is WCC reset-MDT: manual
+   * Table 3-2 bit 7 says "all MDT bits in the device's existing character
+   * buffer are reset," and x3270's handler (`ctlr.c:1545-1550`) has no
+   * protection check. This matters because Read Modified filters on MDT alone
+   * (`ctlr.c:921`) — a protected field left carrying MDT would otherwise leak
+   * its data to the host on the next read. Erase Input is the
+   * unprotected-only operation; see `clearUnprotectedMDT`.
+   */
   clearAllMDT(): void {
+    for (let i = 0; i < this.size; i++) {
+      const a = this.attrs[i]!;
+      if (a >= 0) this.attrs[i] = a & ~FA.MODIFY;
+    }
+  }
+
+  /** Reset MDT in unprotected fields only (Erase Input, manual 4-14). */
+  clearUnprotectedMDT(): void {
     for (let i = 0; i < this.size; i++) {
       const a = this.attrs[i]!;
       if (a >= 0 && (a & FA.PROTECT) === 0) {
@@ -2434,13 +2757,23 @@ export class Screen {
 
   /**
    * Erase All Unprotected: null the data in unprotected fields and reset their
-   * MDT. Field attributes themselves survive.
+   * MDT. Field attributes themselves survive. On an unformatted screen there
+   * are no field attributes to preserve — the whole buffer is, by definition,
+   * unprotected — so this clears everything, matching x3270's
+   * `else { ctlr_clear(true); }` at `ctlr.c:1443-1445`.
    */
   eraseAllUnprotected(): void {
+    if (!this.isFormatted()) {
+      this.clear();
+      return;
+    }
     for (const f of this.fields()) {
       if (f.protected) continue;
       let a = f.start;
       for (let n = 0; n < f.length; n++) {
+        // Must write chars[] directly, not via setChar: setChar also clears
+        // attrs[], which would destroy the very field attributes EAU is
+        // required to preserve.
         this.chars[a] = 0x00;
         a = this.inc(a);
       }
@@ -2448,15 +2781,68 @@ export class Screen {
     }
   }
 
+  /**
+   * The first cell a user could type into: the start of the first
+   * unprotected field, skipping zero-length fields (a zero-length field's
+   * `start` IS the next attribute — landing the cursor there and typing would
+   * collapse two fields). Mirrors x3270's `next_unprotected`
+   * (`ctlr.c:623-638`). Returns null if there is no such field.
+   */
+  firstUnprotectedStart(): number | null {
+    for (const f of this.fields()) {
+      if (!f.protected && f.length > 0) return f.start;
+    }
+    return null;
+  }
+
+  /**
+   * Unprotected, non-auto-skip fields with room for data — the set Tab and
+   * Back Tab cycle through. Zero-length fields are excluded for the same
+   * reason `firstUnprotectedStart` excludes them.
+   */
+  typableFields(): Field[] {
+    return this.fields().filter((f) => !f.protected && !f.autoSkip && f.length > 0);
+  }
+
+  /**
+   * Visit every cell from `start` up to (excluding) `stop`, wrapping as
+   * needed, passing each cell's governing field (or null if unformatted) and
+   * whether the cell itself is that field's attribute byte. Carries the
+   * attribute forward instead of calling `fieldAt` per cell, so a full sweep
+   * is O(size) rather than O(size^2) — the naive per-cell `fieldAt` scan costs
+   * ~3.7M operations over a full 1920-cell buffer. Mirrors x3270's
+   * `current_fa` tracking (`ctlr.c:1809-1816`).
+   */
+  forEachCellWithField(
+    start: number,
+    stop: number,
+    cb: (addr: number, field: Field | null, isAttr: boolean) => void,
+  ): void {
+    this.check(start);
+    this.check(stop);
+    let field = this.fieldAt(start);
+    let a = start;
+    do {
+      const attr = this.attrs[a]!;
+      const isAttr = attr >= 0;
+      if (isAttr) field = this.makeField(a);
+      cb(a, field, isAttr);
+      a = this.inc(a);
+    } while (a !== stop);
+  }
+
   // ---- output ----
 
-  /** Raw buffer contents, for Read Buffer and for tests. */
+  /** Raw buffer contents, for tests and diagnostics. */
   readBuffer(): Uint8Array {
     return Uint8Array.from(this.chars);
   }
 
   /** One display row as text, 1-based. Nulls and attributes render as spaces. */
   rowText(row: number): string {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
     let out = '';
     const base = (row - 1) * this.cols;
     for (let c = 0; c < this.cols; c++) {
@@ -2477,17 +2863,26 @@ export class Screen {
     return lines.join('\n');
   }
 
-  /** An immutable view for the UI or for assertions. */
+  /**
+   * An immutable view for the UI or for assertions. The `Readonly<Cell>` /
+   * `Readonly<Field>` element types make `snap.cells[0].ebcdic = ...` a
+   * compile error, and each array and element is also `Object.freeze`d so the
+   * same mutation fails at runtime too (e.g. from plain JS callers).
+   */
   snapshot(): ScreenSnapshot {
-    const cells: Cell[] = new Array(this.size);
-    for (let i = 0; i < this.size; i++) cells[i] = { kind: 'char', ebcdic: this.chars[i]! };
+    const cells: Readonly<Cell>[] = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      cells[i] = Object.freeze({ kind: 'char' as const, ebcdic: this.chars[i]! });
+    }
+    const fields = this.fields().map((f) => Object.freeze(f));
+    const formatted = fields.length > 0;
     return {
       rows: this.rows,
       cols: this.cols,
       cursor: this.cursor,
-      cells,
-      fields: this.fields(),
-      formatted: this.isFormatted(),
+      cells: Object.freeze(cells),
+      fields: Object.freeze(fields),
+      formatted,
     };
   }
 }
@@ -2496,7 +2891,7 @@ export class Screen {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/screen.test.ts`
-Expected: PASS, 21 tests.
+Expected: PASS, 46 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4262,7 +4657,13 @@ export class Keyboard {
     s.setMDT(f.attrAddr);
   }
 
-  /** Clear every unprotected field, reset MDT, home the cursor. */
+  /**
+   * Clear every unprotected field, reset their MDT, home the cursor.
+   *
+   * eraseAllUnprotected already resets MDT on the unprotected fields it clears
+   * (manual 3-8), which is the Erase Input rule — unlike WCC reset-MDT, which is
+   * unconditional. Do not reach for clearAllMDT here.
+   */
   eraseInput(): void {
     this.screen.eraseAllUnprotected();
     this.home();
