@@ -152,12 +152,22 @@ describe('attribute predicates', () => {
     expect(s.fieldAt(1)!.modified).toBe(false);
   });
 
-  it('clearAllMDT leaves protected fields alone', () => {
-    // Erase Input and WCC reset-MDT act on unprotected fields.
+  it('clearAllMDT resets MDT unconditionally, including protected fields (WCC reset-MDT)', () => {
+    // Read Modified filters on MDT alone, with no protection check, so a
+    // protected field left carrying MDT would leak data to the host.
     const s = new Screen();
     s.setFieldAttribute(0, FA.MODIFY);
     s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
     s.clearAllMDT();
+    expect(s.fieldAt(1)!.modified).toBe(false);
+    expect(s.fieldAt(101)!.modified).toBe(false);
+  });
+
+  it('clearUnprotectedMDT leaves protected fields alone (Erase Input)', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.MODIFY);
+    s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
+    s.clearUnprotectedMDT();
     expect(s.fieldAt(1)!.modified).toBe(false);
     expect(s.fieldAt(101)!.modified).toBe(true);
   });
@@ -189,6 +199,17 @@ describe('clearing', () => {
     // Field attributes themselves survive EAU.
     expect(s.isFieldAttribute(0)).toBe(true);
     expect(s.isFieldAttribute(10)).toBe(true);
+  });
+
+  it('Erase All Unprotected clears an unformatted screen entirely', () => {
+    // An unformatted buffer is, by definition, entirely unprotected (x3270
+    // ctlr.c:1443-1445): a host that prints a banner before its first SF (as
+    // VM/370 does) still expects EAU to blank the screen.
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.eraseAllUnprotected();
+    expect(s.cellAt(5)!.ebcdic).toBe(0x00);
+    expect(s.isFormatted()).toBe(false);
   });
 });
 
