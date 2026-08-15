@@ -60,7 +60,10 @@ function commandOf(byte: number): CommandName | null {
     case SnaCmd.RB: case Cmd.RB: return 'ReadBuffer';
     case SnaCmd.RM: case Cmd.RM: return 'ReadModified';
     case SnaCmd.RMA: case Cmd.RMA: return 'ReadModifiedAll';
-    case SnaCmd.WSF: return 'WriteStructuredField';
+    // Both WSF encodings, like every other command. Cmd.WSF is 0x11, the same
+    // value as Order.SBA — safe here because this function is only ever called
+    // on the command byte, never on an order byte.
+    case SnaCmd.WSF: case Cmd.WSF: return 'WriteStructuredField';
     case Cmd.NOP: return 'NoOp';
     default: return null;
   }

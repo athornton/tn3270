@@ -14,6 +14,10 @@ describe('command recognition', () => {
     expect(parseRecord(Uint8Array.of(Cmd.EW, 0xc3)).command).toBe('EraseWrite');
     expect(parseRecord(Uint8Array.of(Cmd.W, 0x00)).command).toBe('Write');
     expect(parseRecord(Uint8Array.of(Cmd.EWA, 0x00)).command).toBe('EraseWriteAlternate');
+    expect(parseRecord(Uint8Array.of(Cmd.RB)).command).toBe('ReadBuffer');
+    expect(parseRecord(Uint8Array.of(Cmd.RM)).command).toBe('ReadModified');
+    expect(parseRecord(Uint8Array.of(Cmd.RMA)).command).toBe('ReadModifiedAll');
+    expect(parseRecord(Uint8Array.of(Cmd.EAU)).command).toBe('EraseAllUnprotected');
   });
 
   it('parses the read commands, which carry no WCC', () => {
@@ -37,6 +41,19 @@ describe('command recognition', () => {
       kind: 'structuredFields',
       data: Uint8Array.of(0x00, 0x05, 0x01, 0xff, 0x02),
     });
+  });
+
+  it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
+    // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
+    // disambiguates: commandOf only ever sees the command byte. x3270 accepts
+    // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750).
+    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    // And 0x11 in ORDER position is still SBA, not a nested WSF.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));
+    expect(r.tokens[0]).toEqual({ kind: 'sba', address: 0 });
   });
 
   it('rejects an empty record', () => {
