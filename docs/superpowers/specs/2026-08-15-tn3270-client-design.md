@@ -56,6 +56,37 @@ Multi-session support and additional EBCDIC code pages are not staged
 separately; stage 1 leaves stubs (see *Forward-Compatibility Stubs*) so they
 become incremental work whenever wanted.
 
+### A Later Dimension — 3279 Graphics / GDDM
+
+Not scheduled, but an explicit long-term goal, and therefore a constraint on
+stage 1 and 2 decisions. Eventually the emulator should reach the fidelity of
+what real 3279 hardware could display — the reference point being the primitive
+GIF viewer Rick Troth wrote for his own 3279 around 1992.
+
+What it entails, roughly in order of increasing effort:
+
+- **WSF Query Reply** advertising graphics capability (usage, character sets,
+  implicit partition, alphanumeric/graphic partitions).
+- **Programmable Symbol Sets (PS)** — host-loadable character cell bitmaps.
+  This is precisely how a GIF viewer on real hardware worked: the image was
+  loaded as custom glyphs and then "typed" onto the screen. It is the cheapest
+  path to real images and the one with actual historical fidelity.
+- **GDF (Graphics Data Format) order parsing** — the vector primitives GDDM
+  emits inside structured fields.
+- **Raster/vector rendering** into the display.
+
+Honest limitation: on real hardware this was bounded by 3279 resolutions and a
+small number of loadable character sets. Troth's viewer was primitive because
+the terminal was. Matching that fidelity is achievable; exceeding it
+substantially means going beyond what the hardware did, which is a separate
+conversation.
+
+Nothing in stage 1 precludes this. Two stage-1 decisions actively enable it:
+`GE` (0x08) is parsed rather than rejected, so the graphic-escape path exists;
+and `WSF` (0xF3) is recognized, skipped, and traced, so the bytes that carry
+GDDM graphics already route to a known place instead of desynchronizing the
+stream. That stub is the future entry point.
+
 ### Out of Scope
 
 Retro CRT shader effects (scanlines, phosphor glow). Pure presentation, easily
@@ -220,7 +251,8 @@ cleanly does not.
 
 Extended attributes (SFE/MF/SA), color and highlighting on the wire, graphic
 escapes beyond skipping, TN3270E headers and device-name negotiation, printer
-LUs, TLS, alternate screen sizes.
+LUs, TLS, alternate screen sizes, and all graphics — Query Reply, Programmable
+Symbol Sets, and GDF (see *A Later Dimension*).
 
 ## Error Handling
 
@@ -354,6 +386,17 @@ Three, all cheap now and expensive to retrofit:
   multi-session tabs are a UI change rather than a core rewrite.
 - **The renderer takes screen dimensions as parameters, never hardcoded 80/24**,
   so TN3270E's negotiated sizes do not touch drawing code.
+- **A cell's visual content is a tagged variant, not "a codepoint to look up in
+  the font."** In stages 1–2 the only variant is `{kind: 'char', codepoint}`,
+  and no other variant need be implemented — but the renderer must dispatch on
+  `kind` rather than assuming every cell indexes the font by character. This is
+  the one genuine retrofit risk for graphics: Programmable Symbol Sets make a
+  cell's content a host-loaded glyph bitmap, and GDF makes it a pixel region.
+  Dispatching from the start makes those additions; assuming codepoints makes
+  them a renderer rewrite. Cost now is one `switch` with a single case.
+- **Query Reply is generated from a capability list, not a hardcoded byte
+  blob** (relevant from the TN3270E stage onward). Advertising graphics later
+  then means adding a capability entry rather than editing opaque bytes.
 
 ## Testing Strategy
 
@@ -408,6 +451,16 @@ the buffer.
   practices), RFC 2355 (TN3270E)
 - x3270 — behavioral reference implementation
 - 3270font — https://github.com/rbanffy/3270font
+- *IBM 3270 Information Display System: 3274 Control Unit Description and
+  Programmer's Guide* and the GDDM reference above, for the eventual graphics
+  work (Programmable Symbol Sets, GDF orders)
+
+Sought but not yet located: Rick Troth's 3279 GIF viewer (~1992, VM/CMS). A web
+search from the development environment failed outright — `WebSearch` returned
+zero results for every query including trivial control queries, so this is a
+tool failure rather than evidence of absence. Worth retrying, or asking the
+author. If recovered, its greatest value would be a **recorded datastream** of a
+real 3279 loading PS glyphs, which is a better fixture than the source itself.
 
 ## Success Criteria
 
