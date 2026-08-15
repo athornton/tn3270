@@ -1012,6 +1012,16 @@ describe('Trace', () => {
     expect(t.lines()[1]).toBe('0.250 < 02');
   });
 
+  it('clamps elapsed time at 0 if the clock steps backward', () => {
+    let now = 1000;
+    const t = new Trace({ enabled: true, clock: () => now });
+    t.recv(Uint8Array.of(1));
+    now = 500; // e.g. an NTP correction on a non-monotonic clock
+    t.recv(Uint8Array.of(2));
+    expect(t.lines()[0]).toBe('0.000 < 01');
+    expect(t.lines()[1]).toBe('0.000 < 02');
+  });
+
   it('appends annotations without disturbing the hex', () => {
     const t = new Trace({ enabled: true, clock: () => 0 });
     t.recv(Uint8Array.of(0xf5), 'Erase/Write');
@@ -1024,6 +1034,14 @@ describe('Trace', () => {
     expect(t.lines()[0]).toBe('0.000 = # negotiated 3270 mode');
   });
 
+  it('sanitizes newlines in notes and annotations so they cannot forge a line', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.note('host said:\n0.000 < de ad be ef');
+    expect(t.lines()).toHaveLength(1);
+    expect(t.lines()[0]).toBe('0.000 = # host said: 0.000 < de ad be ef');
+    expect(parseTrace(t.lines()[0]!)).toEqual([]);
+  });
+
   it('wraps long byte runs at 16 per line', () => {
     const t = new Trace({ enabled: true, clock: () => 0 });
     t.recv(new Uint8Array(20).fill(0xab));
@@ -1031,6 +1049,30 @@ describe('Trace', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]!.split(' ').length).toBe(2 + 16);
     expect(lines[1]!.split(' ').length).toBe(2 + 4);
+  });
+
+  it('marks continuation lines of a wrapped run with a leading +', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(new Uint8Array(20).fill(0xab));
+    const lines = t.lines();
+    expect(lines[0]!.startsWith('0.000 < ')).toBe(true);
+    expect(lines[1]!.startsWith('0.000 + ')).toBe(true);
+  });
+
+  it('does not retain lines when a sink is attached', () => {
+    const sunk: string[] = [];
+    const t = new Trace({ enabled: true, clock: () => 0, sink: (l) => sunk.push(l) });
+    t.recv(Uint8Array.of(0xf5, 0xc3));
+    expect(sunk).toEqual(['0.000 < f5 c3']);
+    expect(t.lines()).toEqual([]);
+  });
+
+  it('returns a snapshot from lines() that mutation cannot affect', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(Uint8Array.of(0xf5));
+    const snapshot = t.lines() as string[];
+    snapshot.push('injected');
+    expect(t.lines()).toHaveLength(1);
   });
 });
 
@@ -1047,9 +1089,20 @@ describe('parseTrace', () => {
     ]);
   });
 
-  it('merges continuation lines of a wrapped run', () => {
-    const text = ['0.000 < ' + 'ab '.repeat(16).trim(), '0.000 < ab ab'].join('\n');
-    const events = parseTrace(text);
+  it('merges a wrapped run back into the single event it originally was', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    const payload = new Uint8Array(20).fill(0xab);
+    t.recv(payload);
+    const events = parseTrace(t.lines().join('\n'));
+    expect(events).toHaveLength(1);
+    expect(events[0]!.bytes).toEqual(payload);
+  });
+
+  it('keeps two genuinely separate events separate even when each is 16 bytes', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(new Uint8Array(16).fill(0xab));
+    t.recv(new Uint8Array(2).fill(0xab));
+    const events = parseTrace(t.lines().join('\n'));
     expect(events).toHaveLength(2);
     expect(events[0]!.bytes).toHaveLength(16);
     expect(events[1]!.bytes).toHaveLength(2);
@@ -1057,6 +1110,14 @@ describe('parseTrace', () => {
 
   it('ignores blank lines and comments', () => {
     expect(parseTrace('\n# a comment\n\n')).toEqual([]);
+  });
+
+  it('throws on a malformed hex byte instead of silently coercing it to zero', () => {
+    expect(() => parseTrace('0.000 < f5 oops c3')).toThrow(/invalid hex byte "oops"/);
+  });
+
+  it('throws on a continuation line with no preceding event', () => {
+    expect(() => parseTrace('0.000 + ab ab')).toThrow(/no preceding event/);
   });
 });
 ```
@@ -1080,9 +1141,11 @@ Create `packages/core/src/trace.ts`:
  *
  *   <elapsed> <dir> <hex bytes...>  [# annotation]
  *
- * where dir is '<' for received, '>' for sent, '=' for a note. Timestamps are
- * seconds since the first event, so two traces of the same session compare
- * cleanly regardless of wall clock.
+ * where dir is '<' for received, '>' for sent, '=' for a note, or '+' for a
+ * continuation of the previous line's byte run (used when a single recv()/
+ * send() call is wrapped across more than one line). Timestamps are seconds
+ * since the first event, so two traces of the same session compare cleanly
+ * regardless of wall clock.
  */
 
 export type TraceDir = 'recv' | 'send';
@@ -1096,6 +1159,11 @@ export interface TraceOptions {
 }
 
 const BYTES_PER_LINE = 16;
+
+/** Newlines in user-supplied text could otherwise forge a fake trace line. */
+function sanitizeText(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ');
+}
 
 export class Trace {
   private enabled: boolean;
@@ -1129,39 +1197,54 @@ export class Trace {
   /** A message with no bytes — negotiation milestones, program checks, etc. */
   note(text: string): void {
     if (!this.enabled) return;
-    this.emit(`${this.stamp()} = # ${text}`);
+    this.emit(`${this.stamp()} = # ${sanitizeText(text)}`);
   }
 
+  /** A snapshot of the lines recorded so far. Mutating it does not affect the trace. */
   lines(): readonly string[] {
-    return this.buffered;
+    return [...this.buffered];
   }
 
   toText(): string {
     return this.buffered.join('\n');
   }
 
-  private emitBytes(marker: string, bytes: Uint8Array, annotation?: string): void {
+  private emitBytes(marker: '<' | '>', bytes: Uint8Array, annotation?: string): void {
     if (!this.enabled) return;
     if (bytes.length === 0) return;
     const stamp = this.stamp();
+    const safeAnnotation = annotation !== undefined ? sanitizeText(annotation) : undefined;
     for (let off = 0; off < bytes.length; off += BYTES_PER_LINE) {
       const chunk = bytes.subarray(off, off + BYTES_PER_LINE);
       const hex = Array.from(chunk, (b) => b.toString(16).padStart(2, '0')).join(' ');
+      const isFirst = off === 0;
       const isLast = off + BYTES_PER_LINE >= bytes.length;
-      const suffix = isLast && annotation ? `  # ${annotation}` : '';
-      this.emit(`${stamp} ${marker} ${hex}${suffix}`);
+      const lineMarker = isFirst ? marker : '+';
+      const suffix = isLast && safeAnnotation ? `  # ${safeAnnotation}` : '';
+      this.emit(`${stamp} ${lineMarker} ${hex}${suffix}`);
     }
   }
 
   private emit(line: string): void {
-    this.buffered.push(line);
-    this.sink?.(line);
+    // A sink means the caller owns persistence (e.g. a file stream); retaining
+    // every line here too would mean a long session holds its entire trace in
+    // memory regardless. Without a sink, buffering is the only way lines() and
+    // toText() can ever return anything, so we keep it in that case.
+    if (this.sink) {
+      this.sink(line);
+    } else {
+      this.buffered.push(line);
+    }
   }
 
   private stamp(): string {
     const now = this.clock();
     this.start ??= now;
-    return ((now - this.start) / 1000).toFixed(3);
+    // Clamp at 0: a clock that steps backward (e.g. an NTP correction on a
+    // non-monotonic clock) must not produce a negative elapsed time, which
+    // parseTrace's line regex would fail to match and silently drop.
+    const elapsed = Math.max(0, (now - this.start) / 1000);
+    return elapsed.toFixed(3);
   }
 }
 
@@ -1170,28 +1253,67 @@ export interface TraceEvent {
   bytes: Uint8Array;
 }
 
+const HEX_BYTE = /^[0-9a-fA-F]{1,2}$/;
+
+/** Parses one line's whitespace-separated hex tokens, validating each. */
+function parseHexPayload(payload: string, lineNo: number, rawLine: string): Uint8Array {
+  if (payload === '') return new Uint8Array(0);
+  const tokens = payload.split(/\s+/);
+  const bytes = new Uint8Array(tokens.length);
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (!HEX_BYTE.test(tok)) {
+      throw new Error(
+        `parseTrace: invalid hex byte "${tok}" on line ${lineNo}: ${rawLine}`,
+      );
+    }
+    bytes[i] = Number.parseInt(tok, 16);
+  }
+  return bytes;
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
 /**
  * Parse a trace back into byte runs, for Replay(). Notes and comments are
- * dropped — they are commentary, not protocol. Each line becomes one event;
- * a wrapped run therefore replays as consecutive events, which is
- * indistinguishable from the receiver's point of view since the framer
- * buffers across chunk boundaries anyway.
+ * dropped — they are commentary, not protocol. A '+' continuation line is
+ * merged into the byte run of the event immediately before it, so a run that
+ * Trace wrapped across several 16-byte lines round-trips as the single event
+ * it originally was. This matters: Tasks 15-17 replay fixtures to test the
+ * framer against real chunk boundaries, and a wrapped run merged back into one
+ * event is what makes that possible.
  */
 export function parseTrace(text: string): TraceEvent[] {
   const events: TraceEvent[] = [];
-  for (const raw of text.split('\n')) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     const line = raw.trim();
-    if (line === '' || line.startsWith('#')) continue;
-    const m = /^([0-9.]+)\s+([<>=])\s*(.*)$/.exec(line);
+    const m = /^([0-9.]+)\s+([<>=+])\s*(.*)$/.exec(line);
     if (!m) continue;
+    const lineNo = i + 1;
     const marker = m[2]!;
     if (marker === '=') continue;
     const payload = m[3]!.replace(/\s*#.*$/, '').trim();
-    if (payload === '') continue;
-    const bytes = Uint8Array.from(
-      payload.split(/\s+/).map((h) => Number.parseInt(h, 16)),
-    );
-    events.push({ dir: marker === '<' ? 'recv' : 'send', bytes });
+    const bytes = parseHexPayload(payload, lineNo, raw);
+    if (bytes.length === 0) continue;
+
+    if (marker === '+') {
+      const prev = events[events.length - 1];
+      if (!prev) {
+        throw new Error(
+          `parseTrace: continuation line ${lineNo} with no preceding event: ${raw}`,
+        );
+      }
+      prev.bytes = concatBytes(prev.bytes, bytes);
+    } else {
+      events.push({ dir: marker === '<' ? 'recv' : 'send', bytes });
+    }
   }
   return events;
 }
@@ -1200,7 +1322,7 @@ export function parseTrace(text: string): TraceEvent[] {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/trace.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1243,8 +1365,9 @@ Create `packages/core/test/telnet.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { TelnetLayer, MAX_RECORD_BYTES, MAX_SUBNEG_BYTES } from '../src/telnet.js';
+import { TelnetLayer, MAX_RECORD_BYTES } from '../src/telnet.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
+import { Trace } from '../src/trace.js';
 
 /** Collects what the layer wants to transmit and the records it produces. */
 function harness() {
@@ -1295,6 +1418,19 @@ describe('option negotiation', () => {
     expect(sent[0]).toEqual(expected);
   });
 
+  it('advertises an ASCII-only terminal type', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    const payload = sent[0]!.slice(4, -2);
+    for (const code of payload) {
+      expect(code).toBeGreaterThanOrEqual(0x20);
+      expect(code).toBeLessThanOrEqual(0x7e);
+    }
+    expect(String.fromCharCode(...payload)).toBe('IBM-3278-2');
+  });
+
   it('refuses TN3270E in stage 1', () => {
     const { layer, sent } = harness();
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
@@ -1332,6 +1468,24 @@ describe('option negotiation', () => {
     expect(sent[0]).toEqual([T.IAC, T.WONT, 99]);
     layer.receive(Uint8Array.of(T.IAC, T.WILL, 99));
     expect(sent[1]).toEqual([T.IAC, T.DONT, 99]);
+  });
+
+  it('drops out of 3270 mode when the host DONTs BINARY', () => {
+    const { layer } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    expect(layer.is3270Mode()).toBe(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.BINARY));
+    expect(layer.is3270Mode()).toBe(false);
+  });
+
+  it('accepts IAC WONT for an option we offered and drops it from hisOpts', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.WILL, O.EOR));
+    expect(sent[0]).toEqual([T.IAC, T.DO, O.EOR]);
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.EOR));
+    expect(sent[1]).toEqual([T.IAC, T.DONT, O.EOR]);
+    expect(layer.is3270Mode()).toBe(false);
   });
 });
 
@@ -1404,6 +1558,13 @@ describe('record framing', () => {
     expect(Array.from(records[0]!)).toEqual([0xf5]);
   });
 
+  it('notes an empty subnegotiation as such instead of a fabricated option number', () => {
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({ write: () => {}, onRecord: () => {}, trace });
+    layer.receive(Uint8Array.of(T.IAC, T.SB, T.IAC, T.SE));
+    expect(trace.lines()).toContain('0.000 = # ignored subnegotiation for option (empty)');
+  });
+
   it('does not leak an NVT logon banner into the first 3270 record', () => {
     // THE regression test for this module. Hosts print a banner or a session
     // manager prompt before going 3270 — VM/ESA, TSO behind a session manager,
@@ -1441,14 +1602,13 @@ describe('record framing', () => {
 
   it('abandons an unterminated subnegotiation instead of eating the stream', () => {
     // St.Sb is left only on IAC SE, so a malformed or truncated subnegotiation
-    // would otherwise consume everything after it and present as a hang.
+    // would otherwise consume everything after it and present as a hang. This
+    // sends exactly enough filler after "IAC SB 99" to hit the 1024-byte cap
+    // with nothing left over, so the abandonment lands exactly on a chunk
+    // boundary and the next chunk is unambiguously a fresh, well-formed record.
     const { layer, records } = in3270();
     layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
-    // Exactly the cap, not more: once the subnegotiation is abandoned the layer
-    // is back in St.Data, so any filler BEYOND the cap is ordinary record data
-    // and would legitimately land in the next record. Overshooting here would
-    // be a broken test, not a broken framer.
-    layer.receive(new Uint8Array(MAX_SUBNEG_BYTES).fill(0x41));
+    layer.receive(new Uint8Array(1024).fill(0x41)); // never terminated
     layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
     expect(records).toHaveLength(1);
     expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
@@ -1476,6 +1636,33 @@ describe('transmission', () => {
     const { layer, sent } = harness();
     layer.sendAttn();
     expect(sent[0]).toEqual([T.IAC, T.BREAK]);
+  });
+});
+
+describe('trace wiring', () => {
+  it('records negotiation, record framing, and Attn through an attached Trace', () => {
+    const sent: number[][] = [];
+    const records: Uint8Array[] = [];
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({
+      write: (b) => sent.push(Array.from(b)),
+      onRecord: (r) => records.push(r),
+      trace,
+    });
+
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    layer.sendRecord(Uint8Array.of(0x7d));
+    layer.sendAttn();
+
+    const lines = trace.lines();
+    expect(lines.length).toBeGreaterThan(0);
+    // At least one received line (negotiation) and one sent line (our WILL reply).
+    expect(lines.some((l) => l.includes(' < '))).toBe(true);
+    expect(lines.some((l) => l.includes(' > '))).toBe(true);
   });
 });
 ```
@@ -1725,10 +1912,13 @@ export class TelnetLayer {
       ]);
       this.trace?.send(out, `TERMINAL-TYPE IS ${this.terminalType}`);
       this.write(out);
+      this.sb = [];
       return;
     }
     // Anything else is dropped; we advertised nothing that needs it.
-    this.trace?.note(`ignored subnegotiation for option ${this.sb[0] ?? -1}`);
+    const optLabel = this.sb.length > 0 ? String(this.sb[0]) : '(empty)';
+    this.trace?.note(`ignored subnegotiation for option ${optLabel}`);
+    this.sb = [];
   }
 
   private flushRecord(): void {
@@ -1765,7 +1955,7 @@ export class TelnetLayer {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/telnet.test.ts`
-Expected: PASS, 23 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 5: Commit**
 
