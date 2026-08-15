@@ -255,6 +255,16 @@ Commands: `Write` (0xF1), `Erase/Write` (0xF5), `Erase/Write Alternate` (0x7E),
 `Erase All Unprotected` (0x6F), `Read Buffer` (0xF2), `Read Modified` (0xF6),
 `Read Modified All` (0x6E). WCC bits: reset, keyboard restore, reset MDT, alarm.
 
+**Each command has two encodings and both must be accepted.** The values above
+are the SNA-style codes that a TN3270 host normally sends; the non-SNA/channel
+codes for the same commands are `W` 0x01, `RB` 0x02, `NOP` 0x03, `EW` 0x05,
+`RM` 0x06, `EWA` 0x0D, `RMA` 0x0E, `EAU` 0x0F, `WSF` 0x11. x3270 accepts either
+(`case CMD_EW: case SNA_CMD_EW:` and so on throughout `ctlr.c`), so we do too.
+Note that non-SNA `WSF` (0x11) collides numerically with the `SBA` *order* — they
+are distinguishable only by position, command byte versus order byte, which is
+one more reason parse and execute are separate. Also note non-SNA `NOP` (0x03)
+is a 3270 command distinct from Telnet `IAC NOP`.
+
 Orders: `SF` (0x1D), `SBA` (0x11), `IC` (0x13), `PT` (0x05), `RA` (0x3C),
 `EUA` (0x12), `GE` (0x08 — parsed and skipped). Deferred orders, recognized so
 they can be skipped by length rather than mis-executed: `SA` (0x28),
