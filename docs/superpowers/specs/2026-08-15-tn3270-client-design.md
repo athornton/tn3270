@@ -376,9 +376,13 @@ state, model, rows, cols, cursor row, cursor col, window id, timing) is s3270's,
 verbatim.
 
 Stage 1 commands: `Connect(host:port)`, `Disconnect`, `String("...")`, `Enter`,
-`Clear`, `PF(n)`, `PA(n)`, `Tab`, `BackTab`, `Home`, `Newline`, `EraseEOF`,
-`Reset`, `MoveCursor(r,c)`, `Ascii()` / `Ascii(r,c,len)`, `Snap`,
+`Clear`, `PF(n)`, `PA(n)`, `Attn`, `Tab`, `BackTab`, `Home`, `Newline`,
+`Left`, `Right`, `Up`, `Down`, `BackSpace`, `Delete`, `Insert`, `EraseEOF`,
+`EraseInput`, `Reset`, `MoveCursor(r,c)`, `Ascii()` / `Ascii(r,c,len)`, `Snap`,
 `Wait(Output|Unlock|3270Mode)`, `Quit`, `Trace(on|off,file)`.
+
+`Attn` sends Telnet `IAC BREAK` rather than an AID (see *Inbound*). Row and
+column arguments are **0-based**, as s3270's are.
 
 Extensions beyond s3270, documented as such:
 
