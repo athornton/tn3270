@@ -1973,6 +1973,29 @@ git commit -m "feat(core): add telnet negotiation and IAC/EOR record framing"
 
 Per the spec: the buffer is the single source of truth, held as flat typed arrays as real hardware does it, and **fields are derived by scanning for attribute positions, never stored as objects.** That is what makes a mid-stream attribute overwrite behave correctly.
 
+**Four requirements found in review that later tasks depend on:**
+
+1. **`clearAllMDT()` is unconditional; `clearUnprotectedMDT()` is the filtered one.**
+   WCC reset-MDT resets every field's MDT (manual Table 3-2 bit 7; x3270
+   `ctlr.c:1545-1550` has no protection check), while Erase Input is
+   unprotected-only (manual 4-14). They cannot share one method: Read Modified
+   filters on MDT alone (`ctlr.c:921`), so a protected field left carrying MDT
+   leaks its data to the host.
+2. **`eraseAllUnprotected()` clears the whole buffer when unformatted** — an
+   unformatted buffer is entirely unprotected (x3270 `ctlr.c:1443-1445`).
+   Otherwise EAU silently does nothing before the host's first `SF`.
+3. **`firstUnprotectedStart()` and `typableFields()` skip zero-length fields.**
+   With adjacent attributes, a field has `length === 0` and its `start` IS the
+   next attribute; parking the cursor there corrupts the buffer on the next
+   keystroke. x3270's `next_unprotected` guards with `!ea_buf[nbaddr].fa`
+   (`ctlr.c:623-638`). Putting these here keeps the guard in one place instead of
+   in EAU, `home`, and `tab` separately.
+4. **Public accessors validate their address.** `fromRowCol` is where user input
+   becomes a buffer address (the CLI feeds it `Number(argv)`), and unchecked
+   out-of-range access degrades silently rather than failing: `fieldAt(size)`
+   misses address 0 and reports `null` on a formatted screen, and `rowText(0)`
+   returns raw NULs that flow into CLI output.
+
 Cell content is a tagged variant with one case in stage 1 (`char`), so Programmable Symbol Sets can be added later without rewriting consumers. The `kind` field is not speculative generality — PS is a committed stage 4 deliverable.
 
 - [ ] **Step 1: Write the failing test**
@@ -3164,7 +3187,7 @@ Expected: FAIL — cannot find module `../src/stream/execute.js`.
 Create `packages/core/src/stream/execute.ts`:
 
 ```typescript
-import { WCC } from '../constants.js';
+import { WCC, FA } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
 
@@ -3217,9 +3240,16 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       return result;
 
     case 'EraseAllUnprotected':
+      // Screen.eraseAllUnprotected handles the unformatted case by clearing the
+      // whole buffer (x3270 ctlr.c:1443-1445 `else ctlr_clear(true)`), since an
+      // unformatted buffer is entirely unprotected.
       screen.eraseAllUnprotected();
-      // EAU also unlocks the keyboard and homes the cursor.
-      screen.cursor = firstUnprotected(screen) ?? 0;
+      // EAU also unlocks the keyboard and homes the cursor. Use the screen's
+      // own helper, which skips zero-length fields the way x3270's
+      // next_unprotected does (ctlr.c:623-638) — a zero-length field's `start`
+      // is another field attribute, and parking the cursor there corrupts the
+      // buffer on the next keystroke.
+      screen.cursor = screen.firstUnprotectedStart() ?? 0;
       result.keyboardRestore = true;
       return result;
 
@@ -3241,6 +3271,13 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   }
 
   const wcc = record.wcc ?? 0;
+  // WCC reset-MDT is UNCONDITIONAL: manual Table 3-2 bit 7 says "all MDT bits in
+  // the device's existing character buffer are reset", and x3270's handler
+  // (ctlr.c:1545-1550) calls mdt_clear on every field attribute with no
+  // protection check. This matters because ctlr_read_modified filters on
+  // FA_IS_MODIFIED alone (ctlr.c:921) — a protected field carrying MODIFY would
+  // otherwise leak its data to the host. Erase Input is the unprotected-only
+  // one; see Screen.clearUnprotectedMDT.
   if (wcc & WCC.RESET_MDT) screen.clearAllMDT();
   if (wcc & WCC.KEYBOARD_RESTORE) result.keyboardRestore = true;
   if (wcc & WCC.SOUND_ALARM) result.alarm = true;
@@ -3312,11 +3349,19 @@ function applyToken(
 
     case 'eua': {
       requireOnScreen(screen, token.stop, 'EUA');
+      // Carry the governing attribute forward instead of calling fieldAt per
+      // cell: fieldAt is O(size), so a per-cell call over a full buffer is
+      // ~3.7M operations. x3270 does the same by tracking current_fa and
+      // updating it when it encounters an attribute (ctlr.c:1809-1816).
       let a = addr;
+      let protectedHere = screen.fieldAt(a)?.protected ?? false;
       do {
-        if (!screen.isFieldAttribute(a)) {
-          const f = screen.fieldAt(a);
-          if (f === null || !f.protected) screen.setChar(a, 0x00);
+        const attr = screen.attributeAt(a);
+        if (attr !== null) {
+          // A field attribute: never erased, and it changes what follows.
+          protectedHere = (attr & FA.PROTECT) !== 0;
+        } else if (!protectedHere) {
+          screen.setChar(a, 0x00);
         }
         a = screen.inc(a);
       } while (a !== token.stop);
@@ -3330,7 +3375,7 @@ function applyToken(
       for (let n = 0; n < screen.size; n++) {
         if (screen.isFieldAttribute(a)) {
           const attr = screen.attributeAt(a)!;
-          const isUnprotected = (attr & 0x20) === 0;
+          const isUnprotected = (attr & FA.PROTECT) === 0;
           if (isUnprotected) return screen.inc(a);
         } else if (wroteSinceOrder) {
           screen.setChar(a, 0x00);
@@ -3358,12 +3403,6 @@ function requireOnScreen(screen: Screen, addr: number, what: string): void {
   }
 }
 
-function firstUnprotected(screen: Screen): number | null {
-  for (const f of screen.fields()) {
-    if (!f.protected) return f.start;
-  }
-  return null;
-}
 ```
 
 - [ ] **Step 4: Run the test**
@@ -4145,19 +4184,22 @@ export class Keyboard {
     s.cursor = (s.cursor + s.cols) % s.size;
   }
 
-  /** First cell of the first unprotected field, or 0 if unformatted. */
+  /**
+   * First typable cell, or 0 if there is none.
+   *
+   * Delegates to the screen so the zero-length-field guard lives in one place:
+   * a zero-length field's `start` IS the next field attribute, and parking the
+   * cursor there corrupts the buffer on the next keystroke. x3270's
+   * next_unprotected (ctlr.c:623-638) skips them for the same reason.
+   */
   home(): void {
-    const s = this.screen;
-    for (const f of s.fields()) {
-      if (!f.protected) { s.cursor = f.start; return; }
-    }
-    s.cursor = 0;
+    this.screen.cursor = this.screen.firstUnprotectedStart() ?? 0;
   }
 
-  /** Next unprotected, non-skip field. Wraps. */
+  /** Next typable field. Wraps. */
   tab(): void {
     const s = this.screen;
-    const fields = s.fields().filter((f) => !f.protected && !f.autoSkip);
+    const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
     const after = fields.find((f) => f.attrAddr > (current?.attrAddr ?? -1));
@@ -4169,7 +4211,7 @@ export class Keyboard {
    */
   backTab(): void {
     const s = this.screen;
-    const fields = s.fields().filter((f) => !f.protected && !f.autoSkip);
+    const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
     if (current !== null && !current.protected && s.cursor !== current.start) {
