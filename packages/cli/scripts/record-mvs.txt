@@ -1,0 +1,63 @@
+# Live-host recording script: MVS 3.8J (TK4-/TK5) under Hercules.
+#
+# STATUS: not yet run against a live host. This is the starting point from
+# the stage-1 plan (Task 16), not a verified transcript. See
+# docs/live-testing.md for the runbook this script is part of.
+#
+# Usage:
+#   node packages/cli/dist/main.js < packages/cli/scripts/record-mvs.txt \
+#     > /tmp/mvs-session.log 2>&1
+#
+# Before running, substitute the real HOST:PORT for the Hercules instance's
+# 3270 listener in the Connect() line below (Hercules typically exposes this
+# on a port configured in its .cnf, commonly 3270 or 3505 range — check the
+# instance, do not assume).
+#
+# Credentials below (HERC01 / CUL8TR) are the TK4-/TK5 turnkey-system
+# defaults, but TK4- and TK5 differ from each other and from any locally
+# modified build, and the logon APPLID, prompts, and exact panel sequence can
+# all vary by build and by whatever the operator customized. Treat this
+# script as a first draft: run it, read what ScreenText actually prints at
+# each step, and adjust the String() arguments to match the real panels
+# rather than assuming this script is correct as written.
+#
+# The operator (a human, not this script) MUST read each ScreenText output
+# before trusting the recording. A session that produces "ok" status lines
+# for every command is not evidence that the logon succeeded — TSO could have
+# rejected the password, ISPF could have failed to start, or the host could
+# have sent a message this script's blind Enter presses click past. Only a
+# human reading the panel text can tell a real TSO/ISPF screen from a "please
+# reenter your password" screen with a superficially similar shape.
+
+Trace(on)
+Connect(HOST:PORT)
+Wait(3270Mode,30)
+ScreenText
+String("LOGON APPLID(TSO)")
+Enter
+Wait(Output,30)
+ScreenText
+String("HERC01")
+Enter
+Wait(Output,30)
+ScreenText
+String("CUL8TR")
+Enter
+Wait(Output,30)
+ScreenText
+Enter
+Wait(Output,30)
+ScreenText
+String("ISPF")
+Enter
+Wait(Output,30)
+ScreenText
+PF(3)
+Wait(Output,30)
+ScreenText
+String("LOGOFF")
+Enter
+Wait(Output,10)
+ScreenText
+Trace(off)
+Quit
