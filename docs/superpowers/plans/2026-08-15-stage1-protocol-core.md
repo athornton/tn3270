@@ -5079,6 +5079,42 @@ describe('sending AIDs', () => {
   });
 });
 
+describe('connection lifecycle', () => {
+  it('closes the previous connection when connecting again', async () => {
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
+    });
+    await session.connect('a', 1);
+    await session.connect('b', 2);
+    expect(conns).toHaveLength(2);
+    expect(conns[0]!.closed).toBe(true);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('a stale socket closing cannot tear down the live session', async () => {
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
+    });
+    await session.connect('a', 1);
+    const stale = conns[0]!;
+    await session.connect('b', 2);
+    stale.onClose?.();
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('disconnect is idempotent', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    let count = 0;
+    session.on('disconnect', () => { count++; });
+    session.disconnect();
+    session.disconnect();
+    expect(count).toBe(1);
+  });
+});
+
 describe('trace and replay', () => {
   it('records both directions when tracing is on', async () => {
     const { session, conn } = newSession();
@@ -5089,6 +5125,21 @@ describe('trace and replay', () => {
     const text = session.trace.toText();
     expect(text).toContain(' < ');
     expect(text).toContain(' > ');
+  });
+
+  it('refuses to replay on a connected session, rather than transmitting', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+    // A realistic trace: the host's negotiation, then a Read Buffer command.
+    const trace = [
+      '0.000 < ff fd 19 ff fb 19',
+      '0.000 < ff fd 00 ff fb 00',
+      '0.000 < f2 ff ef',
+    ].join('\n');
+    expect(() => session.replay(trace)).toThrow(/disconnected/i);
+    expect(conn.sent).toEqual([]);
   });
 
   it('replays a recorded trace with no socket at all', async () => {
@@ -5204,6 +5255,13 @@ export class Session {
   }
 
   async connect(host: string, port: number): Promise<void> {
+    // Tear down any live connection first. Without this the old Connection is
+    // dropped without close(), and its onClose/onError closures still capture
+    // `this` — so when the stale socket eventually closes it calls
+    // handleClose() and tears down the NEW session. Verified: isConnected()
+    // flips to false while the new socket is still open.
+    if (this.conn !== undefined) this.disconnect();
+
     const conn = await this.opts.connect(host, port);
     this.conn = conn;
     this.error = undefined;
@@ -5329,6 +5387,15 @@ export class Session {
    * terminal bytes are replayed; what we sent last time is not re-sent.
    */
   replay(traceText: string): void {
+    if (this.conn !== undefined) {
+      // Refuse rather than transmit. A recorded trace contains the host's
+      // negotiation AND its read commands; replaying it on a live session makes
+      // handleRecord answer those reads through this.telnet, i.e. down the real
+      // socket. Verified: a trace ending in a Read Buffer sent 60 40 40 ... to
+      // the live host. Injecting invented traffic into someone's MVS session is
+      // not an acceptable failure mode for a debugging aid.
+      throw new Error('replay() requires a disconnected session; disconnect first');
+    }
     const events = parseTrace(traceText);
     const telnet = new TelnetLayer({
       write: () => { /* discard: replay is one-directional */ },
@@ -5366,7 +5433,7 @@ export * from './session.js';
 - [ ] **Step 5: Run the tests**
 
 Run: `npx vitest run packages/core/test/session.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 22 tests.
 
 Then the whole suite: `npm test`
 Expected: all previous tests still pass.
@@ -5946,6 +6013,42 @@ describe('Wait', () => {
     const pending = runner.run('Wait(Output)');
     conn.host(SnaCmd.W, 0x02, 0xc1, T.IAC, T.EOR);
     expect((await pending).split('\n').pop()).toBe('ok');
+  });
+});
+
+describe('connection lifecycle', () => {
+  it('closes the previous connection when connecting again', async () => {
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
+    });
+    await session.connect('a', 1);
+    await session.connect('b', 2);
+    expect(conns).toHaveLength(2);
+    expect(conns[0]!.closed).toBe(true);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('a stale socket closing cannot tear down the live session', async () => {
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
+    });
+    await session.connect('a', 1);
+    const stale = conns[0]!;
+    await session.connect('b', 2);
+    stale.onClose?.();
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('disconnect is idempotent', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    let count = 0;
+    session.on('disconnect', () => { count++; });
+    session.disconnect();
+    session.disconnect();
+    expect(count).toBe(1);
   });
 });
 
