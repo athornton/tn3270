@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
-import { buildReadModified, buildReadBuffer } from '../src/inbound.js';
+import { buildReadModified, buildReadBuffer, encodeAttribute } from '../src/inbound.js';
 import { AID, FA, Order } from '../src/constants.js';
 
 /** A screen with one modified unprotected field holding "AB" at 1-2. */
@@ -132,8 +132,23 @@ describe('Read Buffer', () => {
     expect(Array.from(out.subarray(1, 3))).toEqual([0x40, 0xc1]);
     // Then 1920 buffer positions: an SF order pair for the attribute, then data.
     expect(out[3]).toBe(Order.SF);
-    expect(out[4]).toBe(FA.PROTECT);
+    // Attribute goes out through the code table, not raw: ctlr.c:1112-1114.
+    expect(out[4]).toBe(0x60);
     expect(out[5]).toBe(0xc1);
     expect(out).toHaveLength(3 + 1 + 1920);
+  });
+});
+
+describe('attribute encoding', () => {
+  it('maps attributes through the code table', () => {
+    expect(encodeAttribute(0x00)).toBe(0x40);
+    expect(encodeAttribute(FA.PROTECT)).toBe(0x60);
+    // FA.PROTECT|FA.NUMERIC = 0x30; ADDRESS_CODE_TABLE[0x30] is 0xf0, not 0x70.
+    expect(encodeAttribute(FA.PROTECT | FA.NUMERIC)).toBe(0xf0);
+  });
+
+  it('masks off the printable bits before indexing the table', () => {
+    expect(encodeAttribute(0xe1)).toBe(encodeAttribute(0x21));
+    expect(encodeAttribute(0xe1)).toBe(0x61);
   });
 });
