@@ -6914,6 +6914,15 @@ git commit -m "test: add live-host trace fixtures and golden screens from Hercul
 
 **This task requires reference captures from the user's x3270 and cannot be completed without them.** It is the strongest correctness signal in the plan: it compares our inbound bytes against a known-good implementation driving the same host.
 
+**x3270's trace format is not ours.** `trace_netdata()` (Common/telnet.c:3325) writes
+`< 0x0   f5c311...` — a direction character, a byte **offset** in hex, then
+**unspaced** hex bytes, 32 per line — and its `<` means data x3270 **sent**, the
+opposite of our convention. Ours is `0.000 < f5 c3`: timestamp, spaced bytes,
+`<` meaning received. A raw capture fed to `parseTrace` therefore yields **zero
+events**, and the comparison would "run" against nothing. `src/x3270trace.ts`
+provides `parseX3270Trace` and `x3270TraceToOurs`; the harness sniffs the format
+and converts, so the operator can drop a raw capture in unmodified.
+
 - [ ] **Step 1: Ask the user for a reference capture**
 
 The comparison is only meaningful if both clients did the same thing, so the capture must be scripted, not hand-driven. Ask for:
@@ -6935,6 +6944,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTrace } from '../src/trace.js';
+import { parseX3270Trace } from '../src/x3270trace.js';
 import { Session } from '../src/session.js';
 import { TelnetCmd as T } from '../src/constants.js';
 
@@ -6949,8 +6959,23 @@ const refDir = join(here, '..', '..', 'fixtures', 'x3270');
  *  - Telnet negotiation (option order legitimately varies between clients).
  *  - Records containing typed passwords, which are redacted in the fixture.
  */
-function ourReplies(traceText: string): number[][] {
-  const events = parseTrace(traceText);
+/**
+ * Read a capture in EITHER format.
+ *
+ * x3270's own `-trace` output is not our trace format: it writes
+ * `< 0x0   f5c3...` — direction, a byte OFFSET, unspaced hex, 32 per line, with
+ * `<` meaning ITS output — whereas ours is `0.000 < f5 c3` with a timestamp and
+ * spaced bytes. Detect and convert rather than requiring the operator to
+ * pre-process, since handing the harness a raw capture is the obvious thing to
+ * do and silently parsing zero events out of it would be a confusing failure.
+ */
+function readCapture(text: string) {
+  const looksLikeX3270 = /^[<>]\s+0x[0-9a-fA-F]+\s+[0-9a-fA-F]+\s*$/m.test(text);
+  return looksLikeX3270 ? parseX3270Trace(text) : parseTrace(text);
+}
+
+async function ourReplies(traceText: string): Promise<number[][]> {
+  const events = readCapture(traceText);
   const replies: number[][] = [];
   const conn = {
     write: (b: Uint8Array) => {
@@ -6966,7 +6991,10 @@ function ourReplies(traceText: string): number[][] {
     onError: undefined as ((e: Error) => void) | undefined,
   };
   const session = new Session({ connect: () => conn });
-  void session.connect('replay', 0);
+  // MUST await: Session.connect() awaits its connection factory before assigning
+  // conn.onData, so a synchronous feed loop after `void connect(...)` runs while
+  // onData is still undefined and every byte is silently dropped.
+  await session.connect('replay', 0);
   for (const ev of events) {
     if (ev.dir === 'recv') conn.onData?.(ev.bytes);
   }
@@ -6974,7 +7002,7 @@ function ourReplies(traceText: string): number[][] {
 }
 
 function theirReplies(traceText: string): number[][] {
-  return parseTrace(traceText)
+  return readCapture(traceText)
     .filter((e) => e.dir === 'send')
     .map((e) => Array.from(e.bytes))
     .filter((b) => !(b[0] === T.IAC && b[1] !== undefined && b[1] >= T.SB && b[1] <= T.DONT));
@@ -6991,9 +7019,9 @@ describe('x3270 round-trip conformance', () => {
   }
 
   for (const capture of captures) {
-    it(`sends byte-identical inbound records for ${capture}`, () => {
+    it(`sends byte-identical inbound records for ${capture}`, async () => {
       const text = readFileSync(join(refDir, capture), 'utf8');
-      const ours = ourReplies(text);
+      const ours = await ourReplies(text);
       const theirs = theirReplies(text);
       expect(ours.length).toBe(theirs.length);
       for (let i = 0; i < theirs.length; i++) {

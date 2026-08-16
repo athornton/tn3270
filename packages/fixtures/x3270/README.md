@@ -66,3 +66,20 @@ negotiation exclusion, dropping a record from the comparison, or relaxing
 `toEqual` to something fuzzier defeats the entire point of this harness, which
 is to catch exactly this class of difference against a real reference
 implementation.
+
+## File format
+
+Drop captures in **either** format; the harness sniffs and converts.
+
+- **x3270 native** (`s3270 -trace -tracefile`): `< 0x0   f5c311...` — direction
+  char, byte offset in hex, unspaced hex bytes, 32 per line. Note x3270's `<`
+  means data x3270 **sent**; ours means received. `trace_netdata()` in
+  `Common/telnet.c:3325` is the authority.
+- **Ours** (`Trace.toText()` / the CLI's `Trace(on)`): `0.000 < f5 c3` — elapsed
+  seconds, direction, spaced hex, 16 per line, `+` marking a continuation of one
+  chunk.
+
+`parseX3270Trace()` and `x3270TraceToOurs()` in `packages/core/src/x3270trace.ts`
+handle the conversion. x3270's netdata lines carry byte offsets rather than
+timestamps, so converted traces show `0.000` throughout — that is honest about
+what the source file contains, not a bug.
