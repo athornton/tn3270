@@ -64,6 +64,60 @@ describe('connection lifecycle', () => {
     expect(session.isConnected()).toBe(false);
     expect(session.lastError()).toContain('ECONNRESET');
   });
+
+  it('connecting twice closes the first connection and leaves the session connected', async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    await session.connect('localhost', 3270);
+
+    expect(conn1.closed).toBe(true);
+    expect(conn2.closed).toBe(false);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("a stale socket's onClose cannot make isConnected() false while the new one is live", async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    const staleOnClose = conn1.onClose;
+    await session.connect('localhost', 3270);
+
+    // Fire the FIRST connection's close callback directly, simulating a
+    // straggling event from the socket we already replaced.
+    staleOnClose?.();
+
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("disconnect() is idempotent: two calls emit 'disconnect' once", async () => {
+    const { session, conn } = newSession();
+    const onDisconnect = vi.fn();
+    session.on('disconnect', onDisconnect);
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+
+    session.disconnect();
+    session.disconnect();
+
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('applying host writes', () => {
@@ -228,5 +282,25 @@ describe('trace and replay', () => {
     const fresh = new Session({ connect: () => { throw new Error('must not connect'); } });
     fresh.replay(traceText);
     expect(fresh.screen.rowText(1).slice(0, 2)).toBe('HI');
+  });
+
+  it('replay() on a connected session throws and writes nothing', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+
+    // A realistic recorded fixture: host negotiation followed by a Read
+    // Buffer. If replay() were allowed to run against a live session,
+    // handleRecord would answer that Read Buffer through this.telnet, i.e.
+    // straight down the real socket.
+    const traceText = [
+      '0.000 < ff fd 19 ff fb 19',
+      '0.001 < ff fd 00 ff fb 00',
+      '0.002 < f2 ff ef',
+    ].join('\n');
+
+    expect(() => session.replay(traceText)).toThrow(/disconnected/i);
+    expect(conn.sent).toEqual([]);
   });
 });

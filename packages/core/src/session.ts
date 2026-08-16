@@ -84,6 +84,12 @@ export class Session {
   }
 
   async connect(host: string, port: number): Promise<void> {
+    // Tear down any live connection first. Without this the old Connection is
+    // dropped without close(), and its onClose/onError closures still capture
+    // `this` — so when the stale socket eventually closes it calls
+    // handleClose() and tears down the NEW session.
+    if (this.conn !== undefined) this.disconnect();
+
     const conn = await this.opts.connect(host, port);
     this.conn = conn;
     this.error = undefined;
@@ -95,12 +101,21 @@ export class Session {
       trace: this.trace,
     });
 
+    // Each callback checks identity against the `conn` it closes over, not just
+    // `this.conn !== undefined`. Real transports fire data/close/error
+    // asynchronously (not necessarily inside our call to close()), so a stale
+    // connection's event can still arrive after connect() has already swapped
+    // in a new one. Without the identity check, stale data would be fed into
+    // the NEW telnet layer, and a stale close/error would tear down the live
+    // connection via handleClose().
     conn.onData = (bytes) => {
+      if (this.conn !== conn) return;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
     };
-    conn.onClose = () => this.handleClose();
+    conn.onClose = () => { if (this.conn === conn) this.handleClose(); };
     conn.onError = (err) => {
+      if (this.conn !== conn) return;
       this.error = err.message;
       this.trace.note(`transport error: ${err.message}`);
       this.handleClose();
@@ -209,6 +224,14 @@ export class Session {
    * terminal bytes are replayed; what we sent last time is not re-sent.
    */
   replay(traceText: string): void {
+    if (this.conn !== undefined) {
+      // Refuse rather than transmit. A recorded trace contains the host's
+      // negotiation AND its read commands; replaying it on a live session makes
+      // handleRecord answer those reads through this.telnet, i.e. down the real
+      // socket. Verified: a trace ending in a Read Buffer sent 60 40 40 ... to
+      // the live host.
+      throw new Error('replay() requires a disconnected session; disconnect first');
+    }
     const events = parseTrace(traceText);
     const telnet = new TelnetLayer({
       write: () => { /* discard: replay is one-directional */ },
