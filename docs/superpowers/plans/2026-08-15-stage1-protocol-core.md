@@ -97,6 +97,7 @@ Expected: failure — either "Cannot find module" or npm reporting no test scrip
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
+    "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --build packages/core"
@@ -6467,7 +6468,7 @@ Expected: all tests pass; typecheck silent.
 - [ ] **Step 7: Smoke-test the binary by hand**
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 printf 'ScreenText\nQuit\n' | node packages/cli/dist/main.js | tail -3
 ```
 Expected: 24 blank data lines, a 12-field status line, then `ok`, then the reply to `Quit`.
@@ -6497,6 +6498,12 @@ git commit -m "feat(cli): add s3270 command runner and stdin shell"
 Golden tests are diff-readable: when a change breaks a panel, the broken panel appears in the test output rather than an assertion about cell 743. This task builds the machinery with a *synthetic* fixture so it works before the host is available; Task 16 adds real recordings.
 
 - [ ] **Step 1: Create the fixtures package**
+
+Note this package has **no `build` script**, because it contains only data. That
+means plain `npm run build --workspaces` fails here — npm treats a missing script
+in any workspace as fatal, unlike `--if-present`. The root `build` script already
+passes `--if-present` for this reason; use `npm run build` rather than the bare
+`--workspaces` form.
 
 `packages/fixtures/package.json`:
 
@@ -6600,7 +6607,7 @@ process.stdout.write(out.join('\n') + '\n');
 Then generate it:
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 cd packages/core
 node tools/make-synthetic-fixture.mjs > ../fixtures/traces/synthetic-ispf-like.trace
 cat ../fixtures/traces/synthetic-ispf-like.trace
@@ -6729,7 +6736,7 @@ Expected: FAIL with the "missing golden file" message, which prints the current 
 - [ ] **Step 6: Generate the golden and read it**
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 cd packages/core
 node tools/make-golden.mjs ../fixtures/traces/synthetic-ispf-like.trace > ../fixtures/screens/synthetic-ispf-like.txt
 cat ../fixtures/screens/synthetic-ispf-like.txt
@@ -6745,9 +6752,14 @@ Expected: PASS, 6 tests.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/fixtures packages/core/test/golden.test.ts packages/core/tools/make-golden.mjs
+git add packages/fixtures packages/core/test/golden.test.ts \
+        packages/core/tools/make-golden.mjs packages/core/tools/make-synthetic-fixture.mjs \
+        package-lock.json
 git commit -m "test(core): add golden-screen fixture machinery with a synthetic panel"
 ```
+
+`package-lock.json` belongs in this commit: adding a workspace changes it, and
+leaving it out breaks `npm ci` on a fresh clone.
 
 ---
 
