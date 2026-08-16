@@ -4339,6 +4339,34 @@ describe('cursor movement', () => {
     expect(s.cursor).toBe(1);  // previous field
   });
 
+  it('BackTab never parks the cursor on a field attribute', () => {
+    // A zero-length field's `start` is the NEXT field's attribute byte, so the
+    // fast path must check length > 0. Without it, the following keystroke
+    // destroys field B's boundary — silent buffer corruption.
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(10, 0x00); // zero-length: attribute 11 follows immediately
+    s.setFieldAttribute(11, 0x00); // field B, data from 12
+    s.cursor = 10;                 // parked on the zero-length field's attribute
+    const k = kb(s);
+    k.backTab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+    const fieldsBefore = s.fields().length;
+    k.type('A');
+    expect(s.fields()).toHaveLength(fieldsBefore);
+  });
+
+  it('Tab never parks the cursor on a field attribute either', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(10, 0x00);
+    s.setFieldAttribute(11, 0x00);
+    s.cursor = 1;
+    const k = kb(s);
+    k.tab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+  });
+
   it('Newline moves to the first unprotected cell of the next line', () => {
     const s = new Screen();
     s.setFieldAttribute(80, 0x00);
@@ -4704,7 +4732,14 @@ export class Keyboard {
     const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
-    if (current !== null && !current.protected && s.cursor !== current.start) {
+    // The fast path — "already inside a typable field, so go to its start" —
+    // must require length > 0 as well as unprotected. A zero-length field's
+    // `start` IS the next field's attribute byte, so without that check
+    // backTab parks the cursor on an attribute and the next keystroke destroys
+    // that field's boundary. x3270's BackTab_action guards the same way, with
+    // `!ea_buf[nbaddr].fa` in its search loop (kybd.c:1976-1979).
+    if (current !== null && !current.protected && current.length > 0
+        && s.cursor !== current.start) {
       s.cursor = current.start;
       return;
     }
@@ -4814,7 +4849,7 @@ export class Keyboard {
 - [ ] **Step 5: Run the test**
 
 Run: `npx vitest run packages/core/test/keyboard.test.ts`
-Expected: PASS, 24 tests.
+Expected: PASS, 26 tests.
 
 - [ ] **Step 6: Commit**
 
