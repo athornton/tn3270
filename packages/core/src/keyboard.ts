@@ -145,7 +145,14 @@ export class Keyboard {
     const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
-    if (current !== null && !current.protected && s.cursor !== current.start) {
+    // The fast path — "already inside a typable field, so go to its start" —
+    // must require length > 0 as well as unprotected. A zero-length field's
+    // `start` IS the next field's attribute byte, so without that check
+    // backTab parks the cursor on an attribute and the next keystroke destroys
+    // that field's boundary. x3270's BackTab_action guards the same way, with
+    // `!ea_buf[nbaddr].fa` in its search loop (kybd.c:1976-1979).
+    if (current !== null && !current.protected && current.length > 0
+        && s.cursor !== current.start) {
       s.cursor = current.start;
       return;
     }

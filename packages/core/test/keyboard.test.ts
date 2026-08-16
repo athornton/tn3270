@@ -170,6 +170,34 @@ describe('cursor movement', () => {
     kb(s).newline();
     expect(s.cursor).toBe(81);
   });
+
+  it('BackTab does not park the cursor on an attribute byte of a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);   // field A: data 1..9
+    s.setFieldAttribute(10, 0x00);  // zero-length unprotected field: next attr immediately follows
+    s.setFieldAttribute(11, 0x00);  // field B: data starts at 12
+    s.cursor = 10; // parked on the zero-length field's own attribute byte
+    const k = kb(s);
+    k.backTab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+    const fieldCountBefore = s.fields().length;
+    k.type('A');
+    expect(s.fields().length).toBe(fieldCountBefore); // field boundary at 11 must survive
+  });
+
+  it('Tab does not park the cursor on an attribute byte of a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);   // field A: data 1..9
+    s.setFieldAttribute(10, 0x00);  // zero-length unprotected field: next attr immediately follows
+    s.setFieldAttribute(11, 0x00);  // field B: data starts at 12
+    s.cursor = 10; // parked on the zero-length field's own attribute byte
+    const k = kb(s);
+    k.tab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+    const fieldCountBefore = s.fields().length;
+    k.type('A');
+    expect(s.fields().length).toBe(fieldCountBefore); // field boundary at 11 must survive
+  });
 });
 
 describe('erase actions', () => {
