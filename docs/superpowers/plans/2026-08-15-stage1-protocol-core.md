@@ -3894,7 +3894,7 @@ Create `packages/core/test/inbound.test.ts`:
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
-import { buildReadModified, buildReadBuffer } from '../src/inbound.js';
+import { buildReadModified, buildReadBuffer, encodeAttribute } from '../src/inbound.js';
 import { AID, FA, Order } from '../src/constants.js';
 
 /** A screen with one modified unprotected field holding "AB" at 1-2. */
@@ -4015,6 +4015,21 @@ describe('ordinary reads', () => {
   });
 });
 
+describe('encodeAttribute', () => {
+  it('passes the attribute through the address code table', () => {
+    expect(encodeAttribute(0x00)).toBe(0x40); // unprotected
+    expect(encodeAttribute(FA.PROTECT)).toBe(0x60);
+    expect(encodeAttribute(FA.PROTECT | FA.NUMERIC)).toBe(0x70);
+  });
+
+  it('masks off the printable high bits a real host sets', () => {
+    // 0xE1 = printable | protect | MDT, which is what an actual host sends.
+    // x3270 strips FA_PRINTABLE before the table lookup (ctlr.c:1112).
+    expect(encodeAttribute(0xe1)).toBe(encodeAttribute(0x21));
+    expect(encodeAttribute(0xe1)).toBe(0x61);
+  });
+});
+
 describe('Read Buffer', () => {
   it('returns AID, cursor, and the whole buffer with attributes in place', () => {
     const s = new Screen();
@@ -4026,7 +4041,9 @@ describe('Read Buffer', () => {
     expect(Array.from(out.subarray(1, 3))).toEqual([0x40, 0xc1]);
     // Then 1920 buffer positions: an SF order pair for the attribute, then data.
     expect(out[3]).toBe(Order.SF);
-    expect(out[4]).toBe(FA.PROTECT);
+    // The attribute goes through the code table, so protected (0x20) is 0x60 on
+    // the wire — NOT the raw byte. x3270 ctlr.c:1112-1114.
+    expect(out[4]).toBe(0x60);
     expect(out[5]).toBe(0xc1);
     expect(out).toHaveLength(3 + 1 + 1920);
   });
@@ -4043,7 +4060,7 @@ Expected: FAIL — cannot find module `../src/inbound.js`.
 Create `packages/core/src/inbound.ts`:
 
 ```typescript
-import { AID, Order, isShortReadAID } from './constants.js';
+import { AID, Order, isShortReadAID, ADDRESS_CODE_TABLE } from './constants.js';
 import { encodeAddress } from './address.js';
 import type { Screen } from './screen.js';
 
@@ -4104,19 +4121,44 @@ export function buildReadBuffer(screen: Screen, aid: number): Uint8Array {
   for (let a = 0; a < screen.size; a++) {
     const attr = screen.attributeAt(a);
     if (attr !== null) {
-      out.push(Order.SF, attr);
+      out.push(Order.SF, encodeAttribute(attr));
     } else {
       out.push(screen.cellAt(a).ebcdic);
     }
   }
   return Uint8Array.from(out);
 }
+
+/**
+ * Encode a field attribute for transmission inbound.
+ *
+ * The attribute goes out through the same 64-entry code table as a 12-bit
+ * address, after masking off the two "printable" high bits. x3270 does exactly
+ * this in both places it sends an attribute inbound:
+ *   ctlr.c:1112-1114  `fa = ea_buf[baddr].fa & ~FA_PRINTABLE; ... code_table[fa]`
+ *   ctlr.c:1248       `code_table[ea_buf[baddr].fa & ~FA_PRINTABLE]`
+ *
+ * So a protected field is 0x60 on the wire, not 0x20. Sending the raw byte makes
+ * every attribute in a Read Buffer reply wrong, which a host may or may not
+ * tolerate but which certainly fails byte-identical conformance against x3270.
+ *
+ * Note FA_PRINTABLE is 0xC0 and the remaining defined bits (protect, numeric,
+ * intensity, MDT) all fall inside 0x3D, so masking with 0x3F is equivalent to
+ * x3270's `& ~FA_PRINTABLE` for every attribute a host can send, and keeps the
+ * index inside the 64-entry table.
+ */
+export function encodeAttribute(attr: number): number {
+  const encoded = ADDRESS_CODE_TABLE[attr & 0x3f];
+  /* istanbul ignore if -- masked to 0-63, so always defined */
+  if (encoded === undefined) throw new Error(`unencodable attribute 0x${attr.toString(16)}`);
+  return encoded;
+}
 ```
 
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/inbound.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
