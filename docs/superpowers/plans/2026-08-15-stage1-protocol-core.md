@@ -5118,7 +5118,7 @@ Expected: FAIL — cannot find module `../src/session.js`.
 Create `packages/core/src/session.ts`:
 
 ```typescript
-import { AID, isShortReadAID, MODEL_2 } from './constants.js';
+import { AID, MODEL_2 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Oia, KeyboardState } from './oia.js';
@@ -5312,10 +5312,10 @@ export class Session {
     }
 
     // Any AID locks the keyboard until the host restores it. A short read is no
-    // exception: the host still owns the next move.
+    // exception: the host still owns the next move, and buildReadModified
+    // already decides what a short read puts on the wire.
     this.oia.waitingForHost = true;
     this.oia.inhibit(KeyboardState.SystemWait);
-    void isShortReadAID;
   }
 
   /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
