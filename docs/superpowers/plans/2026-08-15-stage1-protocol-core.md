@@ -6405,6 +6405,15 @@ import { parseCommand } from './commands.js';
  * command semantics live in runner.ts, which is unit-tested.
  */
 async function main(): Promise<void> {
+  // A closed stdout is a normal way for a pipeline to end — `| head -5`, or an
+  // automation harness that stops reading. Without this, the write throws an
+  // unhandled EPIPE and the process dies with a stack trace instead of exiting
+  // quietly, which is both ugly and easy to mistake for a crash in the client.
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+    throw err;
+  });
+
   const session = defaultSession();
   const runner = new Runner(session);
 
@@ -6462,6 +6471,14 @@ npm run build --workspaces
 printf 'ScreenText\nQuit\n' | node packages/cli/dist/main.js | tail -3
 ```
 Expected: 24 blank data lines, a 12-field status line, then `ok`, then the reply to `Quit`.
+
+Then confirm a truncated pipe exits cleanly rather than throwing EPIPE:
+
+```bash
+printf 'ScreenText\nQuit\n' | node packages/cli/dist/main.js | head -2
+echo "exit=$?"
+```
+Expected: two lines and `exit=0`, with **no** stack trace.
 
 - [ ] **Step 8: Commit**
 
