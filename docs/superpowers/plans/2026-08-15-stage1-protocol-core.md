@@ -4015,21 +4015,6 @@ describe('ordinary reads', () => {
   });
 });
 
-describe('encodeAttribute', () => {
-  it('passes the attribute through the address code table', () => {
-    expect(encodeAttribute(0x00)).toBe(0x40); // unprotected
-    expect(encodeAttribute(FA.PROTECT)).toBe(0x60);
-    expect(encodeAttribute(FA.PROTECT | FA.NUMERIC)).toBe(0x70);
-  });
-
-  it('masks off the printable high bits a real host sets', () => {
-    // 0xE1 = printable | protect | MDT, which is what an actual host sends.
-    // x3270 strips FA_PRINTABLE before the table lookup (ctlr.c:1112).
-    expect(encodeAttribute(0xe1)).toBe(encodeAttribute(0x21));
-    expect(encodeAttribute(0xe1)).toBe(0x61);
-  });
-});
-
 describe('Read Buffer', () => {
   it('returns AID, cursor, and the whole buffer with attributes in place', () => {
     const s = new Screen();
@@ -4041,11 +4026,24 @@ describe('Read Buffer', () => {
     expect(Array.from(out.subarray(1, 3))).toEqual([0x40, 0xc1]);
     // Then 1920 buffer positions: an SF order pair for the attribute, then data.
     expect(out[3]).toBe(Order.SF);
-    // The attribute goes through the code table, so protected (0x20) is 0x60 on
-    // the wire — NOT the raw byte. x3270 ctlr.c:1112-1114.
+    // Attribute goes out through the code table, not raw: ctlr.c:1112-1114.
     expect(out[4]).toBe(0x60);
     expect(out[5]).toBe(0xc1);
     expect(out).toHaveLength(3 + 1 + 1920);
+  });
+});
+
+describe('attribute encoding', () => {
+  it('maps attributes through the code table', () => {
+    expect(encodeAttribute(0x00)).toBe(0x40);
+    expect(encodeAttribute(FA.PROTECT)).toBe(0x60);
+    // FA.PROTECT|FA.NUMERIC = 0x30; ADDRESS_CODE_TABLE[0x30] is 0xf0, not 0x70.
+    expect(encodeAttribute(FA.PROTECT | FA.NUMERIC)).toBe(0xf0);
+  });
+
+  it('masks off the printable bits before indexing the table', () => {
+    expect(encodeAttribute(0xe1)).toBe(encodeAttribute(0x21));
+    expect(encodeAttribute(0xe1)).toBe(0x61);
   });
 });
 ```
@@ -4112,6 +4110,26 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
 }
 
 /**
+ * Encode a field attribute for transmission inbound.
+ *
+ * The attribute goes out through the same 64-entry code table as a 12-bit
+ * address, after masking off the two "printable" high bits. x3270 does exactly
+ * this in both places it sends an attribute inbound:
+ *   ctlr.c:1112-1114  `fa = ea_buf[baddr].fa & ~FA_PRINTABLE; ... code_table[fa]`
+ *   ctlr.c:1248       `code_table[ea_buf[baddr].fa & ~FA_PRINTABLE]`
+ *
+ * So a protected field is 0x60 on the wire, not 0x20. FA_PRINTABLE is 0xC0 and
+ * the defined bits (protect, numeric, intensity, MDT) all fall inside 0x3D, so
+ * masking with 0x3F is equivalent to x3270's `& ~FA_PRINTABLE` for every
+ * attribute a host can send, and keeps the index inside the 64-entry table.
+ */
+export function encodeAttribute(attr: number): number {
+  const encoded = ADDRESS_CODE_TABLE[attr & 0x3f];
+  if (encoded === undefined) throw new Error(`unencodable attribute 0x${attr.toString(16)}`);
+  return encoded;
+}
+
+/**
  * Read Buffer: the entire buffer, with each field attribute rendered as an SF
  * order followed by the attribute value, and every other position as its
  * character byte.
@@ -4127,31 +4145,6 @@ export function buildReadBuffer(screen: Screen, aid: number): Uint8Array {
     }
   }
   return Uint8Array.from(out);
-}
-
-/**
- * Encode a field attribute for transmission inbound.
- *
- * The attribute goes out through the same 64-entry code table as a 12-bit
- * address, after masking off the two "printable" high bits. x3270 does exactly
- * this in both places it sends an attribute inbound:
- *   ctlr.c:1112-1114  `fa = ea_buf[baddr].fa & ~FA_PRINTABLE; ... code_table[fa]`
- *   ctlr.c:1248       `code_table[ea_buf[baddr].fa & ~FA_PRINTABLE]`
- *
- * So a protected field is 0x60 on the wire, not 0x20. Sending the raw byte makes
- * every attribute in a Read Buffer reply wrong, which a host may or may not
- * tolerate but which certainly fails byte-identical conformance against x3270.
- *
- * Note FA_PRINTABLE is 0xC0 and the remaining defined bits (protect, numeric,
- * intensity, MDT) all fall inside 0x3D, so masking with 0x3F is equivalent to
- * x3270's `& ~FA_PRINTABLE` for every attribute a host can send, and keeps the
- * index inside the 64-entry table.
- */
-export function encodeAttribute(attr: number): number {
-  const encoded = ADDRESS_CODE_TABLE[attr & 0x3f];
-  /* istanbul ignore if -- masked to 0-63, so always defined */
-  if (encoded === undefined) throw new Error(`unencodable attribute 0x${attr.toString(16)}`);
-  return encoded;
 }
 ```
 
