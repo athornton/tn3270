@@ -4867,6 +4867,22 @@ git commit -m "feat(core): add keyboard actions and OIA state"
 
 Ties everything to a socket. Per the spec: **no module-level state**, so a second instance is a UI change rather than a core rewrite. The socket is injected as a factory so tests drive a fake one, and `Replay()` needs no socket at all.
 
+**Two lifecycle requirements found in review, both non-obvious:**
+
+1. **Every transport callback must check identity against the connection it
+   closed over** — `if (this.conn !== conn) return;` — not merely that some
+   connection exists. Closing the old socket in `connect()` is not sufficient: a
+   real transport fires `close`/`error` *asynchronously*, so a stale socket's
+   callbacks can still arrive after a reconnect and tear down the new session.
+   `onData` needs the same guard, or late bytes from the old socket corrupt the
+   new telnet layer's accumulator.
+2. **`replay()` must refuse on a connected session.** A recorded trace contains
+   the host's negotiation *and* its read commands, so replaying one live makes
+   `handleRecord` answer those reads down the real socket. Verified: a trace
+   ending in Read Buffer sent `60 40 40 ...` to the live host. Injecting invented
+   traffic into someone's MVS session is not an acceptable failure mode for a
+   debugging aid.
+
 The three error classes from the spec are handled distinctly here: `ParseError`/`ExecuteError`/`AddressError` become a program check with the session **still up**; transport failures end the session; anything else propagates.
 
 - [ ] **Step 1: Write the failing test**
@@ -4939,6 +4955,60 @@ describe('connection lifecycle', () => {
     conn.onError?.(new Error('ECONNRESET'));
     expect(session.isConnected()).toBe(false);
     expect(session.lastError()).toContain('ECONNRESET');
+  });
+
+  it('connecting twice closes the first connection and leaves the session connected', async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    await session.connect('localhost', 3270);
+
+    expect(conn1.closed).toBe(true);
+    expect(conn2.closed).toBe(false);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("a stale socket's onClose cannot make isConnected() false while the new one is live", async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    const staleOnClose = conn1.onClose;
+    await session.connect('localhost', 3270);
+
+    // Fire the FIRST connection's close callback directly, simulating a
+    // straggling event from the socket we already replaced.
+    staleOnClose?.();
+
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("disconnect() is idempotent: two calls emit 'disconnect' once", async () => {
+    const { session, conn } = newSession();
+    const onDisconnect = vi.fn();
+    session.on('disconnect', onDisconnect);
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+
+    session.disconnect();
+    session.disconnect();
+
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -5079,42 +5149,6 @@ describe('sending AIDs', () => {
   });
 });
 
-describe('connection lifecycle', () => {
-  it('closes the previous connection when connecting again', async () => {
-    const conns: FakeConnection[] = [];
-    const session = new Session({
-      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
-    });
-    await session.connect('a', 1);
-    await session.connect('b', 2);
-    expect(conns).toHaveLength(2);
-    expect(conns[0]!.closed).toBe(true);
-    expect(session.isConnected()).toBe(true);
-  });
-
-  it('a stale socket closing cannot tear down the live session', async () => {
-    const conns: FakeConnection[] = [];
-    const session = new Session({
-      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
-    });
-    await session.connect('a', 1);
-    const stale = conns[0]!;
-    await session.connect('b', 2);
-    stale.onClose?.();
-    expect(session.isConnected()).toBe(true);
-  });
-
-  it('disconnect is idempotent', async () => {
-    const { session } = newSession();
-    await session.connect('localhost', 3270);
-    let count = 0;
-    session.on('disconnect', () => { count++; });
-    session.disconnect();
-    session.disconnect();
-    expect(count).toBe(1);
-  });
-});
-
 describe('trace and replay', () => {
   it('records both directions when tracing is on', async () => {
     const { session, conn } = newSession();
@@ -5125,21 +5159,6 @@ describe('trace and replay', () => {
     const text = session.trace.toText();
     expect(text).toContain(' < ');
     expect(text).toContain(' > ');
-  });
-
-  it('refuses to replay on a connected session, rather than transmitting', async () => {
-    const { session, conn } = newSession();
-    await session.connect('localhost', 3270);
-    conn.negotiate();
-    conn.sent = [];
-    // A realistic trace: the host's negotiation, then a Read Buffer command.
-    const trace = [
-      '0.000 < ff fd 19 ff fb 19',
-      '0.000 < ff fd 00 ff fb 00',
-      '0.000 < f2 ff ef',
-    ].join('\n');
-    expect(() => session.replay(trace)).toThrow(/disconnected/i);
-    expect(conn.sent).toEqual([]);
   });
 
   it('replays a recorded trace with no socket at all', async () => {
@@ -5155,6 +5174,26 @@ describe('trace and replay', () => {
     const fresh = new Session({ connect: () => { throw new Error('must not connect'); } });
     fresh.replay(traceText);
     expect(fresh.screen.rowText(1).slice(0, 2)).toBe('HI');
+  });
+
+  it('replay() on a connected session throws and writes nothing', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+
+    // A realistic recorded fixture: host negotiation followed by a Read
+    // Buffer. If replay() were allowed to run against a live session,
+    // handleRecord would answer that Read Buffer through this.telnet, i.e.
+    // straight down the real socket.
+    const traceText = [
+      '0.000 < ff fd 19 ff fb 19',
+      '0.001 < ff fd 00 ff fb 00',
+      '0.002 < f2 ff ef',
+    ].join('\n');
+
+    expect(() => session.replay(traceText)).toThrow(/disconnected/i);
+    expect(conn.sent).toEqual([]);
   });
 });
 ```
@@ -5258,8 +5297,7 @@ export class Session {
     // Tear down any live connection first. Without this the old Connection is
     // dropped without close(), and its onClose/onError closures still capture
     // `this` — so when the stale socket eventually closes it calls
-    // handleClose() and tears down the NEW session. Verified: isConnected()
-    // flips to false while the new socket is still open.
+    // handleClose() and tears down the NEW session.
     if (this.conn !== undefined) this.disconnect();
 
     const conn = await this.opts.connect(host, port);
@@ -5273,12 +5311,21 @@ export class Session {
       trace: this.trace,
     });
 
+    // Each callback checks identity against the `conn` it closes over, not just
+    // `this.conn !== undefined`. Real transports fire data/close/error
+    // asynchronously (not necessarily inside our call to close()), so a stale
+    // connection's event can still arrive after connect() has already swapped
+    // in a new one. Without the identity check, stale data would be fed into
+    // the NEW telnet layer, and a stale close/error would tear down the live
+    // connection via handleClose().
     conn.onData = (bytes) => {
+      if (this.conn !== conn) return;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
     };
-    conn.onClose = () => this.handleClose();
+    conn.onClose = () => { if (this.conn === conn) this.handleClose(); };
     conn.onError = (err) => {
+      if (this.conn !== conn) return;
       this.error = err.message;
       this.trace.note(`transport error: ${err.message}`);
       this.handleClose();
@@ -5392,8 +5439,7 @@ export class Session {
       // negotiation AND its read commands; replaying it on a live session makes
       // handleRecord answer those reads through this.telnet, i.e. down the real
       // socket. Verified: a trace ending in a Read Buffer sent 60 40 40 ... to
-      // the live host. Injecting invented traffic into someone's MVS session is
-      // not an acceptable failure mode for a debugging aid.
+      // the live host.
       throw new Error('replay() requires a disconnected session; disconnect first');
     }
     const events = parseTrace(traceText);
