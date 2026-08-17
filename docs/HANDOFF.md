@@ -157,18 +157,28 @@ times; that pushback was the single most valuable part of the process.
    rather than the code (details in the plan under Task 18, Step 3).
 2. ~~**Re-record the VM fixture and golden.**~~ **Done.** The fixture now reaches
    CMS `Ready;` and the golden shows a clean LOGOFF instead of `restart`.
-3. **TK5 fixture — blocked on the host being IPLed.** MVS 3.8j TK5 is listening on
-   `localhost:3271` but MVS itself was never IPLed: the instance was started as
-   `hercules -f conf/tk5.cnf` instead of TK5's `./mvs`, so
-   `HERCULES_RC=scripts/ipl.rc` never got set and its `ipl 390` never ran. Nothing
-   answers on the VTAM terminals until it does. The user cannot use `./mvs` as-is
-   (it depends on a bundled Hercules build they deleted) and will `ipl 390` at the
-   Hercules console instead. Once that happens: drive TK5 panel by panel to TSO
-   rather than running `record-mvs.txt` blind — it is still an unverified draft with
-   TK4-/TK5 default credentials — then record a fixture and redact the password.
-   Groundwork already done: TK5's greeting is all-protected (25 `SF(0x60)` + 8
-   `SF(0xe8)`, no `IC`), so it needs the same dismiss-first preamble as VM, which
-   `record-mvs.txt` now has.
+3. ~~**TK5 fixture.**~~ **Partly done, and the rest is blocked on TN3270E.** MVS
+   3.8j TK5 is up on `localhost:3271` and a pre-logon fixture is committed
+   (`mvs-tk5-vtam-logon.trace`): Hercules banner, VTAM's USS logon panel, and an
+   `IKT00405I` rejection. Credential-free.
+
+   **TSO logon requires TN3270E, which stage 1 does not implement.** This is the
+   cleanest measurement of the session: s3270 reaches TSO advertising
+   `IBM-3278-2-E`, and the *same binary* fails exactly as we do — `IKT00405I SCREEN
+   ERASURE` — when the `S:` host prefix suppresses the `-E`
+   (`telnet.c:2095-2110`). Our inbound records are byte-identical to s3270's
+   successful ones. tnz succeeds because it advertises `IBM-DYNAMIC`. Ruled out by
+   experiment, not argument: trailing blanks, pacing, and logon syntax; and an
+   earlier Query-Reply theory was wrong (the successful run has no Query at all).
+   Full write-up in `docs/live-testing.md`.
+
+   So a TSO fixture is the natural first live test *after* TN3270E lands, not
+   before. Credentials, from `doc/MVS_TK4-_v100_Users_Manual.pdf`:
+   `HERC01`/`CUL8TR`, `HERC02`/`CUL8TR`, `HERC03`+`HERC04`/`PASS4U`,
+   `IBMUSER`/`IBMPASS`. The logon procedure is RESET+CLEAR on first connect to a
+   terminal address, then the bare userid — or `HERC02/CUL8TR` in one field, which
+   skips the password prompt. `TSO` and `LOGON HERC01` both get `INPUT NOT
+   RECOGNIZED`.
 4. **Stage 2** — the Electron GUI. The renderer constraint to remember: cell
    content is a tagged variant, so dispatch on `kind` rather than assuming a font
    lookup, because Programmable Symbol Sets are a committed stage 4 deliverable.

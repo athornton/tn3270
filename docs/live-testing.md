@@ -16,10 +16,11 @@ and the Recording log says what happened when they were run.
   off cleanly; the old ones stalled at `CP READ` because of three host behaviors
   documented under *The logon sequence*. The committed VM fixture and golden still
   come from the old, pre-CMS run and are due to be re-recorded.
-- **MVS 3.8J — not recorded, but a system now exists.** TK5 Update 5 is live on
-  `localhost:3271` (found 2026-08-17). We render its greeting correctly; no logon
-  has been attempted. `packages/cli/scripts/record-mvs.txt` is still untested and
-  needs the same first-input fix as `record-vm.txt`. See the Recording log.
+- **MVS 3.8J TK5 — pre-logon capture recorded 2026-08-17.** TK5 Update 5 on
+  `localhost:3271`. We negotiate, render the TK5 logo and VTAM's USS logon panel,
+  and VTAM answers us. Fixture `mvs-tk5-vtam-logon.trace` + golden; no credentials
+  in it. **TSO is not reached: it requires TN3270E** (proven by controlled
+  experiment — see the Recording log). `record-mvs.txt` remains a draft.
 
 ## Step 1 — Confirm the host is reachable
 
@@ -330,12 +331,64 @@ What has been established, read-only, without logging on:
   *first* input, will therefore lose it exactly as `record-vm.txt` did. Fix it the
   same way before running it.
 
-**Not attempted deliberately:** logging on. `record-mvs.txt` is still an unverified
-first draft that blind-types `HERC01`/`CUL8TR` and clicks Enter past whatever
-appears; on a system nobody has driven yet that risks tripping password retry
-limits or leaving a session wedged. Reaching TSO needs a human watching the panels
-step by step — and note the TSO password will land in the trace in EBCDIC, so plan
-the redaction (step 4) before recording anything.
+**TSO logon on this system requires TN3270E, which stage 1 does not implement.**
+Established by a controlled experiment against the live host — same script, same
+byte-identical inbound records, only the negotiated terminal type varying:
+
+| client | terminal type | result |
+|---|---|---|
+| s3270 | `IBM-3278-2-E` | **reaches TSO**: `HERC02 LOGON IN PROGRESS`, `Welcome to the TSO system on TK5R` |
+| s3270 with the `S:` host prefix | `IBM-3278-2` | `IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY PROCEDURE` |
+| ours | `IBM-3278-2` | `IKT00405I` — identical |
+| tnz | `IBM-DYNAMIC` | reaches TSO (per the user; also gets to ISPF and logs off cleanly) |
+
+The `S:` prefix is what makes this decisive: it sets `HOST_FLAG(STD_DS_HOST)`, which
+suppresses the `-E` suffix in `create_3270_termtype()` (`telnet.c:2095-2110`). So
+**the same binary, on the same host, with the same script, succeeds with `-E` and
+fails without it** — reproducing our failure exactly. Our client is not at fault;
+our inbound records are byte-identical to the ones s3270 sends when it succeeds
+(`7d 5b f8 11 5b 6b c8 c5 d9 c3 f0 f2 61 c3 e4 d3 f8 e3 d9` + field blanks).
+
+Corroborating host-side evidence, from the Hercules console at *every* one of our
+connects, before we type anything:
+
+```
+IKT108I RECEIVE ERROR,RPLRTNCD=04,RPLFDB2=03,SENSE=00000200,WAITING FOR RECONNECT CUU0C0
+LGN001I TSO logon in progress at VTAM terminal CUU0C0
+```
+
+**A theory that was wrong, recorded so it is not re-derived:** the first
+explanation was that TSO sends a Read Partition (Query) we fail to answer, since a
+`WriteStructuredField ReadPartition(0xff) Query` does appear in one s3270 trace.
+That is a *consequence* of TN3270E negotiation, not the cause — the successful
+`HERC02/CUL8TR` run reached TSO with no Query in the exchange at all, and our
+sessions receive no WSF whatsoever (zero `structuredFields` tokens). Query Reply is
+still worth implementing, but it is not what blocks TSO.
+
+Also ruled out, each by experiment rather than argument:
+
+- **Trailing blanks.** We send the field's 128 EBCDIC blanks back with the userid.
+  So does s3270, byte for byte; the host fills the field with `0x40` and x3270's
+  `ctlr.c:831` transmits every non-zero `ec`. Not a difference.
+- **Pacing.** s3270 waits ~2 s after `Clear` before typing. Matching that pacing
+  changed nothing.
+- **Logon syntax.** The manual's procedure (`doc/MVS_TK4-_v100_Users_Manual.pdf`,
+  *Logon to TSO*) is: RESET then CLEAR on the first connection to a terminal
+  address this IPL, then the **bare userid** at the cursor. `TSO` and
+  `LOGON HERC01` both get `INPUT NOT RECOGNIZED` from VTAM's USS table.
+  `HERC02/CUL8TR` in one field works and skips the password prompt.
+
+**Credentials, from that manual** (not guesses): `HERC01`/`CUL8TR` fully authorized
+with RAKF table access, `HERC02`/`CUL8TR` fully authorized without it,
+`HERC03` and `HERC04`/`PASS4U` regular users, `IBMUSER`/`IBMPASS` for recovery only.
+
+**So a TK5/TSO fixture is blocked until TN3270E lands** (staging item 4). What can
+be captured today is the pre-logon path: the Hercules banner, VTAM's USS logon
+panel with its single unprotected field at SBA(1770), and the `INPUT NOT
+RECOGNIZED` rejection. That is real MVS traffic and worth having, but it is not a
+TSO session. When TN3270E does land, this is the natural first live test, and the
+TSO password will land in the trace in EBCDIC — plan the redaction (step 4) before
+recording.
 
 ## Conformance against real x3270 — 2026-08-17
 
