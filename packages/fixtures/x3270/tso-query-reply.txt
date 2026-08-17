@@ -1,0 +1,51 @@
+# x3270 (s3270 4.5ga6) Read Partition Query exchange with MVS 3.8j TK5 TSO.
+# Captured 2026-08-17 against localhost:3271, ttype IBM-3278-2-E, with the
+# TN3270E telnet option NOT negotiated (no fffb28/fffd28 in the trace).
+#
+# This is the exchange our client cannot yet perform, and the reason TSO is
+# unreachable: TSO sends the Query below and waits. See docs/live-testing.md.
+# Kept as an implementation reference for the Query Reply work -- it is what a
+# real, accepted answer looks like on this host. Do NOT treat it as a spec:
+# x3270 sends more reply units than TSO necessarily requires, and the minimum
+# acceptable subset is untested. Verify each unit against GA23-0059 before
+# copying it, per the project's standing rule about wire constants.
+#
+# HOST -> CLIENT: Write Structured Field, Read Partition, Query
+# Byte-by-byte, checked against GA23-0059 (~/3270/ref/pages.txt:6345-6356), which
+# gives the Read Partition format as L L SFID PID TYPE:
+# NOTE the wire bytes are IAC-doubled. As captured: f3 00 05 01 ff ff 02 ff ef.
+# After un-doubling the ff ff -> ff, the structured field is:
+#
+#   f3      command: Write Structured Field
+#   00 05   L: length 5, covering 00 05 01 ff 02 -- matches exactly
+#   01      SFID: Read Partition
+#   ff      PID: X'FF' = the partition identifier used for QUERY operations
+#           (X'00'-X'7E' would be a read against a specific partition).
+#           THIS is the byte that gets doubled: 0xff in data must be sent as
+#           ff ff, and a Query Reply implementation has to un-double on the way
+#           in and double on the way out. Getting this wrong shifts every
+#           subsequent byte and the length check silently stops matching.
+#   02      TYPE: X'02' = Query  (X'03' would be Query List, and only that form
+#           carries the REQTYP/QCODE bytes that follow in the manual's table)
+#   ff ef   IAC EOR (record terminator, not part of the structured field)
+# The manual also fixes the reply AID: "X'88' Query Reply", which matches the
+# first byte of the client record below.
+< f3 00 05 01 ff ff 02 ff ef
+#
+# CLIENT -> HOST: the Query Reply set x3270 sends (AID 0x88), 183 bytes.
+# Units present, per s3270's own trace annotation:
+#   Summary, UsableArea, AlphanumericPartitions, CharacterSets, Color,
+#   Highlighting, ReplyModes, DistributedDataManagement (INLIM/OUTLIM=16384),
+#   RPQNames
+> 88 00 0e 81 80 80 81 84 85 86 87 88 95 a1 a6 00
+> 17 81 81 01 00 00 50 00 18 01 00 0a 02 e5 00 02
+> 00 6f 09 0c 07 80 00 08 81 84 00 07 80 00 00 1b
+> 81 85 82 00 09 0c 00 00 00 00 07 00 10 00 02 b9
+> 00 25 01 00 f1 03 c3 01 36 00 26 81 86 00 10 00
+> f4 f1 00 f2 00 f3 00 f4 00 f5 00 f6 00 f7 00 f8
+> 00 f9 00 fa 00 fb 00 fc 00 fd 00 fe 00 ff ff 00
+> 00 0f 81 87 05 00 f0 f1 f1 f2 f2 f4 f4 f8 f8 00
+> 07 81 88 00 01 02 00 0c 81 95 00 00 40 00 40 00
+> 01 01 00 12 81 a1 00 00 00 00 00 00 00 00 06 a7
+> f3 f2 f7 f0 00 11 81 a6 00 00 0b 01 00 00 50 00
+> 18 00 50 00 18 ff ef
