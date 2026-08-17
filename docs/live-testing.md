@@ -362,15 +362,64 @@ past it. Our client is not at fault in its data stream — our inbound records a
 byte-identical to the ones s3270 sends when it succeeds
 (`7d 5b f8 11 5b 6b c8 c5 d9 c3 f0 f2 61 c3 e4 d3 f8 e3 d9` + field blanks).
 
-**This was misdiagnosed once as "TSO requires TN3270E", on the strength of rows 1-3
-alone.** Rows 1-3 are consistent with that theory and also with "the ttype string
-matters", and nothing distinguished them until row 4 was run. Two variables had been
-changed together — the `-E` suffix *and* TN3270E negotiation — and only one of them
-turned out to be load-bearing. Vary one thing at a time, especially when the
-convenient conclusion happens to point at an unimplemented feature.
+**This took three passes to get right, and the intermediate answers are worth keeping
+because each was wrong in a different way.**
 
-**What actually matters is the `-E` suffix, and TN3270E is not involved.** Follow-up
-runs, all with **zero** `fffb28`/`fffd28` in the trace:
+- **Pass 1: "TSO needs a Query Reply we don't send."** Right about the requirement,
+  but asserted before checking whether the Query was even being sent to us — it
+  isn't, with our ttype.
+- **Pass 2: "TSO requires TN3270E."** Wrong. It rested on rows 1-3 below, which are
+  equally consistent with "the ttype string matters"; the `S:` prefix changes the
+  `-E` suffix *and* suppresses the TN3270E option together, so it could not separate
+  them. Row 4 (`-oversize` forcing `IBM-DYNAMIC` with `S:` still set) isolated it.
+  Vary one thing at a time — especially when the convenient conclusion points at a
+  feature you have not built.
+- **Pass 3, current: the ttype is the trigger and Query Reply is the requirement.**
+  Both, in sequence. Reached by diffing the *whole* successful exchange against the
+  failing one rather than just the outcome, which is what should have been done first.
+
+The rows below are what isolated the trigger. All runs had **zero** `fffb28`/`fffd28`
+in the trace, so the TN3270E telnet option is not involved in any of this:
+
+**Full causal chain, third and final version.** Two things are true in sequence, and
+each earlier attempt at this had one half:
+
+1. **The terminal type is the trigger.** With `IBM-3278-2` the host never sends a
+   Query at all. With `-E` or `IBM-DYNAMIC` it does.
+2. **Query Reply is the requirement.** Claiming extended data stream makes TSO ask
+   `WriteStructuredField ReadPartition(0xff) Query`, and it expects an answer.
+
+From s3270's successful `IBM-3278-2-E` trace, in order:
+
+```
+> ttype IBM-3278-2-E                     (negotiation)
+> 6dffef                                 (Clear)
+> 7d5bf8...c8c5d9c3f0f161...             (userid/password — identical to ours)
+< EraseWrite ... SetBufferAddress(24,80)
+< WriteStructuredField ReadPartition(0xff) Query          <-- TSO asks
+> QueryReply(Summary, UsableArea, AlphanumericPartitions, CharacterSets,
+            Color, Highlighting, ReplyModes, DDM, RPQNames)   <-- s3270 answers
+  → $HASP100 / IEF125I HERC02 - LOGGED ON
+```
+
+With `IBM-3278-2` that Query step never happens; instead the host logs
+`IKT108I RECEIVE ERROR … SENSE=00000200` and `IEA000I 0C0,IOE` (an I/O error on the
+device) and the session dies at `IKT00405I`.
+
+**So advertising `-E` without implementing Query Reply would move the failure, not
+fix it** — TSO would start asking and we would not reply. The work is: make the
+terminal type configurable *and* answer Read Partition. The user's own `zti` session
+confirms the successful shape end to end, with no `IKT108I` and no `IEA000I` anywhere:
+
+```
+HHC02914I 0:00C0 COMM: client 13 negotiations complete; ttype = 'IBM-DYNAMIC'
+LGN001I TSO logon in progress at VTAM terminal CUU0C0
+$HASP100 HERC02   ON TSOINRDR
+$HASP373 HERC02   STARTED
+IEF125I HERC02 - LOGGED ON - TIME=23.23.05
+IEF126I HERC02 - LOGGED OFF - TIME=23.23.16
+$HASP395 HERC02   ENDED   /  $HASP250 HERC02  IS PURGED
+```
 
 | ttype advertised | TN3270E negotiated | reaches TSO |
 |---|---|---|
@@ -390,12 +439,28 @@ the `IKT00405I` failure and means the ttype was accepted. One run was briefly sc
 as a failure for this reason. Use a different userid per run (`HERC01`, `HERC02`,
 `HERC03`, `HERC04`) or log off properly.
 
-**Consequence for us:** TSO looks reachable with a one-string change rather than a
-protocol layer. Do it deliberately, though — claiming extended data stream invites
-extended orders (SA/SFE/MF, which we parse and ignore) and `IBM-DYNAMIC` additionally
-invites host-driven alternate geometry, the 32×80 case above that stage 1 reports as
-a program check. The honest sequence is: make the terminal type configurable, try
-`IBM-3278-2-E`, and see what the host then sends that we do not yet implement.
+**Consequence for us:** two pieces of work, in this order.
+
+1. **Answer Read Partition (Query)** with at least Usable Area (`0x81`) and Implicit
+   Partitions (`0xA6`); s3270 also sends Summary, Alphanumeric Partitions, Character
+   Sets, Color, Highlighting, Reply Modes, DDM and RPQ Names, and the minimum this
+   TSO accepts is untested.
+2. **Make the terminal type configurable** and advertise `IBM-3278-2-E`.
+
+Doing 2 without 1 moves the failure rather than fixing it. Doing 1 first is
+harmless — nothing asks us today, since `IBM-3278-2` never elicits a Query.
+
+Then expect fallout, because claiming extended data stream invites extended orders:
+SA/SFE/MF are parsed and ignored today (`execute.ts:204`), and SFE *defines a field*,
+so a host that uses it would leave our screen without that structure. `IBM-DYNAMIC`
+additionally invites host-driven alternate geometry — the 32×80 case above, which
+stage 1 reports as a program check.
+
+**An earlier note in the spec said alternate-geometry support "belongs with the
+Query Reply work rather than strictly with TN3270E, and `zti` does it without
+TN3270E."** That is now confirmed on the wire from three directions: `zti` reaches
+TSO with `use_tn3270e = False`, s3270 does the whole Query exchange with zero
+`fffb28`/`fffd28`, and the Query is what TSO actually waits on.
 
 Corroborating host-side evidence, from the Hercules console at *every* one of our
 connects, before we type anything:

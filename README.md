@@ -131,15 +131,20 @@ job is worse than one that says which quarter is missing.
 - **No TLS.** Cleartext only, so this is not safe over an untrusted network.
 - **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no
   SNA response handling, no printer sessions.
-- **Terminal type is hardcoded to `IBM-3278-2`, and TSO on MVS rejects that.** We
-  advertise no extended-data-stream `-E` suffix, and TK5's TSO answers
-  `IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY PROCEDURE` instead of a logon.
-  Measured with s3270 against the same host, all with *no* TN3270E negotiated:
-  `IBM-3278-2` fails, while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all
-  reach TSO. Our inbound records are byte-identical to s3270's successful ones, so
-  this is one string, not a missing protocol layer. VM/370 does not care; TSO does.
-  Making the terminal type configurable is the obvious next step, with the caveat
-  that claiming more capability invites orders and geometries we do not yet handle.
+- **Terminal type is hardcoded to `IBM-3278-2`, which is why TSO on MVS is
+  unreachable.** Two linked gaps, measured against MVS 3.8j TK5 with the TN3270E
+  telnet option never negotiated in any run:
+  - Advertising `IBM-3278-2` fails with `IKT00405I SCREEN ERASURE CAUSED BY ERROR
+    RECOVERY PROCEDURE`, while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all
+    reach TSO. Our inbound records are byte-identical to s3270's successful ones.
+  - But claiming the `-E` (extended data stream) suffix makes TSO send
+    `WriteStructuredField ReadPartition(0xff) Query` and wait for a Query Reply,
+    which we do not answer. So the terminal type is the *trigger* and Query Reply is
+    the *requirement*: changing the string alone would move the failure, not fix it.
+
+  VM/370 exercises neither, which is how stage 1 got this far. Fixing it means
+  answering Read Partition and then making the terminal type configurable — and
+  expecting extended orders and alternate geometries we do not yet handle.
 - **No extended attributes.** SA, SFE and MF orders are parsed for length and
   then ignored, so colour, highlighting and character sets are recognised but not
   rendered. Note this is more than cosmetic: SFE *defines a field*, so a host that
@@ -147,10 +152,12 @@ job is worse than one that says which quarter is missing.
   MVS 3.8j sends these, which is why stage 1 gets away with it.
 - **No Programmable Symbol Sets** and no graphics.
 - **No Query Reply.** Write Structured Field is parsed but never answered, so we
-  cannot advertise a screen geometry. A host that has learned an alternate size
-  from a different client on the same device may drive us with addresses outside
-  80×24; stage 1 reports that as a program check rather than silently wrapping.
-  See the spec's *Outbound* section — this is measured behaviour, not theory.
+  cannot advertise a screen geometry. Two measured consequences: a host that has
+  learned an alternate size from a different client on the same device may drive us
+  with addresses outside 80×24 (stage 1 reports that as a program check rather than
+  silently wrapping), and **TSO on MVS waits on a Read Partition Query we never
+  answer** — see the terminal-type entry above, which is the same problem seen from
+  the other end. See the spec's *Outbound* section; this is measured, not theory.
 - **80×24 only.** `Screen` takes its geometry as a parameter, so this is a
   configuration limit rather than a structural one.
 - **MVS reaches VTAM but not TSO.** Everything else above was verified against

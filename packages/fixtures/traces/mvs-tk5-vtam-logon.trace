@@ -9,14 +9,20 @@
 # single unprotected field at SBA(1770) carrying IC), and VTAM rejecting an
 # unrecognized token with IKT00405I. It does NOT reach TSO.
 #
-# TSO on this system rejects the terminal type we advertise, IBM-3278-2. This is NOT
-# a TN3270E problem: measured with s3270 against this host, with the TN3270E telnet
-# option (40) never negotiated in any run, IBM-3278-2 fails with IKT00405I while
-# IBM-3278-2-E, IBM-3279-2-E and IBM-DYNAMIC all reach TSO. The -E suffix means
-# extended data stream in the ttype string, which is a different thing from the
-# TN3270E option. Our inbound records are byte-identical to s3270's successful ones,
-# so the gap is one string. See docs/live-testing.md for the full comparison, and
-# for the earlier wrong diagnosis that blamed TN3270E.
+# TWO LINKED GAPS block TSO here, and neither is TN3270E (the telnet option 40 is
+# never negotiated in any run, ours or s3270's):
+#
+#   1. TRIGGER: the terminal type. We advertise IBM-3278-2, which fails with
+#      IKT00405I. IBM-3278-2-E, IBM-3279-2-E and IBM-DYNAMIC all reach TSO.
+#   2. REQUIREMENT: Query Reply. Claiming the -E (extended data stream) suffix makes
+#      TSO send "WriteStructuredField ReadPartition(0xff) Query" and wait for a
+#      QueryReply, which s3270 answers and we cannot. With IBM-3278-2 that Query is
+#      never sent at all.
+#
+# So changing the ttype alone would move the failure rather than fix it. Our inbound
+# records are byte-identical to s3270's successful ones; the gap is negotiation plus
+# the unanswered Query. See docs/live-testing.md for the full three-pass write-up,
+# including two earlier diagnoses that were wrong.
 #
 # NO CREDENTIALS ARE PRESENT. Nothing secret was typed: the only input is the
 # literal string "TSO" and a Clear. Verified zero occurrences of any TK5 password's

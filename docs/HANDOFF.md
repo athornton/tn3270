@@ -151,6 +151,17 @@ a symptom.
    "password rejected" from "LOGON never arrived", which is what had happened. It
    confirms success and diagnoses nothing. Ask what *normal* looks like (that did
    crack it); don't block on a signal that is silent in the failure case.
+10. **Diff the whole conversation, not just who won.** The TSO diagnosis took three
+    passes because the first two compared *outcomes* between a working client and
+    ours — succeeded/failed, plus the one negotiation string that differed. Dumping
+    both full exchanges side by side showed the actual mechanism immediately: the
+    successful one contains a `WriteStructuredField ReadPartition Query` and a
+    `QueryReply` that the failing one never even receives. The answer was sitting in
+    a trace already on disk through both wrong passes.
+11. **When a working reference client is available, get its trace before theorising.**
+    s3270 was built locally the whole time. Every wrong turn today would have been
+    caught in minutes by reading its successful exchange rather than reasoning about
+    what a host "must" want.
 
 ## Bug tally, for calibration
 
@@ -174,19 +185,24 @@ times; that pushback was the single most valuable part of the process.
    (`mvs-tk5-vtam-logon.trace`): Hercules banner, VTAM's USS logon panel, and an
    `IKT00405I` rejection. Credential-free.
 
-   **TSO rejects the terminal type we advertise; TN3270E is NOT required.** We send
-   `IBM-3278-2` and TK5's TSO answers `IKT00405I SCREEN ERASURE`. Measured with s3270
-   on the same host, every run with **zero** TN3270E negotiated: `IBM-3278-2` fails,
-   while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all reach TSO. Our inbound
-   records are byte-identical to s3270's successful ones, so this is one string, not
-   a protocol layer.
+   **Two linked gaps block TSO: the terminal type is the trigger, Query Reply is the
+   requirement.** We advertise `IBM-3278-2`; TK5's TSO answers `IKT00405I SCREEN
+   ERASURE`. Measured with s3270, TN3270E option never negotiated in any run:
+   `IBM-3278-2` fails while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` reach
+   TSO. But diffing the whole successful exchange shows *why*: claiming `-E` makes
+   TSO send `WriteStructuredField ReadPartition(0xff) Query` and wait for a Query
+   Reply, which s3270 answers and we cannot. With `IBM-3278-2` the Query is never
+   sent at all. So changing the ttype alone moves the failure rather than fixing it;
+   the order of work is Query Reply first, then a configurable terminal type.
 
-   **This was first diagnosed as "TSO requires TN3270E" and that was wrong.** The
-   evidence then was s3270 succeeding with `-E` and failing with the `S:` prefix —
-   but `S:` changes the ttype *and* suppresses TN3270E together, so it could not
-   separate them. `-oversize 80x24` (which forces `IBM-DYNAMIC`) plus `S:` isolated
-   it. Vary one thing at a time, especially when the convenient answer points at a
-   feature you have not built. Full write-up in `docs/live-testing.md`.
+   **This took three passes, and the wrong turns are instructive.** Pass 1 said
+   "needs Query Reply" — right requirement, asserted before checking the Query was
+   even being sent. Pass 2 said "requires TN3270E" — wrong, because the `S:` prefix
+   changes the ttype *and* suppresses the option together, so it never separated
+   them; `-oversize` forcing `IBM-DYNAMIC` isolated it. Pass 3 got both halves by
+   diffing the full exchange rather than the outcome. Vary one variable at a time,
+   and diff the whole conversation, not just who won. Full write-up in
+   `docs/live-testing.md`.
 
    So a TSO fixture is the natural first live test *after* TN3270E lands, not
    before. Credentials, from `doc/MVS_TK4-_v100_Users_Manual.pdf`:
