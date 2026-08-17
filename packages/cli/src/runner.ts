@@ -14,6 +14,12 @@ import { formatStatus } from './status.js';
 
 /** How long the record stream must be idle for Wait(Settle) to fire. */
 const SETTLE_MS = 400;
+/**
+ * How long to keep waiting for a typable field before accepting a screen that has
+ * none. Output-only panels are legitimate, so this cannot wait forever — but it
+ * must outlast a host that settles on one screen and then sends another.
+ */
+const SETTLE_QUIET_MS = 2000;
 
 export interface RunnerOptions {
   clock?: () => number;
@@ -296,7 +302,24 @@ export class Runner {
             return false;
           }
           if (Date.now() - settleSince < SETTLE_MS) return false;
-          return !this.session.oia.isInhibited();
+          if (this.session.oia.isInhibited()) return false;
+
+          // And there must be somewhere to type. An unlocked keyboard is not
+          // enough: this host settles briefly on a status screen that has 28
+          // fields, none of them typable, with the cursor on a protected cell —
+          // then replaces it with the logon panel. Returning on the first quiet
+          // moment therefore hands the script a screen it cannot type into, and
+          // the next String() fails as "input inhibited". Intermittent, because
+          // whether the panel has landed depends on timing.
+          //
+          // A screen with no typable field at all is a legitimate final state
+          // (an output-only panel), so this cannot be an unconditional
+          // requirement — it applies only while the host is still sending. Hence
+          // the check is "typable OR the stream has been quiet a long time".
+          const sc = this.session.screen;
+          const typable = sc.typableFields().length > 0;
+          if (typable) return true;
+          return Date.now() - settleSince >= SETTLE_QUIET_MS;
         }
         case 'inputfield': {
           // Wait until the cursor is sitting somewhere typable. This is the

@@ -9,4 +9,7 @@ Clear
 Wait(Unlock)
 Enter
 Wait(Unlock)
+String("LOGOFF")
+Enter
+Wait(Unlock)
 Quit

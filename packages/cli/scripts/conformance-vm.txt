@@ -27,5 +27,12 @@ Clear
 Wait(Settle,20)
 Enter
 Wait(Settle,20)
+# LOGOFF is not optional. CP answers a LOGON for an account that is already
+# logged on with "restart" and no input field, so leaving the session open makes
+# the NEXT run of this script fail — which looked exactly like a client-side race
+# until five clean runs showed run 1 passing and runs 2-5 failing.
+String("LOGOFF")
+Enter
+Wait(Settle,20)
 TraceText
 Quit

@@ -196,3 +196,42 @@ section.
 
 No MVS system exists yet. `packages/cli/scripts/record-mvs.txt` is prepared and
 untested; treat its credentials as TK4-/TK5 defaults that will need checking.
+
+## Conformance against real x3270 — 2026-08-17
+
+**Result: 5 of 5 inbound records byte-identical**, reproduced three times.
+
+s3270 4.5ga6 is built locally at `~/src/suite3270-4.5`, so this needs no second
+machine. Both clients drive paired scripts against the same host:
+
+```sh
+S=~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270
+$S -model 3278-2 -trace -tracefile /tmp/ref.trace 127.0.0.1:3270 \
+    < packages/cli/scripts/conformance-vm.s3270
+node packages/cli/dist/main.js < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
+node packages/core/tools/compare-conformance.mjs /tmp/ours.log /tmp/ref.trace
+```
+
+The matched records cover Enter with typed field data, Enter on a
+modified-but-empty field, Clear (a short read — AID byte alone), and LOGOFF.
+
+**Both scripts MUST end with LOGOFF.** CP answers a LOGON for an
+already-logged-on account with `restart` and no input field, so a session left
+open makes the next run fail. This cost real time: it presented as an
+intermittent client-side race, and only five runs against clean logs showed the
+actual pattern — run 1 passing, runs 2-5 failing. It is host state, not timing.
+
+**Excluded from the comparison, deliberately:** telnet negotiation. s3270 always
+advertises `IBM-3278-2-E` and has no flag to suppress TN3270E, so the
+terminal-type strings differ by design. The 3270 datastream is what stage 1
+implements and what is compared. This difference goes away when TN3270E lands.
+
+**Two testing lessons worth keeping:**
+
+- Appending repeated runs to one log file made the evidence unreadable — 31
+  "replies" for 15 commands, with a whole disconnected run hiding at the top.
+  Use a fresh file per run.
+- A probe that connects and samples immediately sees only the first record. This
+  host reliably sends three within 5 ms, but "reliably fast" is not "synchronous";
+  an 8-connection probe that waited 2.5 s each time was 8-for-8 consistent where
+  a no-wait probe looked random.
