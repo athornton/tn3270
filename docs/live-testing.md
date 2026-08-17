@@ -242,24 +242,34 @@ them.
 - **Host:** `localhost:3270` under Hercules, user's machine. Unprivileged account
   `CMSUSER`.
 - **Script:** `packages/cli/scripts/record-vm.txt`
-- **Result:** 43 commands, **0 errors, 0 program checks**. CP answered `LOGOFF`
-  with its own timestamp (`LOGOFF AT 18:27:40 GMT MONDAY 08/17/26`), which is the
-  proof that our inbound stream is genuinely understood by the host rather than
-  merely accepted.
-- **Fixture:** `packages/fixtures/traces/vm370-logon-logoff.trace` (217 lines),
+- **Result (re-recorded 2026-08-17 after the logon fix):** 77 commands, **0 errors,
+  0 program checks**, and the session **reaches CMS**. It logs on, IPLs CMS, gets
+  `Ready;`, has `QUERY TERMINAL` answered *by CMS* (`AUTOCR OFF, MORE 050 010,
+  HOLD ON, TIMESTAMP OFF`), and logs off cleanly with CP's own accounting
+  (`CONNECT= 00:00:02 VIRTCPU= …`, `LOGOFF AT 21:48:27`). A CMS command getting a
+  CMS answer is the proof we are genuinely past CP, not merely tolerated by it.
+- **Fixture:** `packages/fixtures/traces/vm370-logon-logoff.trace` (391 lines),
   golden at `packages/fixtures/screens/vm370-logon-logoff.txt`.
-- **Redaction:** two records containing the password were replaced with comment
-  lines — one we sent, one the host echoed back. Verified zero occurrences of the
-  password's EBCDIC bytes (`c3 d4 e2 e4 e2 c5 d9`) remain. The fixture is
-  replay-faithful only up to the password prompt.
+- **Redaction:** the one sent record containing the password was replaced with a
+  comment line. Verified zero occurrences of the password's EBCDIC bytes remain
+  anywhere in the file. The fixture is replay-faithful only up to the password
+  prompt.
 
-**Quirks of this capture.** `DMKCFC001E ?CP: QUERY` is CP rejecting `QUERY
-TERMINAL`, which is a CMS command rather than a CP one — kept because a rejected
-command is a useful thing to have in a fixture. **But the reason CP saw it at all
-was a real scripting bug, fixed 2026-08-17: the session never got past CP because
-the logon sequence was wrong, not because it "would need an IPL".** See *The
-logon sequence* below. `record-vm.txt` now reaches CMS `Ready;` and this fixture
-is due to be re-recorded.
+  Note the password happens to equal the userid on this system, so the same byte
+  sequence also appears legitimately inside `LOGON CMSUSER` and the host's echo of
+  it. Those are the userid — not secret, and already in the script — so only the
+  bare-password record was redacted. **A naive `grep -c` for those bytes will
+  therefore report hits on a correctly-redacted fixture;** check whether each hit
+  is preceded by the `LOGON` verb before concluding anything. The host does *not*
+  echo the password itself, because the prompt's field is nondisplay (`SF(0x4d)`),
+  so unlike the previous capture there is only one record to redact rather than two.
+
+**What this capture exercises** that the previous one could not: the `VM READ`
+state, the CMS IPL, disk-access and disk-substitution messages, a `MORE...` pause
+released by `Clear`, and a CMS command with a CMS reply. The old capture stalled at
+`CP READ` and its golden showed `restart` plus `DMKCFC001E ?CP: QUERY` — both
+artifacts of the logon bug described under *The logon sequence*, not host quirks as
+previously recorded here.
 
 **Bugs this session found**, none of which were findable offline:
 

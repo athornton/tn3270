@@ -1,13 +1,13 @@
 # Golden screen. Regenerate with tools/make-golden.mjs; review the diff.
 # cursor: 1760  oia: X Disconnected
 +--------------------------------------------------------------------------------+
-|                                                                                |
-|restart                                                                         |
-|                                                                                |
-|QUERY TERMINAL                                                                  |
-|DMKCFC001E ?CP: QUERY                                                           |
 |LOGOFF                                                                          |
-|LOGOFF AT 18:27:40 GMT MONDAY 08/17/26                                          |
+|CONNECT= 00:00:02 VIRTCPU= 000:00.10 TOTCPU= 000:00.24                          |
+|LOGOFF AT 21:48:27 GMT MONDAY 08/17/26                                          |
+|                                                                                |
+|                                                                                |
+|                                                                                |
+|                                                                                |
 |                                                                                |
 |                                                                                |
 |                                                                                |
