@@ -495,6 +495,45 @@ Also ruled out, each by experiment rather than argument:
 with RAKF table access, `HERC02`/`CUL8TR` fully authorized without it,
 `HERC03` and `HERC04`/`PASS4U` regular users, `IBMUSER`/`IBMPASS` for recovery only.
 
+### The target sequence, and a geometry trap in it
+
+A working `zti` session was captured with `script -B` (2026-08-17) and transcribed
+into `packages/cli/scripts/record-mvs.txt`. The sequence:
+
+| screen size | step |
+|---|---|
+| 24×80 | Hercules banner → `Reset` `Clear` → VTAM USS panel (`Logon ===>`) |
+| 24×80 | bare userid `HERC02` + Enter |
+| **27×132** | `ENTER CURRENT PASSWORD FOR HERC02-` → password + Enter |
+| 27×132 | `HERC02 LOGON IN PROGRESS`, `Welcome to the TSO system on TK5R`, `***` |
+| 27×132 | Enter → a fortune cookie, `***` |
+| 27×132 | Enter → **ISPF primary option menu** (`USERID: HERC02`, `TERMINAL: 3277`) |
+| 27×132 | `X` + Enter → `CLST020 LIST data set not allocated`, then TSO `READY` |
+| 27×132 | `LOGOFF` + Enter → `HERC02 LOGGED OFF TSO` |
+| 24×80 | `******`, then the VTAM panel again |
+
+**The screen size changes mid-session, at the password prompt, and reverts at
+logoff.** That 27×132 was not TSO's choice: `zti` advertised it, derived from the
+operator's **171×41 terminal window** (`tnz/tnz.py:265-282` selects 27×132 for ≥27
+rows and ≥132 columns — checked, 41 and 171 hit exactly that branch), and TSO used
+what the client offered. 27×132 is 3564 cells, well past 80×24's 1920.
+
+Two consequences worth internalising before implementing Query Reply:
+
+- **What we answer the Query with determines the geometry we then have to handle.**
+  Reply 24×80 and the session should stay 24×80 throughout; offer more and the host
+  will address beyond 1920 cells, which stage 1 reports as a program check. That
+  program check is the honest failure and must not be "fixed" by wrapping.
+- **This is the same mechanism as the VM/370 32×80 surprise**, seen from the
+  cooperative end rather than as cross-client contamination. There, `zti` taught the
+  host a geometry and the host later drove *us* with it. Here the client offers a
+  geometry and the host uses it immediately. One mechanism, two symptoms.
+
+Two more details from the transcript, both easy to get wrong: **ISPF starts
+automatically** from this account's `ISPLOGON` proc — nothing is typed to launch it,
+just an Enter past the `***` — and `TERMINAL: 3277` on the ISPF panel is ISPF's own
+notion of the terminal, not the telnet terminal type we negotiated.
+
 **So a TK5/TSO fixture is blocked until TN3270E lands** (staging item 4). What can
 be captured today is the pre-logon path: the Hercules banner, VTAM's USS logon
 panel with its single unprotected field at SBA(1770), and the `INPUT NOT
