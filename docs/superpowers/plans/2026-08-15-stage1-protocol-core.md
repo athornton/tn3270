@@ -7027,6 +7027,12 @@ timeout 5 bash -c 'cat < /dev/null > /dev/tcp/HOST/PORT' && echo reachable || ec
 ```
 Expected: `reachable`. If not, stop and report; do not fake a fixture.
 
+This logs a cosmetic `HHC02909E Recv() error … reset by peer` on the Hercules
+console, and no simpler probe avoids it — Hercules treats *any* disconnect before it
+learns the terminal type as an error (`console.c:2955-2989`); a politer close just
+logs `HHC02908E` instead. Measured against the real host, not inferred. Don't chase
+it. See `docs/live-testing.md` step 1.
+
 - [ ] **Step 2: Write the MVS recording script**
 
 Create `packages/cli/scripts/record-mvs.txt`. The exact logon sequence depends on the host build (TK4-/TK5 differ), so treat this as the starting point and adjust from what the screens actually show:

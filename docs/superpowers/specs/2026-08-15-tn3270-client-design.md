@@ -314,14 +314,38 @@ and in stage 1 both clear the same 80×24 buffer.
 "for a 3278-2 the alternate screen size equals the default, so EWA behaves
 identically to EW". That is not reliable. A VM/CE 1.2 host under Hercules sent
 `EWA` carrying `SBA(2399)` and `EUA(→2539)` — addresses that only fit a 2560-cell
-(32×80) screen — while we identified ourselves as `IBM-3278-2`. The host was
-reconfigured to stay within 80×24 for stage 1, but the assumption is false in
-general: a host may use the alternate size regardless of the model we claim.
+(32×80) screen — while we identified ourselves as `IBM-3278-2`.
 
-Stage 1 therefore treats an out-of-range address as a **program check**, which is
-honest and visible, rather than silently wrapping it. Real alternate-geometry
-support belongs with TN3270E, where the screen size is negotiated; `Screen`
-already takes its geometry as a constructor parameter so that change is local.
+**Cause found 2026-08-17, and it was not the host being arbitrary.** The user's
+usual client is tnz, which advertises terminal type **`IBM-DYNAMIC`** and then
+answers Read Partition (Query) with an *Implicit Partitions* Query Reply (`0xA6`)
+whose `WA`/`HA` fields carry an alternate size **derived from the user's terminal
+window** — `tnz/tnz.py:265-282`: `lines >= 62 → 62×160`, `>= 43 → 43×80`,
+`>= 32 → 32×80`, else `24×80`. The user's terminal was 41 lines, which selects the
+`32×80` branch, and 2399/2539 fit 2560 cells but not 1920. VM had recorded that
+geometry for `GRAF 2C8` and later drove *our* session with it.
+
+So the mechanism is: a **different client** on the same device taught the host a
+32×80 alternate size, and the host kept using it. Note this is ordinary 3270 Query
+Reply, not TN3270E — an `IBM-DYNAMIC` client can negotiate geometry over a base
+connection. Neither host has ever sent *us* a Read Partition (Query): zero WSF
+records in the VM and TK5 traces, which is expected since we advertise a fixed
+model. We parse WSF (`stream/parse.ts` → `structuredFields`) but do not answer
+queries, so we cannot advertise a size at all.
+
+The practical assumption still holds and is now better founded: **a host may drive
+the alternate size regardless of the model we claim**, because it may be
+remembering what another client negotiated on that device. Stage 1 therefore
+treats an out-of-range address as a **program check**, which is honest and visible,
+rather than silently wrapping it.
+
+Real alternate-geometry support belongs with the Query Reply work rather than
+strictly with TN3270E — answering Read Partition with Usable Area (`0x81`) and
+Implicit Partitions (`0xA6`) is what actually sets the size, and tnz does it
+without TN3270E. `Screen` already takes its geometry as a constructor parameter so
+that change is local. Reproducing the 32×80 condition on demand is now easy: run
+`zti` from a terminal at least 32 lines tall, then connect with our client on the
+same device.
 
 ### Inbound (terminal → host)
 

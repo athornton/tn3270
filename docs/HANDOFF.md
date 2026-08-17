@@ -19,32 +19,54 @@ done. Only **Task 18** (README + completion check) remains, and it is unblocked.
   (`localhost:3270`): 43 commands, 0 errors, 0 program checks. CP answered
   `LOGOFF` with its own timestamp, which is what proves the host understands our
   inbound stream rather than merely tolerating it.
-- **5 of 5 inbound records byte-identical with real x3270**, reproduced three
+- **CMS reached.** The corrected script logs on, IPLs CMS, gets `Ready;`, has
+  `QUERY TERMINAL` answered *by CMS*, and logs off cleanly — repeatedly.
+- **5 of 6 inbound records byte-identical with real x3270**, reproduced three
   consecutive times. s3270 4.5ga6 is built at `~/src/suite3270-4.5` (the user
   built it), so this needs no second machine. Procedure in `docs/live-testing.md`.
+  The sixth record is the AID sent on the all-protected connect-time banner, where
+  the two clients differ by design (s3270 blocks on a hardcoded `Wait(InputField)`
+  at `stdinscript.c:437`); both forms are correct per `ctlr.c:796-830`. The
+  earlier "5 of 5" predates the banner-dismissal fix, which added slot 0.
 - The host console log shows `ttype = 'IBM-3278-2'` for our connections —
   independent confirmation from the host side. (s3270 shows `IBM-3278-2-E`.)
 
-## The one open problem
+## The one open problem — RESOLVED 2026-08-17
 
-**We reach `CP READ`, never `VM READ`.** The password is not being accepted, so
-we never IPL CMS. The decisive comparison: **s3270 reaches `RUNNING` where we
-reach `CP READ`** on the same host with the same credentials and the same script
-shape. Since our datastream is byte-identical for every record we both send, the
-difference is *timing or sequence*, not content. The screen shows `restart`
-before the password prompt, which may mean CP is treating the connection as a
-reconnect rather than a fresh logon.
+**`CP READ` vs `VM READ` was a bug in the recording script, not in the client.**
+We now reach CMS `Ready;` and log off cleanly, verified repeatedly, with `QUERY
+TERMINAL` answered by CMS (`AUTOCR OFF, MORE 050 010, HOLD ON, TIMESTAMP OFF`)
+rather than rejected by CP. Full write-up in `docs/live-testing.md` under *The
+logon sequence*. In short, three host behaviors:
 
-Two questions were put to the user and are unanswered:
+1. **The first Enter is consumed dismissing the screen, and its text is
+   discarded.** The host sends three records within 5 ms of connect, no input
+   needed: the all-protected Hercules banner, then the real input field
+   (`SF(0x4d) IC` at 1759), then the VM/370 logo over the top. The old script
+   typed `LOGON` as its first input, so it was thrown away and everything after
+   was off by one — the "password" hit a fresh `CP READ` as a command. Fix: two
+   Enters after connect before typing.
+2. **Use `Wait(Settle)`, not `Wait(InputField)`, on that first screen.** The
+   banner is 19 all-protected fields, so for ~1 ms there is no field to match;
+   losing that race costs a full timeout and an `error`. Settle doesn't race.
+3. **`MORE...` silently eats input.** We transmit into it (verified on the wire)
+   and CMS discards it, which swallowed the `LOGOFF` and left the account logged
+   on. Send `Clear` first.
 
-1. When logging on interactively with `zti`, does the screen show `restart`
-   before the password prompt, or go straight to asking for a password? That
-   distinguishes "normal" from "symptom".
-2. Does the host console log show anything when we send the password — a rejected
-   logon, a reconnect, an `HCPxxx` message?
+**`restart` was misdiagnosed everywhere.** It is not a marker of an
+already-logged-on account; it is CP's reply to any unrecognized token at `CP
+READ`, confirmed by typing `FOOBAR` on a freshly logged-off account. That wrong
+claim was in this file, `docs/live-testing.md`, and both conformance scripts, and
+all four are now corrected.
 
-**Do not guess at this.** Two wrong conclusions were reached today by reasoning
-ahead of the evidence (see *Lessons* below).
+**The instructive part:** the reasoning that sent this to the user was "our
+datastream is byte-identical, so the difference must be timing." The datastream
+*was* byte-identical, and the conclusion was still false — the comparison behind
+it (`conformance-vm.s3270`) never sends a password at all, so it could not have
+been evidence about the logon either way. Check that a comparison actually
+exercises what you are attributing to it. The user's answer — that the normal
+interactive flow shows no `restart` anywhere — is what turned it from noise into
+a symptom.
 
 ## Environment facts that took effort to establish
 
@@ -72,15 +94,47 @@ ahead of the evidence (see *Lessons* below).
    This host reliably sends three within 5 ms, but "reliably fast" is not
    "synchronous". An 8-connection probe that waited 2.5 s each time was 8-for-8
    consistent where a no-wait probe looked random.
-3. **`LOGOFF` at the end of every live script is mandatory.** CP answers a LOGON
-   for an already-logged-on account with `restart` and no input field, so a
-   leftover session breaks the *next* run. This presented convincingly as an
-   intermittent client-side race for several iterations.
+3. **`LOGOFF` at the end of every live script is mandatory**, and the script must
+   actually reach a state where `LOGOFF` can be typed — at `MORE...` it is
+   silently eaten. A leftover logged-on account breaks the next run and hangs
+   s3270 outright. (The original form of this lesson blamed `restart` on the
+   account being in use. That was wrong; see item 5.)
 4. **Verify a reference claim against the source, not by inference.** The x3270
    trace-direction bug came from reasoning about the datastream tracer when the
    network tracer uses the opposite sense — and the test written to pin it pinned
    the error instead, because it asserted the mapping abstractly rather than
    anchoring to bytes only one side can send.
+5. **Check that a comparison exercises the thing you are attributing to it.**
+   "Our datastream is byte-identical to s3270's, so the logon difference must be
+   timing" was false reasoning from a true premise: the comparison script never
+   sends a password. A byte-identical result over records that exclude the
+   behavior in question is not evidence about that behavior.
+6. **Ask the user what normal looks like, early.** One sentence about the
+   interactive flow — no `restart` anywhere — reclassified the central symptom and
+   cost nothing. It should have been the first question, not the last.
+7. **A probe that reports something's ABSENCE must first be shown able to report
+   its presence.** A probe script here lacked `Trace(on)`, so it grepped a log with
+   zero trace records and dutifully reported "never", six runs out of six. That
+   produced a confident, wrong claim ("the host sends nothing until it gets an
+   AID") that survived into committed docs until traced runs contradicted it.
+   Sanity-check the negative control.
+8. **A mimic of the real system is a hypothesis, not evidence.** The Hercules
+   `HHC02908E`/`HHC02909E` question took *four* attempts. Attempts 1-2 were armchair
+   TCP reasoning. Attempt 3 was a 12-line Python server mimicking Hercules'
+   accept/send/`recv()` loop — it reproduced a clean result 6 times running and was
+   still **wrong**, because Hercules emits its greeting from inside libtelnet during
+   the first `recv()` and the hand-rolled loop could not reproduce that timing.
+   Reproducibility inside a mimic measures the mimic. What finally settled it was a
+   labelled run against the real host with 15 s of silence between phases, mapped by
+   client ID. When the real system is available, instrument *it*; keep the mimic for
+   generating hypotheses, and say which one a claim rests on.
+9. **Before blocking on a question, check that its answer could change anything.**
+   Both questions escalated to the user were answerable and neither could have
+   identified the cause. The console log has no message for a bad password — a
+   failed logon is simply an absent `LOGON` line — so it cannot distinguish
+   "password rejected" from "LOGON never arrived", which is what had happened. It
+   confirms success and diagnoses nothing. Ask what *normal* looks like (that did
+   crack it); don't block on a signal that is silent in the failure case.
 
 ## Bug tally, for calibration
 
@@ -94,10 +148,14 @@ times; that pushback was the single most valuable part of the process.
 
 ## Next steps, in order
 
-1. **Task 18** — README and completion check. Unblocked. The README should be
-   candid about what is and isn't done: no GUI, no TLS, no TN3270E, no extended
-   attributes, no PS, and `VM READ` unresolved.
-2. **Resolve `VM READ`** once the user answers, so scripted CMS input works.
+1. **Task 18** — README and completion check. Unblocked, and now the only thing
+   between stage 1 and done. The README should be candid about what is and isn't
+   done: no GUI, no TLS, no TN3270E, no extended attributes, no PS.
+2. **Re-record the VM fixture and golden.** The committed
+   `vm370-logon-logoff.trace` comes from the old pre-CMS run, so its golden shows
+   `restart` and a CP-rejected `QUERY`. Re-recording with the fixed
+   `record-vm.txt` gets a fixture that reaches CMS. Redact the password as before
+   — `docs/live-testing.md` step 4.
 3. **Stage 2** — the Electron GUI. The renderer constraint to remember: cell
    content is a tagged variant, so dispatch on `kind` rather than assuming a font
    lookup, because Programmable Symbol Sets are a committed stage 4 deliverable.
