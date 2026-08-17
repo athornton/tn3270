@@ -14,12 +14,24 @@ describe('parseX3270Trace', () => {
     expect(Array.from(events[0]!.bytes)).toEqual([0xf5, 0xc3, 0x11, 0x40, 0x40, 0x1d, 0xf0]);
   });
 
-  it('inverts direction: x3270 "<" is its own output, i.e. our send', () => {
-    // Getting this backwards would silently invert every conformance comparison,
-    // so it is pinned rather than assumed. x3270 calls
-    // trace_netdata('<', obuf, ...) from its OUTPUT path (telnet.c:632).
-    expect(parseX3270Trace('< 0x0   7d4040\n')[0]!.dir).toBe('send');
-    expect(parseX3270Trace('> 0x0   f5c3\n')[0]!.dir).toBe('recv');
+  it('keeps x3270 direction as-is: "<" received, ">" sent', () => {
+    // Pinned against bytes only ONE side can plausibly send, so this test cannot
+    // pass with the direction inverted — which an earlier version did, because it
+    // asserted the mapping abstractly instead of anchoring it to real traffic.
+    //
+    // IAC DO TERMINAL-TYPE is a host-to-terminal negotiation: a terminal never
+    // sends DO TERMINAL-TYPE. IAC SB TERMINAL-TYPE IS "IBM-3278-2" is the
+    // terminal's reply and can only come from us.
+    // x3270: net_input traces '<' after reading the socket (telnet.c:1519);
+    // net_rawout traces '>' on the way out (telnet.c:2917).
+    const hostSide = parseX3270Trace('< 0x0   fffd18\n')[0]!;
+    expect(hostSide.dir).toBe('recv');
+    expect(Array.from(hostSide.bytes)).toEqual([0xff, 0xfd, 0x18]);
+
+    const ourSide = parseX3270Trace('> 0x0   fffa180049424d2d333237382d32fff0\n')[0]!;
+    expect(ourSide.dir).toBe('send');
+    // ...IS IBM-3278-2...
+    expect(Array.from(ourSide.bytes).slice(0, 4)).toEqual([0xff, 0xfa, 0x18, 0x00]);
   });
 
   it('joins continuation lines by offset into one record', () => {
@@ -40,7 +52,8 @@ describe('parseX3270Trace', () => {
   });
 
   it('starts a new record when the direction changes at a nonzero offset', () => {
-    const text = '> 0x0   f5c3\n< 0x20  7d40\n';
+    // '<' received first, then '>' sent — a host write followed by our reply.
+    const text = '< 0x0   f5c3\n> 0x20  7d40\n';
     const events = parseX3270Trace(text);
     expect(events).toHaveLength(2);
     expect(events[0]!.dir).toBe('recv');
@@ -85,6 +98,18 @@ describe('parseX3270Trace', () => {
     const events = parseX3270Trace('> 0x0   f5\n> 0x120 c1\n');
     expect(events).toHaveLength(1);
     expect(Array.from(events[0]!.bytes)).toEqual([0xf5, 0xc1]);
+  });
+});
+
+describe('an event is a socket read, not a record', () => {
+  it('keeps two IAC EOR-terminated records in one read as one event', () => {
+    // x3270 traces per read() (telnet.c:1519), so one event can hold several
+    // records. Confirmed in a real capture: a 966-byte read held two IAC EORs.
+    // Consumers that need records must reframe through TelnetLayer.
+    const text = '< 0x0   f5c3ffeff1c1ffef\n';
+    const events = parseX3270Trace(text);
+    expect(events).toHaveLength(1);
+    expect(Array.from(events[0]!.bytes)).toEqual([0xf5, 0xc3, 0xff, 0xef, 0xf1, 0xc1, 0xff, 0xef]);
   });
 });
 

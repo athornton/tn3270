@@ -12,6 +12,9 @@ import { formatStatus } from './status.js';
  * process or a socket. main.ts only does stdin/stdout.
  */
 
+/** How long the record stream must be idle for Wait(Settle) to fire. */
+const SETTLE_MS = 400;
+
 export interface RunnerOptions {
   clock?: () => number;
   /** Default Wait timeout in seconds. x3270 uses about 30. */
@@ -106,7 +109,11 @@ export class Runner {
         const target = args[0] ?? '';
         const [host, portText] = splitTarget(target);
         await s.connect(host, portText);
-        this.host = target;
+        // Field 4 of the status line is C(<host>) with NO port: s3270 formats it
+        // from current_host, which holds the hostname alone (task.c:3144).
+        // Verified by running s3270 against the same host: it reports
+        // C(127.0.0.1) where we were reporting C(127.0.0.1:3270).
+        this.host = host;
         return;
       }
       case 'Disconnect':
@@ -256,11 +263,41 @@ export class Runner {
     const deadline = Date.now() + seconds * 1000;
 
     const startingOutput = this.outputCount;
+    let settleLast = -1;
+    let settleSince = 0;
     const done = (): boolean => {
       switch (what) {
         case 'output': return this.outputCount > startingOutput;
         case 'unlock': return !this.session.oia.waitingForHost;
         case '3270mode': return this.session.is3270Mode();
+        case 'settle': {
+          // Wait for the host to stop sending. Distinct from Output (which fires
+          // on the FIRST record) and from Unlock (which can return before any
+          // record arrives). tnz uses this technique: poll until the session's
+          // byte count stops changing, then proceed (ati.py:1965-1976).
+          //
+          // Needed because VM/370 sends one logical screen as several records —
+          // a banner, then the panel carrying the IC — so a predicate that is
+          // briefly true between records fires too early.
+          // Three conditions, all necessary:
+          //  - at least one record has arrived (a session that has received
+          //    nothing is not "settled", it is unstarted);
+          //  - the record count has been stable for SETTLE_MS;
+          //  - the keyboard is usable, because a settled screen we may not type
+          //    into is not ready. Without this last check the wait returned with
+          //    the keyboard still locked and the very next String() failed as
+          //    "input inhibited" — observed live, and it is what made record 0 of
+          //    the conformance comparison differ.
+          const now = this.session.recordCount();
+          if (now === 0) return false;
+          if (settleLast !== now) {
+            settleLast = now;
+            settleSince = Date.now();
+            return false;
+          }
+          if (Date.now() - settleSince < SETTLE_MS) return false;
+          return !this.session.oia.isInhibited();
+        }
         case 'inputfield': {
           // Wait until the cursor is sitting somewhere typable. This is the
           // condition scripts actually want after Enter, and unlike
@@ -278,7 +315,7 @@ export class Runner {
           return f !== null && !f.protected;
         }
         default: throw new Error(
-          `Wait: unknown condition ${args[0]} (expected Output, Unlock, 3270Mode or InputField)`);
+          `Wait: unknown condition ${args[0]} (expected Output, Unlock, Settle, 3270Mode or InputField)`);
       }
     };
 

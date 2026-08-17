@@ -58,8 +58,17 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
     }
     // Trailing nulls are not transmitted; embedded ones are.
     while (data.length > 0 && data[data.length - 1] === 0x00) data.pop();
-    if (!all && data.length === 0) continue;
 
+    // A modified field ALWAYS gets its SBA, even with no content left after
+    // trimming. x3270 writes the SBA the moment it finds a modified field, before
+    // examining any content (ctlr.c:822-829): `if (FA_IS_MODIFIED(...)) { ...
+    // *obptr++ = ORDER_SBA; ENCODE_BADDR(obptr, baddr); ...`.
+    //
+    // Verified by byte-comparison against real x3270 driving the same VM/370 host
+    // through an identical script: pressing Enter on a modified empty field, it
+    // sent `7d 5b 60 11 5b 60` (AID, cursor, SBA(1760)) where we sent
+    // `7d 5b 60` and omitted the SBA. The SBA tells the host WHICH field the
+    // operator cleared, which is information the host cannot otherwise recover.
     out.push(Order.SBA, ...encodeAddress(field.start, screen.size), ...data);
   }
 

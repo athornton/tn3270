@@ -47,10 +47,12 @@ describe('formatStatus', () => {
     expect(f[11]).toBe('-');
   });
 
-  it('reports the host when connected', async () => {
+  it('reports the host WITHOUT the port, as s3270 does', async () => {
+    // s3270 builds this from current_host, the hostname alone (task.c:3144).
+    // Confirmed by running s3270 against the same live host: C(127.0.0.1).
     const s = await connectedSession();
-    const f = formatStatus(s, 'mvs:3270', undefined).split(' ');
-    expect(f[3]).toBe('C(mvs:3270)');
+    const f = formatStatus(s, 'mvs', undefined).split(' ');
+    expect(f[3]).toBe('C(mvs)');
     // Connected but not yet negotiated into 3270 mode.
     expect(f[4]).toBe('P');
   });

@@ -1,0 +1,31 @@
+# Keystroke conformance script — VM/370 (VM/CE 1.2).
+#
+# Drives OUR client. The companion script conformance-vm.s3270 drives s3270
+# through the same actions. Diff the two traces to compare the inbound records
+# that operator keystrokes generate — the half a replay-based test cannot check
+# (see packages/core/test/conformance.test.ts for why).
+#
+# Run both, then compare:
+#   node packages/cli/dist/main.js < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
+#   s3270 -model 3278-2 -trace -tracefile /tmp/ref.trace 127.0.0.1:3270 \
+#       < packages/cli/scripts/conformance-vm.s3270
+#   node packages/core/tools/compare-conformance.mjs /tmp/ours.log /tmp/ref.trace
+#
+# The account must NOT already be logged on: CP answers an in-use LOGON with
+# "restart" and never prompts for a password, which silently changes the script's
+# meaning.
+Trace(on)
+Connect(127.0.0.1:3270)
+Wait(3270Mode,20)
+Wait(Settle,20)
+String("LOGON CMSUSER")
+Enter
+Wait(Settle,20)
+Enter
+Wait(Settle,20)
+Clear
+Wait(Settle,20)
+Enter
+Wait(Settle,20)
+TraceText
+Quit

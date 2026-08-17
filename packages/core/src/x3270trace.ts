@@ -22,13 +22,18 @@ import type { TraceEvent } from './trace.js';
  *   1. The second field is a byte OFFSET within the record (`0x0`, `0x20`, …),
  *      not a timestamp. A continuation line is any line whose offset is nonzero.
  *   2. Hex bytes are UNSPACED, 32 per line.
- *   3. `<` means data the client SENT to the host, and `>` means data RECEIVED
- *      from it — the opposite of our convention. x3270 calls trace_netdata('<',
- *      obuf, ...) from its output path (telnet.c:632 and friends, where obuf is
- *      the outbound buffer).
+ *   3. Direction is the SAME as ours: `<` is received, `>` is sent. Verified
+ *      against the actual network paths rather than inferred —
+ *      `net_input()` calls trace_netdata('<', netrbuf, nr) right after reading
+ *      from the socket (telnet.c:1519), and `net_rawout()` calls
+ *      trace_netdata('>', buf, len) on the way out (telnet.c:2917).
  *
- * Getting direction backwards would silently invert a conformance comparison, so
- * it is asserted by test rather than assumed.
+ *      An earlier version of this file inverted the direction, reasoning from a
+ *      trace_netdata('<', obuf, ...) call in the DATASTREAM tracer, which uses
+ *      the opposite sense from the network tracer. That inversion made a real
+ *      capture parse into 0 usable records while looking superficially fine, and
+ *      the test that was supposed to pin the behavior pinned the error instead.
+ *      Hence the assertions below are written against bytes only a host can send.
  *
  * Interleaved among the data lines are x3270's human-readable annotations
  * ("RCVD EOR", "< WriteStructuredField", timing marks, and so on). Those are
@@ -74,8 +79,8 @@ export function parseX3270Trace(text: string): TraceEvent[] {
       throw new Error(`x3270 trace: odd hex digit count on line: ${raw.trim()}`);
     }
 
-    // Invert the direction: x3270's '<' is its own output, i.e. our 'send'.
-    const dir: 'recv' | 'send' = marker === '<' ? 'send' : 'recv';
+    // Same convention as ours: '<' received, '>' sent (telnet.c:1519, :2917).
+    const dir: 'recv' | 'send' = marker === '<' ? 'recv' : 'send';
 
     const bytes: number[] = [];
     for (let i = 0; i < hex.length; i += 2) {
@@ -93,6 +98,17 @@ export function parseX3270Trace(text: string): TraceEvent[] {
 
   return events;
 }
+
+/**
+ * IMPORTANT: an event is one SOCKET READ, not one 3270 record.
+ *
+ * x3270 traces from `net_input` (telnet.c:1519), so a single line-run is whatever
+ * one `read()` returned — which may contain several `IAC EOR`-terminated records,
+ * or half of one. Verified in a real capture: one 966-byte run contained two
+ * `IAC EOR` sequences. Anything that needs RECORDS must feed these bytes through
+ * a TelnetLayer rather than treating each event as a record; doing the latter
+ * yields a "record" beginning 0xff that fails to parse.
+ */
 
 /**
  * Convert an x3270 trace to our own trace format, so it can be fed to

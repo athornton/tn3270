@@ -50,6 +50,16 @@ export class Session {
   private telnet: TelnetLayer | undefined;
   private error: string | undefined;
   private readonly listeners = new Map<SessionEvent, Set<() => void>>();
+  /**
+   * Host records applied since connect. Monotonic; never reset.
+   *
+   * Exposed so a caller can wait for the stream to QUIESCE rather than for a
+   * particular screen predicate. tnz uses exactly this technique — it polls the
+   * session's byte count and proceeds once it stops changing, with a WAITSLEEP
+   * interval (ati.py:1965-1976) — and it is the robust answer when a host sends
+   * one logical screen as several records, which VM/370 does.
+   */
+  private records = 0;
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -153,7 +163,13 @@ export class Session {
    * is what real hardware does, and a client that dies on a malformed record is
    * useless against real hosts.
    */
+  /** Count of host records applied. Monotonic. */
+  recordCount(): number {
+    return this.records;
+  }
+
   private handleRecord(record: Uint8Array): void {
+    this.records++;
     if (this.trace.isEnabled()) {
       this.trace.note(describeRecord(record));
     }
