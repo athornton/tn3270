@@ -6,19 +6,23 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `stage1-protocol-core`, 66 commits, **315 tests passing**, `npm run
-typecheck` clean, `npm run build` works, working tree clean.
+Branch `stage1-protocol-core`, 70+ commits, **318 tests passing**, `npm run
+typecheck` clean, `npm run build` works.
 
-**Stage 1 is functionally complete and verified against a live host.**
-Tasks 1–17 of `docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` are
-done. Only **Task 18** (README + completion check) remains, and it is unblocked.
+**Stage 1 is COMPLETE.** All 18 tasks of
+`docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` are done, `README.md`
+is written, and three of the plan's four completion checks pass with real output.
+The fourth (`record-mvs.txt` → 0 errors) fails for an environmental reason — the
+TK5 host has no MVS IPLed — not a client defect; see *Next steps* item 3 and the
+plan's Task 18 Step 3. Stage 1 meets the spec's success criterion against the host
+that is actually up.
 
 ### What is proven, not merely tested
 
 - **Live VM/370.** A full scripted session against VM/CE 1.2 under Hercules
-  (`localhost:3270`): 43 commands, 0 errors, 0 program checks. CP answered
-  `LOGOFF` with its own timestamp, which is what proves the host understands our
-  inbound stream rather than merely tolerating it.
+  (`localhost:3270`): 77 commands, 0 errors, 0 program checks, reaching CMS. CP
+  answers `LOGOFF` with its own timestamp and accounting, which is what proves the
+  host understands our inbound stream rather than merely tolerating it.
 - **CMS reached.** The corrected script logs on, IPLs CMS, gets `Ready;`, has
   `QUERY TERMINAL` answered *by CMS*, and logs off cleanly — repeatedly.
 - **5 of 6 inbound records byte-identical with real x3270**, reproduced three
@@ -148,16 +152,23 @@ times; that pushback was the single most valuable part of the process.
 
 ## Next steps, in order
 
-1. **Task 18** — README and completion check. Unblocked, and now the only thing
-   between stage 1 and done. The README should be candid about what is and isn't
-   done: no GUI, no TLS, no TN3270E, no extended attributes, no PS.
-2. **Re-record the VM fixture and golden.** The committed
-   `vm370-logon-logoff.trace` comes from the old pre-CMS run, so its golden shows
-   `restart` and a CP-rejected `QUERY`. Re-recording with the fixed
-   `record-vm.txt` gets a fixture that reaches CMS. Redact the password as before
-   — `docs/live-testing.md` step 4.
-3. **Stage 2** — the Electron GUI. The renderer constraint to remember: cell
+1. ~~**Task 18** — README and completion check.~~ **Done.** `README.md` written;
+   three of the plan's four checks pass, and the MVS one is blocked on the host
+   rather than the code (details in the plan under Task 18, Step 3).
+2. ~~**Re-record the VM fixture and golden.**~~ **Done.** The fixture now reaches
+   CMS `Ready;` and the golden shows a clean LOGOFF instead of `restart`.
+3. **TK5 fixture — blocked on the host being IPLed.** MVS 3.8j TK5 is listening on
+   `localhost:3271` but MVS itself was never IPLed: the instance was started as
+   `hercules -f conf/tk5.cnf` instead of TK5's `./mvs`, so
+   `HERCULES_RC=scripts/ipl.rc` never got set and its `ipl 390` never ran. Nothing
+   answers on the VTAM terminals until it does. The user cannot use `./mvs` as-is
+   (it depends on a bundled Hercules build they deleted) and will `ipl 390` at the
+   Hercules console instead. Once that happens: drive TK5 panel by panel to TSO
+   rather than running `record-mvs.txt` blind — it is still an unverified draft with
+   TK4-/TK5 default credentials — then record a fixture and redact the password.
+   Groundwork already done: TK5's greeting is all-protected (25 `SF(0x60)` + 8
+   `SF(0xe8)`, no `IC`), so it needs the same dismiss-first preamble as VM, which
+   `record-mvs.txt` now has.
+4. **Stage 2** — the Electron GUI. The renderer constraint to remember: cell
    content is a tagged variant, so dispatch on `kind` rather than assuming a font
    lookup, because Programmable Symbol Sets are a committed stage 4 deliverable.
-4. **MVS 3.8J** whenever the user sets one up. `packages/cli/scripts/record-mvs.txt`
-   is prepared but untested; its credentials are TK4-/TK5 defaults.

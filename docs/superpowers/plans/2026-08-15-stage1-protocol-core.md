@@ -7320,7 +7320,7 @@ git commit -m "test(core): add x3270 round-trip conformance harness"
 - Create: `README.md`
 - Modify: `docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` (mark complete)
 
-- [ ] **Step 1: Verify the spec's stage 1 success criterion**
+- [x] **Step 1: Verify the spec's stage 1 success criterion**
 
 The spec says stage 1 is complete when the CLI can, against the live host, log on, navigate to a full-screen panel, type into fields, press Enter and function keys, see correct updates, and log off — traced, replayable, and byte-identical to x3270 under the same script.
 
@@ -7333,15 +7333,44 @@ node packages/cli/dist/main.js < packages/cli/scripts/record-mvs.txt | grep -c "
 npx vitest run packages/core/test/conformance.test.ts                                       # expect pass, not skip
 ```
 
-- [ ] **Step 2: Write the README**
+- [x] **Step 2: Write the README**
 
 Create `README.md` covering: what this is and why (no good Mac 3270 client since Brown tn3270); the staging; how to build and test; how to use the CLI; the trace format; where the spec and plan live; and a candid note on what is not yet implemented (no GUI, no TLS, no TN3270E, no extended attributes, no PS).
 
-- [ ] **Step 3: Report honestly**
+- [x] **Step 3: Report honestly**
 
 State plainly which of the four checks in Step 1 passed with real output, and which did not. If the conformance test is still skipped for want of captures, say so — do not describe stage 1 as complete when its strongest check has not run.
 
-- [ ] **Step 4: Commit**
+**Executed 2026-08-17. Three of the four checks pass; the fourth cannot pass yet.**
+
+| check | result |
+|---|---|
+| `npm test` | **pass** — 318 tests, 18 files |
+| `npm run typecheck` | **pass** — silent |
+| `conformance.test.ts` | **pass** — 2 tests, **not** skipped; it runs against a real capture at `packages/fixtures/x3270/vm370-conformance-model2.trace` (the `it.skip` in that file is a guard for when no capture exists, and it is not the branch taken) |
+| `record-mvs.txt` → 0 errors | **FAILS: 10 errors, 6 timeouts** |
+
+The MVS failure is environmental, not a client defect. The TK5 instance available
+is running Hercules but **MVS was never IPLed**: it was started as `hercules -f
+conf/tk5.cnf` rather than via TK5's `./mvs`, so `HERCULES_RC=scripts/ipl.rc` was
+never set and the `ipl 390` inside it never ran. Devices `00C0-00C6` are VTAM
+terminals (`conf/tk5.cnf:75-83`), so with no MVS there is no VTAM to answer: our
+Enter goes out (`7d 40 40`) and **zero** host records come back. Confirmed by
+`/proc/<pid>/environ` having no `HERCULES_RC`.
+
+The equivalent check against the host that *is* fully up passes:
+
+```
+$ node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt | grep -c '^error$'
+0
+```
+
+77 commands, 0 errors, 0 program checks, reaching CMS `Ready;` with `QUERY
+TERMINAL` answered by CMS. Stage 1 therefore meets the spec's success criterion
+against VM/370, and the outstanding check waits on a system to be IPLed rather
+than on code.
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/superpowers/plans/2026-08-15-stage1-protocol-core.md
