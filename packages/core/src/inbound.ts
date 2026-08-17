@@ -30,6 +30,23 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
   const sendData = all || aid !== AID.SELECT;
   if (!sendData) return Uint8Array.from(out);
 
+  // UNFORMATTED SCREEN: there are no fields to iterate, so walk the whole buffer
+  // and send every non-null character, with no SBA orders at all. x3270 does
+  // exactly this in ctlr_read_modified's `else` branch (ctlr.c:997-1057): it
+  // loops from address 0 emitting `ea_buf[baddr].ec` wherever that is nonzero.
+  //
+  // This is not a corner case. VM/370's logon screen is unformatted — verified
+  // against a live VM/CE 1.2 host, which sends its logo with zero field
+  // attributes — so without this branch everything the operator types before the
+  // first formatted panel is silently dropped and LOGON never reaches CP.
+  if (!screen.isFormatted()) {
+    for (let a = 0; a < screen.size; a++) {
+      const ebcdic = screen.cellAt(a).ebcdic;
+      if (ebcdic !== 0x00) out.push(ebcdic);
+    }
+    return Uint8Array.from(out);
+  }
+
   for (const field of screen.fields()) {
     if (!all && !field.modified) continue;
 

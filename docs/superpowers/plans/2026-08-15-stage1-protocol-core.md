@@ -3998,7 +3998,11 @@ describe('ordinary reads', () => {
     ]);
   });
 
-  it('sends only the AID and cursor on an unformatted screen with no fields', () => {
+  it('sends only the AID and cursor on an EMPTY unformatted screen', () => {
+    // Nothing typed, so there is no character data to send. An unformatted
+    // screen WITH content is a different case — see the 'unformatted screens'
+    // block below, which was added after a live VM/370 session showed that
+    // dropping that content stops LOGON from ever reaching CP.
     const s = new Screen();
     s.cursor = 0;
     const out = buildReadModified(s, AID.ENTER, false);
@@ -4013,6 +4017,37 @@ describe('ordinary reads', () => {
     s.cursor = 2;
     const out = buildReadModified(s, AID.ENTER, false);
     expect(Array.from(out).filter((b) => b === 0xff)).toHaveLength(1);
+  });
+});
+
+describe('unformatted screens', () => {
+  // Found against a live VM/370: its first screen has ZERO field attributes, so
+  // a field-iterating implementation sends nothing and LOGON never reaches CP.
+  // x3270's ctlr_read_modified has an `else` branch for exactly this
+  // (ctlr.c:997-1057) that walks the buffer emitting every nonzero character.
+  it('sends every non-null character when there are no fields', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc8);
+    s.setChar(1, 0xc9);
+    s.cursor = 3;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).toEqual([AID.ENTER, 0x40, 0xc3, 0xc8, 0xc9]);
+  });
+
+  it('emits no SBA orders on an unformatted screen', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setChar(500, 0xc2);
+    s.cursor = 0;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).not.toContain(Order.SBA);
+    expect(Array.from(out).slice(3)).toEqual([0xc1, 0xc2]);
+  });
+
+  it('still sends the AID alone for a short read when unformatted', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    expect(Array.from(buildReadModified(s, AID.CLEAR, false))).toEqual([AID.CLEAR]);
   });
 });
 
@@ -4090,6 +4125,23 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
   // Selector Pen reports position only.
   const sendData = all || aid !== AID.SELECT;
   if (!sendData) return Uint8Array.from(out);
+
+  // UNFORMATTED SCREEN: there are no fields to iterate, so walk the whole buffer
+  // and send every non-null character, with no SBA orders at all. x3270 does
+  // exactly this in ctlr_read_modified's `else` branch (ctlr.c:997-1057): it
+  // loops from address 0 emitting `ea_buf[baddr].ec` wherever that is nonzero.
+  //
+  // This is not a corner case. VM/370's logon screen is unformatted — verified
+  // against a live VM/CE 1.2 host, which sends its logo with zero field
+  // attributes — so without this branch everything the operator types before the
+  // first formatted panel is silently dropped and LOGON never reaches CP.
+  if (!screen.isFormatted()) {
+    for (let a = 0; a < screen.size; a++) {
+      const ebcdic = screen.cellAt(a).ebcdic;
+      if (ebcdic !== 0x00) out.push(ebcdic);
+    }
+    return Uint8Array.from(out);
+  }
 
   for (const field of screen.fields()) {
     if (!all && !field.modified) continue;
@@ -4501,6 +4553,16 @@ Create `packages/core/src/oia.ts`:
 
 export enum KeyboardState {
   Unlocked = 'unlocked',
+  /**
+   * Connected but the host has not written yet, so there is nothing to type
+   * into. x3270 calls this KL_AWAITING_FIRST and sets it both on connect and on
+   * entering 3270 mode, with the comment "Wait for any output or a
+   * WCC(restore) from the host" (kybd.c:584, :613). Without it, a script that
+   * connects and immediately types races the host's first screen — verified
+   * against a live VM/370: String() was refused because the keyboard was busy,
+   * while Wait(Unlock) had already returned because nothing was pending.
+   */
+  AwaitingFirstWrite = 'awaitingfirst',
   ProtectedField = 'protected',
   Numeric = 'numeric',
   Overflow = 'overflow',
@@ -4569,6 +4631,9 @@ export class Oia {
         break;
       case KeyboardState.SystemWait:
         parts.push('X SYSTEM');
+        break;
+      case KeyboardState.AwaitingFirstWrite:
+        parts.push('X Wait');
         break;
       case KeyboardState.Unlocked:
         break;
@@ -5013,6 +5078,35 @@ describe('connection lifecycle', () => {
   });
 });
 
+describe('initial keyboard lock', () => {
+  // Found live: a script that connects and immediately types races the host's
+  // first screen. x3270 sets KL_AWAITING_FIRST on connect — "Wait for any output
+  // or a WCC(restore) from the host" (kybd.c:580-585).
+  it('locks the keyboard on connect, before the host writes', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    expect(session.oia.isInhibited()).toBe(true);
+    expect(session.oia.waitingForHost).toBe(true);
+  });
+
+  it('releases the lock on the first host write, restore bit or not', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    // WCC 0x00 — no keyboard-restore bit at all.
+    conn.host(SnaCmd.W, 0x00, 0xc1, T.IAC, T.EOR);
+    expect(session.oia.isInhibited()).toBe(false);
+    expect(session.oia.waitingForHost).toBe(false);
+  });
+
+  it('reports the wait in the OIA while awaiting the first write', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.toText()).toContain('X Wait');
+  });
+});
+
 describe('applying host writes', () => {
   it('applies an Erase/Write and emits a screen event', async () => {
     const { session, conn } = newSession();
@@ -5305,6 +5399,13 @@ export class Session {
     this.conn = conn;
     this.error = undefined;
     this.oia.connected = true;
+    // The keyboard is locked until the host writes something: there is no screen
+    // to type into yet. x3270 sets KL_AWAITING_FIRST here for the same reason
+    // (kybd.c:580-585). This is what makes Wait(Unlock) meaningful immediately
+    // after Connect — without it the wait returns at once and a script types
+    // into a blank buffer.
+    this.oia.waitingForHost = true;
+    this.oia.inhibit(KeyboardState.AwaitingFirstWrite);
 
     this.telnet = new TelnetLayer({
       write: (b) => conn.write(b),
@@ -5366,6 +5467,14 @@ export class Session {
       const result = execute(this.screen, parsed);
 
       if (result.keyboardRestore) {
+        this.oia.waitingForHost = false;
+        this.oia.reset();
+      } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite) {
+        // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
+        // initial post-connect lock is released by the host writing anything at
+        // all, not only by an explicit keyboard-restore. VM/370's logo arrives
+        // with WCC 0x42 (restore set) but a host that omits the bit must not
+        // leave us locked out forever.
         this.oia.waitingForHost = false;
         this.oia.reset();
       }
@@ -5796,7 +5905,7 @@ export const COMMAND_NAMES = [
   'Connect', 'Disconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
-  'ScreenText', 'ScreenJson', 'Replay', 'Left', 'Right', 'Up', 'Down',
+  'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
   'BackSpace', 'Delete', 'Insert',
 ] as const;
 
@@ -6069,6 +6178,73 @@ describe('Wait', () => {
   });
 });
 
+describe('TraceText', () => {
+  // Found live: Trace(on) enabled tracing but nothing ever emitted it — no sink
+  // was wired and the CLI had no way to retrieve it, so recording a fixture
+  // (the whole point of Task 16) was impossible.
+  it('emits the recorded trace as data lines', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Trace(on)');
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('TraceText');
+    const lines = reply.split('\n').filter((l) => l.startsWith('data: '));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.some((l) => / [<>] /.test(l))).toBe(true);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+
+  it('emits nothing when tracing was never enabled', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('TraceText');
+    expect(reply.split('\n').filter((l) => l.startsWith('data: '))).toHaveLength(0);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+});
+
+describe('Wait(InputField)', () => {
+  // Added after a live VM/370 session: the host sends its banner and the logon
+  // panel as SEPARATE records, and only the second carries the IC that puts the
+  // cursor in a field. Wait(Output) fires on the first and Wait(Unlock) can
+  // return before either, so a script types onto a protected cell. This
+  // condition tests screen STATE, so it cannot be missed by arriving early.
+  // x3270 has the same condition as TS_WAIT_IFIELD (task.c:135).
+  it('returns once the cursor sits in an unprotected field', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const pending = runner.run('Wait(InputField,5)');
+    // First record: formatted but the cursor is left on a protected cell.
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    // Second record puts an unprotected field down and an IC inside it.
+    conn.host(SnaCmd.W, 0x02, Order.SBA, 0x40, 0x4a, Order.SF, 0x00,
+      Order.IC, T.IAC, T.EOR);
+    expect((await pending).split('\n').pop()).toBe('ok');
+  });
+
+  it('does not return while the cursor is on a protected cell', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('Wait(InputField,0.05)');
+    expect(reply).toContain('data: timed out');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('names the accepted conditions when given an unknown one', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('Wait(Frobnicate,1)');
+    expect(reply).toContain('InputField');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+});
+
 describe('trace and replay', () => {
   it('Trace(on) starts recording and Trace(off) stops', async () => {
     const { runner, session, conn } = newRunner();
@@ -6336,6 +6512,15 @@ export class Runner {
         return;
       }
 
+      case 'TraceText':
+        // Emit what has been traced so far as data lines. Without this the trace
+        // is enabled but unreachable: nothing writes it anywhere, so recording a
+        // fixture would be impossible. Trace(on,file) is the eventual home for
+        // streaming straight to disk; this makes the data available today through
+        // the same channel as every other reply.
+        data.push(...s.trace.lines());
+        return;
+
       case 'Replay':
         throw new Error('Replay(file) requires the file system; use runReplayText in tests');
 
@@ -6370,7 +6555,24 @@ export class Runner {
         case 'output': return this.outputCount > startingOutput;
         case 'unlock': return !this.session.oia.waitingForHost;
         case '3270mode': return this.session.is3270Mode();
-        default: throw new Error(`Wait: unknown condition ${args[0]}`);
+        case 'inputfield': {
+          // Wait until the cursor is sitting somewhere typable. This is the
+          // condition scripts actually want after Enter, and unlike
+          // Wait(Output) it tests SCREEN STATE rather than an event, so it
+          // cannot be missed by arriving too early. x3270 has the same
+          // condition (TS_WAIT_IFIELD, task.c:135).
+          //
+          // Needed because a host may send several records for one logical
+          // screen: VM/370 sends its banner and then the logon panel, and only
+          // the second carries the IC that puts the cursor in a field. A script
+          // that types after the first one lands on a protected cell.
+          if (this.session.oia.isInhibited()) return false;
+          const sc = this.session.screen;
+          const f = sc.fieldAt(sc.cursor);
+          return f !== null && !f.protected;
+        }
+        default: throw new Error(
+          `Wait: unknown condition ${args[0]} (expected Output, Unlock, 3270Mode or InputField)`);
       }
     };
 

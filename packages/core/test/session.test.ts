@@ -120,6 +120,35 @@ describe('connection lifecycle', () => {
   });
 });
 
+describe('initial keyboard lock', () => {
+  // Found live: a script that connects and immediately types races the host's
+  // first screen. x3270 sets KL_AWAITING_FIRST on connect — "Wait for any output
+  // or a WCC(restore) from the host" (kybd.c:580-585).
+  it('locks the keyboard on connect, before the host writes', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    expect(session.oia.isInhibited()).toBe(true);
+    expect(session.oia.waitingForHost).toBe(true);
+  });
+
+  it('releases the lock on the first host write, restore bit or not', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    // WCC 0x00 — no keyboard-restore bit at all.
+    conn.host(SnaCmd.W, 0x00, 0xc1, T.IAC, T.EOR);
+    expect(session.oia.isInhibited()).toBe(false);
+    expect(session.oia.waitingForHost).toBe(false);
+  });
+
+  it('reports the wait in the OIA while awaiting the first write', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.toText()).toContain('X Wait');
+  });
+});
+
 describe('applying host writes', () => {
   it('applies an Erase/Write and emits a screen event', async () => {
     const { session, conn } = newSession();

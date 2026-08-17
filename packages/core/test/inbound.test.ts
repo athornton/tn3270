@@ -103,7 +103,11 @@ describe('ordinary reads', () => {
     ]);
   });
 
-  it('sends only the AID and cursor on an unformatted screen with no fields', () => {
+  it('sends only the AID and cursor on an EMPTY unformatted screen', () => {
+    // Nothing typed, so there is no character data to send. An unformatted
+    // screen WITH content is a different case — see the 'unformatted screens'
+    // block below, which was added after a live VM/370 session showed that
+    // dropping that content stops LOGON from ever reaching CP.
     const s = new Screen();
     s.cursor = 0;
     const out = buildReadModified(s, AID.ENTER, false);
@@ -118,6 +122,37 @@ describe('ordinary reads', () => {
     s.cursor = 2;
     const out = buildReadModified(s, AID.ENTER, false);
     expect(Array.from(out).filter((b) => b === 0xff)).toHaveLength(1);
+  });
+});
+
+describe('unformatted screens', () => {
+  // Found against a live VM/370: its first screen has ZERO field attributes, so
+  // a field-iterating implementation sends nothing and LOGON never reaches CP.
+  // x3270's ctlr_read_modified has an `else` branch for exactly this
+  // (ctlr.c:997-1057) that walks the buffer emitting every nonzero character.
+  it('sends every non-null character when there are no fields', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc8);
+    s.setChar(1, 0xc9);
+    s.cursor = 3;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).toEqual([AID.ENTER, 0x40, 0xc3, 0xc8, 0xc9]);
+  });
+
+  it('emits no SBA orders on an unformatted screen', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setChar(500, 0xc2);
+    s.cursor = 0;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).not.toContain(Order.SBA);
+    expect(Array.from(out).slice(3)).toEqual([0xc1, 0xc2]);
+  });
+
+  it('still sends the AID alone for a short read when unformatted', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    expect(Array.from(buildReadModified(s, AID.CLEAR, false))).toEqual([AID.CLEAR]);
   });
 });
 

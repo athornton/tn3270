@@ -218,6 +218,15 @@ export class Runner {
         return;
       }
 
+      case 'TraceText':
+        // Emit what has been traced so far as data lines. Without this the trace
+        // is enabled but unreachable: nothing writes it anywhere, so recording a
+        // fixture would be impossible. Trace(on,file) is the eventual home for
+        // streaming straight to disk; this makes the data available today through
+        // the same channel as every other reply.
+        data.push(...s.trace.lines());
+        return;
+
       case 'Replay':
         throw new Error('Replay(file) requires the file system; use runReplayText in tests');
 
@@ -252,7 +261,24 @@ export class Runner {
         case 'output': return this.outputCount > startingOutput;
         case 'unlock': return !this.session.oia.waitingForHost;
         case '3270mode': return this.session.is3270Mode();
-        default: throw new Error(`Wait: unknown condition ${args[0]}`);
+        case 'inputfield': {
+          // Wait until the cursor is sitting somewhere typable. This is the
+          // condition scripts actually want after Enter, and unlike
+          // Wait(Output) it tests SCREEN STATE rather than an event, so it
+          // cannot be missed by arriving too early. x3270 has the same
+          // condition (TS_WAIT_IFIELD, task.c:135).
+          //
+          // Needed because a host may send several records for one logical
+          // screen: VM/370 sends its banner and then the logon panel, and only
+          // the second carries the IC that puts the cursor in a field. A script
+          // that types after the first one lands on a protected cell.
+          if (this.session.oia.isInhibited()) return false;
+          const sc = this.session.screen;
+          const f = sc.fieldAt(sc.cursor);
+          return f !== null && !f.protected;
+        }
+        default: throw new Error(
+          `Wait: unknown condition ${args[0]} (expected Output, Unlock, 3270Mode or InputField)`);
       }
     };
 

@@ -9,6 +9,16 @@
 
 export enum KeyboardState {
   Unlocked = 'unlocked',
+  /**
+   * Connected but the host has not written yet, so there is nothing to type
+   * into. x3270 calls this KL_AWAITING_FIRST and sets it both on connect and on
+   * entering 3270 mode, with the comment "Wait for any output or a
+   * WCC(restore) from the host" (kybd.c:584, :613). Without it, a script that
+   * connects and immediately types races the host's first screen — verified
+   * against a live VM/370: String() was refused because the keyboard was busy,
+   * while Wait(Unlock) had already returned because nothing was pending.
+   */
+  AwaitingFirstWrite = 'awaitingfirst',
   ProtectedField = 'protected',
   Numeric = 'numeric',
   Overflow = 'overflow',
@@ -77,6 +87,9 @@ export class Oia {
         break;
       case KeyboardState.SystemWait:
         parts.push('X SYSTEM');
+        break;
+      case KeyboardState.AwaitingFirstWrite:
+        parts.push('X Wait');
         break;
       case KeyboardState.Unlocked:
         break;

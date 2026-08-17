@@ -299,9 +299,21 @@ Outbound, addresses are generated 14-bit when the buffer exceeds 4096 cells and
 6-bit values mapped through the standard 64-entry code table (`0x40, 0xC1…0xC9,
 0x4A…0x4F, 0x50, 0xD1…`), matching x3270's `ENCODE_BADDR` and `code_table`.
 
-For a 3278-2 the alternate screen size equals the default, so in stage 1
-`Erase/Write Alternate` behaves identically to `Erase/Write`. It is implemented
-as a distinct command anyway, since TN3270E gives the two different behavior.
+`Erase/Write Alternate` is implemented as a distinct command from `Erase/Write`,
+and in stage 1 both clear the same 80×24 buffer.
+
+**Corrected by live testing (2026-08-17):** an earlier draft of this spec claimed
+"for a 3278-2 the alternate screen size equals the default, so EWA behaves
+identically to EW". That is not reliable. A VM/CE 1.2 host under Hercules sent
+`EWA` carrying `SBA(2399)` and `EUA(→2539)` — addresses that only fit a 2560-cell
+(32×80) screen — while we identified ourselves as `IBM-3278-2`. The host was
+reconfigured to stay within 80×24 for stage 1, but the assumption is false in
+general: a host may use the alternate size regardless of the model we claim.
+
+Stage 1 therefore treats an out-of-range address as a **program check**, which is
+honest and visible, rather than silently wrapping it. Real alternate-geometry
+support belongs with TN3270E, where the screen size is negotiated; `Screen`
+already takes its geometry as a constructor parameter so that change is local.
 
 ### Inbound (terminal → host)
 
@@ -319,6 +331,14 @@ attribute + 1** — the first data cell, not the attribute itself.
 
 Attn is not an AID at all: per RFC 1576 §8 it is sent as **Telnet `IAC BREAK`**,
 so it belongs to the telnet layer rather than `inbound.ts`.
+
+**An unformatted screen sends its whole buffer.** With no field attributes there
+are no fields to iterate, so the reply is the AID, the cursor, and then every
+non-null character from address 0 with **no `SBA` orders at all** (x3270's
+`ctlr_read_modified` `else` branch, `ctlr.c:997-1057`). This is not a corner
+case: VM/370's logon screen is unformatted, so without it everything the operator
+types before the first formatted panel is silently discarded and `LOGON` never
+reaches CP. Confirmed against a live host.
 
 **Short-read AIDs** (Clear, PA1–PA3) send **the AID byte alone** — no cursor
 address and no field data. Verified against GA23-0059-07 ("only an AID byte is
@@ -348,6 +368,20 @@ Extended attributes (SFE/MF/SA), color and highlighting on the wire, graphic
 escapes beyond skipping, TN3270E headers and device-name negotiation, printer
 LUs, TLS, alternate screen sizes, and all graphics — Query Reply, Programmable
 Symbol Sets, and GDF (see *3279 Graphics*).
+
+### Keyboard State on Connect
+
+The keyboard is **locked from the moment we connect until the host writes
+something** — there is no screen to type into yet. x3270 calls this
+`KL_AWAITING_FIRST` and sets it both on connect and on entering 3270 mode, with
+the comment *"Wait for any output or a WCC(restore) from the host"*
+(`kybd.c:580-585`, `:613`). Any host write releases it, not only one with the
+WCC keyboard-restore bit.
+
+Without this, `Wait(Unlock)` returns immediately after `Connect` and a script
+types into a blank buffer. Found against a live host, where the symptom was a
+confusing pair: `String()` refused as inhibited while `Wait(Unlock)` reported
+nothing pending.
 
 ## Error Handling
 
@@ -387,6 +421,18 @@ Stage 1 commands: `Connect(host:port)`, `Disconnect`, `String("...")`, `Enter`,
 
 `Attn` sends Telnet `IAC BREAK` rather than an AID (see *Inbound*). Row and
 column arguments are **0-based**, as s3270's are.
+
+`Wait` accepts `Output`, `Unlock`, `3270Mode`, and **`InputField`**. The last
+waits until the cursor sits in an unprotected field, matching x3270's
+`TS_WAIT_IFIELD` (`task.c:135`). It exists because a host may send one logical
+screen as several records — VM/370 sends a banner and then the logon panel, and
+only the second carries the `IC` — so `Wait(Output)` fires too early and
+`Wait(Unlock)` can return before either. `InputField` tests screen *state* rather
+than an event, so it cannot be missed by arriving early.
+
+`TraceText` (an extension) emits the recorded trace as `data:` lines. Without it
+`Trace(on)` enables tracing that nothing ever writes anywhere, which makes
+recording a fixture impossible.
 
 Extensions beyond s3270, documented as such:
 

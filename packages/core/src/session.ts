@@ -94,6 +94,13 @@ export class Session {
     this.conn = conn;
     this.error = undefined;
     this.oia.connected = true;
+    // The keyboard is locked until the host writes something: there is no screen
+    // to type into yet. x3270 sets KL_AWAITING_FIRST here for the same reason
+    // (kybd.c:580-585). This is what makes Wait(Unlock) meaningful immediately
+    // after Connect — without it the wait returns at once and a script types
+    // into a blank buffer.
+    this.oia.waitingForHost = true;
+    this.oia.inhibit(KeyboardState.AwaitingFirstWrite);
 
     this.telnet = new TelnetLayer({
       write: (b) => conn.write(b),
@@ -155,6 +162,14 @@ export class Session {
       const result = execute(this.screen, parsed);
 
       if (result.keyboardRestore) {
+        this.oia.waitingForHost = false;
+        this.oia.reset();
+      } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite) {
+        // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
+        // initial post-connect lock is released by the host writing anything at
+        // all, not only by an explicit keyboard-restore. VM/370's logo arrives
+        // with WCC 0x42 (restore set) but a host that omits the bit must not
+        // leave us locked out forever.
         this.oia.waitingForHost = false;
         this.oia.reset();
       }

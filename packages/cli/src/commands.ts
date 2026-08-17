@@ -16,7 +16,7 @@ export const COMMAND_NAMES = [
   'Connect', 'Disconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
-  'ScreenText', 'ScreenJson', 'Replay', 'Left', 'Right', 'Up', 'Down',
+  'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
   'BackSpace', 'Delete', 'Insert',
 ] as const;
 

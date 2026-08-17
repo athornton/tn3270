@@ -174,6 +174,73 @@ describe('Wait', () => {
   });
 });
 
+describe('TraceText', () => {
+  // Found live: Trace(on) enabled tracing but nothing ever emitted it — no sink
+  // was wired and the CLI had no way to retrieve it, so recording a fixture
+  // (the whole point of Task 16) was impossible.
+  it('emits the recorded trace as data lines', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Trace(on)');
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('TraceText');
+    const lines = reply.split('\n').filter((l) => l.startsWith('data: '));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.some((l) => / [<>] /.test(l))).toBe(true);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+
+  it('emits nothing when tracing was never enabled', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('TraceText');
+    expect(reply.split('\n').filter((l) => l.startsWith('data: '))).toHaveLength(0);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+});
+
+describe('Wait(InputField)', () => {
+  // Added after a live VM/370 session: the host sends its banner and the logon
+  // panel as SEPARATE records, and only the second carries the IC that puts the
+  // cursor in a field. Wait(Output) fires on the first and Wait(Unlock) can
+  // return before either, so a script types onto a protected cell. This
+  // condition tests screen STATE, so it cannot be missed by arriving early.
+  // x3270 has the same condition as TS_WAIT_IFIELD (task.c:135).
+  it('returns once the cursor sits in an unprotected field', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const pending = runner.run('Wait(InputField,5)');
+    // First record: formatted but the cursor is left on a protected cell.
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    // Second record puts an unprotected field down and an IC inside it.
+    conn.host(SnaCmd.W, 0x02, Order.SBA, 0x40, 0x4a, Order.SF, 0x00,
+      Order.IC, T.IAC, T.EOR);
+    expect((await pending).split('\n').pop()).toBe('ok');
+  });
+
+  it('does not return while the cursor is on a protected cell', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('Wait(InputField,0.05)');
+    expect(reply).toContain('data: timed out');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('names the accepted conditions when given an unknown one', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('Wait(Frobnicate,1)');
+    expect(reply).toContain('InputField');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+});
+
 describe('trace and replay', () => {
   it('Trace(on) starts recording and Trace(off) stops', async () => {
     const { runner, session, conn } = newRunner();
