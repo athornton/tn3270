@@ -35,6 +35,18 @@ describe('parseCommand', () => {
     expect(parseCommand('   ')).toBeNull();
   });
 
+  it('treats a # comment as a no-op, like a blank line', () => {
+    // Recording scripts are meant to be self-documenting; rejecting comments
+    // produced 15 spurious errors in a real live-host run.
+    expect(parseCommand('# a comment')).toBeNull();
+    expect(parseCommand('   # indented comment')).toBeNull();
+    expect(parseCommand('#')).toBeNull();
+  });
+
+  it('does not treat a # inside a quoted string as a comment', () => {
+    expect(parseCommand('String("value # 3")')).toEqual({ name: 'String', args: ['value # 3'] });
+  });
+
   it('rejects an unknown verb', () => {
     expect(() => parseCommand('Frobnicate')).toThrow(/unknown command/i);
   });

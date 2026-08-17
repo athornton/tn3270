@@ -1,50 +1,43 @@
-# Live-host recording script: VM/370 R6 (TK4-/TK5 companion CMS image) under
-# Hercules.
+# VM/370 R6 (VM/CE 1.2) recording script.
 #
-# STATUS: not yet run against a live host. This is the starting point from
-# the stage-1 plan (Task 16), not a verified transcript. See
-# docs/live-testing.md for the runbook this script is part of.
+# Substitute HOST:PORT for your Hercules listener. Verified against VM/CE 1.2 on
+# localhost:3270 with the unprivileged account CMSUSER.
 #
-# Usage:
-#   node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt \
-#     > /tmp/vm-session.log 2>&1
+# READ the ScreenText output. A status line saying "ok" only means the command was
+# accepted, not that the host did what you expected — check the panels.
 #
-# Before running, substitute the real HOST:PORT for the Hercules instance's
-# 3270 listener in the Connect() line below. This is very likely a different
-# port than the MVS listener even on the same Hercules host, since each
-# guest OS typically gets its own configured device/port — check the
-# instance, do not assume it matches record-mvs.txt.
+# Note the Wait(InputField) calls rather than Wait(Output): VM sends one logical
+# screen as several records, and only the last carries the IC that places the
+# cursor in a field. Wait(Output) fires on the first record and Wait(Unlock) can
+# return before any of them.
 #
-# The username below (CMSUSER) is a placeholder, not a real TK4-/TK5 default:
-# unlike MVS's HERC01/CUL8TR pair, VM/370 turnkey builds vary in which CMS
-# userids are provisioned out of the box. Read the CP logon screen produced
-# by the first ScreenText and substitute a userid (and password, if the
-# build requires one at LOGON rather than only at further CP commands) that
-# actually exists on the target system.
-#
-# As with record-mvs.txt: the operator MUST read the ScreenText output at
-# each step rather than trust the "ok"/"error" status lines alone. CP will
-# happily accept a garbled LOGON line and print an error panel that still
-# produces a normal-looking "ok" status from this CLI; only a human reading
-# the panel text distinguishes a real CMS ready prompt from a rejected logon.
-
+# CREDENTIALS: the password typed below appears in the trace in EBCDIC. Redact it
+# before committing any fixture derived from this run — see docs/live-testing.md.
 Trace(on)
 Connect(HOST:PORT)
-Wait(3270Mode,30)
+Wait(3270Mode,20)
+Wait(InputField,25)
 ScreenText
 String("LOGON CMSUSER")
 Enter
-Wait(Output,30)
+Wait(InputField,25)
 ScreenText
+String("CMSUSER")
 Enter
-Wait(Output,30)
+Wait(Unlock,30)
+ScreenText
+ScreenJson
+Enter
+Wait(Unlock,30)
 ScreenText
 String("QUERY TERMINAL")
 Enter
-Wait(Output,30)
+Wait(Unlock,25)
 ScreenText
 String("LOGOFF")
 Enter
-Wait(Output,10)
+Wait(Unlock,20)
+ScreenText
+TraceText
 Trace(off)
 Quit

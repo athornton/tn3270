@@ -25,6 +25,12 @@ const CANONICAL = new Map(COMMAND_NAMES.map((n) => [n.toLowerCase(), n]));
 export function parseCommand(line: string): Command | null {
   const trimmed = line.trim();
   if (trimmed === '') return null;
+  // A '#' comment is a no-op, like a blank line. Script files are meant to
+  // document themselves — the recording scripts under packages/cli/scripts carry
+  // host details, credential warnings, and rationale for each Wait — and
+  // rejecting those lines produced 15 spurious errors in a real recording run,
+  // which is exactly the noise that makes an operator stop reading the output.
+  if (trimmed.startsWith('#')) return null;
 
   const parenAt = trimmed.indexOf('(');
   let verb: string;

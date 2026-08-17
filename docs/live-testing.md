@@ -156,30 +156,48 @@ git commit -m "test: add live-host trace fixtures and golden screens from Hercul
 Note in the commit message which fixtures are new and which host/OS produced
 them.
 
-## Recording log (fill in when recording actually happens)
+## Recording log
 
-This section is intentionally empty placeholders. Fill in one entry per
-recording session.
+### VM/370 R6 (VM/CE 1.2) — recorded 2026-08-17
 
-### Host details
+- **Host:** `localhost:3270` under Hercules, user's machine. Unprivileged account
+  `CMSUSER`.
+- **Script:** `packages/cli/scripts/record-vm.txt`
+- **Result:** 43 commands, **0 errors, 0 program checks**. CP answered `LOGOFF`
+  with its own timestamp (`LOGOFF AT 18:27:40 GMT MONDAY 08/17/26`), which is the
+  proof that our inbound stream is genuinely understood by the host rather than
+  merely accepted.
+- **Fixture:** `packages/fixtures/traces/vm370-logon-logoff.trace` (217 lines),
+  golden at `packages/fixtures/screens/vm370-logon-logoff.txt`.
+- **Redaction:** two records containing the password were replaced with comment
+  lines — one we sent, one the host echoed back. Verified zero occurrences of the
+  password's EBCDIC bytes (`c3 d4 e2 e4 e2 c5 d9`) remain. The fixture is
+  replay-faithful only up to the password prompt.
 
-- Hercules host/port (MVS):
-- Hercules host/port (VM/370), if different:
-- Host OS build (e.g. TK4- version, TK5 version, or custom):
-- Date recorded:
-- Hercules version / config notes:
+**Quirks of this capture, not bugs.** `DMKCFC001E ?CP: QUERY` is CP rejecting
+`QUERY TERMINAL`, which is a CMS command rather than a CP one — a scripting error
+in the original run, kept because a rejected command is a useful thing to have in
+a fixture. The session stays at `CP READ` and never reaches CMS; that would need
+an IPL, which this script does not do.
 
-### Per-fixture notes
+**Bugs this session found**, none of which were findable offline:
 
-For each `packages/fixtures/traces/*.trace` file added from a live host,
-record here:
+1. The trace was unreachable — `Trace(on)` enabled it but nothing emitted it, so
+   recording a fixture at all was impossible. Added `TraceText`.
+2. Input on an unformatted screen was silently dropped. VM's logon screen has zero
+   field attributes, and we only iterated fields, so `LOGON` never reached CP.
+3. No initial keyboard lock, so `Wait(Unlock)` returned immediately after
+   `Connect` and scripts typed into a blank buffer.
+4. `Wait` could not express "ready for input"; added `Wait(InputField)`.
+5. Comment lines in a script file were rejected as unknown commands — 15 spurious
+   errors in the first full run.
 
-- Fixture name:
-- Which script produced it (`record-mvs.txt`, `record-vm.txt`, or a
-  hand-adjusted variant — if adjusted, note what changed and why):
-- What it exercises (e.g. "VTAM logon through ISPF primary menu and logoff"):
-- Any redacted records (line numbers, what was redacted):
-- Any host quirks encountered (unexpected panel text, non-default APPLID,
-  timing sensitivity, program checks found and fixed):
-- Whether a VM/370 companion fixture exists and, if not, why (host not
-  available, CMS image not provisioned, etc.):
+It also **falsified a spec claim**: this host sent `Erase/Write Alternate` with
+addresses only fitting a 32×80 screen while we identified as `IBM-3278-2`. The
+host was reconfigured to stay in 80×24 for stage 1; see the spec's *Outbound*
+section.
+
+### MVS 3.8J — not yet recorded
+
+No MVS system exists yet. `packages/cli/scripts/record-mvs.txt` is prepared and
+untested; treat its credentials as TK4-/TK5 defaults that will need checking.
