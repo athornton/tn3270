@@ -368,6 +368,52 @@ describe('clearing', () => {
   });
 });
 
+describe('field partition invariants', () => {
+  // These exist because a hand-rolled membership check (start <= a < start+length)
+  // fooled me into reporting a bug against a live host that did not exist. That
+  // check omits the attribute byte itself — `start` is attrAddr + 1 — and also
+  // ignores wrap. Per GA23-0059-07 a field is "the field attribute position PLUS
+  // the character positions up to, but not including, the next field attribute",
+  // so the attribute byte belongs to its own field. Always ask fieldAt().
+  it('fields partition the whole buffer with no gaps or overlaps', () => {
+    for (const attrs of [[0], [5], [1919], [0, 20], [10, 11], [1899], [0, 960, 1919]]) {
+      const s = new Screen();
+      for (const a of attrs) s.setFieldAttribute(a, 0x00);
+      const owner = new Map<number, number>();
+      for (const f of s.fields()) {
+        owner.set(f.attrAddr, f.attrAddr);
+        let a = f.start;
+        for (let n = 0; n < f.length; n++) {
+          expect(owner.has(a), `address ${a} claimed twice`).toBe(false);
+          owner.set(a, f.attrAddr);
+          a = s.inc(a);
+        }
+      }
+      expect(owner.size, `attrs ${attrs} did not cover the buffer`).toBe(s.size);
+    }
+  });
+
+  it('the attribute byte belongs to its own field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(20, 0x00);
+    for (const f of s.fields()) {
+      expect(s.fieldAt(f.attrAddr)!.attrAddr).toBe(f.attrAddr);
+    }
+  });
+
+  it('fieldAt is never null anywhere on a formatted screen', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1759, 0x00); // only attribute, high address
+    for (const a of [0, 1, 1758, 1759, 1760, 1919]) {
+      expect(s.fieldAt(a), `fieldAt(${a}) was null`).not.toBeNull();
+    }
+    // Address 0 is governed by the wrapping field, as x3270's
+    // find_field_attribute also reports.
+    expect(s.fieldAt(0)!.attrAddr).toBe(1759);
+  });
+});
+
 describe('snapshot', () => {
   it('produces an immutable snapshot the UI can hold', () => {
     const s = new Screen();

@@ -212,6 +212,14 @@ IPC without three divergent code paths.
 
 ### Two Structural Decisions
 
+**A field includes its own attribute byte.** GA23-0059-07: a field is "the field
+attribute position plus the character positions up to, but not including, the next
+field attribute". Since `Field.start` is `attrAddr + 1`, membership must be asked
+of `fieldAt()` rather than computed as `start <= a < start + length` — that
+expression excludes the attribute byte and ignores wrap, and it produced a false
+bug report against a live host. Verified equivalent to x3270's
+`find_field_attribute` over 768,000 (address, screen) pairs.
+
 **The screen buffer is the single source of truth, held as a flat typed array of
 cells plus a parallel attribute array** — as real hardware does it — *not* as a
 list of field objects. Field boundaries are *derived* by scanning for attribute
