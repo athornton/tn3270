@@ -4,14 +4,27 @@
 # the stage-1 plan (Task 16), not a verified transcript. See
 # docs/live-testing.md for the runbook this script is part of.
 #
+# A TK5 Update 5 system IS now running on localhost:3271 (found 2026-08-17), and
+# we render its greeting correctly. Nobody has logged on yet. Do not run this
+# script unattended: it blind-types credentials and presses Enter past whatever
+# appears, which on an undriven system can trip password retry limits.
+#
 # Usage:
 #   node packages/cli/dist/main.js < packages/cli/scripts/record-mvs.txt \
 #     > /tmp/mvs-session.log 2>&1
 #
 # Before running, substitute the real HOST:PORT for the Hercules instance's
-# 3270 listener in the Connect() line below (Hercules typically exposes this
-# on a port configured in its .cnf, commonly 3270 or 3505 range — check the
-# instance, do not assume).
+# 3270 listener in the Connect() line below. TK5's tk5.cnf defaults CNSLPORT to
+# 3270, but the VM/370 instance already holds 3270 on this box, so TK5 landed on
+# 3271 — check `ss -ltn` and the running hercules processes, do not assume.
+#
+# THE FIRST SCREEN IS A DISMISSAL SCREEN. TK5 opens with the all-protected
+# Hercules/TK5 banner: 25 SF(0x60) + 8 SF(0xe8), no unprotected field, no IC
+# order. Whatever is typed there is consumed dismissing it and the TEXT IS
+# DISCARDED. This is the same trap that made record-vm.txt stall at CP READ for a
+# whole session (see docs/live-testing.md, "The logon sequence"), so the Enters
+# below come BEFORE the first String(). Verify against ScreenText rather than
+# assuming the count is right for TK5 — VM needed two.
 #
 # Credentials below (HERC01 / CUL8TR) are the TK4-/TK5 turnkey-system
 # defaults, but TK4- and TK5 differ from each other and from any locally
@@ -32,10 +45,16 @@
 Trace(on)
 Connect(HOST:PORT)
 Wait(3270Mode,30)
+# Settle, not InputField: the banner is entirely protected, so there is no field
+# to wait for. Then dismiss it before typing anything.
+Wait(Settle,20)
+ScreenText
+Enter
+Wait(Settle,20)
 ScreenText
 String("LOGON APPLID(TSO)")
 Enter
-Wait(Output,30)
+Wait(Settle,30)
 ScreenText
 String("HERC01")
 Enter

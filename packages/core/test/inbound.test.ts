@@ -156,6 +156,50 @@ describe('unformatted screens', () => {
   });
 });
 
+describe('all-protected screens (the Hercules connect-time banner)', () => {
+  // This host greets a new connection with the Hercules/Aethra banner: 19 fields,
+  // every one of them protected, and it sends nothing further until it receives an
+  // AID. Pressing Enter there is therefore unavoidable — it is how you get VM's
+  // real screen — and what we send is the whole of record 0 in the x3270
+  // conformance comparison, so it has to be exactly right.
+  //
+  // Correct is AID + cursor and NO field data: x3270 emits AID then
+  // ENCODE_BADDR(cursor_addr) unconditionally for an ordinary AID
+  // (ctlr.c:796-803), then walks fields and skips any whose MDT is clear
+  // (ctlr.c:810-830). A protected field cannot have been typed into, so no MDT is
+  // set and nothing follows the cursor. Confirmed on the wire against the live
+  // host as `7d 40 40`.
+  function allProtectedBanner(): Screen {
+    const s = new Screen();
+    for (let row = 0; row < 19; row++) {
+      const at = row * 80;
+      s.setFieldAttribute(at, FA.PROTECT);
+      s.setChar(at + 1, 0xc8); // some banner text; never modified by the operator
+    }
+    s.cursor = 0;
+    return s;
+  }
+
+  it('sends AID and cursor only, with no field data', () => {
+    const out = buildReadModified(allProtectedBanner(), AID.ENTER, false);
+    expect(Array.from(out)).toEqual([AID.ENTER, 0x40, 0x40]);
+  });
+
+  it('emits no SBA order, because no field has its MDT set', () => {
+    const out = buildReadModified(allProtectedBanner(), AID.ENTER, false);
+    expect(Array.from(out)).not.toContain(Order.SBA);
+  });
+
+  it('treats the screen as formatted, not unformatted', () => {
+    // The regression this guards: an implementation that decides "no modified
+    // fields, so fall back to the unformatted path" would dump the banner's own
+    // text back at the host. The banner HAS fields; it just has no modified ones.
+    const out = buildReadModified(allProtectedBanner(), AID.ENTER, false);
+    expect(Array.from(out)).not.toContain(0xc8);
+    expect(out).toHaveLength(3);
+  });
+});
+
 describe('Read Buffer', () => {
   it('returns AID, cursor, and the whole buffer with attributes in place', () => {
     const s = new Screen();

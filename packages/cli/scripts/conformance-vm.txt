@@ -11,12 +11,58 @@
 #       < packages/cli/scripts/conformance-vm.s3270
 #   node packages/core/tools/compare-conformance.mjs /tmp/ours.log /tmp/ref.trace
 #
-# The account must NOT already be logged on: CP answers an in-use LOGON with
-# "restart" and never prompts for a password, which silently changes the script's
-# meaning.
+# This script deliberately never sends a password: it presses a bare Enter at the
+# password prompt, because the point is to compare the inbound records that
+# keystrokes generate, and a password must not enter a committed trace. It
+# therefore never reaches CMS, which is fine — and it means this script cannot be
+# used as evidence about the logon sequence. See record-vm.txt for that.
+#
+# The two Enters after connect are required. The first screen alternates between
+# the Hercules banner and the VM/370 logo, and both discard the text typed on
+# them; see record-vm.txt for the full explanation.
+#
+# USE Wait(Settle) ON THE FIRST SCREEN. What this host actually does on connect,
+# measured over 8 traced connections (see docs/live-testing.md):
+#
+#   0.003 s  Hercules/Aethra banner — 19 fields, ALL protected, no input field
+#   0.004 s  EraseWrite ... SF(0x4d) IC at 1759 — the real input field
+#   0.005 s  Write overlaying the VM/370 logo art
+#
+# All three arrive with no input required, so the banner is always sent and then
+# wiped 1 ms later. Wait(Settle) lands after all three, which is what we want.
+#
+# Wait(InputField) would also be satisfied here in the normal case — but it is a
+# 1 ms race, and when it loses it costs the full timeout, an `error` line, and the
+# keystroke fires anyway on the way past. Settle is the stable choice.
+#
+# The unavoidable consequence: record 0 is whatever the client sends on the
+# banner, and the two clients disagree about that by design, so this comparison is
+# 5/6 rather than 6/6.
+#
+#  - Ours sends AID + cursor(1,1) with no field data (`7d 40 40`) — correct for a
+#    screen with no modified field, per x3270's own ctlr.c:796-830.
+#  - s3270 sends the same thing when it gets there, but its timing differs: it has
+#    a hardcoded Wait(InputField) in stdinscript.c:437 before it reads ANY command,
+#    so on some runs it is still blocked on the banner while we have moved on. Whose
+#    `7d 40 40` lands in slot 0 therefore varies between runs.
+#
+# Records 1-5 (typed LOGON, Enter on a modified-but-empty field, Clear as a short
+# read, LOGOFF) are the ones this script exists to compare and they match. Treat a
+# record-0 difference as expected, and check the screens before calling it a bug:
+#   grep -ao 'Hercules Version\|VM/370 Online' /tmp/ref.trace | head -1
+#   grep -c 'c8 85 99 83 a4 93 85 a2' /tmp/ours.log   # nonzero = we got the banner
+#
+# Drive s3270 with the C: host prefix (`C:127.0.0.1:3270`). Without it s3270 adds
+# its login-macro Wait(InputField) on top and hangs outright on banner runs;
+# compare-conformance.mjs warns when it produced zero records — heed that warning
+# rather than reading 0/N as a regression.
 Trace(on)
 Connect(127.0.0.1:3270)
 Wait(3270Mode,20)
+# Settle, not InputField: the banner has no input field and VM sends nothing more
+# until it gets an AID, so InputField can only time out here.
+Wait(Settle,20)
+Enter
 Wait(Settle,20)
 String("LOGON CMSUSER")
 Enter
@@ -27,10 +73,10 @@ Clear
 Wait(Settle,20)
 Enter
 Wait(Settle,20)
-# LOGOFF is not optional. CP answers a LOGON for an account that is already
-# logged on with "restart" and no input field, so leaving the session open makes
-# the NEXT run of this script fail — which looked exactly like a client-side race
-# until five clean runs showed run 1 passing and runs 2-5 failing.
+# LOGOFF is not optional: leaving the account logged on makes the next run fail.
+# (An earlier version of this comment blamed "restart" on the account being in
+# use. That was wrong — see docs/live-testing.md. Since this script never
+# completes a logon, it never held the account anyway.)
 String("LOGOFF")
 Enter
 Wait(Settle,20)

@@ -1,4 +1,6 @@
 Wait(3270Mode)
+Wait(2,Seconds)
+Enter
 Wait(Unlock)
 String("LOGON CMSUSER")
 Enter
