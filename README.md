@@ -130,12 +130,16 @@ job is worse than one that says which quarter is missing.
 - **No GUI.** Stage 1 is a library and a scripting CLI. There is no window.
 - **No TLS.** Cleartext only, so this is not safe over an untrusted network.
 - **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no
-  SNA response handling, no printer sessions. **This is what blocks TSO on MVS.**
-  Measured: s3270 reaches TSO on MVS 3.8j TK5 when it advertises `IBM-3278-2-E`,
-  and the *same binary* fails identically to us — `IKT00405I SCREEN ERASURE CAUSED
-  BY ERROR RECOVERY PROCEDURE` — when its `S:` host prefix suppresses the `-E`. Our
-  inbound records are byte-identical to s3270's successful ones, so this is a
-  negotiation gap, not a data-stream defect. VM/370 does not care; TSO does.
+  SNA response handling, no printer sessions.
+- **Terminal type is hardcoded to `IBM-3278-2`, and TSO on MVS rejects that.** We
+  advertise no extended-data-stream `-E` suffix, and TK5's TSO answers
+  `IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY PROCEDURE` instead of a logon.
+  Measured with s3270 against the same host, all with *no* TN3270E negotiated:
+  `IBM-3278-2` fails, while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all
+  reach TSO. Our inbound records are byte-identical to s3270's successful ones, so
+  this is one string, not a missing protocol layer. VM/370 does not care; TSO does.
+  Making the terminal type configurable is the obvious next step, with the caveat
+  that claiming more capability invites orders and geometries we do not yet handle.
 - **No extended attributes.** SA, SFE and MF orders are parsed for length and
   then ignored, so colour, highlighting and character sets are recognised but not
   rendered. Note this is more than cosmetic: SFE *defines a field*, so a host that
@@ -151,9 +155,9 @@ job is worse than one that says which quarter is missing.
   configuration limit rather than a structural one.
 - **MVS reaches VTAM but not TSO.** Everything else above was verified against
   VM/370. On MVS 3.8j TK5 we negotiate, render the TK5 logo and VTAM's USS logon
-  panel correctly, and VTAM answers us — but TSO logon needs TN3270E, per the
-  measurement above, so `packages/cli/scripts/record-mvs.txt` remains a draft and
-  there is no TSO fixture. Details in `docs/live-testing.md`.
+  panel correctly, and VTAM answers us — but TSO rejects our hardcoded terminal
+  type, per the entry above, so `packages/cli/scripts/record-mvs.txt` remains a
+  draft and there is no TSO fixture. Details in `docs/live-testing.md`.
 
 ## Stage 1 completion check
 

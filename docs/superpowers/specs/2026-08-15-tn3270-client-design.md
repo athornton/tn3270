@@ -317,7 +317,8 @@ identically to EW". That is not reliable. A VM/CE 1.2 host under Hercules sent
 (32×80) screen — while we identified ourselves as `IBM-3278-2`.
 
 **Cause found 2026-08-17, and it was not the host being arbitrary.** The user's
-usual client is tnz, which advertises terminal type **`IBM-DYNAMIC`** and then
+usual client is **`zti`**, the terminal interface of the `tnz` package (the command
+is `zti`; the protocol lives in `tnz/tnz.py`). It advertises `IBM-DYNAMIC` and then
 answers Read Partition (Query) with an *Implicit Partitions* Query Reply (`0xA6`)
 whose `WA`/`HA` fields carry an alternate size **derived from the user's terminal
 window** — `tnz/tnz.py:265-282`: `lines >= 62 → 62×160`, `>= 43 → 43×80`,

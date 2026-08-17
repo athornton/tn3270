@@ -19,8 +19,9 @@ and the Recording log says what happened when they were run.
 - **MVS 3.8J TK5 — pre-logon capture recorded 2026-08-17.** TK5 Update 5 on
   `localhost:3271`. We negotiate, render the TK5 logo and VTAM's USS logon panel,
   and VTAM answers us. Fixture `mvs-tk5-vtam-logon.trace` + golden; no credentials
-  in it. **TSO is not reached: it requires TN3270E** (proven by controlled
-  experiment — see the Recording log). `record-mvs.txt` remains a draft.
+  in it. **TSO is not reached: this TSO rejects the terminal type `IBM-3278-2` that
+  we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
+  option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
 ## Step 1 — Confirm the host is reachable
 
@@ -287,13 +288,17 @@ previously recorded here.
 It also **falsified a spec claim**: this host sent `Erase/Write Alternate` with
 addresses only fitting a 32×80 screen while we identified as `IBM-3278-2`.
 
-**Cause found 2026-08-17: another client taught the host that geometry.** tnz (the
-user's usual client, and what `zti` runs) advertises terminal type
-**`IBM-DYNAMIC`** and answers Read Partition (Query) with an Implicit Partitions
-Query Reply whose alternate size comes from the **terminal window height** —
-`tnz/tnz.py:265-282` picks `32×80` for any terminal with at least 32 lines. The
-user's was 41. VM remembered that for `GRAF 2C8` and later drove our session with
-it. `SBA(2399)`/`EUA(→2539)` fit 2560 cells, not 1920.
+**Cause found 2026-08-17: another client taught the host that geometry.** The
+client the user actually runs is **`zti`** — the terminal interface shipped by the
+`tnz` package (console script `tnz.zti:main`), with the protocol implemented in
+`tnz/tnz.py`. Naming matters here only because the *behaviour* below lives in the
+library while the *command you type* is `zti`; `~/git/tnz` is the source for both.
+
+It advertises terminal type **`IBM-DYNAMIC`** and answers Read Partition (Query)
+with an Implicit Partitions Query Reply whose alternate size comes from the
+**terminal window height** — `tnz/tnz.py:265-282` picks `32×80` for any terminal
+with at least 32 lines. The user's was 41. VM remembered that for `GRAF 2C8` and
+later drove our session with it. `SBA(2399)`/`EUA(→2539)` fit 2560 cells, not 1920.
 
 Two consequences for testing here:
 
@@ -302,12 +307,12 @@ Two consequences for testing here:
   what the host sends *us* on a later connection. If unexplained out-of-range
   addresses reappear, check what else has touched that device before suspecting our
   parser.
-- **To pin tnz to 80×24, export `SESSION_PS_SIZE=2`** (verified: `_util.py` maps
-  `"2" → (24, 80)`, `"3" → (32, 80)`, `"4" → (43, 80)`). The terminal *type* cannot
-  be changed — `terminal_type` is hardcoded to `IBM-DYNAMIC` at `tnz/tnz.py:177`
-  with nothing reading an override — so size is the available control. Setting it
-  also makes tnz's geometry independent of the window, which is worth doing before
-  any comparison run regardless.
+- **To pin `zti` to 80×24, export `SESSION_PS_SIZE=2`** before starting it
+  (verified: `_util.py` maps `"2" → (24, 80)`, `"3" → (32, 80)`, `"4" → (43, 80)`).
+  The terminal *type* cannot be changed — `terminal_type` is hardcoded to
+  `IBM-DYNAMIC` at `tnz/tnz.py:177` with nothing reading an override — so size is
+  the available control. Setting it also makes the advertised geometry independent
+  of your window size, which is worth doing before any comparison run regardless.
 
 To reproduce the 32×80 condition deliberately, run `zti` from a terminal ≥32 lines
 and then connect with our client. See the spec's *Outbound* section.
@@ -331,23 +336,66 @@ What has been established, read-only, without logging on:
   *first* input, will therefore lose it exactly as `record-vm.txt` did. Fix it the
   same way before running it.
 
-**TSO logon on this system requires TN3270E, which stage 1 does not implement.**
-Established by a controlled experiment against the live host — same script, same
-byte-identical inbound records, only the negotiated terminal type varying:
+**TSO logon on this system rejects the terminal type `IBM-3278-2`. It does NOT
+require TN3270E.** Established by a controlled experiment against the live host —
+same script, same byte-identical inbound records, only the advertised terminal type
+varying. The fourth row is the one that matters:
 
-| client | terminal type | result |
-|---|---|---|
-| s3270 | `IBM-3278-2-E` | **reaches TSO**: `HERC02 LOGON IN PROGRESS`, `Welcome to the TSO system on TK5R` |
-| s3270 with the `S:` host prefix | `IBM-3278-2` | `IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY PROCEDURE` |
-| ours | `IBM-3278-2` | `IKT00405I` — identical |
-| tnz | `IBM-DYNAMIC` | reaches TSO (per the user; also gets to ISPF and logs off cleanly) |
+| client | terminal type | TN3270E? | result |
+|---|---|---|---|
+| s3270 | `IBM-3278-2-E` | yes | **reaches TSO**: `HERC02 LOGON IN PROGRESS`, `Welcome to the TSO system on TK5R` |
+| s3270, `S:` host prefix | `IBM-3278-2` | no | `IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY PROCEDURE` |
+| ours | `IBM-3278-2` | no | `IKT00405I` — identical |
+| s3270, `S:` prefix + `-oversize 80x24` | **`IBM-DYNAMIC`** | **no** | **reaches TSO** — `Welcome to the TSO system on TK5R` |
+| `zti` (the `tnz` package) | `IBM-DYNAMIC` | no (off by default) | reaches TSO, ISPF, clean logoff (per the user, `HERC02/CUL8TR`) |
 
-The `S:` prefix is what makes this decisive: it sets `HOST_FLAG(STD_DS_HOST)`, which
-suppresses the `-E` suffix in `create_3270_termtype()` (`telnet.c:2095-2110`). So
-**the same binary, on the same host, with the same script, succeeds with `-E` and
-fails without it** — reproducing our failure exactly. Our client is not at fault;
-our inbound records are byte-identical to the ones s3270 sends when it succeeds
+Row 4 isolates the variable. The `S:` prefix sets `HOST_FLAG(STD_DS_HOST)`, which
+suppresses the `-E` suffix in `create_3270_termtype()` (`telnet.c:2095-2110`), and
+`-oversize` makes that same function return `IBM-DYNAMIC` (`telnet.c:2100-2101`).
+Verified on the wire: `fffa1800 49424d2d44594e414d4943 fff0` = `IBM-DYNAMIC`, and
+**zero** `fffb28`/`fffd28` — no TN3270E negotiation anywhere in the successful run.
+`zti` corroborates: `use_tn3270e` defaults to `False` (`tnz/tnz.py:91`) and is only
+enabled by `SESSION_TN_ENHANCED` (`ati.py:2654-2656`), which the user has not set.
+
+So `IBM-3278-2` is the thing this TSO rejects, and either `-E` or `IBM-DYNAMIC` gets
+past it. Our client is not at fault in its data stream — our inbound records are
+byte-identical to the ones s3270 sends when it succeeds
 (`7d 5b f8 11 5b 6b c8 c5 d9 c3 f0 f2 61 c3 e4 d3 f8 e3 d9` + field blanks).
+
+**This was misdiagnosed once as "TSO requires TN3270E", on the strength of rows 1-3
+alone.** Rows 1-3 are consistent with that theory and also with "the ttype string
+matters", and nothing distinguished them until row 4 was run. Two variables had been
+changed together — the `-E` suffix *and* TN3270E negotiation — and only one of them
+turned out to be load-bearing. Vary one thing at a time, especially when the
+convenient conclusion happens to point at an unimplemented feature.
+
+**What actually matters is the `-E` suffix, and TN3270E is not involved.** Follow-up
+runs, all with **zero** `fffb28`/`fffd28` in the trace:
+
+| ttype advertised | TN3270E negotiated | reaches TSO |
+|---|---|---|
+| `IBM-3278-2` | no | **no** — `IKT00405I` |
+| `IBM-3278-2-E` | no | **yes** |
+| `IBM-3279-2-E` | no | **yes** |
+| `IBM-DYNAMIC` | no | **yes** |
+
+So the whole failure is that we advertise `IBM-3278-2` and this TSO wants the `-E`
+form. The `-E` suffix here means *extended data stream* — a 3270 capability claim in
+the terminal-type string — which is a different thing from the TN3270E telnet option
+(40), and conflating the two is what produced the wrong diagnosis above.
+
+Beware a confound when re-running these: TSO answers a second logon for a
+live session with `IKJ56425I LOGON REJECTED, USERID HERC02 IN USE`, which is *not*
+the `IKT00405I` failure and means the ttype was accepted. One run was briefly scored
+as a failure for this reason. Use a different userid per run (`HERC01`, `HERC02`,
+`HERC03`, `HERC04`) or log off properly.
+
+**Consequence for us:** TSO looks reachable with a one-string change rather than a
+protocol layer. Do it deliberately, though — claiming extended data stream invites
+extended orders (SA/SFE/MF, which we parse and ignore) and `IBM-DYNAMIC` additionally
+invites host-driven alternate geometry, the 32×80 case above that stage 1 reports as
+a program check. The honest sequence is: make the terminal type configurable, try
+`IBM-3278-2-E`, and see what the host then sends that we do not yet implement.
 
 Corroborating host-side evidence, from the Hercules console at *every* one of our
 connects, before we type anything:

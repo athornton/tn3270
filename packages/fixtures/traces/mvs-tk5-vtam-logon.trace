@@ -9,11 +9,14 @@
 # single unprotected field at SBA(1770) carrying IC), and VTAM rejecting an
 # unrecognized token with IKT00405I. It does NOT reach TSO.
 #
-# TSO logon on this system requires TN3270E, which stage 1 does not implement.
-# Proven by controlled experiment: s3270 reaches TSO when it advertises
-# IBM-3278-2-E, and the same binary fails exactly as we do -- IKT00405I -- when its
-# S: host prefix suppresses the -E suffix. Our inbound records are byte-identical
-# to s3270's successful ones. See docs/live-testing.md for the full comparison.
+# TSO on this system rejects the terminal type we advertise, IBM-3278-2. This is NOT
+# a TN3270E problem: measured with s3270 against this host, with the TN3270E telnet
+# option (40) never negotiated in any run, IBM-3278-2 fails with IKT00405I while
+# IBM-3278-2-E, IBM-3279-2-E and IBM-DYNAMIC all reach TSO. The -E suffix means
+# extended data stream in the ttype string, which is a different thing from the
+# TN3270E option. Our inbound records are byte-identical to s3270's successful ones,
+# so the gap is one string. See docs/live-testing.md for the full comparison, and
+# for the earlier wrong diagnosis that blamed TN3270E.
 #
 # NO CREDENTIALS ARE PRESENT. Nothing secret was typed: the only input is the
 # literal string "TSO" and a Clear. Verified zero occurrences of any TK5 password's

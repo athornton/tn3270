@@ -80,12 +80,24 @@ a symptom.
   screenshots under Xvfb. Invocation is in the spec's *Development Environment*.
 - **s3270 4.5ga6** at
   `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270`. Use
-  `-model 3278-2`. It always advertises `-E` (TN3270E) with no flag to suppress
-  it, so negotiation differs from ours by design; excluded from comparison.
+  `-model 3278-2`. By default it advertises the `-E` (extended data stream) ttype
+  suffix, so its terminal type differs from ours; that is why conformance excludes
+  negotiation. **The `-E` suffix CAN be suppressed** — an earlier note here said it
+  could not. Host-prefix and flag controls, all verified on the wire:
+  - `S:host` → `HOST_FLAG(STD_DS_HOST)`, drops `-E` → `IBM-3278-2` (matches us).
+  - `C:host` → skips the login-macro `Wait(InputField)`; needed or it hangs on
+    all-protected connect screens.
+  - `-oversize 80x24` → forces `IBM-DYNAMIC` (`telnet.c:2100-2101`).
+  - Prefixes stack as `S:C:127.0.0.1:3271`, each with its own colon. Writing them
+    together as `SC:...` is a syntax error (`double ':'`) — tested.
+  None of these turn on the TN3270E telnet option (40); check for `fffb28`/`fffd28`
+  in the trace if you need to know whether TN3270E was actually negotiated.
 - **Reference sources on disk.** `~/3270/ref/ga23-0059-07.pdf` plus `pages.txt`
   (greppable extracted text; Appendix F is the hex index). x3270 source at
-  `~/src/suite3270-4.5/Common/`. tnz source at `~/git/tnz` — the user's preferred
-  client, readable Python, and a third reference implementation.
+  `~/src/suite3270-4.5/Common/`. Source for **`zti`** — the client the user actually
+  drives, and the terminal interface of the `tnz` package — at `~/git/tnz`:
+  readable Python and a third reference implementation. Say `zti` for the command
+  and `tnz`/`tnz/tnz.py` for the library; they are the same project.
 - `npm run build` — **not** `npm run build --workspaces`, which fails on the
   data-only fixtures package.
 
@@ -162,15 +174,19 @@ times; that pushback was the single most valuable part of the process.
    (`mvs-tk5-vtam-logon.trace`): Hercules banner, VTAM's USS logon panel, and an
    `IKT00405I` rejection. Credential-free.
 
-   **TSO logon requires TN3270E, which stage 1 does not implement.** This is the
-   cleanest measurement of the session: s3270 reaches TSO advertising
-   `IBM-3278-2-E`, and the *same binary* fails exactly as we do — `IKT00405I SCREEN
-   ERASURE` — when the `S:` host prefix suppresses the `-E`
-   (`telnet.c:2095-2110`). Our inbound records are byte-identical to s3270's
-   successful ones. tnz succeeds because it advertises `IBM-DYNAMIC`. Ruled out by
-   experiment, not argument: trailing blanks, pacing, and logon syntax; and an
-   earlier Query-Reply theory was wrong (the successful run has no Query at all).
-   Full write-up in `docs/live-testing.md`.
+   **TSO rejects the terminal type we advertise; TN3270E is NOT required.** We send
+   `IBM-3278-2` and TK5's TSO answers `IKT00405I SCREEN ERASURE`. Measured with s3270
+   on the same host, every run with **zero** TN3270E negotiated: `IBM-3278-2` fails,
+   while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all reach TSO. Our inbound
+   records are byte-identical to s3270's successful ones, so this is one string, not
+   a protocol layer.
+
+   **This was first diagnosed as "TSO requires TN3270E" and that was wrong.** The
+   evidence then was s3270 succeeding with `-E` and failing with the `S:` prefix —
+   but `S:` changes the ttype *and* suppresses TN3270E together, so it could not
+   separate them. `-oversize 80x24` (which forces `IBM-DYNAMIC`) plus `S:` isolated
+   it. Vary one thing at a time, especially when the convenient answer points at a
+   feature you have not built. Full write-up in `docs/live-testing.md`.
 
    So a TSO fixture is the natural first live test *after* TN3270E lands, not
    before. Credentials, from `doc/MVS_TK4-_v100_Users_Manual.pdf`:
