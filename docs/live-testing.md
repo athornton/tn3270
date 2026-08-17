@@ -1,25 +1,20 @@
 # Live-host testing runbook
 
-**Status as of this writing: no live recording has happened yet.** Nothing in
-this document below the "Executed so far" line has been run. This is a
-runbook for Task 16 (live host verification) — prepared so that, once a
-Hercules instance is reachable, the remaining steps are a matter of running
-the commands below rather than designing them from scratch.
+**Status: a live VM/370 session has been recorded.** See the *Recording log* at
+the end of this document for what ran, what it found, and what remains. MVS 3.8J
+has not been recorded — no such system exists yet.
+
+This document is both the procedure and the log: the steps below are what to run,
+and the Recording log says what happened when they were run.
 
 ## Executed so far
 
-- Nothing. There is no Hercules instance configured for this project yet.
-- `packages/cli/scripts/record-mvs.txt` and `packages/cli/scripts/record-vm.txt`
-  exist as starting-point scripts (see Task 16 in the stage-1 plan) but have
-  never been run against a real host, and are expected to need adjustment
-  once real panel text is visible.
-- `packages/fixtures/traces/` and `packages/fixtures/screens/` contain only
-  the synthetic fixture from Task 15 (`synthetic-ispf-like.*`). No real-host
-  trace or golden exists.
-
-Everything from here down is the procedure to follow when a host becomes
-available — write down what actually happened as you go, in the "Recording
-log" section at the bottom, rather than leaving this file purely aspirational.
+- **VM/370 R6 (VM/CE 1.2) on `localhost:3270` — recorded 2026-08-17.** 43
+  commands, 0 errors, 0 program checks. Fixture and golden committed. Five real
+  bugs found and fixed; one spec claim falsified. Details in the Recording log.
+- **MVS 3.8J — not recorded.** No system configured.
+  `packages/cli/scripts/record-mvs.txt` is prepared but untested; its credentials
+  are TK4-/TK5 defaults that will need checking against whatever build is used.
 
 ## Step 1 — Confirm the host is reachable
 
