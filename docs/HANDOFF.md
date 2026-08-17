@@ -6,16 +6,21 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `stage1-protocol-core`, 70+ commits, **318 tests passing**, `npm run
-typecheck` clean, `npm run build` works.
+Branch `stage1-protocol-core`, 76 commits, **319 tests passing**, `npm run typecheck`
+clean, `npm run build` works, working tree clean.
 
 **Stage 1 is COMPLETE.** All 18 tasks of
-`docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` are done, `README.md`
-is written, and three of the plan's four completion checks pass with real output.
-The fourth (`record-mvs.txt` → 0 errors) fails for an environmental reason — the
-TK5 host has no MVS IPLed — not a client defect; see *Next steps* item 3 and the
-plan's Task 18 Step 3. Stage 1 meets the spec's success criterion against the host
-that is actually up.
+`docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` are done, `README.md` is
+written, and three of the plan's four completion checks pass with real output. The
+fourth (`record-mvs.txt` → 0 errors) fails because MVS/TSO needs the extended data
+stream terminal type and a Query Reply — that is now **stage 2a**, the next work, not
+an environmental problem as an earlier version of this paragraph said. (The TK5 host
+*was* un-IPLed at one point; it is IPLed now and TSO is reachable by other clients.)
+Stage 1 meets the spec's success criterion against VM/370.
+
+**Priority changed 2026-08-17:** extended data stream + Query Reply comes **before**
+the Electron GUI, because MVS 3.8j is expected to be the largest group of users and
+TSO does not work without it. See *Next steps* item 4, which is where to start.
 
 ### What is proven, not merely tested
 
@@ -180,7 +185,7 @@ times; that pushback was the single most valuable part of the process.
    rather than the code (details in the plan under Task 18, Step 3).
 2. ~~**Re-record the VM fixture and golden.**~~ **Done.** The fixture now reaches
    CMS `Ready;` and the golden shows a clean LOGOFF instead of `restart`.
-3. ~~**TK5 fixture.**~~ **Partly done, and the rest is blocked on TN3270E.** MVS
+3. ~~**TK5 fixture.**~~ **Partly done; the TSO half is what stage 2a unblocks.** MVS
    3.8j TK5 is up on `localhost:3271` and a pre-logon fixture is committed
    (`mvs-tk5-vtam-logon.trace`): Hercules banner, VTAM's USS logon panel, and an
    `IKT00405I` rejection. Credential-free.
@@ -211,6 +216,44 @@ times; that pushback was the single most valuable part of the process.
    terminal address, then the bare userid — or `HERC02/CUL8TR` in one field, which
    skips the password prompt. `TSO` and `LOGON HERC01` both get `INPUT NOT
    RECOGNIZED`.
-4. **Stage 2** — the Electron GUI. The renderer constraint to remember: cell
-   content is a tagged variant, so dispatch on `kind` rather than assuming a font
-   lookup, because Programmable Symbol Sets are a committed stage 4 deliverable.
+4. **STAGE 2a — extended data stream + Query Reply. START HERE.** Reprioritised
+   ahead of the GUI on 2026-08-17: MVS 3.8j is expected to be the largest user group,
+   so TSO working matters more than a window. Three pieces, and the measurements
+   behind each are in `docs/live-testing.md`:
+
+   - **Configurable terminal type**, defaulting to something TSO accepts. Today it is
+     hardcoded `IBM-3278-2` (grep `IBM-3278-2` in `packages/core/src/`), and TSO
+     rejects exactly that. `IBM-3278-2-E` is verified sufficient.
+   - **Answer Read Partition (Query).** Today WSF is parsed to a `structuredFields`
+     token and dropped (`stream/parse.ts`, `stream/execute.ts:211`). The reference
+     bytes — the host's Query and the 183-byte reply s3270 sends, which this host
+     accepts — are in `packages/fixtures/x3270/tso-query-reply.txt`, annotated
+     against GA23-0059. **Verify each reply unit against the manual before copying
+     it**; x3270 sends more units than TSO necessarily needs and the minimum is
+     untested.
+   - **Alternate screen geometry.** `Screen` already takes geometry as a constructor
+     parameter, so this is plumbing plus honest bounds. Whatever we advertise in the
+     Query Reply is what the host will then use.
+
+   **Acceptance test, already written:** `packages/cli/scripts/record-mvs.txt` is the
+   real target sequence, transcribed from a working `zti` session. It currently fails
+   at `IKT00405I` right after the userid — that is the documented, expected failure.
+   Done means it reaches the ISPF primary option menu and logs off cleanly, and then
+   a redacted fixture + golden get committed (the password appears in the trace in
+   EBCDIC; `docs/live-testing.md` step 4).
+
+   **The trap to respect:** the captured session runs 24×80 for the logon panel,
+   **27×132 from the password prompt onward**, and 24×80 again after logoff. The host
+   used the geometry the *client* offered. Reply 24×80 and it should stay 1920 cells;
+   offer more and expect addresses past that. An out-of-range address is a program
+   check today and that is the honest failure — do not wrap.
+
+5. **Stage 2b — TN3270E proper**, the telnet option (40): DEVICE-TYPE/FUNCTIONS
+   subnegotiation, the 5-byte data header, BIND/UNBIND, SNA responses, LU selection.
+   **Deliberately after 2a, because TSO needs none of it** — zero `fffb28`/`fffd28`
+   in any successful run, and `zti` reaches TSO with `use_tn3270e = False`. Its own
+   payoff is LU names, printer sessions and response handling.
+
+6. **Stage 3 — the Electron GUI.** The renderer constraint to remember: cell content
+   is a tagged variant, so dispatch on `kind` rather than assuming a font lookup,
+   because Programmable Symbol Sets are a committed later deliverable.

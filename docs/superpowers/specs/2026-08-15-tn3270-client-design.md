@@ -45,10 +45,30 @@ usable by a human.
 Signed and notarized macOS `.app`; Linux AppImage and deb. Config file and
 preferences UI.
 
+### RESEQUENCED 2026-08-17 — extended data stream comes before the GUI
+
+The staging below was written before live MVS testing. **MVS 3.8j is expected to be
+the largest group of users, and TSO does not work without the extended data stream
+terminal type and a Query Reply**, so that work was promoted ahead of the GUI:
+
+- **Stage 2a — extended data stream + Query Reply.** Configurable terminal type
+  (`IBM-3278-2-E`), answer Read Partition (Query), alternate screen geometry.
+- **Stage 2b — TN3270E proper**, the telnet option (40) with DEVICE-TYPE/FUNCTIONS,
+  the data header, BIND/UNBIND, SNA responses and LU selection. **Split from 2a
+  because TSO needs none of it** — measured: zero `fffb28`/`fffd28` in any
+  successful run, and `zti` reaches TSO with `use_tn3270e = False`.
+- Then the GUI (old stage 2), packaging (old stage 3), and the list below.
+
+The two items were bundled as "TN3270E" in the original list; they are separable and
+only 2a is on the path to TSO. See `docs/live-testing.md` for the measurements and
+`docs/HANDOFF.md` *Next steps* for the resume point.
+
 ### Stage 4+ — Secondary goals, in order
 
 1. TLS connections (modern z/OS on port 992, certificate handling)
-2. TN3270E: negotiated screen size, extended attributes
+2. ~~TN3270E: negotiated screen size, extended attributes~~ — **promoted, and split;
+   see the resequencing note above.** Negotiated screen size belongs with Query Reply
+   (stage 2a); the telnet option is stage 2b.
 3. IND$FILE file transfer
 4. Printer sessions (LU1/LU3, 3287 emulation)
 5. **Programmable Symbol Sets** — host-loadable glyph bitmaps, and with them the
@@ -56,9 +76,12 @@ preferences UI.
 
 PS is a committed deliverable, not a maybe. Two things fix its position:
 
-- **It must follow TN3270E** — a hard dependency. PS is loaded via structured
-  fields, and the host sends none until Query Reply has advertised the
-  capability.
+- **It must follow Query Reply** — a hard dependency, and note the reason this
+  bullet gives is *Query Reply*, not TN3270E: PS is loaded via structured fields,
+  and the host sends none until Query Reply has advertised the capability. This
+  originally read "must follow TN3270E" because the two were bundled; with stage 2a
+  delivering Query Reply, PS's real prerequisite lands much earlier than planned.
+  Its position in the list is set by the IND$FILE decision below, not by this.
 - **It must follow IND$FILE** — an explicit decision by the user, not a guess.
   File transfer is the more useful capability and ships first.
 

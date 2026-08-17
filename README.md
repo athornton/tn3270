@@ -11,7 +11,8 @@ data-stream implementation with a native-feeling GUI, correct enough that a host
 cannot tell it from the hardware.
 
 **Status: stage 1 (protocol core + scriptable CLI) is complete. There is no GUI
-yet.** See *What is not implemented* below, which is the honest part of this file.
+yet.** Next up is extended data stream + Query Reply, so that MVS/TSO works; the GUI
+follows. See *What is not implemented* below, which is the honest part of this file.
 
 ## What works today
 
@@ -113,11 +114,20 @@ recording against a real host and the log of what was found doing so.
 ## Staging
 
 1. **Protocol core + CLI** — done.
-2. **Electron GUI** — next.
-3. **Packaging** for macOS and Linux.
-4. **TLS**, then **TN3270E**, then **IND$FILE**, then printer support, then
-   Programmable Symbol Sets. PS follows IND$FILE by preference and TN3270E by
-   necessity.
+2. **Extended data stream + Query Reply** — next. A configurable terminal type
+   (`IBM-3278-2-E`), a Query Reply answering Read Partition, and alternate screen
+   geometry. This is what MVS/TSO requires, and it was reprioritised ahead of the
+   GUI because MVS 3.8j is expected to be the largest group of users.
+3. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS
+   subnegotiation, the data header, BIND/UNBIND, SNA responses, device-name (LU)
+   selection. Separated from stage 2 deliberately: measurement shows TSO needs
+   neither the option nor any of this, so bundling them would have delayed a
+   working TSO session for no benefit.
+4. **Electron GUI**, then **packaging** for macOS and Linux.
+5. **TLS**, then **IND$FILE**, then printer sessions, then Programmable Symbol
+   Sets. PS follows IND$FILE by preference; its hard dependency is stage 2's Query
+   Reply (the host sends no PS structured fields until the capability is
+   advertised), not TN3270E as earlier drafts of the spec assumed.
 
 GDDM vector graphics are unscheduled. The fidelity target for graphics is Rick
 Troth's 3279 GIF viewer from around 1992.
