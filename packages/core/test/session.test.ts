@@ -446,7 +446,7 @@ describe('query reply', () => {
     expect(reply).toEqual(lastRecord(conn));
   });
 
-  it('answers a QCODE List for one unit with that unit and Summary', async () => {
+  it('answers a QCODE List with exactly the unit requested', async () => {
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
     conn.negotiate();
@@ -455,12 +455,12 @@ describe('query reply', () => {
     conn.host(
       SnaCmd.WSF, 0x00, 0x07, 0x01, T.IAC, T.IAC, 0x03, 0x00, 0x81, T.IAC, T.EOR);
     const reply = lastRecord(conn);
-    // Summary (7 bytes: L L SFID QCODE + three QCODEs) then Usable Area.
-    expect(reply[4]).toBe(Qcode.SUMMARY);
-    expect(reply[1 + 7 + 3]).toBe(Qcode.USABLE_AREA);
-    // Two units only: 1 AID + 7 Summary + 23 Usable Area. Implicit Partition was
-    // not requested, so its 17 bytes must be absent.
-    expect(reply).toHaveLength(1 + 7 + 23);
+    // ONE unit: 1 AID + 23 Usable Area. Neither Summary nor Implicit Partition was
+    // named, so neither appears — p. 6-96's "QCODE List=X'80'" is Summary's own
+    // QCODE, not a REQTYP, so there is no always-send-Summary rule to apply here.
+    // An earlier version of this test expected a forced Summary.
+    expect(reply[4]).toBe(Qcode.USABLE_AREA);
+    expect(reply).toHaveLength(1 + 23);
   });
 
   it('sends the Null Query Reply when it supports nothing requested', async () => {

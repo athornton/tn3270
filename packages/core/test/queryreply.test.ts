@@ -289,19 +289,23 @@ describe('Query List selection', () => {
     expect(Array.from(equivalent)).toEqual(Array.from(plain));
   });
 
-  it('returns only the listed units for REQTYP=QCODE List, plus Summary', () => {
+  it('returns ONLY the listed units for REQTYP=QCODE List — no unrequested Summary', () => {
     // "the 3270 data stream device or / workstation returns all the requested
     // Query / Replies (QCODES listed) that are supported" (pages.txt:10768-
-    // 10770). Summary rides along unlisted because p. 6-96 requires it: "must
-    // always be sent inbound in reply to a Read Partition / structured field
-    // specifying Query, or Query List (QCODE List=X'80', / Equivalent, or All)"
-    // (pages.txt:11409-11411). x3270 omits it here; see the note on buildReply.
+    // 10770). ONLY those.
+    //
+    // An earlier version of this test expected a forced Summary, reading p. 6-96's
+    // "QCODE List=X'80'" (pages.txt:11409-11411) as a REQTYP. It is not — it is
+    // SUMMARY'S OWN QCODE, i.e. "when the list names 0x80". The manual repeats the
+    // same boilerplate per unit with that unit's code: the Null reply reads
+    // `QCODE List=X'FF'` (pages.txt:10745-10746) and Begin/End of File
+    // `QCODE List=X'9F'` (pages.txt:8801-8802). x3270 agrees and sends only what
+    // was listed (Common/sf.c:268-277).
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
       DEFAULT_CAPABILITIES, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
-    // Implicit Partition was not asked for and must not appear. Spelled out
-    // because the assertion above would also pass if the order merely differed.
+    expect(qcodesOf(reply)).toEqual([Qcode.USABLE_AREA]);
+    expect(qcodesOf(reply)).not.toContain(Qcode.SUMMARY);
     expect(qcodesOf(reply)).not.toContain(Qcode.IMPLICIT_PARTITION);
   });
 
@@ -316,19 +320,22 @@ describe('Query List selection', () => {
     // to decide what to ask for NEXT. x3270 agrees: do_qr_summary loops its whole
     // reply table (sf.c:699-708) with no reference to the request.
     //
-    // So a one-unit request still advertises all three.
+    // So a two-unit request whose Summary IS asked for still advertises all three.
+    // (Summary has to be requested: we no longer force it in unasked — see the
+    // QCODE-List test above for why that was wrong.)
     const reply = buildReply(
-      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST,
+        qcodes: [Qcode.SUMMARY, Qcode.USABLE_AREA] },
       DEFAULT_CAPABILITIES, GEOMETRY);
     const summaryUnit = units(reply)[0]!;
     expect(summaryUnit[3]).toBe(Qcode.SUMMARY);
     expect(Array.from(summaryUnit.subarray(4))).toEqual(ALL_THREE);
   });
 
-  it('does not send Summary twice when the list names it', () => {
-    // The always-send rule must not become a duplicate-reply violation: "the
-    // 3270 device or / workstation does not return duplicate Query Replies"
-    // (pages.txt:8542-8544).
+  it('sends Summary exactly once when the list names it', () => {
+    // "the 3270 device or / workstation does not return duplicate Query Replies"
+    // (pages.txt:8542-8544). Trivial now that Summary is never force-prepended,
+    // but kept: it is the regression test for reintroducing that behaviour.
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.SUMMARY] },
       DEFAULT_CAPABILITIES, GEOMETRY);
@@ -347,7 +354,7 @@ describe('Query List selection', () => {
         qcodes: [Qcode.USABLE_AREA, Qcode.USABLE_AREA, Qcode.USABLE_AREA],
       },
       DEFAULT_CAPABILITIES, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
+    expect(qcodesOf(reply)).toEqual([Qcode.USABLE_AREA]);
   });
 
   it('ignores unsupported QCODEs in a list that also names a supported one', () => {
@@ -359,7 +366,7 @@ describe('Query List selection', () => {
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x86, Qcode.USABLE_AREA, 0x87] },
       DEFAULT_CAPABILITIES, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
+    expect(qcodesOf(reply)).toEqual([Qcode.USABLE_AREA]);
   });
 
   it('returns the Null Query Reply when it supports nothing requested', () => {
@@ -483,7 +490,10 @@ describe('a capability a plain Query does not return', () => {
   it('is included when a QCODE list names it', () => {
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x9f] }, CAPS, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, 0x9f]);
+    // Only 0x9f: a QCODE-List reply carries exactly what was named, and Summary
+    // was not. See the QCODE-List test above for why an earlier version of this
+    // suite expected a forced Summary here.
+    expect(qcodesOf(reply)).toEqual([0x9f]);
   });
 
   it('is listed in Summary regardless, because Summary reports support', () => {
@@ -498,24 +508,8 @@ describe('a capability a plain Query does not return', () => {
   });
 });
 
-describe('the Summary forced into a QCODE-List reply', () => {
-  it("uses the caller's own Summary capability, not a substituted one", () => {
-    // selectCapabilities prepends Summary to a QCODE-List reply that did not
-    // name it. It must prepend the Summary from the CALLER'S list: substituting
-    // this module's private one would silently discard a caller's definition and
-    // emit a unit it never asked for. Distinguishable only by content, so this
-    // Summary carries a recognisable marker body instead of a QCODE list.
-    const marked: Capability = {
-      qcode: Qcode.SUMMARY,
-      returnedForQuery: true,
-      params: () => [0xde, 0xad],
-    };
-    const caps = [marked, ...DEFAULT_CAPABILITIES.filter((c) => c.qcode !== Qcode.SUMMARY)];
-    const reply = buildReply(
-      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
-      caps, GEOMETRY);
-    // 88, then L L 81 80 de ad — the marker survives, so it was not replaced.
-    expect(Array.from(reply.subarray(0, 7)))
-      .toEqual([AID.SF, 0x00, 0x06, Sfid.QUERY_REPLY, Qcode.SUMMARY, 0xde, 0xad]);
-  });
-});
+// REMOVED: a describe block asserting that a QCODE-List reply prepends the
+// CALLER'S Summary capability rather than this module's. That behaviour is gone —
+// Summary is no longer forced into a QCODE-List reply at all, because p. 6-96's
+// "QCODE List=X'80'" is Summary's own QCODE and not a REQTYP. Nothing replaced it:
+// there is no longer a substitution to get wrong.

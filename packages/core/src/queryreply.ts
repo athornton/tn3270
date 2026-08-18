@@ -524,18 +524,30 @@ export function selectCapabilities(
       // host is required to read that way. Emit nothing else alongside it
       // either: the unit's whole purpose is to be a bare four-byte negative.
       if (chosen.length === 0) return [nullReply];
-      // Summary forced to the front for the reason documented above. Prepended
-      // rather than push-then-sort so its position matches every other path,
-      // and guarded so a list that DID name 0x80 does not get it twice — which
-      // would be a real duplicate-reply violation.
+      // RETURN EXACTLY WHAT WAS ASKED FOR. No forced Summary.
       //
-      // The Summary taken from `capabilities` when it has one, falling back to
-      // this module's: a caller supplying its own Summary entry (the tests do
-      // supply custom capability lists) must get ITS unit, not a second
-      // definition silently substituted for it.
-      if (chosen.some((c) => c.qcode === Qcode.SUMMARY)) return chosen;
-      const theirSummary = capabilities.find((c) => c.qcode === Qcode.SUMMARY);
-      return [theirSummary ?? summary, ...chosen];
+      // An earlier version of this function prepended Summary unconditionally,
+      // reading p. 6-96's "The Summary Query Reply must always be sent inbound in
+      // reply to a Read / Partition structured field specifying Query, or Query
+      // List (QCODE List=X'80', / Equivalent, or All)" (pages.txt:11409-11411) as
+      // "always, whatever the list says". **That reading was wrong.**
+      //
+      // `X'80'` there is SUMMARY'S OWN QCODE, not a REQTYP value, so the sentence
+      // means "when the QCODE list names 0x80". The manual uses the identical
+      // boilerplate for every unit with that unit's code substituted — the Null
+      // reply says `QCODE List=X'FF'` (pages.txt:10745-10746) and Begin/End of
+      // File says `QCODE List=X'9F'` (pages.txt:8801-8802). Reading 0x80 as a
+      // request type would force those to mean something incoherent.
+      //
+      // The tell was internal: the `chosen.length === 0` branch above already
+      // reads `X'FF'` correctly as a QCODE, and this branch then read `X'80'` the
+      // other way, thirty lines apart in the same function.
+      //
+      // x3270 gets this right and we now match it: its QCODE-List arm emits only
+      // codes found in the host's list, `if (memchr(&buf[6], replies[i].code,
+      // buflen-6))`, then the Null reply if none matched (Common/sf.c:268-277).
+      // Forcing Summary in would send a unit the host did not ask for.
+      return chosen;
     }
 
     default:

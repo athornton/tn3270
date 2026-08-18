@@ -472,9 +472,30 @@ would have corrupted data silently.
 Query List support is implemented and verified offline (see the stage 2a spec, whose
 "Query List out of scope" entry is now superseded). Independently confirmed against
 the built API: REQTYP=ALL and Equivalent both produce byte-identical output to a plain
-Query (48 bytes), a QCODE-List for `0x81` returns 31 bytes with Summary still
-advertising all three units, and a list naming only unsupported QCODEs returns exactly
-`88 00 04 81 ff` — the Null Query Reply.
+Query (48 bytes), a QCODE-List for `0x81` returns **24 bytes — that unit alone** — and a
+list naming only unsupported QCODEs returns exactly `88 00 04 81 ff`, the Null Query
+Reply.
+
+**One conformance defect was found and fixed after the first commit** (`cd7e887`, fixed
+in the follow-up). The first cut prepended Summary to *every* QCODE-List reply, reading
+p. 6-96's "must always be sent inbound in reply to a Read Partition structured field
+specifying Query, or Query List (QCODE List=X'80', Equivalent, or All)"
+(`pages.txt:11409-11411`) as "always, whatever the list says".
+
+**`X'80'` there is Summary's OWN QCODE, not a REQTYP** — the sentence means "when the
+list names 0x80". The manual repeats that boilerplate per unit with the unit's own code
+substituted: the Null reply reads `QCODE List=X'FF'` (`pages.txt:10745-10746`),
+Begin/End of File `QCODE List=X'9F'` (`:8801-8802`). Reading 0x80 as a request type
+would make those incoherent. x3270 has it right — its QCODE-List arm emits only codes
+found in the host's list (`Common/sf.c:268-277`) — and we now match it, so a subset
+reply no longer sends a unit the host never asked for.
+
+**The tell was internal, and worth remembering as a review heuristic:** the same
+function already read `X'FF'` correctly as a QCODE in its Null branch, then read
+`X'80'` the other way thirty lines later. A file that contradicts itself about the same
+boilerplate is a stronger signal than either reading on its own. Six unit tests and one
+session test had been written to assert the wrong behaviour and were corrected; one
+describe block testing a now-nonexistent code path was deleted rather than adapted.
 
 **But a live VM/CMS transfer still fails, and NOT for the Query List reason.** Two
 attempts, 2026-08-18:
