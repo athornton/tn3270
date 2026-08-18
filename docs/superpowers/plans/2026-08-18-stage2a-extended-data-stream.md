@@ -20,7 +20,11 @@
 
 **The project's standing rule, which this plan depends on:** verify every wire constant against `~/3270/ref/pages.txt` (greppable text of GA23-0059) or x3270's source at `~/src/suite3270-4.5/`, never from memory and never by copying the capture. This rule has already caught two errors in the design phase — an OCR-mangled attribute type, and a missing pair of reserved flag bytes. If a byte in this plan disagrees with the manual, **the manual wins and the plan is wrong**; say so rather than making the test match the plan.
 
-**Do not change the default terminal type.** It stays `IBM-3278-2` so the committed VM/370 conformance goldens keep passing. The TSO run passes `-model 3278-2-E` explicitly.
+**Do not change the default terminal type.** It stays `IBM-3278-2`; the TSO run passes `-model 3278-2-E` explicitly.
+
+**But note WHY, because an earlier draft of this plan gave the wrong reason.** It said the committed VM/370 conformance goldens would stop passing. **They would not** — verified by flipping `TERMINAL_TYPE` to a junk value: `golden.test.ts` and `conformance.test.ts` both still pass, because they replay *recorded bytes* through `session.replay()`, so the live negotiation default never enters the comparison. The only test that catches it is `telnet.test.ts`, which pins the ASCII bytes of the subnegotiation directly.
+
+The constraint is still right — a live re-record would negotiate something different, and `packages/fixtures/x3270/vm370-conformance-model2.trace:14-16` says negotiation is excluded from the comparison by design. But do not trust the goldens to enforce it. This is the `[[check-what-a-comparison-covers]]` trap: a reader who believed the original wording would change the default, see green goldens, and conclude it was safe.
 
 ## File Structure
 
@@ -1463,7 +1467,9 @@ import { TERMINAL_TYPE } from '../src/constants.js';
 
 describe('terminal type resolution', () => {
   it('defaults to IBM-3278-2, unchanged from stage 1', () => {
-    // Must not change: the committed VM/370 conformance goldens negotiate this.
+    // Must not change. NOTE the goldens do NOT enforce this -- they replay
+    // recorded bytes, so the live default never enters the comparison.
+    // telnet.test.ts is what catches a change, by pinning the ASCII bytes.
     expect(resolveTerminalType({})).toBe('IBM-3278-2');
     expect(resolveTerminalType({})).toBe(TERMINAL_TYPE);
   });
@@ -1609,8 +1615,8 @@ Expected: all PASS, 10 new tests.
 git add packages/core/src/termtype.ts packages/core/test/termtype.test.ts packages/core/src/index.ts
 git commit -m "Resolve the terminal type from a model or a raw string
 
-The default stays IBM-3278-2 so the VM/370 conformance goldens keep
-negotiating what they recorded. The model table lists only sizes we can
+The default stays IBM-3278-2. The goldens do NOT enforce this (they replay
+recorded bytes); telnet.test.ts does, by pinning the subnegotiation bytes. The model table lists only sizes we can
 honestly claim while the screen is pinned at 24x80."
 ```
 
@@ -1670,7 +1676,8 @@ describe('terminal type negotiation', () => {
   });
 
   it('negotiates IBM-3278-2 when no terminal type is given', async () => {
-    // Must not change: the committed VM/370 conformance goldens recorded this.
+    // Must not change. The goldens do NOT enforce this -- they replay recorded
+    // bytes; this assertion and telnet.test.ts are the real enforcement.
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
     conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);

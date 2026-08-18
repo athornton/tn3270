@@ -16,7 +16,7 @@ diagnosis once already. TN3270E is stage 2b and TSO needs none of it.
 In scope:
 
 1. **Configurable terminal type.** The **default stays `IBM-3278-2`** so the existing
-   VM/370 conformance runs and their committed goldens keep passing unchanged; the TSO
+   VM/370 conformance runs keep negotiating what they recorded; the TSO
    run passes `-model 3278-2-E` explicitly. Changing the default is a separate
    decision, deliberately not taken here.
 2. **Answer Read Partition (Query)** with three Query Reply units: Summary (0x80),
