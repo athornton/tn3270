@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildQueryReply, DEFAULT_CAPABILITIES, type Capability } from '../src/queryreply.js';
-import { AID, Qcode, Sfid } from '../src/constants.js';
+import {
+  buildQueryReply, buildNullQueryReply, buildReply, DEFAULT_CAPABILITIES,
+  type Capability,
+} from '../src/queryreply.js';
+import { AID, Qcode, ReqTyp, Sfid } from '../src/constants.js';
 
 const GEOMETRY = { rows: 24, cols: 80 };
 
@@ -83,7 +86,7 @@ describe('query reply', () => {
     // Verified: replacing summary.params with () => [0x80, 0x81, 0xa6] left all
     // nine tests green. Growing the list is what distinguishes the two: a
     // hardcoded Summary cannot mention a capability it was not written with.
-    const extra: Capability = { qcode: 0x86, params: () => [] };
+    const extra: Capability = { qcode: 0x86, returnedForQuery: true, params: () => [] };
     const grown = units(buildQueryReply([...DEFAULT_CAPABILITIES, extra], GEOMETRY));
     expect(Array.from(grown[0]!.subarray(4))).toEqual([
       Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION, 0x86,
@@ -226,5 +229,293 @@ describe('query reply', () => {
       expect(Array.from(ours), `unit 0x${qcode.toString(16)} differs from x3270`)
         .toEqual(Array.from(byQcode.get(qcode)!));
     }
+  });
+});
+
+/**
+ * REQTYP selection, GA23-0059 p. 6-20 and p. 5-52.
+ *
+ * These assert on QCODES, not on unit bytes: the bytes of each unit are already
+ * covered above and by the x3270 comparison, and what is under test here is
+ * WHICH units are chosen.
+ */
+describe('Query List selection', () => {
+  /** The QCODEs of a reply, in order, so a selection is one assertion. */
+  function qcodesOf(reply: Uint8Array): number[] {
+    return units(reply).map((u) => u[3]!);
+  }
+
+  const ALL_THREE = [Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION];
+
+  it('answers the real VM/370 MECAFF request with all three units', () => {
+    // THE CASE THAT UNBLOCKS VM/CMS FILE TRANSFER. Captured live:
+    // 00 07 01 ff 03 80 00 — REQTYP 0x80 = B'10' All, with a one-byte QCODE
+    // list [0x00]. Built here from the same values the parser produces for those
+    // bytes; the byte-level parse is asserted in sf.test.ts.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [0x00] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual(ALL_THREE);
+    // And it is a well-formed record, not just a right-shaped list: same AID as
+    // every other reply.
+    expect(reply[0]).toBe(AID.SF);
+  });
+
+  it('ignores the QCODE list under REQTYP=All', () => {
+    // "The Query List = All can contain a / QCODE list. However, the QCODE list
+    // is ignored" (pages.txt:8554-8557); p. 5-52 puts it as "the All flag
+    // overrides the list" (pages.txt:6388-6389).
+    //
+    // The list here asks for Color and Highlighting, which we do NOT support, so
+    // an implementation that intersected instead of ignoring would return the
+    // Null Query Reply. That makes this a real discrimination, not a tautology:
+    // measured against a deliberately-intersecting selectCapabilities, this
+    // yields [0xff].
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [0x86, 0x87] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual(ALL_THREE);
+  });
+
+  it('returns the plain-Query set for REQTYP=Equivalent', () => {
+    // "Requests the 3270 device or workstation to return / the same Query
+    // Replies that would be returned in reply to a Query" (pages.txt:8545-
+    // 8547). Asserted as EQUAL TO the plain-Query reply rather than against a
+    // written-out list, so the two cannot drift apart.
+    const equivalent = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.EQUIVALENT, qcodes: [] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    const plain = buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(Array.from(equivalent)).toEqual(Array.from(plain));
+  });
+
+  it('returns only the listed units for REQTYP=QCODE List, plus Summary', () => {
+    // "the 3270 data stream device or / workstation returns all the requested
+    // Query / Replies (QCODES listed) that are supported" (pages.txt:10768-
+    // 10770). Summary rides along unlisted because p. 6-96 requires it: "must
+    // always be sent inbound in reply to a Read Partition / structured field
+    // specifying Query, or Query List (QCODE List=X'80', / Equivalent, or All)"
+    // (pages.txt:11409-11411). x3270 omits it here; see the note on buildReply.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
+    // Implicit Partition was not asked for and must not appear. Spelled out
+    // because the assertion above would also pass if the order merely differed.
+    expect(qcodesOf(reply)).not.toContain(Qcode.IMPLICIT_PARTITION);
+  });
+
+  it('keeps Summary listing every capability, not just the units sent', () => {
+    // THE POINT THIS PROJECT'S BRIEF FOR THIS WORK GOT WRONG, so it is asserted
+    // rather than assumed. p. 6-20: "The Summary Query Reply provides / a list
+    // of the QCODEs of all the Query Replies supported by the 3270 data stream /
+    // device or workstation." (pages.txt:8570-8572) — supported, not sent. The
+    // reason is the sentence after: Summary is "the only / indication of support
+    // of functions where the associated Query Reply is returned in / reply to a
+    // Query List = QCODE List or All" (pages.txt:8574-8576), so a host walks it
+    // to decide what to ask for NEXT. x3270 agrees: do_qr_summary loops its whole
+    // reply table (sf.c:699-708) with no reference to the request.
+    //
+    // So a one-unit request still advertises all three.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    const summaryUnit = units(reply)[0]!;
+    expect(summaryUnit[3]).toBe(Qcode.SUMMARY);
+    expect(Array.from(summaryUnit.subarray(4))).toEqual(ALL_THREE);
+  });
+
+  it('does not send Summary twice when the list names it', () => {
+    // The always-send rule must not become a duplicate-reply violation: "the
+    // 3270 device or / workstation does not return duplicate Query Replies"
+    // (pages.txt:8542-8544).
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.SUMMARY] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY]);
+  });
+
+  it('de-duplicates a repeated QCODE', () => {
+    // "It is not invalid for a particular QCODE to appear / more than once in
+    // the list. However, regardless of / how many times it appears, the 3270
+    // device or / workstation does not return duplicate Query / Replies."
+    // (pages.txt:8540-8544.)
+    const reply = buildReply(
+      {
+        kind: 'queryList',
+        reqtyp: ReqTyp.QCODE_LIST,
+        qcodes: [Qcode.USABLE_AREA, Qcode.USABLE_AREA, Qcode.USABLE_AREA],
+      },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
+  });
+
+  it('ignores unsupported QCODEs in a list that also names a supported one', () => {
+    // "All QCODE values in the list are valid. Those QCODEs not supported are /
+    // ignored." (pages.txt:6395-6396.) The manual's own worked example, p. 6-77:
+    // a device supporting A, B, C asked for A, X, Z "does not send the Null Query
+    // Reply. It sends the Query Reply for / feature A only." (pages.txt:10755-
+    // 10757.)
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x86, Qcode.USABLE_AREA, 0x87] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, Qcode.USABLE_AREA]);
+  });
+
+  it('returns the Null Query Reply when it supports nothing requested', () => {
+    // p. 6-77's example 2: "A device supports features A, B, and C. / The host
+    // queries for features X, Y, and Z. / The device sends the Null Query Reply"
+    // (pages.txt:10758-10761). 0x86 is Color and 0x87 Highlighting, neither of
+    // which we advertise.
+    //
+    // BYTE-EXACT, because the whole unit is four bytes and every one is fixed by
+    // p. 6-77's table (pages.txt:10768-10771): L=X'0004', SFID=X'81',
+    // QCODE=X'FF'. The leading 0x88 is the AID that precedes any Query Reply.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x86, 0x87] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(Array.from(reply)).toEqual([AID.SF, 0x00, 0x04, Sfid.QUERY_REPLY, 0xff]);
+    // NOT a lone Summary. Summary alone would also carry "none of what you
+    // asked", but by a form no host must read that way, and p. 6-77 names the
+    // Null reply specifically.
+    expect(qcodesOf(reply)).toEqual([Qcode.NULL]);
+  });
+
+  it('returns the Null Query Reply for an empty QCODE list', () => {
+    // p. 5-52: "If the value / is B'00' but no list is present (count field is
+    // valid), a Null Query Reply is / returned." (pages.txt:6377-6379.) x3270
+    // short-circuits the same case at sf.c:258-262, `if (buflen < 7) ...
+    // do_query_reply(QR_NULL)`.
+    //
+    // Note this is NOT the same as "send everything", which a permissive reading
+    // of "the only Query Replies being requested are those specified" might
+    // suggest. An empty list requests nothing, and nothing is supported of it.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [] },
+      DEFAULT_CAPABILITIES, GEOMETRY);
+    expect(Array.from(reply)).toEqual([AID.SF, 0x00, 0x04, Sfid.QUERY_REPLY, 0xff]);
+  });
+
+  it('builds the same Null reply through the standalone helper', () => {
+    // buildNullQueryReply exists for callers that have already decided; it must
+    // not be a second, drifting copy of the framing.
+    expect(Array.from(buildNullQueryReply(GEOMETRY)))
+      .toEqual(Array.from(buildReply(
+        { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [] },
+        DEFAULT_CAPABILITIES, GEOMETRY)));
+  });
+
+  it('throws on the reserved REQTYP rather than inventing a reply', () => {
+    // p. 5-51 (pages.txt:6361): "B'11' Reserved". x3270 returns PDS_BAD_CMD
+    // (sf.c:301-303). Unreachable from a live session — stream/sf.ts screens it
+    // before it becomes an sfReply — so this asserts the assertion.
+    expect(() => buildReply(
+      { kind: 'queryList', reqtyp: 0xc0, qcodes: [] }, DEFAULT_CAPABILITIES, GEOMETRY))
+      .toThrow(RangeError);
+  });
+});
+
+/**
+ * The Table 6-1 "Query" column, which distinguishes Equivalent from All.
+ *
+ * Every capability we ship today is Query-returnable, so these two request types
+ * produce identical output and no test using DEFAULT_CAPABILITIES can tell them
+ * apart. That is a fact about our current three units, not about the protocol —
+ * Table 6-1 has genuine "No" rows, e.g. "Begin/End of File No X'9F' No Yes"
+ * (pages.txt:8587) and "Graphic Symbol Sets No X'B6' No Yes" (pages.txt:8604).
+ *
+ * So these tests inject a synthetic non-Query-returnable capability. Without
+ * them, deleting the returnedForQuery filter from selectCapabilities would leave
+ * the whole suite green while silently breaking Equivalent for the first such
+ * capability anyone adds — which is precisely the regression the filter exists
+ * to prevent, and the reason it is written now rather than later.
+ */
+describe('a capability a plain Query does not return', () => {
+  /** Stands in for Begin/End of File (0x9F), "No ... No Yes" in Table 6-1. */
+  const allOnly: Capability = {
+    qcode: 0x9f,
+    returnedForQuery: false,
+    params: () => [],
+  };
+  const CAPS = [...DEFAULT_CAPABILITIES, allOnly];
+  const qcodesOf = (reply: Uint8Array): number[] => {
+    const out: number[] = [];
+    let i = 1;
+    while (i < reply.length) {
+      const len = (reply[i]! << 8) | reply[i + 1]!;
+      out.push(reply[i + 3]!);
+      i += len;
+    }
+    return out;
+  };
+
+  it('is omitted from a plain Query', () => {
+    expect(qcodesOf(buildReply({ kind: 'query' }, CAPS, GEOMETRY))).not.toContain(0x9f);
+  });
+
+  it('is omitted from an Equivalent with no list', () => {
+    // The regression this file exists for: Equivalent means "what a Query would
+    // return", so a No row must stay out even though All would include it.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.EQUIVALENT, qcodes: [] }, CAPS, GEOMETRY);
+    expect(qcodesOf(reply)).not.toContain(0x9f);
+  });
+
+  it('is included in an Equivalent that names it, since the list adds to the set', () => {
+    // p. 5-52: Equivalent sends the Query set "in addition to / those QCODEs (if
+    // any) that are specified in the QCODE list" (pages.txt:6381-6382).
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.EQUIVALENT, qcodes: [0x9f] }, CAPS, GEOMETRY);
+    expect(qcodesOf(reply)).toContain(0x9f);
+    // ...and still carries the Query set alongside it, which is the "equivalent
+    // PLUS list" half of the rule.
+    expect(qcodesOf(reply)).toContain(Qcode.USABLE_AREA);
+  });
+
+  it('is included in All', () => {
+    // Table 6-1's third column is "Yes" for every row, including the No ones:
+    // All means all supported.
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [] }, CAPS, GEOMETRY);
+    expect(qcodesOf(reply)).toContain(0x9f);
+  });
+
+  it('is included when a QCODE list names it', () => {
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x9f] }, CAPS, GEOMETRY);
+    expect(qcodesOf(reply)).toEqual([Qcode.SUMMARY, 0x9f]);
+  });
+
+  it('is listed in Summary regardless, because Summary reports support', () => {
+    // p. 6-20 is explicit that this is Summary's job: it is "the only /
+    // indication of support of functions where the associated Query Reply is
+    // returned in / reply to a Query List = QCODE List or All"
+    // (pages.txt:8574-8576). A capability returned ONLY for All is exactly that
+    // case, so omitting it from Summary would make it undiscoverable.
+    const reply = buildReply({ kind: 'query' }, CAPS, GEOMETRY);
+    const summaryBody = reply.subarray(5, 5 + 4);
+    expect(Array.from(summaryBody)).toContain(0x9f);
+  });
+});
+
+describe('the Summary forced into a QCODE-List reply', () => {
+  it("uses the caller's own Summary capability, not a substituted one", () => {
+    // selectCapabilities prepends Summary to a QCODE-List reply that did not
+    // name it. It must prepend the Summary from the CALLER'S list: substituting
+    // this module's private one would silently discard a caller's definition and
+    // emit a unit it never asked for. Distinguishable only by content, so this
+    // Summary carries a recognisable marker body instead of a QCODE list.
+    const marked: Capability = {
+      qcode: Qcode.SUMMARY,
+      returnedForQuery: true,
+      params: () => [0xde, 0xad],
+    };
+    const caps = [marked, ...DEFAULT_CAPABILITIES.filter((c) => c.qcode !== Qcode.SUMMARY)];
+    const reply = buildReply(
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.USABLE_AREA] },
+      caps, GEOMETRY);
+    // 88, then L L 81 80 de ad — the marker survives, so it was not replaced.
+    expect(Array.from(reply.subarray(0, 7)))
+      .toEqual([AID.SF, 0x00, 0x06, Sfid.QUERY_REPLY, Qcode.SUMMARY, 0xde, 0xad]);
   });
 });

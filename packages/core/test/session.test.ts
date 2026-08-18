@@ -410,14 +410,138 @@ describe('query reply', () => {
     expect(session.oia.isInhibited()).toBe(false);
   });
 
-  it('does not answer a Query List, which we do not implement', async () => {
+  /**
+   * The Query List MECAFF sends, in wire form.
+   *
+   * 00 07 01 ff 03 80 00 with the PID's 0xFF DOUBLED, for the reason spelled out
+   * on QUERY above: a single 0xFF reaching the telnet state machine is read as
+   * IAC and eats the following byte. The REQTYP 0x80 and QCODE 0x00 need no
+   * doubling.
+   *
+   * Note L stays 7 — it counts RECORD bytes, not wire bytes, so the doubled IAC
+   * does not change it. Getting that wrong yields a field one byte short of its
+   * REQTYP and a program check instead of a reply.
+   */
+  const QUERY_LIST_ALL = [
+    SnaCmd.WSF, 0x00, 0x07, 0x01, T.IAC, T.IAC, 0x03, 0x80, 0x00,
+  ] as const;
+
+  it('answers the real VM/370 Query List with a full Query Reply', async () => {
+    // THE TEST THAT MATTERS FOR VM/CMS FILE TRANSFER. MECAFF's IND$FILE sends
+    // this and waits; while Query List went unanswered, transfer hung forever.
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
     conn.negotiate();
     conn.sent.length = 0;
-    // PID 0xff doubled, as in QUERY above; only the TYPE differs.
+    conn.host(...QUERY_LIST_ALL, T.IAC, T.EOR);
+    const reply = lastRecord(conn);
+    expect(reply[0]).toBe(AID.SF);
+    expect(reply[3]).toBe(Sfid.QUERY_REPLY);
+    expect(reply[4]).toBe(Qcode.SUMMARY);
+    // REQTYP=All, so all three units. Asserted as EQUAL to what a plain Query
+    // produces, which is the strongest available statement for our current
+    // capability list and which would catch a filter accidentally applied here.
+    conn.sent.length = 0;
+    conn.host(...QUERY, T.IAC, T.EOR);
+    expect(reply).toEqual(lastRecord(conn));
+  });
+
+  it('answers a QCODE List for one unit with that unit and Summary', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    // L=7: REQTYP 0x00 (QCODE List) then QCODE 0x81 (Usable Area).
+    conn.host(
+      SnaCmd.WSF, 0x00, 0x07, 0x01, T.IAC, T.IAC, 0x03, 0x00, 0x81, T.IAC, T.EOR);
+    const reply = lastRecord(conn);
+    // Summary (7 bytes: L L SFID QCODE + three QCODEs) then Usable Area.
+    expect(reply[4]).toBe(Qcode.SUMMARY);
+    expect(reply[1 + 7 + 3]).toBe(Qcode.USABLE_AREA);
+    // Two units only: 1 AID + 7 Summary + 23 Usable Area. Implicit Partition was
+    // not requested, so its 17 bytes must be absent.
+    expect(reply).toHaveLength(1 + 7 + 23);
+  });
+
+  it('sends the Null Query Reply when it supports nothing requested', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    // QCODE List asking for Color (0x86) and Highlighting (0x87), neither of
+    // which we advertise. p. 6-77's example 2 (pages.txt:10758-10761).
+    conn.host(
+      SnaCmd.WSF, 0x00, 0x08, 0x01, T.IAC, T.IAC, 0x03, 0x00, 0x86, 0x87,
+      T.IAC, T.EOR);
+    // Byte-exact, INCLUDING the wire doubling: the QCODE 0xFF is content, so
+    // sendRecord doubles it (telnet.ts:82). lastRecord does not un-double, hence
+    // ff ff here for the one 0xff in `88 00 04 81 ff`. That doubling is exactly
+    // what makes this reply survive the transport, and asserting the wire form
+    // proves it happened.
+    expect(conn.sent).toEqual([AID.SF, 0x00, 0x04, Sfid.QUERY_REPLY, 0xff, 0xff, T.IAC, T.EOR]);
+  });
+
+  it('does not answer a Query List against a real partition', async () => {
+    // x3270 rejects this (sf.c:248-251); we count it and stay quiet. PID 0x00 is
+    // not doubled — it is not 0xFF.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    conn.host(SnaCmd.WSF, 0x00, 0x07, 0x01, 0x00, 0x03, 0x80, 0x81, T.IAC, T.EOR);
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it('survives a reserved REQTYP without answering or dropping the session', async () => {
+    // B'11' (0xC0) is "Reserved" (pages.txt:6361). THE REGRESSION THIS GUARDS:
+    // selectCapabilities throws a RangeError on it, and handleRecord rethrows
+    // anything that is not a ParseError/AddressError/ExecuteError as "our own
+    // bug". If the reserved value reached the builder, two bits from a host would
+    // tear the connection down. It is screened in stream/sf.ts instead.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    conn.host(SnaCmd.WSF, 0x00, 0x06, 0x01, T.IAC, T.IAC, 0x03, 0xc0, T.IAC, T.EOR);
+    expect(conn.sent).toHaveLength(0);
+    expect(session.isConnected()).toBe(true);
+    // Not a program check either: an unanswerable field is ignored, not faulted.
+    expect(session.oia.toText()).not.toContain('X PROG');
+  });
+
+  it('does not touch the screen or keyboard when answering a Query List', async () => {
+    // The same rule as the plain-Query test above, which is live-verified: a
+    // Read Partition is a question about the device. p. 5-53's step list
+    // (pages.txt:6413-6427) changes no buffer, and its step 1 raises the
+    // enter-inhibit — so the keyboard must stay LOCKED, not be unlocked by a
+    // record that wrote nothing.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.screen.setChar(0, 0xc1);
+    session.screen.cursor = 5;
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    conn.host(...QUERY_LIST_ALL, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
+    expect(session.screen.cursor).toBe(5);
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    expect(session.oia.isInhibited()).toBe(true);
+  });
+
+  it('rejects a Query List with no REQTYP as a program check, keeping the connection', async () => {
+    // L=5 ends after TYPE, so byte 5 is missing. x3270 calls this "error: missing
+    // request type" (sf.c:252-255). This was a VALID no-op input before Query
+    // List was implemented; it is now a malformed record, and the session must
+    // fault it rather than guess REQTYP=B'00' (which would answer with a Null
+    // Query Reply — a positive-looking "we support nothing").
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
     conn.host(SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x03, T.IAC, T.EOR);
     expect(conn.sent).toHaveLength(0);
+    expect(session.oia.toText()).toContain('X PROG');
+    expect(session.isConnected()).toBe(true);
   });
 
   it('does not answer a Read Partition against a real partition', async () => {

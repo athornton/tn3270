@@ -354,3 +354,66 @@ describe('structured fields and no-op', () => {
     expect(s.cellAt(0).ebcdic).toBe(0xc1);
   });
 });
+
+describe('Read Partition classification', () => {
+  it('reports a plain Query as a query request', () => {
+    // The MVS/TSO path, live-verified. L=5 covers 00 05 01 ff 02, and the field
+    // ends after TYPE (p. 5-52, pages.txt:6371).
+    const r = run(new Screen(), SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02);
+    expect(r.sfReply).toEqual({ kind: 'query' });
+    expect(r.structuredFieldsIgnored).toBe(0);
+  });
+
+  it('reports the real VM/370 Query List with its REQTYP and QCODE list', () => {
+    // 00 07 01 ff 03 80 00 as captured from MECAFF. Before this work the same
+    // bytes fell into structuredFieldsIgnored and file transfer on VM/CMS hung
+    // waiting for a reply that never came.
+    const r = run(new Screen(), SnaCmd.WSF, 0x00, 0x07, 0x01, 0xff, 0x03, 0x80, 0x00);
+    expect(r.sfReply).toEqual({ kind: 'queryList', reqtyp: 0x80, qcodes: [0x00] });
+    expect(r.structuredFieldsIgnored).toBe(0);
+  });
+
+  it('carries an empty QCODE list through rather than dropping the field', () => {
+    // L=6, so no bytes 6-n. This must reach the session as a request, because an
+    // empty list under REQTYP=B'00' means "send the Null Query Reply" (p. 5-52,
+    // pages.txt:6377-6379) — a reply, not silence.
+    const r = run(new Screen(), SnaCmd.WSF, 0x00, 0x06, 0x01, 0xff, 0x03, 0x00);
+    expect(r.sfReply).toEqual({ kind: 'queryList', reqtyp: 0x00, qcodes: [] });
+  });
+
+  it('ignores a Query List against a real partition', () => {
+    // x3270 rejects this outright (sf.c:248-251); we count and trace it. PID 0x00
+    // is a read of partition zero, and we support no partitions.
+    const r = run(new Screen(), SnaCmd.WSF, 0x00, 0x07, 0x01, 0x00, 0x03, 0x80, 0x81);
+    expect(r.sfReply).toBeUndefined();
+    expect(r.structuredFieldsIgnored).toBe(1);
+  });
+
+  it('ignores the reserved REQTYP instead of letting it reach the builder', () => {
+    // B'11' (0xC0) is "Reserved" (pages.txt:6361). selectCapabilities throws a
+    // RangeError on it, and session.ts rethrows non-protocol errors as our own
+    // bug — which would drop the connection. So it must be filtered here.
+    const r = run(new Screen(), SnaCmd.WSF, 0x00, 0x06, 0x01, 0xff, 0x03, 0xc0);
+    expect(r.sfReply).toBeUndefined();
+    expect(r.structuredFieldsIgnored).toBe(1);
+  });
+
+  it('does not touch the screen for either query type', () => {
+    // A Read Partition is a question about the device, not a write to it — none
+    // of p. 5-53's seven steps changes the buffer (pages.txt:6413-6427).
+    for (const bytes of [
+      [SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02],
+      [SnaCmd.WSF, 0x00, 0x07, 0x01, 0xff, 0x03, 0x80, 0x00],
+    ]) {
+      const s = new Screen();
+      s.setChar(0, 0xc1);
+      s.cursor = 7;
+      const r = run(s, ...bytes);
+      expect(s.cellAt(0).ebcdic).toBe(0xc1);
+      expect(s.cursor).toBe(7);
+      // And it is not mistaken for a write that would unlock the keyboard.
+      expect(r.releasesEnterInhibit).toBe(false);
+      expect(r.keyboardRestore).toBe(false);
+    }
+  });
+});

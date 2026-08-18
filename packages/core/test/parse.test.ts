@@ -284,6 +284,32 @@ describe('describeRecord', () => {
     ))).toBe('WriteStructuredField ReadPartition(pid=0x00,type=0x02) unknownSF(0x40,1B)');
   });
 
+  it('renders a Query List with its REQTYP and QCODE list', () => {
+    // The real VM/370 MECAFF request. Without REQTYP and the list in the trace,
+    // "asked for everything" and "asked for one unit we lack" would look
+    // identical while producing very different replies. x3270 traces the same
+    // (sf.c:256-267).
+    expect(describeRecord(Uint8Array.of(
+      SnaCmd.WSF, 0x00, 0x07, 0x01, 0xff, 0x03, 0x80, 0x00,
+    ))).toBe('WriteStructuredField ReadPartition(pid=0xff,type=0x03,reqtyp=0x80,qcodes=[0x00])');
+  });
+
+  it('renders an empty QCODE list as empty brackets, not a bare label', () => {
+    // An absent list is the Null Query Reply trigger (p. 5-52), a meaningful
+    // state, so it must be visibly empty rather than look like a formatting bug.
+    expect(describeRecord(Uint8Array.of(
+      SnaCmd.WSF, 0x00, 0x06, 0x01, 0xff, 0x03, 0x00,
+    ))).toBe('WriteStructuredField ReadPartition(pid=0xff,type=0x03,reqtyp=0x00,qcodes=[])');
+  });
+
+  it('omits the Query List fields from a plain Query', () => {
+    // The live-verified MVS path renders as it always did — no empty reqtyp= or
+    // qcodes=[] appended to a request that carries neither.
+    expect(describeRecord(Uint8Array.of(
+      SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02,
+    ))).toBe('WriteStructuredField ReadPartition(pid=0xff,type=0x02)');
+  });
+
   it('does not render an unknown structured field the way it renders a SF order', () => {
     // Both used to start "SF(", so one grep over a trace returned both.
     const order = describeRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SF, FA.PROTECT));

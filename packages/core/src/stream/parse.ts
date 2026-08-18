@@ -319,12 +319,33 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
  */
 function describeStructuredField(f: StructuredField): string {
   switch (f.kind) {
-    case 'readPartition':
+    case 'readPartition': {
       // PID is padded like every other hex here: 0x00 is a reachable, meaningful
       // value (a read of partition 0, NOT a query), and "pid=0x0" would read as
       // a truncation bug in the emulator rather than a byte off the wire.
-      return `ReadPartition(pid=0x${f.pid.toString(16).padStart(2, '0')}`
-        + `,type=0x${f.type.toString(16).padStart(2, '0')})`;
+      const base = `pid=0x${f.pid.toString(16).padStart(2, '0')}`
+        + `,type=0x${f.type.toString(16).padStart(2, '0')}`;
+      // REQTYP and the QCODE list are traced when present, because on a Query
+      // List they are what decides the reply — a trace showing only the TYPE
+      // could not distinguish "asked for everything" from "asked for one unit we
+      // do not have", and those produce very different records. x3270 traces the
+      // same information, e.g. `trace_ds("List(")` then each see_qcode
+      // (sf.c:256-267).
+      //
+      // The reqtyp shown is the MASKED value stream/sf.ts recorded, not the raw
+      // byte 5, so a host setting reserved bits 2-7 will show its reqtyp here
+      // without them. That is the value we acted on, which is what a trace
+      // should show.
+      if (f.queryList === undefined) return `ReadPartition(${base})`;
+      const qcodes = f.queryList.qcodes
+        .map((q) => `0x${q.toString(16).padStart(2, '0')}`).join(',');
+      return `ReadPartition(${base}`
+        + `,reqtyp=0x${f.queryList.reqtyp.toString(16).padStart(2, '0')}`
+        // Empty is spelled out rather than left as `qcodes=`: an absent list is
+        // the Null Query Reply trigger (p. 5-52), a meaningful state, not a
+        // formatting accident.
+        + `,qcodes=[${qcodes}])`;
+    }
     case 'unknownSf':
       return `unknownSF(0x${f.sfid.toString(16).padStart(2, '0')},${f.data.length}B)`;
   }

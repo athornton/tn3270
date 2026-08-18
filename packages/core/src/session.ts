@@ -7,7 +7,7 @@ import { TelnetLayer } from './telnet.js';
 import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
-import { buildQueryReply, DEFAULT_CAPABILITIES } from './queryreply.js';
+import { buildReply, DEFAULT_CAPABILITIES, type QueryRequest } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 
@@ -235,8 +235,8 @@ export class Session {
       if (result.readRequest !== undefined) {
         this.answerRead(result.readRequest);
       }
-      if (result.sfReply === 'queryReply') {
-        this.answerQuery();
+      if (result.sfReply !== undefined) {
+        this.answerQuery(result.sfReply);
       }
       // The only thing that OBSERVES the SA/MF counters. execute() bumps them
       // per record and nothing sums them, so without a line here a live run
@@ -280,11 +280,14 @@ export class Session {
   }
 
   /**
-   * Answer a Read Partition (Query) with our capabilities, then lock the
-   * keyboard.
+   * Answer a Read Partition (Query or Query List) with our capabilities, then
+   * lock the keyboard.
    *
    * Deliberately does NOT touch the screen or the cursor: a Query is a question
-   * about the device, not a write to it.
+   * about the device, not a write to it. That holds for a Query List too —
+   * p. 5-53's step list (pages.txt:6413-6427) treats the two identically apart
+   * from which replies go inbound, and nowhere among its seven steps is a buffer
+   * change.
    *
    * It DOES touch the keyboard, which is step 1 of Read Partition processing,
    * GA23-0059 p. 5-53 (pages.txt:6413): "1. The enter-inhibit condition is
@@ -316,9 +319,18 @@ export class Session {
    * reached it, and a session whose socket has just vanished is not one to
    * unlock a keyboard over.
    */
-  private answerQuery(): void {
+  private answerQuery(request: QueryRequest): void {
     const geometry = { rows: this.screen.rows, cols: this.screen.cols };
-    this.telnet?.sendRecord(buildQueryReply(DEFAULT_CAPABILITIES, geometry));
+    // buildReply, not buildQueryReply: it applies the REQTYP rules and the
+    // always-send-Summary rule in one place.
+    //
+    // It CAN throw a RangeError, on a reserved REQTYP (B'11'), and handleRecord
+    // does not catch that — it rethrows non-protocol errors as "our own bug",
+    // which drops the connection. A host must not be able to trigger that, so
+    // the reserved value is screened out in stream/sf.ts queryListRequest before
+    // it ever becomes an sfReply. The throw is an unreachable assertion, and
+    // there are tests at both levels pinning that.
+    this.telnet?.sendRecord(buildReply(request, DEFAULT_CAPABILITIES, geometry));
     // enterInhibit, not inhibit(EnterInhibit): it yields to a stronger inhibit
     // already in force. Before the host's first write that is
     // AwaitingFirstWrite — the case TSO produces, since it queries before

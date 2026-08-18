@@ -1,4 +1,4 @@
-import { Sfid, PID_QUERY, ReadPartitionType } from '../constants.js';
+import { Sfid, PID_QUERY, ReadPartitionType, ReqTyp, REQTYP_MASK } from '../constants.js';
 
 /**
  * Structured field framing for the OUTBOUND direction — outbound is the
@@ -26,9 +26,46 @@ export class SfParseError extends Error {
   }
 }
 
+/**
+ * The extra parameters a Query List (TYPE=0x03) carries and a Query does not.
+ *
+ * GA23-0059 p. 5-52 (pages.txt:6371-6373) draws the line: for TYPE "X'02' The
+ * structured field ends after byte 4", while for "X'03' Byte 5 is a flag byte.
+ * Bytes 6-n contain the QCODEs of the / Query Replies being requested." So this
+ * is present for exactly one TYPE, which is why it is a separate optional member
+ * rather than two more always-present numbers on readPartition.
+ */
+export interface QueryListParams {
+  /**
+   * REQTYP, already MASKED to bits 0-1 — compare against ReqTyp, not the raw
+   * byte. See the note on REQTYP_MASK in constants.ts for why we mask where
+   * x3270 does not.
+   */
+  readonly reqtyp: number;
+  /**
+   * QCODEs from byte 6 on, in the order the host sent them. MAY BE EMPTY, and
+   * an empty list is meaningful rather than degenerate: under REQTYP=QCODE List
+   * it selects the Null Query Reply (p. 5-52, pages.txt:6377-6379, "If the value
+   * is B'00' but no list is present (count field is valid), a Null Query Reply
+   * is returned"; x3270 sf.c:258-262 `if (buflen < 7) ... do_query_reply(
+   * QR_NULL)`).
+   *
+   * Duplicates are NOT removed here. They are legal — "It is not invalid for a
+   * particular QCODE to appear / more than once in the list" (pages.txt:8540-
+   * 8541, p. 6-20) — and de-duplication belongs where the reply is built, since
+   * the rule is about the REPLIES ("the 3270 device or / workstation does not
+   * return duplicate Query Replies", pages.txt:8542-8544), not about the
+   * request. Keeping the raw order also keeps the trace faithful.
+   */
+  readonly qcodes: readonly number[];
+}
+
 export type StructuredField =
-  /** Read Partition. We answer TYPE=QUERY with PID=0xFF; see stage 2a spec. */
-  | { kind: 'readPartition'; pid: number; type: number }
+  /**
+   * Read Partition. We answer TYPE=QUERY and TYPE=QUERY_LIST, both with
+   * PID=0xFF; see the stage 2a spec and the Query List work that followed it.
+   */
+  | { kind: 'readPartition'; pid: number; type: number; queryList?: QueryListParams }
   /** Any SFID we do not implement: counted and traced, never fatal. */
   | { kind: 'unknownSf'; sfid: number; data: Uint8Array };
 
@@ -112,10 +149,63 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
           `Read Partition at offset ${i} needs PID and TYPE, got ${params.length} byte(s)`,
         );
       }
-      // PID is RECORDED, not assumed: a non-0xFF value is a read against a real
-      // partition, which we do not support, and the trace must show the
-      // difference rather than silently treating it as a query.
-      fields.push({ kind: 'readPartition', pid: params[0]!, type: params[1]! });
+      const pid = params[0]!;
+      const type = params[1]!;
+
+      // A Query List carries REQTYP at byte 5 and an optional QCODE list from
+      // byte 6. Both live in `params`, which starts at byte 3, so REQTYP is
+      // params[2] and the list is params[3...]. Off-by-three here would read the
+      // PID as a request type.
+      //
+      // MISSING REQTYP IS AN ERROR, not a defaulted zero. x3270 rejects it
+      // explicitly (sf.c:252-255):
+      //
+      //     if (buflen < 6) {
+      //         trace_ds("error: missing request type\n");
+      //         return PDS_BAD_CMD;
+      //     }
+      //
+      // and its buflen counts from byte 0, so `< 6` means "no byte 5" — the same
+      // condition as params.length < 3 here. Defaulting to B'00' would be worse
+      // than rejecting: QCODE List with an absent list means Null Query Reply,
+      // so we would answer a malformed request with a positive-looking "we
+      // support nothing" that the host would believe.
+      //
+      // Note this check does NOT apply to a plain Query. p. 5-52 says TYPE=0x02
+      // "ends after byte 4" (pages.txt:6371), so demanding byte 5 of a Query
+      // would reject the very request MVS/TSO sends and that path is live-
+      // verified. Hence the guard sits inside the QUERY_LIST branch.
+      if (type === ReadPartitionType.QUERY_LIST) {
+        if (params.length < 3) {
+          throw new SfParseError(
+            `Read Partition (Query List) at offset ${i} needs REQTYP at byte 5, `
+            + `got ${params.length + 3} byte(s) of field`,
+          );
+        }
+        fields.push({
+          kind: 'readPartition',
+          pid,
+          type,
+          queryList: {
+            // Masked to bits 0-1 at the PARSE boundary so no consumer has to
+            // remember to. See REQTYP_MASK in constants.ts.
+            reqtyp: params[2]! & REQTYP_MASK,
+            // Array.from, not subarray: a Uint8Array view would alias the
+            // caller's record buffer, and these values outlive the parse in the
+            // ExecuteResult the session acts on.
+            qcodes: Array.from(params.subarray(3)),
+          },
+        });
+      } else {
+        // PID is RECORDED, not assumed: a non-0xFF value is a read against a
+        // real partition, which we do not support, and the trace must show the
+        // difference rather than silently treating it as a query.
+        //
+        // No `queryList` key at all rather than an explicit undefined, which
+        // exactOptionalPropertyTypes rejects and which would also make the
+        // existing toEqual assertions on this shape fail.
+        fields.push({ kind: 'readPartition', pid, type });
+      }
     } else {
       fields.push({ kind: 'unknownSf', sfid, data: Uint8Array.from(params) });
     }
@@ -127,14 +217,75 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
 }
 
 /**
- * True for the one request we answer: a Query against the query PID.
+ * True for a PLAIN Query (TYPE=0x02) against the query PID — and nothing else.
  *
- * Both halves matter. A non-query PID is a read against a real partition, which
- * we do not support, and TYPE 0x03 is a Query List whose subsetting rules we
- * have not implemented — answering either with our capabilities would be wrong.
+ * DELIBERATELY STILL NARROW now that Query List is implemented. This predicate
+ * does not mean "a request we answer"; it means one specific request type, and
+ * the caller distinguishes the two because their replies differ. Widening it to
+ * match TYPE=0x03 would make a Query List take the plain-Query branch and send
+ * the full capability set regardless of REQTYP — the exact bug the subsetting
+ * code exists to avoid, and one that would pass every plain-Query test.
+ * See queryListRequest below for the other half.
+ *
+ * A non-query PID still fails here: it is a read against a real partition, which
+ * we do not support.
  */
 export function isQueryRequest(sf: StructuredField): boolean {
   return sf.kind === 'readPartition'
     && sf.pid === PID_QUERY
     && sf.type === ReadPartitionType.QUERY;
+}
+
+/**
+ * The Query List parameters if this is one we should answer, else undefined.
+ *
+ * Returns the PARAMS rather than a boolean so the caller cannot ask "is it a
+ * Query List?" and then reach for `.queryList` separately, which under
+ * noUncheckedIndexedAccess would need a non-null assertion at every use.
+ *
+ * The PID check is the same rejection x3270 makes, and it is a REJECTION rather
+ * than an ignore — sf.c:248-251:
+ *
+ *     if (partition != 0xff) {
+ *         trace_ds("error: illegal partition\n");
+ *         return PDS_BAD_CMD;
+ *     }
+ *
+ * and the manual lists it among the conditions under which "Read Partition is
+ * rejected": "The operation type is Query or Query List and the PIO is not
+ * X'FF'" (pages.txt:6404; "PIO" is OCR damage for "PID"). Note that covers Query
+ * AND Query List with one clause, so both PID checks come from this one line.
+ *
+ * Undefined for a bad PID rather than throwing, matching isQueryRequest's shape:
+ * whether an unanswerable Read Partition is a counted no-op or a program check
+ * is the executor's policy decision, not this predicate's. See execute.ts.
+ */
+export function queryListRequest(sf: StructuredField): QueryListParams | undefined {
+  if (sf.kind !== 'readPartition') return undefined;
+  if (sf.type !== ReadPartitionType.QUERY_LIST) return undefined;
+  if (sf.pid !== PID_QUERY) return undefined;
+  // Present for every QUERY_LIST the parser emits — it throws when REQTYP is
+  // missing — so this is a type narrowing, not a real branch.
+  if (sf.queryList === undefined) return undefined;
+  // B'11' is "Reserved" (pages.txt:6361) and there is no defined behaviour for
+  // it, so it is not a request we can answer. Screened HERE, at the same place
+  // as the bad-PID case, so the caller's "unanswerable" branch handles both
+  // alike and no invalid REQTYP can reach the reply builder.
+  //
+  // This ordering is load-bearing for session robustness, not just tidiness:
+  // selectCapabilities throws a RangeError on a reserved REQTYP, and
+  // session.ts handleRecord deliberately RETHROWS anything that is not a
+  // ParseError/AddressError/ExecuteError as "our own bug" — which tears the
+  // connection down. A host sending B'11' must not be able to do that. Rejecting
+  // it before it becomes an sfReply keeps that throw as the unreachable
+  // assertion it is meant to be.
+  if (!isKnownReqtyp(sf.queryList.reqtyp)) return undefined;
+  return sf.queryList;
+}
+
+/** Is this one of the three defined REQTYP values? Expects a masked value. */
+function isKnownReqtyp(reqtyp: number): boolean {
+  return reqtyp === ReqTyp.QCODE_LIST
+    || reqtyp === ReqTyp.EQUIVALENT
+    || reqtyp === ReqTyp.ALL;
 }

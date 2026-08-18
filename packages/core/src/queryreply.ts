@@ -1,4 +1,4 @@
-import { AID, Qcode, Sfid } from './constants.js';
+import { AID, Qcode, ReqTyp, Sfid } from './constants.js';
 
 /**
  * Query Reply, the answer to a host's Read Partition (Query).
@@ -20,9 +20,45 @@ export interface ScreenGeometry {
 
 export interface Capability {
   readonly qcode: number;
-  /** Unit body AFTER `L L SFID QCODE` — the builder writes that prefix. */
+  /**
+   * Unit body AFTER `L L SFID QCODE` — the builder writes that prefix.
+   *
+   * `all` is EVERY capability we support, NOT the subset being sent in this
+   * particular reply. Only Summary reads it, and that distinction is the whole
+   * point: see the note on `summary` below.
+   */
   readonly params: (geometry: ScreenGeometry, all: readonly Capability[]) => number[];
+  /**
+   * Does a plain Read Partition (Query) return this unit?
+   *
+   * This is Table 6-1's "Query" column (p. 6-21, pages.txt:8584+), and it is
+   * genuinely per-reply rather than universal: Begin/End of File is "No X'9F'
+   * No Yes" (pages.txt:8587) and Graphic Symbol Sets is "No X'B6' No Yes"
+   * (pages.txt:8604) — returned for All, never for a Query or an Equivalent.
+   *
+   * REQUIRED, not optional-defaulting-to-true, deliberately. All three units we
+   * ship today are "Yes", so a default would be correct for every existing
+   * entry and silently wrong for the first "No" someone adds — and the failure
+   * would be invisible: an Equivalent reply carrying a unit a Query would never
+   * return, which is exactly the regression this field exists to prevent. A
+   * required field makes the author look the row up in Table 6-1 and turns
+   * forgetting into a compile error.
+   */
+  readonly returnedForQuery: boolean;
 }
+
+/**
+ * What the host asked for, distilled from the parsed Read Partition.
+ *
+ * Lives here rather than in stream/sf.ts because the RULES for turning it into
+ * units live here, next to the capability list they filter. stream/sf.ts owns
+ * the bytes; this owns the meaning.
+ */
+export type QueryRequest =
+  /** Read Partition TYPE=0x02. */
+  | { readonly kind: 'query' }
+  /** Read Partition TYPE=0x03. reqtyp is already masked to bits 0-1. */
+  | { readonly kind: 'queryList'; readonly reqtyp: number; readonly qcodes: readonly number[] };
 
 /**
  * Big-endian 16-bit, range-checked.
@@ -73,9 +109,45 @@ const sdp = (id: number, params: number[]): number[] => [2 + params.length, id, 
  * Do not take Summary's QCODE from Table 6-1: that row OCRs as "Summary Yes
  * X'BO' Yes Yes" (pages.txt:8635), and 0xB0 is a real QCODE (Segment) so the
  * damage is not self-evident. See the note on Qcode in constants.ts.
+ *
+ * SUMMARY LISTS EVERYTHING WE SUPPORT, NOT WHAT THIS PARTICULAR REPLY CARRIES.
+ * That is the opposite of what the Query List brief for this work assumed, and
+ * the sources are unambiguous on it — twice over:
+ *
+ *  1. The manual defines the content as total capability, not reply contents:
+ *     "The Summary Query Reply provides / a list of the QCODEs of all the Query
+ *     Replies supported by the 3270 data stream / device or workstation."
+ *     (pages.txt:8570-8572, p. 6-20; emphasis on "all ... supported").
+ *  2. The next sentence gives the REASON, and it is a functional one rather
+ *     than a matter of taste: "The Summary Query Reply provides the host with
+ *     the only / indication of support of functions where the associated Query
+ *     Reply is returned in / reply to a Query List = QCODE List or All."
+ *     (pages.txt:8574-8576.) Summary is how a host discovers what it may ASK
+ *     for next. Narrowing the list to the current reply would make a QCODE-List
+ *     reply advertise a device that supports only what was just requested, and
+ *     a host walking Summary to plan a second request would never learn about
+ *     the rest.
+ *
+ * x3270 agrees and does not vary by request: do_qr_summary loops the whole
+ * reply table (sf.c:699-708), `for (i = 0; i < NSR; i++) ... *obptr++ =
+ * replies[i].code`, with no reference to the QCODE list that selected it. So a
+ * QCODE-List request for just 0x81 gets an x3270 Summary listing all eleven.
+ *
+ * This is why Capability.params receives `all` — the full support list — and
+ * not the subset being sent. Do NOT "fix" that to the subset: it would look
+ * more self-consistent and would be wrong.
+ *
+ * SUMMARY IS ALSO ALWAYS SENT, whatever the request. p. 6-96 states it as an
+ * unconditional rule: "The Summary Query Reply must always be sent inbound in
+ * reply to a Read Partition / structured field specifying Query, or Query List
+ * (QCODE List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) Note that
+ * covers QCODE List, so a list naming only 0x81 still gets Summary. buildReply
+ * enforces this; see the note there, which is also where x3270's narrower
+ * behaviour is recorded.
  */
 const summary: Capability = {
   qcode: Qcode.SUMMARY,
+  returnedForQuery: true, // Table 6-1: "Summary Yes ... Yes Yes" (pages.txt:8635)
   params: (_geometry, all) => all.map((c) => c.qcode),
 };
 
@@ -106,6 +178,9 @@ const summary: Capability = {
  */
 const usableArea: Capability = {
   qcode: Qcode.USABLE_AREA,
+  // Table 6-1: "Usable Area Yes X'81' Yes Yes" (pages.txt:8638) — that row is
+  // OCR-clean, unlike Summary's.
+  returnedForQuery: true,
   params: (geometry) => [
     // FLAGS byte 4. Bits 4-7 are ADDR; X'1' = "12/14-bit addressing allowed"
     // (pages.txt:11601). PP, HC and the reserved bits are all zero: we are a
@@ -199,6 +274,8 @@ const usableArea: Capability = {
  */
 const implicitPartition: Capability = {
   qcode: Qcode.IMPLICIT_PARTITION,
+  // Table 6-1: "Implicit Partition Yes X'A6' Yes Yes" (pages.txt:8608).
+  returnedForQuery: true,
   params: (geometry) => [
     0x00, 0x00, // base bytes 4-5 FLAGS: reserved, X'0000'
     // SDPID X'01', then FLAGS and the four sizes. L comes out as X'0B' — the
@@ -236,6 +313,22 @@ export const DEFAULT_CAPABILITIES: readonly Capability[] = [
 export function buildQueryReply(
   capabilities: readonly Capability[],
   geometry: ScreenGeometry,
+  /**
+   * Everything the device supports, when that differs from what is being SENT.
+   *
+   * Only Summary reads it, and it exists because Summary's content is defined as
+   * total capability rather than reply contents — "a list of the QCODEs of all
+   * the Query Replies supported by the 3270 data stream / device or workstation"
+   * (pages.txt:8570-8572, p. 6-20). Without this parameter a QCODE-List reply's
+   * Summary would advertise only the units that request happened to select, and
+   * a host walking Summary to plan its next request would never learn the rest
+   * — the exact failure p. 6-20 warns about when it calls Summary "the only /
+   * indication of support" for QCODE-List-returned functions (pages.txt:8574).
+   *
+   * DEFAULTS TO `capabilities`, which is right for the plain-Query path where
+   * the two are the same list, and keeps this a compatible addition.
+   */
+  supported: readonly Capability[] = capabilities,
 ): Uint8Array {
   // Nonzero is a GEOMETRY rule, not an encoding rule, so u16 is the wrong place
   // for it: X'0000' is a legitimate 16-bit field elsewhere in this very reply
@@ -250,10 +343,230 @@ export function buildQueryReply(
   }
   const out: number[] = [AID.SF];
   for (const cap of capabilities) {
-    const params = cap.params(geometry, capabilities);
+    // `supported`, NOT `capabilities`: see the parameter's own note. Passing the
+    // subset here is the bug that makes a QCODE-List Summary under-report, and
+    // it is invisible on the plain-Query path where the two lists are equal.
+    const params = cap.params(geometry, supported);
     // Length covers the two length bytes, SFID, QCODE and the parameters.
     const length = 4 + params.length;
     out.push(...u16(length), Sfid.QUERY_REPLY, cap.qcode, ...params);
   }
   return Uint8Array.from(out);
+}
+
+/**
+ * The Null Query Reply: "we support none of the QCODEs you listed."
+ *
+ * Five bytes on the wire, four of them the structured field. The unit's own
+ * table, p. 6-77 (pages.txt:10768-10771), is fully legible for once:
+ *
+ *     0-1  L      X'0004'  Length of this structured field
+ *     2    SFID   X'81'    Identifies this structured field as a Query Reply
+ *     3    QCODE  X'FF'    Identifies this Query Reply as Null
+ *
+ * so the field is `00 04 81 ff` and buildQueryReply's AID.SF precedes it, giving
+ * `88 00 04 81 ff`. Note L=4 with NO parameter bytes, which is why the Null
+ * capability's params returns the empty array and why buildQueryReply's
+ * `4 + params.length` produces the manual's value without a special case.
+ *
+ * BUILT THROUGH THE SAME PATH AS EVERY OTHER REPLY, not hand-assembled. x3270
+ * does the same — do_qr_null's entire body is a trace line (sf.c:688-692), with
+ * the framing supplied by do_query_reply's common `obptr += 2; *obptr++ =
+ * SFID_QREPLY; *obptr++ = code` and its length fixup (sf.c:658-684). One framing
+ * path means the AID, the SFID and the length arithmetic cannot drift between
+ * this reply and the others.
+ *
+ * The 0xFF is CONTENT and gets IAC-doubled by the telnet layer on its way out,
+ * exactly as the 0xFF in x3270's Color unit does. That is sendRecord's job
+ * (telnet.ts:82), not ours; a caller comparing these bytes to a wire capture
+ * must un-double first.
+ */
+const nullReply: Capability = {
+  qcode: Qcode.NULL,
+  // Table 6-1 gives Null "No X'FF' No No" (pages.txt:8612) — it is returned in
+  // response to no request type as a matter of SUPPORT. It reaches the wire only
+  // by the explicit "nothing matched" path in buildReply, never by enumeration,
+  // which is why it is absent from DEFAULT_CAPABILITIES and why this is false.
+  returnedForQuery: false,
+  params: () => [],
+};
+
+export function buildNullQueryReply(geometry: ScreenGeometry): Uint8Array {
+  // No `supported` argument: the Null reply carries no Summary, so nothing reads
+  // it. The default (equal to the sent list) is inert here.
+  return buildQueryReply([nullReply], geometry);
+}
+
+/**
+ * Choose the units to send for a Query or a Query List, then build the reply.
+ *
+ * THE ONE ENTRY POINT the session should use. The three REQTYP versions are
+ * p. 6-20's table (pages.txt:8526-8560) and x3270's dispatch is sf.c:244-305.
+ *
+ * WHY SUMMARY IS FORCED IN, and where we knowingly differ from x3270. p. 6-96 is
+ * unconditional: "The Summary Query Reply must always be sent inbound in reply
+ * to a Read Partition / structured field specifying Query, or Query List (QCODE
+ * List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) x3270 does NOT
+ * honour that for a QCODE List — its filter is a plain membership test,
+ * sf.c:268-272:
+ *
+ *     for (i = 0; i < NSR; i++) {
+ *         if (memchr(&buf[6], (char)replies[i].code, buflen-6) && ...) {
+ *             do_query_reply(replies[i].code);
+ *
+ * so a list naming only 0x81 gets 0x81 alone and no Summary. We follow the
+ * MANUAL here rather than x3270, for the reason p. 6-20 gives: Summary is "the
+ * only / indication of support of functions where the associated Query Reply is
+ * returned in / reply to a Query List = QCODE List or All"
+ * (pages.txt:8574-8576) — omit it and a host has no way to discover what else to
+ * ask for. It is also strictly safer: an extra Summary is a unit the host asked
+ * about implicitly and can ignore, whereas a missing one removes information.
+ *
+ * This does mean a QCODE-List reply can carry a unit that was not listed. That
+ * is intended and is not a duplicate-reply violation; the no-duplicates rule
+ * (pages.txt:8542-8544) is about sending the SAME QCODE twice, which the
+ * de-duplication below prevents.
+ *
+ * A note on what "matching" means for the QCODE list: p. 5-52 says "All QCODE
+ * values in the list are valid. Those QCODEs not supported are / ignored."
+ * (pages.txt:6395-6396) — an unsupported QCODE is skipped, never an error. So
+ * there is no validation of the host's list, only intersection.
+ */
+export function selectCapabilities(
+  request: QueryRequest,
+  capabilities: readonly Capability[],
+): readonly Capability[] {
+  // Query and Equivalent are the same selection, and expressing it once is the
+  // point. p. 6-20 defines Equivalent as "Requests the 3270 device or
+  // workstation to return / the same Query Replies that would be returned in
+  // reply to a Query" (pages.txt:8545-8547), so the two share this filter by
+  // DERIVATION rather than by coincidence.
+  //
+  // FILTERED ON returnedForQuery, not "return everything". Today every entry is
+  // true, so this is an identity map and Equivalent equals All — a fact about
+  // our current three units, NOT a property of the protocol. Writing the filter
+  // now is what stops a later "No" capability (Begin/End of File, say) from
+  // silently leaking into an Equivalent reply. Deleting it because it looks like
+  // a no-op would reintroduce exactly that bug.
+  const queryEquivalent = (): readonly Capability[] =>
+    capabilities.filter((c) => c.returnedForQuery);
+
+  if (request.kind === 'query') return queryEquivalent();
+
+  switch (request.reqtyp) {
+    case ReqTyp.ALL:
+      // "Requests the 3270 data stream device or / workstation to return all the
+      // Query Replies / supported. The Query List = All can contain a / QCODE
+      // list. However, the QCODE list is ignored" (pages.txt:8553-8557). Hence
+      // `capabilities` unfiltered and request.qcodes untouched — the list is not
+      // consulted, not even to intersect. p. 5-52 puts it as "the All flag
+      // overrides the list" (pages.txt:6388-6389).
+      //
+      // Unfiltered means All is the one path that may include a unit a Query
+      // would not, which is Table 6-1's whole third column.
+      return capabilities;
+
+    case ReqTyp.EQUIVALENT: {
+      // "Optionally, a list of QCODES / can also be included." (pages.txt:8546-
+      // 8547.) Since every unit we have is Query-returnable, that list can add
+      // nothing today — the union below is already the whole capability list.
+      // It is written as a union anyway so the semantics stay right when a
+      // non-Query-returnable capability arrives: p. 5-52 says Equivalent sends
+      // the Query set "in addition to / those QCODEs (if any) that are specified
+      // in the QCODE list" (pages.txt:6381-6382).
+      //
+      // Order is preserved from `capabilities`, not from the host's list, so
+      // Summary stays first as it does on every other path. The manual permits
+      // any order — "There is no requirement as to the order of the QCODES ...
+      // or the order that the requested Query Replies are / returned"
+      // (pages.txt:8534-8539) — but consistency keeps the tests and traces
+      // comparable across request types.
+      const listed = new Set(request.qcodes);
+      return capabilities.filter((c) => c.returnedForQuery || listed.has(c.qcode));
+    }
+
+    case ReqTyp.QCODE_LIST: {
+      // "Contains a list of one or more Query Reply / QCODES. The 3270 data
+      // stream device or / workstation returns all the requested Query / Replies
+      // (QCODES listed) that are supported. If / none of the requested Query
+      // Replies are / supported, a Null Query Reply is returned."
+      // (pages.txt:8529-8534.)
+      //
+      // AN EMPTY LIST IS THE NULL CASE, and it arrives here rather than being
+      // rejected. p. 5-52 is explicit: "If the value / is B'00' but no list is
+      // present (count field is valid), a Null Query Reply is / returned."
+      // (pages.txt:6377-6379.) x3270 short-circuits it before even looking,
+      // sf.c:258-262:
+      //
+      //     if (buflen < 7) {
+      //         trace_ds(")\n");
+      //         do_query_reply(QR_NULL);
+      //
+      // where buflen < 7 means "no byte 6", i.e. an absent list. We need no
+      // special case for it: an empty `listed` matches nothing, `chosen` comes
+      // back empty, and the empty check below yields the Null reply. Same
+      // output, one path.
+      //
+      // The Set also delivers the no-duplicates rule for free: a list naming
+      // 0x81 three times still yields one unit, because we iterate
+      // `capabilities` and test membership rather than iterating the host's list.
+      // That is x3270's structure too (its memchr runs per reply, not per listed
+      // QCODE) and it is the reason duplicates need no explicit handling.
+      const listed = new Set(request.qcodes);
+      const chosen = capabilities.filter((c) => listed.has(c.qcode));
+      // Nothing matched: the Null Query Reply, and NOT a lone Summary. The
+      // always-send-Summary rule from p. 6-96 does not rescue this case, because
+      // the Null unit's OWN section, p. 6-77, has a worked example that forbids
+      // it — for a device supporting A, B, C asked for X, Y, Z, "The device
+      // sends the Null Query Reply because the device does not support any / of
+      // the requested features." (pages.txt:10761-10762). A reply of Summary
+      // alone would say "supported nothing you asked for" too, but by a form no
+      // host is required to read that way. Emit nothing else alongside it
+      // either: the unit's whole purpose is to be a bare four-byte negative.
+      if (chosen.length === 0) return [nullReply];
+      // Summary forced to the front for the reason documented above. Prepended
+      // rather than push-then-sort so its position matches every other path,
+      // and guarded so a list that DID name 0x80 does not get it twice — which
+      // would be a real duplicate-reply violation.
+      //
+      // The Summary taken from `capabilities` when it has one, falling back to
+      // this module's: a caller supplying its own Summary entry (the tests do
+      // supply custom capability lists) must get ITS unit, not a second
+      // definition silently substituted for it.
+      if (chosen.some((c) => c.qcode === Qcode.SUMMARY)) return chosen;
+      const theirSummary = capabilities.find((c) => c.qcode === Qcode.SUMMARY);
+      return [theirSummary ?? summary, ...chosen];
+    }
+
+    default:
+      // B'11' is "Reserved" (pages.txt:6361). x3270 rejects an unknown request
+      // type with PDS_BAD_CMD (sf.c:301-303), which is a program check, so the
+      // caller raises one rather than inventing a reply. Returning an empty
+      // array instead would put a bare AID on the wire, which is not a legal
+      // record.
+      throw new RangeError(
+        `unsupported Query List REQTYP 0x${request.reqtyp.toString(16).padStart(2, '0')}`,
+      );
+  }
+}
+
+/**
+ * Build the reply to a Query or Query List in one step.
+ *
+ * The session calls this and nothing else. Keeping selection and building
+ * behind one function means the Null case cannot be reached with a stray AID and
+ * no units, and that Summary's "must always be sent" rule has exactly one
+ * enforcement point.
+ */
+export function buildReply(
+  request: QueryRequest,
+  capabilities: readonly Capability[],
+  geometry: ScreenGeometry,
+): Uint8Array {
+  // The third argument is what keeps Summary honest: the first is the subset
+  // being SENT, the third is everything SUPPORTED. They differ for exactly the
+  // QCODE-List case, and conflating them was a real defect this function's tests
+  // caught. See buildQueryReply's `supported` parameter.
+  return buildQueryReply(
+    selectCapabilities(request, capabilities), geometry, capabilities);
 }

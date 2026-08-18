@@ -4,7 +4,7 @@ import {
   Cmd, SnaCmd, Order, AID, FA, WCC,
   ADDRESS_CODE_TABLE, isShortReadAID,
   PF_AIDS, PA_AIDS,
-  Sfid, PID_QUERY, ReadPartitionType, Qcode, XA_3270,
+  Sfid, PID_QUERY, ReadPartitionType, ReqTyp, REQTYP_MASK, Qcode, XA_3270,
 } from '../src/constants.js';
 
 describe('telnet constants', () => {
@@ -166,6 +166,28 @@ describe('structured field constants', () => {
     expect(Qcode.SUMMARY).toBe(0x80);
     expect(Qcode.USABLE_AREA).toBe(0x81);
     expect(Qcode.IMPLICIT_PARTITION).toBe(0xa6);
+    // Null, p. 6-77: "3 QCODE X'FF' Identifies this Query Reply as Null"
+    // (pages.txt:10771); x3270 include/3270ds.h:180 QR_NULL 0xff.
+    expect(Qcode.NULL).toBe(0xff);
+  });
+
+  it('REQTYP values are the shifted bits 0-1 forms, matching x3270', () => {
+    // REQTYP occupies "bits 0-1 of byte 5" (pages.txt:8508), so B'00'/B'01'/B'10'
+    // land in the TOP two bits: 0x00, 0x40, 0x80 — not 0, 1, 2. Reading the
+    // manual's B'01' as the literal value 1 is the mistake this guards; the
+    // captured VM request carries 0x80, which under that misreading is unknown.
+    // x3270 include/3270ds.h:118-120 spells them exactly this way.
+    expect(ReqTyp.QCODE_LIST).toBe(0x00);
+    expect(ReqTyp.EQUIVALENT).toBe(0x40);
+    expect(ReqTyp.ALL).toBe(0x80);
+    // The mask covers those two bits and nothing else; bits 2-7 are reserved
+    // ("2-7 SFID Reserved", pages.txt:6356, where "SFID" is OCR damage).
+    expect(REQTYP_MASK).toBe(0xc0);
+    // Every defined value survives masking, i.e. none of them sets a reserved
+    // bit. B'11' = 0xC0 is "Reserved" (pages.txt:6361) and is deliberately
+    // absent from ReqTyp.
+    for (const v of Object.values(ReqTyp)) expect(v & REQTYP_MASK).toBe(v);
+    expect(Object.values(ReqTyp)).not.toContain(0xc0);
   });
 
   it('0x81 is both the Query Reply SFID and the Usable Area QCODE', () => {

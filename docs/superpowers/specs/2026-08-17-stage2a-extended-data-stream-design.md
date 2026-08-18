@@ -219,11 +219,16 @@ Three behaviours to get right, each with a tempting wrong alternative:
   and the `AwaitingFirstWrite` release at `session.ts:182` keys off host *writes*. A
   Query arriving while we are still locked leaves us locked, because the host has not
   written anything.
-- **Only TYPE=0x02 is answered.** Query List (0x03) carries REQTYP and a QCODE list
-  needing subsetting rules we have not implemented (p. 6-19, `pages.txt:8502`). It is parsed, counted,
-  and deliberately **not** answered — we log it and the host times out, rather than
-  sending a reply whose rules we guessed. TK5 sends 0x02; if it ever sends 0x03 the
-  trace says so.
+- ~~**Only TYPE=0x02 is answered.**~~ **SUPERSEDED — Query List is now implemented.**
+  As written, stage 2a parsed and counted Query List (0x03) but deliberately did not
+  answer it, reasoning that its REQTYP subsetting rules (p. 6-19, `pages.txt:8508`)
+  were unimplemented and a guessed reply was worse than none. The prediction that
+  "if it ever sends 0x03 the trace says so" came true on **VM/370**, not TK5:
+  MECAFF's `IND$FILE` asks with a Query List (`00 07 01 ff 03 80 00`, REQTYP=All)
+  and waits forever, so file transfer on VM/CMS was blocked. All three REQTYP
+  versions plus the Null Query Reply are now implemented — see `queryreply.ts`
+  `selectCapabilities`. MVS/TSO's plain Query path is unchanged and still
+  live-verified.
 - **PID is recorded, not assumed.** The reply carries no PID of its own, but `sf.ts`
   keeps the incoming PID so a non-0xFF Read Partition (a real partition read, which
   we do not support) is distinguishable in the trace from the query case.
@@ -269,7 +274,9 @@ TDD applies: the manual is precise enough to write failing tests first.
 GA23-0059 with the page cited in each test, not against x3270's capture. Nasty cases
 required: zero-length SF (resolved to end-of-payload, *not* rejected — see Error
 handling); a bare `00 00` with no SFID; length past payload end; WSF with a trailing partial field;
-SFE with no 0xC0 pair; SFE with an unknown pair type; Read Partition with TYPE=0x03;
+SFE with no 0xC0 pair; SFE with an unknown pair type; Read Partition with TYPE=0x03
+(originally "parsed but unanswered" — now answered, with all three REQTYP versions,
+the Null Query Reply, a missing REQTYP byte, and the reserved REQTYP B'11' covered);
 Read Partition with PID≠0xFF.
 
 **2. One golden-bytes test against the fixture — a comparison, not an oracle.** Our

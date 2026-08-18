@@ -1,7 +1,8 @@
 import { WCC, FA, Order, XA_3270 } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
-import { isQueryRequest } from './sf.js';
+import { isQueryRequest, queryListRequest } from './sf.js';
+import type { QueryRequest } from '../queryreply.js';
 
 /**
  * Apply a parsed record to a screen.
@@ -21,8 +22,19 @@ export class ExecuteError extends Error {
 export interface ExecuteResult {
   /** The host asked us to send something back. */
   readRequest?: Extract<CommandName, 'ReadBuffer' | 'ReadModified' | 'ReadModifiedAll'>;
-  /** The host asked what this terminal can do, and we should answer. */
-  sfReply?: 'queryReply';
+  /**
+   * The host asked what this terminal can do, and we should answer.
+   *
+   * Carries WHICH request it was, not just that one happened: a plain Query and
+   * the three Query List versions produce different sets of units, and the
+   * session cannot tell them apart from a bare flag. This replaced the string
+   * literal 'queryReply' when Query List landed.
+   *
+   * The DECISION of which units to send is not made here — it belongs with the
+   * capability list in queryreply.ts, which owns the Table 6-1 rules. This field
+   * carries the request; selectCapabilities interprets it.
+   */
+  sfReply?: QueryRequest;
   /** WCC bit 6: unlock the keyboard. */
   keyboardRestore: boolean;
   /**
@@ -125,25 +137,41 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     case 'WriteStructuredField':
       for (const t of record.tokens) {
         if (t.kind !== 'structuredField') continue;
-        // isQueryRequest (stream/sf.ts) checks BOTH the PID and the TYPE. A
-        // Query List (0x03) needs subsetting rules we have not implemented, and
-        // a non-0xFF PID is a read against a real partition we do not support.
-        // Both are counted and traced rather than answered — an unanswered
-        // request is honest; a guessed answer is not.
+        // Two predicates, not one, and both check the PID. isQueryRequest is a
+        // plain Query (TYPE=0x02); queryListRequest is a Query List (0x03) and
+        // hands back its REQTYP and QCODE list. They are kept separate because
+        // the replies differ — see the note on isQueryRequest in stream/sf.ts.
         //
         // The subsetting rules span p. 6-19 AND p. 6-20, not p. 6-19 alone.
         // p. 6-19 introduces the selector — "an additional parameter, REQTYP
         // (Request Type), bits 0-1 of byte 5 and, / optionally, a list of
         // QCODES starting at byte 6" (pages.txt:8508-8509) — and the rules for
-        // each of its three values are the table on p. 6-20, e.g. QCODE List
-        // B'00' "workstation returns all the requested Query / Replies (QCODES
-        // listed) that are supported. If / none of the requested Query Replies
-        // are / supported, a Null Query Reply is returned."
-        // (pages.txt:8531-8534). We build no Null Query Reply and do no
-        // filtering, so we cannot honour any of the three.
+        // each of its three values are the table on p. 6-20. Those rules are
+        // implemented in queryreply.ts selectCapabilities, which is where the
+        // capability list they filter lives; this case only classifies.
+        //
+        // WHY THIS MATTERS FOR VM: VM/370's MECAFF IND$FILE asks with a Query
+        // List, not a Query, and waits for a reply. While this branch counted
+        // 0x03 as ignored, file transfer on VM/CMS hung forever. MVS/TSO sends a
+        // plain Query and was unaffected.
+        const list = queryListRequest(t.field);
         if (isQueryRequest(t.field)) {
-          result.sfReply = 'queryReply';
+          result.sfReply = { kind: 'query' };
+        } else if (list !== undefined) {
+          result.sfReply = { kind: 'queryList', reqtyp: list.reqtyp, qcodes: list.qcodes };
         } else {
+          // Everything else: a read against a real partition (non-0xFF PID on a
+          // query, which x3270 rejects at sf.c:230-251), a TYPE we do not
+          // implement, or an SFID we do not implement. Counted and traced rather
+          // than answered — an unanswered request is honest; a guessed answer is
+          // not.
+          //
+          // Counted rather than program-checked, which is where we knowingly
+          // diverge from x3270: it returns PDS_BAD_CMD for a bad PID, and under
+          // TN3270E that becomes a negative response (telnet.c:3432-3436). We
+          // negotiate no TN3270E yet, so there is nowhere to send one, and
+          // dropping the session over a field we can simply ignore would be
+          // worse behaviour than the trace line. Revisit with stage 2b.
           result.structuredFieldsIgnored++;
         }
       }

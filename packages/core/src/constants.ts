@@ -108,11 +108,54 @@ export const Sfid = {
 /** PID value meaning "this is a query, not a read of partition 0x00-0x7E". */
 export const PID_QUERY = 0xff;
 
-/** Read Partition TYPE byte. We answer QUERY only; see the stage 2a spec. */
+/**
+ * Read Partition TYPE byte, GA23-0059 p. 5-51 (pages.txt:6350-6355).
+ *
+ * We answer both query types. The table also lists X'6E' Read Modified All,
+ * X'F2' Read Buffer and X'F6' Read Modified — reads against a REAL partition,
+ * which we do not support, so they are absent here on purpose. x3270 handles
+ * them (sf.c:304-334) and requires PID 0x00 for each; we have no partitions to
+ * read.
+ */
 export const ReadPartitionType = {
   QUERY: 0x02,
   QUERY_LIST: 0x03,
 } as const;
+
+/**
+ * Query List REQTYP, GA23-0059 p. 5-51 and p. 6-19.
+ *
+ * BITS 0-1 OF BYTE 5, not the whole byte: "an additional parameter, REQTYP
+ * (Request Type), bits 0-1 of byte 5 and, / optionally, a list of QCODES
+ * starting at byte 6" (pages.txt:8508-8509, p. 6-19). Bits 2-7 are reserved —
+ * the byte table's row reads "2-7 SFID Reserved" (pages.txt:6356; that "SFID"
+ * is OCR damage, the field is unnamed reserved space).
+ *
+ * The values below are therefore the SHIFTED forms, B'00'/B'01'/B'10' occupying
+ * the top two bits: 0x00, 0x40, 0x80. That is exactly how x3270 spells them
+ * (include/3270ds.h:118-120):
+ *
+ *     #define   SF_RPQ_LIST	0x00	//   QCODE list
+ *     #define   SF_RPQ_EQUIV	0x40	//   equivalent+ QCODE list
+ *     #define   SF_RPQ_ALL	0x80	//   all
+ *
+ * B'11' (0xC0) is "Reserved" (pages.txt:6361) and there is no entry for it:
+ * x3270 rejects an unrecognised request type outright (sf.c:301-303, `default:
+ * ... return PDS_BAD_CMD`), and so do we.
+ *
+ * NOTE x3270 compares `buf[5]` against these WITHOUT masking off bits 2-7, so a
+ * host setting a reserved low bit lands in its default case and is rejected.
+ * We mask instead — see REQTYP_MASK — because the manual defines the field as
+ * bits 0-1 and says nothing about the other six mattering.
+ */
+export const ReqTyp = {
+  QCODE_LIST: 0x00,
+  EQUIVALENT: 0x40,
+  ALL: 0x80,
+} as const;
+
+/** Bits 0-1 of byte 5. The rest is reserved; see the note on ReqTyp. */
+export const REQTYP_MASK = 0xc0;
 
 /**
  * Query Reply codes (QCODE), GA23-0059 Table 6-1. Only what we implement.
@@ -128,6 +171,23 @@ export const Qcode = {
   SUMMARY: 0x80,
   USABLE_AREA: 0x81,
   IMPLICIT_PARTITION: 0xa6,
+  /**
+   * Null (QCODE 0xFF) — "we support none of what you asked for".
+   *
+   * NOT a capability, which is why it is not in DEFAULT_CAPABILITIES and why
+   * Table 6-1 gives it "Null No X'FF' No No" (pages.txt:8612): the only three
+   * columns are Query / Query List / Equivalent / All and it is returned by
+   * NONE of them as a matter of support. It is returned by exactly one path,
+   * REQTYP=QCODE List matching nothing we have. x3270 keeps it in its reply
+   * table but pointedly excludes it from every enumeration, with the comment
+   * "QR_NULL must be last in the table" (sf.c:94) and NSR = NSR_ALL - 1
+   * (sf.c:102-103) so the loops stop before it.
+   *
+   * Value from 3270ds.h:180 `#define QR_NULL 0xff` and from the manual's own
+   * byte table, "3 QCODE X'FF' Identifies this Query Reply as Null"
+   * (pages.txt:10771).
+   */
+  NULL: 0xff,
 } as const;
 
 /**
