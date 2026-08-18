@@ -94,11 +94,46 @@ become incremental work whenever wanted.
 ### 3279 Graphics — Programmable Symbol Sets, and later GDDM
 
 The emulator should reach the fidelity of what real 3279 hardware could display.
-The reference point is the primitive GIF viewer Rick Troth wrote for his own 3279
-around 1992.
+The reference point is the GIF viewing Rick Troth was doing on his own 3279 around
+1992.
+
+**Provenance, corrected 2026-08-18 after the user contacted Troth directly.**
+Earlier drafts said "the GIF viewer Rick Troth wrote". The route was **CMS
+Gopher** — his, Rice University, copyright 1993, `troth@rice.edu` — but **Gopher
+did not contain the viewer**. `GOPHER24 FILELIST` line 46:
+
+```
+* To display GIFs with CMS Gopher, get the VMGIF package from BLEKUL11.
+```
+
+Gopher dispatched to a separate package, **VMGIF from BLEKUL11** (the VM system at
+Katholieke Universiteit Leuven), through a `GOPCLIGV REXX` glue exec.
+`GOPHERT GIF` in the archive is a test image, not the viewer.
+
+Local copies of CMS Gopher 2.4.2 are in `$HOME/cmsgopher`. State of them: the two
+`.tar.gz` files yield only `FILELIST` and `README` (both extract with a benign
+`Unknown file type 't'` warning); `gop242s.vmarc` unpacks with `vma` and is
+service patches to the main package; `gopher24.vmarc` has not been unpacked, its
+members being `:CFF`-compressed. **VMGIF itself has not been located** — worth
+looking for if authentic reference behaviour is ever wanted, since it is the
+actual artefact.
+
+**VMGIF used GDDM. WE WILL NOT — this is a decision, not an omission.** IBM is
+sunsetting GDDM and would be unlikely to license it even to a current paying VM
+customer, so it is not a dependency this project can take. The route is
+**Programmable Symbol Sets driving the 3279 screen directly.** Nothing is lost:
+GDDM would need those same primitives underneath, so PS is the foundation either
+way, and it is what the era's viewers actually did at the bottom.
 
 **Programmable Symbol Sets are in scope as stage 4 item 5** (above). GDDM vector
 graphics remain unscheduled beyond that.
+
+**Stretch goal, recorded because it is the natural end point:** an open-source
+implementation of the GDDM spec targeting VM/370 R6 and MVS 3.8j, so
+period-authentic graphics software could run against these hosts rather than only
+our own client. Unscheduled and substantially larger than this project, but it is
+the reason the PS primitives are worth building well rather than just far enough
+to draw our own pictures.
 
 Components, in dependency order:
 
@@ -126,7 +161,7 @@ monochrome or 4-color rasters at the 3279's cell resolution, so rendering them i
 a `putImageData`-class operation, not a new graphics pipeline.
 
 Honest limitation: on real hardware this was bounded by 3279 cell resolution and
-a small number of loadable sets. Troth's viewer was primitive because the
+a small number of loadable sets. VMGIF's output was primitive because the
 terminal was. Matching that fidelity is achievable; exceeding it substantially
 means going beyond what the hardware did, which is a separate conversation.
 
@@ -666,11 +701,14 @@ the buffer.
   Programmer's Guide* and the GDDM reference above, for the eventual graphics
   work (Programmable Symbol Sets, GDF orders)
 
-Sought but not yet located: Rick Troth's 3279 GIF viewer (~1992, VM/CMS). A web
-search from the development environment failed outright — `WebSearch` returned
-zero results for every query including trivial control queries, so this is a
-tool failure rather than evidence of absence. Worth retrying, or asking the
-author. If recovered, its greatest value would be a **recorded datastream** of a
+Sought but not yet located: **VMGIF, from BLEKUL11** (~1992, VM/CMS) — the actual
+GIF viewer. **Asking the author worked**: the user contacted Rick Troth, who
+identified the route as CMS Gopher, and Gopher's own `FILELIST` then names VMGIF
+as the separate package that did the displaying (see *3279 Graphics* above). CMS
+Gopher 2.4.2 is now in `$HOME/cmsgopher`, but VMGIF is not in it. `WebSearch`
+from this environment returns zero results for every query including control
+queries, so it is a broken tool rather than evidence of absence — searching for
+VMGIF will need a working search or a VM-community archive. If recovered, its greatest value would be a **recorded datastream** of a
 real 3279 loading PS glyphs, which is a better fixture than the source itself.
 
 ## Success Criteria

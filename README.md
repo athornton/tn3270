@@ -129,8 +129,38 @@ recording against a real host and the log of what was found doing so.
    Reply (the host sends no PS structured fields until the capability is
    advertised), not TN3270E as earlier drafts of the spec assumed.
 
-GDDM vector graphics are unscheduled. The fidelity target for graphics is Rick
-Troth's 3279 GIF viewer from around 1992.
+### Graphics: the fidelity target, and why GDDM is not the route
+
+The target is what a real 3279 could display, and the concrete reference is the
+GIF viewing Rick Troth was doing on his own 3279 around 1992. **Provenance now
+established from Troth himself**, which corrects earlier drafts of these docs:
+the viewer was reached through **CMS Gopher** (his, Rice University, 1993 —
+`troth@rice.edu`), but Gopher did not contain it. `GOPHER24 FILELIST` says so in
+one line:
+
+```
+* To display GIFs with CMS Gopher, get the VMGIF package from BLEKUL11.
+```
+
+So CMS Gopher dispatched to a separate package, **VMGIF from BLEKUL11** (the VM
+system at Katholieke Universiteit Leuven), via a `GOPCLIGV REXX` glue exec.
+`GOPHERT GIF` in the archive is a test image, not the viewer. Local copies of
+CMS Gopher 2.4.2 are in `$HOME/cmsgopher`; the `.tar.gz` pair yields only
+`FILELIST` and `README`, `gop242s.vmarc` unpacks to service patches, and
+`gopher24.vmarc` has not been unpacked (`:CFF` compressed members). **VMGIF
+itself has not been located.**
+
+**VMGIF used GDDM, and we will not.** IBM is sunsetting GDDM and would be
+unlikely to license it even to a current paying VM customer, so the route for us
+is **Programmable Symbol Sets driving the 3279 screen directly** — decomposing an
+image into custom character cells and loading them, which is how the era's
+viewers worked underneath anyway. GDDM would need those same primitives beneath
+it, so nothing is wasted by starting there.
+
+**A stretch goal, recorded because it is the natural end point:** an open-source
+implementation of the GDDM spec targeting VM/370 R6 and MVS 3.8j. That would let
+period-authentic graphics software run against these hosts rather than only our
+own client. Unscheduled, and much larger than this project.
 
 ## What is not implemented
 
