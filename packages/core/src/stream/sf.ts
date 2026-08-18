@@ -32,8 +32,12 @@ export type StructuredField =
  * GA23-0059 p. 5-5 (pages.txt:4409-4412): "Except for the use of a Length
  * parameter value of zero, a structured field with a / one-byte type parameter
  * will be rejected if the Length field value is less than / three." Every SFID
- * we recognise is one byte; the manual's four-byte minimum applies to the
- * two-byte type fields (e.g. X'0F85') that we do not implement.
+ * we recognise is one byte — Read Partition's is X'01' at byte 2
+ * (pages.txt:6345) — so three is our minimum. The manual's four-byte minimum
+ * applies to the two-byte type fields we do not implement, e.g. Begin/End of
+ * File, whose table row reads "2-3 SFID X' OF85' Identifies this structured
+ * field as" (pages.txt:4683; the OCR renders the leading zero as the letter O
+ * and inserts a space, so that field is really X'0F85').
  */
 const MIN_SF_LENGTH = 3;
 
