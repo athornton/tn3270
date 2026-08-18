@@ -429,6 +429,37 @@ matches the observed padding exactly. A fixed-record dataset has no way to recor
 that the last record was short. **For shipping a MODULE, use `Recfm=variable`**,
 and expect padding if you ask for `fixed`.
 
+**WHICH RECFM TO USE, from the CMS Gopher readme rather than guesswork.** Troth's
+`GOPHER24 README` gives the convention for the two things you actually ship to a
+VM system, and they differ:
+
+```
+  PLEASE NOTE:   when fetching MODULEs and VMARC files from some hosts,
+  the record structure must be restored.   If you pick-up a MODULE from
+  a UNIX FTP host,  you must  "deblock" it back into its CMS form with:
+
+        PIPE < program MODRAW | DEBLOCK CMS | > program MODULE A
+
+  For VMARC files,  reblock to  Fixed 80  with:
+
+        PIPE < package VMARCRAW | FBLOCK 80 00 | > package VMARC A
+```
+
+- **VMARC → `Recfm=fixed,Lrecl=80`.** Note `FBLOCK 80 00` pads with **nulls** —
+  which is precisely the padding measured above and called a "quirk". It is not a
+  quirk; it is the convention the format expects. Confirmed against the local
+  copies: `gop242s.vmarc` is 9920 bytes (124 records) and `gopher24.vmarc` is
+  601840 (7523), both **exactly divisible by 80**.
+- **MODULE → NOT fixed-80.** A CMS MODULE carries its own internal record
+  structure, restored with `DEBLOCK CMS`, so a plain fixed-80 upload is not
+  sufficient. This is a gap worth knowing before trying to ship an executable.
+- **Anything where byte-exactness matters and the host format is ours to choose →
+  `Recfm=variable`**, which round-trips exactly (measured above).
+
+(Aside, since it comes up: `gopher24.vmarc` being cleanly divisible by 80 means
+its blocking is fine, so `vma`'s failure to unpack it is about the `:CFF`
+compressed members, not the record format.)
+
 This exercises everything a download does not: the encoder, the quadrant state
 machine in the emitting direction, the checksum the host verifies, and frame
 sequencing on the sending side. The retained-encoded-bytes design for retransmit
