@@ -309,6 +309,58 @@ does not reach `LOGOFF`, and the next attempt then draws
 being tested. Rotate among `HERC01`/`HERC02` (`CUL8TR`) and `HERC03`/`HERC04`
 (`PASS4U`), and always reach a real `LOGOFF`.
 
+## PROTOCOL CONFIRMED: TK5 SPEAKS CUT, AND OUR CODEC ALREADY DECODES IT
+
+The open question — CUT or DFT — is settled by measurement. **TK5's IND$FILE speaks
+CUT**, and our `ft/cut.ts` decoded a live frame from the real host on the first attempt.
+
+The host records are unmistakable against `ft_cut_ds.h`:
+
+```
+EraseWrite SBA(1919) SBA(0) data[5]    SBA(1914) SF(0xc1) IC data[4] SF(0x7c)
+EraseWrite SBA(1919) SBA(0) data[1909] SBA(1914) SF(0xc1) IC data[4] SF(0x7c)
+```
+
+`SBA(1919)` is `O_SF`; `SBA(1914)` is `O_RESPONSE` (`O_SF-5`); `SF(0xc1)` is `FT_DATA`;
+and `data[1909]` is exactly `O_RESPONSE - O_DT_DATA`, the maximum download payload
+derived from the header.
+
+**Decoding a real frame end to end** (`IND$FILE GET 'SYS1.PARMLIB(IEASYS00)' ASCII
+CRLF`):
+
+```
+frame type 0xc1 = FT_DATA,  seq = 1,  csum6 = 62,  declared len = 1904
+hostToLocal -> 1498 bytes:
+" APF=00,     Suffix for authorized lib list IEAAPFxx\r\n
+  APG=07,     Automatic Prority Group\r\n
+  BLDLF=BA,   Suffix for BLDL list IEABLDxx\r\n ..."
+```
+
+That is genuinely the contents of `SYS1.PARMLIB(IEASYS00)`, with the `\r\n` the `CRLF`
+option asked for. The frame layout, the 12-bit length across two 6-bit chars, the
+quadrant state machine and the EBCDIC tables are all confirmed correct against a real
+host — not just against x3270.
+
+**AND THE DOWNLOAD CHECKSUM IS REAL ON THIS HOST: host sent 6-bit 62, we computed 62.**
+This settles the earlier open question. MECAFF ignores the checksum on receive, but
+TK5's IND$FILE *populates* it on send, so verifying it is meaningful here rather than
+spurious — the "verify but warn, never abort" decision now rests on evidence.
+
+**Consequences for the plan:**
+
+- The CUT codec needs no changes. It is verified against a live host.
+- `frames.ts` as designed is the correct next step; no DFT engine is needed for TK5.
+- **MVS/TSO is now the lead host**, not VM/CMS: it asks with a plain Query we already
+  answer, needs no Query List work, and has no fullscreen gatekeeping. VM remains
+  blocked on Query List support.
+
+**Operational lesson, learned the hard way:** every host script must reach `LOGOFF` on
+*every* exit path. Probes that ended at `Quit` without logging off left all four TSO
+userids stuck `IN USE`, which then looks exactly like a failure of whatever is being
+tested — and it cost a wrong conclusion (fields at 1915/1919 read as CUT frames when the
+session had never got past logon). The stage 1 runbook already says this; it is repeated
+here because it was ignored anyway.
+
 ## Codec findings, from the implementation (2026-08-18)
 
 `packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
