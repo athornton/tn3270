@@ -32,6 +32,8 @@ export interface SessionOptions {
   rows?: number;
   cols?: number;
   codePage?: CodePage;
+  /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2. */
+  terminalType?: string;
 }
 
 export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm';
@@ -117,6 +119,11 @@ export class Session {
       write: (b) => conn.write(b),
       onRecord: (r) => this.handleRecord(r),
       trace: this.trace,
+      // Spread conditionally: with exactOptionalPropertyTypes an explicit
+      // `terminalType: undefined` is a type error, and passing it would also
+      // bypass the layer's own `?? TERMINAL_TYPE` default if that guard ever
+      // became a truthiness check.
+      ...(this.opts.terminalType ? { terminalType: this.opts.terminalType } : {}),
     });
 
     // Each callback checks identity against the `conn` it closes over, not just

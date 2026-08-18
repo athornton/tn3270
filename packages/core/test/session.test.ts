@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Session, type Connection } from '../src/session.js';
+import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA, Qcode, Sfid,
 } from '../src/constants.js';
@@ -29,9 +29,9 @@ class FakeConnection implements Connection {
   }
 }
 
-function newSession() {
+function newSession(opts: Partial<SessionOptions> = {}) {
   const conn = new FakeConnection();
-  const session = new Session({ connect: () => conn });
+  const session = new Session({ connect: () => conn, ...opts });
   return { session, conn };
 }
 
@@ -441,5 +441,41 @@ describe('query reply', () => {
     conn.host(SnaCmd.WSF, 0x00, 0x00, 0x01, T.IAC, T.EOR);
     expect(session.oia.toText()).toContain('X PROG');
     expect(session.isConnected()).toBe(true);
+  });
+});
+
+describe('terminal type negotiation', () => {
+  /** The ASCII name from the session's TERMINAL-TYPE IS subnegotiation. */
+  function negotiatedName(conn: FakeConnection): string {
+    // IAC SB 24 IS <name...> IAC SE — telnet.ts:230-234.
+    const start = conn.sent.findIndex((b, i) =>
+      b === T.IAC && conn.sent[i + 1] === T.SB
+      && conn.sent[i + 2] === O.TERMINAL_TYPE && conn.sent[i + 3] === S.IS);
+    expect(start, 'no TERMINAL-TYPE IS was sent').toBeGreaterThanOrEqual(0);
+    const nameStart = start + 4;
+    // The first SE at or after the name is the one closing this subnegotiation:
+    // an ASCII ttype cannot contain 0xf0. The name runs up to IAC SE, so stop
+    // one byte before the SE to exclude its IAC.
+    const end = conn.sent.indexOf(T.SE, nameStart);
+    return String.fromCharCode(...conn.sent.slice(nameStart, end - 1));
+  }
+
+  it('negotiates the configured terminal type', async () => {
+    const { session, conn } = newSession({ terminalType: 'IBM-3278-2-E' });
+    await session.connect('localhost', 3270);
+    // By hand, because negotiate() clears conn.sent afterwards.
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    conn.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+    expect(negotiatedName(conn)).toBe('IBM-3278-2-E');
+  });
+
+  it('negotiates IBM-3278-2 when no terminal type is given', async () => {
+    // Must not change. The goldens do NOT enforce this -- they replay recorded
+    // bytes; this assertion and telnet.test.ts are the real enforcement.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    conn.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+    expect(negotiatedName(conn)).toBe('IBM-3278-2');
   });
 });

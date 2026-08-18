@@ -48,8 +48,11 @@ function tcpConnect(host: string, port: number): Promise<Connection> {
   });
 }
 
-export function defaultSession(): Session {
-  return new Session({ connect: (h, p) => tcpConnect(h, p) });
+export function defaultSession(terminalType?: string): Session {
+  return new Session({
+    connect: (h, p) => tcpConnect(h, p),
+    ...(terminalType ? { terminalType } : {}),
+  });
 }
 
 export class Runner {
