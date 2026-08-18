@@ -69,6 +69,18 @@ describe('structured field framing', () => {
   it('accepts an empty payload as no structured fields', () => {
     expect(parseStructuredFields(Uint8Array.of())).toEqual([]);
   });
+
+  it('reads a length above 255, so both length bytes are used', () => {
+    // L=0x0104 = 260: two length bytes, an SFID, and 257 parameter bytes. Every
+    // other test here has 0x00 in the high position, so a parser that ignored
+    // payload[i] entirely would pass all of them.
+    const payload = new Uint8Array(260);
+    payload[0] = 0x01; payload[1] = 0x04; payload[2] = 0x40;
+    const fields = parseStructuredFields(payload);
+    expect(fields).toHaveLength(1);
+    expect(fields[0]).toMatchObject({ kind: 'unknownSf', sfid: 0x40 });
+    expect((fields[0] as { data: Uint8Array }).data.length).toBe(257);
+  });
 });
 
 describe('a zero length runs to the end of the payload', () => {

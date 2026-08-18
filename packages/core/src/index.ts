@@ -9,6 +9,7 @@ export * from './telnet.js';
 export * from './screen.js';
 export * from './stream/parse.js';
 export * from './stream/execute.js';
+export * from './stream/sf.js';
 export * from './inbound.js';
 export * from './keyboard.js';
 export * from './oia.js';

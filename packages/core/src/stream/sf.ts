@@ -1,7 +1,13 @@
 import { Sfid, PID_QUERY, ReadPartitionType } from '../constants.js';
 
 /**
- * Structured field framing for the inbound (host to us) direction.
+ * Structured field framing for the OUTBOUND direction — outbound is the
+ * manual's word for host-to-terminal, not ours-to-host. GA23-0059 p. 5-5:
+ * "The outbound structured fields are described under "Outbound Structured
+ * Fields" / on page 5-11" (pages.txt:4414-4415), and that section's list
+ * includes "01nn Read Partition" (pages.txt:4419), the field parsed here. The
+ * INBOUND structured fields are the ones we send; see the note on
+ * Sfid.QUERY_REPLY in constants.ts, which uses "inbound" in that same sense.
  *
  * A Write Structured Field record carries one or more structured fields, each
  * `L L SFID <params...>` where the 16-bit L INCLUDES the two length bytes:
@@ -48,7 +54,7 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
   while (i < payload.length) {
     if (i + 2 > payload.length) {
       throw new SfParseError(
-        `structured field truncated: ${payload.length - i} byte(s) left, need at least 2 for the length`,
+        `structured field at offset ${i} truncated: ${payload.length - i} byte(s) left, need at least 2 for the length`,
       );
     }
     const declared = (payload[i]! << 8) | payload[i + 1]!;
@@ -63,21 +69,32 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
     //         fieldlen = buflen;
     //     }
     // Resolving it to the remaining length here also makes the advance below
-    // non-zero, so the loop still terminates. Note this is why the substitution
-    // must come BEFORE the minimum check: 00 00 with nothing after it resolves
-    // to 2, which then fails as being below the minimum, matching the manual's
-    // "sending only the Length field (i.e. 0000) ... is invalid"
-    // (pages.txt:4413).
+    // non-zero, so the loop still terminates.
+    //
+    // The substitution MUST stay ahead of the minimum check below, and the case
+    // that proves it is a LEGAL zero-length field, not an illegal one: a Query
+    // sent as `00 00 01 ff 02` at the end of a transmission resolves to 5 and
+    // parses, but a minimum check applied to the declared 0 would reject it and
+    // we would hang on the very request this stage exists to answer. (A bare
+    // `00 00` is rejected under either ordering, so it does NOT demonstrate the
+    // constraint — do not use it to convince yourself a reordering is safe.)
     const length = declared === 0 ? payload.length - i : declared;
 
     // An undersized length must be rejected BEFORE it is used to advance, or
     // the loop makes no progress.
     if (length < MIN_SF_LENGTH) {
-      throw new SfParseError(`structured field length ${length} below the minimum ${MIN_SF_LENGTH}`);
+      // Report the declared bytes when they were zero: `length` is synthesised
+      // in that case, and an operator grepping a trace for it would find
+      // nothing on the wire.
+      throw new SfParseError(
+        declared === 0
+          ? `zero-length structured field at offset ${i} resolved to ${length} byte(s), below the minimum ${MIN_SF_LENGTH}`
+          : `structured field at offset ${i} has length ${length}, below the minimum ${MIN_SF_LENGTH}`,
+      );
     }
     if (i + length > payload.length) {
       throw new SfParseError(
-        `structured field length ${length} runs past the end of a ${payload.length}-byte payload`,
+        `structured field at offset ${i} has length ${length}, which runs past the end of a ${payload.length}-byte payload`,
       );
     }
 
@@ -91,7 +108,9 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
       // format as L(0-1) SFID(2) PIO(3) TYPE(4), and x3270 rejects a shorter
       // one at sf.c:221 `if (buflen < 5)`. ["PIO" is OCR damage for "PID".]
       if (params.length < 2) {
-        throw new SfParseError(`Read Partition needs PID and TYPE, got ${params.length} byte(s)`);
+        throw new SfParseError(
+          `Read Partition at offset ${i} needs PID and TYPE, got ${params.length} byte(s)`,
+        );
       }
       // PID is RECORDED, not assumed: a non-0xFF value is a read against a real
       // partition, which we do not support, and the trace must show the
