@@ -7,6 +7,7 @@ import { TelnetLayer } from './telnet.js';
 import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
+import { buildQueryReply, DEFAULT_CAPABILITIES } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 
@@ -180,12 +181,18 @@ export class Session {
       if (result.keyboardRestore) {
         this.oia.waitingForHost = false;
         this.oia.reset();
-      } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite) {
+      } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite
+        && parsed.command !== 'WriteStructuredField') {
         // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
         // initial post-connect lock is released by the host writing anything at
         // all, not only by an explicit keyboard-restore. VM/370's logo arrives
         // with WCC 0x42 (restore set) but a host that omits the bit must not
         // leave us locked out forever.
+        //
+        // ...and a Write Structured Field is NOT such a write: it puts nothing
+        // in the buffer. TSO sends its Read Partition (Query) BEFORE any write,
+        // so without this exclusion the operator gets an unlocked keyboard over
+        // a blank screen.
         this.oia.waitingForHost = false;
         this.oia.reset();
       }
@@ -195,6 +202,22 @@ export class Session {
       }
       if (result.readRequest !== undefined) {
         this.answerRead(result.readRequest);
+      }
+      if (result.sfReply === 'queryReply') {
+        this.answerQuery();
+      }
+      // The only thing that OBSERVES the SA/MF counters. execute() bumps them
+      // per record and nothing sums them, so without a line here a live run
+      // could not tell "we saw no SA/MF" from "nobody looked" — the precise
+      // failure those counters exist to rule out. Named in the message so a
+      // trace grep finds them.
+      //
+      // isEnabled() first, matching describeRecord above: this runs on every
+      // record, and trace.note's own guard would still have us build the string.
+      if (this.trace.isEnabled()
+        && (result.setAttributeIgnored > 0 || result.modifyFieldIgnored > 0)) {
+        this.trace.note(
+          `ignored orders: SA=${result.setAttributeIgnored} MF=${result.modifyFieldIgnored}`);
       }
       this.emit('screen');
     } catch (err) {
@@ -222,6 +245,25 @@ export class Session {
       ? buildReadBuffer(this.screen, AID.NONE)
       : buildReadModified(this.screen, AID.NONE, kind === 'ReadModifiedAll');
     this.telnet?.sendRecord(payload);
+  }
+
+  /**
+   * Answer a Read Partition (Query) with our capabilities.
+   *
+   * Deliberately does NOT touch the screen, the cursor or the keyboard: a Query
+   * is a question about the device, not a write to it. In particular the
+   * keyboard stays locked, because AwaitingFirstWrite is released by host
+   * WRITES and the host has not written anything yet.
+   *
+   * `this.telnet?.` and not a throw, matching answerRead: both are reached only
+   * from handleRecord, which the telnet layer itself calls, so a missing telnet
+   * means the transport went away mid-record and there is nowhere to send. The
+   * throwing convention belongs to the operator-initiated senders (sendAID,
+   * sendAttn), where a caller is present to be told.
+   */
+  private answerQuery(): void {
+    const geometry = { rows: this.screen.rows, cols: this.screen.cols };
+    this.telnet?.sendRecord(buildQueryReply(DEFAULT_CAPABILITIES, geometry));
   }
 
   /** Operator pressed a key that generates an AID. */

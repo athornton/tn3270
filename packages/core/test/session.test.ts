@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Session, type Connection } from '../src/session.js';
-import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA } from '../src/constants.js';
+import {
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA, Qcode, Sfid,
+} from '../src/constants.js';
 import { KeyboardState } from '../src/oia.js';
 
 /** An in-memory connection that records what the session sends. */
@@ -331,5 +333,113 @@ describe('trace and replay', () => {
 
     expect(() => session.replay(traceText)).toThrow(/disconnected/i);
     expect(conn.sent).toEqual([]);
+  });
+});
+
+describe('query reply', () => {
+  /**
+   * WSF carrying Read Partition: L=5 SFID=01 PID=ff TYPE=02.
+   *
+   * The PID is DOUBLED on the wire, and it must be: PID_QUERY is 0xFF, which is
+   * IAC, and conn.host() feeds raw wire bytes into the telnet state machine.
+   * A single 0xFF here is read as an IAC command and the following 0x02 as its
+   * argument, so the record arrives 2 bytes short and never parses as a Query.
+   * A real host doubles it the same way our sendRecord does (telnet.ts:79), and
+   * the receiver un-doubles it (telnet.ts:122) — see the note in stream/sf.ts.
+   */
+  const QUERY = [SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02] as const;
+
+  /**
+   * The 3270 record the session sent, unwrapped from telnet framing.
+   *
+   * conn.sent is a flat byte array and an outbound record ends with IAC EOR
+   * (telnet.ts:84). Doubled IAC inside the payload is not un-doubled here — no
+   * assertion below needs it.
+   */
+  function lastRecord(conn: FakeConnection): number[] {
+    const end = conn.sent.length - 2; // drop the trailing IAC EOR
+    expect(conn.sent.slice(end)).toEqual([T.IAC, T.EOR]);
+    return conn.sent.slice(0, end);
+  }
+
+  it('answers a Read Partition Query with a Query Reply', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    conn.host(...QUERY, T.IAC, T.EOR);
+    const reply = lastRecord(conn);
+    // AID 0x88, then L L SFID QCODE — Summary first.
+    expect(reply[0]).toBe(AID.SF);
+    expect(reply[3]).toBe(Sfid.QUERY_REPLY);
+    expect(reply[4]).toBe(Qcode.SUMMARY);
+  });
+
+  it('does not touch the screen when answering a Query', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.screen.setChar(0, 0xc1);
+    session.screen.cursor = 5;
+    conn.host(...QUERY, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
+    expect(session.screen.cursor).toBe(5);
+  });
+
+  it('does NOT unlock the keyboard on a Query, which is not a write', async () => {
+    // THE REGRESSION THIS GUARDS: the AwaitingFirstWrite release fires for any
+    // record, and TSO sends its Query BEFORE any write. Without excluding
+    // WriteStructuredField the operator gets an unlocked keyboard over a blank
+    // screen.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    conn.host(...QUERY, T.IAC, T.EOR);
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    expect(session.oia.isInhibited()).toBe(true);
+  });
+
+  it('still unlocks on a real write that follows a Query', async () => {
+    // The exclusion must not break the normal release.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.host(...QUERY, T.IAC, T.EOR);
+    conn.host(SnaCmd.W, 0x00, 0xc1, T.IAC, T.EOR);
+    expect(session.oia.isInhibited()).toBe(false);
+  });
+
+  it('does not answer a Query List, which we do not implement', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    // PID 0xff doubled, as in QUERY above; only the TYPE differs.
+    conn.host(SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x03, T.IAC, T.EOR);
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it('does not answer a Read Partition against a real partition', async () => {
+    // PID 0x00 is a read of partition zero, not a query. We do not support
+    // partitions, so answering with capabilities would be wrong.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent.length = 0;
+    conn.host(SnaCmd.WSF, 0x00, 0x05, 0x01, 0x00, 0x02, T.IAC, T.EOR);
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it('reports a malformed structured field as a program check, keeping the connection', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    // A length with an SFID but no PID/TYPE. NOTE L=0 is LEGAL (it means "to
+    // the end of the transmission", which stream/sf.ts resolves), so this is
+    // rejected for lacking PID and TYPE, not for the zero.
+    conn.host(SnaCmd.WSF, 0x00, 0x00, 0x01, T.IAC, T.EOR);
+    expect(session.oia.toText()).toContain('X PROG');
+    expect(session.isConnected()).toBe(true);
   });
 });

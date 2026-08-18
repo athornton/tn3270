@@ -1,6 +1,7 @@
 import { WCC, FA, Order, XA_3270 } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
+import { isQueryRequest } from './sf.js';
 
 /**
  * Apply a parsed record to a screen.
@@ -20,6 +21,8 @@ export class ExecuteError extends Error {
 export interface ExecuteResult {
   /** The host asked us to send something back. */
   readRequest?: Extract<CommandName, 'ReadBuffer' | 'ReadModified' | 'ReadModifiedAll'>;
+  /** The host asked what this terminal can do, and we should answer. */
+  sfReply?: 'queryReply';
   /** WCC bit 6: unlock the keyboard. */
   keyboardRestore: boolean;
   /** WCC bit 5: sound the alarm. */
@@ -85,7 +88,28 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
 
     case 'WriteStructuredField':
       for (const t of record.tokens) {
-        if (t.kind === 'structuredField') result.structuredFieldsIgnored++;
+        if (t.kind !== 'structuredField') continue;
+        // isQueryRequest (stream/sf.ts) checks BOTH the PID and the TYPE. A
+        // Query List (0x03) needs subsetting rules we have not implemented, and
+        // a non-0xFF PID is a read against a real partition we do not support.
+        // Both are counted and traced rather than answered — an unanswered
+        // request is honest; a guessed answer is not.
+        //
+        // The subsetting rules span p. 6-19 AND p. 6-20, not p. 6-19 alone.
+        // p. 6-19 introduces the selector — "an additional parameter, REQTYP
+        // (Request Type), bits 0-1 of byte 5 and, / optionally, a list of
+        // QCODES starting at byte 6" (pages.txt:8508-8509) — and the rules for
+        // each of its three values are the table on p. 6-20, e.g. QCODE List
+        // B'00' "workstation returns all the requested Query / Replies (QCODES
+        // listed) that are supported. If / none of the requested Query Replies
+        // are / supported, a Null Query Reply is returned."
+        // (pages.txt:8531-8534). We build no Null Query Reply and do no
+        // filtering, so we cannot honour any of the three.
+        if (isQueryRequest(t.field)) {
+          result.sfReply = 'queryReply';
+        } else {
+          result.structuredFieldsIgnored++;
+        }
       }
       return result;
 
