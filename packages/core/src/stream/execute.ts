@@ -28,7 +28,13 @@ export interface ExecuteResult {
   printerUnavailable: boolean;
   /** How many structured fields we skipped, for the trace. */
   structuredFieldsIgnored: number;
-  /** SA orders parsed and dropped. Stage 2a does not implement them. */
+  /**
+   * SA orders parsed and dropped. Stage 2a does not implement them.
+   *
+   * Per-record, and nothing sums these across a session: the live run measures
+   * SA and MF by grepping the trace for `deferred(0x28` / `deferred(0x2c`
+   * (parse.ts describeRecord emits them), which is what aggregates.
+   */
   setAttributeIgnored: number;
   /**
    * MF orders parsed and dropped.
@@ -36,6 +42,7 @@ export interface ExecuteResult {
    * A NONZERO VALUE HERE IS A FOLD-INTO-2B SIGNAL: MF modifies an existing
    * field's attributes, so ignoring one can leave a field's protection stale
    * and the operator unable to type where they should. See the stage 2a spec.
+   * Measured via the trace grep, as for setAttributeIgnored above.
    */
   modifyFieldIgnored: number;
   /** Set when a recoverable protocol fault occurred. */
@@ -122,9 +129,18 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     // is a malformed record the real hardware would never see. Deferred tokens
     // on those six paths therefore go uncounted, and that is the whole of the
     // gap — verified by walking every case in the switch above.
+    // An exhaustive switch, not an if/else chain: 8017c49 narrowed
+    // deferred.order to SA|MF, so the never guard turns "a third deferred order
+    // was added and nothing counts it" into a compile error. Without it such an
+    // order would be silently uncounted, and a zero here would then mean "we
+    // never saw one" when it actually meant "we never looked" — the precise
+    // failure these counters exist to rule out.
     if (token.kind === 'deferred') {
-      if (token.order === Order.SA) result.setAttributeIgnored++;
-      else if (token.order === Order.MF) result.modifyFieldIgnored++;
+      switch (token.order) {
+        case Order.SA: result.setAttributeIgnored++; break;
+        case Order.MF: result.modifyFieldIgnored++; break;
+        default: { const _never: never = token.order; void _never; }
+      }
     }
     addr = applyToken(screen, token, addr, () => { wroteSinceOrder = true; }, wroteSinceOrder);
     if (token.kind !== 'data' && token.kind !== 'ge' && token.kind !== 'ra') {

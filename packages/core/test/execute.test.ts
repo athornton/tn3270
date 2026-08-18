@@ -241,10 +241,20 @@ describe('orders', () => {
     // effect." x3270 gets this for free: its pair loop calls START_FIELD on
     // every 0xC0 it meets, so the last write to the buffer wins
     // (ctlr.c:1838-1842).
+    //
+    // 0xE8 for the second value, NOT 0x00: the no-pair default is also 0x00, so
+    // expecting that would pass for an implementation that gave up on a repeated
+    // type and fell back to the default. 0xE8 is distinguishable from both the
+    // first value and the default, and it doubles as the suite's only
+    // realistically-shaped attribute byte — printable bits on (0xC0, which
+    // Field.attr's contract at screen.ts:36-43 says every real host sets), plus
+    // protect 0x20 and FA.INT_HIGH_SEL 0x08. Asserting on it therefore also pins
+    // that we pass the byte through unmasked rather than normalizing it.
     const s = new Screen();
     run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40,
-      Order.SFE, 0x02, XA_3270, 0x60, XA_3270, 0x00);
-    expect(s.attributeAt(0)).toBe(0x00);
+      Order.SFE, 0x02, XA_3270, 0x60, XA_3270, 0xe8);
+    expect(s.attributeAt(0)).toBe(0xe8);
+    expect(s.fieldAt(1)?.intensified).toBe(true);
   });
 
   it('counts SA and MF separately so the live run can measure them', () => {
@@ -252,9 +262,21 @@ describe('orders', () => {
     // PRESENCE. Stage 1 lesson 7: a probe that could only ever say "never"
     // produced a confident wrong claim that reached committed docs. These
     // assertions are that proof.
+    //
+    // TWO SA orders and ONE MF, deliberately asymmetric. With one of each, both
+    // counters read 1 whichever order increments which, so swapping the two
+    // cases in the counting loop passes — and that swap is not cosmetic:
+    // modifyFieldIgnored is the documented fold-into-2b trigger, so under it a
+    // host sending only SA would trigger a stage-2b fold on evidence that does
+    // not exist, which is the exact lesson-7 failure this test cites. The
+    // asymmetry also pins that repeats of one order accumulate rather than
+    // saturating at 1.
     const s = new Screen();
-    const r = run(s, SnaCmd.W, 0x00, Order.SA, 0x42, 0xf4, Order.MF, 0x01, XA_3270, 0x60);
-    expect(r.setAttributeIgnored).toBe(1);
+    const r = run(s, SnaCmd.W, 0x00,
+      Order.SA, 0x42, 0xf4,
+      Order.SA, 0x42, 0xf5,
+      Order.MF, 0x01, XA_3270, 0x60);
+    expect(r.setAttributeIgnored).toBe(2);
     expect(r.modifyFieldIgnored).toBe(1);
   });
 
