@@ -196,13 +196,38 @@ describe('order parsing', () => {
     ]);
   });
 
+  it('keeps duplicate attribute types in wire order, without collapsing them', () => {
+    // p. 4-5: the LAST specification for a repeated type wins, so the order must
+    // survive parsing for the consumer to apply that rule — and the trace must be
+    // able to show that the host really did send the pair twice.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0x60, 0xc0, 0x00));
+    expect(r.tokens).toEqual([
+      { kind: 'sfe', pairs: [{ type: 0xc0, value: 0x60 }, { type: 0xc0, value: 0x00 }] },
+    ]);
+  });
+
+  // Both orders get both truncation cases. Before SFE and MF were split they
+  // shared one code path, so testing either tested both; now the length
+  // arithmetic is duplicated, and MF's copy is only pinned by MF's own tests.
+  // Each "pair count runs past" case is exactly ONE byte short, so an off-by-one
+  // in `need` fails the test rather than sliding under a larger margin.
   it('rejects an SFE whose pair count runs past the record', () => {
-    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x04, 0xc0, 0x60)))
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0x60, 0x42)))
       .toThrow(ParseError);
   });
 
   it('rejects an SFE with no count byte at all', () => {
     expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE)))
+      .toThrow(ParseError);
+  });
+
+  it('rejects an MF whose pair count runs past the record', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.MF, 0x02, 0xc0, 0x60, 0x42)))
+      .toThrow(ParseError);
+  });
+
+  it('rejects an MF with no count byte at all', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.MF)))
       .toThrow(ParseError);
   });
 

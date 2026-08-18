@@ -38,11 +38,16 @@ export type CommandName =
  *
  * So: order byte, count of pairs, then that many (type, value) byte pairs.
  *
- * Do not take the pair type from the figure just below that one, which the OCR
- * renders "I X'C8' I Field Attribute I" — the basic field attribute type is
- * 0xC0, per Table 4-6 (OCR "X'CO' 3270 Field attribute", letter O for zero) and
- * x3270's include/3270ds.h:230, which defines XA_3270 as 0xc0. See XA_3270 in
- * constants.ts, which already pins this.
+ * Pairs are kept in wire order, and duplicates are NOT collapsed. Consumers
+ * MUST take the LAST occurrence of a repeated attribute type, per p. 4-5
+ * (pages.txt:2899-2901): "All attribute types and values are checked for
+ * validity. If the same attribute / type-value pair appears more than once, the
+ * last specification for a repeated / attribute type takes effect." Use
+ * findLast, not find — the stage 2a plan said find and was wrong.
+ *
+ * The basic field attribute arrives as a pair of type 0xC0 — NOT the X'C8' the
+ * figure below the format OCRs as. See XA_3270 in constants.ts, which pins the
+ * value and records that OCR damage with its page citations.
  */
 export interface AttributePair {
   type: number;
@@ -58,8 +63,13 @@ export type Token =
   | { kind: 'ra'; stop: number; fill: number; ge: boolean }
   | { kind: 'eua'; stop: number }
   | { kind: 'ge'; ebcdic: number }
-  /** SA/MF: recognized so they can be skipped by length, not executed. */
-  | { kind: 'deferred'; order: number; data: Uint8Array }
+  /**
+   * SA/MF: recognized so they can be skipped by length, not executed. `order` is
+   * narrowed to the two the parser can actually emit, so adding a third deferred
+   * order forces every consumer's if/else on it to be revisited rather than
+   * letting the new one parse and go silently uncounted.
+   */
+  | { kind: 'deferred'; order: typeof Order.SA | typeof Order.MF; data: Uint8Array }
   /** SFE with its attribute pairs decoded. Defines a field; see execute.ts. */
   | { kind: 'sfe'; pairs: AttributePair[] }
   /** One structured field from a WSF record, parsed by stream/sf.ts. */
@@ -243,7 +253,7 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
         //   "If SFE is sent with no type-value pairs (zero value for number of pairs), defaults
         //   are set."
         // x3270's loop over the count does the same, running zero times without
-        // special-casing (ctlr.c:1833-1834).
+        // special-casing (ctlr.c:1833).
         flushRun();
         i++;
         need(1, 'SFE count');
