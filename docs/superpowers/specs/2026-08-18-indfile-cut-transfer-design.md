@@ -361,6 +361,48 @@ tested — and it cost a wrong conclusion (fields at 1915/1919 read as CUT frame
 session had never got past logon). The stage 1 runbook already says this; it is repeated
 here because it was ignored anyway.
 
+## FIRST LIVE TRANSFER WORKS — download from MVS TK5, 2026-08-18
+
+```
+Transfer(Direction=receive,HostFile='SYS1.PARMLIB(IEASYS00)',
+         LocalFile=/tmp/got.txt,Mode=ascii,Cr=add)
+```
+
+**1742 bytes arrived, correct start to finish, with CRLF line terminators as
+requested.** `file` reports "ASCII text, with CRLF line terminators"; the content is
+genuinely `IEASYS00` from `APF=00` through `WTORPLY=10`. The whole stack works end to
+end against a real host: telnet framing, Query Reply, CUT frame detection, frame
+parsing, the base-77 codec with its quadrant state machine, the transfer state machine,
+and the CLI action.
+
+Client invocation: `-model 3278-2-E` (a plain `IBM-3278-2` is refused by TSO with
+`IKT00405I`).
+
+**Two operational lessons from the run, both worth carrying into the runbook:**
+
+1. **`Wait(Unlock)` before typing after a transfer.** The `String("LOGOFF")` that
+   followed the transfer was refused with `input inhibited` — the status line shows `L`
+   (locked) for that command and `U` immediately after, so the keystroke simply raced
+   the post-transfer screen. Adding `Wait(Unlock,20)` before it fixes it, verified: a
+   clean `LOGOFF` back to the VTAM panel with no inhibited keystroke. **A transfer
+   leaves the keyboard briefly locked and a script must wait for it.**
+2. **That refused `LOGOFF` left the userid logged on**, which then blocks the next run
+   with `IKJ56425I ... IN USE`. Same trap as before, from a different cause: last time
+   the script never reached `LOGOFF`, this time it reached it and the host refused it.
+   **Check the reply status, not just that the command was issued** — the `error` line
+   was right there in the output.
+
+**TSO quoting is semantic.** `HostFile='SYS1.PARMLIB(IEASYS00)'` — with quotes — fetches
+that dataset; without them TSO prepends the userid and looks for
+`HERC02.SYS1.PARMLIB(IEASYS00)`. The host name passes through verbatim, matching x3270
+(`ft.c:687`), so the operator owns the quoting. Both forms are legitimate and only the
+operator knows which is meant.
+
+**Still untested against a live host: upload (`Direction=send`).** That is the primary
+use case — getting software onto a system with no TCP/IP — and it exercises the encoder,
+the checksum the host actually verifies, and the retransmit path, none of which a
+download touches.
+
 ## Codec findings, from the implementation (2026-08-18)
 
 `packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
