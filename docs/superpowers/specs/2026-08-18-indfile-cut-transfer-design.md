@@ -325,7 +325,51 @@ frames sequence correctly rather than only individually.
   with the 6-bit alphabet, and bytes from each quadrant. A text file exercises none of
   the quadrant machinery.
 
-## THE PROBE RAN, AND IT FAILED — read this before touching host code
+## BLOCKER RESOLVED 2026-08-18 — it was the terminal type, then Query List
+
+**The cause was `IBM-3278-2`.** MECAFF refuses fullscreen to a terminal that does not
+claim extended data stream. Single-variable test, everything else identical:
+
+| terminal type | `FSQRY` |
+|---|---|
+| `IBM-3278-2` (our default) | "Please press ENTER to cancel fullscreen operation" |
+| `IBM-3278-2-E` | `Ready;` — succeeds |
+| `IBM-DYNAMIC` | succeeds |
+
+The user confirmed EE and XXLIST work from their own client, which is what ruled out
+DIAG-58 and made the client the remaining variable. **So the earlier hypothesis that
+DIAG-58 might be absent in CE 1.1.2 was WRONG** — fullscreen is healthy; we were simply
+not claiming enough capability to be offered it.
+
+**With `-model 3278-2-E`, `IND$FILS GET` gets much further and reveals the real
+blocker:** the refusal is gone and MECAFF sends us a structured field —
+
+```
+f3 00 07 01 ff ff 03 80 00 ff ef
+   ^^^^^ L=7  ^^ SFID 01 = Read Partition
+              ^^ PID ff   ^^ TYPE 03 = QUERY LIST   ^^ REQTYP 80   ^^ QCODE 00
+```
+
+**It is a Query LIST (TYPE=0x03), which stage 2a deliberately does not answer.** We
+count it and stay silent, so MECAFF waits for a reply that never comes. Verified: we
+send nothing after that record.
+
+**REQTYP `0x80` is ALL.** GA23-0059 p. 6-19 (`pages.txt:8508-8512`) puts REQTYP in
+*bits 0-1* of byte 5, so `0x80` is B'10' = ALL: "Requests the 3270 data stream device or
+workstation to return all the Query Replies supported… the QCODE list is ignored".
+
+**So the fix is small and well-defined:** answer Query List. x3270 handles all three
+versions (`Common/sf.c:240-297`); for `SF_RPQ_ALL` it emits every reply it supports,
+which for us is exactly the three units `buildQueryReply` already produces. The other
+two versions are QCODE List (return the requested subset, or a Null Query Reply
+`QR_NULL` if none are supported) and Equivalent (same set as a plain Query).
+
+**This is the stage 2a deferral coming due**, and it now blocks file transfer. It is a
+prerequisite, not a nice-to-have.
+
+## SUPERSEDED — the original probe failure, kept for the reasoning
+
+
 
 The gate below did its job: **it fired before any code was written.** Findings,
 2026-08-18:
