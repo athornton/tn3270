@@ -403,6 +403,39 @@ use case — getting software onto a system with no TCP/IP — and it exercises 
 the checksum the host actually verifies, and the retransmit path, none of which a
 download touches.
 
+## UPLOAD WORKS TOO — round trip byte-exact against MVS TK5, 2026-08-18
+
+The primary use case is proven. A deliberately nasty 249-byte binary — nulls,
+`0xFF`, all four quadrant selectors, the twelve punctuation bytes shared between
+quadrants 0 and 1, `0x00`-`0xFF` at stride 17, and 200 random bytes; 160 distinct
+values — was uploaded and downloaded back.
+
+**`Recfm=variable` round-trips exactly:**
+
+```
+Transfer(Direction=send,LocalFile=/tmp/nasty.bin,HostFile=NASTYV.BIN,
+         Recfm=variable,Lrecl=1024)          -> 249 bytes transferred
+Transfer(Direction=receive,HostFile='HERC02.NASTYV.BIN',
+         LocalFile=/tmp/back2.bin)           -> 249 bytes transferred
+sent 249, back 249, IDENTICAL: true
+```
+
+Both transfers ran **in one session**, upload then download without reconnecting.
+
+**`Recfm=fixed` pads, and that is correct behaviour rather than a bug.** The same
+payload with `Recfm=fixed,Lrecl=80` came back as **320 bytes: the original 249
+followed by 71 nulls.** `ceil(249/80) = 4` records × 80 = 320, padding 71 — which
+matches the observed padding exactly. A fixed-record dataset has no way to record
+that the last record was short. **For shipping a MODULE, use `Recfm=variable`**,
+and expect padding if you ask for `fixed`.
+
+This exercises everything a download does not: the encoder, the quadrant state
+machine in the emitting direction, the checksum the host verifies, and frame
+sequencing on the sending side. The retained-encoded-bytes design for retransmit
+was not observably triggered (no retransmit occurred on a clean local link), so
+**that path remains unit-tested only** — see the note below on why re-encoding
+would have corrupted data silently.
+
 ## Codec findings, from the implementation (2026-08-18)
 
 `packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
