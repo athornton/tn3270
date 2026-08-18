@@ -6,8 +6,27 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `stage2a-extended-data-stream`, **402 tests passing**, `npm run typecheck`
-clean, `npm run build` works, working tree clean.
+Branch `main` (renamed from `master` 2026-08-18), **429 tests passing**,
+`npm run typecheck` clean, `npm run build` works, working tree clean. Stage 1 and
+stage 2a are both merged to `main`.
+
+**Two gaps found during stage 2a have since been closed, and both audits found more
+than the stated bug:**
+
+- **Enter-inhibit after a Query** is now raised, per GA23-0059 p. 5-53
+  (`pages.txt:6413`) and x3270's `query_reply_end()` (`Common/sf.c:929`), and cleared
+  by Write/EW/EWA/EAU exactly as x3270 clears it (`ctlr.c:550`, `:1309`, `:1406`).
+  The audit also found that **nothing enforced any keyboard lock on typing** —
+  `Keyboard.type` consulted no lock at all, so even the pre-existing
+  `AwaitingFirstWrite` was advisory. Now enforced, with operator errors excluded the
+  way x3270 excludes `KL_OERR_MASK`. `Wait(Unlock)` was likewise blind to it.
+- **IAC is now doubled inside telnet subnegotiation data**, required by RFC 855's
+  final paragraph and done by x3270. The audit found three further defects on the
+  *escaped*-byte path, all the same shape — it skipped gates the plain-byte path
+  honours: escaped IACs bypassed both accumulator ceilings entirely (200k `IAC IAC`
+  pairs grew a 1024-cap buffer to 200001), and an escaped IAC was stored regardless
+  of 3270 mode, **leaking a banner byte into the head of the first real record** —
+  the same class as the bug this module already calls "THE regression test".
 
 **STAGE 2a IS COMPLETE AND PROVEN AGAINST A LIVE HOST.** MVS 3.8j TSO is reachable:
 the acceptance script reaches the ISPF primary option menu and logs off cleanly, 0
