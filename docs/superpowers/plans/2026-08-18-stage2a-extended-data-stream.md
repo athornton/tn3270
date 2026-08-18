@@ -668,11 +668,25 @@ describe('query reply', () => {
         .filter((l) => l.startsWith('> '))
         .flatMap((l) => l.slice(2).trim().split(/\s+/))
         .map((h) => parseInt(h, 16))
-        // Their record ends with the IAC EOR terminator, which is telnet
-        // framing rather than reply content.
         .filter((b) => !Number.isNaN(b)),
     );
-    const theirUnits = units(theirs.subarray(0, theirs.length - 2));
+    // TWO layers of telnet framing come off, not one. An earlier draft of this
+    // plan stripped only IAC EOR, which HANGS AND OOMS the vitest worker:
+    // content 0xff is IAC-doubled on the wire, x3270's Color unit contains a
+    // real 0xff, so leaving `ff ff` in desynchronizes the length walk, a later
+    // unit reads len=0, `i` never advances, and the loop allocates until the
+    // heap dies — reporting nothing useful. The fixture's own header
+    // (tso-query-reply.txt:16-25) warns about exactly this doubling.
+    // 183 wire bytes - 2 (IAC EOR) - 1 (doubled IAC) = 180 = ten units.
+    // Make `units()` throw on any length below 4 as well, so a future desync
+    // fails loudly instead of exhausting memory.
+    const framed = theirs.subarray(0, theirs.length - 2);
+    const undoubled: number[] = [];
+    for (let i = 0; i < framed.length; i++) {
+      undoubled.push(framed[i]!);
+      if (framed[i] === 0xff && framed[i + 1] === 0xff) i++;
+    }
+    const theirUnits = units(Uint8Array.from(undoubled));
     const byQcode = new Map(theirUnits.map((u) => [u[3]!, u]));
 
     const ourUnits = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
