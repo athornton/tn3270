@@ -239,4 +239,10 @@ one unmet check is waiting on a system to be IPLed rather than on code.
 
 ## License
 
-Not yet chosen.
+MIT. See [LICENSE](LICENSE).
+
+Note the reference material this project was built against is **not** covered by
+that licence and is not redistributed here: IBM's GA23-0059 3270 Data Stream
+Programmer's Reference, x3270 (Paul Mattes, BSD-3-Clause), tnz/zti, and the host-side
+`IND$FILE` implementations. The `packages/fixtures/` captures are our own recordings
+of traffic between this client and hosts the author runs locally.

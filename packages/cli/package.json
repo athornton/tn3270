@@ -1,6 +1,8 @@
 {
   "name": "@tn3270/cli",
   "version": "0.1.0",
+  "license": "MIT",
+  "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
   "bin": { "tn3270-cli": "./dist/main.js" },
   "dependencies": { "@tn3270/core": "0.1.0" },
