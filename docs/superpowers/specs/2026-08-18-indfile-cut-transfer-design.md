@@ -467,6 +467,45 @@ was not observably triggered (no retransmit occurred on a clean local link), so
 **that path remains unit-tested only** — see the note below on why re-encoding
 would have corrupted data silently.
 
+## VM/CMS: Query List now answered, but the transfer STILL DOES NOT WORK
+
+Query List support is implemented and verified offline (see the stage 2a spec, whose
+"Query List out of scope" entry is now superseded). Independently confirmed against
+the built API: REQTYP=ALL and Equivalent both produce byte-identical output to a plain
+Query (48 bytes), a QCODE-List for `0x81` returns 31 bytes with Summary still
+advertising all three units, and a list naming only unsupported QCODEs returns exactly
+`88 00 04 81 ff` — the Null Query Reply.
+
+**But a live VM/CMS transfer still fails, and NOT for the Query List reason.** Two
+attempts, 2026-08-18:
+
+1. `HostFile=PROFILE EXEC A` — **rejected by our own argument parser.** `splitArgs`
+   (`packages/cli/src/commands.ts:54`) splits on commas *or spaces*, so a CMS
+   three-part filename becomes three keyword tokens and `EXEC` looks like an option
+   needing a value. **Quote it: `HostFile="PROFILE EXEC A"`.** The parser honours
+   double quotes. This is a usability trap specific to the CMS dialect — TSO dataset
+   names have no spaces — and it should probably be documented in the runbook or
+   handled at the call site.
+
+2. With the name quoted, the command parsed and the transfer ran, then timed out:
+   `no CUT frame from the host within 30s after 0 bytes`. **Zero outbound records in
+   the trace and the screen showing `RUNNING`** — so the diagnosis is unfinished. It
+   is *not* the Query List: no `ReadPartition` of any type appears in that run at all,
+   meaning MECAFF never got as far as asking. Something earlier in the sequence — most
+   likely the `Clear`/`Wait` handshake before the command, or the command never
+   reaching the CMS prompt — is wrong.
+
+**So the VM blocker has moved, not lifted.** What is established: MECAFF needs
+`-model 3278-2-E` (a plain `IBM-3278-2` gets "Please press ENTER to cancel fullscreen
+operation"), and it asks with a Query List which we can now answer. What is not: an
+end-to-end VM transfer. **MVS/TSO remains the only host with a verified working
+transfer, in both directions.**
+
+Next step when this resumes: drive the VM sequence one step at a time with `ScreenText`
+between each, confirming the `IND$FILD GET ...` command actually lands at the `Ready;`
+prompt before the transfer loop starts. The zero-outbound-records detail is the clue —
+we may not be typing anything at all.
+
 ## Codec findings, from the implementation (2026-08-18)
 
 `packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
