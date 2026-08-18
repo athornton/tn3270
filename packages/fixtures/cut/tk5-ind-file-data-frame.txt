@@ -18,11 +18,14 @@
 #   6b d8              O_DT_LEN         -> (from6<<6)|from6 = 1904
 #   7e ...             O_DT_DATA, 1904 bytes of 6-bit encoded data
 #
-# DECODED CONTENT, produced by ft/cut.ts hostToLocal() -- 1498 bytes beginning:
-#   " APF=00,     Suffix for authorized lib list IEAAPFxx\r\n
-#     APG=07,     Automatic Prority Group\r\n
-#     BLDLF=BA,   Suffix for BLDL list IEABLDxx\r\n ..."
-# which is genuinely SYS1.PARMLIB(IEASYS00) with CRLF line endings.
+# DECODED CONTENT, produced by ft/cut.ts hostToLocal() -- 1498 bytes, genuinely
+# SYS1.PARMLIB(IEASYS00) with CRLF line endings. It begins with " APF=00," and
+# contains the lines "APG=07", "BLDLF=BA" and "CMD=00".
+#
+# NOTE the real member pads its comment column to 22 spaces, not the handful an
+# earlier version of this header showed -- that abridgement made a test fail
+# against a quotation rather than against the data. THE HEX BELOW IS THE ORACLE;
+# this header is commentary. Assert on substrings, not on exact spacing.
 #
 # THE CHECKSUM IS REAL ON THIS HOST: the frame carries 6-bit 62 at O_DT_CSUM and
 # our checksum() over the raw data computes 62. MECAFF on VM/370 ignores the
