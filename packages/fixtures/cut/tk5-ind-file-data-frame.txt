@@ -1,0 +1,154 @@
+# A REAL CUT data frame captured from MVS 3.8j TK5, 2026-08-18.
+#
+# Host program: "Free File Transfer Program" 2.0.5 (Mike Rayborn, 2002-2016),
+# installed from the CBT tape. Command:
+#   IND$FILE GET 'SYS1.PARMLIB(IEASYS00)' ASCII CRLF
+# Client: our own CLI with `-model 3278-2-E` (a plain IBM-3278-2 is refused by
+# TSO with IKT00405I).
+#
+# This is the WHOLE inbound 3270 record, starting with the command byte -- not
+# just the CUT payload. Layout, verified against x3270's include/ft_cut_ds.h:
+#
+#   f5 c2              EraseWrite, WCC 0xc2
+#   11 5d 7f           SBA(1919) = O_SF
+#   11 40 40           SBA(0)     -- CUT frame starts at the next byte
+#   c1                 O_FRAME_TYPE = FT_DATA
+#   82                 O_DT_FRAME_SEQ   -> from6 = 1
+#   f4                 O_DT_CSUM        -> from6 = 62
+#   6b d8              O_DT_LEN         -> (from6<<6)|from6 = 1904
+#   7e ...             O_DT_DATA, 1904 bytes of 6-bit encoded data
+#
+# DECODED CONTENT, produced by ft/cut.ts hostToLocal() -- 1498 bytes beginning:
+#   " APF=00,     Suffix for authorized lib list IEAAPFxx\r\n
+#     APG=07,     Automatic Prority Group\r\n
+#     BLDLF=BA,   Suffix for BLDL list IEABLDxx\r\n ..."
+# which is genuinely SYS1.PARMLIB(IEASYS00) with CRLF line endings.
+#
+# THE CHECKSUM IS REAL ON THIS HOST: the frame carries 6-bit 62 at O_DT_CSUM and
+# our checksum() over the raw data computes 62. MECAFF on VM/370 ignores the
+# checksum on receive, but this host populates it on send -- which is why
+# verifying it is worthwhile rather than spurious.
+#
+# No credentials appear in this capture (the logon happened in earlier records).
+
+f5 c2 11 5d 7f 11 40 40 c1 82 f4 6b d8 7e 40 c1
+5e 50 7e c6 5c f1 7e f0 f0 6b 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+e2 a4 86 86 89 a7 40 86 5e 6f 7e 99 40 5e 61 7e
+a4 a3 88 5e 6f 7e 99 89 5e 7a 7e 85 84 40 5e 6c
+7e 89 82 40 5e 6c 7e 89 a2 a3 40 c9 c5 c1 c1 5e
+50 7e c6 a7 a7 5c d5 d2 7e 40 c1 5e 50 7e c7 5c
+f1 7e f0 f7 6b 40 40 40 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 c1 a4 a3 5e 6f
+6d 61 7e a3 89 83 40 5e 50 7e 99 5e 6f 7e 99 89
+a3 a8 40 c7 99 5e 6f 7e a4 97 5c d5 d2 7e 40 c2
+5e 4c 7e c4 5e 4c 7e c6 5c f1 7e c2 c1 6b 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 e2 a4 86 86 89 a7 40 86 5e 6f 7e 99 40 c2
+5e 4c 7e c4 5e 4c 7e 40 5e 6c 7e 89 a2 a3 40 c9
+c5 c1 c2 5e 4c 7e c4 a7 a7 5c d5 d2 7e 40 c3 5e
+4d 7e c4 5c f1 7e f0 f0 6b 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 c1
+a4 a3 5e 6f 6d 61 7e a3 89 83 40 83 5e 6f 6d 6d
+61 6e 7e 84 a2 40 86 99 5e 6f 6d 7e 40 c3 d6 5e
+4d 4d 4e 7e c4 f0 f0 5c d5 d2 7e 40 c3 e2 c1 5c
+f1 7e f2 f0 f4 f8 6b 40 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 e2 89 5e 7a 7e
+85 40 5e 6f 7e 86 40 c3 e2 c1 40 40 4d f2 5e 4d
+7e 40 5e 6d 7e 89 5e 6e 7e 89 5e 6d 7e a4 5e 6d
+7e 40 82 85 83 5e 61 7e a4 a2 85 40 e5 e3 c1 5e
+4d 7e 5d 5c d5 d2 7e 40 c3 5e 4c 50 7e c1 6b 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 e4 a2 85 40 5e 61 7e 40 83
+5e 6f 6c 7e 84 40 a2 a3 5e 61 7e 99 a3 5c d5 d2
+7e 40 c4 e4 5e 4d 50 5c f1 7e c4 c1 e2 c4 6b 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 97 5e 6c 61 7e 83 85 40 84 a4 5e 6d 7e 97
+a2 40 5e 6f 6e 7e 40 c4 c1 e2 c4 6b 40 5e 6c 7e
+89 a2 a3 40 5e 61 7e a3 40 c9 5e 50 4c 5c d5 d2
+7e 40 c6 c9 e7 5c f1 7e f0 f1 6b 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 5e 6c 7e 89 a2 a3 40 5e 6f 7e 86 40 86 89 a7
+85 84 40 5e 6d 6f 7e 84 a4 5e 6c 7e 85 a2 40 c9
+c5 c1 c6 c9 e7 a7 a7 5c d5 d2 7e 40 c8 c1 d9 c4
+c3 5e 50 7e e8 5c f1 7e 4d f3 f0 c5 6b c1 5e 4c
+4c 7e 6b c3 5e 4d 7e c4 e2 5d 6b 40 40 40 40 40
+40 5e 50 7e 99 5e 6f 7e a5 89 84 85 40 88 5e 61
+7e 99 84 83 5e 6f 7e 97 a8 40 5e 6f 6e 7e 40 f3
+f0 c5 40 84 85 a5 89 83 85 5c d5 d2 7e 40 c9 5e
+50 7e e2 5c f1 7e f0 f0 6b 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 5e
+50 7e 85 99 86 5e 6f 7e 99 5e 6d 61 7e 83 85 40
+5e 6f 7e 97 a3 89 5e 6f 6e 7e a2 40 86 99 5e 6f
+6d 7e 40 c9 c5 c1 c9 5e 50 7e e2 a7 a7 5c d5 d2
+7e 40 5e 4c 4e 4b 5c f1 7e f0 f0 6b 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 e4 a2 85 40 5e 6c 7e 89 5e 6e 6b 7e 40 5e
+6c 7e 89 a2 a3 40 86 99 5e 6f 6d 7e 40 5e 4c 4e
+4b 4c 7e e2 e3 a7 a7 5c d5 d2 7e 40 5e 4c 7e d6
+c7 c3 5e 4c 7e e2 5c f1 5e 4c 7e 6b 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+d1 c5 e2 f2 40 5e 6c 6f 7e 87 40 a2 a8 a2 5e 6f
+7e a4 a3 40 83 5e 6c 61 7e a2 a2 5c d5 d2 7e 40
+5e 4c 7e d6 c7 5e 4c 4d 7e e3 5c f1 7e f9 f9 f9
+f9 f9 f9 6b 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 40 e6 e3 5e 4c 7e 40 5e 6d 7e 85 a2 a2 5e
+61 7e 87 85 a2 40 98 a4 85 a4 85 84 5c d5 d2 7e
+40 5e 4d 7e c1 e7 e4 e2 c5 d9 5c f1 7e f8 f0 6b
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 e2 a8 a2 a3 85 5e 6d 7e 40 a3 5e 61 7e a2
+5e 6b 7e a2 4e c9 5e 6e 7e 89 a3 89 5e 61 7e a3
+5e 6f 7e 99 a2 4e e3 e2 d6 40 a4 a2 85 99 a2 40
+5e 6d 61 7e a7 5c d5 d2 7e 40 d6 5e 50 7e c9 5c
+f1 7e e8 c5 e2 6b 40 40 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 d6 5e 50 7e 85
+99 5e 61 7e a3 89 5e 6f 6e 7e 40 c9 5e 6e 7e a3
+85 99 a5 85 5e 6e 7e a3 89 5e 6f 6e 7e 40 89 a2
+40 5e 61 6c 6c 6f 7e a6 85 84 5c d5 d2 7e 40 d6
+5e 50 7e e3 5c f1 7e f0 f0 6b 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+e3 a4 5e 6e 7e 89 5e 6e 7e 87 40 97 5e 61 7e 99
+5e 6d 7e a2 40 86 99 5e 6f 6d 7e 40 c9 c5 c1 d6
+5e 50 7e e3 a7 a7 5c d5 d2 7e 40 5e 50 7e c1 c7
+c5 5c f1 7e 4d e2 e8 e2 f1 4b 5e 50 7e c1 c7 c5
+4b 5e 50 4c 50 7e c1 6b 40 40 40 40 40 40 40 40
+5e 4c 50 7e c1 40 97 5e 61 7e 87 85 40 84 5e 61
+7e a3 5e 61 7e a2 85 a3 40 5e 6e 61 6d 7e 85 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 40 e7 5c d5 d2 7e 40 40 40 40 40 40 40 40
+40 40 40 e2 e8 e2 f1 4b 5e 50 7e c1 c7 c5 4b c3
+d6 5e 4d 4d 7e d6 5e 4e 7e 6b 40 40 c3 d6 5e 4d
+4d 7e d6 5e 4e 7e 40 97 5e 61 7e 87 85 40 84 5e
+61 7e a3 5e 61 7e a2 85 a3 40 5e 6e 61 6d 7e 85
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 e7 5c d5 d2 7e 40 40 40 40 40 40 40 40 40 40
+40 e2 e8 e2 f1 4b 5e 50 7e c1 c7 c5 4b 5e 4c 7e
+d6 c3 c1 5e 4c 7e 6b 40 40 40 5e 4c 7e d6 c3 c1
+5e 4c 7e 40 f1 40 97 5e 61 7e 87 85 40 84 5e 61
+7e a3 5e 61 7e a2 85 a3 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 e7 5c d5
+d2 7e 40 40 40 40 40 40 40 40 40 40 40 5e 4c 7e
+5d 6b 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 5e 6c 7e 89 a2 a3 40 97 5e 61 7e 87 85 40
+84 5e 61 7e a3 a2 85 a3 a2 40 5e 61 7e a3 40 c9
+5e 50 4c 7e 40 a3 89 5e 6d 7e 85 5c d5 d2 7e 40
+d9 c5 c1 5e 4c 5c f1 7e f1 f2 f8 6b 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5e 61 6c 6c 6f 7e a6 40 5e 61 7e a3 40 5e 6d 6f
+7e a2 a3 40 f1 f2 f8 5e 4b 7e 40 86 5e 6f 7e 99
+40 e5 5c f1 7e d9 40 5e 61 7e 84 84 99 85 a2 a2
+40 a2 97 5e 61 7e 83 85 a2 5c d5 d2 7e 40 d9 e2
+e4 5c f1 7e f0 6b 40 40 40 40 40 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 5e 6e 6f
+7e 40 99 85 83 5e 6f 6e 7e 86 89 87 a4 99 85 5e
+61 7e 82 5e 6c 7e 85 40 a2 a3 5e 6f 7e 99 5e 61
+7e 87 85 40 a4 5e 6e 7e 89 a3 a2 5c d5 d2 7e 40
+e2 5e 4d 7e c6 5c f1 7e f0 f0 6b 40 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 a4 a2 85 40 a2 5e 6d 7e 86 40 97 5e 61 7e 99
+5e 61 6d 7e 85 a3 85 99 a2 40 86 99 5e 6f 6d 7e
+40 e2 5e 4d 7e c6 5e 50 7e d9 5e 4d 7e a7 a7 5c
+d5 d2 7e 40 e2 d8 c1 5c f1 7e f3 6b 40 40 40 40
+40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+40 40 40 5e 61 7e 84 84 40 f3 40 f6 f4 11 5d 7a
+1d c1 13 00 00 00 00 1d 7c ff ef
