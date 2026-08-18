@@ -13,19 +13,47 @@ import { AID, Qcode, Sfid } from './constants.js';
  * here is one we honour. See the stage 2a design doc.
  */
 
-export interface Geometry {
-  rows: number;
-  cols: number;
+export interface ScreenGeometry {
+  readonly rows: number;
+  readonly cols: number;
 }
 
 export interface Capability {
-  qcode: number;
+  readonly qcode: number;
   /** Unit body AFTER `L L SFID QCODE` — the builder writes that prefix. */
-  params: (geometry: Geometry, all: readonly Capability[]) => number[];
+  readonly params: (geometry: ScreenGeometry, all: readonly Capability[]) => number[];
 }
 
-/** Big-endian 16-bit. */
-const u16 = (n: number): number[] => [(n >> 8) & 0xff, n & 0xff];
+/**
+ * Big-endian 16-bit, range-checked.
+ *
+ * Throwing rather than masking, which is what encodeAddress and encodeAttribute
+ * do at comparable boundaries. Masking was silently wrong in three ways that all
+ * produced a plausible-looking record a host would act on: a negative cols
+ * emitted X'FFFF', which the telnet layer then IAC-doubles into wire garbage; a
+ * fractional geometry truncated W/H while BUFFSZ kept the fraction, so the reply
+ * contradicted itself; and a params list over 65531 bytes wrapped L.
+ *
+ * This does NOT reject zero, and must not: X'0000' is a legal value for several
+ * fields in this reply (the reserved base bytes, and BUFFSZ on a partitioned
+ * device per p. 6-104). A zero screen DIMENSION is separately illegal, and
+ * buildQueryReply enforces that where it belongs.
+ */
+const u16 = (n: number): number[] => {
+  if (!Number.isInteger(n) || n < 0 || n > 0xffff) {
+    throw new RangeError(`not a 16-bit value: ${n}`);
+  }
+  return [(n >> 8) & 0xff, n & 0xff];
+};
+
+/**
+ * Self-defining parameter: `L SDPID <params>`, where L counts itself.
+ *
+ * Derived, not hand-written, for the same reason buildQueryReply derives the
+ * outer length. Hardcoding X'0B' means a later SDP edit has to remember to
+ * update a magic number, and nothing but the x3270 fixture would notice.
+ */
+const sdp = (id: number, params: number[]): number[] => [2 + params.length, id, ...params];
 
 /**
  * Summary (QCODE 0x80), GA23-0059 p. 6-96 for the format, p. 6-20 for the rule.
@@ -172,12 +200,14 @@ const usableArea: Capability = {
 const implicitPartition: Capability = {
   qcode: Qcode.IMPLICIT_PARTITION,
   params: (geometry) => [
-    0x00, 0x00,   // base bytes 4-5 FLAGS: reserved, X'0000'
-    0x0b,         // SDP L: length of this self-defining parameter
-    0x01,         // SDP SDPID: Implicit Partition Sizes for Display Devices
-    0x00,         // SDP FLAGS: reserved
-    ...u16(geometry.cols), ...u16(geometry.rows), // WD HD — default
-    ...u16(geometry.cols), ...u16(geometry.rows), // WA HA — alternate == default
+    0x00, 0x00, // base bytes 4-5 FLAGS: reserved, X'0000'
+    // SDPID X'01', then FLAGS and the four sizes. L comes out as X'0B' — the
+    // manual's value — because sdp() counts itself: 2 + 9.
+    ...sdp(0x01, [
+      0x00, // SDP FLAGS: reserved
+      ...u16(geometry.cols), ...u16(geometry.rows), // WD HD — default
+      ...u16(geometry.cols), ...u16(geometry.rows), // WA HA — alternate == default
+    ]),
   ],
 };
 
@@ -193,14 +223,31 @@ export const DEFAULT_CAPABILITIES: readonly Capability[] = [
  * of a set of Query Reply structured fields, only the first is preceded by an
  * AID of X'88'." (pages.txt:8648-8649, p. 6-22.)
  *
+ * The AID is 0x88, which is AID.SF. It is NOT AID.QREPLY (0x61), whose name in
+ * that same enum reads as though it belonged here. 0x61 is the AID on a Read
+ * Modified or Read Buffer that a Read Partition triggers — x3270 passes
+ * AID_QREPLY to ctlr_read_modified and ctlr_read_buffer (sf.c:314, :324, :332),
+ * never to a Query Reply. Different case entirely.
+ *
  * Returns pure 3270 data. IAC doubling is the telnet layer's job (telnet.ts:82,
  * in sendRecord), which matters here because 0xFF appears in real reply content
  * — see the Color unit in the x3270 fixture.
  */
 export function buildQueryReply(
   capabilities: readonly Capability[],
-  geometry: Geometry,
+  geometry: ScreenGeometry,
 ): Uint8Array {
+  // Nonzero is a GEOMETRY rule, not an encoding rule, so u16 is the wrong place
+  // for it: X'0000' is a legitimate 16-bit field elsewhere in this very reply
+  // (p. 6-104 has BUFFSZ "set to zero" for a partitioned device, and X'0000'
+  // is the required value of the two reserved base bytes). What is illegal is a
+  // zero SCREEN dimension — p. 6-72, "Default and alternate values must be
+  // nonzero" — and a zero would otherwise sail through u16 unnoticed.
+  for (const [name, value] of [['rows', geometry.rows], ['cols', geometry.cols]] as const) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new RangeError(`geometry.${name} must be a positive integer, got ${value}`);
+    }
+  }
   const out: number[] = [AID.SF];
   for (const cap of capabilities) {
     const params = cap.params(geometry, capabilities);
