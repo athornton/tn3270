@@ -1149,7 +1149,13 @@ Replace the temporary `case 'sfe': return addr;` from task 5 with:
       // attribute types take their defaults, so the field exists with attribute
       // 0x00 (unprotected, unintensified, MDT clear). Skipping it would lose
       // the field, which is the failure SFE is implemented to prevent.
-      const basic = token.pairs.find((p) => p.type === XA_3270);
+      // findLast, NOT find — an earlier draft of this plan specified `find` and
+      // was wrong. GA23-0059 p. 4-5 (pages.txt:2899-2901): "If the same
+      // attribute / type-value pair appears more than once, the last
+      // specification for a repeated / attribute type takes effect." x3270 gets
+      // this for free by calling START_FIELD on every 0xC0 it walks past
+      // (ctlr.c:1838-1842), so its final write is what remains in the buffer.
+      const basic = token.pairs.findLast((p) => p.type === XA_3270);
       screen.setFieldAttribute(addr, basic?.value ?? 0x00);
       return screen.inc(addr);
     }
