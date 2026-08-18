@@ -1233,7 +1233,13 @@ Note also that `negotiate()` ends with `this.sent = []`, so anything sent *durin
 ```typescript
 describe('query reply', () => {
   /** WSF carrying Read Partition: L=5 SFID=01 PID=ff TYPE=02. */
-  const QUERY = [SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02] as const;
+  // NOTE the DOUBLED IAC. PID_QUERY is 0xFF, which IS IAC, and conn.host()
+  // feeds raw WIRE bytes into the telnet state machine — a bare 0xff is
+  // consumed as a telnet command and swallows the byte after it, so the record
+  // arrives two bytes short and never parses as a Query. A real host doubles
+  // it. An earlier draft of this plan omitted the doubling, which made the
+  // "does not answer a Query List" test below pass for the wrong reason.
+  const QUERY = [SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02] as const;
 
   /**
    * The 3270 record the session sent, unwrapped from telnet framing.
@@ -1302,7 +1308,7 @@ describe('query reply', () => {
     await session.connect('localhost', 3270);
     conn.negotiate();
     conn.sent.length = 0;
-    conn.host(SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x03, T.IAC, T.EOR);
+    conn.host(SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x03, T.IAC, T.EOR);
     expect(conn.sent).toHaveLength(0);
   });
 
