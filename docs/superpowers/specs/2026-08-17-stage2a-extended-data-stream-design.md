@@ -33,6 +33,19 @@ Explicitly **not** in scope, stated so it is not later mistaken for delivered:
 - **SA and MF semantics** (see the contingency below).
 - **Query List** (Read Partition TYPE=0x03).
 - **TN3270E telnet option 40** — stage 2b.
+- **The enter-inhibit condition after answering a Query.** Found during
+  implementation, not planned for, and deliberately left out rather than bolted on.
+  GA23-0059 p. 5-53 (`pages.txt:6412`) lists it as step 1 of Read Partition
+  processing — "The enter-inhibit condition is raised." — and x3270 implements it:
+  `query_reply_end()` calls `kybd_inhibit(true)` (`Common/sf.c:929`), cleared only by
+  a later Erase/EAU/Write (`ctlr.c:550`, `:1309`, `:1406`).
+
+  **Our behaviour coincides with x3270's for the case this stage exists to serve** —
+  TSO queries before any write, so we stay locked either way — but **diverges for a
+  mid-session Query**, where we would leave the keyboard unlocked over a screen the
+  host considers frozen. Implementing it needs a new `Oia` state plus its own tests.
+  If the live run shows TSO re-querying after the logon panel, this moves from
+  "known gap" to "must fix".
 
 ### Contingency, agreed up front
 
