@@ -17,7 +17,7 @@ export const COMMAND_NAMES = [
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
   'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
-  'BackSpace', 'Delete', 'Insert',
+  'BackSpace', 'Delete', 'Insert', 'Transfer',
 ] as const;
 
 const CANONICAL = new Map(COMMAND_NAMES.map((n) => [n.toLowerCase(), n]));

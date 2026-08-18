@@ -1,9 +1,11 @@
 import { createConnection } from 'node:net';
 import {
   Session, type Connection, AID, PF_AIDS, PA_AIDS, KeyboardState,
+  CutTransfer, isCutFrame, type TransferResult,
 } from '@tn3270/core';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
+import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';
 
 /**
  * Executes s3270 commands against a session.
@@ -21,10 +23,39 @@ const SETTLE_MS = 400;
  */
 const SETTLE_QUIET_MS = 2000;
 
+/**
+ * How long a whole `Transfer()` may take, and how long any one frame may take.
+ *
+ * BOTH ARE MANDATORY, for the reason Wait's own comment gives: without a timeout
+ * a script against a host that stops answering hangs forever. A transfer needs
+ * two of them because the two failures look different. A host that goes quiet
+ * mid-file stalls one frame, and 30 s is generous for a round trip that has
+ * already had a dozen predecessors; a host that keeps answering but never
+ * finishes — the retransmit loop the design doc warns about — would refresh a
+ * per-frame timer forever, so the overall cap is what bounds it.
+ *
+ * 600 s overall is sized off the protocol rather than picked: a download frame
+ * carries at most 1909 bytes (MAX_DOWNLOAD_DATA) and each costs a round trip, so
+ * a megabyte is around 550 frames. Both are overridable per Runner.
+ */
+const TRANSFER_TIMEOUT_MS = 600_000;
+const TRANSFER_FRAME_TIMEOUT_MS = 30_000;
+
 export interface RunnerOptions {
   clock?: () => number;
   /** Default Wait timeout in seconds. x3270 uses about 30. */
   defaultWaitSeconds?: number;
+  /**
+   * The file system, for `Transfer()`. Absent by default, and `Transfer()` then
+   * fails the way `Replay()` does: this file deliberately imports no `node:fs`,
+   * so that every command's semantics stay testable without a temp directory.
+   * main.ts supplies the real one. See `TransferFiles`.
+   */
+  files?: TransferFiles;
+  /** Overall Transfer() timeout in seconds. See TRANSFER_TIMEOUT_MS. */
+  transferSeconds?: number;
+  /** Per-frame Transfer() timeout in seconds. See TRANSFER_FRAME_TIMEOUT_MS. */
+  transferFrameSeconds?: number;
 }
 
 /** A real TCP connection adapter. */
@@ -60,12 +91,20 @@ export class Runner {
   private host: string | undefined;
   private readonly clock: () => number;
   private readonly defaultWait: number;
+  private readonly files: TransferFiles | undefined;
+  private readonly transferMs: number;
+  private readonly transferFrameMs: number;
   /** Bumped whenever the host writes, so Wait(Output) can observe it. */
   private outputCount = 0;
 
   constructor(private readonly session: Session, opts: RunnerOptions = {}) {
     this.clock = opts.clock ?? (() => Date.now());
     this.defaultWait = opts.defaultWaitSeconds ?? 30;
+    this.files = opts.files;
+    this.transferMs = opts.transferSeconds !== undefined
+      ? opts.transferSeconds * 1000 : TRANSFER_TIMEOUT_MS;
+    this.transferFrameMs = opts.transferFrameSeconds !== undefined
+      ? opts.transferFrameSeconds * 1000 : TRANSFER_FRAME_TIMEOUT_MS;
     this.session.on('screen', () => { this.outputCount++; });
   }
 
@@ -246,12 +285,266 @@ export class Runner {
       case 'Replay':
         throw new Error('Replay(file) requires the file system; use runReplayText in tests');
 
+      case 'Transfer':
+        await this.transfer(args, data);
+        return;
+
       case 'Wait':
         await this.wait(args);
         return;
 
       default:
         throw new Error(`unimplemented command: ${name}`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Transfer()
+  // -------------------------------------------------------------------------
+
+  /**
+   * `Transfer(keyword=value,...)` — drive one IND$FILE transfer to completion.
+   *
+   * ## THE SHAPE OF THIS, AND WHY IT FITS `dispatch` RATHER THAN FIGHTING IT
+   *
+   * Every other command here is one screen action; this is a multi-round-trip
+   * conversation. It nonetheless belongs in the same place, because `dispatch` is
+   * already `async` and `Wait()` already owns the pattern this needs: poll a
+   * predicate over the session's state against a real-time deadline
+   * (`this.wait`'s loop, and the note there on why it uses `Date.now` and not the
+   * injectable clock). A transfer is that loop, with a state machine's `step`
+   * instead of a boolean predicate. No new timing mechanism is introduced and no
+   * event-driven observer is registered — the design doc's "observer, not a
+   * session feature" applies to `Session`, which is untouched, and the runner is
+   * the only thing subscribing to anything.
+   *
+   * The alternative — an `ftState` field on the Runner, stepped from the `screen`
+   * event, with `Transfer()` returning immediately — was rejected: the s3270 line
+   * protocol has no way to report a completion that arrives after the `ok`, so
+   * every script would need a `Wait(TransferComplete)` that does not exist, and a
+   * half-finished transfer would survive into the next command.
+   *
+   * ## THE ORDER OF OPERATIONS IS THE ERROR-HANDLING RULE
+   *
+   * The design doc: "A local file error — unreadable source, or destination
+   * existing without `Exist=replace` — fails BEFORE the host command is typed, so
+   * the host is never left sitting in transfer mode waiting for a client that has
+   * already given up." So everything that can be checked locally is checked
+   * first: the keywords, the geometry, the connection, the source file, the
+   * destination. Only then does anything reach the host.
+   */
+  private async transfer(args: string[], data: string[]): Promise<void> {
+    const { request, command } = transferCommand(args);
+    const files = this.requireFiles();
+
+    // GEOMETRY, before anything else. `isCutFrame` throws on a screen that is not
+    // 24x80 (frames.ts `requireCutGeometry`, and the design doc's "GEOMETRY
+    // COUPLING" section), and it is better to say so here than to have the first
+    // poll of the loop throw it after the host has been told to start.
+    if (this.session.screen.size !== 1920) {
+      throw new Error(
+        `Transfer(): CUT file transfer needs a 24x80 screen; this session is ` +
+          `${this.session.screen.rows}x${this.session.screen.cols}`,
+      );
+    }
+    if (!this.session.is3270Mode()) {
+      // x3270's `ftUnableNot3270`, "not in 3270 mode" (fb-common:47).
+      throw new Error('Transfer(): not in 3270 mode');
+    }
+
+    // The local side. For a send this reads the whole file into memory, which is
+    // what the state machine wants anyway (`CutTransfer` takes the bytes up
+    // front, so it can answer a retransmit without re-reading), and a file big
+    // enough to matter would take hours over CUT regardless.
+    let source: Uint8Array | undefined;
+    if (request.direction === 'send') {
+      try {
+        source = files.read(request.localFile);
+      } catch (err) {
+        throw new Error(
+          `Transfer(): cannot read local file ${request.localFile}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else if (request.exist === 'keep' && files.exists(request.localFile)) {
+      // `if (p->receive_flag && !p->append_flag && !p->allow_overwrite) { ...
+      // popup_an_error(AnTransfer "(): File exists"); }` (ft.c:666-674). Same
+      // message as x3270's, with the path added because a script that transfers
+      // several files needs to know which one.
+      throw new Error(`Transfer(): file exists: ${request.localFile} (use Exist=replace or append)`);
+    }
+
+    const transfer = new CutTransfer({
+      direction: request.direction,
+      ...(source !== undefined ? { data: source } : {}),
+    });
+
+    // NOW the host is involved. Everything from here can leave it in transfer
+    // mode, which is why nothing above could.
+    this.primeAndType(command);
+    this.session.sendAID(AID.ENTER);
+
+    const result = await this.runTransferFrames(transfer);
+
+    for (const warning of transfer.warnings) data.push(`Transfer(): ${warning}`);
+
+    if (!result.ok) {
+      // The host's own text, which `CutTransfer` has already substituted
+      // `ftHostCancel` into if the host sent none. Thrown rather than pushed, so
+      // the reply's last line is `error`.
+      throw new Error(`Transfer(): ${result.error}`);
+    }
+
+    if (request.direction === 'receive') {
+      // `result.data` is always present for a successful receive (`CutTransfer.
+      // success()`), but the type allows its absence, and an empty file is a
+      // legitimate transfer.
+      const bytes = result.data ?? new Uint8Array(0);
+      if (request.exist === 'append') files.append(request.localFile, bytes);
+      else files.write(request.localFile, bytes);
+    }
+
+    // `ftComplete: Transfer complete, %i bytes transferred` (fb-common:31).
+    data.push(`Transfer complete, ${transfer.bytesTransferred} bytes transferred`);
+  }
+
+  private requireFiles(): TransferFiles {
+    if (this.files === undefined) {
+      // The same division of labour as Replay(): this file imports no `node:fs`,
+      // so main.ts injects the real implementation and a test injects an
+      // in-memory one.
+      throw new Error('Transfer() requires the file system; construct the Runner with a `files` option');
+    }
+    return this.files;
+  }
+
+  /**
+   * Erase the input field and type the command into it. x3270's `kybd_prime`
+   * (kybd.c:4367-4438), called from `ft_go` (ft.c:775).
+   *
+   * x3270 uses the return value as a capacity check — `if (flen <= 0 || flen <
+   * vb_len(&r) - 1)` fails with `ftUnableTooSmall` (ft.c:776-801), the `- 1`
+   * discounting the trailing newline it appends. We do the same test against the
+   * command length, because a command truncated at the field boundary is a
+   * command the host will reject in a way that looks like a protocol fault.
+   *
+   * ONE DIVERGENCE, stated because it is reachable. x3270 searches for the next
+   * unprotected field starting AT THE CURSOR (`next_unprotected(cursor_addr)`,
+   * kybd.c:4412); we fall back to the FIRST typable field on the screen
+   * (`Keyboard.home`, which is `Screen.firstUnprotectedStart`). They differ only
+   * when the cursor sits in a protected area of a screen with several input
+   * fields, and on the panels that matter — a TSO READY prompt, a CMS command
+   * line — there is exactly one. Going to the first field is also the safer of
+   * the two guesses: it cannot wrap around into a field the operator was in the
+   * middle of.
+   */
+  private primeAndType(command: string): void {
+    const s = this.session.screen;
+    const k = this.session.keyboard;
+
+    if (this.session.oia.isInhibited()) {
+      // x3270's `ftUnableLocked`, "keyboard locked" (fb-common:46). A script
+      // should have reached a settled prompt with Wait(Settle) or
+      // Wait(InputField) first.
+      throw new Error('Transfer(): cannot begin transfer: keyboard locked');
+    }
+
+    // An unformatted screen has no fields to erase and no capacity to measure —
+    // x3270 guesses at the run of nulls and spaces from the cursor
+    // (kybd.c:4389-4403) and leaves it to the host to make sense of. We refuse
+    // instead: IND$FILE is typed at a command prompt, every host that offers one
+    // paints it as a field, and an unformatted screen at this point means the
+    // script is somewhere it did not think it was — a VM/370 logon banner, say.
+    // Failing here is recoverable; typing a transfer command into a logon screen
+    // is not.
+    if (!s.isFormatted()) {
+      throw new Error('Transfer(): cannot begin transfer: no input field (screen is unformatted)');
+    }
+
+    const atCursor = s.fieldAt(s.cursor);
+    const usable = atCursor !== null && !atCursor.protected && !s.isFieldAttribute(s.cursor)
+      && atCursor.length > 0;
+    if (usable) {
+      k.moveCursor(atCursor.start);
+    } else {
+      k.home();
+      const homed = s.fieldAt(s.cursor);
+      if (homed === null || homed.protected) {
+        // `ftUnableNoField`, "no input field" (fb-common:48).
+        throw new Error('Transfer(): cannot begin transfer: no input field');
+      }
+    }
+
+    const field = s.fieldAt(s.cursor);
+    if (field === null || field.length < command.length) {
+      // `ftUnableTooSmall`, "input field too small" (fb-common:49), with the two
+      // numbers, because the operator's fix depends on which panel they are on.
+      throw new Error(
+        `Transfer(): cannot begin transfer: input field too small ` +
+          `(${field?.length ?? 0} cells for a ${command.length}-character command)`,
+      );
+    }
+
+    // "Erase it" (kybd.c:4430-4435): the whole field is nulled before typing, so
+    // whatever the operator or the host left there does not become part of the
+    // command. eraseEOF from the field start does exactly that, and sets MDT.
+    k.eraseEOF();
+    if (!k.typeString(command)) {
+      // typeString stops at the first refusal and the OIA says why. Cannot
+      // normally happen — the lock and the capacity are both checked above — but
+      // a half-typed command must be reported, not sent.
+      throw new Error(`Transfer(): input inhibited while typing the command (${this.session.oia.toText()})`);
+    }
+  }
+
+  /**
+   * The frame loop: wait for a CUT frame, step the machine, send its AID, repeat.
+   *
+   * `Date.now`, not `this.clock`, for the same reason `wait()` gives: the
+   * injectable clock exists to make the status line deterministic, and driving a
+   * real timeout from a frozen test clock would spin forever.
+   *
+   * TWO DEADLINES, because the two ways a transfer wedges look different — see
+   * `TRANSFER_TIMEOUT_MS`. A timeout is reported as a failure rather than thrown,
+   * so the caller's single "did it work" branch handles it, and it says that the
+   * host may still be mid-transfer: we deliberately do NOT invent an abort
+   * sequence here. x3270's abort writes the response area and presses PF2
+   * (`cut_abort`, ft_cut.c:662-678), which is `CutTransfer`'s to do from a frame
+   * it has parsed; synthesising one from the runner would put bytes on the wire
+   * that no captured session contains, and the honest failure is better than an
+   * untested guess. The operator's recovery is Attn or Clear, as it would be from
+   * a real terminal.
+   */
+  private async runTransferFrames(transfer: CutTransfer): Promise<TransferResult> {
+    const overallDeadline = Date.now() + this.transferMs;
+    // The screen the host wrote most recently that we have already processed.
+    // A frame is "new" only once the host has written again, otherwise the first
+    // poll after an ack would re-process the frame still sitting in the buffer.
+    let processedOutput = this.outputCount;
+
+    for (;;) {
+      const frameDeadline = Math.min(Date.now() + this.transferFrameMs, overallDeadline);
+      while (this.outputCount === processedOutput || !isCutFrame(this.session.screen)) {
+        if (Date.now() >= frameDeadline) {
+          const why = Date.now() >= overallDeadline
+            ? `did not complete within ${this.transferMs / 1000}s`
+            : `no CUT frame from the host within ${this.transferFrameMs / 1000}s`;
+          return {
+            ok: false,
+            error: `transfer ${why} after ${transfer.bytesTransferred} bytes; ` +
+              `the host may still be in transfer mode (press Attn or Clear)`,
+          };
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      processedOutput = this.outputCount;
+
+      // `step` may mutate the screen — an abort response, or a whole upload frame
+      // — and the AID it returns is what sends those bytes, so the two must not
+      // be separated.
+      const step = transfer.step(this.session.screen);
+      if (step.ack !== undefined) this.session.sendAID(step.ack);
+      if (step.done !== undefined) return step.done;
     }
   }
 

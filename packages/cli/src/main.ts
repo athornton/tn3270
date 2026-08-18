@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolveTerminalType, TerminalTypeError } from '@tn3270/core';
 import { Runner, defaultSession } from './runner.js';
 import { parseCommand } from './commands.js';
+import type { TransferFiles } from './transfer.js';
 
 export class UsageError extends Error {
   constructor(message: string) {
@@ -54,6 +55,28 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 }
 
 /**
+ * The real file system, for `Transfer()`.
+ *
+ * Lives here for exactly the reason `Replay(file)` does — runner.ts stays
+ * I/O-free so every command's semantics are testable without a temp directory —
+ * but injected rather than special-cased, because a transfer's file access is
+ * interleaved with host round trips and cannot be lifted out of the runner the
+ * way reading a replay file up front can.
+ *
+ * `Uint8Array`, never a string: these are file BYTES, and the whole point of the
+ * binary default is that nothing in the path decodes them. `readFileSync` with no
+ * encoding returns a Buffer, which IS a Uint8Array, but a fresh view is
+ * constructed so nothing downstream can be surprised by Buffer's extra methods
+ * or by its pooled backing store.
+ */
+export const nodeTransferFiles: TransferFiles = {
+  exists: (path) => existsSync(path),
+  read: (path) => new Uint8Array(readFileSync(path)),
+  write: (path, bytes) => { writeFileSync(path, bytes); },
+  append: (path, bytes) => { appendFileSync(path, bytes); },
+};
+
+/**
  * s3270-compatible line protocol over stdin/stdout. Deliberately thin: all
  * command semantics live in runner.ts, which is unit-tested.
  */
@@ -72,7 +95,7 @@ async function main(): Promise<void> {
   // the telnet layer would have defaulted to on its own.
   const args = parseArgs(process.argv.slice(2));
   const session = defaultSession(resolveTerminalType(args));
-  const runner = new Runner(session);
+  const runner = new Runner(session, { files: nodeTransferFiles });
 
   const rl = createInterface({ input: process.stdin, terminal: false });
 
