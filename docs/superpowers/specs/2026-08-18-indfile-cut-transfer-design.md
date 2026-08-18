@@ -261,6 +261,54 @@ A local file error — unreadable source, or destination existing without
 `Exist=replace` — fails **before** the host command is typed, so the host is never left
 sitting in transfer mode waiting for a client that has already given up.
 
+## MVS/TSO HOST FOUND, and it is the friendlier one (2026-08-18)
+
+The user installed the CBT disks on TK5 and cataloged them. **TK5 now has a working
+IND$FILE that talks to a plain 3270 client.** `IND$FILE` with no arguments prints:
+
+```
+Free File Transfer Program, version 2.0.5, Compiled: Sep  1 2016 08:50:49
+Copyright(c) 2002-2016 Mike Rayborn, mailto:mikerayborn@comcast.net
+Usage: IND$FILE {GET|PUT} 'dataset.name' options
+       IND$FILE {GET|PUT} dd:ddname      options
+options: ASCII CRLF APPEND TRACE DEBUG
+         RECFM(F|V|U) LRECL(nn) BLKSIZE(nn) TRACKS|CYLS SPACE(n,n)
+         UNIT(x) VOLUME(vvvvvv) CODEPAGE(cdpg)
+         RDW RDW4 RDWPC RDWPC4
+```
+
+So it is an open-source reimplementation, not IBM's — but unlike MECAFF it has **no
+fullscreen gatekeeping**, and its options confirm the dialect this design anticipated:
+
+- **Binary is the default**; `ASCII` is opt-in. Matches our choice.
+- **TSO keyword form** — `RECFM(F)` with parens, versus CMS's bare `RECFM F`. Exactly
+  the dialect seam already designed in.
+- Three host-file forms to accept: quoted `'dataset.name'`, unquoted (userid
+  prepended), and `dd:ddname` for a pre-allocated ddname.
+- `TRACE` writes host-side diagnostics to a dataset allocated to `INDTRACE` — a real
+  gift when debugging a transfer, and worth using on the first live run.
+- `CODEPAGE(cdpg)` names an external translation table, default `CDPGDFLT`. Relevant
+  given the codec finding below that x3270's tables are not cp037.
+
+**Crucially: TK5 asks with a PLAIN QUERY, not a Query List.** Measured
+`ReadPartition(pid=0xff,type=0x02)`, and our stage 2a Query Reply answers it correctly
+(observed on the wire: `88 00 07 81 80 80 81 a6 00 17 81 81 ...`). **So MVS/TSO is not
+blocked on the Query List work that VM/CMS needs** — it may well be the first host to
+complete a transfer, inverting the original plan's ordering.
+
+Still unknown for TK5: **whether it speaks CUT or DFT.** The usage text does not say,
+and the one `GET` attempt so far failed for an unrelated scripting reason
+(`IKJ56410I ... COMMAND NOT ACCEPTED DURING LOGON` — a desynchronized logon script,
+plus a userid left logged on by a previous probe). That question must be answered before
+`transfer.ts` is written, because CUT and DFT are different protocols and only the CUT
+codec is built.
+
+**Operational note that cost a probe round:** TSO leaves a userid logged on if a script
+does not reach `LOGOFF`, and the next attempt then draws
+`IKJ56425I LOGON REJECTED, USERID IN USE` — which looks like a failure of the thing
+being tested. Rotate among `HERC01`/`HERC02` (`CUL8TR`) and `HERC03`/`HERC04`
+(`PASS4U`), and always reach a real `LOGOFF`.
+
 ## Codec findings, from the implementation (2026-08-18)
 
 `packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
