@@ -1,5 +1,6 @@
 import { Cmd, SnaCmd, Order } from '../constants.js';
 import { decodeAddress, AddressError } from '../address.js';
+import { parseStructuredFields, SfParseError, type StructuredField } from './sf.js';
 
 /**
  * Turn one 3270 record into a command plus a token list. Pure: no Screen, no
@@ -36,8 +37,8 @@ export type Token =
   | { kind: 'ge'; ebcdic: number }
   /** SA/SFE/MF: recognized so they can be skipped by length, not executed. */
   | { kind: 'deferred'; order: number; data: Uint8Array }
-  /** WSF payload, unexamined in stage 1. */
-  | { kind: 'structuredFields'; data: Uint8Array };
+  /** One structured field from a WSF record, parsed by stream/sf.ts. */
+  | { kind: 'structuredField'; field: StructuredField };
 
 export interface ParsedRecord {
   command: CommandName;
@@ -89,7 +90,17 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
   // apart, which is why this check is on the command byte only.
   if (command === 'WriteStructuredField') {
     const data = record.subarray(i);
-    return { command, tokens: data.length ? [{ kind: 'structuredFields', data: Uint8Array.from(data) }] : [] };
+    try {
+      const tokens: Token[] = parseStructuredFields(data)
+        .map((field) => ({ kind: 'structuredField', field }));
+      return { command, tokens };
+    } catch (e) {
+      // Surface SF framing errors as ParseError so session.ts maps them to
+      // X PROG the same way as every other malformed record. Callers must not
+      // have to know about a second error type.
+      if (e instanceof SfParseError) throw new ParseError(e.message);
+      throw e;
+    }
   }
 
   const tokens: Token[] = [];
@@ -240,7 +251,16 @@ export function describeRecord(record: Uint8Array): string {
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
-      case 'structuredFields': parts.push(`WSF[${t.data.length}B]`); break;
+      case 'structuredField':
+        switch (t.field.kind) {
+          case 'readPartition':
+            parts.push(`ReadPartition(pid=0x${t.field.pid.toString(16)},type=0x${t.field.type.toString(16).padStart(2, '0')})`);
+            break;
+          case 'unknownSf':
+            parts.push(`SF(sfid=0x${t.field.sfid.toString(16).padStart(2, '0')},${t.field.data.length}B)`);
+            break;
+        }
+        break;
     }
   }
   return parts.join(' ');

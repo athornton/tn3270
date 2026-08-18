@@ -33,23 +33,27 @@ describe('command recognition', () => {
     expect(r.wcc).toBeUndefined();
   });
 
-  it('parses Write Structured Field and keeps the payload unexamined', () => {
+  it('parses Write Structured Field into typed structured fields', () => {
     const r = parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02));
     expect(r.command).toBe('WriteStructuredField');
-    expect(r.tokens).toHaveLength(1);
-    expect(r.tokens[0]).toEqual({
-      kind: 'structuredFields',
-      data: Uint8Array.of(0x00, 0x05, 0x01, 0xff, 0x02),
-    });
+    expect(r.tokens).toEqual([
+      { kind: 'structuredField', field: { kind: 'readPartition', pid: 0xff, type: 0x02 } },
+    ]);
+  });
+
+  it('rejects a WSF whose declared length exceeds the payload', () => {
+    // Was accepted while the payload was opaque. A length of 5 with 2 bytes
+    // present is malformed and must not reach the executor.
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05))).toThrow(ParseError);
   });
 
   it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
     // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
     // disambiguates: commandOf only ever sees the command byte. x3270 accepts
     // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750).
-    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
+    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02)).command)
       .toBe('WriteStructuredField');
-    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
+    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02)).command)
       .toBe('WriteStructuredField');
     // And 0x11 in ORDER position is still SBA, not a nested WSF.
     const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));

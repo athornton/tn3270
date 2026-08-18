@@ -218,7 +218,9 @@ describe('read commands', () => {
 describe('structured fields and no-op', () => {
   it('ignores a WSF payload but reports that one arrived', () => {
     const s = new Screen();
-    const r = run(s, SnaCmd.WSF, 0x00, 0x05, 0x01, 0x02);
+    // A complete 5-byte Read Partition (Query): the old payload declared a
+    // length of 5 with only 4 bytes present, which typed SF parsing rejects.
+    const r = run(s, SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02);
     expect(r.structuredFieldsIgnored).toBe(1);
   });
 

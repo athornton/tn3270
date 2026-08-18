@@ -66,7 +66,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
 
     case 'WriteStructuredField':
       for (const t of record.tokens) {
-        if (t.kind === 'structuredFields') result.structuredFieldsIgnored++;
+        if (t.kind === 'structuredField') result.structuredFieldsIgnored++;
       }
       return result;
 
@@ -208,7 +208,7 @@ function applyToken(
       // send them, and TN3270E will implement them properly.
       return addr;
 
-    case 'structuredFields':
+    case 'structuredField':
       return addr;
   }
 }
