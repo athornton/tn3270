@@ -6,9 +6,30 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `main` (renamed from `master` 2026-08-18), **429 tests passing**,
+Branch `main` (renamed from `master` 2026-08-18), **696 tests passing**,
 `npm run typecheck` clean, `npm run build` works, working tree clean. Stage 1 and
 stage 2a are both merged to `main`.
+
+**IND$FILE FILE TRANSFER WORKS ON MVS/TSO, both directions (2026-08-18).** See
+`docs/superpowers/specs/2026-08-18-indfile-cut-transfer-design.md` for the whole
+design and every measurement. In brief:
+
+- CUT mode, not DFT — established from the host's own source and then from the wire.
+- Download: `SYS1.PARMLIB(IEASYS00)`, 1742 bytes, correct with CRLF.
+- Upload: a 249-byte binary chosen to stress the quadrant machinery round-tripped
+  **byte-identically** with `Recfm=variable`. `Recfm=fixed` pads to the record
+  boundary, which is correct behaviour and what VMARC wants (`FBLOCK 80 00`).
+- The host program is Mike Rayborn's "Free File Transfer Program" 2.0.5 from the CBT
+  tape, installed by the user. It needs `-model 3278-2-E`.
+- **Retransmit is unit-tested only** — no retransmit fired on a clean local link, and
+  it is the one path where a subtle bug corrupts data silently instead of failing.
+
+**VM/CMS transfer does NOT work yet, and the blocker has moved rather than lifted.**
+Query List (`TYPE=0x03`) is now answered — MECAFF asks with one and stage 2a had
+deliberately left it unanswered — but a live VM run still times out with zero
+outbound records and no `ReadPartition` in the trace at all, so the fault is earlier
+in the sequence. Also note `HostFile` must be QUOTED on CMS (`HostFile="PROFILE EXEC
+A"`), because our argument splitter treats spaces as separators. Details in that spec.
 
 **Two gaps found during stage 2a have since been closed, and both audits found more
 than the stated bug:**
