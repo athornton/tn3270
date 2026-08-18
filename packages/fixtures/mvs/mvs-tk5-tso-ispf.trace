@@ -1,0 +1,1323 @@
+# MVS 3.8j TK5 (Update 5) — TSO logon through ISPF and back out.
+# Captured 2026-08-18 against localhost:3271 with `-model 3278-2-E`, using the
+# stage 2a client (Query Reply + configurable terminal type). THE FIRST RUN THAT
+# REACHES TSO: stage 1 died here with IKT00405I SCREEN ERASURE.
+#
+# What this proves, and what it does not:
+#   * ISPF primary option menu reached (USERID: HERC02, TERMINAL: 3277), then a
+#     clean logoff back to the VTAM Logon panel. 0 errors, 0 program checks.
+#   * TERMINAL: 3277 and the status lines' "24 80" confirm the session stayed
+#     24x80 throughout. TSO did NOT need a larger screen, and never asked for
+#     one -- the 27x132 in the earlier zti capture was zti advertising its own
+#     window size, not a TSO requirement.
+#   * The three-unit Query Reply (Summary, Usable Area, Implicit Partition) was
+#     ACCEPTED by this host. The "minimum acceptable subset is untested" caveat
+#     on tso-query-reply.txt is now tested, for this host and this path.
+#   * SA orders: 113 across the session. MF orders: 0. So TK5's ISPF does use
+#     Set Attribute (which we parse and drop, losing only colour/highlighting)
+#     and does NOT use Modify Field -- meaning stage 2a's MF deferral cost
+#     nothing here. That was measured, not assumed; the counters were proven
+#     able to report a presence before this run trusted their absence.
+#
+# REDACTED: the password appears twice in a raw capture and BOTH are removed
+# here -- once as EBCDIC on the wire (c3 e4 d3 f8 e3 d9 -> 00 x6, line ~949) and
+# once as PLAINTEXT in a ScreenText dump, because MVS 3.8j echoes the password to
+# the screen with no masking (-> XXXXXX, line ~222). Re-record with care: the
+# second one is easy to miss.
+#
+# Credentials are in TK5's own manual (doc/MVS_TK4-_v100_Users_Manual.pdf);
+# HERC02/CUL8TR was used. Log off properly or the next run draws IKJ56425I
+# LOGON REJECTED ... IN USE, which is NOT the IKT00405I failure and has been
+# misscored as one before.
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+U U U N N 2 24 80 0 0 0x0 0.000
+ok
+L U U C(localhost) P 2 24 80 0 0 0x0 0.010
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.010
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 2.009
+ok
+data:  Hercules Version  : 4.6.0.10954-Aethra-g8424c6a0                               
+data:  Host name         : athor-nb                                                   
+data:  Host OS           : Linux-5.14.0-570.60.1+9.1.el9_6_ciq.x86_64 #1 SMP PREEMPT_D
+data:  Host Architecture : x86_64TC 2026                                              
+data:  Processors        : MP=128                                                     
+data:  LPAR Name         : HERCULES                                                   
+data:  Device number     : 0:00C0                                                     
+data:                             TTTTTTTTTTTT   KKKK  KKKKK     555555555555         
+data:                             TT   TT   TT    KK    KK       55                   
+data:                             TT   TT   TT    KK   KK        55       Update 5    
+data:                                  TT         KK  KK         55                   
+data:          4l      _,,,---,,_      TT         KK KK          55                   
+data:   ZZZzz /,'.-'`'    -.  ;-;;,    TT         KKKK           55555555555          
+data:        4,4-  ) )-,_. ,( (  ''-'  TT         KKKKK                    55         
+data:       '---''(_/--'  `-')_)       TT         KK  KK                   55         
+data:                                  TT         KK   KK                  55         
+data:         The MVS 3.8j             TT         KK    KK                 55         
+data:       Tur(n)key System           TT         KK     KK                55         
+data:                                TTTTTT      KKKK     KKK    55555555555          
+data:                                                                                 
+data:      TK3 created by   Volker Bandke       volker@bandke.org                     
+data:      TK4- update by   Juergen Winkelmann  juergen.winkelmann@pebble-beach.ch    
+data:      TK5  update by   Rob Prins           prin0096@gmail.com                    
+data:           see SYS2.JCLLIB(CREDITS) for complete credits                         
+U F P C(localhost) I 2 24 80 0 0 0x0 0.001
+ok
+U F P C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+L U U C(localhost) I 2 24 80 0 0 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.413
+ok
+data: Terminal   CUU0C0                                                 Date  18.08.26
+data:                                                                   Time  05:34:24
+data:                                                                                 
+data:                               ______________     __      __     ___________     
+data:                              /||||||||||||||\   |||\    ///\   ||||||||||||\    
+data:                             | |||||||||||||| |  ||||   /// /   |||||||||||| |   
+data:                             |/____/||||\ ___\|  ||||  /// /    ||||\ ______\|   
+data:         |l      _,,,---,,_       | |||| |       |||| /// /     |||| |           
+data:  ZZZzz /,'.-'`'    -.  ;-;;,     | |||| |       ||||/// /      |||||||||| \     
+data:       |,4-  ) )-,_. ,( (  ''-'   | |||| |       |||///_/       ||||||||||| \    
+data:      '---''(_/--'  `-')_)        | |||| |       |||\\\ \       \_______|||| |   
+data:                                  | |||| |       ||||\\\ \              |||| |   
+data:        The MVS 3.8j              | |||| |       |||| \\\ \     |||||||||||| |   
+data:      Tur(n)key system            | |||| |       ||||  \\\_\    ||||||||||| /    
+data:                                  |/____\|       \__\   \___\   \__________/     
+data:                                                                                 
+data:       TK3  created by Volker Bandke      volker@bandke.org                      
+data:       TK4- update by Juergen Winkelmann  juergen.winkelmann@pebble-beach.ch     
+data:       TK5  update by Rob Prins           prin0096@gmail.com                     
+data:            see SYS2.JCLLIB(CREDITS) for complete credits                        
+data:                         MVS 3.8j Level 8505 - Update 5                          
+data:                                                                                 
+data: Logon ===>                                                                      
+data:                                                             RUNNING  TK5        
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 17 0x0 0.001
+ok
+L F U C(localhost) I 2 24 80 22 17 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 1 0x0 0.433
+ok
+data:  ENTER CURRENT PASSWORD FOR HERC02-                                             
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+U F U C(localhost) I 2 24 80 1 1 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 1 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 1 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 7 0x0 0.001
+ok
+L F U C(localhost) I 2 24 80 1 7 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 10 5 0x0 2.724
+ok
+data:  ENTER CURRENT PASSWORD FOR HERC02-                                             
+data:  XXXXXX                                                                         
+data:  HERC02 LOGON IN PROGRESS AT 05:34:25 ON AUGUST 18, 2026                        
+data:  NO BROADCAST MESSAGES                                                          
+data:  +----------------------------------------------------------------------------+ 
+data:  !                                                                            ! 
+data:  !                     Welcome to the TSO system on TK5R                      ! 
+data:  !                     =================================                      ! 
+data:  !                                                                            ! 
+data:  +----------------------------------------------------------------------------+ 
+data:  ***                                                                            
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+U F U C(localhost) I 2 24 80 10 5 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 10 5 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 10 5 0x0 0.000
+ok
+L F U C(localhost) I 2 24 80 10 5 0x0 0.001
+ok
+U F U C(localhost) I 2 24 80 11 5 0x0 0.483
+ok
+data:                                                                                 
+data:                                                                                 
+data:                 |l      _,,,---,,_                                              
+data:           ZZZzz /,`.-'`'    -.  ;-;;,                                           
+data:                |,4-  ) )-,_. ,( (  `'-'                                         
+data:               '---''(_/--'  :-')_)                                              
+data:                                                                                 
+data:  Lesser known machine instructions - EBO: Emulate Brown-Out                     
+data:                                                                                 
+data:  Another bit of wisdom from the fortune cookie jar                              
+data:                                                                                 
+data:  ***                                                                            
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+U F U C(localhost) I 2 24 80 11 5 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 11 5 0x0 0.000
+ok
+L F U C(localhost) I 2 24 80 11 5 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 14 0x0 0.495
+ok
+data:                             ISPF primary option menu                            
+data:  Option  ===>                                                                   
+data:                                                             USERID   : HERC02   
+data:     0  ISPF PARMS    Specify terminal and user parms        TIME     : 05:34    
+data:     1  BROWSE        Display source data using Review       TERMINAL : 3277     
+data:     2  EDIT          Change source data using Revedit       PF KEYS  : 0012     
+data:     R  RPF           Browse, EDIT, Reset, PDS with RPF      PANEL    : ISP@PRIM 
+data:     3  UTILITIES     Perform utility functions              SCREEN   : 1        
+data:     4  FOREGROUND    Invoke language processors             LANGUAGE : ENGLISH  
+data:     5  BATCH         Submit job for language processing     APPL ID  : ISP      
+data:     6  COMMAND       Enter TSO command or CLIST             RELEASE  : V2.2.000 
+data:     7  DIALOG TEST   Perform dialog testing                 PRIM     : YES      
+data:     C  CHANGES       Summary of changes for this release    SYSTEMID : TK5R     
+data:     M  TSOAPPLS      Productivity tools and handy apps      PROC     : ISPLOGON 
+data:     T  TUTORIAL      Display information about ISPF                             
+data:     T1 TK5           Summary of changes made in TK5                             
+data:     X  EXIT          Terminate ISPF using log and list defaults                 
+data:                                                                                 
+data:  Enter END command to terminate ISPF.                                           
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+U F U C(localhost) I 2 24 80 1 14 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 14 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 14 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 14 0x0 0.000
+ok
+data: {"rows":24,"cols":80,"cursor":94,"formatted":true,"oia":"4 A","fields":[{"attrAddr":0,"start":1,"length":79,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":80,"start":81,"length":12,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":93,"start":94,"length":125,"attr":64,"protected":false,"numeric":false,"autoSkip":false,"intensified":false,"hidden":false,"modified":false},{"attrAddr":219,"start":220,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":228,"start":229,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":239,"start":240,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":240,"start":241,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":246,"start":247,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":259,"start":260,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":299,"start":300,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":308,"start":309,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":319,"start":320,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":320,"start":321,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":326,"start":327,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":339,"start":340,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":379,"start":380,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":388,"start":389,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":399,"start":400,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":400,"start":401,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":406,"start":407,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":419,"start":420,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":459,"start":460,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":468,"start":469,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":479,"start":480,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":480,"start":481,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":486,"start":487,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":499,"start":500,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":539,"start":540,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":548,"start":549,"length":11,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":560,"start":561,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":566,"start":567,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":579,"start":580,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":619,"start":620,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":628,"start":629,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":639,"start":640,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":640,"start":641,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":646,"start":647,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":659,"start":660,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":699,"start":700,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":708,"start":709,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":719,"start":720,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":720,"start":721,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":726,"start":727,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":739,"start":740,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":779,"start":780,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":788,"start":789,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":799,"start":800,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":800,"start":801,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":806,"start":807,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":819,"start":820,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":859,"start":860,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":868,"start":869,"length":11,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":880,"start":881,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":886,"start":887,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":899,"start":900,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":939,"start":940,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":948,"start":949,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":959,"start":960,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":960,"start":961,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":966,"start":967,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":979,"start":980,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1019,"start":1020,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1028,"start":1029,"length":10,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1039,"start":1040,"length":0,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1040,"start":1041,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1046,"start":1047,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1059,"start":1060,"length":39,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1099,"start":1100,"length":8,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1108,"start":1109,"length":11,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1120,"start":1121,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1126,"start":1127,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1139,"start":1140,"length":31,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1171,"start":1172,"length":28,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1200,"start":1201,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1206,"start":1207,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1219,"start":1220,"length":60,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1280,"start":1281,"length":5,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1286,"start":1287,"length":12,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1299,"start":1300,"length":60,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1360,"start":1361,"length":79,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1440,"start":1441,"length":5,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1446,"start":1447,"length":3,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false},{"attrAddr":1450,"start":1451,"length":69,"attr":240,"protected":true,"numeric":true,"autoSkip":true,"intensified":false,"hidden":false,"modified":false},{"attrAddr":1520,"start":1521,"length":399,"attr":248,"protected":true,"numeric":true,"autoSkip":true,"intensified":true,"hidden":false,"modified":false}],"cells":[{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":126},{"kind":"char","ebcdic":126},{"kind":"char","ebcdic":126},{"kind":"char","ebcdic":110},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":228},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":200},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":245},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":243},{"kind":"char","ebcdic":244},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":241},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":194},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":230},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":165},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":166},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":243},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":247},{"kind":"char","ebcdic":247},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":165},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":210},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":232},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":241},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":194},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":166},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":107},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":107},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":107},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":166},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":124},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":243},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":228},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":241},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":244},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":228},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":165},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":146},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":228},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":200},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":245},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":194},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":200},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":130},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":145},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":130},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":246},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":229},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":75},{"kind":"char","ebcdic":242},{"kind":"char","ebcdic":75},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":240},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":247},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":232},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":200},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":232},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":210},{"kind":"char","ebcdic":245},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":212},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":165},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":195},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":122},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":199},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":228},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":214},{"kind":"char","ebcdic":217},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":193},{"kind":"char","ebcdic":211},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":151},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":130},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":241},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":210},{"kind":"char","ebcdic":245},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":168},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":136},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":210},{"kind":"char","ebcdic":245},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":231},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":231},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":227},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":135},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":134},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":164},{"kind":"char","ebcdic":147},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":162},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":197},{"kind":"char","ebcdic":213},{"kind":"char","ebcdic":196},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":131},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":132},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":150},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":153},{"kind":"char","ebcdic":148},{"kind":"char","ebcdic":137},{"kind":"char","ebcdic":149},{"kind":"char","ebcdic":129},{"kind":"char","ebcdic":163},{"kind":"char","ebcdic":133},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":201},{"kind":"char","ebcdic":226},{"kind":"char","ebcdic":215},{"kind":"char","ebcdic":198},{"kind":"char","ebcdic":75},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":64},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0},{"kind":"char","ebcdic":0}]}
+U F U C(localhost) I 2 24 80 1 14 0x0 0.001
+ok
+U F U C(localhost) I 2 24 80 1 14 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 15 0x0 0.000
+ok
+L F U C(localhost) I 2 24 80 1 15 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 0 0x0 0.928
+ok
+data:  READY                                                                          
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+data:                                                                                 
+U F U C(localhost) I 2 24 80 1 0 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 0 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 1 6 0x0 0.000
+ok
+L F U C(localhost) I 2 24 80 1 6 0x0 0.001
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.466
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+data: Terminal   CUU0C0                                                 Date  18.08.26
+data:                                                                   Time  05:34:29
+data:                                                                                 
+data:                               ______________     __      __     ___________     
+data:                              /||||||||||||||\   |||\    ///\   ||||||||||||\    
+data:                             | |||||||||||||| |  ||||   /// /   |||||||||||| |   
+data:                             |/____/||||\ ___\|  ||||  /// /    ||||\ ______\|   
+data:         |l      _,,,---,,_       | |||| |       |||| /// /     |||| |           
+data:  ZZZzz /,'.-'`'    -.  ;-;;,     | |||| |       ||||/// /      |||||||||| \     
+data:       |,4-  ) )-,_. ,( (  ''-'   | |||| |       |||///_/       ||||||||||| \    
+data:      '---''(_/--'  `-')_)        | |||| |       |||\\\ \       \_______|||| |   
+data:                                  | |||| |       ||||\\\ \              |||| |   
+data:        The MVS 3.8j              | |||| |       |||| \\\ \     |||||||||||| |   
+data:      Tur(n)key system            | |||| |       ||||  \\\_\    ||||||||||| /    
+data:                                  |/____\|       \__\   \___\   \__________/     
+data:                                                                                 
+data:       TK3  created by Volker Bandke      volker@bandke.org                      
+data:       TK4- update by Juergen Winkelmann  juergen.winkelmann@pebble-beach.ch     
+data:       TK5  update by Rob Prins           prin0096@gmail.com                     
+data:            see SYS2.JCLLIB(CREDITS) for complete credits                        
+data:                         MVS 3.8j Level 8505 - Update 5                          
+data:                                                                                 
+data: Logon ===>                                                                      
+data:                                                             RUNNING  TK5        
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+data: 0.000 < ff fd 18
+data: 0.001 > ff fb 18
+data: 0.001 < ff fa 18 01 ff f0
+data: 0.001 > ff fa 18 00 49 42 4d 2d 33 32 37 38 2d 32 2d 45
+data: 0.001 + ff f0  # TERMINAL-TYPE IS IBM-3278-2-E
+data: 0.001 < ff fb 00 ff fd 00 ff fb 19 ff fd 19
+data: 0.001 > ff fd 00
+data: 0.001 > ff fb 00
+data: 0.001 > ff fd 19
+data: 0.001 > ff fb 19
+data: 0.002 < f5 42 11 40 40 1d 60 c8 85 99 83 a4 93 85 a2 40
+data: 0.002 + e5 85 99 a2 89 96 95 40 40 7a 11 40 d4 1d e8 f4
+data: 0.002 + 4b f6 4b f0 4b f1 f0 f9 f5 f4 60 c1 85 a3 88 99
+data: 0.002 + 81 60 87 f8 f4 f2 f4 83 f6 81 f0 11 c1 50 1d 60
+data: 0.002 + c8 96 a2 a3 40 95 81 94 85 40 40 40 40 40 40 40
+data: 0.002 + 40 40 7a 11 c1 e4 1d e8 81 a3 88 96 99 60 95 82
+data: 0.002 + 11 c2 60 1d 60 c8 96 a2 a3 40 d6 e2 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 7a 11 c2 f4 1d e8 d3 89 95
+data: 0.002 + a4 a7 60 f5 4b f1 f4 4b f0 60 f5 f7 f0 4b f6 f0
+data: 0.002 + 4b f1 4e f9 4b f1 4b 85 93 f9 6d f6 6d 83 89 98
+data: 0.002 + 4b a7 f8 f6 6d f6 f4 40 7b f1 40 e2 d4 d7 40 d7
+data: 0.002 + d9 c5 c5 d4 d7 e3 6d c4 e8 d5 c1 d4 c9 c3 40 c6
+data: 0.002 + 99 89 40 d4 81 a8 40 f8 40 f1 f9 7a f3 f0 7a f0
+data: 0.002 + f5 40 e4 e3 c3 40 f2 f0 f2 f6 11 c3 f0 1d 60 c8
+data: 0.002 + 96 a2 a3 40 c1 99 83 88 89 a3 85 83 a3 a4 99 85
+data: 0.002 + 40 7a 11 c4 c4 1d e8 a7 f8 f6 6d f6 f4 11 c5 40
+data: 0.002 + 1d 60 d7 99 96 83 85 a2 a2 96 99 a2 40 40 40 40
+data: 0.002 + 40 40 40 40 7a 11 c5 d4 1d e8 d4 d7 7e f1 f2 f8
+data: 0.002 + 11 c6 50 1d 60 d3 d7 c1 d9 40 d5 81 94 85 40 40
+data: 0.002 + 40 40 40 40 40 40 40 7a 11 c6 e4 1d e8 c8 c5 d9
+data: 0.002 + c3 e4 d3 c5 e2 11 c7 60 1d 60 c4 85 a5 89 83 85
+data: 0.002 + 40 95 a4 94 82 85 99 40 40 40 40 40 7a 11 c7 f4
+data: 0.002 + 1d e8 f0 7a f0 f0 c3 f0 11 c8 f0 1d 60 e2 a4 82
+data: 0.002 + 83 88 81 95 95 85 93 40 40 40 40 40 40 40 40 7a
+data: 0.002 + 11 c9 c4 1d e8 f0 f0 f1 f9 11 c8 f0 1d 60 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 e3 e3 e3 e3 e3 e3 e3
+data: 0.002 + e3 e3 e3 e3 e3 40 40 40 d2 d2 d2 d2 40 40 d2 d2
+data: 0.002 + d2 d2 d2 40 40 40 40 40 f5 f5 f5 f5 f5 f5 f5 f5
+data: 0.002 + f5 f5 f5 f5 11 4a 40 1d 60 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 e3 e3 40 40 40 e3 e3 40 40 40 e3 e3
+data: 0.002 + 40 40 40 40 d2 d2 40 40 40 40 d2 d2 40 40 40 40
+data: 0.002 + 40 40 40 f5 f5 11 4b 50 1d 60 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 e3 e3 40 40 40 e3 e3 40 40 40 e3
+data: 0.002 + e3 40 40 40 40 d2 d2 40 40 40 d2 d2 40 40 40 40
+data: 0.002 + 40 40 40 40 f5 f5 40 40 40 40 40 40 40 e4 97 84
+data: 0.002 + 81 a3 85 40 f5 11 4c 60 1d 60 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 e3 e3 40 40 40 40
+data: 0.002 + 40 40 40 40 40 d2 d2 40 40 d2 d2 40 40 40 40 40
+data: 0.002 + 40 40 40 40 f5 f5 11 4d f0 1d 60 40 40 40 40 40
+data: 0.002 + 40 40 40 f4 93 40 40 40 40 40 40 6d 6b 6b 6b 60
+data: 0.002 + 60 60 6b 6b 6d 40 40 40 40 40 40 e3 e3 40 40 40
+data: 0.002 + 40 40 40 40 40 40 d2 d2 40 d2 d2 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 f5 f5 40 40 40 40 40 11 4f 40 1d
+data: 0.002 + 60 40 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d
+data: 0.002 + 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 40 40 40
+data: 0.002 + 40 e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 d2 d2
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 f5 f5 f5 f5 f5
+data: 0.002 + f5 f5 f5 f5 f5 f5 40 40 40 40 11 50 50 1d 60 40
+data: 0.002 + 40 40 40 40 40 f4 6b f4 60 40 40 5d 40 5d 60 6b
+data: 0.002 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 40 40 e3
+data: 0.002 + e3 40 40 40 40 40 40 40 40 40 d2 d2 d2 d2 d2 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 f5 f5 40 40 40 40 40 40 11 d1 60 1d 60
+data: 0.002 + 40 40 40 40 40 7d 60 60 60 7d 7d 4d 6d 61 60 60
+data: 0.002 + 7d 40 40 79 60 7d 5d 6d 5d 40 40 40 40 40 40 40
+data: 0.002 + e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 40 40 d2
+data: 0.002 + d2 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 f5 f5 11 d2 f0 1d 60 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 e3 e3 40 40 40
+data: 0.002 + 40 40 40 40 40 40 d2 d2 40 40 40 d2 d2 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 f5
+data: 0.002 + f5 11 d4 40 1d 60 40 40 40 40 40 40 40 e3 88 85
+data: 0.002 + 40 d4 e5 e2 40 f3 4b f8 91 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 e3 e3 40 40 40 40 40 40 40 40
+data: 0.002 + 40 d2 d2 40 40 40 40 d2 d2 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 f5 f5 11 d5 50 1d
+data: 0.002 + 60 40 40 40 40 40 e3 a4 99 4d 95 5d 92 85 a8 40
+data: 0.002 + e2 a8 a2 a3 85 94 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 40 40
+data: 0.002 + 40 40 40 d2 d2 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 f5 f5 11 d6 60 1d 60 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 40 40 40 40 40 40 40 e3 e3 e3 e3 e3 e3
+data: 0.002 + 40 40 40 40 40 40 d2 d2 d2 d2 40 40 40 40 40 d2
+data: 0.002 + d2 d2 40 40 40 40 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+data: 0.002 + f5 11 d7 f0 1d 60 11 d9 40 1d 60 40 40 40 40 e3
+data: 0.002 + d2 f3 40 83 99 85 81 a3 85 84 40 82 a8 40 40 40
+data: 0.002 + e5 96 93 92 85 99 40 c2 81 95 84 92 85 40 40 40
+data: 0.002 + 40 40 40 40 a5 96 93 92 85 99 7c 82 81 95 84 92
+data: 0.002 + 85 4b 96 99 87 11 5a 50 1d 60 40 40 40 40 e3 d2
+data: 0.002 + f4 60 40 a4 97 84 81 a3 85 40 82 a8 40 40 40 d1
+data: 0.002 + a4 85 99 87 85 95 40 e6 89 95 92 85 93 94 81 95
+data: 0.002 + 95 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92 85
+data: 0.002 + 93 94 81 95 95 7c 97 85 82 82 93 85 60 82 85 81
+data: 0.002 + 83 88 4b 83 88 11 5b 60 1d 60 40 40 40 40 e3 d2
+data: 0.002 + f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 40 40 d9
+data: 0.002 + 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40
+data: 0.002 + 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89
+data: 0.002 + 93 4b 83 96 94 11 5c f0 1d 60 40 40 40 40 40 40
+data: 0.002 + 40 40 40 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3
+data: 0.002 + c9 c2 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40
+data: 0.002 + 83 96 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2
+data: 0.002 + ff ef
+data: 0.004 = # EraseWrite WCC=0x42 SBA(0) SF(0x60) data[19] SBA(20) SF(0xe8) data[28] SBA(80) SF(0x60) data[19] SBA(100) SF(0xe8) data[8] SBA(160) SF(0x60) data[19] SBA(180) SF(0xe8) data[93] SBA(240) SF(0x60) data[19] SBA(260) SF(0xe8) data[6] SBA(320) SF(0x60) data[19] SBA(340) SF(0xe8) data[6] SBA(400) SF(0x60) data[19] SBA(420) SF(0xe8) data[8] SBA(480) SF(0x60) data[19] SBA(500) SF(0xe8) data[6] SBA(560) SF(0x60) data[19] SBA(580) SF(0xe8) data[4] SBA(560) SF(0x60) data[70] SBA(640) SF(0x60) data[60] SBA(720) SF(0x60) data[75] SBA(800) SF(0x60) data[60] SBA(880) SF(0x60) data[65] SBA(960) SF(0x60) data[73] SBA(1040) SF(0x60) data[76] SBA(1120) SF(0x60) data[70] SBA(1200) SF(0x60) data[70] SBA(1280) SF(0x60) data[70] SBA(1360) SF(0x60) data[70] SBA(1440) SF(0x60) data[69] SBA(1520) SF(0x60) SBA(1600) SF(0x60) data[58] SBA(1680) SF(0x60) data[75] SBA(1760) SF(0x60) data[59] SBA(1840) SF(0x60) data[54]
+data: 2.020 > 6d ff ef
+data: 2.021 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+data: 2.021 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+data: 2.021 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+data: 2.021 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+data: 2.021 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+data: 2.021 + 1d f8 f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f
+data: 2.021 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+data: 2.021 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+data: 2.021 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+data: 2.021 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+data: 2.021 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+data: 2.021 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+data: 2.021 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+data: 2.021 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+data: 2.021 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+data: 2.021 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+data: 2.021 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.021 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+data: 2.021 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+data: 2.021 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+data: 2.021 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+data: 2.021 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+data: 2.021 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+data: 2.021 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+data: 2.021 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+data: 2.021 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+data: 2.021 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+data: 2.021 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+data: 2.021 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+data: 2.021 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+data: 2.021 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+data: 2.021 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+data: 2.021 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+data: 2.021 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+data: 2.021 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+data: 2.021 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+data: 2.021 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+data: 2.021 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+data: 2.021 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+data: 2.021 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+data: 2.021 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+data: 2.021 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+data: 2.021 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.021 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.021 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+data: 2.021 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+data: 2.021 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+data: 2.021 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+data: 2.021 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+data: 2.021 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+data: 2.021 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 2.021 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 2.021 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+data: 2.021 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+data: 2.021 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+data: 2.021 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+data: 2.021 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+data: 2.021 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+data: 2.021 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+data: 2.021 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+data: 2.021 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+data: 2.021 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+data: 2.021 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+data: 2.021 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+data: 2.021 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+data: 2.021 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+data: 2.021 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+data: 2.021 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+data: 2.021 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+data: 2.021 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+data: 2.021 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+data: 2.021 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+data: 2.021 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.021 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+data: 2.021 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef
+data: 2.022 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 2.023 = # ignored orders: SA=7 MF=0
+data: 2.023 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+data: 2.023 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+data: 2.023 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+data: 2.023 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+data: 2.023 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+data: 2.023 + 1d f8 f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f
+data: 2.023 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+data: 2.023 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+data: 2.023 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+data: 2.023 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+data: 2.023 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+data: 2.023 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+data: 2.023 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+data: 2.023 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+data: 2.023 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+data: 2.023 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+data: 2.023 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+data: 2.023 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+data: 2.023 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+data: 2.023 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+data: 2.023 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+data: 2.023 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+data: 2.023 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+data: 2.023 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+data: 2.023 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+data: 2.023 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+data: 2.023 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+data: 2.023 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+data: 2.023 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+data: 2.023 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+data: 2.023 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+data: 2.023 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+data: 2.023 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+data: 2.023 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+data: 2.023 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+data: 2.023 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+data: 2.023 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+data: 2.023 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+data: 2.023 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+data: 2.023 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+data: 2.023 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+data: 2.023 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+data: 2.023 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+data: 2.023 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+data: 2.023 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+data: 2.023 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 2.023 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 2.023 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+data: 2.023 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+data: 2.023 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+data: 2.023 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+data: 2.023 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+data: 2.023 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+data: 2.023 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+data: 2.023 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+data: 2.023 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+data: 2.023 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+data: 2.023 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+data: 2.023 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+data: 2.023 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+data: 2.023 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+data: 2.023 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+data: 2.023 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+data: 2.023 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+data: 2.023 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+data: 2.023 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+data: 2.023 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+data: 2.023 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+data: 2.023 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3
+data: 2.023 + 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8 1d f8
+data: 2.023 + 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3
+data: 2.023 + 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8
+data: 2.023 + 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50
+data: 2.023 + 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7 1d f8
+data: 2.023 + f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f 93 11
+data: 2.023 + c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a
+data: 2.023 + 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79
+data: 2.023 + 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b
+data: 2.023 + d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b
+data: 2.023 + 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8
+data: 2.023 + 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40 79 60
+data: 2.023 + 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40 d4 e5
+data: 2.023 + e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95 5d 92
+data: 2.023 + 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42 f2 40
+data: 2.023 + 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40
+data: 2.023 + 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61
+data: 2.023 + 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f
+data: 2.023 + 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40
+data: 2.023 + 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40
+data: 2.023 + 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40 4f 4f
+data: 2.023 + 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40 40 4f
+data: 2.023 + 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e 4e 40
+data: 2.023 + 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11
+data: 2.023 + 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40
+data: 2.023 + 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+data: 2.023 + 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d
+data: 2.023 + 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7 40 6d
+data: 2.023 + 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f
+data: 2.023 + e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f
+data: 2.023 + 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f 4f 40
+data: 2.023 + 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f 40 61
+data: 2.023 + 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61 61 61
+data: 2.023 + 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61 6d 61
+data: 2.023 + 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40
+data: 2.023 + 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40
+data: 2.023 + 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40
+data: 2.023 + 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40
+data: 2.023 + 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11
+data: 2.023 + c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+data: 2.023 + 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d
+data: 2.023 + 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0
+data: 2.023 + 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f
+data: 2.023 + 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f
+data: 2.023 + 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11
+data: 2.023 + d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11
+data: 2.023 + d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00
+data: 2.023 + 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85 81 a3
+data: 2.023 + 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2 81 95
+data: 2.023 + 84 92 85 40 40 40 40 40 40 a5 96 93 92 85 99 7c
+data: 2.023 + 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5 d5 1d
+data: 2.023 + f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82 a8 40
+data: 2.023 + d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93 94 81
+data: 2.023 + 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92
+data: 2.023 + 85 93 94 81 95 95 7c 97 85 82 82 93 85 60 82 85
+data: 2.023 + 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0
+data: 2.023 + e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 d9
+data: 2.023 + 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89
+data: 2.023 + 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2
+data: 2.023 + 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3
+data: 2.023 + d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96 94 97
+data: 2.023 + 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8 e8 1d
+data: 2.023 + f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3
+data: 2.023 + 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4
+data: 2.023 + 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d f8 d3
+data: 2.023 + 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+data: 2.023 + 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5
+data: 2.023 + 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3 11 40
+data: 2.023 + 40 e3 85 99 94 89 95 81 93 11 40 c8 1d f8 11 40
+data: 2.023 + 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3 1d f8
+data: 2.023 + 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8 11 c1
+data: 2.023 + c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50 1d f8
+data: 2.023 + 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7 1d f8 f0 f5
+data: 2.023 + 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f 93 11 c8 7f
+data: 2.023 + 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a 40 1d
+data: 2.023 + f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d 40
+data: 2.023 + 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b d5 1d
+data: 2.023 + f8 4f 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b
+data: 2.023 + 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8 7d 60
+data: 2.023 + 60 60 7d 7d 4d 6d 61 60 60 7d 40 40 79 60 7d 5d
+data: 2.023 + 6d 5d 11 4f c7 28 42 f6 e3 88 85 40 d4 e5 e2 40
+data: 2.023 + f3 4b f8 91 11 50 d5 e3 a4 99 4d 95 5d 92 85 a8
+data: 2.023 + 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42 f2 40 40 6d
+data: 2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 40 11
+data: 2.023 + c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61 6d 6d
+data: 2.023 + 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f 11 c9
+data: 2.023 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+data: 2.023 + 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+data: 2.023 + 40 40 40 40 11 4b 6e 40 40 40 4f 40 4f 4f 4f 4f
+data: 2.023 + 40 4f 40 40 40 40 40 11 4c 7e 40 40 40 4f 40 4f
+data: 2.023 + 4f 4f 4f 40 4f 40 40 40 40 40 11 4e 4e 40 40 40
+data: 2.023 + 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4f 5e
+data: 2.023 + 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40
+data: 2.023 + 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40
+data: 2.023 + 40 40 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d 6d e0
+data: 2.023 + 4f 40 40 40 40 40 11 c4 60 28 42 f7 40 6d 6d 40
+data: 2.023 + 40 40 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f e0 40
+data: 2.023 + 40 40 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f 40 40
+data: 2.023 + 40 61 61 61 40 61 11 c8 50 4f 4f 4f 4f 40 40 61
+data: 2.023 + 61 61 40 61 40 11 c9 60 4f 4f 4f 4f 40 61 61 61
+data: 2.023 + 40 61 40 40 11 4a f0 4f 4f 4f 4f 61 61 61 40 61
+data: 2.023 + 40 40 40 11 4c 40 4f 4f 4f 61 61 61 6d 61 40 40
+data: 2.023 + 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40 40 40
+data: 2.023 + 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40 40 40
+data: 2.023 + 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40 40 11
+data: 2.023 + d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40 11 d2
+data: 2.023 + 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11 c4 6f
+data: 2.023 + 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40
+data: 2.023 + 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f e0
+data: 2.023 + 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 2.023 + 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d 6d 6d
+data: 2.023 + e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0 6d 6d
+data: 2.023 + 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f 40 40
+data: 2.023 + 40 40 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f 7f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 d1 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11 d2 5f
+data: 2.023 + e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00 00 11
+data: 2.023 + d4 c5 1d f0 e3 d2 f3 40 40 83 99 85 81 a3 85 84
+data: 2.023 + 40 82 a8 40 e5 96 93 92 85 99 40 c2 81 95 84 92
+data: 2.023 + 85 40 40 40 40 40 40 a5 96 93 92 85 99 7c 82 81
+data: 2.023 + 95 84 92 85 4b 96 99 87 1d f0 11 d5 d5 1d f0 e3
+data: 2.023 + d2 f4 60 40 a4 97 84 81 a3 85 40 82 a8 40 d1 a4
+data: 2.023 + 85 99 87 85 95 40 e6 89 95 92 85 93 94 81 95 95
+data: 2.023 + 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92 85 93
+data: 2.023 + 94 81 95 95 7c 97 85 82 82 93 85 60 82 85 81 83
+data: 2.023 + 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0 e3 d2
+data: 2.023 + f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 d9 96 82
+data: 2.023 + 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89 93 4b
+data: 2.023 + 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2 85 85
+data: 2.023 + 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3 d9 c5
+data: 2.023 + c4 c9 e3 e2 5d 40 86 96 99 40 83 96 94 97 93 85
+data: 2.023 + a3 85 40 83 99 85 84 89 a3 a2 11 d8 e8 1d f0 11
+data: 2.023 + d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3 85 a5
+data: 2.023 + 85 93 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4 97 84
+data: 2.023 + 81 a3 85 40 f5 28 00 00 11 5b 5f 1d f8 d3 96 87
+data: 2.023 + 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 11 5d 6b
+data: 2.023 + 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5 11 5d
+data: 2.023 + 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3 11 40 40 e3
+data: 2.023 + 85 99 94 89 95 81 93 11 40 c8 1d f8 11 40 4a 1d
+data: 2.023 + f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3 1d f8 11 c1
+data: 2.023 + c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8 11 c1 c7 1d
+data: 2.023 + f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50 1d f8 11 c2
+data: 2.023 + d1 1d f8 e3 89 94 85 11 c2 d7 1d f8 f0 f5 7a f3
+data: 2.023 + f4 7a f2 f4 11 c8 f7 1d f8 4f 93 11 c8 7f 1d f8
+data: 2.023 + 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a 40 1d f8 e9
+data: 2.023 + e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d 40 40 40
+data: 2.023 + 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b d5 1d f8 4f
+data: 2.023 + 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b 4d 40
+data: 2.023 + 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8 7d 60 60 60
+data: 2.023 + 7d 7d 4d 6d 61 60 60 7d 40 40 79 60 7d 5d 6d 5d
+data: 2.023 + 11 4f c7 28 42 f6 e3 88 85 40 d4 e5 e2 40 f3 4b
+data: 2.023 + f8 91 11 50 d5 e3 a4 99 4d 95 5d 92 85 a8 40 a2
+data: 2.023 + a8 a2 a3 85 94 11 c4 4c 28 42 f2 40 40 6d 6d 6d
+data: 2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 40 11 c5 5c
+data: 2.023 + 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61 6d 6d 6d 6d
+data: 2.023 + 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f 11 c9 4e 40
+data: 2.023 + 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11
+data: 2.023 + 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40
+data: 2.023 + 40 40 11 4b 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+data: 2.023 + 40 40 40 40 40 11 4c 7e 40 40 40 4f 40 4f 4f 4f
+data: 2.023 + 4f 40 4f 40 40 40 40 40 11 4e 4e 40 40 40 4f 40
+data: 2.023 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4f 5e 40 40
+data: 2.023 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 50
+data: 2.023 + 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+data: 2.023 + 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d 6d e0 4f 40
+data: 2.023 + 40 40 40 40 11 c4 60 28 42 f7 40 6d 6d 40 40 40
+data: 2.023 + 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f e0 40 40 40
+data: 2.023 + 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f 40 40 40 61
+data: 2.023 + 61 61 40 61 11 c8 50 4f 4f 4f 4f 40 40 61 61 61
+data: 2.023 + 40 61 40 11 c9 60 4f 4f 4f 4f 40 61 61 61 40 61
+data: 2.023 + 40 40 11 4a f0 4f 4f 4f 4f 61 61 61 40 61 40 40
+data: 2.023 + 40 11 4c 40 4f 4f 4f 61 61 61 6d 61 40 40 40 40
+data: 2.023 + 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40 40 40 40 11
+data: 2.023 + 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40 40 40 11 4f
+data: 2.023 + f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40 40 11 d1 40
+data: 2.023 + 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40 11 d2 50 e0
+data: 2.023 + 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11 c4 6f 28 42
+data: 2.023 + f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 11 c5
+data: 2.023 + 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f e0 11 c7
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11
+data: 2.023 + c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d 6d 6d e0 4f
+data: 2.023 + 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f 4f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0 6d 6d 6d 6d
+data: 2.023 + 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f 40 40 40 40
+data: 2.023 + 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f 7f 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 d1 4f 4f 4f
+data: 2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11 d2 5f e0 6d
+data: 2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00 00 11 d4 c5
+data: 2.023 + 1d f0 e3 d2 f3 40 40 83 99 85 81 a3 85 84 40 82
+data: 2.023 + a8 40 e5 96 93 92 85 99 40 c2 81 95 84 92 85 40
+data: 2.023 + 40 40 40 40 40 a5 96 93 92 85 99 7c 82 81 95 84
+data: 2.023 + 92 85 4b 96 99 87 1d f0 11 d5 d5 1d f0 e3 d2 f4
+data: 2.023 + 60 40 a4 97 84 81 a3 85 40 82 a8 40 d1 a4 85 99
+data: 2.023 + 87 85 95 40 e6 89 95 92 85 93 94 81 95 95 40 40
+data: 2.023 + 91 a4 85 99 87 85 95 4b a6 89 95 92 85 93 94 81
+data: 2.023 + 95 95 7c 97 85 82 82 93 85 60 82 85 81 83 88 4b
+data: 2.023 + 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0 e3 d2 f5 40
+data: 2.023 + 40 a4 97 84 81 a3 85 40 82 a8 40 d9 96 82 40 d7
+data: 2.023 + 99 89 95 a2 40 40 40 40 40 40 40 40 40 40 40 97
+data: 2.023 + 99 89 95 f0 f0 f9 f6 7c 87 94 81 89 93 4b 83 96
+data: 2.023 + 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2 85 85 40 e2
+data: 2.023 + e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3 d9 c5 c4 c9
+data: 2.023 + e3 e2 5d 40 86 96 99 40 83 96 94 97 93 85 a3 85
+data: 2.023 + 40 83 99 85 84 89 a3 a2 11 d8 e8 1d f0 11 d9 d7
+data: 2.023 + 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3 85 a5 85 93
+data: 2.023 + 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4 97 84 81 a3
+data: 2.023 + 85 40 f5 28 00 00 11 5b 5f 1d f8 d3 96 87 96 95
+data: 2.023 + 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.023 + 40 40 40 40 40 40 40 40 40 40 40 11 5d 6b 1d f8
+data: 2.023 + d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5 11 5d 7b 1d
+data: 2.023 + f8 11 5d 7f 1d f8 ff ef
+data: 2.024 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 2.025 = # ignored orders: SA=7 MF=0
+data: 2.025 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 2.026 = # ignored orders: SA=7 MF=0
+data: 2.026 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 2.026 = # ignored orders: SA=7 MF=0
+data: 2.026 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 2.027 = # ignored orders: SA=7 MF=0
+data: 2.435 > 7d 5b f1 11 5b 6b c8 c5 d9 c3 f0 f2 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 2.435 + 40 40 40 40 40 40 ff ef
+data: 2.449 < f5 c3 11 5d 7f 1d 40 11 40 40 13 ff ef
+data: 2.449 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) IC
+data: 2.450 < f3 00 05 01 ff ff 02 ff ef
+data: 2.450 = # WriteStructuredField ReadPartition(pid=0xff,type=0x02)
+data: 2.451 > 88 00 07 81 80 80 81 a6 00 17 81 81 01 00 00 50
+data: 2.451 + 00 18 01 00 0a 02 e5 00 02 00 6f 09 0c 07 80 00
+data: 2.451 + 11 81 a6 00 00 0b 01 00 00 50 00 18 00 50 00 18
+data: 2.451 + ff ef
+data: 2.458 < f5 c3 11 5d 7f 1d 40 11 40 40 1d c8 c5 d5 e3 c5
+data: 2.458 + d9 40 c3 e4 d9 d9 c5 d5 e3 40 d7 c1 e2 e2 e6 d6
+data: 2.458 + d9 c4 40 c6 d6 d9 40 c8 c5 d9 c3 f0 f2 60 1d 40
+data: 2.458 + 11 c1 50 1d 4c 13 ff ef
+data: 2.458 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[34] SF(0x40) SBA(80) SF(0x4c) IC
+data: 2.869 > 7d c1 d7 11 c1 d1 00 00 00 00 00 00 ff ef
+data: 2.871 < f1 c1 11 c2 60 1d c8 11 c2 60 13 ff ef
+data: 2.871 = # Write WCC=0xc1 SBA(160) SF(0xc8) SBA(160) IC
+data: 2.871 < f1 c1 11 c2 60 1d c8 c8 c5 d9 c3 f0 f2 40 d3 d6
+data: 2.871 + c7 d6 d5 40 c9 d5 40 d7 d9 d6 c7 d9 c5 e2 e2 40
+data: 2.871 + c1 e3 40 f0 f5 7a f3 f4 7a f2 f5 40 d6 d5 40 c1
+data: 2.871 + e4 c7 e4 e2 e3 40 f1 f8 6b 40 f2 f0 f2 f6 1d 40
+data: 2.871 + 11 c3 f0 13 ff ef
+data: 2.872 = # Write WCC=0xc1 SBA(160) SF(0xc8) data[55] SF(0x40) SBA(240) IC
+data: 2.891 < f1 c1 11 c3 f0 1d c8 d5 d6 40 c2 d9 d6 c1 c4 c3
+data: 2.891 + c1 e2 e3 40 d4 c5 e2 e2 c1 c7 c5 e2 1d 40 11 c5
+data: 2.891 + 40 13 ff ef
+data: 2.891 = # Write WCC=0xc1 SBA(240) SF(0xc8) data[21] SF(0x40) SBA(320) IC
+data: 5.146 < f1 c1 11 c5 40 1d c8 4e 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 4e 1d 40 11 c6 50 1d c8 5a 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 5a 1d 40 11 c7 60 1d
+data: 5.146 + c8 5a 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 e6 85 93 83 96 94 85 40 a3
+data: 5.146 + 96 40 a3 88 85 40 e3 e2 d6 40 a2 a8 a2 a3 85 94
+data: 5.146 + 40 96 95 40 e3 d2 f5 d9 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 5a 1d
+data: 5.146 + 40 11 c8 f0 1d c8 5a 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 7e 7e 7e 7e
+data: 5.146 + 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e
+data: 5.146 + 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 5a 1d 40 11 4a 40 1d c8 5a 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 5.146 + 40 40 40 40 40 40 40 40 5a 1d 40 11 4b 50 1d c8
+data: 5.146 + 4e 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+data: 5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 4e 1d 40
+data: 5.146 + 11 4c 60 13 ff ef
+data: 5.146 = # Write WCC=0xc1 SBA(320) SF(0xc8) data[78] SF(0x40) SBA(400) SF(0xc8) data[78] SF(0x40) SBA(480) SF(0xc8) data[78] SF(0x40) SBA(560) SF(0xc8) data[78] SF(0x40) SBA(640) SF(0xc8) data[78] SF(0x40) SBA(720) SF(0xc8) data[78] SF(0x40) SBA(800) IC
+data: 5.182 < f1 c3 11 4c 60 1d c8 5c 5c 5c 1d 40 13 11 4c e5
+data: 5.182 + 13 ff ef
+data: 5.182 = # Write WCC=0xc3 SBA(800) SF(0xc8) data[3] SF(0x40) IC SBA(805) IC
+data: 5.594 > 7d 4c e5 ff ef
+data: 5.600 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+data: 5.601 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+data: 5.661 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+data: 5.661 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+data: 5.664 < f1 c1 11 5d 7f 1d 40 11 40 40 1d c8 40 1d 40 11
+data: 5.664 + c1 50 1d c8 40 1d 40 11 c2 60 1d c8 40 40 40 40
+data: 5.664 + 40 40 40 40 40 40 40 40 40 40 40 4f 93 40 40 40
+data: 5.664 + 40 40 40 6d 6b 6b 6b 60 60 60 6b 6b 6d 1d 40 11
+data: 5.664 + c3 f0 1d c8 40 40 40 40 40 40 40 40 40 e9 e9 e9
+data: 5.664 + a9 a9 40 61 6b 79 4b 60 7d 79 7d 40 40 40 40 60
+data: 5.664 + 4b 40 40 5e 60 5e 5e 6b 1d 40 11 c5 40 1d c8 40
+data: 5.664 + 40 40 40 40 40 40 40 40 40 40 40 40 40 4f 6b f4
+data: 5.664 + 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b 4d 40 4d 40
+data: 5.664 + 40 79 7d 60 7d 1d 40 11 c6 50 1d c8 40 40 40 40
+data: 5.664 + 40 40 40 40 40 40 40 40 40 7d 60 60 60 7d 7d 4d
+data: 5.664 + 6d 61 60 60 7d 40 40 7a 60 7d 5d 6d 5d 1d 40 11
+data: 5.664 + c7 60 1d c8 40 1d 40 11 c8 f0 1d c8 d3 85 a2 a2
+data: 5.664 + 85 99 40 92 95 96 a6 95 40 94 81 83 88 89 95 85
+data: 5.664 + 40 89 95 a2 a3 99 a4 83 a3 89 96 95 a2 40 60 40
+data: 5.664 + c5 c2 d6 7a 40 c5 94 a4 93 81 a3 85 40 c2 99 96
+data: 5.664 + a6 95 60 d6 a4 a3 1d 40 11 4a 40 1d c8 40 1d 40
+data: 5.664 + 11 4b 50 1d c8 c1 95 96 a3 88 85 99 40 82 89 a3
+data: 5.664 + 40 96 86 40 a6 89 a2 84 96 94 40 86 99 96 94 40
+data: 5.664 + a3 88 85 40 86 96 99 a3 a4 95 85 40 83 96 96 92
+data: 5.664 + 89 85 40 91 81 99 1d 40 11 4c 60 1d c8 40 1d 40
+data: 5.664 + 11 4d f0 13 ff ef
+data: 5.664 = # Write WCC=0xc1 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[1] SF(0x40) SBA(80) SF(0xc8) data[1] SF(0x40) SBA(160) SF(0xc8) data[33] SF(0x40) SBA(240) SF(0xc8) data[36] SF(0x40) SBA(320) SF(0xc8) data[38] SF(0x40) SBA(400) SF(0xc8) data[33] SF(0x40) SBA(480) SF(0xc8) data[1] SF(0x40) SBA(560) SF(0xc8) data[58] SF(0x40) SBA(640) SF(0xc8) data[1] SF(0x40) SBA(720) SF(0xc8) data[49] SF(0x40) SBA(800) SF(0xc8) data[1] SF(0x40) SBA(880) IC
+data: 5.666 < f1 c3 11 4d f0 1d c8 5c 5c 5c 1d 40 13 11 4d f5
+data: 5.666 + 13 ff ef
+data: 5.666 = # Write WCC=0xc3 SBA(880) SF(0xc8) data[3] SF(0x40) IC SBA(885) IC
+data: 6.078 > 7d 4d f5 ff ef
+data: 6.084 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+data: 6.084 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+data: 6.161 < f5 c3 11 40 40 1d f8 28 42 f7 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 c9 e2 d7 c6 40 97 99 89 94 81 99
+data: 6.161 + a8 40 96 97 a3 89 96 95 40 94 85 95 a4 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 11 c1 50 1d f8 d6 97
+data: 6.161 + a3 89 96 95 40 40 7e 7e 7e 6e 11 c1 5d 1d 40 28
+data: 6.161 + 42 f5 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+data: 6.161 + c3 5b 1d f0 28 42 f4 e4 e2 c5 d9 c9 c4 40 40 11
+data: 6.161 + c3 e4 1d f0 28 42 f5 7a 40 c8 c5 d9 c3 f0 f2 40
+data: 6.161 + 40 11 c3 6f 1d f0 28 42 f4 11 c3 f0 1d f8 28 42
+data: 6.161 + f7 40 40 40 f0 40 11 c3 f6 1d f0 28 42 f5 c9 e2
+data: 6.161 + d7 c6 40 d7 c1 d9 d4 e2 40 40 11 c4 c3 1d f0 28
+data: 6.161 + 42 f4 40 e2 97 85 83 89 86 a8 40 a3 85 99 94 89
+data: 6.161 + 95 81 93 40 81 95 84 40 a4 a2 85 99 40 97 81 99
+data: 6.161 + 94 a2 40 40 40 40 40 40 40 11 c4 6b 1d f0 e3 c9
+data: 6.161 + d4 c5 40 40 40 40 11 c4 f4 1d f0 28 42 f5 7a 40
+data: 6.161 + f0 f5 7a f3 f4 40 40 40 11 c4 7f 1d f0 28 42 f4
+data: 6.161 + 11 c5 40 1d f8 28 42 f7 40 40 40 f1 40 11 c5 c6
+data: 6.161 + 1d f0 28 42 f5 c2 d9 d6 e6 e2 c5 40 40 40 40 40
+data: 6.161 + 40 11 c5 d3 1d f0 28 42 f4 40 c4 89 a2 97 93 81
+data: 6.161 + a8 40 a2 96 a4 99 83 85 40 84 81 a3 81 40 a4 a2
+data: 6.161 + 89 95 87 40 d9 85 a5 89 85 a6 40 40 40 40 40 40
+data: 6.161 + 11 c5 7b 1d f0 e3 c5 d9 d4 c9 d5 c1 d3 11 c6 c4
+data: 6.161 + 1d f0 28 42 f5 7a 40 f3 f2 f7 f7 40 40 40 40 11
+data: 6.161 + c6 4f 1d f0 28 42 f4 11 c6 50 1d f8 28 42 f7 40
+data: 6.161 + 40 40 f2 40 11 c6 d6 1d f0 28 42 f5 c5 c4 c9 e3
+data: 6.161 + 40 40 40 40 40 40 40 40 11 c6 e3 1d f0 28 42 f4
+data: 6.161 + 40 c3 88 81 95 87 85 40 a2 96 a4 99 83 85 40 84
+data: 6.161 + 81 a3 81 40 a4 a2 89 95 87 40 d9 85 a5 85 84 89
+data: 6.161 + a3 40 40 40 40 40 40 11 c7 4b 1d f0 d7 c6 40 d2
+data: 6.161 + c5 e8 e2 40 11 c7 d4 1d f0 28 42 f5 7a 40 f0 f0
+data: 6.161 + f1 f2 40 40 40 40 11 c7 5f 1d f0 28 42 f4 11 c7
+data: 6.161 + 60 1d f8 28 42 f7 40 40 40 d9 40 11 c7 e6 1d f0
+data: 6.161 + 28 42 f5 d9 d7 c6 40 40 40 40 40 40 40 40 40 11
+data: 6.161 + c7 f3 1d f0 28 42 f4 40 c2 99 96 a6 a2 85 6b 40
+data: 6.161 + c5 c4 c9 e3 6b 40 d9 85 a2 85 a3 6b 40 d7 c4 e2
+data: 6.161 + 40 a6 89 a3 88 40 d9 d7 c6 40 40 40 40 40 11 c8
+data: 6.161 + 5b 1d f0 d7 c1 d5 c5 d3 40 40 40 11 c8 e4 1d f0
+data: 6.161 + 28 42 f5 7a 40 c9 e2 d7 7c d7 d9 c9 d4 40 11 c8
+data: 6.161 + f0 1d f8 28 42 f7 40 40 40 f3 40 11 c8 f6 1d f0
+data: 6.161 + 28 42 f5 e4 e3 c9 d3 c9 e3 c9 c5 e2 40 40 40 11
+data: 6.161 + c9 c3 1d f0 28 42 f4 40 d7 85 99 86 96 99 94 40
+data: 6.161 + a4 a3 89 93 89 a3 a8 40 86 a4 95 83 a3 89 96 95
+data: 6.161 + a2 40 40 40 40 40 40 40 40 40 40 40 40 40 11 c9
+data: 6.161 + 6b 1d f0 e2 c3 d9 c5 c5 d5 40 40 11 c9 f4 1d f0
+data: 6.161 + 28 42 f5 7a 40 f1 40 40 40 40 40 40 40 11 c9 7f
+data: 6.161 + 1d f0 28 42 f4 11 4a 40 1d f8 28 42 f7 40 40 40
+data: 6.161 + f4 40 11 4a c6 1d f0 28 42 f5 c6 d6 d9 c5 c7 d9
+data: 6.161 + d6 e4 d5 c4 40 40 11 4a d3 1d f0 28 42 f4 40 c9
+data: 6.161 + 95 a5 96 92 85 40 93 81 95 87 a4 81 87 85 40 97
+data: 6.161 + 99 96 83 85 a2 a2 96 99 a2 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 11 4a 7b 1d f0 d3 c1 d5 c7 e4 c1
+data: 6.161 + c7 c5 11 4b c4 1d f0 28 42 f5 7a 40 c5 d5 c7 d3
+data: 6.161 + c9 e2 c8 40 11 4b 4f 1d f0 28 42 f4 11 4b 50 1d
+data: 6.161 + f8 28 42 f7 40 40 40 f5 40 11 4b d6 1d f0 28 42
+data: 6.161 + f5 c2 c1 e3 c3 c8 40 40 40 40 40 40 40 11 4b e3
+data: 6.161 + 1d f0 28 42 f4 40 e2 a4 82 94 89 a3 40 91 96 82
+data: 6.161 + 40 86 96 99 40 93 81 95 87 a4 81 87 85 40 97 99
+data: 6.161 + 96 83 85 a2 a2 89 95 87 40 40 40 40 11 4c 4b 1d
+data: 6.161 + f0 c1 d7 d7 d3 40 c9 c4 40 11 4c d4 1d f0 28 42
+data: 6.161 + f5 7a 40 c9 e2 d7 40 40 40 40 40 11 4c 5f 1d f0
+data: 6.161 + 28 42 f4 11 4c 60 1d f8 28 42 f7 40 40 40 f6 40
+data: 6.161 + 11 4c e6 1d f0 28 42 f5 c3 d6 d4 d4 c1 d5 c4 40
+data: 6.161 + 40 40 40 40 11 4c f3 1d f0 28 42 f4 40 c5 95 a3
+data: 6.161 + 85 99 40 e3 e2 d6 40 83 96 94 94 81 95 84 40 96
+data: 6.161 + 99 40 c3 d3 c9 e2 e3 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 11 4d 5b 1d f0 d9 c5 d3 c5 c1 e2 c5 40
+data: 6.161 + 11 4d e4 1d f0 28 42 f5 7a 40 e5 f2 4b f2 4b f0
+data: 6.161 + f0 f0 40 11 4d f0 1d f8 28 42 f7 40 40 40 f7 40
+data: 6.161 + 11 4d f6 1d f0 28 42 f5 c4 c9 c1 d3 d6 c7 40 e3
+data: 6.161 + c5 e2 e3 40 11 4e c3 1d f0 28 42 f4 40 d7 85 99
+data: 6.161 + 86 96 99 94 40 84 89 81 93 96 87 40 a3 85 a2 a3
+data: 6.161 + 89 95 87 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 11 4e 6b 1d f0 d7 d9 c9 d4 40 40 40 40
+data: 6.161 + 11 4e f4 1d f0 28 42 f5 7a 40 e8 c5 e2 40 40 40
+data: 6.161 + 40 40 11 4e 7f 1d f0 28 42 f4 11 4f 40 1d f8 28
+data: 6.161 + 42 f7 40 40 40 c3 40 11 4f c6 1d f0 28 42 f5 c3
+data: 6.161 + c8 c1 d5 c7 c5 e2 40 40 40 40 40 11 4f d3 1d f0
+data: 6.161 + 28 42 f4 40 e2 a4 94 94 81 99 a8 40 96 86 40 83
+data: 6.161 + 88 81 95 87 85 a2 40 86 96 99 40 a3 88 89 a2 40
+data: 6.161 + 99 85 93 85 81 a2 85 40 40 40 11 4f 7b 1d f0 e2
+data: 6.161 + e8 e2 e3 c5 d4 c9 c4 11 50 c4 1d f0 28 42 f5 7a
+data: 6.161 + 40 e3 d2 f5 d9 40 40 40 40 11 50 4f 1d f0 28 42
+data: 6.161 + f4 11 50 50 1d f8 28 42 f7 40 40 40 d4 40 11 50
+data: 6.161 + d6 1d f0 28 42 f5 e3 e2 d6 c1 d7 d7 d3 e2 40 40
+data: 6.161 + 40 40 11 50 e3 1d f0 28 42 f4 40 d7 99 96 84 a4
+data: 6.161 + 83 a3 89 a5 89 a3 a8 40 a3 96 96 93 a2 40 81 95
+data: 6.161 + 84 40 88 81 95 84 a8 40 81 97 97 a2 40 40 40 40
+data: 6.161 + 40 11 d1 4b 1d f0 d7 d9 d6 c3 40 40 40 40 11 d1
+data: 6.161 + d4 1d f0 28 42 f5 7a 40 c9 e2 d7 d3 d6 c7 d6 d5
+data: 6.161 + 40 11 d1 60 1d f8 28 42 f7 40 40 40 e3 40 11 d1
+data: 6.161 + e6 1d f0 28 42 f5 e3 e4 e3 d6 d9 c9 c1 d3 40 40
+data: 6.161 + 40 40 11 d1 f3 1d f0 28 42 f4 40 c4 89 a2 97 93
+data: 6.161 + 81 a8 40 89 95 86 96 99 94 81 a3 89 96 95 40 81
+data: 6.161 + 82 96 a4 a3 40 c9 e2 d7 c6 11 d2 d3 1d f0 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 11 d2 f0 1d f8 28
+data: 6.161 + 42 f7 40 40 40 e3 f1 11 d2 f6 1d f0 28 42 f5 e3
+data: 6.161 + d2 f5 40 40 40 40 40 40 40 40 40 11 d3 c3 1d f0
+data: 6.161 + 28 42 f4 40 e2 a4 94 94 81 99 a8 40 96 86 40 83
+data: 6.161 + 88 81 95 87 85 a2 40 94 81 84 85 40 89 95 40 e3
+data: 6.161 + d2 f5 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+data: 6.161 + d4 40 1d f8 28 42 f7 40 40 40 e7 40 11 d4 c6 1d
+data: 6.161 + f0 28 42 f5 c5 e7 c9 e3 40 40 40 40 40 40 40 40
+data: 6.161 + 11 d4 d3 1d f0 28 42 f4 40 e3 85 99 94 89 95 81
+data: 6.161 + a3 85 40 c9 e2 d7 c6 40 a4 a2 89 95 87 40 93 96
+data: 6.161 + 87 40 81 95 84 40 93 89 a2 a3 40 84 85 86 81 a4
+data: 6.161 + 93 a3 a2 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 11 d5 50 1d f8 28 42 f7 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 11 d6 60 1d f0
+data: 6.161 + 28 42 f4 c5 95 a3 85 99 11 d6 e6 1d f8 28 42 f7
+data: 6.161 + c5 d5 c4 11 d6 6a 1d f0 28 42 f4 83 96 94 94 81
+data: 6.161 + 95 84 40 a3 96 40 a3 85 99 94 89 95 81 a3 85 40
+data: 6.161 + c9 e2 d7 c6 4b 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 11 d7 f0 1d f8 28 42 f7 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.161 + 40 40 40 40 40 40 40 11 c1 5e 13 ff ef
+data: 6.163 = # EraseWrite WCC=0xc3 SBA(0) SF(0xf8) deferred(0x28,2B) data[79] SBA(80) SF(0xf8) data[12] SBA(93) SF(0x40) deferred(0x28,2B) data[125] SBA(219) SF(0xf0) deferred(0x28,2B) data[8] SBA(228) SF(0xf0) deferred(0x28,2B) data[10] SBA(239) SF(0xf0) deferred(0x28,2B) SBA(240) SF(0xf8) deferred(0x28,2B) data[5] SBA(246) SF(0xf0) deferred(0x28,2B) data[12] SBA(259) SF(0xf0) deferred(0x28,2B) data[39] SBA(299) SF(0xf0) data[8] SBA(308) SF(0xf0) deferred(0x28,2B) data[10] SBA(319) SF(0xf0) deferred(0x28,2B) SBA(320) SF(0xf8) deferred(0x28,2B) data[5] SBA(326) SF(0xf0) deferred(0x28,2B) data[12] SBA(339) SF(0xf0) deferred(0x28,2B) data[39] SBA(379) SF(0xf0) data[8] SBA(388) SF(0xf0) deferred(0x28,2B) data[10] SBA(399) SF(0xf0) deferred(0x28,2B) SBA(400) SF(0xf8) deferred(0x28,2B) data[5] SBA(406) SF(0xf0) deferred(0x28,2B) data[12] SBA(419) SF(0xf0) deferred(0x28,2B) data[39] SBA(459) SF(0xf0) data[8] SBA(468) SF(0xf0) deferred(0x28,2B) data[10] SBA(479) SF(0xf0) deferred(0x28,2B) SBA(480) SF(0xf8) deferred(0x28,2B) data[5] SBA(486) SF(0xf0) deferred(0x28,2B) data[12] SBA(499) SF(0xf0) deferred(0x28,2B) data[39] SBA(539) SF(0xf0) data[8] SBA(548) SF(0xf0) deferred(0x28,2B) data[11] SBA(560) SF(0xf8) deferred(0x28,2B) data[5] SBA(566) SF(0xf0) deferred(0x28,2B) data[12] SBA(579) SF(0xf0) deferred(0x28,2B) data[39] SBA(619) SF(0xf0) data[8] SBA(628) SF(0xf0) deferred(0x28,2B) data[10] SBA(639) SF(0xf0) deferred(0x28,2B) SBA(640) SF(0xf8) deferred(0x28,2B) data[5] SBA(646) SF(0xf0) deferred(0x28,2B) data[12] SBA(659) SF(0xf0) deferred(0x28,2B) data[39] SBA(699) SF(0xf0) data[8] SBA(708) SF(0xf0) deferred(0x28,2B) data[10] SBA(719) SF(0xf0) deferred(0x28,2B) SBA(720) SF(0xf8) deferred(0x28,2B) data[5] SBA(726) SF(0xf0) deferred(0x28,2B) data[12] SBA(739) SF(0xf0) deferred(0x28,2B) data[39] SBA(779) SF(0xf0) data[8] SBA(788) SF(0xf0) deferred(0x28,2B) data[10] SBA(799) SF(0xf0) deferred(0x28,2B) SBA(800) SF(0xf8) deferred(0x28,2B) data[5] SBA(806) SF(0xf0) deferred(0x28,2B) data[12] SBA(819) SF(0xf0) deferred(0x28,2B) data[39] SBA(859) SF(0xf0) data[8] SBA(868) SF(0xf0) deferred(0x28,2B) data[11] SBA(880) SF(0xf8) deferred(0x28,2B) data[5] SBA(886) SF(0xf0) deferred(0x28,2B) data[12] SBA(899) SF(0xf0) deferred(0x28,2B) data[39] SBA(939) SF(0xf0) data[8] SBA(948) SF(0xf0) deferred(0x28,2B) data[10] SBA(959) SF(0xf0) deferred(0x28,2B) SBA(960) SF(0xf8) deferred(0x28,2B) data[5] SBA(966) SF(0xf0) deferred(0x28,2B) data[12] SBA(979) SF(0xf0) deferred(0x28,2B) data[39] SBA(1019) SF(0xf0) data[8] SBA(1028) SF(0xf0) deferred(0x28,2B) data[10] SBA(1039) SF(0xf0) deferred(0x28,2B) SBA(1040) SF(0xf8) deferred(0x28,2B) data[5] SBA(1046) SF(0xf0) deferred(0x28,2B) data[12] SBA(1059) SF(0xf0) deferred(0x28,2B) data[39] SBA(1099) SF(0xf0) data[8] SBA(1108) SF(0xf0) deferred(0x28,2B) data[11] SBA(1120) SF(0xf8) deferred(0x28,2B) data[5] SBA(1126) SF(0xf0) deferred(0x28,2B) data[12] SBA(1139) SF(0xf0) deferred(0x28,2B) data[31] SBA(1171) SF(0xf0) data[28] SBA(1200) SF(0xf8) deferred(0x28,2B) data[5] SBA(1206) SF(0xf0) deferred(0x28,2B) data[12] SBA(1219) SF(0xf0) deferred(0x28,2B) data[60] SBA(1280) SF(0xf8) deferred(0x28,2B) data[5] SBA(1286) SF(0xf0) deferred(0x28,2B) data[12] SBA(1299) SF(0xf0) deferred(0x28,2B) data[60] SBA(1360) SF(0xf8) deferred(0x28,2B) data[79] SBA(1440) SF(0xf0) deferred(0x28,2B) data[5] SBA(1446) SF(0xf8) deferred(0x28,2B) data[3] SBA(1450) SF(0xf0) deferred(0x28,2B) data[69] SBA(1520) SF(0xf8) deferred(0x28,2B) data[79] SBA(94) IC
+data: 6.163 = # ignored orders: SA=71 MF=0
+data: 6.575 > 7d c1 5f 11 c1 5e e7 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 6.575 + 40 40 40 ff ef
+data: 7.083 < f5 c5 11 5d 7f 1d 40 11 40 40 1d c8 c3 d3 e2 e3
+data: 7.083 + f0 f2 f0 40 40 d3 c9 e2 e3 40 84 81 a3 81 40 a2
+data: 7.083 + 85 a3 40 95 96 a3 40 81 93 93 96 83 81 a3 85 84
+data: 7.083 + 1d 40 11 c1 50 13 ff ef
+data: 7.083 = # EraseWrite WCC=0xc5 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[36] SF(0x40) SBA(80) IC
+data: 7.095 < f5 c3 11 5d 7f 1d 40 11 40 40 1d c8 d9 c5 c1 c4
+data: 7.095 + e8 40 1d 40 11 c1 50 13 ff ef
+data: 7.095 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[6] SF(0x40) SBA(80) IC
+data: 7.504 > 7d c1 d6 11 40 c8 00 00 00 00 00 00 00 00 00 00
+data: 7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+data: 7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+data: 7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+data: 7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 d3 d6
+data: 7.504 + c7 d6 c6 c6 ff ef
+data: 7.544 < f1 c1 11 c2 60 1d c8 c8 c5 d9 c3 f0 f2 40 d3 d6
+data: 7.544 + c7 c7 c5 c4 40 d6 c6 c6 40 e3 e2 d6 40 c1 e3 40
+data: 7.544 + f0 f5 7a f3 f4 7a f2 f9 40 d6 d5 40 c1 e4 c7 e4
+data: 7.544 + e2 e3 40 f1 f8 6b 40 f2 f0 f2 f6 1d 40 11 c3 f0
+data: 7.544 + 13 ff ef
+data: 7.544 = # Write WCC=0xc1 SBA(160) SF(0xc8) data[52] SF(0x40) SBA(240) IC
+data: 7.549 < f1 c1 11 c3 f0 1d c8 5c 5c 5c 5c 5c 5c 1d 40 11
+data: 7.549 + c5 40 13 ff ef
+data: 7.549 = # Write WCC=0xc1 SBA(240) SF(0xc8) data[6] SF(0x40) SBA(320) IC
+data: 7.558 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+data: 7.558 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+data: 7.558 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+data: 7.558 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+data: 7.558 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+data: 7.558 + 1d f8 f0 f5 7a f3 f4 7a f2 f9 11 c8 f7 1d f8 4f
+data: 7.558 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+data: 7.558 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+data: 7.558 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+data: 7.558 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+data: 7.558 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+data: 7.558 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+data: 7.558 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+data: 7.558 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+data: 7.558 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+data: 7.558 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+data: 7.558 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+data: 7.558 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+data: 7.558 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+data: 7.558 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+data: 7.558 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+data: 7.558 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+data: 7.558 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+data: 7.558 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+data: 7.558 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+data: 7.558 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+data: 7.558 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+data: 7.558 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+data: 7.558 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+data: 7.558 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+data: 7.558 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+data: 7.558 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+data: 7.558 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+data: 7.558 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+data: 7.558 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+data: 7.558 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+data: 7.558 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+data: 7.558 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+data: 7.558 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+data: 7.558 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+data: 7.558 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+data: 7.558 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+data: 7.558 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 7.558 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+data: 7.558 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+data: 7.558 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+data: 7.558 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+data: 7.558 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+data: 7.558 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+data: 7.558 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+data: 7.558 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 7.558 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+data: 7.558 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+data: 7.558 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+data: 7.558 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+data: 7.558 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+data: 7.558 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+data: 7.558 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+data: 7.558 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+data: 7.558 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+data: 7.558 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+data: 7.558 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+data: 7.558 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+data: 7.558 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+data: 7.558 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+data: 7.558 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+data: 7.558 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+data: 7.558 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+data: 7.558 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+data: 7.558 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+data: 7.558 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+data: 7.558 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+data: 7.558 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+data: 7.558 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+data: 7.558 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef
+data: 7.559 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+data: 7.559 = # ignored orders: SA=7 MF=0
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
+U F U C(localhost) I 2 24 80 22 11 0x0 0.000
+ok
