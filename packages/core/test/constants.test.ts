@@ -4,6 +4,7 @@ import {
   Cmd, SnaCmd, Order, AID, FA, WCC,
   ADDRESS_CODE_TABLE, isShortReadAID,
   PF_AIDS, PA_AIDS,
+  Sfid, PID_QUERY, ReadPartitionType, Qcode, XA_3270,
 } from '../src/constants.js';
 
 describe('telnet constants', () => {
@@ -148,5 +149,33 @@ describe('12-bit address code table', () => {
     expect(ADDRESS_CODE_TABLE[10]).toBe(0x4a);
     expect(ADDRESS_CODE_TABLE[16]).toBe(0x50);
     expect(ADDRESS_CODE_TABLE[63]).toBe(0x7f);
+  });
+});
+
+describe('structured field constants', () => {
+  it('structured field identifiers match GA23-0059', () => {
+    // Read Partition format, p. 5-51 (pages.txt:6342-6356).
+    expect(Sfid.READ_PARTITION).toBe(0x01);
+    expect(Sfid.QUERY_REPLY).toBe(0x81);
+    expect(PID_QUERY).toBe(0xff);
+    expect(ReadPartitionType.QUERY).toBe(0x02);
+    expect(ReadPartitionType.QUERY_LIST).toBe(0x03);
+  });
+
+  it('query reply codes match GA23-0059 table 6-1', () => {
+    expect(Qcode.SUMMARY).toBe(0x80);
+    expect(Qcode.USABLE_AREA).toBe(0x81);
+    expect(Qcode.IMPLICIT_PARTITION).toBe(0xa6);
+  });
+
+  it('0x81 is both the Query Reply SFID and the Usable Area QCODE', () => {
+    // Distinguished by byte position (2 vs. 3), never by value.
+    expect(Sfid.QUERY_REPLY).toBe(Qcode.USABLE_AREA);
+  });
+
+  it('the SFE field-attribute pair type is 0xC0, not the 0xC8 the manual prose OCRs as', () => {
+    // Manual attribute-type table gives X'C0' 3270 Field attribute; x3270
+    // include/3270ds.h:230 defines XA_3270 0xc0. Both checked.
+    expect(XA_3270).toBe(0xc0);
   });
 });

@@ -2,9 +2,11 @@
  * Wire constants for the 3270 datastream and the telnet options TN3270 uses.
  *
  * Verified against GA23-0059-07 Appendix F (hexadecimal index), Tables 3-2
- * (WCC), 3-4 (AID), and 4-4 (field attributes), cross-checked against x3270's
- * include/3270ds.h. Do not change a value without checking both sources: the
- * manual's OCR mangles some hex digits in tables, and memory is not a source.
+ * (WCC), 3-4 (AID), 4-4 (field attributes), 4-6 (attribute types), and 6-1
+ * (Query Replies), plus chapter 5 (Read Partition) and chapter 6 (Query
+ * Reply), cross-checked against x3270's include/3270ds.h. Do not change a
+ * value without checking both sources: the manual's OCR mangles some hex
+ * digits in tables, and memory is not a source.
  */
 
 /** Telnet commands (RFC 854), plus EOR (RFC 885). */
@@ -89,6 +91,56 @@ export const Order = {
   MF: 0x2c,
   RA: 0x3c,
 } as const;
+
+/**
+ * Structured field identifiers (SFID), GA23-0059 p. 5-51 and chapter 6.
+ *
+ * 0x81 is BOTH the Query Reply SFID (inbound — i.e. sent by us; chapter 6 is
+ * "Inbound Structured Fields") and, as a QCODE, the Usable Area reply code.
+ * They occupy different byte positions and are never interchangeable: SFID is
+ * byte 2, QCODE is byte 3.
+ */
+export const Sfid = {
+  READ_PARTITION: 0x01,
+  QUERY_REPLY: 0x81,
+} as const;
+
+/** PID value meaning "this is a query, not a read of partition 0x00-0x7E". */
+export const PID_QUERY = 0xff;
+
+/** Read Partition TYPE byte. We answer QUERY only; see the stage 2a spec. */
+export const ReadPartitionType = {
+  QUERY: 0x02,
+  QUERY_LIST: 0x03,
+} as const;
+
+/**
+ * Query Reply codes (QCODE), GA23-0059 Table 6-1. Only what we implement.
+ *
+ * Usable Area and Implicit Partition are legible in that table (pages.txt:8638,
+ * :8608). Summary's own code is NOT: its row OCRs as "Summary Yes X'BO' Yes
+ * Yes" (pages.txt:8635), and 0xB0 is a real QCODE elsewhere (Segment,
+ * 3270ds.h:173), so the damage is not self-evident. 0x80 comes from the prose
+ * at p. 6-20: "must support the Summary Query Reply, QCODE = X '80'"
+ * (pages.txt:8568-8569), and from 3270ds.h:136 QR_SUMMARY 0x80.
+ */
+export const Qcode = {
+  SUMMARY: 0x80,
+  USABLE_AREA: 0x81,
+  IMPLICIT_PARTITION: 0xa6,
+} as const;
+
+/**
+ * SFE/MF attribute-type for the basic 3270 field attribute.
+ *
+ * 0xC0, confirmed twice because the manual's prose example OCRs as X'C8'
+ * (pages.txt:2882). The attribute-type table (Table 4-6) reads
+ * "X'CO' 3270 Field attribute" (pages.txt:3430) — that O is OCR of a zero —
+ * and x3270's include/3270ds.h:230 defines XA_3270 0xc0. Numerically equal to
+ * FA.PRINTABLE, which is a coincidence of the architecture, not a relation —
+ * do not unify them.
+ */
+export const XA_3270 = 0xc0;
 
 /** Attention identifiers (Table 3-4). */
 export const AID = {
