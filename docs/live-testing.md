@@ -556,11 +556,18 @@ masking. Grep for both before committing a re-record.
 
 ## Stage 2a results — TSO reached, 2026-08-18
 
-**The acceptance test passes.** `packages/cli/scripts/record-mvs.txt` run with
+**The acceptance test passes, and it is REPRODUCED — twice, on two different
+userids, across a TK5 re-IPL.** `packages/cli/scripts/record-mvs.txt` run with
 `-model 3278-2-E` against TK5 on `localhost:3271` reaches the ISPF primary option
-menu (`USERID: HERC02`, `TERMINAL: 3277`) and logs off cleanly to the VTAM panel.
-0 errors, 0 program checks, 102 `ok` status lines. Fixture:
+menu (`TERMINAL: 3277`) and logs off cleanly to the VTAM panel. 0 errors, 0 program
+checks, no `IKT00405I`, no `IKJ56425I`. Run 1 used `HERC02`, run 2 used `HERC01`
+after the host was re-IPLed. Fixture (run 1):
 `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`.
+
+Reproducing mattered: the **first** connection to a terminal address after an IPL
+takes a different path (the all-protected Hercules banner needing RESET+CLEAR), so a
+single run on an already-warmed address would not have shown that the cold path also
+works. It does.
 
 What was measured, as distinct from what was assumed:
 
@@ -568,8 +575,8 @@ What was measured, as distinct from what was assumed:
 |---|---|---|
 | Does the 3-unit Query Reply suffice? | **Yes** | Session proceeds past the Query to ISPF; host never re-queries or rejects |
 | Does TSO need a screen bigger than 24×80? | **No** | Every status line reads `24 80`; ISPF reports `TERMINAL: 3277`, which has no alternate size; no address exceeded 1920 |
-| Does TK5's ISPF send SA? | **Yes, 113 of them** | `ignored orders: SA=…` trace lines, summed |
-| Does TK5's ISPF send MF? | **No, zero** | same |
+| Does TK5's ISPF send SA? | **Yes — 113 as HERC02, 92 as HERC01** | `ignored orders: SA=…` trace lines, summed |
+| Does TK5's ISPF send MF? | **No, zero on both runs** | same |
 | Is TN3270E needed? | **No** | no `fffb28`/`fffd28` anywhere in the run |
 
 **The geometry answer settles a question that had been open since the 32×80
