@@ -154,10 +154,20 @@ Yr(4) AW AH BUFFSZ(2)`. Bytes 0–20 are always mandatory; BUFFSZ (21–22) is r
 if any self-defining parameter is present. x3270's unit is L=0x17=23, which accounts
 for exactly these bytes.
 
-**Implicit Partitions (0xA6)**, Sizes for Display Devices SDP — p. 6-72
-(`pages.txt:10541`):
-`L=0x0B SDPID=0x01 FLAGS=0x00 WD WD HD HD WA WA HA HA`. Required for all display
-devices; default and alternate must both be nonzero.
+**Implicit Partitions (0xA6)** — note this unit **nests**: a base, then one or more
+self-defining parameters inside it.
+
+- Base, p. 6-71 (`pages.txt:10522-10528`):
+  `L L SFID=0x81 QCODE=0xA6 FLAGS FLAGS`, where bytes 4–5 are two reserved flag
+  bytes (`X'0000'`).
+- Sizes for Display Devices SDP, p. 6-72 (`pages.txt:10557-10566`):
+  `L=0x0B SDPID=0x01 FLAGS=0x00 WD WD HD HD WA WA HA HA`. Required for all display
+  devices; default and alternate must both be nonzero.
+
+So the whole unit is 6 + 11 = 17 bytes, which is exactly x3270's
+`00 11 81 a6 00 00 | 0b 01 00 00 50 00 18 00 50 00 18` (L=0x11=17). ✓ An earlier
+draft of this spec wrote the SDP as if it were the entire unit, dropping the two
+reserved base flag bytes — that would have made every byte after them wrong.
 
 **SFE (0x29)** — p. 4-4 (`pages.txt:2880`): `29 <pair-count> <type,value>...`. The field-attribute pair
 type is **0xC0**, confirmed twice: the manual's attribute-type table gives
