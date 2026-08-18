@@ -230,6 +230,22 @@ function buildIndFileCommand(req: TransferRequest, dialect: FtHostType): string 
     }
   }
 
+  // THE HOST FILE NAME GOES THROUGH VERBATIM, quotes and all. x3270 does the
+  // same — `p->host_filename` is substituted unmodified (ft.c:687) from whatever
+  // the operator supplied (ft.c:361) — so the caller owns the quoting.
+  //
+  // That matters on TSO, where quoting is SEMANTIC rather than syntactic. The
+  // live TK5 usage text says so:
+  //
+  //     Usage: IND$FILE {GET|PUT} 'dataset.name' options
+  //     If the dataset name is specified without quotes, then the TSO userid
+  //     will be prepended to the dataset as 'userid.dataset.name'.
+  //
+  // So `HostFile=SYS1.PARMLIB(IEASYS00)` fetches HERC02.SYS1.PARMLIB(IEASYS00)
+  // and fails, while `HostFile='SYS1.PARMLIB(IEASYS00)'` fetches the real one.
+  // Both are legitimate requests and only the operator knows which is meant, so
+  // adding quotes here would break the userid-relative form that TSO users
+  // expect. Documented instead of guessed at.
   const open = dialect === 'tso' ? '' : '(';
   return `${IND_FILE} ${verb} ${req.hostFile} ${open}${options.join(' ')}`.trimEnd();
 }
