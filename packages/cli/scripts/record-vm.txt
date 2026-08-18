@@ -1,0 +1,77 @@
+# VM/370 R6 (VM/CE 1.2) recording script.
+#
+# Substitute HOST:PORT for your Hercules listener. Verified against VM/CE 1.2 on
+# localhost:3270 with the unprivileged account CMSUSER: reaches CMS "Ready;" and
+# logs off cleanly, three runs for three.
+#
+# READ the ScreenText output. A status line saying "ok" only means the command was
+# accepted, not that the host did what you expected — check the panels.
+#
+# CREDENTIALS: the password typed below appears in the trace in EBCDIC. Redact it
+# before committing any fixture derived from this run — see docs/live-testing.md.
+#
+# THREE THINGS THIS HOST REQUIRES, each of which cost a debugging session:
+#
+# 1. TWO Enters after connect, before typing anything. This host sends THREE
+#    records within 5 ms of connecting, with no input required (measured over 8
+#    traced connections): the Hercules/Aethra banner, then the real input field
+#    (SF(0x4d) IC at 1759), then the VM/370 logo art over the top. The Enter that
+#    follows is consumed dismissing that screen and its text is DISCARDED. Typing
+#    LOGON as the first input loses it, and then the password arrives at a fresh
+#    CP READ as if it were a command — CP answers "restart" (its reply to any
+#    unrecognized token) and you never get a password prompt at all.
+#
+# 2. Wait(Settle), not Wait(InputField), on that first screen. The Hercules banner
+#    is 19 fields and every one is protected, so for the ~1 ms before the field
+#    screen overwrites it there is nothing for InputField to match. Settle lands
+#    after all three records and does not race.
+#
+# 3. Clear to dismiss MORE... CMS pauses with MORE... in the OIA when output
+#    fills the screen. We happily transmit into it (verified on the wire) and CMS
+#    discards what we send, so a LOGOFF typed at MORE... vanishes and leaves the
+#    account logged on for the next run.
+Trace(on)
+Connect(HOST:PORT)
+Wait(3270Mode,20)
+# Dismiss whichever banner came first, then the VM/370 logo behind it. On runs
+# that start at the logo the second Enter lands on CP READ and is harmless.
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+ScreenText
+String("LOGON CMSUSER")
+Enter
+Wait(Settle,20)
+ScreenText
+String("CMSUSER")
+Enter
+Wait(Settle,25)
+ScreenText
+ScreenJson
+# VM READ: the profile runs and CMS IPLs on this Enter.
+Enter
+Wait(Settle,25)
+ScreenText
+# The welcome banner fills the screen, so CMS is sitting at MORE... here.
+Clear
+Wait(Settle,20)
+ScreenText
+# QUERY TERMINAL is a CMS command, so it only answers once CMS is actually up.
+# Reaching this and getting "AUTOCR OFF, MORE 050 010, HOLD ON, TIMESTAMP OFF"
+# rather than "DMKCFC001E ?CP: QUERY" is the proof that we got past CP.
+String("QUERY TERMINAL")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+# LOGOFF is not optional: leaving the account logged on makes the next run fail.
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+TraceText
+Trace(off)
+Quit

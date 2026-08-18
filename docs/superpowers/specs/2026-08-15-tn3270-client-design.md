@@ -45,10 +45,30 @@ usable by a human.
 Signed and notarized macOS `.app`; Linux AppImage and deb. Config file and
 preferences UI.
 
+### RESEQUENCED 2026-08-17 — extended data stream comes before the GUI
+
+The staging below was written before live MVS testing. **MVS 3.8j is expected to be
+the largest group of users, and TSO does not work without the extended data stream
+terminal type and a Query Reply**, so that work was promoted ahead of the GUI:
+
+- **Stage 2a — extended data stream + Query Reply.** Configurable terminal type
+  (`IBM-3278-2-E`), answer Read Partition (Query), alternate screen geometry.
+- **Stage 2b — TN3270E proper**, the telnet option (40) with DEVICE-TYPE/FUNCTIONS,
+  the data header, BIND/UNBIND, SNA responses and LU selection. **Split from 2a
+  because TSO needs none of it** — measured: zero `fffb28`/`fffd28` in any
+  successful run, and `zti` reaches TSO with `use_tn3270e = False`.
+- Then the GUI (old stage 2), packaging (old stage 3), and the list below.
+
+The two items were bundled as "TN3270E" in the original list; they are separable and
+only 2a is on the path to TSO. See `docs/live-testing.md` for the measurements and
+`docs/HANDOFF.md` *Next steps* for the resume point.
+
 ### Stage 4+ — Secondary goals, in order
 
 1. TLS connections (modern z/OS on port 992, certificate handling)
-2. TN3270E: negotiated screen size, extended attributes
+2. ~~TN3270E: negotiated screen size, extended attributes~~ — **promoted, and split;
+   see the resequencing note above.** Negotiated screen size belongs with Query Reply
+   (stage 2a); the telnet option is stage 2b.
 3. IND$FILE file transfer
 4. Printer sessions (LU1/LU3, 3287 emulation)
 5. **Programmable Symbol Sets** — host-loadable glyph bitmaps, and with them the
@@ -56,9 +76,12 @@ preferences UI.
 
 PS is a committed deliverable, not a maybe. Two things fix its position:
 
-- **It must follow TN3270E** — a hard dependency. PS is loaded via structured
-  fields, and the host sends none until Query Reply has advertised the
-  capability.
+- **It must follow Query Reply** — a hard dependency, and note the reason this
+  bullet gives is *Query Reply*, not TN3270E: PS is loaded via structured fields,
+  and the host sends none until Query Reply has advertised the capability. This
+  originally read "must follow TN3270E" because the two were bundled; with stage 2a
+  delivering Query Reply, PS's real prerequisite lands much earlier than planned.
+  Its position in the list is set by the IND$FILE decision below, not by this.
 - **It must follow IND$FILE** — an explicit decision by the user, not a guess.
   File transfer is the more useful capability and ships first.
 
@@ -212,6 +235,14 @@ IPC without three divergent code paths.
 
 ### Two Structural Decisions
 
+**A field includes its own attribute byte.** GA23-0059-07: a field is "the field
+attribute position plus the character positions up to, but not including, the next
+field attribute". Since `Field.start` is `attrAddr + 1`, membership must be asked
+of `fieldAt()` rather than computed as `start <= a < start + length` — that
+expression excludes the attribute byte and ignores wrap, and it produced a false
+bug report against a live host. Verified equivalent to x3270's
+`find_field_attribute` over 768,000 (address, screen) pairs.
+
 **The screen buffer is the single source of truth, held as a flat typed array of
 cells plus a parallel attribute array** — as real hardware does it — *not* as a
 list of field objects. Field boundaries are *derived* by scanning for attribute
@@ -299,9 +330,46 @@ Outbound, addresses are generated 14-bit when the buffer exceeds 4096 cells and
 6-bit values mapped through the standard 64-entry code table (`0x40, 0xC1…0xC9,
 0x4A…0x4F, 0x50, 0xD1…`), matching x3270's `ENCODE_BADDR` and `code_table`.
 
-For a 3278-2 the alternate screen size equals the default, so in stage 1
-`Erase/Write Alternate` behaves identically to `Erase/Write`. It is implemented
-as a distinct command anyway, since TN3270E gives the two different behavior.
+`Erase/Write Alternate` is implemented as a distinct command from `Erase/Write`,
+and in stage 1 both clear the same 80×24 buffer.
+
+**Corrected by live testing (2026-08-17):** an earlier draft of this spec claimed
+"for a 3278-2 the alternate screen size equals the default, so EWA behaves
+identically to EW". That is not reliable. A VM/CE 1.2 host under Hercules sent
+`EWA` carrying `SBA(2399)` and `EUA(→2539)` — addresses that only fit a 2560-cell
+(32×80) screen — while we identified ourselves as `IBM-3278-2`.
+
+**Cause found 2026-08-17, and it was not the host being arbitrary.** The user's
+usual client is **`zti`**, the terminal interface of the `tnz` package (the command
+is `zti`; the protocol lives in `tnz/tnz.py`). It advertises `IBM-DYNAMIC` and then
+answers Read Partition (Query) with an *Implicit Partitions* Query Reply (`0xA6`)
+whose `WA`/`HA` fields carry an alternate size **derived from the user's terminal
+window** — `tnz/tnz.py:265-282`: `lines >= 62 → 62×160`, `>= 43 → 43×80`,
+`>= 32 → 32×80`, else `24×80`. The user's terminal was 41 lines, which selects the
+`32×80` branch, and 2399/2539 fit 2560 cells but not 1920. VM had recorded that
+geometry for `GRAF 2C8` and later drove *our* session with it.
+
+So the mechanism is: a **different client** on the same device taught the host a
+32×80 alternate size, and the host kept using it. Note this is ordinary 3270 Query
+Reply, not TN3270E — an `IBM-DYNAMIC` client can negotiate geometry over a base
+connection. Neither host has ever sent *us* a Read Partition (Query): zero WSF
+records in the VM and TK5 traces, which is expected since we advertise a fixed
+model. We parse WSF (`stream/parse.ts` → `structuredFields`) but do not answer
+queries, so we cannot advertise a size at all.
+
+The practical assumption still holds and is now better founded: **a host may drive
+the alternate size regardless of the model we claim**, because it may be
+remembering what another client negotiated on that device. Stage 1 therefore
+treats an out-of-range address as a **program check**, which is honest and visible,
+rather than silently wrapping it.
+
+Real alternate-geometry support belongs with the Query Reply work rather than
+strictly with TN3270E — answering Read Partition with Usable Area (`0x81`) and
+Implicit Partitions (`0xA6`) is what actually sets the size, and tnz does it
+without TN3270E. `Screen` already takes its geometry as a constructor parameter so
+that change is local. Reproducing the 32×80 condition on demand is now easy: run
+`zti` from a terminal at least 32 lines tall, then connect with our client on the
+same device.
 
 ### Inbound (terminal → host)
 
@@ -319,6 +387,14 @@ attribute + 1** — the first data cell, not the attribute itself.
 
 Attn is not an AID at all: per RFC 1576 §8 it is sent as **Telnet `IAC BREAK`**,
 so it belongs to the telnet layer rather than `inbound.ts`.
+
+**An unformatted screen sends its whole buffer.** With no field attributes there
+are no fields to iterate, so the reply is the AID, the cursor, and then every
+non-null character from address 0 with **no `SBA` orders at all** (x3270's
+`ctlr_read_modified` `else` branch, `ctlr.c:997-1057`). This is not a corner
+case: VM/370's logon screen is unformatted, so without it everything the operator
+types before the first formatted panel is silently discarded and `LOGON` never
+reaches CP. Confirmed against a live host.
 
 **Short-read AIDs** (Clear, PA1–PA3) send **the AID byte alone** — no cursor
 address and no field data. Verified against GA23-0059-07 ("only an AID byte is
@@ -348,6 +424,20 @@ Extended attributes (SFE/MF/SA), color and highlighting on the wire, graphic
 escapes beyond skipping, TN3270E headers and device-name negotiation, printer
 LUs, TLS, alternate screen sizes, and all graphics — Query Reply, Programmable
 Symbol Sets, and GDF (see *3279 Graphics*).
+
+### Keyboard State on Connect
+
+The keyboard is **locked from the moment we connect until the host writes
+something** — there is no screen to type into yet. x3270 calls this
+`KL_AWAITING_FIRST` and sets it both on connect and on entering 3270 mode, with
+the comment *"Wait for any output or a WCC(restore) from the host"*
+(`kybd.c:580-585`, `:613`). Any host write releases it, not only one with the
+WCC keyboard-restore bit.
+
+Without this, `Wait(Unlock)` returns immediately after `Connect` and a script
+types into a blank buffer. Found against a live host, where the symptom was a
+confusing pair: `String()` refused as inhibited while `Wait(Unlock)` reported
+nothing pending.
 
 ## Error Handling
 
@@ -387,6 +477,18 @@ Stage 1 commands: `Connect(host:port)`, `Disconnect`, `String("...")`, `Enter`,
 
 `Attn` sends Telnet `IAC BREAK` rather than an AID (see *Inbound*). Row and
 column arguments are **0-based**, as s3270's are.
+
+`Wait` accepts `Output`, `Unlock`, `3270Mode`, and **`InputField`**. The last
+waits until the cursor sits in an unprotected field, matching x3270's
+`TS_WAIT_IFIELD` (`task.c:135`). It exists because a host may send one logical
+screen as several records — VM/370 sends a banner and then the logon panel, and
+only the second carries the `IC` — so `Wait(Output)` fires too early and
+`Wait(Unlock)` can return before either. `InputField` tests screen *state* rather
+than an event, so it cannot be missed by arriving early.
+
+`TraceText` (an extension) emits the recorded trace as `data:` lines. Without it
+`Trace(on)` enables tracing that nothing ever writes anywhere, which makes
+recording a fixture impossible.
 
 Extensions beyond s3270, documented as such:
 

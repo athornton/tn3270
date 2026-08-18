@@ -1,0 +1,109 @@
+# MVS 3.8j TK5 (Update 5) recording script — TSO logon through ISPF and back out.
+#
+# STATUS: WORKS as of 2026-08-18, with `-model 3278-2-E`. This was the stage 2a
+# acceptance test and it passes: ISPF primary option menu reached, clean logoff,
+# 0 errors, 0 program checks. Recorded at packages/fixtures/mvs/mvs-tk5-tso-ispf.trace
+# (password redacted in two places -- see that file's header).
+#
+# Invoke as:
+#   sed 's/HOST:PORT/localhost:3271/' packages/cli/scripts/record-mvs.txt \
+#     | node packages/cli/dist/main.js -model 3278-2-E > /tmp/tso-run-$(date +%s).log 2>&1
+#
+# A FRESH LOG FILE PER RUN, never appended: appending once produced 31 "replies"
+# for 15 commands and several wrong conclusions drawn from that mapping.
+#
+# The ttype flag is what makes this work. Without `-model 3278-2-E` the default
+# is IBM-3278-2 and TSO answers IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY
+# PROCEDURE. Claiming -E makes TSO send a Read Partition (Query) it waits on,
+# which the client now answers with a three-unit Query Reply.
+#
+# Substitute HOST:PORT. On the machine this was captured from, TK5 is on
+# localhost:3271 because VM/370 holds 3270 -- check, do not assume.
+#
+# READ the ScreenText output. An `ok` status line only means the command was
+# accepted, not that the host did what you wanted.
+#
+# CREDENTIALS: HERC02/CUL8TR, from TK5's own manual
+# (doc/MVS_TK4-_v100_Users_Manual.pdf, "Logon to TSO"). HERC01 also works and is
+# more privileged; HERC03/HERC04 use PASS4U; IBMUSER/IBMPASS is recovery-only.
+# The password appears in any trace BOTH as EBCDIC on the wire AND as plaintext
+# in a ScreenText dump -- MVS 3.8j echoes it to the screen unmasked. Redact both
+# before committing a fixture.
+#
+# LOG OFF PROPERLY or the next run draws IKJ56425I LOGON REJECTED, USERID IN USE,
+# which is NOT the IKT00405I failure and has been misscored as one.
+#
+# ---------------------------------------------------------------------------
+# THE GEOMETRY QUESTION -- ANSWERED 2026-08-18: TSO does NOT need 27x132.
+#
+# The earlier `zti` capture changed size MID-SESSION: 24x80 for the Hercules
+# banner and VTAM logon panel, then 27x132 from the password prompt onwards, then
+# back to 24x80 after logoff. That 27x132 was never TSO's requirement -- `zti`
+# ADVERTISED it, derived from the operator's 171x41 terminal window
+# (tnz/tnz.py:265-282 picks 27x132 for >=27 rows and >=132 columns), and TSO
+# simply used what the client offered.
+#
+# MEASURED, not inferred: this client answers the Query with 24x80 as both the
+# default and the alternate size, and the whole session stayed 24x80 -- every
+# status line reads "24 80" and ISPF itself reports TERMINAL: 3277, a device with
+# no alternate size at all. No address ever exceeded 1920 cells. So the host uses
+# whatever geometry the client offers, and 24x80 is sufficient for TSO and ISPF.
+#
+# Alternate-size support is therefore NOT a prerequisite for TSO. It remains
+# unimplemented (stage 2b or later). If you ever do offer a larger size, expect
+# addresses past 1920; an out-of-range address is a program check, which is the
+# honest failure. Do not "fix" that by wrapping.
+# ---------------------------------------------------------------------------
+Trace(on)
+Connect(HOST:PORT)
+Wait(3270Mode,25)
+# First connection to a terminal address after IPL shows the Hercules banner, which
+# is entirely protected — RESET then CLEAR gets the VTAM logon panel. On later
+# connections the panel appears directly and the Clear is harmless. This is TK5's
+# own documented procedure, not a guess.
+Wait(Settle,20)
+ScreenText
+Reset
+Clear
+Wait(Settle,20)
+ScreenText
+# The VTAM USS panel has exactly one unprotected field, at SBA(1770) with IC on it,
+# right after "Logon ===>". Type the BARE USERID here. `TSO` and `LOGON HERC02` both
+# draw INPUT NOT RECOGNIZED from the USS table.
+String("HERC02")
+Enter
+Wait(Settle,25)
+ScreenText
+# "ENTER CURRENT PASSWORD FOR HERC02-". In the captured session the screen became
+# 27x132 at exactly this point.
+String("CUL8TR")
+Enter
+Wait(Settle,30)
+ScreenText
+# LOGON IN PROGRESS, then the "Welcome to the TSO system on TK5R" banner, ending in
+# TSO's *** more-output prompt. Enter clears it.
+Enter
+Wait(Settle,25)
+ScreenText
+# A fortune cookie, and another ***.
+Enter
+Wait(Settle,25)
+ScreenText
+# ISPF starts automatically from this account's ISPLOGON proc — we do not type
+# "ISPF". Expect the primary option menu, with USERID: HERC02 and TERMINAL: 3277.
+# Reaching this panel is the real proof of a working session.
+ScreenJson
+# X at the Option prompt exits ISPF ("Enter END command to terminate ISPF").
+String("X")
+Enter
+Wait(Settle,25)
+ScreenText
+# "CLST020 LIST data set not allocated", then the bare TSO READY prompt.
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+# "HERC02 LOGGED OFF TSO", then ****** and the VTAM panel again at 24x80.
+ScreenText
+TraceText
+Trace(off)
+Quit

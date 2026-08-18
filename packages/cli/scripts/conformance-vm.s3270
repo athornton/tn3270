@@ -1,0 +1,17 @@
+Wait(3270Mode)
+Wait(2,Seconds)
+Enter
+Wait(Unlock)
+String("LOGON CMSUSER")
+Enter
+Wait(Unlock)
+Enter
+Wait(Unlock)
+Clear
+Wait(Unlock)
+Enter
+Wait(Unlock)
+String("LOGOFF")
+Enter
+Wait(Unlock)
+Quit

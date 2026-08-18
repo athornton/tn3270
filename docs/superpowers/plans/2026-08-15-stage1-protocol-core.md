@@ -97,10 +97,10 @@ Expected: failure — either "Cannot find module" or npm reporting no test scrip
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
+    "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/core packages/cli",
-    "lint": "tsc --build packages/core packages/cli"
+    "typecheck": "tsc --build packages/core"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
@@ -133,6 +133,8 @@ Expected: failure — either "Cannot find module" or npm reporting no test scrip
 ```
 
 `noUncheckedIndexedAccess` matters here: this codebase indexes byte arrays constantly, and it forces the undefined checks that catch off-by-one buffer reads.
+
+Note `typecheck` names only `packages/core`, because `packages/cli` does not exist until Task 13 — `tsc --build` fails hard on a missing project reference, which would leave the project's own verification command broken for eleven tasks. **Task 13 adds `packages/cli` to this script.** There is deliberately no `lint` script: nothing here lints, and a `lint` that only runs `tsc` is a lie.
 
 `vitest.config.ts`:
 
@@ -560,7 +562,7 @@ export const TERMINAL_TYPE = 'IBM-3278-2';
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/constants.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -743,12 +745,17 @@ Create `packages/core/tools/gen-cp037.mjs`:
 ```javascript
 /**
  * Regenerates src/codepages/cp037.ts from Python's built-in cp037 codec.
- * Run: node tools/gen-cp037.mjs > src/codepages/cp037.ts
+ * Run: node tools/gen-cp037.mjs src/codepages/cp037.ts
  *
  * Python's codec is the authority here; hand-transcribing 256 values invites
  * silent errors. Requires python3 on PATH.
+ *
+ * Takes an output PATH rather than writing to stdout on purpose: `> target`
+ * truncates the target before node starts, so a missing python3 would leave the
+ * checked-in table empty. Validates the codec output before writing anything.
  */
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 
 const json = execFileSync('python3', [
   '-c',
@@ -756,6 +763,9 @@ const json = execFileSync('python3', [
 ], { encoding: 'utf8' });
 
 const chars = JSON.parse(json);
+if (chars.length !== 256 || chars.some((c) => Array.from(c).length !== 1)) {
+  throw new Error(`codec produced ${chars.length} entries, or a multi-code-point entry`);
+}
 const codepoints = chars.map((c) => c.codePointAt(0));
 
 const rows = [];
@@ -763,11 +773,17 @@ for (let i = 0; i < 256; i += 8) {
   rows.push('  ' + codepoints.slice(i, i + 8).map((n) => `0x${n.toString(16).padStart(4, '0')}`).join(', ') + ',');
 }
 
-process.stdout.write(`/**
+const outPath = process.argv[2];
+if (!outPath) {
+  process.stderr.write('usage: gen-cp037.mjs <output path>\n');
+  process.exit(2);
+}
+
+writeFileSync(outPath, `/**
  * CP037 (EBCDIC US/Canada) to Unicode.
  *
  * GENERATED FILE - do not edit by hand.
- * Regenerate with: node tools/gen-cp037.mjs > src/codepages/cp037.ts
+ * Regenerate with: node tools/gen-cp037.mjs src/codepages/cp037.ts
  */
 
 /** EBCDIC byte -> Unicode code point. */
@@ -782,7 +798,7 @@ ${rows.join('\n')}
 ```bash
 cd packages/core
 mkdir -p src/codepages
-node tools/gen-cp037.mjs > src/codepages/cp037.ts
+node tools/gen-cp037.mjs src/codepages/cp037.ts
 grep -c '0x' src/codepages/cp037.ts
 ```
 
@@ -997,6 +1013,16 @@ describe('Trace', () => {
     expect(t.lines()[1]).toBe('0.250 < 02');
   });
 
+  it('clamps elapsed time at 0 if the clock steps backward', () => {
+    let now = 1000;
+    const t = new Trace({ enabled: true, clock: () => now });
+    t.recv(Uint8Array.of(1));
+    now = 500; // e.g. an NTP correction on a non-monotonic clock
+    t.recv(Uint8Array.of(2));
+    expect(t.lines()[0]).toBe('0.000 < 01');
+    expect(t.lines()[1]).toBe('0.000 < 02');
+  });
+
   it('appends annotations without disturbing the hex', () => {
     const t = new Trace({ enabled: true, clock: () => 0 });
     t.recv(Uint8Array.of(0xf5), 'Erase/Write');
@@ -1009,6 +1035,14 @@ describe('Trace', () => {
     expect(t.lines()[0]).toBe('0.000 = # negotiated 3270 mode');
   });
 
+  it('sanitizes newlines in notes and annotations so they cannot forge a line', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.note('host said:\n0.000 < de ad be ef');
+    expect(t.lines()).toHaveLength(1);
+    expect(t.lines()[0]).toBe('0.000 = # host said: 0.000 < de ad be ef');
+    expect(parseTrace(t.lines()[0]!)).toEqual([]);
+  });
+
   it('wraps long byte runs at 16 per line', () => {
     const t = new Trace({ enabled: true, clock: () => 0 });
     t.recv(new Uint8Array(20).fill(0xab));
@@ -1016,6 +1050,30 @@ describe('Trace', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]!.split(' ').length).toBe(2 + 16);
     expect(lines[1]!.split(' ').length).toBe(2 + 4);
+  });
+
+  it('marks continuation lines of a wrapped run with a leading +', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(new Uint8Array(20).fill(0xab));
+    const lines = t.lines();
+    expect(lines[0]!.startsWith('0.000 < ')).toBe(true);
+    expect(lines[1]!.startsWith('0.000 + ')).toBe(true);
+  });
+
+  it('does not retain lines when a sink is attached', () => {
+    const sunk: string[] = [];
+    const t = new Trace({ enabled: true, clock: () => 0, sink: (l) => sunk.push(l) });
+    t.recv(Uint8Array.of(0xf5, 0xc3));
+    expect(sunk).toEqual(['0.000 < f5 c3']);
+    expect(t.lines()).toEqual([]);
+  });
+
+  it('returns a snapshot from lines() that mutation cannot affect', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(Uint8Array.of(0xf5));
+    const snapshot = t.lines() as string[];
+    snapshot.push('injected');
+    expect(t.lines()).toHaveLength(1);
   });
 });
 
@@ -1032,9 +1090,20 @@ describe('parseTrace', () => {
     ]);
   });
 
-  it('merges continuation lines of a wrapped run', () => {
-    const text = ['0.000 < ' + 'ab '.repeat(16).trim(), '0.000 < ab ab'].join('\n');
-    const events = parseTrace(text);
+  it('merges a wrapped run back into the single event it originally was', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    const payload = new Uint8Array(20).fill(0xab);
+    t.recv(payload);
+    const events = parseTrace(t.lines().join('\n'));
+    expect(events).toHaveLength(1);
+    expect(events[0]!.bytes).toEqual(payload);
+  });
+
+  it('keeps two genuinely separate events separate even when each is 16 bytes', () => {
+    const t = new Trace({ enabled: true, clock: () => 0 });
+    t.recv(new Uint8Array(16).fill(0xab));
+    t.recv(new Uint8Array(2).fill(0xab));
+    const events = parseTrace(t.lines().join('\n'));
     expect(events).toHaveLength(2);
     expect(events[0]!.bytes).toHaveLength(16);
     expect(events[1]!.bytes).toHaveLength(2);
@@ -1042,6 +1111,14 @@ describe('parseTrace', () => {
 
   it('ignores blank lines and comments', () => {
     expect(parseTrace('\n# a comment\n\n')).toEqual([]);
+  });
+
+  it('throws on a malformed hex byte instead of silently coercing it to zero', () => {
+    expect(() => parseTrace('0.000 < f5 oops c3')).toThrow(/invalid hex byte "oops"/);
+  });
+
+  it('throws on a continuation line with no preceding event', () => {
+    expect(() => parseTrace('0.000 + ab ab')).toThrow(/no preceding event/);
   });
 });
 ```
@@ -1065,9 +1142,11 @@ Create `packages/core/src/trace.ts`:
  *
  *   <elapsed> <dir> <hex bytes...>  [# annotation]
  *
- * where dir is '<' for received, '>' for sent, '=' for a note. Timestamps are
- * seconds since the first event, so two traces of the same session compare
- * cleanly regardless of wall clock.
+ * where dir is '<' for received, '>' for sent, '=' for a note, or '+' for a
+ * continuation of the previous line's byte run (used when a single recv()/
+ * send() call is wrapped across more than one line). Timestamps are seconds
+ * since the first event, so two traces of the same session compare cleanly
+ * regardless of wall clock.
  */
 
 export type TraceDir = 'recv' | 'send';
@@ -1081,6 +1160,11 @@ export interface TraceOptions {
 }
 
 const BYTES_PER_LINE = 16;
+
+/** Newlines in user-supplied text could otherwise forge a fake trace line. */
+function sanitizeText(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ');
+}
 
 export class Trace {
   private enabled: boolean;
@@ -1114,39 +1198,54 @@ export class Trace {
   /** A message with no bytes — negotiation milestones, program checks, etc. */
   note(text: string): void {
     if (!this.enabled) return;
-    this.emit(`${this.stamp()} = # ${text}`);
+    this.emit(`${this.stamp()} = # ${sanitizeText(text)}`);
   }
 
+  /** A snapshot of the lines recorded so far. Mutating it does not affect the trace. */
   lines(): readonly string[] {
-    return this.buffered;
+    return [...this.buffered];
   }
 
   toText(): string {
     return this.buffered.join('\n');
   }
 
-  private emitBytes(marker: string, bytes: Uint8Array, annotation?: string): void {
+  private emitBytes(marker: '<' | '>', bytes: Uint8Array, annotation?: string): void {
     if (!this.enabled) return;
     if (bytes.length === 0) return;
     const stamp = this.stamp();
+    const safeAnnotation = annotation !== undefined ? sanitizeText(annotation) : undefined;
     for (let off = 0; off < bytes.length; off += BYTES_PER_LINE) {
       const chunk = bytes.subarray(off, off + BYTES_PER_LINE);
       const hex = Array.from(chunk, (b) => b.toString(16).padStart(2, '0')).join(' ');
+      const isFirst = off === 0;
       const isLast = off + BYTES_PER_LINE >= bytes.length;
-      const suffix = isLast && annotation ? `  # ${annotation}` : '';
-      this.emit(`${stamp} ${marker} ${hex}${suffix}`);
+      const lineMarker = isFirst ? marker : '+';
+      const suffix = isLast && safeAnnotation ? `  # ${safeAnnotation}` : '';
+      this.emit(`${stamp} ${lineMarker} ${hex}${suffix}`);
     }
   }
 
   private emit(line: string): void {
-    this.buffered.push(line);
-    this.sink?.(line);
+    // A sink means the caller owns persistence (e.g. a file stream); retaining
+    // every line here too would mean a long session holds its entire trace in
+    // memory regardless. Without a sink, buffering is the only way lines() and
+    // toText() can ever return anything, so we keep it in that case.
+    if (this.sink) {
+      this.sink(line);
+    } else {
+      this.buffered.push(line);
+    }
   }
 
   private stamp(): string {
     const now = this.clock();
     this.start ??= now;
-    return ((now - this.start) / 1000).toFixed(3);
+    // Clamp at 0: a clock that steps backward (e.g. an NTP correction on a
+    // non-monotonic clock) must not produce a negative elapsed time, which
+    // parseTrace's line regex would fail to match and silently drop.
+    const elapsed = Math.max(0, (now - this.start) / 1000);
+    return elapsed.toFixed(3);
   }
 }
 
@@ -1155,28 +1254,67 @@ export interface TraceEvent {
   bytes: Uint8Array;
 }
 
+const HEX_BYTE = /^[0-9a-fA-F]{1,2}$/;
+
+/** Parses one line's whitespace-separated hex tokens, validating each. */
+function parseHexPayload(payload: string, lineNo: number, rawLine: string): Uint8Array {
+  if (payload === '') return new Uint8Array(0);
+  const tokens = payload.split(/\s+/);
+  const bytes = new Uint8Array(tokens.length);
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (!HEX_BYTE.test(tok)) {
+      throw new Error(
+        `parseTrace: invalid hex byte "${tok}" on line ${lineNo}: ${rawLine}`,
+      );
+    }
+    bytes[i] = Number.parseInt(tok, 16);
+  }
+  return bytes;
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
 /**
  * Parse a trace back into byte runs, for Replay(). Notes and comments are
- * dropped — they are commentary, not protocol. Each line becomes one event;
- * a wrapped run therefore replays as consecutive events, which is
- * indistinguishable from the receiver's point of view since the framer
- * buffers across chunk boundaries anyway.
+ * dropped — they are commentary, not protocol. A '+' continuation line is
+ * merged into the byte run of the event immediately before it, so a run that
+ * Trace wrapped across several 16-byte lines round-trips as the single event
+ * it originally was. This matters: Tasks 15-17 replay fixtures to test the
+ * framer against real chunk boundaries, and a wrapped run merged back into one
+ * event is what makes that possible.
  */
 export function parseTrace(text: string): TraceEvent[] {
   const events: TraceEvent[] = [];
-  for (const raw of text.split('\n')) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     const line = raw.trim();
-    if (line === '' || line.startsWith('#')) continue;
-    const m = /^([0-9.]+)\s+([<>=])\s*(.*)$/.exec(line);
+    const m = /^([0-9.]+)\s+([<>=+])\s*(.*)$/.exec(line);
     if (!m) continue;
+    const lineNo = i + 1;
     const marker = m[2]!;
     if (marker === '=') continue;
     const payload = m[3]!.replace(/\s*#.*$/, '').trim();
-    if (payload === '') continue;
-    const bytes = Uint8Array.from(
-      payload.split(/\s+/).map((h) => Number.parseInt(h, 16)),
-    );
-    events.push({ dir: marker === '<' ? 'recv' : 'send', bytes });
+    const bytes = parseHexPayload(payload, lineNo, raw);
+    if (bytes.length === 0) continue;
+
+    if (marker === '+') {
+      const prev = events[events.length - 1];
+      if (!prev) {
+        throw new Error(
+          `parseTrace: continuation line ${lineNo} with no preceding event: ${raw}`,
+        );
+      }
+      prev.bytes = concatBytes(prev.bytes, bytes);
+    } else {
+      events.push({ dir: marker === '<' ? 'recv' : 'send', bytes });
+    }
   }
   return events;
 }
@@ -1185,7 +1323,7 @@ export function parseTrace(text: string): TraceEvent[] {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/trace.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1203,14 +1341,34 @@ git commit -m "feat(core): add byte-level trace with replayable text format"
 
 This is the module the spec singles out as the most common source of "works on localhost, fails on a real network" bugs, because records split across TCP segments. The framer is therefore a byte-at-a-time state machine with no assumption that a chunk boundary means anything — the same shape as x3270's `telnet_fsm`.
 
+**Three non-obvious requirements, each of which was a real bug caught in review:**
+
+1. **Data accumulation is gated on 3270 mode.** Hosts print an NVT banner or a
+   session-manager prompt before going 3270. Those bytes must not enter the
+   record accumulator, or they get prepended to the first real record and the
+   parser reads a banner character as the command byte — reproduced as a 40-byte
+   first record beginning `45 6e 74 65 72` ("Enter…") with the real `f5 c3`
+   buried at the end. x3270 gates it at `telnet.c:1773`; EOR outside 3270 mode
+   discards the accumulator at `telnet.c:1848-1859`.
+2. **Every accepted option answers at most once.** RFC 854: a request to enter a
+   mode we are already in must go unacknowledged, "essential to prevent endless
+   loops in the negotiation." This applies to `ECHO` as much as to the desired
+   options.
+3. **Both per-byte accumulators are bounded.** They are `number[]`, so each wire
+   byte costs ~32 bytes of heap; unbounded, a host that never sends `IAC EOR`
+   grows the heap 32x the wire rate. `St.Sb` is additionally a trap — it is left
+   only on `IAC SE`, so an unterminated subnegotiation silently eats the rest of
+   the session and presents as a hang.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `packages/core/test/telnet.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { TelnetLayer } from '../src/telnet.js';
+import { TelnetLayer, MAX_RECORD_BYTES } from '../src/telnet.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
+import { Trace } from '../src/trace.js';
 
 /** Collects what the layer wants to transmit and the records it produces. */
 function harness() {
@@ -1261,6 +1419,19 @@ describe('option negotiation', () => {
     expect(sent[0]).toEqual(expected);
   });
 
+  it('advertises an ASCII-only terminal type', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    const payload = sent[0]!.slice(4, -2);
+    for (const code of payload) {
+      expect(code).toBeGreaterThanOrEqual(0x20);
+      expect(code).toBeLessThanOrEqual(0x7e);
+    }
+    expect(String.fromCharCode(...payload)).toBe('IBM-3278-2');
+  });
+
   it('refuses TN3270E in stage 1', () => {
     const { layer, sent } = harness();
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
@@ -1298,6 +1469,24 @@ describe('option negotiation', () => {
     expect(sent[0]).toEqual([T.IAC, T.WONT, 99]);
     layer.receive(Uint8Array.of(T.IAC, T.WILL, 99));
     expect(sent[1]).toEqual([T.IAC, T.DONT, 99]);
+  });
+
+  it('drops out of 3270 mode when the host DONTs BINARY', () => {
+    const { layer } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    expect(layer.is3270Mode()).toBe(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.BINARY));
+    expect(layer.is3270Mode()).toBe(false);
+  });
+
+  it('accepts IAC WONT for an option we offered and drops it from hisOpts', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.WILL, O.EOR));
+    expect(sent[0]).toEqual([T.IAC, T.DO, O.EOR]);
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.EOR));
+    expect(sent[1]).toEqual([T.IAC, T.DONT, O.EOR]);
+    expect(layer.is3270Mode()).toBe(false);
   });
 });
 
@@ -1369,6 +1558,72 @@ describe('record framing', () => {
     layer.receive(Uint8Array.of(T.IAC, T.SB, 77, 1, 2, 3, T.IAC, T.SE, 0xf5, T.IAC, T.EOR));
     expect(Array.from(records[0]!)).toEqual([0xf5]);
   });
+
+  it('notes an empty subnegotiation as such instead of a fabricated option number', () => {
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({ write: () => {}, onRecord: () => {}, trace });
+    layer.receive(Uint8Array.of(T.IAC, T.SB, T.IAC, T.SE));
+    expect(trace.lines()).toContain('0.000 = # ignored subnegotiation for option (empty)');
+  });
+
+  it('does not leak an NVT logon banner into the first 3270 record', () => {
+    // THE regression test for this module. Hosts print a banner or a session
+    // manager prompt before going 3270 — VM/ESA, TSO behind a session manager,
+    // most Hercules configurations. Those bytes must never reach the record
+    // accumulator, or the parser reads a banner character as the command byte.
+    const { layer, records } = harness();
+    const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    layer.receive(ascii('Enter terminal type: '));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(ascii('\r\nVM/ESA ONLINE\r\n'));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('discards a record terminated before 3270 mode was negotiated', () => {
+    const { layer, records } = harness();
+    layer.receive(Uint8Array.of(0x68, 0x69, T.IAC, T.EOR));
+    expect(records).toHaveLength(0);
+  });
+
+  it('answers a repeated DO ECHO only once, per RFC 854', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.ECHO));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual([T.IAC, T.WILL, O.ECHO]);
+  });
+
+  it('abandons an unterminated subnegotiation instead of eating the stream', () => {
+    // St.Sb is left only on IAC SE, so a malformed or truncated subnegotiation
+    // would otherwise consume everything after it and present as a hang. This
+    // sends exactly enough filler after "IAC SB 99" to hit the 1024-byte cap
+    // with nothing left over, so the abandonment lands exactly on a chunk
+    // boundary and the next chunk is unambiguously a fresh, well-formed record.
+    const { layer, records } = in3270();
+    layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
+    layer.receive(new Uint8Array(1024).fill(0x41)); // never terminated
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('drops an over-long record rather than growing without bound', () => {
+    const { layer, records } = in3270();
+    layer.receive(new Uint8Array(MAX_RECORD_BYTES + 16).fill(0x41));
+    layer.receive(Uint8Array.of(T.IAC, T.EOR));
+    expect(records).toHaveLength(0);
+    // And the layer recovers for the next record.
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
 });
 
 describe('transmission', () => {
@@ -1382,6 +1637,33 @@ describe('transmission', () => {
     const { layer, sent } = harness();
     layer.sendAttn();
     expect(sent[0]).toEqual([T.IAC, T.BREAK]);
+  });
+});
+
+describe('trace wiring', () => {
+  it('records negotiation, record framing, and Attn through an attached Trace', () => {
+    const sent: number[][] = [];
+    const records: Uint8Array[] = [];
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({
+      write: (b) => sent.push(Array.from(b)),
+      onRecord: (r) => records.push(r),
+      trace,
+    });
+
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    layer.sendRecord(Uint8Array.of(0x7d));
+    layer.sendAttn();
+
+    const lines = trace.lines();
+    expect(lines.length).toBeGreaterThan(0);
+    // At least one received line (negotiation) and one sent line (our WILL reply).
+    expect(lines.some((l) => l.includes(' < '))).toBe(true);
+    expect(lines.some((l) => l.includes(' > '))).toBe(true);
   });
 });
 ```
@@ -1419,6 +1701,19 @@ enum St { Data, Iac, Will, Wont, Do, Dont, Sb, SbIac }
 /** Options we actively want. */
 const DESIRED = new Set<number>([O.BINARY, O.TERMINAL_TYPE, O.EOR, O.SUPPRESS_GO_AHEAD]);
 
+/**
+ * Ceilings on the two per-byte accumulators.
+ *
+ * A record has no length field, so neither can be pre-sized — but both are
+ * `number[]`, which boxes each byte at roughly 32 bytes of heap. Without a
+ * ceiling, a host that never sends IAC EOR (or a stream desynchronized so that
+ * EOR is consumed as an option byte) grows the heap ~32x the wire rate until the
+ * process dies. A full 3278-2 rewrite is a few KB, so 64 KB is generous.
+ */
+export const MAX_RECORD_BYTES = 65536;
+/** x3270 uses a 1024-byte sbbuf (telnet.c:1876); it does not bounds-check, we do. */
+export const MAX_SUBNEG_BYTES = 1024;
+
 export class TelnetLayer {
   private readonly write: (bytes: Uint8Array) => void;
   private readonly onRecord: (record: Uint8Array) => void;
@@ -1428,6 +1723,8 @@ export class TelnetLayer {
   private state = St.Data;
   private record: number[] = [];
   private sb: number[] = [];
+  /** Set when the current record blew the ceiling; suppresses its delivery. */
+  private overlongRecord = false;
 
   /** Options we have told the host WE will do. */
   private readonly myOpts = new Set<number>();
@@ -1480,8 +1777,23 @@ export class TelnetLayer {
   private step(c: number): void {
     switch (this.state) {
       case St.Data:
-        if (c === T.IAC) this.state = St.Iac;
-        else this.record.push(c);
+        if (c === T.IAC) {
+          this.state = St.Iac;
+        } else if (this.is3270Mode()) {
+          if (this.record.length >= MAX_RECORD_BYTES) {
+            this.trace?.note(`record exceeded ${MAX_RECORD_BYTES} bytes, discarded`);
+            this.record = [];
+            this.overlongRecord = true;
+          } else {
+            this.record.push(c);
+          }
+        }
+        // Outside 3270 mode the byte is NVT text — a logon banner or a session
+        // manager prompt. It must NOT enter the record accumulator, or it gets
+        // prepended to the first real 3270 record and the parser reads a banner
+        // character as the command byte. x3270 gates this at telnet.c:1773
+        // (`if (IN_NVT && !IN_E) ... else store3270in(c)`). Stage 1 renders no
+        // NVT text, so dropping it is correct.
         return;
 
       case St.Iac:
@@ -1529,8 +1841,18 @@ export class TelnetLayer {
         return;
 
       case St.Sb:
-        if (c === T.IAC) this.state = St.SbIac;
-        else this.sb.push(c);
+        if (c === T.IAC) {
+          this.state = St.SbIac;
+        } else if (this.sb.length >= MAX_SUBNEG_BYTES) {
+          // Unterminated subnegotiation. St.Sb is left only on IAC SE, so
+          // without this the rest of the session is silently consumed and the
+          // client looks hung.
+          this.trace?.note(`subnegotiation exceeded ${MAX_SUBNEG_BYTES} bytes, abandoned`);
+          this.sb = [];
+          this.state = St.Data;
+        } else {
+          this.sb.push(c);
+        }
         return;
 
       case St.SbIac:
@@ -1556,9 +1878,15 @@ export class TelnetLayer {
     }
     if (opt === O.ECHO) {
       // Some hosts renegotiate ECHO repeatedly during a pre-3270 NVT login.
-      // Answer as asked; stage 1 implements no NVT-mode local echo.
-      this.myOpts.add(opt);
-      this.reply(T.WILL, opt);
+      // Answer as asked, but only on a real change: RFC 854 requires that a
+      // request to enter a mode we are already in go unacknowledged, "essential
+      // to prevent endless loops in the negotiation". x3270 guards every
+      // accepted option the same way (telnet.c:2000, `if (!myopts[c])`).
+      // Stage 1 implements no NVT-mode local echo.
+      if (!this.myOpts.has(opt)) {
+        this.myOpts.add(opt);
+        this.reply(T.WILL, opt);
+      }
       return;
     }
     // Everything else, including TN3270E, TIMING-MARK and 3270-REGIME.
@@ -1585,13 +1913,32 @@ export class TelnetLayer {
       ]);
       this.trace?.send(out, `TERMINAL-TYPE IS ${this.terminalType}`);
       this.write(out);
+      this.sb = [];
       return;
     }
     // Anything else is dropped; we advertised nothing that needs it.
-    this.trace?.note(`ignored subnegotiation for option ${this.sb[0] ?? -1}`);
+    const optLabel = this.sb.length > 0 ? String(this.sb[0]) : '(empty)';
+    this.trace?.note(`ignored subnegotiation for option ${optLabel}`);
+    this.sb = [];
   }
 
   private flushRecord(): void {
+    if (!this.is3270Mode()) {
+      // EOR before negotiation completed. x3270 logs and discards the
+      // accumulator (telnet.c:1848-1859, `ibptr = ibuf`); so do we.
+      if (this.record.length > 0) {
+        this.trace?.note(`EOR received outside 3270 mode, ${this.record.length} bytes discarded`);
+        this.record = [];
+      }
+      return;
+    }
+    if (this.overlongRecord) {
+      // The record already exceeded MAX_RECORD_BYTES and was dropped; deliver
+      // nothing rather than a truncated tail, and resync for the next one.
+      this.overlongRecord = false;
+      this.record = [];
+      return;
+    }
     if (this.record.length === 0) return; // nothing to deliver
     const rec = Uint8Array.from(this.record);
     this.record = [];
@@ -1609,7 +1956,7 @@ export class TelnetLayer {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/telnet.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1626,6 +1973,29 @@ git commit -m "feat(core): add telnet negotiation and IAC/EOR record framing"
 - Create: `packages/core/src/screen.ts`, `packages/core/test/screen.test.ts`
 
 Per the spec: the buffer is the single source of truth, held as flat typed arrays as real hardware does it, and **fields are derived by scanning for attribute positions, never stored as objects.** That is what makes a mid-stream attribute overwrite behave correctly.
+
+**Four requirements found in review that later tasks depend on:**
+
+1. **`clearAllMDT()` is unconditional; `clearUnprotectedMDT()` is the filtered one.**
+   WCC reset-MDT resets every field's MDT (manual Table 3-2 bit 7; x3270
+   `ctlr.c:1545-1550` has no protection check), while Erase Input is
+   unprotected-only (manual 4-14). They cannot share one method: Read Modified
+   filters on MDT alone (`ctlr.c:921`), so a protected field left carrying MDT
+   leaks its data to the host.
+2. **`eraseAllUnprotected()` clears the whole buffer when unformatted** — an
+   unformatted buffer is entirely unprotected (x3270 `ctlr.c:1443-1445`).
+   Otherwise EAU silently does nothing before the host's first `SF`.
+3. **`firstUnprotectedStart()` and `typableFields()` skip zero-length fields.**
+   With adjacent attributes, a field has `length === 0` and its `start` IS the
+   next attribute; parking the cursor there corrupts the buffer on the next
+   keystroke. x3270's `next_unprotected` guards with `!ea_buf[nbaddr].fa`
+   (`ctlr.c:623-638`). Putting these here keeps the guard in one place instead of
+   in EAU, `home`, and `tab` separately.
+4. **Public accessors validate their address.** `fromRowCol` is where user input
+   becomes a buffer address (the CLI feeds it `Number(argv)`), and unchecked
+   out-of-range access degrades silently rather than failing: `fieldAt(size)`
+   misses address 0 and reports `null` on a formatted screen, and `rowText(0)`
+   returns raw NULs that flow into CLI output.
 
 Cell content is a tagged variant with one case in stage 1 (`char`), so Programmable Symbol Sets can be added later without rewriting consumers. The `kind` field is not speculative generality — PS is a committed stage 4 deliverable.
 
@@ -1666,6 +2036,47 @@ describe('geometry', () => {
     expect(s.inc(0)).toBe(1);
     expect(s.inc(1919)).toBe(0);
     expect(s.dec(0)).toBe(1919);
+  });
+
+  it('rejects degenerate geometry', () => {
+    expect(() => new Screen({ rows: 0, cols: 80 })).toThrow(RangeError);
+    expect(() => new Screen({ rows: 24, cols: 0 })).toThrow(RangeError);
+    expect(() => new Screen({ rows: 24.5, cols: 80 })).toThrow(RangeError);
+  });
+
+  it('rejects out-of-range and non-integer addresses in the public accessors', () => {
+    const s = new Screen();
+    expect(() => s.cellAt(-1)).toThrow(RangeError);
+    expect(() => s.cellAt(1920)).toThrow(RangeError);
+    expect(() => s.cellAt(5.5)).toThrow(RangeError);
+    expect(() => s.setChar(1920, 0xc1)).toThrow(RangeError);
+    expect(() => s.setFieldAttribute(1920, 0)).toThrow(RangeError);
+    expect(() => s.attributeAt(1920)).toThrow(RangeError);
+    expect(() => s.isFieldAttribute(1920)).toThrow(RangeError);
+    expect(() => s.fieldAt(1920)).toThrow(RangeError);
+    expect(() => s.setMDT(1920)).toThrow(RangeError);
+    expect(() => s.rowText(0)).toThrow(RangeError);
+    expect(() => s.rowText(25)).toThrow(RangeError);
+  });
+
+  it('rejects out-of-range row/col in fromRowCol, which is where CLI input becomes an address', () => {
+    const s = new Screen();
+    expect(() => s.fromRowCol(0, 1)).toThrow(RangeError);
+    expect(() => s.fromRowCol(25, 1)).toThrow(RangeError);
+    expect(() => s.fromRowCol(1, 0)).toThrow(RangeError);
+    expect(() => s.fromRowCol(1, 81)).toThrow(RangeError);
+  });
+
+  it('handles a non-24x80 geometry across row/col conversion, text rendering and field wrap', () => {
+    const s = new Screen({ rows: 43, cols: 80 });
+    expect(s.toRowCol(3439)).toEqual({ row: 43, col: 80 });
+    expect(s.fromRowCol(43, 80)).toBe(3439);
+    expect(s.rowText(43)).toHaveLength(80);
+    s.setFieldAttribute(3439, FA.PROTECT);
+    const f = s.fieldAt(0);
+    expect(f!.attrAddr).toBe(3439);
+    expect(f!.start).toBe(0);
+    expect(f!.length).toBe(3439);
   });
 });
 
@@ -1712,6 +2123,15 @@ describe('field attributes', () => {
     expect(s.rowText(1)[0]).toBe(' ');
   });
 
+  it('rowText blanks every attribute position in the row, not just the first', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setFieldAttribute(1, FA.PROTECT);
+    s.setChar(2, 0xc2);
+    s.setFieldAttribute(3, 0);
+    expect(s.rowText(1).slice(0, 4)).toBe('A B ');
+  });
+
   it('finds the field governing a cell by scanning backwards', () => {
     const s = new Screen();
     s.setFieldAttribute(10, FA.PROTECT);
@@ -1744,6 +2164,19 @@ describe('field attributes', () => {
     expect(s.isFormatted()).toBe(false);
   });
 
+  it('overwriting a field attribute with a character collapses two fields into one', () => {
+    const s = new Screen();
+    s.setFieldAttribute(10, FA.PROTECT);
+    s.setFieldAttribute(20, 0);
+    expect(s.fields()).toHaveLength(2);
+    s.setChar(10, 0xc1); // destroys the boundary between the two fields
+    const fs = s.fields();
+    expect(fs).toHaveLength(1);
+    expect(fs[0]!.attrAddr).toBe(20);
+    // The merged field now spans everything except the one attribute at 20.
+    expect(fs[0]!.length).toBe(1919);
+  });
+
   it('lists fields in address order with derived extents', () => {
     const s = new Screen();
     s.setFieldAttribute(0, FA.PROTECT);
@@ -1756,6 +2189,57 @@ describe('field attributes', () => {
     expect(fs[1]!.length).toBe(9);
     // The last field wraps around to the first attribute.
     expect(fs[2]!.length).toBe(1920 - 21);
+  });
+
+  it('a single field attribute governs the entire rest of the buffer', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    const fs = s.fields();
+    expect(fs).toHaveLength(1);
+    expect(fs[0]!.length).toBe(1919);
+  });
+
+  it('an attribute at the last address governs address 0, wrapped', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1919, FA.PROTECT);
+    const f = s.fieldAt(0);
+    expect(f!.attrAddr).toBe(1919);
+    expect(f!.start).toBe(0);
+    expect(f!.length).toBe(1919);
+  });
+
+  it('two adjacent attributes produce a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(1, 0);
+    const f = s.fieldAt(0)!; // fieldAt on the attribute address itself
+    expect(f.attrAddr).toBe(0);
+    expect(f.length).toBe(0);
+    // start points AT the next attribute, not at a data cell.
+    expect(f.start).toBe(1);
+    expect(s.isFieldAttribute(f.start)).toBe(true);
+  });
+
+  it('fieldAt on an attribute position returns that attribute\'s own field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(10, FA.PROTECT);
+    s.setFieldAttribute(20, 0);
+    const f = s.fieldAt(10);
+    expect(f!.attrAddr).toBe(10);
+  });
+
+  it('isFormatted and fields stay in agreement across a series of mutations', () => {
+    const s = new Screen();
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setFieldAttribute(5, FA.PROTECT);
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setFieldAttribute(50, 0);
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setChar(5, 0xc1); // destroys one of the two attributes
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    s.setChar(50, 0xc2); // destroys the last attribute
+    expect(s.isFormatted()).toBe(s.fields().length > 0);
+    expect(s.isFormatted()).toBe(false);
   });
 });
 
@@ -1778,6 +2262,16 @@ describe('attribute predicates', () => {
     expect(s.fieldAt(301)!.modified).toBe(true);
   });
 
+  it('autoSkip requires protected AND numeric, not either alone', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT); // protected only
+    s.setFieldAttribute(10, FA.NUMERIC); // numeric only
+    s.setFieldAttribute(20, FA.PROTECT | FA.NUMERIC); // both
+    expect(s.fieldAt(1)!.autoSkip).toBe(false);
+    expect(s.fieldAt(11)!.autoSkip).toBe(false);
+    expect(s.fieldAt(21)!.autoSkip).toBe(true);
+  });
+
   it('sets and clears the modified data tag', () => {
     const s = new Screen();
     s.setFieldAttribute(0, 0);
@@ -1788,14 +2282,44 @@ describe('attribute predicates', () => {
     expect(s.fieldAt(1)!.modified).toBe(false);
   });
 
-  it('clearAllMDT leaves protected fields alone', () => {
-    // Erase Input and WCC reset-MDT act on unprotected fields.
+  it('setMDT is a no-op on an address that is not a field attribute', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0);
+    s.setMDT(5); // not an attribute address
+    expect(s.fieldAt(1)!.modified).toBe(false);
+  });
+
+  it('clearAllMDT resets MDT unconditionally, including protected fields (WCC reset-MDT)', () => {
+    // Read Modified filters on MDT alone, with no protection check, so a
+    // protected field left carrying MDT would leak data to the host.
     const s = new Screen();
     s.setFieldAttribute(0, FA.MODIFY);
     s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
     s.clearAllMDT();
     expect(s.fieldAt(1)!.modified).toBe(false);
+    expect(s.fieldAt(101)!.modified).toBe(false);
+  });
+
+  it('clearUnprotectedMDT leaves protected fields alone (Erase Input)', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.MODIFY);
+    s.setFieldAttribute(100, FA.PROTECT | FA.MODIFY);
+    s.clearUnprotectedMDT();
+    expect(s.fieldAt(1)!.modified).toBe(false);
     expect(s.fieldAt(101)!.modified).toBe(true);
+  });
+
+  it('decodes attribute bits from a realistic host byte with the high bits set', () => {
+    // Real hosts set the base-architecture "printable" bits (0xC0); a clean
+    // FA.PROTECT constant never exercises that. 0xE1 = printable | protect | MDT.
+    const s = new Screen();
+    s.setFieldAttribute(0, 0xe1);
+    const f = s.fieldAt(1)!;
+    expect(f.protected).toBe(true);
+    expect(f.modified).toBe(true);
+    expect(f.numeric).toBe(false);
+    // The raw byte is preserved unnormalized.
+    expect(f.attr).toBe(0xe1);
   });
 });
 
@@ -1826,6 +2350,74 @@ describe('clearing', () => {
     expect(s.isFieldAttribute(0)).toBe(true);
     expect(s.isFieldAttribute(10)).toBe(true);
   });
+
+  it('Erase All Unprotected clears an unformatted screen entirely', () => {
+    // An unformatted buffer is, by definition, entirely unprotected (x3270
+    // ctlr.c:1443-1445): a host that prints a banner before its first SF (as
+    // VM/370 does) still expects EAU to blank the screen.
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.cursor = 42;
+    s.eraseAllUnprotected();
+    expect(s.cellAt(5)!.ebcdic).toBe(0x00);
+    expect(s.isFormatted()).toBe(false);
+  });
+
+  it('Erase All Unprotected nulls a field that wraps past the end of the buffer', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1918, 0); // unprotected, wraps: start=1919, then 0
+    s.setChar(1919, 0xc1);
+    s.setChar(0, 0xc2);
+    s.eraseAllUnprotected();
+    expect(s.cellAt(1919)!.ebcdic).toBe(0x00);
+    expect(s.cellAt(0)!.ebcdic).toBe(0x00);
+  });
+});
+
+describe('field partition invariants', () => {
+  // These exist because a hand-rolled membership check (start <= a < start+length)
+  // fooled me into reporting a bug against a live host that did not exist. That
+  // check omits the attribute byte itself — `start` is attrAddr + 1 — and also
+  // ignores wrap. Per GA23-0059-07 a field is "the field attribute position PLUS
+  // the character positions up to, but not including, the next field attribute",
+  // so the attribute byte belongs to its own field. Always ask fieldAt().
+  it('fields partition the whole buffer with no gaps or overlaps', () => {
+    for (const attrs of [[0], [5], [1919], [0, 20], [10, 11], [1899], [0, 960, 1919]]) {
+      const s = new Screen();
+      for (const a of attrs) s.setFieldAttribute(a, 0x00);
+      const owner = new Map<number, number>();
+      for (const f of s.fields()) {
+        owner.set(f.attrAddr, f.attrAddr);
+        let a = f.start;
+        for (let n = 0; n < f.length; n++) {
+          expect(owner.has(a), `address ${a} claimed twice`).toBe(false);
+          owner.set(a, f.attrAddr);
+          a = s.inc(a);
+        }
+      }
+      expect(owner.size, `attrs ${attrs} did not cover the buffer`).toBe(s.size);
+    }
+  });
+
+  it('the attribute byte belongs to its own field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(20, 0x00);
+    for (const f of s.fields()) {
+      expect(s.fieldAt(f.attrAddr)!.attrAddr).toBe(f.attrAddr);
+    }
+  });
+
+  it('fieldAt is never null anywhere on a formatted screen', () => {
+    const s = new Screen();
+    s.setFieldAttribute(1759, 0x00); // only attribute, high address
+    for (const a of [0, 1, 1758, 1759, 1760, 1919]) {
+      expect(s.fieldAt(a), `fieldAt(${a}) was null`).not.toBeNull();
+    }
+    // Address 0 is governed by the wrapping field, as x3270's
+    // find_field_attribute also reports.
+    expect(s.fieldAt(0)!.attrAddr).toBe(1759);
+  });
 });
 
 describe('snapshot', () => {
@@ -1841,6 +2433,88 @@ describe('snapshot', () => {
     s.setChar(0, 0xc2);
     // The snapshot must not have changed underneath its holder.
     expect(snap.cells[0]!.ebcdic).toBe(0xc1);
+  });
+
+  it('isolates cursor, fields and formatted from later mutation, not just cells', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.cursor = 3;
+    const snap = s.snapshot();
+    s.cursor = 999;
+    s.setFieldAttribute(50, 0); // adds a field
+    s.setChar(0, 0xc1); // destroys the field the snapshot saw
+    expect(snap.cursor).toBe(3);
+    expect(snap.fields).toHaveLength(1);
+    expect(snap.fields[0]!.attrAddr).toBe(0);
+    expect(snap.formatted).toBe(true);
+  });
+
+  it('freezes cell and field objects so mutation throws or is a no-op', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    const snap = s.snapshot();
+    expect(Object.isFrozen(snap.cells)).toBe(true);
+    expect(Object.isFrozen(snap.cells[0])).toBe(true);
+    expect(Object.isFrozen(snap.fields)).toBe(true);
+    expect(Object.isFrozen(snap.fields[0])).toBe(true);
+  });
+});
+
+describe('cursor placement helpers', () => {
+  it('firstUnprotectedStart skips zero-length fields', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0); // unprotected, but zero-length (next is attr 1)
+    s.setFieldAttribute(1, FA.PROTECT); // protected
+    s.setFieldAttribute(10, 0); // unprotected, has room
+    expect(s.firstUnprotectedStart()).toBe(11);
+  });
+
+  it('firstUnprotectedStart returns null when nothing is typable', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    expect(s.firstUnprotectedStart()).toBeNull();
+    expect(new Screen().firstUnprotectedStart()).toBeNull();
+  });
+
+  it('typableFields excludes protected, auto-skip and zero-length fields', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT); // excluded: protected
+    s.setFieldAttribute(10, FA.PROTECT | FA.NUMERIC); // excluded: auto-skip
+    s.setFieldAttribute(20, 0); // included
+    s.setFieldAttribute(1919, 0); // excluded: zero-length (wraps to attr 0)
+    const fs = s.typableFields();
+    expect(fs.map((f) => f.attrAddr)).toEqual([20]);
+  });
+});
+
+describe('forEachCellWithField', () => {
+  it('carries the governing field forward across the swept range', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT);
+    s.setFieldAttribute(10, 0);
+    const seen: { addr: number; attrAddr: number | null; isAttr: boolean }[] = [];
+    s.forEachCellWithField(0, 20, (addr, field, isAttr) => {
+      seen.push({ addr, attrAddr: field?.attrAddr ?? null, isAttr });
+    });
+    expect(seen).toHaveLength(20);
+    expect(seen[0]).toEqual({ addr: 0, attrAddr: 0, isAttr: true });
+    expect(seen[5]).toEqual({ addr: 5, attrAddr: 0, isAttr: false });
+    expect(seen[10]).toEqual({ addr: 10, attrAddr: 10, isAttr: true });
+    expect(seen[15]).toEqual({ addr: 15, attrAddr: 10, isAttr: false });
+  });
+
+  it('reports a null field on an unformatted screen', () => {
+    const s = new Screen();
+    const fields: (number | null)[] = [];
+    s.forEachCellWithField(0, 3, (_addr, field) => fields.push(field?.attrAddr ?? null));
+    expect(fields).toEqual([null, null, null]);
+  });
+
+  it('wraps past the end of the buffer', () => {
+    const s = new Screen();
+    const addrs: number[] = [];
+    s.forEachCellWithField(1918, 2, (addr) => addrs.push(addr));
+    expect(addrs).toEqual([1918, 1919, 0, 1]);
   });
 });
 ```
@@ -1880,10 +2554,24 @@ export type Cell = { kind: 'char'; ebcdic: number };
 export interface Field {
   /** Address of the field attribute byte itself. */
   attrAddr: number;
-  /** Address of the first data cell (attrAddr + 1, wrapped). */
+  /**
+   * Address of the first data cell (attrAddr + 1, wrapped). For a
+   * zero-length field — one attribute immediately followed by another — this
+   * IS the next attribute's address, not a data cell. Callers that park the
+   * cursor here must check `length > 0` first; use `firstUnprotectedStart()`
+   * or `typableFields()`, which already do.
+   */
   start: number;
   /** Data cells in the field, excluding the attribute byte. */
   length: number;
+  /**
+   * The raw, unnormalized attribute byte exactly as the host sent it. Real
+   * hosts set bits beyond the ones this module names (the base architecture
+   * requires the top two bits on, so a plain "unprotected" byte arrives as
+   * 0xC0, not 0x00). Consume this only via `&` with `FA.*` masks — never
+   * `===` — or normalization differences will make an identical-looking
+   * field compare unequal.
+   */
   attr: number;
   protected: boolean;
   numeric: boolean;
@@ -1898,8 +2586,8 @@ export interface ScreenSnapshot {
   rows: number;
   cols: number;
   cursor: number;
-  cells: readonly Cell[];
-  fields: readonly Field[];
+  cells: readonly Readonly<Cell>[];
+  fields: readonly Readonly<Field>[];
   formatted: boolean;
 }
 
@@ -1926,23 +2614,44 @@ export class Screen {
   constructor(opts: ScreenOptions = {}) {
     this.rows = opts.rows ?? MODEL_2.rows;
     this.cols = opts.cols ?? MODEL_2.cols;
+    if (!Number.isInteger(this.rows) || this.rows <= 0) {
+      throw new RangeError(`rows must be a positive integer, got ${this.rows}`);
+    }
+    if (!Number.isInteger(this.cols) || this.cols <= 0) {
+      throw new RangeError(`cols must be a positive integer, got ${this.cols}`);
+    }
     this.size = this.rows * this.cols;
     this.chars = new Uint8Array(this.size);
     this.attrs = new Int16Array(this.size).fill(NOT_ATTR);
     this.codePage = opts.codePage ?? cp037;
   }
 
+  /** Throws if `addr` is not an integer in [0, size). */
+  private check(addr: number): void {
+    if (!Number.isInteger(addr) || addr < 0 || addr >= this.size) {
+      throw new RangeError(`address ${addr} out of range for a ${this.size}-cell buffer`);
+    }
+  }
+
   // ---- geometry ----
 
   /** Display row/column, 1-based, as the OIA and s3270 report them. */
   toRowCol(addr: number): { row: number; col: number } {
+    this.check(addr);
     return {
       row: Math.floor(addr / this.cols) + 1,
       col: (addr % this.cols) + 1,
     };
   }
 
+  /** Row and column are both 1-based. Throws if the result would be out of range. */
   fromRowCol(row: number, col: number): number {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
+    if (!Number.isInteger(col) || col < 1 || col > this.cols) {
+      throw new RangeError(`col ${col} out of range for a ${this.cols}-col screen`);
+    }
     return (row - 1) * this.cols + (col - 1);
   }
 
@@ -1959,6 +2668,7 @@ export class Screen {
   // ---- cells ----
 
   cellAt(addr: number): Cell {
+    this.check(addr);
     return { kind: 'char', ebcdic: this.chars[addr]! };
   }
 
@@ -1968,20 +2678,24 @@ export class Screen {
    * changes as a result.
    */
   setChar(addr: number, ebcdic: number): void {
+    this.check(addr);
     this.chars[addr] = ebcdic & 0xff;
     this.attrs[addr] = NOT_ATTR;
   }
 
   isFieldAttribute(addr: number): boolean {
+    this.check(addr);
     return this.attrs[addr]! >= 0;
   }
 
   attributeAt(addr: number): number | null {
+    this.check(addr);
     const a = this.attrs[addr]!;
     return a >= 0 ? a : null;
   }
 
   setFieldAttribute(addr: number, attr: number): void {
+    this.check(addr);
     this.attrs[addr] = attr & 0xff;
     // An attribute position displays as a blank and holds no character.
     this.chars[addr] = 0x00;
@@ -1996,6 +2710,7 @@ export class Screen {
 
   /** The field governing `addr`, found by scanning backwards for an attribute. */
   fieldAt(addr: number): Field | null {
+    this.check(addr);
     let a = addr;
     for (let n = 0; n < this.size; n++) {
       if (this.attrs[a]! >= 0) return this.makeField(a);
@@ -2038,14 +2753,38 @@ export class Screen {
     };
   }
 
+  /**
+   * Set the MDT bit on the field attribute at `attrAddr`. `attrAddr` must be
+   * the attribute's own address (`field.attrAddr`), not any address inside
+   * the field — unlike x3270's `mdt_set`, this does not resolve an arbitrary
+   * in-field address for you. Passing a non-attribute address is a silent
+   * no-op; callers that have a `Field` should always pass its `attrAddr`.
+   */
   setMDT(attrAddr: number): void {
+    this.check(attrAddr);
     if (this.attrs[attrAddr]! >= 0) {
       this.attrs[attrAddr] = this.attrs[attrAddr]! | FA.MODIFY;
     }
   }
 
-  /** Reset MDT in unprotected fields (WCC reset-MDT, Erase Input). */
+  /**
+   * Reset MDT in EVERY field, protected or not. This is WCC reset-MDT: manual
+   * Table 3-2 bit 7 says "all MDT bits in the device's existing character
+   * buffer are reset," and x3270's handler (`ctlr.c:1545-1550`) has no
+   * protection check. This matters because Read Modified filters on MDT alone
+   * (`ctlr.c:921`) — a protected field left carrying MDT would otherwise leak
+   * its data to the host on the next read. Erase Input is the
+   * unprotected-only operation; see `clearUnprotectedMDT`.
+   */
   clearAllMDT(): void {
+    for (let i = 0; i < this.size; i++) {
+      const a = this.attrs[i]!;
+      if (a >= 0) this.attrs[i] = a & ~FA.MODIFY;
+    }
+  }
+
+  /** Reset MDT in unprotected fields only (Erase Input, manual 4-14). */
+  clearUnprotectedMDT(): void {
     for (let i = 0; i < this.size; i++) {
       const a = this.attrs[i]!;
       if (a >= 0 && (a & FA.PROTECT) === 0) {
@@ -2065,13 +2804,23 @@ export class Screen {
 
   /**
    * Erase All Unprotected: null the data in unprotected fields and reset their
-   * MDT. Field attributes themselves survive.
+   * MDT. Field attributes themselves survive. On an unformatted screen there
+   * are no field attributes to preserve — the whole buffer is, by definition,
+   * unprotected — so this clears everything, matching x3270's
+   * `else { ctlr_clear(true); }` at `ctlr.c:1443-1445`.
    */
   eraseAllUnprotected(): void {
+    if (!this.isFormatted()) {
+      this.clear();
+      return;
+    }
     for (const f of this.fields()) {
       if (f.protected) continue;
       let a = f.start;
       for (let n = 0; n < f.length; n++) {
+        // Must write chars[] directly, not via setChar: setChar also clears
+        // attrs[], which would destroy the very field attributes EAU is
+        // required to preserve.
         this.chars[a] = 0x00;
         a = this.inc(a);
       }
@@ -2079,15 +2828,68 @@ export class Screen {
     }
   }
 
+  /**
+   * The first cell a user could type into: the start of the first
+   * unprotected field, skipping zero-length fields (a zero-length field's
+   * `start` IS the next attribute — landing the cursor there and typing would
+   * collapse two fields). Mirrors x3270's `next_unprotected`
+   * (`ctlr.c:623-638`). Returns null if there is no such field.
+   */
+  firstUnprotectedStart(): number | null {
+    for (const f of this.fields()) {
+      if (!f.protected && f.length > 0) return f.start;
+    }
+    return null;
+  }
+
+  /**
+   * Unprotected, non-auto-skip fields with room for data — the set Tab and
+   * Back Tab cycle through. Zero-length fields are excluded for the same
+   * reason `firstUnprotectedStart` excludes them.
+   */
+  typableFields(): Field[] {
+    return this.fields().filter((f) => !f.protected && !f.autoSkip && f.length > 0);
+  }
+
+  /**
+   * Visit every cell from `start` up to (excluding) `stop`, wrapping as
+   * needed, passing each cell's governing field (or null if unformatted) and
+   * whether the cell itself is that field's attribute byte. Carries the
+   * attribute forward instead of calling `fieldAt` per cell, so a full sweep
+   * is O(size) rather than O(size^2) — the naive per-cell `fieldAt` scan costs
+   * ~3.7M operations over a full 1920-cell buffer. Mirrors x3270's
+   * `current_fa` tracking (`ctlr.c:1809-1816`).
+   */
+  forEachCellWithField(
+    start: number,
+    stop: number,
+    cb: (addr: number, field: Field | null, isAttr: boolean) => void,
+  ): void {
+    this.check(start);
+    this.check(stop);
+    let field = this.fieldAt(start);
+    let a = start;
+    do {
+      const attr = this.attrs[a]!;
+      const isAttr = attr >= 0;
+      if (isAttr) field = this.makeField(a);
+      cb(a, field, isAttr);
+      a = this.inc(a);
+    } while (a !== stop);
+  }
+
   // ---- output ----
 
-  /** Raw buffer contents, for Read Buffer and for tests. */
+  /** Raw buffer contents, for tests and diagnostics. */
   readBuffer(): Uint8Array {
     return Uint8Array.from(this.chars);
   }
 
   /** One display row as text, 1-based. Nulls and attributes render as spaces. */
   rowText(row: number): string {
+    if (!Number.isInteger(row) || row < 1 || row > this.rows) {
+      throw new RangeError(`row ${row} out of range for a ${this.rows}-row screen`);
+    }
     let out = '';
     const base = (row - 1) * this.cols;
     for (let c = 0; c < this.cols; c++) {
@@ -2108,17 +2910,26 @@ export class Screen {
     return lines.join('\n');
   }
 
-  /** An immutable view for the UI or for assertions. */
+  /**
+   * An immutable view for the UI or for assertions. The `Readonly<Cell>` /
+   * `Readonly<Field>` element types make `snap.cells[0].ebcdic = ...` a
+   * compile error, and each array and element is also `Object.freeze`d so the
+   * same mutation fails at runtime too (e.g. from plain JS callers).
+   */
   snapshot(): ScreenSnapshot {
-    const cells: Cell[] = new Array(this.size);
-    for (let i = 0; i < this.size; i++) cells[i] = { kind: 'char', ebcdic: this.chars[i]! };
+    const cells: Readonly<Cell>[] = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      cells[i] = Object.freeze({ kind: 'char' as const, ebcdic: this.chars[i]! });
+    }
+    const fields = this.fields().map((f) => Object.freeze(f));
+    const formatted = fields.length > 0;
     return {
       rows: this.rows,
       cols: this.cols,
       cursor: this.cursor,
-      cells,
-      fields: this.fields(),
-      formatted: this.isFormatted(),
+      cells: Object.freeze(cells),
+      fields: Object.freeze(fields),
+      formatted,
     };
   }
 }
@@ -2127,7 +2938,7 @@ export class Screen {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/screen.test.ts`
-Expected: PASS, 21 tests.
+Expected: PASS, 46 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2166,6 +2977,10 @@ describe('command recognition', () => {
     expect(parseRecord(Uint8Array.of(Cmd.EW, 0xc3)).command).toBe('EraseWrite');
     expect(parseRecord(Uint8Array.of(Cmd.W, 0x00)).command).toBe('Write');
     expect(parseRecord(Uint8Array.of(Cmd.EWA, 0x00)).command).toBe('EraseWriteAlternate');
+    expect(parseRecord(Uint8Array.of(Cmd.RB)).command).toBe('ReadBuffer');
+    expect(parseRecord(Uint8Array.of(Cmd.RM)).command).toBe('ReadModified');
+    expect(parseRecord(Uint8Array.of(Cmd.RMA)).command).toBe('ReadModifiedAll');
+    expect(parseRecord(Uint8Array.of(Cmd.EAU)).command).toBe('EraseAllUnprotected');
   });
 
   it('parses the read commands, which carry no WCC', () => {
@@ -2189,6 +3004,19 @@ describe('command recognition', () => {
       kind: 'structuredFields',
       data: Uint8Array.of(0x00, 0x05, 0x01, 0xff, 0x02),
     });
+  });
+
+  it('accepts BOTH WSF encodings, including non-SNA 0x11', () => {
+    // Cmd.WSF is 0x11, numerically identical to Order.SBA. Position
+    // disambiguates: commandOf only ever sees the command byte. x3270 accepts
+    // both (`case CMD_WSF: case SNA_CMD_WSF:` at ctlr.c:749-750).
+    expect(parseRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    expect(parseRecord(Uint8Array.of(Cmd.WSF, 0x00, 0x05)).command)
+      .toBe('WriteStructuredField');
+    // And 0x11 in ORDER position is still SBA, not a nested WSF.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40));
+    expect(r.tokens[0]).toEqual({ kind: 'sba', address: 0 });
   });
 
   it('rejects an empty record', () => {
@@ -2222,7 +3050,17 @@ describe('order parsing', () => {
 
   it('parses RA with its address and fill character', () => {
     const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0xc2, 0x60, 0x5c));
-    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c }]);
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 160, fill: 0x5c, ge: false }]);
+  });
+
+  it('parses RA with a GE before the fill character', () => {
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE, 0xf1));
+    expect(r.tokens).toEqual([{ kind: 'ra', stop: 5, fill: 0xf1, ge: true }]);
+  });
+
+  it('rejects RA whose GE has no following fill character', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.RA, 0x40, 0xc5, Order.GE)))
+      .toThrow(ParseError);
   });
 
   it('parses EUA with its stop address', () => {
@@ -2357,7 +3195,7 @@ export type Token =
   | { kind: 'sf'; attr: number }
   | { kind: 'ic' }
   | { kind: 'pt' }
-  | { kind: 'ra'; stop: number; fill: number }
+  | { kind: 'ra'; stop: number; fill: number; ge: boolean }
   | { kind: 'eua'; stop: number }
   | { kind: 'ge'; ebcdic: number }
   /** SA/SFE/MF: recognized so they can be skipped by length, not executed. */
@@ -2386,7 +3224,10 @@ function commandOf(byte: number): CommandName | null {
     case SnaCmd.RB: case Cmd.RB: return 'ReadBuffer';
     case SnaCmd.RM: case Cmd.RM: return 'ReadModified';
     case SnaCmd.RMA: case Cmd.RMA: return 'ReadModifiedAll';
-    case SnaCmd.WSF: return 'WriteStructuredField';
+    // Both WSF encodings, like every other command. Cmd.WSF is 0x11, the same
+    // value as Order.SBA — safe here because this function is only ever called
+    // on the command byte, never on an order byte.
+    case SnaCmd.WSF: case Cmd.WSF: return 'WriteStructuredField';
     case Cmd.NOP: return 'NoOp';
     default: return null;
   }
@@ -2473,8 +3314,19 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
         flushRun();
         i++;
         const stop = address('RA');
+        // RA may carry a Graphic Escape before its fill character, in which case
+        // the fill is the byte AFTER the GE. x3270 checks for this explicitly
+        // (ctlr.c:1739-1746). Taking the byte after the address unconditionally
+        // would store 0x08 as the fill and leak the real character out as a
+        // stray data byte.
         need(1, 'RA fill character');
-        tokens.push({ kind: 'ra', stop, fill: record[i++]! });
+        let ge = false;
+        if (record[i] === Order.GE) {
+          ge = true;
+          i++;
+          need(1, 'RA GE fill character');
+        }
+        tokens.push({ kind: 'ra', stop, fill: record[i++]!, ge });
         break;
       }
       case Order.EUA: {
@@ -2548,7 +3400,7 @@ export function describeRecord(record: Uint8Array): string {
       case 'sf': parts.push(`SF(0x${t.attr.toString(16).padStart(2, '0')})`); break;
       case 'ic': parts.push('IC'); break;
       case 'pt': parts.push('PT'); break;
-      case 'ra': parts.push(`RA(->${t.stop},0x${t.fill.toString(16).padStart(2, '0')})`); break;
+      case 'ra': parts.push(`RA(->${t.stop},${t.ge ? 'GE ' : ''}0x${t.fill.toString(16).padStart(2, '0')})`); break;
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
@@ -2562,7 +3414,7 @@ export function describeRecord(record: Uint8Array): string {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/parse.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 25 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2725,6 +3577,14 @@ describe('orders', () => {
       .toThrow(ExecuteError);
   });
 
+  it('RA with a GE before the fill fills with the escaped character, not 0x08', () => {
+    const s = new Screen();
+    const [h, l] = [0xc0 | (5 >> 6), 0xc0 | (5 & 0x3f)];
+    run(s, SnaCmd.W, 0x00, Order.RA, h, l, Order.GE, 0xf1);
+    for (let a = 0; a < 5; a++) expect(s.cellAt(a).ebcdic).toBe(0xf1);
+    expect(s.cellAt(5).ebcdic).toBe(0x00);
+  });
+
   it('EUA nulls unprotected cells in a range and leaves protected ones', () => {
     const s = new Screen();
     run(s, SnaCmd.W, 0x00,
@@ -2737,6 +3597,13 @@ describe('orders', () => {
     expect(s.cellAt(1).ebcdic).toBe(0x00);
     expect(s.cellAt(2).ebcdic).toBe(0x00);
     expect(s.cellAt(11).ebcdic).toBe(0xc3);
+  });
+
+  it('EUA rejects a stop address past the end of the screen', () => {
+    const s = new Screen();
+    // 14-bit form so we can express an address beyond 1919.
+    expect(() => run(s, SnaCmd.W, 0x00, Order.EUA, 0x0f, 0xff))
+      .toThrow(ExecuteError);
   });
 
   it('PT advances to the first data cell of the next unprotected field', () => {
@@ -2818,7 +3685,7 @@ Expected: FAIL — cannot find module `../src/stream/execute.js`.
 Create `packages/core/src/stream/execute.ts`:
 
 ```typescript
-import { WCC } from '../constants.js';
+import { WCC, FA } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
 
@@ -2871,9 +3738,16 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       return result;
 
     case 'EraseAllUnprotected':
+      // Screen.eraseAllUnprotected handles the unformatted case by clearing the
+      // whole buffer (x3270 ctlr.c:1443-1445 `else ctlr_clear(true)`), since an
+      // unformatted buffer is entirely unprotected.
       screen.eraseAllUnprotected();
-      // EAU also unlocks the keyboard and homes the cursor.
-      screen.cursor = firstUnprotected(screen) ?? 0;
+      // EAU also unlocks the keyboard and homes the cursor. Use the screen's
+      // own helper, which skips zero-length fields the way x3270's
+      // next_unprotected does (ctlr.c:623-638) — a zero-length field's `start`
+      // is another field attribute, and parking the cursor there corrupts the
+      // buffer on the next keystroke.
+      screen.cursor = screen.firstUnprotectedStart() ?? 0;
       result.keyboardRestore = true;
       return result;
 
@@ -2895,6 +3769,13 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   }
 
   const wcc = record.wcc ?? 0;
+  // WCC reset-MDT is UNCONDITIONAL: manual Table 3-2 bit 7 says "all MDT bits in
+  // the device's existing character buffer are reset", and x3270's handler
+  // (ctlr.c:1545-1550) calls mdt_clear on every field attribute with no
+  // protection check. This matters because ctlr_read_modified filters on
+  // FA_IS_MODIFIED alone (ctlr.c:921) — a protected field carrying MODIFY would
+  // otherwise leak its data to the host. Erase Input is the unprotected-only
+  // one; see Screen.clearUnprotectedMDT.
   if (wcc & WCC.RESET_MDT) screen.clearAllMDT();
   if (wcc & WCC.KEYBOARD_RESTORE) result.keyboardRestore = true;
   if (wcc & WCC.SOUND_ALARM) result.alarm = true;
@@ -2955,6 +3836,11 @@ function applyToken(
     case 'ra': {
       requireOnScreen(screen, token.stop, 'RA');
       // do-while: stop === addr fills the whole buffer, matching x3270.
+      // token.ge is deliberately carried and not acted on here: stage 1 has no
+      // loadable character sets, so a graphic-escaped fill is stored as the
+      // ordinary byte it is. Programmable Symbol Sets (a committed stage 4
+      // deliverable) is where the cell would become {kind:'ps',...} instead,
+      // and the flag exists so that change stays local to this case.
       let a = addr;
       do {
         screen.setChar(a, token.fill);
@@ -2966,11 +3852,19 @@ function applyToken(
 
     case 'eua': {
       requireOnScreen(screen, token.stop, 'EUA');
+      // Carry the governing attribute forward instead of calling fieldAt per
+      // cell: fieldAt is O(size), so a per-cell call over a full buffer is
+      // ~3.7M operations. x3270 does the same by tracking current_fa and
+      // updating it when it encounters an attribute (ctlr.c:1809-1816).
       let a = addr;
+      let protectedHere = screen.fieldAt(a)?.protected ?? false;
       do {
-        if (!screen.isFieldAttribute(a)) {
-          const f = screen.fieldAt(a);
-          if (f === null || !f.protected) screen.setChar(a, 0x00);
+        const attr = screen.attributeAt(a);
+        if (attr !== null) {
+          // A field attribute: never erased, and it changes what follows.
+          protectedHere = (attr & FA.PROTECT) !== 0;
+        } else if (!protectedHere) {
+          screen.setChar(a, 0x00);
         }
         a = screen.inc(a);
       } while (a !== token.stop);
@@ -2984,7 +3878,7 @@ function applyToken(
       for (let n = 0; n < screen.size; n++) {
         if (screen.isFieldAttribute(a)) {
           const attr = screen.attributeAt(a)!;
-          const isUnprotected = (attr & 0x20) === 0;
+          const isUnprotected = (attr & FA.PROTECT) === 0;
           if (isUnprotected) return screen.inc(a);
         } else if (wroteSinceOrder) {
           screen.setChar(a, 0x00);
@@ -3011,19 +3905,12 @@ function requireOnScreen(screen: Screen, addr: number, what: string): void {
     throw new ExecuteError(`${what} address ${addr} beyond buffer end ${screen.size - 1}`);
   }
 }
-
-function firstUnprotected(screen: Screen): number | null {
-  for (const f of screen.fields()) {
-    if (!f.protected) return f.start;
-  }
-  return null;
-}
 ```
 
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/execute.test.ts`
-Expected: PASS, 25 tests.
+Expected: PASS, 27 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3054,7 +3941,7 @@ Create `packages/core/test/inbound.test.ts`:
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
-import { buildReadModified, buildReadBuffer } from '../src/inbound.js';
+import { buildReadModified, buildReadBuffer, encodeAttribute } from '../src/inbound.js';
 import { AID, FA, Order } from '../src/constants.js';
 
 /** A screen with one modified unprotected field holding "AB" at 1-2. */
@@ -3157,7 +4044,11 @@ describe('ordinary reads', () => {
     ]);
   });
 
-  it('sends only the AID and cursor on an unformatted screen with no fields', () => {
+  it('sends only the AID and cursor on an EMPTY unformatted screen', () => {
+    // Nothing typed, so there is no character data to send. An unformatted
+    // screen WITH content is a different case — see the 'unformatted screens'
+    // block below, which was added after a live VM/370 session showed that
+    // dropping that content stops LOGON from ever reaching CP.
     const s = new Screen();
     s.cursor = 0;
     const out = buildReadModified(s, AID.ENTER, false);
@@ -3175,6 +4066,37 @@ describe('ordinary reads', () => {
   });
 });
 
+describe('unformatted screens', () => {
+  // Found against a live VM/370: its first screen has ZERO field attributes, so
+  // a field-iterating implementation sends nothing and LOGON never reaches CP.
+  // x3270's ctlr_read_modified has an `else` branch for exactly this
+  // (ctlr.c:997-1057) that walks the buffer emitting every nonzero character.
+  it('sends every non-null character when there are no fields', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc8);
+    s.setChar(1, 0xc9);
+    s.cursor = 3;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).toEqual([AID.ENTER, 0x40, 0xc3, 0xc8, 0xc9]);
+  });
+
+  it('emits no SBA orders on an unformatted screen', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setChar(500, 0xc2);
+    s.cursor = 0;
+    const out = buildReadModified(s, AID.ENTER, false);
+    expect(Array.from(out)).not.toContain(Order.SBA);
+    expect(Array.from(out).slice(3)).toEqual([0xc1, 0xc2]);
+  });
+
+  it('still sends the AID alone for a short read when unformatted', () => {
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    expect(Array.from(buildReadModified(s, AID.CLEAR, false))).toEqual([AID.CLEAR]);
+  });
+});
+
 describe('Read Buffer', () => {
   it('returns AID, cursor, and the whole buffer with attributes in place', () => {
     const s = new Screen();
@@ -3186,9 +4108,24 @@ describe('Read Buffer', () => {
     expect(Array.from(out.subarray(1, 3))).toEqual([0x40, 0xc1]);
     // Then 1920 buffer positions: an SF order pair for the attribute, then data.
     expect(out[3]).toBe(Order.SF);
-    expect(out[4]).toBe(FA.PROTECT);
+    // Attribute goes out through the code table, not raw: ctlr.c:1112-1114.
+    expect(out[4]).toBe(0x60);
     expect(out[5]).toBe(0xc1);
     expect(out).toHaveLength(3 + 1 + 1920);
+  });
+});
+
+describe('attribute encoding', () => {
+  it('maps attributes through the code table', () => {
+    expect(encodeAttribute(0x00)).toBe(0x40);
+    expect(encodeAttribute(FA.PROTECT)).toBe(0x60);
+    // FA.PROTECT|FA.NUMERIC = 0x30; ADDRESS_CODE_TABLE[0x30] is 0xf0, not 0x70.
+    expect(encodeAttribute(FA.PROTECT | FA.NUMERIC)).toBe(0xf0);
+  });
+
+  it('masks off the printable bits before indexing the table', () => {
+    expect(encodeAttribute(0xe1)).toBe(encodeAttribute(0x21));
+    expect(encodeAttribute(0xe1)).toBe(0x61);
   });
 });
 ```
@@ -3203,7 +4140,7 @@ Expected: FAIL — cannot find module `../src/inbound.js`.
 Create `packages/core/src/inbound.ts`:
 
 ```typescript
-import { AID, Order, isShortReadAID } from './constants.js';
+import { AID, Order, isShortReadAID, ADDRESS_CODE_TABLE } from './constants.js';
 import { encodeAddress } from './address.js';
 import type { Screen } from './screen.js';
 
@@ -3235,6 +4172,23 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
   const sendData = all || aid !== AID.SELECT;
   if (!sendData) return Uint8Array.from(out);
 
+  // UNFORMATTED SCREEN: there are no fields to iterate, so walk the whole buffer
+  // and send every non-null character, with no SBA orders at all. x3270 does
+  // exactly this in ctlr_read_modified's `else` branch (ctlr.c:997-1057): it
+  // loops from address 0 emitting `ea_buf[baddr].ec` wherever that is nonzero.
+  //
+  // This is not a corner case. VM/370's logon screen is unformatted — verified
+  // against a live VM/CE 1.2 host, which sends its logo with zero field
+  // attributes — so without this branch everything the operator types before the
+  // first formatted panel is silently dropped and LOGON never reaches CP.
+  if (!screen.isFormatted()) {
+    for (let a = 0; a < screen.size; a++) {
+      const ebcdic = screen.cellAt(a).ebcdic;
+      if (ebcdic !== 0x00) out.push(ebcdic);
+    }
+    return Uint8Array.from(out);
+  }
+
   for (const field of screen.fields()) {
     if (!all && !field.modified) continue;
 
@@ -3255,6 +4209,26 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
 }
 
 /**
+ * Encode a field attribute for transmission inbound.
+ *
+ * The attribute goes out through the same 64-entry code table as a 12-bit
+ * address, after masking off the two "printable" high bits. x3270 does exactly
+ * this in both places it sends an attribute inbound:
+ *   ctlr.c:1112-1114  `fa = ea_buf[baddr].fa & ~FA_PRINTABLE; ... code_table[fa]`
+ *   ctlr.c:1248       `code_table[ea_buf[baddr].fa & ~FA_PRINTABLE]`
+ *
+ * So a protected field is 0x60 on the wire, not 0x20. FA_PRINTABLE is 0xC0 and
+ * the defined bits (protect, numeric, intensity, MDT) all fall inside 0x3D, so
+ * masking with 0x3F is equivalent to x3270's `& ~FA_PRINTABLE` for every
+ * attribute a host can send, and keeps the index inside the 64-entry table.
+ */
+export function encodeAttribute(attr: number): number {
+  const encoded = ADDRESS_CODE_TABLE[attr & 0x3f];
+  if (encoded === undefined) throw new Error(`unencodable attribute 0x${attr.toString(16)}`);
+  return encoded;
+}
+
+/**
  * Read Buffer: the entire buffer, with each field attribute rendered as an SF
  * order followed by the attribute value, and every other position as its
  * character byte.
@@ -3264,7 +4238,7 @@ export function buildReadBuffer(screen: Screen, aid: number): Uint8Array {
   for (let a = 0; a < screen.size; a++) {
     const attr = screen.attributeAt(a);
     if (attr !== null) {
-      out.push(Order.SF, attr);
+      out.push(Order.SF, encodeAttribute(attr));
     } else {
       out.push(screen.cellAt(a).ebcdic);
     }
@@ -3276,7 +4250,7 @@ export function buildReadBuffer(screen: Screen, aid: number): Uint8Array {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run packages/core/test/inbound.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3471,6 +4445,34 @@ describe('cursor movement', () => {
     kb(s).newline();
     expect(s.cursor).toBe(81);
   });
+
+  it('BackTab does not park the cursor on an attribute byte of a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);   // field A: data 1..9
+    s.setFieldAttribute(10, 0x00);  // zero-length unprotected field: next attr immediately follows
+    s.setFieldAttribute(11, 0x00);  // field B: data starts at 12
+    s.cursor = 10; // parked on the zero-length field's own attribute byte
+    const k = kb(s);
+    k.backTab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+    const fieldCountBefore = s.fields().length;
+    k.type('A');
+    expect(s.fields().length).toBe(fieldCountBefore); // field boundary at 11 must survive
+  });
+
+  it('Tab does not park the cursor on an attribute byte of a zero-length field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);   // field A: data 1..9
+    s.setFieldAttribute(10, 0x00);  // zero-length unprotected field: next attr immediately follows
+    s.setFieldAttribute(11, 0x00);  // field B: data starts at 12
+    s.cursor = 10; // parked on the zero-length field's own attribute byte
+    const k = kb(s);
+    k.tab();
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+    const fieldCountBefore = s.fields().length;
+    k.type('A');
+    expect(s.fields().length).toBe(fieldCountBefore); // field boundary at 11 must survive
+  });
 });
 
 describe('erase actions', () => {
@@ -3597,6 +4599,16 @@ Create `packages/core/src/oia.ts`:
 
 export enum KeyboardState {
   Unlocked = 'unlocked',
+  /**
+   * Connected but the host has not written yet, so there is nothing to type
+   * into. x3270 calls this KL_AWAITING_FIRST and sets it both on connect and on
+   * entering 3270 mode, with the comment "Wait for any output or a
+   * WCC(restore) from the host" (kybd.c:584, :613). Without it, a script that
+   * connects and immediately types races the host's first screen — verified
+   * against a live VM/370: String() was refused because the keyboard was busy,
+   * while Wait(Unlock) had already returned because nothing was pending.
+   */
+  AwaitingFirstWrite = 'awaitingfirst',
   ProtectedField = 'protected',
   Numeric = 'numeric',
   Overflow = 'overflow',
@@ -3665,6 +4677,9 @@ export class Oia {
         break;
       case KeyboardState.SystemWait:
         parts.push('X SYSTEM');
+        break;
+      case KeyboardState.AwaitingFirstWrite:
+        parts.push('X Wait');
         break;
       case KeyboardState.Unlocked:
         break;
@@ -3799,19 +4814,22 @@ export class Keyboard {
     s.cursor = (s.cursor + s.cols) % s.size;
   }
 
-  /** First cell of the first unprotected field, or 0 if unformatted. */
+  /**
+   * First typable cell, or 0 if there is none.
+   *
+   * Delegates to the screen so the zero-length-field guard lives in one place:
+   * a zero-length field's `start` IS the next field attribute, and parking the
+   * cursor there corrupts the buffer on the next keystroke. x3270's
+   * next_unprotected (ctlr.c:623-638) skips them for the same reason.
+   */
   home(): void {
-    const s = this.screen;
-    for (const f of s.fields()) {
-      if (!f.protected) { s.cursor = f.start; return; }
-    }
-    s.cursor = 0;
+    this.screen.cursor = this.screen.firstUnprotectedStart() ?? 0;
   }
 
-  /** Next unprotected, non-skip field. Wraps. */
+  /** Next typable field. Wraps. */
   tab(): void {
     const s = this.screen;
-    const fields = s.fields().filter((f) => !f.protected && !f.autoSkip);
+    const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
     const after = fields.find((f) => f.attrAddr > (current?.attrAddr ?? -1));
@@ -3823,10 +4841,17 @@ export class Keyboard {
    */
   backTab(): void {
     const s = this.screen;
-    const fields = s.fields().filter((f) => !f.protected && !f.autoSkip);
+    const fields = s.typableFields();
     if (fields.length === 0) { s.cursor = 0; return; }
     const current = s.fieldAt(s.cursor);
-    if (current !== null && !current.protected && s.cursor !== current.start) {
+    // The fast path — "already inside a typable field, so go to its start" —
+    // must require length > 0 as well as unprotected. A zero-length field's
+    // `start` IS the next field's attribute byte, so without that check
+    // backTab parks the cursor on an attribute and the next keystroke destroys
+    // that field's boundary. x3270's BackTab_action guards the same way, with
+    // `!ea_buf[nbaddr].fa` in its search loop (kybd.c:1976-1979).
+    if (current !== null && !current.protected && current.length > 0
+        && s.cursor !== current.start) {
       s.cursor = current.start;
       return;
     }
@@ -3874,7 +4899,13 @@ export class Keyboard {
     s.setMDT(f.attrAddr);
   }
 
-  /** Clear every unprotected field, reset MDT, home the cursor. */
+  /**
+   * Clear every unprotected field, reset their MDT, home the cursor.
+   *
+   * eraseAllUnprotected already resets MDT on the unprotected fields it clears
+   * (manual 3-8), which is the Erase Input rule — unlike WCC reset-MDT, which is
+   * unconditional. Do not reach for clearAllMDT here.
+   */
   eraseInput(): void {
     this.screen.eraseAllUnprotected();
     this.home();
@@ -3930,7 +4961,7 @@ export class Keyboard {
 - [ ] **Step 5: Run the test**
 
 Run: `npx vitest run packages/core/test/keyboard.test.ts`
-Expected: PASS, 24 tests.
+Expected: PASS, 26 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -3947,6 +4978,22 @@ git commit -m "feat(core): add keyboard actions and OIA state"
 - Create: `packages/core/src/session.ts`, `packages/core/test/session.test.ts`, `packages/core/src/index.ts` (rewrite)
 
 Ties everything to a socket. Per the spec: **no module-level state**, so a second instance is a UI change rather than a core rewrite. The socket is injected as a factory so tests drive a fake one, and `Replay()` needs no socket at all.
+
+**Two lifecycle requirements found in review, both non-obvious:**
+
+1. **Every transport callback must check identity against the connection it
+   closed over** — `if (this.conn !== conn) return;` — not merely that some
+   connection exists. Closing the old socket in `connect()` is not sufficient: a
+   real transport fires `close`/`error` *asynchronously*, so a stale socket's
+   callbacks can still arrive after a reconnect and tear down the new session.
+   `onData` needs the same guard, or late bytes from the old socket corrupt the
+   new telnet layer's accumulator.
+2. **`replay()` must refuse on a connected session.** A recorded trace contains
+   the host's negotiation *and* its read commands, so replaying one live makes
+   `handleRecord` answer those reads down the real socket. Verified: a trace
+   ending in Read Buffer sent `60 40 40 ...` to the live host. Injecting invented
+   traffic into someone's MVS session is not an acceptable failure mode for a
+   debugging aid.
 
 The three error classes from the spec are handled distinctly here: `ParseError`/`ExecuteError`/`AddressError` become a program check with the session **still up**; transport failures end the session; anything else propagates.
 
@@ -4020,6 +5067,89 @@ describe('connection lifecycle', () => {
     conn.onError?.(new Error('ECONNRESET'));
     expect(session.isConnected()).toBe(false);
     expect(session.lastError()).toContain('ECONNRESET');
+  });
+
+  it('connecting twice closes the first connection and leaves the session connected', async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    await session.connect('localhost', 3270);
+
+    expect(conn1.closed).toBe(true);
+    expect(conn2.closed).toBe(false);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("a stale socket's onClose cannot make isConnected() false while the new one is live", async () => {
+    const conn1 = new FakeConnection();
+    const conn2 = new FakeConnection();
+    let calls = 0;
+    const session = new Session({
+      connect: () => {
+        calls++;
+        return calls === 1 ? conn1 : conn2;
+      },
+    });
+
+    await session.connect('localhost', 3270);
+    const staleOnClose = conn1.onClose;
+    await session.connect('localhost', 3270);
+
+    // Fire the FIRST connection's close callback directly, simulating a
+    // straggling event from the socket we already replaced.
+    staleOnClose?.();
+
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it("disconnect() is idempotent: two calls emit 'disconnect' once", async () => {
+    const { session, conn } = newSession();
+    const onDisconnect = vi.fn();
+    session.on('disconnect', onDisconnect);
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+
+    session.disconnect();
+    session.disconnect();
+
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('initial keyboard lock', () => {
+  // Found live: a script that connects and immediately types races the host's
+  // first screen. x3270 sets KL_AWAITING_FIRST on connect — "Wait for any output
+  // or a WCC(restore) from the host" (kybd.c:580-585).
+  it('locks the keyboard on connect, before the host writes', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+    expect(session.oia.isInhibited()).toBe(true);
+    expect(session.oia.waitingForHost).toBe(true);
+  });
+
+  it('releases the lock on the first host write, restore bit or not', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    // WCC 0x00 — no keyboard-restore bit at all.
+    conn.host(SnaCmd.W, 0x00, 0xc1, T.IAC, T.EOR);
+    expect(session.oia.isInhibited()).toBe(false);
+    expect(session.oia.waitingForHost).toBe(false);
+  });
+
+  it('reports the wait in the OIA while awaiting the first write', async () => {
+    const { session } = newSession();
+    await session.connect('localhost', 3270);
+    expect(session.oia.toText()).toContain('X Wait');
   });
 });
 
@@ -4186,6 +5316,26 @@ describe('trace and replay', () => {
     fresh.replay(traceText);
     expect(fresh.screen.rowText(1).slice(0, 2)).toBe('HI');
   });
+
+  it('replay() on a connected session throws and writes nothing', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+
+    // A realistic recorded fixture: host negotiation followed by a Read
+    // Buffer. If replay() were allowed to run against a live session,
+    // handleRecord would answer that Read Buffer through this.telnet, i.e.
+    // straight down the real socket.
+    const traceText = [
+      '0.000 < ff fd 19 ff fb 19',
+      '0.001 < ff fd 00 ff fb 00',
+      '0.002 < f2 ff ef',
+    ].join('\n');
+
+    expect(() => session.replay(traceText)).toThrow(/disconnected/i);
+    expect(conn.sent).toEqual([]);
+  });
 });
 ```
 
@@ -4199,7 +5349,7 @@ Expected: FAIL — cannot find module `../src/session.js`.
 Create `packages/core/src/session.ts`:
 
 ```typescript
-import { AID, isShortReadAID, MODEL_2 } from './constants.js';
+import { AID, MODEL_2 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Oia, KeyboardState } from './oia.js';
@@ -4285,10 +5435,23 @@ export class Session {
   }
 
   async connect(host: string, port: number): Promise<void> {
+    // Tear down any live connection first. Without this the old Connection is
+    // dropped without close(), and its onClose/onError closures still capture
+    // `this` — so when the stale socket eventually closes it calls
+    // handleClose() and tears down the NEW session.
+    if (this.conn !== undefined) this.disconnect();
+
     const conn = await this.opts.connect(host, port);
     this.conn = conn;
     this.error = undefined;
     this.oia.connected = true;
+    // The keyboard is locked until the host writes something: there is no screen
+    // to type into yet. x3270 sets KL_AWAITING_FIRST here for the same reason
+    // (kybd.c:580-585). This is what makes Wait(Unlock) meaningful immediately
+    // after Connect — without it the wait returns at once and a script types
+    // into a blank buffer.
+    this.oia.waitingForHost = true;
+    this.oia.inhibit(KeyboardState.AwaitingFirstWrite);
 
     this.telnet = new TelnetLayer({
       write: (b) => conn.write(b),
@@ -4296,12 +5459,21 @@ export class Session {
       trace: this.trace,
     });
 
+    // Each callback checks identity against the `conn` it closes over, not just
+    // `this.conn !== undefined`. Real transports fire data/close/error
+    // asynchronously (not necessarily inside our call to close()), so a stale
+    // connection's event can still arrive after connect() has already swapped
+    // in a new one. Without the identity check, stale data would be fed into
+    // the NEW telnet layer, and a stale close/error would tear down the live
+    // connection via handleClose().
     conn.onData = (bytes) => {
+      if (this.conn !== conn) return;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
     };
-    conn.onClose = () => this.handleClose();
+    conn.onClose = () => { if (this.conn === conn) this.handleClose(); };
     conn.onError = (err) => {
+      if (this.conn !== conn) return;
       this.error = err.message;
       this.trace.note(`transport error: ${err.message}`);
       this.handleClose();
@@ -4341,6 +5513,14 @@ export class Session {
       const result = execute(this.screen, parsed);
 
       if (result.keyboardRestore) {
+        this.oia.waitingForHost = false;
+        this.oia.reset();
+      } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite) {
+        // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
+        // initial post-connect lock is released by the host writing anything at
+        // all, not only by an explicit keyboard-restore. VM/370's logo arrives
+        // with WCC 0x42 (restore set) but a host that omits the bit must not
+        // leave us locked out forever.
         this.oia.waitingForHost = false;
         this.oia.reset();
       }
@@ -4393,10 +5573,10 @@ export class Session {
     }
 
     // Any AID locks the keyboard until the host restores it. A short read is no
-    // exception: the host still owns the next move.
+    // exception: the host still owns the next move, and buildReadModified
+    // already decides what a short read puts on the wire.
     this.oia.waitingForHost = true;
     this.oia.inhibit(KeyboardState.SystemWait);
-    void isShortReadAID;
   }
 
   /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
@@ -4410,6 +5590,14 @@ export class Session {
    * terminal bytes are replayed; what we sent last time is not re-sent.
    */
   replay(traceText: string): void {
+    if (this.conn !== undefined) {
+      // Refuse rather than transmit. A recorded trace contains the host's
+      // negotiation AND its read commands; replaying it on a live session makes
+      // handleRecord answer those reads through this.telnet, i.e. down the real
+      // socket. Verified: a trace ending in a Read Buffer sent 60 40 40 ... to
+      // the live host.
+      throw new Error('replay() requires a disconnected session; disconnect first');
+    }
     const events = parseTrace(traceText);
     const telnet = new TelnetLayer({
       write: () => { /* discard: replay is one-directional */ },
@@ -4447,7 +5635,7 @@ export * from './session.js';
 - [ ] **Step 5: Run the tests**
 
 Run: `npx vitest run packages/core/test/session.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 22 tests.
 
 Then the whole suite: `npm test`
 Expected: all previous tests still pass.
@@ -4646,7 +5834,20 @@ describe('parseCommand', () => {
 Run: `npx vitest run packages/cli`
 Expected: FAIL — the `packages/cli` sources do not exist.
 
-- [ ] **Step 3: Create the cli package files**
+- [ ] **Step 3: Add the cli package to the typecheck script**
+
+Task 1 deliberately left `packages/cli` out of the root `typecheck` script because
+`tsc --build` fails on a missing project reference. Now that the package exists,
+add it back. In the root `package.json`:
+
+```json
+    "typecheck": "tsc --build packages/core packages/cli"
+```
+
+Verify with `npm run typecheck` — it must exit 0 silently once Step 4 and Step 5
+have created the sources.
+
+- [ ] **Step 4: Create the cli package files**
 
 `packages/cli/package.json`:
 
@@ -4672,7 +5873,7 @@ Expected: FAIL — the `packages/cli` sources do not exist.
 }
 ```
 
-- [ ] **Step 4: Write the status formatter**
+- [ ] **Step 5: Write the status formatter**
 
 Create `packages/cli/src/status.ts`:
 
@@ -4727,7 +5928,7 @@ export function formatStatus(
 }
 ```
 
-- [ ] **Step 5: Write the command parser**
+- [ ] **Step 6: Write the command parser**
 
 Create `packages/cli/src/commands.ts`:
 
@@ -4750,7 +5951,7 @@ export const COMMAND_NAMES = [
   'Connect', 'Disconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
-  'ScreenText', 'ScreenJson', 'Replay', 'Left', 'Right', 'Up', 'Down',
+  'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
   'BackSpace', 'Delete', 'Insert',
 ] as const;
 
@@ -4811,14 +6012,14 @@ function splitArgs(rest: string): string[] {
 }
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 7: Run the tests**
 
 Run: `npm install && npx vitest run packages/cli`
 Expected: PASS, 16 tests (9 command-parser, 7 status).
 
 `npm install` is needed again so the workspace links `@tn3270/core` into `packages/cli/node_modules`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/cli
@@ -4835,6 +6036,12 @@ git commit -m "feat(cli): add s3270 status line and command parser"
 The command *execution* lives in `runner.ts`, separated from `main.ts`'s stdin plumbing so it is testable without spawning a process. `main.ts` stays a thin shell: read a line, run it, print the reply.
 
 Reply shape, per s3270: zero or more `data: ` lines, then the status line, then `ok` or `error`.
+
+**Every reply path must include the status line, including error paths.** Automation
+parses replies positionally, so a bare `data:`/`error` pair with no status line
+desynchronizes the parser for the rest of the session. That means `main.ts`'s
+`Replay` file-I/O failure path needs a shared formatter rather than writing the
+pair itself — hence `Runner.errorReply(message)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5017,6 +6224,73 @@ describe('Wait', () => {
   });
 });
 
+describe('TraceText', () => {
+  // Found live: Trace(on) enabled tracing but nothing ever emitted it — no sink
+  // was wired and the CLI had no way to retrieve it, so recording a fixture
+  // (the whole point of Task 16) was impossible.
+  it('emits the recorded trace as data lines', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Trace(on)');
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('TraceText');
+    const lines = reply.split('\n').filter((l) => l.startsWith('data: '));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.some((l) => / [<>] /.test(l))).toBe(true);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+
+  it('emits nothing when tracing was never enabled', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('TraceText');
+    expect(reply.split('\n').filter((l) => l.startsWith('data: '))).toHaveLength(0);
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+});
+
+describe('Wait(InputField)', () => {
+  // Added after a live VM/370 session: the host sends its banner and the logon
+  // panel as SEPARATE records, and only the second carries the IC that puts the
+  // cursor in a field. Wait(Output) fires on the first and Wait(Unlock) can
+  // return before either, so a script types onto a protected cell. This
+  // condition tests screen STATE, so it cannot be missed by arriving early.
+  // x3270 has the same condition as TS_WAIT_IFIELD (task.c:135).
+  it('returns once the cursor sits in an unprotected field', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const pending = runner.run('Wait(InputField,5)');
+    // First record: formatted but the cursor is left on a protected cell.
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    // Second record puts an unprotected field down and an IC inside it.
+    conn.host(SnaCmd.W, 0x02, Order.SBA, 0x40, 0x4a, Order.SF, 0x00,
+      Order.IC, T.IAC, T.EOR);
+    expect((await pending).split('\n').pop()).toBe('ok');
+  });
+
+  it('does not return while the cursor is on a protected cell', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(SnaCmd.EW, 0x02, Order.SF, FA.PROTECT, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('Wait(InputField,0.05)');
+    expect(reply).toContain('data: timed out');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('names the accepted conditions when given an unknown one', async () => {
+    const { runner, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    const reply = await runner.run('Wait(Frobnicate,1)');
+    expect(reply).toContain('InputField');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+});
+
 describe('trace and replay', () => {
   it('Trace(on) starts recording and Trace(off) stops', async () => {
     const { runner, session, conn } = newRunner();
@@ -5030,9 +6304,14 @@ describe('trace and replay', () => {
 
   it('Replay drives the screen from trace text', async () => {
     const { runner, session } = newRunner();
-    // Two host records: an Erase/Write placing "HI" at the top left.
+    // Session.replay() builds a fresh TelnetLayer with no pre-negotiated
+    // options, and flushRecord() discards any record delivered before
+    // is3270Mode() is true. A real trace always contains the negotiation
+    // that preceded the data, so the fixture must include it too.
     const trace = [
-      '0.000 < f5 c3 11 40 40 c8 c9 ff ef',
+      '0.000 < ff fd 19 ff fb 19', // IAC DO EOR, IAC WILL EOR
+      '0.000 < ff fd 00 ff fb 00', // IAC DO BINARY, IAC WILL BINARY
+      '0.000 < f5 c3 11 40 40 c8 c9 ff ef', // Erase/Write placing "HI" at top left
     ].join('\n');
     const reply = await runner.runReplayText(trace);
     expect(reply.split('\n').pop()).toBe('ok');
@@ -5139,6 +6418,15 @@ export class Runner {
     out.push(formatStatus(this.session, this.host, elapsed));
     out.push(ok ? 'ok' : 'error');
     return out.join('\n');
+  }
+
+  /**
+   * Format an out-of-band failure (e.g. Replay's file I/O, which main.ts owns)
+   * as a proper s3270 reply: a data line, the status line, then error. Every
+   * reply must carry a status line, even ones that never reached dispatch().
+   */
+  errorReply(message: string): string {
+    return [`data: ${message}`, formatStatus(this.session, this.host, undefined), 'error'].join('\n');
   }
 
   /** Replay trace text directly — used by Replay() and by tests. */
@@ -5270,6 +6558,15 @@ export class Runner {
         return;
       }
 
+      case 'TraceText':
+        // Emit what has been traced so far as data lines. Without this the trace
+        // is enabled but unreachable: nothing writes it anywhere, so recording a
+        // fixture would be impossible. Trace(on,file) is the eventual home for
+        // streaming straight to disk; this makes the data available today through
+        // the same channel as every other reply.
+        data.push(...s.trace.lines());
+        return;
+
       case 'Replay':
         throw new Error('Replay(file) requires the file system; use runReplayText in tests');
 
@@ -5304,7 +6601,24 @@ export class Runner {
         case 'output': return this.outputCount > startingOutput;
         case 'unlock': return !this.session.oia.waitingForHost;
         case '3270mode': return this.session.is3270Mode();
-        default: throw new Error(`Wait: unknown condition ${args[0]}`);
+        case 'inputfield': {
+          // Wait until the cursor is sitting somewhere typable. This is the
+          // condition scripts actually want after Enter, and unlike
+          // Wait(Output) it tests SCREEN STATE rather than an event, so it
+          // cannot be missed by arriving too early. x3270 has the same
+          // condition (TS_WAIT_IFIELD, task.c:135).
+          //
+          // Needed because a host may send several records for one logical
+          // screen: VM/370 sends its banner and then the logon panel, and only
+          // the second carries the IC that puts the cursor in a field. A script
+          // that types after the first one lands on a protected cell.
+          if (this.session.oia.isInhibited()) return false;
+          const sc = this.session.screen;
+          const f = sc.fieldAt(sc.cursor);
+          return f !== null && !f.protected;
+        }
+        default: throw new Error(
+          `Wait: unknown condition ${args[0]} (expected Output, Unlock, 3270Mode or InputField)`);
       }
     };
 
@@ -5340,6 +6654,15 @@ import { parseCommand } from './commands.js';
  * command semantics live in runner.ts, which is unit-tested.
  */
 async function main(): Promise<void> {
+  // A closed stdout is a normal way for a pipeline to end — `| head -5`, or an
+  // automation harness that stops reading. Without this, the write throws an
+  // unhandled EPIPE and the process dies with a stack trace instead of exiting
+  // quietly, which is both ugly and easy to mistake for a crash in the client.
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+    throw err;
+  });
+
   const session = defaultSession();
   const runner = new Runner(session);
 
@@ -5358,8 +6681,10 @@ async function main(): Promise<void> {
         handled = true;
       }
     } catch (err) {
+      // Every reply must carry a status line, even one that failed before
+      // reaching the runner (a missing file name, or readFileSync's ENOENT).
       const msg = err instanceof Error ? err.message : String(err);
-      process.stdout.write(`data: ${msg}\nerror\n`);
+      process.stdout.write(runner.errorReply(msg) + '\n');
       handled = true;
     }
 
@@ -5391,10 +6716,18 @@ Expected: all tests pass; typecheck silent.
 - [ ] **Step 7: Smoke-test the binary by hand**
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 printf 'ScreenText\nQuit\n' | node packages/cli/dist/main.js | tail -3
 ```
 Expected: 24 blank data lines, a 12-field status line, then `ok`, then the reply to `Quit`.
+
+Then confirm a truncated pipe exits cleanly rather than throwing EPIPE:
+
+```bash
+printf 'ScreenText\nQuit\n' | node packages/cli/dist/main.js | head -2
+echo "exit=$?"
+```
+Expected: two lines and `exit=0`, with **no** stack trace.
 
 - [ ] **Step 8: Commit**
 
@@ -5413,6 +6746,12 @@ git commit -m "feat(cli): add s3270 command runner and stdin shell"
 Golden tests are diff-readable: when a change breaks a panel, the broken panel appears in the test output rather than an assertion about cell 743. This task builds the machinery with a *synthetic* fixture so it works before the host is available; Task 16 adds real recordings.
 
 - [ ] **Step 1: Create the fixtures package**
+
+Note this package has **no `build` script**, because it contains only data. That
+means plain `npm run build --workspaces` fails here — npm treats a missing script
+in any workspace as fatal, unlike `--if-present`. The root `build` script already
+passes `--if-present` for this reason; use `npm run build` rather than the bare
+`--workspaces` form.
 
 `packages/fixtures/package.json`:
 
@@ -5497,6 +6836,14 @@ const out = [
   '# Erase/Write, SBA, SF (protected / intensified / unprotected), RA fill and IC.',
   '# Not a real host capture -- Task 16 adds those. EBCDIC cp037, 12-bit addresses.',
   '# GENERATED by tools/make-synthetic-fixture.mjs.',
+  '#',
+  '# The negotiation lines are NOT decoration. TelnetLayer only accumulates record',
+  '# bytes once BINARY and EOR are agreed both ways, and discards a record',
+  '# terminated before that — so a data-only fixture replays as a blank screen and',
+  '# a golden generated from it would enshrine that blankness. Every real capture',
+  '# starts this way too.',
+  '0.000 < ff fd 19 ff fb 19',                   // IAC DO EOR / IAC WILL EOR
+  '0.000 < ff fd 00 ff fb 00',                   // IAC DO BINARY / IAC WILL BINARY
 ];
 const bytes = [...record, 0xff, 0xef];                    // IAC EOR
 for (let i = 0; i < bytes.length; i += 16) {
@@ -5508,7 +6855,7 @@ process.stdout.write(out.join('\n') + '\n');
 Then generate it:
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 cd packages/core
 node tools/make-synthetic-fixture.mjs > ../fixtures/traces/synthetic-ispf-like.trace
 cat ../fixtures/traces/synthetic-ispf-like.trace
@@ -5571,6 +6918,17 @@ describe('golden screens', () => {
     expect(traces.length).toBeGreaterThan(0);
   });
 
+  it('every fixture actually renders something', () => {
+    // A trace missing its negotiation replays as a blank screen rather than
+    // failing, and a golden generated from it would enshrine the blankness.
+    // This catches that class of fixture bug for every fixture, forever.
+    for (const trace of traces) {
+      const session = replayFixture(trace);
+      expect(session.screen.toText().trim(), `${trace} rendered a blank screen`)
+        .not.toBe('');
+    }
+  });
+
   for (const trace of traces) {
     it(`replays ${trace} to its golden screen`, () => {
       const golden = join(screensDir, basename(trace, '.trace') + '.txt');
@@ -5626,7 +6984,7 @@ Expected: FAIL with the "missing golden file" message, which prints the current 
 - [ ] **Step 6: Generate the golden and read it**
 
 ```bash
-npm run build --workspaces
+npm run build --workspaces --if-present
 cd packages/core
 node tools/make-golden.mjs ../fixtures/traces/synthetic-ispf-like.trace > ../fixtures/screens/synthetic-ispf-like.txt
 cat ../fixtures/screens/synthetic-ispf-like.txt
@@ -5642,9 +7000,14 @@ Expected: PASS, 6 tests.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/fixtures packages/core/test/golden.test.ts packages/core/tools/make-golden.mjs
+git add packages/fixtures packages/core/test/golden.test.ts \
+        packages/core/tools/make-golden.mjs packages/core/tools/make-synthetic-fixture.mjs \
+        package-lock.json
 git commit -m "test(core): add golden-screen fixture machinery with a synthetic panel"
 ```
+
+`package-lock.json` belongs in this commit: adding a workspace changes it, and
+leaving it out breaks `npm ci` on a fresh clone.
 
 ---
 
@@ -5663,6 +7026,12 @@ git commit -m "test(core): add golden-screen fixture machinery with a synthetic 
 timeout 5 bash -c 'cat < /dev/null > /dev/tcp/HOST/PORT' && echo reachable || echo unreachable
 ```
 Expected: `reachable`. If not, stop and report; do not fake a fixture.
+
+This logs a cosmetic `HHC02909E Recv() error … reset by peer` on the Hercules
+console, and no simpler probe avoids it — Hercules treats *any* disconnect before it
+learns the terminal type as an error (`console.c:2955-2989`); a politer close just
+logs `HHC02908E` instead. Measured against the real host, not inferred. Don't chase
+it. See `docs/live-testing.md` step 1.
 
 - [ ] **Step 2: Write the MVS recording script**
 
@@ -5799,6 +7168,15 @@ git commit -m "test: add live-host trace fixtures and golden screens from Hercul
 
 **This task requires reference captures from the user's x3270 and cannot be completed without them.** It is the strongest correctness signal in the plan: it compares our inbound bytes against a known-good implementation driving the same host.
 
+**x3270's trace format is not ours.** `trace_netdata()` (Common/telnet.c:3325) writes
+`< 0x0   f5c311...` — a direction character, a byte **offset** in hex, then
+**unspaced** hex bytes, 32 per line — and its `<` means data x3270 **sent**, the
+opposite of our convention. Ours is `0.000 < f5 c3`: timestamp, spaced bytes,
+`<` meaning received. A raw capture fed to `parseTrace` therefore yields **zero
+events**, and the comparison would "run" against nothing. `src/x3270trace.ts`
+provides `parseX3270Trace` and `x3270TraceToOurs`; the harness sniffs the format
+and converts, so the operator can drop a raw capture in unmodified.
+
 - [ ] **Step 1: Ask the user for a reference capture**
 
 The comparison is only meaningful if both clients did the same thing, so the capture must be scripted, not hand-driven. Ask for:
@@ -5820,6 +7198,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTrace } from '../src/trace.js';
+import { parseX3270Trace } from '../src/x3270trace.js';
 import { Session } from '../src/session.js';
 import { TelnetCmd as T } from '../src/constants.js';
 
@@ -5834,8 +7213,23 @@ const refDir = join(here, '..', '..', 'fixtures', 'x3270');
  *  - Telnet negotiation (option order legitimately varies between clients).
  *  - Records containing typed passwords, which are redacted in the fixture.
  */
-function ourReplies(traceText: string): number[][] {
-  const events = parseTrace(traceText);
+/**
+ * Read a capture in EITHER format.
+ *
+ * x3270's own `-trace` output is not our trace format: it writes
+ * `< 0x0   f5c3...` — direction, a byte OFFSET, unspaced hex, 32 per line, with
+ * `<` meaning ITS output — whereas ours is `0.000 < f5 c3` with a timestamp and
+ * spaced bytes. Detect and convert rather than requiring the operator to
+ * pre-process, since handing the harness a raw capture is the obvious thing to
+ * do and silently parsing zero events out of it would be a confusing failure.
+ */
+function readCapture(text: string) {
+  const looksLikeX3270 = /^[<>]\s+0x[0-9a-fA-F]+\s+[0-9a-fA-F]+\s*$/m.test(text);
+  return looksLikeX3270 ? parseX3270Trace(text) : parseTrace(text);
+}
+
+async function ourReplies(traceText: string): Promise<number[][]> {
+  const events = readCapture(traceText);
   const replies: number[][] = [];
   const conn = {
     write: (b: Uint8Array) => {
@@ -5851,7 +7245,10 @@ function ourReplies(traceText: string): number[][] {
     onError: undefined as ((e: Error) => void) | undefined,
   };
   const session = new Session({ connect: () => conn });
-  void session.connect('replay', 0);
+  // MUST await: Session.connect() awaits its connection factory before assigning
+  // conn.onData, so a synchronous feed loop after `void connect(...)` runs while
+  // onData is still undefined and every byte is silently dropped.
+  await session.connect('replay', 0);
   for (const ev of events) {
     if (ev.dir === 'recv') conn.onData?.(ev.bytes);
   }
@@ -5859,7 +7256,7 @@ function ourReplies(traceText: string): number[][] {
 }
 
 function theirReplies(traceText: string): number[][] {
-  return parseTrace(traceText)
+  return readCapture(traceText)
     .filter((e) => e.dir === 'send')
     .map((e) => Array.from(e.bytes))
     .filter((b) => !(b[0] === T.IAC && b[1] !== undefined && b[1] >= T.SB && b[1] <= T.DONT));
@@ -5876,9 +7273,9 @@ describe('x3270 round-trip conformance', () => {
   }
 
   for (const capture of captures) {
-    it(`sends byte-identical inbound records for ${capture}`, () => {
+    it(`sends byte-identical inbound records for ${capture}`, async () => {
       const text = readFileSync(join(refDir, capture), 'utf8');
-      const ours = ourReplies(text);
+      const ours = await ourReplies(text);
       const theirs = theirReplies(text);
       expect(ours.length).toBe(theirs.length);
       for (let i = 0; i < theirs.length; i++) {
@@ -5923,7 +7320,7 @@ git commit -m "test(core): add x3270 round-trip conformance harness"
 - Create: `README.md`
 - Modify: `docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` (mark complete)
 
-- [ ] **Step 1: Verify the spec's stage 1 success criterion**
+- [x] **Step 1: Verify the spec's stage 1 success criterion**
 
 The spec says stage 1 is complete when the CLI can, against the live host, log on, navigate to a full-screen panel, type into fields, press Enter and function keys, see correct updates, and log off — traced, replayable, and byte-identical to x3270 under the same script.
 
@@ -5936,15 +7333,44 @@ node packages/cli/dist/main.js < packages/cli/scripts/record-mvs.txt | grep -c "
 npx vitest run packages/core/test/conformance.test.ts                                       # expect pass, not skip
 ```
 
-- [ ] **Step 2: Write the README**
+- [x] **Step 2: Write the README**
 
 Create `README.md` covering: what this is and why (no good Mac 3270 client since Brown tn3270); the staging; how to build and test; how to use the CLI; the trace format; where the spec and plan live; and a candid note on what is not yet implemented (no GUI, no TLS, no TN3270E, no extended attributes, no PS).
 
-- [ ] **Step 3: Report honestly**
+- [x] **Step 3: Report honestly**
 
 State plainly which of the four checks in Step 1 passed with real output, and which did not. If the conformance test is still skipped for want of captures, say so — do not describe stage 1 as complete when its strongest check has not run.
 
-- [ ] **Step 4: Commit**
+**Executed 2026-08-17. Three of the four checks pass; the fourth cannot pass yet.**
+
+| check | result |
+|---|---|
+| `npm test` | **pass** — 318 tests, 18 files |
+| `npm run typecheck` | **pass** — silent |
+| `conformance.test.ts` | **pass** — 2 tests, **not** skipped; it runs against a real capture at `packages/fixtures/x3270/vm370-conformance-model2.trace` (the `it.skip` in that file is a guard for when no capture exists, and it is not the branch taken) |
+| `record-mvs.txt` → 0 errors | **FAILS: 10 errors, 6 timeouts** |
+
+The MVS failure is environmental, not a client defect. The TK5 instance available
+is running Hercules but **MVS was never IPLed**: it was started as `hercules -f
+conf/tk5.cnf` rather than via TK5's `./mvs`, so `HERCULES_RC=scripts/ipl.rc` was
+never set and the `ipl 390` inside it never ran. Devices `00C0-00C6` are VTAM
+terminals (`conf/tk5.cnf:75-83`), so with no MVS there is no VTAM to answer: our
+Enter goes out (`7d 40 40`) and **zero** host records come back. Confirmed by
+`/proc/<pid>/environ` having no `HERCULES_RC`.
+
+The equivalent check against the host that *is* fully up passes:
+
+```
+$ node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt | grep -c '^error$'
+0
+```
+
+77 commands, 0 errors, 0 program checks, reaching CMS `Ready;` with `QUERY
+TERMINAL` answered by CMS. Stage 1 therefore meets the spec's success criterion
+against VM/370, and the outstanding check waits on a system to be IPLed rather
+than on code.
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/superpowers/plans/2026-08-15-stage1-protocol-core.md

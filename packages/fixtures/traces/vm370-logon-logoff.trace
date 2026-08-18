@@ -1,0 +1,391 @@
+# Live capture: VM/370 R6 (VM/CE 1.2) under Hercules, recorded 2026-08-17.
+#
+# Script: packages/cli/scripts/record-vm.txt. This capture REACHES CMS: it logs on,
+# IPLs CMS, gets "Ready;", has QUERY TERMINAL answered by CMS itself
+# ("AUTOCR OFF, MORE 050 010, HOLD ON, TIMESTAMP OFF"), and logs off cleanly.
+# 77 commands, 0 errors, 0 program checks.
+#
+# This replaces an earlier capture that stalled at CP READ. That one was taken
+# before the logon sequence was fixed: the script typed LOGON as its first input,
+# which the connect-time dismissal screen consumed and discarded, so the password
+# arrived at a fresh CP READ as a command and CP answered "restart". See
+# docs/live-testing.md, "The logon sequence", for the full explanation.
+#
+# REDACTED: one sent record containing the account password has been replaced with
+# a comment line. The fixture is therefore replay-faithful only up to the password
+# prompt; screens after it reflect a session where those bytes are absent. That is
+# deliberate: a working password must never enter git history. Verified zero
+# occurrences of the password's EBCDIC bytes remain.
+#
+# Note the password happens to equal the userid on this system, so the same EBCDIC
+# byte sequence also appears legitimately inside the "LOGON CMSUSER" command and the
+# host's echo of it. Those occurrences are the userid, which is not secret and is
+# already in the script; only the bare-password record was redacted.
+#
+# What this capture exercises that the old one could not: the VM READ state, the
+# CMS IPL, disk-access messages, a MORE... pause released by Clear, and a CMS
+# command with a CMS reply.
+0.000 < ff fd 18
+0.000 > ff fb 18
+0.001 < ff fa 18 01 ff f0
+0.001 > ff fa 18 00 49 42 4d 2d 33 32 37 38 2d 32 ff f0  # TERMINAL-TYPE IS IBM-3278-2
+0.001 < ff fb 00 ff fd 00
+0.001 > ff fd 00
+0.001 > ff fb 00
+0.001 < ff fb 19 ff fd 19 f5 42 11 40 40 1d 60 c8 85 99
+0.001 + 83 a4 93 85 a2 40 e5 85 99 a2 89 96 95 40 40 7a
+0.001 + 11 40 d4 1d e8 f4 4b f6 4b f0 4b f1 f0 f9 f5 f4
+0.001 + 60 c1 85 a3 88 99 81 60 87 f8 f4 f2 f4 83 f6 81
+0.001 + f0 11 c1 50 1d 60 c8 96 a2 a3 40 95 81 94 85 40
+0.001 + 40 40 40 40 40 40 40 40 7a 11 c1 e4 1d e8 81 a3
+0.001 + 88 96 99 60 95 82 11 c2 60 1d 60 c8 96 a2 a3 40
+0.001 + d6 e2 40 40 40 40 40 40 40 40 40 40 40 7a 11 c2
+0.001 + f4 1d e8 d3 89 95 a4 a7 60 f5 4b f1 f4 4b f0 60
+0.001 + f5 f7 f0 4b f6 f0 4b f1 4e f9 4b f1 4b 85 93 f9
+0.001 + 6d f6 6d 83 89 98 4b a7 f8 f6 6d f6 f4 11 c3 f0
+0.001 + 1d 60 c8 96 a2 a3 40 c1 99 83 88 89 a3 85 83 a3
+0.001 + a4 99 85 40 7a 11 c4 c4 1d e8 a7 f8 f6 6d f6 f4
+0.001 + 11 c5 40 1d 60 d7 99 96 83 85 a2 a2 96 99 a2 40
+0.001 + 40 40 40 40 40 40 40 7a 11 c5 d4 1d e8 d4 d7 7e
+0.001 + f1 f2 f8 11 c6 50 1d 60 d3 d7 c1 d9 40 d5 81 94
+0.001 + 85 40 40 40 40 40 40 40 40 40 7a 11 c6 e4 1d e8
+0.001 + c8 c5 d9 c3 e4 d3 c5 e2 11 c7 60 1d 60 c4 85 a5
+0.001 + 89 83 85 40 95 a4 94 82 85 99 40 40 40 40 40 7a
+0.001 + 11 c7 f4 1d e8 f0 7a f0 f2 c3 f8 11 c8 f0 1d 60
+0.001 + e2 a4 82 83 88 81 95 95 85 93 40 40 40 40 40 40
+0.001 + 40 40 7a 11 c9 c4 1d e8 f0 f0 f2 c3 11 c8 f0 1d
+0.001 + 60 11 4a 40 1d 60 11 4b 50 1d 60 40 40 40 40 40
+0.001 + 40 40 40 40 e3 88 85 40 c8 85 99 83 a4 93 85 a2
+0.001 + 40 e2 61 f3 f7 f0 6b 40 c5 e2 c1 61 f3 f9 f0 40
+0.001 + 81 95 84 40 a9 61 c1 99 83 88 89 a3 85 83 a3 a4
+0.001 + 99 85 40 c5 94 a4 93 81 a3 96 99 11 4c 60 1d 60
+0.001 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 6d 40 40 40 40 6d 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 11 4d f0 1d 60 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 61 e0 40 40 40 40 40 40 40 40 40 4f 40
+0.001 + 4f 40 40 4f 40 4f 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 11 4f 40 1d 60 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 61
+0.001 + 40 40 e0 40 40 40 40 6d 6d 6d 40 4f 40 4f 6d 40
+0.001 + 4f 40 4f 6d 6d 40 40 40 6d 40 6d 6d 40 40 6d 6d
+0.001 + 40 6d 40 11 50 50 1d 60 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 40 40 61 40 61 e0 40
+0.001 + e0 40 40 61 40 6d 40 e0 4f 40 6d 6d 4f 4f 40 7d
+0.001 + 6d 40 e0 40 4f 40 7d 6d 6d 4f 61 40 6d 79 40 4f
+0.001 + 11 d1 60 1d 60 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 61 40 6d 6d 6d 6d 40 e0 4f
+0.001 + 40 40 6d 6d 61 4f 40 4f 6d 40 4f 40 4f 40 4f 40
+0.001 + 4f 4f 40 4f 40 40 4f 40 4d 6d 4f 40 4f 11 d2 f0
+0.001 + 1d 60 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 61 6d 61 40 40 40 40 e0 6d e0 e0 6d 6d
+0.001 + 6d 4f 40 e0 6d 6d 4f 4f 6d 4f 40 4f 6d 4f 4f 6d
+0.001 + 4f 40 40 40 e0 6d 6d 6b 6d 4f 11 d4 40 1d 60 11
+0.001 + d5 50 1d 60 40 40 40 40 40 40 40 40 40 40 40 40
+0.001 + 40 40 40 40 40 40 40 40 40 40 d4 a8 40 d7 c3 40
+0.001 + a3 88 89 95 92 a2 40 89 a3 7d a2 40 81 40 d4 c1
+0.001 + c9 d5 c6 d9 c1 d4 c5 5a 11 d6 60 1d 60 11 d7 f0
+0.001 + 1d 60 40 40 40 40 40 40 40 40 40 40 40 40 40 c3
+0.001 + 96 97 a8 99 89 87 88 a3 40 d9 96 87 85 99 40 c2
+0.001 + 96 a6 93 85 99 6b 40 d1 81 95 40 d1 81 85 87 85
+0.001 + 99 6b 40 81 95 84 40 96 a3 88 85 99 a2 ff ef
+0.001 > ff fd 19
+0.001 > ff fb 19
+0.003 = # EraseWrite WCC=0x42 SBA(0) SF(0x60) data[19] SBA(20) SF(0xe8) data[28] SBA(80) SF(0x60) data[19] SBA(100) SF(0xe8) data[8] SBA(160) SF(0x60) data[19] SBA(180) SF(0xe8) data[42] SBA(240) SF(0x60) data[19] SBA(260) SF(0xe8) data[6] SBA(320) SF(0x60) data[19] SBA(340) SF(0xe8) data[6] SBA(400) SF(0x60) data[19] SBA(420) SF(0xe8) data[8] SBA(480) SF(0x60) data[19] SBA(500) SF(0xe8) data[6] SBA(560) SF(0x60) data[19] SBA(580) SF(0xe8) data[4] SBA(560) SF(0x60) SBA(640) SF(0x60) SBA(720) SF(0x60) data[64] SBA(800) SF(0x60) data[57] SBA(880) SF(0x60) data[56] SBA(960) SF(0x60) data[56] SBA(1040) SF(0x60) data[56] SBA(1120) SF(0x60) data[56] SBA(1200) SF(0x60) data[56] SBA(1280) SF(0x60) SBA(1360) SF(0x60) data[52] SBA(1440) SF(0x60) SBA(1520) SF(0x60) data[59]
+0.004 < f5 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+0.004 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+0.004 + d4 f3 f7 f0 c3 c5 40 40 ff ef f1 c6 11 40 40 e5
+0.004 + d4 61 f3 f7 f0 40 d6 95 93 89 95 85 40 40 40 40
+0.004 + 40 40 40 11 c5 d1 40 40 40 40 40 40 40 40 40 e5
+0.004 + e5 40 40 40 40 40 40 40 40 e5 e5 40 40 40 40 d4
+0.004 + d4 40 40 40 40 40 40 40 40 d4 d4 40 40 40 40 40
+0.004 + 40 40 40 40 11 c6 61 40 40 40 40 40 40 40 40 40
+0.004 + e5 e5 40 40 40 40 40 40 40 40 e5 e5 40 40 40 40
+0.004 + d4 d4 d4 40 40 40 40 40 40 d4 d4 d4 40 40 40 40
+0.004 + 40 40 40 40 40 11 c7 f1 40 40 f3 f3 f3 f3 f3 f3
+0.004 + f3 f3 f3 f3 40 40 40 40 40 f7 f7 f7 f7 f7 f7 f7
+0.004 + f7 f7 f7 f7 f7 40 40 40 40 d4 d4 f0 f0 f0 f0 f0
+0.004 + f0 f0 f0 40 40 40 11 c9 c1 40 f3 f3 f3 f3 f3 f3
+0.004 + f3 f3 f3 f3 f3 f3 40 40 40 40 f7 f7 f7 f7 f7 f7
+0.004 + f7 f7 f7 f7 f7 d4 d4 40 40 d4 d4 f0 f0 f0 f0 f0
+0.004 + f0 f0 f0 f0 f0 40 40 11 4a d1 40 f3 f3 40 40 40
+0.004 + 40 40 40 e5 e5 f3 f3 40 40 40 40 f7 f7 e5 e5 40
+0.004 + 40 40 40 f7 f7 40 40 d4 d4 d4 d4 f0 f0 d4 d4 40
+0.004 + 40 40 40 40 40 f0 f0 40 11 4b 61 40 40 40 40 40
+0.004 + 40 40 40 40 40 e5 f3 f3 40 40 40 40 40 e5 e5 40
+0.004 + 40 40 40 f7 f7 d4 40 40 40 d4 d4 40 f0 f0 d4 d4
+0.004 + 40 40 40 40 40 40 f0 f0 40 11 4c f1 40 40 40 40
+0.004 + 40 40 40 40 40 40 40 f3 f3 40 40 40 40 e5 e5 40
+0.004 + 40 40 40 f7 f7 d4 d4 40 40 40 40 40 40 f0 f0 d4
+0.004 + d4 40 40 40 40 40 40 f0 f0 40 11 4e c1 40 40 40
+0.004 + 40 40 40 40 40 f3 f3 f3 f3 e5 e5 40 40 e5 e5 40
+0.004 + 40 40 40 f7 f7 40 d4 d4 40 40 40 40 40 40 f0 f0
+0.004 + d4 d4 40 40 40 40 40 40 f0 f0 40 11 4f d1 40 40
+0.004 + 40 40 40 40 40 40 f3 f3 f3 f3 40 e5 e5 e5 e5 40
+0.004 + 40 40 40 40 f7 f7 40 d4 d4 40 40 40 40 40 40 f0
+0.004 + f0 d4 d4 40 40 40 40 40 40 f0 f0 40 11 50 61 40
+0.004 + 40 40 40 40 40 40 40 40 40 40 f3 f3 40 e5 e5 40
+0.004 + 40 40 40 40 40 f7 f7 40 d4 d4 40 40 40 40 40 40
+0.004 + f0 f0 d4 d4 40 40 40 40 40 40 f0 f0 40 11 d1 f1
+0.004 + 40 40 40 40 40 40 40 40 40 40 40 f3 f3 40 40 40
+0.004 + 40 40 40 40 40 40 f7 f7 40 40 40 40 40 40 40 40
+0.004 + 40 f0 f0 40 40 40 40 40 40 40 40 f0 f0 40 11 d3
+0.004 + c1 40 f3 f3 40 40 40 40 40 40 40 40 f3 f3 40 40
+0.004 + 40 40 40 40 40 40 40 f7 f7 40 40 40 40 40 40 40
+0.004 + 40 40 f0 f0 40 40 40 40 40 40 40 40 f0 f0 40 11
+0.004 + d4 d1 40 f3 f3 f3 f3 f3 f3 f3 f3 f3 f3 f3 f3 40
+0.004 + 40 40 40 40 40 40 40 40 f7 f7 40 40 40 40 40 40
+0.004 + 40 40 40 40 f0 f0 f0 f0 f0 f0 f0 f0 f0 f0 40 40
+0.004 + 11 d5 61 40 40 f3 f3 f3 f3 f3 f3 f3 f3 f3 f3 40
+0.004 + 40 40 40 40 40 40 40 40 40 f7 f7 40 40 40 40 40
+0.004 + 40 40 40 40 40 40 f0 f0 f0 f0 f0 f0 f0 f0 40 40
+0.004 + 40 11 d6 f1 40 40 40 40 40 40 40 40 40 40 40 40
+0.004 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.004 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.004 + 40 40 11 d8 c1 40 40 40 40 e5 d4 61 f3 f7 f0 40
+0.004 + c3 96 94 94 a4 95 89 a3 a8 40 c5 84 89 a3 89 96
+0.004 + 95 40 e5 f1 40 d9 85 93 85 81 a2 85 40 f1 4b f2
+0.004 + 40 40 40 ff ef
+0.004 = # EraseWrite WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+0.004 = # Write WCC=0xc6 SBA(0) data[20] SBA(337) data[46] SBA(417) data[46] SBA(497) data[46] SBA(577) data[46] SBA(657) data[46] SBA(737) data[46] SBA(817) data[46] SBA(897) data[46] SBA(977) data[46] SBA(1057) data[46] SBA(1137) data[46] SBA(1217) data[46] SBA(1297) data[46] SBA(1377) data[46] SBA(1457) data[46] SBA(1537) data[46]
+0.415 > 7d 5b 60 11 5b 60 ff ef
+0.416 < f5 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+0.416 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+0.416 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+0.416 = # EraseWrite WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+0.416 < f1 c2 11 5b 5f 1d c1 11 5d 6b 1d 60 c3 d7 40 d9
+0.416 + c5 c1 c4 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff
+0.416 + ef
+0.416 = # Write WCC=0xc2 SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+0.832 > 7d 5b 60 11 5b 60 ff ef
+0.832 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+0.832 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+0.832 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+0.832 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+0.832 < f1 c0 11 40 40 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+0.832 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+0.832 + c5 40 40 ff ef
+0.833 = # Write WCC=0xc0 SBA(0) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+0.833 < f1 c2 11 5b 5f 1d c1 11 5d 6b 1d 60 c3 d7 40 d9
+0.833 + c5 c1 c4 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff
+0.833 + ef
+0.833 = # Write WCC=0xc2 SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.248 > 7d 5b 6d 11 5b 60 d3 d6 c7 d6 d5 40 c3 d4 e2 e4
+1.248 + e2 c5 d9 ff ef
+1.249 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+1.249 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+1.249 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+1.249 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.249 < f1 c0 11 c1 50 d3 d6 c7 d6 d5 40 c3 d4 e2 e4 e2
+1.249 + c5 d9 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5
+1.249 + c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff
+1.249 + ef
+1.249 = # Write WCC=0xc0 SBA(80) data[13] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.249 < f1 c0 11 c2 60 c5 d5 e3 c5 d9 40 d7 c1 e2 e2 e6
+1.249 + d6 d9 c4 7a 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4
+1.249 + d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40
+1.249 + 40 ff ef
+1.249 = # Write WCC=0xc0 SBA(160) data[15] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.249 < f1 c2 11 5b 5f 1d 4d 11 5d 6b 1d 60 c3 d7 40 d9
+1.249 + c5 c1 c4 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff
+1.249 + ef
+1.249 = # Write WCC=0xc2 SBA(1759) SF(0x4d) SBA(1899) SF(0x60) data[19]
+# REDACTED: sent record contained the account password (see docs/live-testing.md)
+1.664 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+1.664 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+1.664 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+1.664 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.664 < f1 c0 11 c3 f0 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+1.664 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+1.664 + c5 40 40 ff ef
+1.664 = # Write WCC=0xc0 SBA(240) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.666 < f1 c0 11 c5 40 d3 d6 c7 d6 d5 40 c1 e3 40 f2 f1
+1.666 + 7a f4 f8 7a f2 f5 40 c7 d4 e3 40 d4 d6 d5 c4 c1
+1.666 + e8 40 f0 f8 61 f1 f7 61 f2 f6 11 5b 5f 1d c1 11
+1.666 + 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4
+1.666 + f3 f7 f0 c3 c5 40 40 ff ef
+1.666 = # Write WCC=0xc0 SBA(320) data[37] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.668 < f1 c0 11 c6 50 e5 d4 40 c3 96 94 94 a4 95 89 a3
+1.668 + a8 40 c5 84 89 a3 89 96 95 40 e5 f1 40 d9 f1 4b
+1.668 + f2 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9
+1.668 + d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+1.668 = # Write WCC=0xc0 SBA(400) data[28] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+1.668 < f1 c2 11 5b 5f 1d c1 11 5d 6b 1d 60 e5 d4 40 d9
+1.668 + c5 c1 c4 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff
+1.668 + ef
+1.668 = # Write WCC=0xc2 SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.080 > 7d 5b 60 11 5b 60 ff ef
+2.080 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+2.080 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+2.080 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.080 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.080 < f1 c0 11 c7 60 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+2.080 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+2.080 + c5 40 40 ff ef
+2.080 = # Write WCC=0xc0 SBA(480) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.210 < f1 c0 11 c8 f0 e8 40 4d f1 f9 c5 5d 40 d9 61 d6
+2.210 + 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5
+2.210 + c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.210 = # Write WCC=0xc0 SBA(560) data[11] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.440 < f1 c0 11 4a 40 e4 40 4d f1 f9 c4 5d 40 d9 61 d6
+2.440 + 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5
+2.440 + c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.440 = # Write WCC=0xc0 SBA(640) data[11] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.451 < f1 c0 11 4b 50 7d f1 f9 c4 7d 40 d9 c5 d7 d3 c1
+2.451 + c3 c5 e2 40 7d 40 e4 40 4d f1 f9 c4 5d 40 7d 11
+2.451 + 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7
+2.451 + 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.451 = # Write WCC=0xc0 SBA(720) data[26] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.456 < f1 c0 11 4c 60 e4 40 4d f1 f9 c4 5d 40 d9 61 d6
+2.456 + 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5
+2.456 + c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.456 = # Write WCC=0xc0 SBA(800) data[11] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.459 < f1 c0 11 4d f0 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+2.459 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+2.459 + c5 40 40 ff ef
+2.459 = # Write WCC=0xc0 SBA(880) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.460 < f1 c0 11 4f 40 4e 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 4e 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4
+2.460 + d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40
+2.460 + 40 ff ef
+2.460 = # Write WCC=0xc0 SBA(960) data[79] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.460 < f1 c0 11 50 50 4f 40 40 40 40 40 40 40 40 40 40
+2.460 + e6 85 93 83 96 94 85 40 a3 96 40 e5 d4 61 f3 f7
+2.460 + f0 40 81 95 84 40 e5 d4 61 f3 f8 f0 40 c3 96 94
+2.460 + 94 a4 95 89 a3 a8 40 c5 84 89 a3 89 96 95 40 40
+2.460 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.460 + 40 40 40 4f 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4
+2.460 + d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40
+2.460 + 40 ff ef
+2.460 = # Write WCC=0xc0 SBA(1040) data[79] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.460 < f1 c0 11 d1 60 4e 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+2.460 + 60 60 60 4e 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4
+2.460 + d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40
+2.460 + 40 ff ef
+2.460 = # Write WCC=0xc0 SBA(1120) data[79] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.460 < f1 c0 11 d2 f0 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+2.460 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+2.460 + c5 40 40 ff ef
+2.460 = # Write WCC=0xc0 SBA(1200) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.460 < f1 c0 11 d4 40 c6 96 99 40 93 89 a2 a3 a2 40 96
+2.460 + 86 40 81 a5 81 89 93 81 82 93 85 40 83 96 94 94
+2.460 + 81 95 84 a2 40 81 95 84 40 86 81 83 89 93 89 a3
+2.460 + 89 85 a2 6b 40 81 95 84 40 84 85 a3 81 89 93 a2
+2.460 + 40 81 82 96 a4 a3 40 a2 97 85 83 89 86 89 83 11
+2.460 + 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7
+2.460 + 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.460 = # Write WCC=0xc0 SBA(1280) data[74] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c0 11 d5 50 83 96 94 94 81 95 84 a2 6b 40 89
+2.461 + a2 a2 a4 85 40 a3 88 85 40 7d c8 c5 d3 d7 7d 40
+2.461 + 83 96 94 94 81 95 84 4b 11 5b 5f 1d c1 11 5d 6b
+2.461 + 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7
+2.461 + f0 c3 c5 40 40 ff ef
+2.461 = # Write WCC=0xc0 SBA(1360) data[35] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c0 11 d6 60 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+2.461 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+2.461 + c5 40 40 ff ef
+2.461 = # Write WCC=0xc0 SBA(1440) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c0 11 d7 f0 d6 a3 88 85 99 40 a4 a2 85 86 a4
+2.461 + 93 40 84 96 83 a4 94 85 95 a3 81 a3 89 96 95 40
+2.461 + 81 95 84 40 a2 81 94 97 93 85 40 97 99 96 87 99
+2.461 + 81 94 a2 40 83 81 95 40 82 85 40 86 96 a4 95 84
+2.461 + 40 96 95 40 d4 c1 c9 d5 e3 40 f1 f9 c4 6b 11 5b
+2.461 + 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40
+2.461 + 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.461 = # Write WCC=0xc0 SBA(1520) data[73] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c0 11 d9 40 81 83 83 85 a2 a2 85 84 40 81 a2
+2.461 + 40 a8 96 a4 99 40 e4 40 84 89 a2 92 4b 11 5b 5f
+2.461 + 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40
+2.461 + 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.461 = # Write WCC=0xc0 SBA(1600) data[24] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c0 11 5a 50 40 11 5b 5f 1d c1 11 5d 6b 1d 60
+2.461 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+2.461 + c5 40 40 ff ef
+2.461 = # Write WCC=0xc0 SBA(1680) data[1] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.461 < f1 c2 11 5d 6b 1d 60 d4 d6 d9 c5 4b 4b 4b 40 40
+2.461 + 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.461 = # Write WCC=0xc2 SBA(1899) SF(0x60) data[19]
+2.868 > 6d ff ef
+2.868 < f5 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+2.868 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+2.868 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.868 = # EraseWrite WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+2.868 < f1 c0 11 40 40 d9 85 81 84 a8 5e 40 e3 7e f0 4b
+2.868 + f0 f1 61 f0 4b f0 f1 40 f2 f1 7a f4 f8 7a f2 f6
+2.868 + 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5
+2.868 + c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+2.868 = # Write WCC=0xc0 SBA(0) data[27] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.283 > 7d 5b 6e 11 5b 60 d8 e4 c5 d9 e8 40 e3 c5 d9 d4
+3.283 + c9 d5 c1 d3 ff ef
+3.283 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+3.283 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+3.283 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+3.283 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.283 < f1 c0 11 c1 50 d8 e4 c5 d9 e8 40 e3 c5 d9 d4 c9
+3.283 + d5 c1 d3 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5
+3.283 + d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40
+3.283 + ff ef
+3.283 = # Write WCC=0xc0 SBA(80) data[14] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.285 < f1 c0 11 c2 60 d3 c9 d5 c5 d5 c4 40 40 7b 40 6b
+3.285 + 40 d3 c9 d5 c5 c4 c5 d3 40 40 4a 40 6b 40 c3 c8
+3.285 + c1 d9 c4 c5 d3 40 40 7c 40 6b 40 c5 e2 c3 c1 d7
+3.285 + c5 40 40 7f 40 6b 40 e3 c1 c2 c3 c8 c1 d9 40 d6
+3.285 + d5 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9
+3.285 + d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+3.285 = # Write WCC=0xc0 SBA(160) data[60] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.285 < f1 c0 11 c3 f0 d3 c9 d5 c5 e2 c9 e9 c5 40 f0 f8
+3.285 + f0 6b 40 c1 e3 e3 d5 40 d6 c6 c6 6b 40 c1 d7 d3
+3.285 + 40 d6 c6 c6 6b 40 e3 c5 e7 e3 40 d6 c6 c6 6b 40
+3.285 + d4 d6 c4 c5 40 e5 d4 6b 40 c8 c9 d3 c9 c7 c8 e3
+3.285 + 40 d6 c6 c6 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4
+3.285 + d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40
+3.285 + 40 ff ef
+3.285 = # Write WCC=0xc0 SBA(240) data[63] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.285 < f1 c0 11 c5 40 c1 e4 e3 d6 c3 d9 40 d6 c6 c6 6b
+3.285 + 40 d4 d6 d9 c5 40 f0 f5 f0 40 f0 f1 f0 6b 40 c8
+3.285 + d6 d3 c4 40 d6 d5 40 6b 40 e3 c9 d4 c5 e2 e3 c1
+3.285 + d4 d7 40 d6 c6 c6 11 5b 5f 1d c1 11 5d 6b 1d 60
+3.285 + d9 e4 d5 d5 c9 d5 c7 40 40 40 e5 d4 f3 f7 f0 c3
+3.285 + c5 40 40 ff ef
+3.285 = # Write WCC=0xc0 SBA(320) data[49] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.285 < f1 c0 11 c6 50 d9 85 81 84 a8 5e 40 e3 7e f0 4b
+3.285 + f0 f1 61 f0 4b f0 f1 40 f2 f1 7a f4 f8 7a f2 f6
+3.285 + 11 5b 5f 1d c1 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5
+3.285 + c7 40 40 40 e5 d4 f3 f7 f0 c3 c5 40 40 ff ef
+3.285 = # Write WCC=0xc0 SBA(400) data[27] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+3.696 > 6d ff ef
+3.697 < f5 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+3.697 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+3.697 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+3.697 = # EraseWrite WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+4.111 > 7d 5b e6 11 5b 60 d3 d6 c7 d6 c6 c6 ff ef
+4.111 < f1 c2 11 5b 5f 1d 4d 13 12 5d 6b 11 5b 5f 1d c1
+4.111 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+4.111 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+4.111 = # Write WCC=0xc2 SBA(1759) SF(0x4d) IC EUA(->1899) SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+4.111 < f1 c0 11 40 40 d3 d6 c7 d6 c6 c6 11 5b 5f 1d c1
+4.111 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+4.111 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+4.111 = # Write WCC=0xc0 SBA(0) data[6] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+4.112 < f1 c0 11 c1 50 c3 d6 d5 d5 c5 c3 e3 7e 40 f0 f0
+4.112 + 7a f0 f0 7a f0 f2 40 e5 c9 d9 e3 c3 d7 e4 7e 40
+4.112 + f0 f0 f0 7a f0 f0 4b f1 f0 40 e3 d6 e3 c3 d7 e4
+4.112 + 7e 40 f0 f0 f0 7a f0 f0 4b f2 f4 11 5b 5f 1d c1
+4.112 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+4.112 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+4.112 = # Write WCC=0xc0 SBA(80) data[54] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
+4.112 < f1 c0 11 c2 60 d3 d6 c7 d6 c6 c6 40 c1 e3 40 f2
+4.112 + f1 7a f4 f8 7a f2 f7 40 c7 d4 e3 40 d4 d6 d5 c4
+4.112 + c1 e8 40 f0 f8 61 f1 f7 61 f2 f6 11 5b 5f 1d c1
+4.112 + 11 5d 6b 1d 60 d9 e4 d5 d5 c9 d5 c7 40 40 40 e5
+4.112 + d4 f3 f7 f0 c3 c5 40 40 ff ef
+4.112 = # Write WCC=0xc0 SBA(160) data[38] SBA(1759) SF(0xc1) SBA(1899) SF(0x60) data[19]
