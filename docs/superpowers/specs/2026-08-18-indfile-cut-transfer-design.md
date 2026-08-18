@@ -50,10 +50,14 @@ This matters because DFT is the more modern protocol and the natural assumption 
   `IND$FILE TEXT` on the `MECAFF` userid's E disk (`MCF294`), `IND$FILE C` and
   `IND$FILE H` on F (`MCF394`). The C source is on disk, so host-side behaviour can be
   read rather than guessed.
-- **It is NOT on `CMSUSER`'s accessed disks.** `LISTFILE IND$FILE * *` as `CMSUSER`
-  returns `Ready(00028)` (file not found). Setup requires an `ACCESS` of a MECAFF disk
-  or a copy onto the user's A disk. **The runbook must state this** — it cost a probe
-  round to discover.
+- **The executables are `IND$FILD` and `IND$FILS`, NOT `IND$FILE`.** An earlier draft
+  of this spec had this wrong. `IND$FILE` exists only as `C` (source) and `TEXT`
+  (object); the runnable modules carry the `D`/`S` suffixes for the dynamically- and
+  statically-linked variants the readme describes. `LISTFILE IND$FILE * *` returns
+  `Ready(00028)` and looks like "not installed" when it is really "wrong name".
+- **They ARE already on `CMSUSER`'s default disks** — `IND$FILD MODULE Y2` and
+  `IND$FILS MODULE Y2`, on the `19E` system disk accessed as Y. No `LINK` or `ACCESS`
+  is needed; an earlier draft of this spec wrongly said setup was required.
 - **Credentials** (from `readme-1_2.txt`, not guessed): `CMSUSER`/`CMSUSER`,
   `MAINT`/`CPCMS`, `MECAFF`/`MECAFF`, `GCCCMS`/`GCCCMS`, `BREXX`/`BREXX`.
 - VM/CE's own changelog records "Changed 3270 config so "Escape" is "escape" as needed
@@ -151,8 +155,12 @@ Four quadrants (`NQ 4`) of 77 elements (`NE 77`); `XLATE_NULL 0xc1`; NULL lives 
 **Upload computes a checksum; download's is verified but never fatal.**
 
 - Upload: XOR every data byte, mask to 6 bits, encode through `table6`, write at
-  `O_UP_CSUM` — exactly `ft_cut.c:550-554`. The host verifies it and can demand a
-  retransmit, so this one is load-bearing.
+  `O_UP_CSUM` — exactly `ft_cut.c:550-554`. In principle the host verifies it and can
+  demand a retransmit. **But MECAFF does not:** its `receiveData` reads
+  `char csum; /* checksum is simply ignored ! */` (`IND$FILE C` on the MECAFF disk).
+  So against *this* host a checksum bug would not be caught by the host at all — only
+  by comparing the transferred file. Send it correctly regardless, because a real IBM
+  host does check, but do not rely on the host to catch our mistakes.
 - Download: `O_DT_CSUM` exists at offset 2 and **x3270 never reads it** — the only
   reference anywhere in the x3270 tree is the `#define` itself (verified by
   `grep -rn O_DT_CSUM`). It is a deliberate omission, not an oversight.
@@ -279,6 +287,67 @@ frames sequence correctly rather than only individually.
 - **A deliberately nasty binary payload** containing `0x00`, `0xFF`, bytes colliding
   with the 6-bit alphabet, and bytes from each quadrant. A text file exercises none of
   the quadrant machinery.
+
+## THE PROBE RAN, AND IT FAILED — read this before touching host code
+
+The gate below did its job: **it fired before any code was written.** Findings,
+2026-08-18:
+
+**MECAFF's fullscreen tools will not run in our session, and IND$FILE is only one
+casualty.** `IND$FILD GET ...`, `IND$FILS GET ...` and — decisively — **`FSQRY`, MECAFF's
+own capability-query tool** all respond with the same thing:
+
+```
+Please press ENTER to cancel fullscreen operation
+```
+
+`FSQRY` failing identically is what proves this is not an IND$FILE problem and not a
+protocol mismatch with our client. **Zero WSF records reach us** in any attempt, so the
+host declines before it ever queries the terminal.
+
+What is nonetheless confirmed working on the host side:
+
+- **MECAFF's `IND$FILE` really does implement CUT.** `IND$FILE C` contains `frameSeq`,
+  `sentInitialAck`, `sendStatus(code, message)`, `sendData`, `receiveData`, and the
+  status codes `CODE_ABORT_FILE` / `CODE_ABORT_XMIT`.
+- **It reaches the terminal through DIAG-58**, i.e. CP's own fullscreen 3270 I/O — no
+  external MECAFF service is required. `FSIO.C` is the "MECAFF API implementation"
+  (Dr. Hans-Walter Latz, 2011-2013) and declares `put3270`, `get3270`, `wsfqry` and
+  `pgpl3270`, with `PUT3270_CCW_WSF 0x20` among the CCW opcodes — it can write
+  structured fields, which is exactly what CUT needs.
+- `FSIO.C` carries explicit DIAG-58 presence checks, `cx58v107()` and `cx58v108()`,
+  "in 2 variants for V1.07 resp. V1.08-or-later".
+
+**Version question, settled so nobody re-derives it:** the running system reports
+`VM/370 Community Edition Version 1 Release 1.2 07/19/22`, and that is the newest.
+The `readme-1_3.txt` in the distribution — whose item 3 is the tempting "Changed 3270
+config so 'Escape' is 'escape' as needed for ind$file" — is dated **March 2021** and
+belongs to the older *Sixpack* numbering that CE superseded. CE 1.1.2 (July 2022) is
+newer than Sixpack 1.3 despite the smaller number. **There is no 1.3 to upgrade to.**
+
+Tried and did not help: `CP TERMINAL ESCAPE OFF`. `CP QUERY TERMINAL` reports
+`MODE VM, LINESIZE 080, ESCAPE "`.
+
+**Leading hypotheses, untested:**
+
+1. DIAG-58 is absent or at a level `cx58v107`/`cx58v108` rejects in this CE build — CE
+   may have taken the MECAFF *tools* without the CP-side support Sixpack 1.3 added.
+2. The terminal type. We advertise `IBM-3278-2`; MECAFF must know the geometry to paint
+   fullscreen, so a plain model 2 may be declined. Stage 2a gave us `-model 3278-2-E`
+   and `--terminal-type IBM-DYNAMIC` to test this cheaply. **Caveat:** we answer Query
+   Reply with 24×80 as *both* sizes, so advertising `IBM-DYNAMIC` may not suffice on its
+   own — which would make alternate geometry a real prerequisite.
+3. A CP terminal-definition (`DMKRIO`) attribute marking the device fullscreen-capable.
+
+**The user is testing whether `EE`, the MECAFF editor, works** — they have used it on a
+VM/CE system before. If EE paints, DIAG-58 is fine and the cause is narrower than
+"no fullscreen support"; if EE also fails, it is systemic.
+
+**Consequence for sequencing:** the codec and frame layer are host-independent and
+proceed regardless. The live acceptance test is blocked on VM/CMS until the above is
+resolved, and MVS/TSO may well be the first host to answer — the user is installing
+IND$FILE there from CBT, and that is likely IBM's genuine implementation with no MECAFF
+layer in the way.
 
 ## Prerequisite probe, BEFORE implementation
 
