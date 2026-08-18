@@ -701,14 +701,41 @@ the buffer.
   Programmer's Guide* and the GDDM reference above, for the eventual graphics
   work (Programmable Symbol Sets, GDF orders)
 
-Sought but not yet located: **VMGIF, from BLEKUL11** (~1992, VM/CMS) — the actual
-GIF viewer. **Asking the author worked**: the user contacted Rick Troth, who
-identified the route as CMS Gopher, and Gopher's own `FILELIST` then names VMGIF
-as the separate package that did the displaying (see *3279 Graphics* above). CMS
-Gopher 2.4.2 is now in `$HOME/cmsgopher`, but VMGIF is not in it. `WebSearch`
-from this environment returns zero results for every query including control
-queries, so it is a broken tool rather than evidence of absence — searching for
-VMGIF will need a working search or a VM-community archive. If recovered, its greatest value would be a **recorded datastream** of a
+**VMGIF is probably lost. Search exhausted 2026-08-18 — do not repeat it blindly.**
+
+The artefact wanted is **VMGIF, from BLEKUL11** (~1992, VM/CMS), the package CMS
+Gopher shelled out to in order to display GIFs. Provenance is settled (see *3279
+Graphics* above): the user contacted Rick Troth, who named CMS Gopher as the
+route, Gopher's own `FILELIST` names VMGIF as the separate display package, and
+the user then independently confirmed by finding a Gopher client that shells out
+to it.
+
+**Both known distribution points are gone**, per the user: a LISTSERV in Belgium
+and Troth's own copy at the University of Alabama. Confirmed by DNS —
+`listserv.cc.kuleuven.ac.be` and `ua1vm.ua.edu` no longer resolve.
+
+What was searched, and what was found:
+
+| Source | Result |
+|---|---|
+| `listserv.kuleuven.be` / `ls.kuleuven.be` | **Alive** but it is the modern LISTSERV: ~1000 current mailing lists, no VM-era file collections. The `BLEKUL11` archives did not survive the migration. |
+| `www.vm.ibm.com/download/packages/` | **Alive and genuinely useful** — 1996-2022 community VM packages, including `GOPHER VMARC` (108K, "A gopher client for CMS"). **No VMGIF**, and none under `gif`/`image`/`picture`/`bitmap`/`viewer`/`draw` either. Worth remembering as a live VM software archive. |
+| `vm.marist.edu` | resolves, 404 at the root |
+| Wayback Machine, `ua1vm.ua.edu` | **no snapshots at all** |
+| Wayback Machine, KU Leuven listserv | 1999 snapshots exist, but only mailing-list *notebook* archives — not the VM file collections |
+| Wayback CDX, `*/vmgif*` and `*/VMGIF*` | **zero hits site-wide** |
+
+**That last line is a real negative, not a tool failure** — the same CDX query
+returned 400 results for the KU Leuven host, so the index works and VMGIF simply
+is not in it. Contrast `WebSearch` from this environment, which returns zero
+results for every query including control queries and is therefore worthless as
+evidence either way.
+
+**Consequence:** treat VMGIF as unavailable and design from the manual instead.
+Nothing in the plan depends on it — it was only ever wanted as a fidelity
+reference and, ideally, a recorded datastream. The GA23-0059 Load PS structured
+field is the real specification. If it ever does turn up, its value would be that
+recorded datastream from real hardware. If recovered, its greatest value would be a **recorded datastream** of a
 real 3279 loading PS glyphs, which is a better fixture than the source itself.
 
 ## Success Criteria
