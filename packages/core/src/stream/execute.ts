@@ -115,11 +115,13 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     // applyToken has no access to the result.
     //
     // The commands that return before this loop cannot deliver a deferred token
-    // that matters: WSF parses to structuredField tokens only, and EAU/Read
-    // Buffer/Read Modified/Read Modified All carry no data field at all, so an
-    // SA or MF riding along in one is a malformed record the real hardware would
-    // never see. Deferred tokens on those paths therefore go uncounted, and that
-    // is the whole of the gap.
+    // that matters: WSF parses to structuredField tokens only, and NoOp, EAU and
+    // Read Buffer/Read Modified/Read Modified All carry no data field at all
+    // (NOP is "sent with no WCC or data", pages.txt:1730; EAU's format at
+    // pages.txt:1951-1958 has no data field), so an SA or MF riding along in one
+    // is a malformed record the real hardware would never see. Deferred tokens
+    // on those six paths therefore go uncounted, and that is the whole of the
+    // gap — verified by walking every case in the switch above.
     if (token.kind === 'deferred') {
       if (token.order === Order.SA) result.setAttributeIgnored++;
       else if (token.order === Order.MF) result.modifyFieldIgnored++;
