@@ -96,8 +96,21 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
       return { command, tokens };
     } catch (e) {
       // Surface SF framing errors as ParseError so session.ts maps them to
-      // X PROG the same way as every other malformed record. Callers must not
-      // have to know about a second error type.
+      // X PROG the same way as every other malformed record. This is not
+      // cosmetic: session.ts:201-207 program-checks ParseError/AddressError and
+      // RETHROWS anything else as "our own bug", which drops the connection. An
+      // SfParseError escaping here would disconnect on a malformed host record.
+      //
+      // Rejecting the record as a whole discards well-formed fields ahead of
+      // the bad one. x3270 instead dispatches each field as it walks, so an
+      // earlier Read Partition has already been answered before it bails on a
+      // later length error (sf.c:146-151 return after the per-field dispatch at
+      // sf.c:153-183) — and it calls that out as a wart, sf.c:185-191: "if we
+      // have already / generated some output, then we have already positively /
+      // acknowledged the request, so if we fail here, we have no / way to
+      // return the error indication." Accepted here because a partial WSF is a
+      // host bug and X PROG is the honest answer; revisit if a real host is
+      // found that splits fields that way.
       if (e instanceof SfParseError) throw new ParseError(e.message);
       throw e;
     }
@@ -227,6 +240,31 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
   return wcc === undefined ? { command, tokens } : { command, wcc, tokens };
 }
 
+/**
+ * Nested union: the return type makes a missing SF kind a compile error.
+ *
+ * Extracted rather than switched inline because a nested switch inside
+ * describeRecord's own switch gets no exhaustiveness checking, and a
+ * StructuredField variant added by a later stage would silently vanish from the
+ * trace. x3270's equivalent dispatch has a case per outbound SFID (sf.c:153-183).
+ *
+ * "unknownSF" not "SF": describeRecord's `case 'sf'` below already emits SF( for
+ * the Start Field ORDER, so one grep over a trace would return both. x3270 words
+ * this one "unsupported ID 0x%02x" (sf.c:180).
+ */
+function describeStructuredField(f: StructuredField): string {
+  switch (f.kind) {
+    case 'readPartition':
+      // PID is padded like every other hex here: 0x00 is a reachable, meaningful
+      // value (a read of partition 0, NOT a query), and "pid=0x0" would read as
+      // a truncation bug in the emulator rather than a byte off the wire.
+      return `ReadPartition(pid=0x${f.pid.toString(16).padStart(2, '0')}`
+        + `,type=0x${f.type.toString(16).padStart(2, '0')})`;
+    case 'unknownSf':
+      return `unknownSF(0x${f.sfid.toString(16).padStart(2, '0')},${f.data.length}B)`;
+  }
+}
+
 /** One-line annotation of a record, for the trace. Never throws. */
 export function describeRecord(record: Uint8Array): string {
   let parsed: ParsedRecord;
@@ -251,16 +289,7 @@ export function describeRecord(record: Uint8Array): string {
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
-      case 'structuredField':
-        switch (t.field.kind) {
-          case 'readPartition':
-            parts.push(`ReadPartition(pid=0x${t.field.pid.toString(16)},type=0x${t.field.type.toString(16).padStart(2, '0')})`);
-            break;
-          case 'unknownSf':
-            parts.push(`SF(sfid=0x${t.field.sfid.toString(16).padStart(2, '0')},${t.field.data.length}B)`);
-            break;
-        }
-        break;
+      case 'structuredField': parts.push(describeStructuredField(t.field)); break;
     }
   }
   return parts.join(' ');

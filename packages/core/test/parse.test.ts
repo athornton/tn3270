@@ -41,6 +41,18 @@ describe('command recognition', () => {
     ]);
   });
 
+  it('emits one token per structured field, not one per record', () => {
+    // A WSF legitimately carries several fields; the per-field tokenisation is
+    // what task 7 iterates. One Read Partition Query, then an unknown SFID.
+    const r = parseRecord(Uint8Array.of(
+      SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02, 0x00, 0x04, 0x40, 0xaa,
+    ));
+    expect(r.tokens).toEqual([
+      { kind: 'structuredField', field: { kind: 'readPartition', pid: 0xff, type: 0x02 } },
+      { kind: 'structuredField', field: { kind: 'unknownSf', sfid: 0x40, data: Uint8Array.of(0xaa) } },
+    ]);
+  });
+
   it('rejects a WSF whose declared length exceeds the payload', () => {
     // Was accepted while the payload was opaque. A length of 5 with 2 bytes
     // present is malformed and must not reach the executor.
@@ -185,6 +197,23 @@ describe('describeRecord', () => {
     expect(text).toContain('SBA(160)');
     expect(text).toContain('SF');
     expect(text).toContain('data[1]');
+  });
+
+  it('renders both structured field kinds, with PID padded', () => {
+    // Exact equality, not toContain: `toContain('SF')` passes on the substring
+    // inside "WriteStructuredField" and so pins nothing. PID 0x00 here is the
+    // padding case — a read of partition 0, which must not render as "pid=0x0".
+    expect(describeRecord(Uint8Array.of(
+      SnaCmd.WSF, 0x00, 0x05, 0x01, 0x00, 0x02, 0x00, 0x04, 0x40, 0xaa,
+    ))).toBe('WriteStructuredField ReadPartition(pid=0x00,type=0x02) unknownSF(0x40,1B)');
+  });
+
+  it('does not render an unknown structured field the way it renders a SF order', () => {
+    // Both used to start "SF(", so one grep over a trace returned both.
+    const order = describeRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SF, FA.PROTECT));
+    const sf = describeRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x04, 0x40, 0xaa));
+    expect(order).toBe('Write WCC=0x00 SF(0x20)');
+    expect(sf).toBe('WriteStructuredField unknownSF(0x40,1B)');
   });
 
   it('describes an unparseable record without throwing', () => {
