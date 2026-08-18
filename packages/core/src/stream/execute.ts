@@ -201,11 +201,19 @@ function applyToken(
       return 0; // unformatted: PT homes
     }
 
+    // TEMPORARY, replaced in stage 2a task 6, which makes SFE actually define a
+    // field from its 0xC0 pair. Not intended behaviour: an ignored SFE leaves
+    // the screen without that field's structure, so screen.fields() misses it
+    // and inbound Read Modified cannot report what the operator typed there.
+    case 'sfe':
+      return addr;
+
     case 'deferred':
-      // SA/SFE/MF are parsed for length and ignored in stage 1. SFE and MF
-      // define a field, so at minimum SFE must still plant an attribute or the
-      // screen loses its structure; stage 1 hosts (MVS 3.8J, VM/370) do not
-      // send them, and TN3270E will implement them properly.
+      // SA/MF are parsed for length and ignored. MF also defines nothing on its
+      // own — it modifies a field that already exists — so ignoring it loses
+      // attribute updates but not screen structure. Stage 1 hosts (MVS 3.8J,
+      // VM/370) do not send either; task 6 counts them so a live run shows
+      // whether any host does.
       return addr;
 
     case 'structuredField':

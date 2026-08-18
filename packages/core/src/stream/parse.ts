@@ -26,6 +26,29 @@ export type CommandName =
   | 'WriteStructuredField'
   | 'NoOp';
 
+/**
+ * One SFE/MF attribute type-value pair. GA23-0059 p. 4-4 draws the SFE format
+ * as a four-column figure that the OCR flattens to four lines, quoted verbatim
+ * (the OCR splits "Pairs" into "Pai rs"):
+ *
+ *   Number of
+ *   Attribute
+ *   Type-Value Attribute Attribute
+ *   X'29' Pai rs Type Value
+ *
+ * So: order byte, count of pairs, then that many (type, value) byte pairs.
+ *
+ * Do not take the pair type from the figure just below that one, which the OCR
+ * renders "I X'C8' I Field Attribute I" — the basic field attribute type is
+ * 0xC0, per Table 4-6 (OCR "X'CO' 3270 Field attribute", letter O for zero) and
+ * x3270's include/3270ds.h:230, which defines XA_3270 as 0xc0. See XA_3270 in
+ * constants.ts, which already pins this.
+ */
+export interface AttributePair {
+  type: number;
+  value: number;
+}
+
 export type Token =
   | { kind: 'data'; bytes: Uint8Array }
   | { kind: 'sba'; address: number }
@@ -35,8 +58,10 @@ export type Token =
   | { kind: 'ra'; stop: number; fill: number; ge: boolean }
   | { kind: 'eua'; stop: number }
   | { kind: 'ge'; ebcdic: number }
-  /** SA/SFE/MF: recognized so they can be skipped by length, not executed. */
+  /** SA/MF: recognized so they can be skipped by length, not executed. */
   | { kind: 'deferred'; order: number; data: Uint8Array }
+  /** SFE with its attribute pairs decoded. Defines a field; see execute.ts. */
+  | { kind: 'sfe'; pairs: AttributePair[] }
   /** One structured field from a WSF record, parsed by stream/sf.ts. */
   | { kind: 'structuredField'; field: StructuredField };
 
@@ -211,19 +236,49 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
         i += 2;
         break;
       }
-      case Order.SFE:
-      case Order.MF: {
-        // One count byte, then that many type/value pairs.
-        const order = b;
+      case Order.SFE: {
+        // One count byte, then that many type/value pairs (p. 4-4). A count of
+        // zero is legal and still defines a field; p. 4-5, quoted with the
+        // manual's own line break after "defaults":
+        //   "If SFE is sent with no type-value pairs (zero value for number of pairs), defaults
+        //   are set."
+        // x3270's loop over the count does the same, running zero times without
+        // special-casing (ctlr.c:1833-1834).
         flushRun();
         i++;
-        need(1, order === Order.SFE ? 'SFE count' : 'MF count');
+        need(1, 'SFE count');
         const count = record[i]!;
         const operandLen = 1 + count * 2;
-        need(operandLen, order === Order.SFE ? 'SFE' : 'MF');
+        need(operandLen, 'SFE');
+        const pairs: AttributePair[] = [];
+        for (let p = 0; p < count; p++) {
+          const at = i + 1 + p * 2;
+          pairs.push({ type: record[at]!, value: record[at + 1]! });
+        }
+        tokens.push({ kind: 'sfe', pairs });
+        i += operandLen;
+        break;
+      }
+      case Order.MF: {
+        // Same wire shape as SFE — p. 4-7 draws MF with the identical four-column
+        // figure, "Number of / Attribute / Type/Value Attribute Attribute /
+        // X'2C' Pai rs Type Value" (OCR splits "Pairs" into "Pai rs"; note MF's
+        // heading reads "Type/Value" where SFE's reads "Type-Value"). But MF
+        // MODIFIES an existing field rather than defining one — p. 4-7, quoted
+        // with the manual's own line break after "attributes":
+        //   "The MF order begins a sequence that updates field and extended field attributes
+        //   at the current buffer address."
+        // Stage 2a does not implement it. Kept opaque and counted so the live
+        // run can show whether any host actually sends it.
+        flushRun();
+        i++;
+        need(1, 'MF count');
+        const count = record[i]!;
+        const operandLen = 1 + count * 2;
+        need(operandLen, 'MF');
         tokens.push({
           kind: 'deferred',
-          order,
+          order: Order.MF,
           data: Uint8Array.from(record.subarray(i, i + operandLen)),
         });
         i += operandLen;
@@ -289,6 +344,15 @@ export function describeRecord(record: Uint8Array): string {
       case 'eua': parts.push(`EUA(->${t.stop})`); break;
       case 'ge': parts.push(`GE(0x${t.ebcdic.toString(16).padStart(2, '0')})`); break;
       case 'deferred': parts.push(`deferred(0x${t.order.toString(16)},${t.data.length}B)`); break;
+      // Both halves padded like every other hex here: a pair value of 0x00 is a
+      // reachable, meaningful byte (type 0xC0 value 0x00 is an unprotected
+      // alphanumeric field), and "0x0" would read as a truncation bug in the
+      // emulator rather than what the host actually sent.
+      case 'sfe':
+        parts.push(`SFE(${t.pairs.map((p) =>
+          `0x${p.type.toString(16).padStart(2, '0')}`
+          + `=0x${p.value.toString(16).padStart(2, '0')}`).join(',')})`);
+        break;
       case 'structuredField': parts.push(describeStructuredField(t.field)); break;
     }
   }

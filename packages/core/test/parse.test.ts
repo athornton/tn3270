@@ -144,7 +144,7 @@ describe('order parsing', () => {
   });
 
   it('recognizes deferred orders and records their operand length', () => {
-    // SA, SFE and MF are not executed in stage 1, but must be skipped by the
+    // SA and MF are not executed in stage 2a, but must be skipped by the
     // right number of bytes or everything after them is garbage.
     const sa = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SA, 0x42, 0xf2, 0xc1));
     expect(sa.tokens).toEqual([
@@ -152,18 +152,69 @@ describe('order parsing', () => {
       { kind: 'data', bytes: Uint8Array.of(0xc1) },
     ]);
 
-    // SFE: one count byte, then that many type/value pairs.
-    const sfe = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0xf8, 0x42, 0xf2, 0xc1));
-    expect(sfe.tokens[0]).toEqual({
-      kind: 'deferred', order: Order.SFE,
+    // MF: one count byte, then that many type/value pairs.
+    const mf = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.MF, 0x02, 0xc0, 0xf8, 0x42, 0xf2, 0xc1));
+    expect(mf.tokens[0]).toEqual({
+      kind: 'deferred', order: Order.MF,
       data: Uint8Array.of(0x02, 0xc0, 0xf8, 0x42, 0xf2),
     });
-    expect(sfe.tokens[1]).toEqual({ kind: 'data', bytes: Uint8Array.of(0xc1) });
+    expect(mf.tokens[1]).toEqual({ kind: 'data', bytes: Uint8Array.of(0xc1) });
+  });
 
-    const mf = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.MF, 0x01, 0xc0, 0xf8, 0xc1));
-    expect(mf.tokens[0]).toEqual({
-      kind: 'deferred', order: Order.MF, data: Uint8Array.of(0x01, 0xc0, 0xf8),
+  it('decodes SFE attribute pairs', () => {
+    // SFE, 1 pair, type 0xC0 (3270 field attribute) value 0x60 (protected).
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x01, 0xc0, 0x60));
+    expect(r.tokens).toEqual([
+      { kind: 'sfe', pairs: [{ type: 0xc0, value: 0x60 }] },
+    ]);
+  });
+
+  it('decodes an SFE with several pairs, keeping ones we do not honour', () => {
+    // Type 0x42 is colour, which stage 2a drops at EXECUTE time — but the
+    // parser still reports it, so the trace shows what the host actually sent.
+    const r = parseRecord(Uint8Array.of(
+      SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0x60, 0x42, 0xf4));
+    expect(r.tokens[0]).toEqual({
+      kind: 'sfe',
+      pairs: [{ type: 0xc0, value: 0x60 }, { type: 0x42, value: 0xf4 }],
     });
+  });
+
+  it('accepts an SFE with zero pairs', () => {
+    // p. 4-5: "If SFE is sent with no type-value pairs (zero value for number
+    // of pairs), defaults are set." It still defines a field.
+    const r = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x00));
+    expect(r.tokens).toEqual([{ kind: 'sfe', pairs: [] }]);
+  });
+
+  it('resumes reading data after an SFE, not inside its pairs', () => {
+    const r = parseRecord(Uint8Array.of(
+      SnaCmd.W, 0x00, Order.SFE, 0x01, 0xc0, 0x60, 0xc1, 0xc2));
+    expect(r.tokens).toEqual([
+      { kind: 'sfe', pairs: [{ type: 0xc0, value: 0x60 }] },
+      { kind: 'data', bytes: Uint8Array.of(0xc1, 0xc2) },
+    ]);
+  });
+
+  it('rejects an SFE whose pair count runs past the record', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x04, 0xc0, 0x60)))
+      .toThrow(ParseError);
+  });
+
+  it('rejects an SFE with no count byte at all', () => {
+    expect(() => parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE)))
+      .toThrow(ParseError);
+  });
+
+  it('leaves SA and MF as deferred tokens', () => {
+    const sa = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SA, 0x42, 0xf4));
+    expect(sa.tokens).toEqual([
+      { kind: 'deferred', order: Order.SA, data: Uint8Array.of(0x42, 0xf4) },
+    ]);
+    const mf = parseRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.MF, 0x01, 0xc0, 0x60));
+    expect(mf.tokens).toEqual([
+      { kind: 'deferred', order: Order.MF, data: Uint8Array.of(0x01, 0xc0, 0x60) },
+    ]);
   });
 
   it('rejects an order truncated by the end of the record', () => {
@@ -214,6 +265,17 @@ describe('describeRecord', () => {
     const sf = describeRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x04, 0x40, 0xaa));
     expect(order).toBe('Write WCC=0x00 SF(0x20)');
     expect(sf).toBe('WriteStructuredField unknownSF(0x40,1B)');
+  });
+
+  it('renders SFE pairs with both hex halves padded', () => {
+    // Value 0x00 is the padding case: an SFE pair type 0xC0 value 0x00 is an
+    // unprotected alphanumeric field, a real byte off the wire, and "0x0" would
+    // read as a truncation bug rather than the attribute the host sent.
+    expect(describeRecord(Uint8Array.of(
+      SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0x00, 0x42, 0xf4,
+    ))).toBe('Write WCC=0x00 SFE(0xc0=0x00,0x42=0xf4)');
+    expect(describeRecord(Uint8Array.of(SnaCmd.W, 0x00, Order.SFE, 0x00)))
+      .toBe('Write WCC=0x00 SFE()');
   });
 
   it('describes an unparseable record without throwing', () => {
