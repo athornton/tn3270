@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute, ExecuteError } from '../src/stream/execute.js';
-import { SnaCmd, Order, FA, WCC } from '../src/constants.js';
+import { SnaCmd, Order, FA, WCC, XA_3270 } from '../src/constants.js';
 
 /** Parse and execute one record against a screen. */
 function run(s: Screen, ...bytes: number[]) {
@@ -193,6 +193,76 @@ describe('orders', () => {
       0xc1, 0xc2);
     expect(s.cellAt(1919).ebcdic).toBe(0xc1);
     expect(s.cellAt(0).ebcdic).toBe(0xc2);
+  });
+
+  it('SFE defines a field with the 0xC0 pair as its attribute', () => {
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x01, XA_3270, 0x60);
+    expect(s.attributeAt(0)).toBe(0x60);
+    expect(s.isFormatted()).toBe(true);
+    expect(s.fieldAt(1)?.protected).toBe(true);
+  });
+
+  it('SFE with no 0xC0 pair STILL defines a field, with the default attribute', () => {
+    // p. 4-5: unspecified attribute types take their defaults. Skipping the
+    // field here would lose it entirely, which is the failure SFE exists to
+    // prevent. Type 0x42 is colour, which we do not honour.
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x01, 0x42, 0xf4);
+    expect(s.attributeAt(0)).toBe(0x00);
+    expect(s.isFormatted()).toBe(true);
+  });
+
+  it('SFE with zero pairs defines a field with the default attribute', () => {
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x00);
+    expect(s.attributeAt(0)).toBe(0x00);
+    expect(s.isFormatted()).toBe(true);
+  });
+
+  it('SFE advances past the attribute position like SF does', () => {
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x01, XA_3270, 0x60, 0xc1);
+    // The data byte lands AFTER the attribute, at address 1.
+    expect(s.cellAt(1).ebcdic).toBe(0xc1);
+  });
+
+  it('SFE ignores pair types it does not honour but keeps the field attribute', () => {
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40,
+      Order.SFE, 0x02, 0x42, 0xf4, XA_3270, 0x60);
+    expect(s.attributeAt(0)).toBe(0x60);
+  });
+
+  it('SFE takes the LAST 0xC0 pair when the type repeats', () => {
+    // p. 4-5 (pages.txt:2899-2901): "All attribute types and values are checked
+    // for validity. If the same attribute / type-value pair appears more than
+    // once, the last specification for a repeated / attribute type takes
+    // effect." x3270 gets this for free: its pair loop calls START_FIELD on
+    // every 0xC0 it meets, so the last write to the buffer wins
+    // (ctlr.c:1838-1842).
+    const s = new Screen();
+    run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40,
+      Order.SFE, 0x02, XA_3270, 0x60, XA_3270, 0x00);
+    expect(s.attributeAt(0)).toBe(0x00);
+  });
+
+  it('counts SA and MF separately so the live run can measure them', () => {
+    // A COUNTER THAT REPORTS ABSENCE MUST FIRST BE SHOWN ABLE TO REPORT
+    // PRESENCE. Stage 1 lesson 7: a probe that could only ever say "never"
+    // produced a confident wrong claim that reached committed docs. These
+    // assertions are that proof.
+    const s = new Screen();
+    const r = run(s, SnaCmd.W, 0x00, Order.SA, 0x42, 0xf4, Order.MF, 0x01, XA_3270, 0x60);
+    expect(r.setAttributeIgnored).toBe(1);
+    expect(r.modifyFieldIgnored).toBe(1);
+  });
+
+  it('reports zero ignored orders for a record containing none', () => {
+    const s = new Screen();
+    const r = run(s, SnaCmd.W, 0x00, 0xc1);
+    expect(r.setAttributeIgnored).toBe(0);
+    expect(r.modifyFieldIgnored).toBe(0);
   });
 
   it('a field attribute overwritten by data destroys the field', () => {
