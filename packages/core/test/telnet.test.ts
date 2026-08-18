@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TelnetLayer, MAX_RECORD_BYTES } from '../src/telnet.js';
+import { TelnetLayer, MAX_RECORD_BYTES, MAX_SUBNEG_BYTES } from '../src/telnet.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
 import { Trace } from '../src/trace.js';
 
@@ -10,6 +10,18 @@ function harness() {
   const layer = new TelnetLayer({
     write: (b) => sent.push(Array.from(b)),
     onRecord: (r) => records.push(r),
+  });
+  return { layer, sent, records };
+}
+
+/** As `harness`, with an explicit terminal type. */
+function harness2(terminalType: string) {
+  const sent: number[][] = [];
+  const records: Uint8Array[] = [];
+  const layer = new TelnetLayer({
+    write: (b) => sent.push(Array.from(b)),
+    onRecord: (r) => records.push(r),
+    terminalType,
   });
   return { layer, sent, records };
 }
@@ -63,6 +75,43 @@ describe('option negotiation', () => {
       expect(code).toBeLessThanOrEqual(0x7e);
     }
     expect(String.fromCharCode(...payload)).toBe('IBM-3278-2');
+  });
+
+  it('doubles an IAC inside the terminal-type body but not the framing', () => {
+    // RFC 855 (option specifications), final paragraph: "Finally, if parameters
+    // in an option "subnegotiation" include a byte with a value of 255, it is
+    // necessary to double this byte in accordance the general TELNET rules."
+    // x3270 implements exactly this for the ttype reply: the reply is built with
+    // its own IAC SB / IAC SE already in the buffer and handed to
+    // net_hexnvt_out_framed(..., true) (telnet.c:2025), which skips quoting the
+    // first byte and the last two — telnet.c:3003-3004,
+    //     if (framed && (first || len == 1)) {
+    //         /* Don't quote initial IAC or trailing IAC SE. */
+    // Only reachable via the raw --terminal-type escape hatch; -model produces
+    // ASCII only. It is a correctness fix, not an urgent one.
+    const { layer, sent } = harness2('A\xffB');
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    expect(sent[0]).toEqual([
+      T.IAC, T.SB, O.TERMINAL_TYPE, S.IS,
+      0x41, T.IAC, T.IAC, 0x42, // the interior 0xff is doubled
+      T.IAC, T.SE,              // ...but the trailing framing is not
+    ]);
+  });
+
+  it('doubles a ttype IAC that only appears after truncation to a byte', () => {
+    // The name is built with charCodeAt, which yields a UTF-16 code unit, and
+    // Uint8Array.from then truncates it mod 256 *silently*. U+01FF is 511, which
+    // is not 0xff but truncates to 0xff, so a doubling test applied to the
+    // untruncated value would emit a bare IAC. The mask must come first.
+    const { layer, sent } = harness2('ǿ');
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
+    expect(sent[0]).toEqual([
+      T.IAC, T.SB, O.TERMINAL_TYPE, S.IS, T.IAC, T.IAC, T.IAC, T.SE,
+    ]);
   });
 
   it('refuses TN3270E in stage 1', () => {
@@ -243,6 +292,74 @@ describe('record framing', () => {
     const { layer, records } = in3270();
     layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
     layer.receive(new Uint8Array(1024).fill(0x41)); // never terminated
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('un-doubles IAC IAC inside an inbound subnegotiation body', () => {
+    // The inbound direction was already correct, and matches x3270: St.SbIac
+    // falls through to `this.sb.push(c)` for any non-SE byte, so IAC IAC stores
+    // one 0xff — the same shape as x3270's TNS_SB_IAC, which for c != SE leaves
+    // the byte it already stored via `*sbptr++ = c` (telnet.c:1994-1996) and
+    // returns to TNS_SB. Observed through the trace note, because an option byte
+    // of 0xff can only have arrived as a doubled IAC.
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({ write: () => {}, onRecord: () => {}, trace });
+    layer.receive(Uint8Array.of(T.IAC, T.SB, T.IAC, T.IAC, 1, 2, T.IAC, T.SE));
+    expect(trace.lines()).toContain('0.000 = # ignored subnegotiation for option 255');
+  });
+
+  it('caps an unterminated subnegotiation made of escaped IACs', () => {
+    // The ceiling was checked only on the St.Sb path, so a body of IAC IAC pairs
+    // routed through St.SbIac -> sb.push() bypassed it entirely and grew the
+    // number[] without bound — the exact heap exhaustion MAX_SUBNEG_BYTES exists
+    // to prevent, just via the escaped-byte door. Measured before the fix: 200000
+    // escaped IACs left this.sb at 200001 entries with no note emitted.
+    // Sized exactly, like the plain-filler test above, so abandonment lands on
+    // the chunk boundary with no pair left over: a leftover pair would be re-read
+    // in St.Data as escaped data and prepended to the next record — correct
+    // behaviour, but it would mask what this asserts. MAX_SUBNEG_BYTES pairs, not
+    // one more, because the option byte 99 already occupies the first slot.
+    const { layer, records } = in3270();
+    layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
+    const pairs = new Uint8Array(MAX_SUBNEG_BYTES * 2);
+    pairs.fill(T.IAC); // every byte an IAC, so every pair is one escaped 0xff
+    layer.receive(pairs);
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(records).toHaveLength(1);
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('caps a record made of escaped IACs', () => {
+    // Same hole on the record path: St.Iac's `this.record.push(0xff)` skipped the
+    // MAX_RECORD_BYTES check that St.Data applies, so escaped IACs grew the
+    // accumulator past the ceiling. Measured before the fix: 100000 escaped IACs
+    // left this.record at 100000 entries against a 65536 cap.
+    const { layer, records } = in3270();
+    const pairs = new Uint8Array(MAX_RECORD_BYTES * 2 + 64);
+    pairs.fill(T.IAC);
+    layer.receive(pairs);
+    layer.receive(Uint8Array.of(T.IAC, T.EOR));
+    expect(records).toHaveLength(0);
+    layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
+    expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
+  });
+
+  it('does not leak an escaped IAC into the record outside 3270 mode', () => {
+    // St.Data drops NVT text, but St.Iac's escaped-IAC branch pushed 0xff
+    // unconditionally, so a doubled IAC in the pre-3270 banner became the first
+    // byte of the first real record. Measured before the fix: the record came out
+    // as [255, 245, 195] instead of [245, 195]. x3270 gates the escaped-IAC
+    // branch on mode too — telnet.c:1744-1745,
+    //     case IAC:	/* escaped IAC, insert it */
+    //         if (IN_NVT && !IN_E) {
+    // sends it to nvt_process() and only the else calls store3270in(c)
+    // (telnet.c:1772-1773).
+    const { layer, records } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.IAC)); // doubled IAC while still NVT
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY));
     layer.receive(Uint8Array.of(0xf5, 0xc3, T.IAC, T.EOR));
     expect(records).toHaveLength(1);
     expect(Array.from(records[0]!)).toEqual([0xf5, 0xc3]);
