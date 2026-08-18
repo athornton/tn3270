@@ -1,6 +1,6 @@
 import { createConnection } from 'node:net';
 import {
-  Session, type Connection, AID, PF_AIDS, PA_AIDS,
+  Session, type Connection, AID, PF_AIDS, PA_AIDS, KeyboardState,
 } from '@tn3270/core';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
@@ -277,7 +277,33 @@ export class Runner {
     const done = (): boolean => {
       switch (what) {
         case 'output': return this.outputCount > startingOutput;
-        case 'unlock': return !this.session.oia.waitingForHost;
+        // Both halves are needed, and the second was added with enter-inhibit.
+        //
+        // waitingForHost alone was sufficient while every host-imposed lock set
+        // it — AwaitingFirstWrite on connect and SystemWait on an AID both do.
+        // EnterInhibit does not: it is raised by answering a Query, which sends
+        // no AID and is not the host writing, so nothing sets that flag and
+        // Wait(Unlock) would return over a keyboard that still refuses input.
+        // The next String() would then fail as "input inhibited" — the exact
+        // failure mode the Wait(Settle) comment below records from a live run.
+        //
+        // x3270 blocks Wait(Unlock) on enter-inhibit: TS_WAIT_UNLOCK's test is
+        // `if (KBWAIT) { return any; }` (Common/task.c:2276-2279), and
+        // KBWAIT_MASK lists the bit — `#define KBWAIT_MASK (KL_OIA_LOCKED|
+        // KL_OIA_TWAIT|KL_DEFERRED_UNLOCK|KL_ENTER_INHIBIT|KL_AWAITING_FIRST|
+        // KL_FT|KL_BID)` (task.c:262).
+        //
+        // Deliberately tests EnterInhibit BY NAME rather than isInhibited(),
+        // narrow to the one state that was missing. The broad version would
+        // also start blocking on ProgramCheck, which today returns immediately
+        // because programCheck() clears waitingForHost (session.ts:269) — and
+        // blocking there would be wrong as well as out of scope, since only the
+        // operator's Reset clears a program check, so the wait could do nothing
+        // but burn its timeout. x3270's mask likewise omits the operator-error
+        // bits (KL_OERR_MASK is absent from KBWAIT_MASK above) for that reason.
+        case 'unlock':
+          return !this.session.oia.waitingForHost
+            && this.session.oia.keyboard !== KeyboardState.EnterInhibit;
         case '3270mode': return this.session.is3270Mode();
         case 'settle': {
           // Wait for the host to stop sending. Distinct from Output (which fires

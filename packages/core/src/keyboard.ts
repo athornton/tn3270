@@ -24,6 +24,37 @@ export class Keyboard {
   /** Type one character. Returns false if the keyboard is inhibited. */
   type(char: string): boolean {
     const s = this.screen;
+
+    // A HOST-IMPOSED LOCK REFUSES THE KEYSTROKE OUTRIGHT, and leaves the state
+    // alone for the host to clear.
+    //
+    // Before this guard nothing enforced any lock on typing: only the CLI's
+    // Wait(Settle) and Wait(InputField) consulted isInhibited (runner.ts:334,
+    // :364, both `if (this.session.oia.isInhibited()) return false;`), so a
+    // caller reaching Keyboard.type directly could write into a screen the host
+    // had frozen — and after answering a Query that is precisely the screen it
+    // would be writing into. An unenforced state is not a fix.
+    //
+    // x3270 refuses on ANY lock bit and it is the first thing key_Character
+    // does: `if (kybdlock) { ... enq_fta(key_Character_wrapper, ...); return
+    // true; }` (Common/kybd.c:1201-1210), the DBCS twin key_WCharacter doing
+    // the same at kybd.c:1489-1497. It parks the keystroke on the typeahead
+    // queue rather than discarding it — a queue we do not have, so we refuse
+    // and return false, which is this class's documented contract for a
+    // refusal.
+    //
+    // OPERATOR ERRORS ARE EXCLUDED, and must be, or the exclusion breaks two
+    // shipped behaviours: "refuses a letter in a numeric field" types '5'
+    // successfully straight after the refused 'A', and the auto-skip test types
+    // on after a full field. x3270 draws the same line, clearing KL_OERR_MASK
+    // and continuing where a host lock would have deferred — see
+    // OERR_CLEAR_OR_ENQ (kybd.c:147-158), whose two arms are exactly
+    // `kybdlock_clr(KL_OERR_MASK, action)` versus `enq_ta(action, ...)`.
+    // Semantically: an operator error is the operator's own to correct with the
+    // next keystroke, whereas AwaitingFirstWrite, EnterInhibit, SystemWait and
+    // ProgramCheck are the host's to release.
+    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+
     const field = s.fieldAt(s.cursor);
 
     if (field !== null) {

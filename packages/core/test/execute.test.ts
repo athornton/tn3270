@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute, ExecuteError } from '../src/stream/execute.js';
-import { SnaCmd, Order, FA, WCC, XA_3270 } from '../src/constants.js';
+import { SnaCmd, Cmd, Order, FA, WCC, XA_3270 } from '../src/constants.js';
 
 /** Parse and execute one record against a screen. */
 function run(s: Screen, ...bytes: number[]) {
@@ -68,6 +68,34 @@ describe('WCC handling', () => {
   it('reports an alarm request', () => {
     const s = new Screen();
     expect(run(s, SnaCmd.W, WCC.SOUND_ALARM).alarm).toBe(true);
+  });
+
+  it('reports which commands release the enter-inhibit condition', () => {
+    // The exact command set x3270 clears KL_ENTER_INHIBIT on, pinned here at
+    // the layer that decides it rather than only through the session:
+    // ctlr_erase for EW and EWA (Common/ctlr.c:550, dispatched at
+    // ctlr.c:615-625), ctlr_erase_all_unprotected for EAU (ctlr.c:1309), and
+    // ctlr_write for Write (ctlr.c:1406).
+    //
+    // Asserted WITHOUT WCC keyboard-restore (WCC 0x00), so what is being
+    // measured is the command, not the bit. And asserted false for the reads,
+    // WSF and NoOp, which is what makes a Query's inhibit outlast the reply
+    // exchange — none of those three functions is on their path
+    // (ctlr.c:632-657).
+    const s = new Screen();
+    expect(run(s, SnaCmd.W, 0x00).releasesEnterInhibit).toBe(true);
+    expect(run(s, SnaCmd.EW, 0x00).releasesEnterInhibit).toBe(true);
+    expect(run(s, SnaCmd.EWA, 0x00).releasesEnterInhibit).toBe(true);
+    expect(run(s, SnaCmd.EAU).releasesEnterInhibit).toBe(true);
+
+    expect(run(s, SnaCmd.RB).releasesEnterInhibit).toBe(false);
+    expect(run(s, SnaCmd.RM).releasesEnterInhibit).toBe(false);
+    expect(run(s, SnaCmd.RMA).releasesEnterInhibit).toBe(false);
+    // WSF carrying a Read Partition (Query): L=5 SFID=01 PID=ff TYPE=02. No
+    // IAC doubling here — parseRecord takes an already-unframed record.
+    expect(run(s, SnaCmd.WSF, 0x00, 0x05, 0x01, 0xff, 0x02).releasesEnterInhibit)
+      .toBe(false);
+    expect(run(s, Cmd.NOP).releasesEnterInhibit).toBe(false);
   });
 
   it('reports that no printer is available for start-printer', () => {

@@ -300,4 +300,77 @@ describe('OIA', () => {
     o.insertMode = true;
     expect(o.toText()).toContain('^');
   });
+
+  it('renders enter-inhibit as x3270 does', () => {
+    // x3270 folds KL_ENTER_INHIBIT into "X Wait" in every one of its four
+    // status renderers — `} else if (kybdlock & (KL_ENTER_INHIBIT | KL_BID)) {
+    // other_msg = "X Wait";` (c3270/screen.c:2385-2386, and identically
+    // Common/vstatus.c:279-280, x3270/status.c:643, wc3270/screen.c:3122).
+    const o = new Oia();
+    o.connected = true;
+    o.inhibit(KeyboardState.EnterInhibit);
+    expect(o.toText()).toContain('X Wait');
+  });
+});
+
+describe('enter-inhibit refuses input', () => {
+  // GA23-0059 p. 5-53 step 1 of Read Partition processing (pages.txt:6413):
+  // "1. The enter-inhibit condition is raised." A state nobody enforces is not
+  // a fix, so these assert through the Keyboard, not just the Oia.
+  it('refuses to type while inhibited, and leaves the buffer untouched', () => {
+    const s = twoFields();
+    const k = kb(s);
+    k.oia.inhibit(KeyboardState.EnterInhibit);
+    expect(k.type('A')).toBe(false);
+    expect(s.cellAt(1).ebcdic).toBe(0x00);
+    expect(s.cursor).toBe(1);
+    // And the state is NOT overwritten by an operator-error state: the refusal
+    // must leave the host-imposed inhibit in place for the host to clear.
+    expect(k.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+  });
+
+  it('refuses typeString on the very first character', () => {
+    const s = twoFields();
+    const k = kb(s);
+    k.oia.inhibit(KeyboardState.EnterInhibit);
+    expect(k.typeString('AB')).toBe(false);
+    expect(s.cellAt(1).ebcdic).toBe(0x00);
+    expect(s.cellAt(2).ebcdic).toBe(0x00);
+  });
+
+  it('refuses to type while awaiting the first write', () => {
+    // The pre-existing lock had the same unenforced gap. x3270 refuses on ANY
+    // kybdlock bit, not a chosen subset: key_Character's first act is
+    // `if (kybdlock) { ... enq_fta(...); return true; }` (kybd.c:1201-1210) —
+    // it queues the keystroke as typeahead rather than applying it.
+    const s = twoFields();
+    const k = kb(s);
+    k.oia.inhibit(KeyboardState.AwaitingFirstWrite);
+    expect(k.type('A')).toBe(false);
+    expect(s.cellAt(1).ebcdic).toBe(0x00);
+  });
+
+  it('lets the operator type again once Reset clears the inhibit', () => {
+    // Reset is the operator's own escape. It is NOT the protocol's clear for
+    // enter-inhibit (that is the host's next write), but x3270's do_reset
+    // clears every bit but KL_BID when explicit (kybd.c:2062), so an operator
+    // who presses Reset is not stuck.
+    const s = twoFields();
+    const k = kb(s);
+    k.oia.inhibit(KeyboardState.EnterInhibit);
+    expect(k.type('A')).toBe(false);
+    k.reset();
+    expect(k.type('A')).toBe(true);
+    expect(s.cellAt(1).ebcdic).toBe(0xc1);
+  });
+
+  it('still reports an operator error when the keyboard was unlocked', () => {
+    // The guard must not swallow the operator-error path: a protected-field
+    // refusal from an UNLOCKED keyboard still has to set X Protected.
+    const s = twoFields();
+    s.cursor = 11;
+    const k = kb(s);
+    expect(k.type('A')).toBe(false);
+    expect(k.oia.keyboard).toBe(KeyboardState.ProtectedField);
+  });
 });

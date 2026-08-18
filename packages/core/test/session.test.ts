@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
-  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA, Qcode, Sfid,
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Cmd, Order, AID, FA, Qcode, Sfid,
 } from '../src/constants.js';
 import { KeyboardState } from '../src/oia.js';
 
@@ -441,6 +441,156 @@ describe('query reply', () => {
     conn.host(SnaCmd.WSF, 0x00, 0x00, 0x01, T.IAC, T.EOR);
     expect(session.oia.toText()).toContain('X PROG');
     expect(session.isConnected()).toBe(true);
+  });
+
+  describe('the enter-inhibit condition', () => {
+    /**
+     * GA23-0059 p. 5-53, step 1 of Read Partition processing
+     * (pages.txt:6413): "1. The enter-inhibit condition is raised."
+     *
+     * x3270 does the same in query_reply_end() (Common/sf.c:926-930):
+     *
+     *     net_output();
+     *     kybd_inhibit(true);
+     *
+     * and kybd_inhibit(true) sets KL_ENTER_INHIBIT (Common/kybd.c:528),
+     * whose header comment is "Awaiting unlock after QueryReply"
+     * (include/kybd.h:45).
+     */
+
+    /** Get a session past its first host write, so AwaitingFirstWrite is gone. */
+    async function midSession() {
+      const { session, conn } = newSession();
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      // Erase/Write with WCC keyboard-restore, one unprotected field, cursor
+      // inside it: an ordinary host panel the operator may type into.
+      conn.host(SnaCmd.EW, 0x02, Order.SF, 0x00, T.IAC, T.EOR);
+      session.keyboard.moveCursor(1);
+      expect(session.oia.isInhibited()).toBe(false);
+      conn.sent.length = 0;
+      return { session, conn };
+    }
+
+    it('raises the inhibit on a mid-session Query', async () => {
+      // THE DIVERGENCE THIS CLOSES. Before this fix a mid-session Query left
+      // the keyboard unlocked over a screen the host considers frozen, and the
+      // operator could type into it.
+      const { session, conn } = await midSession();
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+      expect(session.oia.isInhibited()).toBe(true);
+    });
+
+    it('refuses operator input after a mid-session Query', async () => {
+      // Enforcement, not just state: the whole point is that the operator
+      // cannot type into the frozen screen.
+      const { session, conn } = await midSession();
+      expect(session.keyboard.type('A')).toBe(true); // typable before
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(session.keyboard.type('B')).toBe(false);
+      expect(session.screen.cellAt(2).ebcdic).toBe(0x00);
+    });
+
+    it('answers the Query BEFORE raising the inhibit', async () => {
+      // x3270's ordering in query_reply_end(): net_output() then
+      // kybd_inhibit(true) (Common/sf.c:928-929). Asserted by observing that
+      // the reply is on the wire by the time the state has changed — both
+      // happen inside the one synchronous handleRecord, so the only way to see
+      // the order is that the reply is NOT lost to the lock.
+      const { session, conn } = await midSession();
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(conn.sent.length).toBeGreaterThan(0);
+      expect(lastRecord(conn)[0]).toBe(AID.SF);
+      expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+    });
+
+    // The four commands x3270 clears KL_ENTER_INHIBIT on, and only those:
+    // ctlr_erase (Common/ctlr.c:550), reached for Erase/Write and
+    // Erase/Write Alternate (the dispatch at ctlr.c:615-625);
+    // ctlr_erase_all_unprotected (ctlr.c:1309); and ctlr_write (ctlr.c:1406),
+    // reached for all three write commands. Deliberately WITHOUT WCC
+    // keyboard-restore, so what releases the lock is the command itself.
+    const clearing: ReadonlyArray<readonly [string, readonly number[]]> = [
+      ['Write', [SnaCmd.W, 0x00, 0xc1]],
+      ['EraseWrite', [SnaCmd.EW, 0x00, 0xc1]],
+      ['EraseWriteAlternate', [SnaCmd.EWA, 0x00, 0xc1]],
+      // EAU takes no WCC and no data (format at pages.txt:1951-1958).
+      ['EraseAllUnprotected', [SnaCmd.EAU]],
+    ];
+
+    for (const [name, record] of clearing) {
+      it(`releases the inhibit on ${name}`, async () => {
+        const { session, conn } = await midSession();
+        conn.host(...QUERY, T.IAC, T.EOR);
+        expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+        conn.host(...record, T.IAC, T.EOR);
+        expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+        expect(session.oia.isInhibited()).toBe(false);
+      });
+    }
+
+    it('is NOT released by a Read command, a NoOp or another Query', async () => {
+      // x3270 clears the bit in exactly three functions, none of which a read,
+      // a NoOp or a second WSF reaches: process_ds dispatches CMD_RB/RM/RMA to
+      // ctlr_read_buffer/ctlr_read_modified, CMD_WSF to
+      // write_structured_field, and CMD_NOP to nothing but a trace line
+      // (Common/ctlr.c:632-657).
+      const { session, conn } = await midSession();
+      conn.host(...QUERY, T.IAC, T.EOR);
+      conn.host(SnaCmd.RM, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+      // Cmd.NOP, not SnaCmd.NOP, which does not exist: Table 3-1 "Command
+      // Codes and Abbreviations" (pages.txt:1712-1722) lists no NOP row at all,
+      // and x3270 likewise defines `#define CMD_NOP 0x03 /* no-op */`
+      // (include/3270ds.h:43) with no SNA_CMD_NOP beside its eight siblings.
+      conn.host(Cmd.NOP, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+    });
+
+    it('leaves AwaitingFirstWrite in place for a pre-write Query', async () => {
+      // WHICH STATE WINS BEFORE THE FIRST WRITE. AwaitingFirstWrite must not
+      // be downgraded to EnterInhibit: it is the STRONGER condition (there is
+      // no screen at all yet, versus a screen that is merely frozen), it is
+      // released by a strictly larger set of records (any write, including one
+      // whose WCC restores the keyboard), and x3270 gives it priority in the
+      // status line too — the KL_AWAITING_FIRST arm precedes the
+      // KL_ENTER_INHIBIT arm in all four renderers (c3270/screen.c:2383-2386).
+      // Both are inhibits, so the operator is refused either way.
+      const { session, conn } = newSession();
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.AwaitingFirstWrite);
+      expect(session.oia.isInhibited()).toBe(true);
+      expect(session.keyboard.type('A')).toBe(false);
+    });
+
+    it('does not disturb a stronger inhibit the operator must clear', async () => {
+      // A program check outranks enter-inhibit: x3270 keeps the operator-error
+      // and lock bits set independently in one word, so raising
+      // KL_ENTER_INHIBIT cannot erase them. We have a single state, so the
+      // rule has to be explicit — and losing X PROG would hide a protocol
+      // fault behind a routine wait.
+      const { session, conn } = await midSession();
+      conn.host(0x99, 0x00, T.IAC, T.EOR); // unknown command
+      expect(session.oia.keyboard).toBe(KeyboardState.ProgramCheck);
+      conn.host(...QUERY, T.IAC, T.EOR);
+      expect(session.oia.keyboard).toBe(KeyboardState.ProgramCheck);
+      expect(session.oia.toText()).toContain('X PROG');
+    });
+
+    it('a WCC keyboard-restore still unlocks after a Query', async () => {
+      // The existing keyboardRestore path must keep working: WCC bit 6 unlocks
+      // regardless, and it arrives on a Write, which clears the inhibit anyway.
+      const { session, conn } = await midSession();
+      conn.host(...QUERY, T.IAC, T.EOR);
+      conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // WCC keyboard restore
+      expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+    });
   });
 });
 

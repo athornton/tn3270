@@ -25,6 +25,33 @@ export interface ExecuteResult {
   sfReply?: 'queryReply';
   /** WCC bit 6: unlock the keyboard. */
   keyboardRestore: boolean;
+  /**
+   * This command releases the enter-inhibit condition raised by a Query.
+   *
+   * Distinct from keyboardRestore, and deliberately so. keyboardRestore is the
+   * host asking, via WCC bit 6, to unlock EVERYTHING; this is the far narrower
+   * "a write happened, so the screen the Query froze is no longer frozen", and
+   * it holds whether or not the WCC sets that bit. The session applies each
+   * separately.
+   *
+   * True for exactly four commands, which are exactly the four x3270 clears
+   * KL_ENTER_INHIBIT on:
+   *
+   *   - Erase/Write and Erase/Write Alternate, via ctlr_erase's opening
+   *     `kybd_inhibit(false);` (Common/ctlr.c:546-550); process_ds routes both
+   *     there, `case CMD_EWA: ... ctlr_erase(true);` and `case CMD_EW: ...
+   *     ctlr_erase(false);` (ctlr.c:615-625).
+   *   - Erase All Unprotected, via ctlr_erase_all_unprotected (ctlr.c:1303-1309).
+   *   - Write, via ctlr_write (ctlr.c:1406). Note this one covers all three
+   *     write commands, since process_ds calls ctlr_write after ctlr_erase for
+   *     EW and EWA too — hence EW/EWA clear it twice in x3270, harmlessly.
+   *
+   * And false for everything else, which is what makes the inhibit outlast a
+   * read: process_ds sends CMD_RB/RM/RMA to ctlr_read_buffer/ctlr_read_modified,
+   * CMD_WSF to write_structured_field, and CMD_NOP to a trace line and nothing
+   * else (ctlr.c:632-657) — none of the three clearing functions among them.
+   */
+  releasesEnterInhibit: boolean;
   /** WCC bit 5: sound the alarm. */
   alarm: boolean;
   /** WCC bit 4 asked for a local copy and we have no printer. */
@@ -55,6 +82,7 @@ export interface ExecuteResult {
 export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   const result: ExecuteResult = {
     keyboardRestore: false,
+    releasesEnterInhibit: false,
     alarm: false,
     printerUnavailable: false,
     structuredFieldsIgnored: 0,
@@ -84,6 +112,14 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       // buffer on the next keystroke.
       screen.cursor = screen.firstUnprotectedStart() ?? 0;
       result.keyboardRestore = true;
+      // Redundant against keyboardRestore just above, which already unlocks
+      // everything — set anyway so the flag means "this command releases the
+      // inhibit" for all four commands uniformly, rather than "…except where
+      // some other flag happens to cover it". x3270 is equally redundant here:
+      // ctlr_erase_all_unprotected calls kybd_inhibit(false) at its top
+      // (ctlr.c:1309) and do_reset(false) at its bottom (ctlr.c:1350), and the
+      // latter clears the same bit again (kybd.c:2062).
+      result.releasesEnterInhibit = true;
       return result;
 
     case 'WriteStructuredField':
@@ -118,9 +154,11 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       // On a model 2 the alternate size equals the default, so both clear the
       // same buffer. TN3270E gives them different behavior.
       screen.clear();
+      result.releasesEnterInhibit = true;
       break;
 
     case 'Write':
+      result.releasesEnterInhibit = true;
       break;
   }
 

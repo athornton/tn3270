@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA } from '@tn3270/core';
+import { Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState } from '@tn3270/core';
 import { Runner } from '../src/runner.js';
 
 class FakeConnection implements Connection {
@@ -162,6 +162,48 @@ describe('Wait', () => {
     const reply = await runner.run('Wait(Unlock,0.05)');
     expect(reply).toContain('data: timed out');
     expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('Wait(Unlock) does not return while enter-inhibit is up', async () => {
+    // Enter-inhibit sets no waitingForHost — answering a Query sends no AID and
+    // is not a host write — so a wait that tested only that flag would return
+    // over a keyboard that still refuses input, and the next String() would
+    // fail as "input inhibited". x3270 blocks here: KBWAIT_MASK includes
+    // KL_ENTER_INHIBIT (Common/task.c:262) and TS_WAIT_UNLOCK returns early
+    // while KBWAIT holds (task.c:2276-2279).
+    const { runner, session, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    session.oia.waitingForHost = false;
+    session.oia.inhibit(KeyboardState.EnterInhibit);
+    const reply = await runner.run('Wait(Unlock,0.05)');
+    expect(reply).toContain('data: timed out');
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('Wait(Unlock) returns once a write releases the inhibit', async () => {
+    const { runner, session, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    session.oia.waitingForHost = false;
+    session.oia.inhibit(KeyboardState.EnterInhibit);
+    conn.host(SnaCmd.W, 0x00, 0xc1, T.IAC, T.EOR);
+    const reply = await runner.run('Wait(Unlock,0.05)');
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+
+  it('Wait(Unlock) still returns immediately on a program check', async () => {
+    // Narrowness check on the guard above: a program check must NOT newly block
+    // the wait. Only the operator's Reset clears one, so waiting could do
+    // nothing but burn the timeout — and x3270's KBWAIT_MASK likewise omits the
+    // operator-error bits.
+    const { runner, session, conn } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    conn.negotiate();
+    conn.host(0x99, 0x00, T.IAC, T.EOR); // unknown command
+    expect(session.oia.keyboard).toBe(KeyboardState.ProgramCheck);
+    const reply = await runner.run('Wait(Unlock,0.05)');
+    expect(reply.split('\n').pop()).toBe('ok');
   });
 
   it('Wait(Output) returns when the host writes', async () => {

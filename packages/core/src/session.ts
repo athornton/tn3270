@@ -185,6 +185,31 @@ export class Session {
       const parsed = parseRecord(record);
       const result = execute(this.screen, parsed);
 
+      // Release the enter-inhibit condition raised by an earlier Query.
+      //
+      // Placed before the two branches below for READABILITY, narrowest rule
+      // first, and NOT because the order is load-bearing: it was checked by
+      // moving this block after them, and all 45 session tests still passed.
+      // The three rules turn out to commute, because the state EnterInhibit
+      // can coexist with is only itself. Reaching the AwaitingFirstWrite
+      // branch requires the state to BE AwaitingFirstWrite, and enterInhibit()
+      // never overwrites that, so the two can never contend for the same
+      // record. Do not read the sequence here as an invariant.
+      //
+      // releaseEnterInhibit, not reset(): it clears that one state and leaves
+      // any other alone, mirroring x3270's single-bit `kybdlock_clr(
+      // KL_ENTER_INHIBIT, "kybd_inhibit")` (Common/kybd.c:533). A reset() here
+      // would let a routine host write clear a program check the host has not
+      // acknowledged.
+      //
+      // Unconditional on the flag rather than guarded by "are we inhibited":
+      // x3270 calls kybd_inhibit(false) on every Erase/EAU/Write regardless of
+      // the current lock (ctlr.c:550, :1309, :1406), and releaseEnterInhibit is
+      // itself a no-op unless EnterInhibit is the live state.
+      if (result.releasesEnterInhibit) {
+        this.oia.releaseEnterInhibit();
+      }
+
       if (result.keyboardRestore) {
         this.oia.waitingForHost = false;
         this.oia.reset();
@@ -255,22 +280,51 @@ export class Session {
   }
 
   /**
-   * Answer a Read Partition (Query) with our capabilities.
+   * Answer a Read Partition (Query) with our capabilities, then lock the
+   * keyboard.
    *
-   * Deliberately does NOT touch the screen, the cursor or the keyboard: a Query
-   * is a question about the device, not a write to it. In particular the
-   * keyboard stays locked, because AwaitingFirstWrite is released by host
-   * WRITES and the host has not written anything yet.
+   * Deliberately does NOT touch the screen or the cursor: a Query is a question
+   * about the device, not a write to it.
+   *
+   * It DOES touch the keyboard, which is step 1 of Read Partition processing,
+   * GA23-0059 p. 5-53 (pages.txt:6413): "1. The enter-inhibit condition is
+   * raised." The host has frozen the screen pending its own next write, and
+   * until that arrives the operator must not type into it. x3270 raises it in
+   * query_reply_end (Common/sf.c:926-930), which is the whole function:
+   *
+   *     net_output();
+   *     kybd_inhibit(true);
+   *
+   * REPLY FIRST, THEN INHIBIT, matching that ordering exactly. The manual's own
+   * step list is the other way round — the inhibit is step 1 and step 5 says
+   * that for a Query "a / set of Query Replies is transmitted inbound"
+   * (pages.txt:6420-6421, the slash marking the OCR line break) — but
+   * the two are indistinguishable from outside, because sendRecord neither
+   * consults the keyboard state nor yields, and x3270's concrete ordering is
+   * the better guide for anyone diffing the two clients. What would be a real
+   * bug is the reverse of what we do: raising it first through a path that
+   * checked the lock before transmitting would swallow our own reply.
    *
    * `this.telnet?.` and not a throw, matching answerRead: both are reached only
    * from handleRecord, which the telnet layer itself calls, so a missing telnet
    * means the transport went away mid-record and there is nowhere to send. The
    * throwing convention belongs to the operator-initiated senders (sendAID,
    * sendAttn), where a caller is present to be told.
+   *
+   * Note the inhibit is raised even on that transport-gone path. That is
+   * correct: the host asked and the screen is frozen whether or not our answer
+   * reached it, and a session whose socket has just vanished is not one to
+   * unlock a keyboard over.
    */
   private answerQuery(): void {
     const geometry = { rows: this.screen.rows, cols: this.screen.cols };
     this.telnet?.sendRecord(buildQueryReply(DEFAULT_CAPABILITIES, geometry));
+    // enterInhibit, not inhibit(EnterInhibit): it yields to a stronger inhibit
+    // already in force. Before the host's first write that is
+    // AwaitingFirstWrite — the case TSO produces, since it queries before
+    // writing — and demoting it there would narrow the release rule from "any
+    // write, or a WCC keyboard-restore" to "any write". See Oia.enterInhibit.
+    this.oia.enterInhibit();
   }
 
   /** Operator pressed a key that generates an AID. */

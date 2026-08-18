@@ -33,19 +33,21 @@ Explicitly **not** in scope, stated so it is not later mistaken for delivered:
 - **SA and MF semantics** (see the contingency below).
 - **Query List** (Read Partition TYPE=0x03).
 - **TN3270E telnet option 40** — stage 2b.
-- **The enter-inhibit condition after answering a Query.** Found during
-  implementation, not planned for, and deliberately left out rather than bolted on.
-  GA23-0059 p. 5-53 (`pages.txt:6412`) lists it as step 1 of Read Partition
-  processing — "The enter-inhibit condition is raised." — and x3270 implements it:
-  `query_reply_end()` calls `kybd_inhibit(true)` (`Common/sf.c:929`), cleared only by
-  a later Erase/EAU/Write (`ctlr.c:550`, `:1309`, `:1406`).
+- ~~**The enter-inhibit condition after answering a Query.**~~ **CLOSED after 2a
+  shipped**, as a follow-up rather than in-stage work. GA23-0059 p. 5-53
+  (`pages.txt:6413`, not `:6412` as this entry first said) lists it as step 1 of Read
+  Partition processing — "1. The enter-inhibit condition is raised." — and x3270
+  implements it: `query_reply_end()` calls `kybd_inhibit(true)` (`Common/sf.c:929`),
+  cleared only by a later Erase/EAU/Write (`ctlr.c:550`, `:1309`, `:1406`).
 
-  **Our behaviour coincides with x3270's for the case this stage exists to serve** —
-  TSO queries before any write, so we stay locked either way — but **diverges for a
-  mid-session Query**, where we would leave the keyboard unlocked over a screen the
-  host considers frozen. Implementing it needs a new `Oia` state plus its own tests.
-  If the live run shows TSO re-querying after the logon panel, this moves from
-  "known gap" to "must fix".
+  As predicted, our behaviour already coincided with x3270's for the case this stage
+  exists to serve — TSO queries before any write, so we stayed locked either way —
+  and diverged only for a **mid-session Query**, where we left the keyboard unlocked
+  over a screen the host considers frozen. Now implemented as
+  `KeyboardState.EnterInhibit`, raised in `Session.answerQuery` and released by the
+  four commands x3270 releases it on, with the enforcement the state needed: nothing
+  had ever refused typing on *any* keyboard lock, so `Keyboard.type` now does, and
+  `Wait(Unlock)` blocks on the new state as x3270's `KBWAIT_MASK` does.
 
 ### Contingency, agreed up front
 
