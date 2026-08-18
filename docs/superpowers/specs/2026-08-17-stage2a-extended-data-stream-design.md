@@ -220,9 +220,30 @@ below 3, or a length running past the payload end — raises `ParseError`, which
 `session.ts:200-208` already maps to `X PROG` with `PROG_INVALID_COMMAND` while
 keeping the connection up.
 
-**A zero-length structured field (L=0) is the specific nasty case**, because a naive
-loop reads it as "advance by zero" and spins forever. It is a `ParseError`, and it
-gets its own test.
+**A zero-length structured field (L=0) is the specific nasty case, and an earlier
+draft of this spec got it wrong.** A naive loop reads L=0 as "advance by zero" and
+spins forever, so it must be handled — but **rejecting it is also wrong**. GA23-0059
+p. 5-5 (`pages.txt:4402-4408`) makes L=0 *legal*, meaning the field's length "should
+be determined using the end of the transmission", and `pages.txt:1938` adds that it
+may only appear on the last structured field in the chain. x3270 implements exactly
+that at `Common/sf.c:138-140`:
+
+```c
+	if (fieldlen == 0) {
+	    fieldlen = buflen;
+	}
+	if (fieldlen < 3) { ... reject ... }
+```
+
+So the parser **resolves L=0 to the remaining payload length before the minimum
+check**. The loop still always terminates, because a resolved length is at least 1.
+A bare `00 00` resolves to 2 and is then rejected by the minimum, which matches the
+manual's own "sending only the Length field (i.e. 0000) ... is invalid"
+(`pages.txt:4413`).
+
+This is not academic: had we rejected L=0, a host sending its Query as the last
+structured field would have hung exactly the way TSO hangs today — the failure this
+stage exists to fix.
 
 ## Testing
 
@@ -231,7 +252,8 @@ TDD applies: the manual is precise enough to write failing tests first.
 
 **1. Unit tests from the manual, before the code.** Byte layouts asserted against
 GA23-0059 with the page cited in each test, not against x3270's capture. Nasty cases
-required: zero-length SF; length past payload end; WSF with a trailing partial field;
+required: zero-length SF (resolved to end-of-payload, *not* rejected — see Error
+handling); a bare `00 00` with no SFID; length past payload end; WSF with a trailing partial field;
 SFE with no 0xC0 pair; SFE with an unknown pair type; Read Partition with TYPE=0x03;
 Read Partition with PID≠0xFF.
 

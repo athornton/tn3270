@@ -1297,7 +1297,10 @@ describe('query reply', () => {
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
     conn.negotiate();
-    // L=0 would loop forever if the parser did not reject it.
+    // A bare length with an SFID but no PID/TYPE. Note L=0 is LEGAL per
+    // GA23-0059 p. 5-5 (it means "to the end of the transmission", which
+    // stream/sf.ts resolves), so this is rejected for lacking PID and TYPE,
+    // not for the zero. An earlier draft of this plan had that backwards.
     conn.host(SnaCmd.WSF, 0x00, 0x00, 0x01, T.IAC, T.EOR);
     expect(session.oia.toText()).toContain('X PROG');
     expect(session.isConnected()).toBe(true);
