@@ -261,6 +261,43 @@ A local file error — unreadable source, or destination existing without
 `Exist=replace` — fails **before** the host command is typed, so the host is never left
 sitting in transfer mode waiting for a client that has already given up.
 
+## Codec findings, from the implementation (2026-08-18)
+
+`packages/core/src/ft/cut.ts` is built and committed (`3b3b386`), 50 tests, exhaustive
+round-trip over every byte 0x00-0xFF. Four findings worth keeping, each independently
+verified rather than taken on report:
+
+**1. x3270's EBCDIC tables are NOT cp037, and the difference is reachable.**
+`ebc2asc0` differs from cp037 in **66 of 256 entries** — it flattens the whole EBCDIC
+control range below 0x40 to space, except X'1C'→`*` and X'1E'→`;`, which are two
+selectors' ASCII forms. Only two differences sit at or above 0x40 and exactly one is
+reachable: **EBCDIC X'41' is space (0x20) to x3270 but NO-BREAK SPACE (0xA0) to
+cp037**, and NBSP is not in `ALPHAS` — so a cp037-based codec throws a conversion error
+where x3270 decodes successfully. **The codec therefore carries its own private
+tables**, and must keep doing so. Over the 64 `TABLE6` and 77 `ALPHAS` characters the
+two agree exactly, which is why the encode path would have looked fine in testing.
+
+**2. All 256 byte values are representable** — no gaps. `0x00` sits at index 0 of
+*both* quadrant 2 and quadrant 3, which is exactly why `localToHost` must special-case
+NULL before the generic quadrant search rather than letting it pick whichever it finds
+first. Zero counts per quadrant are `[0, 0, 32, 9]`; twelve punctuation bytes
+(0x4B-0x4E, 0x50, 0x61, 0x6B-0x6F, 0x7A) are shared between quadrants 0 and 1.
+
+**3. ONE CODEC INSTANCE PER TRANSFER, held across all frames.** The quadrant is
+persistent state and a selector byte is emitted only when it changes. x3270 uses a
+file-static (`ft_cut.c:108`), which we deliberately did not copy — it would make
+concurrent transfers corrupt each other and tests order-dependent. `frames.ts` and
+`transfer.ts` must hold a single `CutCodec`; the module-level `hostToLocal`/
+`localToHost` helpers build a fresh codec per call and are whole-buffer only. A
+per-frame reset would emit spurious leading selectors on upload and reject legitimate
+data-first frames on download.
+
+**4. The `c != XLATE_NULL` clause at `ft_cut.c:181` is dead code.** It can only change a
+decision when the quadrant is not `OTHER_2`, `xlate[ix]` is 0, and `c` is 0xC1 — but
+`ebc2asc0[0xC1]` is `'A'`, always `ALPHAS` index 1, and no non-`OTHER_2` quadrant has a
+zero at index 1. Unsatisfiable. Ported anyway (quadrants are data, so it costs nothing)
+with a test asserting the unsatisfiability, so we would learn if that ever changed.
+
 ## Testing
 
 **1. Codec tests, exhaustive where exhaustive is available.** `from6`/`to6` over all
