@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-08-17
+# Handoff — state as of 2026-08-18
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -6,8 +6,42 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `stage1-protocol-core`, 76 commits, **319 tests passing**, `npm run typecheck`
+Branch `stage2a-extended-data-stream`, **402 tests passing**, `npm run typecheck`
 clean, `npm run build` works, working tree clean.
+
+**STAGE 2a IS COMPLETE AND PROVEN AGAINST A LIVE HOST.** MVS 3.8j TSO is reachable:
+the acceptance script reaches the ISPF primary option menu and logs off cleanly, 0
+errors and 0 program checks. Fixture at `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`,
+full results in `docs/live-testing.md` under *Stage 2a results*. What shipped:
+
+- **Configurable terminal type** — `-model 3278-2` / `-model 3278-2-E`, plus
+  `--terminal-type <string>` as a raw escape hatch. **The default deliberately stays
+  `IBM-3278-2`**; the TSO run passes `-model 3278-2-E` explicitly. Note the
+  conformance goldens do NOT enforce that default (they replay recorded bytes);
+  `telnet.test.ts` does, by pinning the subnegotiation bytes.
+- **Query Reply** — three units (Summary 0x80, Usable Area 0x81, Implicit Partition
+  0xA6), generated from a capability list so adding one is a single entry. Accepted by
+  TK5. Byte-identical to x3270 on all three.
+- **SFE** implemented as a field-defining order, including the case that matters: an
+  SFE with no 0xC0 pair still defines a field with the default attribute 0x00.
+- **SA and MF** still parsed-and-dropped, but now counted and traced.
+
+**Three questions that were open are now answered by measurement:**
+
+1. **TSO does not need a screen larger than 24×80.** The session stayed 1920 cells
+   throughout and ISPF reports `TERMINAL: 3277`, a device with no alternate size. The
+   27×132 in the old `zti` capture was `zti` advertising its own window size. So
+   alternate-geometry support is not a TSO prerequisite and remains unimplemented.
+2. **TK5's ISPF sends 113 SA orders and zero MF orders.** The MF deferral therefore
+   cost nothing on this path. Had MF appeared, the pre-agreed response was to fold 2a
+   and 2b together.
+3. **TN3270E is needed for none of this** — zero `fffb28`/`fffd28` in the whole run.
+
+**One known divergence from x3270, deliberately not fixed:** we do not raise
+enter-inhibit after answering a Query, which GA23-0059 p. 5-53 makes step 1 of Read
+Partition processing and x3270 implements in `query_reply_end()`. Harmless for TSO
+(it queries before any write), but a mid-session Query would leave the keyboard
+unlocked over a screen the host considers frozen. Details in the stage 2a spec.
 
 **Stage 1 is COMPLETE.** All 18 tasks of
 `docs/superpowers/plans/2026-08-15-stage1-protocol-core.md` are done, `README.md` is
@@ -216,37 +250,29 @@ times; that pushback was the single most valuable part of the process.
    terminal address, then the bare userid — or `HERC02/CUL8TR` in one field, which
    skips the password prompt. `TSO` and `LOGON HERC01` both get `INPUT NOT
    RECOGNIZED`.
-4. **STAGE 2a — extended data stream + Query Reply. START HERE.** Reprioritised
-   ahead of the GUI on 2026-08-17: MVS 3.8j is expected to be the largest user group,
-   so TSO working matters more than a window. Three pieces, and the measurements
-   behind each are in `docs/live-testing.md`:
+4. ~~**STAGE 2a — extended data stream + Query Reply.**~~ **DONE 2026-08-18, verified
+   against a live host.** All three pieces shipped: configurable terminal type, Query
+   Reply, and SFE. The acceptance test (`packages/cli/scripts/record-mvs.txt` with
+   `-model 3278-2-E`) reaches the ISPF primary option menu and logs off cleanly.
+   Details above under *Where things stand*, measurements in `docs/live-testing.md`.
 
-   - **Configurable terminal type**, defaulting to something TSO accepts. Today it is
-     hardcoded `IBM-3278-2` (grep `IBM-3278-2` in `packages/core/src/`), and TSO
-     rejects exactly that. `IBM-3278-2-E` is verified sufficient.
-   - **Answer Read Partition (Query).** Today WSF is parsed to a `structuredFields`
-     token and dropped (`stream/parse.ts`, `stream/execute.ts:211`). The reference
-     bytes — the host's Query and the 183-byte reply s3270 sends, which this host
-     accepts — are in `packages/fixtures/x3270/tso-query-reply.txt`, annotated
-     against GA23-0059. **Verify each reply unit against the manual before copying
-     it**; x3270 sends more units than TSO necessarily needs and the minimum is
-     untested.
-   - **Alternate screen geometry.** `Screen` already takes geometry as a constructor
-     parameter, so this is plumbing plus honest bounds. Whatever we advertise in the
-     Query Reply is what the host will then use.
+   **Alternate geometry was NOT delivered and is not needed for TSO** — we advertise
+   24×80 as both default and alternate size, which the manual prescribes for a device
+   with no alternate size, and the live run confirmed TSO uses whatever the client
+   offers. Mid-session resize is unimplemented.
 
-   **Acceptance test, already written:** `packages/cli/scripts/record-mvs.txt` is the
-   real target sequence, transcribed from a working `zti` session. It currently fails
-   at `IKT00405I` right after the userid — that is the documented, expected failure.
-   Done means it reaches the ISPF primary option menu and logs off cleanly, and then
-   a redacted fixture + golden get committed (the password appears in the trace in
-   EBCDIC; `docs/live-testing.md` step 4).
-
-   **The trap to respect:** the captured session runs 24×80 for the logon panel,
-   **27×132 from the password prompt onward**, and 24×80 again after logoff. The host
-   used the geometry the *client* offered. Reply 24×80 and it should stay 1920 cells;
-   offer more and expect addresses past that. An out-of-range address is a program
-   check today and that is the honest failure — do not wrap.
+   **Worth knowing about the process, because it was the most productive part:** six
+   real defects were found in the *plan* rather than the implementations, every one by
+   an implementer checking a primary source instead of trusting the instruction. The
+   plan said reject zero-length structured fields (the manual makes them legal, and
+   rejecting would have hung on a Query sent as the last field); said `find` where the
+   manual requires last-wins (`findLast`); shipped a test helper that OOMed the vitest
+   worker because the fixture is IAC-doubled; asserted the conformance goldens enforce
+   the default ttype when they cannot; quoted a manual string that greps to zero hits;
+   and omitted IAC-doubling from session-level test bytes, which made a negative test
+   pass for the wrong reason. Mutation testing during review also found two tests that
+   passed with the behaviour they claimed to pin deleted. **Keep asking implementers to
+   verify against `pages.txt` and x3270 rather than accepting the task text.**
 
 5. **Stage 2b — TN3270E proper**, the telnet option (40): DEVICE-TYPE/FUNCTIONS
    subnegotiation, the 5-byte data header, BIND/UNBIND, SNA responses, LU selection.

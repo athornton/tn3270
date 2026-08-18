@@ -470,13 +470,21 @@ IKT108I RECEIVE ERROR,RPLRTNCD=04,RPLFDB2=03,SENSE=00000200,WAITING FOR RECONNEC
 LGN001I TSO logon in progress at VTAM terminal CUU0C0
 ```
 
-**A theory that was wrong, recorded so it is not re-derived:** the first
-explanation was that TSO sends a Read Partition (Query) we fail to answer, since a
-`WriteStructuredField ReadPartition(0xff) Query` does appear in one s3270 trace.
-That is a *consequence* of TN3270E negotiation, not the cause — the successful
-`HERC02/CUL8TR` run reached TSO with no Query in the exchange at all, and our
-sessions receive no WSF whatsoever (zero `structuredFields` tokens). Query Reply is
-still worth implementing, but it is not what blocks TSO.
+**A theory that was wrong, recorded so it is not re-derived — but note the
+correction below it:** pass 2's explanation was that the Query is "a *consequence*
+of TN3270E negotiation, not the cause", on the evidence that a successful
+`HERC02/CUL8TR` run reached TSO with no Query in the exchange and that our own
+sessions received no WSF at all (zero structured-field tokens).
+
+**That last sentence used to read "Query Reply is still worth implementing, but it
+is not what blocks TSO." That was wrong, and stage 2a proved it wrong on the wire.**
+The reason we saw no WSF is that we advertised `IBM-3278-2`, which never elicits a
+Query — absence of the Query was a consequence of our own ttype, not evidence about
+what TSO needs. Once we advertise `IBM-3278-2-E`, TSO *does* send
+`WriteStructuredField ReadPartition(pid=0xff,type=0x02)` and waits on it, and
+answering it is exactly what reaches ISPF (2026-08-18 run, `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`).
+So the ttype is the trigger and Query Reply is the requirement, as pass 3 concluded;
+TN3270E is needed for neither.
 
 Also ruled out, each by experiment rather than argument:
 
@@ -534,13 +542,56 @@ automatically** from this account's `ISPLOGON` proc — nothing is typed to laun
 just an Enter past the `***` — and `TERMINAL: 3277` on the ISPF panel is ISPF's own
 notion of the terminal, not the telnet terminal type we negotiated.
 
-**So a TK5/TSO fixture is blocked until TN3270E lands** (staging item 4). What can
-be captured today is the pre-logon path: the Hercules banner, VTAM's USS logon
-panel with its single unprotected field at SBA(1770), and the `INPUT NOT
-RECOGNIZED` rejection. That is real MVS traffic and worth having, but it is not a
-TSO session. When TN3270E does land, this is the natural first live test, and the
-TSO password will land in the trace in EBCDIC — plan the redaction (step 4) before
-recording.
+**A TK5/TSO fixture is no longer blocked — it exists.** An earlier version of this
+paragraph said it was "blocked until TN3270E lands", which was wrong twice over: the
+blocker was stage 2a (ttype + Query Reply), and TN3270E is not needed at all. The
+full session is committed at `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`
+(2026-08-18): Hercules banner, VTAM USS panel, logon, ISPF primary option menu,
+clean logoff. 0 errors, 0 program checks.
+
+**Redaction is a two-place job, and the second place is easy to miss.** The password
+appears as EBCDIC on the wire (`c3 e4 d3 f8 e3 d9`) *and* as plaintext in a
+`ScreenText` dump, because MVS 3.8j echoes the password to the screen with no
+masking. Grep for both before committing a re-record.
+
+## Stage 2a results — TSO reached, 2026-08-18
+
+**The acceptance test passes.** `packages/cli/scripts/record-mvs.txt` run with
+`-model 3278-2-E` against TK5 on `localhost:3271` reaches the ISPF primary option
+menu (`USERID: HERC02`, `TERMINAL: 3277`) and logs off cleanly to the VTAM panel.
+0 errors, 0 program checks, 102 `ok` status lines. Fixture:
+`packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`.
+
+What was measured, as distinct from what was assumed:
+
+| Question | Answer | Evidence |
+|---|---|---|
+| Does the 3-unit Query Reply suffice? | **Yes** | Session proceeds past the Query to ISPF; host never re-queries or rejects |
+| Does TSO need a screen bigger than 24×80? | **No** | Every status line reads `24 80`; ISPF reports `TERMINAL: 3277`, which has no alternate size; no address exceeded 1920 |
+| Does TK5's ISPF send SA? | **Yes, 113 of them** | `ignored orders: SA=…` trace lines, summed |
+| Does TK5's ISPF send MF? | **No, zero** | same |
+| Is TN3270E needed? | **No** | no `fffb28`/`fffd28` anywhere in the run |
+
+**The geometry answer settles a question that had been open since the 32×80
+surprise.** The host uses whatever geometry the client advertises; it has no
+requirement of its own. The 27×132 in the earlier `zti` capture was `zti` offering
+its window size, exactly as the `tnz/tnz.py:265-282` reading predicted. Alternate-size
+support is therefore *not* a prerequisite for TSO and remains unimplemented.
+
+**The SA count is why the MF deferral was safe here, and it was measured rather than
+hoped.** 113 SA orders are parsed and dropped, costing only colour and highlighting;
+zero MF orders means nothing relied on the field-modifying behaviour stage 2a omits.
+Had MF appeared, the pre-agreed response was to fold 2a and 2b together. The counters
+were shown able to report a *presence* (a unit test asserts non-zero on a synthetic
+SA/MF record) before this run's zero was trusted — stage 1 lesson 7 applied
+deliberately.
+
+**One known divergence from x3270, found during implementation and not fixed.** We do
+not raise the enter-inhibit condition after answering a Query, which GA23-0059 p. 5-53
+(`pages.txt:6412`) makes step 1 of Read Partition processing and which x3270 implements
+in `query_reply_end()` (`Common/sf.c:929`). For TSO the behaviour coincides — it queries
+before any write, so we stay locked either way — but a *mid-session* Query would leave
+the keyboard unlocked over a screen the host considers frozen. See the stage 2a spec.
 
 ## Conformance against real x3270 — 2026-08-17
 
