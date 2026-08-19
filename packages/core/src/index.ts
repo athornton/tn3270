@@ -3,6 +3,7 @@ export const VERSION = '0.1.0';
 export * from './constants.js';
 export * from './address.js';
 export * from './codepage.js';
+export * from './palette.js';
 export * from './trace.js';
 export * from './x3270trace.js';
 export * from './telnet.js';
