@@ -1,8 +1,39 @@
-import { WCC, FA, Order, XA_3270 } from '../constants.js';
+import { WCC, FA, Order, XA, XA_3270 } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
 import { isQueryRequest, queryListRequest } from './sf.js';
 import type { QueryRequest } from '../queryreply.js';
+
+/**
+ * The running character-attribute state an SA order maintains.
+ *
+ * A MAP BY TYPE, not a single value, because the manual requires a composite:
+ * "The set of type-value pairs applied during character processing is a
+ * composite, by attribute type, of the last value specified in previously
+ * encountered SA orders" (p. 4-7, pages.txt:2995-2996). One value would make an
+ * SA colour silently clear a preceding SA highlighting.
+ *
+ * Lives for one write command and is discarded: "Another write type command is
+ * sent" returns the set to defaults (p. 4-6, pages.txt:2978), which x3270 does by
+ * zeroing default_fg/bg/gr at the top of write processing (ctlr.c:1414-1416).
+ * Declared inside `execute` for exactly that reason — module scope would leak it
+ * between records, which is reset trigger 2 silently not happening.
+ *
+ * The Clear key — the manual's third trigger (pages.txt:2979) — resets it
+ * through Screen.clear() instead, because Clear originates locally rather than in
+ * a datastream, so there is no SaState alive to reset when it happens. The fourth
+ * trigger is a power switch.
+ *
+ * A MEMBER'S ABSENCE IS LOAD-BEARING, and is not the same as a zero: absent means
+ * "this type is at its default, write nothing", where 0x00 under FOREGROUND is
+ * `XAC_DEFAULT`, a value the host legitimately set. `delete` rather than `= 0` in
+ * the reset paths below for that reason.
+ */
+interface SaState {
+  fg?: number;
+  bg?: number;
+  gr?: number;
+}
 
 /**
  * Apply a parsed record to a screen.
@@ -71,7 +102,15 @@ export interface ExecuteResult {
   /** How many structured fields we skipped, for the trace. */
   structuredFieldsIgnored: number;
   /**
-   * SA orders parsed and dropped. Stage 2a does not implement them.
+   * SA orders parsed and dropped — the ones whose attribute TYPE we do not
+   * implement, which is `XA.CHARSET` and anything unrecognised.
+   *
+   * NOT a count of SA orders seen. Colour, background, highlighting and the
+   * X'00' reset are applied now, and counting those would break what this field
+   * is for: a zero must keep meaning "we never saw one we had to throw away"
+   * rather than "we stopped looking". The session reports it as dropped work
+   * (session.ts:250-252), so an applied order appearing here would be a false
+   * report of a gap.
    *
    * Per-record, and nothing sums these across a session: the live run measures
    * SA and MF by grepping the trace for `deferred(0x28` / `deferred(0x2c`
@@ -206,6 +245,9 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   let addr = 0;
   /** True when the previous token wrote something — PT nulls only then. */
   let wroteSinceOrder = false;
+  // Fresh per write command, and deliberately not per session; see SaState.
+  // This declaration IS reset trigger 2.
+  const sa: SaState = {};
 
   for (const token of record.tokens) {
     // Tally the orders we drop, here rather than in applyToken because
@@ -227,12 +269,22 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     // failure these counters exist to rule out.
     if (token.kind === 'deferred') {
       switch (token.order) {
-        case Order.SA: result.setAttributeIgnored++; break;
+        case Order.SA: {
+          // ONLY the types still dropped, now that four of them are applied
+          // below. Counting an implemented type would make a nonzero here mean
+          // "some SA arrived" rather than "an SA was thrown away", and the
+          // session's trace line (session.ts:250-252) reports it as the latter.
+          const type = token.data[0]!;
+          const implemented = type === XA.RESET || type === XA.FOREGROUND
+            || type === XA.BACKGROUND || type === XA.HIGHLIGHTING;
+          if (!implemented) result.setAttributeIgnored++;
+          break;
+        }
         case Order.MF: result.modifyFieldIgnored++; break;
         default: { const _never: never = token.order; void _never; }
       }
     }
-    addr = applyToken(screen, token, addr, () => { wroteSinceOrder = true; }, wroteSinceOrder);
+    addr = applyToken(screen, token, addr, () => { wroteSinceOrder = true; }, wroteSinceOrder, sa);
     if (token.kind !== 'data' && token.kind !== 'ge' && token.kind !== 'ra') {
       wroteSinceOrder = false;
     }
@@ -241,12 +293,47 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   return result;
 }
 
+/**
+ * Stamp the running SA state onto a cell just written.
+ *
+ * Called after `setChar`, never before: `setChar` deliberately leaves extended
+ * attributes alone (see its comment) precisely so this can run second.
+ *
+ * CLEARS FIRST, and that is not redundant. "Character attributes are associated
+ * with a character and not with the character's position in the buffer. Thus,
+ * whenever a character is overwritten by a new character (or cleared or erased),
+ * the old character attribute is overwritten by the character attribute of the
+ * new character" (p. 4-16, pages.txt:3388-3390). `Screen.setExtended` MERGES, to
+ * serve the composite rule, so merging the state alone would leave a previous
+ * record's colour on a cell this record has just overwritten. x3270 has no such
+ * hazard because it stamps all three unconditionally (ctlr.c:2141-2143) through
+ * `ctlr_add_fg`, whose `ea_buf[baddr].fg = color` assigns rather than merges
+ * (ctlr.c:2852-2867) — so the clear here is what makes this an assignment,
+ * matching x3270 exactly.
+ *
+ * Note the consequence: this must NOT short-circuit when the state is empty. An
+ * empty state means "default", and stamping a default over a stale attribute is
+ * the whole point.
+ */
+function applySa(screen: Screen, addr: number, sa: SaState): void {
+  screen.clearExtended(addr);
+  screen.setExtended(addr, sa);
+}
+
+/** All four types back to default. The SA X'00' and plain-SF reset, shared. */
+function resetSa(sa: SaState): void {
+  delete sa.fg;
+  delete sa.bg;
+  delete sa.gr;
+}
+
 function applyToken(
   screen: Screen,
   token: Token,
   addr: number,
   markWrote: () => void,
   wroteSinceOrder: boolean,
+  sa: SaState,
 ): number {
   switch (token.kind) {
     case 'sba':
@@ -255,6 +342,16 @@ function applyToken(
 
     case 'sf':
       screen.setFieldAttribute(addr, token.attr);
+      // "If the display receives an SF order, it sets the associated extended
+      // field attribute to its default value" (p. 4-4, pages.txt:2869-2870), so
+      // the running state returns to unspecified — otherwise a field following a
+      // coloured one inherits colour the host never gave it. setFieldAttribute
+      // has already cleared the attribute CELL's own extended attributes; this is
+      // the running-state half of the same rule, and both halves are needed.
+      // x3270 does both too: START_FIELD zeroes the cell's fg/bg/gr
+      // (ctlr.c:1394-1398) but leaves default_fg alone — its equivalent of the
+      // running-state half is that it never seeds default_* from a field at all.
+      resetSa(sa);
       return screen.inc(addr);
 
     case 'ic':
@@ -265,6 +362,7 @@ function applyToken(
       let a = addr;
       for (const b of token.bytes) {
         screen.setChar(a, b);
+        applySa(screen, a, sa);
         a = screen.inc(a);
       }
       markWrote();
@@ -276,6 +374,9 @@ function applyToken(
       // is stored as an ordinary byte. When Programmable Symbol Sets land, this
       // is where the cell becomes {kind:'ps',...} instead.
       screen.setChar(addr, token.ebcdic);
+      // A GE character carries the running attributes like any other character;
+      // x3270 stamps default_fg/bg/gr on it identically (ctlr.c:1739-1741).
+      applySa(screen, addr, sa);
       markWrote();
       return screen.inc(addr);
 
@@ -290,6 +391,10 @@ function applyToken(
       let a = addr;
       do {
         screen.setChar(a, token.fill);
+        // RA-filled positions are "subsequently interpreted characters" and take
+        // the running attributes; x3270 stamps them per fill iteration inside its
+        // own do-while (ctlr.c:1669-1671).
+        applySa(screen, a, sa);
         a = screen.inc(a);
       } while (a !== token.stop);
       markWrote();
@@ -311,6 +416,14 @@ function applyToken(
           protectedHere = (attr & FA.PROTECT) !== 0;
         } else if (!protectedHere) {
           screen.setChar(a, 0x00);
+          // NOT applySa: EUA nulls rather than writes, so it must not stamp the
+          // running state — it clears instead. "Field attributes and extended
+          // field attributes are not affected by EUA. Character attributes for
+          // every character changed to nulls are reset to their defaults" (p.
+          // 4-11, pages.txt:3165-3166). Needed as its own call because setChar
+          // deliberately leaves extended attributes alone; without it a nulled
+          // cell keeps the colour of the character that used to be there.
+          screen.clearExtended(a);
         }
         a = screen.inc(a);
       } while (a !== token.stop);
@@ -328,6 +441,15 @@ function applyToken(
           if (isUnprotected) return screen.inc(a);
         } else if (wroteSinceOrder) {
           screen.setChar(a, 0x00);
+          // Same rule as EUA above, and stated for PT explicitly: "The PT order
+          // resets the character attribute to its default value for each
+          // character set to nulls" (p. 4-9, pages.txt:3090-3091). x3270 zeroes
+          // fg, bg and gr beside the null (ctlr.c:1555-1560). Guarded by
+          // wroteSinceOrder along with the null itself, because a PT that
+          // "immediately follows a command, order, or order sequence" leaves the
+          // buffer unmodified (pages.txt:3088-3089) — and an attribute is buffer
+          // content.
+          screen.clearExtended(a);
         }
         a = screen.inc(a);
       }
@@ -336,9 +458,9 @@ function applyToken(
 
     case 'sfe': {
       // SFE DEFINES A FIELD. The 0xC0 pair carries the basic field attribute;
-      // every other pair type (0x41 highlighting, 0x42 colour, 0x43 character
-      // set, ...) is an extended attribute stage 2a does not render, so it is
-      // dropped.
+      // the colour and highlighting pairs seed the running SA state at the bottom
+      // of this case. 0x43 character set is still dropped — Programmable Symbol
+      // Sets are out of scope — as is anything else.
       //
       // A missing 0xC0 pair does NOT mean "no field": p. 4-5 says unspecified
       // attribute types take their defaults, so the field exists with attribute
@@ -356,14 +478,74 @@ function applyToken(
       // (ctlr.c:1838-1842), so its last one is the one left in the buffer.
       const basic = token.pairs.findLast((p) => p.type === XA_3270);
       screen.setFieldAttribute(addr, basic?.value ?? 0x00);
+
+      // The extended pairs seed the RUNNING SA STATE, which then applies to every
+      // character this field contains. That is how a field-level attribute and a
+      // character-level SA compose: the field sets the baseline, a later SA in
+      // the same record overrides it, and the next SF/SFE replaces the baseline.
+      //
+      // RESET FIRST, unconditionally, so a plain SFE behaves like a plain SF: an
+      // SFE that names no colour must leave the state at default rather than
+      // inheriting the previous field's, because "unspecified attribute types
+      // take their default values" (p. 4-5). x3270 does this by zeroing
+      // efa_fg/efa_bg/efa_gr before its pair loop (ctlr.c:1827-1829) rather than
+      // carrying them in.
+      //
+      // In pair order, and assigning as it goes, so a repeat resolves to the last
+      // one: "If the same attribute type-value pair appears more than once, the
+      // last specification for a repeated attribute type takes effect" (p. 4-5,
+      // pages.txt:2899-2901). Same reason as findLast above, by a different means
+      // — findLast is needed there because setFieldAttribute is called once.
+      //
+      // Note setFieldAttribute above has already cleared the attribute cell's own
+      // extended attributes (pages.txt:2869-2870), so this cannot leak backwards
+      // onto the attribute position.
+      resetSa(sa);
+      for (const p of token.pairs) {
+        if (p.type === XA.FOREGROUND) sa.fg = p.value;
+        else if (p.type === XA.BACKGROUND) sa.bg = p.value;
+        else if (p.type === XA.HIGHLIGHTING) sa.gr = p.value;
+        else if (p.type === XA.RESET) resetSa(sa);
+      }
       return screen.inc(addr);
     }
 
-    case 'deferred':
-      // SA and MF only. Parsed for length, counted in the token loop above, and
-      // not applied. SA sets character attributes we do not render; MF's gap is
-      // functional and documented on modifyFieldIgnored.
-      return addr;
+    case 'deferred': {
+      // MF is still unimplemented and still counted; see modifyFieldIgnored.
+      if (token.order === Order.MF) return addr;
+
+      // SA. token.data is exactly [type, value] (parse.ts:240-246).
+      const type = token.data[0]!;
+      const value = token.data[1]!;
+      switch (type) {
+        case XA.RESET:
+          // "All character attributes reset all character attribute types that
+          // are specifiable in the SA order to their default value. Attribute
+          // types affected are color, highlighting, and character set" (p. 4-18,
+          // pages.txt:3449-3452) — so ALL types, not one. Twelve of these are in
+          // the committed TK5 fixture, so this path is live. Character set is
+          // among the types reset, and we store none, so there is nothing to drop
+          // for it. x3270 zeroes all five of its defaults in its XA_ALL arm
+          // (ctlr.c:1915-1921).
+          //
+          // The value byte is ignored deliberately: "The only valid value setting
+          // is X'00'; all others are reserved" (pages.txt:3452-3453). x3270 does
+          // not look at it either.
+          resetSa(sa);
+          return addr;
+        // Each stores the VALUE the host sent, including 0x00 — which under these
+        // three types is XAC_DEFAULT/XAH.DEFAULT, "device default", a legitimate
+        // setting and NOT a reset. See the TYPE-vs-VALUE warning in constants.ts.
+        case XA.FOREGROUND: sa.fg = value; return addr;
+        case XA.BACKGROUND: sa.bg = value; return addr;
+        case XA.HIGHLIGHTING: sa.gr = value; return addr;
+        default:
+          // CHARSET (Programmable Symbol Sets, out of scope) and anything
+          // unrecognised: genuinely unimplemented, and counted as such by the
+          // token loop, which repeats this same predicate.
+          return addr;
+      }
+    }
 
     case 'structuredField':
       return addr;

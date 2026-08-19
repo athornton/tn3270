@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute, ExecuteError } from '../src/stream/execute.js';
-import { SnaCmd, Cmd, Order, FA, WCC, XA_3270 } from '../src/constants.js';
+import { SnaCmd, Cmd, Order, FA, WCC, XA, XA_3270 } from '../src/constants.js';
 
 /** Parse and execute one record against a screen. */
 function run(s: Screen, ...bytes: number[]) {
@@ -299,10 +299,18 @@ describe('orders', () => {
     // not exist, which is the exact lesson-7 failure this test cites. The
     // asymmetry also pins that repeats of one order accumulate rather than
     // saturating at 1.
+    //
+    // BOTH SA ORDERS MUST USE A TYPE THAT IS STILL DROPPED, which is why they are
+    // XA.CHARSET and not the XA.FOREGROUND (0x42) they used to be. Colour,
+    // background, highlighting and the X'00' reset are applied now, so an SA
+    // carrying one of those is no longer ignored and must not be counted here —
+    // see setAttributeIgnored's contract. This test's EXPECTATION changed with
+    // that feature; what it is testing did not. sa.test.ts covers the other half,
+    // that the four implemented types count zero.
     const s = new Screen();
     const r = run(s, SnaCmd.W, 0x00,
-      Order.SA, 0x42, 0xf4,
-      Order.SA, 0x42, 0xf5,
+      Order.SA, XA.CHARSET, 0xf1,
+      Order.SA, XA.CHARSET, 0xf8,
       Order.MF, 0x01, XA_3270, 0x60);
     expect(r.setAttributeIgnored).toBe(2);
     expect(r.modifyFieldIgnored).toBe(1);
