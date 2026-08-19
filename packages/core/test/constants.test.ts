@@ -204,7 +204,7 @@ describe('structured field constants', () => {
 });
 
 describe('extended attribute types and values', () => {
-  it('names the attribute types from 3270ds.h:240-250', () => {
+  it('names the attribute types from 3270ds.h:229 (XA_ALL), 240-250', () => {
     expect(XA.RESET).toBe(0x00);
     expect(XA.HIGHLIGHTING).toBe(0x41);
     expect(XA.FOREGROUND).toBe(0x42);
@@ -223,7 +223,7 @@ describe('extended attribute types and values', () => {
 
   it('XA.RESET is a TYPE meaning reset-all, distinct from XAC_DEFAULT as a VALUE', () => {
     // Both are 0x00 and conflating them is a real bug: as a type it means "return
-    // every character attribute to default" (pages.txt:2986); as a value under
+    // every character attribute to default" (pages.txt:3449-3456); as a value under
     // XA.FOREGROUND it means "device default colour". The TK5 fixture contains
     // twelve of the former.
     expect(XA.RESET).toBe(XAC_DEFAULT);

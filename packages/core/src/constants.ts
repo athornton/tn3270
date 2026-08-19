@@ -199,8 +199,74 @@ export const Qcode = {
  * and x3270's include/3270ds.h:230 defines XA_3270 0xc0. Numerically equal to
  * FA.PRINTABLE, which is a coincidence of the architecture, not a relation —
  * do not unify them.
+ *
+ * This is one row of Table 4-6. The other rows this codebase names are just
+ * below, as `XA`/`XAH`/`XAC_DEFAULT`.
  */
 export const XA_3270 = 0xc0;
+
+/**
+ * Extended attribute types, carried by SA (X'28') and as SFE type-value pairs
+ * — the other rows of Table 4-6, of which `XA_3270` above is one row (0xC0).
+ * x3270's include/3270ds.h:229 (XA_ALL), 240-250.
+ *
+ * `RESET` is x3270's XA_ALL, deliberately renamed: "reset" names what it
+ * DOES (return every character attribute type to its default), where "all"
+ * names only which types it affects. Every other member below is a
+ * mechanical prefix-drop of its x3270 name; this one isn't, on purpose.
+ *
+ * RESET's defining text is under the heading "All Character Attributes":
+ * "All character attributes reset all character attribute types that are
+ * specifiable in the SA order to their default value. Attribute types
+ * affected are color, highlighting, and character set. The only valid value
+ * setting is X'00' ... The attribute type X'00' can appear only in the SA
+ * order" (pages.txt:3449-3456). Separately, pages.txt:2986 says X'00' is the
+ * one attribute type "always supported by the SA order" — i.e. every
+ * implementation must accept it — which supports supportedness, not the
+ * reset-all definition; don't cite it for the latter.
+ *
+ * Do not confuse `RESET` (0x00 as a TYPE, meaning reset-all) with
+ * `XAC_DEFAULT` below (0x00 as a VALUE under FOREGROUND/BACKGROUND, meaning
+ * "device default colour"). Both appear in the committed TK5 fixture (101
+ * FOREGROUND, 12 RESET), so a conflation is not hypothetical.
+ *
+ * CHARSET is named but deliberately NOT implemented — it selects Programmable
+ * Symbol Sets, which are out of scope. It stays counted by setAttributeIgnored.
+ * Table 4-6 also has VALIDATION (0xC1), OUTLINING (0xC2), and TRANSPARENCY
+ * (0x46) (3270ds.h:231, 235, 251); those are out of scope too and, unlike
+ * CHARSET, not even named here.
+ */
+export const XA = {
+  RESET: 0x00,
+  HIGHLIGHTING: 0x41,
+  FOREGROUND: 0x42,
+  CHARSET: 0x43,
+  BACKGROUND: 0x45,
+} as const;
+
+/**
+ * Highlighting values for `XA.HIGHLIGHTING`. x3270's 3270ds.h:241-246.
+ *
+ * TRAP: the manual's Chapter 4 highlighting table (pages.txt:3487-3498) lists
+ * only FIVE settings — X'00', X'F0', X'F1', X'F2', X'F4' — and OMITS X'F8'
+ * Intensify entirely. A verifier who checks only that obvious table will find
+ * 5 of these 6 values and may wrongly conclude INTENSIFY is wrong. INTENSIFY
+ * is confirmed instead by the Query Reply (Highlighting) section, which lists
+ * all six including "X'F8' ... Intensify" (pages.txt:10310-10325). Same class
+ * of trap as the Qcode.SUMMARY OCR note and the XA_3270 mangled-hex note
+ * above: check the source that actually settles it, not the first one found.
+ */
+export const XAH = {
+  DEFAULT: 0x00,
+  NORMAL: 0xf0,
+  BLINK: 0xf1,
+  REVERSE: 0xf2,
+  UNDERSCORE: 0xf4,
+  INTENSIFY: 0xf8,
+} as const;
+
+/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
+export const XAC_DEFAULT = 0x00;
 
 /** Attention identifiers (Table 3-4). */
 export const AID = {
@@ -307,40 +373,5 @@ export const ADDRESS_CODE_TABLE: readonly number[] = [
 
 /** Default screen geometry for an IBM-3278-2. */
 export const MODEL_2 = { rows: 24, cols: 80 } as const;
-
-/**
- * Extended attribute types, carried by SA (X'28') and as SFE type-value pairs.
- * x3270's include/3270ds.h:240-250.
- *
- * `RESET` is 0x00 AS A TYPE and means "return every character attribute type to
- * its default" — the manual: "The attribute type X'00' is always supported by
- * the SA order" (pages.txt:2986). Do not confuse it with `XAC_DEFAULT`, which is
- * 0x00 as a VALUE under FOREGROUND/BACKGROUND and means "device default colour".
- * Both appear in the committed TK5 fixture (101 FOREGROUND, 12 RESET), so a
- * conflation is not hypothetical.
- *
- * CHARSET is named but deliberately NOT implemented — it selects Programmable
- * Symbol Sets, which are out of scope. It stays counted by setAttributeIgnored.
- */
-export const XA = {
-  RESET: 0x00,
-  HIGHLIGHTING: 0x41,
-  FOREGROUND: 0x42,
-  CHARSET: 0x43,
-  BACKGROUND: 0x45,
-} as const;
-
-/** Highlighting values for `XA.HIGHLIGHTING`. 3270ds.h:241-246. */
-export const XAH = {
-  DEFAULT: 0x00,
-  NORMAL: 0xf0,
-  BLINK: 0xf1,
-  REVERSE: 0xf2,
-  UNDERSCORE: 0xf4,
-  INTENSIFY: 0xf8,
-} as const;
-
-/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
-export const XAC_DEFAULT = 0x00;
 
 export const TERMINAL_TYPE = 'IBM-3278-2';
