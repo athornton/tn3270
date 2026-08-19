@@ -497,8 +497,9 @@ boilerplate is a stronger signal than either reading on its own. Six unit tests 
 session test had been written to assert the wrong behaviour and were corrected; one
 describe block testing a now-nonexistent code path was deleted rather than adapted.
 
-**But a live VM/CMS transfer still fails, and NOT for the Query List reason.** Two
-attempts, 2026-08-18:
+**VM/CMS TRANSFER WORKS, BOTH DIRECTIONS — verified live 2026-08-19.** There was never
+a client bug. Two things were needed, one real and one an artefact of how the earlier
+runs were driven:
 
 1. `HostFile=PROFILE EXEC A` — **rejected by our own argument parser.** `splitArgs`
    (`packages/cli/src/commands.ts:54`) splits on commas *or spaces*, so a CMS
@@ -508,24 +509,43 @@ attempts, 2026-08-18:
    names have no spaces — and it should probably be documented in the runbook or
    handled at the call site.
 
-2. With the name quoted, the command parsed and the transfer ran, then timed out:
-   `no CUT frame from the host within 30s after 0 bytes`. **Zero outbound records in
-   the trace and the screen showing `RUNNING`** — so the diagnosis is unfinished. It
-   is *not* the Query List: no `ReadPartition` of any type appears in that run at all,
-   meaning MECAFF never got as far as asking. Something earlier in the sequence — most
-   likely the `Clear`/`Wait` handshake before the command, or the command never
-   reaching the CMS prompt — is wrong.
+2. **`-model 3278-2-E` is required, and the earlier "0 bytes" timeouts were a
+   contaminated account, not a frame-loop fault.** Results, `packages/cli/scripts/
+   transfer-vm.txt`:
 
-**So the VM blocker has moved, not lifted.** What is established: MECAFF needs
-`-model 3278-2-E` (a plain `IBM-3278-2` gets "Please press ENTER to cancel fullscreen
-operation"), and it asks with a Query List which we can now answer. What is not: an
-end-to-end VM transfer. **MVS/TSO remains the only host with a verified working
-transfer, in both directions.**
+   - **Download:** `PROFILE EXEC A`, 299 bytes, correct content with CRLF.
+   - **Round trip:** the same 249-byte binary used for the TSO test uploaded with
+     `Recfm=variable` and downloaded back **byte-identically** (sha256 equal), twice
+     in a row. `LISTFILE` confirms `V 80` on the host side.
+   - The host says `TRANS03 - File transfer complete` in both directions.
 
-Next step when this resumes: drive the VM sequence one step at a time with `ScreenText`
-between each, confirming the `IND$FILD GET ...` command actually lands at the `Ready;`
-prompt before the transfer loop starts. The zero-outbound-records detail is the clue —
-we may not be typing anything at all.
+**The ttype is the whole of the real requirement, isolated by a controlled comparison**
+— the identical script run with only `-model` changed, both runs confirmed at CMS
+`Ready;` beforehand:
+
+| ttype | Result |
+|---|---|
+| `IBM-3278-2` (our default) | fails: `Error: IND$FILE requires a MECAFF connected 3270 terminal`, preceded by `Please press ENTER to cancel fullscreen operation` |
+| `IBM-3278-2-E` | 299 bytes transferred, host confirms complete |
+
+So MECAFF's `IND$FILE` refuses a non-extended terminal outright, exactly as TSO's does,
+and the Query List support committed in `cd7e887` is what lets the `-E` path succeed.
+
+**WHY THIS LOOKED LIKE A CLIENT BUG FOR A DAY, and the trap to remember: a VM account
+left logged on is not "busy" — the next `LOGON` RECONNECTS to the still-running virtual
+machine.** That machine is already past its IPL, so the fixed `Enter`/`Enter`/`Clear`
+dance lands at `CP READ` instead of CMS, and every command after it is read by *CP*,
+which answers `?CP: IND$FILE` and runs nothing. The transfer then times out at 0 bytes
+with the screen looking plausible. This produced three separate false failures in this
+session, including one where a failing run and a passing run were attributed to the
+ttype when the difference was really the leftover session — the `LOGOFF` line
+`CONNECT= 00:01:03`, spanning two runs, is what exposed it.
+
+**A live VM script must therefore prove where it is, not assume it.** `transfer-vm.txt`
+types `QUERY DISK A` before transferring: `Ready;` means CMS, `?CP: QUERY` means the run
+is a reconnect and every result below it is meaningless. Note also that a *failed*
+transfer leaves the account logged on (the script cannot reach its `LOGOFF`), so the
+next run inherits the trap — check for `LOGOFF AT` in the log before trusting a rerun.
 
 ## Codec findings, from the implementation (2026-08-18)
 

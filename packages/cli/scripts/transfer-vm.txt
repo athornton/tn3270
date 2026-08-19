@@ -1,0 +1,83 @@
+# VM/CMS IND$FILE round trip: upload a binary, download it back, compare.
+#
+# RUN IT WITH -model 3278-2-E. That is not optional and it is the whole of what
+# VM needed: MECAFF's IND$FILE refuses a plain IBM-3278-2 with "Error: IND$FILE
+# requires a MECAFF connected 3270 terminal". Verified by running this script with
+# only that flag changed -- see the transfer design doc.
+#
+#   node packages/cli/dist/main.js -model 3278-2-E \
+#     < packages/cli/scripts/transfer-vm.txt > /tmp/vm-rt.log 2>&1
+#   cmp /tmp/rt-src.bin /tmp/rt-back.bin
+#
+# It expects a 249-byte /tmp/rt-src.bin; any binary will do.
+#
+# THE TRAP THIS SCRIPT DEFENDS AGAINST, which cost three false failures:
+# a VM account left logged on is not "busy" -- the next LOGON RECONNECTS to the
+# still-running virtual machine. That machine is already past its IPL, so the
+# Enter/Enter/Clear dance below lands at CP READ instead of CMS, and every command
+# after it is read by CP, which answers "?CP: IND$FILE" and runs nothing. The
+# transfer then times out at 0 bytes and looks exactly like a client bug.
+#
+# Hence QUERY DISK A below: it PROVES where we are before anything is transferred.
+# "Ready;" means CMS and the run is valid. "?CP: QUERY" means this is a reconnect
+# and every result below it is meaningless -- log off and start again.
+#
+# A FAILED transfer never reaches the LOGOFF at the end, so it leaves the account
+# logged on and hands the trap to the next run. Check the log for "LOGOFF AT"
+# before trusting a rerun.
+Trace(on)
+Connect(127.0.0.1:3270)
+Wait(3270Mode,20)
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+String("LOGON CMSUSER")
+Enter
+Wait(Settle,20)
+String("CMSUSER")
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+Clear
+Wait(Settle,20)
+# PROOF OF STATE: this must answer "Ready;" and not "?CP: QUERY". If it says ?CP
+# the run is a reconnect and every result below is meaningless.
+String("QUERY DISK A")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+String("ERASE RT TEST A")
+Enter
+Wait(Settle,20)
+ScreenText
+Transfer(Direction=send,Host=vm,HostFile="RT TEST A",LocalFile=/tmp/rt-src.bin,Recfm=variable)
+ScreenText
+Clear
+Wait(Settle,20)
+String("LISTFILE RT TEST A (DATE")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+Transfer(Direction=receive,Host=vm,HostFile="RT TEST A",LocalFile=/tmp/rt-back.bin,Exist=replace)
+ScreenText
+Clear
+Wait(Settle,20)
+String("ERASE RT TEST A")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+Trace(off)
+Quit

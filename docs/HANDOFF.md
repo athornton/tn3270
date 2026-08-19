@@ -10,7 +10,8 @@ Branch `main` (renamed from `master` 2026-08-18), **696 tests passing**,
 `npm run typecheck` clean, `npm run build` works, working tree clean. Stage 1 and
 stage 2a are both merged to `main`.
 
-**IND$FILE FILE TRANSFER WORKS ON MVS/TSO, both directions (2026-08-18).** See
+**IND$FILE FILE TRANSFER WORKS ON BOTH HOSTS, both directions** — MVS/TSO 2026-08-18,
+VM/CMS 2026-08-19 (see the following paragraph). See
 `docs/superpowers/specs/2026-08-18-indfile-cut-transfer-design.md` for the whole
 design and every measurement. In brief:
 
@@ -24,12 +25,25 @@ design and every measurement. In brief:
 - **Retransmit is unit-tested only** — no retransmit fired on a clean local link, and
   it is the one path where a subtle bug corrupts data silently instead of failing.
 
-**VM/CMS transfer does NOT work yet, and the blocker has moved rather than lifted.**
-Query List (`TYPE=0x03`) is now answered — MECAFF asks with one and stage 2a had
-deliberately left it unanswered — but a live VM run still times out with zero
-outbound records and no `ReadPartition` in the trace at all, so the fault is earlier
-in the sequence. Also note `HostFile` must be QUOTED on CMS (`HostFile="PROFILE EXEC
-A"`), because our argument splitter treats spaces as separators. Details in that spec.
+**VM/CMS TRANSFER NOW WORKS TOO (2026-08-19), both directions.** There was no client
+bug: `-model 3278-2-E` is required on VM exactly as on TSO (MECAFF's `IND$FILE` refuses
+a plain `IBM-3278-2` with "requires a MECAFF connected 3270 terminal"), and the earlier
+"zero outbound records" timeouts were a **contaminated account**, not a frame-loop
+fault. `PROFILE EXEC A` downloads correctly at 299 bytes, and the same 249-byte binary
+as the TSO test round-trips **byte-identically** with `Recfm=variable`, reproduced twice.
+Script: `packages/cli/scripts/transfer-vm.txt`, run with `-model 3278-2-E`.
+
+**The trap that produced three false failures, worth internalising: a VM account left
+logged on is not "busy" — the next `LOGON` RECONNECTS to the still-running virtual
+machine**, which is past its IPL, so a fixed `Enter`/`Enter`/`Clear` opening lands at
+`CP READ` and every later command is read by *CP* (`?CP: IND$FILE`) rather than CMS. The
+transfer times out at 0 bytes looking like our fault. A failed transfer also never
+reaches its own `LOGOFF`, so it hands the trap to the next run. **Live VM scripts must
+prove their state** — `transfer-vm.txt` types `QUERY DISK A` first, where `Ready;` means
+CMS and `?CP: QUERY` means the run is void — and you should check the log for `LOGOFF
+AT` before trusting a rerun. Also note `HostFile` must be QUOTED on CMS
+(`HostFile="PROFILE EXEC A"`), because our argument splitter treats spaces as
+separators. Details in that spec.
 
 **Two gaps found during stage 2a have since been closed, and both audits found more
 than the stated bug:**
