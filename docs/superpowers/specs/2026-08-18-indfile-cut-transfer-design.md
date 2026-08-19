@@ -462,10 +462,67 @@ compressed members, not the record format.)
 
 This exercises everything a download does not: the encoder, the quadrant state
 machine in the emitting direction, the checksum the host verifies, and frame
-sequencing on the sending side. The retained-encoded-bytes design for retransmit
-was not observably triggered (no retransmit occurred on a clean local link), so
-**that path remains unit-tested only** — see the note below on why re-encoding
-would have corrupted data silently.
+sequencing on the sending side.
+
+## Retransmit: NEITHER HOST CAN EVER TRIGGER IT (measured 2026-08-19)
+
+The retained-encoded-bytes design was never observably triggered, and the reason is
+now established rather than assumed: **neither of our two hosts can send an
+`FT_RETRANSMIT`.** The path stays unit-tested not for want of trying but because no
+live trigger exists.
+
+**VM/CMS — proved from the host's own source.** MECAFF's protocol layer was fetched
+off the running system with our own client (`IND$SCRN C F`, `IND$FILE H F`,
+`IND$DENC C F` from the MECAFF userid's F disk — which is itself a nice demonstration
+of the transfer working). `IND$SCRN C` writes the frame-type character with `_cc()`
+and the complete set it ever writes is three literals: `'C'` for the control-code
+panel (`snd_stat`), `'A'` for data (`snd_data`), `'B'` for the data-request panel
+(`rcv_data`). Through cp037 those are exactly `FT_CONTROL_CODE` 0xC3,
+`FT_DATA` 0xC1 and `FT_DATA_REQUEST` 0xC2 — verified against our generated table, where
+`0x4C` decodes to `<`, a character MECAFF never emits. **So MECAFF has no code path
+that asks for a retransmit.**
+
+Note the trap in its header while reading this: `IND$FILE H` documents
+`1 = ACK_RETRANSMIT` in the return-code list for `snd_data`/`rcv_data`, which looks
+like retransmit support and is the OPPOSITE direction — those are codes MECAFF
+*receives from the terminal*, decoded from the inbound AID at `IND$SCRN C:149`
+(`aid == 0xf1` → PF1 → return 1). That is the client asking the *host* to re-send, i.e.
+`ACK_RETRANSMIT`, not `FT_RETRANSMIT`. The two are distinct halves of the protocol and
+`0x4c` is the one we implement.
+
+**MVS/TSO — proved by measurement, since Rayborn's program is closed-source.** A
+5000-byte upload (3 data frames) was run twice against TK5, changing exactly one thing:
+a patched build XORed 0x15 into the checksum of upload frame 2 only, so the host saw a
+good frame and then a bad one. Results:
+
+| run | probe fired | host behaviour | outcome |
+|---|---|---|---|
+| control | no | 5 data-request frames | `Transfer complete, 5000 bytes` |
+| corrupt frame 2 | yes | **5 data-request frames — identical** | `Transfer complete, 5000 bytes` |
+
+The host asked for exactly the same frames in the same order and never sent a `0x4c`.
+Downloading the resulting dataset back with a clean client returned the original 5000
+bytes byte-for-byte, confirming only the checksum byte had been falsified and the
+payload was intact throughout. **TSO's IND$FILE does not check the upload checksum
+either** — which is the same conclusion the spec already reached for MECAFF from its
+`/* checksum is simply ignored ! */`, now extended to the second host by experiment.
+
+Two consequences:
+
+1. **The "verify but never abort" download decision is further vindicated.** Neither
+   host would act on a checksum, so a client that aborted on one would fail transfers
+   both hosts consider fine.
+2. **The retransmit path cannot be live-tested on this hardware, and that is a
+   property of the hosts, not a gap in the testing.** It stays exercised by the unit
+   tests, which cover replay byte-identity, continuation after replay, repeated
+   retransmits, retransmit-before-first-frame, and retransmit-during-download. If a
+   host that does request retransmits ever turns up (a real IBM VTAM IND$FILE, or
+   CICS), that is the time to revisit — and the negative control above is the harness
+   to do it with: patch the checksum, watch for `0x4c`.
+
+The probe was a temporary patch to `packages/core/dist/` only, reverted after the run;
+no source change was involved. See the note below on why re-encoding would have
+corrupted data silently.
 
 ## VM/CMS: Query List now answered, but the transfer STILL DOES NOT WORK
 

@@ -114,9 +114,28 @@ Local copies of CMS Gopher 2.4.2 are in `$HOME/cmsgopher`. State of them: the tw
 `.tar.gz` files yield only `FILELIST` and `README` (both extract with a benign
 `Unknown file type 't'` warning); `gop242s.vmarc` unpacks with `vma` and is
 service patches to the main package; `gopher24.vmarc` has not been unpacked, its
-members being `:CFF`-compressed. **VMGIF itself has not been located** — worth
-looking for if authentic reference behaviour is ever wanted, since it is the
-actual artefact.
+members being `:CFF`-compressed.
+
+**VMGIF HAS NOW BEEN LOCATED — the user has it in `$HOME/vmgif`** (2026-08-19), dated
+April 1993:
+
+| File | Size | Notes |
+|---|---|---|
+| `VMGIF.MODULE.T1` | 84600 | the executable; S/370 object, no source |
+| `VMGIF.EXEC.T1` | 444 | wrapper exec (EBCDIC; `.asc` translations alongside) |
+| `VMGIFOPT.EXEC.T1` | 575 | options exec |
+| `VMGIF.HELPCMS.T1` | 18591 | HELPCMS file — the closest thing to documentation |
+| `TONETABL.VMGIF.T1` | 5063 | tone/dither table, already ISO-8859 rather than EBCDIC |
+
+**Source has not been found, and we probably do not need it.** The `MODULE` could be
+disassembled if it came to that (S/370 object code, and the HELPCMS file plus
+`TONETABL` give a lot of the intent without it). But the user's read is the right one:
+once we know how to push pixels with Programmable Symbol Sets, **writing a GIF decoder
+from the spec is no harder than reverse-engineering a 1993 one** — GIF/LZW is a
+published, stable format and our decoder would run client-side in TypeScript, not on
+the host. So treat VMGIF as a **behavioural reference** (what a 3279 dithered image
+actually looked like, and `TONETABL` is literally its palette mapping) rather than as
+code to port. It remains the fidelity target named below.
 
 **VMGIF used GDDM. WE WILL NOT — this is a decision, not an omission.** IBM is
 sunsetting GDDM and would be unlikely to license it even to a current paying VM

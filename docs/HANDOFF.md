@@ -22,8 +22,16 @@ design and every measurement. In brief:
   boundary, which is correct behaviour and what VMARC wants (`FBLOCK 80 00`).
 - The host program is Mike Rayborn's "Free File Transfer Program" 2.0.5 from the CBT
   tape, installed by the user. It needs `-model 3278-2-E`.
-- **Retransmit is unit-tested only** — no retransmit fired on a clean local link, and
-  it is the one path where a subtle bug corrupts data silently instead of failing.
+- **Retransmit is unit-tested only, and now we know NEITHER HOST CAN TRIGGER IT**
+  (measured 2026-08-19, details in the transfer spec under *Retransmit*). MECAFF's own
+  source — fetched off the live system with our client — writes exactly three frame-type
+  characters, `'C'`/`'A'`/`'B'` = 0xC3/0xC1/0xC2, and never `0x4c`. TSO's closed-source
+  program was tested instead: a build that corrupted the checksum of upload frame 2
+  produced an **identical** 5-data-request exchange and a successful transfer, and the
+  dataset read back byte-for-byte correct. So both hosts ignore the upload checksum and
+  neither ever asks for a retransmit. The path stays unit-tested by necessity, not
+  neglect; re-test with the same checksum-corrupting harness if a real IBM VTAM or CICS
+  host ever appears.
 
 **VM/CMS TRANSFER NOW WORKS TOO (2026-08-19), both directions.** There was no client
 bug: `-model 3278-2-E` is required on VM exactly as on TSO (MECAFF's `IND$FILE` refuses
