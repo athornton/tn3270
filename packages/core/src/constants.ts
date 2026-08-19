@@ -307,4 +307,39 @@ export const ADDRESS_CODE_TABLE: readonly number[] = [
 
 /** Default screen geometry for an IBM-3278-2. */
 export const MODEL_2 = { rows: 24, cols: 80 } as const;
+
+/**
+ * Extended attribute types, carried by SA (X'28') and as SFE type-value pairs.
+ * x3270's include/3270ds.h:240-250.
+ *
+ * `RESET` is 0x00 AS A TYPE and means "return every character attribute type to
+ * its default" — the manual: "The attribute type X'00' is always supported by
+ * the SA order" (pages.txt:2986). Do not confuse it with `XAC_DEFAULT`, which is
+ * 0x00 as a VALUE under FOREGROUND/BACKGROUND and means "device default colour".
+ * Both appear in the committed TK5 fixture (101 FOREGROUND, 12 RESET), so a
+ * conflation is not hypothetical.
+ *
+ * CHARSET is named but deliberately NOT implemented — it selects Programmable
+ * Symbol Sets, which are out of scope. It stays counted by setAttributeIgnored.
+ */
+export const XA = {
+  RESET: 0x00,
+  HIGHLIGHTING: 0x41,
+  FOREGROUND: 0x42,
+  CHARSET: 0x43,
+  BACKGROUND: 0x45,
+} as const;
+
+/** Highlighting values for `XA.HIGHLIGHTING`. 3270ds.h:241-246. */
+export const XAH = {
+  DEFAULT: 0x00,
+  NORMAL: 0xf0,
+  BLINK: 0xf1,
+  REVERSE: 0xf2,
+  UNDERSCORE: 0xf4,
+  INTENSIFY: 0xf8,
+} as const;
+
+/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
+export const XAC_DEFAULT = 0x00;
 export const TERMINAL_TYPE = 'IBM-3278-2';

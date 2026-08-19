@@ -5,6 +5,7 @@ import {
   ADDRESS_CODE_TABLE, isShortReadAID,
   PF_AIDS, PA_AIDS,
   Sfid, PID_QUERY, ReadPartitionType, ReqTyp, REQTYP_MASK, Qcode, XA_3270,
+  XA, XAH, XAC_DEFAULT,
 } from '../src/constants.js';
 
 describe('telnet constants', () => {
@@ -199,5 +200,33 @@ describe('structured field constants', () => {
     // Manual attribute-type table gives X'C0' 3270 Field attribute; x3270
     // include/3270ds.h:230 defines XA_3270 0xc0. Both checked.
     expect(XA_3270).toBe(0xc0);
+  });
+});
+
+describe('extended attribute types and values', () => {
+  it('names the attribute types from 3270ds.h:240-250', () => {
+    expect(XA.RESET).toBe(0x00);
+    expect(XA.HIGHLIGHTING).toBe(0x41);
+    expect(XA.FOREGROUND).toBe(0x42);
+    expect(XA.CHARSET).toBe(0x43);
+    expect(XA.BACKGROUND).toBe(0x45);
+  });
+
+  it('names all six highlighting values, including intensify', () => {
+    expect(XAH.DEFAULT).toBe(0x00);
+    expect(XAH.NORMAL).toBe(0xf0);
+    expect(XAH.BLINK).toBe(0xf1);
+    expect(XAH.REVERSE).toBe(0xf2);
+    expect(XAH.UNDERSCORE).toBe(0xf4);
+    expect(XAH.INTENSIFY).toBe(0xf8);
+  });
+
+  it('XA.RESET is a TYPE meaning reset-all, distinct from XAC_DEFAULT as a VALUE', () => {
+    // Both are 0x00 and conflating them is a real bug: as a type it means "return
+    // every character attribute to default" (pages.txt:2986); as a value under
+    // XA.FOREGROUND it means "device default colour". The TK5 fixture contains
+    // twelve of the former.
+    expect(XA.RESET).toBe(XAC_DEFAULT);
+    expect(XA.RESET).not.toBe(XA.FOREGROUND);
   });
 });
