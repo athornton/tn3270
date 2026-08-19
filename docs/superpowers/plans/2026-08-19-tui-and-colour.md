@@ -959,7 +959,9 @@ In `applyToken`'s `'data'` case, replace the loop body:
     }
 ```
 
-Do the same inside the `'ra'` case's fill loop and the `'ge'` case, wherever `setChar` is called on a position the host is filling with data. **Do not** apply it in `'eua'`, which nulls rather than writes.
+Do the same inside the `'ra'` case's fill loop and the `'ge'` case, wherever `setChar` is called on a position the host is filling with data.
+
+**`'eua'` and `'pt'` must CLEAR rather than stamp — also corrected after implementation.** An earlier version of this plan said "do not apply it in `'eua'`, which nulls rather than writes." Half right: EUA must not *stamp* the running state, but it must *clear* what is there, because Task 3 made `setChar` leave extended attributes alone and so nulling a cell would otherwise leave its colour behind. The manual says so directly: "Field attributes and extended field attributes are not affected by EUA. **Character attributes for every character changed to nulls are reset to their defaults**" (`pages.txt:3165-3166`). PT is the same case (`pages.txt:3090-3091`; x3270 `ctlr.c:1555-1560`), gated on `wroteSinceOrder` since a PT following an order leaves the buffer unmodified.
 
 Add the helper beside `applyToken`:
 
@@ -969,12 +971,41 @@ Add the helper beside `applyToken`:
  *
  * Called after `setChar`, never before: `setChar` deliberately leaves extended
  * attributes alone (see its comment) precisely so this can run second.
+ *
+ * CLEAR THEN SET — an ASSIGNMENT, not a merge. See the warning below.
  */
 function applySa(screen: Screen, addr: number, sa: SaState): void {
-  if (sa.fg === undefined && sa.bg === undefined && sa.gr === undefined) return;
+  screen.clearExtended(addr);
   screen.setExtended(addr, sa);
 }
 ```
+
+> **⚠️ CORRECTED 2026-08-19 AFTER IMPLEMENTATION FOUND A REAL BUG HERE.** An earlier
+> version of this plan wrote `applySa` as an early return plus a merge:
+>
+> ```ts
+> if (sa.fg === undefined && sa.bg === undefined && sa.gr === undefined) return;
+> screen.setExtended(addr, sa);   // WRONG
+> ```
+>
+> That is silently incorrect, because Task 3's `setExtended` **merges** (rightly — the
+> composite rule needs it). So a cell overwritten by a later record with no SA in effect
+> **keeps the previous record's colour**. Stale colour on rewritten cells, no error.
+>
+> The manual is explicit and was sitting there the whole time: "Character attributes are
+> associated with a character and not with the character's position in the buffer. Thus,
+> whenever a character is overwritten by a new character (or cleared or erased), the old
+> character attribute is overwritten by the character attribute of the new character"
+> (**`pages.txt:3388-3392`**). x3270 has no such hazard: it stamps all three
+> unconditionally (`ctlr.c:2141-2143`) through `ctlr_add_fg`, which **assigns**
+> (`ea_buf[baddr].fg = color`, `ctlr.c:2865`).
+>
+> **The plan's own reset-per-write-command test does not catch this**, because it writes
+> the second record to a *different address* and so never exercises an overwrite.
+> Verified: reverting `applySa` to the early-return form fails exactly two tests, both of
+> which had to be added — "a rewritten character loses the attributes of the character it
+> replaced" and "an overwrite drops a stale attribute of a type the new SA does not
+> mention". Keep both.
 
 - [ ] **Step 6: Handle the SA order itself**
 

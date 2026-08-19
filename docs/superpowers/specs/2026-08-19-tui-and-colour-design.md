@@ -166,6 +166,35 @@ Field-level extended attributes from SFE are stored on the cells the field cover
 character-level SA overrides them for the characters it precedes. Where both are absent,
 resolution falls through to the base field attribute (rule 2 below).
 
+**THREE MORE RULES, added 2026-08-19 because implementation found the four above were not
+sufficient.** All three are stated outright in the manual and all three fail silently —
+wrong colour, never an error:
+
+- **A rewritten character loses the attributes of the character it replaced.** "Character
+  attributes are associated with a character and not with the character's position in the
+  buffer. Thus, whenever a character is overwritten by a new character (or cleared or
+  erased), the old character attribute is overwritten by the character attribute of the
+  new character" (`pages.txt:3388-3392`). So stamping the running state onto a written
+  cell must be an **assignment, not a merge** — clear the cell's attributes, then apply.
+  This is the one that actually bit: the plan had a merge with an early return when no SA
+  was in effect, which left a previous record's colour on cells the new record overwrote.
+  x3270 avoids it by stamping all three unconditionally (`ctlr.c:2141-2143`) through
+  `ctlr_add_fg`, which assigns (`ctlr.c:2865`).
+- **EUA resets the attributes of the cells it nulls.** "Field attributes and extended
+  field attributes are not affected by EUA. Character attributes for every character
+  changed to nulls are reset to their defaults" (`pages.txt:3165-3166`). EUA must not
+  *stamp* the running state — it writes no characters — but it must *clear*.
+- **PT likewise** (`pages.txt:3090-3091`, x3270 `ctlr.c:1555-1560`), gated on whether
+  anything was actually written: "When PT immediately follows a command, order, or order
+  sequence, the buffer is not modified" (`:3089`).
+
+**Why the original four looked sufficient and were not:** each of the three above is
+about a cell whose *character* changes without an SA order being involved. The four
+original rules are all about the lifetime of the SA *state*. Both halves are needed, and
+a test suite built only around state lifetime will not notice — the plan's own
+reset-per-write-command test wrote its second record to a different address, so it never
+exercised an overwrite at all.
+
 Attribute types to support (from `include/3270ds.h:240-255`, cross-checked against the
 manual):
 
