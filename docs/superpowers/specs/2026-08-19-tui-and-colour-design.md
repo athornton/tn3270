@@ -380,14 +380,24 @@ The existing discipline applies: unit tests against synthetic screens, then a li
    as a failure rather than as a quietly monochrome screen.
 5. **Live: drive a real ISPF session in the TUI and look at it.** Screenshot-equivalent
    is a `ScreenJson` dump plus the resolved colours, diffable against a `zti` run for
-   the same panel. `zti` is on disk at `~/git/tnz` and does implement colour, which makes
-   it the reference for colour the way s3270 was for the datastream — **but note it
-   gates colour on `self.colors >= 8 and sys.stdin.isatty()` (`tnz/tnz.py:251-253`) and
-   defaults `capable_color = False` for non-tty use (`:202-207`).** So a `zti` run
-   captured through a pipe will report no colour, and comparing against it would
-   "prove" we emit too much. Capture it on a real tty (`script`, as the 2026-08-17
-   session did) or the comparison is worthless — the same class of mistake as the
+   the same panel. `zti` is on disk at `~/git/tnz`, renders colour normally inside any
+   colour-capable terminal, and is therefore the reference for colour the way s3270 was
+   for the datastream.
+
+   **The hazard is in the capture method, not in `zti`.** Its colour gate is
+   `self.colors >= 8 and sys.stdin.isatty()` (`tnz/tnz.py:251-253`), and `self.colors`
+   defaults to **768** (`:94`, overridable via `TNZ_COLORS`), so the `>= 8` half is
+   satisfied out of the box and `isatty()` is the only thing that can fail. Piping a
+   `zti` run's stdout to a file makes it false, silently producing a colourless capture
+   that would "prove" we emit too much colour. Capture through a pty — `script`, as the
+   2026-08-17 session did — or the comparison is worthless. Same class of mistake as the
    negative-control probe that reported an absence it could not have detected.
+
+   **`zti` is a reference for WHICH colour, not for quantisation.** It has no depth
+   tiering: `tnz.py` consults no terminfo, and `zti.py` reduces everything to a boolean
+   `min(tns.colors, self.colors) >= 8` (`zti.py:1560`, `:3134`, `:3180`). So our
+   16/256/24-bit ladder has no reference implementation to diff against and its tests
+   must be self-contained — which is what test 2 above is for.
 
 **Mutation-test the resolution rules.** Review on the stage 2a work found two tests that
 passed with the behaviour they claimed to pin deleted; the colour rules are exactly the
