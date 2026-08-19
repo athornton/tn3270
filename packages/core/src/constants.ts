@@ -342,4 +342,5 @@ export const XAH = {
 
 /** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
 export const XAC_DEFAULT = 0x00;
+
 export const TERMINAL_TYPE = 'IBM-3278-2';
