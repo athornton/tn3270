@@ -104,12 +104,22 @@ export class Screen {
   /**
    * Extended attributes, one array each, parallel to `chars`.
    *
-   * 0 means "unspecified" and is distinguishable from every real value because
-   * every architected colour is 0xF0-0xFF and every highlighting value is 0x00
-   * (default) or 0xF0-0xF8 — so 0 is never a value a host can set. Storing
-   * `XAH.DEFAULT` (0x00) explicitly is therefore impossible here, which is
-   * correct: "default" and "unspecified" resolve identically, and SA type 0x00
-   * clears back to unspecified rather than writing a value.
+   * 0 means "unspecified". Every architected colour is 0xF0-0xFF, so for `fgs`
+   * and `bgs` the sentinel is unambiguous.
+   *
+   * For `grs` it genuinely collapses two states, and that is SAFE rather than
+   * merely convenient: `XAH.DEFAULT` IS 0x00, so a host can set highlighting to
+   * a value this array cannot distinguish from "nothing set". The manual defines
+   * that value as meaning "the default action of the device"
+   * (pages.txt:10329-10331), so it renders identically to no highlighting at
+   * all — the same reasoning that lets `XAC_DEFAULT` (0x00 as a colour VALUE)
+   * fall through to the base field attribute rather than being stored.
+   *
+   * DO NOT reach for `XA.RESET` to justify this. An earlier version of this
+   * comment did, and it was wrong in exactly the way `constants.ts` warns about:
+   * `XA.RESET` is 0x00 as an attribute TYPE, meaning "reset every type", which
+   * is a different concept from `XAH.DEFAULT` being 0x00 as a highlighting
+   * VALUE. Both being zero is a coincidence of encoding, not a shared meaning.
    */
   private readonly fgs: Uint8Array;
   private readonly bgs: Uint8Array;
@@ -380,6 +390,12 @@ export class Screen {
         // attrs[], which would destroy the very field attributes EAU is
         // required to preserve.
         this.chars[a] = 0x00;
+        // Extended attributes go with the character data they decorate. EAU is
+        // NOT one of the manual's four SA-state reset triggers, so this line is
+        // an inference rather than a quotation — but leaving them would show
+        // stale colour on a cell whose data has just been nulled. Written
+        // directly rather than via clearExtended for the same reason as chars[]
+        // above: one bounds check per cell is wasted work in a hot loop.
         this.fgs[a] = 0;
         this.bgs[a] = 0;
         this.grs[a] = 0;
@@ -479,6 +495,12 @@ export class Screen {
    */
   snapshot(): ScreenSnapshot {
     const cells: Readonly<Cell>[] = new Array(this.size);
+    // Via cellAt rather than building the object inline, deliberately: cellAt
+    // owns the "absent means unspecified" conditional-assignment rule, and
+    // duplicating it here is how the two would drift. The cost is one redundant
+    // bounds check per cell — 1920 of them, on a call made once per host record,
+    // which is immaterial. The tight loop in eraseAllUnprotected makes the
+    // opposite choice for the opposite reason; both are intentional.
     for (let i = 0; i < this.size; i++) {
       cells[i] = Object.freeze(this.cellAt(i));
     }
