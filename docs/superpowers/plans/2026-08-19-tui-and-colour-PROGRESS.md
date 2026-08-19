@@ -9,7 +9,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 |---|---|---|---|
 | 1. Attribute type/value constants | **DONE** | `805c474`, `cc1f89d`, `71fdbdd` | 698 |
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
-| 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0` | 715 |
+| 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
 | 4. SA running state in executor | | | |
 | 5. `render.ts` resolution | | | |
 | 6. TK5 fixture proof | | | |
@@ -78,6 +78,16 @@ conflates `XAH.DEFAULT` (0x00, a value a host CAN send) with "nothing set". It d
 and that is correct, because the manual says `X'00'` means "the same as the action for
 the attribute value X'00' (the default action of the device)" (`pages.txt:10329-10331`).
 The two states resolve identically, so collapsing them loses nothing.
+
+**The most instructive defect so far, because of what it was:** the comment justifying
+that sentinel argued from "SA type 0x00 clears back to unspecified" — i.e. it justified
+a claim about `XAH.DEFAULT` (0x00 as a highlighting VALUE) by appealing to `XA.RESET`
+(0x00 as an attribute TYPE). **That is precisely the TYPE-vs-VALUE conflation
+`constants.ts` was written to warn against**, reproduced inside the change that added the
+warning's neighbour. The behaviour was correct throughout; only the argument was wrong.
+Fixed in `a6327bb`, which now cites the real reason and explicitly warns the next reader
+off the `XA.RESET` route. Worth remembering that a comment can be confidently wrong in a
+file whose whole purpose is preventing that error.
 
 **A genuinely useful find, now in the spec:** the OCR-damaged colour Table 4-7 is
 **reprinted UNDAMAGED at `pages.txt:9244-9260`** (manual p. 6-37, Chapter 6's Query
