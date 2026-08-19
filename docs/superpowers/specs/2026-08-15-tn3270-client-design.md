@@ -634,6 +634,13 @@ available under OFL 1.1 — redistribution and bundling are permitted provided
 the copyright notice and disclaimer ship with the app. (Its Debian-logo glyph is
 CC-BY-SA-3.0 / LGPL-3+; noted for attribution completeness.) The authentic look
 is therefore the default with no user setup. Users may still substitute a font.
+The user re-confirmed this as the right choice on 2026-08-19.
+
+**This applies to the GUI and the eventual web front end only — NOT to the TUI.** A
+terminal front end draws in whatever font the terminal is already configured with and
+has no hook to change it, so for `packages/tui` 3270font is advice for the README
+("install it and point your terminal at it") rather than a dependency. See the *Fonts*
+section of `docs/superpowers/specs/2026-08-19-tui-and-colour-design.md`.
 
 ### Keyboard
 

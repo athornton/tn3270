@@ -374,6 +374,28 @@ file as the GUI's does.
 The OIA is drawn on a 25th row and comes from `oia.toText()`, which already exists and
 is already what the CLI and tests consume. No new status logic.
 
+### Fonts are the GUI's problem, not the TUI's
+
+**The TUI must not try to load or bundle a font.** It draws into whatever terminal the
+user already has, with whatever font that terminal is configured to use; there is no
+hook for a client to change it and attempting one would be both futile and rude.
+
+The main design doc commits to bundling **3270font**
+(https://github.com/rbanffy/3270font) for the **GUI** — licence checked during design:
+BSD 3-Clause with the SFD source additionally under OFL 1.1, so bundling is permitted
+provided the copyright notice ships. For the TUI, that is *advice to the user* rather
+than a dependency, and it belongs in the README: a user who wants the authentic look
+installs 3270font locally and points their terminal at it. Nothing in `packages/tui`
+should reference it in code.
+
+**One TUI-specific consequence worth stating, because it is invisible until it bites:**
+the 3270 character set includes glyphs a modern terminal font may lack, and a missing
+glyph renders as a replacement box that silently corrupts the screen a user is reading.
+The renderer cannot detect this — it emits a code point and the terminal decides. So
+when the code page grows beyond CP037, or when Programmable Symbol Sets eventually land
+(out of scope here), the honest answer for a terminal front end is that some cells may
+be unrepresentable, and that limit should be documented rather than papered over.
+
 ## Error handling
 
 - **Terminal too small** for the negotiated screen: say so and refuse to draw a
