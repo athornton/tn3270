@@ -13,12 +13,35 @@ import { cp037, type CodePage } from './codepage.js';
  */
 
 /**
- * Cell content is a tagged variant. Stage 1 has exactly one case; Programmable
+ * Cell content is a tagged variant. Stage 1 had exactly one case; Programmable
  * Symbol Sets (a committed stage 4 deliverable) will add
  * `{ kind: 'ps', store, index }`, and consumers must dispatch on `kind` rather
  * than assume a code page lookup.
+ *
+ * The three extended attributes are OPTIONAL and their absence is meaningful:
+ * it means "this cell specifies nothing, fall through to the base field
+ * attribute". That is not the same as any concrete colour, so do not default
+ * them to 0x00 — `render.ts` needs the distinction. This mirrors x3270's
+ * `struct ea` (include/globals.h:364-374), which likewise carries the character
+ * and its attributes together.
  */
-export type Cell = { kind: 'char'; ebcdic: number };
+export type Cell = {
+  kind: 'char';
+  ebcdic: number;
+  /** Foreground colour identification, 0xF0-0xFF. Absent means unspecified. */
+  fg?: number;
+  /** Background colour identification, 0xF0-0xFF. Absent means unspecified. */
+  bg?: number;
+  /** Highlighting value (`XAH.*`). Absent means unspecified. */
+  gr?: number;
+};
+
+/** The subset of a cell's attributes a caller may set. See `Screen.setExtended`. */
+export interface ExtendedAttributes {
+  fg?: number;
+  bg?: number;
+  gr?: number;
+}
 
 export interface Field {
   /** Address of the field attribute byte itself. */
@@ -78,6 +101,19 @@ export class Screen {
   private readonly chars: Uint8Array;
   /** attrs[i] >= 0 means position i holds that field attribute value. */
   private readonly attrs: Int16Array;
+  /**
+   * Extended attributes, one array each, parallel to `chars`.
+   *
+   * 0 means "unspecified" and is distinguishable from every real value because
+   * every architected colour is 0xF0-0xFF and every highlighting value is 0x00
+   * (default) or 0xF0-0xF8 — so 0 is never a value a host can set. Storing
+   * `XAH.DEFAULT` (0x00) explicitly is therefore impossible here, which is
+   * correct: "default" and "unspecified" resolve identically, and SA type 0x00
+   * clears back to unspecified rather than writing a value.
+   */
+  private readonly fgs: Uint8Array;
+  private readonly bgs: Uint8Array;
+  private readonly grs: Uint8Array;
   private readonly codePage: CodePage;
 
   constructor(opts: ScreenOptions = {}) {
@@ -92,6 +128,9 @@ export class Screen {
     this.size = this.rows * this.cols;
     this.chars = new Uint8Array(this.size);
     this.attrs = new Int16Array(this.size).fill(NOT_ATTR);
+    this.fgs = new Uint8Array(this.size);
+    this.bgs = new Uint8Array(this.size);
+    this.grs = new Uint8Array(this.size);
     this.codePage = opts.codePage ?? cp037;
   }
 
@@ -138,13 +177,48 @@ export class Screen {
 
   cellAt(addr: number): Cell {
     this.check(addr);
-    return { kind: 'char', ebcdic: this.chars[addr]! };
+    const cell: Cell = { kind: 'char', ebcdic: this.chars[addr]! };
+    // Conditional assignment, not `fg: x || undefined`: the property must be
+    // ABSENT when unspecified, because `'fg' in cell` is how a consumer asks.
+    if (this.fgs[addr]! !== 0) cell.fg = this.fgs[addr]!;
+    if (this.bgs[addr]! !== 0) cell.bg = this.bgs[addr]!;
+    if (this.grs[addr]! !== 0) cell.gr = this.grs[addr]!;
+    return cell;
+  }
+
+  /**
+   * Merge extended attributes into one cell.
+   *
+   * MERGE, NOT REPLACE, because the manual's composite rule requires it: "The
+   * set of type-value pairs applied during character processing is a composite,
+   * by attribute type, of the last value specified in previously encountered SA
+   * orders" (p. 4-6, pages.txt:2995-2996). An SA setting colour must leave a
+   * previously set highlighting alone. Pass `clearExtended` to reset.
+   */
+  setExtended(addr: number, ext: ExtendedAttributes): void {
+    this.check(addr);
+    if (ext.fg !== undefined) this.fgs[addr] = ext.fg & 0xff;
+    if (ext.bg !== undefined) this.bgs[addr] = ext.bg & 0xff;
+    if (ext.gr !== undefined) this.grs[addr] = ext.gr & 0xff;
+  }
+
+  /** Return one cell's extended attributes to "unspecified". */
+  clearExtended(addr: number): void {
+    this.check(addr);
+    this.fgs[addr] = 0;
+    this.bgs[addr] = 0;
+    this.grs[addr] = 0;
   }
 
   /**
    * Write a character. If the position held a field attribute, that attribute
    * is destroyed — the host is allowed to do this, and the field structure
    * changes as a result.
+   *
+   * Deliberately does NOT touch fgs/bgs/grs. The executor decides what
+   * extended attributes a written character carries (it holds the running SA
+   * state) and calls setExtended right after this. Clearing here would
+   * discard them a moment later.
    */
   setChar(addr: number, ebcdic: number): void {
     this.check(addr);
@@ -168,6 +242,12 @@ export class Screen {
     this.attrs[addr] = attr & 0xff;
     // An attribute position displays as a blank and holds no character.
     this.chars[addr] = 0x00;
+    // "If the display receives an SF order, it sets the associated extended
+    // field attribute to its default value" (p. 4-4, pages.txt:2869-2870). SFE
+    // overrides this by calling setExtended AFTER this returns; a plain SF must
+    // leave the position clean, or a field following a coloured one inherits
+    // colour the host never gave it.
+    this.clearExtended(addr);
   }
 
   isFormatted(): boolean {
@@ -268,6 +348,15 @@ export class Screen {
   clear(): void {
     this.chars.fill(0x00);
     this.attrs.fill(NOT_ATTR);
+    // EW/EWA "resets any extended field attributes and character attributes
+    // associated with the nulled characters to their default values"
+    // (pages.txt:2990-2992). This is also the path the Clear AID takes
+    // (session.ts:350-351), which is the manual's fourth SA reset trigger --
+    // "The Clear key is pressed" (pages.txt:2979). So implementing it here
+    // satisfies both rules at once.
+    this.fgs.fill(0);
+    this.bgs.fill(0);
+    this.grs.fill(0);
     this.cursor = 0;
   }
 
@@ -291,6 +380,9 @@ export class Screen {
         // attrs[], which would destroy the very field attributes EAU is
         // required to preserve.
         this.chars[a] = 0x00;
+        this.fgs[a] = 0;
+        this.bgs[a] = 0;
+        this.grs[a] = 0;
         a = this.inc(a);
       }
       this.attrs[f.attrAddr] = f.attr & ~FA.MODIFY;
@@ -388,7 +480,7 @@ export class Screen {
   snapshot(): ScreenSnapshot {
     const cells: Readonly<Cell>[] = new Array(this.size);
     for (let i = 0; i < this.size; i++) {
-      cells[i] = Object.freeze({ kind: 'char' as const, ebcdic: this.chars[i]! });
+      cells[i] = Object.freeze(this.cellAt(i));
     }
     const fields = this.fields().map((f) => Object.freeze(f));
     const formatted = fields.length > 0;

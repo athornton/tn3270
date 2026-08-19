@@ -511,3 +511,106 @@ describe('forEachCellWithField', () => {
     expect(addrs).toEqual([1918, 1919, 0, 1]);
   });
 });
+
+describe('extended attribute storage', () => {
+  it('defaults every cell to no extended attributes', () => {
+    const s = new Screen();
+    const c = s.cellAt(0);
+    expect(c.fg).toBeUndefined();
+    expect(c.bg).toBeUndefined();
+    expect(c.gr).toBeUndefined();
+  });
+
+  it('stores and returns foreground, background and highlighting', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.setExtended(5, { fg: 0xf2, bg: 0xf1, gr: 0xf4 });
+    const c = s.cellAt(5);
+    expect(c.fg).toBe(0xf2);
+    expect(c.bg).toBe(0xf1);
+    expect(c.gr).toBe(0xf4);
+  });
+
+  it('setExtended merges rather than replacing, so one type does not clear another', () => {
+    // The manual's composite rule (pages.txt:2995-2997): the applied set is a
+    // composite BY ATTRIBUTE TYPE. Setting colour must not wipe highlighting.
+    const s = new Screen();
+    s.setExtended(5, { gr: 0xf1 });
+    s.setExtended(5, { fg: 0xf2 });
+    expect(s.cellAt(5).gr).toBe(0xf1);
+    expect(s.cellAt(5).fg).toBe(0xf2);
+  });
+
+  it('clearExtended returns one cell to defaults', () => {
+    const s = new Screen();
+    s.setExtended(5, { fg: 0xf2, bg: 0xf1, gr: 0xf4 });
+    s.clearExtended(5);
+    const c = s.cellAt(5);
+    expect(c.fg).toBeUndefined();
+    expect(c.bg).toBeUndefined();
+    expect(c.gr).toBeUndefined();
+  });
+
+  it('clear() resets extended attributes as well as characters', () => {
+    // EW/EWA "resets any extended field attributes and character attributes
+    // associated with the nulled characters to their default values"
+    // (pages.txt:2990-2992). clear() is also what the Clear AID calls
+    // (session.ts:350-351), which is the manual's fourth SA reset trigger.
+    const s = new Screen();
+    s.setExtended(5, { fg: 0xf2 });
+    s.clear();
+    expect(s.cellAt(5).fg).toBeUndefined();
+  });
+
+  it('setFieldAttribute clears the attribute cell own extended attributes', () => {
+    // "If the display receives an SF order, it sets the associated extended
+    // field attribute to its default value" (pages.txt:2869-2870). A field
+    // following a coloured one must not inherit colour it was never given.
+    const s = new Screen();
+    s.setExtended(10, { fg: 0xf2, gr: 0xf1 });
+    s.setFieldAttribute(10, 0xc0);
+    expect(s.cellAt(10).fg).toBeUndefined();
+    expect(s.cellAt(10).gr).toBeUndefined();
+  });
+
+  it('eraseAllUnprotected clears extended attributes in unprotected fields only', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0xc0); // unprotected
+    s.setFieldAttribute(10, 0xe0); // protected
+    s.setChar(5, 0xc1);
+    s.setExtended(5, { fg: 0xf2 });
+    s.setChar(15, 0xc2);
+    s.setExtended(15, { fg: 0xf3 });
+    s.eraseAllUnprotected();
+    expect(s.cellAt(5).fg).toBeUndefined();
+    expect(s.cellAt(15).fg).toBe(0xf3); // protected field survives
+  });
+
+  it('snapshot carries extended attributes and is frozen', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.setExtended(5, { fg: 0xf2 });
+    const snap = s.snapshot();
+    expect(snap.cells[5]!.fg).toBe(0xf2);
+    expect(() => {
+      (snap.cells[5] as { fg?: number }).fg = 0xf1;
+    }).toThrow();
+  });
+
+  it('omits absent attributes from the snapshot rather than defaulting them', () => {
+    // Absence is protocol-meaningful: it means "fall through to the base field
+    // attribute", which is NOT the same as any concrete colour. Storing 0x00
+    // here would erase the distinction, because 0x00 as a VALUE means
+    // "device default" and would resolve identically -- but only by accident.
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    const snap = s.snapshot();
+    expect('fg' in snap.cells[5]!).toBe(false);
+  });
+
+  it('setExtended rejects an out-of-range address', () => {
+    const s = new Screen();
+    expect(() => s.setExtended(-1, { fg: 0xf2 })).toThrow(RangeError);
+    expect(() => s.setExtended(s.size, { fg: 0xf2 })).toThrow(RangeError);
+  });
+});
