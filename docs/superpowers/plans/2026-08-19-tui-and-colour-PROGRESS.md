@@ -9,7 +9,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 |---|---|---|---|
 | 1. Attribute type/value constants | **DONE** | `805c474`, `cc1f89d`, `71fdbdd` | 698 |
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
-| 3. Per-cell storage in `Screen` | next | — | — |
+| 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0` | 715 |
 | 4. SA running state in executor | | | |
 | 5. `render.ts` resolution | | | |
 | 6. TK5 fixture proof | | | |
@@ -60,6 +60,24 @@ cited passage says what it is claimed to say — and checking takes a minute.
 - The "every entry has an RGB triple" test was vacuous (the `Rgb` tuple type already
   guarantees it) and was replaced with pairwise-distinctness, which is what would have
   caught the collisions.
+
+**Task 3 — three more wrong citations in my plan, and one real test gap:**
+- SF reset is at `pages.txt:2869-2870`, **not** 2874-2875 (which is SFE format text).
+- EW/EWA reset is at `2990-2992`, **not** 2988-2991.
+- The `session.ts` Clear call is at `350-351`, not 350-353.
+- **`setChar`'s non-interference with extended attributes was untested.** Found by the
+  spec reviewer doing real mutation testing, and I reproduced it: adding
+  `this.clearExtended(addr)` to `setChar` left **all 59 tests passing**. That is the
+  rule Task 4 depends on most — the executor calls `setChar` then `setExtended`, so a
+  clear there would silently discard every SA colour and quietly send the TK5 fixture
+  monochrome. Now pinned; re-running the same mutation gives 1 failure.
+
+**A question worth having settled (raised by quality review, checked against the
+manual):** storing `0` as the "unspecified" sentinel in `Uint8Array`s looks like it
+conflates `XAH.DEFAULT` (0x00, a value a host CAN send) with "nothing set". It does —
+and that is correct, because the manual says `X'00'` means "the same as the action for
+the attribute value X'00' (the default action of the device)" (`pages.txt:10329-10331`).
+The two states resolve identically, so collapsing them loses nothing.
 
 **A genuinely useful find, now in the spec:** the OCR-damaged colour Table 4-7 is
 **reprinted UNDAMAGED at `pages.txt:9244-9260`** (manual p. 6-37, Chapter 6's Query
