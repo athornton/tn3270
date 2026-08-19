@@ -197,6 +197,36 @@ rewriting the renderer. Those stubs are the future entry points.
 Retro CRT shader effects (scanlines, phosphor glow). Pure presentation, easily
 added later, no protocol impact.
 
+### Test hosts: historic now, modern later
+
+Everything verified so far is **historic**: VM/370 R6 (VM/CE 1.2) and MVS 3.8j
+(TK5), both under Hercules, and the user can stand up **DOS/VS** easily as a third.
+These are the systems the project is aimed at first and they are sufficient to prove
+the protocol core, stage 2a, and IND$FILE — as they have.
+
+**They are not sufficient to prove the whole implementation, and we should be
+explicit about the gap rather than discover it late.** Historic hosts exercise none
+of: TLS on port 992, TN3270E option 40 (measured absent from every successful run
+here), LU names and printer sessions as a modern VTAM presents them, current code
+pages, or the larger negotiated geometries a modern client is expected to handle.
+Several stage 4+ items therefore have **no local test host at all**.
+
+**Plan: after the historic hosts are flawless, the user will poll contacts still
+working in the mainframe world for access to a modern z/OS and z/VM, and possibly
+z/VSE.** The user believes those contacts are in a position to grant it. That is the
+only realistic way to test TLS, TN3270E, and modern-VTAM behaviour against something
+authoritative rather than against our reading of the manual.
+
+Two consequences for sequencing, worth acting on now:
+
+- **Do not treat "works on TK5 and VM/CE" as "conformant".** Where behaviour is
+  known to differ on modern systems, say so in the code comment and cite the
+  manual, so a later z/OS run has something falsifiable to check against.
+- **Prefer designs that keep host-specific behaviour at a seam.** IND$FILE's
+  `Dialect` object is the model: TSO and VM differ in three named places and
+  nothing else. TN3270E and TLS should land the same way, so adding a modern host
+  is configuration and a new dialect rather than a rewrite.
+
 ## Technology Choice
 
 **Electron + TypeScript.**
