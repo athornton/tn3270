@@ -8,20 +8,36 @@
  *
  * ## THE MANUAL'S TABLE IS OCR-DAMAGED — DO NOT TRANSCRIBE IT LITERALLY
  *
- * Table 4-7 (GA23-0059 p. 4-19/4-20, pages.txt:3524-3541) prints `X'FB'`
- * TWICE, for both Black and Purple, and renders the second Neutral (F7) as
- * `X'F?'`. The codes are in fact contiguous 0xF0-0xFF, so Black is 0xF8 and
- * Purple 0xFB — confirmed two ways: (1) the same table is reprinted intact in
- * Chapter 6's "Query Reply (Color)" section (p. 221, pages.txt:9244-9260),
- * where line 9253 reads `Black X'F8'`; and (2) x3270's include/3270ds.h:
- * 313-328, whose HOST_COLOR_* run 0..15 in the same order (HOST_COLOR_BLACK
- * == 8, HOST_COLOR_PURPLE == 11). palette.test.ts pins both of the damaged
+ * Table 4-7 (GA23-0059 p. 4-20, pages.txt:3524-3541) prints `X'FB'` TWICE,
+ * for both Black and Purple, and renders the second Neutral (F7) as `X'F?'`.
+ * The codes are in fact contiguous 0xF0-0xFF, so Black is 0xF8 and Purple
+ * 0xFB — confirmed two ways: (1) the same table is reprinted, undamaged, in
+ * Chapter 6's "Query Reply (Color)" section (p. 6-37, pages.txt:9244-9260),
+ * where line 9253 reads `Black X'F8'` — though that reprint went through the
+ * same OCR pipeline, so it corroborates rather than independently confirms;
+ * and (2) x3270's include/3270ds.h:313-328, whose HOST_COLOR_* run 0..15 in
+ * the same order (HOST_COLOR_BLACK == 8, HOST_COLOR_PURPLE == 11), which
+ * *is* an independent source. palette.test.ts pins both of the damaged
  * entries.
  *
- * RGB values follow x3270's default 3279 rendering. They are a presentation
- * choice, not architecture: the manual specifies which colour each code IS, not
- * its exact chromaticity, and a real 3279's phosphors matched none of these
- * precisely.
+ * ## THE RGB VALUES ARE OUR OWN CHOICE, DELIBERATELY NOT X3270'S
+ *
+ * x3270's own default 3279 rendering (c3270/screen.c:213-229, `rgbmap[16]`)
+ * uses muted, named-CSS-ish colours: e.g. blue is `0x1e90ff` (dodger blue),
+ * turquoise is `0x00ffff`, black is `0x2f4f4f` (dark slate grey — x3270's own
+ * comment there reads "alas, this may be gray"). Measured against a standard
+ * 16-colour ANSI palette, x3270's blue and turquoise both quantise to the
+ * same slot, collapsing two of the seven base colours into one. Task 10
+ * (terminal quantisation) depends on all seven base colours staying visually
+ * distinct at both 16 and 256 colours, so this table instead uses saturated
+ * primaries/secondaries (pure red, green, blue, cyan, magenta, yellow, plus
+ * black and white) that survive quantisation at both depths. These are a
+ * presentation choice, not architecture: the manual specifies which colour
+ * each code IS, not its exact chromaticity, and a real 3279's phosphors
+ * matched none of these precisely — ours or x3270's.
+ *
+ * All sixteen RGB triples are pairwise distinct (palette.test.ts), so no two
+ * architecturally-different colour identifications alias to the same pixel.
  */
 
 /** The seven base 3279 colours, by architected code. Table 4-7. */
@@ -69,22 +85,25 @@ export const COLOUR_NAMES: Readonly<Record<number, string>> = Object.freeze({
 export type Rgb = readonly [number, number, number];
 
 export const PALETTE_3279: Readonly<Record<number, Rgb>> = Object.freeze({
-  0xf0: [0x00, 0x00, 0x00],
+  // Neutral black/white and Black/White are architecturally distinct codes
+  // (a host can choose either), so they get distinct RGB despite both being
+  // "black-ish" or "white-ish" -- see the OCR-damage note above.
+  0xf0: [0x1a, 0x1a, 0x1a], // neutral-black: near-black, not pure black
   0xf1: [0x00, 0x00, 0xff],
   0xf2: [0xff, 0x00, 0x00],
   0xf3: [0xff, 0x00, 0xff],
   0xf4: [0x00, 0xff, 0x00],
   0xf5: [0x00, 0xff, 0xff],
   0xf6: [0xff, 0xff, 0x00],
-  0xf7: [0xff, 0xff, 0xff],
-  0xf8: [0x00, 0x00, 0x00],
+  0xf7: [0xe0, 0xe0, 0xe0], // neutral-white: near-white, not pure white
+  0xf8: [0x00, 0x00, 0x00], // black: pure black
   0xf9: [0x00, 0x00, 0x80],
   0xfa: [0xff, 0x80, 0x00],
   0xfb: [0x80, 0x00, 0xff],
   0xfc: [0x80, 0xff, 0x80],
   0xfd: [0x80, 0xff, 0xff],
   0xfe: [0x80, 0x80, 0x80],
-  0xff: [0xff, 0xff, 0xff],
+  0xff: [0xff, 0xff, 0xff], // white: pure white
 });
 
 /** RGB for a colour identification. Throws rather than guessing. */

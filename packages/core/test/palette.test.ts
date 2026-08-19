@@ -31,15 +31,30 @@ describe('3279 palette', () => {
     expect(Colour.GREEN).toBe(0xf4);
   });
 
-  it('gives every entry an RGB triple', () => {
+  it('gives every architected colour a distinct RGB triple', () => {
+    // Neutral black/white (0xF0/0xF7) and Black/White (0xF8/0xFF) are
+    // architecturally distinct codes; collapsing either pair to the same
+    // pixel would silently discard information a host chose deliberately.
+    const seen = new Set<string>();
     for (const code of Object.keys(PALETTE_3279).map(Number)) {
       const rgb = colourRgb(code);
-      expect(rgb).toHaveLength(3);
-      for (const c of rgb) {
-        expect(c).toBeGreaterThanOrEqual(0);
-        expect(c).toBeLessThanOrEqual(255);
-      }
+      const key = rgb.join(',');
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
     }
+    expect(seen.size).toBe(16);
+  });
+
+  it('keeps Colour, COLOUR_NAMES and PALETTE_3279 in sync', () => {
+    // These three are authored separately but keyed by the same sixteen
+    // codes. A missing or mistyped entry in any one of them, outside the
+    // handful of codes the other tests spot-check, would otherwise pass
+    // silently.
+    const colourCodes = Object.values(Colour).sort((a, b) => a - b);
+    const nameCodes = Object.keys(COLOUR_NAMES).map(Number).sort((a, b) => a - b);
+    const paletteCodes = Object.keys(PALETTE_3279).map(Number).sort((a, b) => a - b);
+    expect(nameCodes).toEqual(colourCodes);
+    expect(paletteCodes).toEqual(colourCodes);
   });
 
   it('throws on a code outside 0xF0-0xFF rather than guessing', () => {
