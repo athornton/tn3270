@@ -532,7 +532,7 @@ describe('extended attribute storage', () => {
   });
 
   it('setExtended merges rather than replacing, so one type does not clear another', () => {
-    // The manual's composite rule (pages.txt:2995-2997): the applied set is a
+    // The manual's composite rule (pages.txt:2995-2996): the applied set is a
     // composite BY ATTRIBUTE TYPE. Setting colour must not wipe highlighting.
     const s = new Screen();
     s.setExtended(5, { gr: 0xf1 });
@@ -549,6 +549,24 @@ describe('extended attribute storage', () => {
     expect(c.fg).toBeUndefined();
     expect(c.bg).toBeUndefined();
     expect(c.gr).toBeUndefined();
+  });
+
+  it('setChar does not clear extended attributes already on the cell', () => {
+    // Reset rule 4: setChar deliberately leaves fgs/bgs/grs alone. This is
+    // NOT incidental -- Task 4's executor holds the running SA state and, for
+    // every character it writes, calls setChar followed immediately by
+    // setExtended for that same address. If setChar cleared extended
+    // attributes, the executor's setExtended call would still land, but only
+    // by accident of ordering; the moment anything reorders those two calls,
+    // or writes a character without immediately re-asserting SA state, every
+    // SA colour goes silently missing and the TK5 fixture renders monochrome.
+    const s = new Screen();
+    s.setExtended(5, { fg: 0xf2, bg: 0xf1, gr: 0xf4 });
+    s.setChar(5, 0xc1);
+    const c = s.cellAt(5);
+    expect(c.fg).toBe(0xf2);
+    expect(c.bg).toBe(0xf1);
+    expect(c.gr).toBe(0xf4);
   });
 
   it('clear() resets extended attributes as well as characters', () => {
