@@ -240,6 +240,36 @@ the GUI needs the same RGB values for canvas fills. Names and codes from Table 4
 Turquoise `F5`, Yellow `F6`, Neutral-white `F7`, Black `F8`, Deep Blue `F9`, Orange
 `FA`, Purple `FB`, Pale Green `FC`, Pale Turquoise `FD`, Grey `FE`, White `FF`.
 
+**A BETTER PRIMARY SOURCE FOR THE CODES EXISTS, found during implementation
+(2026-08-19): the same table is REPRINTED UNDAMAGED at `pages.txt:9244-9260`**, in
+Chapter 6's Query Reply (Color) section (manual p. 6-37). It reads `Neutral X'F7'`,
+`Black X'F8'` and `Purple X'FB'` correctly. Prefer it over Table 4-7 — though note it
+comes through the same OCR pipeline over the same underlying table, so it is strong
+corroboration rather than a fully independent document.
+
+**THE RGB VALUES ARE OURS, NOT x3270's — and an earlier draft of this spec said
+otherwise, wrongly.** x3270's actual default RGB table is `rgbmap[16]` at
+`c3270/screen.c:213-229`, and it is a set of muted, named-CSS-style colours
+(`neutral black 0x1a1a1a`, `blue 0x1e90ff` dodger blue, `green 0x32cd32` lime green,
+`black 0x2f4f4f` dark slate grey — its own comment admits "alas, this may be gray").
+**We use saturated primaries instead**, which is a deliberate presentation choice for a
+device whose phosphors matched neither set, and the file must say so rather than
+claiming a provenance it does not have.
+
+Two consequences measured before committing to it:
+
+- **All sixteen RGB values must be pairwise distinct.** Collapsing `neutral-black`
+  (`F0`) with `black` (`F8`), or `neutral-white` (`F7`) with `white` (`FF`), loses
+  information a host deliberately sent — x3270 keeps all sixteen visually distinct and
+  so must we. A test asserting pairwise distinctness is worth more than the
+  near-vacuous "every entry has three bytes in range" check, which TypeScript's tuple
+  type already guarantees.
+- **Saturated primaries survive 16-colour quantisation; x3270's palette does not.**
+  With x3270's `rgbmap`, blue (`1e90ff`) and turquoise (`00ffff`) both quantise to ANSI
+  96, collapsing two of the seven base colours. With saturated primaries all seven stay
+  distinct at 16 **and** 256. That is the concrete reason to keep our own values, and
+  it is why the quantisation tests can assert seven-distinct at all.
+
 **BEWARE THE OCR IN THAT TABLE — it is damaged in two places and must not be
 transcribed literally.** It renders F7 as `X'F?'`, and it prints **`X'FB'` twice**, for
 both Black and Purple. The correct values are Black `0xF8` and Purple `0xFB`; F8 is

@@ -1974,6 +1974,22 @@ describe('sgrFor: quantisation per depth', () => {
     expect(sgrFor(Colour.GREEN, 16777216, 'bg')).toBe('48;2;0;255;0');
   });
 
+  // ⚠️ EVERY NUMBER IN THIS DESCRIBE BLOCK IS DERIVED FROM `PALETTE_3279`.
+  // They were computed against the palette as first written in Task 2, whose
+  // RGB values were then CHANGED during review: `neutral-black`/`black` and
+  // `neutral-white`/`white` had each been given identical values, which loses
+  // information a host deliberately sent, so all four were made distinct.
+  //
+  // The seven base colours (blue, red, pink, green, turquoise, yellow, white)
+  // were not among the four changed, so these numbers should still hold — but
+  // WHITE (0xFF) is one of the seven AND was one of the four, so re-derive
+  // rather than assume. Read the committed `PALETTE_3279` and recompute:
+  //   24-bit: `38;2;r;g;b`
+  //   256:    16 + 36*round(r/255*5) + 6*round(g/255*5) + round(b/255*5)
+  //   16:     (bright ? 90 : 30) + nearest ANSI-8 index, bright = max>170
+  // If a number below disagrees with that arithmetic, the PLAN is stale and
+  // your derivation wins. Say so rather than adjusting the implementation.
+
   it('256 emits a cube index', () => {
     const sgr = sgrFor(Colour.GREEN, 256, 'fg');
     expect(sgr).toMatch(/^38;5;\d+$/);
