@@ -3,6 +3,18 @@
 Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on branch
 **`tui-and-colour`** (branched from `main` at `b054045`). Update after each task.
 
+> **STOPPED AFTER TASK 8, 2026-08-20, on a spend limit — not a blocker.** Tasks 1-8 (the
+> whole core half) are done, reviewed and green: **822 tests**, typecheck clean, working tree
+> clean, `~/bin/check-spend` reading $1705.86 of a $1800 ceiling the user set. **Tasks 9-16
+> are untouched and the plan for them is unamended** — resume at Task 9 (`packages/tui`
+> skeleton). Nothing is half-finished: every task that was started is committed with both
+> reviews closed.
+>
+> **Read this whole file before resuming.** It records 39 defects, 30 of them errors in the
+> plan itself, and six recurring traps that will bite again. In particular: the plan's Task 9-13
+> text has NOT had the scrutiny Tasks 1-8's had, so expect the same defect rate and verify its
+> code against the sources rather than transcribing it.
+
 ## Status
 
 | Task | State | Commits | Tests after |
@@ -11,7 +23,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
 | 4. SA running state in executor | **DONE**, both reviews closed | `a456b06`, `4ea5c50`, `78c0dd4` | 751 |
-| 5. `render.ts` resolution | **DONE**, spec review closed | `3a3531b`, `27e5310`, `52a19f7` | 802 |
+| 5. `render.ts` resolution | **DONE**, both reviews closed | `3a3531b`, `27e5310`, `52a19f7`, `4188b1e`, `6cefc9c` | 822 |
 | 6. TK5 fixture proof | **DONE**, reviewed — the run's goal, reached | `cdc200c`, `7045b10` | 808 |
 | 7. Query Reply Color + Highlighting | **DONE** | `c4708d1` | 816 |
 | 8. `ScreenJson` resolved colour | **DONE** | `a79f4fd` | 821 |
@@ -357,6 +369,35 @@ told to review a **commit** (`git show <sha>`) rather than the working tree. And
 `git stash`** in a shared tree — it is repo-global, so it cannot be scoped to your own files.
 A transient full-suite failure while another agent is mid-edit is expected and is not a
 regression; verify HEAD in a detached worktree before believing otherwise.
+
+## Task 5's final round, and a third pass on one comment
+
+`4188b1e` unified the three attribute fall-throughs behind a `usableHighlight` mirroring
+`usableColour`, after review found `gr` gated level 1 on *non-zero* where fg/bg gate it on
+*renderable*. I reproduced the consequence: a cell carrying a garbage `gr` of `0x99`
+**suppressed its field's highlighting entirely**, while a garbage `fg` fell through to the
+field's colour — same malformed host byte, two policies, one property apart. Also closed a
+gap where **swapping background's levels 1 and 2 left all 56 tests green** (verified).
+
+**A subtlety in that fix worth keeping:** `HIGHLIGHTS` holds **five** of the six architected
+values, not all six. `X'00'` is excluded so it falls through, but **`X'F0'` Normal is
+included** — "Normal (as determined by the 3270 field attribute)" is a *positive* instruction
+to show no extended highlighting, so a character set to Normal must **override** a
+reverse-video field rather than inherit from it. That F0-vs-00 distinction is why it is a set
+rather than a range check.
+
+**And a caution about masking:** x3270 stores `gr` unchecked because its SA path already did
+`*cp & 0x0f` (`ctlr.c:1785`) for its compressed bit field — but that mask turns `0x99` into
+blink|intensify, **two highlights at once**, which the architecture forbids "on an exclusive
+basis" (`pages.txt:10326-10328`). So masking is not a safe shortcut for us; we keep the
+architected value verbatim and check membership.
+
+**Third pass on one comment, which is its own lesson.** The `Int16Array` justification was
+wrong; the correction replaced it with a *different* wrong fact (43×132 as "the largest
+architected geometry"); the passage cited actually says a 3180 does 43 rows **or** 132 columns
+"but not concurrently", so the largest architected model is 27×132 = 3564. `6cefc9c` fixes it.
+**A correction can be as wrong as what it corrects** — verify the replacement fact, not just
+the fact being replaced.
 
 ## Reminders for the rest of the run
 
