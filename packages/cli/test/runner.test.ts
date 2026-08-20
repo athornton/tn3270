@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
   encodeAddress, cp037, checksum, from6, to6, hostToLocal, localToHost,
-  EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode,
+  EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode, Colour,
   O_CC_FRAME_SEQ, O_CC_MESSAGE, O_CC_STATUS_CODE, O_DR_FRAME_SEQ, O_DR_SF,
   O_DT_CSUM, O_DT_DATA, O_DT_FRAME_SEQ, O_DT_LEN, O_FRAME_TYPE, O_SF,
   O_UP_DATA, O_UP_FRAME_SEQ, O_UP_LEN, RO_FRAME_TYPE, RO_REASON_CODE,
@@ -99,6 +99,37 @@ describe('screen reading', () => {
     expect(parsed.cols).toBe(80);
     expect(parsed.fields).toHaveLength(1);
     expect(parsed.cells[1].ebcdic).toBe(0xc1);
+  });
+});
+
+describe('ScreenJson colour', () => {
+  it('reports resolved colour per cell', async () => {
+    const { runner, session } = newRunner();
+    // A protected, unintensified field: the 3279 default map renders it BLUE.
+    session.screen.setFieldAttribute(0, FA.PRINTABLE | FA.PROTECT);
+    session.screen.setChar(1, 0xc1);
+
+    const reply = await runner.run('ScreenJson');
+    // Data lines are prefixed "data: "; the JSON is the only one here.
+    const line = reply.split('\n').find((l) => l.startsWith('data: '))!;
+    const json = JSON.parse(line.slice('data: '.length));
+
+    expect(json.resolved).toBeDefined();
+    expect(json.resolved).toHaveLength(1920);
+    expect(json.resolved[1].fg).toBe(Colour.BLUE);
+    expect(json.resolved[1].text).toBe('A');
+  });
+
+  it('still reports the raw cells alongside the resolved ones', async () => {
+    // A conformance comparison needs the bytes; a human debugging colour needs
+    // the resolution. Dropping either makes one of those impossible.
+    const { runner, session } = newRunner();
+    session.screen.setChar(0, 0xc1);
+    const reply = await runner.run('ScreenJson');
+    const line = reply.split('\n').find((l) => l.startsWith('data: '))!;
+    const json = JSON.parse(line.slice('data: '.length));
+    expect(json.cells[0].ebcdic).toBe(0xc1);
+    expect(json.resolved[0].text).toBe('A');
   });
 });
 

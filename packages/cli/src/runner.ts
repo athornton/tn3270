@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net';
 import {
   Session, type Connection, AID, PF_AIDS, PA_AIDS, KeyboardState,
-  CutTransfer, isCutFrame, type TransferResult,
+  CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
@@ -261,6 +261,11 @@ export class Runner {
           oia: s.oia.toText(),
           fields: snap.fields,
           cells: snap.cells,
+          // Resolved colours alongside the raw cells, not instead of them: a
+          // conformance comparison needs the bytes, a human debugging colour
+          // needs the resolution, and dropping either would make one of those
+          // impossible.
+          resolved: resolve(snap),
         }));
         return;
       }
