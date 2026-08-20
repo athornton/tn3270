@@ -1567,25 +1567,48 @@ git commit -m "Resolve extended attributes into concrete 3279 colours"
 **Files:**
 - Modify: `packages/core/test/render.test.ts`
 
-**This is the test that would have caught the whole gap**, and it needs no host. The fixture is already on disk and contains 101 foreground SA orders.
+**This is the test that would have caught the whole gap**, and it needs no host.
 
-> **⚠️ WHAT THIS TASK CANNOT PROVE, measured 2026-08-20: the TK5 fixture contains ZERO SFE
-> orders.** All 113 of its SA orders are character-level, so no field-attribute cell in it
-> carries extended attributes and **the field-level fallback (the eighth rule) gets no
-> coverage here at all.** That is exactly why that whole class of defect went unnoticed —
-> the trace we regression-test against never exercises the field level.
+> **⚠️ REWRITTEN 2026-08-20. THE FIXTURE IS NOT REPLAYABLE AS COMMITTED, and the original
+> version of this task assumed it was.** Measured, not guessed:
 >
-> So this task proves the **character** level against real host traffic and leaves the
-> **field** level unit-tested only. Say so in the commit message rather than letting a
-> green Task 6 read as covering both. Real coverage needs a trace from a host that sends
-> SFE; none is committed today. This is [[check-what-a-comparison-covers]] again: a passing
-> comparison proves nothing about behaviour its inputs never exercise.
+> - `Session.replay()` uses `parseTrace` (`trace.ts:157`), whose line regex is
+>   `/^([0-9.]+)\s+([<>=+])\s*(.*)$/` after a `.trim()`.
+> - The three files in **`packages/fixtures/traces/`** match that and replay fine
+>   (294, 5 and 363 trace lines respectively).
+> - **`packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` does not.** It is raw CLI output: every
+>   line is prefixed `data: `, so **zero** lines match the regex. Replaying it yields an
+>   empty, unformatted screen — 0 fields, 0 attributes, 1920 green cells. A test asserting
+>   "more than one colour" against it would have failed for the right reason; a test
+>   asserting anything weaker would have passed while proving nothing.
+> - **Stripping the six-character `data: ` prefix makes it work**, verified: 28 fields,
+>   **532 cells carrying real character-level colour**, resolving to five distinct colours —
+>   white 793, blue 618, red 329, neutral-white 144, yellow 36 — on a recognisable TK5
+>   panel (`Terminal CUU0C0 … Date 18.08.26`). Two of those, **neutral-white and yellow, the
+>   base-attribute map cannot produce**, which is exactly the evidence this task exists to
+>   get.
+>
+> **So Step 1 is a conversion, not a lookup.** Convert the fixture to the canonical trace
+> format and put it where the replayable ones live. Keep its comment header — it documents
+> the capture and carries a redaction note.
+>
+> **AND WHAT THIS TASK STILL CANNOT PROVE: the TK5 trace contains ZERO SFE orders.** All 113
+> SA orders are character-level, so no field-attribute cell in it carries extended attributes
+> and **the field-level fallback (the eighth rule) gets no coverage from real traffic at
+> all.** That is precisely why that whole class of defect went unnoticed. Say so in the
+> commit message rather than letting a green Task 6 read as covering both levels. Real
+> coverage needs a capture from a host that sends SFE; none is committed.
+> [[check-what-a-comparison-covers]]: a passing comparison proves nothing about behaviour its
+> inputs never exercise.
 
-- [ ] **Step 1: Find how existing tests replay a fixture**
+- [ ] **Step 1: Convert the fixture to canonical form**
 
-Run: `grep -rn "mvs-tk5-tso-ispf\|readFileSync" packages/core/test/*.test.ts | head`
+The existing helper is `replayFixture` in `packages/core/test/golden.test.ts:24-30`; it reads from `packages/fixtures/traces/` and calls `session.replay()`. Reuse it — do not write a second trace parser.
 
-Reuse that helper rather than writing a second trace parser. If the existing one is in a test-local helper, import it; if it is inline, extract it to `packages/core/test/helpers/trace.ts` as part of this task and update its original caller.
+Convert `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` into `packages/fixtures/traces/mvs-tk5-tso-ispf.trace` by stripping the `data: ` prefix from lines matching `/^data: [0-9.]+ [<>+=]/` and keeping comment lines. **Two things to check before committing the result:**
+
+1. **Redaction.** The original header warns the password appears twice — as EBCDIC on the wire and as plaintext in a `ScreenText` dump. Confirm the converted file contains neither. Grep for the EBCDIC bytes `c3 e4 d3 f8 e3 d9` and for `CUL8TR`.
+2. **`golden.test.ts` will pick the new file up automatically**, because it globs `*.trace` in that directory and asserts against a golden screen. Either generate the golden with `tools/make-golden.mjs` as that test expects, or place the converted fixture where it will not be globbed. Decide deliberately and say which you chose and why — a new fixture silently changing what `golden.test.ts` covers is the kind of thing this project writes down.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1593,39 +1616,72 @@ Append to `packages/core/test/render.test.ts`:
 
 ```ts
 describe('the live TK5 ISPF fixture', () => {
-  it('produces coloured cells, not a monochrome screen', () => {
-    // The fixture carries 101 SA foreground orders and 12 resets -- counted with
-    // packages/cli/scripts/count-orders.mjs, NOT with a hex grep, which gives
-    // the wrong answer twice over. Before this work every one was discarded.
-    const screen = replayFixture('mvs/mvs-tk5-tso-ispf.trace');
-    const resolved = resolve(screen.snapshot());
-    const distinct = new Set(resolved.map((c) => c.fg));
-    expect(distinct.size).toBeGreaterThan(1);
+  // ALL FOUR NUMBERS BELOW WERE MEASURED against the converted fixture before
+  // this task was written, not guessed. If yours differ, the conversion differs
+  // -- investigate that rather than adjusting the expectation.
+  //   28 fields, 532 cells with a character-level fg, and resolved counts of
+  //   white 793, blue 618, red 329, neutral-white 144, yellow 36.
+
+  it('replays at all -- the negative control this task exists because of', () => {
+    // The fixture was previously UNREPLAYABLE (raw `data: `-prefixed CLI output,
+    // zero lines matching parseTrace's regex), which produced an empty screen:
+    // 0 fields, 1920 uniformly green cells. Assert the screen is FORMATTED first,
+    // so a regression in the conversion fails here and loudly rather than
+    // surfacing as a subtly wrong colour count below.
+    const s = replayFixture('mvs-tk5-tso-ispf.trace');
+    expect(s.screen.isFormatted()).toBe(true);
+    expect(s.screen.fields().length).toBeGreaterThan(20);
   });
 
-  it('uses a colour the base-attribute map alone could not produce', () => {
-    // The default map yields only green, red, blue and white. A fifth colour
-    // proves the SA orders actually reached the screen, which a test asserting
-    // merely "more than one colour" would not.
-    const screen = replayFixture('mvs/mvs-tk5-tso-ispf.trace');
+  it('carries real character-level colour, not just base-attribute colour', () => {
+    // 532 of 1920 cells have their own fg. This is the assertion that would have
+    // caught the original gap: before this work every SA order was discarded and
+    // this count was 0.
+    const s = replayFixture('mvs-tk5-tso-ispf.trace');
+    let withFg = 0;
+    for (let i = 0; i < s.screen.size; i++) {
+      if (s.screen.cellAt(i).fg !== undefined) withFg++;
+    }
+    expect(withFg).toBeGreaterThan(400);
+  });
+
+  it('uses colours the base-attribute map alone could not produce', () => {
+    // The default map yields ONLY green, red, blue and white. TK5's panel also
+    // shows neutral-white and yellow, which can only have come from SA orders --
+    // so this distinguishes "colour resolved" from "colour received", which a
+    // test asserting merely "more than one colour" would not.
+    const s = replayFixture('mvs-tk5-tso-ispf.trace');
     const fromDefaults = new Set([Colour.GREEN, Colour.RED, Colour.BLUE, Colour.WHITE]);
-    const seen = new Set(resolve(screen.snapshot()).map((c) => c.fg));
+    const seen = new Set(resolve(s.screen.snapshot()).map((c) => c.fg));
+    expect(seen.has(Colour.NEUTRAL_WHITE)).toBe(true);
+    expect(seen.has(Colour.YELLOW)).toBe(true);
     const beyond = [...seen].filter((c) => !fromDefaults.has(c) && c !== Colour.NEUTRAL_BLACK);
     expect(beyond.length).toBeGreaterThan(0);
   });
 
   it('pins the SA order counts, so a parser regression fails loudly', () => {
     // Without this, a change that stopped recognising SA would show up only as a
-    // quietly monochrome screen -- which is exactly the failure mode this whole
-    // task exists to end.
-    const counts = countDeferredOrders('mvs/mvs-tk5-tso-ispf.trace');
+    // quietly monochrome screen -- exactly the failure mode this task exists to
+    // end. Counts come from the parser, never a hex grep; see
+    // packages/cli/scripts/count-orders.mjs and its header comment.
+    const counts = countDeferredOrders('mvs-tk5-tso-ispf.trace');
     expect(counts.sa).toBe(113);
     expect(counts.mf).toBe(0);
     expect(counts.byType.get(0x42)).toBe(101);
     expect(counts.byType.get(0x00)).toBe(12);
   });
+
+  it('confirms the fixture has NO SFE orders, so the field level is uncovered', () => {
+    // Not a formality: this is the assertion that documents what the suite does
+    // NOT prove. If a future fixture DOES contain SFE, this test failing is the
+    // signal to go and add real field-level coverage.
+    const counts = countDeferredOrders('mvs-tk5-tso-ispf.trace');
+    expect(counts.sfe).toBe(0);
+  });
 });
 ```
+
+Note the last test needs `countDeferredOrders` to report an `sfe` count as well as `sa`/`mf`; `parse.ts` emits SFE as its own token kind (`{ kind: 'sfe', pairs }`), so this is one extra counter, not a new parser.
 
 - [ ] **Step 3: Add the two helpers**
 
