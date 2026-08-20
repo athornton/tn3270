@@ -81,9 +81,16 @@ full results in `docs/live-testing.md` under *Stage 2a results*. What shipped:
   `IBM-3278-2`**; the TSO run passes `-model 3278-2-E` explicitly. Note the
   conformance goldens do NOT enforce that default (they replay recorded bytes);
   `telnet.test.ts` does, by pinning the subnegotiation bytes.
-- **Query Reply** — three units (Summary 0x80, Usable Area 0x81, Implicit Partition
-  0xA6), generated from a capability list so adding one is a single entry. Accepted by
-  TK5. Byte-identical to x3270 on all three.
+- **Query Reply** — five units (Summary 0x80, Usable Area 0x81, Color 0x86,
+  Highlighting 0x87, Implicit Partition 0xA6), generated from a capability list so
+  adding one is a single entry. The three-unit set was accepted by TK5; Color and
+  Highlighting were added once SA execution and colour resolution made them honest.
+  Byte-identical to x3270 except in Color's fifteen colour-identifier bytes, where
+  our capture was taken with x3270 in monochrome mode and we advertise the identity
+  pairs unconditionally — see the note on `color` in `queryreply.ts`.
+  **Advertising these did not change what TK5 sends us**: it emits SA colour either
+  way, which the trace fixture's 113 SA orders (captured before we advertised
+  anything) show.
 - **SFE** implemented as a field-defining order, including the case that matters: an
   SFE with no 0xC0 pair still defines a field with the default attribute 0x00.
 - **SA and MF** still parsed-and-dropped, but now counted and traced.

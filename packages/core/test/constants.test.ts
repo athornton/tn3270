@@ -166,6 +166,15 @@ describe('structured field constants', () => {
   it('query reply codes match GA23-0059 table 6-1', () => {
     expect(Qcode.SUMMARY).toBe(0x80);
     expect(Qcode.USABLE_AREA).toBe(0x81);
+    // Color, "Color Yes X'86' Yes Yes" (pages.txt:8589), and Highlighting,
+    // "Highlighting Yes X'87' Yes Yes" (pages.txt:8605). Both rows are OCR-clean,
+    // unlike Summary's, and both are confirmed by their own unit byte tables
+    // (pages.txt:9214, :10342) and by 3270ds.h:142-143.
+    expect(Qcode.COLOR).toBe(0x86);
+    expect(Qcode.HIGHLIGHTING).toBe(0x87);
+    // Adjacent and easy to transpose, so pinned as an ordering too: Color is the
+    // lower of the two.
+    expect(Qcode.COLOR).toBeLessThan(Qcode.HIGHLIGHTING);
     expect(Qcode.IMPLICIT_PARTITION).toBe(0xa6);
     // Null, p. 6-77: "3 QCODE X'FF' Identifies this Query Reply as Null"
     // (pages.txt:10771); x3270 include/3270ds.h:180 QR_NULL 0xff.

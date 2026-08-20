@@ -170,6 +170,23 @@ export const REQTYP_MASK = 0xc0;
 export const Qcode = {
   SUMMARY: 0x80,
   USABLE_AREA: 0x81,
+  /**
+   * Color. Table 6-1: "Color Yes X'86' Yes Yes" (pages.txt:8589) — that row is
+   * OCR-clean, and the unit's own byte table agrees: "3 QCODE X'86' Identifies
+   * this Query Reply as Color" (pages.txt:9214). x3270's 3270ds.h:142
+   * QR_COLOR 0x86.
+   *
+   * Table 6-1's "Yes" in the Query column is what makes `returnedForQuery: true`
+   * correct for it; x3270 also gives it a `single_fn` (sf.c:86), which is only
+   * reachable from a plain Query or an enumerating Query List.
+   */
+  COLOR: 0x86,
+  /**
+   * Highlighting. Table 6-1: "Highlighting Yes X'87' Yes Yes"
+   * (pages.txt:8605), confirmed by "3 QCODE X'87' Identifies this Query Reply as
+   * Highlighting" (pages.txt:10342) and 3270ds.h:143 QR_HIGHLIGHTING 0x87.
+   */
+  HIGHLIGHTING: 0x87,
   IMPLICIT_PARTITION: 0xa6,
   /**
    * Null (QCODE 0xFF) — "we support none of what you asked for".

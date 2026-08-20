@@ -468,10 +468,17 @@ describe('query reply', () => {
     await session.connect('localhost', 3270);
     conn.negotiate();
     conn.sent.length = 0;
-    // QCODE List asking for Color (0x86) and Highlighting (0x87), neither of
-    // which we advertise. p. 6-77's example 2 (pages.txt:10758-10761).
+    // QCODE List asking for Image (0x82) and Line Type (0xB2), neither of which
+    // we advertise: Table 6-1 gives "Image No X'82' No Yes" (pages.txt:8607) and
+    // "Line Type No X'B2' No Yes" (pages.txt:8610). p. 6-77's example 2
+    // (pages.txt:10758-10761).
+    //
+    // These WERE 0x86 and 0x87. We now advertise Color and Highlighting, so that
+    // request would return two real units and this test would be asserting the
+    // Null reply against a host request we DO satisfy. Neither replacement is
+    // 0xFF, so neither needs doubling and L stays 8.
     conn.host(
-      SnaCmd.WSF, 0x00, 0x08, 0x01, T.IAC, T.IAC, 0x03, 0x00, 0x86, 0x87,
+      SnaCmd.WSF, 0x00, 0x08, 0x01, T.IAC, T.IAC, 0x03, 0x00, 0x82, 0xb2,
       T.IAC, T.EOR);
     // Byte-exact, INCLUDING the wire doubling: the QCODE 0xFF is content, so
     // sendRecord doubles it (telnet.ts:82). lastRecord does not un-double, hence

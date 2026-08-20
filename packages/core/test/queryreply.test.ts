@@ -6,7 +6,8 @@ import {
   buildQueryReply, buildNullQueryReply, buildReply, DEFAULT_CAPABILITIES,
   type Capability,
 } from '../src/queryreply.js';
-import { AID, Qcode, ReqTyp, Sfid } from '../src/constants.js';
+import { AID, Qcode, ReqTyp, Sfid, XAH } from '../src/constants.js';
+import { Colour, colourRgb } from '../src/palette.js';
 
 const GEOMETRY = { rows: 24, cols: 80 };
 
@@ -36,6 +37,22 @@ function units(reply: Uint8Array): Uint8Array[] {
   return out;
 }
 
+/**
+ * The BODY of one unit, i.e. what follows `L L SFID QCODE`.
+ *
+ * Built on `units` rather than being a second walker, so the length-consistency
+ * check above applies to every lookup. Throws on a missing QCODE instead of
+ * returning undefined: a test that silently asserted against an absent unit is
+ * the failure mode this project has hit repeatedly.
+ */
+function unitBody(reply: Uint8Array, qcode: number): number[] {
+  const found = units(reply).filter((u) => u[3] === qcode);
+  if (found.length !== 1) {
+    throw new Error(`expected exactly one unit 0x${qcode.toString(16)}, found ${found.length}`);
+  }
+  return Array.from(found[0]!.subarray(4));
+}
+
 describe('query reply', () => {
   it('starts with the Query Reply AID', () => {
     // GA23-0059 p. 6-22 (NOT 6-19, which is the Read Partition side): "When a
@@ -48,26 +65,36 @@ describe('query reply', () => {
     expect(AID.SF).toBe(0x88);
   });
 
-  it('sends exactly the three units we honour', () => {
+  it('sends exactly the five units we honour', () => {
+    // WAS THREE. Color and Highlighting joined the list once SA execution and
+    // render.ts's colour resolution made them honest; the order is the wire order
+    // and is asserted, because units go out in capability-list order.
     const parsed = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
-    expect(parsed).toHaveLength(3);
+    expect(parsed).toHaveLength(5);
     // Every unit is SFID 0x81 (Query Reply) with its QCODE in byte 3.
-    expect(parsed.map((u) => u[2])).toEqual([Sfid.QUERY_REPLY, Sfid.QUERY_REPLY, Sfid.QUERY_REPLY]);
+    expect(parsed.map((u) => u[2])).toEqual(new Array(5).fill(Sfid.QUERY_REPLY));
     expect(parsed.map((u) => u[3])).toEqual([
-      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION,
+      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.COLOR, Qcode.HIGHLIGHTING,
+      Qcode.IMPLICIT_PARTITION,
     ]);
   });
 
   it('declares unit lengths that walk exactly to the end of the record', () => {
     // units() throws if the declared lengths do not land on the record end, so
     // the walk itself is the assertion. The expected sizes are pinned here so a
-    // changed unit has to be changed deliberately: Summary is 4 + 3 QCODEs,
-    // Usable Area is the 23-byte base, Implicit Partition is 6 + 11.
+    // changed unit has to be changed deliberately: Summary is 4 + 5 QCODEs,
+    // Usable Area is the 23-byte base, Color is 4 + 2 + 32, Highlighting is
+    // 4 + 1 + 10, Implicit Partition is 6 + 11.
     const parsed = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
-    expect(parsed.map((u) => u.length)).toEqual([7, 23, 17]);
+    expect(parsed.map((u) => u.length)).toEqual([9, 23, 38, 15, 17]);
     for (const u of parsed) {
       expect((u[0]! << 8) | u[1]!).toBe(u.length);
     }
+    // Color's L and Highlighting's L against x3270's captured values, which is
+    // the independent check on the two new arithmetic sums: the fixture's units
+    // are `00 26 81 86` (38) and `00 0f 81 87` (15).
+    expect(parsed[2]!.length).toBe(0x26);
+    expect(parsed[3]!.length).toBe(0x0f);
   });
 
   it('derives the Summary QCODE list from the capability list itself', () => {
@@ -77,28 +104,41 @@ describe('query reply', () => {
     // the capability list means it cannot disagree with what we send.
     const summary = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))[0]!;
     expect(Array.from(summary.subarray(4))).toEqual([
-      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION,
+      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.COLOR, Qcode.HIGHLIGHTING,
+      Qcode.IMPLICIT_PARTITION,
     ]);
 
     // The assertion above passes just as happily against a HARDCODED list, so on
     // its own it does not test the word "derives" in this test's name — which is
     // the whole reason this module is a capability list and not a byte blob.
-    // Verified: replacing summary.params with () => [0x80, 0x81, 0xa6] left all
-    // nine tests green. Growing the list is what distinguishes the two: a
-    // hardcoded Summary cannot mention a capability it was not written with.
-    const extra: Capability = { qcode: 0x86, returnedForQuery: true, params: () => [] };
+    // Verified: replacing summary.params with a written-out list left the suite
+    // green. Growing the list is what distinguishes the two: a hardcoded Summary
+    // cannot mention a capability it was not written with.
+    //
+    // The synthetic QCODE here is 0x83, Text Partitions ("Text Partitions Yes
+    // X'83' Yes Yes", pages.txt:8636). It was 0x86 until Color took that code —
+    // which would have made this test append a SECOND 0x86 to a list that already
+    // had one, so the "grown" reply carried a duplicate QCODE and the assertion
+    // still passed. The QCODE chosen here must be one DEFAULT_CAPABILITIES does
+    // not already contain; that is what the length check below enforces.
+    const extra: Capability = { qcode: 0x83, returnedForQuery: true, params: () => [] };
+    expect(DEFAULT_CAPABILITIES.map((c) => c.qcode)).not.toContain(extra.qcode);
     const grown = units(buildQueryReply([...DEFAULT_CAPABILITIES, extra], GEOMETRY));
     expect(Array.from(grown[0]!.subarray(4))).toEqual([
-      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION, 0x86,
+      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.COLOR, Qcode.HIGHLIGHTING,
+      Qcode.IMPLICIT_PARTITION, 0x83,
     ]);
     // And the new unit is really emitted, so Summary is not promising a reply
     // that never arrives — the drift this design exists to prevent.
-    expect(grown).toHaveLength(4);
-    expect(grown[3]![3]).toBe(0x86);
+    expect(grown).toHaveLength(6);
+    expect(grown[5]![3]).toBe(0x83);
   });
 
   it('encodes Usable Area per GA23-0059 p. 6-101', () => {
-    const ua = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))[1]!;
+    // By QCODE. Index 1 still happens to be right, but the Implicit Partition
+    // tests below broke on exactly this pattern when the list grew.
+    const ua = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))
+      .find((u) => u[3] === Qcode.USABLE_AREA)!;
     // L L SFID QCODE FLAGS FLAGS W W H H UNITS Xr(4) Yr(4) AW AH BUFFSZ(2)
     expect(ua.length).toBe(23);
     expect(ua[4]).toBe(0x01);                   // FLAGS: ADDR = 12/14-bit
@@ -127,7 +167,13 @@ describe('query reply', () => {
   });
 
   it('nests the Sizes-for-Display SDP inside the Implicit Partition base', () => {
-    const ip = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))[2]!;
+    // Found BY QCODE rather than by position. It used to be index 2 and is now 4,
+    // because Color and Highlighting were inserted before it — a positional index
+    // silently reads a different unit when the list grows, which is exactly how
+    // this test failed against the Color unit's bytes rather than reporting a
+    // moved index.
+    const ip = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))
+      .find((u) => u[3] === Qcode.IMPLICIT_PARTITION)!;
     // Base is 6 bytes (L L SFID QCODE + two RESERVED flag bytes, p. 6-71),
     // then an 11-byte SDP (p. 6-72). Dropping the reserved bytes shifts
     // everything after them.
@@ -148,13 +194,16 @@ describe('query reply', () => {
     // have an alternate screen size, the value for the alternate screen size
     // must be that of the default screen size." The same page also requires
     // "Default and alternate values must be nonzero."
-    const sdp = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY))[2]!.subarray(6);
+    // By QCODE, not by position — see the note in the SDP-nesting test above.
+    const sdp = Uint8Array.from(unitBody(
+      buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY), Qcode.IMPLICIT_PARTITION)).subarray(2);
     expect(Array.from(sdp.subarray(3, 7))).toEqual(Array.from(sdp.subarray(7, 11)));
   });
 
   it('reflects a different geometry in both the reply and the buffer size', () => {
     // Geometry is a parameter, not a constant, even though 2a only ships 24x80.
-    const ua = units(buildQueryReply(DEFAULT_CAPABILITIES, { rows: 32, cols: 80 }))[1]!;
+    const ua = units(buildQueryReply(DEFAULT_CAPABILITIES, { rows: 32, cols: 80 }))
+      .find((u) => u[3] === Qcode.USABLE_AREA)!;
     expect((ua[8]! << 8) | ua[9]!).toBe(32);
     expect((ua[21]! << 8) | ua[22]!).toBe(2560);
   });
@@ -184,11 +233,15 @@ describe('query reply', () => {
 
   it('matches x3270 byte-for-byte on the units we both send', () => {
     // SCOPE, and read this before extending the test: x3270's reply carries ten
-    // units and ours carries three, so the whole records CANNOT be equal. What
-    // is comparable is the three units we both send, and those are worth
+    // units and ours carries five, so the whole records CANNOT be equal. What
+    // is comparable is the units we both send, and those are worth
     // comparing because this host accepted x3270's.
     //
-    // WHAT THIS DOES NOT COVER: that our three-unit SUBSET is acceptable to
+    // ONE UNIT IS EXEMPTED, AND ONLY IN NAMED BYTES: Color. See the exemption
+    // below, which spells out which bytes may differ and asserts everything else
+    // is identical, rather than skipping the unit.
+    //
+    // WHAT THIS DOES NOT COVER: that our five-unit SUBSET is acceptable to
     // TSO. Nothing offline can show that; only the live run in task 10 can.
     // A passing test here plus a failing live run is a coherent outcome, not a
     // contradiction.
@@ -223,12 +276,234 @@ describe('query reply', () => {
     const byQcode = new Map(theirUnits.map((u) => [u[3]!, u]));
 
     const ourUnits = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
+    // Both new units are in the capture, so neither is compared vacuously. This
+    // is the guard that keeps the loop below from passing by finding nothing.
+    expect(byQcode.has(Qcode.COLOR)).toBe(true);
+    expect(byQcode.has(Qcode.HIGHLIGHTING)).toBe(true);
     for (const ours of ourUnits) {
       const qcode = ours[3]!;
-      if (qcode === Qcode.SUMMARY) continue; // lists ten QCODEs for them, three for us
+      if (qcode === Qcode.SUMMARY) continue; // lists ten QCODEs for them, five for us
+      const theirUnit = byQcode.get(qcode)!;
+      if (qcode === Qcode.COLOR) {
+        // THE ONE DELIBERATE DIVERGENCE, exempted by NAMED BYTES rather than by
+        // skipping the unit, so everything else in it is still pinned.
+        //
+        // The capture was taken with x3270 in monochrome mode, where its CI is
+        // 0x00 for every pair after the mandatory default (sf.c:747-754). We
+        // always advertise the identity — see the long note on `color` in
+        // queryreply.ts for why the gate does not transfer to us. So the fifteen
+        // CI bytes at odd offsets from 8 may differ and nothing else may.
+        expect(ours).toHaveLength(theirUnit.length); // same L, same pair count
+        for (let i = 0; i < ours.length; i++) {
+          const isDivergentCi = i >= 9 && i < ours.length && (i - 9) % 2 === 0;
+          if (isDivergentCi) {
+            // Pinned in BOTH directions, which is what makes this an exemption
+            // and not a hole: theirs is 0x00, ours is the CAV that precedes it.
+            expect(theirUnit[i], `their CI at ${i}`).toBe(0x00);
+            expect(ours[i], `our CI at ${i}`).toBe(ours[i - 1]);
+          } else {
+            expect(ours[i], `Color byte ${i} differs from x3270`).toBe(theirUnit[i]);
+          }
+        }
+        continue;
+      }
       expect(Array.from(ours), `unit 0x${qcode.toString(16)} differs from x3270`)
-        .toEqual(Array.from(byQcode.get(qcode)!));
+        .toEqual(Array.from(theirUnit));
     }
+  });
+});
+
+/**
+ * Color (QCODE 0x86), GA23-0059 p. 6-36 (pages.txt:9198+).
+ *
+ * NOTE the page: the plan for this work cited p. 6-38, which is wrong. The
+ * unit's section header is at pages.txt:9198 on the page whose footer reads
+ * "6-36 3270 Data Stream Programmer's Reference", and the manual's own
+ * cross-references agree — "see 'Query Reply (Color)' on page 6-36"
+ * (pages.txt:3558, :3988).
+ */
+describe('Color query reply', () => {
+  it('reports 16 colours with green as the required default entry', () => {
+    const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.COLOR);
+    // p. 6-36's table (pages.txt:9214-9225): byte 4 FLAGS, byte 5 NP, then NP
+    // (CAV, CI) pairs.
+    //
+    // FLAGS: bit 1 is PRTBLK, "Printer only - black ribbon is loaded"
+    // (pages.txt:9217-9221), and every other bit is reserved. We are a display,
+    // so the whole byte is zero. x3270 writes it as "no options" (sf.c:743).
+    expect(body[0]).toBe(0x00);
+    // NP = "Length of color attribute list (NP = number of GAV/COLOR pairs)"
+    // (pages.txt:9222-9223; "GAV" is OCR of "CAV"). 16 pairs, x3270's
+    // color_max (sf.c:738, :744).
+    expect(body[1]).toBe(0x10);
+    // THE FIRST PAIR IS MANDATORY AND IS NOT AN IDENTITY. p. 6-36: "All devices
+    // that send Query Reply (Color) are required to have the values CAV1 =
+    // X' 00', Cl 1 = value associated with the device default color, as the
+    // first entry in the GAV/Cl pairs list." (pages.txt:9268-9270.) So CAV1 is
+    // 0x00 — the "device default" colour value, our XAC_DEFAULT — and CI1 must
+    // name a real colour.
+    expect(body[2]).toBe(0x00);
+    // GREEN, not white and not black. x3270 writes `0xf0 + HOST_COLOR_GREEN`
+    // with HOST_COLOR_GREEN = 4 (sf.c:746, 3270ds.h:317), i.e. 0xF4, and
+    // p. 6-36's colour table gives "Green X'F4'" (pages.txt:9251).
+    //
+    // This is the byte that has to agree with render.ts, and asserting the
+    // constant rather than the literal is what keeps the two honest: level 4 of
+    // render's resolution yields Colour.GREEN for an ordinary unprotected
+    // normal-intensity field, so what we advertise as the default is what we
+    // actually paint.
+    expect(body[3]).toBe(Colour.GREEN);
+    expect(Colour.GREEN).toBe(0xf4);
+    // The manual also forbids the reverse mapping: "The CAV(n) value of X'OO'
+    // can have an associated Cl(n) value of any of the defined values except
+    // X' 00'." (pages.txt:9266-9267.)
+    expect(body[3]).not.toBe(0x00);
+
+    // Then fifteen IDENTITY pairs, 0xF1..0xFF — "The device must either display
+    // the color whose color identifier is the same as the color attribute value
+    // or display the device default color" (pages.txt:9236-9238), and identity
+    // is the first of those. Every one of these is a real claim we honour:
+    // PALETTE_3279 has an entry for each, so render.ts's usableColour accepts it
+    // rather than falling through to a default.
+    for (let i = 0; i < 15; i++) {
+      const cav = 0xf1 + i;
+      expect(body[4 + i * 2]).toBe(cav);
+      expect(body[5 + i * 2]).toBe(cav);
+      // Not a restatement of the line above: this asserts the palette can render
+      // what the pair promises. A CAV we advertise identity for but cannot paint
+      // would be a lie the host acts on.
+      expect(() => colourRgb(cav)).not.toThrow();
+    }
+    // 2 header bytes + 16 pairs. NOT 4 + 30, which the plan's expected length
+    // said: the plan counted from the start of the UNIT (including L L SFID
+    // QCODE) while indexing from the start of the BODY, so its two numbers
+    // disagreed with each other by four.
+    expect(body).toHaveLength(2 + 32);
+  });
+
+  it('advertises identity pairs where x3270 in monochrome mode advertises 0x00', () => {
+    // A DELIBERATE DIVERGENCE, asserted so it cannot be "fixed" by accident.
+    // x3270's loop emits the identity only under mode3279 and 0x00 otherwise
+    // (sf.c:747-754), and our own x3270 capture was taken in that monochrome
+    // state — packages/fixtures/x3270/tso-query-reply.txt has `00 f4 f1 00 f2
+    // 00 ...`, every CI after the default being 0x00.
+    //
+    // We always advertise the identity, and the reason is structural rather than
+    // stylistic: x3270's mode3279 is a MODEL choice that also picks its terminal
+    // type ("327" + '9' vs '8', model.c:135-137, telnet.c:2104), so for x3270 the
+    // two travel together. Ours does not: TERMINAL_TYPE is IBM-3278-2 regardless
+    // (constants.ts) and render.ts's mode3279 is a per-render presentation flag
+    // with no path to this module. Gating on it would mean the same session
+    // advertising different colour support depending on a rendering option, which
+    // is not something a Query Reply is allowed to depend on.
+    //
+    // The claim also stays true under mode3279: false, because 0x00 does not mean
+    // "no colour" — p. 6-36 says CI "identif[ies] the colors that are displayed"
+    // and lets a device answer with "the device default color"
+    // (pages.txt:9236-9238). Advertising identity says we distinguish the
+    // sixteen, which we do — Screen stores the CAV per cell whatever the renderer
+    // later does with it.
+    const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.COLOR);
+    // Every CI after the mandatory default pair is nonzero. This is the
+    // assertion that fails if someone ports x3270's `else *obptr++ = 0x00`.
+    const cis = [...Array(15).keys()].map((i) => body[5 + i * 2]);
+    expect(cis).not.toContain(0x00);
+  });
+
+  it('omits the Default Background Color self-defining parameter x3270 can append', () => {
+    // x3270 appends a 4-byte SDP `04 02 00 f0` when its screen has a background
+    // colour AND appres.qr_bg_color is set (sf.c:756-765). We do not, and this
+    // pins that: the unit is exactly the base list with nothing after it, so a
+    // length of 2 + 32 leaves no room for an SDP. Ours is the same choice the
+    // captured x3270 made — the fixture's Color unit is L=0x26 = 38 = 4 + 2 + 32,
+    // with no trailing SDP.
+    const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.COLOR);
+    expect(body).toHaveLength(34);
+  });
+});
+
+/**
+ * Highlighting (QCODE 0x87), GA23-0059 p. 6-65 (pages.txt:10304+).
+ *
+ * NOTE the page: the plan cited p. 6-53. The section header sits on the page
+ * whose footer reads "Chapter 6. Inbound Structured Fields 6-65"
+ * (pages.txt:10320), and the manual's own contents list says "Query Reply
+ * (Highlighting) 6-65" (pages.txt:7764).
+ */
+describe('Highlighting query reply', () => {
+  it('reports the five pairs x3270 does, with DEFAULT mapping to NORMAL', () => {
+    const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.HIGHLIGHTING);
+    // p. 6-65's table (pages.txt:10343-10345): byte 4 NP = "Number of
+    // attribute-value/action pairs", then (Vi, Ai) pairs. Five, matching
+    // x3270's `*obptr++ = 5; /* report on 5 pairs */` (sf.c:773).
+    expect(body).toEqual([
+      0x05,
+      // DEFAULT -> NORMAL, not DEFAULT -> DEFAULT. The manual requires the
+      // X'00' entry — "If a device accepts the highlight attribute, then it must
+      // accept attribute value X' 00' (default specification)"
+      // (pages.txt:10312-10313) — and it makes the mapping meaningful: "The code
+      // X' 00' indicates that the device action for the corresponding attribute
+      // value is the same as the action for the attribute value X '00' (the
+      // default action of the device)" (pages.txt:10329-10331). We answer with
+      // NORMAL instead, which names the action outright. x3270 does the same
+      // (sf.c:774-775).
+      XAH.DEFAULT, XAH.NORMAL,
+      // Then four identities. Each is a claim render.ts honours: it sets exactly
+      // one of blink/reverse/underscore/intensify by equality against these.
+      XAH.BLINK, XAH.BLINK,
+      XAH.REVERSE, XAH.REVERSE,
+      XAH.UNDERSCORE, XAH.UNDERSCORE,
+      XAH.INTENSIFY, XAH.INTENSIFY,
+    ]);
+    // NP must equal the number of pairs actually present, or the host mis-parses
+    // the rest of the record. Derived here rather than restated.
+    expect(body[0]).toBe((body.length - 1) / 2);
+  });
+
+  it('advertises only highlighting values render.ts can act on', () => {
+    // The honesty check, and the reason the list is five and not six values.
+    // p. 6-65 fixes the valid set as X'00', X'F0', X'F1', X'F2', X'F4', X'F8'
+    // (pages.txt:10314-10325) — six values, five of which are ACTIONS. We
+    // advertise every one of them as an accepted attribute value, and render.ts
+    // resolves each: NORMAL/DEFAULT to no highlight, and the other four to their
+    // own flag.
+    const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.HIGHLIGHTING);
+    const accepted = [...Array(5).keys()].map((i) => body[1 + i * 2]);
+    expect(accepted).toEqual([
+      XAH.DEFAULT, XAH.BLINK, XAH.REVERSE, XAH.UNDERSCORE, XAH.INTENSIFY,
+    ]);
+    // INTENSIFY is the one to watch: Chapter 4's highlighting table omits X'F8'
+    // entirely (pages.txt:3487-3498) and only this unit's section lists it
+    // (pages.txt:10310-10325). See the trap note on XAH in constants.ts.
+    expect(accepted).toContain(0xf8);
+    // Every advertised value is a value SA can carry, so nothing here is
+    // unreachable from the wire.
+    expect(new Set(accepted).size).toBe(5);
+  });
+});
+
+describe('Summary lists the two new units', () => {
+  it('names Color and Highlighting, so they were added to the list and not just defined', () => {
+    // Summary's params are `all.map(c => c.qcode)`, so this is really an
+    // assertion about DEFAULT_CAPABILITIES: a capability defined but left out of
+    // the list would pass every byte-level test above (they build from
+    // DEFAULT_CAPABILITIES, so it would be absent and unitBody would throw) —
+    // but this is the check that states the intent directly.
+    const summary = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
+      Qcode.SUMMARY);
+    expect(summary).toContain(Qcode.COLOR);
+    expect(summary).toContain(Qcode.HIGHLIGHTING);
+    // And Summary agrees with what is actually sent, which is the drift this
+    // module's design exists to prevent. Asserted as set equality against the
+    // real unit list rather than a written-out constant.
+    const sent = units(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY))
+      .map((u) => u[3]!);
+    expect(summary).toEqual(sent);
   });
 });
 
@@ -245,9 +520,49 @@ describe('Query List selection', () => {
     return units(reply).map((u) => u[3]!);
   }
 
-  const ALL_THREE = [Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.IMPLICIT_PARTITION];
+  /**
+   * Every unit a plain Query returns, in wire order.
+   *
+   * DERIVED from DEFAULT_CAPABILITIES rather than written out, which is the point:
+   * these tests are about WHICH units are selected, not about how many exist, and
+   * a hand-written list means every future capability edits five unrelated tests.
+   * The two below are the checks that keep the derivation from being vacuous —
+   * one pins the count so a capability silently dropped from the list would fail
+   * here, the other pins the order Summary-first.
+   */
+  const QUERY_SET = DEFAULT_CAPABILITIES.filter((c) => c.returnedForQuery).map((c) => c.qcode);
 
-  it('answers the real VM/370 MECAFF request with all three units', () => {
+  /**
+   * Two real QCODEs we do not support, for the "host asked for what we lack" cases.
+   *
+   * Image, "Image No X'82' No Yes" (pages.txt:8607), and Line Type, "Line Type No
+   * X'B2' No Yes" (pages.txt:8610). Real codes rather than invented ones, so the
+   * tests exercise the intersection the manual describes rather than a value no
+   * host would send.
+   *
+   * These WERE 0x86 and 0x87 — Color and Highlighting — until this task advertised
+   * both. That is the trap: three tests here took "unsupported" as a standing fact
+   * about those two codes, and advertising them turned each into a different test
+   * than its name claimed. The unsupportedness is now asserted, once, below.
+   */
+  const UNSUPPORTED = [0x82, 0xb2] as const;
+
+  it('uses QCODEs we really do not support for the negative cases', () => {
+    // The premise every UNSUPPORTED test rests on, checked in one place so that
+    // advertising either code later fails HERE with a clear reason rather than
+    // quietly hollowing out three tests elsewhere.
+    const supported = DEFAULT_CAPABILITIES.map((c) => c.qcode);
+    for (const qcode of UNSUPPORTED) expect(supported).not.toContain(qcode);
+  });
+
+  it('returns all five units a plain Query asks for', () => {
+    expect(QUERY_SET).toEqual([
+      Qcode.SUMMARY, Qcode.USABLE_AREA, Qcode.COLOR, Qcode.HIGHLIGHTING,
+      Qcode.IMPLICIT_PARTITION,
+    ]);
+  });
+
+  it('answers the real VM/370 MECAFF request with every unit', () => {
     // THE CASE THAT UNBLOCKS VM/CMS FILE TRANSFER. Captured live:
     // 00 07 01 ff 03 80 00 — REQTYP 0x80 = B'10' All, with a one-byte QCODE
     // list [0x00]. Built here from the same values the parser produces for those
@@ -255,7 +570,7 @@ describe('Query List selection', () => {
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [0x00] },
       DEFAULT_CAPABILITIES, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual(ALL_THREE);
+    expect(qcodesOf(reply)).toEqual(QUERY_SET);
     // And it is a well-formed record, not just a right-shaped list: same AID as
     // every other reply.
     expect(reply[0]).toBe(AID.SF);
@@ -266,15 +581,20 @@ describe('Query List selection', () => {
     // is ignored" (pages.txt:8554-8557); p. 5-52 puts it as "the All flag
     // overrides the list" (pages.txt:6388-6389).
     //
-    // The list here asks for Color and Highlighting, which we do NOT support, so
-    // an implementation that intersected instead of ignoring would return the
-    // Null Query Reply. That makes this a real discrimination, not a tautology:
-    // measured against a deliberately-intersecting selectCapabilities, this
-    // yields [0xff].
+    // THE LIST HERE CHANGED WITH THIS TASK, and the reason is the whole point of
+    // the test. It used to name Color and Highlighting as QCODEs "we do NOT
+    // support", so an implementation that intersected instead of ignoring would
+    // return the Null reply. We support both now, and leaving them here would
+    // have quietly gutted the test: an intersecting implementation would return
+    // [0x86, 0x87] and only the ORDER would have differed from the full set.
+    //
+    // Replaced with UNSUPPORTED — see its note above — so the discrimination
+    // survives. Measured against a deliberately-intersecting selectCapabilities,
+    // this yields [0xff].
     const reply = buildReply(
-      { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [0x86, 0x87] },
+      { kind: 'queryList', reqtyp: ReqTyp.ALL, qcodes: [...UNSUPPORTED] },
       DEFAULT_CAPABILITIES, GEOMETRY);
-    expect(qcodesOf(reply)).toEqual(ALL_THREE);
+    expect(qcodesOf(reply)).toEqual(QUERY_SET);
   });
 
   it('returns the plain-Query set for REQTYP=Equivalent', () => {
@@ -320,7 +640,7 @@ describe('Query List selection', () => {
     // to decide what to ask for NEXT. x3270 agrees: do_qr_summary loops its whole
     // reply table (sf.c:699-708) with no reference to the request.
     //
-    // So a two-unit request whose Summary IS asked for still advertises all three.
+    // So a two-unit request whose Summary IS asked for still advertises all five.
     // (Summary has to be requested: we no longer force it in unasked — see the
     // QCODE-List test above for why that was wrong.)
     const reply = buildReply(
@@ -329,7 +649,12 @@ describe('Query List selection', () => {
       DEFAULT_CAPABILITIES, GEOMETRY);
     const summaryUnit = units(reply)[0]!;
     expect(summaryUnit[3]).toBe(Qcode.SUMMARY);
-    expect(Array.from(summaryUnit.subarray(4))).toEqual(ALL_THREE);
+    expect(Array.from(summaryUnit.subarray(4))).toEqual(QUERY_SET);
+    // The teeth: this reply SENDS two units and its Summary names five. Without
+    // that gap the assertion above would hold for a Summary that (wrongly) listed
+    // only what was sent, which is the exact defect this test exists for.
+    expect(qcodesOf(reply)).toHaveLength(2);
+    expect(QUERY_SET.length).toBeGreaterThan(2);
   });
 
   it('sends Summary exactly once when the list names it', () => {
@@ -363,8 +688,16 @@ describe('Query List selection', () => {
     // a device supporting A, B, C asked for A, X, Z "does not send the Null Query
     // Reply. It sends the Query Reply for / feature A only." (pages.txt:10755-
     // 10757.)
+    //
+    // The unsupported pair is Image (0x82) and Line Type (0xB2), asserted
+    // unsupported by UNSUPPORTED below. It was 0x86/0x87 until this task
+    // advertised those, at which point the request named three SUPPORTED QCODEs
+    // and the test asserted a reply of one — it failed loudly rather than
+    // silently, but the lesson is the same: the "unsupported" premise has to be
+    // checked, not assumed.
     const reply = buildReply(
-      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x86, Qcode.USABLE_AREA, 0x87] },
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST,
+        qcodes: [UNSUPPORTED[0]!, Qcode.USABLE_AREA, UNSUPPORTED[1]!] },
       DEFAULT_CAPABILITIES, GEOMETRY);
     expect(qcodesOf(reply)).toEqual([Qcode.USABLE_AREA]);
   });
@@ -372,14 +705,13 @@ describe('Query List selection', () => {
   it('returns the Null Query Reply when it supports nothing requested', () => {
     // p. 6-77's example 2: "A device supports features A, B, and C. / The host
     // queries for features X, Y, and Z. / The device sends the Null Query Reply"
-    // (pages.txt:10758-10761). 0x86 is Color and 0x87 Highlighting, neither of
-    // which we advertise.
+    // (pages.txt:10758-10761).
     //
     // BYTE-EXACT, because the whole unit is four bytes and every one is fixed by
     // p. 6-77's table (pages.txt:10768-10771): L=X'0004', SFID=X'81',
     // QCODE=X'FF'. The leading 0x88 is the AID that precedes any Query Reply.
     const reply = buildReply(
-      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [0x86, 0x87] },
+      { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [...UNSUPPORTED] },
       DEFAULT_CAPABILITIES, GEOMETRY);
     expect(Array.from(reply)).toEqual([AID.SF, 0x00, 0x04, Sfid.QUERY_REPLY, 0xff]);
     // NOT a lone Summary. Summary alone would also carry "none of what you
@@ -503,8 +835,17 @@ describe('a capability a plain Query does not return', () => {
     // (pages.txt:8574-8576). A capability returned ONLY for All is exactly that
     // case, so omitting it from Summary would make it undiscoverable.
     const reply = buildReply({ kind: 'query' }, CAPS, GEOMETRY);
-    const summaryBody = reply.subarray(5, 5 + 4);
-    expect(Array.from(summaryBody)).toContain(0x9f);
+    // Read through unitBody rather than slicing `reply.subarray(5, 5 + 4)`, which
+    // is what this line used to do: that 4 was the Summary body length back when
+    // there were three capabilities plus this synthetic one, so adding Color and
+    // Highlighting made the slice cover only the first four of six QCODEs and cut
+    // 0x9F off the end. A hardcoded window into a derived list is a latent break;
+    // the QCODE lookup cannot drift.
+    expect(unitBody(reply, Qcode.SUMMARY)).toContain(0x9f);
+    // 0x9F is in Summary but NOT in the reply, which is the whole claim. Without
+    // this, a Summary listing everything AND a reply carrying everything would
+    // pass just as well.
+    expect(qcodesOf(reply)).not.toContain(0x9f);
   });
 });
 

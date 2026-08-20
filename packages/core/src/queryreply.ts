@@ -1,4 +1,5 @@
-import { AID, Qcode, ReqTyp, Sfid } from './constants.js';
+import { AID, Qcode, ReqTyp, Sfid, XAH } from './constants.js';
+import { Colour } from './palette.js';
 
 /**
  * Query Reply, the answer to a host's Read Partition (Query).
@@ -7,10 +8,17 @@ import { AID, Qcode, ReqTyp, Sfid } from './constants.js';
  * advertising something later is one list entry and the Summary unit cannot
  * disagree with what is actually sent.
  *
- * Stage 2a advertises the minimal honest set: Summary, Usable Area, Implicit
- * Partition. x3270 sends ten, including Color and Highlighting — which would
- * invite the SA orders stage 2a deliberately does not implement. Every unit
- * here is one we honour. See the stage 2a design doc.
+ * Every unit here is one we honour, which is the rule that decides what goes in.
+ * Stage 2a shipped the minimal honest set — Summary, Usable Area, Implicit
+ * Partition — and deliberately withheld Color and Highlighting because they
+ * invite the SA orders it did not implement. Now that SA and the four-level
+ * colour resolution are in, the two are honest and are advertised.
+ *
+ * ADVERTISING THEM IS NOT WHAT MAKES HOST COLOUR ARRIVE. MVS 3.8j TK5 sends SA
+ * colour whether or not we ask — the committed trace fixture has 113 SA orders
+ * against a client that advertised neither unit — so these two are for
+ * correctness with better-behaved hosts, not a prerequisite. x3270 sends ten
+ * units; we still send five. See the stage 2a design doc.
  */
 
 export interface ScreenGeometry {
@@ -288,9 +296,136 @@ const implicitPartition: Capability = {
   ],
 };
 
-/** What stage 2a advertises. Adding a unit is one entry here. */
+/**
+ * Color (QCODE 0x86), GA23-0059 p. 6-36 (pages.txt:9198+, NOT p. 6-38).
+ *
+ * Body after the header: `FLAGS NP` then NP (CAV, CI) pairs
+ * (pages.txt:9214-9225).
+ *
+ *  - FLAGS is zero. Its only defined bit is PRTBLK, "Printer only - black ribbon
+ *    is loaded" (pages.txt:9217-9221); we are a display and everything else in
+ *    the byte is reserved. x3270 calls it "no options" (sf.c:743).
+ *  - NP = 16, x3270's color_max (sf.c:738).
+ *  - THE FIRST PAIR IS MANDATORY AND IS NOT AN IDENTITY: "All devices that send
+ *    Query Reply (Color) are required to have the values CAV1 = X' 00', Cl 1 =
+ *    value associated with the device default color, as the first entry"
+ *    (pages.txt:9268-9270). CAV1 = X'00' is XAC_DEFAULT, the "device default"
+ *    colour VALUE — the same 0x00 render.ts's usableColour rejects so that
+ *    resolution falls through to the base map. CI1 must name a real colour, and
+ *    may be anything "except X' 00'" (pages.txt:9266-9267).
+ *  - CI1 IS GREEN, not white and not black. x3270 writes `0xf0 +
+ *    HOST_COLOR_GREEN` = 0xF4 (sf.c:746, 3270ds.h:317), and p. 6-36's colour
+ *    table gives "Green X'F4'" (pages.txt:9251). Taken from Colour.GREEN rather
+ *    than written as a literal because it must agree with render.ts: level 4
+ *    resolves an ordinary unprotected normal-intensity field to GREEN, so the
+ *    advertised default is the colour we actually paint.
+ *  - The remaining fifteen are IDENTITY pairs, 0xF1..0xFF. The manual allows
+ *    either identity or the device default — "The device must either display the
+ *    color whose color identifier is the same as the color attribute value or
+ *    display the device default color" (pages.txt:9236-9238) — and identity is
+ *    the honest answer here, because PALETTE_3279 has an entry for every one of
+ *    the fifteen.
+ *
+ * WE ALWAYS ADVERTISE THE IDENTITY, where x3270 emits 0x00 as the CI outside
+ * mode3279 (sf.c:747-754). Our own capture was taken in that monochrome state,
+ * so the fixture reads `00 f4 f1 00 f2 00 ...` — a real divergence, not an
+ * oversight, and the reason is structural: x3270's mode3279 is a MODEL choice
+ * that also selects its terminal type ("327" + '9' vs '8', model.c:135-137,
+ * telnet.c:2104), so for x3270 the negotiation and the rendering travel
+ * together. Ours do not. TERMINAL_TYPE is IBM-3278-2 regardless, and render.ts's
+ * mode3279 is a per-render presentation flag with no path into this module.
+ * Gating on it would make the same session advertise different colour support
+ * depending on a rendering option the host cannot see.
+ *
+ * It also stays TRUE under mode3279: false, which is why the divergence is safe
+ * rather than merely convenient. CI does not mean "I will light this pixel"; it
+ * identifies "the colors that are displayed or printed ... for each of the
+ * accepted color attribute values" (pages.txt:9233-9235), and Screen stores the
+ * CAV per cell whatever a later renderer chooses to do with it.
+ *
+ * NO Default Background Color self-defining parameter. x3270 can append a 4-byte
+ * `04 02 00 f0` when its screen has a background colour and appres.qr_bg_color is
+ * set (sf.c:756-765); the captured x3270 did not, and neither do we — we have no
+ * settable default background to report.
+ */
+const color: Capability = {
+  qcode: Qcode.COLOR,
+  // Table 6-1: "Color Yes X'86' Yes Yes" (pages.txt:8589).
+  returnedForQuery: true,
+  params: () => {
+    // NP is DERIVED from the list below, not written as 0x10, for the same
+    // reason sdp() counts itself and buildQueryReply derives L: a hand-written
+    // count is a magic number that a later edit to the pairs would leave stale,
+    // and a host that trusts NP would then mis-parse the rest of the record.
+    const pairs = [[0x00, Colour.GREEN]];
+    for (let cav = 0xf1; cav <= 0xff; cav++) pairs.push([cav, cav]);
+    return [0x00, pairs.length, ...pairs.flat()];
+  },
+};
+
+/**
+ * Highlighting (QCODE 0x87), GA23-0059 p. 6-65 (pages.txt:10304+, NOT p. 6-53).
+ *
+ * Body after the header: `NP` then NP (Vi, Ai) pairs — "NP Number of
+ * attribute-value/action pairs", "Vi Data stream attribute value accepted",
+ * "Ai Data stream action" (pages.txt:10343-10345).
+ *
+ * Five pairs, matching x3270's do_qr_highlighting (sf.c:769-784), and the first
+ * is DEFAULT -> NORMAL rather than DEFAULT -> DEFAULT. Both halves of that are
+ * required reading:
+ *
+ *  - The X'00' entry is compulsory: "If a device accepts the highlight
+ *    attribute, then it must accept attribute value X' 00' (default
+ *    specification)." (pages.txt:10312-10313.)
+ *  - Answering NORMAL names the action outright. An action of X'00' would mean
+ *    "the device action for the corresponding attribute value is the same as the
+ *    action for the attribute value X '00' (the default action of the device)"
+ *    (pages.txt:10329-10331) — true but circular. x3270 answers XAH_NORMAL
+ *    (sf.c:774-775) and so do we.
+ *
+ * The other four are identities, and each is a claim render.ts honours: it sets
+ * exactly one of blink/reverse/underscore/intensify by equality against these
+ * values. Exclusivity is the architecture's, not ours: "This structured field
+ * indicates that the device supports highlighting on an exclusive basis. That
+ * is, one and only one of the highlight values can be applied to a field or
+ * character location." (pages.txt:10326-10328.)
+ *
+ * INTENSIFY (X'F8') is the value to double-check rather than the one to doubt:
+ * Chapter 4's highlighting table omits it entirely (pages.txt:3487-3498) and only
+ * this unit's section lists it (pages.txt:10314-10325). See the trap note on XAH
+ * in constants.ts.
+ */
+const highlighting: Capability = {
+  qcode: Qcode.HIGHLIGHTING,
+  // Table 6-1: "Highlighting Yes X'87' Yes Yes" (pages.txt:8605).
+  returnedForQuery: true,
+  params: () => {
+    // Derived NP again — see the note in `color`.
+    const pairs: number[][] = [
+      [XAH.DEFAULT, XAH.NORMAL],
+      [XAH.BLINK, XAH.BLINK],
+      [XAH.REVERSE, XAH.REVERSE],
+      [XAH.UNDERSCORE, XAH.UNDERSCORE],
+      [XAH.INTENSIFY, XAH.INTENSIFY],
+    ];
+    return [pairs.length, ...pairs.flat()];
+  },
+};
+
+/**
+ * What we advertise. Adding a unit is one entry here.
+ *
+ * ORDER IS WIRE ORDER: buildQueryReply emits units in list order, so inserting
+ * Color and Highlighting before Implicit Partition changed the inbound byte
+ * stream. That is deliberate and it matches the order x3270 sends (its reply
+ * table runs 0x80, 0x81, ..., 0x86, 0x87, ..., 0xa6, sf.c:82-92), which is also
+ * ascending QCODE. The manual imposes no requirement — "There is no requirement
+ * as to the order of the QCODES ... or the order that the requested Query
+ * Replies are / returned" (pages.txt:8534-8539) — so this is for comparability
+ * with x3270 captures, not conformance.
+ */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [
-  summary, usableArea, implicitPartition,
+  summary, usableArea, color, highlighting, implicitPartition,
 ];
 
 /**
