@@ -4,7 +4,7 @@ import { resolve } from '../src/render.js';
 import { Colour, PALETTE_3279 } from '../src/palette.js';
 import { XA, XAH, FA, XA_3270 } from '../src/constants.js';
 import { encodeAddress } from '../src/address.js';
-import { cp037 } from '../src/codepage.js';
+import { cp037, CodePage } from '../src/codepage.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute } from '../src/stream/execute.js';
 
@@ -337,54 +337,126 @@ describe('resolve: mode3279 false makes everything green (rule 3)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// THE X'00' RULE, PINNED THROUGH HAND-BUILT SNAPSHOTS AND NOT THROUGH A Screen.
+//
+// `Screen` stores "unspecified" as the byte 0, so `cellAt` OMITS the property
+// when it is zero -- see the `fgs`/`bgs`/`grs` comment in screen.ts, where the
+// sentinel is justified precisely because XAC_DEFAULT renders the same as
+// nothing-set. The consequence for testing is sharp: BOTH routes into a Screen
+// collapse an explicit 0x00 to *absent*, so neither can pin this rule.
+//
+//   setExtended(1, { fg: 0x00 })            -> snapshot cell has no `fg`
+//   SA X'42' X'00' through parse+execute    -> the same
+//
+// An earlier version of this file asserted the rule three times through those
+// routes. Every assertion was TRUE but VACUOUS: instrumenting the `code === 0x00`
+// branch showed ZERO hits across the whole file, and mutating it to return black
+// -- the exact error the manual forbids -- left all 49 tests green.
+//
+// `resolve` is an exported pure function of a ScreenSnapshot, so a hand-built
+// snapshot carrying an explicit zero is a legitimate input and the only way to
+// reach the branch. Same reasoning, and same precedent, as the attribute-position
+// test below.
+// ---------------------------------------------------------------------------
+
+/**
+ * A 1x3 snapshot: a field attribute at 0 with optional extended attributes, and
+ * two data cells at 1 and 2 whose own attributes the caller supplies.
+ */
+function handBuilt(
+  attr: number,
+  fieldExt: { fg?: number; bg?: number; gr?: number },
+  cellExt: { fg?: number; bg?: number; gr?: number },
+): import('../src/screen.js').ScreenSnapshot {
+  return {
+    rows: 1,
+    cols: 3,
+    cursor: 0,
+    cells: [
+      { kind: 'char', ebcdic: 0x00, ...fieldExt },  // the field-attribute cell
+      { kind: 'char', ebcdic: 0xc1, ...cellExt },   // 'A', the cell under test
+      { kind: 'char', ebcdic: 0xc2 },
+    ],
+    fields: [
+      {
+        attrAddr: 0, start: 1, length: 2, attr,
+        protected: (attr & FA.PROTECT) !== 0,
+        numeric: false, autoSkip: false,
+        intensified: (attr & FA.INTENSITY) === FA.INT_HIGH_SEL,
+        hidden: (attr & FA.INTENSITY) === FA.INT_ZERO_NSEL,
+        modified: false,
+      },
+    ],
+    formatted: true,
+  };
+}
+
 describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
-  it('a colour value of 0x00 means device default, NOT black', () => {
+  it("an explicit fg of 0x00 falls through to the FIELD's colour, NOT to black", () => {
     // "The X'00' value selects the device default color indicated in the Query
-    // Reply (Color) structured field" (pages.txt:3544-3546). So it falls through
-    // to the base mapping -- here a protected field, so blue.
-    const s = fielded(FA.PRINTABLE | FA.PROTECT);
-    s.setExtended(1, { fg: 0x00 });
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.BLUE);
-  });
-
-  it("a character's 0x00 falls through to the FIELD's colour, not past it", () => {
-    // The two rules compose: 0x00 means "default for this property", and the
-    // manual's conflict rule says a character specifying default takes the
-    // field's value (pages.txt:3383-3387). So 0x00 must land on level 2, not
-    // skip to the base map.
-    const s = run([
-      ...W, ...sba(0),
-      ...sfe(FA.PRINTABLE | FA.PROTECT, XA.FOREGROUND, Colour.YELLOW),
-      0x28, XA.FOREGROUND, 0x00,   // explicit "device default" on the character
-      0xc1,
-    ]);
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.YELLOW);
-  });
-
-  it('0x00 falls through even if the palette gains a 0x00 entry', async () => {
-    // WHY THIS TEST EXISTS: the 0x00 rule is enforced twice in render.ts -- once
-    // explicitly, and again by 0x00 not being a key of PALETTE_3279. Mutation
-    // testing showed the explicit check can be DELETED with every other test in
-    // this file still passing, because the second enforcement covers for it. But
-    // the two encode DIFFERENT rules that merely agree today: X'00' means "device
-    // default" as a matter of protocol (pages.txt:3544-3546), where the palette
-    // lookup only means "renderable". Add a 0x00 swatch to the palette -- a
-    // device-default swatch is an entirely plausible change -- and the protocol
-    // rule would silently invert into "0x00 paints that swatch", overriding a
-    // field colour the host did set.
+    // Reply (Color) structured field" (pages.txt:3544-3546) -- it is a
+    // fall-through, and emphatically not the colour black, which has its own
+    // identifications (0xF0 neutral black, 0xF8 black).
     //
-    // So this stubs exactly that future in and asserts the protocol rule still
-    // holds. It has to go through the module registry rather than mutating the
-    // export: PALETTE_3279 is Object.freeze'd, so an earlier version of this test
-    // that used defineProperty silently failed to apply its own stub. Hence the
-    // guard assertion below, which is what caught that.
-    const s = run([
-      ...W, ...sba(0),
-      ...sfe(FA.PRINTABLE, XA.FOREGROUND, Colour.YELLOW),
-      0x28, XA.FOREGROUND, 0x00,   // explicit "device default" on the character
-      0xc1,
-    ]);
-    const snap = s.snapshot();
+    // Composed with the conflict rule: a character "specifying default" takes the
+    // value "established for the field in the extended field attribute"
+    // (pages.txt:3383-3387). So 0x00 must land on LEVEL 2, not skip past it to
+    // the base map -- which is why the field here is protected (base map: blue)
+    // while its extended attribute is yellow. Only the correct behaviour yields
+    // yellow: black fails, and skipping level 2 gives blue.
+    const snap = handBuilt(FA.PRINTABLE | FA.PROTECT, { fg: Colour.YELLOW }, { fg: 0x00 });
+    expect(snap.cells[1]!.fg, 'the explicit zero must survive into the input').toBe(0x00);
+    expect(resolve(snap)[1]!.fg).toBe(Colour.YELLOW);
+  });
+
+  it('an explicit fg of 0x00 with no field colour falls through to the base map', () => {
+    // The same fall-through continuing to level 3 when level 2 has nothing:
+    // a protected, unintensified field is blue (fprint_screen.c:81-88).
+    const snap = handBuilt(FA.PRINTABLE | FA.PROTECT, {}, { fg: 0x00 });
+    expect(snap.cells[1]!.fg).toBe(0x00);
+    expect(resolve(snap)[1]!.fg).toBe(Colour.BLUE);
+  });
+
+  it("an explicit bg of 0x00 falls through to the FIELD's background", () => {
+    // The manual's rule is per PROPERTY -- "any character property" -- so
+    // background behaves identically, and x3270 mirrors the two-step for bg at
+    // c3270/screen.c:1153-1158.
+    const snap = handBuilt(FA.PRINTABLE, { bg: Colour.BLUE }, { bg: 0x00 });
+    expect(snap.cells[1]!.bg).toBe(0x00);
+    expect(resolve(snap)[1]!.bg).toBe(Colour.BLUE);
+  });
+
+  it('an explicit FIELD colour of 0x00 falls through to the base map', () => {
+    // The rule applies at level 2 as well: a field whose extended attribute says
+    // "device default" contributes nothing, and the base map decides.
+    const snap = handBuilt(FA.PRINTABLE | FA.PROTECT, { fg: 0x00 }, {});
+    expect(snap.cells[0]!.fg).toBe(0x00);
+    expect(resolve(snap)[1]!.fg).toBe(Colour.BLUE);
+  });
+
+  it('0x00 is a fall-through even if the palette gains a 0x00 entry', async () => {
+    // The `code === 0x00` check and the palette-membership check reject 0x00
+    // independently, and they encode DIFFERENT rules that merely agree today:
+    // this one is the architected meaning of X'00' (pages.txt:3544-3546), the
+    // other is "unrenderable byte". Add a 0x00 swatch to the palette -- a
+    // device-default swatch is an entirely plausible change -- and only the
+    // explicit check stops the protocol rule inverting into "0x00 paints that
+    // swatch", overriding a field colour the host did set.
+    //
+    // Unlike the earlier version of this test, the input carries a REAL explicit
+    // zero, so it reaches the branch and the stub is relevant to it.
+    //
+    // TWO WAYS THIS TEST HAS ALREADY FAILED TO TEST ANYTHING, hence the two guard
+    // assertions. (1) A version mutating the export with defineProperty silently
+    // did nothing, because PALETTE_3279 is Object.freeze'd -- so it goes through
+    // the module registry instead. (2) `vi.doMock` alone was not enough either:
+    // `render.js` is statically imported at the top of this file and therefore
+    // already cached against the REAL palette, so re-importing it returned the
+    // identical module object and the stub never reached it. `vi.resetModules()`
+    // must come BEFORE the re-import, and the second guard below asserts we really
+    // did get a fresh module rather than the cached one.
+    const snap = handBuilt(FA.PRINTABLE, { fg: Colour.YELLOW }, { fg: 0x00 });
 
     vi.doMock('../src/palette.js', async () => {
       const actual = await vi.importActual<typeof import('../src/palette.js')>('../src/palette.js');
@@ -394,10 +466,13 @@ describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
       };
     });
     try {
+      vi.resetModules();
       const { resolve: mocked } = await import('../src/render.js');
       const palette = await import('../src/palette.js');
       expect(palette.PALETTE_3279[0x00], 'the stub must apply or this proves nothing')
         .toEqual([0x11, 0x22, 0x33]);
+      expect(mocked, 'must be a FRESH render module, not the statically cached one')
+        .not.toBe(resolve);
       expect(mocked(snap)[1]!.fg).toBe(Colour.YELLOW);
     } finally {
       vi.doUnmock('../src/palette.js');
@@ -408,13 +483,26 @@ describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
     expect(resolve(snap)[1]!.fg).toBe(Colour.YELLOW);
   });
 
-  it("a FIELD colour of 0x00 falls through to the base map", () => {
-    const s = run([
+  it('a Screen collapses 0x00 to absent, which is why the tests above bypass it', () => {
+    // Pins the storage-layer fact that made the earlier tests vacuous, so that if
+    // `Screen` ever starts preserving an explicit zero -- distinguishing
+    // "unspecified" from XAC_DEFAULT -- this fails and points here. It is the
+    // reason the four tests above hand-build their snapshots, and that reason
+    // should not be able to rot silently.
+    const s = fielded(FA.PRINTABLE | FA.PROTECT);
+    s.setExtended(1, { fg: 0x00 });
+    expect(s.snapshot().cells[1]!.fg).toBeUndefined();
+    // Both routes: an SA order carrying 0x00 collapses the same way.
+    const viaRecord = run([
       ...W, ...sba(0),
-      ...sfe(FA.PRINTABLE | FA.PROTECT, XA.FOREGROUND, 0x00),
+      ...sfe(FA.PRINTABLE | FA.PROTECT, XA.FOREGROUND, Colour.YELLOW),
+      0x28, XA.FOREGROUND, 0x00,
       0xc1,
     ]);
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.BLUE);
+    expect(viaRecord.snapshot().cells[1]!.fg).toBeUndefined();
+    // Absent and explicit-zero must nonetheless RESOLVE the same -- which is the
+    // whole justification for the sentinel (screen.ts, on `fgs`/`bgs`/`grs`).
+    expect(resolve(viaRecord.snapshot())[1]!.fg).toBe(Colour.YELLOW);
   });
 
   it('0xF7 is neutral white, and is a real colour rather than a fall-through', () => {
@@ -618,9 +706,20 @@ describe('resolve: text and hidden fields', () => {
   });
 
   it('honours a non-default code page', () => {
+    // MUST USE A CODE PAGE THAT DISAGREES WITH THE DEFAULT. An earlier version
+    // passed `{ codePage: cp037 }` -- which IS the default -- and asserted 'A',
+    // so hardcoding cp037 and discarding `opts.codePage` left it green. It
+    // asserted the right thing and pinned nothing.
+    //
+    // codepage.ts exports only cp037, so this builds a stub whose table maps
+    // every byte to a distinguishable character. Any assertion that passes with
+    // this stub and with cp037 alike would be worthless, so 'Z' is chosen
+    // precisely because cp037 decodes 0xC1 as 'A'.
+    const alwaysZ = new CodePage('always-Z', new Array<number>(256).fill(0x5a /* 'Z' */));
     const s = fielded(FA.PRINTABLE);
-    // cp037 and cp1047 differ only in the bracket/circumflex region, so a
-    // character outside it proves the option is threaded through at all.
+    expect(resolve(s.snapshot(), { codePage: alwaysZ })[1]!.text).toBe('Z');
+    // And the default really is cp037, so the option is a genuine override.
+    expect(resolve(s.snapshot())[1]!.text).toBe('A');
     expect(resolve(s.snapshot(), { codePage: cp037 })[1]!.text).toBe('A');
   });
 

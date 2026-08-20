@@ -152,16 +152,31 @@ function defaultColour(attr: number): Colour3279 {
  * as a value. An unrecognised byte falls through the same way -- a malformed
  * attribute from a host must never reach `colourRgb`, which throws.
  *
- * THE 0x00 CHECK IS REDUNDANT TODAY AND KEPT ON PURPOSE. Deleting it changes no
- * behaviour, because 0x00 is not a key of `PALETTE_3279` either, so the second
- * line rejects it too. It stays because the two lines encode DIFFERENT rules that
- * happen to agree: this one is the architected meaning of X'00'
- * (pages.txt:3544-3546), the other is "unrenderable byte". If `PALETTE_3279` ever
- * gained a 0x00 entry -- a device-default swatch is an entirely plausible change
- * -- the protocol rule would silently invert into "0x00 paints that swatch",
- * overriding a field colour the host did set. `render.test.ts` stubs exactly that
- * future in and pins the rule, so this line is load-bearing under the change it
- * is defending against, even though no test can kill it today.
+ * THE 0x00 CHECK IS UNREACHABLE FROM ANY `Screen`-DERIVED SNAPSHOT, AND KEPT ON
+ * PURPOSE. `Screen` stores "unspecified" as the byte 0 and `cellAt` omits the
+ * property when it is zero (see the `fgs`/`bgs`/`grs` comment in screen.ts), so
+ * every value that reaches here through a real `Screen` is either absent or
+ * non-zero -- an explicit X'00' from an SA order arrives as `undefined`, caught by
+ * the clause before this one.
+ *
+ * Two reasons it stays. First, `resolve` is an EXPORTED PURE FUNCTION of a
+ * `ScreenSnapshot`, so a hand-built snapshot is a legitimate input and can carry
+ * an explicit zero; the branch is reachable across the module's actual contract,
+ * just not through today's only producer. Second, this clause and the palette
+ * lookup below encode GENUINELY DIFFERENT RULES that merely coincide: this is the
+ * architected meaning of X'00', "the device default color indicated in the Query
+ * Reply (Color) structured field" (pages.txt:3544-3546), where the lookup means
+ * only "not a byte we can render". Were `PALETTE_3279` ever to gain a 0x00 entry
+ * -- a device-default swatch is an entirely plausible change -- the protocol rule
+ * would silently invert into "0x00 paints that swatch", overriding a field colour
+ * the host did set.
+ *
+ * `render.test.ts` pins all of this through hand-built snapshots, and separately
+ * pins the `Screen` collapse itself so the reason those tests bypass `Screen`
+ * cannot rot. An earlier version of that block asserted the rule only through
+ * `Screen`, which made every assertion true but VACUOUS: instrumentation showed
+ * this branch taking zero hits, and mutating it to return black -- the exact error
+ * the manual forbids -- left the whole file green.
  *
  * Note this returns a value rather than a boolean, so callers can chain levels
  * with `??` and cannot accidentally use an unusable code.
