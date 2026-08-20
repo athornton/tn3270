@@ -176,17 +176,11 @@ describe('resolve: the field extended attribute is the second level', () => {
     expect(r[2]!.fg).toBe(Colour.YELLOW);
   });
 
-  it('the field colour beats the base map, which would have said green', () => {
-    // The mutation-proofing pair for the test above: an unprotected normal field
-    // resolves to green from the base map, so a resolver that skipped level 2
-    // would give green here rather than yellow.
-    const s = run([
-      ...W, ...sba(0),
-      ...sfe(FA.PRINTABLE, XA.FOREGROUND, Colour.YELLOW),
-      0xc1,
-    ]);
-    expect(resolve(s.snapshot())[1]!.fg).not.toBe(Colour.GREEN);
-  });
+  // (A test asserting `.not.toBe(Colour.GREEN)` on this same record used to sit
+  // here. Removed: the test above asserts `.toBe(Colour.YELLOW)` on identical
+  // input, which is strictly stronger, so it could only ever fail alongside it.
+  // The base map for an unprotected normal field IS green, which is what makes
+  // yellow there proof that level 2 beat level 3.)
 
   it("a character's own SA still overrides the field's colour", () => {
     // "Otherwise, the character attribute overrides the field attribute"
@@ -238,6 +232,23 @@ describe('resolve: the field extended attribute is the second level', () => {
     ]);
     expect(s.cellAt(1).bg).toBeUndefined();
     expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.BLUE);
+  });
+
+  it("a character's own background overrides the field's", () => {
+    // THE MANUAL'S SECOND CLAUSE, FOR BACKGROUND: "Otherwise, the character
+    // attribute overrides the field attribute" (pages.txt:3386-3387). Review
+    // found background's two levels could be SWAPPED with the whole suite green
+    // -- every bg test set the field's colour and left the character's unset, so
+    // nothing distinguished which of the two won when both were present. The
+    // equivalent swap already failed for fg and gr; only bg was unpinned.
+    const s = run([
+      ...W, ...sba(0),
+      ...sfe(FA.PRINTABLE, XA.BACKGROUND, Colour.BLUE),
+      0x28, XA.BACKGROUND, Colour.PINK,
+      0xc1,
+    ]);
+    expect(s.cellAt(1).bg, 'the character must really carry its own bg').toBe(Colour.PINK);
+    expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.PINK);
   });
 
   it('highlighting falls back to the field too', () => {
@@ -623,6 +634,81 @@ describe('resolve: highlighting', () => {
     expect([c.blink, c.reverse, c.underscore, c.intensify]).toEqual([false, false, false, false]);
   });
 
+  it("an unrecognised highlighting value FALLS THROUGH to the field's, not over it", () => {
+    // THE BUG THIS PINS, which review found and I reproduced: highlighting used to
+    // gate level 1 on NON-ZERO where fg and bg gate it on RENDERABLE. So the same
+    // malformed byte behaved oppositely one property apart -- a cell carrying
+    // gr = 0x99 in a reverse-video field had its reverse SUPPRESSED, while a cell
+    // carrying fg = 0x99 in a yellow field correctly fell THROUGH to yellow.
+    //
+    // Falling through is what the manual requires, and it says so for values as
+    // well as types: "Attribute types and values that are unknown or cannot be
+    // maintained and returned inbound by an implementation are rejected. All
+    // attribute types and values are checked for validity" (pages.txt:2897-2899).
+    // A rejected value was never established, so the field's highlighting stands.
+    //
+    // Hand-built because the point is the resolver's policy, and this states it as
+    // a single invariant across all three properties.
+    const snap = handBuilt(
+      FA.PRINTABLE,
+      { gr: XAH.REVERSE, fg: Colour.YELLOW, bg: Colour.BLUE },
+      { gr: 0x99, fg: 0x99, bg: 0x99 },
+    );
+    const c = resolve(snap)[1]!;
+    expect(c.reverse, 'garbage gr must not suppress the field reverse').toBe(true);
+    expect(c.fg, 'garbage fg falls through, as it always did').toBe(Colour.YELLOW);
+    expect(c.bg, 'garbage bg falls through, as it always did').toBe(Colour.BLUE);
+  });
+
+  it('XAH.NORMAL is a real value that OVERRIDES the field, not a fall-through', () => {
+    // The counterpart to the test above, and the reason `usableHighlight` rejects
+    // only XAH.DEFAULT and not XAH.NORMAL. X'F0' is "Normal (as determined by the
+    // 3270 field attribute)" (pages.txt:3489-3495) -- an explicit instruction to
+    // show no extended highlighting, which is NOT the same as saying nothing.
+    // A character set to Normal inside a reverse-video field must come out plain.
+    const snap = handBuilt(FA.PRINTABLE, { gr: XAH.REVERSE }, { gr: XAH.NORMAL });
+    const c = resolve(snap)[1]!;
+    expect(c.reverse).toBe(false);
+    expect([c.blink, c.underscore, c.intensify]).toEqual([false, false, false]);
+    // Where XAH.DEFAULT, being "the default action of the device"
+    // (pages.txt:10329-10331), does fall through and the field's reverse stands.
+    expect(resolve(handBuilt(FA.PRINTABLE, { gr: XAH.REVERSE }, { gr: XAH.DEFAULT }))[1]!.reverse)
+      .toBe(true);
+  });
+
+  it('an unrecognised FIELD highlighting value falls through to no highlighting', () => {
+    const snap = handBuilt(FA.PRINTABLE, { gr: 0x99 }, {});
+    const c = resolve(snap)[1]!;
+    expect([c.blink, c.reverse, c.underscore, c.intensify]).toEqual([false, false, false, false]);
+  });
+
+  it('X-00 is one of the six valid highlighting values yet must not act as one', () => {
+    // WHY THIS EXISTS: `usableHighlight` rejects XAH.DEFAULT twice over -- by an
+    // explicit clause, and by 0x00 not being a member of the HIGHLIGHTS set. So
+    // deleting the explicit clause changes nothing today and no test can kill it,
+    // exactly as for the colour 0x00 check. Mutation testing confirmed that.
+    //
+    // The risk the clause guards is specific and realistic: X'00' IS one of the
+    // six architecturally valid highlighting values (pages.txt:10313-10325), so a
+    // future reader completing HIGHLIGHTS from the manual would add it -- and
+    // without the clause, a character's X'00' would then override its field's
+    // highlighting with nothing, inverting the manual's rule.
+    //
+    // This test pins the OBSERVABLE rule the clause defends, stated so that it
+    // fails if either enforcement is removed while the other is loosened: X'00'
+    // must behave like an absent attribute and NOT like XAH.NORMAL, even though
+    // both are valid values and both end up showing no highlight.
+    const field = { gr: XAH.REVERSE };
+    const viaDefault = resolve(handBuilt(FA.PRINTABLE, field, { gr: XAH.DEFAULT }))[1]!;
+    const viaAbsent = resolve(handBuilt(FA.PRINTABLE, field, {}))[1]!;
+    const viaNormal = resolve(handBuilt(FA.PRINTABLE, field, { gr: XAH.NORMAL }))[1]!;
+    // X'00' is indistinguishable from saying nothing at all...
+    expect(viaDefault.reverse).toBe(viaAbsent.reverse);
+    expect(viaDefault.reverse).toBe(true);
+    // ...and distinguishable from X'F0', which suppresses the field's highlight.
+    expect(viaNormal.reverse).toBe(false);
+  });
+
   it('intensify is the 0xF8 highlighting, not the field intensified bit', () => {
     // ResolvedCell.intensify names highlighting X'F8' alone. A field's
     // intensified bit is already carried as colour by the base map (red /
@@ -670,10 +756,10 @@ describe('resolve: text and hidden fields', () => {
 
   it('returns one entry per cell, including attribute positions', () => {
     const s = fielded(FA.PRINTABLE);
-    const r = resolve(s.snapshot());
-    expect(r).toHaveLength(s.size);
-    // The attribute position itself displays as a blank.
-    expect(r[0]!.text).toBe(' ');
+    expect(resolve(s.snapshot())).toHaveLength(s.size);
+    // The blank at the attribute position is asserted by the test below, which
+    // pins it against a byte actually sitting under the attribute; asserting it
+    // here as well only re-tested `setFieldAttribute` nulling the cell.
   });
 
   it('blanks an attribute position even when a byte sits under it', () => {

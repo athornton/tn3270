@@ -70,8 +70,50 @@ import { cp037, CodePage } from './codepage.js';
 import { Colour, PALETTE_3279, type Colour3279 } from './palette.js';
 import type { ScreenSnapshot } from './screen.js';
 
+/**
+ * One cell, ready to draw. Every front end consumes an array of these.
+ *
+ * ## WHAT THIS DELIBERATELY DOES NOT CARRY
+ *
+ * GEOMETRY. `resolve` reads `snap.cells` and `snap.fields` and ignores `rows`,
+ * `cols` and `cursor`, so a `ResolvedCell[]` is a flat array with no shape: a
+ * consumer that needs to know where row 2 starts, or where the cursor is, must
+ * keep the snapshot alongside it. That is why `resolve` returns a bare array
+ * rather than a wrapper -- the snapshot is already the authority on geometry and
+ * duplicating it here would give two things to keep in step.
+ *
+ * ## FOUR BOOLEANS RATHER THAN ONE TAGGED HIGHLIGHTING VALUE
+ *
+ * `blink`/`reverse`/`underscore`/`intensify` are mutually exclusive on the wire
+ * -- highlighting is "exclusive ... one and only one of the highlight values can
+ * be applied" (pages.txt:10326-10328) -- so a single `highlight: 'blink' | ...`
+ * would model the protocol more tightly and give each front end an
+ * exhaustiveness-checked switch instead of four branches.
+ *
+ * Four booleans anyway, for two reasons. First, the exclusivity is a fact about
+ * the WIRE, not about rendering: `intensify` is already documented below as
+ * something a renderer may want to OR with its own `FA_IS_HIGH` test, the way
+ * x3270 does, and a tagged value makes that combination unrepresentable. A
+ * canvas or CSS back end likewise sets bold, inversion and underline as
+ * independent switches. Second, the flags are what a renderer needs at the point
+ * of use; reconstructing them from a tag is work every front end would repeat.
+ *
+ * The cost is real and accepted: nothing in the type stops a future edit setting
+ * two at once. `render.test.ts` pins the exclusivity instead ("sets ONLY the flag
+ * for the value given"), which is where the invariant lives.
+ */
 export interface ResolvedCell {
-  /** What to draw. A space for nulls and for field-attribute positions. */
+  /**
+   * What to draw. A space for nulls and for field-attribute positions.
+   *
+   * STILL THE REAL CHARACTER WHEN `hidden` IS SET -- this is not pre-redacted,
+   * and a front end that draws `text` without checking `hidden` puts a password
+   * on screen and into the terminal's scrollback. Suppression is left to the
+   * renderer because only it knows what to draw instead (a space, a bullet, a
+   * styled run), and because the inbound path must still transmit the real data:
+   * a non-display field's "attribute values ... are transmitted inbound"
+   * (pages.txt:3464-3467). Task 11's renderer has the corresponding test.
+   */
   text: string;
   /** Concrete 3279 colour identification. Never undefined, never invalid. */
   fg: Colour3279;
@@ -93,7 +135,11 @@ export interface ResolvedCell {
    * protocol fact. A renderer wanting x3270's look can OR in its own test.
    */
   intensify: boolean;
-  /** Field intensity 0x0C: a renderer must not draw the text at all. */
+  /**
+   * Field intensity 0x0C: a renderer must not draw the text at all. See the
+   * warning on `text` above -- this flag is the ONLY thing standing between a
+   * password field and the screen.
+   */
   hidden: boolean;
 }
 
@@ -140,6 +186,17 @@ const DEFAULT_COLOURS: readonly Colour3279[] = [
 ];
 
 function defaultColour(attr: number): Colour3279 {
+  // A BIT TEST on FA.INT_HIGH_SEL, not a field comparison against FA.INTENSITY,
+  // matching x3270's DEFCOLOR_MAP `(f) & FA_INT_HIGH_SEL) >> 3`
+  // (fprint_screen.c:86-87). The two differ for exactly one attribute: intensity
+  // 0x0C (hidden) has bit 0x08 set, so THIS classifies a hidden field as
+  // intensified and returns red, where `Screen.intensified` (screen.ts:309) and
+  // `hidden` below use `=== FA.INTENSITY` comparisons and call it hidden, not
+  // intensified. Both are right for their own purpose and the divergence is
+  // deliberate: the colour a hidden field would have had is moot, because
+  // `hidden` tells the renderer not to draw its text at all. x3270 has the same
+  // pair of idioms side by side -- FA_IS_HIGH is a field comparison
+  // (3270ds.h:211-212) while FA_IS_INTENSE is a bit test (3270ds.h:225-226).
   const index = ((attr & FA.PROTECT) !== 0 ? 2 : 0) | ((attr & FA.INT_HIGH_SEL) !== 0 ? 1 : 0);
   return DEFAULT_COLOURS[index]!;
 }
@@ -201,6 +258,82 @@ function usableColour(code: number | undefined): Colour3279 | undefined {
   return PALETTE_3279[code] !== undefined ? code : undefined;
 }
 
+/**
+ * The highlighting values that name an actual highlight, for `usableHighlight`.
+ *
+ * The architecture defines SIX valid values and this set holds FIVE. From Query
+ * Reply (Highlighting), which is the source that lists them all: "the following
+ * attribute values are the only valid values: X'00' X'F0' X'F1' X'F2' X'F4'
+ * X'F8'" (pages.txt:10313-10325). Chapter 4's table omits X'F8' entirely
+ * (pages.txt:3485-3498) -- see the TRAP note on `XAH` in constants.ts.
+ *
+ * X'00' is the omitted one, and it is omitted because it is a FALL-THROUGH rather
+ * than a highlight: "the default action of the device" (pages.txt:10329-10331).
+ * It is valid on the wire and rejected here, which is exactly the split
+ * `PALETTE_3279` makes for colours -- 0x00 is a legal colour value and not a
+ * palette key.
+ *
+ * NOTE X'F0' Normal IS a member, and that is not an oversight: "Normal (as
+ * determined by the 3270 field attribute)" (pages.txt:3489-3495) is a positive
+ * instruction to show no extended highlighting, so a character set to Normal must
+ * OVERRIDE a reverse-video field rather than inherit from it. The difference
+ * between F0 and 00 is the whole reason this set exists instead of a range check;
+ * `render.test.ts` pins both directions.
+ */
+const HIGHLIGHTS: ReadonlySet<number> = new Set([
+  XAH.NORMAL, XAH.BLINK, XAH.REVERSE, XAH.UNDERSCORE, XAH.INTENSIFY,
+]);
+
+/**
+ * Is `code` a highlighting value we can act on? The exact analogue of
+ * `usableColour`, and deliberately so: all three properties then read as ONE
+ * rule and the `??` chain in `resolve` is uniform across them.
+ *
+ * IT DID NOT USE TO BE, and the divergence was reachable rather than academic.
+ * This line was once `(cell.gr ?? 0x00) !== 0x00 ? cell.gr! : ...`, which gates
+ * level 1 on NON-ZERO where fg and bg gate it on RENDERABLE. So a garbage byte
+ * behaved oppositely one property apart: a cell carrying gr = 0x99 inside a
+ * reverse-video field came out with reverse SUPPRESSED, while a cell carrying
+ * fg = 0x99 inside a yellow field correctly fell THROUGH to yellow. Same
+ * malformed host byte, two different policies.
+ *
+ * The manual makes falling through the right one, and says so for values as well
+ * as types: "Attribute types and values that are unknown or cannot be maintained
+ * and returned inbound by an implementation are rejected. All attribute types and
+ * values are checked for validity" (p. 4-5, pages.txt:2897-2899). A rejected
+ * value is one the device never established, so the field's highlighting still
+ * stands -- exactly as a rejected colour leaves the field's colour standing.
+ *
+ * `XAH.DEFAULT` (0x00) is excluded for the same reason `usableColour` excludes
+ * 0x00: it means "the default action of the device" (pages.txt:10329-10331), a
+ * fall-through rather than a value. And for the same reason as there, THAT CLAUSE
+ * IS UNKILLABLE BY TEST TODAY -- `XAH.DEFAULT` is not a member of `HIGHLIGHTS`
+ * either, so deleting it changes no behaviour, and mutation testing confirmed
+ * every test still passes. It is kept on the same grounds: the two lines encode
+ * different rules that merely coincide, one architectural ("X'00' means device
+ * default") and one representational ("not a highlight we act on"). Were X'00'
+ * ever added to `HIGHLIGHTS` -- and it IS one of the six architecturally valid
+ * values, so a future reader completing the set from the manual is a realistic
+ * mistake -- this clause is what would stop it overriding a field's highlighting
+ * with nothing.
+ *
+ * WE VALIDATE WHERE X3270 MASKS, and the difference is representational, not a
+ * disagreement. `ctlr_add_gr` stores whatever it is handed without checking
+ * (ctlr.c), because its SA path has already reduced the byte to a low nibble --
+ * `ctlr_add_gr(buffer_addr, *cp & 0x0f)` (ctlr.c:1785) -- to fit its compressed
+ * `GR_*` bit field (GR_BLINK 0x01 ... GR_INTENSIFY 0x08, globals.h:375-378).
+ * That mask silently turns 0x99 into 0x09, i.e. blink|intensify: two highlights
+ * at once, which the architecture forbids on an "exclusive basis"
+ * (pages.txt:10326-10328). We keep the architected value verbatim, so we must
+ * check membership instead. Note x3270 DOES validate the analogous colour case
+ * at store time, `if ((color & 0xf0) != 0xf0) color = 0` in `ctlr_add_fg` -- so
+ * rejecting a malformed value is its instinct too, just at a different layer.
+ */
+function usableHighlight(code: number | undefined): number | undefined {
+  if (code === undefined || code === XAH.DEFAULT) return undefined;
+  return HIGHLIGHTS.has(code) ? code : undefined;
+}
+
 export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): ResolvedCell[] {
   const mode3279 = opts.mode3279 ?? true;
   const codePage = opts.codePage ?? cp037;
@@ -219,9 +352,16 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
   // `Screen.forEachCellWithField` and x3270's `current_fa` tracking
   // (ctlr.c:1809-1816).
   //
-  // Int16Array will not do for the addresses: an address can exceed 32767 on a
-  // large alternate screen size, and -1 must stay distinguishable. Int32Array is
-  // exact for any buffer. `attrOf` holds a byte, so Uint8Array suffices, and
+  // `Int32Array` for the addresses because it is the natural width for a signed
+  // index, NOT because Int16Array would overflow -- an earlier version of this
+  // comment claimed that and it was FALSE. The largest architected geometry is
+  // 43x132 = 5676 cells (Model 4 rows by Model 5 columns, pages.txt:11924-11928),
+  // an order of magnitude inside Int16Array's 32767, and `Screen.attrs` is itself
+  // an Int16Array carrying the same -1 sentinel (screen.ts:103) -- so the old
+  // wording implied a latent bug in screen.ts that does not exist. Int16Array
+  // would work here; Int32Array is simply the default integer width and costs
+  // 11KB on a 3564-cell screen, which is nothing against a per-record redraw.
+  // `attrOf` holds a byte, so Uint8Array suffices, and
   // 0x00 is a legitimate attribute value (x3270's `START_FIELD(0)` for an SFE
   // with no 0xC0 pair, ctlr.c:1883-1885) -- which is why "no field" is signalled
   // by `attrAddrOf[i] < 0` and never by `attrOf[i] === 0`.
@@ -250,11 +390,18 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     }
   }
 
-  // Which cells ARE field attributes. A Set rather than
-  // `snap.fields.some(f => f.attrAddr === i)` in the loop: that is O(fields) per
-  // cell, ~192,000 comparisons on a 1920-cell screen with 100 fields, per
-  // redraw.
-  const attrPositions = new Set(snap.fields.map((f) => f.attrAddr));
+  // NO SEPARATE SET OF ATTRIBUTE POSITIONS, because the walk above already
+  // answers the question. A cell is a field attribute exactly when the field
+  // governing it is its own: `attrAddrOf[i] === i`. That follows from the tiling
+  // argument -- each field claims `attrAddr` first and then only cells after it,
+  // so no other field can write its own address into another cell's slot.
+  //
+  // An earlier version built `new Set(snap.fields.map(f => f.attrAddr))` and
+  // justified it against `snap.fields.some(...)` per cell, which is O(fields) per
+  // cell and genuinely bad. But that was arguing against the wrong alternative:
+  // the array it needed had already been built one statement earlier. One
+  // comparison beats a Set probe, and there is one less structure to keep
+  // consistent with the walk.
 
   const out: ResolvedCell[] = new Array(size);
   for (let i = 0; i < size; i++) {
@@ -275,19 +422,16 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
       ? usableColour(cell.bg) ?? usableColour(field?.bg) ?? Colour.NEUTRAL_BLACK
       : Colour.NEUTRAL_BLACK;
 
-    // Highlighting takes the same two-level fallback and is NOT gated on
-    // mode3279 -- blink, reverse and underscore are things a monochrome 3278
-    // does, and x3270 computes gr outside its colour block (c3270/screen.c:1166,
-    // after the `if (!mode3279 || ...)` branch closes). XAH.DEFAULT being 0x00
-    // means "the default action of the device" (pages.txt:10329-10331), i.e. no
-    // highlighting, which is why an absent gr and an explicit 0x00 can share the
-    // same fall-through.
-    const gr = (cell.gr ?? 0x00) !== 0x00 ? cell.gr! : (field?.gr ?? XAH.DEFAULT);
+    // Highlighting takes the same two levels through the same idiom, and is NOT
+    // gated on mode3279 -- blink, reverse and underscore are things a monochrome
+    // 3278 does, and x3270 computes gr outside its colour block
+    // (c3270/screen.c:1166, after the `if (!mode3279 || ...)` branch closes).
+    const gr = usableHighlight(cell.gr) ?? usableHighlight(field?.gr) ?? XAH.DEFAULT;
 
     out[i] = {
       // A field attribute position "displays as a blank" and holds no character
       // (Screen.setFieldAttribute nulls it), and a null is a space.
-      text: attrPositions.has(i) || cell.ebcdic === 0x00 ? ' ' : codePage.toUnicode(cell.ebcdic),
+      text: attrAddr === i || cell.ebcdic === 0x00 ? ' ' : codePage.toUnicode(cell.ebcdic),
       fg,
       bg,
       // Equality, not a bit test: highlighting is a one-of VALUE ("the field can
