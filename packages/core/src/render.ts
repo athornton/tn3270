@@ -353,14 +353,16 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
   // (ctlr.c:1809-1816).
   //
   // `Int32Array` for the addresses because it is the natural width for a signed
-  // index, NOT because Int16Array would overflow -- an earlier version of this
-  // comment claimed that and it was FALSE. The largest architected geometry is
-  // 43x132 = 5676 cells (Model 4 rows by Model 5 columns, pages.txt:11924-11928),
-  // an order of magnitude inside Int16Array's 32767, and `Screen.attrs` is itself
-  // an Int16Array carrying the same -1 sentinel (screen.ts:103) -- so the old
-  // wording implied a latent bug in screen.ts that does not exist. Int16Array
-  // would work here; Int32Array is simply the default integer width and costs
-  // 11KB on a 3564-cell screen, which is nothing against a per-record redraw.
+  // index, NOT because Int16Array would overflow -- two earlier versions of this
+  // comment claimed a size limit and both were wrong. The largest architected
+  // model is 27x132 = 3564 cells (Model 5); the 43-row figure belongs to a device
+  // that can do 43 rows OR 132 columns "but not concurrently"
+  // (pages.txt:11924-11928), so 43x132 is not a geometry any host can drive.
+  // Either way it is orders of magnitude inside Int16Array's 32767, and
+  // `Screen.attrs` is itself an Int16Array carrying the same -1 sentinel
+  // (screen.ts:103) -- so a size-limit argument here would imply a latent bug in
+  // screen.ts that does not exist. Int16Array would work; Int32Array is simply
+  // the default integer width and costs a few KB on a per-record redraw.
   // `attrOf` holds a byte, so Uint8Array suffices, and
   // 0x00 is a legitimate attribute value (x3270's `START_FIELD(0)` for an SFE
   // with no 0xC0 pair, ctlr.c:1883-1885) -- which is why "no field" is signalled
