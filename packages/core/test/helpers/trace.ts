@@ -69,8 +69,17 @@ export interface DeferredOrderCounts {
  * and walking parseRecord's tokens is the only count worth quoting.
  *
  * The one difference from the script is the line regex: the script reads the raw
- * `data: `-prefixed capture, this reads the canonical form, so the prefix is gone.
- * Both accept the same three markers with the same meanings.
+ * `data: `-prefixed capture (its prefix is optional), this reads the canonical form
+ * only. Both accept the same three markers with the same meanings.
+ *
+ * THAT NARROWNESS IS DELIBERATE — DO NOT "FIX" IT BY MAKING THE PREFIX OPTIONAL
+ * HERE. `tracesDir` is the only directory this resolves names under, so a
+ * raw-form file cannot arrive in normal use; and on a raw-form file this returns
+ * all zeros, which is exactly what makes the TK5 count tests fail as negative
+ * controls if the fixture ever reverts to the unconverted form. Widening the
+ * regex would silently turn two of those tests green against a blank screen —
+ * the precise failure mode they exist to catch. See render.test.ts's
+ * "the live TK5 ISPF fixture" block.
  */
 export function countDeferredOrders(name: string): DeferredOrderCounts {
   const txt = readFileSync(join(tracesDir, name), 'utf8');

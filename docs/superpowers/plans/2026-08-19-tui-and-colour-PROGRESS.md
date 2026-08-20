@@ -232,8 +232,17 @@ substance of Task 6.
 2. **`count-orders.mjs` could not read the canonical form** — its regex hard-required the
    `data: ` prefix, so on the converted file it reported `SA=0`, which is indistinguishable
    from "the parser stopped recognising SA". The plan told the implementer to trust the script
-   over the plan, but that cross-check was impossible to perform. Prefix now optional; both
-   forms report 113/101/12 and the script and test helper genuinely agree.
+   over the plan, but that cross-check was impossible to perform. Prefix now optional; the
+   **script** reports 113/101/12 on both forms.
+
+   **A correction to my own commit message for `cdc200c`,** caught by review: it claimed the
+   script *and the test helper* agree on both forms. Not true — `countDeferredOrders`
+   (`helpers/trace.ts:85`) has no optional prefix and returns **all zeros** on the raw form.
+   **That narrowness is right and must not be "fixed":** the helper resolves names only under
+   `tracesDir`, so a raw file cannot arrive in normal use, and returning zeros is exactly what
+   makes two of the TK5 count tests fail as negative controls if the fixture ever reverts to
+   unconverted form. Widening the regex would silently turn those tests green against a blank
+   screen. Now stated in the helper's own comment as a do-not-change note.
 
 **Chosen deliberately:** the fixture went into `fixtures/traces/` *with* a generated golden, so
 `golden.test.ts`'s "every fixture renders something" case guards it — that case is a standing
