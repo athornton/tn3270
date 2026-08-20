@@ -36,6 +36,64 @@ interface SaState {
 }
 
 /**
+ * Every attribute type back to its default.
+ *
+ * `delete`, not `= 0`: absence means "unspecified", where 0x00 is a value the host
+ * can legitimately set. See the note on SaState. Shared by the SA X'00' handler,
+ * the plain-SF reset, and the SFE baseline.
+ */
+function resetSa(sa: SaState): void {
+  delete sa.fg;
+  delete sa.bg;
+  delete sa.gr;
+}
+
+/**
+ * What each SA attribute type does to the running state.
+ *
+ * A TABLE RATHER THAN A SWITCH because two callers need the same answer and they
+ * MUST NOT DRIFT: the `'deferred'` case decides what to apply, and the token loop
+ * decides what to count in `setAttributeIgnored`. With the membership test written
+ * out separately, adding a fifth type to one and forgetting the other would make
+ * that counter report applied work as dropped — the exact silent lie its contract
+ * exists to rule out. Here `saTypeImplemented` is *derived* from this table, so
+ * adding an entry updates both callers at once and forgetting is not possible.
+ *
+ * Same motive as the `_never` guard in the token loop: make the failure a
+ * structural impossibility rather than something a reviewer has to notice.
+ */
+const SA_HANDLERS: Readonly<Record<number, (sa: SaState, value: number) => void>> = {
+  // "All character attributes reset all character attribute types that are
+  // specifiable in the SA order to their default value. Attribute types affected
+  // are color, highlighting, and character set" (p. 4-18, pages.txt:3450-3452) —
+  // so ALL types, not one. Twelve of these are in the committed TK5 fixture, so
+  // this path is live. Character set is among the types reset and we store none,
+  // so there is nothing to drop for it. x3270 zeroes all five of its defaults in
+  // its XA_ALL arm (ctlr.c:1915-1921).
+  //
+  // The value is ignored deliberately: "The only valid value setting is X'00'; all
+  // others are reserved" (pages.txt:3452). x3270 does not look at it either.
+  [XA.RESET]: (sa) => { resetSa(sa); },
+  // These three store the VALUE the host sent, INCLUDING 0x00 — which under them
+  // is XAC_DEFAULT/XAH.DEFAULT, "device default", a legitimate setting and NOT a
+  // reset. See the TYPE-vs-VALUE warning in constants.ts.
+  [XA.FOREGROUND]: (sa, value) => { sa.fg = value; },
+  [XA.BACKGROUND]: (sa, value) => { sa.bg = value; },
+  [XA.HIGHLIGHTING]: (sa, value) => { sa.gr = value; },
+};
+
+/**
+ * Does the SA order apply this attribute type, or drop it?
+ *
+ * Derived from `SA_HANDLERS` so it cannot disagree with what is actually applied.
+ * `XA.CHARSET` (Programmable Symbol Sets, out of scope) and anything unrecognised
+ * are false, and stay counted by `setAttributeIgnored`.
+ */
+function saTypeImplemented(type: number): boolean {
+  return Object.hasOwn(SA_HANDLERS, type);
+}
+
+/**
  * Apply a parsed record to a screen.
  *
  * Throws ExecuteError for conditions the hardware treats as a program check
@@ -269,17 +327,15 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     // failure these counters exist to rule out.
     if (token.kind === 'deferred') {
       switch (token.order) {
-        case Order.SA: {
+        case Order.SA:
           // ONLY the types still dropped, now that four of them are applied
           // below. Counting an implemented type would make a nonzero here mean
           // "some SA arrived" rather than "an SA was thrown away", and the
           // session's trace line (session.ts:250-252) reports it as the latter.
-          const type = token.data[0]!;
-          const implemented = type === XA.RESET || type === XA.FOREGROUND
-            || type === XA.BACKGROUND || type === XA.HIGHLIGHTING;
-          if (!implemented) result.setAttributeIgnored++;
+          // The predicate is shared with the case that does the applying, so the
+          // two cannot drift; see saTypeImplemented.
+          if (!saTypeImplemented(token.data[0]!)) result.setAttributeIgnored++;
           break;
-        }
         case Order.MF: result.modifyFieldIgnored++; break;
         default: { const _never: never = token.order; void _never; }
       }
@@ -318,13 +374,6 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
 function applySa(screen: Screen, addr: number, sa: SaState): void {
   screen.clearExtended(addr);
   screen.setExtended(addr, sa);
-}
-
-/** All four types back to default. The SA X'00' and plain-SF reset, shared. */
-function resetSa(sa: SaState): void {
-  delete sa.fg;
-  delete sa.bg;
-  delete sa.gr;
 }
 
 function applyToken(
@@ -457,10 +506,11 @@ function applyToken(
     }
 
     case 'sfe': {
-      // SFE DEFINES A FIELD. The 0xC0 pair carries the basic field attribute;
-      // the colour and highlighting pairs seed the running SA state at the bottom
-      // of this case. 0x43 character set is still dropped — Programmable Symbol
-      // Sets are out of scope — as is anything else.
+      // SFE DEFINES A FIELD. The 0xC0 pair carries the basic field attribute; the
+      // colour and highlighting pairs become the field's EXTENDED FIELD ATTRIBUTE,
+      // stored on the attribute cell, and also seed the running SA state — see the
+      // two uses at the bottom of this case. 0x43 character set is still dropped —
+      // Programmable Symbol Sets are out of scope — as is anything else.
       //
       // A missing 0xC0 pair does NOT mean "no field": p. 4-5 says unspecified
       // attribute types take their defaults, so the field exists with attribute
@@ -479,34 +529,82 @@ function applyToken(
       const basic = token.pairs.findLast((p) => p.type === XA_3270);
       screen.setFieldAttribute(addr, basic?.value ?? 0x00);
 
-      // The extended pairs seed the RUNNING SA STATE, which then applies to every
+      // Collect the extended pairs once; they are used for two different things
+      // below. In pair order, assigning as it goes, so a repeat resolves to the
+      // last one: "All attribute types and values are checked for validity. If
+      // the same attribute type-value pair appears more than once, the last
+      // specification for a repeated attribute type takes effect" (p. 4-5,
+      // pages.txt:2899-2901). Same rule as findLast above, by a different means —
+      // findLast is needed there because setFieldAttribute is called once.
+      //
+      // XA.RESET is deliberately NOT handled: "The attribute type X'00' can
+      // appear only in the SA order" (p. 4-18, pages.txt:3456), so in an SFE it is
+      // not a reset but an invalid type, and invalid types "are rejected"
+      // (pages.txt:2897-2898) — i.e. ignored, leaving the other pairs to stand.
+      // x3270 agrees: its SFE arm for XA_ALL traces the pair and advances past it
+      // without touching efa_fg/bg/gr (ctlr.c:1869-1871), where its SA arm for the
+      // same type zeroes all five defaults (ctlr.c:1915-1921). An earlier draft
+      // treated it as a reset here, which would have let a trailing X'00' silently
+      // discard a colour the host did set.
+      const efa: SaState = {};
+      for (const p of token.pairs) {
+        if (p.type === XA.FOREGROUND) efa.fg = p.value;
+        else if (p.type === XA.BACKGROUND) efa.bg = p.value;
+        else if (p.type === XA.HIGHLIGHTING) efa.gr = p.value;
+      }
+
+      // USE ONE: store them on the FIELD ATTRIBUTE CELL, which is where the
+      // EXTENDED FIELD ATTRIBUTE lives. This is the level a character attribute
+      // falls back to: "If there are field attributes in the character buffer and
+      // if a character attribute specifies default for any character property
+      // (color, highlighting, or character set), the character is displayed using
+      // the value of that property established for the field in the extended field
+      // attribute. Otherwise, the character attribute overrides the field
+      // attribute" (p. 4-16, pages.txt:3383-3387).
+      //
+      // WITHOUT THIS THE FIELD'S COLOUR IS UNRECOVERABLE. The running state below
+      // only reaches characters written in THIS record; a later record that
+      // overwrites one character mid-field, with no SFE and no SA, correctly
+      // clears that character's own attribute (pages.txt:3388-3392) and would then
+      // have nothing to fall back on — one colourless cell between coloured
+      // neighbours, inside a field the host still defines as coloured.
+      //
+      // The FA cell is exactly where x3270 puts them, immediately after its pair
+      // loop: `ctlr_add_fg(buffer_addr, efa_fg)` and siblings at ctlr.c:1886-1889,
+      // with buffer_addr still on the attribute position (it increments at :1891).
+      // Its renderer reads them straight back off that cell — `if (xea[i].fg)
+      // fa_fg = xea[i].fg & 0x0f; else fa_fg = color_from_fa(fa)`
+      // (fprint_screen.c:581-585), then falls back to it per character at :754-758.
+      //
+      // Safe to write unconditionally: setFieldAttribute above has just cleared
+      // this cell (pages.txt:2869-2870), so an empty `efa` leaves it clean rather
+      // than inheriting the previous field's colour. CONSUMING this fallback is
+      // Task 5's job in render.ts; storing it is this task's.
+      screen.setExtended(addr, efa);
+
+      // USE TWO: seed the RUNNING SA STATE, so the pairs also reach every
       // character this field contains. That is how a field-level attribute and a
       // character-level SA compose: the field sets the baseline, a later SA in
       // the same record overrides it, and the next SF/SFE replaces the baseline.
+      //
+      // A DELIBERATE DIVERGENCE FROM X3270, which seeds no running state from SFE
+      // at all — no default_* assignment appears anywhere in its SFE case — and
+      // instead relies entirely on the per-cell fallback to the FA cell above. We
+      // do both, so a cell written under a coloured SFE carries the colour
+      // directly. That is redundant for rendering but not wrong (the manual makes
+      // the character attribute authoritative when set, pages.txt:3386-3387), and
+      // it keeps the SFE-then-SA precedence tests meaningful. Storing it in both
+      // places is what makes the fallback available when the character attribute
+      // is later cleared.
       //
       // RESET FIRST, unconditionally, so a plain SFE behaves like a plain SF: an
       // SFE that names no colour must leave the state at default rather than
       // inheriting the previous field's, because "unspecified attribute types
       // take their default values" (p. 4-5). x3270 does this by zeroing
-      // efa_fg/efa_bg/efa_gr before its pair loop (ctlr.c:1827-1829) rather than
+      // efa_fg/efa_bg/efa_gr before its pair loop (ctlr.c:1827-1832) rather than
       // carrying them in.
-      //
-      // In pair order, and assigning as it goes, so a repeat resolves to the last
-      // one: "If the same attribute type-value pair appears more than once, the
-      // last specification for a repeated attribute type takes effect" (p. 4-5,
-      // pages.txt:2899-2901). Same reason as findLast above, by a different means
-      // — findLast is needed there because setFieldAttribute is called once.
-      //
-      // Note setFieldAttribute above has already cleared the attribute cell's own
-      // extended attributes (pages.txt:2869-2870), so this cannot leak backwards
-      // onto the attribute position.
       resetSa(sa);
-      for (const p of token.pairs) {
-        if (p.type === XA.FOREGROUND) sa.fg = p.value;
-        else if (p.type === XA.BACKGROUND) sa.bg = p.value;
-        else if (p.type === XA.HIGHLIGHTING) sa.gr = p.value;
-        else if (p.type === XA.RESET) resetSa(sa);
-      }
+      Object.assign(sa, efa);
       return screen.inc(addr);
     }
 
@@ -514,37 +612,11 @@ function applyToken(
       // MF is still unimplemented and still counted; see modifyFieldIgnored.
       if (token.order === Order.MF) return addr;
 
-      // SA. token.data is exactly [type, value] (parse.ts:240-246).
-      const type = token.data[0]!;
-      const value = token.data[1]!;
-      switch (type) {
-        case XA.RESET:
-          // "All character attributes reset all character attribute types that
-          // are specifiable in the SA order to their default value. Attribute
-          // types affected are color, highlighting, and character set" (p. 4-18,
-          // pages.txt:3449-3452) — so ALL types, not one. Twelve of these are in
-          // the committed TK5 fixture, so this path is live. Character set is
-          // among the types reset, and we store none, so there is nothing to drop
-          // for it. x3270 zeroes all five of its defaults in its XA_ALL arm
-          // (ctlr.c:1915-1921).
-          //
-          // The value byte is ignored deliberately: "The only valid value setting
-          // is X'00'; all others are reserved" (pages.txt:3452-3453). x3270 does
-          // not look at it either.
-          resetSa(sa);
-          return addr;
-        // Each stores the VALUE the host sent, including 0x00 — which under these
-        // three types is XAC_DEFAULT/XAH.DEFAULT, "device default", a legitimate
-        // setting and NOT a reset. See the TYPE-vs-VALUE warning in constants.ts.
-        case XA.FOREGROUND: sa.fg = value; return addr;
-        case XA.BACKGROUND: sa.bg = value; return addr;
-        case XA.HIGHLIGHTING: sa.gr = value; return addr;
-        default:
-          // CHARSET (Programmable Symbol Sets, out of scope) and anything
-          // unrecognised: genuinely unimplemented, and counted as such by the
-          // token loop, which repeats this same predicate.
-          return addr;
-      }
+      // SA. token.data is exactly [type, value] (parse.ts:240-246). An absent
+      // handler is a type we do not implement, which the token loop has already
+      // counted via saTypeImplemented — the same table, so the two cannot disagree.
+      SA_HANDLERS[token.data[0]!]?.(sa, token.data[1]!);
+      return addr;
     }
 
     case 'structuredField':

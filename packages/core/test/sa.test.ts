@@ -207,6 +207,39 @@ describe('SA sets character attributes on subsequent characters', () => {
       expect(r.setAttributeIgnored, `type 0x${type.toString(16)}`).toBe(0);
     }
   });
+
+  it('what it counts and what it applies agree, type by type', () => {
+    // THE COUNTER MUST NOT DISAGREE WITH THE BEHAVIOUR. Rather than restate the
+    // list of implemented types -- which is the duplication this pins against --
+    // this derives "did we apply it" from the screen and compares it to
+    // setAttributeIgnored for every type in Table 4-6 plus a few reserved bytes.
+    //
+    // An arm added to the applying side but not the counting side, or vice versa,
+    // fails here whatever the type is.
+    const types = [
+      XA.RESET, XA.HIGHLIGHTING, XA.FOREGROUND, XA.CHARSET, XA.BACKGROUND,
+      0xc1, 0xc2, 0x46, 0x99, 0xff,   // VALIDATION, OUTLINING, TRANSPARENCY, junk
+    ];
+    for (const type of types) {
+      // A first SA sets a known colour; the SA under test then either changes the
+      // running state (applied) or does not (ignored). A non-zero, non-default
+      // value so that "applied" is observable for every implemented type.
+      const s = new Screen();
+      const r = execute(s, parseRecord(Uint8Array.from([
+        ...W, ...SBA0,
+        0x28, XA.FOREGROUND, Colour.RED,
+        0x28, type, Colour.BLUE,
+        0xc1,
+      ])));
+      const cell = s.cellAt(0);
+      // "Applied" means the second SA changed something about the cell: it either
+      // reset the red, or set a colour/highlighting of its own.
+      const applied = cell.fg !== Colour.RED || cell.bg !== undefined
+        || cell.gr !== undefined;
+      const counted = r.setAttributeIgnored > 0;
+      expect(applied, `type 0x${type.toString(16)}: applied`).toBe(!counted);
+    }
+  });
 });
 
 describe('SFE seeds field-level extended attributes', () => {
@@ -274,17 +307,117 @@ describe('SFE seeds field-level extended attributes', () => {
     expect(s.cellAt(2).fg).toBe(Colour.RED);
   });
 
-  it('an SFE RESET pair clears what an earlier pair in the same order set', () => {
-    // p. 4-5: "If the same attribute type-value pair appears more than once, the
-    // last specification for a repeated attribute type takes effect"
-    // (pages.txt:2899-2901) -- so the pairs are applied in order, and a trailing
-    // X'00' type wins over the colour before it.
+  it('a repeated pair type resolves to the last one', () => {
+    // "All attribute types and values are checked for validity. If the same
+    // attribute type-value pair appears more than once, the last specification for
+    // a repeated attribute type takes effect" (p. 4-5, pages.txt:2899-2901).
+    const s = run([
+      ...W, ...SBA0,
+      0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW, XA.FOREGROUND, Colour.PINK,
+      0xc1,
+    ]);
+    expect(s.cellAt(1).fg).toBe(Colour.PINK);
+  });
+
+  it('an X-00 pair type in an SFE is rejected, NOT treated as a reset', () => {
+    // TYPE-vs-VALUE again, and in the one place the two orders genuinely differ:
+    // "The attribute type X'00' can appear only in the SA order" (p. 4-18,
+    // pages.txt:3456). In an SFE it is therefore an invalid type, and invalid types
+    // "are rejected" (pages.txt:2897-2898) -- ignored, leaving the other pairs to
+    // stand. x3270's SFE arm for XA_ALL advances past it without touching
+    // efa_fg/bg/gr (ctlr.c:1869-1871), where its SA arm for the same type zeroes
+    // all five defaults (ctlr.c:1915-1921).
+    //
+    // An earlier draft of this file asserted the opposite, on the plan's word. The
+    // yellow must survive, both on the characters and on the field.
     const s = run([
       ...W, ...SBA0,
       0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW, XA.RESET, 0x00,
       0xc1,
     ]);
-    expect(s.cellAt(1).fg).toBeUndefined();
+    expect(s.cellAt(1).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+  });
+});
+
+describe('SFE stores the extended FIELD attribute on the attribute cell', () => {
+  // The field level is a SECOND place attributes live, and the level a character
+  // attribute falls back to: "If there are field attributes in the character
+  // buffer and if a character attribute specifies default for any character
+  // property (color, highlighting, or character set), the character is displayed
+  // using the value of that property established for the field in the extended
+  // field attribute" (p. 4-16, pages.txt:3383-3387).
+  //
+  // Storing it is this task's job. CONSUMING it -- actually resolving a cleared
+  // character attribute to the field's colour -- is Task 5's, in render.ts.
+
+  it('puts an SFE colour on the field-attribute cell', () => {
+    // x3270 writes them there too, immediately after its pair loop and before it
+    // increments past the attribute position (ctlr.c:1886-1891).
+    const s = run([
+      ...W, ...SBA0,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0xc1,
+    ]);
+    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+  });
+
+  it('puts highlighting and background there as well', () => {
+    const s = run([
+      ...W, ...SBA0,
+      0x29, 0x03, 0xc0, 0xc0, XA.BACKGROUND, Colour.BLUE, XA.HIGHLIGHTING, XAH.REVERSE,
+      0xc1,
+    ]);
+    expect(s.cellAt(0).bg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).gr).toBe(XAH.REVERSE);
+  });
+
+  it('leaves the attribute cell clean for an SFE that specifies no colour', () => {
+    // setFieldAttribute clears it (pages.txt:2869-2870) and an empty pair set adds
+    // nothing back, so a plain SFE after a coloured one does not inherit.
+    const s = run([
+      ...W, ...SBA0,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0xc1,
+      0x29, 0x01, 0xc0, 0xc0,
+      0xc2,
+    ]);
+    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(2).fg).toBeUndefined();
+  });
+
+  it('a plain SF leaves no extended field attribute', () => {
+    const s = run([...W, ...SBA0, 0x1d, 0xc0, 0xc1]);
+    expect(s.cellAt(0).fg).toBeUndefined();
+  });
+
+  it('KEEPS the field colour when a later record overwrites a character mid-field', () => {
+    // THE REASON THE FIELD LEVEL MUST BE STORED AT ALL, and the defect this test
+    // exists to prevent.
+    //
+    // The running SA state only reaches characters written in the SAME record. A
+    // second record that overwrites one character mid-field, with no SFE and no
+    // SA, correctly clears that character's own attribute -- "whenever a character
+    // is overwritten by a new character ... the old character attribute is
+    // overwritten by the character attribute of the new character"
+    // (pages.txt:3388-3392) -- and must then have something to fall back on.
+    // Without the field level, the colour is gone from the buffer entirely: one
+    // colourless cell between two coloured neighbours, inside a field the host
+    // still defines as coloured.
+    const s = new Screen();
+    run([
+      ...W, ...SBA0,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0xc1, 0xc2, 0xc3,
+    ], s);
+    run([...W, 0x11, 0x40, 0x42, 0xc9], s);   // SBA to 2, overwrite the middle char
+
+    // The character's own attribute is correctly gone -- that rule still holds.
+    expect(s.cellAt(2).fg).toBeUndefined();
+    // But the FIELD still carries the colour, so it is recoverable.
+    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    // And the field is still the same field, governing the overwritten cell.
+    expect(s.fieldAt(2)?.attrAddr).toBe(0);
   });
 });
 
@@ -309,6 +442,51 @@ describe('orders that null characters also reset those characters attributes', (
     // Address 2 is at/after the stop address, so it is untouched -- the positive
     // control that proves the assertions above are not vacuous.
     expect(s.cellAt(2).fg).toBe(Colour.RED);
+  });
+
+  it('EUA leaves a PROTECTED cell attributes alone, not just its character', () => {
+    // A PROTECTION control, not an address control. The test above proves EUA stops
+    // at its stop address; it says nothing about protection, because every cell in
+    // it is unprotected. Without this assertion, clearing attributes
+    // unconditionally -- while leaving the NULL correctly guarded -- passes the
+    // entire suite. Verified: that mutation failed 0 of 740 tests before this test
+    // existed.
+    //
+    // The manual makes the protected case explicit twice in two lines: "Field
+    // attributes and extended field attributes are not affected by EUA. Character
+    // attributes for every character CHANGED TO NULLS are reset to their defaults"
+    // (p. 4-11, pages.txt:3165-3166) -- so a cell that is not changed to nulls
+    // keeps its attributes. x3270 likewise only touches unprotected cells, its
+    // `else if (!FA_IS_PROTECTED(current_fa))` (ctlr.c:1711-1714).
+    const s = new Screen();
+    run([
+      ...W, ...SBA0,
+      0x1d, 0xc0 | 0x20,            // SF protected at 0, so 1.. is protected
+      0x28, XA.FOREGROUND, Colour.RED,
+      0xc1, 0xc2,                   // protected chars at 1 and 2, both red
+      0x11, 0x40, 0x41,             // SBA to 1
+      0x12, 0x40, 0x43,             // EUA, stop 3 -- covers the protected cells
+    ], s);
+    // Protected, so neither the character nor its attributes may change.
+    expect(s.cellAt(1).ebcdic).toBe(0xc1);
+    expect(s.cellAt(1).fg).toBe(Colour.RED);
+    expect(s.cellAt(2).fg).toBe(Colour.RED);
+  });
+
+  it('EUA still clears an UNPROTECTED cell inside a formatted screen', () => {
+    // The complement of the test above, so neither can pass by EUA simply never
+    // clearing anything on a formatted screen.
+    const s = new Screen();
+    run([
+      ...W, ...SBA0,
+      0x1d, 0xc0,                   // SF unprotected at 0
+      0x28, XA.FOREGROUND, Colour.RED,
+      0xc1, 0xc2,
+      0x11, 0x40, 0x41,
+      0x12, 0x40, 0x43,
+    ], s);
+    expect(s.cellAt(1).ebcdic).toBe(0x00);
+    expect(s.cellAt(1).fg).toBeUndefined();
   });
 
   it('the PT order clears the attributes of the cells it nulls', () => {
