@@ -12,7 +12,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
 | 4. SA running state in executor | **DONE**, both reviews closed | `a456b06`, `4ea5c50`, `78c0dd4` | 751 |
 | 5. `render.ts` resolution | **DONE**, spec review closed | `3a3531b`, `27e5310`, `52a19f7` | 802 |
-| 6. TK5 fixture proof | | | |
+| 6. TK5 fixture proof | **DONE** — the run's goal, reached | (see below) | 808 |
 | 7. Query Reply Color + Highlighting | | | |
 | 8. `ScreenJson` resolved colour | | | |
 | 9. `packages/tui` skeleton | | | |
@@ -202,6 +202,48 @@ taking my word for.
 Also `pages.txt:3546-3548` → **`3544-3546`** for the `0x00` rule, and the drafted `Int16Array`
 for field addresses would have been a latent bug: an address can exceed 32767 on a large
 alternate size. The implementer used `Int32Array`.
+
+## THE GOAL OF THIS RUN IS REACHED — real host colour now reaches the screen
+
+**Task 6, verified independently.** Replaying the converted TK5 trace:
+
+- **28 fields, 532 of 1920 cells carrying a character-level `fg`** (it was 0 before this work)
+- resolving to **white 793, blue 618, red 329, neutral-white 144, yellow 36**
+- **neutral-white and yellow cannot come from the base-attribute map** (green/red/blue/white
+  only), so they are the specific evidence that SA orders reached the screen rather than
+  merely arriving on the wire
+
+**But the fixture was not replayable as committed, and that is why the gap survived so long.**
+It was raw CLI output with every hex line prefixed `data: `, so `parseTrace`'s regex matched
+**zero** lines: replaying it gave 0 fields and 1920 uniformly green cells. Nothing in the
+repository exercised SA colour end to end — the three fixtures that *did* replay contain no
+character-level colour at all, all of theirs coming from the base map. Converting it is the
+substance of Task 6.
+
+**Two things Task 6 found that I had not flagged:**
+
+1. **A grep that can never come back clean is not a check.** The original fixture header quoted
+   *both* the plaintext password and its EBCDIC bytes inside its own redaction note, so
+   `grep CUL8TR` on the committed file was guaranteed to fire. Header reworded so both greps
+   are real gates. (The implementer reintroduced the literal in its own explanatory note and
+   caught it on re-grep.) Verified myself: 0 hits for `CUL8TR` and 0 for `c3 e4 d3 f8 e3 d9`,
+   in the fixture **and** in the generated golden — the golden was a redaction risk nobody had
+   considered, since MVS 3.8j echoes passwords unmasked.
+2. **`count-orders.mjs` could not read the canonical form** — its regex hard-required the
+   `data: ` prefix, so on the converted file it reported `SA=0`, which is indistinguishable
+   from "the parser stopped recognising SA". The plan told the implementer to trust the script
+   over the plan, but that cross-check was impossible to perform. Prefix now optional; both
+   forms report 113/101/12 and the script and test helper genuinely agree.
+
+**Chosen deliberately:** the fixture went into `fixtures/traces/` *with* a generated golden, so
+`golden.test.ts`'s "every fixture renders something" case guards it — that case is a standing
+check against exactly the blank-screen failure this task existed to fix, and it does fail
+against the unconverted file.
+
+**And the negative control caught the storage-sentinel trap a fifth time:** the
+zero-SFE-assertion test initially **passed against the unconverted fixture**, because every one
+of its assertions is "expect zero/absent" and an empty parse satisfies all of them for free —
+including `for (const f of [])`. Anchored to `parsed === 21` and `sa === 113` first.
 
 ## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
 
