@@ -195,6 +195,52 @@ a test suite built only around state lifetime will not notice — the plan's own
 reset-per-write-command test wrote its second record to a different address, so it never
 exercised an overwrite at all.
 
+### THE EIGHTH RULE, and it changes the storage model: field-level fallback
+
+**Found 2026-08-20 by review of Task 4, and this spec was wrong to omit it.** The manual
+requires a two-level lookup, not one:
+
+> If there are field attributes in the character buffer and if a character attribute
+> specifies default for any character property (color, highlighting, or character set),
+> **the character is displayed using the value of that property established for the field
+> in the extended field attribute.** Otherwise, the character attribute overrides the
+> field attribute. (`pages.txt:3383-3387`)
+
+So an SFE's colour is a property **of the field**, and a character whose own attribute is
+default must fall back to it — not to the base-attribute map. Our model stored SFE colour
+only by stamping it onto the cells as they were written, which loses it the moment a cell
+is rewritten. Demonstrated concretely: an SFE field with `fg=yellow` and three characters
+gives all three yellow; a second record overwriting the middle character with no SFE and
+no SA leaves that one cell colourless between two yellow neighbours, **inside a field
+still defined as yellow**. There is nothing to recover the colour from.
+
+Note this is not a bug in the assignment-not-merge rule above — that rule is right, and
+`pages.txt:3388-3392` requires exactly that clearing. The bug is that clearing the
+*character* attribute must expose a *field* attribute underneath, and we never stored one.
+
+**x3270's model, which is the one to copy:**
+
+- `START_FIELD` zeroes the FA cell's colour (`ctlr.c:1394-1398`).
+- SFE writes its extended attributes **onto the FA cell itself** (`ctlr_add_fg(buffer_addr,
+  efa_fg)` and siblings, `ctlr.c:1886-1889`) — the FA cell is where field-level extended
+  attributes live.
+- Rendering falls back per cell: `if (xea[i].fg) fg_color = xea[i].fg & 0x0f; else
+  fg_color = fa_fg;` (`fprint_screen.c:754-758`).
+
+**Consequences for the tasks:**
+
+1. **Storage** — the SFE handler must write its extended attributes to the field-attribute
+   cell, in addition to seeding the running SA state for the characters that follow. The FA
+   cell already exists and `setExtended` already works on any address, so this is a small
+   change, not a redesign.
+2. **Resolution (Task 5)** — `resolve()` needs a **field-extended-attribute term** between
+   "the cell's own attribute" and "the base-attribute map". The drafted version reads only
+   `cell.fg` then falls straight through to `defaultColour(attr)`, so as drafted it cannot
+   express this rule even once the data is stored. The precedence is: cell's own attribute
+   → the field's extended attribute → base-attribute map → `mode3279` green.
+3. **`ResolvedCell` is unaffected** — this changes how a colour is *derived*, not what a
+   renderer consumes.
+
 Attribute types to support (from `include/3270ds.h:240-255`, cross-checked against the
 manual):
 

@@ -1138,6 +1138,39 @@ git commit -m "Implement SA and SFE colour as running character-attribute state"
 
 Storage answers "what did the host say". This answers "what colour is this cell", and it must live in **one** place: two of its five rules are datastream semantics with citations, and reimplemented per front end they would diverge three ways.
 
+> **⚠️ AMENDED 2026-08-20: THIS TASK HAS A SIXTH RULE, AND THE DRAFT BELOW CANNOT
+> EXPRESS IT.** Review of Task 4 found that the manual requires a **two-level** lookup:
+>
+> > If there are field attributes in the character buffer and if a character attribute
+> > specifies default for any character property (color, highlighting, or character set),
+> > **the character is displayed using the value of that property established for the
+> > field in the extended field attribute.** Otherwise, the character attribute overrides
+> > the field attribute. (`pages.txt:3383-3387`)
+>
+> So an SFE's colour belongs to the FIELD, and a character with no attribute of its own
+> falls back to it — *before* reaching the base-attribute map. Task 4 now stores field
+> extended attributes on the **field-attribute cell**, the way x3270 does
+> (`ctlr.c:1886-1889`), and x3270 resolves it per cell as
+> `if (xea[i].fg) fg_color = xea[i].fg & 0x0f; else fg_color = fa_fg;`
+> (`fprint_screen.c:754-758`).
+>
+> **The precedence is therefore four levels, not three:**
+>
+> 1. the cell's own extended attribute (`cell.fg`), if usable
+> 2. **the field's extended attribute — read from the cell at `field.attrAddr`** ← NEW
+> 3. the base-attribute map (`defaultColour`)
+> 4. `mode3279 === false` → green, overriding everything
+>
+> The drafted `resolve()` below reads `cell.fg` and falls straight through to
+> `defaultColour(attr)`, with no term for level 2 — so **add it**, and add tests: a
+> character in an SFE-coloured field with no attribute of its own takes the field's
+> colour; and a character whose colour was cleared by an overwrite falls back to the
+> field's rather than to green. Everything else in this task is unchanged, and
+> `ResolvedCell`'s shape is unaffected — this changes how a colour is derived, not what a
+> renderer consumes.
+>
+> Full write-up in the spec under *THE EIGHTH RULE*.
+
 - [ ] **Step 1: Confirm the base-attribute mapping against x3270**
 
 Run: `sed -n '75,96p' ~/src/suite3270-4.5/Common/fprint_screen.c`
