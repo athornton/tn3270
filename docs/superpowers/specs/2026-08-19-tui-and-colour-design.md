@@ -241,6 +241,41 @@ Note this is not a bug in the assignment-not-merge rule above — that rule is r
 3. **`ResolvedCell` is unaffected** — this changes how a colour is *derived*, not what a
    renderer consumes.
 
+### An SFE pair of type X'00' is NOT a reset — the plan said it was, and was wrong
+
+The plan instructed that an SFE pair of type `XA.RESET` clear the running state, and that
+was implemented and pinned with a test before the error was caught. **It is backwards.**
+The manual: "**The attribute type X'00' can appear only in the SA order**"
+(`pages.txt:3456`), and for SFE, "Attribute types and values that are unknown or cannot be
+maintained and returned inbound by an implementation are **rejected**"
+(`pages.txt:2897-2898`). So in an SFE it is an invalid type and must be *ignored*, leaving
+the other pairs standing.
+
+x3270 draws exactly this distinction: its SFE arm for `XA_ALL` traces and advances past
+without touching any `efa_*` (`ctlr.c:1869-1871`), while its SA arm zeroes all five
+defaults (`ctlr.c:1915-1921`). As originally shipped, a trailing `X'00'` pair in an SFE
+would have **silently discarded a colour the host did set** in the same order.
+
+**A related deliberate divergence, worth knowing before Task 5:** x3270 seeds *no* running
+state from SFE at all — it relies entirely on the FA-cell fallback. We do both (seed the
+state *and* store on the FA cell), which is redundant but harmless: the manual makes a
+character attribute authoritative when set (`:3386-3387`), so the two paths agree. Keep it
+in mind when deciding which level is load-bearing in resolution.
+
+### The fixture cannot cover the field level — TK5 sends no SFE at all
+
+**Measured: the committed TK5 fixture contains ZERO SFE orders**, so all 113 of its SA
+orders are character-level and **no field-attribute cell in it carries extended
+attributes**. That is precisely why this whole class of defect went unnoticed: the trace we
+regression-test against never exercises the field level.
+
+Consequence for **Task 6**, which is the task whose entire purpose is proving the colour
+gap closed against real host traffic: it can prove the *character* level and cannot prove
+the *field* level. The field level is unit-tested only. Do not let a green Task 6 be read
+as covering both — and if real coverage is wanted, it needs a trace from a host that sends
+SFE. See [[check-what-a-comparison-covers]]: a passing comparison proves nothing about
+behaviour its inputs never exercise.
+
 Attribute types to support (from `include/3270ds.h:240-255`, cross-checked against the
 manual):
 

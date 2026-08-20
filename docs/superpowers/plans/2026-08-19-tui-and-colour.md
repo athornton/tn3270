@@ -1072,12 +1072,33 @@ Replace the `'sfe'` case's ending. Keep the existing `findLast` for the basic at
         if (p.type === XA.FOREGROUND) sa.fg = p.value;
         else if (p.type === XA.BACKGROUND) sa.bg = p.value;
         else if (p.type === XA.HIGHLIGHTING) sa.gr = p.value;
-        else if (p.type === XA.RESET) { delete sa.fg; delete sa.bg; delete sa.gr; }
+        // NO `XA.RESET` ARM HERE -- see the warning below.
       }
       return screen.inc(addr);
 ```
 
 Add `XA` to the `constants.js` import at the top of the file.
+
+> **⚠️ CORRECTED 2026-08-20. An earlier version of this plan had a fourth arm in that loop
+> treating an SFE pair of type `XA.RESET` as a reset of the running state. That is
+> BACKWARDS**, and it was implemented and pinned with a test before the error was caught.
+> The manual: "The attribute type X'00' can appear only in the SA order"
+> (`pages.txt:3456`), and for SFE specifically, "Attribute types and values that are
+> unknown or cannot be maintained and returned inbound by an implementation are
+> **rejected**" (`pages.txt:2897-2898`). In an SFE it is an invalid type and must be
+> **ignored**, leaving the other pairs standing.
+>
+> x3270 draws exactly this distinction: its SFE arm for `XA_ALL` traces and advances past
+> without touching any `efa_*` (`ctlr.c:1869-1871`), while its SA arm zeroes all five
+> defaults (`ctlr.c:1915-1921`). As the plan originally had it, a trailing `X'00'` pair
+> would have **silently discarded a colour the host set in the same order**.
+
+**ALSO store the pairs on the field-attribute cell**, which is the storage half of the
+eighth rule (see the amendment at the top of Task 5). Order matters:
+`setFieldAttribute(addr, basic)` first — it clears that cell's extended attributes — then
+`setExtended(addr, {...pairs})`, then seed the running state. x3270 does the same, writing
+`efa_fg` and siblings while `buffer_addr` is still on the attribute position
+(`ctlr.c:1886-1889`, incrementing at `:1891`).
 
 - [ ] **Step 8: Reset on a plain SF too**
 
@@ -1530,6 +1551,18 @@ git commit -m "Resolve extended attributes into concrete 3279 colours"
 - Modify: `packages/core/test/render.test.ts`
 
 **This is the test that would have caught the whole gap**, and it needs no host. The fixture is already on disk and contains 101 foreground SA orders.
+
+> **⚠️ WHAT THIS TASK CANNOT PROVE, measured 2026-08-20: the TK5 fixture contains ZERO SFE
+> orders.** All 113 of its SA orders are character-level, so no field-attribute cell in it
+> carries extended attributes and **the field-level fallback (the eighth rule) gets no
+> coverage here at all.** That is exactly why that whole class of defect went unnoticed —
+> the trace we regression-test against never exercises the field level.
+>
+> So this task proves the **character** level against real host traffic and leaves the
+> **field** level unit-tested only. Say so in the commit message rather than letting a
+> green Task 6 read as covering both. Real coverage needs a trace from a host that sends
+> SFE; none is committed today. This is [[check-what-a-comparison-covers]] again: a passing
+> comparison proves nothing about behaviour its inputs never exercise.
 
 - [ ] **Step 1: Find how existing tests replay a fixture**
 
