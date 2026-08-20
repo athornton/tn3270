@@ -10,7 +10,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 1. Attribute type/value constants | **DONE** | `805c474`, `cc1f89d`, `71fdbdd` | 698 |
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
-| 4. SA running state in executor | **DONE** (quality review pending) | `a456b06`, `4ea5c50` | 749 |
+| 4. SA running state in executor | **DONE**, both reviews closed | `a456b06`, `4ea5c50`, `78c0dd4` | 751 |
 | 5. `render.ts` resolution | | | |
 | 6. TK5 fixture proof | | | |
 | 7. Query Reply Color + Highlighting | | | |
@@ -97,7 +97,7 @@ x3270 before acceptance, and each reproduced.
    `setExtended` merges (rightly — the composite rule needs it), a cell overwritten by a
    later record with no SA in effect **kept the previous record's colour**. The manual:
    "whenever a character is overwritten by a new character (or cleared or erased), the old
-   character attribute is overwritten" (`pages.txt:3388-3392`). Must be clear-then-set, an
+   character attribute is overwritten" (`pages.txt:3388-3391`). Must be clear-then-set, an
    assignment. x3270 stamps unconditionally (`ctlr.c:2141-2143`) via `ctlr_add_fg`, which
    assigns (`:2865`). **I reproduced this: reverting to my version fails exactly 2 tests.**
    Note the plan's own reset-per-write test could not catch it — it wrote the second record
@@ -119,10 +119,43 @@ x3270 before acceptance, and each reproduced.
    (`ctlr.c:1869-1871`) where its SA arm zeroes everything (`:1915-1921`). As shipped it
    would have discarded a colour the host set in the same order.
 
+5. **SFE seeding leaked across field boundaries — a real correctness bug, found by quality
+   review and reproduced.** An `SBA` can move the write address into a *different,
+   existing* field without passing an SF/SFE, and the SFE-seeded state followed the
+   address: a plain field with no EFA got the previous field's yellow stamped onto it.
+   Root cause named exactly: **seeding a FIELD-scoped attribute into a CHARACTER-scoped
+   running variable gives it the wrong lifetime.** Fix — drop the seeding entirely and rely
+   on the FA-cell storage, which is what x3270 does (`grep default_(fg|bg|gr)` over its SFE
+   region `ctlr.c:1816-1894` returns **zero** matches).
+6. **AND FIXING THAT EXPOSED THE SAME CONFUSION INVERTED: a plain SF must not reset the
+   running SA state, and the plan said it should.** `pages.txt:2869-2870` is purely
+   field-level; the SA reset list is **closed** — "These **four** actions…"
+   (`:2977-2982`) — and SF is not among them; x3270's `ORDER_SF` clears the FA cell
+   (`ctlr.c:1486-1487`) and never touches `default_*` (every assignment in the file:
+   `:410`, `:1414`, `:1905`, `:1917`, `:2711` — no SF, no SFE). So a field-scoped event was
+   destroying character-scoped state.
+
+**The lesson from 5 and 6 together, which is the real one:** field attributes and character
+attributes are **separate planes with separate lifetimes**, and they get conflated because
+the wire encoding shares the `0x28` family. Defect 5 gave a field attribute a character
+lifetime; defect 6 gave a field event authority over character state. **Neither direction
+was caught by any test until each was specifically probed** — and defect 6 only surfaced
+because fixing 5 made a mutation stop failing, which the implementer investigated instead of
+dismissing as a thin test.
+
 Plus two untested-invariant gaps: EUA's protected-cell attribute preservation (mutation
 passed 740/740 before a test was added), and a predicate duplicating a switch, now both
-derived from one `SA_HANDLERS` table with a test that compares screen effect to counter
-across ten types.
+derived from one `SA_HANDLERS` table — keyed by `XA`'s literal union, so a typo'd entry is
+a `TS2353` error — with a test that compares screen effect to counter across ten types.
+
+**One correction to a reviewer, worth noting since the pattern has been the reverse:** the
+quality review claimed tightening `SA_HANDLERS`'s key type would leave indexing unaffected.
+It does not — a wire byte is `number` and a literal-keyed `Record` rejects it (`TS7053`), so
+one widening cast is unavoidable and is now confined to a single shared accessor. Reviewers
+are checkable too.
+
+**My citation `pages.txt:3388-3392` was also wrong** (over-included "If a character is
+moved"); the quote ends mid-3391, so `3388-3391` is exact. Corrected across all three docs.
 
 **MEASURED LIMIT ON OUR ONE FIXTURE, and it explains the whole defect cluster: the TK5
 trace has 344 plain SF orders, 113 SA orders and ZERO SFE orders.** So the field level is

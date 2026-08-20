@@ -996,7 +996,7 @@ function applySa(screen: Screen, addr: number, sa: SaState): void {
 > associated with a character and not with the character's position in the buffer. Thus,
 > whenever a character is overwritten by a new character (or cleared or erased), the old
 > character attribute is overwritten by the character attribute of the new character"
-> (**`pages.txt:3388-3392`**). x3270 has no such hazard: it stamps all three
+> (**`pages.txt:3388-3391`**). x3270 has no such hazard: it stamps all three
 > unconditionally (`ctlr.c:2141-2143`) through `ctlr_add_fg`, which **assigns**
 > (`ea_buf[baddr].fg = color`, `ctlr.c:2865`).
 >

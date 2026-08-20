@@ -174,7 +174,7 @@ wrong colour, never an error:
   attributes are associated with a character and not with the character's position in the
   buffer. Thus, whenever a character is overwritten by a new character (or cleared or
   erased), the old character attribute is overwritten by the character attribute of the
-  new character" (`pages.txt:3388-3392`). So stamping the running state onto a written
+  new character" (`pages.txt:3388-3391`). So stamping the running state onto a written
   cell must be an **assignment, not a merge** — clear the cell's attributes, then apply.
   This is the one that actually bit: the plan had a merge with an early return when no SA
   was in effect, which left a previous record's colour on cells the new record overwrote.
@@ -215,7 +215,7 @@ no SA leaves that one cell colourless between two yellow neighbours, **inside a 
 still defined as yellow**. There is nothing to recover the colour from.
 
 Note this is not a bug in the assignment-not-merge rule above — that rule is right, and
-`pages.txt:3388-3392` requires exactly that clearing. The bug is that clearing the
+`pages.txt:3388-3391` requires exactly that clearing. The bug is that clearing the
 *character* attribute must expose a *field* attribute underneath, and we never stored one.
 
 **x3270's model, which is the one to copy:**
@@ -240,6 +240,34 @@ Note this is not a bug in the assignment-not-merge rule above — that rule is r
    → the field's extended attribute → base-attribute map → `mode3279` green.
 3. **`ResolvedCell` is unaffected** — this changes how a colour is *derived*, not what a
    renderer consumes.
+
+### A plain SF must NOT reset the running SA state either — the plan said it should
+
+**Found 2026-08-20, while fixing the SFE leak above, and it is the same confusion running
+the other way.** The plan had the `'sf'` case call a full reset of the running SA state.
+It must not:
+
+- `pages.txt:2869-2870` ("sets the associated extended field attribute to its default
+  value") is **entirely field-level**, and `setFieldAttribute` already satisfies it by
+  clearing that cell's extended attributes.
+- **The SA reset list is closed.** Four triggers, then: "These **four** actions all return
+  the established set of character attribute type-value pairs to their default value"
+  (`pages.txt:2977-2982`). A plain SF is not one of them.
+- x3270's `ORDER_SF` zeroes the FA cell's colour (`ctlr.c:1486-1487`) and **never touches
+  `default_*`** — verified by listing every assignment to `default_fg` in the file: connect
+  (`:410`), write-command reset (`:1414`), the SA order (`:1905`, `:1917`), and a resize
+  path (`:2711`). No SF, no SFE.
+
+So a plain SF was destroying **character-scoped** state on a **field-scoped** event.
+Demonstrated: `SA fg=red`, char, plain SF, char gave the second character no colour where
+x3270 gives it red.
+
+**Note the symmetry, because it is the lesson.** The SFE leak gave a field attribute a
+character lifetime; this gave a field event authority over character state. Both come from
+treating "field attribute" and "character attribute" as one concept because the wire
+encoding shares the `0x28` family. **They are separate planes with separate lifetimes**, and
+every rule in this section is ultimately about keeping them apart. Neither direction was
+caught by tests until each was specifically probed.
 
 ### An SFE pair of type X'00' is NOT a reset — the plan said it was, and was wrong
 
@@ -587,7 +615,7 @@ they belong to. Measured against x3270:
 x3270's model is that **an attribute travels with its character byte** — which is the same
 rule `applySa` already quotes: "whenever a character is overwritten by a new character (or
 cleared or erased), the old character attribute is overwritten"
-(`pages.txt:3388-3392`). The rule does not distinguish host writes from local ones. Only
+(`pages.txt:3388-3391`). The rule does not distinguish host writes from local ones. Only
 `EraseInput` is accidentally correct, because it routes through `eraseAllUnprotected`,
 which clears the three arrays directly.
 
