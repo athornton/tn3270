@@ -10,7 +10,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 1. Attribute type/value constants | **DONE** | `805c474`, `cc1f89d`, `71fdbdd` | 698 |
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
-| 4. SA running state in executor | | | |
+| 4. SA running state in executor | **DONE** (quality review pending) | `a456b06`, `4ea5c50` | 749 |
 | 5. `render.ts` resolution | | | |
 | 6. TK5 fixture proof | | | |
 | 7. Query Reply Color + Highlighting | | | |
@@ -88,6 +88,47 @@ warning's neighbour. The behaviour was correct throughout; only the argument was
 Fixed in `a6327bb`, which now cites the real reason and explicitly warns the next reader
 off the `XA.RESET` route. Worth remembering that a comment can be confidently wrong in a
 file whose whole purpose is preventing that error.
+
+**Task 4 — the richest task for defects, and FOUR of them were mine.** This is the one
+where the plan was actively dangerous, not just imprecise. All verified from the manual and
+x3270 before acceptance, and each reproduced.
+
+1. **`applySa` was a merge with an early return. Silent corruption.** Because Task 3's
+   `setExtended` merges (rightly — the composite rule needs it), a cell overwritten by a
+   later record with no SA in effect **kept the previous record's colour**. The manual:
+   "whenever a character is overwritten by a new character (or cleared or erased), the old
+   character attribute is overwritten" (`pages.txt:3388-3392`). Must be clear-then-set, an
+   assignment. x3270 stamps unconditionally (`ctlr.c:2141-2143`) via `ctlr_add_fg`, which
+   assigns (`:2865`). **I reproduced this: reverting to my version fails exactly 2 tests.**
+   Note the plan's own reset-per-write test could not catch it — it wrote the second record
+   to a *different address*, so it never exercised an overwrite.
+2. **EUA and PT must CLEAR attributes, not merely "not stamp"** as the plan said
+   (`pages.txt:3165-3166` and `:3090-3091`, PT gated on `wroteSinceOrder` because "when PT
+   immediately follows a command, order, or order sequence, the buffer is not modified").
+3. **THE EIGHTH RULE: extended FIELD attributes were never stored at all.** The manual
+   requires a two-level lookup — a character whose own attribute is default "is displayed
+   using the value of that property established for the field in the extended field
+   attribute" (`pages.txt:3383-3387`). Demonstrated: SFE `fg=yellow` + 3 chars, then a
+   second record overwrites the middle one → colourless cell between two yellow neighbours,
+   inside a field still defined yellow, unrecoverable. Fix follows x3270: store on the
+   **FA cell** (`ctlr.c:1886-1889`) and fall back per cell (`fprint_screen.c:754-758`).
+   **This makes Task 5 four-level, not three** — cell → field → base map → mode3279.
+4. **An SFE pair of type X'00' is NOT a reset — the plan said it was.** "The attribute type
+   X'00' can appear only in the SA order" (`pages.txt:3456`); in SFE it is invalid and
+   "rejected" (`:2897-2898`), i.e. ignored. x3270's SFE arm advances past
+   (`ctlr.c:1869-1871`) where its SA arm zeroes everything (`:1915-1921`). As shipped it
+   would have discarded a colour the host set in the same order.
+
+Plus two untested-invariant gaps: EUA's protected-cell attribute preservation (mutation
+passed 740/740 before a test was added), and a predicate duplicating a switch, now both
+derived from one `SA_HANDLERS` table with a test that compares screen effect to counter
+across ten types.
+
+**MEASURED LIMIT ON OUR ONE FIXTURE, and it explains the whole defect cluster: the TK5
+trace has 344 plain SF orders, 113 SA orders and ZERO SFE orders.** So the field level is
+unexercised by the only real host traffic we regression-test against. Task 6 can prove the
+character level and cannot prove the field level; it now says so. Real coverage needs a
+trace from a host that sends SFE. [[check-what-a-comparison-covers]].
 
 **A genuinely useful find, now in the spec:** the OCR-damaged colour Table 4-7 is
 **reprinted UNDAMAGED at `pages.txt:9244-9260`** (manual p. 6-37, Chapter 6's Query
