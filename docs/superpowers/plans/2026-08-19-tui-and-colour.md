@@ -1191,6 +1191,19 @@ Storage answers "what did the host say". This answers "what colour is this cell"
 > renderer consumes.
 >
 > Full write-up in the spec under *THE EIGHTH RULE*.
+>
+> **THREE MORE CORRECTIONS, from implementing this task (2026-08-20):**
+>
+> 1. **Level 2 applies to background and highlighting too, not just foreground.** The
+>    manual says "any character property (color, highlighting, or character set)", and
+>    x3270 mirrors its fg two-step for bg (`c3270/screen.c:1153-1158`) and gr
+>    (`:1166-1171`). A foreground-only fallback leaves an SFE's reverse-video field flat.
+> 2. **`mode3279 === false` must gate BACKGROUND as well as foreground** — x3270 puts its
+>    whole colour block behind `if (mode3279 || ...)` (`c3270/screen.c:1126`) — but must
+>    **NOT** gate highlighting: a 3278 blinks and reverses perfectly well, and x3270
+>    computes `gr` after its colour branch closes.
+> 3. **`0xF7` must NOT be remapped to white.** See the corrected rule 5 in the spec; the
+>    draft below has this fixed.
 
 - [ ] **Step 1: Confirm the base-attribute mapping against x3270**
 
@@ -1289,20 +1302,24 @@ describe('resolve: mode3279 false makes everything green (rule 3)', () => {
 describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
   it('a colour value of 0x00 means device default, NOT black', () => {
     // "The X'00' value selects the device default color indicated in the Query
-    // Reply (Color) structured field" (pages.txt:3546-3548). So it falls through
+    // Reply (Color) structured field" (pages.txt:3544-3546). So it falls through
     // to the base mapping -- here a protected field, so blue.
     const s = fielded(FA.PRINTABLE | FA.PROTECT);
     s.setExtended(1, { fg: 0x00 });
     expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.BLUE);
   });
 
-  it('0xF7 resolves to white while PS is out of scope', () => {
-    // "If a single-plane or nonloadable character set is referenced, the color
-    // defaults to the single color specified for the X'F7' value by Query Reply
-    // (Color)" -- white on a display (pages.txt:3548-3554).
+  it('0xF7 stays 0xF7 -- it is Neutral, a distinct colour, NOT white', () => {
+    // CORRECTED 2026-08-20. The manual routes X'F7' through Query Reply (Color)
+    // (pages.txt:3544-3550), and OUR reply gives F7 an identity pair, so F7
+    // resolves to F7. It is listed separately from White 0xFF in Table 4-7, has
+    // its own RGB in palette.ts, and x3270 keeps HOST_COLOR_NEUTRAL_WHITE (7)
+    // distinct from HOST_COLOR_WHITE (15), special-casing F7 nowhere. Remapping
+    // would collapse two colours a host deliberately chose between.
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { fg: 0xf7 });
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.WHITE);
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.NEUTRAL_WHITE);
+    expect(resolve(s.snapshot())[1]!.fg).not.toBe(Colour.WHITE);
   });
 
   it('a malformed colour falls through to the default rather than throwing', () => {
@@ -1384,7 +1401,7 @@ Create `packages/core/src/render.ts`:
  * its rules are datastream semantics rather than rendering taste:
  *
  *   - A colour VALUE of 0x00 means "the device default indicated in Query Reply
- *     (Color)" (GA23-0059 p. 4-19, pages.txt:3546-3548) -- NOT black.
+ *     (Color)" (GA23-0059 p. 4-19, pages.txt:3544-3546) -- NOT black.
  *   - 0xF7 means "the colour comes from a triple-plane character set", and with a
  *     single-plane or nonloadable set it takes the single colour Query Reply
  *     (Color) gives for F7, i.e. white on a display (pages.txt:3548-3554).
@@ -1493,10 +1510,10 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     out[i] = {
       text: isAttrPosition || cell.ebcdic === 0x00 ? ' ' : codePage.toUnicode(cell.ebcdic),
       fg: mode3279 && usableColour(cell.fg)
-        ? (cell.fg === 0xf7 ? Colour.WHITE : cell.fg!)
+        ? cell.fg!   // NO 0xF7 remap -- see the correction note
         : defaultColour(attr, mode3279),
       bg: mode3279 && usableColour(cell.bg)
-        ? (cell.bg === 0xf7 ? Colour.WHITE : cell.bg!)
+        ? cell.bg!   // NO 0xF7 remap -- see the correction note
         : Colour.NEUTRAL_BLACK,
       blink: gr === XAH.BLINK,
       reverse: gr === XAH.REVERSE,
@@ -3031,7 +3048,7 @@ This is a manual pass, not a tool. For each mutation: make the edit, run the nam
 | 1 | Delete the `mode3279` guard in `defaultColour`, so it always uses the table | the two `mode3279: false` tests |
 | 2 | Change `DEFAULT_COLOURS` index order, e.g. swap `BLUE` and `WHITE` | the protected/protected-intensified tests |
 | 3 | Make `usableColour` accept `0x00` | the "0x00 means device default" test |
-| 4 | Remove the `0xf7 ? WHITE` special case, returning `cell.fg` | the `0xF7` test |
+| 4 | Remap `0xf7` to `Colour.WHITE` (the plan's original error) | the `0xF7`-stays-Neutral test |
 | 5 | Make `usableColour` return `true` unconditionally | the malformed-colour test (should now throw) |
 | 6 | Change `hidden` to compare against `FA.INT_HIGH_SEL` | the hidden-field test |
 | 7 | Map `blink` from `XAH.REVERSE` instead of `XAH.BLINK` | the highlighting table test |

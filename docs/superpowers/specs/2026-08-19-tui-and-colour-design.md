@@ -362,11 +362,17 @@ The rules it implements, each with its source:
    colourised just because the host sent an attribute.
 4. **`0x00` means "device default", not black.** The manual: "The `X'00'` value selects
    the device default color indicated in the Query Reply (Color) structured field"
-   (`pages.txt:3546-3548`). So `0x00` resolves through rule 2, never to a literal colour.
-5. **`0xF7` means "colour comes from a triple-plane character set."** Same passage: with
-   a single-plane or nonloadable character set "the color defaults to the single color
-   specified for the `X'F7'` value by Query Reply (Color)" — i.e. white on a display.
-   Since PS is out of scope, `0xF7` resolves to white and that is correct today.
+   (`pages.txt:3544-3546`). So `0x00` resolves through rule 2, never to a literal colour.
+5. **`0xF7` is Neutral, and resolution must LEAVE IT ALONE.** ~~It resolves to white.~~
+   **This spec had it wrong and implementation corrected it (2026-08-20).** The manual says
+   `X'F7'` "indicates that the color is defined by a triple-plane character set", and with a
+   single-plane set "the color defaults to the single color specified for the `X'F7'` value
+   by Query Reply (Color)" (`pages.txt:3544-3550`) — and *our* Query Reply (Color) gives F7
+   an identity pair, so F7 resolves to F7. It is a distinct architected identification
+   (Neutral, listed separately from White `0xFF` in Table 4-7) with its own RGB in
+   `palette.ts` on purpose, and x3270 keeps `HOST_COLOR_NEUTRAL_WHITE` (7) and
+   `HOST_COLOR_WHITE` (15) as separate slots and special-cases F7 nowhere in resolution.
+   Remapping it to `Colour.WHITE` would collapse two colours a host chose between.
 
 **Rules 4 and 5 are why resolution cannot live in a front end.** They are datastream
 semantics with citations, not rendering taste; reimplemented per front end they would
