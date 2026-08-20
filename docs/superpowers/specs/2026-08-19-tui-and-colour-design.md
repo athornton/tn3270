@@ -565,6 +565,42 @@ The existing discipline applies: unit tests against synthetic screens, then a li
 passed with the behaviour they claimed to pin deleted; the colour rules are exactly the
 shape of thing where an assertion can look right and pin nothing.
 
+## KNOWN GAP, deliberately deferred: `Keyboard` does not maintain extended attributes
+
+**Found 2026-08-20 by review of Task 4. Real, reproduced, and NOT fixed by this spec's
+tasks.** Recording it because the alternative is that Task 5 renders stale colour and
+nobody knows why.
+
+Task 3 gave `setChar` a deliberate contract: it does not touch extended attributes,
+because the *executor* holds the running SA state and calls `setExtended` immediately
+after. The executor honours that. **`Keyboard` never did**, and this work did not revisit
+it — so every *local* screen mutation leaves attributes desynchronised from the characters
+they belong to. Measured against x3270:
+
+| operation | ours | x3270 |
+|---|---|---|
+| type `Z` over a red cell | `Z` keeps red | clears it — `ctlr_add_fg(baddr, 0); ctlr_add_gr(baddr, 0)` (`kybd.c:1378-1379`) |
+| Delete inside `A/red B/blue C/blue` | leaves `B/red` | moves the whole `struct ea`, so `B/blue` |
+| EraseEOF over red cells | nulls keep red | `ctlr_add(…, EBC_null, …)` clears |
+| Insert `Z` at a red cell | `Z` inherits red | colours shift with their characters |
+
+x3270's model is that **an attribute travels with its character byte** — which is the same
+rule `applySa` already quotes: "whenever a character is overwritten by a new character (or
+cleared or erased), the old character attribute is overwritten"
+(`pages.txt:3388-3392`). The rule does not distinguish host writes from local ones. Only
+`EraseInput` is accidentally correct, because it routes through `eraseAllUnprotected`,
+which clears the three arrays directly.
+
+**Why it is deferred rather than folded in:** it is `keyboard.ts`, not the executor or the
+renderer, and it touches six call sites in a module with its own well-tested invariants.
+Doing it inside a task scoped to the executor would mean an unreviewed change to typing
+behaviour riding along with a colour change.
+
+**Why it must not be forgotten:** the visible symptom is a user typing over a red field
+and seeing their own text come out red, which reads as a rendering bug in the TUI and will
+be debugged there first. Fix it before the TUI is used in earnest, and follow x3270's
+model — clear on overwrite, and move attributes with characters on insert/delete.
+
 ## Scope boundary
 
 **In:** per-cell fg/bg/highlighting storage; SA and SFE colour and highlighting; the
@@ -573,7 +609,9 @@ resolution module and the 3279 palette; Color and Highlighting Query Reply units
 
 **Out:** Programmable Symbol Sets (`0x43` character set stays dropped); MF colour
 (`modifyFieldIgnored` keeps counting); the web front end and its server; the Electron
-GUI; mouse support; alternate geometry beyond what the core already negotiates.
+GUI; mouse support; alternate geometry beyond what the core already negotiates; and
+**`Keyboard`'s maintenance of extended attributes on local edits** — see *KNOWN GAP*
+above, which is real, measured, and must be fixed before the TUI is used in earnest.
 
 **Not assumed:** that any of this is conformant on a modern host. Everything here is
 verified against VM/370 and MVS 3.8j only — see the *Test hosts* section of the main
