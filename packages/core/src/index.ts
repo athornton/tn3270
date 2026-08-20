@@ -4,6 +4,7 @@ export * from './constants.js';
 export * from './address.js';
 export * from './codepage.js';
 export * from './palette.js';
+export * from './render.js';
 export * from './trace.js';
 export * from './x3270trace.js';
 export * from './telnet.js';
