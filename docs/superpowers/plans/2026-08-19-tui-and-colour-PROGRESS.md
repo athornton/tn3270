@@ -14,7 +14,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 5. `render.ts` resolution | **DONE**, spec review closed | `3a3531b`, `27e5310`, `52a19f7` | 802 |
 | 6. TK5 fixture proof | **DONE**, reviewed — the run's goal, reached | `cdc200c`, `7045b10` | 808 |
 | 7. Query Reply Color + Highlighting | **DONE** | `c4708d1` | 816 |
-| 8. `ScreenJson` resolved colour | | | |
+| 8. `ScreenJson` resolved colour | **DONE** | `a79f4fd` | 821 |
 | 9. `packages/tui` skeleton | | | |
 | 10. Depth detection + quantisation | | | |
 | 11. ANSI rendering + diffing | | | |
@@ -286,6 +286,25 @@ was taken with x3270 in monochrome mode. Rather than skipping the unit in the co
 test exempts those bytes **by name and pins both sides**, so the other 23 stay pinned and the
 divergence cannot silently widen.
 
+## THE CHAIN IS PROVEN END TO END THROUGH THE OPERATOR-FACING SURFACE
+
+**Task 8 closed the agreed scope (Tasks 5-8).** `ScreenJson` now emits `resolved` alongside the
+raw `cells`, and driving the real CLI's `Replay()` against the committed TK5 fixture — no host
+needed — gives **exactly** the numbers the core tests assert:
+
+```
+fields: 28   resolved length: 1920
+WHITE 793   BLUE 618   RED 329   NEUTRAL-WHITE 144   YELLOW 36
+```
+
+So the whole path works: wire bytes → telnet → parse → execute (SA/SFE, eight rules) → per-cell
+storage → four-level resolution → the operator-facing CLI. Colour can now be inspected on a live
+host **without simultaneously trusting a brand-new terminal renderer**, which is exactly why this
+task came before the TUI rather than after it.
+
+Both keys are emitted deliberately: a conformance comparison needs the raw bytes, a human
+debugging colour needs the resolution, and dropping either makes one of those impossible.
+
 ## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
 
 `Screen` stores "unspecified" as `0`, so `cellAt` omits the property when the byte is zero.
@@ -323,6 +342,21 @@ already failed to test anything.
 **A tooling hazard from the same session, flagged because it silently destroys work:** using
 `git checkout --` to revert a mutation **discards uncommitted implementation fixes** made
 earlier in the same sweep. Restore from a pristine copy (`cp`) instead, and verify with `diff`.
+
+**A SECOND, worse one — concurrency. Do not run two agents that both touch the working tree.**
+Task 8's implementer ran `git stash` (to A/B a test flake) while the Task 5 agent had
+uncommitted edits in flight, and the stash swept up **both** agents' work. It recovered
+correctly — restored only its own two files with `git checkout stash@{0} -- <path>`, dropped
+the stash, and left Task 5's files untouched — and I verified afterwards that the stash list is
+empty, Task 5's WIP is intact, and the **committed** state at HEAD is green (56/56 in a clean
+detached worktree). But that was luck plus a careful agent, not a safe design.
+
+**Rules going forward:** only ever one agent with write access to the tree at a time. Reviews
+that mutate code must run alone. Read-only reviews can overlap with an implementer, but must be
+told to review a **commit** (`git show <sha>`) rather than the working tree. And **never
+`git stash`** in a shared tree — it is repo-global, so it cannot be scoped to your own files.
+A transient full-suite failure while another agent is mid-edit is expected and is not a
+regression; verify HEAD in a detached worktree before believing otherwise.
 
 ## Reminders for the rest of the run
 
