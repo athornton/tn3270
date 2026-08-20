@@ -12,8 +12,8 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
 | 4. SA running state in executor | **DONE**, both reviews closed | `a456b06`, `4ea5c50`, `78c0dd4` | 751 |
 | 5. `render.ts` resolution | **DONE**, spec review closed | `3a3531b`, `27e5310`, `52a19f7` | 802 |
-| 6. TK5 fixture proof | **DONE** — the run's goal, reached | (see below) | 808 |
-| 7. Query Reply Color + Highlighting | | | |
+| 6. TK5 fixture proof | **DONE**, reviewed — the run's goal, reached | `cdc200c`, `7045b10` | 808 |
+| 7. Query Reply Color + Highlighting | **DONE** | `c4708d1` | 816 |
 | 8. `ScreenJson` resolved colour | | | |
 | 9. `packages/tui` skeleton | | | |
 | 10. Depth detection + quantisation | | | |
@@ -253,6 +253,38 @@ against the unconverted file.
 zero-SFE-assertion test initially **passed against the unconverted fixture**, because every one
 of its assertions is "expect zero/absent" and an empty parse satisfies all of them for free —
 including `for (const f of [])`. Anchored to `parsed === 21` and `sa === 113` first.
+
+**Task 7 — a NEW failure mode: adding a capability silently hollowed out three tests.**
+Two wrong page numbers in my plan (Color is p. **6-36** not 6-38; Highlighting p. **6-65**
+not 6-53) and an expected length wrong twice over (it counted header bytes while indexing
+from the body, and 15 identity pairs plus a default is 32 payload bytes, not 30). But the
+interesting part is what advertising `0x86`/`0x87` did to the existing suite, because **none
+of it would have failed**:
+
+- Three tests used `0x86`/`0x87` as standing examples of *"QCODEs we do not support"*. One
+  appended a synthetic capability with `qcode: 0x86` — which would have put a **second**
+  `0x86` in a list that already contained one, **and still passed**. Now `0x83`.
+- One sliced Summary as `subarray(5, 5 + 4)`, a hardcoded body length that silently cut
+  `0x9F` off the end once the list grew. It also never asserted `0x9F` was absent from the
+  reply, which was its actual claim.
+- Four tests indexed units **positionally**, so inserting before Implicit Partition made
+  index 2 start reading the Color unit. All now look up by QCODE.
+
+**The lesson generalises past this project:** when a test uses a real protocol value as a
+stand-in for "unsupported", implementing that value converts the test into something else
+without breaking it. Prefer a value asserted-unsupported in exactly one place, so adding it
+later fails *there*, with a reason.
+
+Verified myself: five units now go out as `0x80(L=9) 0x81(L=23) 0x86(L=38) 0x87(L=15)
+0xa6(L=17)`, both Table 6-1 rows are OCR-clean and say `Yes ... Yes Yes`, and **the fixture
+still reports 113/101/12** — advertising colour did not change what TK5 sends, which is the
+invariant that matters.
+
+One deliberate divergence, well handled: our Color unit is **not** byte-identical to the
+x3270 capture, differing in exactly its fifteen colour-identifier bytes, because that capture
+was taken with x3270 in monochrome mode. Rather than skipping the unit in the comparison, the
+test exempts those bytes **by name and pins both sides**, so the other 23 stay pinned and the
+divergence cannot silently widen.
 
 ## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
 
