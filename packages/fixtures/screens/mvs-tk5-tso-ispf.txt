@@ -1,0 +1,28 @@
+# Golden screen. Regenerate with tools/make-golden.mjs; review the diff.
+# cursor: 1771  oia: X Disconnected
++--------------------------------------------------------------------------------+
+|Terminal   CUU0C0                                                 Date  18.08.26|
+|                                                                  Time  05:34:29|
+|                                                                                |
+|                              ______________     __      __     ___________     |
+|                             /||||||||||||||\   |||\    ///\   ||||||||||||\    |
+|                            | |||||||||||||| |  ||||   /// /   |||||||||||| |   |
+|                            |/____/||||\ ___\|  ||||  /// /    ||||\ ______\|   |
+|        |l      _,,,---,,_       | |||| |       |||| /// /     |||| |           |
+| ZZZzz /,'.-'`'    -.  ;-;;,     | |||| |       ||||/// /      |||||||||| \     |
+|      |,4-  ) )-,_. ,( (  ''-'   | |||| |       |||///_/       ||||||||||| \    |
+|     '---''(_/--'  `-')_)        | |||| |       |||\\\ \       \_______|||| |   |
+|                                 | |||| |       ||||\\\ \              |||| |   |
+|       The MVS 3.8j              | |||| |       |||| \\\ \     |||||||||||| |   |
+|     Tur(n)key system            | |||| |       ||||  \\\_\    ||||||||||| /    |
+|                                 |/____\|       \__\   \___\   \__________/     |
+|                                                                                |
+|      TK3  created by Volker Bandke      volker@bandke.org                      |
+|      TK4- update by Juergen Winkelmann  juergen.winkelmann@pebble-beach.ch     |
+|      TK5  update by Rob Prins           prin0096@gmail.com                     |
+|           see SYS2.JCLLIB(CREDITS) for complete credits                        |
+|                        MVS 3.8j Level 8505 - Update 5                          |
+|                                                                                |
+|Logon ===>                                                                      |
+|                                                            RUNNING  TK5        |
++--------------------------------------------------------------------------------+

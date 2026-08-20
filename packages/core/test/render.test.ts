@@ -7,6 +7,7 @@ import { encodeAddress } from '../src/address.js';
 import { cp037, CodePage } from '../src/codepage.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute } from '../src/stream/execute.js';
+import { replayFixture, countDeferredOrders } from './helpers/trace.js';
 
 /** Every architected colour identification — what `colourRgb` accepts. */
 const PALETTE_KEYS = new Set(Array.from({ length: 16 }, (_, i) => 0xf0 + i));
@@ -734,5 +735,162 @@ describe('resolve: text and hidden fields', () => {
     const r = resolve(s.snapshot());
     expect(r).toHaveLength(s.size);
     expect(r.every((c) => c.text === ' ' && c.fg === Colour.GREEN)).toBe(true);
+  });
+});
+
+describe('the live TK5 ISPF fixture', () => {
+  // THE ONLY EVIDENCE IN THIS SUITE THAT COMES FROM A REAL HOST. Everything else
+  // in this file is a hand-built screen or a hand-assembled record, which proves
+  // the rules are implemented as written but cannot prove a host actually sends
+  // what we think it sends. This block replays 895 lines of MVS 3.8j TK5 traffic
+  // captured 2026-08-18 and asserts colour survives the whole chain: telnet
+  // negotiation -> framer -> parseRecord -> execute -> Screen -> resolve.
+  //
+  // EVERY NUMBER BELOW WAS MEASURED against the converted fixture, not guessed.
+  // If yours differ, THE CONVERSION DIFFERS -- investigate that rather than
+  // adjusting the expectation. Regenerate the fixture with the sed command in its
+  // own header comment.
+  //   28 fields; 532 of 1920 cells with a character-level fg; resolved fg counts
+  //   white 793, blue 618, red 329, neutral-white 144, yellow 36 (= 1920).
+  const FIXTURE = 'mvs-tk5-tso-ispf.trace';
+
+  it('replays at all -- the negative control this task exists because of', () => {
+    // THE FIXTURE WAS UNREPLAYABLE AS ORIGINALLY COMMITTED. It is raw CLI stdout
+    // with a `data: ` prefix on every line, so zero lines matched parseTrace's
+    // regex and replay produced an empty screen -- 0 fields, 1920 uniformly green
+    // cells -- WITHOUT ERRORING. Assert the screen is FORMATTED first, so a
+    // regression in the conversion fails here and loudly rather than surfacing as
+    // a subtly wrong colour count below.
+    const s = replayFixture(FIXTURE);
+    expect(s.screen.isFormatted()).toBe(true);
+    // Exact, not `> 20`: 28 is a fact about this capture, and a loose bound would
+    // still pass if a change silently dropped a quarter of the fields.
+    expect(s.screen.fields()).toHaveLength(28);
+  });
+
+  it('carries real character-level colour, not just base-attribute colour', () => {
+    // THE ASSERTION THAT WOULD HAVE CAUGHT THE ORIGINAL GAP. Before this work every
+    // SA order was parsed and discarded, so this count was 0 for the whole life of
+    // the project. It counts cells whose OWN fg is set -- storage, before any
+    // resolution -- which is the narrowest place the SA path can be observed.
+    const s = replayFixture(FIXTURE);
+    let withFg = 0;
+    for (let i = 0; i < s.screen.size; i++) {
+      if (s.screen.cellAt(i).fg !== undefined) withFg++;
+    }
+    expect(withFg).toBe(532);
+
+    // AND NOTHING ELSE ARRIVED, which is as much a finding as the 532. TK5 sends
+    // only SA type X'42'; no background and no highlighting, so these must be 0.
+    // Pinning the zeros means a future capture that DOES carry them fails here and
+    // gets looked at, instead of quietly widening what this test appears to cover.
+    let withBg = 0;
+    let withGr = 0;
+    for (let i = 0; i < s.screen.size; i++) {
+      const c = s.screen.cellAt(i);
+      if (c.bg !== undefined) withBg++;
+      if (c.gr !== undefined) withGr++;
+    }
+    expect(withBg).toBe(0);
+    expect(withGr).toBe(0);
+  });
+
+  it('uses colours the base-attribute map alone could not produce', () => {
+    // THIS IS THE TEST THAT DISTINGUISHES "COLOUR RESOLVED" FROM "COLOUR RECEIVED".
+    // DEFAULT_COLOURS in render.ts has exactly four entries -- green, red, blue,
+    // white -- so those four can appear on a screen where every SA order was thrown
+    // away. Neutral-white and yellow CANNOT: nothing but a character-level
+    // attribute from an SA order can put them there. A test asserting merely "more
+    // than one colour" would pass on a screen with no SA support whatsoever.
+    const s = replayFixture(FIXTURE);
+    const fromDefaults = new Set<number>([Colour.GREEN, Colour.RED, Colour.BLUE, Colour.WHITE]);
+    const counts = new Map<number, number>();
+    for (const c of resolve(s.screen.snapshot())) counts.set(c.fg, (counts.get(c.fg) ?? 0) + 1);
+
+    expect(counts.get(Colour.NEUTRAL_WHITE)).toBe(144);
+    expect(counts.get(Colour.YELLOW)).toBe(36);
+
+    const beyond = [...counts.keys()].filter((c) => !fromDefaults.has(c));
+    expect(beyond.sort()).toEqual([Colour.YELLOW, Colour.NEUTRAL_WHITE]);
+
+    // The whole distribution, so a change in ANY of the four precedence levels
+    // moves a number here rather than hiding inside a `toBeGreaterThan`.
+    expect(Object.fromEntries([...counts].map(([k, n]) => [k.toString(16), n]))).toEqual({
+      ff: 793, // white  -- protected intensified fields, via the base map
+      f1: 618, // blue   -- protected normal fields, via the base map
+      f2: 329, // red    -- SA X'42' X'F2'
+      f7: 144, // neutral-white -- SA, unreachable from the base map
+      f6: 36,  // yellow        -- SA, unreachable from the base map
+    });
+    // Every cell accounted for: the counts partition the buffer.
+    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBe(s.screen.size);
+
+    // AND mode3279:false must flatten all of it back to green -- the same real
+    // screen driven through the monochrome gate, which no hand-built fixture can
+    // show is reachable from actual host traffic.
+    const mono = new Set(resolve(s.screen.snapshot(), { mode3279: false }).map((c) => c.fg));
+    expect([...mono]).toEqual([Colour.GREEN]);
+  });
+
+  it('pins the SA order counts, so a parser regression fails loudly', () => {
+    // Without this, a change that stopped recognising SA would show up only as a
+    // quietly monochrome screen -- exactly the failure mode this block exists to
+    // end. Counts come from the PARSER, never a hex grep: see
+    // packages/cli/scripts/count-orders.mjs and its header for why a grep over
+    // "28 42" is wrong in both directions at once.
+    const counts = countDeferredOrders(FIXTURE);
+    expect(counts.sa).toBe(113);
+    expect(counts.mf).toBe(0);
+    expect(counts.byType.get(0x42)).toBe(101); // foreground colour
+    expect(counts.byType.get(0x00)).toBe(12);  // reset character attributes
+    // No OTHER SA type appears, so 101 + 12 is the whole of the 113 and the two
+    // named types cannot drift apart from the total unnoticed.
+    expect([...counts.byType.keys()].sort()).toEqual([0x00, 0x42]);
+    // The reassembly itself, because a change there would move every count above
+    // in step and leave this test green while measuring a different byte stream.
+    expect(counts.records).toBe(25);
+    expect(counts.parsed).toBe(21);
+  });
+
+  it('confirms the fixture has NO SFE orders, so the field level is uncovered', () => {
+    // NOT A FORMALITY. This is the assertion that documents what the suite does NOT
+    // prove. All 113 SA orders are character-level, so no field-attribute cell in
+    // this capture carries extended attributes, and resolve()'s SECOND precedence
+    // level -- the field-level fallback -- gets no coverage from real host traffic
+    // at all. That is precisely why that class of defect went unnoticed for so long.
+    // Real coverage needs a capture from a host that sends SFE; none is committed.
+    //
+    // If a future fixture DOES contain SFE, this test failing is the signal to go
+    // and add genuine field-level coverage -- not to relax the assertion.
+    // [[check-what-a-comparison-covers]]
+    const counts = countDeferredOrders(FIXTURE);
+
+    // EVERY OTHER ASSERTION IN THIS TEST IS "EXPECT NOTHING", WHICH AN EMPTY PARSE
+    // SATISFIES FOR FREE. Replaying the UNCONVERTED fixture reassembles 0 records
+    // and derives 0 fields, so `sfe === 0` and the loop below both held while
+    // measuring nothing whatsoever -- this was the ONE test of the five that stayed
+    // GREEN against the broken fixture, which makes it the exact trap this project
+    // has been bitten by three times. So anchor the absence to a POSITIVE fact
+    // first: the parse really happened and really saw the orders.
+    expect(counts.parsed).toBe(21);
+    expect(counts.sa).toBe(113);
+
+    // Now the absence means something.
+    expect(counts.sfe).toBe(0);
+
+    // AND THE CONSEQUENCE, ASSERTED DIRECTLY rather than left as prose: not one
+    // field-attribute cell carries an extended attribute. This is what "the field
+    // level is uncovered" MEANS, and unlike the SFE count it is measured at the
+    // storage layer, so it would still hold if SFE were parsed but not stored.
+    const s = replayFixture(FIXTURE);
+    const fields = s.screen.fields();
+    // Guard the loop for the same reason: `for (const f of [])` asserts nothing.
+    expect(fields).toHaveLength(28);
+    for (const f of fields) {
+      const cell = s.screen.cellAt(f.attrAddr);
+      expect(cell.fg, `field at ${f.attrAddr}`).toBeUndefined();
+      expect(cell.bg, `field at ${f.attrAddr}`).toBeUndefined();
+      expect(cell.gr, `field at ${f.attrAddr}`).toBeUndefined();
+    }
   });
 });

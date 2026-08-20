@@ -25,10 +25,18 @@ const txt = readFileSync(file, 'utf8');
 
 // Inbound (host->client) records start with '<'; '+' continues the previous one; '>' is
 // outbound and ends any record being accumulated.
+//
+// The `data: ` prefix is OPTIONAL so this script reads both the raw capture in
+// fixtures/mvs/ (CLI stdout, every line prefixed) and the canonical replayable form in
+// fixtures/traces/ (prefix stripped). Without that, running this on the canonical file
+// matched zero lines and reported SA=0 -- which looks exactly like "the parser stopped
+// recognising SA" and made the cross-check against
+// core/test/helpers/trace.ts:countDeferredOrders impossible to perform at all. That
+// helper is a port of this logic and the two MUST agree; keep them in step.
 let cur = null;
 const recs = [];
 for (const line of txt.split('\n')) {
-  const m = line.match(/^data: [0-9.]+ ([<>+]) ((?:[0-9a-f]{2} ?)+)/);
+  const m = line.match(/^(?:data: )?[0-9.]+ ([<>+]) ((?:[0-9a-f]{2} ?)+)/);
   if (!m) continue;
   const [, dir, hex] = m;
   const bytes = hex.trim().split(/\s+/).map((h) => parseInt(h, 16));

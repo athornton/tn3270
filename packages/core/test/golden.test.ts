@@ -1,13 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { Session } from '../src/session.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const fixtures = join(here, '..', '..', 'fixtures');
-const tracesDir = join(fixtures, 'traces');
-const screensDir = join(fixtures, 'screens');
+import { join, basename } from 'node:path';
+import type { Session } from '../src/session.js';
+// `replayFixture` used to live here. It moved to helpers/ so render.test.ts could
+// share it rather than reimplement trace parsing; see that file's header.
+import { replayFixture, tracesDir, screensDir } from './helpers/trace.js';
 
 /** Render a screen the same way tools/make-golden.mjs does. */
 function render(session: Session): string {
@@ -19,14 +16,6 @@ function render(session: Session): string {
   for (const l of session.screen.toText().split('\n')) out.push('|' + l + '|');
   out.push('+' + '-'.repeat(cols) + '+');
   return out.join('\n') + '\n';
-}
-
-function replayFixture(name: string): Session {
-  const session = new Session({
-    connect: () => { throw new Error('replay must not open a socket'); },
-  });
-  session.replay(readFileSync(join(tracesDir, name), 'utf8'));
-  return session;
 }
 
 describe('golden screens', () => {

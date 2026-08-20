@@ -1,0 +1,963 @@
+# MVS 3.8j TK5 (Update 5) -- TSO logon through ISPF and back out. CANONICAL FORM.
+#
+# DERIVED, NOT RECORDED. This is `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`
+# converted to the trace format `parseTrace` accepts. Regenerate with:
+#
+#   sed -n -e '/^#/p' -e 's/^data: \([0-9.]\+ [<>=+]\)/\1/p' \
+#       packages/fixtures/mvs/mvs-tk5-tso-ispf.trace \
+#     > packages/fixtures/traces/mvs-tk5-tso-ispf.trace
+#
+# (then restore this header, which replaces the original's -- see REDACTION below).
+#
+# WHY THE CONVERSION EXISTS. The raw file is CLI stdout: every line carries a
+# `data: ` prefix, and interleaved with the protocol are ScreenText dumps and OIA
+# status lines. `parseTrace` (core/src/trace.ts) matches `/^([0-9.]+)\s+([<>=+])\s*(.*)$/`
+# after a trim, so NOT ONE line of the raw file matches it. Replaying the raw file
+# does not error -- it silently yields an empty unformatted screen: 0 fields, 0
+# attributes, 1920 uniformly green cells. Stripping the six-character prefix is the
+# whole of the fix; the 895 protocol lines and their bytes are otherwise untouched.
+#
+# BOTH FILES ARE KEPT ON PURPOSE and are not redundant. The raw one is the full
+# capture record: it holds the rendered ScreenText panels and the OIA lines, which
+# document what the host actually displayed and which this file necessarily drops.
+# This one is the replayable protocol subset. If you re-record, re-derive this.
+#
+# What this proves, and what it does not:
+#   * ISPF primary option menu reached (USERID: HERC02, TERMINAL: 3277), then a
+#     clean logoff back to the VTAM Logon panel. 0 errors, 0 program checks.
+#   * TERMINAL: 3277 and the status lines' "24 80" confirm the session stayed
+#     24x80 throughout. TSO did NOT need a larger screen, and never asked for
+#     one -- the 27x132 in the earlier zti capture was zti advertising its own
+#     window size, not a TSO requirement.
+#   * The three-unit Query Reply (Summary, Usable Area, Implicit Partition) was
+#     ACCEPTED by this host.
+#   * SET ATTRIBUTE IS REAL HERE, AND THIS IS THE ONLY COMMITTED EVIDENCE OF IT.
+#     113 SA orders across the session -- 101 of type X'42' (foreground colour)
+#     and 12 of type X'00' (reset character attributes) -- and 0 MF orders. Those
+#     counts come from the parser, never a hex grep; see
+#     packages/cli/scripts/count-orders.mjs and its header for why a grep is wrong
+#     in both directions. Replayed, this yields 532 of 1920 cells carrying a
+#     character-level foreground, resolving to five distinct colours. Every one of
+#     those 113 orders was PARSED AND DISCARDED for the whole life of the project
+#     until the TUI/colour work; render.test.ts now pins it.
+#   * WHAT IT CANNOT PROVE: THERE ARE ZERO SFE ORDERS IN THIS CAPTURE. All 113 SA
+#     orders are character-level, so no field-attribute cell here carries extended
+#     attributes and the FIELD-LEVEL fallback -- resolve()'s second precedence
+#     level -- gets no coverage from real host traffic at all. That is precisely
+#     why that class of defect went unnoticed. Real coverage needs a capture from
+#     a host that sends SFE; none is committed. render.test.ts asserts the zero, so
+#     that test failing is the signal to go and add field-level coverage.
+#
+# REDACTION. The password appears TWICE in a raw capture of this session and both
+# are already removed upstream -- once as EBCDIC on the wire (overwritten with six
+# X'00' bytes, hence the run of nulls in the outbound LOGON record) and once as
+# PLAINTEXT, because MVS 3.8j echoes the password to the screen with no masking, in
+# a ScreenText dump that this file drops entirely. Verified on this file: zero
+# occurrences of the password's EBCDIC bytes in the reassembled wire stream, in
+# either casing, and zero ScreenText lines.
+#
+# THE HEADER ITSELF NO LONGER SPELLS THE PASSWORD, which is the one way this file
+# differs from the raw one beyond the prefix. The original header quoted both the
+# plaintext password and its EBCDIC byte string inside its own redaction note, so a
+# grep for either hit the documentation and could never come back clean -- and a
+# check that always fires is not a check. The credential is a published TK5
+# default (doc/MVS_TK4-_v100_Users_Manual.pdf) and is named in docs/live-testing.md
+# for whoever needs to re-record; it does not need to be in a fixture too.
+#
+# Log off properly or the next run draws IKJ56425I LOGON REJECTED ... IN USE, which
+# is NOT the IKT00405I failure and has been misscored as one before.
+0.000 < ff fd 18
+0.001 > ff fb 18
+0.001 < ff fa 18 01 ff f0
+0.001 > ff fa 18 00 49 42 4d 2d 33 32 37 38 2d 32 2d 45
+0.001 + ff f0  # TERMINAL-TYPE IS IBM-3278-2-E
+0.001 < ff fb 00 ff fd 00 ff fb 19 ff fd 19
+0.001 > ff fd 00
+0.001 > ff fb 00
+0.001 > ff fd 19
+0.001 > ff fb 19
+0.002 < f5 42 11 40 40 1d 60 c8 85 99 83 a4 93 85 a2 40
+0.002 + e5 85 99 a2 89 96 95 40 40 7a 11 40 d4 1d e8 f4
+0.002 + 4b f6 4b f0 4b f1 f0 f9 f5 f4 60 c1 85 a3 88 99
+0.002 + 81 60 87 f8 f4 f2 f4 83 f6 81 f0 11 c1 50 1d 60
+0.002 + c8 96 a2 a3 40 95 81 94 85 40 40 40 40 40 40 40
+0.002 + 40 40 7a 11 c1 e4 1d e8 81 a3 88 96 99 60 95 82
+0.002 + 11 c2 60 1d 60 c8 96 a2 a3 40 d6 e2 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 7a 11 c2 f4 1d e8 d3 89 95
+0.002 + a4 a7 60 f5 4b f1 f4 4b f0 60 f5 f7 f0 4b f6 f0
+0.002 + 4b f1 4e f9 4b f1 4b 85 93 f9 6d f6 6d 83 89 98
+0.002 + 4b a7 f8 f6 6d f6 f4 40 7b f1 40 e2 d4 d7 40 d7
+0.002 + d9 c5 c5 d4 d7 e3 6d c4 e8 d5 c1 d4 c9 c3 40 c6
+0.002 + 99 89 40 d4 81 a8 40 f8 40 f1 f9 7a f3 f0 7a f0
+0.002 + f5 40 e4 e3 c3 40 f2 f0 f2 f6 11 c3 f0 1d 60 c8
+0.002 + 96 a2 a3 40 c1 99 83 88 89 a3 85 83 a3 a4 99 85
+0.002 + 40 7a 11 c4 c4 1d e8 a7 f8 f6 6d f6 f4 11 c5 40
+0.002 + 1d 60 d7 99 96 83 85 a2 a2 96 99 a2 40 40 40 40
+0.002 + 40 40 40 40 7a 11 c5 d4 1d e8 d4 d7 7e f1 f2 f8
+0.002 + 11 c6 50 1d 60 d3 d7 c1 d9 40 d5 81 94 85 40 40
+0.002 + 40 40 40 40 40 40 40 7a 11 c6 e4 1d e8 c8 c5 d9
+0.002 + c3 e4 d3 c5 e2 11 c7 60 1d 60 c4 85 a5 89 83 85
+0.002 + 40 95 a4 94 82 85 99 40 40 40 40 40 7a 11 c7 f4
+0.002 + 1d e8 f0 7a f0 f0 c3 f0 11 c8 f0 1d 60 e2 a4 82
+0.002 + 83 88 81 95 95 85 93 40 40 40 40 40 40 40 40 7a
+0.002 + 11 c9 c4 1d e8 f0 f0 f1 f9 11 c8 f0 1d 60 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 e3 e3 e3 e3 e3 e3 e3
+0.002 + e3 e3 e3 e3 e3 40 40 40 d2 d2 d2 d2 40 40 d2 d2
+0.002 + d2 d2 d2 40 40 40 40 40 f5 f5 f5 f5 f5 f5 f5 f5
+0.002 + f5 f5 f5 f5 11 4a 40 1d 60 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 e3 e3 40 40 40 e3 e3 40 40 40 e3 e3
+0.002 + 40 40 40 40 d2 d2 40 40 40 40 d2 d2 40 40 40 40
+0.002 + 40 40 40 f5 f5 11 4b 50 1d 60 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 e3 e3 40 40 40 e3 e3 40 40 40 e3
+0.002 + e3 40 40 40 40 d2 d2 40 40 40 d2 d2 40 40 40 40
+0.002 + 40 40 40 40 f5 f5 40 40 40 40 40 40 40 e4 97 84
+0.002 + 81 a3 85 40 f5 11 4c 60 1d 60 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 e3 e3 40 40 40 40
+0.002 + 40 40 40 40 40 d2 d2 40 40 d2 d2 40 40 40 40 40
+0.002 + 40 40 40 40 f5 f5 11 4d f0 1d 60 40 40 40 40 40
+0.002 + 40 40 40 f4 93 40 40 40 40 40 40 6d 6b 6b 6b 60
+0.002 + 60 60 6b 6b 6d 40 40 40 40 40 40 e3 e3 40 40 40
+0.002 + 40 40 40 40 40 40 d2 d2 40 d2 d2 40 40 40 40 40
+0.002 + 40 40 40 40 40 f5 f5 40 40 40 40 40 11 4f 40 1d
+0.002 + 60 40 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d
+0.002 + 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 40 40 40
+0.002 + 40 e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 d2 d2
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 f5 f5 f5 f5 f5
+0.002 + f5 f5 f5 f5 f5 f5 40 40 40 40 11 50 50 1d 60 40
+0.002 + 40 40 40 40 40 f4 6b f4 60 40 40 5d 40 5d 60 6b
+0.002 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 40 40 e3
+0.002 + e3 40 40 40 40 40 40 40 40 40 d2 d2 d2 d2 d2 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 f5 f5 40 40 40 40 40 40 11 d1 60 1d 60
+0.002 + 40 40 40 40 40 7d 60 60 60 7d 7d 4d 6d 61 60 60
+0.002 + 7d 40 40 79 60 7d 5d 6d 5d 40 40 40 40 40 40 40
+0.002 + e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 40 40 d2
+0.002 + d2 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 f5 f5 11 d2 f0 1d 60 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 e3 e3 40 40 40
+0.002 + 40 40 40 40 40 40 d2 d2 40 40 40 d2 d2 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 f5
+0.002 + f5 11 d4 40 1d 60 40 40 40 40 40 40 40 e3 88 85
+0.002 + 40 d4 e5 e2 40 f3 4b f8 91 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 e3 e3 40 40 40 40 40 40 40 40
+0.002 + 40 d2 d2 40 40 40 40 d2 d2 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 f5 f5 11 d5 50 1d
+0.002 + 60 40 40 40 40 40 e3 a4 99 4d 95 5d 92 85 a8 40
+0.002 + e2 a8 a2 a3 85 94 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 e3 e3 40 40 40 40 40 40 40 40 40 d2 d2 40 40
+0.002 + 40 40 40 d2 d2 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 f5 f5 11 d6 60 1d 60 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 40 40 40 40 40 40 40 e3 e3 e3 e3 e3 e3
+0.002 + 40 40 40 40 40 40 d2 d2 d2 d2 40 40 40 40 40 d2
+0.002 + d2 d2 40 40 40 40 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+0.002 + f5 11 d7 f0 1d 60 11 d9 40 1d 60 40 40 40 40 e3
+0.002 + d2 f3 40 83 99 85 81 a3 85 84 40 82 a8 40 40 40
+0.002 + e5 96 93 92 85 99 40 c2 81 95 84 92 85 40 40 40
+0.002 + 40 40 40 40 a5 96 93 92 85 99 7c 82 81 95 84 92
+0.002 + 85 4b 96 99 87 11 5a 50 1d 60 40 40 40 40 e3 d2
+0.002 + f4 60 40 a4 97 84 81 a3 85 40 82 a8 40 40 40 d1
+0.002 + a4 85 99 87 85 95 40 e6 89 95 92 85 93 94 81 95
+0.002 + 95 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92 85
+0.002 + 93 94 81 95 95 7c 97 85 82 82 93 85 60 82 85 81
+0.002 + 83 88 4b 83 88 11 5b 60 1d 60 40 40 40 40 e3 d2
+0.002 + f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 40 40 d9
+0.002 + 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40
+0.002 + 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89
+0.002 + 93 4b 83 96 94 11 5c f0 1d 60 40 40 40 40 40 40
+0.002 + 40 40 40 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3
+0.002 + c9 c2 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40
+0.002 + 83 96 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2
+0.002 + ff ef
+0.004 = # EraseWrite WCC=0x42 SBA(0) SF(0x60) data[19] SBA(20) SF(0xe8) data[28] SBA(80) SF(0x60) data[19] SBA(100) SF(0xe8) data[8] SBA(160) SF(0x60) data[19] SBA(180) SF(0xe8) data[93] SBA(240) SF(0x60) data[19] SBA(260) SF(0xe8) data[6] SBA(320) SF(0x60) data[19] SBA(340) SF(0xe8) data[6] SBA(400) SF(0x60) data[19] SBA(420) SF(0xe8) data[8] SBA(480) SF(0x60) data[19] SBA(500) SF(0xe8) data[6] SBA(560) SF(0x60) data[19] SBA(580) SF(0xe8) data[4] SBA(560) SF(0x60) data[70] SBA(640) SF(0x60) data[60] SBA(720) SF(0x60) data[75] SBA(800) SF(0x60) data[60] SBA(880) SF(0x60) data[65] SBA(960) SF(0x60) data[73] SBA(1040) SF(0x60) data[76] SBA(1120) SF(0x60) data[70] SBA(1200) SF(0x60) data[70] SBA(1280) SF(0x60) data[70] SBA(1360) SF(0x60) data[70] SBA(1440) SF(0x60) data[69] SBA(1520) SF(0x60) SBA(1600) SF(0x60) data[58] SBA(1680) SF(0x60) data[75] SBA(1760) SF(0x60) data[59] SBA(1840) SF(0x60) data[54]
+2.020 > 6d ff ef
+2.021 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+2.021 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+2.021 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+2.021 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+2.021 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+2.021 + 1d f8 f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f
+2.021 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+2.021 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+2.021 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+2.021 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+2.021 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+2.021 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+2.021 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+2.021 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+2.021 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+2.021 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+2.021 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+2.021 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+2.021 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+2.021 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+2.021 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+2.021 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+2.021 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+2.021 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+2.021 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+2.021 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+2.021 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+2.021 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+2.021 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+2.021 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+2.021 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+2.021 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+2.021 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+2.021 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+2.021 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+2.021 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+2.021 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+2.021 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+2.021 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+2.021 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+2.021 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+2.021 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+2.021 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.021 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.021 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+2.021 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+2.021 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+2.021 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+2.021 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+2.021 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+2.021 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+2.021 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+2.021 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+2.021 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+2.021 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+2.021 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+2.021 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+2.021 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+2.021 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+2.021 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+2.021 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+2.021 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+2.021 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+2.021 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+2.021 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+2.021 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+2.021 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+2.021 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+2.021 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+2.021 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+2.021 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+2.021 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+2.021 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.021 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+2.021 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef
+2.022 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+2.023 = # ignored orders: SA=7 MF=0
+2.023 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+2.023 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+2.023 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+2.023 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+2.023 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+2.023 + 1d f8 f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f
+2.023 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+2.023 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+2.023 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+2.023 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+2.023 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+2.023 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+2.023 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+2.023 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+2.023 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+2.023 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+2.023 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+2.023 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+2.023 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+2.023 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+2.023 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+2.023 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+2.023 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+2.023 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+2.023 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+2.023 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+2.023 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+2.023 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+2.023 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+2.023 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+2.023 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+2.023 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+2.023 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+2.023 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+2.023 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+2.023 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+2.023 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+2.023 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+2.023 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+2.023 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+2.023 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+2.023 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+2.023 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+2.023 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+2.023 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+2.023 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+2.023 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+2.023 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+2.023 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+2.023 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+2.023 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+2.023 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+2.023 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+2.023 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+2.023 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+2.023 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+2.023 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+2.023 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+2.023 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+2.023 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+2.023 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+2.023 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+2.023 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+2.023 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+2.023 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+2.023 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+2.023 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+2.023 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+2.023 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3
+2.023 + 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8 1d f8
+2.023 + 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3
+2.023 + 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8
+2.023 + 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50
+2.023 + 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7 1d f8
+2.023 + f0 f5 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f 93 11
+2.023 + c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a
+2.023 + 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79
+2.023 + 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b
+2.023 + d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b
+2.023 + 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8
+2.023 + 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40 79 60
+2.023 + 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40 d4 e5
+2.023 + e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95 5d 92
+2.023 + 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42 f2 40
+2.023 + 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40
+2.023 + 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61
+2.023 + 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f
+2.023 + 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40
+2.023 + 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40
+2.023 + 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40 4f 4f
+2.023 + 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40 40 4f
+2.023 + 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e 4e 40
+2.023 + 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11
+2.023 + 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40
+2.023 + 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+2.023 + 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d
+2.023 + 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7 40 6d
+2.023 + 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f
+2.023 + e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f
+2.023 + 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f 4f 40
+2.023 + 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f 40 61
+2.023 + 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61 61 61
+2.023 + 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61 6d 61
+2.023 + 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40
+2.023 + 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40
+2.023 + 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40
+2.023 + 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40
+2.023 + 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11
+2.023 + c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+2.023 + 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d
+2.023 + 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0
+2.023 + 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f
+2.023 + 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f
+2.023 + 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11
+2.023 + d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11
+2.023 + d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00
+2.023 + 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85 81 a3
+2.023 + 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2 81 95
+2.023 + 84 92 85 40 40 40 40 40 40 a5 96 93 92 85 99 7c
+2.023 + 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5 d5 1d
+2.023 + f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82 a8 40
+2.023 + d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93 94 81
+2.023 + 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92
+2.023 + 85 93 94 81 95 95 7c 97 85 82 82 93 85 60 82 85
+2.023 + 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0
+2.023 + e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 d9
+2.023 + 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89
+2.023 + 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2
+2.023 + 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3
+2.023 + d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96 94 97
+2.023 + 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8 e8 1d
+2.023 + f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3
+2.023 + 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4
+2.023 + 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d f8 d3
+2.023 + 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+2.023 + 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5
+2.023 + 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3 11 40
+2.023 + 40 e3 85 99 94 89 95 81 93 11 40 c8 1d f8 11 40
+2.023 + 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3 1d f8
+2.023 + 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8 11 c1
+2.023 + c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50 1d f8
+2.023 + 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7 1d f8 f0 f5
+2.023 + 7a f3 f4 7a f2 f2 11 c8 f7 1d f8 4f 93 11 c8 7f
+2.023 + 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a 40 1d
+2.023 + f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d 40
+2.023 + 40 40 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b d5 1d
+2.023 + f8 4f 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b
+2.023 + 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8 7d 60
+2.023 + 60 60 7d 7d 4d 6d 61 60 60 7d 40 40 79 60 7d 5d
+2.023 + 6d 5d 11 4f c7 28 42 f6 e3 88 85 40 d4 e5 e2 40
+2.023 + f3 4b f8 91 11 50 d5 e3 a4 99 4d 95 5d 92 85 a8
+2.023 + 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42 f2 40 40 6d
+2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 40 11
+2.023 + c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61 6d 6d
+2.023 + 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f 11 c9
+2.023 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+2.023 + 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+2.023 + 40 40 40 40 11 4b 6e 40 40 40 4f 40 4f 4f 4f 4f
+2.023 + 40 4f 40 40 40 40 40 11 4c 7e 40 40 40 4f 40 4f
+2.023 + 4f 4f 4f 40 4f 40 40 40 40 40 11 4e 4e 40 40 40
+2.023 + 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4f 5e
+2.023 + 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40
+2.023 + 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40
+2.023 + 40 40 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d 6d e0
+2.023 + 4f 40 40 40 40 40 11 c4 60 28 42 f7 40 6d 6d 40
+2.023 + 40 40 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f e0 40
+2.023 + 40 40 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f 40 40
+2.023 + 40 61 61 61 40 61 11 c8 50 4f 4f 4f 4f 40 40 61
+2.023 + 61 61 40 61 40 11 c9 60 4f 4f 4f 4f 40 61 61 61
+2.023 + 40 61 40 40 11 4a f0 4f 4f 4f 4f 61 61 61 40 61
+2.023 + 40 40 40 11 4c 40 4f 4f 4f 61 61 61 6d 61 40 40
+2.023 + 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40 40 40
+2.023 + 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40 40 40
+2.023 + 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40 40 11
+2.023 + d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40 11 d2
+2.023 + 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11 c4 6f
+2.023 + 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40
+2.023 + 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f e0
+2.023 + 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+2.023 + 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d 6d 6d
+2.023 + e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0 6d 6d
+2.023 + 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f 40 40
+2.023 + 40 40 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f 7f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 d1 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11 d2 5f
+2.023 + e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00 00 11
+2.023 + d4 c5 1d f0 e3 d2 f3 40 40 83 99 85 81 a3 85 84
+2.023 + 40 82 a8 40 e5 96 93 92 85 99 40 c2 81 95 84 92
+2.023 + 85 40 40 40 40 40 40 a5 96 93 92 85 99 7c 82 81
+2.023 + 95 84 92 85 4b 96 99 87 1d f0 11 d5 d5 1d f0 e3
+2.023 + d2 f4 60 40 a4 97 84 81 a3 85 40 82 a8 40 d1 a4
+2.023 + 85 99 87 85 95 40 e6 89 95 92 85 93 94 81 95 95
+2.023 + 40 40 91 a4 85 99 87 85 95 4b a6 89 95 92 85 93
+2.023 + 94 81 95 95 7c 97 85 82 82 93 85 60 82 85 81 83
+2.023 + 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0 e3 d2
+2.023 + f5 40 40 a4 97 84 81 a3 85 40 82 a8 40 d9 96 82
+2.023 + 40 d7 99 89 95 a2 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 97 99 89 95 f0 f0 f9 f6 7c 87 94 81 89 93 4b
+2.023 + 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2 85 85
+2.023 + 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3 d9 c5
+2.023 + c4 c9 e3 e2 5d 40 86 96 99 40 83 96 94 97 93 85
+2.023 + a3 85 40 83 99 85 84 89 a3 a2 11 d8 e8 1d f0 11
+2.023 + d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3 85 a5
+2.023 + 85 93 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4 97 84
+2.023 + 81 a3 85 40 f5 28 00 00 11 5b 5f 1d f8 d3 96 87
+2.023 + 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 11 5d 6b
+2.023 + 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5 11 5d
+2.023 + 7b 1d f8 11 5d 7f 1d f8 ff ef f5 c3 11 40 40 e3
+2.023 + 85 99 94 89 95 81 93 11 40 c8 1d f8 11 40 4a 1d
+2.023 + f8 c3 e4 e4 f0 c3 f0 40 40 11 40 d3 1d f8 11 c1
+2.023 + c1 1d f8 c4 81 a3 85 11 c1 c6 1d f8 11 c1 c7 1d
+2.023 + f8 f1 f8 4b f0 f8 4b f2 f6 11 c1 50 1d f8 11 c2
+2.023 + d1 1d f8 e3 89 94 85 11 c2 d7 1d f8 f0 f5 7a f3
+2.023 + f4 7a f2 f4 11 c8 f7 1d f8 4f 93 11 c8 7f 1d f8
+2.023 + 6d 6b 6b 6b 60 60 60 6b 6b 6d 11 4a 40 1d f8 e9
+2.023 + e9 e9 a9 a9 40 61 6b 7d 4b 60 7d 79 7d 40 40 40
+2.023 + 40 60 4b 40 40 5e 60 5e 5e 6b 11 4b d5 1d f8 4f
+2.023 + 6b f4 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b 4d 40
+2.023 + 4d 40 40 7d 7d 60 7d 11 4c e4 1d f8 7d 60 60 60
+2.023 + 7d 7d 4d 6d 61 60 60 7d 40 40 79 60 7d 5d 6d 5d
+2.023 + 11 4f c7 28 42 f6 e3 88 85 40 d4 e5 e2 40 f3 4b
+2.023 + f8 91 11 50 d5 e3 a4 99 4d 95 5d 92 85 a8 40 a2
+2.023 + a8 a2 a3 85 94 11 c4 4c 28 42 f2 40 40 6d 6d 6d
+2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 40 11 c5 5c
+2.023 + 40 61 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + e0 40 11 c6 6c 4f 40 4f 4f 4f 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 40 4f 11 c7 7c 4f 61 6d 6d 6d 6d
+2.023 + 61 4f 4f 4f 4f e0 40 6d 6d 6d e0 4f 11 c9 4e 40
+2.023 + 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11
+2.023 + 4a 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40
+2.023 + 40 40 11 4b 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+2.023 + 40 40 40 40 40 11 4c 7e 40 40 40 4f 40 4f 4f 4f
+2.023 + 4f 40 4f 40 40 40 40 40 11 4e 4e 40 40 40 4f 40
+2.023 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4f 5e 40 40
+2.023 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 50
+2.023 + 6e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+2.023 + 40 11 d1 7e 40 40 40 4f 61 6d 6d 6d 6d e0 4f 40
+2.023 + 40 40 40 40 11 c4 60 28 42 f7 40 6d 6d 40 40 40
+2.023 + 40 40 40 6d 6d 40 11 c5 f0 4f 4f 4f e0 40 40 40
+2.023 + 40 61 61 61 e0 11 c7 40 4f 4f 4f 4f 40 40 40 61
+2.023 + 61 61 40 61 11 c8 50 4f 4f 4f 4f 40 40 61 61 61
+2.023 + 40 61 40 11 c9 60 4f 4f 4f 4f 40 61 61 61 40 61
+2.023 + 40 40 11 4a f0 4f 4f 4f 4f 61 61 61 40 61 40 40
+2.023 + 40 11 4c 40 4f 4f 4f 61 61 61 6d 61 40 40 40 40
+2.023 + 11 4d 50 4f 4f 4f e0 e0 e0 40 e0 40 40 40 40 11
+2.023 + 4e 60 4f 4f 4f 4f e0 e0 e0 40 e0 40 40 40 11 4f
+2.023 + f0 4f 4f 4f 4f 40 e0 e0 e0 40 e0 40 40 11 d1 40
+2.023 + 4f 4f 4f 4f 40 40 e0 e0 e0 6d e0 40 11 d2 50 e0
+2.023 + 6d 6d e0 40 40 40 e0 6d 6d 6d e0 11 c4 6f 28 42
+2.023 + f1 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 40 11 c5
+2.023 + 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f e0 11 c7
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11
+2.023 + c8 5f 4f 4f 4f 4f e0 40 6d 6d 6d 6d 6d 6d e0 4f
+2.023 + 11 c9 6f 4f 4f 4f 4f 40 4f 11 4a 7f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 40 e0 11 4c 4f 4f 4f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 40 e0 11 4d 5f e0 6d 6d 6d 6d
+2.023 + 6d 6d 6d 4f 4f 4f 4f 40 4f 11 4e 6f 40 40 40 40
+2.023 + 40 40 40 40 4f 4f 4f 4f 40 4f 11 4f 7f 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 d1 4f 4f 4f
+2.023 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 61 11 d2 5f e0 6d
+2.023 + 6d 6d 6d 6d 6d 6d 6d 6d 6d 61 28 00 00 11 d4 c5
+2.023 + 1d f0 e3 d2 f3 40 40 83 99 85 81 a3 85 84 40 82
+2.023 + a8 40 e5 96 93 92 85 99 40 c2 81 95 84 92 85 40
+2.023 + 40 40 40 40 40 a5 96 93 92 85 99 7c 82 81 95 84
+2.023 + 92 85 4b 96 99 87 1d f0 11 d5 d5 1d f0 e3 d2 f4
+2.023 + 60 40 a4 97 84 81 a3 85 40 82 a8 40 d1 a4 85 99
+2.023 + 87 85 95 40 e6 89 95 92 85 93 94 81 95 95 40 40
+2.023 + 91 a4 85 99 87 85 95 4b a6 89 95 92 85 93 94 81
+2.023 + 95 95 7c 97 85 82 82 93 85 60 82 85 81 83 88 4b
+2.023 + 83 88 11 d6 5b 1d f0 11 d6 e5 1d f0 e3 d2 f5 40
+2.023 + 40 a4 97 84 81 a3 85 40 82 a8 40 d9 96 82 40 d7
+2.023 + 99 89 95 a2 40 40 40 40 40 40 40 40 40 40 40 97
+2.023 + 99 89 95 f0 f0 f9 f6 7c 87 94 81 89 93 4b 83 96
+2.023 + 94 11 d7 5b 1d f0 11 d7 7a 1d f0 a2 85 85 40 e2
+2.023 + e8 e2 f2 4b d1 c3 d3 d3 c9 c2 4d c3 d9 c5 c4 c9
+2.023 + e3 e2 5d 40 86 96 99 40 83 96 94 97 93 85 a3 85
+2.023 + 40 83 99 85 84 89 a3 a2 11 d8 e8 1d f0 11 d9 d7
+2.023 + 1d f0 d4 e5 e2 40 f3 4b f8 91 40 d3 85 a5 85 93
+2.023 + 40 f8 f5 f0 f5 40 60 40 28 42 f6 e4 97 84 81 a3
+2.023 + 85 40 f5 28 00 00 11 5b 5f 1d f8 d3 96 87 96 95
+2.023 + 40 7e 7e 7e 6e 11 5b 6a 1d c8 13 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.023 + 40 40 40 40 40 40 40 40 40 40 40 11 5d 6b 1d f8
+2.023 + d9 e4 d5 d5 c9 d5 c7 40 40 e3 d2 f5 11 5d 7b 1d
+2.023 + f8 11 5d 7f 1d f8 ff ef
+2.024 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+2.025 = # ignored orders: SA=7 MF=0
+2.025 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+2.026 = # ignored orders: SA=7 MF=0
+2.026 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+2.026 = # ignored orders: SA=7 MF=0
+2.026 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+2.027 = # ignored orders: SA=7 MF=0
+2.435 > 7d 5b f1 11 5b 6b c8 c5 d9 c3 f0 f2 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+2.435 + 40 40 40 40 40 40 ff ef
+2.449 < f5 c3 11 5d 7f 1d 40 11 40 40 13 ff ef
+2.449 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) IC
+2.450 < f3 00 05 01 ff ff 02 ff ef
+2.450 = # WriteStructuredField ReadPartition(pid=0xff,type=0x02)
+2.451 > 88 00 07 81 80 80 81 a6 00 17 81 81 01 00 00 50
+2.451 + 00 18 01 00 0a 02 e5 00 02 00 6f 09 0c 07 80 00
+2.451 + 11 81 a6 00 00 0b 01 00 00 50 00 18 00 50 00 18
+2.451 + ff ef
+2.458 < f5 c3 11 5d 7f 1d 40 11 40 40 1d c8 c5 d5 e3 c5
+2.458 + d9 40 c3 e4 d9 d9 c5 d5 e3 40 d7 c1 e2 e2 e6 d6
+2.458 + d9 c4 40 c6 d6 d9 40 c8 c5 d9 c3 f0 f2 60 1d 40
+2.458 + 11 c1 50 1d 4c 13 ff ef
+2.458 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[34] SF(0x40) SBA(80) SF(0x4c) IC
+2.869 > 7d c1 d7 11 c1 d1 00 00 00 00 00 00 ff ef
+2.871 < f1 c1 11 c2 60 1d c8 11 c2 60 13 ff ef
+2.871 = # Write WCC=0xc1 SBA(160) SF(0xc8) SBA(160) IC
+2.871 < f1 c1 11 c2 60 1d c8 c8 c5 d9 c3 f0 f2 40 d3 d6
+2.871 + c7 d6 d5 40 c9 d5 40 d7 d9 d6 c7 d9 c5 e2 e2 40
+2.871 + c1 e3 40 f0 f5 7a f3 f4 7a f2 f5 40 d6 d5 40 c1
+2.871 + e4 c7 e4 e2 e3 40 f1 f8 6b 40 f2 f0 f2 f6 1d 40
+2.871 + 11 c3 f0 13 ff ef
+2.872 = # Write WCC=0xc1 SBA(160) SF(0xc8) data[55] SF(0x40) SBA(240) IC
+2.891 < f1 c1 11 c3 f0 1d c8 d5 d6 40 c2 d9 d6 c1 c4 c3
+2.891 + c1 e2 e3 40 d4 c5 e2 e2 c1 c7 c5 e2 1d 40 11 c5
+2.891 + 40 13 ff ef
+2.891 = # Write WCC=0xc1 SBA(240) SF(0xc8) data[21] SF(0x40) SBA(320) IC
+5.146 < f1 c1 11 c5 40 1d c8 4e 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 4e 1d 40 11 c6 50 1d c8 5a 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 5a 1d 40 11 c7 60 1d
+5.146 + c8 5a 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 e6 85 93 83 96 94 85 40 a3
+5.146 + 96 40 a3 88 85 40 e3 e2 d6 40 a2 a8 a2 a3 85 94
+5.146 + 40 96 95 40 e3 d2 f5 d9 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 5a 1d
+5.146 + 40 11 c8 f0 1d c8 5a 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 7e 7e 7e 7e
+5.146 + 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e
+5.146 + 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 7e 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 5a 1d 40 11 4a 40 1d c8 5a 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+5.146 + 40 40 40 40 40 40 40 40 5a 1d 40 11 4b 50 1d c8
+5.146 + 4e 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60
+5.146 + 60 60 60 60 60 60 60 60 60 60 60 60 60 4e 1d 40
+5.146 + 11 4c 60 13 ff ef
+5.146 = # Write WCC=0xc1 SBA(320) SF(0xc8) data[78] SF(0x40) SBA(400) SF(0xc8) data[78] SF(0x40) SBA(480) SF(0xc8) data[78] SF(0x40) SBA(560) SF(0xc8) data[78] SF(0x40) SBA(640) SF(0xc8) data[78] SF(0x40) SBA(720) SF(0xc8) data[78] SF(0x40) SBA(800) IC
+5.182 < f1 c3 11 4c 60 1d c8 5c 5c 5c 1d 40 13 11 4c e5
+5.182 + 13 ff ef
+5.182 = # Write WCC=0xc3 SBA(800) SF(0xc8) data[3] SF(0x40) IC SBA(805) IC
+5.594 > 7d 4c e5 ff ef
+5.600 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+5.601 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+5.661 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+5.661 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+5.664 < f1 c1 11 5d 7f 1d 40 11 40 40 1d c8 40 1d 40 11
+5.664 + c1 50 1d c8 40 1d 40 11 c2 60 1d c8 40 40 40 40
+5.664 + 40 40 40 40 40 40 40 40 40 40 40 4f 93 40 40 40
+5.664 + 40 40 40 6d 6b 6b 6b 60 60 60 6b 6b 6d 1d 40 11
+5.664 + c3 f0 1d c8 40 40 40 40 40 40 40 40 40 e9 e9 e9
+5.664 + a9 a9 40 61 6b 79 4b 60 7d 79 7d 40 40 40 40 60
+5.664 + 4b 40 40 5e 60 5e 5e 6b 1d 40 11 c5 40 1d c8 40
+5.664 + 40 40 40 40 40 40 40 40 40 40 40 40 40 4f 6b f4
+5.664 + 60 40 40 5d 40 5d 60 6b 6d 4b 40 6b 4d 40 4d 40
+5.664 + 40 79 7d 60 7d 1d 40 11 c6 50 1d c8 40 40 40 40
+5.664 + 40 40 40 40 40 40 40 40 40 7d 60 60 60 7d 7d 4d
+5.664 + 6d 61 60 60 7d 40 40 7a 60 7d 5d 6d 5d 1d 40 11
+5.664 + c7 60 1d c8 40 1d 40 11 c8 f0 1d c8 d3 85 a2 a2
+5.664 + 85 99 40 92 95 96 a6 95 40 94 81 83 88 89 95 85
+5.664 + 40 89 95 a2 a3 99 a4 83 a3 89 96 95 a2 40 60 40
+5.664 + c5 c2 d6 7a 40 c5 94 a4 93 81 a3 85 40 c2 99 96
+5.664 + a6 95 60 d6 a4 a3 1d 40 11 4a 40 1d c8 40 1d 40
+5.664 + 11 4b 50 1d c8 c1 95 96 a3 88 85 99 40 82 89 a3
+5.664 + 40 96 86 40 a6 89 a2 84 96 94 40 86 99 96 94 40
+5.664 + a3 88 85 40 86 96 99 a3 a4 95 85 40 83 96 96 92
+5.664 + 89 85 40 91 81 99 1d 40 11 4c 60 1d c8 40 1d 40
+5.664 + 11 4d f0 13 ff ef
+5.664 = # Write WCC=0xc1 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[1] SF(0x40) SBA(80) SF(0xc8) data[1] SF(0x40) SBA(160) SF(0xc8) data[33] SF(0x40) SBA(240) SF(0xc8) data[36] SF(0x40) SBA(320) SF(0xc8) data[38] SF(0x40) SBA(400) SF(0xc8) data[33] SF(0x40) SBA(480) SF(0xc8) data[1] SF(0x40) SBA(560) SF(0xc8) data[58] SF(0x40) SBA(640) SF(0xc8) data[1] SF(0x40) SBA(720) SF(0xc8) data[49] SF(0x40) SBA(800) SF(0xc8) data[1] SF(0x40) SBA(880) IC
+5.666 < f1 c3 11 4d f0 1d c8 5c 5c 5c 1d 40 13 11 4d f5
+5.666 + 13 ff ef
+5.666 = # Write WCC=0xc3 SBA(880) SF(0xc8) data[3] SF(0x40) IC SBA(885) IC
+6.078 > 7d 4d f5 ff ef
+6.084 < f1 c3 11 40 40 13 3c 5d 7f 00 ff ef
+6.084 = # Write WCC=0xc3 SBA(0) IC RA(->1919,0x00)
+6.161 < f5 c3 11 40 40 1d f8 28 42 f7 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 c9 e2 d7 c6 40 97 99 89 94 81 99
+6.161 + a8 40 96 97 a3 89 96 95 40 94 85 95 a4 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 11 c1 50 1d f8 d6 97
+6.161 + a3 89 96 95 40 40 7e 7e 7e 6e 11 c1 5d 1d 40 28
+6.161 + 42 f5 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+6.161 + c3 5b 1d f0 28 42 f4 e4 e2 c5 d9 c9 c4 40 40 11
+6.161 + c3 e4 1d f0 28 42 f5 7a 40 c8 c5 d9 c3 f0 f2 40
+6.161 + 40 11 c3 6f 1d f0 28 42 f4 11 c3 f0 1d f8 28 42
+6.161 + f7 40 40 40 f0 40 11 c3 f6 1d f0 28 42 f5 c9 e2
+6.161 + d7 c6 40 d7 c1 d9 d4 e2 40 40 11 c4 c3 1d f0 28
+6.161 + 42 f4 40 e2 97 85 83 89 86 a8 40 a3 85 99 94 89
+6.161 + 95 81 93 40 81 95 84 40 a4 a2 85 99 40 97 81 99
+6.161 + 94 a2 40 40 40 40 40 40 40 11 c4 6b 1d f0 e3 c9
+6.161 + d4 c5 40 40 40 40 11 c4 f4 1d f0 28 42 f5 7a 40
+6.161 + f0 f5 7a f3 f4 40 40 40 11 c4 7f 1d f0 28 42 f4
+6.161 + 11 c5 40 1d f8 28 42 f7 40 40 40 f1 40 11 c5 c6
+6.161 + 1d f0 28 42 f5 c2 d9 d6 e6 e2 c5 40 40 40 40 40
+6.161 + 40 11 c5 d3 1d f0 28 42 f4 40 c4 89 a2 97 93 81
+6.161 + a8 40 a2 96 a4 99 83 85 40 84 81 a3 81 40 a4 a2
+6.161 + 89 95 87 40 d9 85 a5 89 85 a6 40 40 40 40 40 40
+6.161 + 11 c5 7b 1d f0 e3 c5 d9 d4 c9 d5 c1 d3 11 c6 c4
+6.161 + 1d f0 28 42 f5 7a 40 f3 f2 f7 f7 40 40 40 40 11
+6.161 + c6 4f 1d f0 28 42 f4 11 c6 50 1d f8 28 42 f7 40
+6.161 + 40 40 f2 40 11 c6 d6 1d f0 28 42 f5 c5 c4 c9 e3
+6.161 + 40 40 40 40 40 40 40 40 11 c6 e3 1d f0 28 42 f4
+6.161 + 40 c3 88 81 95 87 85 40 a2 96 a4 99 83 85 40 84
+6.161 + 81 a3 81 40 a4 a2 89 95 87 40 d9 85 a5 85 84 89
+6.161 + a3 40 40 40 40 40 40 11 c7 4b 1d f0 d7 c6 40 d2
+6.161 + c5 e8 e2 40 11 c7 d4 1d f0 28 42 f5 7a 40 f0 f0
+6.161 + f1 f2 40 40 40 40 11 c7 5f 1d f0 28 42 f4 11 c7
+6.161 + 60 1d f8 28 42 f7 40 40 40 d9 40 11 c7 e6 1d f0
+6.161 + 28 42 f5 d9 d7 c6 40 40 40 40 40 40 40 40 40 11
+6.161 + c7 f3 1d f0 28 42 f4 40 c2 99 96 a6 a2 85 6b 40
+6.161 + c5 c4 c9 e3 6b 40 d9 85 a2 85 a3 6b 40 d7 c4 e2
+6.161 + 40 a6 89 a3 88 40 d9 d7 c6 40 40 40 40 40 11 c8
+6.161 + 5b 1d f0 d7 c1 d5 c5 d3 40 40 40 11 c8 e4 1d f0
+6.161 + 28 42 f5 7a 40 c9 e2 d7 7c d7 d9 c9 d4 40 11 c8
+6.161 + f0 1d f8 28 42 f7 40 40 40 f3 40 11 c8 f6 1d f0
+6.161 + 28 42 f5 e4 e3 c9 d3 c9 e3 c9 c5 e2 40 40 40 11
+6.161 + c9 c3 1d f0 28 42 f4 40 d7 85 99 86 96 99 94 40
+6.161 + a4 a3 89 93 89 a3 a8 40 86 a4 95 83 a3 89 96 95
+6.161 + a2 40 40 40 40 40 40 40 40 40 40 40 40 40 11 c9
+6.161 + 6b 1d f0 e2 c3 d9 c5 c5 d5 40 40 11 c9 f4 1d f0
+6.161 + 28 42 f5 7a 40 f1 40 40 40 40 40 40 40 11 c9 7f
+6.161 + 1d f0 28 42 f4 11 4a 40 1d f8 28 42 f7 40 40 40
+6.161 + f4 40 11 4a c6 1d f0 28 42 f5 c6 d6 d9 c5 c7 d9
+6.161 + d6 e4 d5 c4 40 40 11 4a d3 1d f0 28 42 f4 40 c9
+6.161 + 95 a5 96 92 85 40 93 81 95 87 a4 81 87 85 40 97
+6.161 + 99 96 83 85 a2 a2 96 99 a2 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 11 4a 7b 1d f0 d3 c1 d5 c7 e4 c1
+6.161 + c7 c5 11 4b c4 1d f0 28 42 f5 7a 40 c5 d5 c7 d3
+6.161 + c9 e2 c8 40 11 4b 4f 1d f0 28 42 f4 11 4b 50 1d
+6.161 + f8 28 42 f7 40 40 40 f5 40 11 4b d6 1d f0 28 42
+6.161 + f5 c2 c1 e3 c3 c8 40 40 40 40 40 40 40 11 4b e3
+6.161 + 1d f0 28 42 f4 40 e2 a4 82 94 89 a3 40 91 96 82
+6.161 + 40 86 96 99 40 93 81 95 87 a4 81 87 85 40 97 99
+6.161 + 96 83 85 a2 a2 89 95 87 40 40 40 40 11 4c 4b 1d
+6.161 + f0 c1 d7 d7 d3 40 c9 c4 40 11 4c d4 1d f0 28 42
+6.161 + f5 7a 40 c9 e2 d7 40 40 40 40 40 11 4c 5f 1d f0
+6.161 + 28 42 f4 11 4c 60 1d f8 28 42 f7 40 40 40 f6 40
+6.161 + 11 4c e6 1d f0 28 42 f5 c3 d6 d4 d4 c1 d5 c4 40
+6.161 + 40 40 40 40 11 4c f3 1d f0 28 42 f4 40 c5 95 a3
+6.161 + 85 99 40 e3 e2 d6 40 83 96 94 94 81 95 84 40 96
+6.161 + 99 40 c3 d3 c9 e2 e3 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 11 4d 5b 1d f0 d9 c5 d3 c5 c1 e2 c5 40
+6.161 + 11 4d e4 1d f0 28 42 f5 7a 40 e5 f2 4b f2 4b f0
+6.161 + f0 f0 40 11 4d f0 1d f8 28 42 f7 40 40 40 f7 40
+6.161 + 11 4d f6 1d f0 28 42 f5 c4 c9 c1 d3 d6 c7 40 e3
+6.161 + c5 e2 e3 40 11 4e c3 1d f0 28 42 f4 40 d7 85 99
+6.161 + 86 96 99 94 40 84 89 81 93 96 87 40 a3 85 a2 a3
+6.161 + 89 95 87 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 11 4e 6b 1d f0 d7 d9 c9 d4 40 40 40 40
+6.161 + 11 4e f4 1d f0 28 42 f5 7a 40 e8 c5 e2 40 40 40
+6.161 + 40 40 11 4e 7f 1d f0 28 42 f4 11 4f 40 1d f8 28
+6.161 + 42 f7 40 40 40 c3 40 11 4f c6 1d f0 28 42 f5 c3
+6.161 + c8 c1 d5 c7 c5 e2 40 40 40 40 40 11 4f d3 1d f0
+6.161 + 28 42 f4 40 e2 a4 94 94 81 99 a8 40 96 86 40 83
+6.161 + 88 81 95 87 85 a2 40 86 96 99 40 a3 88 89 a2 40
+6.161 + 99 85 93 85 81 a2 85 40 40 40 11 4f 7b 1d f0 e2
+6.161 + e8 e2 e3 c5 d4 c9 c4 11 50 c4 1d f0 28 42 f5 7a
+6.161 + 40 e3 d2 f5 d9 40 40 40 40 11 50 4f 1d f0 28 42
+6.161 + f4 11 50 50 1d f8 28 42 f7 40 40 40 d4 40 11 50
+6.161 + d6 1d f0 28 42 f5 e3 e2 d6 c1 d7 d7 d3 e2 40 40
+6.161 + 40 40 11 50 e3 1d f0 28 42 f4 40 d7 99 96 84 a4
+6.161 + 83 a3 89 a5 89 a3 a8 40 a3 96 96 93 a2 40 81 95
+6.161 + 84 40 88 81 95 84 a8 40 81 97 97 a2 40 40 40 40
+6.161 + 40 11 d1 4b 1d f0 d7 d9 d6 c3 40 40 40 40 11 d1
+6.161 + d4 1d f0 28 42 f5 7a 40 c9 e2 d7 d3 d6 c7 d6 d5
+6.161 + 40 11 d1 60 1d f8 28 42 f7 40 40 40 e3 40 11 d1
+6.161 + e6 1d f0 28 42 f5 e3 e4 e3 d6 d9 c9 c1 d3 40 40
+6.161 + 40 40 11 d1 f3 1d f0 28 42 f4 40 c4 89 a2 97 93
+6.161 + 81 a8 40 89 95 86 96 99 94 81 a3 89 96 95 40 81
+6.161 + 82 96 a4 a3 40 c9 e2 d7 c6 11 d2 d3 1d f0 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 11 d2 f0 1d f8 28
+6.161 + 42 f7 40 40 40 e3 f1 11 d2 f6 1d f0 28 42 f5 e3
+6.161 + d2 f5 40 40 40 40 40 40 40 40 40 11 d3 c3 1d f0
+6.161 + 28 42 f4 40 e2 a4 94 94 81 99 a8 40 96 86 40 83
+6.161 + 88 81 95 87 85 a2 40 94 81 84 85 40 89 95 40 e3
+6.161 + d2 f5 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 11
+6.161 + d4 40 1d f8 28 42 f7 40 40 40 e7 40 11 d4 c6 1d
+6.161 + f0 28 42 f5 c5 e7 c9 e3 40 40 40 40 40 40 40 40
+6.161 + 11 d4 d3 1d f0 28 42 f4 40 e3 85 99 94 89 95 81
+6.161 + a3 85 40 c9 e2 d7 c6 40 a4 a2 89 95 87 40 93 96
+6.161 + 87 40 81 95 84 40 93 89 a2 a3 40 84 85 86 81 a4
+6.161 + 93 a3 a2 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 11 d5 50 1d f8 28 42 f7 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 11 d6 60 1d f0
+6.161 + 28 42 f4 c5 95 a3 85 99 11 d6 e6 1d f8 28 42 f7
+6.161 + c5 d5 c4 11 d6 6a 1d f0 28 42 f4 83 96 94 94 81
+6.161 + 95 84 40 a3 96 40 a3 85 99 94 89 95 81 a3 85 40
+6.161 + c9 e2 d7 c6 4b 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 11 d7 f0 1d f8 28 42 f7 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.161 + 40 40 40 40 40 40 40 11 c1 5e 13 ff ef
+6.163 = # EraseWrite WCC=0xc3 SBA(0) SF(0xf8) deferred(0x28,2B) data[79] SBA(80) SF(0xf8) data[12] SBA(93) SF(0x40) deferred(0x28,2B) data[125] SBA(219) SF(0xf0) deferred(0x28,2B) data[8] SBA(228) SF(0xf0) deferred(0x28,2B) data[10] SBA(239) SF(0xf0) deferred(0x28,2B) SBA(240) SF(0xf8) deferred(0x28,2B) data[5] SBA(246) SF(0xf0) deferred(0x28,2B) data[12] SBA(259) SF(0xf0) deferred(0x28,2B) data[39] SBA(299) SF(0xf0) data[8] SBA(308) SF(0xf0) deferred(0x28,2B) data[10] SBA(319) SF(0xf0) deferred(0x28,2B) SBA(320) SF(0xf8) deferred(0x28,2B) data[5] SBA(326) SF(0xf0) deferred(0x28,2B) data[12] SBA(339) SF(0xf0) deferred(0x28,2B) data[39] SBA(379) SF(0xf0) data[8] SBA(388) SF(0xf0) deferred(0x28,2B) data[10] SBA(399) SF(0xf0) deferred(0x28,2B) SBA(400) SF(0xf8) deferred(0x28,2B) data[5] SBA(406) SF(0xf0) deferred(0x28,2B) data[12] SBA(419) SF(0xf0) deferred(0x28,2B) data[39] SBA(459) SF(0xf0) data[8] SBA(468) SF(0xf0) deferred(0x28,2B) data[10] SBA(479) SF(0xf0) deferred(0x28,2B) SBA(480) SF(0xf8) deferred(0x28,2B) data[5] SBA(486) SF(0xf0) deferred(0x28,2B) data[12] SBA(499) SF(0xf0) deferred(0x28,2B) data[39] SBA(539) SF(0xf0) data[8] SBA(548) SF(0xf0) deferred(0x28,2B) data[11] SBA(560) SF(0xf8) deferred(0x28,2B) data[5] SBA(566) SF(0xf0) deferred(0x28,2B) data[12] SBA(579) SF(0xf0) deferred(0x28,2B) data[39] SBA(619) SF(0xf0) data[8] SBA(628) SF(0xf0) deferred(0x28,2B) data[10] SBA(639) SF(0xf0) deferred(0x28,2B) SBA(640) SF(0xf8) deferred(0x28,2B) data[5] SBA(646) SF(0xf0) deferred(0x28,2B) data[12] SBA(659) SF(0xf0) deferred(0x28,2B) data[39] SBA(699) SF(0xf0) data[8] SBA(708) SF(0xf0) deferred(0x28,2B) data[10] SBA(719) SF(0xf0) deferred(0x28,2B) SBA(720) SF(0xf8) deferred(0x28,2B) data[5] SBA(726) SF(0xf0) deferred(0x28,2B) data[12] SBA(739) SF(0xf0) deferred(0x28,2B) data[39] SBA(779) SF(0xf0) data[8] SBA(788) SF(0xf0) deferred(0x28,2B) data[10] SBA(799) SF(0xf0) deferred(0x28,2B) SBA(800) SF(0xf8) deferred(0x28,2B) data[5] SBA(806) SF(0xf0) deferred(0x28,2B) data[12] SBA(819) SF(0xf0) deferred(0x28,2B) data[39] SBA(859) SF(0xf0) data[8] SBA(868) SF(0xf0) deferred(0x28,2B) data[11] SBA(880) SF(0xf8) deferred(0x28,2B) data[5] SBA(886) SF(0xf0) deferred(0x28,2B) data[12] SBA(899) SF(0xf0) deferred(0x28,2B) data[39] SBA(939) SF(0xf0) data[8] SBA(948) SF(0xf0) deferred(0x28,2B) data[10] SBA(959) SF(0xf0) deferred(0x28,2B) SBA(960) SF(0xf8) deferred(0x28,2B) data[5] SBA(966) SF(0xf0) deferred(0x28,2B) data[12] SBA(979) SF(0xf0) deferred(0x28,2B) data[39] SBA(1019) SF(0xf0) data[8] SBA(1028) SF(0xf0) deferred(0x28,2B) data[10] SBA(1039) SF(0xf0) deferred(0x28,2B) SBA(1040) SF(0xf8) deferred(0x28,2B) data[5] SBA(1046) SF(0xf0) deferred(0x28,2B) data[12] SBA(1059) SF(0xf0) deferred(0x28,2B) data[39] SBA(1099) SF(0xf0) data[8] SBA(1108) SF(0xf0) deferred(0x28,2B) data[11] SBA(1120) SF(0xf8) deferred(0x28,2B) data[5] SBA(1126) SF(0xf0) deferred(0x28,2B) data[12] SBA(1139) SF(0xf0) deferred(0x28,2B) data[31] SBA(1171) SF(0xf0) data[28] SBA(1200) SF(0xf8) deferred(0x28,2B) data[5] SBA(1206) SF(0xf0) deferred(0x28,2B) data[12] SBA(1219) SF(0xf0) deferred(0x28,2B) data[60] SBA(1280) SF(0xf8) deferred(0x28,2B) data[5] SBA(1286) SF(0xf0) deferred(0x28,2B) data[12] SBA(1299) SF(0xf0) deferred(0x28,2B) data[60] SBA(1360) SF(0xf8) deferred(0x28,2B) data[79] SBA(1440) SF(0xf0) deferred(0x28,2B) data[5] SBA(1446) SF(0xf8) deferred(0x28,2B) data[3] SBA(1450) SF(0xf0) deferred(0x28,2B) data[69] SBA(1520) SF(0xf8) deferred(0x28,2B) data[79] SBA(94) IC
+6.163 = # ignored orders: SA=71 MF=0
+6.575 > 7d c1 5f 11 c1 5e e7 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+6.575 + 40 40 40 ff ef
+7.083 < f5 c5 11 5d 7f 1d 40 11 40 40 1d c8 c3 d3 e2 e3
+7.083 + f0 f2 f0 40 40 d3 c9 e2 e3 40 84 81 a3 81 40 a2
+7.083 + 85 a3 40 95 96 a3 40 81 93 93 96 83 81 a3 85 84
+7.083 + 1d 40 11 c1 50 13 ff ef
+7.083 = # EraseWrite WCC=0xc5 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[36] SF(0x40) SBA(80) IC
+7.095 < f5 c3 11 5d 7f 1d 40 11 40 40 1d c8 d9 c5 c1 c4
+7.095 + e8 40 1d 40 11 c1 50 13 ff ef
+7.095 = # EraseWrite WCC=0xc3 SBA(1919) SF(0x40) SBA(0) SF(0xc8) data[6] SF(0x40) SBA(80) IC
+7.504 > 7d c1 d6 11 40 c8 00 00 00 00 00 00 00 00 00 00
+7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+7.504 + 00 00 00 00 00 00 00 00 00 00 00 00 00 00 d3 d6
+7.504 + c7 d6 c6 c6 ff ef
+7.544 < f1 c1 11 c2 60 1d c8 c8 c5 d9 c3 f0 f2 40 d3 d6
+7.544 + c7 c7 c5 c4 40 d6 c6 c6 40 e3 e2 d6 40 c1 e3 40
+7.544 + f0 f5 7a f3 f4 7a f2 f9 40 d6 d5 40 c1 e4 c7 e4
+7.544 + e2 e3 40 f1 f8 6b 40 f2 f0 f2 f6 1d 40 11 c3 f0
+7.544 + 13 ff ef
+7.544 = # Write WCC=0xc1 SBA(160) SF(0xc8) data[52] SF(0x40) SBA(240) IC
+7.549 < f1 c1 11 c3 f0 1d c8 5c 5c 5c 5c 5c 5c 1d 40 11
+7.549 + c5 40 13 ff ef
+7.549 = # Write WCC=0xc1 SBA(240) SF(0xc8) data[6] SF(0x40) SBA(320) IC
+7.558 < f5 c3 11 40 40 e3 85 99 94 89 95 81 93 11 40 c8
+7.558 + 1d f8 11 40 4a 1d f8 c3 e4 e4 f0 c3 f0 40 40 11
+7.558 + 40 d3 1d f8 11 c1 c1 1d f8 c4 81 a3 85 11 c1 c6
+7.558 + 1d f8 11 c1 c7 1d f8 f1 f8 4b f0 f8 4b f2 f6 11
+7.558 + c1 50 1d f8 11 c2 d1 1d f8 e3 89 94 85 11 c2 d7
+7.558 + 1d f8 f0 f5 7a f3 f4 7a f2 f9 11 c8 f7 1d f8 4f
+7.558 + 93 11 c8 7f 1d f8 6d 6b 6b 6b 60 60 60 6b 6b 6d
+7.558 + 11 4a 40 1d f8 e9 e9 e9 a9 a9 40 61 6b 7d 4b 60
+7.558 + 7d 79 7d 40 40 40 40 60 4b 40 40 5e 60 5e 5e 6b
+7.558 + 11 4b d5 1d f8 4f 6b f4 60 40 40 5d 40 5d 60 6b
+7.558 + 6d 4b 40 6b 4d 40 4d 40 40 7d 7d 60 7d 11 4c e4
+7.558 + 1d f8 7d 60 60 60 7d 7d 4d 6d 61 60 60 7d 40 40
+7.558 + 79 60 7d 5d 6d 5d 11 4f c7 28 42 f6 e3 88 85 40
+7.558 + d4 e5 e2 40 f3 4b f8 91 11 50 d5 e3 a4 99 4d 95
+7.558 + 5d 92 85 a8 40 a2 a8 a2 a3 85 94 11 c4 4c 28 42
+7.558 + f2 40 40 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d
+7.558 + 6d 40 40 11 c5 5c 40 61 4f 4f 4f 4f 4f 4f 4f 4f
+7.558 + 4f 4f 4f 4f 4f 4f e0 40 11 c6 6c 4f 40 4f 4f 4f
+7.558 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 4f 11 c7 7c
+7.558 + 4f 61 6d 6d 6d 6d 61 4f 4f 4f 4f e0 40 6d 6d 6d
+7.558 + e0 4f 11 c9 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f
+7.558 + 40 40 40 40 40 11 4a 5e 40 40 40 4f 40 4f 4f 4f
+7.558 + 4f 40 4f 40 40 40 40 40 11 4b 6e 40 40 40 4f 40
+7.558 + 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4c 7e 40 40
+7.558 + 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40 40 11 4e
+7.558 + 4e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40 40 40 40
+7.558 + 40 11 4f 5e 40 40 40 4f 40 4f 4f 4f 4f 40 4f 40
+7.558 + 40 40 40 40 11 50 6e 40 40 40 4f 40 4f 4f 4f 4f
+7.558 + 40 4f 40 40 40 40 40 11 d1 7e 40 40 40 4f 61 6d
+7.558 + 6d 6d 6d e0 4f 40 40 40 40 40 11 c4 60 28 42 f7
+7.558 + 40 6d 6d 40 40 40 40 40 40 6d 6d 40 11 c5 f0 4f
+7.558 + 4f 4f e0 40 40 40 40 61 61 61 e0 11 c7 40 4f 4f
+7.558 + 4f 4f 40 40 40 61 61 61 40 61 11 c8 50 4f 4f 4f
+7.558 + 4f 40 40 61 61 61 40 61 40 11 c9 60 4f 4f 4f 4f
+7.558 + 40 61 61 61 40 61 40 40 11 4a f0 4f 4f 4f 4f 61
+7.558 + 61 61 40 61 40 40 40 11 4c 40 4f 4f 4f 61 61 61
+7.558 + 6d 61 40 40 40 40 11 4d 50 4f 4f 4f e0 e0 e0 40
+7.558 + e0 40 40 40 40 11 4e 60 4f 4f 4f 4f e0 e0 e0 40
+7.558 + e0 40 40 40 11 4f f0 4f 4f 4f 4f 40 e0 e0 e0 40
+7.558 + e0 40 40 11 d1 40 4f 4f 4f 4f 40 40 e0 e0 e0 6d
+7.558 + e0 40 11 d2 50 e0 6d 6d e0 40 40 40 e0 6d 6d 6d
+7.558 + e0 11 c4 6f 28 42 f1 40 6d 6d 6d 6d 6d 6d 6d 6d
+7.558 + 6d 6d 6d 40 11 c5 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+7.558 + 4f 4f 4f e0 11 c7 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f
+7.558 + 4f 4f 4f 40 4f 11 c8 5f 4f 4f 4f 4f e0 40 6d 6d
+7.558 + 6d 6d 6d 6d e0 4f 11 c9 6f 4f 4f 4f 4f 40 4f 11
+7.558 + 4a 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4c
+7.558 + 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40 e0 11 4d
+7.558 + 5f e0 6d 6d 6d 6d 6d 6d 6d 4f 4f 4f 4f 40 4f 11
+7.558 + 4e 6f 40 40 40 40 40 40 40 40 4f 4f 4f 4f 40 4f
+7.558 + 11 4f 7f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+7.558 + 4f 11 d1 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 4f 40
+7.558 + 61 11 d2 5f e0 6d 6d 6d 6d 6d 6d 6d 6d 6d 6d 61
+7.558 + 28 00 00 11 d4 c5 1d f0 e3 d2 f3 40 40 83 99 85
+7.558 + 81 a3 85 84 40 82 a8 40 e5 96 93 92 85 99 40 c2
+7.558 + 81 95 84 92 85 40 40 40 40 40 40 a5 96 93 92 85
+7.558 + 99 7c 82 81 95 84 92 85 4b 96 99 87 1d f0 11 d5
+7.558 + d5 1d f0 e3 d2 f4 60 40 a4 97 84 81 a3 85 40 82
+7.558 + a8 40 d1 a4 85 99 87 85 95 40 e6 89 95 92 85 93
+7.558 + 94 81 95 95 40 40 91 a4 85 99 87 85 95 4b a6 89
+7.558 + 95 92 85 93 94 81 95 95 7c 97 85 82 82 93 85 60
+7.558 + 82 85 81 83 88 4b 83 88 11 d6 5b 1d f0 11 d6 e5
+7.558 + 1d f0 e3 d2 f5 40 40 a4 97 84 81 a3 85 40 82 a8
+7.558 + 40 d9 96 82 40 d7 99 89 95 a2 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 97 99 89 95 f0 f0 f9 f6 7c 87 94
+7.558 + 81 89 93 4b 83 96 94 11 d7 5b 1d f0 11 d7 7a 1d
+7.558 + f0 a2 85 85 40 e2 e8 e2 f2 4b d1 c3 d3 d3 c9 c2
+7.558 + 4d c3 d9 c5 c4 c9 e3 e2 5d 40 86 96 99 40 83 96
+7.558 + 94 97 93 85 a3 85 40 83 99 85 84 89 a3 a2 11 d8
+7.558 + e8 1d f0 11 d9 d7 1d f0 d4 e5 e2 40 f3 4b f8 91
+7.558 + 40 d3 85 a5 85 93 40 f8 f5 f0 f5 40 60 40 28 42
+7.558 + f6 e4 97 84 81 a3 85 40 f5 28 00 00 11 5b 5f 1d
+7.558 + f8 d3 96 87 96 95 40 7e 7e 7e 6e 11 5b 6a 1d c8
+7.558 + 13 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40
+7.558 + 40 11 5d 6b 1d f8 d9 e4 d5 d5 c9 d5 c7 40 40 e3
+7.558 + d2 f5 11 5d 7b 1d f8 11 5d 7f 1d f8 ff ef
+7.559 = # EraseWrite WCC=0xc3 SBA(0) data[8] SBA(8) SF(0xf8) SBA(10) SF(0xf8) data[8] SBA(19) SF(0xf8) SBA(65) SF(0xf8) data[4] SBA(70) SF(0xf8) SBA(71) SF(0xf8) data[8] SBA(80) SF(0xf8) SBA(145) SF(0xf8) data[4] SBA(151) SF(0xf8) data[8] SBA(567) SF(0xf8) data[2] SBA(575) SF(0xf8) data[10] SBA(640) SF(0xf8) data[27] SBA(725) SF(0xf8) data[24] SBA(804) SF(0xf8) data[20] SBA(967) deferred(0x28,2B) data[12] SBA(1045) data[16] SBA(268) deferred(0x28,2B) data[18] SBA(348) data[18] SBA(428) data[18] SBA(508) data[18] SBA(590) data[16] SBA(670) data[16] SBA(750) data[16] SBA(830) data[16] SBA(910) data[16] SBA(990) data[16] SBA(1070) data[16] SBA(1150) data[16] SBA(288) deferred(0x28,2B) data[12] SBA(368) data[12] SBA(448) data[12] SBA(528) data[12] SBA(608) data[12] SBA(688) data[12] SBA(768) data[12] SBA(848) data[12] SBA(928) data[12] SBA(1008) data[12] SBA(1088) data[12] SBA(1168) data[12] SBA(303) deferred(0x28,2B) data[13] SBA(383) data[13] SBA(463) data[14] SBA(543) data[14] SBA(623) data[6] SBA(703) data[12] SBA(783) data[13] SBA(863) data[14] SBA(943) data[14] SBA(1023) data[14] SBA(1103) data[13] SBA(1183) data[12] deferred(0x28,2B) SBA(1285) SF(0xf0) data[52] SF(0xf0) SBA(1365) SF(0xf0) data[69] SBA(1435) SF(0xf0) SBA(1445) SF(0xf0) data[53] SBA(1499) SF(0xf0) SBA(1530) SF(0xf0) data[45] SBA(1576) SF(0xf0) SBA(1623) SF(0xf0) data[22] deferred(0x28,2B) data[8] deferred(0x28,2B) SBA(1759) SF(0xf8) data[10] SBA(1770) SF(0xc8) IC data[128] SBA(1899) SF(0xf8) data[12] SBA(1915) SF(0xf8) SBA(1919) SF(0xf8)
+7.559 = # ignored orders: SA=7 MF=0

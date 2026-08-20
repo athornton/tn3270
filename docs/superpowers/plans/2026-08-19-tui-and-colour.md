@@ -1601,7 +1601,7 @@ git commit -m "Resolve extended attributes into concrete 3279 colours"
 > [[check-what-a-comparison-covers]]: a passing comparison proves nothing about behaviour its
 > inputs never exercise.
 
-- [ ] **Step 1: Convert the fixture to canonical form**
+- [x] **Step 1: Convert the fixture to canonical form**
 
 The existing helper is `replayFixture` in `packages/core/test/golden.test.ts:24-30`; it reads from `packages/fixtures/traces/` and calls `session.replay()`. Reuse it — do not write a second trace parser.
 
@@ -1610,7 +1610,7 @@ Convert `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` into `packages/fixtures/t
 1. **Redaction.** The original header warns the password appears twice — as EBCDIC on the wire and as plaintext in a `ScreenText` dump. Confirm the converted file contains neither. Grep for the EBCDIC bytes `c3 e4 d3 f8 e3 d9` and for `CUL8TR`.
 2. **`golden.test.ts` will pick the new file up automatically**, because it globs `*.trace` in that directory and asserts against a golden screen. Either generate the golden with `tools/make-golden.mjs` as that test expects, or place the converted fixture where it will not be globbed. Decide deliberately and say which you chose and why — a new fixture silently changing what `golden.test.ts` covers is the kind of thing this project writes down.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `packages/core/test/render.test.ts`:
 
@@ -1683,16 +1683,16 @@ describe('the live TK5 ISPF fixture', () => {
 
 Note the last test needs `countDeferredOrders` to report an `sfe` count as well as `sa`/`mf`; `parse.ts` emits SFE as its own token kind (`{ kind: 'sfe', pairs }`), so this is one extra counter, not a new parser.
 
-- [ ] **Step 3: Add the two helpers**
+- [x] **Step 3: Add the two helpers**
 
 `replayFixture` and `countDeferredOrders` go in `packages/core/test/helpers/trace.ts`. `countDeferredOrders` is the same logic as `packages/cli/scripts/count-orders.mjs` — **port it, do not re-derive it**, and note in a comment that the script and the helper must agree. Record reassembly is the part to copy exactly: inbound records start with `<` and continue on `+` lines, and a record beginning `0xff` is telnet negotiation rather than a 3270 record.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 Run: `npx vitest run packages/core/test/render.test.ts`
 Expected: PASS. **If the counts come out other than 113/101/12, believe the script over the plan** — run `node packages/cli/scripts/count-orders.mjs`, use what it reports, and say in the commit that the plan's numbers were stale.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/test/render.test.ts packages/core/test/helpers/trace.ts
