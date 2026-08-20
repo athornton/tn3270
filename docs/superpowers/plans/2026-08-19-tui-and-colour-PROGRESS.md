@@ -11,7 +11,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 2. The 3279 palette | **DONE** | `965cbd4`, `5932ace` | 704 |
 | 3. Per-cell storage in `Screen` | **DONE** | `8058145`, `dd999f0`, `a6327bb` | 715 |
 | 4. SA running state in executor | **DONE**, both reviews closed | `a456b06`, `4ea5c50`, `78c0dd4` | 751 |
-| 5. `render.ts` resolution | | | |
+| 5. `render.ts` resolution | **DONE**, spec review closed | `3a3531b`, `27e5310`, `52a19f7` | 802 |
 | 6. TK5 fixture proof | | | |
 | 7. Query Reply Color + Highlighting | | | |
 | 8. `ScreenJson` resolved colour | | | |
@@ -178,6 +178,31 @@ colours remain distinct at 16 **and** 256. The four changed entries are not amon
 seven, which is why the numbers survived — but re-derive rather than trust this if
 `PALETTE_3279` changes again.
 
+**Task 5 — three plan defects, and one of them I repeated in my own instruction to the
+implementer.** All corrected against the sources, which the implementer checked rather than
+taking my word for.
+
+1. **`0xF7` must NOT be remapped to white.** The plan's drafted `resolve()` had
+   `cell.fg === 0xf7 ? Colour.WHITE : cell.fg`, **and I repeated that instruction verbatim
+   when dispatching the task.** Both wrong. `0xF7` is Neutral — a distinct architected
+   identification listed separately from White `0xFF` in Table 4-7, given its own RGB in
+   `palette.ts` deliberately — and the manual routes it through Query Reply (Color)
+   (`pages.txt:3544-3550`), whose F7 entry is an identity pair in our own reply, so F7
+   resolves to F7. x3270 keeps `HOST_COLOR_NEUTRAL_WHITE` (7) and `HOST_COLOR_WHITE` (15) as
+   separate slots and special-cases F7 nowhere. Remapping collapses two colours a host chose
+   between.
+2. **The field fallback covers background and highlighting too, not just foreground.** The
+   manual says "any character property (color, highlighting, or character set)", and x3270
+   mirrors its fg two-step for bg (`c3270/screen.c:1153-1158`) and gr (`:1166-1171`). A
+   foreground-only fallback leaves an SFE's reverse-video field flat.
+3. **`mode3279 === false` gates colour but NOT highlighting.** The plan gated only fg,
+   letting a background through on monochrome hardware; and highlighting must stay ungated
+   because a 3278 blinks and reverses — x3270 computes `gr` after its colour branch closes.
+
+Also `pages.txt:3546-3548` → **`3544-3546`** for the `0x00` rule, and the drafted `Int16Array`
+for field addresses would have been a latent bug: an address can exceed 32767 on a large
+alternate size. The implementer used `Int32Array`.
+
 ## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
 
 `Screen` stores "unspecified" as `0`, so `cellAt` omits the property when the byte is zero.
@@ -201,7 +226,20 @@ path. Three consequences have now bitten:
 **Practical rule for the remaining tasks:** when a test names a specific protocol value, check
 that the value actually arrives. Instrumenting the branch (a `console.log` and a test run) takes
 a minute and is the only way to tell "asserted" from "pinned". Both Task 5 gaps were found this
-way, not by reading.
+way, not by reading. Verified closed: the same `0x00`→black mutation that left **49 tests green**
+now produces **5 failures**.
+
+**A FOURTH instance of the same shape, worth knowing if any test ever mocks a module here:**
+that palette-stub test was vacuous for a *second, independent* reason — `vi.doMock` alone never
+reached `render.ts`, because it is statically imported at the top of the test file and therefore
+already cached against the real palette. Re-importing returned the **identical module object**
+(`a.resolve === resolve` → `true`). **`vi.resetModules()` must precede the re-import.** So a
+test can be doubly vacuous, and each guard assertion it now carries corresponds to a way it has
+already failed to test anything.
+
+**A tooling hazard from the same session, flagged because it silently destroys work:** using
+`git checkout --` to revert a mutation **discards uncommitted implementation fixes** made
+earlier in the same sweep. Restore from a pristine copy (`cp`) instead, and verify with `diff`.
 
 ## Reminders for the rest of the run
 
