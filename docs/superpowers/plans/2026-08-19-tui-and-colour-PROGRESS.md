@@ -178,6 +178,31 @@ colours remain distinct at 16 **and** 256. The four changed entries are not amon
 seven, which is why the numbers survived — but re-derive rather than trust this if
 `PALETTE_3279` changes again.
 
+## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
+
+`Screen` stores "unspecified" as `0`, so `cellAt` omits the property when the byte is zero.
+That is correct and deliberate — but it means **`0x00` as a legitimate protocol VALUE cannot
+be represented in a `Screen`**, and therefore cannot reach any consumer through the normal
+path. Three consequences have now bitten:
+
+1. **Task 3**: the sentinel comment justified itself with `XA.RESET` (a TYPE) when the claim
+   was about `XAH.DEFAULT` (a VALUE). Right behaviour, wrong argument.
+2. **Task 5**: three tests named the `0x00`-means-device-default rule and **none of them
+   reached it.** Both routes they used — `setExtended({fg: 0x00})` and a real SA order with
+   value `0x00` — collapse to *absent* before resolution sees them. I reproduced the
+   consequence: making `0x00` resolve to black, the exact error the manual forbids, left all
+   49 tests green. An elaborate palette-stub test written to defend that very line passed
+   with the line deleted.
+3. **The general shape**: a test that drives a pure function *through the storage layer* can
+   only exercise states the storage layer can represent. Where a rule concerns a state
+   storage collapses, the test must **hand the function a value directly** — for `resolve`,
+   a hand-built snapshot, which is a legitimate input to an exported pure function.
+
+**Practical rule for the remaining tasks:** when a test names a specific protocol value, check
+that the value actually arrives. Instrumenting the branch (a `console.log` and a test run) takes
+a minute and is the only way to tell "asserted" from "pinned". Both Task 5 gaps were found this
+way, not by reading.
+
 ## Reminders for the rest of the run
 
 - **Task 14 needs both Hercules systems IPLed** (VM/370 on 3270, TK5 on 3271) and the
