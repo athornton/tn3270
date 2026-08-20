@@ -122,6 +122,15 @@ export interface ResolveOptions {
  *
  * x3270's `field_colors[4]` with its `DEFCOLOR_MAP` index
  * (fprint_screen.c:81-88): bit 1 is PROTECT, bit 0 is INT_HIGH_SEL.
+ *
+ * NO `mode3279` PARAMETER, unlike x3270's `color_from_fa`, which takes the gate
+ * inside itself (fprint_screen.c:90-94) because it is the only colour path its
+ * print renderer has. Here the gate has to sit at the call site instead: it
+ * overrides levels 1 and 2 as well, and those never reach this function. An
+ * earlier version had the check in BOTH places, so deleting the one here changed
+ * nothing and no test could tell — mutation testing found it. One gate, one
+ * place, and `mode3279: false` is now the only thing that can produce green
+ * without consulting this table.
  */
 const DEFAULT_COLOURS: readonly Colour3279[] = [
   Colour.GREEN, // unprotected, normal
@@ -130,8 +139,7 @@ const DEFAULT_COLOURS: readonly Colour3279[] = [
   Colour.WHITE, // protected, intensified
 ];
 
-function defaultColour(attr: number, mode3279: boolean): Colour3279 {
-  if (!mode3279) return Colour.GREEN;
+function defaultColour(attr: number): Colour3279 {
   const index = ((attr & FA.PROTECT) !== 0 ? 2 : 0) | ((attr & FA.INT_HIGH_SEL) !== 0 ? 1 : 0);
   return DEFAULT_COLOURS[index]!;
 }
@@ -143,6 +151,17 @@ function defaultColour(attr: number, mode3279: boolean): Colour3279 {
  * default", so it must fall through to the NEXT LEVEL rather than being treated
  * as a value. An unrecognised byte falls through the same way -- a malformed
  * attribute from a host must never reach `colourRgb`, which throws.
+ *
+ * THE 0x00 CHECK IS REDUNDANT TODAY AND KEPT ON PURPOSE. Deleting it changes no
+ * behaviour, because 0x00 is not a key of `PALETTE_3279` either, so the second
+ * line rejects it too. It stays because the two lines encode DIFFERENT rules that
+ * happen to agree: this one is the architected meaning of X'00'
+ * (pages.txt:3544-3546), the other is "unrenderable byte". If `PALETTE_3279` ever
+ * gained a 0x00 entry -- a device-default swatch is an entirely plausible change
+ * -- the protocol rule would silently invert into "0x00 paints that swatch",
+ * overriding a field colour the host did set. `render.test.ts` stubs exactly that
+ * future in and pins the rule, so this line is load-bearing under the change it
+ * is defending against, even though no test can kill it today.
  *
  * Note this returns a value rather than a boolean, so callers can chain levels
  * with `??` and cannot accidentally use an unusable code.
@@ -200,6 +219,14 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     // `calc_attrs(baddr, baddr, fa)` (c3270/screen.c:1451). It also makes the
     // wrap-around case fall out: the last field's run continues past the end of
     // the buffer to cell 0, so cells before the first attribute are owned by it.
+    //
+    // No overlap check, and none is needed: `Screen.makeField` computes `length`
+    // by scanning forward to the next attribute, so the runs TILE the ring
+    // exactly -- every cell is claimed once and only once. Adding an
+    // `if (attrAddrOf[a] < 0)` guard is therefore a no-op, which mutation testing
+    // confirmed by leaving every test passing; a brute-force check over 400
+    // random layouts (768,000 assignments) found zero double-claims. Unconditional
+    // assignment is the honest expression of a partition.
     let a = f.attrAddr;
     for (let n = 0; n <= f.length; n++) {
       attrAddrOf[a] = f.attrAddr;
@@ -227,7 +254,7 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     // The four levels, per property. `usableColour` returning undefined for both
     // 0x00 and a malformed byte is what makes `??` express the fall-through.
     const fg = mode3279
-      ? usableColour(cell.fg) ?? usableColour(field?.fg) ?? defaultColour(attr, true)
+      ? usableColour(cell.fg) ?? usableColour(field?.fg) ?? defaultColour(attr)
       : Colour.GREEN;
     const bg = mode3279
       ? usableColour(cell.bg) ?? usableColour(field?.bg) ?? Colour.NEUTRAL_BLACK

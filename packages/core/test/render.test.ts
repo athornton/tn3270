@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { resolve } from '../src/render.js';
-import { Colour } from '../src/palette.js';
+import { Colour, PALETTE_3279 } from '../src/palette.js';
 import { XA, XAH, FA, XA_3270 } from '../src/constants.js';
 import { encodeAddress } from '../src/address.js';
 import { cp037 } from '../src/codepage.js';
@@ -86,6 +86,27 @@ describe('resolve: base field attribute fallback (rule 2)', () => {
     const r = resolve(s.snapshot());
     expect(r[1]!.fg).toBe(Colour.GREEN);
     expect(r[11]!.fg).toBe(Colour.BLUE);
+  });
+
+  it('the LAST data cell of a field is governed by that field', () => {
+    // A field's run is `length + 1` cells -- the attribute byte plus its data.
+    // Mutation testing found that an off-by-one making it `length` leaves the
+    // last data cell of EVERY field unowned, which silently greens it. Every
+    // other test here writes near the START of a field, so all of them survived
+    // it. This one asserts the far end of two adjacent fields.
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PRINTABLE | FA.PROTECT);   // blue: cells 1..9
+    s.setFieldAttribute(10, FA.PRINTABLE);               // green: cells 11..1919
+    for (let i = 0; i < 1920; i++) if (!s.isFieldAttribute(i)) s.setChar(i, 0xc1);
+    const r = resolve(s.snapshot());
+    expect(r[9]!.fg, 'last cell of the protected field').toBe(Colour.BLUE);
+    expect(r[1919]!.fg, 'last cell of the buffer').toBe(Colour.GREEN);
+    // And no cell anywhere is left unowned. `hidden` is the cheapest witness:
+    // an unowned cell sees attribute 0x00, whose intensity is not 0x0C, so this
+    // catches the same off-by-one through a second property.
+    const hiddenScreen = new Screen();
+    hiddenScreen.setFieldAttribute(0, FA.PRINTABLE | FA.INT_ZERO_NSEL);
+    expect(resolve(hiddenScreen.snapshot()).every((c) => c.hidden)).toBe(true);
   });
 
   it('cells before the first field belong to the LAST field, which wraps', () => {
@@ -340,6 +361,53 @@ describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
     expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.YELLOW);
   });
 
+  it('0x00 falls through even if the palette gains a 0x00 entry', async () => {
+    // WHY THIS TEST EXISTS: the 0x00 rule is enforced twice in render.ts -- once
+    // explicitly, and again by 0x00 not being a key of PALETTE_3279. Mutation
+    // testing showed the explicit check can be DELETED with every other test in
+    // this file still passing, because the second enforcement covers for it. But
+    // the two encode DIFFERENT rules that merely agree today: X'00' means "device
+    // default" as a matter of protocol (pages.txt:3544-3546), where the palette
+    // lookup only means "renderable". Add a 0x00 swatch to the palette -- a
+    // device-default swatch is an entirely plausible change -- and the protocol
+    // rule would silently invert into "0x00 paints that swatch", overriding a
+    // field colour the host did set.
+    //
+    // So this stubs exactly that future in and asserts the protocol rule still
+    // holds. It has to go through the module registry rather than mutating the
+    // export: PALETTE_3279 is Object.freeze'd, so an earlier version of this test
+    // that used defineProperty silently failed to apply its own stub. Hence the
+    // guard assertion below, which is what caught that.
+    const s = run([
+      ...W, ...sba(0),
+      ...sfe(FA.PRINTABLE, XA.FOREGROUND, Colour.YELLOW),
+      0x28, XA.FOREGROUND, 0x00,   // explicit "device default" on the character
+      0xc1,
+    ]);
+    const snap = s.snapshot();
+
+    vi.doMock('../src/palette.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/palette.js')>('../src/palette.js');
+      return {
+        ...actual,
+        PALETTE_3279: Object.freeze({ ...actual.PALETTE_3279, 0x00: [0x11, 0x22, 0x33] }),
+      };
+    });
+    try {
+      const { resolve: mocked } = await import('../src/render.js');
+      const palette = await import('../src/palette.js');
+      expect(palette.PALETTE_3279[0x00], 'the stub must apply or this proves nothing')
+        .toEqual([0x11, 0x22, 0x33]);
+      expect(mocked(snap)[1]!.fg).toBe(Colour.YELLOW);
+    } finally {
+      vi.doUnmock('../src/palette.js');
+      vi.resetModules();
+    }
+    // And the real palette is untouched, so no later test inherits the stub.
+    expect(PALETTE_3279[0x00]).toBeUndefined();
+    expect(resolve(snap)[1]!.fg).toBe(Colour.YELLOW);
+  });
+
   it("a FIELD colour of 0x00 falls through to the base map", () => {
     const s = run([
       ...W, ...sba(0),
@@ -519,13 +587,34 @@ describe('resolve: text and hidden fields', () => {
     expect(r[0]!.text).toBe(' ');
   });
 
-  it('blanks an attribute position even when the host left a byte under it', () => {
-    // setFieldAttribute nulls the cell, so this can only arise if a future
-    // change stops doing that. Pinning it here keeps the blank a property of
-    // resolution rather than an accident of storage.
-    const s = fielded(FA.PRINTABLE);
-    expect(resolve(s.snapshot())[0]!.text).toBe(' ');
-    expect(resolve(s.snapshot())[1]!.text).toBe('A');
+  it('blanks an attribute position even when a byte sits under it', () => {
+    // WHY THIS BUILDS A SNAPSHOT BY HAND: mutation testing showed that deleting
+    // the attribute-position test from `text` breaks nothing, because
+    // `Screen.setFieldAttribute` also nulls the cell, so `ebcdic === 0x00`
+    // blanks it anyway. An earlier version of this test asserted the blank off a
+    // real Screen and therefore pinned storage's behaviour, not resolution's.
+    //
+    // `resolve` is a pure function of a ScreenSnapshot, so the honest way to pin
+    // ITS rule is to hand it the state its contract must survive: a cell that is
+    // a field attribute AND carries a character byte. A renderer must draw a
+    // blank there regardless -- the position holds an attribute, not data.
+    const snap: import('../src/screen.js').ScreenSnapshot = {
+      rows: 1,
+      cols: 2,
+      cursor: 0,
+      cells: [
+        { kind: 'char', ebcdic: 0xc1 },   // 'A' sitting under the attribute
+        { kind: 'char', ebcdic: 0xc2 },   // 'B', ordinary data
+      ],
+      fields: [
+        { attrAddr: 0, start: 1, length: 1, attr: FA.PRINTABLE, protected: false,
+          numeric: false, autoSkip: false, intensified: false, hidden: false, modified: false },
+      ],
+      formatted: true,
+    };
+    const r = resolve(snap);
+    expect(r[0]!.text).toBe(' ');
+    expect(r[1]!.text).toBe('B');
   });
 
   it('honours a non-default code page', () => {
