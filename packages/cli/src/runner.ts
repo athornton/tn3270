@@ -678,7 +678,14 @@ export class Runner {
   }
 }
 
-function splitTarget(target: string): [string, number] {
+/**
+ * `host:port`, defaulting to 23. Exported because the TUI parses the same
+ * argument and a second copy of this rule would be one to keep in step.
+ *
+ * `lastIndexOf` rather than `indexOf`, so a bare IPv6 literal loses only its
+ * final group rather than everything after the first colon.
+ */
+export function splitTarget(target: string): [string, number] {
   const colon = target.lastIndexOf(':');
   if (colon < 0) return [target, 23];
   return [target.slice(0, colon), Number(target.slice(colon + 1))];

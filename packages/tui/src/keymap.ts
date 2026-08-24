@@ -140,6 +140,28 @@ function isPrintable(b: number): boolean {
 }
 
 /**
+ * How many leading bytes are printable ASCII; 0 if the first one is not.
+ *
+ * Exported so `app.ts` can consume a typed run in one pass instead of probing
+ * prefix by prefix, which is O(n^2) on a paste. The printability rule stays here,
+ * with the table, rather than being restated by the caller.
+ */
+export function printableRun(bytes: Uint8Array): number {
+  let n = 0;
+  while (n < bytes.length && isPrintable(bytes[n]!)) n++;
+  return n;
+}
+
+/**
+ * The longest sequence in the table, so a caller can bound its prefix scan.
+ *
+ * DERIVED, not written down: a longer key added below raises this automatically,
+ * where a literal 7 would silently stop matching the new key's last byte.
+ */
+export const MAX_SEQUENCE_LENGTH: number =
+  Math.max(...[...TABLE.keys()].map((k) => k.length));
+
+/**
  * The action for a buffer of terminal input.
  *
  * `PARTIAL` means "a longer sequence may still arrive"; `null` means "discard".
