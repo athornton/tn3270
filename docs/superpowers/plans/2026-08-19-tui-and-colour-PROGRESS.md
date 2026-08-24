@@ -563,3 +563,36 @@ TK5 on 3271). `ss`/`netstat` show nothing in this sandbox — probe with
 an account left logged on is reconnected, not refused, landing at `CP READ` where
 every command goes to CP. Then `docs/live-testing.md` gains a *TUI and colour
 results* section, and **record what did not work too**.
+
+## A GAP THE PLAN DID NOT COVER: SIGWINCH IS NOT HANDLED
+
+Found while checking for dead API at the end of the run, and left UNFIXED
+deliberately, because it needs a decision rather than a patch.
+
+`TerminalRenderer.invalidate()` is documented "Force the next paint to redraw
+everything, **e.g. after a terminal resize**" and is called exactly once, in
+`App.start()`. **Nothing listens for `SIGWINCH`.** So resizing the window leaves
+the renderer's `previous` array describing the old geometry: the screen stays
+stale until the host happens to write again, and every cursor-position escape is
+computed from `this.cols`, which never changes.
+
+Note this is NOT the 3270 mid-session resize already recorded as deferred in
+`HANDOFF.md` — that is a protocol question about alternate screen sizes. This is
+purely about the terminal window, and the repaint half is already built.
+
+**It is not a one-line fix, which is why it is a note and not a commit.** Three
+things need deciding together:
+
+1. On growth, `invalidate()` and repaint is right and easy.
+2. On shrink below `screen.rows + 1` or `screen.cols`, `start()`'s rule is to
+   REFUSE — but refusing mid-session cannot mean throwing, because the session is
+   live and the host is mid-conversation. Probably: stop painting, show a
+   "terminal too small" message, and resume when it grows back. That is new
+   behaviour with its own tests, not a wiring change.
+3. `App` currently takes `stdout.rows/columns` once, in `start()`. It would need
+   to re-read them per resize, which means the geometry stops being effectively
+   readonly and `tooSmall` gets a second caller with different consequences.
+
+The `pty-smoke.py` harness already sets the window size with `TIOCSWINSZ`, so it
+is the natural place to test this: resize the pty mid-session and assert a full
+repaint arrives.
