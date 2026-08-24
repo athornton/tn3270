@@ -408,3 +408,158 @@ the fact being replaced.
   landing at `CP READ` where every command goes to CP (`?CP: ...`). Log off cleanly.
 - Task 4 is the riskiest (SA running state, four reset rules, the composite rule).
 - Task 15's mutation pass predicts which mutant most likely survives; do not skip it.
+
+---
+
+# Tasks 9-13, 15, 16 — the TUI, 2026-08-24
+
+`909` tests in 34 files, typecheck and build clean. **Task 14 is the only task in
+this plan not done**, because both Hercules systems were down and the user IPLs
+them by hand. Everything below was found by measuring, and each item cost real
+time, so it is recorded rather than summarised.
+
+## THE PLAN'S OWN NUMBERS WERE RIGHT TWICE AND WRONG THREE TIMES
+
+Task 10 asked for the `tput`-versus-Node measurement to be reproduced *before*
+implementing, which was the right instruction. `tput` matched exactly
+(256/256/16777216/8/-1). **Node's column did not**: `getColorDepth` returns BITS
+— documented as 1/4/8/24, confirmed at both ends here (`TERM=dumb` → 1,
+`COLORTERM=truecolor` → 24) — so the real values are `8/4/4/4/4`, not the plan's
+`8/16/16/16/16`. Four of the five rows had been transcribed as colour COUNTS while
+the first was left as raw bits, mixing units inside one column. The conclusion
+survives and gets stronger: `tput` is right five times out of five,
+`getColorDepth` once.
+
+Every quantisation number was re-derived from the committed `PALETTE_3279` as the
+plan asked, since four palette entries changed after those numbers were written.
+All of them held.
+
+**The keymap correction is the one a user would have felt: the arrow keys and Home
+have TWO encodings each, and terminfo reports the one the plan did not.**
+`tput kcuu1` is `\x1bOA` and `khome` is `\x1bOH`, where the plan's tests used
+`\x1b[A` and `\x1b[H`. Both are real — xterm sends CSI in normal cursor mode and
+SS3 once DECCKM is set, and `smkx` is exactly `\x1b[?1h\x1b=`, so terminfo
+documents the application-mode form because it assumes `smkx` was sent. Any layer
+(us, tmux, screen) can flip it, so binding one encoding loses the arrow keys
+outright on some terminals. Both are bound and both are tested. The function keys
+needed no correction, including the irregularity: F7-F11 are `18/19/20/21/23~`,
+with **no `22~`**.
+
+## A REGEX THAT COULD NOT MATCH, AND THE VACUOUS TEST NEXT TO IT
+
+Task 11's two colour tests shared one mistake with two faces. A cell emits
+foreground and background in ONE sequence — `\x1b[38;5;46;48;5;59m` — so the
+foreground parameter is never followed by `m`, and the plan's `/\x1b\[38;5;\d+m/`
+matches nothing at all.
+
+One test failed honestly. **The other counted matches of the same impossible
+regex, got zero, and passed.** It is the test named "does not repeat an identical
+SGR for adjacent cells", and it was verified vacuous by mutation: an
+implementation emitting a fresh SGR for EVERY cell — precisely the defect it
+names — passed it. Both now match the parameter within the list, and the count is
+**exactly one** rather than "at most one per row", because an upper bound would
+readmit that same mutant if the regex were ever loosened again.
+
+**This is the fifth instance of the project's recurring shape** (see the storage
+sentinel section above): a test that names a rule it never reaches. The tell is
+always the same — the assertion passes when the behaviour is deleted.
+
+## THE STATUS ROW NUMBER WAS UNPINNED, AND THAT IS A VISIBLE BUG
+
+Mutation found it: moving the OIA from `rows + 1` to `rows + 2` left all eleven
+other render tests green. It is not cosmetic. `tooSmall` reserves exactly ONE
+extra row, so the status line would be drawn off the bottom of a terminal the
+renderer had just declared large enough. The row number and `tooSmall`'s allowance
+are **one decision** and are now pinned together at three geometries.
+
+## A DROPPED KEYSTROKE IN THE PLAN'S `pump()`
+
+The plan called `lookup()` on the WHOLE buffer and discarded one byte whenever it
+returned null. One `read` carries several keystrokes, so a buffer of `A\x1b[A` is
+ordinary — type fast, or press a key while an arrow is in flight. `lookup("A\x1b[A")`
+is null (not a sequence, not all printable), **so the loop shifted the `A` away**:
+silent, and likelier the faster the user types. Confirmed by restoring the plan's
+version under the new tests, which fail with `expected ' ' to be 'A'`.
+
+`pump()` now matches the FRONT of the buffer, preferring the longest action, and
+discards an impossible sequence WHOLE — leaving the `[` of a broken `\x1b[?`
+behind would type a literal bracket into the user's field.
+
+## RAW MODE: WHY THE STREAMS ARE INJECTED
+
+`stdin`/`stdout`/`host` are narrow interfaces rather than `process` globals, and
+that is what makes "raw mode is restored on every exit path" testable at all. All
+six paths are pinned **separately**, because registering five of six is the likely
+defect and using the program normally would never reveal it. Eight mutants die,
+including a forgotten `SIGHUP`, a non-idempotent `restore`, and the geometry check
+moved to after raw mode is entered.
+
+`quitting` was the field the plan said to use or delete. It is used: `host.exit()`
+does not stop the current turn, so an already-queued `screen` event can otherwise
+reach `draw()` after `restore()` and paint 3270 cells over the user's shell prompt.
+
+## TASK 15: THE PREDICTED SURVIVOR IS AN EQUIVALENT MUTANT
+
+The plan predicted mutation 11 (`applySa` before `setChar`) would survive, and
+prescribed a fix: write a cell twice with different SA state between the writes.
+**It survives, and that test cannot close it.** `setChar` writes `chars[]` and the
+field-attribute marker and "deliberately does NOT touch fgs/bgs/grs"
+(`screen.ts:228-231`); `applySa` writes only those three planes. Disjoint state,
+so the two statements commute and **no input can distinguish the orderings**.
+
+Verified rather than argued: the prescribed test was written and it passes with
+the pristine code AND with the lines swapped, 38 for 38 both ways. Recording it as
+having closed the hole would have been the sixth instance of the trap. It is kept,
+relabelled for what it genuinely pins (the second write of an address wins,
+character and colour together — previously unpinned), with the equivalence
+recorded in the test so nobody re-derives it. A second new test pins the
+falsifiable part: `applySa` clears before it sets, so making it additive fails 3
+tests where the ordering swap fails none.
+
+**Mutation 12 was obsolete** — it wanted `delete sa.*` removed from the `'sf'`
+case, and earlier work had already deliberately stopped SF touching the running
+state. Twelve of thirteen killed, one obsolete, one equivalent.
+
+## COMMENTS OUTLIVE THE CODE THEY DESCRIBE — THIRD TIME THIS STAGE
+
+`resetSa` claimed to be "Shared by the SA X'00' handler and the plain-SF reset".
+It has exactly one caller. The claim was true when written and became false when
+the SF reset was removed. Same shape as the `Int16Array` justification and the
+43×132 geometry claim. **When you remove a caller, grep for prose that names it.**
+
+## TWO BUGS IN MY OWN TEST HARNESS, BOTH BLAMING THE CLIENT FIRST
+
+`pty-smoke.py` reported a broken input path twice, and was wrong twice.
+
+1. It typed as soon as the alternate screen appeared — which is *before* the
+   host's first write, when the keyboard is correctly locked with `X Wait`
+   (`AwaitingFirstWrite`). Every keystroke was properly refused.
+2. It omitted the `IC` order, so the cursor sat at address 0 inside a PROTECTED
+   field and typing was again correctly refused.
+
+Both times the client was right and the test was early or malformed. A harness
+that reports a failure has to be shown capable of reporting success first — the
+same lesson as the trace probe that lacked `Trace(on)`.
+
+## ONE MORE UNENFORCEABLE GUARD, ANNOTATED RATHER THAN PAPERED OVER
+
+Two clauses in this work cannot be pinned by any test, and both are annotated in
+place saying so, so that nobody later writes a test claiming to cover them:
+
+- `colours.ts`: the `depth < 16777216` clause in the COLORTERM branch is redundant,
+  because the only assignment is to the maximum. Deleting it leaves everything
+  green. It stays as a guard for a future edit mapping some COLORTERM value to a
+  LOWER depth. What IS testable, and now tested, is that a present-but-smaller
+  COLORTERM (`256color`, `8`) never lowers a higher terminfo answer.
+- `keymap.ts`: checking an exact match before a prefix cannot be pinned, because
+  no key in the table is a proper prefix of another. It becomes load-bearing the
+  moment a terminal needs such a key.
+
+## Where to resume
+
+**Task 14, and it needs the user to IPL both Hercules systems** (VM/370 on 3270,
+TK5 on 3271). `ss`/`netstat` show nothing in this sandbox — probe with
+`/dev/tcp/127.0.0.1/PORT`. Read the VM reconnect trap in `docs/HANDOFF.md` first:
+an account left logged on is reconnected, not refused, landing at `CP READ` where
+every command goes to CP. Then `docs/live-testing.md` gains a *TUI and colour
+results* section, and **record what did not work too**.

@@ -468,13 +468,22 @@ Four tiers, chosen from the terminal's actual capability:
 **Detection is `tput -T$TERM colors`, shelled out — not a library and not Node's
 builtin.** Measured on the dev box, all three approaches against the same terminals:
 
+**Corrected 2026-08-24 (Task 10), after re-measuring on Node v26.7.0.** The
+`getColorDepth` column below originally read 8/16/16/16/16. That mixed two units:
+the call returns **bits of depth**, documented as 1/4/8/24 and confirmed at both
+ends here (`TERM=dumb` → 1, `COLORTERM=truecolor` → 24), so four of the five rows
+had been written as colour COUNTS while the first was left as the raw return. The
+raw value is given first, with the count it implies in brackets. The conclusion is
+unchanged and in fact stronger: `tput` is right five times out of five,
+`getColorDepth` once.
+
 | terminal | `tput` | Node `getColorDepth` | truth |
 |---|---|---|---|
-| `xterm-256color` | 256 | 8 | 256 |
-| `screen-256color` | 256 | **16** ✗ | 256 |
-| `xterm-direct` | **16777216** | **16** ✗ | 24-bit |
-| `xterm` | 8 | 16 | 8 |
-| `vt100` | -1 | 16 ✗ | none |
+| `xterm-256color` | 256 | 8 [256] | 256 |
+| `screen-256color` | 256 | **4 [16]** ✗ | 256 |
+| `xterm-direct` | **16777216** | **4 [16]** ✗ | 24-bit |
+| `xterm` | 8 | **4 [16]** ✗ | 8 |
+| `vt100` | -1 | **4 [16]** ✗ | none |
 | unknown | -1 (clean fail) | — | — |
 
 Node's `tty.WriteStream.getColorDepth` is `TERM`-string heuristics, not terminfo, and it
@@ -489,8 +498,18 @@ Three refinements, each of which is a real case:
 1. **`COLORTERM=truecolor` overrides terminfo upward.** Many 24-bit terminals still
    advertise `TERM=xterm-256color`; terminfo alone would cap them at 256. Take the
    maximum of the two signals.
-2. **`tput` may be absent** (minimal container, Windows). Fall back to
-   `getColorDepth`, then to monochrome. A missing binary must never be fatal.
+2. **`tput` may be absent** (minimal container, Windows). A missing binary must
+   never be fatal.
+
+   **NOT IMPLEMENTED AS WRITTEN, deliberately (Task 10): there is no
+   `getColorDepth` fallback, only monochrome.** Falling back to it would mean
+   trusting, in the one case where nothing else is available, the very function the
+   table above shows to be wrong four times in five — and its errors run in the
+   dangerous direction. It reports 4 [16] for `vt100`, so the fallback would emit
+   colour escapes to a terminal that cannot show them, printing them as literal
+   text across the user's screen. Monochrome renders correctly everywhere, so it is
+   the safe answer when detection genuinely fails. `--colors` remains the way to
+   get colour on a box with no `tput`.
 3. **`--colors 0|8|16|256|16m` forces it.** Detection is a default, not a verdict:
    terminfo entries are sometimes conservative, and the monochrome path needs to be
    testable on a colour terminal.
@@ -512,6 +531,17 @@ deliver PF keys as multi-byte escape sequences that vary by terminal, and an esc
 prefix is ambiguous with a lone Escape until a timeout resolves it. Parse sequences from
 terminfo where possible rather than hardcoding xterm's, and give the keymap a config
 file as the GUI's does.
+
+**Found while implementing this (Task 10/12), and it is a second instance of that
+hazard rather than the same one: the arrow keys and Home each have TWO encodings,
+and terminfo reports only one of them.** `tput kcuu1` gives `\x1bOA` and `khome`
+gives `\x1bOH` — the SS3 forms — because terminfo assumes `smkx` has been sent, and
+`smkx` is exactly `\x1b[?1h\x1b=` (DECCKM). An xterm in *normal* cursor mode sends
+the CSI forms `\x1b[A` and `\x1b[H` instead. Both are correct, and any layer — the
+client, tmux, screen — can flip the mode, so **bind both**: taking terminfo's answer
+alone loses the arrow keys on a terminal that never had `smkx` applied. So "parse
+from terminfo" above is necessary but not sufficient; terminfo gives one encoding of
+a key that has two.
 
 ### Status line
 

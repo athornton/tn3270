@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-08-18
+# Handoff — state as of 2026-08-24
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -6,9 +6,37 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch `main` (renamed from `master` 2026-08-18), **696 tests passing**,
-`npm run typecheck` clean, `npm run build` works, working tree clean. Stage 1 and
-stage 2a are both merged to `main`.
+Branch **`tui-and-colour`** (not yet merged; `main` holds stages 1 and 2a),
+**909 tests passing in 34 files**, `npm run typecheck` clean, `npm run build`
+works, working tree clean.
+
+**THERE IS NOW A WORKING TERMINAL CLIENT.** `packages/tui` is a c3270-style front
+end: `node packages/tui/dist/main.js [-model M] [--colors N] host[:port]`. Colour
+is stored per cell, resolved through the four-level precedence, quantised to
+whatever the terminal supports, and drawn with dirty-cell diffing. The plan is
+`docs/superpowers/plans/2026-08-19-tui-and-colour.md`, and
+`...-tui-and-colour-PROGRESS.md` carries the findings — read that second file
+before touching this work, because most of what cost time is in it rather than here.
+
+**Tasks 1-13, 15 and 16 are done. TASK 14 IS NOT, and it is the only thing left
+in this plan:** live verification of the TUI against MVS 3.8j TK5 and VM/370.
+Both Hercules systems were down for this session (`/dev/tcp` probe refused on
+3270 and 3271) and **the user IPLs them by hand**, so it could not be attempted.
+Everything else is proven; this is proven only against a local fake host.
+
+**What the TUI was actually verified against**, since the hosts were down: a real
+pty driving a local minimal TN3270 server, `packages/tui/scripts/pty-smoke.py`,
+ten checks all passing — telnet negotiation, the host's text drawn, a 256-colour
+SGR emitted, typing into an unprotected field, `Ctrl-]`, and **ECHO restored on
+the tty after exit**, which is the one that matters. It is NOT a substitute for a
+live host: it cannot tell us what MVS or VM really send. Run it with
+`python3 packages/tui/scripts/pty-smoke.py`; exit 0 means all ten held.
+
+**Still not done, deliberately:** Programmable Symbol Sets (`XA.CHARSET` 0x43 is
+still parsed and dropped, and `Cell` is already a tagged variant so the renderer
+can dispatch on `kind` when PS lands); MF orders (parsed, counted as
+`modifyFieldIgnored`, never applied — TK5's ISPF sends zero of them); mouse
+support; the Electron GUI (stage 3); the web front end; and TN3270E (stage 2b).
 
 **IND$FILE FILE TRANSFER WORKS ON BOTH HOSTS, both directions** — MVS/TSO 2026-08-18,
 VM/CMS 2026-08-19 (see the following paragraph). See
