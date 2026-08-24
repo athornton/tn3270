@@ -613,3 +613,55 @@ describe('orders that null characters also reset those characters attributes', (
     expect(s.cellAt(0).fg).toBe(Colour.RED);
   });
 });
+
+describe('rewriting a cell in one record takes the LATER running state', () => {
+  /**
+   * Task 15's mutation pass prescribed this test, and it is worth having -- but
+   * NOT for the reason the plan gave, and the difference is the finding.
+   *
+   * The plan predicted that swapping `applySa` and `setChar` in the `'data'` case
+   * would survive mutation, and said to close the hole by writing a cell twice
+   * with different SA state between the writes. It does survive. But the test
+   * below CANNOT close it, because the mutant is EQUIVALENT rather than merely
+   * uncovered: `setChar` writes `chars[]` and the field-attribute marker and
+   * "deliberately does NOT touch fgs/bgs/grs" (screen.ts:228-231), while
+   * `applySa` writes only those three planes. The two statements touch disjoint
+   * state, so they commute, and NO test can distinguish the orderings.
+   *
+   * Verified rather than reasoned: this test passes with the pristine code AND
+   * with the two lines swapped. Writing it as the plan intended -- and recording
+   * it as having closed the hole -- would have been a fifth instance of the trap
+   * this project keeps hitting, a test that names a rule it never reaches.
+   *
+   * What it DOES pin is real and previously unpinned: the second write of the
+   * same address wins, for the character and the colour together.
+   */
+  it('keeps the second write character AND colour, not a mix of the two', () => {
+    const s = run([
+      ...W, ...SBA0,
+      0x28, XA.FOREGROUND, Colour.RED,
+      0xc1,                                    // 'A' in red at address 0
+      ...SBA0,                                 // back to address 0
+      0x28, XA.FOREGROUND, Colour.BLUE,
+      0xc2,                                    // 'B' in blue over the top
+    ]);
+    expect(s.cellAt(0).fg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).ebcdic).toBe(0xc2);
+  });
+
+  it('clears a colour the earlier write set when the later one specifies none', () => {
+    // applySa calls clearExtended first, so an overwrite with empty running state
+    // must leave no colour behind. This is the assertion that would fail if
+    // applySa ever became additive.
+    const s = run([
+      ...W, ...SBA0,
+      0x28, XA.FOREGROUND, Colour.RED,
+      0xc1,
+      ...SBA0,
+      0x28, XA.RESET, 0x00,                    // reset the running state
+      0xc2,
+    ]);
+    expect(s.cellAt(0).fg).toBeUndefined();
+    expect(s.cellAt(0).ebcdic).toBe(0xc2);
+  });
+});

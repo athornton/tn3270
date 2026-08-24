@@ -39,8 +39,14 @@ interface SaState {
  * Every attribute type back to its default.
  *
  * `delete`, not `= 0`: absence means "unspecified", where 0x00 is a value the host
- * can legitimately set. See the note on SaState. Shared by the SA X'00' handler
- * and the plain-SF reset.
+ * can legitimately set. See the note on SaState.
+ *
+ * ONE CALLER, the SA X'00' handler. An earlier version of this comment also
+ * claimed "the plain-SF reset", which was true when written and is now wrong: the
+ * SF case deliberately leaves the running state alone (see the long note in the
+ * `'sf'` arm), because clearing character state on a field event conflates the two
+ * scopes. Left as a named function rather than inlined because the manual treats
+ * "all attribute types to their defaults" as one operation.
  */
 function resetSa(sa: SaState): void {
   delete sa.fg;
