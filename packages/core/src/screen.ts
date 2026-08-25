@@ -84,23 +84,51 @@ export interface ScreenSnapshot {
 }
 
 export interface ScreenOptions {
+  /** The DEFAULT (Erase/Write) size. The screen starts here. */
   rows?: number;
   cols?: number;
+  /**
+   * The ALTERNATE (Erase/Write Alternate) size. Defaults to the default size,
+   * which is what a model 2 has and what every caller predating alternate-size
+   * support means.
+   */
+  alternateRows?: number;
+  alternateCols?: number;
   codePage?: CodePage;
+}
+
+/** Rejects a geometry the buffer cannot be built from. */
+function checkGeometry(rows: number, cols: number): void {
+  if (!Number.isInteger(rows) || rows <= 0) {
+    throw new RangeError(`rows must be a positive integer, got ${rows}`);
+  }
+  if (!Number.isInteger(cols) || cols <= 0) {
+    throw new RangeError(`cols must be a positive integer, got ${cols}`);
+  }
 }
 
 /** Marker in the attribute array meaning "this position is not an attribute". */
 const NOT_ATTR = -1;
 
 export class Screen {
-  readonly rows: number;
-  readonly cols: number;
-  readonly size: number;
+  /**
+   * The CURRENT geometry, which Erase/Write and Erase/Write Alternate switch
+   * between. Mutable for that reason -- `cursor` above is public and mutable for
+   * the same one -- but only `resize` may write them.
+   */
+  rows = 0;
+  cols = 0;
+  size = 0;
   cursor = 0;
 
-  private readonly chars: Uint8Array;
+  /** The Erase/Write size. The screen starts here, as x3270's does (ctlr.c:341). */
+  readonly defaultSize: { readonly rows: number; readonly cols: number };
+  /** The Erase/Write Alternate size. Equal to `defaultSize` on a model 2. */
+  readonly alternateSize: { readonly rows: number; readonly cols: number };
+
+  private chars = new Uint8Array(0);
   /** attrs[i] >= 0 means position i holds that field attribute value. */
-  private readonly attrs: Int16Array;
+  private attrs = new Int16Array(0);
   /**
    * Extended attributes, one array each, parallel to `chars`.
    *
@@ -121,27 +149,68 @@ export class Screen {
    * is a different concept from `XAH.DEFAULT` being 0x00 as a highlighting
    * VALUE. Both being zero is a coincidence of encoding, not a shared meaning.
    */
-  private readonly fgs: Uint8Array;
-  private readonly bgs: Uint8Array;
-  private readonly grs: Uint8Array;
+  private fgs = new Uint8Array(0);
+  private bgs = new Uint8Array(0);
+  private grs = new Uint8Array(0);
   private readonly codePage: CodePage;
 
   constructor(opts: ScreenOptions = {}) {
-    this.rows = opts.rows ?? MODEL_2.rows;
-    this.cols = opts.cols ?? MODEL_2.cols;
-    if (!Number.isInteger(this.rows) || this.rows <= 0) {
-      throw new RangeError(`rows must be a positive integer, got ${this.rows}`);
-    }
-    if (!Number.isInteger(this.cols) || this.cols <= 0) {
-      throw new RangeError(`cols must be a positive integer, got ${this.cols}`);
-    }
-    this.size = this.rows * this.cols;
+    const rows = opts.rows ?? MODEL_2.rows;
+    const cols = opts.cols ?? MODEL_2.cols;
+    checkGeometry(rows, cols);
+    const altRows = opts.alternateRows ?? rows;
+    const altCols = opts.alternateCols ?? cols;
+    checkGeometry(altRows, altCols);
+    this.defaultSize = { rows, cols };
+    this.alternateSize = { rows: altRows, cols: altCols };
+    this.codePage = opts.codePage ?? cp037;
+    this.allocate(rows, cols);
+  }
+
+  // ---- size switching ----
+
+  /**
+   * Build the buffer at `rows` x `cols`, discarding whatever was there.
+   *
+   * Discarding is CORRECT rather than a shortcut: the only callers are
+   * Erase/Write and Erase/Write Alternate, both of which erase the screen as
+   * their defining act, so there is no surviving content a resize could be
+   * accused of losing.
+   */
+  private allocate(rows: number, cols: number): void {
+    this.rows = rows;
+    this.cols = cols;
+    this.size = rows * cols;
     this.chars = new Uint8Array(this.size);
     this.attrs = new Int16Array(this.size).fill(NOT_ATTR);
     this.fgs = new Uint8Array(this.size);
     this.bgs = new Uint8Array(this.size);
     this.grs = new Uint8Array(this.size);
-    this.codePage = opts.codePage ?? cp037;
+    this.cursor = 0;
+  }
+
+  /**
+   * Switch geometry, reporting whether anything actually changed.
+   *
+   * The return value is what lets a caller repaint only when it must: on a model
+   * 2 the default and alternate sizes are equal, so every Erase/Write Alternate
+   * in a whole session returns false and costs nothing.
+   */
+  resize(rows: number, cols: number): boolean {
+    checkGeometry(rows, cols);
+    if (rows === this.rows && cols === this.cols) return false;
+    this.allocate(rows, cols);
+    return true;
+  }
+
+  /** Erase/Write: back to the default size. */
+  useDefaultSize(): boolean {
+    return this.resize(this.defaultSize.rows, this.defaultSize.cols);
+  }
+
+  /** Erase/Write Alternate: to the alternate size. */
+  useAlternateSize(): boolean {
+    return this.resize(this.alternateSize.rows, this.alternateSize.cols);
   }
 
   /** Throws if `addr` is not an integer in [0, size). */

@@ -191,6 +191,12 @@ export interface ExecuteResult {
   alarm: boolean;
   /** WCC bit 4 asked for a local copy and we have no printer. */
   printerUnavailable: boolean;
+  /**
+   * The screen changed geometry, so a renderer must re-place everything rather
+   * than diff against a buffer of the wrong shape. False for a whole session on
+   * a model 2, where the default and alternate sizes are equal.
+   */
+  resized: boolean;
   /** How many structured fields we skipped, for the trace. */
   structuredFieldsIgnored: number;
   /**
@@ -228,6 +234,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     releasesEnterInhibit: false,
     alarm: false,
     printerUnavailable: false,
+    resized: false,
     structuredFieldsIgnored: 0,
     setAttributeIgnored: 0,
     modifyFieldIgnored: 0,
@@ -308,10 +315,19 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       }
       return result;
 
+    // EW and EWA are THE screen-size switch, and nothing to do with TN3270E --
+    // x3270 does it at `ctlr.c:558-561`, `newROWS = altROWS` against
+    // `newROWS = defROWS`, with no reference to the telnet option. On a model 2
+    // the two sizes are equal, so both still clear the same buffer and `resized`
+    // stays false for the whole session.
     case 'EraseWrite':
+      result.resized = screen.useDefaultSize();
+      screen.clear();
+      result.releasesEnterInhibit = true;
+      break;
+
     case 'EraseWriteAlternate':
-      // On a model 2 the alternate size equals the default, so both clear the
-      // same buffer. TN3270E gives them different behavior.
+      result.resized = screen.useAlternateSize();
       screen.clear();
       result.releasesEnterInhibit = true;
       break;
