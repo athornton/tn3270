@@ -107,6 +107,12 @@ any realistic palette, blue and turquoise both fall nearest to cyan and would co
 | 4 | 43×80 |
 | 5 | 27×132 |
 
+**Pick the model your host's device is defined as.** The host does not adapt to us:
+VM/370 takes a display's geometry from its own DMKRIO configuration, so a device
+defined there as a 3278-4 is sent 43 rows whatever we advertise — and a model-2 client
+on that device ends up with a locked keyboard and no fields rather than a small screen.
+Verified live; see `docs/live-testing.md`.
+
 **The model does not change the screen you get on connect.** Every model's *default*
 size is 24×80; the model number sets the *alternate* size, and the host switches between
 them with Erase/Write and Erase/Write Alternate. So `-model 3278-4` starts at 24×80 and
