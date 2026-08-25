@@ -32,11 +32,13 @@ things that cost time, in `docs/live-testing.md` under *TUI and colour results*.
 in that map at all, so they came from the host's SA/SFE attributes. The fixture
 replay still reproduces its own numbers exactly, so resolution has not moved.
 
-**⚠️ HERC01, HERC02 and HERC03 ARE STILL LOGGED ON** and answer `IKJ56425I LOGON
-REJECTED, USERID ... IN USE`. Early harness runs had no teardown and quitting the
-TUI does not log off, so each failure stranded one. **They need an operator
-`C U=HERCnn` on the MVS console — nothing a TN3270 client can do will clear them.**
-**Use HERC04**, which is confirmed free.
+**All four TK5 userids are free.** HERC01-03 were stranded by early harness runs
+(quitting the TUI does not log off, and the harness had no teardown yet) and **the
+user cleared them from the MVS console on 2026-08-25** — nothing reachable from a
+TN3270 client can do it, so that remains the recovery route if it happens again.
+The teardown now always runs on a failed flow, and the TK5 flow has since been
+**reproduced three times, 8 of 8 steps each, on HERC04, HERC01 and HERC02, with the
+userid verified free after every run.**
 
 **Two harnesses, both reusable:**
 

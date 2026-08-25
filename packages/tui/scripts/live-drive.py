@@ -351,8 +351,18 @@ def main():
     # -- which is exactly what stranded HERC03. PF3 IS the END command and works from
     # any ISPF panel. Then Clear, because at MORE... the host silently eats input and
     # would swallow the LOGOFF itself.
+    #
+    # ONLY ON FAILURE. When the flow ran to completion its own last step already
+    # confirmed the logoff, and running the teardown anyway typed PF3/LOGOFF into
+    # the post-logoff VTAM panel -- which disturbed the screen and made the CHECK
+    # fail, so a fully successful run reported `logoff NOT confirmed`. That is worse
+    # than useless: the accounts were genuinely free (verified independently), so the
+    # flag was training the reader to ignore it.
     logged_off = False
-    if step >= 3:                            # got as far as sending a password
+    if step == len(steps):
+        logged_off = True
+        transcript.append("  teardown: not needed, the flow logged off itself")
+    elif step >= 3:                          # got as far as sending a password
         for keys in (PF3, PF3, CR, CTRL_C, b"LOGOFF" + CR, CR):
             os.write(main_fd, keys)
             drain(2.5)

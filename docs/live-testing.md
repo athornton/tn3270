@@ -911,15 +911,30 @@ looks like a real negative result — and parsing SGR parameters naively will re
    "Enter END command to terminate ISPF" and stays; the teardown now sends PF3,
    which IS END and works from any panel.
 
-### THREE TK5 USERIDS ARE STILL HELD — an operator must clear them
+### The TK5 flow, reproduced three times — and a stranding that has been cleared
 
-**HERC01, HERC02 and HERC03 are logged on** and answer `IKJ56425I LOGON REJECTED,
-USERID ... IN USE`. Quitting the TUI does **not** log off, and early runs of the
-harness had no teardown, so each failed run stranded one. They need a console
-`C U=HERCnn` (or a TK5 restart); nothing reachable from a TN3270 client will clear
-them, and they did not time out over the session.
+**Reproduced 8 of 8 steps on HERC04, then HERC01, then HERC02**, identical each time
+including "drained after 3 Enter(s)", and **the userid was verified free after every
+run** by a separate logon that got the password prompt rather than `IN USE`. So the
+clean logoff is a property of the flow, not a lucky run.
 
-**HERC04 is free** and is the one to use. The harness now always attempts a logoff
-when it got as far as sending a password, and reports `logoff CONFIRMED` or not — do
-not trust a run that says otherwise. The same discipline as
-`record-mvs.txt`'s mandatory `LOGOFF`, which this ignored at first and paid for.
+**HERC01, HERC02 and HERC03 were stranded** by the earliest runs — quitting the TUI
+does not log off, and the harness had no teardown yet, so each failure held one. They
+answered `IKJ56425I LOGON REJECTED, USERID ... IN USE`, did not time out over the
+session, and **the user cleared them from the MVS console on 2026-08-25**. Nothing
+reachable from a TN3270 client will clear them, so that console is the recovery route
+if it happens again. All four userids are free as of that clearing.
+
+The harness now always attempts a logoff when it got as far as sending a password.
+
+**And a reporting bug fixed in the same pass, because it was actively misleading:**
+the teardown used to run even on a fully successful flow, typing PF3/LOGOFF into the
+already-post-logoff VTAM panel; that disturbed the screen, its own check then failed,
+and the run printed `logoff NOT confirmed` **on runs where the account was
+independently verified free**. A flag that cries wolf on success trains the reader to
+ignore it, which is worse than not having it. The teardown is now skipped when the
+flow completed, since the flow's last step already confirms the logoff.
+
+Once it stopped disturbing that final screen, the post-logoff VTAM panel showed **five
+foreground colours** of its own — blue 332, white 124, red 113, neutral-white 93,
+yellow 32 — a second live screen exceeding the four-colour default map.

@@ -572,10 +572,17 @@ an escape sequence splits across reads; TSO has THREE more-output prompts, not t
 `CMS` because it matches `CMSUSER`; and `X` only exits ISPF from the Option field,
 where PF3 works anywhere.
 
-**And a cost worth remembering: three TK5 userids are stranded.** Quitting the TUI
-does not log off, and the harness had no teardown at first, so each failed run held
-one. HERC01/02/03 need an operator `C U=HERCnn`. The teardown now always runs and
-reports whether it confirmed the logoff.
+**A cost worth remembering: three TK5 userids were stranded.** Quitting the TUI does
+not log off, and the harness had no teardown at first, so each failed run held one.
+HERC01/02/03 needed an operator `C U=HERCnn`, which the user did on 2026-08-25; no
+TN3270 client can clear them. The teardown now always runs on a failed flow, and the
+TK5 flow has since been **reproduced three times, 8/8 each, with the userid verified
+free after every run**.
+
+**The teardown's own report was misleading and is fixed.** It ran even on success,
+typing into the already-post-logoff panel, breaking its own check and printing
+`logoff NOT confirmed` on runs whose accounts were independently free. A flag that
+cries wolf on success is worse than no flag.
 
 The `zti` comparison is **PARTIAL** and labelled as such: established that zti uses
 24-bit truecolor with its own palette, NOT established that every cell agrees with
