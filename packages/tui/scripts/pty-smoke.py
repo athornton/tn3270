@@ -149,6 +149,12 @@ def main():
     pid = os.fork()
     if pid == 0:
         os.setsid()
+        # TIOCSCTTY IS REQUIRED FOR SIGWINCH TO ARRIVE. After setsid() the child has
+        # no controlling terminal, and dup2()-ing an fd the PARENT opened does not
+        # give it one -- so the kernel has nowhere to send window-change signals and
+        # TIOCSWINSZ on the master silently does nothing to the child. The resize
+        # checks below failed for exactly this reason, looking like a client bug.
+        fcntl.ioctl(child_fd, termios.TIOCSCTTY, 0)
         os.dup2(child_fd, 0)
         os.dup2(child_fd, 1)
         os.dup2(child_fd, 2)
@@ -184,13 +190,65 @@ def main():
             attrs = termios.tcgetattr(main_fd)
             raw_seen = not (attrs[3] & termios.ECHO)
             os.write(main_fd, b"XYZ")        # type into the unprotected field
-            time.sleep(0.5)
-            os.write(main_fd, b"\x1d")       # Ctrl-] quits
             typed = True
-        if typed and b"\x1b[?1049l" in bytes(captured):
+            time.sleep(0.8)
+        # DO NOT QUIT HERE. An earlier version sent Ctrl-] immediately after typing,
+        # which meant the resize checks below ran against an already-dead client and
+        # reported two honest-looking failures about a feature they never exercised.
+        # The quit happens after those checks.
+        if typed and b"XYZ" in bytes(captured):
             break
 
-    time.sleep(0.4)
+    # RESIZE, end to end. Setting the window size on the master delivers a real
+    # SIGWINCH to the child's process group, which is the one part of the resize
+    # feature no unit test can reach: the signal itself.
+    resize_msg = resize_repaint = False
+    if typed:
+        def winsize(rows, cols):
+            fcntl.ioctl(main_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+        def sip(seconds):
+            got = bytearray()
+            end2 = time.time() + seconds
+            while time.time() < end2:
+                r, _, _ = select.select([main_fd], [], [], 0.3)
+                if not r:
+                    continue
+                try:
+                    d = os.read(main_fd, 65536)
+                except OSError:
+                    break
+                if not d:
+                    break
+                got += d
+            return bytes(got)
+
+        winsize(20, 80)                      # below the 24-row minimum
+        shrunk = sip(2.0)
+        resize_msg = b"too small" in shrunk
+        winsize(25, 80)                      # back to room for the OIA
+        grown = sip(2.5)
+        # A full repaint must follow, and the OIA must reappear on row 25.
+        resize_repaint = b"HELLO TN3270" in grown and b"\x1b[25;1H" in grown
+        captured += shrunk + grown
+
+    os.write(main_fd, b"\x1d")               # Ctrl-] quits
+    # Read what the quit produced. The loop above used to break on seeing the
+    # alternate-buffer exit, so it was captured for free; now that the quit happens
+    # here, it has to be drained explicitly or the teardown assertions see nothing.
+    end3 = time.time() + 2.0
+    while time.time() < end3:
+        r, _, _ = select.select([main_fd], [], [], 0.3)
+        if not r:
+            continue
+        try:
+            d = os.read(main_fd, 65536)
+        except OSError:
+            break
+        if not d:
+            break
+        captured += d
+    time.sleep(0.3)
     _, status = os.waitpid(pid, os.WNOHANG)
     after = termios.tcgetattr(main_fd)
     out = bytes(captured)
@@ -206,6 +264,8 @@ def main():
         ("emitted a 256-colour SGR", re.search(rb"\x1b\[[\d;]*38;5;\d+", out) is not None),
         ("echoed the typed characters back to the screen", b"XYZ" in out),
         ("drew a status line", b"\x1b[25;1H" in out),
+        ("said 'too small' when shrunk below 24 rows", resize_msg),
+        ("repainted in full, with the OIA back, when regrown", resize_repaint),
     ]
 
     print(f"terminal type the host saw: {host.ttype!r}")

@@ -589,47 +589,77 @@ The `zti` comparison is **PARTIAL** and labelled as such: established that zti u
 ours, because its tally spans its own chrome and comparing properly needs its curses
 screen reconstructed too.
 
+## SIGWINCH — CLOSED 2026-08-25, and it moved the minimum geometry
+
+Recorded first as a gap needing a decision, then decided and implemented. **The
+decision was to follow c3270: the 3270 screen is mandatory, the OIA is not.**
+
+Checking the reference before choosing is what made this worth doing, because it
+exposed something the gap note had not: **we were STRICTER THAN c3270 and rejected an
+80x24 terminal outright.** c3270 errors only when the SCREEN will not fit
+(`c3270/screen.c:412-419`, "minimum 24x80") and simply drops the status line when
+there is no room (`set_status_row`, `screen.c:895`:
+`if (screen_rows < emulator_rows + 1) { status_row = status_skip = 0; }`, its menubar
+degrading the same way, "2 rows, 1 in a pinch"). 80x24 is the commonest terminal size
+in existence and we refused to start in it, for no protocol reason.
+
+What shipped, TDD throughout: `tooSmall` drops the `+ 1`; a new `statusRowFor`
+returns the OIA's row or `undefined`; `TerminalRenderer` takes a `statusRow` plus a
+`setStatusRow` that invalidates on change; and `App` registers `SIGWINCH`, re-reads
+`stdout.rows/columns` per signal, and **suspends** below the minimum -- painting stops
+with a message and resumes on growth. Clipping was rejected outright: the 1920 cells
+are the HOST'S data and silently hiding some is worse than visibly refusing to draw.
+
+Worth knowing: c3270 has **no dynamic re-layout at all** (no `KEY_RESIZE`, no
+`resizeterm`; layout is computed once in `screen_init`), and its lone
+`signal(SIGWINCH, SIG_IGN)` at `screen.c:886` is conditional on `C3270_80_132`,
+guarding against signals its own 80/132 switching causes. So we now handle resize
+*better* than the reference, having adopted its apportionment rule.
+
+**Three mutants survived the first sweep, and all three were instructive:**
+
+1. **No `invalidate()` on resume from suspension** survived, because the existing
+   resume test happened to have a screen change to emit. The requirement is
+   independent of the 3270 screen: the TERMINAL was overwritten by the too-small
+   message, so the remembered screen is a lie about what the user can see. The new
+   test resumes with the screen unchanged.
+2. **Removing the no-change SIGWINCH guard** survived, because while RUNNING it emits
+   nothing either way. Only the SUSPENDED case can pin it -- without the guard every
+   spurious signal rewrites the message and re-clears the terminal. The new test
+   fires three identical signals while suspended.
+3. **Updating `previousStatus` when no status is drawn** survived and is genuinely
+   unpinnable: the only route from no-row to row is `setStatusRow`, which invalidates,
+   and `invalidate` already clears `previousStatus`. The comment claiming that
+   mechanism was corrected rather than a vacuous test written to defend it.
+
+**And two bugs in my own harness, both of which accused the client first.** The
+end-to-end resize check now lives in `pty-smoke.py` (12 checks, all passing), but it
+reported two honest-looking failures until:
+
+- **`TIOCSCTTY` was missing.** After `setsid()` the child has no controlling terminal,
+  and `dup2`-ing an fd the PARENT opened does not give it one -- so `TIOCSWINSZ` on the
+  master delivered no signal at all. **A resize test that cannot deliver SIGWINCH tests
+  nothing**, and it looked exactly like a client that ignores resizes.
+- The quit was still sent immediately after typing, so the resize checks ran against an
+  already-dead client.
+
+Same shape as the trace probe that lacked `Trace(on)`: a probe that reports absence
+must first be shown able to report presence.
+
 ## Where to resume
 
-**Nothing in this plan. Task 14 is done** -- the note below is kept for whoever runs
-these hosts next.
+**Nothing in this plan. All sixteen tasks are done, and so is the SIGWINCH gap that
+was found after them.** The notes below are for whoever drives these hosts next.
 
-**When you next need both Hercules systems IPLed** (VM/370 on 3270,
-TK5 on 3271). `ss`/`netstat` show nothing in this sandbox — probe with
-`/dev/tcp/127.0.0.1/PORT`. Read the VM reconnect trap in `docs/HANDOFF.md` first:
-an account left logged on is reconnected, not refused, landing at `CP READ` where
-every command goes to CP. Then `docs/live-testing.md` gains a *TUI and colour
-results* section, and **record what did not work too**.
+**When you next need both Hercules systems IPLed** (VM/370 on 3270, TK5 on 3271) —
+the user does that by hand. `ss`/`netstat` show nothing in this sandbox, so probe with
+`/dev/tcp/127.0.0.1/PORT`. Read the VM reconnect trap in `docs/HANDOFF.md` first: an
+account left logged on is reconnected, not refused, landing at `CP READ` where every
+command goes to CP. Use `packages/tui/scripts/live-drive.py` rather than starting from
+scratch, and **record what did not work too** — the *TUI and colour results* section of
+`docs/live-testing.md` is where that goes, and its list of six self-inflicted failures
+is the most useful part of it.
 
-## A GAP THE PLAN DID NOT COVER: SIGWINCH IS NOT HANDLED
+**When Hercules is down**, `packages/tui/scripts/pty-smoke.py` covers the same ground
+host-free: 12 checks including raw-mode teardown and the resize behaviour.
 
-Found while checking for dead API at the end of the run, and left UNFIXED
-deliberately, because it needs a decision rather than a patch.
-
-`TerminalRenderer.invalidate()` is documented "Force the next paint to redraw
-everything, **e.g. after a terminal resize**" and is called exactly once, in
-`App.start()`. **Nothing listens for `SIGWINCH`.** So resizing the window leaves
-the renderer's `previous` array describing the old geometry: the screen stays
-stale until the host happens to write again, and every cursor-position escape is
-computed from `this.cols`, which never changes.
-
-Note this is NOT the 3270 mid-session resize already recorded as deferred in
-`HANDOFF.md` — that is a protocol question about alternate screen sizes. This is
-purely about the terminal window, and the repaint half is already built.
-
-**It is not a one-line fix, which is why it is a note and not a commit.** Three
-things need deciding together:
-
-1. On growth, `invalidate()` and repaint is right and easy.
-2. On shrink below `screen.rows + 1` or `screen.cols`, `start()`'s rule is to
-   REFUSE — but refusing mid-session cannot mean throwing, because the session is
-   live and the host is mid-conversation. Probably: stop painting, show a
-   "terminal too small" message, and resume when it grows back. That is new
-   behaviour with its own tests, not a wiring change.
-3. `App` currently takes `stdout.rows/columns` once, in `start()`. It would need
-   to re-read them per resize, which means the geometry stops being effectively
-   readonly and `tooSmall` gets a second caller with different consequences.
-
-The `pty-smoke.py` harness already sets the window size with `TIOCSWINSZ`, so it
-is the natural place to test this: resize the pty mid-session and assert a full
-repaint arrives.

@@ -51,6 +51,13 @@ userid verified free after every run.**
   a local minimal TN3270 server, ten checks including **ECHO restored on the tty
   after exit**. Use it when Hercules is down; exit 0 means all ten held.
 
+**Terminal geometry, changed 2026-08-25:** the minimum is now **24x80, not 25x80**,
+matching c3270 -- the 3270 screen is mandatory and the OIA is optional, so an 80x24
+terminal runs with no status line instead of being refused. **SIGWINCH is handled**:
+the client re-measures, repaints in full, and below the minimum suspends with a
+message rather than clipping, resuming when the terminal grows. Verified end to end
+with a real signal in `pty-smoke.py`.
+
 **Still not done, deliberately:** Programmable Symbol Sets (`XA.CHARSET` 0x43 is
 still parsed and dropped, and `Cell` is already a tagged variant so the renderer
 can dispatch on `kind` when PS lands); MF orders (parsed, counted as

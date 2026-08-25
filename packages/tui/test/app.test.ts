@@ -32,9 +32,12 @@ class FakeStdin implements InputStream {
 
 class FakeStdout implements OutputStream {
   written: string[] = [];
-  constructor(public readonly rows = 25, public readonly columns = 80) {}
+  // Mutable, because a terminal resize is exactly a change to these two numbers
+  // and App must re-read them rather than caching them at start().
+  constructor(public rows = 25, public columns = 80) {}
   write(text: string): void { this.written.push(text); }
   get all(): string { return this.written.join(''); }
+  resize(rows: number, columns: number): void { this.rows = rows; this.columns = columns; }
 }
 
 class FakeHost implements HostProcess {
@@ -74,21 +77,129 @@ function cellText(session: Session, index: number): string {
 const ALT_ON = '\x1b[?1049h';
 const ALT_OFF = '\x1b[?1049l';
 
-describe('refusing a terminal that is too small', () => {
-  it('throws rather than drawing a misleading partial screen', () => {
-    const h = harness(24, 80);   // 24 rows: no room for the status line
-    expect(() => h.app.start()).toThrow(/needs at least 80x25/);
+describe('the minimum geometry, which now matches c3270', () => {
+  it('RUNS in a terminal with no room for the OIA, rather than refusing', () => {
+    // 80x24 is the commonest terminal size there is, and we used to refuse it. The
+    // screen is mandatory, the OIA is not -- c3270/screen.c:895 drops the status
+    // line the same way. This is the behaviour change the relaxed tooSmall exists
+    // for, asserted at the App level because that is where a user meets it.
+    const h = harness(24, 80);
+    expect(() => h.app.start()).not.toThrow();
+    expect(h.stdin.raw).toBe(true);
+    expect(h.stdout.all).toContain(ALT_ON);
+  });
+
+  it('draws no status line when there is no room for one', () => {
+    const h = harness(24, 80);
+    h.app.start();
+    expect(h.stdout.all).not.toContain('\x1b[25;1H');
+  });
+
+  it('still refuses a terminal that cannot hold the screen itself', () => {
+    expect(() => harness(23, 80).app.start()).toThrow(/needs at least 80x24/);
+    expect(() => harness(24, 79).app.start()).toThrow(/needs at least 80x24/);
   });
 
   it('does NOT enter raw mode or the alternate buffer when it refuses', () => {
     // The refusal must not itself wreck the terminal: if raw mode were entered
-    // before the geometry check, a user who ran this in an 80x24 window would get
-    // an exception AND a terminal with no echo, and the exception would be the
-    // less serious half of that.
-    const h = harness(24, 80);
+    // before the geometry check, a user in too small a window would get an
+    // exception AND a terminal with no echo, and the exception would be the less
+    // serious half of that.
+    const h = harness(23, 80);
     expect(() => h.app.start()).toThrow();
     expect(h.stdin.rawCalls).toEqual([]);
     expect(h.stdout.all).not.toContain(ALT_ON);
+  });
+});
+
+describe('terminal resize (SIGWINCH)', () => {
+  it('registers a SIGWINCH handler', () => {
+    const h = harness();
+    h.app.start();
+    expect(h.host.handlers.get('SIGWINCH')?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('repaints in full when the terminal grows', () => {
+    // Every cursor address the diff remembers was computed for the old layout, so
+    // a resize must invalidate rather than diff across it.
+    const h = harness(24, 80);
+    h.app.start();
+    h.session.keyboard.typeString('AB');
+    const before = h.stdout.written.length;
+    h.stdout.resize(30, 80);
+    h.host.fire('SIGWINCH');
+    const emitted = h.stdout.written.slice(before).join('');
+    expect(emitted).toContain('AB');            // full repaint, not an empty diff
+    expect(emitted).toContain('\x1b[25;1H');    // and the OIA now has a home
+  });
+
+  it('stops painting and says why when the terminal shrinks below the screen', () => {
+    const h = harness(30, 80);
+    h.app.start();
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.all.toLowerCase()).toContain('too small');
+    const after = h.stdout.written.length;
+    h.session.keyboard.typeString('XYZ');
+    h.app.onInput(Uint8Array.from([0x41]));
+    // Suspended: no 3270 cells may be painted into a terminal that cannot hold
+    // them, because a clipped screen silently hides the host's data.
+    expect(h.stdout.written.length).toBe(after);
+  });
+
+  it('resumes with a full repaint when the terminal grows back', () => {
+    const h = harness(30, 80);
+    h.app.start();
+    h.session.keyboard.typeString('AB');
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    const before = h.stdout.written.length;
+    h.stdout.resize(30, 80);
+    h.host.fire('SIGWINCH');
+    const emitted = h.stdout.written.slice(before).join('');
+    expect(emitted).toContain('AB');
+  });
+
+  it('repaints on resume even when the 3270 screen did not change', () => {
+    // Found by mutation: dropping `if (wasSuspended) invalidate()` left every test
+    // green, because the earlier resume test happened to have a screen change to
+    // emit. The requirement is independent of the 3270 screen -- the TERMINAL was
+    // overwritten by the too-small message, so the remembered screen is a lie about
+    // what the user can see, and only a full repaint fixes it.
+    const h = harness(30, 80);
+    h.app.start();
+    h.session.keyboard.typeString('AB');
+    h.app.onInput(Uint8Array.from([0x1b, 0x5b, 0x43]));   // right arrow, forces a draw
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    const before = h.stdout.written.length;
+    h.stdout.resize(30, 80);                              // grow back, screen unchanged
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.written.slice(before).join('')).toContain('AB');
+  });
+
+  it('does not repeat the too-small message on a spurious SIGWINCH', () => {
+    // Also found by mutation: the no-change guard emits nothing either way while
+    // RUNNING, so only the suspended case can pin it -- without the guard, every
+    // spurious signal rewrites the message and clears the terminal again, which
+    // flickers indefinitely on terminals that emit them freely.
+    const h = harness(30, 80);
+    h.app.start();
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    const after = h.stdout.written.length;
+    h.host.fire('SIGWINCH');
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.written.length).toBe(after);
+  });
+
+  it('ignores a SIGWINCH that did not actually change the size', () => {
+    // Terminals emit these; a full repaint per spurious signal would flicker.
+    const h = harness();
+    h.app.start();
+    const before = h.stdout.written.length;
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.written.length).toBe(before);
   });
 });
 

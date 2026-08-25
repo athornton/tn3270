@@ -23,7 +23,7 @@
 
 import { AID, PA_AIDS, PF_AIDS, resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
-import { TerminalRenderer, tooSmall } from './render.js';
+import { statusRowFor, TerminalRenderer, tooSmall } from './render.js';
 import { lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action } from './keymap.js';
 
 /** How long to wait before deciding a lone ESC really was Escape. */
@@ -68,6 +68,20 @@ export class App {
   private buffer: number[] = [];
   private escTimer: ReturnType<typeof setTimeout> | undefined;
   private restored = false;
+  /** Last terminal size acted on, so a no-change SIGWINCH costs nothing. */
+  private termRows = -1;
+  private termCols = -1;
+  /**
+   * True while the terminal is too small to draw the screen.
+   *
+   * A live session cannot answer a mid-session shrink the way `start()` answers a
+   * too-small launch -- throwing would abandon a connection the host thinks is
+   * open. So painting STOPS instead, with a message saying why, and resumes when
+   * the terminal grows back. Clipping to fit is deliberately not an option: the
+   * 1920 cells are the host's data and silently hiding some of them is worse than
+   * visibly refusing to draw.
+   */
+  private suspended = false;
   /**
    * Set once a quit is in flight.
    *
@@ -86,24 +100,30 @@ export class App {
     this.stdout = opts.stdout;
     this.host = opts.host;
     this.mode3279 = opts.mode3279 ?? true;
+    const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
     this.renderer = new TerminalRenderer({
-      rows: this.session.screen.rows,
-      cols: this.session.screen.cols,
+      ...screen,
       depth: opts.depth ?? detectDepth(),
+      statusRow: statusRowFor(this.terminal(), screen),
     });
+  }
+
+  /** The terminal's CURRENT size. Re-read every time, never cached. */
+  private terminal(): { rows: number; cols: number } {
+    return { rows: this.stdout.rows ?? 0, cols: this.stdout.columns ?? 0 };
   }
 
   /** Enter raw mode, register teardown, and start drawing. */
   start(): void {
-    const term = { rows: this.stdout.rows ?? 0, cols: this.stdout.columns ?? 0 };
+    const term = this.terminal();
     const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
     if (tooSmall(term, screen)) {
       // Refuse rather than draw a misleading partial screen -- the same choice
       // Transfer() makes when the geometry is wrong. Thrown BEFORE raw mode is
       // entered, so a refusal cannot itself wreck the terminal.
       throw new Error(
-        `terminal is ${term.cols}x${term.rows}; a ${screen.cols}x${screen.rows} ` +
-        `screen plus its status line needs at least ${screen.cols}x${screen.rows + 1}`,
+        `terminal is ${term.cols}x${term.rows}; the 3270 screen ` +
+        `needs at least ${screen.cols}x${screen.rows}`,
       );
     }
 
@@ -124,6 +144,9 @@ export class App {
       this.host.on(sig, () => bail());
     }
 
+    this.termRows = term.rows;
+    this.termCols = term.cols;
+    this.host.on('SIGWINCH', () => this.onResize());
     this.session.on('screen', () => this.draw());
     this.session.on('disconnect', () => { this.draw(); });
     this.stdin.on('data', (b: Uint8Array) => this.onInput(b));
@@ -146,10 +169,44 @@ export class App {
     this.stdin.pause();
   }
 
+  /**
+   * Re-measure after a terminal resize and repaint, suspend, or resume.
+   *
+   * The diff CANNOT survive a resize: every cursor address in the renderer's
+   * remembered screen was computed against the old layout, so `setStatusRow`
+   * invalidates whenever the OIA's home changes, and coming back from suspension
+   * invalidates explicitly -- there the remembered screen may be unchanged while
+   * the terminal has been overwritten by the too-small message.
+   */
+  private onResize(): void {
+    if (this.quitting || this.restored) return;
+    const term = this.terminal();
+    if (term.rows === this.termRows && term.cols === this.termCols) return;
+    this.termRows = term.rows;
+    this.termCols = term.cols;
+
+    const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
+    if (tooSmall(term, screen)) {
+      this.suspended = true;
+      this.stdout.write(
+        `\x1b[2J\x1b[1;1Hterminal too small: the 3270 screen needs ` +
+        `${screen.cols}x${screen.rows}, this terminal is ${term.cols}x${term.rows}. ` +
+        `Resize to continue.`,
+      );
+      return;
+    }
+
+    const wasSuspended = this.suspended;
+    this.suspended = false;
+    this.renderer.setStatusRow(statusRowFor(term, screen));
+    if (wasSuspended) this.renderer.invalidate();
+    this.draw();
+  }
+
   private draw(): void {
     // Nothing may be painted once the terminal has been handed back; see the
-    // note on `quitting`.
-    if (this.quitting || this.restored) return;
+    // note on `quitting`. Nor while suspended -- see that field.
+    if (this.quitting || this.restored || this.suspended) return;
     const cells = resolve(this.session.screen.snapshot(), { mode3279: this.mode3279 });
     const out = this.renderer.paint(cells, this.session.screen.cursor, this.session.oia.toText());
     if (out !== '') this.stdout.write(out);
