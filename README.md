@@ -12,7 +12,7 @@ cannot tell it from the hardware.
 
 **Status: there is a working terminal client.** The protocol core, an
 s3270-compatible scripting CLI, extended data stream with Query Reply, 3279 colour,
-`IND$FILE` file transfer and a c3270-style TUI are all done and verified against two
+`IND$FILE` file transfer, TLS and a c3270-style TUI are all done and verified against two
 live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See *What is not
 implemented* below, which is the honest part of this file.
 
@@ -63,7 +63,7 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 952 tests, 34 files
+npm test           # 1006 tests, 36 files
 npm run typecheck
 ```
 
@@ -226,20 +226,31 @@ Done:
 3. **`IND$FILE`** (CUT mode), both hosts, both directions.
 4. **3279 colour and the TUI** — per-cell extended attributes, four-level colour
    resolution, terminfo-driven depth detection, and a c3270-style front end.
+5. **TLS** — and it did jump the queue, for the reason earlier drafts of this section
+   predicted: a 3270 client that cannot do TLS is unusable against anything modern.
+   **On by default**, with `-cafile`, `-noverifycert` and `-insecure`; s3270's option
+   spellings with its default inverted. Verified against both hosts through an in-repo
+   TLS proxy, since neither Hercules system can speak it. Client certificates,
+   `-accepthostname` and negotiated `START_TLS` are **not** done — see *What is not
+   implemented*.
 
 Remaining, in the order the author wants it:
 
-5. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS subnegotiation,
+6. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS subnegotiation,
    the data header, BIND/UNBIND, SNA responses, device-name (LU) selection. Separated
    from item 2 deliberately: measurement shows TSO needs neither the option nor any of
    this, so bundling them would have delayed a working TSO session for no benefit.
-6. **Electron GUI**, then **a webserver serving the same front end**.
-7. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
+7. **Electron GUI**, then **a webserver serving the same front end**.
+8. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
    earlier drafts of the spec assumed.
-8. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux,
-   **TLS**, and **printer sessions**. TLS may well deserve to jump the queue — a 3270
-   client that cannot do TLS is unusable against anything modern.
+9. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
+   **printer sessions**.
+
+**In flight, not on `main`:** alternate screen sizes and models 3, 4 and 5 are complete
+and live-verified on the `alternate-screen-size` branch, which is pushed but unmerged.
+Adding screen sizes turned out not to be part of TN3270E at all — the geometry rides in
+the terminal-type string — so it does not depend on item 6.
 
 ### Graphics: the fidelity target, and why GDDM is not the route
 
@@ -327,13 +338,14 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 952 tests, 34 files |
+| `npm test` | **pass** — 1006 tests, 36 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
 | TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
+| TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last
