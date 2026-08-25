@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolveTerminalType, TerminalTypeError } from '@tn3270/core';
 import { Runner, defaultSession } from './runner.js';
+import { takeTlsFlag, resolveTls, type TlsFlags, type TlsOptions } from './tls.js';
 import { parseCommand } from './commands.js';
 import type { TransferFiles } from './transfer.js';
 
@@ -16,6 +17,8 @@ export class UsageError extends Error {
 export interface CliArgs {
   model?: string;
   terminalType?: string;
+  /** How the socket is made. Absent only before `resolveTls` has run. */
+  tls?: TlsOptions;
 }
 
 /**
@@ -33,9 +36,15 @@ export interface CliArgs {
  */
 export function parseArgs(argv: readonly string[]): CliArgs {
   const args: CliArgs = {};
+  const tlsFlags: TlsFlags = {};
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const value = argv[i + 1];
+    const eaten = takeTlsFlag(tlsFlags, flag, value, (m) => new UsageError(m));
+    if (eaten !== undefined) {
+      i += eaten;
+      continue;
+    }
     switch (flag) {
       case '-model':
         if (value === undefined) throw new UsageError('-model needs a value, e.g. -model 3278-2-E');
@@ -51,6 +60,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
     }
   }
+  args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
   return args;
 }
 
@@ -94,8 +104,11 @@ async function main(): Promise<void> {
   // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2
   // the telnet layer would have defaulted to on its own.
   const args = parseArgs(process.argv.slice(2));
-  const session = defaultSession(resolveTerminalType(args));
-  const runner = new Runner(session, { files: nodeTransferFiles });
+  const session = defaultSession(resolveTerminalType(args), args.tls);
+  const runner = new Runner(session, {
+    files: nodeTransferFiles,
+    tlsEnabled: args.tls?.kind !== 'plaintext',
+  });
 
   const rl = createInterface({ input: process.stdin, terminal: false });
 

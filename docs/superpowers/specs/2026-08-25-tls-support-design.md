@@ -164,9 +164,16 @@ and the four rows of the hang table, turned into tests:
 - **an idle session survives longer than the handshake deadline** — this is the
   `setTimeout(0)` regression test, and it is the one a reasonable implementer would skip
 
-Live, deferred to September: the proxy in front of VM/CE, driven by
-`packages/tui/scripts/live-drive.py`, proving a real 3270 session works end to end over
-TLS. Until that runs, TLS is unit-verified only and the README should not claim otherwise.
+Live — **done 2026-08-25, same day**, against both Hercules systems with the proxy in
+front. Results and the runbook are in `docs/live-testing.md` under *TLS against both
+hosts*. The rows that matter: TK5 and VM/CE both reached over verified TLS with `-cafile`
+(CLI and, for TK5, the TUI in a pty); `-insecure` unchanged straight at `:3270`; and
+default TLS straight at `:3270` failing in **10.013 s** with the `-insecure` message
+rather than hanging. No logon was performed — the opening screen proves the transport, and
+staying out of `LOGON` avoids handing the VM reconnect trap to the next run.
+
+Not done: `live-drive.py` over TLS. Its targets are hardcoded and it performs a full
+logon, so pointing it at the proxy is a change to that script rather than a TLS test.
 
 ## Deliberately out of scope
 
@@ -186,5 +193,14 @@ that a list here is never closed:
 ## Cost note
 
 Written 2026-08-25 with the month's budget nearly exhausted. The measurements above were
-made before writing, so the traps are observed rather than anticipated; implementation was
-deliberately left for the September budget rather than half-landed across the boundary.
+made before writing, so the traps are observed rather than anticipated. Implementation was
+initially deferred to September on a cost estimate that proved about 5× too high, and was
+then completed the same day, live-verified, within the remaining budget.
+
+One correction earned during implementation, recorded because the failure mode is
+reusable: the first run of the plaintext-host test hung for the full 5 s test timeout,
+which looks exactly like the handshake deadline not firing. It was the *stub* — a
+`net.Socket` with no `data` listener stays paused, never processes the client's FIN, and
+`server.close()` then waits forever for a connection that will not end. The deadline was
+working the whole time and fires at 302 ms. Any stub server in these tests needs a `data`
+listener purely to resume the socket.

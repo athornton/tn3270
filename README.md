@@ -70,7 +70,8 @@ npm run typecheck
 ## Using the TUI
 
 ```sh
-node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] host[:port]
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] \
+    [-insecure] [-noverifycert] [-cafile FILE] host[:port]
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
@@ -88,6 +89,48 @@ Colours are zti's, not core's: the shared palette in `packages/core` keeps satur
 primaries, and the TUI renders the gentler values zti uses because they read better in a
 terminal. Quantisation to 16 colours is an explicit table rather than nearest-RGB — with
 any realistic palette, blue and turquoise both fall nearest to cyan and would collide.
+
+## Connecting over TLS
+
+**TLS is the default.** Give no flag and the connection is encrypted and the host's
+certificate chain verified against the system trust store.
+
+| Flag | Effect |
+|---|---|
+| *(none)* | TLS, chain verified |
+| `-cafile FILE` | TLS, verified against that PEM instead of the system store |
+| `-noverifycert` | TLS, chain not verified. `-no-verify` is accepted too |
+| `-insecure` | no TLS at all |
+
+`-insecure` is what the Hercules systems need — neither VM/370 nor MVS 3.8j can speak
+TLS. s3270's `L:host` prefix is accepted and stripped, since TLS is already the default;
+asking for it while also passing `-insecure` is an error rather than a silent downgrade.
+The default port stays 23 even with `L:`, matching s3270: quietly redirecting to 992
+would open a connection somewhere you did not type.
+
+**Prefer `-cafile` over `-noverifycert` for a self-signed host.** Both connect, but
+pinning the host's own certificate still *authenticates* it and so still detects a
+man-in-the-middle; `-noverifycert` authenticates nothing. There is a script to make a
+test certificate, and a proxy to put TLS in front of a host that lacks it:
+
+```sh
+node packages/cli/scripts/gen-test-certs.mjs /tmp/certs
+node packages/cli/scripts/tls-proxy.mjs --to 127.0.0.1:3271 --listen 19271 \
+    --cert /tmp/certs/cert.pem --key /tmp/certs/key.pem
+node packages/tui/dist/main.js -model 3278-2-E -cafile /tmp/certs/cert.pem 127.0.0.1:19271
+```
+
+**A plaintext host does not refuse TLS — it goes quiet.** Hercules sends `IAC DO TN3270E`
+and waits, which OpenSSL reads as the start of a record and then blocks for a length that
+never comes. So there is a 10-second handshake deadline, and every TLS failure names the
+flag that would fix it:
+
+```
+127.0.0.1:3270 accepted the connection but never completed a TLS handshake. If it
+does not speak TLS — a Hercules or other vintage system — use -insecure.
+```
+
+Design and measurements: `docs/superpowers/specs/2026-08-25-tls-support-design.md`.
 
 ## Using the CLI
 
@@ -238,8 +281,10 @@ own client. Unscheduled, and much larger than this project.
 Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
 worse than one that says which quarter is missing.
 
-- **No TLS.** Cleartext only, so this is not safe over an untrusted network. On the
-  roadmap, and arguably the most important thing left.
+- **No client certificates.** TLS works (see *Connecting over TLS*), but only for
+  authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
+  `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
+  unimplemented.
 - **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no SNA
   response handling, no printer sessions. Measured, not assumed: neither VM/370 nor
   MVS 3.8j TSO negotiates the option in any run, which is why the client gets this far

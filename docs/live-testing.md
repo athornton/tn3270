@@ -938,3 +938,47 @@ flow completed, since the flow's last step already confirms the logoff.
 Once it stopped disturbing that final screen, the post-logoff VTAM panel showed **five
 foreground colours** of its own — blue 332, white 124, red 113, neutral-white 93,
 yellow 32 — a second live screen exceeding the four-colour default map.
+
+## TLS against both hosts — verified 2026-08-25
+
+Neither Hercules system can speak TLS, so TLS is tested by putting a terminating proxy in
+front of one. The proxy is in-repo (`packages/cli/scripts/tls-proxy.mjs`) rather than
+stunnel or socat because neither is installed here and there is no root to install them —
+and because the unit tests need to start it themselves on an ephemeral port with a
+just-generated certificate.
+
+```sh
+node packages/cli/scripts/gen-test-certs.mjs /tmp/livetls
+node packages/cli/scripts/tls-proxy.mjs --to 127.0.0.1:3270 --listen 19270 \
+    --cert /tmp/livetls/cert.pem --key /tmp/livetls/key.pem &   # VM/CE
+node packages/cli/scripts/tls-proxy.mjs --to 127.0.0.1:3271 --listen 19271 \
+    --cert /tmp/livetls/cert.pem --key /tmp/livetls/key.pem &   # TK5
+
+printf 'Connect(127.0.0.1:19271)\nWait(InputField)\nAscii()\nQuit()\n' |
+  node packages/cli/dist/main.js -cafile /tmp/livetls/cert.pem -model 3278-2-E
+```
+
+**Certificates are generated, never committed.** A committed certificate expires and turns
+a green suite red on a date nobody chose, in a commit that did not touch TLS.
+
+**No logon is performed.** Reading the opening screen proves the transport, and staying
+out of `LOGON` avoids handing the VM reconnect trap to the next run — see *The logon
+sequence*.
+
+Five results, all with the client's own binaries, not `openssl s_client`:
+
+| What | Result |
+|---|---|
+| VM/370 CE via proxy, `-cafile` | connected, verified; screen went formatted, 22 fields, `RUNNING VM370CE` |
+| MVS 3.8j TK5 via proxy, `-cafile` | connected, verified; full turnkey banner rendered |
+| TK5 via proxy, `-cafile`, **TUI** in a pty | banner drawn in 256 colour, no TLS diagnostics |
+| `-insecure` straight at `:3270` | connected exactly as before TLS existed |
+| default TLS straight at `:3270` | **failed in 10.013 s** with the `-insecure` message |
+
+That last row is the one worth keeping. A plaintext host does not refuse a TLS handshake,
+it goes quiet — Hercules sends `IAC DO TN3270E` and waits, and OpenSSL reads the leading
+`0xff` as a record content type and blocks for a length that never arrives. Without the
+handshake deadline this is an indefinite hang with no output, which is why the deadline is
+part of the design rather than a refinement of it. Pointing default TLS at the *proxy*
+without `-cafile` is the other half of the check: it is refused for a self-signed
+certificate, which is what proves verification is genuinely on.

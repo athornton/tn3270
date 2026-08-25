@@ -7,7 +7,10 @@
  */
 
 import { resolveTerminalType, TerminalTypeError } from '@tn3270/core';
-import { defaultSession, splitTarget } from '@tn3270/cli';
+import {
+  defaultSession, splitTarget, takeTlsFlag, resolveTls, TLS_USAGE,
+  type TlsFlags, type TlsOptions,
+} from '@tn3270/cli';
 import { App, type HostProcess } from './app.js';
 import type { Depth } from './colours.js';
 
@@ -24,6 +27,8 @@ export interface TuiArgs {
   /** Absent means detect from terminfo. */
   colors?: Depth;
   host?: string;
+  /** How the socket is made. Absent only before `resolveTls` has run. */
+  tls?: TlsOptions;
 }
 
 /**
@@ -53,9 +58,15 @@ const COLOUR_WORDS: Readonly<Record<string, Depth>> = Object.freeze({
  */
 export function parseArgs(argv: readonly string[]): TuiArgs {
   const args: TuiArgs = {};
+  const tlsFlags: TlsFlags = {};
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const value = argv[i + 1];
+    const eaten = takeTlsFlag(tlsFlags, flag, value, (m) => new UsageError(m));
+    if (eaten !== undefined) {
+      i += eaten;
+      continue;
+    }
     switch (flag) {
       case '-model':
         if (value === undefined) throw new UsageError('-model needs a value, e.g. -model 3278-2-E');
@@ -91,6 +102,15 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         break;
     }
   }
+  args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
+  // Both the host and the flags are in argv here, so this contradiction can be
+  // caught before a socket is opened — unlike the CLI, whose host arrives later
+  // via `Connect()` and which therefore checks the same thing in the runner.
+  if (args.tls.kind === 'plaintext' && /^[Ll]:/.test(args.host ?? '')) {
+    throw new UsageError(
+      `${args.host!} asks for TLS with the L: prefix, but -insecure disables TLS`,
+    );
+  }
   return args;
 }
 
@@ -107,13 +127,15 @@ export const BANNER = 'tn3270: Ctrl-] quits, Ctrl-C is Clear, Ctrl-R is Reset';
 export async function run(argv: readonly string[], host: HostProcess): Promise<number> {
   const args = parseArgs(argv);
   if (args.host === undefined) {
-    throw new UsageError('usage: tn3270 [-model M] [--terminal-type T] [--colors N] host[:port]');
+    throw new UsageError(
+      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] ${TLS_USAGE} host[:port]`,
+    );
   }
 
   const session = defaultSession(resolveTerminalType({
     ...(args.model !== undefined ? { model: args.model } : {}),
     ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
-  }));
+  }), args.tls);
 
   const [hostname, port] = splitTarget(args.host);
   process.stdout.write(`${BANNER}\n`);

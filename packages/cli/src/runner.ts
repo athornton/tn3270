@@ -1,8 +1,8 @@
-import { createConnection } from 'node:net';
 import {
-  Session, type Connection, AID, PF_AIDS, PA_AIDS, KeyboardState,
+  Session, AID, PF_AIDS, PA_AIDS, KeyboardState,
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
+import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
 import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';
@@ -56,32 +56,27 @@ export interface RunnerOptions {
   transferSeconds?: number;
   /** Per-frame Transfer() timeout in seconds. See TRANSFER_FRAME_TIMEOUT_MS. */
   transferFrameSeconds?: number;
+  /**
+   * Whether the injected session's socket is TLS. Defaults to true, matching
+   * `defaultSession`. Its only job is to let `Connect(L:host)` be refused on a
+   * session built by `-insecure`: honouring that prefix is impossible after
+   * construction, and connecting in the clear to a host the script explicitly
+   * marked as TLS is a silent downgrade, which is the one outcome worth an error.
+   */
+  tlsEnabled?: boolean;
 }
 
-/** A real TCP connection adapter. */
-function tcpConnect(host: string, port: number): Promise<Connection> {
-  return new Promise((resolve, reject) => {
-    const sock = createConnection({ host, port });
-    const conn: Connection = {
-      write: (b) => { sock.write(b); },
-      close: () => { sock.destroy(); },
-      onData: undefined,
-      onClose: undefined,
-      onError: undefined,
-    };
-    sock.on('data', (b: Buffer) => conn.onData?.(new Uint8Array(b)));
-    sock.on('close', () => conn.onClose?.());
-    sock.on('error', (e: Error) => {
-      conn.onError?.(e);
-      reject(e);
-    });
-    sock.on('connect', () => resolve(conn));
-  });
-}
-
-export function defaultSession(terminalType?: string): Session {
+/**
+ * A session whose socket is TLS unless told otherwise.
+ *
+ * `tls` defaults to `DEFAULT_TLS` — verified TLS — because that is the product
+ * default, and a default argument that meant plaintext would make every caller
+ * that forgot the parameter silently insecure. `-insecure` passes
+ * `{ kind: 'plaintext' }` explicitly.
+ */
+export function defaultSession(terminalType?: string, tls: TlsOptions = DEFAULT_TLS): Session {
   return new Session({
-    connect: (h, p) => tcpConnect(h, p),
+    connect: (h, p) => tcpConnect(h, p, tls),
     ...(terminalType ? { terminalType } : {}),
   });
 }
@@ -92,6 +87,7 @@ export class Runner {
   private readonly clock: () => number;
   private readonly defaultWait: number;
   private readonly files: TransferFiles | undefined;
+  private readonly tlsEnabled: boolean;
   private readonly transferMs: number;
   private readonly transferFrameMs: number;
   /** Bumped whenever the host writes, so Wait(Output) can observe it. */
@@ -105,6 +101,7 @@ export class Runner {
       ? opts.transferSeconds * 1000 : TRANSFER_TIMEOUT_MS;
     this.transferFrameMs = opts.transferFrameSeconds !== undefined
       ? opts.transferFrameSeconds * 1000 : TRANSFER_FRAME_TIMEOUT_MS;
+    this.tlsEnabled = opts.tlsEnabled ?? true;
     this.session.on('screen', () => { this.outputCount++; });
   }
 
@@ -155,7 +152,13 @@ export class Runner {
     switch (name) {
       case 'Connect': {
         const target = args[0] ?? '';
-        const [host, portText] = splitTarget(target);
+        const [host, portText, tlsRequested] = splitTarget(target);
+        if (tlsRequested && !this.tlsEnabled) {
+          throw new Error(
+            `${target} asks for TLS with the L: prefix, but this session was started with `
+            + '-insecure. Connecting in the clear would be a silent downgrade.',
+          );
+        }
         await s.connect(host, portText);
         // Field 4 of the status line is C(<host>) with NO port: s3270 formats it
         // from current_host, which holds the hostname alone (task.c:3144).
@@ -679,14 +682,32 @@ export class Runner {
 }
 
 /**
- * `host:port`, defaulting to 23. Exported because the TUI parses the same
- * argument and a second copy of this rule would be one to keep in step.
+ * `host:port`, defaulting to 23, with s3270's `L:` TLS prefix stripped.
+ *
+ * Exported because the TUI parses the same argument and a second copy of this
+ * rule would be one to keep in step.
  *
  * `lastIndexOf` rather than `indexOf`, so a bare IPv6 literal loses only its
  * final group rather than everything after the first colon.
+ *
+ * The third element reports whether `L:` was present. In s3270 that prefix is
+ * what turns TLS ON for a host (Common/host.c:633); here TLS is already the
+ * default, so it is a no-op — but it must be STRIPPED, or `L:localhost:3270`
+ * becomes a DNS lookup for the host `L`. Scripts carried over from s3270 will
+ * contain it. The flag is returned rather than discarded so that `L:` against a
+ * deliberately plaintext session can be refused instead of silently downgraded.
+ *
+ * The port default stays 23 even for `L:`, matching s3270: silently redirecting
+ * to 992 would open a connection somewhere the operator did not type.
  */
-export function splitTarget(target: string): [string, number] {
-  const colon = target.lastIndexOf(':');
-  if (colon < 0) return [target, 23];
-  return [target.slice(0, colon), Number(target.slice(colon + 1))];
+export function splitTarget(target: string): [string, number, boolean] {
+  let rest = target;
+  let tlsRequested = false;
+  if (rest.startsWith('L:') || rest.startsWith('l:')) {
+    tlsRequested = true;
+    rest = rest.slice(2);
+  }
+  const colon = rest.lastIndexOf(':');
+  if (colon < 0) return [rest, 23, tlsRequested];
+  return [rest.slice(0, colon), Number(rest.slice(colon + 1)), tlsRequested];
 }

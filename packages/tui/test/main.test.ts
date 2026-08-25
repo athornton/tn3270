@@ -7,16 +7,19 @@ import { BANNER, parseArgs, UsageError } from '../src/main.js';
 // run on import, which is why the TUI is wired this way and why cli/src/index.ts
 // deliberately does not re-export it.)
 
+/** TLS is ON by default, so every parse carries it. See the CLI's own test. */
+const TLS = { kind: 'tls', verify: true } as const;
+
 describe('parseArgs', () => {
   it('takes a bare argument as the host', () => {
-    expect(parseArgs(['127.0.0.1:3270'])).toEqual({ host: '127.0.0.1:3270' });
+    expect(parseArgs(['127.0.0.1:3270'])).toEqual({ host: '127.0.0.1:3270', tls: TLS });
   });
 
   it('parses the flags the CLI also has, with the same spellings', () => {
     expect(parseArgs(['-model', '3278-2-E', 'vm:3270']))
-      .toEqual({ model: '3278-2-E', host: 'vm:3270' });
+      .toEqual({ model: '3278-2-E', host: 'vm:3270', tls: TLS });
     expect(parseArgs(['--terminal-type', 'IBM-DYNAMIC', 'vm']))
-      .toEqual({ terminalType: 'IBM-DYNAMIC', host: 'vm' });
+      .toEqual({ terminalType: 'IBM-DYNAMIC', host: 'vm', tls: TLS });
   });
 
   it('understands every --colors spelling', () => {
