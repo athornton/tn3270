@@ -102,16 +102,28 @@ The remaining work, in the user's own order, and they expect it to be the whole 
    tagged variant, so dispatch on `kind` rather than assuming a font lookup.
 3. **A simple webserver serving the app as well**, i.e. the same front end over HTTP.
 
-**⚠️ THIS SUPERSEDES THE OLDER TAIL OF THE PLAN, AND THE DIFFERENCE IS WORTH
-CONFIRMING BEFORE ANYONE ACTS ON EITHER.** The earlier staging (spec, and *Next steps*
-below) continued `packaging → TLS → printer → Programmable Symbol Sets`, with GDDM
-vector graphics unscheduled and VMGIF in hand at `$HOME/vmgif` as a behavioural
-reference for PS. The user said "I think that will be everything" after item 3, which
-reads as those being dropped or deferred rather than forgotten — but it was an aside at
-the end of a session, not a decision recorded against the spec. **Ask.** They are not
-deleted here precisely so the question survives: TLS in particular is a security
-feature, not a nicety, and PS has a committed design dependency already built (Query
-Reply from stage 2a, and the tagged-variant cell that exists only for it).
+4. **Programmable Symbol Sets, and VMGIF.** *Corrected 2026-08-25, minutes after the
+   list above: the user had simply FORGOTTEN this, not dropped it.* PS is still wanted.
+   Its hard dependency — stage 2a's Query Reply — is already built, as is the reason
+   `Cell` is a tagged variant: a renderer must dispatch on `kind` rather than assume a
+   font lookup, and PS is the only thing that variant exists for. **VMGIF is in hand at
+   `$HOME/vmgif`** (April 1993: `VMGIF.MODULE.T1` 84600 bytes, wrapper execs, HELPCMS,
+   and `TONETABL`, its palette/dither table). No source, and disassembly is probably
+   unnecessary — decoding GIF from the published spec is no harder than reverse
+   engineering a 1993 implementation once PS can push pixels. Treat it as a behavioural
+   reference. GDDM is deliberately NOT a dependency (IBM is sunsetting it); the route is
+   PS driving the 3279 screen directly.
+
+**⚠️ STILL OPEN: TLS AND THE PRINTER SESSION.** The older staging ran
+`packaging → TLS → printer → Programmable Symbol Sets`. PS is confirmed back in (item 4)
+and packaging is implied by items 2-3, but **TLS and printer were not mentioned either
+way** and remain unconfirmed. They are not deleted here. **Ask before assuming either
+is out** — TLS especially, since it is a security feature rather than a nicety, and a
+3270 client that cannot do TLS is unusable against anything modern.
+
+The general lesson, since it paid off within one exchange: an end-of-session aside is
+not a decision recorded against the spec. Writing the difference down as a QUESTION
+rather than acting on it is what let the user catch the omission immediately.
 
 **IND$FILE FILE TRANSFER WORKS ON BOTH HOSTS, both directions** — MVS/TSO 2026-08-18,
 VM/CMS 2026-08-19 (see the following paragraph). See
