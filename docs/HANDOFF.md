@@ -95,13 +95,15 @@ support; the Electron GUI (stage 3); the web front end; and TN3270E (stage 2b).
 ## Roadmap, from the user 2026-08-25
 
 **THIS LIST IS NOT EXHAUSTIVE, AND THE USER HAS SAID SO EXPLICITLY.** It was first
-written down as "I think that will be everything"; within minutes that was corrected
-twice — Programmable Symbol Sets had been forgotten (now item 4), and then: "so the
-above will not in fact be everything." Treat it as the confirmed and ordered part of an
-OPEN set, not as a definition of done. Do not infer that something is out of scope
-merely because it is absent here.
+written down as "I think that will be everything", and was then corrected three times in
+as many messages: Programmable Symbol Sets had been forgotten; then "so the above will
+not in fact be everything"; then packaging, TLS, printer and PS were all confirmed to
+remain. Treat it as an OPEN set, not a definition of done, and **do not infer that
+something is out of scope merely because it is absent here.**
 
-The confirmed work, in the user's own order:
+The confirmed work. Items 1-4 are in the user's own stated order; 5-7 are confirmed on
+the roadmap but their position is not, so the old staging's relative order is used below
+as a presumption only:
 
 1. **The rest of TN3270E** — stage 2b: the telnet option (40), DEVICE-TYPE/FUNCTIONS
    subnegotiation, the 5-byte data header, BIND/UNBIND, SNA responses, LU selection.
@@ -121,12 +123,19 @@ The confirmed work, in the user's own order:
    reference. GDDM is deliberately NOT a dependency (IBM is sunsetting it); the route is
    PS driving the 3279 screen directly.
 
-**Also outstanding, from the older staging, position unconfirmed:** **TLS** and the
-**printer session** (the old order was `packaging → TLS → printer → PS`; packaging is
-implied by items 2-3). Neither was mentioned when the list above was given, so neither
-is scheduled — but neither is cancelled. **TLS is the one to raise first**: it is
-security rather than polish, and a 3270 client that cannot do TLS is unusable against
-anything modern.
+5. **Packaging** — the old stage 4. Confirmed 2026-08-25. Presumably follows the Electron
+   app and the webserver, since it packages them.
+6. **TLS.** Confirmed 2026-08-25. Not polish: a 3270 client that cannot do TLS is
+   unusable against anything modern, so it may well deserve to move ahead of items 2-4
+   — worth asking when 2b lands.
+7. **The printer session.** Confirmed 2026-08-25. Its natural companion is TN3270E,
+   whose own payoff the spec lists as "LU names, printer sessions and response
+   handling", so item 1 may leave this close to free.
+
+**All four of packaging, TLS, printer and PS were explicitly confirmed to remain**, so
+nothing from the older staging has been dropped. GDDM vector graphics remains the one
+thing deliberately NOT on the roadmap: IBM is sunsetting it, and the route is PS driving
+the 3279 screen directly.
 
 The method note, because it paid off twice inside one exchange: an end-of-session aside
 is not a decision recorded against the spec. This roadmap was written down as a QUESTION
