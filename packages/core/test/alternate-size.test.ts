@@ -275,3 +275,42 @@ describe('a host record resizes the screen end to end', () => {
     expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
   });
 });
+
+describe('a host addressing past our buffer says WHY', () => {
+  // "SBA address 3279 beyond buffer end 1919" is true and useless. Measured live:
+  // VM/CE sends exactly that to a client claiming 3278-2 on a device DMKRIO defines
+  // as a 3278-4, and the session dies with a program check on the first SBA past
+  // row 24. The message has to name the fix.
+  function sbaBeyond(addr: number): string {
+    const screen = new Screen();                       // 24x80, 1920 cells
+    try {
+      // The parser has already decoded the address by this point, so the token
+      // carries it directly -- no 12-bit encoding to get wrong here.
+      execute(screen, { command: 'Write', wcc: 0, tokens: [{ kind: 'sba', address: addr }] });
+    } catch (e) {
+      return (e as Error).message;
+    }
+    throw new Error(`expected address ${addr} to be refused`);
+  }
+
+  it('names the model that would fit, and the flag that selects it', () => {
+    // 1937 is the first address VM/CE actually sent us past row 24.
+    const msg = sbaBeyond(1937);
+    expect(msg).toContain('beyond buffer end 1919');
+    expect(msg).toContain('24x80');
+    expect(msg).toContain('3278-3');      // smallest model holding 1937
+    expect(msg).toContain('-model');
+  });
+
+  it('picks the smallest model that holds the address', () => {
+    expect(sbaBeyond(3000)).toContain('3278-4');   // > 32x80, fits 43x80
+    expect(sbaBeyond(3500)).toContain('3278-5');   // > 43x80, fits 27x132
+  });
+
+  it('stays quiet when no architected model would hold it', () => {
+    // Past a model 5 is not a geometry mismatch, so guessing one would mislead.
+    const msg = sbaBeyond(4000);
+    expect(msg).toContain('beyond buffer end 1919');
+    expect(msg).not.toContain('-model');
+  });
+});
