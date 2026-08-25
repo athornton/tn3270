@@ -92,6 +92,27 @@ can dispatch on `kind` when PS lands); MF orders (parsed, counted as
 `modifyFieldIgnored`, never applied — TK5's ISPF sends zero of them); mouse
 support; the Electron GUI (stage 3); the web front end; and TN3270E (stage 2b).
 
+## Roadmap, from the user 2026-08-25
+
+The remaining work, in the user's own order, and they expect it to be the whole of it:
+
+1. **The rest of TN3270E** — stage 2b: the telnet option (40), DEVICE-TYPE/FUNCTIONS
+   subnegotiation, the 5-byte data header, BIND/UNBIND, SNA responses, LU selection.
+2. **An Electron app** — stage 3. The renderer constraint to remember: cell content is a
+   tagged variant, so dispatch on `kind` rather than assuming a font lookup.
+3. **A simple webserver serving the app as well**, i.e. the same front end over HTTP.
+
+**⚠️ THIS SUPERSEDES THE OLDER TAIL OF THE PLAN, AND THE DIFFERENCE IS WORTH
+CONFIRMING BEFORE ANYONE ACTS ON EITHER.** The earlier staging (spec, and *Next steps*
+below) continued `packaging → TLS → printer → Programmable Symbol Sets`, with GDDM
+vector graphics unscheduled and VMGIF in hand at `$HOME/vmgif` as a behavioural
+reference for PS. The user said "I think that will be everything" after item 3, which
+reads as those being dropped or deferred rather than forgotten — but it was an aside at
+the end of a session, not a decision recorded against the spec. **Ask.** They are not
+deleted here precisely so the question survives: TLS in particular is a security
+feature, not a nicety, and PS has a committed design dependency already built (Query
+Reply from stage 2a, and the tagged-variant cell that exists only for it).
+
 **IND$FILE FILE TRANSFER WORKS ON BOTH HOSTS, both directions** — MVS/TSO 2026-08-18,
 VM/CMS 2026-08-19 (see the following paragraph). See
 `docs/superpowers/specs/2026-08-18-indfile-cut-transfer-design.md` for the whole
