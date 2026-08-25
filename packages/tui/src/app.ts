@@ -76,6 +76,11 @@ export interface AppOptions {
   host: HostProcess;
   depth?: Depth;
   mode3279?: boolean;
+  /**
+   * The key-binding hint drawn above the screen when the terminal has a spare
+   * row. Absent means draw none, which is what the tests want by default.
+   */
+  hint?: string;
 }
 
 export class App {
@@ -125,6 +130,7 @@ export class App {
       ...screen,
       depth: opts.depth ?? detectDepth(),
       layout: layout(this.terminal(), screen),
+      ...(opts.hint !== undefined ? { hint: opts.hint } : {}),
     });
   }
 

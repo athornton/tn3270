@@ -12,6 +12,7 @@ import {
   type TlsFlags, type TlsOptions,
 } from '@tn3270/cli';
 import { App, type HostProcess } from './app.js';
+import { layout } from './render.js';
 import type { Depth } from './colours.js';
 
 export class UsageError extends Error {
@@ -115,12 +116,16 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
 }
 
 /**
- * The banner, printed BEFORE raw mode and before the alternate screen buffer.
- *
- * It has to say how to get out. Ctrl-C is the Clear AID here, which is what a
- * 3270 user needs but also exactly what everyone reaches for to quit -- so an
- * undocumented Ctrl-] would strand a first-time user in a terminal that ignores
+ * The banner. It has to say how to get out: Ctrl-C is the Clear AID here, which is
+ * what a 3270 user needs but also exactly what everyone reaches for to quit -- so
+ * an undocumented Ctrl-] would strand a first-time user in a terminal that ignores
  * every instinct they have.
+ *
+ * Shown one of TWO ways, never both. Given a spare row the renderer draws it above
+ * the screen, where it STAYS; the user asked for that because the transient line
+ * "goes by too quickly to see". With no spare row it is printed here instead,
+ * before raw mode and before the alternate screen buffer, which is the only way a
+ * short terminal learns Ctrl-] at all.
  */
 export const BANNER = 'tn3270: Ctrl-] quits, Ctrl-C is Clear, Ctrl-R is Reset';
 
@@ -138,14 +143,29 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   }), args.tls);
 
   const [hostname, port] = splitTarget(args.host);
-  process.stdout.write(`${BANNER}\n`);
   await session.connect(hostname, port);
+
+  // Printed here ONLY when the persistent hint has nowhere to go. The transient
+  // line exists because the message used to vanish the instant the alternate
+  // screen buffer opened; where the terminal has a spare row, the renderer now
+  // keeps it on screen and printing it as well would just scroll the shell.
+  //
+  // Computed AFTER connect deliberately: the host can hand us an alternate screen
+  // size, so the screen geometry is only final once negotiation has finished, and
+  // asking a row too early could print the banner for a layout that has room.
+  const screen = { rows: session.screen.rows, cols: session.screen.cols };
+  const place = layout(
+    { rows: process.stdout.rows ?? 0, cols: process.stdout.columns ?? 0 },
+    screen,
+  );
+  if (place.hintRow === undefined) process.stdout.write(`${BANNER}\n`);
 
   const app = new App({
     session,
     stdin: process.stdin,
     stdout: process.stdout,
     host,
+    hint: BANNER,
     ...(args.colors !== undefined ? { depth: args.colors } : {}),
   });
   app.start();

@@ -88,10 +88,32 @@ describe('layout: centring, and which border sides fit', () => {
     expect(l.border).toEqual({ top: false, bottom: true, left: false, right: false });
   });
 
-  it('three spare rows add the top border too', () => {
+  it('three spare rows go to the HINT, not the top border', () => {
+    // The same judgment call as the OIA over the bottom border, made again with the
+    // user 2026-08-25: a line saying how to quit beats a decorative rule. So the
+    // hint takes the row the top border used to get at +3.
     const l = layout({ rows: 27, cols: 80 }, S);
+    expect(l.hintRow).toBe(1);            // no top border, so the hint is row 1
+    expect(l.border.top).toBe(false);
+    expect(l.border.bottom).toBe(true);
+    expect(l.rowOffset).toBe(1);          // the screen sits below the hint
+  });
+
+  it('four spare rows add the top border, BELOW the hint', () => {
+    const l = layout({ rows: 28, cols: 80 }, S);
     expect(l.border.top).toBe(true);
     expect(l.border.bottom).toBe(true);
+    expect(l.hintRow).toBe(1);
+    // The order down the screen is hint, top border, screen -- so the hint is one
+    // row above the border, which itself is one above the screen.
+    expect(l.hintRow).toBe(l.rowOffset - 1);
+    expect(l.rowOffset).toBe(2);
+  });
+
+  it('has no hint row at all when there are fewer than three spare rows', () => {
+    for (const rows of [24, 25, 26]) {
+      expect(layout({ rows, cols: 80 }, S).hintRow, `${rows} rows`).toBeUndefined();
+    }
   });
 
   it('one spare column goes to the LEFT border, not the right', () => {
@@ -108,12 +130,13 @@ describe('layout: centring, and which border sides fit', () => {
   });
 
   it('centres the whole block in a roomy terminal', () => {
-    // 40 rows: block is top+24+status+bottom = 27, so 13 spare -> 6 above.
+    // 40 rows: block is hint+top+24+status+bottom = 28, so 12 spare -> 6 above.
     // 100 cols: block is 1+80+1 = 82, so 18 spare -> 9 left of the border.
     const l = layout({ rows: 40, cols: 100 }, S);
-    expect(l.rowOffset).toBe(6 + 1);      // +1 for the top border row
+    expect(l.rowOffset).toBe(6 + 1 + 1);  // +1 for the top border, +1 for the hint
     expect(l.colOffset).toBe(9 + 1);      // +1 for the left border column
     expect(l.statusRow).toBe(l.rowOffset + S.rows + 1);
+    expect(l.hintRow).toBe(l.rowOffset - 1);
     expect(l.border).toEqual({ top: true, bottom: true, left: true, right: true });
   });
 
@@ -127,13 +150,72 @@ describe('layout: centring, and which border sides fit', () => {
         const bottomMost = l.rowOffset + S.rows
           + (l.statusRow !== undefined ? 1 : 0) + (l.border.bottom ? 1 : 0);
         expect(bottomMost, `${cols}x${rows}`).toBeLessThanOrEqual(rows);
-        expect(l.rowOffset - (l.border.top ? 1 : 0), `${cols}x${rows}`).toBeGreaterThanOrEqual(0);
+        // The hint is now the topmost thing when present, so it is what has to be
+        // inside the terminal -- checking only the border would miss it.
+        const topMost = l.rowOffset - (l.border.top ? 1 : 0) - (l.hintRow !== undefined ? 1 : 0);
+        expect(topMost, `${cols}x${rows}`).toBeGreaterThanOrEqual(0);
+        if (l.hintRow !== undefined) {
+          expect(l.hintRow, `${cols}x${rows}`).toBeGreaterThanOrEqual(1);
+          expect(l.hintRow, `${cols}x${rows}`).toBeLessThan(l.rowOffset + 1);
+        }
         const rightMost = l.colOffset + S.cols + (l.border.right ? 1 : 0);
         expect(rightMost, `${cols}x${rows}`).toBeLessThanOrEqual(cols);
         expect(l.colOffset - (l.border.left ? 1 : 0), `${cols}x${rows}`).toBeGreaterThanOrEqual(0);
         if (l.statusRow !== undefined) expect(l.statusRow).toBeLessThanOrEqual(rows);
       }
     }
+  });
+});
+
+describe('the key-binding hint', () => {
+  // The user's complaint that prompted this: the transient banner "goes by too
+  // quickly to see". Drawn into the frame, it stays.
+  const HINT = 'tn3270: Ctrl-] quits';
+  const place = (over: Partial<Layout> = {}): Layout => ({
+    rowOffset: 2, colOffset: 4, statusRow: 27, hintRow: 1,
+    border: { top: true, bottom: true, left: true, right: true }, ...over,
+  });
+
+  it('draws the hint at hintRow, aligned to the screen not to column 1', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: HINT });
+    // colOffset 4 -> column 5, which is the screen's left edge, matching the OIA.
+    expect(r.paint(grid('ABCDEF'), 0, 's')).toContain(`\x1b[1;5H`);
+  });
+
+  it('draws it DIM and leaves no SGR behind', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: 'hi' });
+    const out = r.paint(grid('ABCDEF'), 0, 's');
+    // Opens with a reset so it inherits nothing, closes with one so the border and
+    // the first cell cannot come out dim.
+    expect(out).toContain('\x1b[0;2mhi\x1b[0m');
+  });
+
+  it('truncates to the screen width rather than running over the right border', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: HINT });
+    const out = r.paint(grid('ABCDEF'), 0, 's');
+    expect(out).toContain(HINT.slice(0, 3));
+    expect(out).not.toContain(HINT.slice(0, 4));
+  });
+
+  it('draws nothing when the terminal has no row for it', () => {
+    const r = new TerminalRenderer({
+      rows: 2, cols: 3, depth: 0, layout: place({ hintRow: undefined }), hint: HINT,
+    });
+    expect(r.paint(grid('ABCDEF'), 0, 's')).not.toContain('tn3270');
+  });
+
+  it('draws nothing when there is no hint to draw', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place() });
+    expect(r.paint(grid('ABCDEF'), 0, 's')).not.toContain('\x1b[0;2m');
+  });
+
+  it('is redrawn after a resize, since a full repaint clears the screen', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: 'hi' });
+    r.paint(grid('ABCDEF'), 0, 's');
+    const second = r.paint(grid('ABCDEF'), 0, 's');
+    expect(second).not.toContain('hi');          // no full repaint, no redraw
+    r.setLayout(place({ rowOffset: 3 }));
+    expect(r.paint(grid('ABCDEF'), 0, 's')).toContain('hi');
   });
 });
 

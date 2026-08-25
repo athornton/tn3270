@@ -60,12 +60,12 @@ interface Harness {
   app: App; session: Session; stdin: FakeStdin; stdout: FakeStdout; host: FakeHost;
 }
 
-function harness(rows = 25, cols = 80): Harness {
+function harness(rows = 25, cols = 80, hint?: string): Harness {
   const session = makeSession();
   const stdin = new FakeStdin();
   const stdout = new FakeStdout(rows, cols);
   const host = new FakeHost();
-  const app = new App({ session, stdin, stdout, host, depth: 0 });
+  const app = new App({ session, stdin, stdout, host, depth: 0, ...(hint !== undefined ? { hint } : {}) });
   return { app, session, stdin, stdout, host };
 }
 
@@ -117,10 +117,24 @@ describe('centring, border and cursor', () => {
     // A JupyterLab terminal is essentially never 80x24, so this is the common case.
     const h = harness(40, 100);
     h.app.start();
-    // 24-row screen + OIA + both borders = 27 in 40 rows -> 6 spare above, +1 for the
-    // top border, so the screen's first row is terminal row 8.
-    expect(h.stdout.all).toContain('\x1b[8;11H');
+    // 24-row screen + OIA + both borders + the hint = 28 in 40 rows -> 6 spare above,
+    // +1 for the hint and +1 for the top border, so the screen's first row is row 9.
+    expect(h.stdout.all).toContain('\x1b[9;11H');
     expect(h.stdout.all).not.toContain('\x1b[1;1H\x1b[');
+  });
+
+  it('draws the key-binding hint above the screen when a row is spare', () => {
+    const h = harness(40, 100, 'tn3270: Ctrl-] quits');
+    h.app.start();
+    expect(h.stdout.all).toContain('Ctrl-] quits');
+  });
+
+  it('draws no hint in a terminal with no spare row for one', () => {
+    // 26 rows takes the OIA and the bottom border and has nothing left, so the hint
+    // has to come from main.ts's printed line instead.
+    const h = harness(26, 100, 'tn3270: Ctrl-] quits');
+    h.app.start();
+    expect(h.stdout.all).not.toContain('Ctrl-] quits');
   });
 
   it('draws a border when there is room', () => {

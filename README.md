@@ -80,7 +80,12 @@ defaults to 23. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks termin
 monochrome path gets tested on a colour terminal.
 
 **`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
-constantly, so the banner says so before raw mode starts. `Ctrl-R` is Reset, `Ctrl-U`
+constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
+it is drawn dim above the screen and **stays there**; in a shorter window it is printed
+once before raw mode starts instead. Never both. Vertical slack is spent in priority
+order — OIA, bottom border, hint, top border — so at exactly 27 rows the hint takes the
+row the top border would have had, on the same reasoning that gives the OIA precedence
+over the bottom border: functional beats decorative. `Ctrl-R` is Reset, `Ctrl-U`
 erases input, `F1`–`F12` are PF1–12 and `Shift+F1`–`F12` are PF13–24, and `Esc` `1`/`2`/`3`
 are PA1/PA2/PA3. Arrow keys are bound in **both** encodings, CSI and SS3, because
 terminfo reports only the application-mode one and any layer can flip the mode.

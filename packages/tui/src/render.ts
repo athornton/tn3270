@@ -66,6 +66,12 @@ export interface Layout {
   colOffset: number;
   /** 1-based terminal row for the OIA, or undefined if it does not fit. */
   statusRow: number | undefined;
+  /**
+   * 1-based terminal row for the key-binding hint, or undefined if it does not
+   * fit. Above the top border when there is one, directly above the screen when
+   * there is not.
+   */
+  hintRow: number | undefined;
   border: BorderSides;
 }
 
@@ -77,14 +83,23 @@ export interface Layout {
  * A JupyterLab terminal is essentially never 80x24, so the interesting case is a
  * window somewhat bigger than the screen and the question is what to do with the
  * extra cells. Vertically: the screen is mandatory, then the OIA, then the BOTTOM
- * border, then the top. Horizontally: the screen, then the LEFT border, then the
- * right. So a window one cell too wide gets a left border and one cell too tall
- * gets an OIA, which is the "prefer left and bottom" rule.
+ * border, then the KEY-BINDING HINT, then the top border. Horizontally: the
+ * screen, then the LEFT border, then the right. So a window one cell too wide gets
+ * a left border and one cell too tall gets an OIA, which is the "prefer left and
+ * bottom" rule.
  *
  * **The OIA outranks the bottom border deliberately** -- it is functional (it is
  * where `X Wait` and the connection state appear) and the border is decorative.
  * That is a judgment call rather than a derivation; flipping it means swapping two
  * lines below.
+ *
+ * **The hint outranks the TOP border for the same reason**, decided with the user
+ * 2026-08-25: a line saying how to quit is worth more than a decorative rule, and
+ * `Ctrl-C` being Clear rather than quit is exactly the thing a first-time user
+ * needs told. So at +3 rows the hint takes the row the top border used to get, and
+ * only at +4 do both appear. The consequence to know: a 27-row terminal showing a
+ * 24-row screen now has a hint and no top border, where it previously had a top
+ * border and no hint.
  *
  * Whatever is left over is split evenly, biased so any odd cell falls at the
  * bottom and right, which is what `Math.floor` gives and what centring
@@ -101,20 +116,29 @@ export function layout(terminal: Geometry, screen: Geometry): Layout {
 
   const wantStatus = slackV >= 1;
   const bottom = slackV >= 2;
-  const top = slackV >= 3;
+  const hint = slackV >= 3;
+  const top = slackV >= 4;
   const left = slackH >= 1;
   const right = slackH >= 2;
 
-  const blockRows = screen.rows + (wantStatus ? 1 : 0) + (bottom ? 1 : 0) + (top ? 1 : 0);
+  const blockRows = screen.rows
+    + (wantStatus ? 1 : 0) + (bottom ? 1 : 0) + (hint ? 1 : 0) + (top ? 1 : 0);
   const blockCols = screen.cols + (left ? 1 : 0) + (right ? 1 : 0);
 
-  const rowOffset = Math.floor((terminal.rows - blockRows) / 2) + (top ? 1 : 0);
+  // Both the hint and the top border sit ABOVE the screen, so each pushes the
+  // screen down by one.
+  const rowOffset = Math.floor((terminal.rows - blockRows) / 2)
+    + (top ? 1 : 0) + (hint ? 1 : 0);
   const colOffset = Math.floor((terminal.cols - blockCols) / 2) + (left ? 1 : 0);
 
   return {
     rowOffset,
     colOffset,
     statusRow: wantStatus ? rowOffset + screen.rows + 1 : undefined,
+    // The top border occupies 1-based row `rowOffset`, so the hint goes one above
+    // it; with no top border the hint takes that row itself. `hint` implies
+    // `slackV >= 3`, which is what keeps this inside the terminal.
+    hintRow: hint ? rowOffset - (top ? 1 : 0) : undefined,
     border: { top, bottom, left, right },
   };
 }
@@ -127,13 +151,19 @@ interface RendererOptions extends Geometry {
    * measured the terminal must assume. `App` always passes `layout(...)`.
    */
   layout?: Layout;
+  /**
+   * The key-binding hint, drawn on `layout.hintRow` when there is room for one.
+   * Absent means draw nothing there, which is what a caller with no message to
+   * show wants. main.ts passes `BANNER`.
+   */
+  hint?: string;
 }
 
 const NO_BORDER: BorderSides = { top: false, bottom: false, left: false, right: false };
 
 function sameLayout(a: Layout, b: Layout): boolean {
   return a.rowOffset === b.rowOffset && a.colOffset === b.colOffset
-    && a.statusRow === b.statusRow
+    && a.statusRow === b.statusRow && a.hintRow === b.hintRow
     && a.border.top === b.border.top && a.border.bottom === b.border.bottom
     && a.border.left === b.border.left && a.border.right === b.border.right;
 }
@@ -144,6 +174,7 @@ export class TerminalRenderer {
   private readonly rows: number;
   private readonly cols: number;
   private readonly depth: Depth;
+  private readonly hint: string | undefined;
   private place: Layout;
   /** Set when the layout moved, so the next full paint clears the old drawing. */
   private needsClear = false;
@@ -155,8 +186,10 @@ export class TerminalRenderer {
     this.rows = opts.rows;
     this.cols = opts.cols;
     this.depth = opts.depth;
+    this.hint = opts.hint;
     this.place = opts.layout ?? {
-      rowOffset: 0, colOffset: 0, statusRow: opts.rows + 1, border: NO_BORDER,
+      rowOffset: 0, colOffset: 0, statusRow: opts.rows + 1,
+      hintRow: undefined, border: NO_BORDER,
     };
   }
 
@@ -210,6 +243,25 @@ export class TerminalRenderer {
     return parts;
   }
 
+  /**
+   * The key-binding hint, drawn only on a full repaint -- like the border, it
+   * never changes between them.
+   *
+   * DIM, and self-contained: it opens with a reset so it cannot inherit an SGR and
+   * closes with one so it cannot leak dim into the border or the first cell. The
+   * cell loop resets before its first write anyway, but the border parts do not.
+   *
+   * Aligned to the screen's left column rather than column 1, and truncated to the
+   * screen width, for the reason the OIA is: it belongs to the block, and running
+   * past the screen would overwrite the right-hand border.
+   */
+  private hintParts(): string[] {
+    const { hintRow, colOffset } = this.place;
+    if (hintRow === undefined || this.hint === undefined || this.hint === '') return [];
+    const text = this.hint.length > this.cols ? this.hint.slice(0, this.cols) : this.hint;
+    return [`${ESC}${hintRow};${colOffset + 1}H${ESC}0;2m${text}${ESC}0m`];
+  }
+
   paint(cells: readonly ResolvedCell[], cursor: number, status: string): string {
     const parts: string[] = [];
     const fullRepaint = this.previous === undefined;
@@ -221,6 +273,7 @@ export class TerminalRenderer {
         this.needsClear = false;
       }
       parts.push(...this.borderParts());
+      parts.push(...this.hintParts());
     }
     let sgr = '';          // the SGR currently in effect on the terminal
     let lastWritten = -2;  // index of the previously emitted cell
