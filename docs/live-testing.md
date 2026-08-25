@@ -1034,3 +1034,26 @@ TUI results at 43x80, driven over a pty:
 
 43 rows needs a 46-row window for the full frame. The refusal is the designed
 behaviour, not a limitation: a clipped 3270 screen hides the host's data.
+
+### EWA is live-verified, and VM sends EW then EWA
+
+`-model 3278-4-E` against VM/CE, whole session traced. Everything we sent was
+telnet negotiation — `ff fa 18 00 "IBM-3278-4-E"` and nothing else — and the host
+sent exactly two 3270 records:
+
+| Received | Command | Effect |
+|---|---|---|
+| `f5 42 ...` | Erase/Write | the VM logo, at the DEFAULT 24x80 |
+| `7e c2 ...` | Erase/Write **Alternate** | switches to the ALTERNATE 43x80 |
+
+So the architected default-then-alternate sequence happens on a real host in one
+session, both halves of the switch fire, and the result is 43x80 with 41 fields and
+**zero program checks**. This is the live proof the alternate-size work previously
+lacked; before this it was verified only from host bytes fed to a Session in a test.
+
+**The Query Reply is still NOT exercised live.** `-E` claims extended data stream, and
+the expectation was that it would invite a Read Partition (Query) — it did not. VM/370
+never asked, and we sent no 3270 records at all. So the default/alternate pair now
+reported in Usable Area, BUFFSZ and Implicit Partition remains unit-tested only. A host
+that queries is still wanted; TSO is the likely candidate, since it is what forced `-E`
+in the first place.
