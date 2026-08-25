@@ -51,6 +51,24 @@ userid verified free after every run.**
   a local minimal TN3270 server, ten checks including **ECHO restored on the tty
   after exit**. Use it when Hercules is down; exit 0 means all ten held.
 
+**The screen is CENTRED with a border, 2026-08-25.** A JupyterLab terminal is
+essentially never 80x24, so slack is spent in priority order rather than shared out:
+vertically screen → OIA → bottom border → top border, horizontally screen → left
+border → right border, and whatever remains is split evenly with any odd cell falling
+bottom/right. So one spare column gets a left border and one spare row gets the OIA.
+The OIA outranks the bottom border deliberately (functional beats decorative) and sits
+INSIDE the border. `layout()` in `render.ts` is the pure function that decides all of
+it, and its test sweeps 22 heights by 5 widths asserting nothing lands outside the
+terminal.
+
+**Background and cursor, same date:** the DEFAULT background is now `BLACK`, a
+deliberate divergence from x3270 (which uses neutral black, `c3270/screen.c:1158`)
+because neutral-black is `0x1a1a1a` and a screenful of dark grey reads as washed out.
+Only the default moved -- an explicit host `F0` still resolves to neutral-black, so
+nothing the host sent is flattened. The cursor is a green steady block via OSC 12 plus
+DECSCUSR, restored on exit with OSC 112 and `\x1b[0 q`. **OSC 12 is best-effort**: a
+terminal that does not implement it ignores it, which is why the shape is set too.
+
 **Terminal geometry, changed 2026-08-25:** the minimum is now **24x80, not 25x80**,
 matching c3270 -- the 3270 screen is mandatory and the OIA is optional, so an 80x24
 terminal runs with no status line instead of being refused. **SIGWINCH is handled**:

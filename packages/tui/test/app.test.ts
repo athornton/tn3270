@@ -112,6 +112,47 @@ describe('the minimum geometry, which now matches c3270', () => {
   });
 });
 
+describe('centring, border and cursor', () => {
+  it('centres the screen in a roomy terminal instead of hugging the corner', () => {
+    // A JupyterLab terminal is essentially never 80x24, so this is the common case.
+    const h = harness(40, 100);
+    h.app.start();
+    // 24-row screen + OIA + both borders = 27 in 40 rows -> 6 spare above, +1 for the
+    // top border, so the screen's first row is terminal row 8.
+    expect(h.stdout.all).toContain('\x1b[8;11H');
+    expect(h.stdout.all).not.toContain('\x1b[1;1H\x1b[');
+  });
+
+  it('draws a border when there is room', () => {
+    const h = harness(40, 100);
+    h.app.start();
+    expect(h.stdout.all).toContain('\u250c');   // top-left corner
+    expect(h.stdout.all).toContain('\u2518');   // bottom-right corner
+  });
+
+  it('draws no border in a terminal that only fits the screen', () => {
+    const h = harness(24, 80);
+    h.app.start();
+    expect(h.stdout.all).not.toContain('\u2500');
+    expect(h.stdout.all).not.toContain('\u2502');
+  });
+
+  it('makes the cursor visible, and restores it on exit', () => {
+    // A block cursor in a colour of its own; on the old dark-grey background the
+    // cursor was effectively invisible. OSC 12 is best-effort -- a terminal that
+    // does not implement it ignores the sequence -- so the shape is set too.
+    const h = harness();
+    h.app.start();
+    expect(h.stdout.all).toContain('\x1b]12;');   // set cursor colour
+    expect(h.stdout.all).toMatch(/\x1b\[\d q/);   // DECSCUSR shape
+    const before = h.stdout.all;
+    h.app.restore();
+    const added = h.stdout.all.slice(before.length);
+    expect(added).toContain('\x1b]112');          // reset cursor colour
+    expect(added).toMatch(/\x1b\[0 q/);           // reset cursor shape
+  });
+});
+
 describe('terminal resize (SIGWINCH)', () => {
   it('registers a SIGWINCH handler', () => {
     const h = harness();
@@ -130,7 +171,7 @@ describe('terminal resize (SIGWINCH)', () => {
     h.host.fire('SIGWINCH');
     const emitted = h.stdout.written.slice(before).join('');
     expect(emitted).toContain('AB');            // full repaint, not an empty diff
-    expect(emitted).toContain('\x1b[25;1H');    // and the OIA now has a home
+    expect(emitted).toMatch(/\x1b\[\d+;\d+H\x1b\[0m/);   // and the OIA now has a home
   });
 
   it('stops painting and says why when the terminal shrinks below the screen', () => {

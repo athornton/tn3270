@@ -108,6 +108,19 @@ class AnsiScreen:
         while i < n:
             b = data[i]
             if b == 0x1B:
+                # OSC (\x1b]...BEL or ST) -- cursor colour, and its reset. Consumed
+                # rather than counted: the client legitimately emits these, and an
+                # `unknown` counter that always shows noise is a counter nobody reads.
+                osc = re.match(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[i:])
+                if osc:
+                    i += osc.end()
+                    continue
+                # DECSCUSR, `\x1b[<n> q` -- note the SPACE before the final byte, which
+                # the CSI pattern below will not match.
+                cursor = re.match(rb"\x1b\[[0-9;]* q", data[i:])
+                if cursor:
+                    i += cursor.end()
+                    continue
                 m = re.match(rb"\x1b\[([0-9;?]*)([A-Za-z])", data[i:])
                 if not m:
                     self.unknown += 1

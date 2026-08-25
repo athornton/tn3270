@@ -646,6 +646,50 @@ reported two honest-looking failures until:
 Same shape as the trace probe that lacked `Trace(on)`: a probe that reports absence
 must first be shown able to report presence.
 
+## CENTRING, BORDER, BACKGROUND AND CURSOR — 2026-08-25
+
+Requested after the SIGWINCH work, on the grounds that a JupyterLab terminal is never
+80x24 so hugging the top-left corner looks wrong. `layout()` is a new pure function
+deciding offsets, the OIA row and which border sides fit; the renderer applies the
+offsets and draws the border on full repaints only; core's default background became
+`BLACK`; the cursor is a green block.
+
+**THE VISUAL CHECK FOUND A BUG THAT 38 UNIT TESTS DID NOT**, which is the lesson of
+this piece. Dumping a reconstructed 90x30 pty showed the whole screen written as ONE
+contiguous run: `RED FIELD` had wrapped onto the end of the previous line, and only two
+terminal rows began at the screen's left edge. The cause is that cells ARE contiguous
+across a row boundary, so the run-length logic emitted no position escape there and
+relied on the TERMINAL wrapping at the screen's right edge — true only while the screen
+exactly filled the terminal width. Centred in a 90-column window, an 80-column screen
+wrapped at 90 instead of 85 and every row after the first was misplaced.
+
+The tests missed it because they exercised offsets through SINGLE-CELL changes, where
+the run always breaks and an escape is emitted anyway. A full repaint of contiguous
+cells was never checked with an offset. **Rendering is visual; look at it.** The fix
+emits a position escape at every row start, and the test now asserts row 2 is
+positioned, not just row 1.
+
+**Two things that looked like bugs and were my harness**, both worth knowing before
+trusting a dump:
+
+- The border WAS being drawn all along; the ASCII-only dump parser silently dropped
+  multi-byte UTF-8 box characters. Confirmed by counting bytes on the wire — one each
+  of `┌┐└┘`, 160 `─`, 50 `│` — before believing the picture.
+- `live-drive.py` reported 4 unrecognised escapes once the cursor sequences landed,
+  because its parser knew neither OSC nor DECSCUSR's `\x1b[2 q` (note the SPACE, which
+  the CSI pattern cannot match). Taught it both; back to 0. A diagnostic counter that
+  always shows noise is one nobody reads — the same failure as the logoff flag that
+  cried wolf on success.
+
+**The background change is a DELIBERATE DIVERGENCE from x3270** and is documented as
+one in both `render.ts` and its test, because the value it replaced was
+reference-derived (`c3270/screen.c:1158`) rather than arbitrary. Precedent is the
+palette's own note that its RGB values are "our own choice, deliberately not
+x3270's". Narrow on purpose: only the default moved.
+
+**One judgment call to know about:** with exactly one spare row the OIA wins over a
+bottom border. Flipping that is two lines in `layout()`.
+
 ## Where to resume
 
 **Nothing in this plan. All sixteen tasks are done, and so is the SIGWINCH gap that

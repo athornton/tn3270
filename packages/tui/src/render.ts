@@ -56,16 +56,86 @@ export function statusRowFor(terminal: Geometry, screen: Geometry): number | und
   return terminal.rows >= screen.rows + 1 ? screen.rows + 1 : undefined;
 }
 
+export interface BorderSides {
+  top: boolean; bottom: boolean; left: boolean; right: boolean;
+}
+
+export interface Layout {
+  /** 0-based rows/cols to add to every screen address. */
+  rowOffset: number;
+  colOffset: number;
+  /** 1-based terminal row for the OIA, or undefined if it does not fit. */
+  statusRow: number | undefined;
+  border: BorderSides;
+}
+
+/**
+ * Where to put the 3270 screen, its OIA and its border in a given terminal.
+ *
+ * ## SLACK IS SPENT IN PRIORITY ORDER, NOT SHARED OUT
+ *
+ * A JupyterLab terminal is essentially never 80x24, so the interesting case is a
+ * window somewhat bigger than the screen and the question is what to do with the
+ * extra cells. Vertically: the screen is mandatory, then the OIA, then the BOTTOM
+ * border, then the top. Horizontally: the screen, then the LEFT border, then the
+ * right. So a window one cell too wide gets a left border and one cell too tall
+ * gets an OIA, which is the "prefer left and bottom" rule.
+ *
+ * **The OIA outranks the bottom border deliberately** -- it is functional (it is
+ * where `X Wait` and the connection state appear) and the border is decorative.
+ * That is a judgment call rather than a derivation; flipping it means swapping two
+ * lines below.
+ *
+ * Whatever is left over is split evenly, biased so any odd cell falls at the
+ * bottom and right, which is what `Math.floor` gives and what centring
+ * conventionally means.
+ *
+ * PURE, and the invariant worth having: nothing it returns may fall outside the
+ * terminal. A border row below the last line, or an OIA past it, scrolls the window
+ * and corrupts every cursor address computed afterwards -- `render.test.ts` sweeps
+ * 22 heights by 5 widths asserting exactly that.
+ */
+export function layout(terminal: Geometry, screen: Geometry): Layout {
+  const slackV = Math.max(0, terminal.rows - screen.rows);
+  const slackH = Math.max(0, terminal.cols - screen.cols);
+
+  const wantStatus = slackV >= 1;
+  const bottom = slackV >= 2;
+  const top = slackV >= 3;
+  const left = slackH >= 1;
+  const right = slackH >= 2;
+
+  const blockRows = screen.rows + (wantStatus ? 1 : 0) + (bottom ? 1 : 0) + (top ? 1 : 0);
+  const blockCols = screen.cols + (left ? 1 : 0) + (right ? 1 : 0);
+
+  const rowOffset = Math.floor((terminal.rows - blockRows) / 2) + (top ? 1 : 0);
+  const colOffset = Math.floor((terminal.cols - blockCols) / 2) + (left ? 1 : 0);
+
+  return {
+    rowOffset,
+    colOffset,
+    statusRow: wantStatus ? rowOffset + screen.rows + 1 : undefined,
+    border: { top, bottom, left, right },
+  };
+}
+
 interface RendererOptions extends Geometry {
   depth: Depth;
   /**
-   * 1-based terminal row for the OIA, or `undefined` to draw none.
-   *
-   * Defaults to `rows + 1`, which is the only correct answer when the caller has
-   * not measured the terminal, and is what every caller wanted before the OIA
-   * became optional. `App` always passes `statusRowFor(...)` explicitly.
+   * Where the screen, OIA and border go. Defaults to flush at the top left with
+   * the OIA directly below and no border, which is what a caller that has not
+   * measured the terminal must assume. `App` always passes `layout(...)`.
    */
-  statusRow?: number | undefined;
+  layout?: Layout;
+}
+
+const NO_BORDER: BorderSides = { top: false, bottom: false, left: false, right: false };
+
+function sameLayout(a: Layout, b: Layout): boolean {
+  return a.rowOffset === b.rowOffset && a.colOffset === b.colOffset
+    && a.statusRow === b.statusRow
+    && a.border.top === b.border.top && a.border.bottom === b.border.bottom
+    && a.border.left === b.border.left && a.border.right === b.border.right;
 }
 
 const ESC = '\x1b[';
@@ -74,7 +144,9 @@ export class TerminalRenderer {
   private readonly rows: number;
   private readonly cols: number;
   private readonly depth: Depth;
-  private statusRow: number | undefined;
+  private place: Layout;
+  /** Set when the layout moved, so the next full paint clears the old drawing. */
+  private needsClear = false;
   private previous: ResolvedCell[] | undefined;
   private previousCursor = -1;
   private previousStatus = '';
@@ -83,7 +155,9 @@ export class TerminalRenderer {
     this.rows = opts.rows;
     this.cols = opts.cols;
     this.depth = opts.depth;
-    this.statusRow = 'statusRow' in opts ? opts.statusRow : opts.rows + 1;
+    this.place = opts.layout ?? {
+      rowOffset: 0, colOffset: 0, statusRow: opts.rows + 1, border: NO_BORDER,
+    };
   }
 
   /** Force the next paint to redraw everything, e.g. after a terminal resize. */
@@ -93,21 +167,61 @@ export class TerminalRenderer {
   }
 
   /**
-   * Move the OIA, or drop it, because the terminal was resized.
+   * Re-place everything, because the terminal was resized.
    *
-   * Invalidates on any change: every cursor address in `previous` was computed for
-   * the old layout, so a diff across the transition would write cells to the wrong
-   * places. A no-op change deliberately does NOT invalidate, or every SIGWINCH that
-   * did not actually change the size would cost a full repaint.
+   * Invalidates AND clears on any change: every cursor address in `previous` was
+   * computed against the old placement, so diffing across the transition would
+   * write cells to the wrong cells, and the old border and screen would be left
+   * behind as litter wherever the block used to be. A no-op change deliberately
+   * does neither, or every spurious SIGWINCH would cost a full clear and repaint.
    */
-  setStatusRow(row: number | undefined): void {
-    if (row === this.statusRow) return;
-    this.statusRow = row;
+  setLayout(next: Layout): void {
+    if (sameLayout(next, this.place)) return;
+    this.place = next;
+    this.needsClear = true;
     this.invalidate();
+  }
+
+  /** The border, drawn only on a full repaint -- it never changes between them. */
+  private borderParts(): string[] {
+    const { rowOffset, colOffset, statusRow, border } = this.place;
+    if (!border.top && !border.bottom && !border.left && !border.right) return [];
+    const top = rowOffset + 1;
+    const bottom = statusRow !== undefined
+      ? Math.max(rowOffset + this.rows, statusRow)
+      : rowOffset + this.rows;
+    const left = colOffset + 1;
+    const right = colOffset + this.cols;
+    const parts: string[] = [];
+    const across = '\u2500'.repeat(this.cols);
+
+    if (border.top) {
+      parts.push(`${ESC}${top - 1};${border.left ? left - 1 : left}H`
+        + (border.left ? '\u250c' : '') + across + (border.right ? '\u2510' : ''));
+    }
+    if (border.bottom) {
+      parts.push(`${ESC}${bottom + 1};${border.left ? left - 1 : left}H`
+        + (border.left ? '\u2514' : '') + across + (border.right ? '\u2518' : ''));
+    }
+    for (let row = top; row <= bottom; row++) {
+      if (border.left) parts.push(`${ESC}${row};${left - 1}H\u2502`);
+      if (border.right) parts.push(`${ESC}${row};${right + 1}H\u2502`);
+    }
+    return parts;
   }
 
   paint(cells: readonly ResolvedCell[], cursor: number, status: string): string {
     const parts: string[] = [];
+    const fullRepaint = this.previous === undefined;
+    if (fullRepaint) {
+      // Clearing is only needed when the block MOVED; on the first paint app.ts has
+      // already cleared, and clearing again would throw away its own work.
+      if (this.needsClear) {
+        parts.push(`${ESC}2J`);
+        this.needsClear = false;
+      }
+      parts.push(...this.borderParts());
+    }
     let sgr = '';          // the SGR currently in effect on the terminal
     let lastWritten = -2;  // index of the previously emitted cell
 
@@ -116,11 +230,19 @@ export class TerminalRenderer {
       const old = this.previous?.[i];
       if (old !== undefined && sameCell(old, cell)) continue;
 
-      // Move the cursor only when this cell does not directly follow the last
-      // one we wrote. A full-screen change therefore emits one position escape.
-      if (i !== lastWritten + 1) {
-        const row = Math.floor(i / this.cols) + 1;
-        const col = (i % this.cols) + 1;
+      // Move the cursor when this cell does not directly follow the last one we
+      // wrote, AND at the start of every screen row.
+      //
+      // The row-start case is not an optimisation to skip: cells ARE contiguous
+      // across a row boundary, but the terminal wraps at ITS right edge, not at the
+      // screen's. That coincided only while the screen exactly filled the terminal
+      // width. Centred in a 90-column window an 80-column screen wrapped at column
+      // 90 rather than 85, putting every row after the first in the wrong place --
+      // found on a real pty, where only the first screen row and the OIA began at
+      // the screen's left edge. Costs one escape per row on a full repaint.
+      if (i !== lastWritten + 1 || i % this.cols === 0) {
+        const row = this.place.rowOffset + Math.floor(i / this.cols) + 1;
+        const col = this.place.colOffset + (i % this.cols) + 1;
         parts.push(`${ESC}${row};${col}H`);
       }
 
@@ -143,8 +265,14 @@ export class TerminalRenderer {
     // invalidates, and `invalidate` already clears `previousStatus`. So this is
     // belt-and-braces for a caller that changes the row some other way, and no test
     // can pin it as the class stands -- do not write one claiming to.
-    if (this.statusRow !== undefined && status !== this.previousStatus) {
-      parts.push(`${ESC}${this.statusRow};1H${ESC}0m${status}${ESC}K`);
+    if (this.place.statusRow !== undefined && status !== this.previousStatus) {
+      // PADDED to the screen width, not `\x1b[K`. Erasing to end of line would wipe
+      // the right-hand border on this row, and aligning to the screen rather than to
+      // column 1 keeps the OIA under the screen when the block is centred.
+      const text = status.length > this.cols
+        ? status.slice(0, this.cols)
+        : status.padEnd(this.cols, ' ');
+      parts.push(`${ESC}${this.place.statusRow};${this.place.colOffset + 1}H${ESC}0m${text}`);
       sgr = '';
       this.previousStatus = status;
     }
@@ -152,8 +280,8 @@ export class TerminalRenderer {
     // The terminal's own cursor goes where the 3270 cursor is, so a user sees it
     // in the field they are typing into.
     if (parts.length > 0 || cursor !== this.previousCursor) {
-      const row = Math.floor(cursor / this.cols) + 1;
-      const col = (cursor % this.cols) + 1;
+      const row = this.place.rowOffset + Math.floor(cursor / this.cols) + 1;
+      const col = this.place.colOffset + (cursor % this.cols) + 1;
       parts.push(`${ESC}${row};${col}H`);
     }
 

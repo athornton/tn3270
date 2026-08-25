@@ -5,3 +5,7 @@ out/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Python bytecode, from the pty/live harnesses in packages/tui/scripts
+__pycache__/
+*.pyc

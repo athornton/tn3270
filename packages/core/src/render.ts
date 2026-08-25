@@ -421,8 +421,17 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
       ? usableColour(cell.fg) ?? usableColour(field?.fg) ?? defaultColour(attr)
       : Colour.GREEN;
     const bg = mode3279
-      ? usableColour(cell.bg) ?? usableColour(field?.bg) ?? Colour.NEUTRAL_BLACK
-      : Colour.NEUTRAL_BLACK;
+      // BLACK, not NEUTRAL_BLACK, and this is a DELIBERATE DIVERGENCE FROM x3270,
+      // which falls back to neutral black here (c3270/screen.c:1158,
+      // `bg = cmap[HOST_COLOR_NEUTRAL_BLACK]`). Neutral-black is 0x1a1a1a in our
+      // palette -- a dark grey -- and a whole screen of it reads as washed-out next
+      // to a terminal's own black, with a cursor that nearly disappears against it.
+      // Same category as the palette's RGB choices, documented there as ours rather
+      // than x3270's: the manual says which colour each CODE is, not what an ABSENT
+      // background should become. Only the default moved; an explicit host F0 still
+      // resolves to neutral-black, so nothing the host actually sent is flattened.
+      ? usableColour(cell.bg) ?? usableColour(field?.bg) ?? Colour.BLACK
+      : Colour.BLACK;
 
     // Highlighting takes the same two levels through the same idiom, and is NOT
     // gated on mode3279 -- blink, reverse and underscore are things a monochrome

@@ -23,11 +23,31 @@
 
 import { AID, PA_AIDS, PF_AIDS, resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
-import { statusRowFor, TerminalRenderer, tooSmall } from './render.js';
+import { layout, TerminalRenderer, tooSmall } from './render.js';
 import { lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action } from './keymap.js';
 
 /** How long to wait before deciding a lone ESC really was Escape. */
 const ESC_TIMEOUT_MS = 50;
+
+/**
+ * Make the cursor findable, and put it back afterwards.
+ *
+ * Two sequences because they degrade differently. DECSCUSR (`\x1b[2 q`, steady
+ * block) is very widely implemented; OSC 12 (cursor colour) is BEST-EFFORT -- a
+ * terminal that does not know it ignores it, which is why the shape is set too
+ * rather than relying on colour alone.
+ *
+ * Green rather than white, matching the default-green foreground a 3279 shows and
+ * the phosphor look people expect; it is one constant to change if white reads
+ * better. The old default background was `neutral-black` at 0x1a1a1a -- a dark grey
+ * -- against which an unstyled cursor was very hard to see. That default is now
+ * pure black (core `resolve`), and the cursor is explicitly coloured.
+ *
+ * OSC 112 resets the colour to the terminal's own, and `\x1b[0 q` the shape, so a
+ * user's carefully configured cursor survives running this.
+ */
+const CURSOR_ON = '\x1b]12;#00ff00\x07\x1b[2 q';
+const CURSOR_OFF = '\x1b]112\x07\x1b[0 q';
 
 export interface InputStream {
   setRawMode?(on: boolean): unknown;
@@ -104,7 +124,7 @@ export class App {
     this.renderer = new TerminalRenderer({
       ...screen,
       depth: opts.depth ?? detectDepth(),
-      statusRow: statusRowFor(this.terminal(), screen),
+      layout: layout(this.terminal(), screen),
     });
   }
 
@@ -130,6 +150,7 @@ export class App {
     this.stdin.setRawMode?.(true);
     this.stdin.resume();
     this.stdout.write('\x1b[?1049h\x1b[2J');   // alternate screen buffer, cleared
+    this.stdout.write(CURSOR_ON);
 
     // EVERY exit path. `restore` is idempotent.
     const bail = (err?: unknown): void => {
@@ -164,6 +185,7 @@ export class App {
       clearTimeout(this.escTimer);
       this.escTimer = undefined;
     }
+    this.stdout.write(CURSOR_OFF);
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);
     this.stdin.pause();
@@ -198,7 +220,7 @@ export class App {
 
     const wasSuspended = this.suspended;
     this.suspended = false;
-    this.renderer.setStatusRow(statusRowFor(term, screen));
+    this.renderer.setLayout(layout(term, screen));
     if (wasSuspended) this.renderer.invalidate();
     this.draw();
   }
