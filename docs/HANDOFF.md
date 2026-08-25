@@ -18,19 +18,36 @@ whatever the terminal supports, and drawn with dirty-cell diffing. The plan is
 `...-tui-and-colour-PROGRESS.md` carries the findings — read that second file
 before touching this work, because most of what cost time is in it rather than here.
 
-**Tasks 1-13, 15 and 16 are done. TASK 14 IS NOT, and it is the only thing left
-in this plan:** live verification of the TUI against MVS 3.8j TK5 and VM/370.
-Both Hercules systems were down for this session (`/dev/tcp` probe refused on
-3270 and 3271) and **the user IPLs them by hand**, so it could not be attempted.
-Everything else is proven; this is proven only against a local fake host.
+**ALL SIXTEEN TASKS ARE DONE, INCLUDING TASK 14's LIVE VERIFICATION.** The TUI was
+driven against both Hercules systems on 2026-08-25 and logged off cleanly from
+both: **VM/370 10 of 10 steps** (CMS answered `QUERY DISK A` with its disk table,
+CP closed with `LOGOFF AT` and its own accounting) and **MVS 3.8j TK5 8 of 8**
+(ISPF primary option menu fully rendered, `USERID : HERC04`, `TERMINAL : 3277`,
+then `X` to TSO `READY` and a clean `LOGOFF`). Full write-up, including the six
+things that cost time, in `docs/live-testing.md` under *TUI and colour results*.
 
-**What the TUI was actually verified against**, since the hosts were down: a real
-pty driving a local minimal TN3270 server, `packages/tui/scripts/pty-smoke.py`,
-ten checks all passing — telnet negotiation, the host's text drawn, a 256-colour
-SGR emitted, typing into an unprotected field, `Ctrl-]`, and **ECHO restored on
-the tty after exit**, which is the one that matters. It is NOT a substitute for a
-live host: it cannot tell us what MVS or VM really send. Run it with
-`python3 packages/tui/scripts/pty-smoke.py`; exit 0 means all ten held.
+**Colour is proven live: five distinct foreground colours on TK5's ISPF menu**
+(green 779, turquoise 416, white 339, neutral-white 322, blue 64), where
+`DEFAULT_COLOURS` can only produce four — and turquoise and neutral-white are not
+in that map at all, so they came from the host's SA/SFE attributes. The fixture
+replay still reproduces its own numbers exactly, so resolution has not moved.
+
+**⚠️ HERC01, HERC02 and HERC03 ARE STILL LOGGED ON** and answer `IKJ56425I LOGON
+REJECTED, USERID ... IN USE`. Early harness runs had no teardown and quitting the
+TUI does not log off, so each failure stranded one. **They need an operator
+`C U=HERCnn` on the MVS console — nothing a TN3270 client can do will clear them.**
+**Use HERC04**, which is confirmed free.
+
+**Two harnesses, both reusable:**
+
+- `packages/tui/scripts/live-drive.py <tk5|vm>` — drives the TUI against a live
+  host over a pty, reconstructing a 25×80 grid from the ANSI stream (you cannot
+  grep a diffing renderer's output; see the doc). Password via
+  `TN3270_PASSWORD`, userid via `TN3270_USER`. It always attempts a logoff and
+  reports `logoff CONFIRMED` — do not trust a run that says otherwise.
+- `packages/tui/scripts/pty-smoke.py` — the host-free version: a real pty against
+  a local minimal TN3270 server, ten checks including **ECHO restored on the tty
+  after exit**. Use it when Hercules is down; exit 0 means all ten held.
 
 **Still not done, deliberately:** Programmable Symbol Sets (`XA.CHARSET` 0x43 is
 still parsed and dropped, and `Cell` is already a tagged variant so the renderer
@@ -101,7 +118,14 @@ than the stated bug:**
 
 **STAGE 2a IS COMPLETE AND PROVEN AGAINST A LIVE HOST.** MVS 3.8j TSO is reachable:
 the acceptance script reaches the ISPF primary option menu and logs off cleanly, 0
-errors and 0 program checks. Fixture at `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`,
+errors and 0 program checks. **TWO FILES SHARE THIS NAME AND ONLY ONE IS
+REPLAYABLE** — `packages/fixtures/traces/mvs-tk5-tso-ispf.trace` is the CANONICAL
+form that `Replay()` accepts, and `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` is
+raw CLI output with every line prefixed, which `Replay()` accepts with an `ok` and
+then produces an EMPTY SCREEN from. Citing the `mvs/` path here without that caveat
+cost a later session a wrong turn: it replayed to 0 fields and 1 colour and briefly
+looked like a colour-resolution regression. Use `traces/`. Fixture at
+`packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`,
 full results in `docs/live-testing.md` under *Stage 2a results*. What shipped:
 
 - **Configurable terminal type** — `-model 3278-2` / `-model 3278-2-E`, plus

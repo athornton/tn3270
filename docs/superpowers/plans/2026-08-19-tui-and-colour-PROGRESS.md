@@ -555,9 +555,39 @@ place saying so, so that nobody later writes a test claiming to cover them:
   no key in the table is a proper prefix of another. It becomes load-bearing the
   moment a terminal needs such a key.
 
+## Task 14 — DONE 2026-08-25, both hosts
+
+The user IPLed both systems and the TUI was driven against each over a pty:
+**VM/370 10/10 steps** (CMS answered `QUERY DISK A` with its disk table; CP closed
+with `LOGOFF AT` and its own accounting) and **TK5 8/8** (ISPF primary option menu
+fully rendered, then `X` to `READY` and a clean `LOGOFF`, with HERC04 confirmed free
+afterwards). Colour live: **five distinct foregrounds** on the ISPF menu where the
+default map yields four, two of them not in that map at all.
+
+Full results, and the six things that cost time, in `docs/live-testing.md` under
+*TUI and colour results*. The short version, because every one was MY error and not
+the client's: you cannot grep a diffing renderer's stream (reconstruct the screen);
+an escape sequence splits across reads; TSO has THREE more-output prompts, not two;
+`MORE...` eats input so Clear goes BEFORE the command; never match the bare string
+`CMS` because it matches `CMSUSER`; and `X` only exits ISPF from the Option field,
+where PF3 works anywhere.
+
+**And a cost worth remembering: three TK5 userids are stranded.** Quitting the TUI
+does not log off, and the harness had no teardown at first, so each failed run held
+one. HERC01/02/03 need an operator `C U=HERCnn`. The teardown now always runs and
+reports whether it confirmed the logoff.
+
+The `zti` comparison is **PARTIAL** and labelled as such: established that zti uses
+24-bit truecolor with its own palette, NOT established that every cell agrees with
+ours, because its tally spans its own chrome and comparing properly needs its curses
+screen reconstructed too.
+
 ## Where to resume
 
-**Task 14, and it needs the user to IPL both Hercules systems** (VM/370 on 3270,
+**Nothing in this plan. Task 14 is done** -- the note below is kept for whoever runs
+these hosts next.
+
+**When you next need both Hercules systems IPLed** (VM/370 on 3270,
 TK5 on 3271). `ss`/`netstat` show nothing in this sandbox — probe with
 `/dev/tcp/127.0.0.1/PORT`. Read the VM reconnect trap in `docs/HANDOFF.md` first:
 an account left logged on is reconnected, not refused, landing at `CP READ` where

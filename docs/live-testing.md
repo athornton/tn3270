@@ -787,3 +787,139 @@ without the user pasting it.
   host reliably sends three within 5 ms, but "reliably fast" is not "synchronous";
   an 8-connection probe that waited 2.5 s each time was 8-for-8 consistent where
   a no-wait probe looked random.
+
+---
+
+## TUI and colour results — 2026-08-25
+
+Task 14 of `docs/superpowers/plans/2026-08-19-tui-and-colour.md`. **Both hosts, both
+driven through the TUI itself, both logged off cleanly.** Terminal was a pty at
+25×80, `TERM=xterm-256color`, `--colors 256`.
+
+### What was verified, and how
+
+Driving is scripted, not hand-typed: `packages/tui/scripts/live-drive.py <tk5|vm>`,
+password from `TN3270_PASSWORD` and userid from `TN3270_USER`. An agent has no
+terminal, and a script is better anyway — every step waits for **text the host
+sent** rather than for a delay, because the keyboard is locked until the host
+writes and anything typed early is correctly refused.
+
+**VM/370 CE on 3270, as CMSUSER — 10 of 10 steps.** CMS answered `QUERY DISK A`
+itself, which is the proof that CMS and not CP is reading:
+
+```
+Ready; T=0.01/0.01 00:03:01
+QUERY DISK A
+Label  CUU M  Stat  Cyl Type Blksize   Files  Blks Used-(%) Blks Left  Blk Total
+CMS191 191 A   R/W  115 3350  800          6        109-00      65422      65531
+Ready; T=0.01/0.01 00:03:08
+```
+
+and CP closed with its own accounting, which is what shows the host understood our
+inbound stream rather than merely tolerating it:
+
+```
+CONNECT= 00:00:14 VIRTCPU= 000:00.10 TOTCPU= 000:00.24
+LOGOFF AT 00:03:14 GMT TUESDAY 08/25/26
+```
+
+**MVS 3.8j TK5 on 3271, as HERC04 — 8 of 8 steps.** The ISPF primary option menu
+rendered fully — `USERID : HERC04`, `TERMINAL : 3277`, `PANEL : ISP@PRIM`,
+`SYSTEMID : TK5R`, `RELEASE : V2.2.000` — then `X` reached TSO `READY`, `LOGOFF`
+returned the VTAM panel, and **HERC04 was confirmed free afterwards** by a separate
+logon that got the password prompt rather than `IN USE`.
+
+### Colour: five distinct foregrounds live, where the default map can produce four
+
+Via the CLI, `record-mvs.txt` with `-model 3278-2-E`, counting `ScreenJson`'s
+`resolved` array at the ISPF menu — 1920 cells, 84 fields, 24×80:
+
+| colour | cells |
+|---|---|
+| green | 779 |
+| turquoise | 416 |
+| white | 339 |
+| neutral-white | 322 |
+| blue | 64 |
+
+**Five, and two of them — turquoise and neutral-white — are not in
+`DEFAULT_COLOURS` at all**, so they can only have come from the host's SA/SFE
+extended attributes. That is the live counterpart of the fixture test, and it is
+the gap this whole stage existed to close. Background was `neutral-black` for all
+1920 cells and no cell carried highlighting.
+
+The TUI drew the same panel with 4 of those 5 as 256-colour cube indices — 46
+green, 51 turquoise, 188 neutral-white, 231 white — blue being absent from the
+panel state captured. Reconstructed from the ANSI stream, so this is what a user
+would actually see.
+
+**The fixture replay still reproduces its own numbers exactly** (28 fields; white
+793, blue 618, red 329, neutral-white 144, yellow 36), so colour resolution has not
+moved. Those differ from the live figures above only because the replay ends on a
+different screen — the Hercules banner, not the ISPF menu. Checked rather than
+assumed, after the live/fixture mismatch first looked like a regression.
+
+### `zti` comparison — PARTIAL, and do not read more into it than it says
+
+Established: **`zti` emits 24-bit truecolor (`38;2;r;g;b`), never 256-colour
+indices**, and its palette is its own — its green is `(35,215,47)` where ours is
+`(0,255,0)`, its turquoise `(87,239,239)` where ours is `(0,255,255)`. On a VTAM
+logon panel it used six foregrounds: green, white, turquoise, red, blue, yellow.
+Differing RGB is expected and not a defect; the manual fixes which colour each code
+IS, not its chromaticity, and `palette.ts` already documents ours as a deliberate
+choice.
+
+**A cell-by-cell comparison was NOT completed.** Two reasons, both worth knowing
+before anyone repeats this:
+
+1. Those six colours are tallied over `zti`'s **whole byte stream**, which includes
+   its OWN interface chrome, not just host cells. It is not a count of one panel.
+2. Comparing properly means reconstructing `zti`'s screen as well, and `zti` is a
+   curses application using relative cursor motion, so the small absolute-only
+   parser in `live-drive.py` is not sufficient for it.
+
+So: `zti` renders host colour and uses truecolor. Whether every cell agrees with
+ours is **still unverified**. Two traps if you take it up: `zti` does **not**
+autoconnect from `SESSION_HOST` — it waits at its own prompt for `goto <host>`, and
+a capture that misses this records a couple of hundred bytes and zero colour, which
+looks like a real negative result — and parsing SGR parameters naively will read the
+`35` of `38;2;35;215;47` as ANSI magenta. Both of those happened here.
+
+### Things that cost time, all of them mine and not the client's
+
+1. **You cannot grep a diffing renderer's output stream.** `TerminalRenderer` emits
+   only changed cells, so on-screen text is not contiguous in the byte stream — a
+   redrawn `USERID` can arrive as `USER`, a cursor move, then `ID`. Substring
+   matching found panels on the first full paint and lost them on every later diff.
+   The harness reconstructs a 25×80 grid and searches that.
+2. **An escape sequence splits across reads.** A chunk ending on a bare `\x1b` left
+   the next chunk's parameters written into the grid as text, producing a panel line
+   that literally read `[38;5;188;48;5;59m  Summary of changes made in TK5`. The
+   client was correct; the parser needed to hold incomplete tails over.
+3. **TSO has THREE more-output prompts before ISPF, not two** — welcome banner,
+   fortune cookie, and the fortune's own `***`. A fixed count timed out staring at
+   ASCII cat art. Loop Enter until no `***` remains; do not count them.
+4. **`MORE...` eats input, so Clear goes BEFORE the command, not after.** The flow
+   sent `QUERY DISK A` and then cleared, so the QUERY was swallowed and the step
+   timed out on a screen that plainly read `MORE...`. Already documented in
+   HANDOFF.md; re-learned anyway.
+5. **Never match the bare string `CMS`** — it matches the userid `CMSUSER`, firing
+   steps before CMS is ready. That put a Clear in early, left the session at `CP
+   READ`, and got `DISK NOT LOGGED ON` from CP, which looked like a client fault.
+   Match `Ready;`, `MORE...` or `CP READ`.
+6. **`X` only exits ISPF from the Option field.** Sent from elsewhere ISPF answers
+   "Enter END command to terminate ISPF" and stays; the teardown now sends PF3,
+   which IS END and works from any panel.
+
+### THREE TK5 USERIDS ARE STILL HELD — an operator must clear them
+
+**HERC01, HERC02 and HERC03 are logged on** and answer `IKJ56425I LOGON REJECTED,
+USERID ... IN USE`. Quitting the TUI does **not** log off, and early runs of the
+harness had no teardown, so each failed run stranded one. They need a console
+`C U=HERCnn` (or a TK5 restart); nothing reachable from a TN3270 client will clear
+them, and they did not time out over the session.
+
+**HERC04 is free** and is the one to use. The harness now always attempts a logoff
+when it got as far as sending a password, and reports `logoff CONFIRMED` or not — do
+not trust a run that says otherwise. The same discipline as
+`record-mvs.txt`'s mandatory `LOGOFF`, which this ignored at first and paid for.
