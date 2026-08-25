@@ -12,9 +12,9 @@ cannot tell it from the hardware.
 
 **Status: there is a working terminal client.** The protocol core, an
 s3270-compatible scripting CLI, extended data stream with Query Reply, 3279 colour,
-`IND$FILE` file transfer and a c3270-style TUI are all done and verified against two
-live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See *What is not
-implemented* below, which is the honest part of this file.
+`IND$FILE` file transfer, TLS, screen models 2–5 and a c3270-style TUI are all done and
+verified against two live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See
+*What is not implemented* below, which is the honest part of this file.
 
 ## What works today
 
@@ -63,7 +63,7 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1037 tests, 37 files
+npm test           # 1040 tests, 37 files
 npm run typecheck
 ```
 
@@ -123,6 +123,10 @@ reference to.
 
 `-E` is an extended-data-stream claim, not a size: `3278-4` and `3278-4-E` have identical
 geometry.
+
+Observed live on VM/370: the host sends Erase/Write for its logo at 24×80, then
+Erase/Write Alternate to move to 43×80 — the architected sequence, both halves in one
+session.
 
 The TUI re-places and repaints when the host resizes the screen, and suspends with a
 message if your window can no longer hold it, exactly as it does for a terminal resize.
@@ -328,7 +332,10 @@ worse than one that says which quarter is missing.
 - **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no SNA
   response handling, no printer sessions. Measured, not assumed: neither VM/370 nor
   MVS 3.8j TSO negotiates the option in any run, which is why the client gets this far
-  without it.
+  without it. The one place its absence bites today is that **we cannot ask for a
+  particular device address** — under Hercules that means taking whichever display it
+  assigns, so selecting a geometry means configuring which displays are attachable at
+  all rather than choosing one at connect time.
 - **No GUI yet.** There is a terminal front end (`packages/tui`) and a scripting CLI,
   but no window. Electron is next.
 - **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
@@ -363,13 +370,15 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 952 tests, 34 files |
+| `npm test` | **pass** — 1040 tests, 37 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
 | TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
+| TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` |
+| model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last
