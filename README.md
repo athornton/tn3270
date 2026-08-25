@@ -10,22 +10,47 @@ terminal-mode client in a window that does not know it is pretending to be a
 data-stream implementation with a native-feeling GUI, correct enough that a host
 cannot tell it from the hardware.
 
-**Status: stage 1 (protocol core + scriptable CLI) is complete. There is no GUI
-yet.** Next up is extended data stream + Query Reply, so that MVS/TSO works; the GUI
-follows. See *What is not implemented* below, which is the honest part of this file.
+**Status: there is a working terminal client.** The protocol core, an
+s3270-compatible scripting CLI, extended data stream with Query Reply, 3279 colour,
+`IND$FILE` file transfer and a c3270-style TUI are all done and verified against two
+live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See *What is not
+implemented* below, which is the honest part of this file.
 
 ## What works today
 
-The protocol core and an s3270-compatible scripting CLI. Verified against a live
-VM/370 (VM/CE 1.2 under Hercules): the client negotiates telnet, identifies as
-`IBM-3278-2`, logs on, IPLs CMS, drives full-screen panels, types into fields,
-sends Enter/Clear/PF/PA, reads modified fields back, and logs off — with CMS
-answering a CMS command, which is the difference between being understood and
-being tolerated.
+**A usable terminal client, driven interactively against both live hosts.**
 
-Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) for every
-keystroke case the comparison covers: typed field data, Enter on a
-modified-but-empty field, Clear as a short read, and LOGOFF.
+```sh
+node packages/tui/dist/main.js -model 3278-2-E 127.0.0.1:3271
+```
+
+- **MVS 3.8j (TK5)** — logs on to TSO, reaches ISPF's primary option menu, pages
+  through the tutorial, exits and logs off cleanly. Reproduced on four separate
+  userids.
+- **VM/370 (VM/CE 1.2)** — logs on, reaches CMS, has `QUERY DISK A` answered *by CMS*
+  with its disk table, and logs off with CP's own `LOGOFF AT` accounting. That last
+  part is the difference between being understood and being tolerated.
+
+**3279 colour is real and proven on the wire, not just in unit tests.** TK5's ISPF
+menu renders five distinct foreground colours where the base-attribute map can only
+produce four — two of them (turquoise, neutral-white) come from the host's SA/SFE
+extended attributes and would have been silently discarded before. The SA orders we
+parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
+colour-capable 3279.
+
+**`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
+binary round-tripping byte-identically each way.
+
+Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
+the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
+
+Two test harnesses come with it, because "it looked right" is not a result:
+
+- `packages/tui/scripts/live-drive.py <tk5|vm>` drives the TUI against a real host over
+  a pty and reconstructs what was actually drawn. It counts reverse-video cells and
+  solid blocks, and reports whether it confirmed its own logoff.
+- `packages/tui/scripts/pty-smoke.py` does the same host-free against a local minimal
+  TN3270 server: 12 checks, including that your terminal still echoes afterwards.
 
 ## Build and test
 
@@ -38,9 +63,31 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 318 tests
+npm test           # 952 tests, 34 files
 npm run typecheck
 ```
+
+## Using the TUI
+
+```sh
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] host[:port]
+```
+
+`-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
+defaults to 23. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
+`0` is monochrome because you said so — the distinction matters, since it is how the
+monochrome path gets tested on a colour terminal.
+
+**`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
+constantly, so the banner says so before raw mode starts. `Ctrl-R` is Reset, `Ctrl-U`
+erases input, `F1`–`F12` are PF1–12 and `Shift+F1`–`F12` are PF13–24, and `Esc` `1`/`2`/`3`
+are PA1/PA2/PA3. Arrow keys are bound in **both** encodings, CSI and SS3, because
+terminfo reports only the application-mode one and any layer can flip the mode.
+
+Colours are zti's, not core's: the shared palette in `packages/core` keeps saturated
+primaries, and the TUI renders the gentler values zti uses because they read better in a
+terminal. Quantisation to 16 colours is an explicit table rather than nearest-RGB — with
+any realistic palette, blue and turquoise both fall nearest to cyan and would collide.
 
 ## Using the CLI
 
@@ -62,7 +109,14 @@ node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt
 **Commands.** `Connect` `Disconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
 `MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` ·
-`ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Wait`
+`ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
+· `Wait`
+
+**`Transfer`** is `IND$FILE`, CUT mode, and it works on both hosts in both directions.
+Two things that will otherwise cost you an afternoon: quote CMS file names, because the
+argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
+`-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
+`packages/cli/scripts/transfer-vm.txt`.
 
 **`Wait(condition[,seconds])`** takes `3270Mode`, `Output`, `Unlock`, `Settle`,
 or `InputField`. Which one you want is not obvious and gets hosts wrong in
@@ -100,10 +154,12 @@ derived from a real session — procedure in `docs/live-testing.md`.
 ## Layout
 
 ```
-packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA, trace
+packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
+                   colour resolution, Query Reply, IND$FILE, trace
 packages/cli       s3270-style scripting CLI
+packages/tui       c3270-style terminal front end, plus the live/pty harnesses
 packages/fixtures  recorded traces, golden screens, x3270 reference captures
-docs/              spec, plan, live-host runbook, handoff
+docs/              spec, plans, live-host runbook, handoff
 ```
 
 Start with `docs/HANDOFF.md`. The design spec is
@@ -113,21 +169,29 @@ recording against a real host and the log of what was found doing so.
 
 ## Staging
 
-1. **Protocol core + CLI** — done.
-2. **Extended data stream + Query Reply** — next. A configurable terminal type
-   (`IBM-3278-2-E`), a Query Reply answering Read Partition, and alternate screen
-   geometry. This is what MVS/TSO requires, and it was reprioritised ahead of the
-   GUI because MVS 3.8j is expected to be the largest group of users.
-3. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS
-   subnegotiation, the data header, BIND/UNBIND, SNA responses, device-name (LU)
-   selection. Separated from stage 2 deliberately: measurement shows TSO needs
-   neither the option nor any of this, so bundling them would have delayed a
-   working TSO session for no benefit.
-4. **Electron GUI**, then **packaging** for macOS and Linux.
-5. **TLS**, then **IND$FILE**, then printer sessions, then Programmable Symbol
-   Sets. PS follows IND$FILE by preference; its hard dependency is stage 2's Query
-   Reply (the host sends no PS structured fields until the capability is
-   advertised), not TN3270E as earlier drafts of the spec assumed.
+Done:
+
+1. **Protocol core + s3270-style CLI.**
+2. **Extended data stream + Query Reply** — configurable terminal type, five Query
+   Reply units, SFE. This is what MVS/TSO requires, and it was reprioritised ahead of
+   the GUI because MVS 3.8j is expected to be the largest group of users.
+3. **`IND$FILE`** (CUT mode), both hosts, both directions.
+4. **3279 colour and the TUI** — per-cell extended attributes, four-level colour
+   resolution, terminfo-driven depth detection, and a c3270-style front end.
+
+Remaining, in the order the author wants it:
+
+5. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS subnegotiation,
+   the data header, BIND/UNBIND, SNA responses, device-name (LU) selection. Separated
+   from item 2 deliberately: measurement shows TSO needs neither the option nor any of
+   this, so bundling them would have delayed a working TSO session for no benefit.
+6. **Electron GUI**, then **a webserver serving the same front end**.
+7. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
+   sends no PS structured fields until the capability is advertised), not TN3270E as
+   earlier drafts of the spec assumed.
+8. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux,
+   **TLS**, and **printer sessions**. TLS may well deserve to jump the queue — a 3270
+   client that cannot do TLS is unusable against anything modern.
 
 ### Graphics: the fidelity target, and why GDDM is not the route
 
@@ -147,8 +211,15 @@ system at Katholieke Universiteit Leuven), via a `GOPCLIGV REXX` glue exec.
 `GOPHERT GIF` in the archive is a test image, not the viewer. Local copies of
 CMS Gopher 2.4.2 are in `$HOME/cmsgopher`; the `.tar.gz` pair yields only
 `FILELIST` and `README`, `gop242s.vmarc` unpacks to service patches, and
-`gopher24.vmarc` has not been unpacked (`:CFF` compressed members). **VMGIF
-itself has not been located.**
+`gopher24.vmarc` has not been unpacked (`:CFF` compressed members).
+
+**VMGIF HAS SINCE BEEN FOUND — BUT AS OBJECT MODULES ONLY.** It is on disk at
+`$HOME/vmgif`, dated April 1993: `VMGIF.MODULE.T1` at 84600 bytes, the wrapper execs,
+`HELPCMS`, and `TONETABL` — its palette/dither table, which is the most directly useful
+piece. **There is no source.** Disassembling it is probably unnecessary: decoding GIF
+from the published spec is no harder than reverse-engineering a 1993 implementation once
+PS can push pixels, so VMGIF is best treated as a *behavioural* reference — evidence of
+what a 3279 could be made to do, and a palette to compare against.
 
 **VMGIF used GDDM, and we will not.** IBM is sunsetting GDDM and would be
 unlikely to license it even to a current paying VM customer, so the route for us
@@ -164,78 +235,60 @@ own client. Unscheduled, and much larger than this project.
 
 ## What is not implemented
 
-Stated plainly, because a 3270 emulator that quietly does three-quarters of the
-job is worse than one that says which quarter is missing.
+Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
+worse than one that says which quarter is missing.
 
-- **No GUI.** Stage 1 is a library and a scripting CLI. There is no window.
-- **No TLS.** Cleartext only, so this is not safe over an untrusted network.
-- **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no
-  SNA response handling, no printer sessions.
-- **Terminal type is hardcoded to `IBM-3278-2`, which is why TSO on MVS is
-  unreachable.** Two linked gaps, measured against MVS 3.8j TK5 with the TN3270E
-  telnet option never negotiated in any run:
-  - Advertising `IBM-3278-2` fails with `IKT00405I SCREEN ERASURE CAUSED BY ERROR
-    RECOVERY PROCEDURE`, while `IBM-3278-2-E`, `IBM-3279-2-E` and `IBM-DYNAMIC` all
-    reach TSO. Our inbound records are byte-identical to s3270's successful ones.
-  - But claiming the `-E` (extended data stream) suffix makes TSO send
-    `WriteStructuredField ReadPartition(0xff) Query` and wait for a Query Reply,
-    which we do not answer. So the terminal type is the *trigger* and Query Reply is
-    the *requirement*: changing the string alone would move the failure, not fix it.
+- **No TLS.** Cleartext only, so this is not safe over an untrusted network. On the
+  roadmap, and arguably the most important thing left.
+- **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no SNA
+  response handling, no printer sessions. Measured, not assumed: neither VM/370 nor
+  MVS 3.8j TSO negotiates the option in any run, which is why the client gets this far
+  without it.
+- **No GUI yet.** There is a terminal front end (`packages/tui`) and a scripting CLI,
+  but no window. Electron is next.
+- **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
+  deliberately dropped. `Cell` is already a tagged variant so that a renderer dispatches
+  on `kind` rather than assuming a font lookup — that variant exists for nothing but PS.
+- **MF orders are parsed, counted and not applied.** Modify Field would alter an
+  existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
+  deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
+  you find out if that changes.
+- **80×24 only.** `Screen` takes its geometry as a parameter, so this is a configuration
+  limit rather than a structural one, but alternate screen sizes are not offered and
+  mid-session resize of the *3270* screen is unimplemented. Measured: TSO does not need
+  more — ISPF reports `TERMINAL: 3277`, a device with no alternate size at all.
+- **No mouse support** in the TUI.
 
-  VM/370 exercises neither, which is how stage 1 got this far. Fixing it means
-  answering Read Partition and then making the terminal type configurable — and
-  expecting extended orders and alternate geometries we do not yet handle.
-- **No extended attributes.** SA, SFE and MF orders are parsed for length and
-  then ignored, so colour, highlighting and character sets are recognised but not
-  rendered. Note this is more than cosmetic: SFE *defines a field*, so a host that
-  used it would leave our screen without that field's structure. Neither VM/370 nor
-  MVS 3.8j sends these, which is why stage 1 gets away with it.
-- **No Programmable Symbol Sets** and no graphics.
-- **No Query Reply.** Write Structured Field is parsed but never answered, so we
-  cannot advertise a screen geometry. Two measured consequences: a host that has
-  learned an alternate size from a different client on the same device may drive us
-  with addresses outside 80×24 (stage 1 reports that as a program check rather than
-  silently wrapping), and **TSO on MVS waits on a Read Partition Query we never
-  answer** — see the terminal-type entry above, which is the same problem seen from
-  the other end. See the spec's *Outbound* section; this is measured, not theory.
-- **80×24 only.** `Screen` takes its geometry as a parameter, so this is a
-  configuration limit rather than a structural one.
-- **MVS reaches VTAM but not TSO.** Everything else above was verified against
-  VM/370. On MVS 3.8j TK5 we negotiate, render the TK5 logo and VTAM's USS logon
-  panel correctly, and VTAM answers us — but TSO rejects our hardcoded terminal
-  type, per the entry above, so `packages/cli/scripts/record-mvs.txt` remains a
-  draft and there is no TSO fixture. Details in `docs/live-testing.md`.
+The TUI has two limits worth knowing before you run it:
 
-## Stage 1 completion check
+- **It needs at least 24 rows and 80 columns**, and refuses smaller rather than drawing
+  a misleading partial screen. At exactly 24 rows it drops the status line and keeps the
+  screen, which is what c3270 does. Given more room it centres the screen and draws a
+  border.
+- **Its cursor colour is best-effort.** OSC 12 is not universally implemented, so the
+  shape is set via DECSCUSR as well; a terminal that ignores both still shows its own
+  cursor.
 
-Run 2026-08-17. The plan defines four checks; three pass and one cannot pass yet.
+## Verification
+
+`npm test` and `npm run typecheck` are the fast gate; the interesting checks are the
+ones against real systems, because most of the defects this project has found were only
+visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 318 tests, 18 files |
-| `npm run typecheck` | **pass** — silent |
-| `npx vitest run …/conformance.test.ts` | **pass** — 2 tests, running against a real x3270 capture, not skipped |
-| `record-mvs.txt` → 0 errors | **fails: 10 errors** |
+| `npm test` | **pass** — 952 tests, 34 files |
+| `npm run typecheck`, `npm run build` | **pass** — silent |
+| conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
+| `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
+| TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
+| TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
+| `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
 
-The MVS check fails for an environmental reason, not a client defect. The TK5
-instance on hand is running Hercules but MVS was never IPLed — it was started with
-`hercules -f conf/tk5.cnf` rather than TK5's `./mvs` launcher, so
-`HERCULES_RC=scripts/ipl.rc` was never set and the `ipl 390` in it never ran. The
-terminal therefore sits on the Hercules connection banner and answers nothing: our
-Enter goes out and **zero** host records come back. Devices `00C0-00C6` are VTAM
-terminals, and with no MVS there is no VTAM to reply.
-
-The equivalent check against VM/370 does pass, with the fixed script:
-
-```sh
-$ node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt | grep -c '^error$'
-0
-```
-
-77 commands, 0 errors, 0 program checks, reaching CMS `Ready;`.
-
-So stage 1 meets the spec's success criterion on the host that exists, and the
-one unmet check is waiting on a system to be IPLed rather than on code.
+Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
+the runbook and the log of what was found doing it, including the failures. That last
+part is deliberate — the write-ups record six self-inflicted diagnostic mistakes, and
+they are the most reusable thing in the file.
 
 ## License
 
