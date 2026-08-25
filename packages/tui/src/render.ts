@@ -248,7 +248,22 @@ export class TerminalRenderer {
 
       const want = this.cellSgr(cell);
       if (want !== sgr) {
-        parts.push(`${ESC}${want || '0'}m`);
+        // RESET FIRST, ALWAYS. SGR parameters ACCUMULATE -- `\x1b[38;5;46m` sets a
+        // colour and leaves reverse, bold, blink and underline exactly as they were,
+        // because only 0 (or 22/24/25/27) clears them. Emitting the desired
+        // attributes alone therefore let a highlighted run leak into everything after
+        // it: ISPF's tutorial sends SA highlighting=0xF2 for its title bar, and every
+        // following cell stayed inverted, turning each subsequent SPACE into a solid
+        // block of the foreground colour and mottling the whole page. VM/370 never
+        // sends reverse, which is why only TK5 showed it.
+        //
+        // The monochrome path accidentally did the right thing (`want` is empty there,
+        // so it emitted a bare `0`), which is why this survived the depth-0 tests.
+        //
+        // Costs two bytes per SGR CHANGE, not per cell -- changes are already
+        // coalesced by the `want !== sgr` test above. Explicit off-codes would save
+        // those two bytes and cost a state machine; not worth it.
+        parts.push(`${ESC}0${want === '' ? '' : `;${want}`}m`);
         sgr = want;
       }
       parts.push(cell.hidden ? ' ' : cell.text);

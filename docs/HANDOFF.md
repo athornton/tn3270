@@ -61,11 +61,21 @@ INSIDE the border. `layout()` in `render.ts` is the pure function that decides a
 it, and its test sweeps 22 heights by 5 widths asserting nothing lands outside the
 terminal.
 
-**Background and cursor, same date:** the DEFAULT background is now `BLACK`, a
-deliberate divergence from x3270 (which uses neutral black, `c3270/screen.c:1158`)
-because neutral-black is `0x1a1a1a` and a screenful of dark grey reads as washed out.
-Only the default moved -- an explicit host `F0` still resolves to neutral-black, so
-nothing the host sent is flattened. The cursor is a green steady block via OSC 12 plus
+**THE TUI HAS ITS OWN PALETTE (2026-08-25), and core's is untouched.**
+`packages/tui/src/colours.ts` uses **zti's** colours for F0-F7 and **x3270's** for
+F8-FF, because zti advertises only F1-F7 and defines no more. F0 renders as PURE BLACK
+there, as zti does, which is why core needs no divergence for a black background -- an
+earlier change to core's default bg has been REVERTED and it is `NEUTRAL_BLACK` again,
+faithful to `c3270/screen.c:1158`. Quantisation to 16 colours is now an EXPLICIT TABLE,
+not nearest-RGB: both references' blue collides with their turquoise under nearest-RGB,
+so the palette was previously carrying a burden that belongs to the quantiser.
+
+**A rendering bug fixed the same day, worth knowing about because the class recurs:
+SGR parameters ACCUMULATE.** Emitting the attributes a cell wants does NOT clear the
+ones it does not; only 0/22/24/25/27 do. A reverse-video run therefore leaked into
+everything after it, and ISPF's tutorial title bar turned 2178 blank cells across three
+pages into solid colour blocks. `paint()` now resets before setting. The monochrome path
+had accidentally been correct, which is why depth-0 tests never caught it. The cursor is a green steady block via OSC 12 plus
 DECSCUSR, restored on exit with OSC 112 and `\x1b[0 q`. **OSC 12 is best-effort**: a
 terminal that does not implement it ignores it, which is why the shape is set too.
 

@@ -77,6 +77,8 @@ class AnsiScreen:
         self.fg = [[None] * COLS for _ in range(ROWS)]
         self.row = self.col = 0
         self.cur_fg = None
+        self.cur_rev = False
+        self.rev = [[False] * COLS for _ in range(ROWS)]
         self.unknown = 0
         self.pending = b""
 
@@ -132,11 +134,17 @@ class AnsiScreen:
                     self.row = max(0, int(parts[0] or 1) - 1)
                     self.col = max(0, int(parts[1] or 1) - 1) if len(parts) > 1 else 0
                 elif final == b"m":
+                    ps = [x for x in params.split(b";") if x != b""]
+                    if not ps or b"0" in ps[:1]:
+                        self.cur_fg = None
+                        self.cur_rev = False
                     mm = re.search(rb"38;5;(\d+)", params)
                     if mm:
                         self.cur_fg = int(mm.group(1))
-                    elif params in (b"", b"0"):
-                        self.cur_fg = None
+                    if b"7" in ps:
+                        self.cur_rev = True
+                    if b"27" in ps:
+                        self.cur_rev = False
                 elif final == b"K":
                     if self.row < ROWS:
                         for c in range(self.col, COLS):
@@ -160,6 +168,7 @@ class AnsiScreen:
                 if self.row < ROWS and self.col < COLS:
                     self.grid[self.row][self.col] = chr(b)
                     self.fg[self.row][self.col] = self.cur_fg
+                    self.rev[self.row][self.col] = self.cur_rev
                 self.col += 1
                 if self.col >= COLS:
                     self.col = 0
@@ -197,7 +206,15 @@ def flow_tk5(pw, user):
         # the Enter before the next screen has even arrived. `"DRAIN***"` loops until
         # no `***` remains, which is the only form that does not depend on counting.
         ("dismiss more-output prompts", "DRAIN***", None),
-        ("ISPF primary option menu", ["USERID", "BROWSE", "Primary Option"], b"X" + CR),
+        ("ISPF primary option menu", ["USERID", "BROWSE", "Primary Option"],
+         (b"T" + CR) if os.environ.get("TN3270_TUTORIAL") else (b"X" + CR)),
+        # Paging the Tutorial is where the SGR-accumulation mottling showed up: its
+        # title bar is the only reverse-video run either host sends.
+        ("tutorial page 1", ["Tutorial", "tutorial"], CR),
+        ("tutorial page 2", None, CR),
+        ("tutorial page 3", None, PF3),
+        ("back out of the tutorial", None, PF3),
+        ("at the menu or READY", None, b"X" + CR),
         ("TSO READY", ["READY", "CLST"], b"LOGOFF" + CR),
         ("logged off", ["LOGGED OFF", "Logon", "RUNNING"], None),
     ]
@@ -416,6 +433,12 @@ def main():
         print(line)
     last_cols = panels[-1][2] if panels else {}
     print(f"foreground codes on the last panel: { {k: v for k, v in sorted(last_cols.items(), key=lambda kv: -kv[1])} }")
+    # A BLANK cell in reverse video renders as a solid block of the foreground
+    # colour -- exactly the mottling this run is checking for.
+    blocks = sum(1 for r in range(ROWS - 1) for c in range(COLS)
+                 if screen.rev[r][c] and screen.grid[r][c] == " ")
+    revtot = sum(1 for r in range(ROWS - 1) for c in range(COLS) if screen.rev[r][c])
+    print(f"reverse-video cells: {revtot}, of which BLANK (solid blocks): {blocks}")
     print(f"unrecognised escape sequences: {screen.unknown}")
     print(f"left the alternate buffer: {b'\x1b[?1049l' in bytes(everything)}")
     print(f"ECHO restored after exit:  {bool(after[3] & termios.ECHO)}")

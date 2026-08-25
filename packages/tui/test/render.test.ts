@@ -286,6 +286,39 @@ describe('TerminalRenderer', () => {
     expect(out).not.toContain('A');
   });
 
+  it('TURNS REVERSE OFF AGAIN once the highlighted run ends', () => {
+    // THE MOTTLING BUG. SGR parameters ACCUMULATE: emitting `\x1b[38;5;46;48;5;59m`
+    // sets colours but leaves SGR 7 in effect, because only 0 or 27 clears it. So a
+    // reverse-video run -- ISPF's tutorial title bar sends SA highlighting=0xF2 for
+    // exactly one -- left every following cell inverted, turning each subsequent
+    // SPACE into a solid green block and giving the page a mottled look. VM never
+    // sends reverse, which is why only TK5 showed it.
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
+    const cells = grid('ABCDEF');
+    cells[0]!.reverse = true;              // one highlighted cell, then plain ones
+    const out = r.paint(cells, 0, 's');
+    // The SGR that precedes 'B' is the one that must undo the reverse.
+    const between = out.slice(out.indexOf('A') + 1, out.indexOf('B'));
+    expect(between, `emitted ${JSON.stringify(between)}`).toMatch(/(^|[;[])(0|27)([;m])/);
+  });
+
+  it('clears highlighting between runs for every flag, at every depth', () => {
+    // The general form, so the same class of bug cannot come back via a different
+    // attribute. At depth 0 the `want || '0'` fallback already emitted a reset, which
+    // is why the monochrome case hid this for so long -- test the colour depths too.
+    for (const depth of [0, 16, 256] as const) {
+      for (const flag of ['reverse', 'blink', 'underscore', 'intensify'] as const) {
+        const r = new TerminalRenderer({ rows: 2, cols: 3, depth });
+        const cells = grid('ABCDEF');
+        cells[0]![flag] = true;
+        const out = r.paint(cells, 0, 's');
+        const between = out.slice(out.indexOf('A') + 1, out.indexOf('B'));
+        expect(between, `${flag} at depth ${depth}: ${JSON.stringify(between)}`)
+          .toMatch(/(^|[;[])(0|2[2457])([;m])/);
+      }
+    }
+  });
+
   it('emits the highlighting attributes it supports', () => {
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
     const cells = grid('ABCDEF');

@@ -61,10 +61,21 @@ describe('detectDepth', () => {
 });
 
 describe('sgrFor: quantisation per depth', () => {
-  it('24-bit emits exact RGB', () => {
-    // Green is 0x00ff00.
-    expect(sgrFor(Colour.GREEN, 16777216, 'fg')).toBe('38;2;0;255;0');
-    expect(sgrFor(Colour.GREEN, 16777216, 'bg')).toBe('48;2;0;255;0');
+  it('24-bit emits exact RGB, from the TUI palette', () => {
+    // ZTI'S GREEN, (36,216,48), not core's saturated 0x00ff00. The TUI has its own
+    // palette (see colours.ts): core stays the shared model, and this front end
+    // renders the colours zti does, which is what the user compares against. Read
+    // from tnz/zti.py:2815 and confirmed on the wire from a captured zti session.
+    expect(sgrFor(Colour.GREEN, 16777216, 'fg')).toBe('38;2;36;216;48');
+    expect(sgrFor(Colour.GREEN, 16777216, 'bg')).toBe('48;2;36;216;48');
+  });
+
+  it('renders neutral black as PURE black, as zti does', () => {
+    // Why core needs no divergence for a black-looking background: the default
+    // background resolves to F0, and F0 is pure black here even though core's
+    // palette keeps 0x1a1a1a for it.
+    expect(sgrFor(Colour.NEUTRAL_BLACK, 16777216, 'bg')).toBe('48;2;0;0;0');
+    expect(sgrFor(Colour.NEUTRAL_BLACK, 256, 'bg')).toBe('48;5;16');
   });
 
   // Every number in this describe block was RE-DERIVED from the committed
@@ -78,8 +89,11 @@ describe('sgrFor: quantisation per depth', () => {
     const sgr = sgrFor(Colour.GREEN, 256, 'fg');
     expect(sgr).toMatch(/^38;5;\d+$/);
     const index = Number(sgr.split(';')[2]);
-    // The 6x6x6 cube starts at 16; pure green is 16 + 36*0 + 6*5 + 0 = 46.
-    expect(index).toBe(46);
+    // 77, not 46: (36,216,48) gives 16 + 36*1 + 6*4 + 1. Worth knowing that BOTH
+    // reference clients land on this same cell -- x3270's #32cd32 limegreen and zti's
+    // (36,216,48) quantise to 77 alike, where core's pure green gave 46. Two
+    // independent implementations agreeing is why this is the right number.
+    expect(index).toBe(77);
   });
 
   it('16 emits a standard ANSI code', () => {

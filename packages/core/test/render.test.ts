@@ -135,22 +135,15 @@ describe('resolve: explicit colour wins (rule 1)', () => {
     expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.BLUE);
   });
 
-  it('the default background is BLACK, deliberately diverging from x3270', () => {
+  it('the default background is neutral black', () => {
     // x3270 has no base-attribute map for background: it falls to a fixed
-    // NEUTRAL black (c3270/screen.c:1158 `bg = cmap[HOST_COLOR_NEUTRAL_BLACK]`), and
-    // this returned NEUTRAL_BLACK to match until 2026-08-25.
+    // neutral black (c3270/screen.c:1158 `bg = cmap[HOST_COLOR_NEUTRAL_BLACK]`).
     //
-    // It is now BLACK, on the user's call, because neutral-black renders as 0x1a1a1a
-    // -- a dark grey -- and a whole screen of it looks wrong next to a terminal's
-    // black background, with a cursor almost invisible against it. Same class of
-    // decision as the palette's RGB values, which are documented there as "our own
-    // choice, deliberately not x3270's": the manual fixes which colour each CODE is,
-    // not what an absent background should default to.
-    //
-    // The divergence is narrow on purpose. Only the DEFAULT changed; a host that
-    // explicitly sends F0 still gets neutral-black's grey, so no information the host
-    // sent is lost and all sixteen codes stay distinguishable.
-    expect(resolve(fielded(FA.PRINTABLE).snapshot())[1]!.bg).toBe(Colour.BLACK);
+    // This briefly returned BLACK instead, to get a black-looking background in the
+    // TUI. That was the wrong layer: core is the faithful model, and how neutral
+    // black LOOKS is a front end's business. packages/tui now renders F0 as pure
+    // black in its own palette, exactly as zti does, so core needs no divergence.
+    expect(resolve(fielded(FA.PRINTABLE).snapshot())[1]!.bg).toBe(Colour.NEUTRAL_BLACK);
   });
 });
 
@@ -343,13 +336,13 @@ describe('resolve: mode3279 false makes everything green (rule 3)', () => {
     ]);
     const r = resolve(s.snapshot(), { mode3279: false });
     expect(r[1]!.fg).toBe(Colour.GREEN);
-    expect(r[1]!.bg).toBe(Colour.BLACK);
+    expect(r[1]!.bg).toBe(Colour.NEUTRAL_BLACK);
   });
 
   it('ignores an explicit background', () => {
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { bg: Colour.BLUE });
-    expect(resolve(s.snapshot(), { mode3279: false })[1]!.bg).toBe(Colour.BLACK);
+    expect(resolve(s.snapshot(), { mode3279: false })[1]!.bg).toBe(Colour.NEUTRAL_BLACK);
   });
 
   it('still honours highlighting, which is not colour', () => {
@@ -562,10 +555,10 @@ describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
     expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.GREEN);
   });
 
-  it('a malformed background falls through to the default background', () => {
+  it('a malformed background falls through to neutral black', () => {
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { bg: 0x99 });
-    expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.BLACK);
+    expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.NEUTRAL_BLACK);
   });
 
   it("a malformed colour on the FIELD falls through too, and not to the character's", () => {

@@ -690,6 +690,73 @@ x3270's". Narrow on purpose: only the default moved.
 **One judgment call to know about:** with exactly one spare row the OIA wins over a
 bottom border. Flipping that is two lines in `layout()`.
 
+## THE MOTTLING BUG: SGR PARAMETERS ACCUMULATE — 2026-08-25
+
+Reported as "the tutorial page renders with solid green cells where I expect a black
+cell, giving the pages a weird mottled effect". A real rendering bug, and the most
+serious one found in the TUI so far.
+
+**Root cause.** `\x1b[38;5;46m` sets a colour and leaves reverse, bold, blink and
+underline exactly as they were — only 0 (or 22/24/25/27) clears them. `paint()` emitted
+the desired attributes alone, so a reverse-video run leaked into every cell after it.
+ISPF's tutorial sends `SA highlighting=0xF2` for its title bar, so from the title
+onwards every cell stayed inverted, and each subsequent **space** became a solid block
+of the foreground colour. VM/370 never sends reverse, which is why only TK5 showed it.
+
+**Measured on the real panels**, rendering the three captured tutorial `ScreenJson`
+dumps through `TerminalRenderer`: **3761 cells drawn in reverse, 2178 of them blanks**
+— 2178 solid green blocks. After the fix: 27 and 7, which is the host's actual title
+bar. Cost of always resetting first: **+174 bytes over three full panels**, about 2%,
+because SGR changes were already coalesced.
+
+**Why the tests missed it for so long:** the monochrome path accidentally did the right
+thing. At depth 0 `want` is empty, so `want || '0'` emitted a bare `0` — a full reset.
+Every highlighting test ran at depth 0. The new tests sweep depths 0, 16 and 256 for
+all four flags.
+
+**The diagnosis took four wrong turns, all mine, and all the same shape — a probe that
+could not report what I was asking it:**
+
+1. I forgot `TraceText`, so the first trace run captured nothing at all.
+2. I grepped a hex dump for `28 42 f4` to find SA orders. A hex dump contains those
+   byte triples by coincidence; the grep was not entitled to its conclusion. Re-parsing
+   the record with `parseTrace` + `parseRecord` gave the exact answer.
+3. I drove s3270 with `Wait(Settle)`. **Settle is OUR extension** — s3270 rejects it,
+   so every step errored and it never reached the panel.
+4. I then compared against s3270 as a **3278**, which is MONOCHROME, so the host sent
+   it no colour at all and its silence looked like a contradiction. Re-run as a 3279 it
+   agreed with us byte for byte: 9 SA foreground orders, identical values and counts.
+
+That last one is worth keeping as a positive result: **our parsing and resolution are
+byte-exact against the reference implementation**, and the host really does paint the
+tutorial body green. The green was never the bug; the leaked reverse video was.
+
+## THE TUI HAS ITS OWN PALETTE, AND IT IS ZTI'S — 2026-08-25
+
+On the user's call, and scoped to the TUI only: core's `PALETTE_3279` is unchanged, as
+the shared model for a future GUI or web front end. `packages/tui/src/colours.ts` now
+carries F0-F7 from **zti** (`tnz/zti.py:2813-2820`, converted from curses' 0-1000
+scale) and F8-FF from **x3270's** `rgbmap`, because zti advertises only F1-F7 in its
+Color Query Reply and so defines no more.
+
+Two things fell out of it:
+
+- **Nearest-RGB matching is gone, replaced by an explicit 16-colour table.** Nearest-RGB
+  made the PALETTE responsible for 16-colour distinctness, which is why core's values
+  are saturated primaries: measured, x3270's `#1e90ff` blue and zti's `(120,144,240)`
+  blue BOTH quantise to bright cyan, colliding with their turquoise. Deciding the slot
+  explicitly separates "what colour is it" from "which of sixteen slots", so a pleasant
+  palette no longer costs correctness on a 16-colour terminal.
+- **Core's background divergence is REVERTED.** The default background is
+  `NEUTRAL_BLACK` again, matching x3270 (`c3270/screen.c:1158`). It was changed to
+  `BLACK` a day earlier to get a black-looking background; that was the wrong layer.
+  zti renders F0 as pure black, so the TUI palette does too, and the background is black
+  with core left faithful. One fewer divergence to defend.
+
+Worth noting how well the references agree: x3270's `#32cd32` and zti's `(36,216,48)`
+green quantise to the SAME 256-colour cell, 77, where core's pure green gave 46. Two
+independent implementations landing on one number is why 77 is the right answer.
+
 ## Where to resume
 
 **Nothing in this plan. All sixteen tasks are done, and so is the SIGWINCH gap that
