@@ -75,7 +75,7 @@ node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] \
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
-defaults to 23. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
+defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a colour terminal.
 
@@ -94,6 +94,34 @@ Colours are zti's, not core's: the shared palette in `packages/core` keeps satur
 primaries, and the TUI renders the gentler values zti uses because they read better in a
 terminal. Quantisation to 16 colours is an explicit table rather than nearest-RGB — with
 any realistic palette, blue and turquoise both fall nearest to cyan and would collide.
+
+## Screen models
+
+`-model 3278-N` and `-model 3278-N-E` accept N of 2, 3, 4 or 5.
+
+| Model | Alternate size |
+|---|---|
+| 2 | 24×80 |
+| 3 | 32×80 |
+| 4 | 43×80 |
+| 5 | 27×132 |
+
+**The model does not change the screen you get on connect.** Every model's *default*
+size is 24×80; the model number sets the *alternate* size, and the host switches between
+them with Erase/Write and Erase/Write Alternate. So `-model 3278-4` starts at 24×80 and
+becomes 43×80 only if the host asks. This is x3270's model exactly — `ROWS = defROWS =
+MODEL_2_ROWS` unconditionally (`ctlr.c:341`), with only `altROWS = maxROWS` varying
+(`ctlr.c:345`) — and it is **not** TN3270E, which `ctlr.c:558-561` switches size without
+reference to.
+
+`-E` is an extended-data-stream claim, not a size: `3278-4` and `3278-4-E` have identical
+geometry.
+
+The TUI re-places and repaints when the host resizes the screen, and suspends with a
+message if your window can no longer hold it, exactly as it does for a terminal resize.
+A `--terminal-type` string is sent verbatim and does **not** set a geometry — we cannot
+know what an arbitrary string implies, so use `-model` if you want the buffer to match
+what you claim.
 
 ## Connecting over TLS
 
@@ -303,10 +331,11 @@ worse than one that says which quarter is missing.
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
   you find out if that changes.
-- **80×24 only.** `Screen` takes its geometry as a parameter, so this is a configuration
-  limit rather than a structural one, but alternate screen sizes are not offered and
-  mid-session resize of the *3270* screen is unimplemented. Measured: TSO does not need
-  more — ISPF reports `TERMINAL: 3277`, a device with no alternate size at all.
+- **No `IBM-DYNAMIC` and no oversize.** Models 2 through 5 work (see *Screen models*),
+  but `IBM-DYNAMIC` — "ask me my size via Query Reply" — and x3270's arbitrary
+  `-oversize` are not offered. Oversize is an emulator extension rather than 3270
+  architecture, and it is the only case that crosses 4096 cells into 14-bit addressing,
+  which `address.ts` already handles.
 - **No mouse support** in the TUI.
 
 The TUI has two limits worth knowing before you run it:

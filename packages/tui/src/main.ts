@@ -6,7 +6,7 @@
  * docs/superpowers/specs/2026-08-19-tui-and-colour-design.md.
  */
 
-import { resolveTerminalType, TerminalTypeError } from '@tn3270/core';
+import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import {
   defaultSession, splitTarget, takeTlsFlag, resolveTls, TLS_USAGE,
   type TlsFlags, type TlsOptions,
@@ -137,10 +137,15 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
     );
   }
 
-  const session = defaultSession(resolveTerminalType({
+  // Built once and passed to both resolvers, so the ttype string and the geometry
+  // can never come from different readings of the same arguments.
+  const typeOpts = {
     ...(args.model !== undefined ? { model: args.model } : {}),
     ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
-  }), args.tls);
+  };
+  const session = defaultSession(
+    resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
+  );
 
   const [hostname, port] = splitTarget(args.host);
   await session.connect(hostname, port);

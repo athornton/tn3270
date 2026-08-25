@@ -167,6 +167,33 @@ describe('layout: centring, and which border sides fit', () => {
   });
 });
 
+describe('setScreenSize: the screen itself changed shape', () => {
+  // Erase/Write Alternate can resize the 3270 screen mid-session. The renderer's
+  // rows/cols bound the cell loop and give every row its start column, so a stale
+  // pair would clip the new screen and address every row after the first wrongly.
+  it('repaints at the new shape, clearing the old drawing', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    r.paint(grid('ABCDEF'), 0, 's');
+    r.setScreenSize(3, 3);
+    const out = r.paint(grid('ABCDEFGHI', 3, 3), 0, 's');
+    expect(out).toContain('\x1b[2J');   // the old drawing is a different shape
+    expect(out).toContain('GHI');        // the third row is now emitted at all
+  });
+
+  it('clips to the OLD size until it is told, which is why it must be told', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    expect(r.paint(grid('ABCDEFGHI', 3, 3), 0, 's')).not.toContain('GHI');
+  });
+
+  it('does nothing when the size is unchanged', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    r.paint(grid('ABCDEF'), 0, 's');
+    r.setScreenSize(2, 3);
+    // No invalidate, so an identical screen still diffs to nothing.
+    expect(r.paint(grid('ABCDEF'), 0, 's')).toBe('');
+  });
+});
+
 describe('the key-binding hint', () => {
   // The user's complaint that prompted this: the transient banner "goes by too
   // quickly to see". Drawn into the frame, it stays.

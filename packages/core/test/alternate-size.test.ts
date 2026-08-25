@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { execute } from '../src/stream/execute.js';
 import { buildQueryReply, DEFAULT_CAPABILITIES } from '../src/queryreply.js';
-import { MODEL_2, MODEL_3, MODEL_4, MODEL_5, Qcode } from '../src/constants.js';
+import {
+  MODEL_2, MODEL_3, MODEL_4, MODEL_5, Qcode,
+  Cmd, TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S,
+} from '../src/constants.js';
+import { Session, type Connection } from '../src/session.js';
 import type { ParsedRecord } from '../src/stream/parse.js';
 
 /**
@@ -190,5 +194,84 @@ describe('the Query Reply stops saying alternate == default', () => {
     expect(() => buildQueryReply(DEFAULT_CAPABILITIES, {
       rows: 24, cols: 80, alternate: { rows: 0, cols: 80 },
     })).toThrow(/alternate\.rows/);
+  });
+});
+
+/**
+ * The whole chain, from host bytes to a resized buffer.
+ *
+ * The unit tests above drive `execute` directly, which proves the switch but not
+ * that a real record reaches it. This drives a Session through negotiation and
+ * feeds it the actual command bytes a host would send.
+ */
+describe('a host record resizes the screen end to end', () => {
+  class FakeConnection implements Connection {
+    sent: number[] = [];
+    onData: ((b: Uint8Array) => void) | undefined;
+    onClose: (() => void) | undefined;
+    onError: ((e: Error) => void) | undefined;
+    write(b: Uint8Array): void { this.sent.push(...b); }
+    close(): void { this.onClose?.(); }
+    host(...bytes: number[]): void { this.onData?.(Uint8Array.from(bytes)); }
+    negotiate(): void {
+      this.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+      this.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+      this.host(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+      this.host(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+      this.sent = [];
+    }
+  }
+
+  /** A model 3 session: default 24x80, alternate 32x80. */
+  async function model3Session() {
+    const conn = new FakeConnection();
+    const session = new Session({
+      connect: () => conn,
+      terminalType: 'IBM-3278-3',
+      alternateRows: MODEL_3.rows,
+      alternateCols: MODEL_3.cols,
+    });
+    await session.connect('h', 23);
+    conn.negotiate();
+    return { session, conn };
+  }
+
+  it('starts at 24x80 however big the alternate is', async () => {
+    const { session } = await model3Session();
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
+  });
+
+  it('EWA from the host switches to 32x80', async () => {
+    const { session, conn } = await model3Session();
+    // Erase/Write Alternate, WCC 0, end of record. This is the byte a host sends.
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([32, 80]);
+    expect(session.screen.size).toBe(2560);
+  });
+
+  it('EW brings it back to 24x80', async () => {
+    const { session, conn } = await model3Session();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    conn.host(Cmd.EW, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
+  });
+
+  it('accepts an address only the alternate size can hold', async () => {
+    const { session, conn } = await model3Session();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    // Row 30 exists at 32x80 and does not at 24x80. Writing there proves the
+    // buffer really grew rather than the geometry fields alone changing.
+    const addr = 29 * 80;
+    expect(() => session.screen.setChar(addr, 0xc1)).not.toThrow();
+    expect(session.screen.readBuffer()[addr]).toBe(0xc1);
+  });
+
+  it('leaves a model 2 at 24x80 even when the host sends EWA', async () => {
+    const conn = new FakeConnection();
+    const session = new Session({ connect: () => conn });
+    await session.connect('h', 23);
+    conn.negotiate();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
   });
 });

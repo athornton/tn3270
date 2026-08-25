@@ -95,6 +95,12 @@ export class App {
   private restored = false;
   /** Last terminal size acted on, so a no-change SIGWINCH costs nothing. */
   private termRows = -1;
+  /**
+   * The SCREEN size last drawn, so an Erase/Write Alternate that actually changed
+   * it can be told apart from the many ordinary screen events that did not.
+   */
+  private screenRows = -1;
+  private screenCols = -1;
   private termCols = -1;
   /**
    * True while the terminal is too small to draw the screen.
@@ -174,7 +180,11 @@ export class App {
     this.termRows = term.rows;
     this.termCols = term.cols;
     this.host.on('SIGWINCH', () => this.onResize());
-    this.session.on('screen', () => this.draw());
+    // A screen event may carry a size change (Erase/Write Alternate), so the
+    // geometry check comes first. It is a cheap comparison that returns
+    // immediately in the overwhelmingly common case of an unchanged size, and on
+    // a model 2 it can never fire at all.
+    this.session.on('screen', () => { this.onScreenResize(); this.draw(); });
     this.session.on('disconnect', () => { this.draw(); });
     this.stdin.on('data', (b: Uint8Array) => this.onInput(b));
     this.renderer.invalidate();
@@ -212,8 +222,29 @@ export class App {
     if (term.rows === this.termRows && term.cols === this.termCols) return;
     this.termRows = term.rows;
     this.termCols = term.cols;
+    this.replace(term);
+  }
 
+  /**
+   * The 3270 SCREEN changed size, because the host sent Erase/Write Alternate.
+   *
+   * Separate entry point from `onResize` but the same body: from the renderer's
+   * point of view a 24x80 screen becoming 43x80 needs exactly what a terminal
+   * resize needs -- re-place, re-shape, repaint, and suspend if the window can no
+   * longer hold it. Nothing here is TN3270E; see execute.ts on EW/EWA.
+   */
+  private onScreenResize(): void {
+    if (this.quitting || this.restored) return;
+    const s = this.session.screen;
+    if (s.rows === this.screenRows && s.cols === this.screenCols) return;
+    this.replace(this.terminal());
+  }
+
+  /** Shared body: re-place everything for the current terminal and screen. */
+  private replace(term: { rows: number; cols: number }): void {
     const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
+    this.screenRows = screen.rows;
+    this.screenCols = screen.cols;
     if (tooSmall(term, screen)) {
       this.suspended = true;
       this.stdout.write(
@@ -226,6 +257,10 @@ export class App {
 
     const wasSuspended = this.suspended;
     this.suspended = false;
+    // Order matters: the renderer must know the new SCREEN shape before it is
+    // given a layout computed from it, or the first paint clips against the old
+    // one.
+    this.renderer.setScreenSize(screen.rows, screen.cols);
     this.renderer.setLayout(layout(term, screen));
     if (wasSuspended) this.renderer.invalidate();
     this.draw();
