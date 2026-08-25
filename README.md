@@ -63,7 +63,7 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 952 tests, 34 files
+npm test           # 1037 tests, 37 files
 npm run typecheck
 ```
 
@@ -75,7 +75,8 @@ node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] \
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
-defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
+defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*.
+`--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a colour terminal.
 
