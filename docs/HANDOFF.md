@@ -94,7 +94,14 @@ support; the Electron GUI (stage 3); the web front end; and TN3270E (stage 2b).
 
 ## Roadmap, from the user 2026-08-25
 
-The remaining work, in the user's own order, and they expect it to be the whole of it:
+**THIS LIST IS NOT EXHAUSTIVE, AND THE USER HAS SAID SO EXPLICITLY.** It was first
+written down as "I think that will be everything"; within minutes that was corrected
+twice — Programmable Symbol Sets had been forgotten (now item 4), and then: "so the
+above will not in fact be everything." Treat it as the confirmed and ordered part of an
+OPEN set, not as a definition of done. Do not infer that something is out of scope
+merely because it is absent here.
+
+The confirmed work, in the user's own order:
 
 1. **The rest of TN3270E** — stage 2b: the telnet option (40), DEVICE-TYPE/FUNCTIONS
    subnegotiation, the 5-byte data header, BIND/UNBIND, SNA responses, LU selection.
@@ -114,16 +121,18 @@ The remaining work, in the user's own order, and they expect it to be the whole 
    reference. GDDM is deliberately NOT a dependency (IBM is sunsetting it); the route is
    PS driving the 3279 screen directly.
 
-**⚠️ STILL OPEN: TLS AND THE PRINTER SESSION.** The older staging ran
-`packaging → TLS → printer → Programmable Symbol Sets`. PS is confirmed back in (item 4)
-and packaging is implied by items 2-3, but **TLS and printer were not mentioned either
-way** and remain unconfirmed. They are not deleted here. **Ask before assuming either
-is out** — TLS especially, since it is a security feature rather than a nicety, and a
-3270 client that cannot do TLS is unusable against anything modern.
+**Also outstanding, from the older staging, position unconfirmed:** **TLS** and the
+**printer session** (the old order was `packaging → TLS → printer → PS`; packaging is
+implied by items 2-3). Neither was mentioned when the list above was given, so neither
+is scheduled — but neither is cancelled. **TLS is the one to raise first**: it is
+security rather than polish, and a 3270 client that cannot do TLS is unusable against
+anything modern.
 
-The general lesson, since it paid off within one exchange: an end-of-session aside is
-not a decision recorded against the spec. Writing the difference down as a QUESTION
-rather than acting on it is what let the user catch the omission immediately.
+The method note, because it paid off twice inside one exchange: an end-of-session aside
+is not a decision recorded against the spec. This roadmap was written down as a QUESTION
+with the superseded items left in place rather than deleted, which is what let the user
+catch first the forgotten item and then the false "everything" framing. **Keep asking
+what is missing from a list rather than treating a stated list as closed.**
 
 **IND$FILE FILE TRANSFER WORKS ON BOTH HOSTS, both directions** — MVS/TSO 2026-08-18,
 VM/CMS 2026-08-19 (see the following paragraph). See
