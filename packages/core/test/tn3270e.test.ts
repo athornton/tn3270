@@ -3,6 +3,9 @@ import {
   Tn3270eOp, Tn3270eReason, Tn3270eFunc, Tn3270eDataType,
   Tn3270eRequestFlag, Tn3270eResponseFlag, Tn3270eSense,
 } from '../src/constants.js';
+import {
+  encodeHeader, decodeHeader, carriesDatastream, TN3270E_HEADER_BYTES,
+} from '../src/tn3270e.js';
 
 /**
  * Values are RFC 2355 §3 (rfc2355.txt:317-347) and §8.1 (rfc2355.txt:969-1095),
@@ -85,5 +88,126 @@ describe('TN3270E wire constants', () => {
     // and "printer is powered off or not connected" -- unreachable from a display,
     // so omitted until the printer session lands.
     expect(Tn3270eSense).toEqual({ DEVICE_END: 0x00, COMMAND_REJECT: 0x00, OP_CHECK: 0x02 });
+  });
+});
+
+describe('TN3270E header codec', () => {
+  it('is five bytes', () => {
+    // RFC 2355 §8.1, and x3270's EH_SIZE (include/tn3270e.h).
+    expect(TN3270E_HEADER_BYTES).toBe(5);
+  });
+
+  it('encodes the outbound header real s3270 sends', () => {
+    // Captured 2026-08-27: the inbound record after String(HI) Enter began
+    // 00 00 00 00 00, and s3270's own trace logged
+    // "SENT TN3270E(3270-DATA NO-RESPONSE 0)".
+    const h = encodeHeader({
+      dataType: Tn3270eDataType.DATA_3270,
+      requestFlag: 0,
+      responseFlag: Tn3270eResponseFlag.NO_RESPONSE,
+      seq: 0,
+    });
+    expect([...h]).toEqual([0x00, 0x00, 0x00, 0x00, 0x00]);
+  });
+
+  it('encodes the positive response real s3270 sends', () => {
+    // Also measured, config F of the harness validation: asked for ALWAYS-RESPONSE,
+    // s3270 replied with a 6-byte record 02 00 00 00 00 00 -- this header plus one
+    // 0x00 sense byte. The seq is copied from the message being answered.
+    const h = encodeHeader({
+      dataType: Tn3270eDataType.RESPONSE,
+      requestFlag: 0,
+      responseFlag: Tn3270eResponseFlag.POSITIVE_RESPONSE,
+      seq: 0,
+    });
+    expect([...h]).toEqual([0x02, 0x00, 0x00, 0x00, 0x00]);
+  });
+
+  it('writes SEQ-NUMBER big-endian', () => {
+    // §8.1.4: "must be sent in network byte order ("big endian")".
+    const h = encodeHeader({
+      dataType: Tn3270eDataType.DATA_3270, requestFlag: 0,
+      responseFlag: Tn3270eResponseFlag.NO_RESPONSE, seq: 0x1234,
+    });
+    expect([...h]).toEqual([0x00, 0x00, 0x00, 0x12, 0x34]);
+  });
+
+  it('does NOT double 0xff itself — escaping belongs to the telnet layer', () => {
+    // §8.1.4 does require a 0xff in SEQ-NUMBER to be doubled, and it will be: the
+    // header is prepended to the payload and the whole record goes through
+    // doubleIac() in telnet.ts. Doing it here as well would double it twice, and
+    // would also corrupt any record whose 3270 payload contains a 0xff. The
+    // end-to-end escaping is pinned at the session level, not here.
+    const h = encodeHeader({
+      dataType: Tn3270eDataType.DATA_3270, requestFlag: 0,
+      responseFlag: Tn3270eResponseFlag.NO_RESPONSE, seq: 0x00ff,
+    });
+    expect([...h]).toEqual([0x00, 0x00, 0x00, 0x00, 0xff]);
+  });
+
+  it('keeps every field inside its own byte, whatever it is handed', () => {
+    // This pins the OBSERVABLE CONTRACT, not the mechanism, and the distinction was
+    // established by mutation: deleting the `& 0xff` from encodeHeader does NOT make
+    // this fail, because Uint8Array.of() already truncates mod 256. So the explicit
+    // masks in encodeHeader are documentation of intent rather than load-bearing
+    // code, and this test would not catch their removal.
+    //
+    // It is kept anyway, because what matters to a host is that an over-large field
+    // cannot bleed into its neighbour -- and that would break the day encodeHeader
+    // is rewritten to build a number[] or write into a DataView, neither of which
+    // truncates for you.
+    const h = encodeHeader({
+      dataType: 0x1_00, requestFlag: 0x1_00, responseFlag: 0x1_00, seq: 0x1_0000,
+    });
+    expect([...h]).toEqual([0x00, 0x00, 0x00, 0x00, 0x00]);
+  });
+
+  it('decodes a header, leaving the payload to the caller', () => {
+    const rec = Uint8Array.of(0x00, 0x00, 0x02, 0x00, 0x07, 0x7d, 0x40, 0xc2);
+    expect(decodeHeader(rec)).toEqual({
+      dataType: Tn3270eDataType.DATA_3270,
+      requestFlag: 0x00,
+      responseFlag: Tn3270eResponseFlag.ALWAYS_RESPONSE,
+      seq: 0x0007,
+    });
+  });
+
+  it('round-trips the recorded inbound record', () => {
+    // 00000000007d40c2c8c9, measured from s3270 in five harness configurations.
+    const rec = Uint8Array.of(0x00, 0x00, 0x00, 0x00, 0x00,
+      0x7d, 0x40, 0xc2, 0xc8, 0xc9);
+    const h = decodeHeader(rec)!;
+    expect([...encodeHeader(h)]).toEqual([...rec.subarray(0, TN3270E_HEADER_BYTES)]);
+    expect([...rec.subarray(TN3270E_HEADER_BYTES)]).toEqual([0x7d, 0x40, 0xc2, 0xc8, 0xc9]);
+  });
+
+  it('returns null for a record too short to hold a header', () => {
+    // Four bytes is not a truncated 3270-DATA message, it is a malformed one. Null
+    // rather than a throw, so the caller can trace and drop it: a client cannot
+    // correct a host, and an exception here would surface as a program check the
+    // host never caused.
+    expect(decodeHeader(Uint8Array.of(0, 0, 0, 0))).toBeNull();
+    expect(decodeHeader(new Uint8Array())).toBeNull();
+  });
+
+  it('accepts a header with no data portion', () => {
+    // §8 allows <TN3270E Header><IAC EOR> with no data, which is how PRINT-EOJ
+    // arrives and how a bare RESPONSE could.
+    expect(decodeHeader(Uint8Array.of(0x08, 0, 0, 0, 0))).toEqual({
+      dataType: Tn3270eDataType.PRINT_EOJ, requestFlag: 0, responseFlag: 0, seq: 0,
+    });
+  });
+
+  it('recognises only 3270-DATA as carrying an executable datastream', () => {
+    // The gate that keeps a bind image or an unbind reason code out of the 3270
+    // executor, where it would produce a spurious program check.
+    expect(carriesDatastream(Tn3270eDataType.DATA_3270)).toBe(true);
+    for (const dt of [
+      Tn3270eDataType.SCS_DATA, Tn3270eDataType.RESPONSE, Tn3270eDataType.BIND_IMAGE,
+      Tn3270eDataType.UNBIND, Tn3270eDataType.NVT_DATA, Tn3270eDataType.REQUEST,
+      Tn3270eDataType.SSCP_LU_DATA, Tn3270eDataType.PRINT_EOJ, 0x09,
+    ]) {
+      expect(carriesDatastream(dt)).toBe(false);
+    }
   });
 });
