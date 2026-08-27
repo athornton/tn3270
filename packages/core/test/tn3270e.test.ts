@@ -476,3 +476,116 @@ describe('TN3270E negotiation — FUNCTIONS', () => {
     expect(r.next.lu).toBe('TESTLU01');
   });
 });
+
+describe('TN3270E negotiation — REJECT, LU fallback and backoff', () => {
+  /** Drive to 'awaitingDeviceType' with the given LU list. */
+  function atDeviceType(lus: readonly string[]): Tn3270eState {
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus });
+    return negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+  }
+
+  const reject = (reason?: number): Uint8Array => Uint8Array.from(
+    reason === undefined
+      ? [Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REJECT]
+      : [Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REJECT, Tn3270eOp.REASON, reason],
+  );
+
+  it('retries the NEXT LU on a rejection that is not UNSUPPORTED-REQ', () => {
+    // telnet.c:2270-2273: next_lu(), then tn3270e_request() again.
+    const r = negotiate(atDeviceType(['LUA', 'LUB']), reject(Tn3270eReason.DEVICE_IN_USE));
+    expect(r.next.luIndex).toBe(1);
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST, ...ascii('IBM-3278-2-E'),
+      Tn3270eOp.CONNECT, ...ascii('LUB'),
+    ]);
+    expect(r.effect).toBeUndefined();
+  });
+
+  it('does NOT resend the LU that was just rejected', () => {
+    // The retry must build its request from the UPDATED state. Reading the old
+    // luIndex resends the same name forever against a host that keeps saying no --
+    // an infinite exchange rather than a failure, which is far worse to diagnose.
+    const r = negotiate(atDeviceType(['LUA', 'LUB']), reject(Tn3270eReason.DEVICE_IN_USE));
+    expect([...r.reply!]).not.toEqual(expect.arrayContaining(ascii('LUA')));
+  });
+
+  it('walks the whole LU list in order, one rejection at a time', () => {
+    let st = atDeviceType(['LUA', 'LUB', 'LUC']);
+    const asked: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = negotiate(st, reject(Tn3270eReason.DEVICE_IN_USE));
+      st = r.next;
+      if (r.reply) {
+        const body = [...r.reply];
+        const at = body.indexOf(Tn3270eOp.CONNECT);
+        asked.push(String.fromCharCode(...body.slice(at + 1)));
+      }
+    }
+    expect(asked).toEqual(['LUB', 'LUC']);
+    expect(st.phase).toBe('backedOff');
+  });
+
+  it('backs off on UNSUPPORTED-REQ even with LUs left to try', () => {
+    // telnet.c:2263-2267 checks the reason BEFORE next_lu(). UNSUPPORTED-REQ is about
+    // the request type rather than the resource, so another LU cannot help and
+    // retrying would be noise on the wire.
+    const r = negotiate(atDeviceType(['LUA', 'LUB']), reject(Tn3270eReason.UNSUPPORTED_REQ));
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.reply).toBeUndefined();
+    expect(r.effect).toEqual({ kind: 'backoff', why: 'host rejected request type' });
+  });
+
+  it('backs off once the LU list is exhausted', () => {
+    const r = negotiate(atDeviceType(['LUA']), reject(Tn3270eReason.DEVICE_IN_USE));
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.effect).toEqual({ kind: 'backoff', why: 'host rejected resource(s)' });
+  });
+
+  it('backs off on a rejection when no LU was ever named', () => {
+    // x3270's "Device type rejected" (telnet.c:2276). With no list there is nothing
+    // to retry, so this must not loop resending the same request.
+    const r = negotiate(atDeviceType([]), reject(Tn3270eReason.INV_DEVICE_TYPE));
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.reply).toBeUndefined();
+    expect(r.effect).toEqual({ kind: 'backoff', why: 'device type rejected' });
+  });
+
+  it('distinguishes "resource rejected" from "device type rejected"', () => {
+    // x3270 emits different messages depending on whether an LU list existed, and
+    // the distinction is what tells an operator whether to fix the LU name or the
+    // model. Asserting both spellings keeps them from collapsing into one.
+    expect(negotiate(atDeviceType(['LUA']), reject(Tn3270eReason.DEVICE_IN_USE))
+      .effect).toEqual({ kind: 'backoff', why: 'host rejected resource(s)' });
+    expect(negotiate(atDeviceType([]), reject(Tn3270eReason.DEVICE_IN_USE))
+      .effect).toEqual({ kind: 'backoff', why: 'device type rejected' });
+  });
+
+  it('treats a REJECT with no REASON clause as a rejection, not a parse error', () => {
+    // §7.1.5 shows REASON present, but a truncated body must not throw and must not
+    // be mistaken for success -- reading body[3] off the end yields undefined, which
+    // must not compare equal to UNSUPPORTED-REQ or to anything else meaningful.
+    const r = negotiate(atDeviceType([]), reject());
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.effect?.kind).toBe('backoff');
+  });
+
+  it('backs off on an unknown reason code rather than ignoring it', () => {
+    const r = negotiate(atDeviceType([]), reject(0x5a));
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.effect?.kind).toBe('backoff');
+  });
+
+  it('reaches backedOff from the FUNCTIONS phase too', () => {
+    // The two backoff routes -- an illegal added function and a device-type reject --
+    // must land in the same terminal phase, because the session's handling of it is
+    // one code path (send WONT, forget the option, stay reachable as classic tn3270).
+    let st = atDeviceType([]);
+    st = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
+    ])).next;
+    const r = negotiate(st, Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE,
+    ));
+    expect(r.next.phase).toBe('backedOff');
+  });
+});

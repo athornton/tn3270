@@ -11,7 +11,7 @@
  * Design doc: docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md
  * Plan:       docs/superpowers/plans/2026-08-27-stage2b-tn3270e.md
  */
-import { Tn3270eDataType, Tn3270eFunc, Tn3270eOp } from './constants.js';
+import { Tn3270eDataType, Tn3270eFunc, Tn3270eOp, Tn3270eReason } from './constants.js';
 
 /**
  * RFC 2355 §8.1: DATA-TYPE, REQUEST-FLAG, RESPONSE-FLAG, then a 2-byte SEQ-NUMBER.
@@ -282,6 +282,45 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
     return {
       next: { ...st, phase: 'awaitingFunctions' },
       reply: Uint8Array.from([Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...common]),
+    };
+  }
+
+  if (body[0] === Tn3270eOp.DEVICE_TYPE && body[1] === Tn3270eOp.REJECT) {
+    // THE REASON IS CHECKED BEFORE TRYING ANOTHER LU, matching telnet.c:2263-2267.
+    // UNSUPPORTED-REQ is about the request TYPE rather than the resource, so no other
+    // LU would fare better and retrying would only add noise to the wire.
+    //
+    // body[3] is undefined when the REASON clause is absent, which §7.1.5 shows as
+    // present but a truncated body could omit. undefined compares equal to nothing,
+    // so it falls through to the rejection paths below rather than throwing or being
+    // mistaken for success.
+    const reason = body[2] === Tn3270eOp.REASON ? body[3] : undefined;
+    if (reason === Tn3270eReason.UNSUPPORTED_REQ) {
+      return {
+        next: { ...st, phase: 'backedOff' },
+        effect: { kind: 'backoff', why: 'host rejected request type' },
+      };
+    }
+    const nextIndex = st.luIndex + 1;
+    if (nextIndex < st.lus.length) {
+      // deviceTypeRequest() is given the UPDATED state so it reads the new luIndex.
+      // Passing `st` would resend the name that was just rejected -- an endless
+      // exchange against a host that keeps saying no, which is much harder to
+      // diagnose than a clean failure.
+      const next: Tn3270eState = {
+        ...st, luIndex: nextIndex, phase: 'awaitingDeviceType',
+      };
+      return { next, reply: deviceTypeRequest(next) };
+    }
+    // Out of LUs, or there never were any. x3270 distinguishes the two messages
+    // (telnet.c:2275-2277), and the distinction is what tells an operator whether to
+    // fix an LU name or the model.
+    return {
+      next: { ...st, phase: 'backedOff' },
+      effect: {
+        kind: 'backoff',
+        why: st.lus.length > 0 ? 'host rejected resource(s)' : 'device type rejected',
+      },
     };
   }
 
