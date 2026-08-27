@@ -46,6 +46,144 @@ export const TelnetOpt = {
 export const TelnetSubopt = { IS: 0, SEND: 1 } as const;
 
 /**
+ * TN3270E subnegotiation operations (RFC 2355 §3, rfc2355.txt:317-347), verified
+ * against x3270's include/tn3270e.h.
+ *
+ * THE OPERAND ORDER IS ASYMMETRIC AND MISORDERING IT FAILS SILENTLY. The server
+ * sends SEND then DEVICE_TYPE (0x08 0x02); the client replies DEVICE_TYPE then
+ * REQUEST (0x02 0x07). x3270 pins the layout at telnet.c:2199, where the test is
+ * `sbbuf[2] == TN3270E_OP_DEVICE_TYPE` — so sbbuf[1] is the verb. Sending
+ * 0x02 0x08 was tried while building the test harness: real s3270 logged
+ * `DEVICE-TYPE ??8` and then stalled, with no reject and no error.
+ */
+export const Tn3270eOp = {
+  ASSOCIATE: 0x00,
+  CONNECT: 0x01,
+  DEVICE_TYPE: 0x02,
+  FUNCTIONS: 0x03,
+  IS: 0x04,
+  REASON: 0x05,
+  REJECT: 0x06,
+  REQUEST: 0x07,
+  SEND: 0x08,
+} as const;
+
+/**
+ * DEVICE-TYPE REJECT reason codes (RFC 2355 §3).
+ *
+ * `INV_NAME` is the RFC's spelling; x3270 calls the same value
+ * TN3270E_REASON_INV_DEVICE_NAME. Same code 3, two names — the RFC's is used here.
+ */
+export const Tn3270eReason = {
+  CONN_PARTNER: 0x00,
+  DEVICE_IN_USE: 0x01,
+  INV_ASSOCIATE: 0x02,
+  INV_NAME: 0x03,
+  INV_DEVICE_TYPE: 0x04,
+  TYPE_NAME_ERROR: 0x05,
+  UNKNOWN_ERROR: 0x06,
+  UNSUPPORTED_REQ: 0x07,
+} as const;
+
+/**
+ * Negotiable functions.
+ *
+ * CONTENTION_RESOLUTION (0x05) is NOT in RFC 2355 — it is a later extension that
+ * x3270 requests anyway (telnet.c:953). We request it for parity; nothing depends
+ * on a host granting it. x3270 also defines TN3270E_FUNC_SNA_SENSE = 6, which is
+ * deliberately absent here: we neither request nor grant it, and an unrecognized
+ * inbound code is dropped from the list per §7.2.2 rather than refused.
+ *
+ * SCS_CTL_CODES and DATA_STREAM_CTL are printer-session functions by definition
+ * (§7.2.2) and belong to the printer stage.
+ *
+ * BIND_IMAGE is defined but deliberately NOT requested. Granted BIND-IMAGE and sent
+ * no BIND, real s3270 never enters 3270 mode at all — the write is delivered and
+ * ignored (telnet.c:2339). Granting it with a BIND works, and denying it works;
+ * only advertise-then-stay-silent hangs. Not asking is what makes that state
+ * unreachable. Measured three ways; see docs/live-testing.md, *TN3270E harness
+ * validation*.
+ */
+export const Tn3270eFunc = {
+  BIND_IMAGE: 0x00,
+  DATA_STREAM_CTL: 0x01,
+  RESPONSES: 0x02,
+  SCS_CTL_CODES: 0x03,
+  SYSREQ: 0x04,
+  CONTENTION_RESOLUTION: 0x05,
+} as const;
+
+/**
+ * Header DATA-TYPE values (RFC 2355 §8.1.1).
+ *
+ * `DATA_3270` rather than `3270_DATA` only because an identifier cannot start with
+ * a digit; the wire name is 3270-DATA. x3270 additionally defines
+ * TN3270E_DT_BID = 0x09, which the RFC's list does not reach — an inbound 0x09 is
+ * traced and dropped like any other type we do not implement.
+ */
+export const Tn3270eDataType = {
+  DATA_3270: 0x00,
+  SCS_DATA: 0x01,
+  RESPONSE: 0x02,
+  BIND_IMAGE: 0x03,
+  UNBIND: 0x04,
+  NVT_DATA: 0x05,
+  REQUEST: 0x06,
+  SSCP_LU_DATA: 0x07,
+  PRINT_EOJ: 0x08,
+} as const;
+
+/**
+ * Header REQUEST-FLAG (RFC 2355 §8.1.2), meaningful only when DATA-TYPE is REQUEST.
+ *
+ * THE RFC DEFINES EXACTLY ONE VALUE, AND THIS LIST IS NOT EXHAUSTIVE OF WHAT A HOST
+ * MAY SEND. x3270 also has SEND_DATA 0x01, KEYBOARD_RESTORE 0x02 and SIGNAL 0x04.
+ * All three are only meaningful on a DATA-TYPE of REQUEST, which we do not handle,
+ * so they are omitted rather than defined-and-ignored.
+ */
+export const Tn3270eRequestFlag = { ERR_COND_CLEARED: 0x00 } as const;
+
+/**
+ * Header RESPONSE-FLAG (RFC 2355 §8.1.3).
+ *
+ * The field is OVERLOADED BY DATA-TYPE, which is why two pairs share values. On
+ * 3270-DATA or SCS-DATA it says whether the sender wants a response; on RESPONSE it
+ * says whether this is a positive or negative one. So POSITIVE_RESPONSE equals
+ * NO_RESPONSE (0x00) and NEGATIVE_RESPONSE equals ERROR_RESPONSE (0x01) — not a
+ * copy-paste error. Both spellings are kept so each call site reads as what it
+ * means.
+ *
+ * x3270 has a third RESPONSE value, TN3270E_RSF_SNA_SENSE 0x02, which RFC 2355 does
+ * not list among the response flags.
+ */
+export const Tn3270eResponseFlag = {
+  NO_RESPONSE: 0x00,
+  ERROR_RESPONSE: 0x01,
+  ALWAYS_RESPONSE: 0x02,
+  POSITIVE_RESPONSE: 0x00,
+  NEGATIVE_RESPONSE: 0x01,
+} as const;
+
+/**
+ * The one data byte of a RESPONSE message (RFC 2355 §10.4.1, rfc2355.txt:1440-1462).
+ *
+ * DEVICE_END and COMMAND_REJECT share 0x00 because the meaning comes from
+ * RESPONSE-FLAG: under POSITIVE, 0x00 is "successful completion (when sent by the
+ * client, this is equivalent to Device End)"; under NEGATIVE it is "an invalid 3270
+ * command was received". OP_CHECK 0x02 is "an illegal 3270 buffer address or order
+ * sequence was received".
+ *
+ * The printer senses are omitted as unreachable from a display session: 0x01
+ * "printer is not ready" (x3270's INTERVENTION_REQUIRED) and 0x03 "printer is
+ * powered off or not connected" (COMPONENT_DISCONNECTED).
+ */
+export const Tn3270eSense = {
+  DEVICE_END: 0x00,
+  COMMAND_REJECT: 0x00,
+  OP_CHECK: 0x02,
+} as const;
+
+/**
  * 3270 commands, non-SNA/channel encoding. x3270 accepts these as well as the
  * SNA codes below, so we do too.
  *
