@@ -1,9 +1,15 @@
-import { AID, MODEL_2 } from './constants.js';
+import {
+  AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
+} from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Oia, KeyboardState } from './oia.js';
 import { Trace, parseTrace } from './trace.js';
 import { TelnetLayer } from './telnet.js';
+import {
+  initialState, negotiate, encodeHeader, decodeHeader, carriesDatastream,
+  TN3270E_HEADER_BYTES, type Tn3270eState,
+} from './tn3270e.js';
 import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
@@ -41,6 +47,10 @@ export interface SessionOptions {
   codePage?: CodePage;
   /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2. */
   terminalType?: string;
+  /** Offer TN3270E. Defaults to true; `-tn3270e off` and the N: prefix clear it. */
+  tn3270e?: boolean;
+  /** LU names to request via CONNECT, tried in order as REJECTs come back. */
+  lus?: readonly string[];
 }
 
 export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm';
@@ -70,6 +80,10 @@ export class Session {
    * one logical screen as several records, which VM/370 does.
    */
   private records = 0;
+  /** TN3270E negotiation state. Undefined until the host offers option 40. */
+  private e: Tn3270eState | undefined;
+  /** Outbound SEQ-NUMBER. Only advances when RESPONSES was agreed (§8.1.4). */
+  private eSeq = 0;
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -133,6 +147,8 @@ export class Session {
       // bypass the layer's own `?? TERMINAL_TYPE` default if that guard ever
       // became a truthiness check.
       ...(this.opts.terminalType ? { terminalType: this.opts.terminalType } : {}),
+      tn3270eEnabled: this.opts.tn3270e ?? true,
+      onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, this.telnet); },
     });
 
     // Each callback checks identity against the `conn` it closes over, not just
@@ -186,12 +202,34 @@ export class Session {
   }
 
   private handleRecord(record: Uint8Array): void {
+    let body = record;
+    if (this.inTn3270e()) {
+      const h = decodeHeader(record);
+      if (h === null) {
+        // Shorter than a header: malformed rather than truncated, so there is nothing
+        // to salvage. Trace and drop, rather than handing the parser five bytes of
+        // nothing and raising a program check the host never caused.
+        this.trace.note(
+          `TN3270E record shorter than a header, ${record.length} bytes, dropped`);
+        return;
+      }
+      if (!carriesDatastream(h.dataType)) {
+        // RESPONSE, UNBIND, BIND-IMAGE, NVT-DATA, SSCP-LU-DATA, PRINT-EOJ. None
+        // carries a 3270 datastream, and feeding one to the executor would raise a
+        // spurious program check. Traced rather than silently ignored: the trace is
+        // how we would find out a real host sends these.
+        this.trace.note(
+          `TN3270E data type 0x${h.dataType.toString(16)} not implemented, dropped`);
+        return;
+      }
+      body = record.subarray(TN3270E_HEADER_BYTES);
+    }
     this.records++;
     if (this.trace.isEnabled()) {
-      this.trace.note(describeRecord(record));
+      this.trace.note(describeRecord(body));
     }
     try {
-      const parsed = parseRecord(record);
+      const parsed = parseRecord(body);
       const result = execute(this.screen, parsed);
 
       // Release the enter-inhibit condition raised by an earlier Query.
@@ -273,6 +311,78 @@ export class Session {
     }
   }
 
+  /**
+   * Advance TN3270E negotiation by one subnegotiation body.
+   *
+   * All the protocol logic is in tn3270e.ts; this only moves bytes and applies
+   * effects, which is what lets the state machine be tested without a socket.
+   *
+   * The layer is passed in rather than read from `this.telnet`, because replay()
+   * builds a local one and leaves the field undefined.
+   */
+  private handleTn3270eSubneg(body: Uint8Array, layer: TelnetLayer | undefined): void {
+    this.e ??= initialState({
+      terminalType: this.opts.terminalType ?? TERMINAL_TYPE,
+      lus: this.opts.lus ?? [],
+    });
+    const r = negotiate(this.e, body);
+    this.e = r.next;
+    if (r.reply) layer?.sendTn3270eSubneg(r.reply);
+    if (r.effect?.kind === 'complete') {
+      this.eSeq = 0;
+      layer?.setTn3270eNegotiated(true);
+      this.trace.note(
+        `TN3270E negotiated, device ${this.e.deviceType ?? '?'}`
+        + `${this.e.lu === undefined ? '' : ` LU ${this.e.lu}`}`
+        + `, functions: ${r.effect.agreed.join(',') || '(none: basic TN3270E)'}`);
+    } else if (r.effect?.kind === 'backoff') {
+      // Tell the host no and forget the option, so the classic BINARY/EOR route is
+      // still reachable on this same connection. x3270's backoff_tn3270e().
+      this.trace.note(`TN3270E abandoned: ${r.effect.why}`);
+      this.e = undefined;
+      layer?.refuseTn3270e();
+    }
+  }
+
+  /** True once TN3270E negotiation completed, i.e. records carry a header. */
+  private inTn3270e(): boolean {
+    return this.e?.phase === 'negotiated';
+  }
+
+  /**
+   * Send one inbound record, adding the TN3270E header when the session has one.
+   *
+   * THE HEADER IS PREPENDED AND THE WHOLE THING HANDED TO sendRecord, so it flows
+   * through the existing doubleIac(). RFC 2355 §8.1.4 requires a 0xff inside
+   * SEQ-NUMBER to be doubled, and doing it this way satisfies that by construction
+   * rather than with a second escaping implementation that could drift out of step
+   * with the first. Writing the header separately would put a bare 0xff on the wire
+   * once the counter passes 255 and desynchronise the host's telnet parser
+   * mid-record, which presents as a hang rather than an error.
+   */
+  private sendInbound(payload: Uint8Array): void {
+    if (!this.inTn3270e()) {
+      this.telnet?.sendRecord(payload);
+      return;
+    }
+    const header = encodeHeader({
+      dataType: Tn3270eDataType.DATA_3270,
+      requestFlag: 0,
+      responseFlag: Tn3270eResponseFlag.NO_RESPONSE,
+      seq: this.eSeq,
+    });
+    const framed = new Uint8Array(header.length + payload.length);
+    framed.set(header, 0);
+    framed.set(payload, header.length);
+    // Advance only when RESPONSES was agreed. §8.1.4: otherwise the field "should
+    // always be set to 0x0000". x3270 gates the increment the same way
+    // (telnet.c:3350), and masks to 15 bits.
+    if (this.e?.agreed.includes(Tn3270eFunc.RESPONSES)) {
+      this.eSeq = (this.eSeq + 1) & 0x7fff;
+    }
+    this.telnet?.sendRecord(framed);
+  }
+
   private programCheck(code: number, why: string): void {
     this.oia.programCheck(code);
     this.oia.waitingForHost = false;
@@ -285,7 +395,7 @@ export class Session {
     const payload = kind === 'ReadBuffer'
       ? buildReadBuffer(this.screen, AID.NONE)
       : buildReadModified(this.screen, AID.NONE, kind === 'ReadModifiedAll');
-    this.telnet?.sendRecord(payload);
+    this.sendInbound(payload);
   }
 
   /**
@@ -347,7 +457,7 @@ export class Session {
     // the reserved value is screened out in stream/sf.ts queryListRequest before
     // it ever becomes an sfReply. The throw is an unreachable assertion, and
     // there are tests at both levels pinning that.
-    this.telnet?.sendRecord(buildReply(request, DEFAULT_CAPABILITIES, geometry));
+    this.sendInbound(buildReply(request, DEFAULT_CAPABILITIES, geometry));
     // enterInhibit, not inhibit(EnterInhibit): it yields to a stronger inhibit
     // already in force. Before the host's first write that is
     // AwaitingFirstWrite — the case TSO produces, since it queries before
@@ -361,7 +471,7 @@ export class Session {
     if (this.telnet === undefined) throw new Error('not connected');
 
     const payload = buildReadModified(this.screen, aid, false);
-    this.telnet.sendRecord(payload);
+    this.sendInbound(payload);
 
     // The Clear key blanks the buffer locally as well as telling the host.
     if (aid === AID.CLEAR) {
@@ -396,9 +506,15 @@ export class Session {
       throw new Error('replay() requires a disconnected session; disconnect first');
     }
     const events = parseTrace(traceText);
-    const telnet = new TelnetLayer({
+    const telnet: TelnetLayer = new TelnetLayer({
       write: () => { /* discard: replay is one-directional */ },
       onRecord: (r) => this.handleRecord(r),
+      tn3270eEnabled: this.opts.tn3270e ?? true,
+      // Wired even though writes are discarded: replaying a TN3270E trace still has
+      // to advance the state machine, or handleRecord never learns to strip the
+      // 5-byte header and every replayed record is parsed one command byte early.
+      // `telnet` rather than `this.telnet`, which replay leaves undefined.
+      onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, telnet); },
     });
     for (const ev of events) {
       if (ev.dir === 'recv') telnet.receive(ev.bytes);
