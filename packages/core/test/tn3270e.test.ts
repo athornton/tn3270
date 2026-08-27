@@ -5,6 +5,7 @@ import {
 } from '../src/constants.js';
 import {
   encodeHeader, decodeHeader, carriesDatastream, TN3270E_HEADER_BYTES,
+  initialState, negotiate, REQUESTED_FUNCTIONS, type Tn3270eState,
 } from '../src/tn3270e.js';
 
 /**
@@ -209,5 +210,135 @@ describe('TN3270E header codec', () => {
     ]) {
       expect(carriesDatastream(dt)).toBe(false);
     }
+  });
+});
+
+/** A subnegotiation parameter string: ASCII to bytes. */
+const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+
+describe('TN3270E negotiation — DEVICE-TYPE', () => {
+  it('requests exactly RESPONSES, SYSREQ and CONTENTION-RESOLUTION', () => {
+    // BIND-IMAGE is deliberately absent. Granted BIND-IMAGE and sent no BIND, real
+    // s3270 never enters 3270 mode -- measured three ways, docs/live-testing.md
+    // *TN3270E harness validation*. Not asking is what makes that unreachable.
+    expect([...REQUESTED_FUNCTIONS]).toEqual([
+      Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
+    ]);
+    expect([...REQUESTED_FUNCTIONS]).not.toContain(Tn3270eFunc.BIND_IMAGE);
+  });
+
+  it('omits both printer functions, which belong to the printer stage', () => {
+    expect([...REQUESTED_FUNCTIONS]).not.toContain(Tn3270eFunc.SCS_CTL_CODES);
+    expect([...REQUESTED_FUNCTIONS]).not.toContain(Tn3270eFunc.DATA_STREAM_CTL);
+  });
+
+  it('answers SEND DEVICE-TYPE with DEVICE-TYPE REQUEST and the terminal type', () => {
+    // Captured from real s3270:
+    //   host  ff fa 28 08 02 ff f0
+    //   s3270 ff fa 28 02 07 "IBM-3278-2-E" ff f0
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    const r = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST, ...ascii('IBM-3278-2-E'),
+    ]);
+    expect(r.next.phase).toBe('awaitingDeviceType');
+    expect(r.effect).toBeUndefined();
+  });
+
+  it('appends CONNECT <lu> when an LU was named', () => {
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['TESTLU01'] });
+    const r = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST, ...ascii('IBM-3278-2-E'),
+      Tn3270eOp.CONNECT, ...ascii('TESTLU01'),
+    ]);
+  });
+
+  it('rejects the misordered SEND DEVICE-TYPE that cost real time', () => {
+    // 02 08 instead of 08 02. Real s3270 answered this with "DEVICE-TYPE ??8" and
+    // then stalled -- no reject, no error, nothing. Silence is the right response to
+    // a body we cannot parse, and tolerating it would mean negotiating against a
+    // server no other client can talk to.
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    const r = negotiate(st, Uint8Array.of(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.SEND));
+    expect(r.reply).toBeUndefined();
+    expect(r.next.phase).toBe('idle');
+    expect(r.effect).toBeUndefined();
+  });
+
+  it('on DEVICE-TYPE IS, records the device and LU and asks for functions', () => {
+    // Captured: ff fa 28 02 04 "IBM-3278-2-E" 01 "TESTLU01" ff f0
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['TESTLU01'] });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    const r = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
+      Tn3270eOp.CONNECT, ...ascii('TESTLU01'),
+    ]));
+    expect(r.next.deviceType).toBe('IBM-3278-2-E');
+    expect(r.next.lu).toBe('TESTLU01');
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...REQUESTED_FUNCTIONS,
+    ]);
+    expect(r.next.phase).toBe('awaitingFunctions');
+  });
+
+  it('accepts DEVICE-TYPE IS with no CONNECT clause', () => {
+    // §7.1.4 does not require the clause. `lu` stays undefined rather than becoming
+    // an empty string: "no LU reported" and "an LU called nothing" are different
+    // facts, and only one of them should show in the OIA.
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    const r = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3279-2-E'),
+    ]));
+    expect(r.next.deviceType).toBe('IBM-3279-2-E');
+    expect(r.next.lu).toBeUndefined();
+  });
+
+  it('reports the LU the SERVER named, not the one we asked for', () => {
+    // A server may assign something other than the requested resource, and the OIA
+    // must show what we actually got. x3270 keeps the two apart the same way
+    // (reported_lu vs try_lu).
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['WANTED'] });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    const r = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
+      Tn3270eOp.CONNECT, ...ascii('ASSIGNED'),
+    ]));
+    expect(r.next.lu).toBe('ASSIGNED');
+  });
+
+  it('treats an empty CONNECT name as no LU rather than as an empty one', () => {
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    const r = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'), Tn3270eOp.CONNECT,
+    ]));
+    expect(r.next.lu).toBeUndefined();
+  });
+
+  it('ignores a body it does not recognise, without changing state', () => {
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    const r = negotiate(st, Uint8Array.of(0x7e, 0x7f));
+    expect(r.reply).toBeUndefined();
+    expect(r.effect).toBeUndefined();
+    expect(r.next).toEqual(st);
+  });
+
+  it('ignores an empty body rather than reading past the end of it', () => {
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    const r = negotiate(st, new Uint8Array());
+    expect(r.reply).toBeUndefined();
+    expect(r.next).toEqual(st);
+  });
+
+  it('leaves the state it was handed untouched', () => {
+    // negotiate() returns a new state rather than mutating: the session keeps the
+    // old one until it has decided what to do with the result, and a test that
+    // drives two branches from one state must not have the first poison the second.
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['LUA'] });
+    const before = JSON.stringify(st);
+    negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
+    expect(JSON.stringify(st)).toBe(before);
   });
 });

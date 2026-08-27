@@ -11,7 +11,7 @@
  * Design doc: docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md
  * Plan:       docs/superpowers/plans/2026-08-27-stage2b-tn3270e.md
  */
-import { Tn3270eDataType } from './constants.js';
+import { Tn3270eDataType, Tn3270eFunc, Tn3270eOp } from './constants.js';
 
 /**
  * RFC 2355 §8.1: DATA-TYPE, REQUEST-FLAG, RESPONSE-FLAG, then a 2-byte SEQ-NUMBER.
@@ -87,4 +87,132 @@ export function decodeHeader(record: Uint8Array): Tn3270eHeader | null {
  */
 export function carriesDatastream(dataType: number): boolean {
   return dataType === Tn3270eDataType.DATA_3270;
+}
+
+/**
+ * The functions we ask for.
+ *
+ * BIND-IMAGE IS DELIBERATELY ABSENT, and the reason is a measured hazard rather than
+ * a cost. Granted BIND-IMAGE and sent no BIND, real s3270 never enters 3270 mode:
+ * an Erase/Write is delivered and ignored, and Wait(3270Mode) times out. Granting it
+ * WITH a BIND works, and denying it works. Since only advertise-then-stay-silent
+ * hangs, not asking is what stops a server from putting us in that state at all.
+ * x3270 accepts the risk (telnet.c:949-953); we need not. Three configurations
+ * tabulated in docs/live-testing.md, *TN3270E harness validation*.
+ *
+ * The two printer functions, SCS-CTL-CODES and DATA-STREAM-CTL, are printer-session
+ * functions by RFC 2355 §7.2.2 and belong to the printer stage.
+ *
+ * CONTENTION-RESOLUTION is not in RFC 2355 at all; x3270 requests it and so do we,
+ * but nothing here depends on a host granting it.
+ */
+export const REQUESTED_FUNCTIONS: readonly number[] = [
+  Tn3270eFunc.RESPONSES,
+  Tn3270eFunc.SYSREQ,
+  Tn3270eFunc.CONTENTION_RESOLUTION,
+];
+
+export type Tn3270ePhase =
+  | 'idle'
+  | 'awaitingDeviceType'
+  | 'awaitingFunctions'
+  | 'negotiated'
+  | 'backedOff';
+
+export interface Tn3270eState {
+  readonly phase: Tn3270ePhase;
+  /** Functions agreed. Empty with phase 'negotiated' is "basic TN3270E" (§9). */
+  readonly agreed: readonly number[];
+  readonly terminalType: string;
+  /** LU names still to try, in order. Advanced on REJECT. */
+  readonly lus: readonly string[];
+  readonly luIndex: number;
+  readonly deviceType?: string;
+  /** The LU the SERVER reported, which need not be the one we asked for. */
+  readonly lu?: string;
+}
+
+export type Tn3270eEffect =
+  | { kind: 'complete'; agreed: readonly number[] }
+  | { kind: 'backoff'; why: string };
+
+export interface NegotiateResult {
+  readonly next: Tn3270eState;
+  /** Subnegotiation body to send, WITHOUT the option byte. The caller frames it. */
+  readonly reply?: Uint8Array;
+  readonly effect?: Tn3270eEffect;
+}
+
+export function initialState(
+  o: { terminalType: string; lus: readonly string[] },
+): Tn3270eState {
+  return {
+    phase: 'idle',
+    agreed: [],
+    terminalType: o.terminalType,
+    lus: o.lus,
+    luIndex: 0,
+  };
+}
+
+const toAscii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+const fromAscii = (b: Uint8Array): string => String.fromCharCode(...b);
+
+/** Build DEVICE-TYPE REQUEST <ttype> [CONNECT <lu>] for the state's current LU. */
+function deviceTypeRequest(st: Tn3270eState): Uint8Array {
+  const lu = st.lus[st.luIndex];
+  return Uint8Array.from([
+    Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST, ...toAscii(st.terminalType),
+    ...(lu === undefined ? [] : [Tn3270eOp.CONNECT, ...toAscii(lu)]),
+  ]);
+}
+
+/**
+ * Advance the negotiation by one received subnegotiation body.
+ *
+ * `body` excludes the option byte AND the trailing IAC SE, so `body[0]` is the first
+ * operation. (x3270 keeps the SE in its sbbuf, which is why its parser scans for it
+ * — telnet.c:2219 — while ours can scan to the end of the buffer instead.)
+ *
+ * Pure: returns a new state and never mutates the one it was handed, so the session
+ * can decide what to do with the result before adopting it.
+ *
+ * An unrecognized or misordered body yields no reply and no state change. Silence is
+ * the correct response to a message we cannot parse, and it is exactly what real
+ * s3270 does when handed a misordered SEND DEVICE-TYPE.
+ */
+export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
+  // SEND DEVICE-TYPE. THE VERB COMES FIRST HERE (0x08 0x02) and the noun first in
+  // our reply (0x02 0x07). That asymmetry is real -- x3270 pins it at telnet.c:2199,
+  // where the test is `sbbuf[2] == TN3270E_OP_DEVICE_TYPE` -- and reversing it makes
+  // s3270 log "DEVICE-TYPE ??8" and then stall, with no reject and no error.
+  if (body[0] === Tn3270eOp.SEND && body[1] === Tn3270eOp.DEVICE_TYPE) {
+    return {
+      next: { ...st, phase: 'awaitingDeviceType' },
+      reply: deviceTypeRequest(st),
+    };
+  }
+
+  if (body[0] === Tn3270eOp.DEVICE_TYPE && body[1] === Tn3270eOp.IS) {
+    // DEVICE-TYPE IS <type> [CONNECT <name>]; the CONNECT clause is optional and
+    // §7.1.4 does not require it. x3270 scans to SE or CONNECT (telnet.c:2219-2221);
+    // our body has no SE, so end-of-buffer plays that role.
+    const rest = body.subarray(2);
+    const sep = rest.indexOf(Tn3270eOp.CONNECT);
+    const type = fromAscii(sep === -1 ? rest : rest.subarray(0, sep));
+    const lu = sep === -1 ? '' : fromAscii(rest.subarray(sep + 1));
+    return {
+      // An empty name is treated as no LU, not as an LU called nothing: only one of
+      // those should reach the status line.
+      next: {
+        ...st, phase: 'awaitingFunctions', deviceType: type,
+        ...(lu === '' ? {} : { lu }),
+      },
+      reply: Uint8Array.from([
+        Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...REQUESTED_FUNCTIONS,
+      ]),
+    };
+  }
+
+  return { next: st };
 }
