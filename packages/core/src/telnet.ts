@@ -14,6 +14,10 @@ export interface TelnetLayerOptions {
   onRecord: (record: Uint8Array) => void;
   trace?: Trace;
   terminalType?: string;
+  /** Offer TN3270E when the host asks. Default true; `-tn3270e off` clears it. */
+  tn3270eEnabled?: boolean;
+  /** Receives a TN3270E subnegotiation body with the option byte stripped. */
+  onTn3270eSubneg?: (body: Uint8Array) => void;
 }
 
 enum St { Data, Iac, Will, Wont, Do, Dont, Sb, SbIac }
@@ -67,6 +71,10 @@ export class TelnetLayer {
   private readonly onRecord: (record: Uint8Array) => void;
   private readonly trace: Trace | undefined;
   private readonly terminalType: string;
+  private readonly tn3270eEnabled: boolean;
+  private readonly onTn3270eSubneg: ((body: Uint8Array) => void) | undefined;
+  /** Set once DEVICE-TYPE and FUNCTIONS have both completed. */
+  private tn3270eNegotiated = false;
 
   private state = St.Data;
   private record: number[] = [];
@@ -84,6 +92,8 @@ export class TelnetLayer {
     this.onRecord = opts.onRecord;
     this.trace = opts.trace;
     this.terminalType = opts.terminalType ?? TERMINAL_TYPE;
+    this.tn3270eEnabled = opts.tn3270eEnabled ?? true;
+    this.onTn3270eSubneg = opts.onTn3270eSubneg;
   }
 
   /**
@@ -91,10 +101,32 @@ export class TelnetLayer {
    * which the byte stream is 3270 records rather than NVT text.
    */
   is3270Mode(): boolean {
+    // TWO ROUTES, AND THE SECOND IS NOT OPTIONAL. Classic TN3270 arrives here by
+    // agreeing BINARY and EOR in both directions. TN3270E arrives by completing its
+    // own negotiation, because RFC 2355 §4 makes binary and EOR IMPLIED rather than
+    // negotiated: "a party to the negotiation that agrees to support TN3270E is
+    // automatically required to support bi-directional binary and EOR
+    // transmissions."
+    //
+    // Measured 2026-08-27: a server sending only `IAC DO TN3270E` -- no BINARY, no
+    // EOR -- still gets 3270 records out of real s3270. With only the classic test
+    // here, such a session negotiates perfectly and then discards every inbound byte
+    // in storeRecordByte() and every record in flushRecord(), presenting as a blank
+    // screen with a trace full of "EOR received outside 3270 mode".
+    //
+    // Negotiation COMPLETE, not merely the option agreed: during DEVICE-TYPE and
+    // FUNCTIONS there is no datastream yet. That is the distinction s3270 draws
+    // between its connected-unbound and connected-tn3270e states.
+    if (this.tn3270eNegotiated) return true;
     return (
       this.myOpts.has(O.BINARY) && this.hisOpts.has(O.BINARY) &&
       this.myOpts.has(O.EOR) && this.hisOpts.has(O.EOR)
     );
+  }
+
+  /** Called by the session when TN3270E negotiation completes, or is abandoned. */
+  setTn3270eNegotiated(v: boolean): void {
+    this.tn3270eNegotiated = v;
   }
 
   receive(chunk: Uint8Array): void {
@@ -258,6 +290,19 @@ export class TelnetLayer {
 
   /** Host asks us to enable an option. */
   private onDo(opt: number): void {
+    // Before the DESIRED test, because option 40 is CONDITIONAL and DESIRED is a
+    // constant set. The RFC 854 "only on a real change" guard applies here too.
+    if (opt === O.TN3270E) {
+      if (!this.tn3270eEnabled) {
+        this.reply(T.WONT, opt);
+        return;
+      }
+      if (!this.myOpts.has(opt)) {
+        this.myOpts.add(opt);
+        this.reply(T.WILL, opt);
+      }
+      return;
+    }
     if (DESIRED.has(opt)) {
       if (!this.myOpts.has(opt)) {
         this.myOpts.add(opt);
@@ -295,6 +340,16 @@ export class TelnetLayer {
   }
 
   private handleSubnegotiation(): void {
+    if (this.sb[0] === O.TN3270E) {
+      // Hand up the body only. The option byte is framing, and the trailing SE is
+      // already absent because our accumulator drops it (see St.SbIac) -- which is
+      // why the consumer can scan to end-of-buffer where x3270 has to scan for SE.
+      // IAC IAC has already been un-doubled by storeSubnegByte.
+      const body = Uint8Array.from(this.sb.slice(1));
+      this.sb = [];
+      this.onTn3270eSubneg?.(body);
+      return;
+    }
     if (this.sb[0] === O.TERMINAL_TYPE && this.sb[1] === S.SEND) {
       // The ttype is a subnegotiation *parameter*, so a 0xFF inside it must be
       // doubled like any other data byte. RFC 855 says so explicitly, in its
@@ -349,6 +404,36 @@ export class TelnetLayer {
     const rec = Uint8Array.from(this.record);
     this.record = [];
     this.onRecord(rec);
+  }
+
+  /**
+   * Frame and send a TN3270E subnegotiation body.
+   *
+   * The body is doubled and the brackets are not, exactly as the TERMINAL-TYPE path
+   * does it: a 0xff in a subnegotiation parameter is data and must be doubled
+   * (RFC 855, final paragraph), while the IAC of IAC SB and IAC SE is a command
+   * introducer and stays single.
+   */
+  sendTn3270eSubneg(body: Uint8Array): void {
+    const out = Uint8Array.from([
+      T.IAC, T.SB, O.TN3270E, ...doubleIac(body), T.IAC, T.SE,
+    ]);
+    this.trace?.send(out, 'TN3270E subnegotiation');
+    this.write(out);
+  }
+
+  /**
+   * Abandon TN3270E and fall back to traditional tn3270.
+   *
+   * Modelled on x3270's backoff_tn3270e(): tell the host no, then forget we ever had
+   * the option, so both the classic BINARY/EOR route and a later renegotiation are
+   * still reachable on this same layer. Latching it off would make a reconnect
+   * silently decline. This is what makes on-by-default safe.
+   */
+  refuseTn3270e(): void {
+    this.myOpts.delete(O.TN3270E);
+    this.tn3270eNegotiated = false;
+    this.reply(T.WONT, O.TN3270E);
   }
 
   private reply(cmd: number, opt: number): void {

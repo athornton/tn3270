@@ -114,10 +114,19 @@ describe('option negotiation', () => {
     ]);
   });
 
-  it('refuses TN3270E in stage 1', () => {
+  it('ACCEPTS TN3270E by default, which stage 1 did not', () => {
+    // THIS ASSERTION WAS INVERTED BY STAGE 2b, deliberately. It read
+    // `[T.IAC, T.WONT, O.TN3270E]` and was named "refuses TN3270E in stage 1",
+    // pinning a limitation rather than a decision: option 40 fell through onDo's
+    // catch-all because nothing implemented it.
+    //
+    // TN3270E is now offered by default, matching x3270, and that is safe because
+    // the negotiation can back off to traditional tn3270 on a reject. The refusal
+    // path still exists and still has a test -- see "answers DO TN3270E with WONT
+    // when disabled", which is what -tn3270e off and the N: prefix produce.
     const { layer, sent } = harness();
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
-    expect(sent[0]).toEqual([T.IAC, T.WONT, O.TN3270E]);
+    expect(sent[0]).toEqual([T.IAC, T.WILL, O.TN3270E]);
   });
 
   it('refuses 3270-REGIME and TIMING-MARK, accepts SUPPRESS-GO-AHEAD', () => {
@@ -414,5 +423,144 @@ describe('trace wiring', () => {
     // At least one received line (negotiation) and one sent line (our WILL reply).
     expect(lines.some((l) => l.includes(' < '))).toBe(true);
     expect(lines.some((l) => l.includes(' > '))).toBe(true);
+  });
+});
+
+describe('TN3270E telnet option (40)', () => {
+  /** As `harness`, with TN3270E control and a subnegotiation-body collector. */
+  function eHarness(tn3270eEnabled: boolean) {
+    const sent: number[][] = [];
+    const records: Uint8Array[] = [];
+    const bodies: Uint8Array[] = [];
+    const layer = new TelnetLayer({
+      write: (b) => sent.push(Array.from(b)),
+      onRecord: (r) => records.push(r),
+      terminalType: 'IBM-3278-2-E',
+      tn3270eEnabled,
+      onTn3270eSubneg: (body) => bodies.push(body),
+    });
+    return { layer, sent, records, bodies };
+  }
+
+  it('answers DO TN3270E with WILL when enabled', () => {
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('answers DO TN3270E with WONT when disabled', () => {
+    // What -tn3270e off and the N: prefix must produce, and what keeps this stage a
+    // strict addition against the two Hercules hosts.
+    const { layer, sent } = eHarness(false);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+
+  it('defaults to enabled when the option is not passed at all', () => {
+    const { layer, sent } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('does not re-answer a repeated DO, per RFC 854', () => {
+    // "essential to prevent endless loops in the negotiation" -- the same guard the
+    // other accepted options already have.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E, T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('hands a TN3270E subnegotiation body up with the option byte stripped', () => {
+    const { layer, bodies } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.receive(Uint8Array.of(T.IAC, T.SB, O.TN3270E, 0x08, 0x02, T.IAC, T.SE));
+    expect(bodies.map((b) => Array.from(b))).toEqual([[0x08, 0x02]]);
+  });
+
+  it('un-doubles IAC IAC inside a TN3270E subnegotiation body', () => {
+    // The accumulator already does this for TERMINAL-TYPE; asserting it here keeps
+    // the two paths from diverging, which is how a previous escaped-byte defect got in.
+    const { layer, bodies } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.receive(Uint8Array.of(
+      T.IAC, T.SB, O.TN3270E, 0x02, 0x04, T.IAC, T.IAC, 0x41, T.IAC, T.SE));
+    expect(Array.from(bodies[0]!)).toEqual([0x02, 0x04, 0xff, 0x41]);
+  });
+
+  it('frames an outbound subnegotiation and doubles IAC in its body', () => {
+    // RFC 855's last paragraph: a 0xff in a subnegotiation PARAMETER must be doubled.
+    // The bracketing IAC SB and IAC SE are commands and stay single -- the same rule
+    // the TERMINAL-TYPE path follows.
+    const { layer, sent } = eHarness(true);
+    layer.sendTn3270eSubneg(Uint8Array.of(0x02, 0x07, 0xff, 0x41));
+    expect(sent).toEqual([[
+      T.IAC, T.SB, O.TN3270E, 0x02, 0x07, T.IAC, T.IAC, 0x41, T.IAC, T.SE,
+    ]]);
+  });
+
+  it('IS IN 3270 MODE ON TN3270E ALONE, with no BINARY or EOR negotiated', () => {
+    // RFC 2355 §4: binary and EOR are IMPLIED by TN3270E, not negotiated -- "a party
+    // to the negotiation that agrees to support TN3270E is automatically required to
+    // support bi-directional binary and EOR transmissions." Measured: a harness
+    // sending only DO TN3270E still gets records out of real s3270.
+    //
+    // Without this second route, every inbound byte of a TN3270E session is dropped
+    // by storeRecordByte and every record discarded by flushRecord: a perfect
+    // negotiation that renders nothing.
+    const { layer } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(layer.is3270Mode()).toBe(false);   // agreed, but not yet negotiated
+    layer.setTn3270eNegotiated(true);
+    expect(layer.is3270Mode()).toBe(true);
+  });
+
+  it('delivers a record in TN3270E mode without BINARY or EOR', () => {
+    // The end-to-end consequence of the gate above.
+    const { layer, records } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    layer.receive(Uint8Array.of(0x00, 0x00, 0x00, 0x00, 0x00, 0xf5, T.IAC, T.EOR));
+    expect(records.map((r) => Array.from(r))).toEqual([[0, 0, 0, 0, 0, 0xf5]]);
+  });
+
+  it('still reaches 3270 mode the classic way when TN3270E is absent', () => {
+    // Regression guard: the Hercules path must be untouched by the widened gate.
+    const { layer } = eHarness(true);
+    layer.receive(Uint8Array.of(
+      T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY,
+      T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR,
+    ));
+    expect(layer.is3270Mode()).toBe(true);
+  });
+
+  it('refuseTn3270e sends WONT and drops back out of 3270 mode', () => {
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    expect(layer.is3270Mode()).toBe(true);
+    sent.length = 0;
+    layer.refuseTn3270e();
+    expect(sent).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+    expect(layer.is3270Mode()).toBe(false);
+  });
+
+  it('can still accept TN3270E again after a refusal', () => {
+    // backoff_tn3270e clears myopts so the option could be renegotiated; ours must
+    // not latch off, or a reconnect on the same layer would silently decline.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.refuseTn3270e();
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('ignores a TN3270E subnegotiation when no consumer was wired', () => {
+    // The replay path builds a layer without the callback; a subnegotiation arriving
+    // there must be dropped rather than throwing on an undefined function.
+    const { layer } = harness();
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(() => layer.receive(
+      Uint8Array.of(T.IAC, T.SB, O.TN3270E, 0x08, 0x02, T.IAC, T.SE))).not.toThrow();
   });
 });
