@@ -21,8 +21,11 @@ verified against two live hosts — VM/370 and MVS 3.8j. The Electron GUI is nex
 **A usable terminal client, driven interactively against both live hosts.**
 
 ```sh
-node packages/tui/dist/main.js -model 3278-2-E 127.0.0.1:3271
+node packages/tui/dist/main.js -insecure -model 3278-2-E 127.0.0.1:3271
 ```
+
+`-insecure` is there because TLS is on by default and Hercules cannot speak it; against
+a modern host you would leave it off. See *TLS*.
 
 - **MVS 3.8j (TK5)** — logs on to TSO, reaches ISPF's primary option menu, pages
   through the tutorial, exits and logs off cleanly. Reproduced on four separate
@@ -63,7 +66,7 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1040 tests, 37 files
+npm test           # 1042 tests, 38 files
 npm run typecheck
 ```
 
@@ -184,14 +187,17 @@ lines are ignored.
 
 ```sh
 printf 'Connect(127.0.0.1:3270)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nQuit\n' \
-  | node packages/cli/dist/main.js
+  | node packages/cli/dist/main.js -insecure
 ```
 
 Or run a script file:
 
 ```sh
-node packages/cli/dist/main.js < packages/cli/scripts/record-vm.txt
+node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 ```
+
+`Connect()` routes through the same TLS decision as the command line, so the flag goes
+on the invocation and cannot be written into the script.
 
 **Commands.** `Connect` `Disconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
@@ -381,7 +387,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1040 tests, 37 files |
+| `npm test` | **pass** — 1042 tests, 38 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

@@ -85,8 +85,16 @@ all, both for a full session and for a bare connect-and-quit:
 
 ```bash
 printf 'Connect(HOST:PORT)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nQuit\n' \
-  | node packages/cli/dist/main.js
+  | node packages/cli/dist/main.js -insecure
 ```
+
+**`-insecure` is required on every line in this runbook that targets Hercules.** TLS
+is on by default since `6337c99`, and neither Hercules system speaks it. The failure
+mode is not a clean refusal: a plaintext host does not reject a TLS handshake, it goes
+quiet, so the symptom is a stall or a 10-second timeout rather than an error naming the
+cause. `Connect()` routes through the same TLS decision as the command line
+(`packages/cli/src/runner.ts:87`), so putting the flag on the *script* is not an option
+— it belongs on the invocation.
 
 **Our client is measured clean, not merely argued clean.** In the four-phase run
 above, both phases that used the real client produced only informational messages:
@@ -119,7 +127,7 @@ because an `HHC01022I` (our clean close) sat directly above an `HHC02915I` +
 ## Step 2 — Record a session
 
 ```bash
-node packages/cli/dist/main.js < packages/cli/scripts/record-mvs.txt \
+node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-mvs.txt \
   > /tmp/mvs-session.log 2>&1
 grep -c "^ok$" /tmp/mvs-session.log
 grep -c "^error$" /tmp/mvs-session.log
@@ -630,7 +638,7 @@ machine. Both clients drive paired scripts against the same host:
 S=~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270
 $S -model 3278-2 -trace -tracefile /tmp/ref.trace 127.0.0.1:3270 \
     < packages/cli/scripts/conformance-vm.s3270
-node packages/cli/dist/main.js < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
+node packages/cli/dist/main.js -insecure < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
 node packages/core/tools/compare-conformance.mjs /tmp/ours.log /tmp/ref.trace
 ```
 

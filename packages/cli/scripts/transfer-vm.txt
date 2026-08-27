@@ -5,7 +5,7 @@
 # requires a MECAFF connected 3270 terminal". Verified by running this script with
 # only that flag changed -- see the transfer design doc.
 #
-#   node packages/cli/dist/main.js -model 3278-2-E \
+#   node packages/cli/dist/main.js -insecure -model 3278-2-E \
 #     < packages/cli/scripts/transfer-vm.txt > /tmp/vm-rt.log 2>&1
 #   cmp /tmp/rt-src.bin /tmp/rt-back.bin
 #

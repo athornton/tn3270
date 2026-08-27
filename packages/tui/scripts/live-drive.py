@@ -274,8 +274,13 @@ def main():
 
     main_fd, child_fd = pty.openpty()
     fcntl.ioctl(child_fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
+    # -insecure IS MANDATORY. TLS is on by default and NEITHER Hercules system can
+    # speak it, so without this the client refuses to connect and every step fails
+    # against a session that was never established. Worse, a plaintext host does not
+    # reject a TLS handshake -- it goes quiet -- so the symptom is a stall, not an
+    # error. If this harness is ever pointed at a TLS host, drop the flag.
     argv = ["node", os.path.join(REPO, "packages/tui/dist/main.js"),
-            "-model", "3278-2-E", "--colors", "256", target]
+            "-insecure", "-model", "3278-2-E", "--colors", "256", target]
     pid = os.fork()
     if pid == 0:
         os.setsid()

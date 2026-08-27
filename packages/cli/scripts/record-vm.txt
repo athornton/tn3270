@@ -4,6 +4,13 @@
 # localhost:3270 with the unprivileged account CMSUSER: reaches CMS "Ready;" and
 # logs off cleanly, three runs for three.
 #
+#   node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
+#
+# -insecure IS REQUIRED. TLS is on by default and Hercules cannot speak it; the
+# failure is a stall, not a refusal, because a plaintext host does not reject a TLS
+# handshake. Connect() uses the same TLS decision as the command line, so the flag
+# cannot live in this file.
+#
 # READ the ScreenText output. A status line saying "ok" only means the command was
 # accepted, not that the host did what you expected — check the panels.
 #

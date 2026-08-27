@@ -144,8 +144,12 @@ def main():
     before = termios.tcgetattr(child_fd)
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__)))))
+    # -insecure IS MANDATORY HERE. TLS is on by default, and FakeHost speaks
+    # plaintext TN3270 -- so without it the client correctly refuses to connect and
+    # every check below fails against a dead session. It reads like a client bug and
+    # is not one.
     argv = ["node", os.path.join(repo, "packages/tui/dist/main.js"),
-            "--colors", "256", f"127.0.0.1:{host.port}"]
+            "-insecure", "--colors", "256", f"127.0.0.1:{host.port}"]
     pid = os.fork()
     if pid == 0:
         os.setsid()

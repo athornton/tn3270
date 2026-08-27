@@ -7,7 +7,7 @@
 #
 # Invoke as:
 #   sed 's/HOST:PORT/localhost:3271/' packages/cli/scripts/record-mvs.txt \
-#     | node packages/cli/dist/main.js -model 3278-2-E > /tmp/tso-run-$(date +%s).log 2>&1
+#     | node packages/cli/dist/main.js -insecure -model 3278-2-E > /tmp/tso-run-$(date +%s).log 2>&1
 #
 # A FRESH LOG FILE PER RUN, never appended: appending once produced 31 "replies"
 # for 15 commands and several wrong conclusions drawn from that mapping.

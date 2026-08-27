@@ -6,7 +6,7 @@
 # (see packages/core/test/conformance.test.ts for why).
 #
 # Run both, then compare:
-#   node packages/cli/dist/main.js < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
+#   node packages/cli/dist/main.js -insecure < packages/cli/scripts/conformance-vm.txt > /tmp/ours.log
 #   s3270 -model 3278-2 -trace -tracefile /tmp/ref.trace 127.0.0.1:3270 \
 #       < packages/cli/scripts/conformance-vm.s3270
 #   node packages/core/tools/compare-conformance.mjs /tmp/ours.log /tmp/ref.trace
