@@ -38,3 +38,24 @@ describe('command line arguments', () => {
     expect(() => parseArgs(['--wat'])).toThrow(UsageError);
   });
 });
+
+describe('-tn3270e', () => {
+  it('is absent by default, meaning the session default applies', () => {
+    // Absent rather than `true`: the product default lives in one place (the
+    // Session), and having the parser assert it too would let the two drift.
+    expect(parseArgs([]).tn3270e).toBeUndefined();
+  });
+
+  it('accepts on and off', () => {
+    expect(parseArgs(['-tn3270e', 'off']).tn3270e).toBe(false);
+    expect(parseArgs(['-tn3270e', 'on']).tn3270e).toBe(true);
+  });
+
+  it('rejects a value that is neither', () => {
+    expect(() => parseArgs(['-tn3270e', 'maybe'])).toThrow(/on or off|takes on or off/i);
+  });
+
+  it('rejects a missing value rather than silently defaulting', () => {
+    expect(() => parseArgs(['-tn3270e'])).toThrow(/needs a value/i);
+  });
+});

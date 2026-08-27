@@ -82,10 +82,16 @@ export function defaultSession(
    * the session a model 2, where the alternate size equals the default 24x80.
    */
   alternate?: { readonly rows: number; readonly cols: number },
+  /**
+   * Offer TN3270E. Absent means the product default, which is ON -- matching x3270,
+   * and safe because the negotiation backs off to traditional tn3270 on a reject.
+   */
+  tn3270e?: boolean,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
     ...(terminalType ? { terminalType } : {}),
+    ...(tn3270e === undefined ? {} : { tn3270e }),
     ...(alternate !== undefined
       ? { alternateRows: alternate.rows, alternateCols: alternate.cols }
       : {}),

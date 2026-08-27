@@ -30,6 +30,8 @@ export interface TuiArgs {
   host?: string;
   /** How the socket is made. Absent only before `resolveTls` has run. */
   tls?: TlsOptions;
+  /** Offer TN3270E. Absent means the default, which is on. */
+  tn3270e?: boolean;
 }
 
 /**
@@ -69,6 +71,20 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
       continue;
     }
     switch (flag) {
+      case '-tn3270e': {
+        // Positive form on the user's call. TN3270E is ON by default, matching x3270,
+        // and safe because the negotiation backs off to traditional tn3270 on a
+        // reject. Against the two Hercules hosts the code never fires -- neither
+        // offers option 40 -- so `off` exists for a host that mishandles it rather
+        // than for them.
+        if (value === undefined) throw new UsageError('-tn3270e needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-tn3270e takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.tn3270e = value === 'on';
+        i++;
+        break;
+      }
       case '-model':
         if (value === undefined) throw new UsageError('-model needs a value, e.g. -model 3278-2-E');
         args.model = value;
@@ -145,6 +161,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   };
   const session = defaultSession(
     resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
+    args.tn3270e,
   );
 
   const [hostname, port] = splitTarget(args.host);

@@ -80,3 +80,23 @@ describe('the banner', () => {
     expect(BANNER).toContain('Clear');
   });
 });
+
+describe('-tn3270e', () => {
+  it('is absent by default, meaning the session default applies', () => {
+    expect(parseArgs(['host']).tn3270e).toBeUndefined();
+  });
+
+  it('accepts on and off, and does not eat the host', () => {
+    // Both parsers, not one. A flag that works in the CLI and not the TUI is worse
+    // than a flag that exists in neither, and the two have separate parsers.
+    expect(parseArgs(['-tn3270e', 'off', 'host:23'])).toMatchObject({
+      tn3270e: false, host: 'host:23',
+    });
+    expect(parseArgs(['-tn3270e', 'on', 'host']).tn3270e).toBe(true);
+  });
+
+  it('rejects a bad or missing value', () => {
+    expect(() => parseArgs(['-tn3270e', 'maybe', 'host'])).toThrow(/on or off|takes on or off/i);
+    expect(() => parseArgs(['-tn3270e'])).toThrow(/needs a value/i);
+  });
+});
