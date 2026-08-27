@@ -158,6 +158,32 @@ export function initialState(
 const toAscii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 const fromAscii = (b: Uint8Array): string => String.fromCharCode(...b);
 
+
+/** Every function code we know. An inbound code outside this is "unrecognized". */
+const KNOWN_FUNCS: readonly number[] = Object.values(Tn3270eFunc);
+
+/**
+ * Decode a function list, discarding codes we do not know.
+ *
+ * RFC 2355 §7.2.2 requires exactly this: "If in the process of functions negotiation
+ * an unrecognized function code is recieved, the recipient should simply remove that
+ * function code from the list and continue normal functions negotiation." So an
+ * unknown code is NOT an error and must not abort the session.
+ *
+ * DISCARDING MUST HAPPEN BEFORE the addsNothing() comparison. Judged the other way
+ * round, an unknown code looks like an illegal addition and triggers backoff, turning
+ * a conforming server into a refused one. x3270 gets this for free by decoding into a
+ * bitmap that cannot hold an unknown bit (tn3270e_fdecode).
+ */
+function decodeFuncs(list: Uint8Array): number[] {
+  return [...list].filter((f) => KNOWN_FUNCS.includes(f));
+}
+
+/** True when `offered` contains nothing outside REQUESTED_FUNCTIONS. */
+function addsNothing(offered: readonly number[]): boolean {
+  return offered.every((f) => REQUESTED_FUNCTIONS.includes(f));
+}
+
 /** Build DEVICE-TYPE REQUEST <ttype> [CONNECT <lu>] for the state's current LU. */
 function deviceTypeRequest(st: Tn3270eState): Uint8Array {
   const lu = st.lus[st.luIndex];
@@ -211,6 +237,51 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
       reply: Uint8Array.from([
         Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...REQUESTED_FUNCTIONS,
       ]),
+    };
+  }
+
+  if (body[0] === Tn3270eOp.FUNCTIONS && body[1] === Tn3270eOp.IS) {
+    const offered = decodeFuncs(body.subarray(2));
+    if (!addsNothing(offered)) {
+      // x3270 calls this "Host illegally added function(s)" (telnet.c:2327) and
+      // abandons TN3270E outright rather than trying to reconcile. So do we: a server
+      // that grants what we did not request is not one to keep bargaining with, and
+      // BIND-IMAGE forced on us is precisely the case that could then hang the
+      // session by never sending a BIND.
+      return {
+        next: { ...st, phase: 'backedOff' },
+        effect: { kind: 'backoff', why: 'host illegally added function(s)' },
+      };
+    }
+    // SILENCE IS THE REPLY. Real s3270 sends nothing here, and an echoed FUNCTIONS IS
+    // would still appear to work against a tolerant server -- which is why the
+    // absence of a reply is asserted in the tests.
+    //
+    // An empty list is legal and completes: RFC 2355 §9 calls it "basic TN3270E".
+    return {
+      next: { ...st, phase: 'negotiated', agreed: offered },
+      effect: { kind: 'complete', agreed: offered },
+    };
+  }
+
+  if (body[0] === Tn3270eOp.FUNCTIONS && body[1] === Tn3270eOp.REQUEST) {
+    const offered = decodeFuncs(body.subarray(2));
+    if (addsNothing(offered)) {
+      // They want what we want, or less: adopt it, confirm with IS, and finish
+      // (telnet.c:2293-2301).
+      return {
+        next: { ...st, phase: 'negotiated', agreed: offered },
+        reply: Uint8Array.from([Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, ...offered]),
+        effect: { kind: 'complete', agreed: offered },
+      };
+    }
+    // They want something we cannot do: counter with the common subset and STAY in
+    // negotiation (telnet.c:2306-2311). No 'complete' effect here -- emitting one
+    // would put the session in 3270 mode before the host has agreed to anything.
+    const common = offered.filter((f) => REQUESTED_FUNCTIONS.includes(f));
+    return {
+      next: { ...st, phase: 'awaitingFunctions' },
+      reply: Uint8Array.from([Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...common]),
     };
   }
 

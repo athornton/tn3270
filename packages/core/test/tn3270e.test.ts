@@ -342,3 +342,137 @@ describe('TN3270E negotiation — DEVICE-TYPE', () => {
     expect(JSON.stringify(st)).toBe(before);
   });
 });
+
+describe('TN3270E negotiation — FUNCTIONS', () => {
+  /** Drive a state to 'awaitingFunctions' the way a real server would. */
+  function atFunctions(lus: readonly string[] = []): Tn3270eState {
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    return negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
+    ])).next;
+  }
+
+  it('accepts a FUNCTIONS IS subset in SILENCE, and completes', () => {
+    // Measured: after the harness granted RESPONSES and SYSREQ, real s3270 sent
+    // NOTHING further and its trace logged "TN3270E option negotiation complete."
+    // An echo here would still appear to work against a tolerant server, which is
+    // why the silence is asserted rather than assumed.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ,
+    ));
+    expect(r.reply).toBeUndefined();
+    expect(r.next.phase).toBe('negotiated');
+    expect([...r.next.agreed]).toEqual([Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ]);
+    expect(r.effect).toEqual({
+      kind: 'complete', agreed: [Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ],
+    });
+  });
+
+  it('completes on an empty function list — "basic TN3270E"', () => {
+    // RFC 2355 §9 names this mode explicitly and calls the null function-list legal.
+    // Treating it as an error would refuse a conforming server; the harness proved a
+    // real client accepts it (config D).
+    const r = negotiate(atFunctions(), Uint8Array.of(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS));
+    expect(r.next.phase).toBe('negotiated');
+    expect([...r.next.agreed]).toEqual([]);
+    expect(r.effect).toEqual({ kind: 'complete', agreed: [] });
+  });
+
+  it('backs off when FUNCTIONS IS ADDS a function we never asked for', () => {
+    // x3270: "Host illegally added function(s)" (telnet.c:2327), which abandons
+    // TN3270E outright rather than trying to reconcile. BIND-IMAGE is the case that
+    // matters: a server forcing it on us is exactly the one that could then hang the
+    // session by never sending a BIND.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, Tn3270eFunc.BIND_IMAGE,
+    ));
+    expect(r.next.phase).toBe('backedOff');
+    expect(r.reply).toBeUndefined();
+    expect(r.effect).toEqual({
+      kind: 'backoff', why: 'host illegally added function(s)',
+    });
+  });
+
+  it('answers a host-initiated FUNCTIONS REQUEST subset with FUNCTIONS IS', () => {
+    // telnet.c:2287-2301. NO REAL SERVER HAS EVER EXERCISED THIS PATH for us -- it
+    // is implemented from x3270's source, and whether any host initiates is one of
+    // the four questions for the future real-host probe.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, Tn3270eFunc.RESPONSES,
+    ));
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES,
+    ]);
+    expect(r.next.phase).toBe('negotiated');
+    expect(r.effect).toEqual({ kind: 'complete', agreed: [Tn3270eFunc.RESPONSES] });
+  });
+
+  it('counter-offers the intersection when a host REQUESTs more than we do', () => {
+    // telnet.c:2306-2311: b8_and, then send REQUEST again. Negotiation CONTINUES
+    // rather than completing, so no effect is emitted yet -- emitting 'complete'
+    // here would put the session in 3270 mode before the host has agreed.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST,
+      Tn3270eFunc.RESPONSES, Tn3270eFunc.SCS_CTL_CODES,
+    ));
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, Tn3270eFunc.RESPONSES,
+    ]);
+    expect(r.next.phase).toBe('awaitingFunctions');
+    expect(r.effect).toBeUndefined();
+  });
+
+  it('drops an unrecognized function code rather than failing', () => {
+    // §7.2.2: "If in the process of functions negotiation an unrecognized function
+    // code is recieved, the recipient should simply remove that function code from
+    // the list and continue normal functions negotiation." [sic -- the RFC's typo]
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, 0x7f,
+    ));
+    expect(r.next.phase).toBe('negotiated');
+    expect([...r.next.agreed]).toEqual([Tn3270eFunc.RESPONSES]);
+  });
+
+  it('drops an unknown code BEFORE judging whether the list added anything', () => {
+    // Order matters. If the unknown code were judged first it would look like an
+    // addition and trigger backoff, turning a conforming server into a refused one.
+    // x3270 decodes into a bitmap (which cannot hold an unknown bit) before
+    // comparing, which has the same effect.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, 0x7f,
+    ));
+    expect(r.next.phase).toBe('negotiated');
+    expect(r.effect?.kind).toBe('complete');
+  });
+
+  it('treats function 6 as unknown, since we do not define it', () => {
+    // x3270 has TN3270E_FUNC_SNA_SENSE = 6 and RFC 2355 does not. We drop it, which
+    // must not be mistaken for an illegal addition.
+    const r = negotiate(atFunctions(), Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, 6,
+    ));
+    expect(r.next.phase).toBe('negotiated');
+    expect([...r.next.agreed]).toEqual([Tn3270eFunc.RESPONSES]);
+  });
+
+  it('keeps the device type and LU across the FUNCTIONS exchange', () => {
+    // Regression guard: the spread in the FUNCTIONS arm must not drop what
+    // DEVICE-TYPE IS recorded, or the status line loses the LU at the last moment.
+    let st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['TESTLU01'] });
+    st = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE)).next;
+    st = negotiate(st, Uint8Array.from([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
+      Tn3270eOp.CONNECT, ...ascii('TESTLU01'),
+    ])).next;
+    const r = negotiate(st, Uint8Array.of(
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES,
+    ));
+    // Assert the transition happened FIRST. Without this the test passes vacuously
+    // against an unimplemented FUNCTIONS arm, which returns the state untouched and
+    // therefore trivially "keeps" both fields -- observed while writing it.
+    expect(r.next.phase).toBe('negotiated');
+    expect(r.next.deviceType).toBe('IBM-3278-2-E');
+    expect(r.next.lu).toBe('TESTLU01');
+  });
+});
