@@ -32,9 +32,18 @@ export const DEFAULT_TLS: TlsOptions = Object.freeze({ kind: 'tls', verify: true
  * How long the TLS handshake may stall before we give up and say so.
  *
  * NOT optional, and not a nicety. A plaintext 3270 host does not reject a TLS
- * handshake — IT HANGS. Hercules writes `IAC DO TN3270E` and waits; OpenSSL
- * reads that leading 0xff as a record content type and blocks for a length that
- * never arrives. Measured 2026-08-25 and pinned by test/tls-harness.test.ts.
+ * handshake — IT HANGS. Hercules writes `IAC DO TERMINAL-TYPE` (ff fd 18) and
+ * waits; OpenSSL reads that leading 0xff as a record content type and blocks for
+ * a length that never arrives. Measured 2026-08-25 and pinned by
+ * test/tls-harness.test.ts.
+ *
+ * An earlier version of this comment named the first option TN3270E (40). That
+ * was wrong, and remeasuring on 2026-08-27 corrected it: NEITHER Hercules system
+ * ever sends option 40 at all — both open with TERMINAL-TYPE (24) and go on to
+ * BINARY and EOR. The hang mechanism is unaffected, since it turns on the leading
+ * 0xff rather than on which option follows it, but the byte was misreported. See
+ * docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md for the full
+ * negotiation capture from both hosts.
  * Without this deadline, `tn3270 localhost:3270` under a TLS default appears to
  * do nothing whatsoever.
  *
