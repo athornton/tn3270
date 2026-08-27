@@ -1065,3 +1065,74 @@ never asked, and we sent no 3270 records at all. So the default/alternate pair n
 reported in Usable Area, BUFFSZ and Implicit Partition remains unit-tested only. A host
 that queries is still wanted; TSO is the likely candidate, since it is what forced `-E`
 in the first place.
+
+## TN3270E harness validation — 2026-08-27
+
+**Neither Hercules system speaks TN3270E, so there is no live host to test stage 2b
+against.** Measured by completing full telnet negotiation against both and logging
+every option: each opens `IAC DO TERMINAL-TYPE`, goes on to BINARY and EOR(25), and
+never mentions option 40 — whether we answer `WILL` or `WONT`. VM/370 953 bytes, MVS
+TK5 2901 bytes.
+
+So the counterparty was built: `packages/cli/scripts/e-server.py`, the same move
+`tls-proxy.mjs` made rather than installing stunnel.
+
+**THE HARNESS IS VALIDATED AGAINST REAL s3270 BEFORE IT IS POINTED AT OUR CLIENT**, and
+that order is not interchangeable. A harness never shown to satisfy a known-good client
+cannot tell us which side is wrong when ours fails. See lesson 8 in `docs/HANDOFF.md` —
+"a mimic of the real system is a hypothesis, not evidence" — which took four attempts to
+learn on a different question.
+
+```bash
+S=~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270
+python3 packages/cli/scripts/e-server.py --port 4941 --grant responses,sysreq &
+sleep 1.2
+printf 'Wait(3270Mode,8)\nWait(InputField,4)\nString(HI)\nEnter\nWait(0.5)\nQuit\n' \
+  | $S -model 3278-2 C:127.0.0.1:4941
+```
+
+The `C:` prefix is required or s3270 hangs on the connect screen (`stdinscript.c:437`).
+For our own client use `-insecure`: the harness speaks plaintext and TLS is on by
+default.
+
+### Results, s3270 4.5ga6, six configurations
+
+| # | configuration | s3270 reached 3270 mode | harness exit |
+|---|---|---|---|
+| A | `--grant responses,sysreq` | **yes** — inbound `00000000007d40c2c8c9` | 0 |
+| B | `--grant bind-image,responses,sysreq --send-bind` | **yes** — identical inbound record | 0 |
+| C | `--grant bind-image,responses,sysreq` (no BIND) | **NO** — write ignored, `Wait(3270Mode)` timed out | 0 |
+| D | `--grant ""` (basic TN3270E, §9) | **yes** — a null function list is legal | 0 |
+| E | `--reject device-in-use` | n/a — answered `IAC WONT TN3270E` and backed off | 0 |
+| F | `--grant responses,sysreq --response-flag 2` | **yes**, and answered the response | 0 |
+
+**C is the load-bearing measurement behind not requesting BIND-IMAGE.** Granted the
+function and sent no BIND, s3270 never enters 3270 mode at all: the Erase/Write is
+delivered and ignored. Granting it *with* a BIND works, and denying it works. Only
+advertise-then-stay-silent hangs, so declining to ask is what makes that state
+unreachable. x3270's rule is `telnet.c:2339`. **If C ever starts succeeding, the design's
+premise has changed and stage 2b's function set should be revisited.**
+
+**F gave a golden the RFC alone could not.** Asked for `ALWAYS-RESPONSE`, s3270 replied
+with a 6-byte record: `02 00 00 00 00 00` — DATA-TYPE `RESPONSE` (0x02), REQUEST-FLAG
+0x00, RESPONSE-FLAG `POSITIVE-RESPONSE` (0x00), SEQ-NUMBER `0x0000` copied from the
+message being answered, then one data byte `0x00` = "successful completion". That is a
+measured reference for our own response path, not a derivation from §10.4.1.
+
+**E confirmed the backoff path on a real client**, which is what makes on-by-default
+safe: a `DEVICE-TYPE REJECT` produced `IAC WONT TN3270E` and the session continued.
+
+The negotiation itself, captured byte for byte, is in
+`docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`. Note the asymmetric
+operand order recorded there: the server sends `SEND DEVICE-TYPE` (`08 02`) and the
+client replies `DEVICE-TYPE REQUEST` (`02 07`). Sending `02 08` made s3270 log
+`DEVICE-TYPE ??8` and then stall — no reject, no error.
+
+### Still outstanding: a real host
+
+This is verification against **x3270, not against a host**, and it is a weaker claim.
+The four questions only a real z/VM or z/OS can answer are listed under Task 15 of
+`docs/superpowers/plans/2026-08-27-stage2b-tn3270e.md`: whether a host initiates
+`FUNCTIONS REQUEST`, whether one ever sends `ALWAYS-RESPONSE` unprompted, whether one
+sends a BIND we did not ask for, and whether `-tn3270e off` still reaches a usable
+session. Record the answers against the spec.
