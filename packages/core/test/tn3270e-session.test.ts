@@ -353,3 +353,50 @@ describe('TN3270E RESPONSES', () => {
     expect(conn.writes.at(-1)!.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
   });
 });
+
+describe('TN3270E SYSREQ', () => {
+  it('sends IAC AO when SYSREQ was agreed', async () => {
+    // RFC 2355 §11 and x3270 telnet.c:3636. SYSREQ is a Telnet command, not an AID,
+    // so it carries no TN3270E header and no IAC EOR.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();                        // grants SYSREQ
+    conn.clear();
+    session.sysreq();
+    expect(conn.writes).toEqual([[T.IAC, T.AO]]);
+  });
+
+  it('sends nothing when SYSREQ was negotiated away', async () => {
+    // A deliberate no-op rather than an error: the key exists on the keyboard
+    // whatever the host granted, and pressing it on a session without the function
+    // is not the operator's mistake. Sending IAC AO anyway would put a command on
+    // the wire the host has no handler for.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE([Tn3270eFunc.RESPONSES]);  // no SYSREQ
+    conn.clear();
+    session.sysreq();
+    expect(conn.writes).toEqual([]);
+  });
+
+  it('sends nothing on a classic session that never saw TN3270E', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateClassic();
+    conn.clear();
+    session.sysreq();
+    expect(conn.writes).toEqual([]);
+  });
+
+  it('does not disturb the outbound sequence counter', async () => {
+    // SYSREQ is not a data message, so it must not spend a sequence number.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.host(...hdr(), ...WRITE_FIELD, T.IAC, T.EOR);
+    session.sysreq();
+    conn.clear();
+    session.sendAID(AID.ENTER);
+    expect(conn.writes.at(-1)!.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
+});

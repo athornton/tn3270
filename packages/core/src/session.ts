@@ -543,6 +543,24 @@ export class Session {
   }
 
   /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
+  /**
+   * The SYSREQ key.
+   *
+   * A no-op unless the function was agreed, and deliberately silent rather than an
+   * error: the key exists on the keyboard whatever the host granted, so pressing it
+   * on a session without the function is not the operator's mistake. Sending IAC AO
+   * anyway would put a command on the wire the host has no handler for.
+   *
+   * Not a data message, so it spends no sequence number.
+   */
+  sysreq(): void {
+    if (!this.e?.agreed.includes(Tn3270eFunc.SYSREQ)) {
+      this.trace.note('SYSREQ ignored: function not negotiated');
+      return;
+    }
+    this.telnet?.sendSysreq();
+  }
+
   sendAttn(): void {
     if (this.telnet === undefined) throw new Error('not connected');
     this.telnet.sendAttn();

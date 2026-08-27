@@ -143,6 +143,19 @@ export class TelnetLayer {
     this.write(bytes);
   }
 
+  /**
+   * SYSREQ is Telnet AO (RFC 2355 §11; x3270 telnet.c:3636), not an AID.
+   *
+   * No TN3270E header and no IAC EOR: RFC 2355 §8 recommends telnet commands travel
+   * BETWEEN data messages rather than inside one, precisely because the receiver is
+   * free to process an embedded command before or after the surrounding record.
+   */
+  sendSysreq(): void {
+    const bytes = Uint8Array.of(T.IAC, T.AO);
+    this.trace?.send(bytes, 'SYSREQ (IAC AO)');
+    this.write(bytes);
+  }
+
   /** The 3270 Attn key is Telnet BREAK (RFC 1576 §8), not an AID. */
   sendAttn(): void {
     const bytes = Uint8Array.of(T.IAC, T.BREAK);
