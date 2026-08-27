@@ -195,6 +195,34 @@ Observed and required: when the server's `FUNCTIONS IS` is an acceptable subset,
 client sends **nothing** in reply. A test must assert that silence; an implementation that
 echoes `FUNCTIONS IS` back would still appear to work against a tolerant server.
 
+## Binary and EOR are implied, and this breaks the existing mode gate
+
+**RFC 2355 §4 (`rfc2355.txt:376-382`): TN3270E implies binary and EOR without negotiating
+them.** "Note that while they are not explicitly negotiated, the equivalent of the Telnet
+Binary Transmission Option and the Telnet End of Record Option is implied in the
+negotiation of the TN3270E Option. That is, a party to the negotiation that agrees to
+support TN3270E is automatically required to support bi-directional binary and EOR
+transmissions."
+
+Confirmed on the wire during this design session: the harness sent **only** `IAC DO
+TN3270E` — never BINARY, never EOR — and real s3270 still entered 3270 mode and framed its
+inbound record with `IAC EOR`.
+
+Our `is3270Mode()` (`telnet.ts:93-99`) requires BINARY **and** EOR agreed in both
+directions. Against such a host it is `false` for the entire session, and then
+`storeRecordByte` (`telnet.ts:249`) drops every inbound data byte while `flushRecord`
+(`telnet.ts:332`) discards the accumulator on every `IAC EOR`. **A fully negotiated
+TN3270E session would render nothing at all**, with a trace full of `EOR received outside
+3270 mode` — a symptom that looks like a parser fault and is not one.
+
+So the gate gains a second route: 3270 mode when TN3270E negotiation has **completed**, or
+when BINARY and EOR are agreed the classic way. Completion, not merely agreeing option 40 —
+during DEVICE-TYPE and FUNCTIONS there is no datastream yet, which is the distinction
+s3270 draws between its `connected-unbound` and `connected-tn3270e` states.
+
+This was found while writing the implementation plan rather than during the design proper,
+and it is recorded here because it is a protocol fact, not an implementation detail.
+
 ## Header codec
 
 Outbound, per `telnet.c:3336-3352`:
