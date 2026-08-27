@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, AID,
-  Tn3270eOp, Tn3270eFunc, Tn3270eDataType,
+  Tn3270eOp, Tn3270eFunc, Tn3270eDataType, Tn3270eResponseFlag, Tn3270eSense,
 } from '../src/constants.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
@@ -247,5 +247,109 @@ describe('TN3270E session data path', () => {
     conn.host(...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1,
       T.IAC, T.IAC, T.IAC, T.EOR);
     expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
+  });
+});
+
+describe('TN3270E RESPONSES', () => {
+  /** Erase/Write with a header carrying the given response flag and sequence. */
+  const write = (flag: number, seq: number): number[] => [
+    ...hdr(flag, seq), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR,
+  ];
+
+  it('answers ALWAYS-RESPONSE positively, carrying the SAME sequence back', async () => {
+    // Measured from real s3270 in harness config F: it replied 02 00 00 00 00 00 --
+    // RESPONSE, POSITIVE, the seq copied from the message answered, one 0x00 byte.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+    conn.host(...write(Tn3270eResponseFlag.ALWAYS_RESPONSE, 0x0042));
+    expect(conn.writes).toEqual([[
+      Tn3270eDataType.RESPONSE, 0x00, Tn3270eResponseFlag.POSITIVE_RESPONSE,
+      0x00, 0x42, Tn3270eSense.DEVICE_END, T.IAC, T.EOR,
+    ]]);
+  });
+
+  it('says nothing for NO-RESPONSE', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+    conn.host(...write(Tn3270eResponseFlag.NO_RESPONSE, 7));
+    expect(conn.writes).toEqual([]);
+  });
+
+  it('says nothing for ERROR-RESPONSE when nothing went wrong', async () => {
+    // §10.4.1: a response is due only if an error occurred. Answering anyway would
+    // put a message on the wire the host is not waiting for.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+    conn.host(...write(Tn3270eResponseFlag.ERROR_RESPONSE, 7));
+    expect(conn.writes).toEqual([]);
+  });
+
+  it('answers a bad buffer address with NEGATIVE and OP-CHECK', async () => {
+    // SBA past the end of the buffer: "an illegal 3270 buffer address or order
+    // sequence was received", RFC 2355's 0x02.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+    conn.host(...hdr(Tn3270eResponseFlag.ERROR_RESPONSE, 0x0009),
+      0xf5, 0xc3, 0x11, 0x7f, 0x7f, T.IAC, T.EOR);
+    expect(conn.writes).toEqual([[
+      Tn3270eDataType.RESPONSE, 0x00, Tn3270eResponseFlag.NEGATIVE_RESPONSE,
+      0x00, 0x09, Tn3270eSense.OP_CHECK, T.IAC, T.EOR,
+    ]]);
+  });
+
+  it('answers an invalid command with NEGATIVE and COMMAND-REJECT', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+    conn.host(...hdr(Tn3270eResponseFlag.ALWAYS_RESPONSE, 0x000a), 0x99, T.IAC, T.EOR);
+    expect(conn.writes.at(-1)!.slice(0, 6)).toEqual([
+      Tn3270eDataType.RESPONSE, 0x00, Tn3270eResponseFlag.NEGATIVE_RESPONSE,
+      0x00, 0x0a, Tn3270eSense.COMMAND_REJECT,
+    ]);
+  });
+
+  it('still raises the program check as well as answering', async () => {
+    // The response goes to the host; the program check goes to the operator. Both,
+    // not either -- a silent negative response would leave an operator staring at a
+    // screen that never updated with no indication why.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.host(...hdr(Tn3270eResponseFlag.ALWAYS_RESPONSE, 1), 0x99, T.IAC, T.EOR);
+    expect(session.oia.toText()).toContain('PROG');
+  });
+
+  it('sends no response at all when RESPONSES was not agreed', async () => {
+    // A server asking for a response on a session where the function was never
+    // agreed is out of spec; answering would put a message on the wire it has no
+    // parser for.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE([]);                       // basic TN3270E
+    conn.clear();
+    conn.host(...write(Tn3270eResponseFlag.ALWAYS_RESPONSE, 5));
+    expect(conn.writes).toEqual([]);
+  });
+
+  it('does not let a response consume an outbound sequence number', async () => {
+    // A RESPONSE copies the inbound seq and must not spend one of ours, or our
+    // numbering drifts out of step with what the host is acknowledging.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.host(...write(Tn3270eResponseFlag.ALWAYS_RESPONSE, 0x0100));
+    conn.host(...hdr(), ...WRITE_FIELD, T.IAC, T.EOR);
+    conn.clear();
+    session.sendAID(AID.ENTER);
+    expect(conn.writes.at(-1)!.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
   });
 });

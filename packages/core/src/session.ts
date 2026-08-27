@@ -1,5 +1,6 @@
 import {
   AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
+  Tn3270eSense,
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
@@ -203,6 +204,8 @@ export class Session {
 
   private handleRecord(record: Uint8Array): void {
     let body = record;
+    /** The header of a TN3270E record, kept so the catch below can answer it. */
+    let wants: ReturnType<typeof decodeHeader> = null;
     if (this.inTn3270e()) {
       const h = decodeHeader(record);
       if (h === null) {
@@ -223,6 +226,7 @@ export class Session {
         return;
       }
       body = record.subarray(TN3270E_HEADER_BYTES);
+      wants = h;
     }
     this.records++;
     if (this.trace.isEnabled()) {
@@ -299,11 +303,35 @@ export class Session {
           `ignored orders: SA=${result.setAttributeIgnored} MF=${result.modifyFieldIgnored}`);
       }
       this.emit('screen');
+      if (wants?.responseFlag === Tn3270eResponseFlag.ALWAYS_RESPONSE) {
+        // Only ALWAYS-RESPONSE gets a positive answer. ERROR-RESPONSE means "tell me
+        // only if it went wrong", so a success there is answered with silence.
+        this.sendResponse(wants.seq, true, Tn3270eSense.DEVICE_END);
+      }
     } catch (err) {
+      // The response goes to the host and the program check to the operator: BOTH,
+      // not either. A silent negative response would leave an operator looking at a
+      // screen that never updated with no indication why.
+      //
+      // The sense code is mapped from the ERROR rather than from our program check
+      // code, because RFC 2355's two reachable senses are finer-grained than our two
+      // codes: 0x00 is "an invalid 3270 command was received" and 0x02 is "an illegal
+      // 3270 buffer address or order sequence". A ParseError is the former, an
+      // AddressError the latter -- even though both report program check 754.
+      // DO NOT collapse the program check codes to match: they are pinned by goldens
+      // and by the live VM/370 measurement.
+      const answerable = wants !== null
+        && wants.responseFlag !== Tn3270eResponseFlag.NO_RESPONSE;
       if (err instanceof ParseError || err instanceof AddressError) {
         this.programCheck(PROG_INVALID_COMMAND, err.message);
+        if (answerable) {
+          this.sendResponse(wants!.seq, false, err instanceof ParseError
+            ? Tn3270eSense.COMMAND_REJECT
+            : Tn3270eSense.OP_CHECK);
+        }
       } else if (err instanceof ExecuteError) {
         this.programCheck(PROG_INVALID_ADDRESS, err.message);
+        if (answerable) this.sendResponse(wants!.seq, false, Tn3270eSense.OP_CHECK);
       } else {
         // Our own bug: never swallowed.
         throw err;
@@ -347,6 +375,34 @@ export class Session {
   /** True once TN3270E negotiation completed, i.e. records carry a header. */
   private inTn3270e(): boolean {
     return this.e?.phase === 'negotiated';
+  }
+
+  /**
+   * Send a TN3270E RESPONSE message (RFC 2355 §10.4.1).
+   *
+   * `seq` is COPIED from the message being answered rather than generated, and this
+   * deliberately does not go through sendInbound(): a response must not consume one
+   * of our outbound sequence numbers, or our numbering drifts out of step with what
+   * the host is acknowledging.
+   *
+   * A no-op when RESPONSES was not agreed. A server asking for a response on such a
+   * session is out of spec, and answering would put a message on the wire it has no
+   * parser for.
+   */
+  private sendResponse(seq: number, positive: boolean, sense: number): void {
+    if (!this.e?.agreed.includes(Tn3270eFunc.RESPONSES)) return;
+    const header = encodeHeader({
+      dataType: Tn3270eDataType.RESPONSE,
+      requestFlag: 0,
+      responseFlag: positive
+        ? Tn3270eResponseFlag.POSITIVE_RESPONSE
+        : Tn3270eResponseFlag.NEGATIVE_RESPONSE,
+      seq,
+    });
+    const msg = new Uint8Array(header.length + 1);
+    msg.set(header, 0);
+    msg[header.length] = sense;
+    this.telnet?.sendRecord(msg);
   }
 
   /**
