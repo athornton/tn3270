@@ -22,8 +22,27 @@ import { Colour } from './palette.js';
  */
 
 export interface ScreenGeometry {
+  /** The DEFAULT (Erase/Write) size. */
   readonly rows: number;
   readonly cols: number;
+  /**
+   * The ALTERNATE (Erase/Write Alternate) size. Absent means "same as default",
+   * which is a model 2 and what every caller predating alternate-size support
+   * means.
+   *
+   * WHICH UNITS USE WHICH, verified against x3270's sf.c rather than guessed,
+   * because getting it inconsistent would advertise two different maxima in one
+   * reply: Usable Area is the MAXIMUM (`sf.c:718-719` writes maxCOLS/maxROWS),
+   * BUFFSZ is the MAXIMUM product (`sf.c:731`, which x3270 itself labels
+   * "questionable"), and only Implicit Partition carries both -- default then
+   * alternate (`sf.c:919-922`).
+   */
+  readonly alternate?: { readonly rows: number; readonly cols: number };
+}
+
+/** The alternate size, defaulting to the default size. */
+function alt(g: ScreenGeometry): { readonly rows: number; readonly cols: number } {
+  return g.alternate ?? { rows: g.rows, cols: g.cols };
 }
 
 export interface Capability {
@@ -202,8 +221,11 @@ const usableArea: Capability = {
     // B'0' means bytes 6-9 are in CELLS, B'1' means pels. So W and H below are
     // cell counts, which is what makes 80x24 correct there.
     0x00,
-    ...u16(geometry.cols), // 6-7  W: width of usable area, in cells
-    ...u16(geometry.rows), // 8-9  H: height of usable area, in cells
+    // The MAXIMUM, not the default: x3270 writes maxCOLS/maxROWS here
+    // (sf.c:718-719). Reporting the default would tell a host the alternate size
+    // it is about to be offered does not fit in the usable area.
+    ...u16(alt(geometry).cols), // 6-7  W: width of usable area, in cells
+    ...u16(alt(geometry).rows), // 8-9  H: height of usable area, in cells
     // 10 UNITS. The manual's values are "X'OO' Inches" / "X'01' Millimeters"
     // (pages.txt:11619-11620; the O in X'OO' is OCR of a zero). So 0x01 does
     // mean millimetres, matching x3270's own comment "units (mm)" (sf.c:720).
@@ -246,7 +268,7 @@ const usableArea: Capability = {
     // 21-22 BUFFSZ: "Character buffer size (bytes)" (pages.txt:11634). Cells
     // and bytes coincide for a non-DBCS display of this size. x3270 writes
     // maxCOLS*maxROWS here and flags it "buffer, questionable" (sf.c:731).
-    ...u16(geometry.rows * geometry.cols),
+    ...u16(alt(geometry).rows * alt(geometry).cols),
   ],
 };
 
@@ -291,7 +313,7 @@ const implicitPartition: Capability = {
     ...sdp(0x01, [
       0x00, // SDP FLAGS: reserved
       ...u16(geometry.cols), ...u16(geometry.rows), // WD HD — default
-      ...u16(geometry.cols), ...u16(geometry.rows), // WA HA — alternate == default
+      ...u16(alt(geometry).cols), ...u16(alt(geometry).rows), // WA HA — alternate
     ]),
   ],
 };
@@ -471,7 +493,13 @@ export function buildQueryReply(
   // is the required value of the two reserved base bytes). What is illegal is a
   // zero SCREEN dimension — p. 6-72, "Default and alternate values must be
   // nonzero" — and a zero would otherwise sail through u16 unnoticed.
-  for (const [name, value] of [['rows', geometry.rows], ['cols', geometry.cols]] as const) {
+  // The alternate is checked too, and by the same rule: p. 6-72 says "Default and
+  // alternate values must be nonzero", so a zero alternate is exactly as illegal
+  // as a zero default and would otherwise sail through u16 unnoticed.
+  for (const [name, value] of [
+    ['rows', geometry.rows], ['cols', geometry.cols],
+    ['alternate.rows', alt(geometry).rows], ['alternate.cols', alt(geometry).cols],
+  ] as const) {
     if (!Number.isInteger(value) || value <= 0) {
       throw new RangeError(`geometry.${name} must be a positive integer, got ${value}`);
     }

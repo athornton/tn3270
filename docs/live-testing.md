@@ -982,3 +982,78 @@ handshake deadline this is an indefinite hang with no output, which is why the d
 part of the design rather than a refinement of it. Pointing default TLS at the *proxy*
 without `-cafile` is the other half of the check: it is refused for a self-signed
 certificate, which is what proves verification is genuinely on.
+
+## Model 4 (43x80) on VM/CE — verified 2026-08-25
+
+**THE HOST DOES NOT ADAPT TO US. `-model` MUST MATCH THE DEVICE DEFINITION.**
+
+VM/370 takes a display's geometry from **DMKRIO**, its own real-I/O configuration,
+not from our TELNET TERMINAL-TYPE negotiation. So on a device DMKRIO defines as a
+3278-4, VM sends a 43-row screen whatever we advertise, and a model-2 client does
+not degrade gracefully — it ends up with a locked keyboard and no fields:
+
+```
+$ node packages/cli/dist/main.js -insecure          # i.e. IBM-3278-2
+data: timed out waiting for InputField
+E U U C(127.0.0.1) I 2 24 80 0 0 0x0 30.003         # E = error, 0 fields
+
+$ node packages/cli/dist/main.js -insecure -model 3278-4
+U F U C(127.0.0.1) I 2 43 80 41 0 0x0 0.010         # 43x80, 41 fields
+```
+
+Field 1 is the keyboard state and fields 7-8 are rows and cols, so those two status
+lines are the whole story. This is the reverse of the usual worry: the risk is not
+claiming a model the host will not honour, it is failing to claim the model the host
+already assumes.
+
+**Getting a model-4 device in the first place is a Hercules config change.**
+`vm370ce.conf` ships with two pools of displays, and out of the box the attachable
+ones are 3277s — which have no alternate size at all, so no `-model` could have
+helped. The 3278-4s at `01C0`/`02C0`/`03C0` are commented out:
+
+```
+# 00C0.32 3270  MOD2      <- 3277s in DMKRIO; comment OUT
+# 01C8.7  3270  MOD2      <- likewise
+01C0.7  3270    MOD4      <- 3278-4s in DMKRIO; uncomment
+02C0.7  3270
+03C0.7  3270
+```
+
+Commenting out the 3277 pool is not optional tidiness. **A plain TN3270 client cannot
+request a device address** — that needs TN3270E device names, which is stage 2b — so
+Hercules assigns the first free device and we have no say. Leaving only model-4
+displays attachable is what makes the assignment deterministic. Requires a shutdown
+and re-IPL.
+
+TUI results at 43x80, driven over a pty:
+
+| Window | Result |
+|---|---|
+| 46 rows | all 43 screen rows drawn, plus hint, border and OIA — terminal rows 1-46 |
+| 30 rows | refuses with "terminal too small", draws no partial screen |
+
+43 rows needs a 46-row window for the full frame. The refusal is the designed
+behaviour, not a limitation: a clipped 3270 screen hides the host's data.
+
+### EWA is live-verified, and VM sends EW then EWA
+
+`-model 3278-4-E` against VM/CE, whole session traced. Everything we sent was
+telnet negotiation — `ff fa 18 00 "IBM-3278-4-E"` and nothing else — and the host
+sent exactly two 3270 records:
+
+| Received | Command | Effect |
+|---|---|---|
+| `f5 42 ...` | Erase/Write | the VM logo, at the DEFAULT 24x80 |
+| `7e c2 ...` | Erase/Write **Alternate** | switches to the ALTERNATE 43x80 |
+
+So the architected default-then-alternate sequence happens on a real host in one
+session, both halves of the switch fire, and the result is 43x80 with 41 fields and
+**zero program checks**. This is the live proof the alternate-size work previously
+lacked; before this it was verified only from host bytes fed to a Session in a test.
+
+**The Query Reply is still NOT exercised live.** `-E` claims extended data stream, and
+the expectation was that it would invite a Read Partition (Query) — it did not. VM/370
+never asked, and we sent no 3270 records at all. So the default/alternate pair now
+reported in Usable Area, BUFFSZ and Implicit Partition remains unit-tested only. A host
+that queries is still wanted; TSO is the likely candidate, since it is what forced `-E`
+in the first place.

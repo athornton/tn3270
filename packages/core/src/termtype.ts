@@ -1,4 +1,4 @@
-import { TERMINAL_TYPE } from './constants.js';
+import { TERMINAL_TYPE, MODEL_2, MODEL_3, MODEL_4, MODEL_5 } from './constants.js';
 
 /**
  * Terminal type resolution for the telnet TERMINAL-TYPE subnegotiation.
@@ -19,21 +19,91 @@ export class TerminalTypeError extends Error {
   }
 }
 
+/** A model: what to call it on the wire, and what its alternate size is. */
+export interface Model {
+  readonly ttype: string;
+  /**
+   * The ALTERNATE (Erase/Write Alternate) size. The default size is 24x80 for
+   * every model -- see the note on MODEL_3 in constants.ts -- so this is the only
+   * geometry a model number actually decides.
+   */
+  readonly alternate: { readonly rows: number; readonly cols: number };
+}
+
 /**
- * Model number to ttype string.
+ * Model number to wire name and alternate size.
  *
- * Deliberately tiny: only models we can honestly claim while the screen is
- * pinned at 24x80. A model implying another geometry needs alternate-size
- * support first, which stage 2a does not implement. Sizes per x3270
- * include/3270ds.h: model 2 is 24x80 (MODEL_2_ROWS 24, MODEL_2_COLS 80),
- * model 3 is 32x80, model 4 is 43x80, model 5 is 27x132.
+ * Sizes per x3270 `include/3270ds.h:446-453`. Models 3, 4 and 5 were held back
+ * until the screen could switch size on Erase/Write Alternate, because claiming
+ * one is a promise to the host that it may do exactly that.
+ *
+ * NOT here: `IBM-DYNAMIC`, which is not a model but "ask me via Query Reply", and
+ * which x3270 sends only for oversize (`telnet.c:2101`). Oversize itself is an
+ * emulator extension rather than 3270 architecture -- no 3278 ever had a 160x62
+ * screen -- and it is the one case that crosses 4096 cells into 14-bit
+ * addressing. Both are deliberately out of scope here.
  *
  * Keys are uppercase because lookups are case-folded; see resolveTerminalType.
  */
-export const KNOWN_MODELS: Readonly<Record<string, string>> = {
-  '3278-2': 'IBM-3278-2',
-  '3278-2-E': 'IBM-3278-2-E',
+export const KNOWN_MODELS: Readonly<Record<string, Model>> = {
+  '3278-2': { ttype: 'IBM-3278-2', alternate: MODEL_2 },
+  '3278-2-E': { ttype: 'IBM-3278-2-E', alternate: MODEL_2 },
+  '3278-3': { ttype: 'IBM-3278-3', alternate: MODEL_3 },
+  '3278-3-E': { ttype: 'IBM-3278-3-E', alternate: MODEL_3 },
+  '3278-4': { ttype: 'IBM-3278-4', alternate: MODEL_4 },
+  '3278-4-E': { ttype: 'IBM-3278-4-E', alternate: MODEL_4 },
+  '3278-5': { ttype: 'IBM-3278-5', alternate: MODEL_5 },
+  '3278-5-E': { ttype: 'IBM-3278-5-E', alternate: MODEL_5 },
 };
+
+/**
+ * The model a request names, or undefined for "no model asked for".
+ *
+ * Shared by `resolveTerminalType` and `resolveAlternateSize` so the two cannot
+ * disagree about what a string means -- the whole point of them being separate
+ * functions over one table.
+ */
+function lookUpModel(opts: TerminalTypeOptions): Model | undefined {
+  if (opts.model === undefined) return undefined;
+  // Accept `3278-2-E`, `IBM-3278-2-E`, and any casing of either. x3270 matches
+  // the prefix with strncasecmp("IBM-", res, 4) and the suffix with
+  // strchr("Ee", res[7]) in Common/model.c canonical_model_x(), so a model
+  // string s3270 accepts is accepted here too. Case folding cannot invent a
+  // model: an unknown number still misses the table and throws.
+  const folded = opts.model.toUpperCase();
+  const bare = folded.startsWith('IBM-') ? folded.slice(4) : folded;
+  // Own-property check, not a bare index: KNOWN_MODELS is a plain object, so
+  // `KNOWN_MODELS['CONSTRUCTOR']`-style lookups would otherwise walk up to
+  // Object.prototype and return a function that the `undefined` guard below
+  // would wave through as if it were a model.
+  const found = Object.hasOwn(KNOWN_MODELS, bare) ? KNOWN_MODELS[bare] : undefined;
+  if (found === undefined) {
+    throw new TerminalTypeError(
+      `unknown model ${JSON.stringify(opts.model)}; known models are `
+      + `${Object.keys(KNOWN_MODELS).join(', ')}. `
+      + 'Use --terminal-type to send an arbitrary string.',
+    );
+  }
+  return found;
+}
+
+/**
+ * The alternate screen size to build the session with.
+ *
+ * Undefined means "no model was named", which leaves the session at a model 2
+ * where the alternate size equals the default. A raw `terminalType` string also
+ * yields undefined ON PURPOSE: we cannot know what geometry an arbitrary string
+ * implies, and guessing one from a substring would be worse than staying 24x80 --
+ * the host is told what we claim by the string itself, and if the operator sends
+ * `IBM-3278-4` that way they get the size they asked the host for but not a
+ * buffer that can hold it. Use `-model` to get both.
+ */
+export function resolveAlternateSize(
+  opts: TerminalTypeOptions,
+): { readonly rows: number; readonly cols: number } | undefined {
+  if (opts.terminalType !== undefined) return undefined;
+  return lookUpModel(opts)?.alternate;
+}
 
 export interface TerminalTypeOptions {
   /** A model number, with or without the IBM- prefix. */
@@ -67,25 +137,5 @@ export function resolveTerminalType(opts: TerminalTypeOptions): string {
   // TERMINAL_TYPE and watching golden.test.ts and conformance.test.ts still
   // pass. The tests that do catch it are telnet.test.ts and termtype.test.ts.
   if (opts.model === undefined) return TERMINAL_TYPE;
-
-  // Accept `3278-2-E`, `IBM-3278-2-E`, and any casing of either. x3270 matches
-  // the prefix with strncasecmp("IBM-", res, 4) and the suffix with
-  // strchr("Ee", res[7]) in Common/model.c canonical_model_x(), so a model
-  // string s3270 accepts is accepted here too. Case folding cannot invent a
-  // model: an unknown number still misses the table and throws.
-  const folded = opts.model.toUpperCase();
-  const bare = folded.startsWith('IBM-') ? folded.slice(4) : folded;
-  // Own-property check, not a bare index: KNOWN_MODELS is a plain object, so
-  // `KNOWN_MODELS['CONSTRUCTOR']`-style lookups would otherwise walk up to
-  // Object.prototype and return a function that the `undefined` guard below
-  // would wave through as if it were a ttype string.
-  const resolved = Object.hasOwn(KNOWN_MODELS, bare) ? KNOWN_MODELS[bare] : undefined;
-  if (resolved === undefined) {
-    throw new TerminalTypeError(
-      `unknown model ${JSON.stringify(opts.model)}; known models are `
-      + `${Object.keys(KNOWN_MODELS).join(', ')}. `
-      + 'Use --terminal-type to send an arbitrary string.',
-    );
-  }
-  return resolved;
+  return lookUpModel(opts)!.ttype;
 }

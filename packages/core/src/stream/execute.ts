@@ -1,4 +1,4 @@
-import { WCC, FA, Order, XA, XA_3270 } from '../constants.js';
+import { WCC, FA, Order, XA, XA_3270, MODEL_3, MODEL_4, MODEL_5 } from '../constants.js';
 import type { Screen } from '../screen.js';
 import type { ParsedRecord, Token, CommandName } from './parse.js';
 import { isQueryRequest, queryListRequest } from './sf.js';
@@ -191,6 +191,12 @@ export interface ExecuteResult {
   alarm: boolean;
   /** WCC bit 4 asked for a local copy and we have no printer. */
   printerUnavailable: boolean;
+  /**
+   * The screen changed geometry, so a renderer must re-place everything rather
+   * than diff against a buffer of the wrong shape. False for a whole session on
+   * a model 2, where the default and alternate sizes are equal.
+   */
+  resized: boolean;
   /** How many structured fields we skipped, for the trace. */
   structuredFieldsIgnored: number;
   /**
@@ -228,6 +234,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
     releasesEnterInhibit: false,
     alarm: false,
     printerUnavailable: false,
+    resized: false,
     structuredFieldsIgnored: 0,
     setAttributeIgnored: 0,
     modifyFieldIgnored: 0,
@@ -308,10 +315,19 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
       }
       return result;
 
+    // EW and EWA are THE screen-size switch, and nothing to do with TN3270E --
+    // x3270 does it at `ctlr.c:558-561`, `newROWS = altROWS` against
+    // `newROWS = defROWS`, with no reference to the telnet option. On a model 2
+    // the two sizes are equal, so both still clear the same buffer and `resized`
+    // stays false for the whole session.
     case 'EraseWrite':
+      result.resized = screen.useDefaultSize();
+      screen.clear();
+      result.releasesEnterInhibit = true;
+      break;
+
     case 'EraseWriteAlternate':
-      // On a model 2 the alternate size equals the default, so both clear the
-      // same buffer. TN3270E gives them different behavior.
+      result.resized = screen.useAlternateSize();
       screen.clear();
       result.releasesEnterInhibit = true;
       break;
@@ -681,8 +697,41 @@ function applyToken(
   }
 }
 
+/**
+ * The architected model whose alternate size would hold `addr`, if any.
+ *
+ * Exists because "SBA address 3279 beyond buffer end 1919" is a true statement
+ * that tells an operator nothing they can act on. The overwhelmingly likely cause
+ * of a host addressing past our buffer is that its device is defined as a bigger
+ * model than we claimed -- VM/370 takes a display's geometry from DMKRIO, not from
+ * our TERMINAL-TYPE, so it will send 43 rows to a client that said 3278-2 and the
+ * session dies with a program check on the first SBA past row 24. Naming the model
+ * that fits turns a dead session into a one-flag fix.
+ */
+function modelThatWouldFit(addr: number): string | undefined {
+  const candidates = [
+    ['3278-3', MODEL_3], ['3278-4', MODEL_4], ['3278-5', MODEL_5],
+  ] as const;
+  for (const [name, geom] of candidates) {
+    if (addr < geom.rows * geom.cols) return `${name} (${geom.rows}x${geom.cols})`;
+  }
+  return undefined;
+}
+
 function requireOnScreen(screen: Screen, addr: number, what: string): void {
   if (addr < 0 || addr >= screen.size) {
-    throw new ExecuteError(`${what} address ${addr} beyond buffer end ${screen.size - 1}`);
+    let msg = `${what} address ${addr} beyond buffer end ${screen.size - 1}`;
+    // Only for an address PAST the end, and only when a real model would hold it:
+    // a negative address is a malformed stream, and an address past even a model 5
+    // is not a geometry mismatch either.
+    if (addr >= screen.size) {
+      const fits = modelThatWouldFit(addr);
+      if (fits !== undefined) {
+        msg += `. The host is addressing a screen larger than this session's `
+          + `${screen.rows}x${screen.cols}; its device is probably defined as a `
+          + `${fits}, which -model must match`;
+      }
+    }
+    throw new ExecuteError(msg);
   }
 }

@@ -29,8 +29,15 @@ export interface Connection {
 
 export interface SessionOptions {
   connect: (host: string, port: number) => Connection | Promise<Connection>;
+  /** The DEFAULT (Erase/Write) screen size. Always 24x80 on a real model. */
   rows?: number;
   cols?: number;
+  /**
+   * The ALTERNATE (Erase/Write Alternate) size, from the model number. Defaults
+   * to the default size, which is a model 2.
+   */
+  alternateRows?: number;
+  alternateCols?: number;
   codePage?: CodePage;
   /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2. */
   terminalType?: string;
@@ -69,6 +76,8 @@ export class Session {
     this.screen = new Screen({
       rows: opts.rows ?? MODEL_2.rows,
       cols: opts.cols ?? MODEL_2.cols,
+      ...(opts.alternateRows !== undefined ? { alternateRows: opts.alternateRows } : {}),
+      ...(opts.alternateCols !== undefined ? { alternateCols: opts.alternateCols } : {}),
       ...(opts.codePage ? { codePage: opts.codePage } : {}),
     });
     this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
@@ -320,7 +329,15 @@ export class Session {
    * unlock a keyboard over.
    */
   private answerQuery(request: QueryRequest): void {
-    const geometry = { rows: this.screen.rows, cols: this.screen.cols };
+    // The DEFAULT size and the ALTERNATE size, NOT the current one. A host that
+    // asks while we happen to be in alternate mode must still be told what the
+    // default is, and `screen.rows` is whichever mode we are in right now --
+    // reading it here would make the reply depend on the moment it was asked.
+    const geometry = {
+      rows: this.screen.defaultSize.rows,
+      cols: this.screen.defaultSize.cols,
+      alternate: this.screen.alternateSize,
+    };
     // buildReply, not buildQueryReply: it applies the REQTYP rules and the
     // always-send-Summary rule in one place.
     //

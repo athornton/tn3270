@@ -1,0 +1,316 @@
+import { describe, it, expect } from 'vitest';
+import { Screen } from '../src/screen.js';
+import { execute } from '../src/stream/execute.js';
+import { buildQueryReply, DEFAULT_CAPABILITIES } from '../src/queryreply.js';
+import {
+  MODEL_2, MODEL_3, MODEL_4, MODEL_5, Qcode,
+  Cmd, TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S,
+} from '../src/constants.js';
+import { Session, type Connection } from '../src/session.js';
+import type { ParsedRecord } from '../src/stream/parse.js';
+
+/**
+ * Alternate screen size: the Erase/Write vs Erase/Write Alternate pair.
+ *
+ * THE FACT THE WHOLE FEATURE TURNS ON, and it is not what the model numbers make
+ * it look like: EVERY model's DEFAULT size is model 2's 24x80. x3270 sets
+ * `ROWS = defROWS = MODEL_2_ROWS` unconditionally (`ctlr.c:341`) and only
+ * `altROWS = maxROWS` varies (`ctlr.c:345`). A model number does not change the
+ * screen you get on connect; it changes the one the host may switch you to.
+ *
+ * None of this is TN3270E. x3270 switches size at `ctlr.c:558-561` with no
+ * reference to the telnet option.
+ */
+
+/** A bare record of one command, which is all these tests need. */
+const record = (command: ParsedRecord['command']): ParsedRecord =>
+  ({ command, wcc: 0, tokens: [] });
+
+const model4 = () => new Screen({
+  rows: MODEL_2.rows, cols: MODEL_2.cols,
+  alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols,
+});
+
+describe('the model geometry table', () => {
+  it('matches x3270 include/3270ds.h:446-453', () => {
+    expect(MODEL_2).toEqual({ rows: 24, cols: 80 });
+    expect(MODEL_3).toEqual({ rows: 32, cols: 80 });
+    expect(MODEL_4).toEqual({ rows: 43, cols: 80 });
+    expect(MODEL_5).toEqual({ rows: 27, cols: 132 });
+  });
+
+  it('keeps every model inside 12-bit addressing except by oversize', () => {
+    // Screens over 4096 cells need 14-bit addresses. No architected model crosses
+    // that line -- model 5 is the largest at 3564 -- so a model alone never
+    // changes the address encoding. Only x3270-style oversize does.
+    for (const m of [MODEL_2, MODEL_3, MODEL_4, MODEL_5]) {
+      expect(m.rows * m.cols).toBeLessThanOrEqual(0x1000);
+    }
+  });
+});
+
+describe('Screen size switching', () => {
+  it('starts at the DEFAULT size, not the alternate', () => {
+    const s = model4();
+    expect([s.rows, s.cols]).toEqual([24, 80]);
+    expect(s.size).toBe(1920);
+    expect(s.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('switches to the alternate size and back', () => {
+    const s = model4();
+    expect(s.useAlternateSize()).toBe(true);
+    expect([s.rows, s.cols, s.size]).toEqual([43, 80, 3440]);
+    expect(s.useDefaultSize()).toBe(true);
+    expect([s.rows, s.cols, s.size]).toEqual([24, 80, 1920]);
+  });
+
+  it('reports NO change when the size is already right', () => {
+    // What keeps a model 2 session free: its two sizes are equal, so every
+    // Erase/Write Alternate in the session is a no-op and costs no repaint.
+    const two = new Screen();
+    expect(two.useAlternateSize()).toBe(false);
+    expect(two.useDefaultSize()).toBe(false);
+    const s = model4();
+    expect(s.useAlternateSize()).toBe(true);
+    expect(s.useAlternateSize()).toBe(false);
+  });
+
+  it('defaults the alternate size to the default size, as a model 2 has', () => {
+    const s = new Screen({ rows: 24, cols: 80 });
+    expect(s.alternateSize).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('discards content, which is what EW and EWA do anyway', () => {
+    const s = model4();
+    s.setChar(0, 0xc1);
+    expect(s.readBuffer()[0]).toBe(0xc1);
+    s.useAlternateSize();
+    expect(s.readBuffer()[0]).toBe(0x00);
+    expect(s.cursor).toBe(0);
+  });
+
+  it('addresses the whole new buffer, and nothing past it', () => {
+    // The invariant with teeth: `check` bounds every address against `size`, so a
+    // resize that updated the arrays but not `size` would either reject legal
+    // addresses or write out of bounds.
+    const s = model4();
+    s.useAlternateSize();
+    expect(() => s.setChar(3439, 0xc1)).not.toThrow();
+    expect(() => s.setChar(3440, 0xc1)).toThrow(RangeError);
+    s.useDefaultSize();
+    expect(() => s.setChar(1920, 0xc1)).toThrow(RangeError);
+  });
+
+  it('rejects a geometry it cannot build a buffer from', () => {
+    const s = model4();
+    for (const [r, c] of [[0, 80], [24, 0], [-1, 80], [24.5, 80]]) {
+      expect(() => s.resize(r!, c!), `${r}x${c}`).toThrow(RangeError);
+    }
+    expect(() => new Screen({ alternateRows: 0, alternateCols: 80 })).toThrow(RangeError);
+  });
+});
+
+describe('Erase/Write vs Erase/Write Alternate', () => {
+  it('EWA selects the alternate size and reports the resize', () => {
+    const s = model4();
+    const r = execute(s, record('EraseWriteAlternate'));
+    expect(r.resized).toBe(true);
+    expect([s.rows, s.cols]).toEqual([43, 80]);
+  });
+
+  it('EW selects the default size', () => {
+    const s = model4();
+    execute(s, record('EraseWriteAlternate'));
+    const r = execute(s, record('EraseWrite'));
+    expect(r.resized).toBe(true);
+    expect([s.rows, s.cols]).toEqual([24, 80]);
+  });
+
+  it('reports no resize on a model 2, for either command', () => {
+    const s = new Screen();
+    expect(execute(s, record('EraseWriteAlternate')).resized).toBe(false);
+    expect(execute(s, record('EraseWrite')).resized).toBe(false);
+  });
+
+  it('still erases when the size did not change', () => {
+    // The resize returns early when the geometry matches, so the erase has to be
+    // its own step. Dropping `screen.clear()` from the EWA case would leave a
+    // model 2 never clearing on Erase/Write Alternate at all.
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    execute(s, record('EraseWriteAlternate'));
+    expect(s.readBuffer()[5]).toBe(0x00);
+  });
+});
+
+describe('the Query Reply stops saying alternate == default', () => {
+  const reply = (alternate?: { rows: number; cols: number }) => buildQueryReply(
+    DEFAULT_CAPABILITIES,
+    { rows: 24, cols: 80, ...(alternate !== undefined ? { alternate } : {}) },
+  );
+  const body = (r: Uint8Array, qcode: number): number[] => {
+    let i = 1;
+    while (i < r.length) {
+      const len = (r[i]! << 8) | r[i + 1]!;
+      if (len < 4) throw new Error(`bogus unit length ${len}`);
+      if (r[i + 3] === qcode) return Array.from(r.subarray(i + 4, i + len));
+      i += len;
+    }
+    throw new Error(`no unit 0x${qcode.toString(16)}`);
+  };
+  const u16 = (bytes: number[], at: number) => (bytes[at]! << 8) | bytes[at + 1]!;
+
+  it('reports the default THEN the alternate in Implicit Partition', () => {
+    // sf.c:919-922: implicit width, implicit height, then maxCOLS, maxROWS.
+    const b = body(reply(MODEL_5), Qcode.IMPLICIT_PARTITION);
+    expect([u16(b, 5), u16(b, 7)]).toEqual([80, 24]);    // WD HD
+    expect([u16(b, 9), u16(b, 11)]).toEqual([132, 27]);  // WA HA
+  });
+
+  it('reports the MAXIMUM in Usable Area, not the default', () => {
+    // sf.c:718-719 writes maxCOLS/maxROWS. Reporting the default here would tell
+    // a host the alternate size it is about to be offered does not fit.
+    const b = body(reply(MODEL_5), Qcode.USABLE_AREA);
+    expect([u16(b, 2), u16(b, 4)]).toEqual([132, 27]);
+  });
+
+  it('sizes BUFFSZ from the maximum too', () => {
+    const b = body(reply(MODEL_4), Qcode.USABLE_AREA);
+    // 43 * 80 = 3440. Its offset is found by searching rather than hardcoded, so
+    // this test does not silently move if the unit gains a field.
+    expect(b.some((_, i) => u16(b, i) === 3440)).toBe(true);
+  });
+
+  it('still says alternate == default when there is no alternate', () => {
+    // The compatibility case, and the one every caller predating this got.
+    const b = body(reply(), Qcode.IMPLICIT_PARTITION);
+    expect([u16(b, 9), u16(b, 11)]).toEqual([80, 24]);
+    expect([u16(body(reply(), Qcode.USABLE_AREA), 2)]).toEqual([80]);
+  });
+
+  it('rejects a zero alternate as firmly as a zero default', () => {
+    // p. 6-72: "Default and alternate values must be nonzero."
+    expect(() => buildQueryReply(DEFAULT_CAPABILITIES, {
+      rows: 24, cols: 80, alternate: { rows: 0, cols: 80 },
+    })).toThrow(/alternate\.rows/);
+  });
+});
+
+/**
+ * The whole chain, from host bytes to a resized buffer.
+ *
+ * The unit tests above drive `execute` directly, which proves the switch but not
+ * that a real record reaches it. This drives a Session through negotiation and
+ * feeds it the actual command bytes a host would send.
+ */
+describe('a host record resizes the screen end to end', () => {
+  class FakeConnection implements Connection {
+    sent: number[] = [];
+    onData: ((b: Uint8Array) => void) | undefined;
+    onClose: (() => void) | undefined;
+    onError: ((e: Error) => void) | undefined;
+    write(b: Uint8Array): void { this.sent.push(...b); }
+    close(): void { this.onClose?.(); }
+    host(...bytes: number[]): void { this.onData?.(Uint8Array.from(bytes)); }
+    negotiate(): void {
+      this.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+      this.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+      this.host(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+      this.host(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+      this.sent = [];
+    }
+  }
+
+  /** A model 3 session: default 24x80, alternate 32x80. */
+  async function model3Session() {
+    const conn = new FakeConnection();
+    const session = new Session({
+      connect: () => conn,
+      terminalType: 'IBM-3278-3',
+      alternateRows: MODEL_3.rows,
+      alternateCols: MODEL_3.cols,
+    });
+    await session.connect('h', 23);
+    conn.negotiate();
+    return { session, conn };
+  }
+
+  it('starts at 24x80 however big the alternate is', async () => {
+    const { session } = await model3Session();
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
+  });
+
+  it('EWA from the host switches to 32x80', async () => {
+    const { session, conn } = await model3Session();
+    // Erase/Write Alternate, WCC 0, end of record. This is the byte a host sends.
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([32, 80]);
+    expect(session.screen.size).toBe(2560);
+  });
+
+  it('EW brings it back to 24x80', async () => {
+    const { session, conn } = await model3Session();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    conn.host(Cmd.EW, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
+  });
+
+  it('accepts an address only the alternate size can hold', async () => {
+    const { session, conn } = await model3Session();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    // Row 30 exists at 32x80 and does not at 24x80. Writing there proves the
+    // buffer really grew rather than the geometry fields alone changing.
+    const addr = 29 * 80;
+    expect(() => session.screen.setChar(addr, 0xc1)).not.toThrow();
+    expect(session.screen.readBuffer()[addr]).toBe(0xc1);
+  });
+
+  it('leaves a model 2 at 24x80 even when the host sends EWA', async () => {
+    const conn = new FakeConnection();
+    const session = new Session({ connect: () => conn });
+    await session.connect('h', 23);
+    conn.negotiate();
+    conn.host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect([session.screen.rows, session.screen.cols]).toEqual([24, 80]);
+  });
+});
+
+describe('a host addressing past our buffer says WHY', () => {
+  // "SBA address 3279 beyond buffer end 1919" is true and useless. Measured live:
+  // VM/CE sends exactly that to a client claiming 3278-2 on a device DMKRIO defines
+  // as a 3278-4, and the session dies with a program check on the first SBA past
+  // row 24. The message has to name the fix.
+  function sbaBeyond(addr: number): string {
+    const screen = new Screen();                       // 24x80, 1920 cells
+    try {
+      // The parser has already decoded the address by this point, so the token
+      // carries it directly -- no 12-bit encoding to get wrong here.
+      execute(screen, { command: 'Write', wcc: 0, tokens: [{ kind: 'sba', address: addr }] });
+    } catch (e) {
+      return (e as Error).message;
+    }
+    throw new Error(`expected address ${addr} to be refused`);
+  }
+
+  it('names the model that would fit, and the flag that selects it', () => {
+    // 1937 is the first address VM/CE actually sent us past row 24.
+    const msg = sbaBeyond(1937);
+    expect(msg).toContain('beyond buffer end 1919');
+    expect(msg).toContain('24x80');
+    expect(msg).toContain('3278-3');      // smallest model holding 1937
+    expect(msg).toContain('-model');
+  });
+
+  it('picks the smallest model that holds the address', () => {
+    expect(sbaBeyond(3000)).toContain('3278-4');   // > 32x80, fits 43x80
+    expect(sbaBeyond(3500)).toContain('3278-5');   // > 43x80, fits 27x132
+  });
+
+  it('stays quiet when no architected model would hold it', () => {
+    // Past a model 5 is not a geometry mismatch, so guessing one would mislead.
+    const msg = sbaBeyond(4000);
+    expect(msg).toContain('beyond buffer end 1919');
+    expect(msg).not.toContain('-model');
+  });
+});

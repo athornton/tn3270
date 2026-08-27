@@ -390,5 +390,18 @@ export const ADDRESS_CODE_TABLE: readonly number[] = [
 
 /** Default screen geometry for an IBM-3278-2. */
 export const MODEL_2 = { rows: 24, cols: 80 } as const;
+/**
+ * Alternate screen sizes for models 3, 4 and 5, per x3270 `include/3270ds.h:446-453`.
+ *
+ * THESE ARE ALTERNATE SIZES ONLY. Every model's DEFAULT size is model 2's 24x80 --
+ * x3270 sets `ROWS = defROWS = MODEL_2_ROWS` unconditionally (`ctlr.c:341`) and
+ * only `altROWS = maxROWS` varies (`ctlr.c:345`), and `globals.h:196-198` labels
+ * the pair "default (EraseWrite)" and "alternate (EraseWriteAlternate)". So a
+ * model number does not change the screen you get on connect; it changes the
+ * screen the host may switch you to with Erase/Write Alternate.
+ */
+export const MODEL_3 = { rows: 32, cols: 80 } as const;
+export const MODEL_4 = { rows: 43, cols: 80 } as const;
+export const MODEL_5 = { rows: 27, cols: 132 } as const;
 
 export const TERMINAL_TYPE = 'IBM-3278-2';

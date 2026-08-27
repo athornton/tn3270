@@ -12,9 +12,9 @@ cannot tell it from the hardware.
 
 **Status: there is a working terminal client.** The protocol core, an
 s3270-compatible scripting CLI, extended data stream with Query Reply, 3279 colour,
-`IND$FILE` file transfer, TLS and a c3270-style TUI are all done and verified against two
-live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See *What is not
-implemented* below, which is the honest part of this file.
+`IND$FILE` file transfer, TLS, screen models 2–5 and a c3270-style TUI are all done and
+verified against two live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See
+*What is not implemented* below, which is the honest part of this file.
 
 ## What works today
 
@@ -63,7 +63,7 @@ work, but that is inference rather than a tested claim.
 npm install
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1006 tests, 36 files
+npm test           # 1040 tests, 37 files
 npm run typecheck
 ```
 
@@ -75,7 +75,8 @@ node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] \
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
-defaults to 23. `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
+defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*.
+`--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a colour terminal.
 
@@ -94,6 +95,44 @@ Colours are zti's, not core's: the shared palette in `packages/core` keeps satur
 primaries, and the TUI renders the gentler values zti uses because they read better in a
 terminal. Quantisation to 16 colours is an explicit table rather than nearest-RGB — with
 any realistic palette, blue and turquoise both fall nearest to cyan and would collide.
+
+## Screen models
+
+`-model 3278-N` and `-model 3278-N-E` accept N of 2, 3, 4 or 5.
+
+| Model | Alternate size |
+|---|---|
+| 2 | 24×80 |
+| 3 | 32×80 |
+| 4 | 43×80 |
+| 5 | 27×132 |
+
+**Pick the model your host's device is defined as.** The host does not adapt to us:
+VM/370 takes a display's geometry from its own DMKRIO configuration, so a device
+defined there as a 3278-4 is sent 43 rows whatever we advertise — and a model-2 client
+on that device ends up with a locked keyboard and no fields rather than a small screen.
+Verified live; see `docs/live-testing.md`.
+
+**The model does not change the screen you get on connect.** Every model's *default*
+size is 24×80; the model number sets the *alternate* size, and the host switches between
+them with Erase/Write and Erase/Write Alternate. So `-model 3278-4` starts at 24×80 and
+becomes 43×80 only if the host asks. This is x3270's model exactly — `ROWS = defROWS =
+MODEL_2_ROWS` unconditionally (`ctlr.c:341`), with only `altROWS = maxROWS` varying
+(`ctlr.c:345`) — and it is **not** TN3270E, which `ctlr.c:558-561` switches size without
+reference to.
+
+`-E` is an extended-data-stream claim, not a size: `3278-4` and `3278-4-E` have identical
+geometry.
+
+Observed live on VM/370: the host sends Erase/Write for its logo at 24×80, then
+Erase/Write Alternate to move to 43×80 — the architected sequence, both halves in one
+session.
+
+The TUI re-places and repaints when the host resizes the screen, and suspends with a
+message if your window can no longer hold it, exactly as it does for a terminal resize.
+A `--terminal-type` string is sent verbatim and does **not** set a geometry — we cannot
+know what an arbitrary string implies, so use `-model` if you want the buffer to match
+what you claim.
 
 ## Connecting over TLS
 
@@ -304,7 +343,10 @@ worse than one that says which quarter is missing.
 - **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no SNA
   response handling, no printer sessions. Measured, not assumed: neither VM/370 nor
   MVS 3.8j TSO negotiates the option in any run, which is why the client gets this far
-  without it.
+  without it. The one place its absence bites today is that **we cannot ask for a
+  particular device address** — under Hercules that means taking whichever display it
+  assigns, so selecting a geometry means configuring which displays are attachable at
+  all rather than choosing one at connect time.
 - **No GUI yet.** There is a terminal front end (`packages/tui`) and a scripting CLI,
   but no window. Electron is next.
 - **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
@@ -314,10 +356,11 @@ worse than one that says which quarter is missing.
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
   you find out if that changes.
-- **80×24 only.** `Screen` takes its geometry as a parameter, so this is a configuration
-  limit rather than a structural one, but alternate screen sizes are not offered and
-  mid-session resize of the *3270* screen is unimplemented. Measured: TSO does not need
-  more — ISPF reports `TERMINAL: 3277`, a device with no alternate size at all.
+- **No `IBM-DYNAMIC` and no oversize.** Models 2 through 5 work (see *Screen models*),
+  but `IBM-DYNAMIC` — "ask me my size via Query Reply" — and x3270's arbitrary
+  `-oversize` are not offered. Oversize is an emulator extension rather than 3270
+  architecture, and it is the only case that crosses 4096 cells into 14-bit addressing,
+  which `address.ts` already handles.
 - **No mouse support** in the TUI.
 
 The TUI has two limits worth knowing before you run it:
@@ -338,7 +381,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1006 tests, 36 files |
+| `npm test` | **pass** — 1040 tests, 37 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -346,6 +389,7 @@ visible there.
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
+| model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last

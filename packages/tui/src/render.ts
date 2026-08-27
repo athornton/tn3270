@@ -171,8 +171,14 @@ function sameLayout(a: Layout, b: Layout): boolean {
 const ESC = '\x1b[';
 
 export class TerminalRenderer {
-  private readonly rows: number;
-  private readonly cols: number;
+  /**
+   * The SCREEN geometry, not the terminal's. Mutable because Erase/Write
+   * Alternate changes it mid-session: these bound the cell loop and give every
+   * row its start column, so a stale pair would clip the new screen and address
+   * every row after the first to the wrong place.
+   */
+  private rows: number;
+  private cols: number;
   private readonly depth: Depth;
   private readonly hint: string | undefined;
   private place: Layout;
@@ -191,6 +197,21 @@ export class TerminalRenderer {
       rowOffset: 0, colOffset: 0, statusRow: opts.rows + 1,
       hintRow: undefined, border: NO_BORDER,
     };
+  }
+
+  /**
+   * Re-shape for a screen that changed size, e.g. Erase/Write Alternate.
+   *
+   * Clears as well as invalidating, for the same reason `setLayout` does: the old
+   * drawing is a different shape, so anything not overwritten by the new one is
+   * left behind as litter.
+   */
+  setScreenSize(rows: number, cols: number): void {
+    if (rows === this.rows && cols === this.cols) return;
+    this.rows = rows;
+    this.cols = cols;
+    this.needsClear = true;
+    this.invalidate();
   }
 
   /** Force the next paint to redraw everything, e.g. after a terminal resize. */

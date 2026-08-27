@@ -74,10 +74,21 @@ export interface RunnerOptions {
  * that forgot the parameter silently insecure. `-insecure` passes
  * `{ kind: 'plaintext' }` explicitly.
  */
-export function defaultSession(terminalType?: string, tls: TlsOptions = DEFAULT_TLS): Session {
+export function defaultSession(
+  terminalType?: string,
+  tls: TlsOptions = DEFAULT_TLS,
+  /**
+   * The model's ALTERNATE screen size, from `resolveAlternateSize`. Absent leaves
+   * the session a model 2, where the alternate size equals the default 24x80.
+   */
+  alternate?: { readonly rows: number; readonly cols: number },
+): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
     ...(terminalType ? { terminalType } : {}),
+    ...(alternate !== undefined
+      ? { alternateRows: alternate.rows, alternateCols: alternate.cols }
+      : {}),
   });
 }
 

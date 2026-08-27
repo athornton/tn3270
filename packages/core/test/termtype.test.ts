@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveTerminalType, KNOWN_MODELS, TerminalTypeError } from '../src/termtype.js';
+import {
+  resolveTerminalType, resolveAlternateSize, KNOWN_MODELS, TerminalTypeError,
+} from '../src/termtype.js';
 import { TERMINAL_TYPE } from '../src/constants.js';
 
 describe('terminal type resolution', () => {
@@ -48,10 +50,54 @@ describe('terminal type resolution', () => {
     expect(() => resolveTerminalType({ terminalType: '' })).toThrow(TerminalTypeError);
   });
 
-  it('lists only models we can honestly claim at 24x80', () => {
-    // Stage 2a pins the geometry, so a model implying another size is not
-    // offered. Adding one means implementing alternate geometry first.
-    expect(Object.keys(KNOWN_MODELS)).toEqual(['3278-2', '3278-2-E']);
+  it('offers models 2 through 5, each with its alternate size', () => {
+    // This test used to assert ONLY models 2 were listed, on the grounds that
+    // stage 2a pinned the geometry at 24x80 and a model implying another size
+    // could not be honestly claimed. Alternate-size support is what earned the
+    // rest: EW/EWA now switch the buffer, so the claim is now true.
+    expect(Object.keys(KNOWN_MODELS)).toEqual([
+      '3278-2', '3278-2-E', '3278-3', '3278-3-E',
+      '3278-4', '3278-4-E', '3278-5', '3278-5-E',
+    ]);
+  });
+
+  it('gives every model an alternate size, and only model 2 gets 24x80', () => {
+    expect(KNOWN_MODELS['3278-2']!.alternate).toEqual({ rows: 24, cols: 80 });
+    expect(KNOWN_MODELS['3278-3']!.alternate).toEqual({ rows: 32, cols: 80 });
+    expect(KNOWN_MODELS['3278-4']!.alternate).toEqual({ rows: 43, cols: 80 });
+    expect(KNOWN_MODELS['3278-5']!.alternate).toEqual({ rows: 27, cols: 132 });
+    // The -E variants differ only in the wire name, never in geometry: -E is an
+    // extended-data-stream claim, not a size. Conflating the two is the mistake
+    // termtype.ts's own header warns about.
+    for (const n of ['2', '3', '4', '5']) {
+      expect(KNOWN_MODELS[`3278-${n}-E`]!.alternate)
+        .toEqual(KNOWN_MODELS[`3278-${n}`]!.alternate);
+      expect(KNOWN_MODELS[`3278-${n}-E`]!.ttype).toBe(`IBM-3278-${n}-E`);
+    }
+  });
+
+  describe('resolveAlternateSize', () => {
+    it('returns the model geometry, and 24x80 for a model 2', () => {
+      expect(resolveAlternateSize({ model: '3278-4' })).toEqual({ rows: 43, cols: 80 });
+      expect(resolveAlternateSize({ model: 'ibm-3278-5-e' })).toEqual({ rows: 27, cols: 132 });
+      expect(resolveAlternateSize({ model: '3278-2' })).toEqual({ rows: 24, cols: 80 });
+    });
+
+    it('returns undefined with no model, leaving the session a model 2', () => {
+      expect(resolveAlternateSize({})).toBeUndefined();
+    });
+
+    it('returns undefined for a raw --terminal-type, deliberately', () => {
+      // We cannot know what geometry an arbitrary string implies, and guessing one
+      // from a substring would be worse than staying 24x80. Someone who sends
+      // IBM-3278-4 this way gets the size they claimed to the host but not a
+      // buffer to hold it -- which is why -model exists.
+      expect(resolveAlternateSize({ terminalType: 'IBM-3278-4' })).toBeUndefined();
+    });
+
+    it('rejects an unknown model, exactly as resolveTerminalType does', () => {
+      expect(() => resolveAlternateSize({ model: '3278-9' })).toThrow(TerminalTypeError);
+    });
   });
 
   // x3270 matches the IBM- prefix with strncasecmp and the -E suffix with

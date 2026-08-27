@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolveTerminalType, TerminalTypeError } from '@tn3270/core';
+import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import { Runner, defaultSession } from './runner.js';
 import { takeTlsFlag, resolveTls, type TlsFlags, type TlsOptions } from './tls.js';
 import { parseCommand } from './commands.js';
@@ -104,7 +104,9 @@ async function main(): Promise<void> {
   // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2
   // the telnet layer would have defaulted to on its own.
   const args = parseArgs(process.argv.slice(2));
-  const session = defaultSession(resolveTerminalType(args), args.tls);
+  const session = defaultSession(
+    resolveTerminalType(args), args.tls, resolveAlternateSize(args),
+  );
   const runner = new Runner(session, {
     files: nodeTransferFiles,
     tlsEnabled: args.tls?.kind !== 'plaintext',
