@@ -250,6 +250,65 @@ describe('TN3270E session data path', () => {
   });
 });
 
+describe('TN3270E state across connections', () => {
+  /**
+   * `this.e` is cleared only on the REJECT backoff path, so without a reset in
+   * connect() a SECOND connection to a host that never mentions option 40 still has
+   * `inTn3270e()` true. Both directions then corrupt: decodeHeader eats the first
+   * five bytes of every inbound record, and sendAID prepends a header the host reads
+   * as 3270 data.
+   *
+   * Reachable from the CLI as a matter of course — two `Connect()` actions in one
+   * script is its normal mode of operation, and the roadmap's per-host `N:` makes
+   * "TN3270E host then plain host" an ordinary sequence rather than a contrived one.
+   */
+  const reconnectToPlainHost = async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    // Guard the premise: if the first connection did not reach TN3270E there is no
+    // stale state to leak and the test proves nothing.
+    expect(session.is3270Mode()).toBe(true);
+
+    session.disconnect();
+    await session.connect('127.0.0.1', 3270);
+    conn.negotiateClassic();
+    return { session, conn };
+  };
+
+  it('strips no header from the next host that never offered TN3270E', async () => {
+    const { session, conn } = await reconnectToPlainHost();
+    conn.host(0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
+    expect(session.oia.toText()).not.toContain('PROG');
+  });
+
+  it('sends no header to the next host either', async () => {
+    // The worse half of the same bug: five bytes the plain host parses as 3270 data.
+    const { session, conn } = await reconnectToPlainHost();
+    conn.host(...WRITE_FIELD, T.IAC, T.EOR);
+    conn.clear();
+    session.sendAID(AID.ENTER);
+    expect(conn.writes.at(-1)![0]).toBe(0x7d);            // the AID, not a header
+  });
+
+  it('clears it on a connect that REPLACES a live connection', async () => {
+    // The path with no explicit Disconnect: connect() tears the old one down itself
+    // (session.ts, "Tear down any live connection first"). This is what makes one
+    // reset site sufficient — both routes reach handleClose — so it is pinned rather
+    // than assumed. `Connect()` twice with no `Disconnect()` between is legal s3270.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    expect(session.is3270Mode()).toBe(true);
+
+    await session.connect('127.0.0.1', 3270);   // no disconnect() call
+    conn.negotiateClassic();
+    conn.host(0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
+  });
+});
+
 describe('TN3270E RESPONSES', () => {
   /** Erase/Write with a header carrying the given response flag and sequence. */
   const write = (flag: number, seq: number): number[] => [

@@ -187,6 +187,21 @@ export class Session {
     this.oia.connected = false;
     this.oia.tn3270Mode = false;
     this.oia.waitingForHost = false;
+    // TN3270E state DIES WITH THE CONNECTION THAT NEGOTIATED IT. Until this line, `e`
+    // was cleared only by the REJECT backoff below, so a second connection to a host
+    // that never mentions option 40 inherited `phase: 'negotiated'` — and then
+    // corrupted traffic in both directions: decodeHeader ate the first five bytes of
+    // every inbound record, and sendRecord prepended a header the plain host parses as
+    // 3270 data. The CLI reaches this with two `Connect()` actions in one script,
+    // which is its ordinary mode of operation.
+    //
+    // Here rather than in connect(), because this is the ONE place a connection ends:
+    // connect() tears down a live predecessor through disconnect(), so both routes
+    // pass through here. `eSeq` too — it is only reset on a completed negotiation
+    // (below), so a second session that never negotiates would keep counting from the
+    // first one's total.
+    this.e = undefined;
+    this.eSeq = 0;
     this.emit('disconnect');
   }
 
