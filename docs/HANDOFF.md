@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-08-24
+# Handoff — state as of 2026-08-28
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -6,9 +6,47 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch **`tui-and-colour`** (not yet merged; `main` holds stages 1 and 2a),
-**909 tests passing in 34 files**, `npm run typecheck` clean, `npm run build`
-works, working tree clean.
+Branch **`main`**, **1202 tests passing in 41 files**, `npm run typecheck` clean,
+`npm run build` works, working tree clean.
+
+**STAGE 2b (TN3270E) IS COMPLETE, AND ITS VERIFICATION IS QUALIFIED.** All 15 plan
+tasks are done. The option, DEVICE-TYPE/FUNCTIONS, the 5-byte header, SNA responses,
+SYSREQ, LU selection and the `N:` prefix all work end to end — **against real s3270
+4.5ga6 and `packages/cli/scripts/e-server.py`, NOT against a live host.** Neither
+Hercules system offers option 40; measured on both, accepting and refusing. Do not
+quote this result without that qualifier. When a real z/VM or z/OS appears, run the
+probe in `docs/live-testing.md`, *TN3270E against a real host* — four questions, the
+largest being whether a host sends `FUNCTIONS REQUEST` first, a branch no server has
+ever exercised.
+
+`packages/cli/scripts/drive-e.py` is the committed driver: seven configurations,
+asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST` is
+byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
+an ABSENCE so that starting to ask for it would fail.
+
+**Next is roadmap item 2, the Electron GUI** — which, unlike 2b, IS verifiable on this
+box: the userspace Xvfb/Electron stack at `~/micromamba/envs/gui` is proven.
+
+**Three defects fixed on the way, each worth knowing:**
+
+- **TN3270E state outlived its connection.** `Session.e` was cleared only by the REJECT
+  backoff path, so a second `Connect()` to a plain host still had `phase: 'negotiated'`
+  and corrupted traffic both ways — inbound headers stripped from records that had
+  none, outbound headers prepended for a host with no parser for them.
+- **`N:` and the LU list were parsed and never applied.** `hostspec.ts` was fully
+  tested while `splitTarget` was still what ran. `resolveHostSpec` now owns prefix
+  meaning for BOTH front ends; `splitTarget` is deleted rather than left beside it.
+- **The prefix letter class was `[A-Za-z]`.** s3270's set is exactly
+  `AaCcLlNnPpSsBbYyTt` (`split_host.c:38`), so `Z:host` silently became prefix `Z` plus
+  host `host`. Prefixes we do not implement are now refused by name.
+
+**And one lesson that generalises, from the harness rather than the client:** two of the
+three failures in the first `drive-e.py` run were the HARNESS's, and both presented as
+client bugs — `e-server.py` scored a correct `WONT` refusal as `FAIL`, and the driver's
+own readiness probe was accepted as the client (the server serves exactly one
+connection), so the real client got `ECONNREFUSED` while the log claimed success. When a
+new harness reports that the client is broken, suspect the harness first until it has
+been shown to satisfy a known-good client.
 
 **THERE IS NOW A WORKING TERMINAL CLIENT.** `packages/tui` is a c3270-style front
 end: `node packages/tui/dist/main.js [-model M] [--colors N] host[:port]`. Colour
@@ -90,7 +128,10 @@ with a real signal in `pty-smoke.py`.
 still parsed and dropped, and `Cell` is already a tagged variant so the renderer
 can dispatch on `kind` when PS lands); MF orders (parsed, counted as
 `modifyFieldIgnored`, never applied — TK5's ISPF sends zero of them); mouse
-support; the Electron GUI (stage 3); the web front end; and TN3270E (stage 2b).
+support; the Electron GUI (stage 3); and the web front end. **TN3270E (stage 2b) is
+now done** — see *Where things stand*. Within it, BIND/UNBIND stays undone (we decline
+BIND-IMAGE by design) and the **printer session now has its harness but nothing has
+driven it**.
 
 ## Roadmap, from the user 2026-08-25
 

@@ -331,14 +331,47 @@ scaffolding built only for this stage.
 Record the answers against this spec rather than in a session note, and treat a stated
 scope here as open: see the roadmap discipline in `docs/HANDOFF.md`.
 
-## Success criteria
+## Success criteria — settled 2026-08-28
 
-- Full negotiation against `e-server.mjs`, reaching 3270 submode and round-tripping an
-  Erase/Write and an Enter.
-- Our `DEVICE-TYPE REQUEST` bytes byte-identical to s3270's captured bytes; our
-  `FUNCTIONS REQUEST` identical except for the deliberately omitted BIND-IMAGE.
-- `-tn3270e off` produces a session byte-identical to today's against both Hercules hosts,
-  proving the stage is a strict addition.
-- A host that refuses option 40 still reaches a working session — the backoff path, tested
-  by a harness that rejects.
-- `npm test`, `npm run typecheck`, `npm run build` clean, and `pty-smoke.py` still 12/12.
+The harness ended up as `e-server.py`, not `e-server.mjs`: it needed raw socket and
+telnet handling that Python's stdlib gives directly, and the other host-free harnesses in
+this repo are Python already.
+
+| criterion | outcome |
+|---|---|
+| Full negotiation, reaching 3270 submode and round-tripping an Erase/Write and an Enter | **met** — `drive-e.py` case 1; inbound `00000000007d40c31140c1c8c9` |
+| `DEVICE-TYPE REQUEST` byte-identical to s3270's capture | **met** — `020749424d2d333237382d322d45`, both |
+| `FUNCTIONS REQUEST` identical except the omitted BIND-IMAGE | **met** — ours `0307020405`, s3270's `030700020405`; pinned as a subtraction |
+| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first |
+| `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
+| `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
+| `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **NOT verified live.** Neither host was running on 2026-08-28 (they are IPLed by hand) |
+
+That last row is the honest gap, and it is narrower than it looks. Strict addition is
+covered host-free by the unit guard "sends NO header when TN3270E was never negotiated"
+and by `pty-smoke.py` passing 12/12 against a plain TN3270 server **with TN3270E on by
+default** — so a non-TN3270E server plus our default configuration is known to work. What
+is missing is the byte-for-byte comparison against VM/370 and MVS 3.8j specifically. Do
+it the next time both are up; it needs no logon.
+
+## What the implementation changed about this design
+
+Recorded here rather than in a session note, per the discipline this spec already states.
+
+- **TN3270E settings are per CONNECTION, not per session.** `Session.connect()` takes an
+  optional `ConnectOptions` carrying `tn3270e` and `lus`. The design assumed constructor
+  options were enough; they are not, because `N:` and `LU@` are properties of a *host*
+  and the CLI's `Connect()` can name a different one every time.
+- **The CLI has no host argument**, so the whole `[prefix:][LU,LU@]host[:port]` shape is
+  applied in `runner.ts` at `Connect()`. `resolveHostSpec` owns prefix meaning for both
+  front ends; the older `splitTarget` was deleted rather than left beside it.
+- **`N:` is honoured where `L:` is refused**, and the asymmetry is principled: TLS is
+  fixed when the socket is made, so honouring `L:` on an `-insecure` session would be a
+  silent downgrade, while TN3270E is negotiated per connection, so the more specific
+  per-host instruction can simply win.
+- **An LU list must be quoted in the CLI.** `Connect("LUA,LUB@host")`. Measured against
+  real s3270: the unquoted form is two arguments and s3270 answers `Connect() requires 1
+  argument`, which we now match exactly.
+- **Prefixes we do not implement are refused, not ignored** — `A:`, `C:`, `P:`, `S:`,
+  `T:`, `Y:` — since each changes what s3270 puts on the wire. `B:` is accepted and
+  ignored because it is a no-op in s3270 itself.

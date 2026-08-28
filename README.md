@@ -44,6 +44,11 @@ colour-capable 3279.
 **`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
 binary round-tripping byte-identically each way.
 
+**TN3270E negotiates end to end** — device type, functions, the 5-byte header, SNA
+responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3270E
+server, **not against a live host**, because neither Hercules system offers the option.
+See *TN3270E* and *Verification*.
+
 Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
 the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
 
@@ -167,8 +172,8 @@ node packages/cli/scripts/tls-proxy.mjs --to 127.0.0.1:3271 --listen 19271 \
 node packages/tui/dist/main.js -model 3278-2-E -cafile /tmp/certs/cert.pem 127.0.0.1:19271
 ```
 
-**A plaintext host does not refuse TLS — it goes quiet.** Hercules sends `IAC DO TN3270E`
-and waits, which OpenSSL reads as the start of a record and then blocks for a length that
+**A plaintext host does not refuse TLS — it goes quiet.** Hercules sends
+`IAC DO TERMINAL-TYPE` (`ff fd 18`) and waits, which OpenSSL reads as the start of a record and then blocks for a length that
 never comes. So there is a 10-second handshake deadline, and every TLS failure names the
 flag that would fix it:
 
@@ -178,6 +183,51 @@ does not speak TLS — a Hercules or other vintage system — use -insecure.
 ```
 
 Design and measurements: `docs/superpowers/specs/2026-08-25-tls-support-design.md`.
+
+## TN3270E
+
+**TN3270E is on by default**, and backs off by itself: a host that refuses the option,
+or rejects our device type, leaves the session running as traditional TN3270 rather
+than failing. That is what makes on-by-default safe, and it is measured rather than
+assumed — see *Verification*.
+
+| Flag or prefix | Effect |
+|---|---|
+| *(none)* | offer TN3270E; fall back to base TN3270 if the host declines |
+| `-tn3270e off` | never offer it; answer `IAC WONT TN3270E` |
+| `-tn3270e on` | the default, stated explicitly |
+| `N:host` | no TN3270E **for that host**, s3270's spelling |
+| `LU@host` | request a specific LU by name |
+| `LUA,LUB@host` | request each in turn as rejections come back |
+
+The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
+must be **quoted** — `Connect("LUA,LUB@host")` — because the LU separator and the
+action-argument separator are both commas; unquoted, s3270 itself answers `Connect()
+requires 1 argument`, and so do we. Prefixes that would change what goes on the wire
+but are not implemented (`A:`, `C:`, `P:`, `S:`, `T:`, `Y:`) are **refused by name**
+rather than ignored, each pointing at the flag to use instead where there is one.
+
+`N:` and an LU list belong to a *connection*, not to the process, so a CLI script may
+connect to a plain host and then to a TN3270E one and be right about both.
+
+**We ask for RESPONSES, SYSREQ and CONTENTION-RESOLUTION — and deliberately not
+BIND-IMAGE.** Grant BIND-IMAGE and send no BIND, and real s3270 never enters 3270 mode
+at all: the Erase/Write is delivered and silently ignored (x3270's `telnet.c:2339`).
+Granting it *with* a BIND works, and denying it works; only advertise-then-stay-silent
+hangs. Not asking is what makes that state unreachable. CONTENTION-RESOLUTION (`0x05`)
+is not in RFC 2355 at all — x3270 requests it anyway, and so do we.
+
+Two things worth knowing:
+
+- **BINARY and EOR are implied by TN3270E, not negotiated** (RFC 2355 §4, confirmed on
+  the wire). A client that requires them to be agreed the classic way would negotiate
+  TN3270E perfectly and then discard every record.
+- **The 5-byte header is data**, so a `0xff` in its SEQ-NUMBER must be IAC-doubled
+  (§8.1.4). With RESPONSES agreed the counter advances, so that byte arrives after 255
+  records — reachable in a long session, not theoretical.
+
+Design and every measurement:
+`docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`.
 
 ## Using the CLI
 
@@ -279,12 +329,16 @@ Done:
    `-accepthostname` and negotiated `START_TLS` are **not** done — see *What is not
    implemented*.
 
+6. **TN3270E proper** — the telnet option (40), DEVICE-TYPE/FUNCTIONS subnegotiation,
+   the data header, SNA responses, SYSREQ and device-name (LU) selection. Separated from
+   item 2 deliberately: measurement shows TSO needs neither the option nor any of this,
+   so bundling them would have delayed a working TSO session for no benefit. **Done
+   except BIND/UNBIND, and it is the first stage with no live-host verification path** —
+   neither Hercules system offers the option, so it is checked against real s3270 and an
+   in-repo server instead. See *TN3270E*.
+
 Remaining, in the order the author wants it:
 
-6. **TN3270E proper** — the telnet option (40): DEVICE-TYPE/FUNCTIONS subnegotiation,
-   the data header, BIND/UNBIND, SNA responses, device-name (LU) selection. Separated
-   from item 2 deliberately: measurement shows TSO needs neither the option nor any of
-   this, so bundling them would have delayed a working TSO session for no benefit.
 7. **Electron GUI**, then **a webserver serving the same front end**.
 8. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
@@ -346,13 +400,13 @@ worse than one that says which quarter is missing.
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
   unimplemented.
-- **No TN3270E.** Base TN3270 only: no device-name negotiation, no BIND/UNBIND, no SNA
-  response handling, no printer sessions. Measured, not assumed: neither VM/370 nor
-  MVS 3.8j TSO negotiates the option in any run, which is why the client gets this far
-  without it. The one place its absence bites today is that **we cannot ask for a
-  particular device address** — under Hercules that means taking whichever display it
-  assigns, so selecting a geometry means configuring which displays are attachable at
-  all rather than choosing one at connect time.
+- **TN3270E is implemented but NOT verified against a live host.** The option, the
+  DEVICE-TYPE/FUNCTIONS subnegotiation, the 5-byte header, SNA responses, SYSREQ and LU
+  names all work (see *TN3270E*) — against real s3270 and an in-repo TN3270E server,
+  because **neither Hercules system offers the option at all**. Measured on both,
+  accepting and refusing: each opens `IAC DO TERMINAL-TYPE` and never mentions option
+  40. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
+  design) and **printer sessions**, whose harness now exists.
 - **No GUI yet.** There is a terminal front end (`packages/tui`) and a scripting CLI,
   but no window. Electron is next.
 - **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
@@ -387,7 +441,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1042 tests, 38 files |
+| `npm test` | **pass** — 1202 tests, 41 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -396,6 +450,7 @@ visible there.
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
+| TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last

@@ -1186,11 +1186,44 @@ error, for the reason the TLS section records. That argv is pinned by
 passes it, each mutation-checked — so this harness cannot rot the way `pty-smoke.py`
 and `live-drive.py` silently did when TLS went on by default.
 
-### Still outstanding: a real host
+## TN3270E against a real host — NOT YET DONE
 
-This is verification against **x3270, not against a host**, and it is a weaker claim.
-The four questions only a real z/VM or z/OS can answer are listed under Task 15 of
-`docs/superpowers/plans/2026-08-27-stage2b-tn3270e.md`: whether a host initiates
-`FUNCTIONS REQUEST`, whether one ever sends `ALWAYS-RESPONSE` unprompted, whether one
-sends a BIND we did not ask for, and whether `-tn3270e off` still reaches a usable
-session. Record the answers against the spec.
+This is verification against **x3270 and a harness, not against a host**, and it is a
+weaker claim. Say so wherever the result is quoted: neither Hercules system on this box
+speaks option 40, measured on both, accepting and refusing.
+
+When real z/VM or z/OS access arrives, run this first — it needs no logon, so it cannot
+hand the VM reconnect trap to the next run:
+
+```bash
+npm run build
+printf 'Connect(HOST:PORT)\nWait(3270Mode,20)\nWait(Settle,10)\nTrace(on)\nScreenText\nTraceText\nQuit\n' \
+  | node packages/cli/dist/main.js -model 3278-2-E > /tmp/e-live.log 2>&1
+grep -iE 'TN3270E|DEVICE.TYPE|FUNCTIONS|BIND' /tmp/e-live.log
+```
+
+Four questions only a real host can answer. **Record the answers against the spec**
+(`docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`), not in a session note —
+an end-of-session aside is not a decision recorded against the design.
+
+1. **Does the host send `FUNCTIONS REQUEST` itself rather than waiting for ours?**
+   Transition 5 of the state machine is implemented from x3270's source and no server
+   has ever exercised it. `e-server.py` always waits for the client, so this is the
+   single largest untested branch in `tn3270e.ts`.
+2. **Does it ever send `ALWAYS-RESPONSE`?** Until one does, the positive-response path is
+   exercised only by us asking the harness to send it — the same honest position
+   retransmit is in. If a host does, check the SEQ it expects copied back.
+3. **Does it send a BIND we are declining to ask for, and does it assign an LU we did
+   not request?** We deny BIND-IMAGE deliberately, so a conforming host should send no
+   BIND; one that does anyway is worth knowing about, and the record is traced and
+   dropped rather than handed to the 3270 executor.
+4. **Does `-tn3270e off` still reach a usable session there?** The backoff path is what
+   makes on-by-default safe, and it has only ever been exercised against our own
+   harness.
+
+Two further things to measure while connected, since the opportunity is rare:
+
+- **A device address by LU name.** `Connect("LUNAME@HOST:PORT")` is the one thing that
+  cannot be tested here at all — `e-server.py` accepts any name. Under Hercules we can
+  only take whichever display is free.
+- **Whether a printer session works.** Its harness now exists; nothing has driven it.
