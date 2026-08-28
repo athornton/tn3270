@@ -589,3 +589,65 @@ describe('TN3270E negotiation — REJECT, LU fallback and backoff', () => {
     expect(r.next.phase).toBe('backedOff');
   });
 });
+
+/**
+ * Conformance with the recorded s3270 negotiation.
+ *
+ * These are not assertions about our own design; they are a comparison against bytes a
+ * known-good client actually put on the wire, captured 2026-08-27 from s3270 4.5ga6
+ * against `packages/cli/scripts/e-server.py`. The full transcripts are in
+ * docs/live-testing.md, *TN3270E harness validation*.
+ */
+describe('conformance with the recorded s3270 negotiation', () => {
+  it('our DEVICE-TYPE REQUEST is byte-identical to s3270 s', () => {
+    // `02 07` then the terminal type in ASCII. The operand order is the load-bearing
+    // part: `02 08` made s3270 itself log `DEVICE-TYPE ??8` and stall, so a comparison
+    // that only checked the type string would miss the mistake most easily made here.
+    const s3270Bytes = [
+      0x02, 0x07, 0x49, 0x42, 0x4d, 0x2d, 0x33, 0x32, 0x37, 0x38,
+      0x2d, 0x32, 0x2d, 0x45,
+    ];
+    const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
+    const r = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
+    expect([...r.reply!]).toEqual(s3270Bytes);
+  });
+
+  it('our FUNCTIONS REQUEST differs from s3270 s ONLY by BIND-IMAGE', () => {
+    // s3270 sent 03 07 00 02 04 05; we send 03 07 02 04 05 -- the same list with
+    // BIND-IMAGE (0x00) removed. Expressed as a SUBTRACTION from s3270's list rather
+    // than as our own three bytes, because that is what would catch an accidental
+    // divergence in the other three. Not asking for BIND-IMAGE is deliberate: granted
+    // it with no BIND following, s3270 never enters 3270 mode at all (measurement C in
+    // docs/live-testing.md, x3270's telnet.c:2339), and not asking is what makes that
+    // state unreachable.
+    const s3270Funcs = [0x00, 0x02, 0x04, 0x05];
+    expect([...REQUESTED_FUNCTIONS]).toEqual(
+      s3270Funcs.filter((f) => f !== Tn3270eFunc.BIND_IMAGE));
+  });
+
+  it('asks for CONTENTION-RESOLUTION even though RFC 2355 does not list it', () => {
+    // 0x05 is absent from RFC 2355; x3270 asks for it anyway and the recorded capture
+    // shows it. Pinned separately so that "the RFC does not mention this" can never be
+    // read as a reason to drop it -- the wire, not the document, is the authority here.
+    expect(REQUESTED_FUNCTIONS).toContain(Tn3270eFunc.CONTENTION_RESOLUTION);
+    expect(Tn3270eFunc.CONTENTION_RESOLUTION).toBe(0x05);
+  });
+
+  it('has the CONSTANT VALUES s3270 s positive response was built from', () => {
+    // Measured in harness config F: 02 00 00 00 00 00 -- RESPONSE, REQUEST-FLAG 0,
+    // POSITIVE-RESPONSE, the SEQ copied from the message answered, then one data byte
+    // 0x00 meaning successful completion. The RFC alone does not give the trailing
+    // byte, which is why this is a capture and not a derivation from §10.4.1.
+    //
+    // WHAT THIS DOES AND DOES NOT PIN, stated because the difference matters: it pins
+    // the four constant values against the capture, so renaming or renumbering one is
+    // caught here. It does NOT show that the session emits them in that order -- there
+    // is no code under test in this assertion. That is
+    // tn3270e-session.test.ts, "answers ALWAYS-RESPONSE positively, carrying the SAME
+    // sequence back", which drives a real Session and compares the record it writes.
+    expect([
+      Tn3270eDataType.RESPONSE, 0x00, Tn3270eResponseFlag.POSITIVE_RESPONSE,
+      0x00, 0x00, Tn3270eSense.DEVICE_END,
+    ]).toEqual([0x02, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  });
+});
