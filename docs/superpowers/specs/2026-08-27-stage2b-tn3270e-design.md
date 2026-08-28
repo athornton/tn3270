@@ -345,17 +345,18 @@ this repo are Python already.
 | A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
-| `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **HALF met, verified later on 2026-08-28.** VM/370 came up: `-tn3270e off`, `N:` and an LU list each produced a byte-identical stream to the default (140 sent, 1806 received). MVS 3.8j was still not running, so one host of two |
+| `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **MET, 2026-08-28, both hosts.** VM/370: `-tn3270e off`, `N:` and an LU list each byte-identical in both directions (140 sent, 1806 received). MVS 3.8j TK5: all four runs identical in what we SENT (33 bytes); received differs by one byte, decoded and shown to be a digit of the clock on TK5's logon panel |
 
 That last row is now the only gap and it is down to one host. **VM/370 is done**:
 measurements in `docs/live-testing.md`, *Stage 2b strict addition, live against VM/370* —
 and it also proved something no unit test could, that an LU list does not leak a `CONNECT`
 onto a plain session. Strict addition is additionally covered host-free by the unit guard
 "sends NO header when TN3270E was never negotiated" and by `pty-smoke.py` passing 12/12
-against a plain TN3270 server with TN3270E on by default. **What remains is MVS 3.8j TK5
-on 3271**, which was not running. It needs no logon: connect, trace, compare the
-concatenated stream per direction — not the trace lines, which vary with TCP read
-boundaries and produced a false difference the first time.
+against a plain TN3270 server with TN3270E on by default. **MVS 3.8j TK5 is now done too**, and there
+the only received-byte difference decoded to a digit of the clock on TK5's logon panel — so
+compare the concatenated stream per direction, not the trace lines (which vary with TCP read
+boundaries), and **decode any difference before believing it**. Both traps produced a false
+negative on the first attempt.
 
 ## What the implementation changed about this design
 

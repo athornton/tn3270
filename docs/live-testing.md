@@ -1219,8 +1219,42 @@ direction, not the trace lines** — trace lines record how TCP happened to deli
 bytes that time, which is not a property of our client at all. See
 `docs/HANDOFF.md` on checking what a comparison actually covers.
 
-**Still outstanding:** the same comparison against **MVS 3.8j TK5** on `3271`, which was
-not running. One host of two, and the table above should not be read as more.
+### MVS 3.8j TK5 too — both hosts done, 2026-08-28
+
+MVS came up the same afternoon. Same four runs on `localhost:3271`, `-model 3278-2-E`, no
+logon:
+
+| run | bytes sent | bytes received | vs the default session |
+|---|---|---|---|
+| default (TN3270E **on**) | 33 | 2901 | baseline |
+| `-tn3270e off` | 33 | 2901 | **identical, both directions** |
+| `Connect(N:127.0.0.1:3271)` | 33 | 2901 | sent identical; received differs by **one byte** |
+| `Connect("MYLU01,BACKUPLU@…")` | 33 | 2901 | sent identical; received differs by **one byte** |
+
+**Everything WE sent was byte-identical in all four runs — 33 bytes.** That is the claim the
+criterion is about, and it holds.
+
+**The one differing received byte is the host's own clock**, and it is worth recording how
+that was established rather than assumed. Decoding the difference from EBCDIC gives:
+
+```
+baseline: ...Time  22:28:24 ...
+this run: ...Time  22:28:25 ...
+```
+
+A single digit of the seconds on TK5's VTAM logon panel, at offset 1664 of 2901. Nothing to
+do with our client. **A red/green diff verdict would have reported "DIFFERS" and left a
+false doubt over the whole result** — the difference had to be decoded to be understood, and
+the same instinct applies to any future comparison against a host that paints a clock.
+
+Note MVS sends far less than VM before settling (33 bytes out versus VM's 140) because it
+negotiates only TERMINAL-TYPE, BINARY and EOR and asks nothing else. **Neither host ever
+sent `ff fd 28` or `ff fb 28`** in any of these eight runs, which is the measurement that
+makes stage 2b unverifiable here in the first place.
+
+**So the criterion is MET on both hosts**, with the clock caveat stated. The remaining
+TN3270E gap is unchanged and is about the negotiation itself, not about strict addition:
+see *TN3270E against a real host*.
 
 ## Electron headless re-verification — 2026-08-28
 
