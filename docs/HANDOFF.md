@@ -24,8 +24,36 @@ asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST`
 byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
 an ABSENCE so that starting to ask for it would fail.
 
-**Next is roadmap item 2, the Electron GUI** — which, unlike 2b, IS verifiable on this
-box: the userspace Xvfb/Electron stack at `~/micromamba/envs/gui` is proven.
+**Next is roadmap item 2, the Electron GUI — AND IT IS ALREADY DESIGNED, PLANNED, AND ITS
+RISKIEST ASSUMPTION IS ALREADY PROVEN. Start here, in this order:**
+
+1. Read `docs/superpowers/specs/2026-08-28-electron-gui-and-shared-frontend-design.md`.
+2. Execute `docs/superpowers/plans/2026-08-28-shared-frontend-extraction.md` — **8 tasks,
+   do this FIRST.** It creates `packages/frontend` and moves the shared front-end rules
+   (host argument, TLS flags, `defaultSession`, keymap, action dispatch) out of `cli` and
+   `tui`. Mostly a refactor, so the plan's own header explains why that inverts TDD: the
+   evidence is the existing **1202 tests passing with assertions unchanged**.
+3. Then `docs/superpowers/plans/2026-08-28-electron-gui.md` — 11 tasks. **Task 1 is already
+   DONE and passed**; the plan says so inline.
+
+**THE ELECTRON GATE PASSED, 2026-08-28, on Electron 44.0.0** (not the 43 verified back in
+August's design, and there was no Electron installed on this box any more — it had to be
+re-established). Canvas renders under Xvfb and `capturePage()` returns real pixels. **Three
+results that are NOT optional and will waste an afternoon if forgotten:**
+
+- **`--no-sandbox` AND `--disable-gpu` are both required.** There is no GL at all on this
+  box (`GLX is not present`).
+- **`show: false` HANGS without `--disable-gpu`** — a stall, not an error, the same shape as
+  the TLS trap.
+- **`capturePage()` returns the CONTENT area**, so a `BrowserWindow` needs
+  **`useContentSize: true`** or every screenshot golden silently depends on window chrome
+  height and will not reproduce on a Mac.
+
+Start Xvfb with `nohup` and then **check for `/tmp/.X11-unix/X99`**: backgrounding it inside
+a command that exits kills it, and the symptom is `Missing X server or $DISPLAY` *with*
+`DISPLAY` set. Full write-up in `docs/live-testing.md`, *Electron headless
+re-verification*. Note the GUI work needs `npm install electron` (~227 MB); the spike's
+copy was deliberately thrown away.
 
 **Three defects fixed on the way, each worth knowing:**
 
@@ -365,7 +393,8 @@ a symptom.
 
 - **No compiler, no X, no root on this box.** A userspace GUI toolchain was built
   with a static micromamba into `~/micromamba/envs/gui` (Chromium/Electron libs,
-  gtk3, libcups, fontconfig + fonts, Xvfb). Real Electron 43 renders and
+  gtk3, libcups, fontconfig + fonts, Xvfb). **Re-verified 2026-08-28 on Electron 44.0.0
+  with `--no-sandbox --disable-gpu`** — see *Where things stand*. Real Electron renders and
   screenshots under Xvfb. Invocation is in the spec's *Development Environment*.
 - **s3270 4.5ga6** at
   `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270`. Use
