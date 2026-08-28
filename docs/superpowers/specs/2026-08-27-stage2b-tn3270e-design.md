@@ -345,14 +345,17 @@ this repo are Python already.
 | A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
-| `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **NOT verified live.** Neither host was running on 2026-08-28 (they are IPLed by hand) |
+| `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **HALF met, verified later on 2026-08-28.** VM/370 came up: `-tn3270e off`, `N:` and an LU list each produced a byte-identical stream to the default (140 sent, 1806 received). MVS 3.8j was still not running, so one host of two |
 
-That last row is the honest gap, and it is narrower than it looks. Strict addition is
-covered host-free by the unit guard "sends NO header when TN3270E was never negotiated"
-and by `pty-smoke.py` passing 12/12 against a plain TN3270 server **with TN3270E on by
-default** — so a non-TN3270E server plus our default configuration is known to work. What
-is missing is the byte-for-byte comparison against VM/370 and MVS 3.8j specifically. Do
-it the next time both are up; it needs no logon.
+That last row is now the only gap and it is down to one host. **VM/370 is done**:
+measurements in `docs/live-testing.md`, *Stage 2b strict addition, live against VM/370* —
+and it also proved something no unit test could, that an LU list does not leak a `CONNECT`
+onto a plain session. Strict addition is additionally covered host-free by the unit guard
+"sends NO header when TN3270E was never negotiated" and by `pty-smoke.py` passing 12/12
+against a plain TN3270 server with TN3270E on by default. **What remains is MVS 3.8j TK5
+on 3271**, which was not running. It needs no logon: connect, trace, compare the
+concatenated stream per direction — not the trace lines, which vary with TCP read
+boundaries and produced a false difference the first time.
 
 ## What the implementation changed about this design
 

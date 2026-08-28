@@ -1186,6 +1186,42 @@ error, for the reason the TLS section records. That argv is pinned by
 passes it, each mutation-checked — so this harness cannot rot the way `pty-smoke.py`
 and `live-drive.py` silently did when TLS went on by default.
 
+## Stage 2b strict addition, live against VM/370 — verified 2026-08-28
+
+**Closes the one success criterion stage 2b had to leave open.** VM/CE 1.2 on
+`localhost:3270`, `-model 3278-4-E`, four runs, **no logon in any of them** — the
+negotiation is all this needs, and not logging on means the VM reconnect trap is never
+armed for the next run.
+
+| run | bytes sent | bytes received | vs the default session |
+|---|---|---|---|
+| default (TN3270E **on**) | 140 | 1806 | baseline |
+| `-tn3270e off` | 140 | 1806 | **identical** |
+| `Connect(N:127.0.0.1:3270)` | 140 | 1806 | **identical** |
+| `Connect("MYLU01,BACKUPLU@127.0.0.1:3270")` | 140 | 1806 | **identical** |
+
+So stage 2b **is** a strict addition on this host: with TN3270E on by default, a host that
+never offers option 40 gets exactly the bytes it got before the stage existed. No
+`ff fa 28` subnegotiation appears in any run, and **the LU names never reach the wire** —
+correct, because `CONNECT` is only ever sent inside a TN3270E negotiation that never
+happens here. That last one matters: an LU list leaking into a plain session would be a
+protocol violation invisible to every unit test.
+
+Confirmed again, since it is the reason 2b has no live path: **VM opens `ff fd 18`** — DO
+TERMINAL-TYPE, option 24 — then BINARY (`00`) and EOR (`19`), and never mentions option 40.
+
+**METHODOLOGICAL TRAP, and it nearly produced a false failure.** A line-by-line diff of
+two traces reported differences in the `N:` and LU runs. They were **read boundaries, not
+bytes**: the default run received `ff fb 00` and `ff fd 00 ff fb 19 ff fd 19` as two
+separate reads, while the others got them coalesced into one, so the traces had 134 lines
+against 135. Nothing about the protocol differed. **Compare the CONCATENATED stream per
+direction, not the trace lines** — trace lines record how TCP happened to deliver the
+bytes that time, which is not a property of our client at all. See
+`docs/HANDOFF.md` on checking what a comparison actually covers.
+
+**Still outstanding:** the same comparison against **MVS 3.8j TK5** on `3271`, which was
+not running. One host of two, and the table above should not be read as more.
+
 ## Electron headless re-verification — 2026-08-28
 
 **PASSES, on the version we would actually ship, with three caveats that change how the
