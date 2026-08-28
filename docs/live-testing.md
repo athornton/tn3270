@@ -1186,6 +1186,59 @@ error, for the reason the TLS section records. That argv is pinned by
 passes it, each mutation-checked — so this harness cannot rot the way `pty-smoke.py`
 and `live-drive.py` silently did when TLS went on by default.
 
+## Electron headless re-verification — 2026-08-28
+
+**PASSES, on the version we would actually ship, with three caveats that change how the
+window must be created.** Re-run because the original claim (`docs/HANDOFF.md`, stage 3)
+was made on 2026-08-15 against **Electron 43**, and as of today there was **no Electron
+installed on this box at all** — that install is gone — while npm offers **44.0.0**. A
+13-day-old claim about a different major version underpinned every task of the GUI plan.
+
+Method: a throwaway spike in `/tmp` (deleted afterwards, so a failure leaves no 227 MB
+binary in the workspace) drawing a green rect on a **canvas** — not a DOM page, since the
+canvas is what the real renderer uses — then `capturePage()` and a pixel check.
+
+Result: `(0, 255, 0)` inside the rect, `(0, 0, 0)` outside. Channel order is **RGB**, and
+the PNG is **colour type 2** (RGB, no alpha).
+
+**The three caveats, each measured:**
+
+1. **`--no-sandbox` and `--disable-gpu` are both required.** There is no GL:
+   `ANGLE Display::initialize error 12289: GLX is not present`, then
+   `eglInitialize OpenGL failed`. Harmless in itself — we rasterise 2D — but see 2.
+2. **`show: false` HANGS unless the GPU is disabled.** The first attempt sat until a
+   120-second timeout with no output past `app ready`. With `--disable-gpu`, a hidden
+   window captures fine and fast. So the failure of a headless capture is a **stall, not
+   an error** — the same shape as the TLS trap, and worth recognising as such.
+3. **`capturePage()` returns the CONTENT area, not the window.** A `BrowserWindow` of
+   `400x200` produced a **400x173** PNG, because width/height include the frame. Pass
+   **`useContentSize: true`** and the capture is exactly `400x200`. Without it every
+   golden would silently depend on window chrome height, which is a platform and
+   theme detail — the goldens would be unreproducible on the user's Mac.
+
+Also worth knowing for the golden comparator: PNG rows here use filters **1, 2 and 4**
+(Sub, Up, Paeth), so any reader that handles only filter 0 reports every pixel as black.
+That produced a false "the canvas is blank" reading during this very check, which is a
+neat illustration of why the plan says to verify pixels rather than image size — and of
+why a *byte-exact* comparison of whole PNGs is simpler and safer than decoding them.
+
+The working recipe:
+
+```bash
+GUI=$HOME/micromamba/envs/gui
+export LD_LIBRARY_PATH=$GUI/lib
+export FONTCONFIG_PATH=$GUI/etc/fonts FONTCONFIG_FILE=$GUI/etc/fonts/fonts.conf
+nohup $GUI/bin/Xvfb :99 -screen 0 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+sleep 3 && ls /tmp/.X11-unix/X99      # prove it is up before trusting DISPLAY
+export DISPLAY=:99
+electron main.js --no-sandbox --disable-gpu
+```
+
+**Start Xvfb with `nohup` and then CHECK FOR THE SOCKET.** Backgrounding it inside a
+command that exits kills it, and the symptom is Electron's
+`Missing X server or $DISPLAY` even though `DISPLAY` is set — which reads as a
+configuration error rather than a dead server. Cost two runs to spot.
+
 ## TN3270E against a real host — NOT YET DONE
 
 This is verification against **x3270 and a harness, not against a host**, and it is a

@@ -55,6 +55,15 @@ and are covered by the golden harness in Task 10.
 
 ## Task 1: Prove Electron still works headless — a GATE, not feature work
 
+> **DONE, 2026-08-28. It passes.** Electron **44.0.0**, canvas rendered, `capturePage()`
+> returned `(0,255,0)` inside the test rect and `(0,0,0)` outside, RGB channel order. Full
+> findings in `docs/live-testing.md`, *Electron headless re-verification*. **Three results
+> change later tasks and are not optional:** `--no-sandbox --disable-gpu` are both
+> required; `show: false` HANGS without `--disable-gpu`, as a stall rather than an error;
+> and `capturePage()` returns the CONTENT area, so Task 2's window needs
+> **`useContentSize: true`** or every golden depends on window chrome height. The steps
+> below are kept as the reproduction.
+
 **Everything else depends on this, and the existing claim is stale.**
 `docs/HANDOFF.md` says real Electron 43 renders under Xvfb and `capturePage()` produces
 correct PNGs, verified 2026-08-15. As of 2026-08-28 **there is no Electron installed on
@@ -113,43 +122,75 @@ app.whenReady().then(async () => {
 GUI=$HOME/micromamba/envs/gui
 export LD_LIBRARY_PATH=$GUI/lib
 export FONTCONFIG_PATH=$GUI/etc/fonts FONTCONFIG_FILE=$GUI/etc/fonts/fonts.conf
-$GUI/bin/Xvfb :99 -screen 0 1280x1024x24 & sleep 2
+nohup $GUI/bin/Xvfb :99 -screen 0 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+sleep 3 && ls /tmp/.X11-unix/X99        # PROVE it is up before trusting DISPLAY
 export DISPLAY=:99
-cd /tmp/electron-spike && ./node_modules/.bin/electron spike.js --no-sandbox
+cd /tmp/electron-spike && ./node_modules/.bin/electron spike.js --no-sandbox --disable-gpu
 ```
 
-Expected: `wrote { width: 400, height: 200 }` and a PNG on disk.
+Expected: `wrote {"width":400,"height":200}` and a PNG on disk.
 
-**`--no-sandbox` is likely required** because Chromium's sandbox wants privileges this
-box does not grant. If it is needed here it will be needed in `main.ts` too — record which.
+**All three of these were learned the hard way on 2026-08-28 and are not optional:**
+
+- **`nohup`, and check for the socket.** Backgrounding Xvfb inside a command that then
+  exits kills it, and the symptom is Electron reporting `Missing X server or $DISPLAY`
+  *with* `DISPLAY` set — which reads as misconfiguration rather than a dead server.
+- **`--no-sandbox`**: Chromium's sandbox wants privileges this box does not grant.
+- **`--disable-gpu`**: there is no GL (`GLX is not present`), and without this flag a
+  `show: false` window HANGS rather than failing — the first attempt sat until a
+  120-second timeout with no output past `app ready`.
 
 - [ ] **Step 4: Verify the PNG has the right pixels, not merely the right size**
 
 A black PNG of correct dimensions would pass a size check and prove nothing.
 
+**A reader that handles only PNG filter type 0 reports every pixel as black.** These rows
+use filters 1, 2 and 4, and a naive reader produced exactly that false negative on the real
+run: it looked as though the canvas had never drawn. Un-filter properly:
+
 ```bash
 cd /tmp/electron-spike && python3 -c "
-import zlib,struct
-d=open('shot.png','rb').read()
-# Walk the chunks and inflate IDAT; no PIL on this box.
+import zlib, struct
+d = open('shot.png','rb').read()
+w, h = struct.unpack('>II', d[16:24]); ct = d[25]
+bpp = 4 if ct == 6 else 3
 pos, idat = 8, b''
 while pos < len(d):
     ln = struct.unpack('>I', d[pos:pos+4])[0]; typ = d[pos+4:pos+8]
     if typ == b'IDAT': idat += d[pos+8:pos+8+ln]
     pos += 12 + ln
-raw = zlib.decompress(idat)
-stride = 400*4 + 1
-def px(x,y):
-    o = y*stride + 1 + x*4
-    return tuple(raw[o:o+3])
+raw = zlib.decompress(idat); stride = w*bpp
+out = bytearray(h*stride)
+def paeth(a,b,c):
+    p=a+b-c; pa,pb,pc=abs(p-a),abs(p-b),abs(p-c)
+    return a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)
+i=0
+for y in range(h):
+    f=raw[i]; i+=1
+    for x in range(stride):
+        v=raw[i+x]
+        a=out[y*stride+x-bpp] if x>=bpp else 0
+        b=out[(y-1)*stride+x] if y>0 else 0
+        c=out[(y-1)*stride+x-bpp] if (x>=bpp and y>0) else 0
+        if f==1: v=(v+a)&255
+        elif f==2: v=(v+b)&255
+        elif f==3: v=(v+(a+b)//2)&255
+        elif f==4: v=(v+paeth(a,b,c))&255
+        out[y*stride+x]=v
+    i+=stride
+px=lambda x,y:tuple(out[y*stride+x*bpp:y*stride+x*bpp+3])
+print('dims', w, h, 'colortype', ct)
 print('inside  rect (50,30):', px(50,30))
 print('outside rect (300,150):', px(300,150))
 "
 ```
 
-Expected: inside is green (one of `(0,255,0)` or `(255,0,0)`-ordered depending on channel
-order — accept any tuple containing 255 and two 0s), outside is `(0,0,0)`. **Record the
-channel order you observe**; Task 10's comparison needs it.
+Measured 2026-08-28: dims `400 200` **with `useContentSize: true`** — `400 173` without it,
+because window width/height include the frame — colour type `2`, inside `(0, 255, 0)`,
+outside `(0, 0, 0)`. Channel order is **RGB**, which is what Task 10's comparison needs.
+
+This is also the argument for Task 10 comparing whole PNGs byte-for-byte instead of
+decoding them: the decoder is the part that was wrong here.
 
 - [ ] **Step 5: Record the result and clean up**
 
