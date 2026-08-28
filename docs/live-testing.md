@@ -1246,7 +1246,35 @@ takes the first free device, and selecting a geometry means configuring which di
 attachable" is **wrong**. You can choose at connect time with `@group` or `@devnum`, and no
 config editing is needed to pick between the 3277 pool and the 3278-4s.
 
-### Open lead, NOT diagnosed
+### The group selector works on MVS TK5 too, and the "0 fields" lead is EXPLAINED
+
+TK5 defines groups in its own config: `03C0`-`03C7` are group **TCAM**, `00C0`-`00C6` have
+no group, and `0010` is group **CONS** — the operator console. Selectors behave the same way:
+
+| terminal type | MVS TK5 result |
+|---|---|
+| `IBM-3278-2-E` (no suffix) | formatted, **22 fields**, unprotected |
+| `IBM-3278-2-E@TCAM` | formatted, **0 fields**, protected |
+| `IBM-3278-2-E@00C1` | formatted, **0 fields**, protected |
+
+**`@CONS` was deliberately NOT tried:** `0010` is the Hercules operator console, and seizing
+the master console of a running MVS could disrupt the system. Worth knowing it is reachable;
+not worth finding out by accident.
+
+**This explains the 0-field observation, and the evidence was already in hand.** The
+hypothesis was that an `@` suffix defeats geometry resolution — but on VM, **`@MOD2` also
+carries a suffix and yielded a normal 22-field panel.** So the suffix parses fine, and 0
+fields tracks **which device you land on**, not how you asked for it: the host's logon
+process is painting one device, and the others sit idle with nothing on them. On MVS,
+`@00C1` is the same device *type* as the working `00C0` and still shows 0 fields, which fits
+the same reading.
+
+**So there is no client defect here.** What remains is a host-behaviour question, not ours:
+whether VTAM/CP paints a logon panel on a device only when configured to. Selecting a device
+you can actually log on to means picking one the host is driving — on VM that is what makes
+`@MOD4` interesting only once DMKRIO drives `01C0`.
+
+
 
 With an `@`-suffixed terminal type, `@MOD4` and `@01C0` reported **0 fields** where `@MOD2`
 reported 22, and the status line said model 2 / 24x80 despite `-model 3278-4-E`. The
