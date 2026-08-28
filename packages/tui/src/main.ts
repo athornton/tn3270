@@ -8,7 +8,7 @@
 
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import {
-  defaultSession, splitTarget, takeTlsFlag, resolveTls, TLS_USAGE,
+  defaultSession, resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/cli';
 import { App, type HostProcess } from './app.js';
@@ -27,7 +27,12 @@ export interface TuiArgs {
   terminalType?: string;
   /** Absent means detect from terminfo. */
   colors?: Depth;
+  /** The bare hostname: prefixes and the LU list are stripped by `resolveHostSpec`. */
   host?: string;
+  /** Resolved and range-checked. Absent only when no host was given at all. */
+  port?: number;
+  /** LU names from the host argument, in the order written. Empty if none. */
+  lus?: readonly string[];
   /** How the socket is made. Absent only before `resolveTls` has run. */
   tls?: TlsOptions;
   /** Offer TN3270E. Absent means the default, which is on. */
@@ -120,13 +125,39 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
     }
   }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
-  // Both the host and the flags are in argv here, so this contradiction can be
-  // caught before a socket is opened — unlike the CLI, whose host arrives later
-  // via `Connect()` and which therefore checks the same thing in the runner.
-  if (args.tls.kind === 'plaintext' && /^[Ll]:/.test(args.host ?? '')) {
-    throw new UsageError(
-      `${args.host!} asks for TLS with the L: prefix, but -insecure disables TLS`,
-    );
+
+  if (args.host !== undefined) {
+    // The whole `[prefix:][LU,LU@]host[:port]` shape, by the shared rules — not a
+    // regex here and a different one in the CLI. `splitTarget` handled only `L:` and
+    // an unvalidated port, so `N:` and an LU list were parsed by hostspec.ts and then
+    // never applied to anything.
+    const raw = args.host;
+    const spec = resolveHostSpec(raw, (m) => new UsageError(m));
+    args.host = spec.host;
+    args.port = spec.port;
+    args.lus = spec.lus;
+
+    // Both the host and the flags are in argv here, so these contradictions can be
+    // caught before a socket is opened — unlike the CLI, whose host arrives later via
+    // `Connect()` and which therefore checks the same things in the runner.
+    if (spec.tlsRequested && args.tls.kind === 'plaintext') {
+      throw new UsageError(
+        `${raw} asks for TLS with the L: prefix, but -insecure disables TLS`,
+      );
+    }
+    if (spec.tn3270e === false) {
+      // An explicit `-tn3270e on` is a contradiction, not something to resolve
+      // silently — the same precedent as `L:` against `-insecure`. Tested `=== true`
+      // rather than truthily, so "the flag was absent" stays distinguishable from
+      // "the flag said on".
+      if (args.tn3270e === true) {
+        throw new UsageError(
+          `${raw} has the N: prefix, which means no TN3270E, but -tn3270e on asks for `
+          + 'it. Drop one of them rather than leaving it ambiguous.',
+        );
+      }
+      args.tn3270e = false;
+    }
   }
   return args;
 }
@@ -149,7 +180,8 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   const args = parseArgs(argv);
   if (args.host === undefined) {
     throw new UsageError(
-      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] ${TLS_USAGE} host[:port]`,
+      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-tn3270e on|off] `
+      + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
     );
   }
 
@@ -164,8 +196,12 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
     args.tn3270e,
   );
 
-  const [hostname, port] = splitTarget(args.host);
-  await session.connect(hostname, port);
+  // The LU list travels with the CONNECTION, not the session: it came from the host
+  // argument, and `ConnectOptions` is where a per-host setting belongs. `tn3270e` went
+  // to the constructor above because it is a process-wide flag here — the TUI takes
+  // one host for its lifetime, so the two routes cannot disagree.
+  await session.connect(args.host, args.port ?? 23,
+    args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
 
   // Printed here ONLY when the persistent hint has nowhere to go. The transient
   // line exists because the message used to vanish the instant the alternate

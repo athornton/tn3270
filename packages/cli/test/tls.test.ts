@@ -6,7 +6,8 @@ import net from 'node:net';
 import { Session, type Connection } from '@tn3270/core';
 import { parseArgs, UsageError } from '../src/main.js';
 import { parseArgs as parseTuiArgs, UsageError as TuiUsageError } from '../../tui/src/main.js';
-import { Runner, splitTarget } from '../src/runner.js';
+import { Runner } from '../src/runner.js';
+import { resolveHostSpec } from '../src/hostspec.js';
 import { resolveTls, describeTlsError, tcpConnect, type TlsFlags } from '../src/tls.js';
 // @ts-expect-error -- .mjs harness, deliberately untyped; tests are outside the tsc build
 import { startTlsProxy } from '../scripts/tls-proxy.mjs';
@@ -85,18 +86,26 @@ describe("s3270's L: host prefix", () => {
   // In s3270 `L:` is what turns TLS on (Common/host.c:633). Here TLS is already
   // the default, so it is a no-op — but it must be stripped, or the host becomes
   // literally `L` and the failure is a baffling DNS error.
+  const err = (m: string) => new Error(m);
+
   it('is stripped, and reported', () => {
-    expect(splitTarget('L:vm.example:992')).toEqual(['vm.example', 992, true]);
-    expect(splitTarget('l:vm.example')).toEqual(['vm.example', 23, true]);
+    expect(resolveHostSpec('L:vm.example:992', err))
+      .toMatchObject({ host: 'vm.example', port: 992, tlsRequested: true });
+    expect(resolveHostSpec('l:vm.example', err))
+      .toMatchObject({ host: 'vm.example', port: 23, tlsRequested: true });
   });
 
   it('leaves an ordinary target alone, still defaulting to port 23', () => {
-    expect(splitTarget('vm.example:3270')).toEqual(['vm.example', 3270, false]);
-    expect(splitTarget('vm.example')).toEqual(['vm.example', 23, false]);
+    expect(resolveHostSpec('vm.example:3270', err))
+      .toMatchObject({ host: 'vm.example', port: 3270, tlsRequested: false });
+    expect(resolveHostSpec('vm.example', err))
+      .toMatchObject({ host: 'vm.example', port: 23, tlsRequested: false });
   });
 
   it('still loses only the last group of a bare IPv6 literal', () => {
-    expect(splitTarget('::1:3270')).toEqual(['::1', 3270, false]);
+    // Unbracketed, so the last colon is the port separator. Carried over from the
+    // `splitTarget` this replaced, because it is the case that made it use lastIndexOf.
+    expect(resolveHostSpec('::1:3270', err)).toMatchObject({ host: '::1', port: 3270 });
   });
 
   it('is a usage error with -insecure on the TUI, where both are in argv', () => {

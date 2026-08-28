@@ -12,14 +12,15 @@ const TLS = { kind: 'tls', verify: true } as const;
 
 describe('parseArgs', () => {
   it('takes a bare argument as the host', () => {
-    expect(parseArgs(['127.0.0.1:3270'])).toEqual({ host: '127.0.0.1:3270', tls: TLS });
+    expect(parseArgs(['127.0.0.1:3270']))
+      .toEqual({ host: '127.0.0.1', port: 3270, lus: [], tls: TLS });
   });
 
   it('parses the flags the CLI also has, with the same spellings', () => {
     expect(parseArgs(['-model', '3278-2-E', 'vm:3270']))
-      .toEqual({ model: '3278-2-E', host: 'vm:3270', tls: TLS });
+      .toEqual({ model: '3278-2-E', host: 'vm', port: 3270, lus: [], tls: TLS });
     expect(parseArgs(['--terminal-type', 'IBM-DYNAMIC', 'vm']))
-      .toEqual({ terminalType: 'IBM-DYNAMIC', host: 'vm', tls: TLS });
+      .toEqual({ terminalType: 'IBM-DYNAMIC', host: 'vm', port: 23, lus: [], tls: TLS });
   });
 
   it('understands every --colors spelling', () => {
@@ -90,7 +91,7 @@ describe('-tn3270e', () => {
     // Both parsers, not one. A flag that works in the CLI and not the TUI is worse
     // than a flag that exists in neither, and the two have separate parsers.
     expect(parseArgs(['-tn3270e', 'off', 'host:23'])).toMatchObject({
-      tn3270e: false, host: 'host:23',
+      tn3270e: false, host: 'host', port: 23,
     });
     expect(parseArgs(['-tn3270e', 'on', 'host']).tn3270e).toBe(true);
   });
@@ -98,5 +99,65 @@ describe('-tn3270e', () => {
   it('rejects a bad or missing value', () => {
     expect(() => parseArgs(['-tn3270e', 'maybe', 'host'])).toThrow(/on or off|takes on or off/i);
     expect(() => parseArgs(['-tn3270e'])).toThrow(/needs a value/i);
+  });
+});
+
+/**
+ * The host argument's full shape, `[prefix:][LU,LU@]host[:port]`.
+ *
+ * The rules themselves are `resolveHostSpec`'s and are tested there; these pin that
+ * the TUI actually APPLIES them, which is the half that was missing — `hostspec.ts`
+ * was parsed and tested while `splitTarget` was still what ran.
+ */
+describe('the host argument', () => {
+  it('splits the port off and defaults it to 23', () => {
+    expect(parseArgs(['host']).port).toBe(23);
+    expect(parseArgs(['host:3271'])).toMatchObject({ host: 'host', port: 3271 });
+  });
+
+  it('turns the N: prefix into -tn3270e off', () => {
+    expect(parseArgs(['N:host'])).toMatchObject({ host: 'host', tn3270e: false });
+  });
+
+  it('refuses N: together with -tn3270e on rather than picking one', () => {
+    // Same precedent as L: alongside -insecure: an explicit contradiction is an error,
+    // because silently resolving it gives the operator a session they did not ask for
+    // and cannot see in the trace.
+    expect(() => parseArgs(['-tn3270e', 'on', 'N:host'])).toThrow(UsageError);
+    expect(() => parseArgs(['-tn3270e', 'on', 'N:host'])).toThrow(/N:/);
+    // Order must not matter: the check runs after the whole vector is parsed.
+    expect(() => parseArgs(['N:host', '-tn3270e', 'on'])).toThrow(/N:/);
+  });
+
+  it('accepts N: with -tn3270e off, which agree', () => {
+    expect(parseArgs(['-tn3270e', 'off', 'N:host']).tn3270e).toBe(false);
+  });
+
+  it('carries the LU list through in order', () => {
+    expect(parseArgs(['LUA,LUB@host:992'])).toMatchObject({
+      host: 'host', port: 992, lus: ['LUA', 'LUB'],
+    });
+  });
+
+  it('still refuses L: alongside -insecure', () => {
+    // Pre-existing behaviour, re-pinned because the check moved from a regex on the
+    // raw argument to the resolved `tlsRequested` flag.
+    expect(() => parseArgs(['-insecure', 'L:host'])).toThrow(/L:|TLS/);
+    expect(() => parseArgs(['-insecure', 'l:host:992'])).toThrow(/L:|TLS/);
+  });
+
+  it('accepts L: on its own and strips it', () => {
+    // Without stripping, `L:localhost:3270` becomes a DNS lookup for the host `L`.
+    expect(parseArgs(['L:host:992'])).toMatchObject({ host: 'host', port: 992 });
+  });
+
+  it('rejects an unusable port instead of connecting to NaN', () => {
+    expect(() => parseArgs(['host:abc'])).toThrow(UsageError);
+    expect(() => parseArgs(['host:0'])).toThrow(/port/i);
+  });
+
+  it('refuses a prefix it does not implement', () => {
+    expect(() => parseArgs(['P:host'])).toThrow(UsageError);
+    expect(() => parseArgs(['Y:host'])).toThrow(/-noverifycert/);
   });
 });

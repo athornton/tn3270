@@ -3,6 +3,7 @@ import {
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
+import { resolveHostSpec } from './hostspec.js';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
 import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';
@@ -168,20 +169,41 @@ export class Runner {
 
     switch (name) {
       case 'Connect': {
-        const target = args[0] ?? '';
-        const [host, portText, tlsRequested] = splitTarget(target);
-        if (tlsRequested && !this.tlsEnabled) {
+        // EXACTLY one argument, as s3270 requires (`check_argc(AnConnect, argc, 1, 1)`,
+        // Common/host.c:1101), with its wording so a script's failure output is
+        // comparable. This matters because the LU separator and the action-argument
+        // separator are both commas: `Connect(LUA,LUB@host)` arrives here as two
+        // arguments, and without the check we would connect to the host `LUA` on port
+        // 23 -- a silently wrong target. The quoted form `Connect("LUA,LUB@host")` is
+        // what carries an LU list, and splitArgs already honours the quotes. Both
+        // behaviours measured against real s3270 4.5ga6, not inferred.
+        if (args.length !== 1) throw new Error('Connect() requires 1 argument');
+        const target = args[0]!;
+        // The full `[prefix:][LU,LU@]host[:port]` shape, by the same rules the TUI
+        // uses. This is the CLI's ONLY host argument, so it is the only place `N:` and
+        // an LU list can be applied at all.
+        const spec = resolveHostSpec(target, (m) => new Error(m));
+        if (spec.tlsRequested && !this.tlsEnabled) {
           throw new Error(
             `${target} asks for TLS with the L: prefix, but this session was started with `
             + '-insecure. Connecting in the clear would be a silent downgrade.',
           );
         }
-        await s.connect(host, portText);
+        // `N:` is HONOURED here, where `L:` above is refused, and the difference is
+        // whether it can be: TLS is decided when the socket is made, so a session built
+        // by `-insecure` cannot become a TLS one and connecting anyway would be a silent
+        // downgrade. TN3270E is negotiated per connection, so the more specific per-host
+        // instruction can simply win over the process-wide `-tn3270e` flag — nothing is
+        // silently wrong, and refusing would leave `Connect(N:host)` with no meaning.
+        await s.connect(spec.host, spec.port, {
+          ...(spec.tn3270e !== undefined ? { tn3270e: spec.tn3270e } : {}),
+          ...(spec.lus.length > 0 ? { lus: spec.lus } : {}),
+        });
         // Field 4 of the status line is C(<host>) with NO port: s3270 formats it
         // from current_host, which holds the hostname alone (task.c:3144).
         // Verified by running s3270 against the same host: it reports
         // C(127.0.0.1) where we were reporting C(127.0.0.1:3270).
-        this.host = host;
+        this.host = spec.host;
         return;
       }
       case 'Disconnect':
@@ -696,35 +718,4 @@ export class Runner {
     }
     throw new Error(`timed out waiting for ${args[0] ?? 'Unlock'}`);
   }
-}
-
-/**
- * `host:port`, defaulting to 23, with s3270's `L:` TLS prefix stripped.
- *
- * Exported because the TUI parses the same argument and a second copy of this
- * rule would be one to keep in step.
- *
- * `lastIndexOf` rather than `indexOf`, so a bare IPv6 literal loses only its
- * final group rather than everything after the first colon.
- *
- * The third element reports whether `L:` was present. In s3270 that prefix is
- * what turns TLS ON for a host (Common/host.c:633); here TLS is already the
- * default, so it is a no-op — but it must be STRIPPED, or `L:localhost:3270`
- * becomes a DNS lookup for the host `L`. Scripts carried over from s3270 will
- * contain it. The flag is returned rather than discarded so that `L:` against a
- * deliberately plaintext session can be refused instead of silently downgraded.
- *
- * The port default stays 23 even for `L:`, matching s3270: silently redirecting
- * to 992 would open a connection somewhere the operator did not type.
- */
-export function splitTarget(target: string): [string, number, boolean] {
-  let rest = target;
-  let tlsRequested = false;
-  if (rest.startsWith('L:') || rest.startsWith('l:')) {
-    tlsRequested = true;
-    rest = rest.slice(2);
-  }
-  const colon = rest.lastIndexOf(':');
-  if (colon < 0) return [rest, 23, tlsRequested];
-  return [rest.slice(0, colon), Number(rest.slice(colon + 1)), tlsRequested];
 }

@@ -12,7 +12,7 @@
  * of the socket code.
  */
 
-export { defaultSession, Runner, splitTarget } from './runner.js';
+export { defaultSession, Runner } from './runner.js';
 export type { RunnerOptions } from './runner.js';
 // The TUI parses the same TLS flags and must resolve them by the same rules, so
 // these are shared rather than reimplemented. See tls.ts.
@@ -21,5 +21,9 @@ export {
   DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions } from './tls.js';
+// Host-argument shape, shared for the same reason the TLS flags are: `N:` and an LU
+// list must mean the same thing in both front ends. See resolveHostSpec.
+export { parseHostSpec, resolveHostSpec } from './hostspec.js';
+export type { HostSpec, ResolvedHost } from './hostspec.js';
 export { parseCommand } from './commands.js';
 export type { TransferFiles } from './transfer.js';

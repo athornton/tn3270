@@ -69,8 +69,8 @@ export const TLS_USAGE = '[-insecure] [-noverifycert] [-verifycert] [-cafile FIL
  * fall through to its own handling.
  *
  * Both front ends delegate here rather than each spelling the flags out, because
- * two copies of these rules is two things to keep in step — the mistake
- * `splitTarget`'s own comment was written to avoid.
+ * two copies of these rules is two things to keep in step. `resolveHostSpec` exists
+ * for the same reason, on the other half of the same argument.
  */
 export function takeTlsFlag(
   flags: TlsFlags,

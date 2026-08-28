@@ -31,6 +31,111 @@ function newRunner() {
   return { runner, session, conn };
 }
 
+/**
+ * `Connect()` is the CLI's only host argument, so the full
+ * `[prefix:][LU,LU@]host[:port]` shape has to be applied HERE. The rules themselves
+ * belong to `resolveHostSpec` and are tested in hostspec.test.ts; these pin that the
+ * runner applies them and hands the per-host parts to the session.
+ *
+ * The session's `connect` is wrapped rather than mocked out, so the real one still
+ * runs: the assertion is about what the runner passes, and a test that stubbed the
+ * connection away could not tell a rejected target from a connected one.
+ */
+function spyingRunner() {
+  const conn = new FakeConnection();
+  const session = new Session({ connect: () => conn });
+  const calls: { host: string; port: number; per: unknown }[] = [];
+  const real = session.connect.bind(session);
+  session.connect = async (host, port, per) => {
+    calls.push({ host, port, per });
+    await real(host, port, per);
+  };
+  return { runner: new Runner(session, { clock: () => 0 }), calls, conn };
+}
+
+describe("Connect()'s host argument", () => {
+  it('splits host and port, defaulting to 23', async () => {
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect(vm.example:3270)');
+    await runner.run('Connect(vm.example)');
+    expect(calls[0]).toMatchObject({ host: 'vm.example', port: 3270 });
+    expect(calls[1]).toMatchObject({ host: 'vm.example', port: 23 });
+  });
+
+  it('passes a QUOTED LU list to the session as a per-connection option', async () => {
+    // Quoted, because the LU separator and the action-argument separator are both
+    // commas. Measured against real s3270 4.5ga6: `Connect(LUA,LUB@host)` answers
+    // "Connect() requires 1 argument", and `Connect("LUA,LUB@host")` connects.
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect("LUA,LUB@vm:992")');
+    expect(calls[0]).toMatchObject({
+      host: 'vm', port: 992, per: { lus: ['LUA', 'LUB'] },
+    });
+  });
+
+  it('rejects an UNQUOTED LU list with s3270 s own arity error', async () => {
+    // Without this the comma splits the argument and we connect to the host `LUA` on
+    // port 23 -- a silently wrong target, which is the one outcome worth an error.
+    // s3270's wording exactly, so a script's failure output is comparable.
+    const { runner, calls } = spyingRunner();
+    const reply = await runner.run('Connect(LUA,LUB@vm:992)');
+    expect(reply).toContain('Connect() requires 1 argument');
+    expect(reply.trimEnd().endsWith('error')).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects Connect() with no argument the same way', async () => {
+    // Measured: s3270 gives the identical message for argc 0.
+    const { runner, calls } = spyingRunner();
+    const reply = await runner.run('Connect()');
+    expect(reply).toContain('Connect() requires 1 argument');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('turns the N: prefix into tn3270e false for that connection only', async () => {
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect(N:plain:3270)');
+    await runner.run('Connect(fancy:992)');
+    expect(calls[0]).toMatchObject({ host: 'plain', per: { tn3270e: false } });
+    // The SECOND connection must not inherit it. This is the whole reason the option
+    // is per-connection rather than per-session.
+    expect(calls[1]!.per).toEqual({});
+  });
+
+  it('says nothing about tn3270e when the target does not', async () => {
+    // `undefined`, not `true`: the session's own setting (from `-tn3270e`) has to keep
+    // deciding, or every Connect() would silently override the flag.
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect(vm:3270)');
+    expect(calls[0]!.per).toEqual({});
+  });
+
+  it('reports an unusable port as an error reply instead of connecting', async () => {
+    const { runner, calls } = spyingRunner();
+    const reply = await runner.run('Connect(vm:no-such-port)');
+    expect(reply).toMatch(/port/i);
+    expect(reply.trimEnd().endsWith('error')).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a prefix it does not implement rather than ignoring it', async () => {
+    const { runner, calls } = spyingRunner();
+    const reply = await runner.run('Connect(P:vm:3270)');
+    expect(reply).toMatch(/P:/);
+    expect(reply.trimEnd().endsWith('error')).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('still reports the bare hostname in the status line', async () => {
+    // Field 4 is C(<host>) with no port and no prefix: s3270 formats it from
+    // current_host (task.c:3144). A prefix leaking in here would be a visible
+    // difference from s3270 in every reply.
+    const { runner } = spyingRunner();
+    const reply = await runner.run('Connect(N:LUA@vm.example:3270)');
+    expect(reply).toContain('C(vm.example)');
+  });
+});
+
 describe('reply format', () => {
   it('ends a successful command with a status line then ok', async () => {
     const { runner } = newRunner();
