@@ -20,7 +20,9 @@ import { dirname, join } from 'node:path';
  * can work against the hosts they exist to drive. If a harness is ever pointed at a
  * host that speaks TLS, delete its case here rather than weakening the assertion.
  */
-const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+const here = dirname(fileURLToPath(import.meta.url));
+const scriptsDir = join(here, '..', 'scripts');
+const cliScriptsDir = join(here, '..', '..', 'cli', 'scripts');
 
 describe('live harnesses target plaintext Hercules', () => {
   for (const script of ['pty-smoke.py', 'live-drive.py']) {
@@ -35,4 +37,34 @@ describe('live harnesses target plaintext Hercules', () => {
       expect(argv![0]).toContain('"-insecure"');
     });
   }
+});
+
+/**
+ * The TN3270E harness needs the same flag for a different reason: `e-server.py` is
+ * plaintext because it is a protocol mimic, not because the host it stands in for is.
+ * The failure mode is identical, and worse here — a stalled handshake in a harness
+ * whose whole job is to decide whether OUR negotiation is correct would read as a
+ * negotiation bug.
+ *
+ * A different shape from the two above, so it is checked differently rather than being
+ * forced into the same regex: drive-e.py holds the flag in one constant and spreads it
+ * into every case's argv. BOTH halves are pinned — the constant's contents and the
+ * spread — because either alone can be removed while the other still reads correctly.
+ */
+describe('the TN3270E harness driver', () => {
+  const source = readFileSync(join(cliScriptsDir, 'drive-e.py'), 'utf8');
+
+  it('keeps -insecure in the flags it passes to every case', () => {
+    const flags = source.match(/^REQUIRED_FLAGS = \[[^\]]*\]/m);
+    expect(flags, 'no REQUIRED_FLAGS list found in drive-e.py').not.toBeNull();
+    expect(flags![0]).toContain("'-insecure'");
+  });
+
+  it('actually spreads those flags into the argv that execs the client', () => {
+    // Without this half, REQUIRED_FLAGS could keep saying -insecure while nothing
+    // passed it -- the test would stay green over a harness that hangs.
+    const run = source.match(/\[node, CLI,[^\]]*\]/s);
+    expect(run, 'no client invocation found in drive-e.py').not.toBeNull();
+    expect(run![0]).toContain('*REQUIRED_FLAGS');
+  });
 });

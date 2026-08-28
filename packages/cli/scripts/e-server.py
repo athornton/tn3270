@@ -277,8 +277,18 @@ class EServer:
                 return 0
             log("-- FAIL: client did NOT back off after a DEVICE-TYPE REJECT --")
             return 5
+        # THE SAME INVERSION, on the other route to a legitimate refusal. A client run
+        # with `-tn3270e off`, or against an `N:` host, is SUPPOSED to answer WONT --
+        # so without --expect-refuse the harness calls the correct outcome exit 3 and
+        # any script driving it has to special-case the failure it just asked for.
+        if self.args.expect_refuse:
+            if refused:
+                log("-- OK: client refused TN3270E, as it was told to --")
+                return 0
+            log("-- FAIL: client accepted TN3270E when it was told not to --")
+            return 6
         if refused:
-            log("-- FAIL: client refused TN3270E --")
+            log("-- FAIL: client refused TN3270E (pass --expect-refuse if that was intended) --")
             return 3
         if not self.negotiated:
             log("-- FAIL: negotiation never completed --")
@@ -329,6 +339,9 @@ def main():
                    help='comma-separated function names to grant, or "" for basic TN3270E')
     p.add_argument('--send-bind', action='store_true',
                    help='send a BIND after negotiation (only meaningful with bind-image granted)')
+    p.add_argument('--expect-refuse', action='store_true',
+                   help='a WONT TN3270E from the client is the PASS condition, not a '
+                        'failure: use for -tn3270e off and for N: hosts')
     p.add_argument('--reject', choices=sorted(REASON),
                    help='reject the DEVICE-TYPE request with this reason')
     p.add_argument('--response-flag', type=lambda s: int(s, 0), default=0,

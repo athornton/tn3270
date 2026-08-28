@@ -1128,6 +1128,64 @@ operand order recorded there: the server sends `SEND DEVICE-TYPE` (`08 02`) and 
 client replies `DEVICE-TYPE REQUEST` (`02 07`). Sending `02 08` made s3270 log
 `DEVICE-TYPE ??8` and then stall — no reject, no error.
 
+### Our client against the same harness — verified 2026-08-28
+
+The second half, and the order was not interchangeable: the harness above was shown to
+satisfy real s3270 **first**, so that a failure here could only be ours. Driven by
+`packages/cli/scripts/drive-e.py`, which is committed and asserts on both the harness's
+exit code and the wire log. Re-run it with:
+
+```bash
+npm run build                      # it drives packages/cli/dist/main.js
+python3 packages/cli/scripts/drive-e.py
+```
+
+| # | configuration | our client | harness exit |
+|---|---|---|---|
+| 1 | `--grant responses,sysreq,contention-resolution` | **negotiated**, inbound `00000000007d40c31140c1c8c9` | 0 |
+| 2 | `--grant ""` (basic TN3270E) | **negotiated** | 0 |
+| 3 | `--grant responses` with `Connect("MYLU01,BACKUPLU@…")` | **negotiated as `MYLU01`** | 0 |
+| 4 | `--reject inv-name` with the same LU list | tried `MYLU01`, then `BACKUPLU`, then `IAC WONT TN3270E` | 0 |
+| 5 | `-tn3270e off` | refused, **without** asking for a device type | 0 |
+| 6 | `Connect(N:…)` | refused identically, per connection | 0 |
+| 7 | `--response-flag 2` (ALWAYS-RESPONSE) | answered `DATA-TYPE=RESPONSE` | 0 |
+
+**Byte-comparable with s3270 where it should be, and different only where intended.**
+Our `DEVICE-TYPE REQUEST` is `020749424d2d333237382d322d45`, identical to s3270's. Our
+`FUNCTIONS REQUEST` is `0307020405` against s3270's `030700020405` — the same list with
+BIND-IMAGE (`0x00`) removed, which is deliberate and is measurement C above. Case 1
+pins that difference as an **absence**, because asserting our own bytes would not catch
+us starting to ask for it.
+
+**Case 4 is the one the unit tests could not give.** LU fallback needs a counterparty
+that rejects: each name is offered in turn and only an exhausted list produces the
+backoff. Both names appear in the log in the order written.
+
+Two harness defects were found and fixed by writing the driver, and both would have
+been read as client bugs:
+
+- **`e-server.py` scored a correct refusal as a failure.** With neither `--reject` nor
+  the new `--expect-refuse`, a client that answers `WONT TN3270E` — which is exactly
+  what `-tn3270e off` and `N:` are for — exited 3 and printed `FAIL`. Cases 5 and 6 are
+  the ones that need it. The same inversion had already been fixed once for `--reject`;
+  this was the other route to a legitimate refusal.
+- **The driver's own readiness probe stole the connection.** `e-server.py` serves
+  exactly one client, so dialling the port to check it was listening was *accepted as*
+  the client; the real client then got `ECONNREFUSED` while the log said something had
+  connected. It failed all seven cases and looked like a client fault. It now waits for
+  the server's own `listening on` line instead.
+
+**One flake found and removed.** `Wait(3270Mode)` returns when option negotiation
+finishes, which is before the host's Erase/Write carrying the field has arrived, so
+`String()` intermittently failed as `input inhibited` — passing on one run, failing on
+the next. Case 1 now waits for `InputField` as well. Three consecutive clean runs.
+
+`-insecure` is mandatory on every case, and its absence is a **hang** rather than an
+error, for the reason the TLS section records. That argv is pinned by
+`packages/tui/test/harness-flags.test.ts` — both the flag constant and the spread that
+passes it, each mutation-checked — so this harness cannot rot the way `pty-smoke.py`
+and `live-drive.py` silently did when TLS went on by default.
+
 ### Still outstanding: a real host
 
 This is verification against **x3270, not against a host**, and it is a weaker claim.
