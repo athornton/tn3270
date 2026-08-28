@@ -309,6 +309,55 @@ describe('TN3270E state across connections', () => {
   });
 });
 
+describe('per-connection TN3270E settings', () => {
+  /**
+   * s3270's `N:` and `LU@` are properties of a HOST, not of a process — they sit in
+   * the host argument, and `Connect()` can name a different host every time. The CLI
+   * has no host argument at all, so without this the only way to reach an LU list was
+   * to construct a `Session` by hand, and `Connect(N:host)` could not be honoured.
+   */
+  it('lets one connection decline TN3270E on a session that offers it', async () => {
+    const { session, conn } = newSession();          // default: tn3270e on
+    await session.connect('127.0.0.1', 3270, { tn3270e: false });
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+
+  it('lets one connection name its own LU list', async () => {
+    const { session, conn } = newSession({ lus: ['SESSLU'] });
+    await session.connect('127.0.0.1', 992, { lus: ['CONNLU'] });
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    conn.clear();
+    conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
+    expect(conn.writes[0]).toEqual([
+      T.IAC, T.SB, O.TN3270E, Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST,
+      ...ascii('IBM-3278-2-E'), Tn3270eOp.CONNECT, ...ascii('CONNLU'), T.IAC, T.SE,
+    ]);
+  });
+
+  it('does NOT leak a per-connection setting into the next connection', async () => {
+    // The same failure class as the stale-`e` bug above: a setting that outlives the
+    // connection it was given for. A script that connects to a plain host with N: and
+    // then to a TN3270E host must get TN3270E on the second one.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 3270, { tn3270e: false });
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+
+    await session.connect('127.0.0.1', 992);         // no per-connection options
+    conn.clear();
+    conn.negotiateE();
+    expect(session.is3270Mode()).toBe(true);
+  });
+
+  it('falls back to the session default when the connection says nothing', async () => {
+    const { session, conn } = newSession({ tn3270e: false, lus: ['SESSLU'] });
+    await session.connect('127.0.0.1', 3270, {});
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+});
+
 describe('TN3270E RESPONSES', () => {
   /** Erase/Write with a header carrying the given response flag and sequence. */
   const write = (flag: number, seq: number): number[] => [

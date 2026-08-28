@@ -54,6 +54,24 @@ export interface SessionOptions {
   lus?: readonly string[];
 }
 
+/**
+ * Settings that belong to ONE connection rather than to the session.
+ *
+ * In s3270 these are properties of a HOST — they are written in the host argument
+ * (`N:`, `LUname@`), and `Connect()` can name a different host every time. Passing
+ * them to the constructor alone would make them properties of the process, so a CLI
+ * script that connects to a plain host and then to a TN3270E one could only be right
+ * about one of them. Each field falls back to the `SessionOptions` value.
+ *
+ * Lives on the connection, and so is discarded with it: see `handleClose`.
+ */
+export interface ConnectOptions {
+  /** Offer TN3270E on this connection. The `N:` host prefix passes `false`. */
+  tn3270e?: boolean;
+  /** LU names to request on this connection, tried in order as REJECTs come back. */
+  lus?: readonly string[];
+}
+
 export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
@@ -85,6 +103,8 @@ export class Session {
   private e: Tn3270eState | undefined;
   /** Outbound SEQ-NUMBER. Only advances when RESPONSES was agreed (§8.1.4). */
   private eSeq = 0;
+  /** This connection's overrides. Empty between connections. See ConnectOptions. */
+  private per: ConnectOptions = {};
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -120,12 +140,16 @@ export class Session {
     return this.error;
   }
 
-  async connect(host: string, port: number): Promise<void> {
+  async connect(host: string, port: number, per: ConnectOptions = {}): Promise<void> {
     // Tear down any live connection first. Without this the old Connection is
     // dropped without close(), and its onClose/onError closures still capture
     // `this` — so when the stale socket eventually closes it calls
     // handleClose() and tears down the NEW session.
     if (this.conn !== undefined) this.disconnect();
+
+    // AFTER the teardown, which clears the previous connection's overrides — set it
+    // before and disconnect() would wipe the ones just passed in.
+    this.per = per;
 
     const conn = await this.opts.connect(host, port);
     this.conn = conn;
@@ -148,7 +172,7 @@ export class Session {
       // bypass the layer's own `?? TERMINAL_TYPE` default if that guard ever
       // became a truthiness check.
       ...(this.opts.terminalType ? { terminalType: this.opts.terminalType } : {}),
-      tn3270eEnabled: this.opts.tn3270e ?? true,
+      tn3270eEnabled: this.per.tn3270e ?? this.opts.tn3270e ?? true,
       onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, this.telnet); },
     });
 
@@ -202,6 +226,9 @@ export class Session {
     // first one's total.
     this.e = undefined;
     this.eSeq = 0;
+    // The connection's own overrides go with it, for the same reason: `N:` applied to
+    // one host must not silently disable TN3270E for the next one.
+    this.per = {};
     this.emit('disconnect');
   }
 
@@ -366,7 +393,7 @@ export class Session {
   private handleTn3270eSubneg(body: Uint8Array, layer: TelnetLayer | undefined): void {
     this.e ??= initialState({
       terminalType: this.opts.terminalType ?? TERMINAL_TYPE,
-      lus: this.opts.lus ?? [],
+      lus: this.per.lus ?? this.opts.lus ?? [],
     });
     const r = negotiate(this.e, body);
     this.e = r.next;
