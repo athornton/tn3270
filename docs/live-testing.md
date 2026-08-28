@@ -1186,6 +1186,79 @@ error, for the reason the TLS section records. That argv is pinned by
 passes it, each mutation-checked — so this harness cannot rot the way `pty-smoke.py`
 and `live-drive.py` silently did when TLS went on by default.
 
+## How Hercules device selection actually works — 2026-08-28
+
+Prompted by the question "are MOD2 and MOD4 defined as LU names?". They are **group
+names**, and they are **not** reachable via TN3270E. Two findings, one measured and one
+from Hercules' own source.
+
+### 1. Both hosts REFUSE TN3270E when offered — stronger than never offering it
+
+Previously recorded as "neither host ever mentions option 40", which was true but only
+covered the passive case. Probed directly with a raw socket:
+
+| probe | VM/370 :3270 | MVS TK5 :3271 |
+|---|---|---|
+| connect and just listen | `ff fd 18` (DO TERMINAL-TYPE) | `ff fd 18` |
+| send `IAC WILL TN3270E` (`ff fb 28`) first | **`ff fe 28` — DONT TN3270E** | **`ff fe 28`** |
+
+So it is not that Hercules waits to be asked. **It says no.** A client cannot obtain
+TN3270E from either host by any route, which closes off the possibility that our client
+was simply failing to offer it — worth knowing, because "the host never offered" and "the
+host refuses" have very different implications for whether the gap is ours.
+
+### 2. The selector rides on the TERMINAL-TYPE string, not on an LU name
+
+From `~/git/hyperion/console.c`, `negotiate_ttype()` at lines 2234-2246:
+
+```c
+s = strchr( tn->ttype, '@' );                        /* '@' in the TERMINAL-TYPE string */
+if (s && strlen( s ) < sizeof( tn->tgroup ))
+    strlcpy( tn->tgroup, &s[1], sizeof( tn->tgroup ));   /* after @ = GROUP name */
+if (s && sscanf( s, "@%hx%c", &devnum, &c ) == 1)        /* ...or a hex DEVICE NUMBER */
+    tn->devnum = devnum;
+```
+
+and its header comment: *"An optional device number suffix (example: `IBM-3270@01F`) may be
+specified to request allocation to a specific device number."* The group is matched against
+the third token of the device statement in `vm370ce.conf` (`dev->filename`, compared at
+`console.c:2940`), which is where `MOD2` and `MOD4` come from.
+
+**So this is a Hercules extension carried in the terminal type, and it needs no TN3270E at
+all.** Our client already sends it with no code change:
+
+```bash
+node packages/cli/dist/main.js -insecure -model 3278-4-E \
+    --terminal-type 'IBM-3278-4-E@MOD4' ...
+```
+
+traced as `TERMINAL-TYPE IS IBM-3278-4-E@MOD4`, and the host answered with `7e` — Erase/
+Write **Alternate**, the 43-row path — with zero program checks.
+
+**It demonstrably steers**, which is the part worth checking rather than assuming: `@MOD2`
+reached a formatted 22-field panel while `@MOD4` and `@01C0` both reached a device that
+presented differently (0 fields), and no suffix behaved like `@MOD2`. Three distinct
+outcomes from three selectors is selection, not luck.
+
+**THIS CORRECTS AN EARLIER CONCLUSION IN THIS FILE AND IN HANDOFF.** The note that "a plain
+TN3270 client cannot request a device address (needs TN3270E device names), so Hercules
+takes the first free device, and selecting a geometry means configuring which displays are
+attachable" is **wrong**. You can choose at connect time with `@group` or `@devnum`, and no
+config editing is needed to pick between the 3277 pool and the 3278-4s.
+
+### Open lead, NOT diagnosed
+
+With an `@`-suffixed terminal type, `@MOD4` and `@01C0` reported **0 fields** where `@MOD2`
+reported 22, and the status line said model 2 / 24x80 despite `-model 3278-4-E`. The
+obvious hypothesis — that the `@` suffix defeats geometry resolution — **was tested and is
+not supported**: calling `resolveAlternateSize` directly returned `undefined` for the plain
+`IBM-3278-4-E` case too, which means that ad-hoc call used the wrong option shape rather
+than exposing a defect. EWA is live-verified elsewhere in this file, so the real code path
+works. **Unresolved: whether 0 fields on a MOD4 device is a real client problem or just the
+logon panel that device happens to present.** Start by reading how `main.ts` builds
+`typeOpts` for `resolveAlternateSize`, then re-run the three selectors and compare screens
+rather than status lines.
+
 ## Stage 2b strict addition, live against VM/370 — verified 2026-08-28
 
 **Closes the one success criterion stage 2b had to leave open.** VM/CE 1.2 on
