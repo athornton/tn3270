@@ -55,6 +55,7 @@ const CASES = [
     // Not a real host: the trace is replayed, so nothing is dialled. A parseable target is
     // still required because the host argument is mandatory in every front end.
     host: '127.0.0.1:1',
+    // no extraArgv: draws the readable 'default' scheme
   },
   {
     name: 'synthetic-ispf-green',

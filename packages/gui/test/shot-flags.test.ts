@@ -63,4 +63,12 @@ describe('the screenshot harness', () => {
     // That single line would make every golden unreproducible.
     expect(shot).not.toContain('imageSmoothingEnabled = true');
   });
+
+  it("threads a case's extraArgv into the process it spawns", () => {
+    // Without this, the green golden would be captured with the DEFAULT scheme and would
+    // quietly re-baseline to the wrong palette on the next --update. `npm test` cannot see
+    // that; this file is the only thing standing between it and a silent wrong baseline.
+    expect(shot).toMatch(/\.\.\.\(kase\.extraArgv \?\? \[\]\)/);
+    expect(shot).toMatch(/extraArgv:\s*\[['"]-scheme['"]/);
+  });
 });
