@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Screen, resolve, Colour, colourRgb, type ResolvedCell } from '@tn3270/core';
+import { Screen, resolve, Colour, type ResolvedCell } from '@tn3270/core';
+import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { drawList, type AtlasGeometry } from '../src/drawlist.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 
@@ -17,9 +18,9 @@ function screenWith(chars: readonly [number, number][]): Screen {
   return s;
 }
 
-const listFor = (s: Screen, oia?: string) => {
+const listFor = (s: Screen, scheme: Scheme = SCHEMES.default!, oia?: string) => {
   const snap = s.snapshot();
-  return drawList(snap, resolve(snap), atlas, oia);
+  return drawList(snap, resolve(snap), atlas, scheme, oia);
 };
 
 describe('drawList', () => {
@@ -44,7 +45,7 @@ describe('drawList', () => {
   it('converts Colour3279 codes to RGB, since the atlas is colourless coverage', () => {
     const dl = listFor(screenWith([[0, 0xc1]]));
     // Default unformatted foreground is green on a 3279.
-    expect(dl.cells[0]!.fg).toEqual(colourRgb(Colour.GREEN));
+    expect(dl.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Colour.GREEN));
     expect(dl.cells[0]!.fg).not.toBe(Colour.GREEN);      // a code, not an Rgb
   });
 
@@ -54,9 +55,9 @@ describe('drawList', () => {
     // rather than against literal RGB, so a palette change does not break it.
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
-    const plain = drawList(snap, resolve(snap), atlas).cells[0]!;
+    const plain = drawList(snap, resolve(snap), atlas, SCHEMES.default!).cells[0]!;
     const flipped = resolve(snap).map((c, i): ResolvedCell => (i === 0 ? { ...c, reverse: true } : c));
-    const reversed = drawList(snap, flipped, atlas).cells[0]!;
+    const reversed = drawList(snap, flipped, atlas, SCHEMES.default!).cells[0]!;
     expect(reversed.fg).toEqual(plain.bg);
     expect(reversed.bg).toEqual(plain.fg);
   });
@@ -74,7 +75,7 @@ describe('drawList', () => {
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
     const hidden = resolve(snap).map((c, i): ResolvedCell => (i === 0 ? { ...c, hidden: true } : c));
-    const dl = drawList(snap, hidden, atlas);
+    const dl = drawList(snap, hidden, atlas, SCHEMES.default!);
     expect(dl.cells[0]!.glyph).toBe(atlas.index[ebcdicToCg(0x40)]);   // CG space
     expect(dl.cells[0]!.glyph).not.toBe(atlas.index[ebcdicToCg(0xc1)]);
   });
@@ -86,7 +87,7 @@ describe('drawList', () => {
     const snap = s.snapshot();
     const flagged = resolve(snap).map((c, i): ResolvedCell =>
       (i === 0 ? { ...c, blink: true, intensify: true, underscore: true } : c));
-    expect(drawList(snap, flagged, atlas).cells[0]).toMatchObject({
+    expect(drawList(snap, flagged, atlas, SCHEMES.default!).cells[0]).toMatchObject({
       blink: true, intensify: true, underline: true,
     });
   });
@@ -110,7 +111,7 @@ describe('the OIA', () => {
     // fillText would pull in a system font, and font rasterisation is the machine-dependent
     // thing that would stop screenshot goldens being byte-reproducible. So the OIA is glyphs
     // from the same atlas as the screen.
-    const dl = listFor(screenWith([]), 'X Wait');
+    const dl = listFor(screenWith([]), SCHEMES.default!, 'X Wait');
     expect(dl.oia!.cells).toHaveLength(6);
     // 'X' is EBCDIC 0xe7, which is CG-mapped like any other character.
     expect(dl.oia!.cells[0]!.glyph).toBe(atlas.index[ebcdicToCg(0xe7)]);
@@ -121,7 +122,7 @@ describe('the OIA', () => {
 
   it('truncates the OIA at the screen width rather than wrapping', () => {
     // A status line that reflowed would move the screen above it.
-    const dl = listFor(screenWith([]), 'y'.repeat(200));
+    const dl = listFor(screenWith([]), SCHEMES.default!, 'y'.repeat(200));
     expect(dl.oia!.cells).toHaveLength(80);
     expect(dl.height).toBe(25 * atlas.cellHeight);
   });
@@ -129,7 +130,7 @@ describe('the OIA', () => {
   it('is drawn BELOW the screen and is not one of the 1920 cells', () => {
     // The spec is explicit that the OIA lives outside the screen buffer. If it were a
     // cell, a host write could overwrite the status line.
-    const dl = listFor(screenWith([]), 'X Wait');
+    const dl = listFor(screenWith([]), SCHEMES.default!, 'X Wait');
     expect(dl.cells).toHaveLength(24 * 80);
     expect(dl.oia?.text).toBe('X Wait');
     expect(dl.oia!.y).toBe(24 * atlas.cellHeight);
@@ -140,5 +141,39 @@ describe('the OIA', () => {
     const dl = listFor(screenWith([]));
     expect(dl.oia).toBeUndefined();
     expect(dl.height).toBe(24 * atlas.cellHeight);
+  });
+});
+
+describe('drawList honours the scheme it is given', () => {
+  it("draws the scheme's blue, not core's", () => {
+    // The bug this change fixes: the GUI resolved through core's colourRgb, whose blue is
+    // pure #0000ff and unreadable on black. A default 3279 field is green, so recolour one
+    // cell by hand rather than relying on the default attribute.
+    const s = screenWith([[0, 0xc1]]);
+    const snap = s.snapshot();
+    const recoloured = resolve(snap).map((c, i) =>
+      i === 0 ? { ...c, fg: Colour.BLUE } : c);
+
+    const readable = drawList(snap, recoloured, atlas, SCHEMES.default!);
+    const saturated = drawList(snap, recoloured, atlas, SCHEMES['3279']!);
+
+    expect(readable.cells[0]!.fg).toEqual([120, 144, 240]);
+    expect(saturated.cells[0]!.fg).toEqual([0, 0, 255]);
+  });
+
+  it('draws the default green field colour from the scheme', () => {
+    expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.default!).cells[0]!.fg)
+      .toEqual([36, 216, 48]);                       // zti green
+    expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.x3270!).cells[0]!.fg)
+      .toEqual([0x32, 0xcd, 0x32]);                  // x3270 limegreen
+  });
+
+  it("draws the OIA in the scheme too, not in core's colours", () => {
+    // The OIA is our chrome, so no host byte says what colour it is -- but it must not be
+    // the one scheme-independent thing on screen.
+    const list = listFor(screenWith([[0, 0xc1]]), SCHEMES.green!, 'X Wait');
+    const oia = list.oia!.cells[list.oia!.cells.length - 1]!;
+    expect(oia.fg).toEqual([0, 255, 0]);             // green's LIME for neutral-white
+    expect(oia.bg).toEqual([0, 0, 0]);
   });
 });

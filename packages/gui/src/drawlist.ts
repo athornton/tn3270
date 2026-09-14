@@ -1,10 +1,14 @@
 import {
-  colourRgb, cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
+  cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
 } from '@tn3270/core';
+import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 
 /**
  * Turn a screen snapshot plus its resolved attributes into per-cell draw instructions.
+ *
+ * THIS FILE RUNS IN THE MAIN PROCESS ONLY. `renderer.js` reaches it through `import type`
+ * alone, which erases, so the value import above cannot reach the browser. Task 4 pins that.
  *
  * ## PURE, AND THAT IS THE POINT
  *
@@ -78,6 +82,7 @@ export function drawList(
   snapshot: ScreenSnapshot,
   resolved: readonly ResolvedCell[],
   atlas: AtlasGeometry,
+  scheme: Scheme,
   oiaText?: string,
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
@@ -91,8 +96,8 @@ export function drawList(
 
     // Reverse video swaps the pair rather than picking a fixed inverse: the cell's own
     // colours are what a 3279 inverts.
-    const fg = colourRgb(r.reverse ? r.bg : r.fg);
-    const bg = colourRgb(r.reverse ? r.fg : r.bg);
+    const fg = schemeRgb(scheme, r.reverse ? r.bg : r.fg);
+    const bg = schemeRgb(scheme, r.reverse ? r.fg : r.bg);
 
     cells.push({
       x: col * atlas.cellWidth,
@@ -116,7 +121,7 @@ export function drawList(
         oia: {
           text: oiaText,
           y: oiaY,
-          cells: oiaCells(oiaText, oiaY, snapshot.cols, atlas),
+          cells: oiaCells(oiaText, oiaY, snapshot.cols, atlas, scheme),
         },
       }
       : {}),
@@ -134,10 +139,10 @@ export function drawList(
  * status line that reflowed would move the screen.
  */
 function oiaCells(
-  text: string, y: number, cols: number, atlas: AtlasGeometry,
+  text: string, y: number, cols: number, atlas: AtlasGeometry, scheme: Scheme,
 ): readonly DrawCell[] {
-  const fg = colourRgb(Colour.NEUTRAL_WHITE);
-  const bg = colourRgb(Colour.NEUTRAL_BLACK);
+  const fg = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
+  const bg = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
   const out: DrawCell[] = [];
   const chars = [...text].slice(0, cols);
   for (let i = 0; i < chars.length; i++) {

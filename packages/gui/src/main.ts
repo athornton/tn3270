@@ -4,7 +4,9 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
-import { applyAction, defaultSession, describeTlsError, type Action } from '@tn3270/frontend';
+import {
+  applyAction, defaultSession, describeTlsError, resolveScheme, type Action,
+} from '@tn3270/frontend';
 import { parseGuiArgs, UsageError } from './args.js';
 import { drawList, type AtlasGeometry } from './drawlist.js';
 import { blankColumns, bestScale } from './blit.js';
@@ -111,6 +113,10 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
+  // string lookup in the paint path.
+  const scheme = args.scheme ?? resolveScheme();
+
   // Built once and passed to both resolvers, so the terminal-type string and the geometry
   // can never come from different readings of the same arguments.
   const typeOpts = {
@@ -180,7 +186,7 @@ app.whenReady().then(async () => {
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
     const list = drawList(
-      snapshot, resolve(snapshot), geometry, oia === '' ? undefined : oia,
+      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia,
     );
     fit(list);
     win.webContents.send('frame', list);

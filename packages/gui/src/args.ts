@@ -1,6 +1,6 @@
 import {
-  resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
-  type TlsFlags, type TlsOptions,
+  resolveHostSpec, takeTlsFlag, resolveTls, resolveScheme, SCHEME_NAMES, TLS_USAGE,
+  type TlsFlags, type TlsOptions, type Scheme,
 } from '@tn3270/frontend';
 
 /**
@@ -12,7 +12,8 @@ import {
  * rule, and the two defects fixed on 2026-08-28 were both exactly that.
  *
  * Deliberately NOT the same as the TUI in one respect: there is no `--colors`. A canvas has
- * no terminfo depth to detect; it draws 24-bit RGB from the 3279 palette.
+ * no terminfo depth to detect; it draws 24-bit RGB straight from the scheme. `-scheme` IS
+ * shared, because which palette to draw is not a terminal question.
  */
 export class UsageError extends Error {
   constructor(message: string) {
@@ -34,10 +35,12 @@ export interface GuiArgs {
   tls?: TlsOptions;
   /** Offer TN3270E. Absent means the default, which is on. */
   tn3270e?: boolean;
+  /** `-scheme`. Absent means the readable default. */
+  scheme?: Scheme;
 }
 
 export const USAGE =
-  `usage: tn3270-gui [-model M] [--terminal-type T] [-tn3270e on|off] `
+  `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
   + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -67,6 +70,18 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         args.model = value;
         i++;
         break;
+      case '-scheme': {
+        if (value === undefined) {
+          throw new UsageError(`-scheme needs a value: ${SCHEME_NAMES.join(', ')}`);
+        }
+        try {
+          args.scheme = resolveScheme(value);
+        } catch (err) {
+          throw new UsageError(err instanceof Error ? err.message : String(err));
+        }
+        i++;
+        break;
+      }
       case '--terminal-type':
         if (value === undefined) {
           throw new UsageError('--terminal-type needs a value, e.g. --terminal-type IBM-DYNAMIC');
