@@ -131,23 +131,3 @@ describe('schemeRgb', () => {
     expect(() => schemeRgb(SCHEMES.default!, 0xef)).toThrow(RangeError);
   });
 });
-
-describe('one source of truth for both front ends', () => {
-  // THE requirement behind this whole change. The GUI drew #0000ff while the TUI drew zti's
-  // blue and nothing failed, because nothing compared them. Both now derive from schemeRgb:
-  // the TUI's sgrFor reads scheme.rgb, and the GUI's drawList calls schemeRgb. This pins that
-  // there is exactly one table behind both, for every scheme and every code.
-  it('resolves every code in every scheme through schemeRgb alone', () => {
-    for (const name of SCHEME_NAMES) {
-      const scheme = SCHEMES[name]!;
-      for (const code of ALL_CODES) {
-        // What the GUI puts in a DrawCell.fg ...
-        const rgb = schemeRgb(scheme, code);
-        // ... and the parameters the TUI's truecolour SGR is built from. Identical by
-        // construction, and this fails the moment either grows a private table again.
-        expect(rgb, `${name} ${COLOUR_NAMES[code]}`).toBe(scheme.rgb[code]);
-        expect(rgb).toHaveLength(3);
-      }
-    }
-  });
-});

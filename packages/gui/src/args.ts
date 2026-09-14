@@ -74,6 +74,8 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         if (value === undefined) {
           throw new UsageError(`-scheme needs a value: ${SCHEME_NAMES.join(', ')}`);
         }
+        // resolveScheme throws RangeError listing the valid names; rethrow as a UsageError
+        // so the front end reports it the same way it reports every other bad flag.
         try {
           args.scheme = resolveScheme(value);
         } catch (err) {

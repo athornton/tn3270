@@ -78,6 +78,8 @@ export interface DrawList {
 /** EBCDIC space, which is what a hidden cell draws instead of its own character. */
 const EBCDIC_SPACE = 0x40;
 
+// `scheme` comes BEFORE `oiaText`: an existing call passing OIA text positionally would
+// otherwise silently take it as the scheme, with no type error and no failing test.
 export function drawList(
   snapshot: ScreenSnapshot,
   resolved: readonly ResolvedCell[],

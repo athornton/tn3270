@@ -157,7 +157,11 @@ describe('drawList honours the scheme it is given', () => {
     const readable = drawList(snap, recoloured, atlas, SCHEMES.default!);
     const saturated = drawList(snap, recoloured, atlas, SCHEMES['3279']!);
 
-    expect(readable.cells[0]!.fg).toEqual([120, 144, 240]);
+    // DERIVED from the registry on purpose. The literal value is pinned once, in
+    // frontend's palette.test.ts; what THIS test asserts is that drawList consults the
+    // registry at all -- so it fails if drawlist.ts ever regrows a private table, which is
+    // the drift that shipped two different blues in the first place.
+    expect(readable.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Colour.BLUE));
     expect(saturated.cells[0]!.fg).toEqual([0, 0, 255]);
   });
 

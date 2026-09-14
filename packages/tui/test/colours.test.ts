@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Colour } from '@tn3270/core';
-import { SCHEMES, resolveScheme } from '@tn3270/frontend';
+import { SCHEMES, resolveScheme, schemeRgb } from '@tn3270/frontend';
 import { detectDepth, sgrFor, type Depth } from '../src/colours.js';
 
 const DEFAULT = SCHEMES.default!;
@@ -150,7 +150,13 @@ describe('sgrFor across schemes', () => {
   it('emits the scheme it is given, not a fixed table', () => {
     // The defect this whole change exists to fix: the GUI drew #0000ff while the TUI drew
     // zti's blue. Now both come from a named scheme and this pins the difference.
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe('38;2;120;144;240');
+    //
+    // DERIVED from the registry on purpose. The literal value is pinned once, in
+    // frontend's palette.test.ts; what THIS test asserts is that the TUI consults the
+    // registry at all -- so it fails if colours.ts ever regrows a private table, which is
+    // the drift that shipped two different blues in the first place.
+    const [r, g, b] = schemeRgb(SCHEMES.default!, Colour.BLUE);
+    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe(`38;2;${r};${g};${b}`);
     expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES['3279']!)).toBe('38;2;0;0;255');
     expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.x3270!)).toBe('38;2;30;144;255');
   });

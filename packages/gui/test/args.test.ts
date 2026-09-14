@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { SCHEMES } from '@tn3270/frontend';
 import { parseGuiArgs, UsageError } from '../src/args.js';
 
 /**
@@ -23,6 +24,18 @@ describe('parseGuiArgs', () => {
     expect(parseGuiArgs(['--terminal-type', 'IBM-3278-4-E@MOD4', 'vm']))
       .toMatchObject({ terminalType: 'IBM-3278-4-E@MOD4' });
     expect(parseGuiArgs(['-tn3270e', 'off', 'vm']).tn3270e).toBe(false);
+  });
+
+  it('parses -scheme, case-insensitively, and rejects an unknown name by listing them', () => {
+    expect(parseGuiArgs(['-scheme', 'green', 'vm']).scheme).toBe(SCHEMES.green);
+    expect(parseGuiArgs(['-scheme', 'GreenScreen', 'vm']).scheme).toBe(SCHEMES.green);
+    expect(parseGuiArgs(['vm']).scheme).toBeUndefined();
+    // A bare `-scheme` with nothing after it -- the flag's own "needs a value" check,
+    // not resolveScheme's unknown-name path.
+    expect(() => parseGuiArgs(['-scheme'])).toThrow(UsageError);
+    expect(() => parseGuiArgs(['-scheme'])).toThrow(/-scheme needs a value/);
+    expect(() => parseGuiArgs(['-scheme', 'solarized', 'vm'])).toThrow(UsageError);
+    expect(() => parseGuiArgs(['-scheme', 'solarized', 'vm'])).toThrow(/default, 3279, x3270, green/);
   });
 
   it('refuses L: together with -insecure, as the others do', () => {
