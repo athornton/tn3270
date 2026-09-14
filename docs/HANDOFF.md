@@ -220,6 +220,28 @@ nothing from the older staging has been dropped. GDDM vector graphics remains th
 thing deliberately NOT on the roadmap: IBM is sunsetting it, and the route is PS driving
 the 3279 screen directly.
 
+8. **Real TN3270E, and `IBM-DYNAMIC` screen size.** Added by the user 2026-09-14, position
+   not stated. **Blocked on access to a real modern z/VM or z/OS, which the user had still
+   not arranged as of 2026-09-14** (first mentioned as being arranged 2026-08-27).
+   **The two halves are NOT equally blocked, and the difference is worth acting on:**
+   - **Live TN3270E is genuinely blocked.** Both Hercules systems *refuse* option 40 rather
+     than merely not offering it — send `ff fb 28` and both answer `ff fe 28`, measured
+     passively, accepting and refusing. **No client can get TN3270E here by any route.** So
+     what item 1 lacks is a live witness, not an implementation: the negotiation is verified
+     against real s3270 4.5ga6 and the in-repo `e-server.py`. Quote that qualification every
+     time. The genuinely unbuilt parts that a real host would unlock: BIND-IMAGE with a real
+     BIND (deliberately not requested — granting it and sending no BIND stops s3270 entering
+     3270 mode at all), the printer session, and LU/device names actually being honoured.
+   - **`IBM-DYNAMIC` is NOT blocked in the same way.** Its client-side prerequisite is Read
+     Partition (Query) / Query Reply, and **MVS 3.8j TK5's TSO issues one** — captured
+     2026-08-17 in `packages/fixtures/x3270/tso-query-reply.txt`, with ttype `IBM-3278-2-E`
+     and **TN3270E not negotiated at all**, so the trigger is the `-E` claim and nothing to
+     do with option 40. What a modern host would add is a host that *asks* for dynamic
+     geometry and honours the answer; the mechanism can be exercised on TK5 today.
+     `IBM-DYNAMIC` is currently out of scope by decision (`termtype.ts:40-44`) — it is not a
+     model but "ask me via Query Reply", and x3270 sends it only for oversize
+     (`telnet.c:2101`).
+
 The method note, because it paid off twice inside one exchange: an end-of-session aside
 is not a decision recorded against the spec. This roadmap was written down as a QUESTION
 with the superseded items left in place rather than deleted, which is what let the user

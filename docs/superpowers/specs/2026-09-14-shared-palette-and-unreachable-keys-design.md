@@ -322,6 +322,24 @@ affected. Missing any of them leaves the README contradicting itself.
 - **The default flip wants one live run per host with NO `-model` flag at all**, which is the
   case that was broken. Expected: MVS TSO logs on where it previously gave `IKT00405I`, and
   VM/370 is unaffected. Both are reachable from this sandbox.
+- **The flip puts the Query Reply path into the DEFAULT MVS session, and that must be
+  confirmed from a trace rather than inferred.** TK5's TSO issues a Read Partition (Query) to
+  an `IBM-3278-2-E` client and **waits** for the answer — captured 2026-08-17 in
+  `packages/fixtures/x3270/tso-query-reply.txt`, with TN3270E *not* negotiated, so the trigger
+  is the `-E` claim alone. Two consequences:
+  - The user's successful `-model 3278-4-E` logon **strongly implies our Query Reply was
+    accepted by a live host for the first time** — the session would have stalled otherwise,
+    and it did not. That is inference from an outcome, so **the plan must confirm it in a wire
+    trace**; the standing rule here is that a passing outcome does not tell you which of its
+    inputs was exercised.
+  - After the flip this stops being opt-in: any Query Reply defect reaches a user who passed no
+    flags. That is an argument for the flip (real coverage by default) *and* a reason the live
+    no-flag run above is mandatory rather than nice to have.
+- **`packages/fixtures/x3270/README.md` and the fixture's own header are now stale** and get
+  corrected: both say the Query exchange "is what our client cannot yet perform, and the reason
+  TSO is unreachable". Query Reply landed in stage 2a, and the user has since logged on to TSO.
+  A fixture header that misdescribes the current state is how a future session re-derives
+  solved work.
 
 ## Live findings from the MVS session (user, 2026-09-14)
 
