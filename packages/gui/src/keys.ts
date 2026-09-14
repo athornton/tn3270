@@ -25,6 +25,11 @@ import type { Action } from '@tn3270/frontend';
  */
 export interface KeyLike {
   readonly key: string;
+  /**
+   * The PHYSICAL key. Load-bearing for Alt chords: on macOS, Option-1 reports
+   * `key === '¡'`, so an `e.key` binding works on Linux and fails on a Mac.
+   */
+  readonly code: string;
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
   readonly metaKey: boolean;
@@ -43,6 +48,8 @@ const NAMED: Readonly<Record<string, Action>> = Object.freeze({
   Delete: { kind: 'delete' },
   // vt220 Select/End bound to EraseEOF, following c3270 -- a CHOICE, not a derivation.
   End: { kind: 'eraseEOF' },
+  // x3270's Toggle(insertMode), fb-x3270:210.
+  Insert: { kind: 'toggleInsert' },
 });
 
 /**
@@ -59,6 +66,12 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   r: { kind: 'reset' },
   u: { kind: 'eraseInput' },
   ']': { kind: 'quit' },
+  a: { kind: 'attn' },
+});
+
+/** Physical digit keys that carry the PA keys when Alt is held. */
+const PA_CODES: Readonly<Record<string, number>> = Object.freeze({
+  Digit1: 1, Digit2: 2, Digit3: 3,
 });
 
 export function actionForKey(e: KeyLike): Action | null {
@@ -69,7 +82,16 @@ export function actionForKey(e: KeyLike): Action | null {
     // letter. `?? null` is what drops Ctrl-Z rather than typing "z".
     return CTRL[e.key.toLowerCase()] ?? null;
   }
-  // A Meta or Alt chord belongs to the window or the OS, never to the field.
+  // The PA keys, on Alt+digit as x3270 and c3270 both have them (Common/fb-c3270:43-45).
+  // Matched on e.code and not e.key: see the note on KeyLike.code. Checked BEFORE the bail
+  // below, which is what used to make every PA key unreachable in this front end.
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    const pa = PA_CODES[e.code];
+    return pa !== undefined ? { kind: 'pa', n: pa } : null;
+  }
+
+  // A Meta or Alt chord belongs to the window or the OS, never to the field. Cmd-digit is
+  // deliberately NOT a PA: that is where menu accelerators live.
   if (e.metaKey || e.altKey) return null;
 
   if (e.key === 'Tab') return e.shiftKey ? { kind: 'backTab' } : { kind: 'tab' };
