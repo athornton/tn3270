@@ -19,3 +19,12 @@
 // this package exists to prevent.
 export { parseHostSpec, resolveHostSpec } from './hostspec.js';
 export type { HostSpec, ResolvedHost } from './hostspec.js';
+
+// The TLS flags. Every front end parses the same ones and must resolve them by the same
+// rules -- they were already shared between two front ends for exactly this reason.
+// `tcpConnect` comes too: it is the one transport all of them need.
+export {
+  takeTlsFlag, resolveTls, tcpConnect, describeTlsError,
+  DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
+} from './tls.js';
+export type { TlsFlags, TlsOptions } from './tls.js';

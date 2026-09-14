@@ -2,8 +2,9 @@ import {
   Session, AID, PF_AIDS, PA_AIDS, KeyboardState,
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
-import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
-import { resolveHostSpec } from '@tn3270/frontend';
+import {
+  tcpConnect, DEFAULT_TLS, resolveHostSpec, type TlsOptions,
+} from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
 import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';
