@@ -20,6 +20,11 @@ goldens deterministic.
 This plan was written before `resolve()`'s actual return type had been read, and Task 5 was
 wrong in three ways. Corrected in place below; recorded here because the reasoning matters:
 
+0. **THE ATLAS IS NOT EBCDIC-INDEXED, found while executing Task 3.** The font is in CG
+   order, not EBCDIC: `ENCODING 16` is `space` (EBCDIC `0x40`) and `ENCODING 160` is `A`
+   (EBCDIC `0xc1`). `packages/gui/src/cg.ts` carries the map, generated from x3270's
+   `ebc2cg0` at `x3270/xtables.c:76` and corroborated by the font's glyph names. So the
+   draw list looks up `ebcdicToCg(cell.ebcdic)`, not `cell.ebcdic`.
 1. **`hidden` WAS MISSING, AND THAT IS A SECURITY BUG.** `ResolvedCell.hidden` is field
    intensity `0x0C`, and core's own comment says it is *"the ONLY thing standing between a
    password field and the screen"* — `text` is deliberately NOT pre-redacted. As originally

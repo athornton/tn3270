@@ -162,11 +162,21 @@ and `3270gr.bdf` for line drawing). Verified on the box, and the licence is **BS
 3-clause** (Paul Mattes 1993-2009, Jeff Sparkes 1990, GTRC 1989) — redistributable in
 binary form with the notice, which ships with the app.
 
-**The glyph ordering is what makes this cheap.** The BDF's own comments record it: *"Page
-0: EBCDIC US-International set, CG order; Page 1: EBCDIC APL/APL2 set, CG order; Page 2:
-DEC line-drawing characters."* Our cells already hold EBCDIC, so the atlas is a **direct
-lookup with no translation step** — and APL, which a 3270 client needs and a Unicode
-monospace font will not have, is already there.
+**CORRECTED 2026-09-14: THE "NO TRANSLATION STEP" CLAIM WAS WRONG.** The BDF's comment
+reads *"Page 0: EBCDIC US-International set, CG order"* — the character SET is EBCDIC's, but
+the ORDER is the **Character Generator's**, which is not the same thing. Measured from the
+vendored font's own glyph names: `ENCODING 16` is `space` where EBCDIC space is `0x40`, and
+`ENCODING 160` is `A` where EBCDIC `A` is `0xc1`. Found by a test, not by reading.
+
+So the atlas needs an EBCDIC→CG map. That is `packages/gui/src/cg.ts`, generated
+mechanically from `ebc2cg0[256]` in x3270's `x3270/xtables.c:76` — the same BSD-3 source as
+the font, so table and glyphs cannot disagree — and independently corroborated by the font's
+glyph names. **The atlas is still the right choice** (APL really is free on page 1, and
+bitmaps at integer scale really are deterministic); the cost is one 256-byte lookup rather
+than zero. Unmapped EBCDIC bytes (55 of 256) point at CG 223, `boxsolid`, so junk from a
+host is visible rather than silently blank.
+
+APL, which a 3270 client needs and a Unicode monospace font will not have, is on page 1.
 
 A committed BDF parser converts to a sprite atlas at build time. Bundling a monospace TTF
 and using `fillText` was rejected: it is not the authentic 3278/3279 look the project
