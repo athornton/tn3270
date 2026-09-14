@@ -1,4 +1,4 @@
-import { Colour, type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
+import { type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
 
 /**
  * The display palettes every front end draws from, and the ANSI slots they quantise to.
@@ -21,7 +21,8 @@ import { Colour, type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
  * `green` is what forces this, and the RGB-only shape looks sufficient right up to the
  * moment it fails: with one shared slot map, a green session would render green at
  * truecolour and blue/red/yellow on a sixteen-colour terminal. The slot map is part of a
- * scheme's identity, which is why `ANSI_16` moved out of the TUI to sit here.
+ * scheme's identity, which is why it is scheme data here rather than the TUI's private
+ * `ANSI_16` table.
  *
  * Quantisation ITSELF stays in the TUI — `detectDepth`, the 6x6x6 cube, the SGR strings.
  * That is genuinely terminal-specific. Which slot a colour belongs in is not.
@@ -219,6 +220,3 @@ export function schemeRgb(scheme: Scheme, code: Colour3279): Rgb {
   }
   return rgb;
 }
-
-/** Re-exported so a consumer needs one import for "the palette". */
-export { Colour };

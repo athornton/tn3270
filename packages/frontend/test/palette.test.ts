@@ -14,6 +14,10 @@ describe('the scheme registry', () => {
     expect(DEFAULT_SCHEME).toBe('default');
   });
 
+  it('has no scheme in SCHEMES missing from SCHEME_NAMES', () => {
+    expect(new Set(Object.keys(SCHEMES))).toEqual(new Set(SCHEME_NAMES));
+  });
+
   // A scheme added later with a missing code would render `undefined` as a colour, which
   // in the GUI is a thrown RangeError mid-frame and in the TUI a silently uncoloured cell.
   it('gives every scheme all sixteen codes in BOTH tables', () => {
