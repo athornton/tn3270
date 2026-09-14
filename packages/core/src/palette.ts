@@ -2,9 +2,15 @@
  * The 3279 colour palette: sixteen architected colour identifications and the
  * RGB each one renders as.
  *
- * IN CORE, NOT IN A FRONT END, deliberately. The TUI quantises these to whatever
- * the terminal supports, the GUI will fill canvas cells with them, and a web
- * front end will emit them as CSS. One table, three consumers.
+ * IN CORE BECAUSE IT IS THE ARCHITECTED MEANING, not because it is what gets drawn.
+ * This table answers "which colour IS code F1" and is pinned to GA23-0059 below. What a
+ * front end actually paints comes from the scheme registry in `packages/frontend/palette.ts`,
+ * where this table is the `3279` scheme's data — and where the READABLE default lives, since
+ * the pure `#0000ff` blue below is close to illegible on black.
+ *
+ * An earlier version of this comment said the TUI quantised these values and the GUI would
+ * fill cells with them. The first half was false from the day the TUI shipped its own table,
+ * and the resulting drift is what a user reported on 2026-09-14: two front ends, two blues.
  *
  * ## THE MANUAL'S TABLE IS OCR-DAMAGED — DO NOT TRANSCRIBE IT LITERALLY
  *
