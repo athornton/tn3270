@@ -25,7 +25,8 @@ import { resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import {
-  applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action,
+  applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, resolveScheme,
+  type Action, type Scheme,
 } from '@tn3270/frontend';
 
 /** How long to wait before deciding a lone ESC really was Escape. */
@@ -77,6 +78,8 @@ export interface AppOptions {
   stdout: OutputStream;
   host: HostProcess;
   depth?: Depth;
+  /** Which palette to draw. Absent means the readable default. */
+  scheme?: Scheme;
   mode3279?: boolean;
   /**
    * The key-binding hint drawn above the screen when the terminal has a spare
@@ -137,6 +140,7 @@ export class App {
     this.renderer = new TerminalRenderer({
       ...screen,
       depth: opts.depth ?? detectDepth(),
+      scheme: opts.scheme ?? resolveScheme(),
       layout: layout(this.terminal(), screen),
       ...(opts.hint !== undefined ? { hint: opts.hint } : {}),
     });

@@ -8,8 +8,8 @@
 
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import {
-  defaultSession, resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
-  type TlsFlags, type TlsOptions,
+  defaultSession, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, resolveTls,
+  TLS_USAGE, type Scheme, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { App, type HostProcess } from './app.js';
 import { layout } from './render.js';
@@ -27,6 +27,8 @@ export interface TuiArgs {
   terminalType?: string;
   /** Absent means detect from terminfo. */
   colors?: Depth;
+  /** `-scheme`. Absent means the readable default. */
+  scheme?: Scheme;
   /** The bare hostname: prefixes and the LU list are stripped by `resolveHostSpec`. */
   host?: string;
   /** Resolved and range-checked. Absent only when no host was given at all. */
@@ -113,6 +115,20 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         args.colors = depth;
         break;
       }
+      case '-scheme': {
+        if (value === undefined) {
+          throw new UsageError(`-scheme needs a value: ${SCHEME_NAMES.join(', ')}`);
+        }
+        // resolveScheme throws RangeError listing the valid names; rethrow as a UsageError
+        // so the front end reports it the same way it reports every other bad flag.
+        try {
+          args.scheme = resolveScheme(value);
+        } catch (err) {
+          throw new UsageError(err instanceof Error ? err.message : String(err));
+        }
+        i++;
+        break;
+      }
       default:
         if (flag.startsWith('-')) {
           throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
@@ -180,8 +196,8 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   const args = parseArgs(argv);
   if (args.host === undefined) {
     throw new UsageError(
-      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-tn3270e on|off] `
-      + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
+      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
+      + `[-tn3270e on|off] ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
     );
   }
 
@@ -225,6 +241,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
     host,
     hint: BANNER,
     ...(args.colors !== undefined ? { depth: args.colors } : {}),
+    ...(args.scheme !== undefined ? { scheme: args.scheme } : {}),
   });
   app.start();
   return 0;

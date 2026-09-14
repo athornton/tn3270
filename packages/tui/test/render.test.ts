@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Colour, type ResolvedCell } from '@tn3270/core';
+import { resolveScheme } from '@tn3270/frontend';
 import { layout, statusRowFor, TerminalRenderer, tooSmall, type Layout } from '../src/render.js';
 
 /** A 2x3 grid of plain green cells, with `text` from a string. */
@@ -363,7 +364,7 @@ describe('TerminalRenderer', () => {
   const FG_256_ALL = /\x1b\[[\d;]*38;5;\d+[\d;]*m/g;
 
   it('emits a colour escape when the colour changes mid-row', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     cells[1]!.fg = Colour.RED;
     const out = r.paint(cells, 0, 'status');
@@ -376,7 +377,7 @@ describe('TerminalRenderer', () => {
   it('does not repeat an identical SGR for adjacent cells', () => {
     // Six cells of one colour must not produce six escape sequences; that
     // triples the bytes written on every redraw over a slow link.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const out = r.paint(grid('ABCDEF'), 0, 'status');
     const escapes = out.match(FG_256_ALL) ?? [];
     // EXACTLY one, not "at most one per row": the cells are contiguous, so a
@@ -402,7 +403,7 @@ describe('TerminalRenderer', () => {
     // exactly one -- left every following cell inverted, turning each subsequent
     // SPACE into a solid green block and giving the page a mottled look. VM never
     // sends reverse, which is why only TK5 showed it.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     cells[0]!.reverse = true;              // one highlighted cell, then plain ones
     const out = r.paint(cells, 0, 's');
@@ -417,7 +418,7 @@ describe('TerminalRenderer', () => {
     // is why the monochrome case hid this for so long -- test the colour depths too.
     for (const depth of [0, 16, 256] as const) {
       for (const flag of ['reverse', 'blink', 'underscore', 'intensify'] as const) {
-        const r = new TerminalRenderer({ rows: 2, cols: 3, depth });
+        const r = new TerminalRenderer({ rows: 2, cols: 3, depth, scheme: resolveScheme() });
         const cells = grid('ABCDEF');
         cells[0]![flag] = true;
         const out = r.paint(cells, 0, 's');
@@ -429,7 +430,7 @@ describe('TerminalRenderer', () => {
   });
 
   it('emits the highlighting attributes it supports', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     cells[0]!.underscore = true;
     cells[1]!.reverse = true;

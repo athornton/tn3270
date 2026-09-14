@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SCHEMES } from '@tn3270/frontend';
 import { BANNER, parseArgs, UsageError } from '../src/main.js';
 
 // Importing this module is safe: the entry point is behind an
@@ -68,6 +69,15 @@ describe('parseArgs', () => {
 
   it('rejects a second host instead of silently taking one of them', () => {
     expect(() => parseArgs(['a:1', 'b:2'])).toThrow(/more than one host/);
+  });
+
+  it('parses -scheme, case-insensitively, and rejects an unknown name by listing them', () => {
+    expect(parseArgs(['-scheme', 'green', 'h']).scheme).toBe(SCHEMES.green);
+    expect(parseArgs(['-scheme', 'GreenScreen', 'h']).scheme).toBe(SCHEMES.green);
+    expect(parseArgs(['h']).scheme).toBeUndefined();
+    expect(() => parseArgs(['-scheme', 'solarized', 'h'])).toThrow(UsageError);
+    expect(() => parseArgs(['-scheme', 'solarized', 'h'])).toThrow(/default, 3279, x3270, green/);
+    expect(() => parseArgs(['-scheme', 'h'])).toThrow(UsageError);
   });
 });
 

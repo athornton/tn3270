@@ -34,70 +34,20 @@
 
 import { execFileSync } from 'node:child_process';
 import { type Colour3279 } from '@tn3270/core';
+import { type Scheme } from '@tn3270/frontend';
 
 /**
- * ## THE TUI HAS ITS OWN PALETTE, AND IT IS ZTI'S
+ * ## THE PALETTES LIVE IN `@tn3270/frontend`, NOT HERE
  *
- * Core's `PALETTE_3279` stays as it is -- it is the shared model, and a future GUI or
- * web front end may want different values again. This table is the TUI's presentation
- * choice, on the user's call: zti's colours are more pleasant in a terminal than core's
- * saturated primaries, and zti is the client being compared against.
+ * They used to be this file's `TUI_PALETTE` and `ANSI_16`, and that was the defect: the GUI
+ * drew core's saturated primaries while the TUI drew zti's gentler ones, so the same session
+ * had two different blues and one of them was unreadable on black. Both tables are now
+ * scheme data in `frontend/src/palette.ts`, including the slot map -- a monochrome-green
+ * scheme has to quantise onto green slots, so "which of sixteen slots" is scheme data too.
  *
- * F0-F7 are **zti's own values**, read from `tnz/zti.py:2813-2820` where they are
- * declared in curses' 0-1000 scale and converted here to 0-255 (`green_rgb =
- * (141, 847, 188)` -> `(36, 216, 48)`). Independently confirmed on the wire: a captured
- * zti session emits `38;2;35;215;47` for green, `38;2;120;144;239` for blue and
- * `38;2;87;239;239` for turquoise, which is this table to within rounding.
- *
- * **zti defines only these eight**, because it advertises only F1-F7 in its Color Query
- * Reply (`tnz/tnz.py:4329-4340`, `NP = 8`) and so is never sent the rest. We advertise
- * all sixteen, so F8-FF have to come from somewhere: they are **x3270's** `rgbmap`
- * (`c3270/screen.c:213-229`), the other reference implementation.
- *
- * NOTE F0 NEUTRAL-BLACK IS PURE BLACK HERE, as it is in zti. Core keeps 0x1a1a1a for
- * it. This is why core needs no divergence to give a black-looking background: the
- * default background resolves to F0, and F0 renders black.
+ * What stays here is genuinely terminal-specific and belongs to no other front end:
+ * terminfo depth detection, the 6x6x6 cube, and the SGR strings themselves.
  */
-const TUI_PALETTE: Readonly<Record<number, readonly [number, number, number]>> = Object.freeze({
-  0xf0: [0, 0, 0],          // zti: neutral black, PURE black
-  0xf1: [120, 144, 240],    // zti blue
-  0xf2: [240, 24, 24],      // zti red
-  0xf3: [255, 0, 255],      // zti pink
-  0xf4: [36, 216, 48],      // zti green
-  0xf5: [88, 240, 240],     // zti turquoise
-  0xf6: [255, 255, 0],      // zti yellow
-  0xf7: [255, 255, 255],    // zti neutral white
-  0xf8: [47, 79, 79],       // x3270 black (0x2f4f4f)
-  0xf9: [0, 0, 205],        // x3270 deep blue
-  0xfa: [255, 165, 0],      // x3270 orange
-  0xfb: [160, 32, 240],     // x3270 purple
-  0xfc: [144, 238, 144],    // x3270 pale green
-  0xfd: [150, 205, 205],    // x3270 pale turquoise
-  0xfe: [119, 136, 153],    // x3270 grey
-  0xff: [245, 245, 245],    // x3270 white
-});
-
-/**
- * The 16-colour slot for each 3279 colour, as an explicit table.
- *
- * ## WHY THIS IS A TABLE AND NOT NEAREST-RGB
- *
- * Nearest-RGB matching made the PALETTE responsible for 16-colour distinctness, which
- * is why core's values are saturated primaries: with any realistic palette, blue and
- * turquoise both land nearest ANSI cyan and collapse into one slot. Measured, for both
- * references -- x3270's `#1e90ff` blue and zti's `(120,144,240)` blue each quantise to
- * bright cyan, exactly like their turquoise.
- *
- * Deciding the slot explicitly separates the two questions -- what colour IS this
- * (above) versus which of sixteen slots does it occupy (here) -- so a pleasant palette
- * no longer costs correctness on a 16-colour terminal. `[ansiIndex, bright]`.
- */
-const ANSI_16: Readonly<Record<number, readonly [number, boolean]>> = Object.freeze({
-  0xf0: [0, false], 0xf1: [4, true],  0xf2: [1, true],  0xf3: [5, true],
-  0xf4: [2, true],  0xf5: [6, true],  0xf6: [3, true],  0xf7: [7, true],
-  0xf8: [0, false], 0xf9: [4, false], 0xfa: [3, true],  0xfb: [5, false],
-  0xfc: [2, true],  0xfd: [6, false], 0xfe: [7, false], 0xff: [7, true],
-});
 
 /** Colours the terminal can show. 0 means monochrome. */
 export type Depth = 0 | 8 | 16 | 256 | 16777216;
@@ -174,10 +124,12 @@ function cube256(r: number, g: number, b: number): number {
  * The SGR parameter string for one colour, e.g. `38;5;46`. Empty when monochrome.
  * The caller wraps it in `\x1b[...m`.
  */
-export function sgrFor(code: Colour3279, depth: Depth, which: 'fg' | 'bg'): string {
+export function sgrFor(
+  code: Colour3279, depth: Depth, which: 'fg' | 'bg', scheme: Scheme,
+): string {
   if (depth === 0) return '';
-  const rgb = TUI_PALETTE[code];
-  const slot = ANSI_16[code];
+  const rgb = scheme.rgb[code];
+  const slot = scheme.ansi16[code];
   if (rgb === undefined || slot === undefined) {
     // render.ts should never hand us an invalid code, but a throw here would take
     // down the whole screen for one bad cell.
