@@ -13,6 +13,12 @@ import { fileURLToPath } from 'node:url';
  *
  * `import type` is invisible here because it erases at compile time -- which is why this
  * test reads the BUILT javascript rather than the TypeScript source.
+ *
+ * The walker sees static `import ... from '...'` / `export ... from '...'` and dynamic
+ * `import('...')`, in both their relative-specifier (followed into the graph) and
+ * `@tn3270/`-specifier (flagged as an offender) forms. It does NOT see a specifier built at
+ * runtime from a variable (e.g. `import(pkgName)`) -- no regex can, and catching that would
+ * need real bundler-grade analysis, not a text scan.
  */
 const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const distDir = join(guiDir, 'dist');
@@ -29,6 +35,9 @@ function graphFrom(entry: string): string[] {
     for (const m of text.matchAll(/(?:from|import)\s*['"](\.[^'"]+)['"]/g)) {
       queue.push(resolvePath(dirname(file), m[1]!));
     }
+    for (const m of text.matchAll(/import\(\s*['"](\.[^'"]+)['"]/g)) {
+      queue.push(resolvePath(dirname(file), m[1]!));
+    }
   }
   return [...seen];
 }
@@ -40,18 +49,27 @@ describe('the renderer bundle', () => {
 
   it('imports no workspace package anywhere in its runtime graph', () => {
     const graph = graphFrom(join(distDir, 'renderer.js'));
-    expect(graph.length).toBeGreaterThan(1);   // guard against an empty scan passing
+    // Not `length > 1`: that cannot distinguish "found everything" from "found something",
+    // and a walker that silently stopped following edges would still pass it. Naming the
+    // real edges means a missed one fails here rather than turning the offender scan below
+    // into a scan of nothing.
+    expect(graph.some((f) => f.endsWith('keys.js')), 'keys.js not reached').toBe(true);
+    expect(graph.some((f) => f.endsWith('blit.js')), 'blit.js not reached').toBe(true);
     const offenders: string[] = [];
     for (const file of graph) {
       const text = readFileSync(file, 'utf8');
       if (/(?:from|import)\s*['"]@tn3270\//.test(text)) offenders.push(file);
+      else if (/import\(\s*['"]@tn3270\//.test(text)) offenders.push(file);
     }
     expect(offenders, 'these run in the renderer and would blank the window').toEqual([]);
   });
 
   it('confirms drawlist.js is NOT in that graph, since it imports core and frontend', () => {
-    // If this ever fails, someone moved palette or draw-list work into the renderer and the
-    // window is about to go blank.
+    // This is implied by the offender scan above, since drawlist.js's own @tn3270/core import
+    // would already be caught if drawlist.js ever entered the graph. It earns its place anyway:
+    // if it fails, it names the regression precisely -- palette or draw-list work moved into
+    // the renderer -- rather than leaving whoever broke it to work backward from a generic
+    // offender list.
     const graph = graphFrom(join(distDir, 'renderer.js'));
     expect(graph.some((f) => f.endsWith('drawlist.js'))).toBe(false);
   });
