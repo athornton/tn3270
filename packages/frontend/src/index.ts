@@ -45,3 +45,9 @@ export type { Action } from './keymap.js';
 // every front end needs and none should own -- the CLI's command table, the TUI's keymap
 // and the GUI's KeyboardEvent mapper all produce these same names.
 export { applyAction } from './actions.js';
+
+// Which key means which action, in words. Documentation with a test rather than a code
+// generator: each front end satisfies it in its own encoding, and bindings.test.ts checks
+// the terminal keymap actually agrees.
+export { BINDING_INTENT } from './bindings.js';
+export type { Binding } from './bindings.js';
