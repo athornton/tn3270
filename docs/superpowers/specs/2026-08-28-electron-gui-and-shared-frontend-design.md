@@ -199,12 +199,26 @@ either fit-to-fill or a fixed preference.
 
 ### Data flow
 
+**CORRECTED 2026-09-14 after implementation.** `drawList` runs in MAIN, not the renderer:
+
 ```
-Session 'screen'  →  snapshot + resolve()   [main]
-                  →  IPC                    →  drawList  →  blit    [renderer]
-KeyboardEvent     →  Action                 [renderer]
-                  →  IPC                    →  applyAction(session, action)   [main]
+Session 'screen'  →  snapshot + resolve() + drawList()      [main]
+                  →  IPC  →  blit                           [renderer]
+KeyboardEvent     →  Action                                 [renderer]
+                  →  IPC  →  applyAction(session, action)   [main]
 ```
+
+The original had `drawList` in the renderer. That cannot work: `drawList` needs core's
+palette and code page, and **a browser cannot resolve a bare specifier like `@tn3270/core`
+without a bundler** — measured, not reasoned about; the renderer died with "Failed to resolve
+module specifier" and showed a blank window. Adding a bundler was the alternative and was
+rejected: moving the computation to main leaves the renderer with only `./blit.js` and
+`./keys.js`, whose own imports are all `import type` and therefore erased.
+
+**The renderer ended up smaller than designed, not larger** — a canvas, a key handler and two
+relative imports — which is the direction the design wanted anyway. The atlas is also read by
+main and shipped over IPC, because `fetch` on a `file://` URL is blocked in Chromium and a
+packaged app's resources sit in an asar only main can read.
 
 ### Error handling
 
@@ -255,7 +269,22 @@ unnoticed when TLS went on by default. Any new script gets a guard in
 - **Live verification needs a host**, and both Hercules systems are IPLed by hand. The GUI
   is verifiable on this box in a way stage 2b was not, which is why it follows 2b.
 
-## Success criteria
+## Success criteria — settled 2026-09-14
+
+| criterion | outcome |
+|---|---|
+| `packages/frontend` exists, modules moved, no shims, existing tests unchanged | **met** — merged as `25fed4f`; 1214 tests then, assertions unchanged |
+| typecheck/build clean, `pty-smoke.py` 12/12, `drive-e.py` 7/7 | **met**, re-run after every task |
+| a window renders a live 3270 screen with the OIA | **met on BOTH hosts** — verified row-by-row against the CLI's own view; see `docs/live-testing.md`, *The Electron GUI against both hosts* |
+| typing, Enter, Clear, PF/PA and cursor movement reach the host; a logon completes | **PARTLY met.** Typing is proved end to end through real Chromium key events (six characters and an advanced cursor, located spatially). PF/PA/Clear travel the identical path and are unit-tested, but were **not** exercised live. **No logon was completed, deliberately** — it would arm VM's reconnect trap and could put a password in a capture |
+| draw list and BDF parser unit-tested; at least one `capturePage()` golden | **met** — 1283 tests in 51 files, one golden, reproducible across runs |
+| `Ctrl-]` quits; a plaintext-host failure shows the `-insecure` message IN THE WINDOW | **PARTLY met.** Both are implemented and the error path is wired to `describeTlsError`; neither was verified live, because the hosts are plaintext and every run used `-insecure` |
+
+Two criteria are therefore **partly** met, and are recorded that way rather than rounded up.
+What is missing from each is stated above; neither is blocked, both just need a session that
+sets out to do them.
+
+The original numbered list follows, unchanged.
 
 1. `packages/frontend` exists — three whole modules (`hostspec.ts`, `tls.ts`, `keymap.ts`)
    and two extractions (`defaultSession`, the action dispatch) — no re-export shims remain, and

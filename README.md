@@ -44,6 +44,17 @@ colour-capable 3279.
 **`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
 binary round-tripping byte-identically each way.
 
+**There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
+blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
+antialiasing off — the authentic 3278/3279 face, and deterministic enough that screenshots
+can be compared byte for byte. It renders live screens from both Hercules systems, sizes
+itself to the model the host negotiates, and takes typed input. `Ctrl-]` quits, because
+Ctrl-C is the Clear AID.
+
+```sh
+node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
+```
+
 **TN3270E negotiates end to end** — device type, functions, the 5-byte header, SNA
 responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3270E
 server, **not against a live host**, because neither Hercules system offers the option.
@@ -302,6 +313,7 @@ packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboar
 packages/frontend  rules every front end shares: host argument, TLS flags, session
                    factory, keymap, action dispatch, binding intent
 packages/cli       s3270-style scripting CLI
+packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas
 packages/tui       c3270-style terminal front end, plus the live/pty harnesses
 packages/fixtures  recorded traces, golden screens, x3270 reference captures
 docs/              spec, plans, live-host runbook, handoff
@@ -409,8 +421,11 @@ worse than one that says which quarter is missing.
   accepting and refusing: each opens `IAC DO TERMINAL-TYPE` and never mentions option
   40. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
   design) and **printer sessions**, whose harness now exists.
-- **No GUI yet.** There is a terminal front end (`packages/tui`) and a scripting CLI,
-  but no window. Electron is next.
+- **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
+  screens from both Hercules systems and takes typed input (see *Verification*), but there
+  is **no connect dialog, no menus, no preferences and no mouse support** — the host and
+  every flag come from the command line, exactly as the TUI takes them. Packaging is also
+  still to come, so there is no `.app` to download yet.
 - **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
   deliberately dropped. `Cell` is already a tagged variant so that a renderer dispatches
   on `kind` rather than assuming a font lookup — that variant exists for nothing but PS.
@@ -443,7 +458,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1214 tests, 44 files |
+| `npm test` | **pass** — 1283 tests, 51 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -452,6 +467,8 @@ visible there.
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
+| GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
+| GUI screenshot goldens under Xvfb | **pass** — 1 case from a replayed synthetic trace, reproducible; raw-bitmap hash, not the PNG |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
