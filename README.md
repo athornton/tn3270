@@ -10,11 +10,16 @@ terminal-mode client in a window that does not know it is pretending to be a
 data-stream implementation with a native-feeling GUI, correct enough that a host
 cannot tell it from the hardware.
 
-**Status: there is a working terminal client.** The protocol core, an
-s3270-compatible scripting CLI, extended data stream with Query Reply, 3279 colour,
-`IND$FILE` file transfer, TLS, screen models 2–5 and a c3270-style TUI are all done and
-verified against two live hosts — VM/370 and MVS 3.8j. The Electron GUI is next. See
-*What is not implemented* below, which is the honest part of this file.
+**Status: there is a working GUI, and a working terminal client, and a scripting CLI.**
+The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
+Reply, 3279 colour, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
+c3270-style TUI and an Electron GUI are all done, and everything but TN3270E is verified
+against two live hosts — VM/370 and MVS 3.8j.
+
+**It is not yet something you can hand to someone else.** There is no packaging, so no
+`.app` to download; the GUI has no connect dialog, menus, preferences or mouse support, and
+takes its host on the command line like the other two front ends. See *What is not
+implemented* below, which is the honest part of this file.
 
 ## What works today
 
@@ -52,8 +57,18 @@ itself to the model the host negotiates, and takes typed input. `Ctrl-]` quits, 
 Ctrl-C is the Clear AID.
 
 ```sh
-node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
+npm run build
+./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
+
+It takes the TUI's flags unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
+set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all three front ends parse
+them with the same code (`packages/frontend`).
+
+**On a headless Linux box** you also need an X server and two Chromium flags, neither of
+which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
+grant, and `--disable-gpu` because without GL a hidden window HANGS rather than failing.
+`docs/live-testing.md` has the full recipe under *The Electron GUI against both hosts*.
 
 **TN3270E negotiates end to end** — device type, functions, the 5-byte header, SNA
 responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3270E
@@ -74,17 +89,62 @@ Two test harnesses come with it, because "it looked right" is not a result:
 ## Build and test
 
 Developed and tested on Node 26. `package.json` declares no `engines` floor and
-no other version has been tried; the code targets ES2023 with `NodeNext` modules
-and imports only `node:fs`, `node:net` and `node:readline`, so Node 18+ ought to
-work, but that is inference rather than a tested claim.
+no other version has been tried; the code targets ES2023 with `NodeNext` modules and imports
+only `node:crypto`, `node:fs`, `node:net`, `node:path`, `node:readline`, `node:tls` and
+`node:url`, so Node 18+ ought to work, but that is inference rather than a tested claim.
+Only `packages/gui` depends on anything outside the standard library, and its dependency is
+Electron.
 
 ```sh
-npm install
+npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1042 tests, 38 files
+npm test           # 1283 tests, 51 files
 npm run typecheck
 ```
+
+`npm run build` also bakes the GUI's glyph atlas out of the vendored bitmap font, so it is
+not optional before running the GUI. Note that `npm install` may not run Electron's own
+postinstall depending on your npm's script-approval settings, in which case the binary is
+fetched on first launch instead — "Downloading Electron binary..." is that, not a hang.
+
+## Using the GUI
+
+```sh
+npm run build
+./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
+```
+
+The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
+set, and the full `[prefix:][LU,LU@]host[:port]` shape. That is not a coincidence or a
+promise to keep them in step: all three front ends parse them with the same code in
+`packages/frontend`.
+
+**`Ctrl-]` quits. `Ctrl-C` does NOT** — it is the Clear AID, which a 3270 user needs
+constantly to dismiss VM's `MORE...` state. `Ctrl-R` is Reset, `Ctrl-U` is EraseInput, F1–F12
+are PF1–PF12 and shifted F1–F12 are PF13–PF24, following c3270.
+
+**The window sizes itself to the screen the host negotiates**, at the largest whole-number
+scale that fits 80% of your display. Whole numbers only: the font is a bitmap, and a
+fractional scale would smear it. A model 4 is 43 rows, and the host decides that *after*
+connecting — VM sends Erase/Write Alternate — so the window may grow a moment after the
+first paint.
+
+The glyphs come from x3270's own 3270 bitmap font, baked into a sprite atlas by
+`npm run build`, drawn with antialiasing off. That is what makes it look like a 3278 rather
+than a terminal in a window, and it is also why screenshots of it can be compared byte for
+byte (`packages/gui/scripts/shot.mjs`).
+
+**What it does not have yet:** no connect dialog, no menus, no preferences, no mouse
+support, and no packaging — so the host goes on the command line and there is no `.app` to
+double-click. **What is implemented but not yet verified against a live host:** the PF, PA and
+Clear keys (they travel the same path as ordinary typing, which *is* verified end to end), the
+`Ctrl-]` quit, and the in-window error message for a failed connection.
+
+**On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
+server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
+failing, which reads as a broken build. Full recipe: `docs/live-testing.md`, *The Electron GUI
+against both hosts*.
 
 ## Using the TUI
 
@@ -351,13 +411,21 @@ Done:
    neither Hercules system offers the option, so it is checked against real s3270 and an
    in-repo server instead. See *TN3270E*.
 
+7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
+   an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
+   the host negotiates. Two things about it are unverified and the spec says so: PF/PA/Clear
+   travel the same path as typing but were not exercised live, and no logon was completed,
+   because that arms VM's reconnect trap and could put a password in a screenshot.
+
 Remaining, in the order the author wants it:
 
-7. **Electron GUI**, then **a webserver serving the same front end**.
-8. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
+8. **A webserver serving the same front end** over HTTP.
+9. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
-   earlier drafts of the spec assumed.
-9. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
+   earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
+   glyph is a host-supplied bitmap, which is exactly what it already draws, so PS should be
+   an addition rather than a second renderer.
+10. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
    **printer sessions**.
 
 **In flight, not on `main`:** alternate screen sizes and models 3, 4 and 5 are complete
