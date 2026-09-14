@@ -15,6 +15,29 @@ goldens deterministic.
 
 ---
 
+## CORRECTED 2026-09-14, BEFORE EXECUTION — read this before Task 5
+
+This plan was written before `resolve()`'s actual return type had been read, and Task 5 was
+wrong in three ways. Corrected in place below; recorded here because the reasoning matters:
+
+1. **`hidden` WAS MISSING, AND THAT IS A SECURITY BUG.** `ResolvedCell.hidden` is field
+   intensity `0x0C`, and core's own comment says it is *"the ONLY thing standing between a
+   password field and the screen"* — `text` is deliberately NOT pre-redacted. As originally
+   written this plan would have drawn passwords in the window, and Task 10 commits
+   screenshot goldens to git, so a logon golden would have put a real password in the
+   repository's history. The GUI draws a hidden cell BLANK, matching the TUI at
+   `render.ts:343` (`cell.hidden ? ' ' : cell.text`).
+2. **The draw list cannot get EBCDIC from `resolve()`.** `ResolvedCell.text` is a *string*;
+   the atlas is EBCDIC-indexed, which was one of the three reasons it beat a TTF. `resolve()`
+   returns an array PARALLEL to `snap.cells`, so `drawList` takes both and zips by index —
+   glyph from `snapshot.cells[i].ebcdic`, colour and flags from `resolved[i]`. No core change
+   and the no-translation property survives.
+3. **`fg`/`bg` are `Colour3279` CODES, not `Rgb`.** The draw list converts with `colourRgb()`.
+
+Also threaded through: `blink` and `intensify` (both exist on `ResolvedCell` and the original
+`DrawCell` dropped them), and `mode3279`, because a 3278 is monochrome hardware and must not
+be colourised — `app.ts:275` is the precedent.
+
 ## PREREQUISITE
 
 **`docs/superpowers/plans/2026-08-28-shared-frontend-extraction.md` must be complete
@@ -1254,6 +1277,13 @@ git commit -m "feat(gui): draw the OIA below the screen buffer"
 a host or a replayed trace, `capturePage()`, and compare against
 `packages/gui/test/golden/*.png` byte-for-byte, writing the actual image beside the golden
 on mismatch. `--update` regenerates goldens.
+
+**DO NOT COMMIT A GOLDEN OF A LOGGED-ON SCREEN.** Goldens live in git forever, and a real
+session's screen can contain a typed password — `hidden` keeps it off the display but a
+golden taken at the wrong moment, or of a field the host did not mark, still ends up in
+history. Capture goldens from a REPLAYED TRACE or an unauthenticated logon panel, and check
+what is in the image before committing it. `docs/live-testing.md` already warns that traces
+contain typed passwords in EBCDIC; this is the same hazard with a picture instead.
 
 **Byte-exact is the right comparison here** — bitmap glyphs at integer scale with
 antialiasing off are deterministic, which is the second reason the atlas beat `fillText`.
