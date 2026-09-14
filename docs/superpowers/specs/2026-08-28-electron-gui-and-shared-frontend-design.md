@@ -162,11 +162,21 @@ and `3270gr.bdf` for line drawing). Verified on the box, and the licence is **BS
 3-clause** (Paul Mattes 1993-2009, Jeff Sparkes 1990, GTRC 1989) — redistributable in
 binary form with the notice, which ships with the app.
 
-**The glyph ordering is what makes this cheap.** The BDF's own comments record it: *"Page
-0: EBCDIC US-International set, CG order; Page 1: EBCDIC APL/APL2 set, CG order; Page 2:
-DEC line-drawing characters."* Our cells already hold EBCDIC, so the atlas is a **direct
-lookup with no translation step** — and APL, which a 3270 client needs and a Unicode
-monospace font will not have, is already there.
+**CORRECTED 2026-09-14: THE "NO TRANSLATION STEP" CLAIM WAS WRONG.** The BDF's comment
+reads *"Page 0: EBCDIC US-International set, CG order"* — the character SET is EBCDIC's, but
+the ORDER is the **Character Generator's**, which is not the same thing. Measured from the
+vendored font's own glyph names: `ENCODING 16` is `space` where EBCDIC space is `0x40`, and
+`ENCODING 160` is `A` where EBCDIC `A` is `0xc1`. Found by a test, not by reading.
+
+So the atlas needs an EBCDIC→CG map. That is `packages/gui/src/cg.ts`, generated
+mechanically from `ebc2cg0[256]` in x3270's `x3270/xtables.c:76` — the same BSD-3 source as
+the font, so table and glyphs cannot disagree — and independently corroborated by the font's
+glyph names. **The atlas is still the right choice** (APL really is free on page 1, and
+bitmaps at integer scale really are deterministic); the cost is one 256-byte lookup rather
+than zero. Unmapped EBCDIC bytes (55 of 256) point at CG 223, `boxsolid`, so junk from a
+host is visible rather than silently blank.
+
+APL, which a 3270 client needs and a Unicode monospace font will not have, is on page 1.
 
 A committed BDF parser converts to a sprite atlas at build time. Bundling a monospace TTF
 and using `fillText` was rejected: it is not the authentic 3278/3279 look the project
@@ -189,12 +199,26 @@ either fit-to-fill or a fixed preference.
 
 ### Data flow
 
+**CORRECTED 2026-09-14 after implementation.** `drawList` runs in MAIN, not the renderer:
+
 ```
-Session 'screen'  →  snapshot + resolve()   [main]
-                  →  IPC                    →  drawList  →  blit    [renderer]
-KeyboardEvent     →  Action                 [renderer]
-                  →  IPC                    →  applyAction(session, action)   [main]
+Session 'screen'  →  snapshot + resolve() + drawList()      [main]
+                  →  IPC  →  blit                           [renderer]
+KeyboardEvent     →  Action                                 [renderer]
+                  →  IPC  →  applyAction(session, action)   [main]
 ```
+
+The original had `drawList` in the renderer. That cannot work: `drawList` needs core's
+palette and code page, and **a browser cannot resolve a bare specifier like `@tn3270/core`
+without a bundler** — measured, not reasoned about; the renderer died with "Failed to resolve
+module specifier" and showed a blank window. Adding a bundler was the alternative and was
+rejected: moving the computation to main leaves the renderer with only `./blit.js` and
+`./keys.js`, whose own imports are all `import type` and therefore erased.
+
+**The renderer ended up smaller than designed, not larger** — a canvas, a key handler and two
+relative imports — which is the direction the design wanted anyway. The atlas is also read by
+main and shipped over IPC, because `fetch` on a `file://` URL is blocked in Chromium and a
+packaged app's resources sit in an asar only main can read.
 
 ### Error handling
 
@@ -245,7 +269,22 @@ unnoticed when TLS went on by default. Any new script gets a guard in
 - **Live verification needs a host**, and both Hercules systems are IPLed by hand. The GUI
   is verifiable on this box in a way stage 2b was not, which is why it follows 2b.
 
-## Success criteria
+## Success criteria — settled 2026-09-14
+
+| criterion | outcome |
+|---|---|
+| `packages/frontend` exists, modules moved, no shims, existing tests unchanged | **met** — merged as `25fed4f`; 1214 tests then, assertions unchanged |
+| typecheck/build clean, `pty-smoke.py` 12/12, `drive-e.py` 7/7 | **met**, re-run after every task |
+| a window renders a live 3270 screen with the OIA | **met on BOTH hosts** — verified row-by-row against the CLI's own view; see `docs/live-testing.md`, *The Electron GUI against both hosts* |
+| typing, Enter, Clear, PF/PA and cursor movement reach the host; a logon completes | **PARTLY met.** Typing is proved end to end through real Chromium key events (six characters and an advanced cursor, located spatially). PF/PA/Clear travel the identical path and are unit-tested, but were **not** exercised live. **No logon was completed, deliberately** — it would arm VM's reconnect trap and could put a password in a capture |
+| draw list and BDF parser unit-tested; at least one `capturePage()` golden | **met** — 1283 tests in 51 files, one golden, reproducible across runs |
+| `Ctrl-]` quits; a plaintext-host failure shows the `-insecure` message IN THE WINDOW | **PARTLY met.** Both are implemented and the error path is wired to `describeTlsError`; neither was verified live, because the hosts are plaintext and every run used `-insecure` |
+
+Two criteria are therefore **partly** met, and are recorded that way rather than rounded up.
+What is missing from each is stated above; neither is blocked, both just need a session that
+sets out to do them.
+
+The original numbered list follows, unchanged.
 
 1. `packages/frontend` exists — three whole modules (`hostspec.ts`, `tls.ts`, `keymap.ts`)
    and two extractions (`defaultSession`, the action dispatch) — no re-export shims remain, and

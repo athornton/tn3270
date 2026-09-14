@@ -24,22 +24,31 @@ asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST`
 byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
 an ABSENCE so that starting to ask for it would fail.
 
-**`packages/frontend` EXISTS as of 2026-09-14 — part 1 of stage 3 is DONE** (branch
-`shared-frontend`). The dependency graph is now `core ← frontend ← { cli, tui }`, and
-**`tui` no longer depends on `cli` at all**, which was the point. What moved: `hostspec.ts`,
-`tls.ts`, `defaultSession`, `keymap.ts`, plus two new modules — `actions.ts` (`applyAction`)
-and `bindings.ts` (`BINDING_INTENT`). **1214 tests in 44 files**, no re-export shims left in
-`cli`.
+**STAGE 3 IS BUILT, 2026-09-14. Both parts.** `packages/frontend` exists (graph is
+`core ← frontend ← { cli, tui, gui }`, and `tui` no longer depends on `cli`), and
+`packages/gui` is an Electron window that RENDERS LIVE 3270 SCREENS FROM BOTH HERCULES
+SYSTEMS and accepts typed input. **1283 tests in 51 files.**
 
-**Next is part 2, the Electron GUI, and its riskiest assumption is already proven. Start
-here:**
+**What the GUI is not, yet:** no connect dialog, no menus, no preferences, no mouse, no
+packaging. The host and flags come from the command line exactly as the TUI takes them.
 
-1. Read `docs/superpowers/specs/2026-08-28-electron-gui-and-shared-frontend-design.md`.
-2. Execute `docs/superpowers/plans/2026-08-28-electron-gui.md` — 11 tasks. **Task 1 is
-   already DONE and passed**; the plan says so inline. Its stated baseline is "1210 tests"
-   — the real number is **1214**, because the extraction added three assertions beyond what
-   its plan predicted (a PA2 case, a PF-number check, and an arrows-have-two-encodings
-   check).
+**Two success criteria are PARTLY met and say so in the spec:** PF/PA/Clear travel the same
+verified path as typing but were not exercised live, and no logon was completed (it would arm
+VM's reconnect trap and could put a password in a screenshot). `Ctrl-]` and the in-window
+error path are implemented but unverified live.
+
+**Read `docs/live-testing.md`, *The Electron GUI against both hosts*, before touching the
+renderer.** The verification method matters more than the result: a screenshot can be blank,
+clipped, or of the wrong screen and still be a valid PNG, so the GUI's ink was compared ROW
+BY ROW against the text the CLI reports from the same host. The one apparent disagreement was
+the cursor, identified because its ink count was exactly 9x3 pixels.
+
+**Five traps recorded there and in the commits, each of which cost a run:**
+1. An ESM preload cannot load, and the bridge then silently never appears.
+2. `include: ["src/**/*.ts"]` does not match `.cts`.
+3. A browser cannot resolve `@tn3270/core`; there is no bundler, so `drawList` runs in MAIN.
+4. `fetch` on `file://` is blocked, so main ships the atlas over IPC.
+5. The first live run CLIPPED the host's data: model 4 needs 616px and the window was 600.
 
 **THE ELECTRON GATE PASSED, 2026-08-28, on Electron 44.0.0** (not the 43 verified back in
 August's design, and there was no Electron installed on this box any more — it had to be

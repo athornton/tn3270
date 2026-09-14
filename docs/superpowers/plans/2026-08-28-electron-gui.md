@@ -1,6 +1,28 @@
 # Electron GUI (stage 3, part 2) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **COMPLETE, 2026-09-14, on branch `electron-gui`.** All 11 tasks. **1283 tests in 51
+> files**, typecheck and build clean, `pty-smoke.py` 12/12, `drive-e.py` 7/7, GUI golden 1/1,
+> and the window renders live screens from BOTH Hercules systems with typed input proved end
+> to end. Two success criteria are **partly** met and the spec says which and why.
+>
+> **SIX THINGS THIS PLAN GOT WRONG, all found by running it.** Recorded because the pattern is
+> the useful part: every one was invisible to reasoning and obvious within one execution.
+>
+> 1. **The atlas is NOT EBCDIC-indexed** (Task 3). The font is in Character Generator order.
+>    `cg.ts` now carries the map, generated from x3270's own `ebc2cg0`.
+> 2. **`hidden` was missing from the draw list** (Task 5) — a password-disclosure bug, since
+>    Task 10 commits screenshots to git.
+> 3. **An ESM preload cannot load**, and the bridge then silently never appears (Task 8).
+> 4. **`include: ["src/**/*.ts"]` does not match `.cts`**, so the preload was never compiled.
+> 5. **A browser cannot resolve `@tn3270/core`** and there is no bundler, so `drawList` moved
+>    to main. The renderer ended up SMALLER than designed.
+> 6. **`fetch` on `file://` is blocked**, so main ships the atlas over IPC.
+>
+> And one the plan could not have caught, because it needed a host: **the first live run
+> CLIPPED the host's data.** Model 4 is 43 rows = 616px with the OIA, and the window was 600.
+
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A window that renders a live 3270 screen from a real host, accepts keystrokes,
 and draws the OIA — started from the command line with the TUI's flags unchanged.
@@ -14,6 +36,34 @@ goldens deterministic.
 **Tech Stack:** Electron, TypeScript 7 project references, vitest, Xvfb.
 
 ---
+
+## CORRECTED 2026-09-14, BEFORE EXECUTION — read this before Task 5
+
+This plan was written before `resolve()`'s actual return type had been read, and Task 5 was
+wrong in three ways. Corrected in place below; recorded here because the reasoning matters:
+
+0. **THE ATLAS IS NOT EBCDIC-INDEXED, found while executing Task 3.** The font is in CG
+   order, not EBCDIC: `ENCODING 16` is `space` (EBCDIC `0x40`) and `ENCODING 160` is `A`
+   (EBCDIC `0xc1`). `packages/gui/src/cg.ts` carries the map, generated from x3270's
+   `ebc2cg0` at `x3270/xtables.c:76` and corroborated by the font's glyph names. So the
+   draw list looks up `ebcdicToCg(cell.ebcdic)`, not `cell.ebcdic`.
+1. **`hidden` WAS MISSING, AND THAT IS A SECURITY BUG.** `ResolvedCell.hidden` is field
+   intensity `0x0C`, and core's own comment says it is *"the ONLY thing standing between a
+   password field and the screen"* — `text` is deliberately NOT pre-redacted. As originally
+   written this plan would have drawn passwords in the window, and Task 10 commits
+   screenshot goldens to git, so a logon golden would have put a real password in the
+   repository's history. The GUI draws a hidden cell BLANK, matching the TUI at
+   `render.ts:343` (`cell.hidden ? ' ' : cell.text`).
+2. **The draw list cannot get EBCDIC from `resolve()`.** `ResolvedCell.text` is a *string*;
+   the atlas is EBCDIC-indexed, which was one of the three reasons it beat a TTF. `resolve()`
+   returns an array PARALLEL to `snap.cells`, so `drawList` takes both and zips by index —
+   glyph from `snapshot.cells[i].ebcdic`, colour and flags from `resolved[i]`. No core change
+   and the no-translation property survives.
+3. **`fg`/`bg` are `Colour3279` CODES, not `Rgb`.** The draw list converts with `colourRgb()`.
+
+Also threaded through: `blink` and `intensify` (both exist on `ResolvedCell` and the original
+`DrawCell` dropped them), and `mode3279`, because a 3278 is monochrome hardware and must not
+be colourised — `app.ts:275` is the precedent.
 
 ## PREREQUISITE
 
@@ -75,7 +125,7 @@ to learn now.
 **Files:**
 - Create: `/tmp/electron-spike/` (throwaway — nothing here is committed)
 
-- [ ] **Step 1: Install Electron in a scratch directory**
+- [x] **Step 1: Install Electron in a scratch directory**
 
 Not in the repo yet: a failed spike must not leave a 150 MB dependency in the workspace.
 
@@ -88,7 +138,7 @@ npm install electron --no-save 2>&1 | tail -3
 Expected: it downloads (~100-150 MB) and exits 0. **If this fails for network reasons,
 stop and report** — the whole stage depends on it.
 
-- [ ] **Step 2: Write the smallest possible window that screenshots itself**
+- [x] **Step 2: Write the smallest possible window that screenshots itself**
 
 `/tmp/electron-spike/spike.js`:
 
@@ -116,7 +166,7 @@ app.whenReady().then(async () => {
 });
 ```
 
-- [ ] **Step 3: Run it under Xvfb**
+- [x] **Step 3: Run it under Xvfb**
 
 ```bash
 GUI=$HOME/micromamba/envs/gui
@@ -140,7 +190,7 @@ Expected: `wrote {"width":400,"height":200}` and a PNG on disk.
   `show: false` window HANGS rather than failing — the first attempt sat until a
   120-second timeout with no output past `app ready`.
 
-- [ ] **Step 4: Verify the PNG has the right pixels, not merely the right size**
+- [x] **Step 4: Verify the PNG has the right pixels, not merely the right size**
 
 A black PNG of correct dimensions would pass a size check and prove nothing.
 
@@ -192,7 +242,7 @@ outside `(0, 0, 0)`. Channel order is **RGB**, which is what Task 10's compariso
 This is also the argument for Task 10 comparing whole PNGs byte-for-byte instead of
 decoding them: the decoder is the part that was wrong here.
 
-- [ ] **Step 5: Record the result and clean up**
+- [x] **Step 5: Record the result and clean up**
 
 Append what you found to `docs/live-testing.md` under a new *Electron headless
 re-verification* heading: the Electron version installed, whether `--no-sandbox` was
@@ -202,7 +252,7 @@ needed, the channel order, and the date. Then:
 rm -rf /tmp/electron-spike
 ```
 
-- [ ] **Step 6: Commit the finding**
+- [x] **Step 6: Commit the finding**
 
 ```bash
 git add docs/live-testing.md
@@ -218,7 +268,7 @@ git commit -m "docs: re-verify Electron renders headless, on the version we will
   `packages/gui/src/main.ts`, `packages/gui/index.html`
 - Modify: root `package.json` (`typecheck` script)
 
-- [ ] **Step 1: Manifest**
+- [x] **Step 1: Manifest**
 
 `packages/gui/package.json`. `electron` is a devDependency: it is the runtime, and
 `electron-builder` bundles it at packaging time rather than it being a library dependency.
@@ -244,7 +294,7 @@ git commit -m "docs: re-verify Electron renders headless, on the version we will
 }
 ```
 
-- [ ] **Step 2: tsconfig**
+- [x] **Step 2: tsconfig**
 
 ```json
 {
@@ -257,7 +307,7 @@ git commit -m "docs: re-verify Electron renders headless, on the version we will
 
 Add `packages/gui` to the root `typecheck` script, after `packages/frontend`.
 
-- [ ] **Step 3: A window, and the one thing it must promise**
+- [x] **Step 3: A window, and the one thing it must promise**
 
 `packages/gui/src/main.ts` — first cut opens a window and quits on `Ctrl-]`:
 
@@ -297,7 +347,7 @@ app.on('window-all-closed', () => { app.quit(); });
 </head><body><canvas id="screen"></canvas></body></html>
 ```
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 ```bash
 cd ~/git/tn3270 && npm install && npm run build
@@ -312,7 +362,7 @@ sleep 4 && pkill -f "electron packages/gui" ; echo "opened and closed"
 Expected: no crash, no error on stderr. Add `--no-sandbox` only if Task 1 showed it was
 needed.
 
-- [ ] **Step 5: Verify the suite is untouched and commit**
+- [x] **Step 5: Verify the suite is untouched and commit**
 
 ```bash
 npm run typecheck && npx vitest run 2>&1 | tail -3
@@ -336,7 +386,7 @@ New code, test-first. BDF is a simple text format: per glyph, an `ENCODING` numb
 - Create: `packages/gui/assets/3270.bdf`, `packages/gui/assets/LICENSE-3270-font.txt`
 - Create: `packages/gui/src/bdf.ts`, `packages/gui/test/bdf.test.ts`
 
-- [ ] **Step 1: Vendor the font and its licence**
+- [x] **Step 1: Vendor the font and its licence**
 
 ```bash
 cd ~/git/tn3270 && mkdir -p packages/gui/assets
@@ -351,7 +401,7 @@ Expected: the BSD-3 notice, Paul Mattes / Jeff Sparkes / GTRC. **The font is ven
 rather than read from `~/src`** because a build must not depend on an unrelated checkout
 in the developer's home directory — and shipping the app means shipping the glyphs.
 
-- [ ] **Step 2: Read the actual header before writing the parser**
+- [x] **Step 2: Read the actual header before writing the parser**
 
 ```bash
 grep -n "^SIZE\|^FONTBOUNDINGBOX\|^CHARS" packages/gui/assets/3270.bdf | head
@@ -362,7 +412,7 @@ sed -n '/^STARTCHAR/,/^ENDCHAR/p' packages/gui/assets/3270.bdf | head -20
 against a glyph you read out of the file yourself, which is the only way it proves the
 parser rather than restating it.
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 `packages/gui/test/bdf.test.ts`. Replace the marked constants with values from Step 2:
 
@@ -419,7 +469,7 @@ describe('parseBdf', () => {
 });
 ```
 
-- [ ] **Step 4: Run it and watch it fail**
+- [x] **Step 4: Run it and watch it fail**
 
 ```bash
 npx vitest run packages/gui/test/bdf.test.ts
@@ -427,7 +477,7 @@ npx vitest run packages/gui/test/bdf.test.ts
 
 Expected: FAIL, cannot resolve `../src/bdf.js`.
 
-- [ ] **Step 5: Implement**
+- [x] **Step 5: Implement**
 
 `packages/gui/src/bdf.ts`:
 
@@ -533,7 +583,7 @@ function normalise(
 }
 ```
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 ```bash
 npx vitest run packages/gui/test/bdf.test.ts
@@ -542,7 +592,7 @@ npx vitest run packages/gui/test/bdf.test.ts
 Expected: PASS, 5 tests. **If the glyph-count test fails, believe the file**, not the
 parser: `CHARS` is the font's own declaration.
 
-- [ ] **Step 7: Eyeball one glyph, because "some bits are set" is a weak claim**
+- [x] **Step 7: Eyeball one glyph, because "some bits are set" is a weak claim**
 
 A parser can pass every assertion above and still produce mush. Print EBCDIC `A`:
 
@@ -566,7 +616,7 @@ EOF
 Expected: a recognisable capital **A**. If it is upside down, the `top` subtraction in
 `normalise` is wrong; if it is mirrored, the bit shift is.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A
@@ -581,7 +631,7 @@ git commit -m "feat(gui): BDF parser, and vendor x3270's 3270 font with its lice
 - Create: `packages/gui/scripts/build-atlas.mjs`
 - Modify: `packages/gui/.gitignore` (create)
 
-- [ ] **Step 1: Write the build script**
+- [x] **Step 1: Write the build script**
 
 `packages/gui/scripts/build-atlas.mjs`. It emits a raw RGBA buffer plus a JSON index
 rather than a PNG — the renderer turns it into an `ImageBitmap`, and writing a PNG would
@@ -629,7 +679,7 @@ writeFileSync(join(here, '..', 'dist', 'atlas.json'), JSON.stringify({
 console.log(`atlas: ${cols} glyphs, ${font.width}x${font.height} cells`);
 ```
 
-- [ ] **Step 2: Do not commit the output**
+- [x] **Step 2: Do not commit the output**
 
 `packages/gui/.gitignore`:
 
@@ -637,7 +687,7 @@ console.log(`atlas: ${cols} glyphs, ${font.width}x${font.height} cells`);
 dist/
 ```
 
-- [ ] **Step 3: Run it**
+- [x] **Step 3: Run it**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | tail -2
@@ -658,7 +708,7 @@ console.log(size === want ? 'size OK ' + size : 'MISMATCH ' + size + ' vs ' + wa
 
 Expected: `size OK <n>`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -674,7 +724,7 @@ Pure, and the main test surface for rendering. Test-first.
 **Files:**
 - Create: `packages/gui/src/drawlist.ts`, `packages/gui/test/drawlist.test.ts`
 
-- [ ] **Step 1: Check what `resolve()` actually returns before asserting on it**
+- [x] **Step 1: Check what `resolve()` actually returns before asserting on it**
 
 ```bash
 grep -n "export interface ResolvedCell" -A 12 packages/core/src/*.ts
@@ -684,7 +734,7 @@ grep -n "export function resolve" -A 8 packages/core/src/*.ts
 **Use the real field names.** The test below assumes `resolve()` yields cells with an
 EBCDIC byte and resolved foreground/background; if the shape differs, follow the source.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `packages/gui/test/drawlist.test.ts`:
 
@@ -753,7 +803,7 @@ describe('drawList', () => {
 });
 ```
 
-- [ ] **Step 3: Run it and watch it fail**
+- [x] **Step 3: Run it and watch it fail**
 
 ```bash
 npx vitest run packages/gui/test/drawlist.test.ts
@@ -761,7 +811,7 @@ npx vitest run packages/gui/test/drawlist.test.ts
 
 Expected: FAIL, cannot resolve `../src/drawlist.js`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `packages/gui/src/drawlist.ts`:
 
@@ -842,7 +892,7 @@ export function drawList(
 }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 ```bash
 npx vitest run packages/gui/test/drawlist.test.ts
@@ -851,7 +901,7 @@ npx vitest run packages/gui/test/drawlist.test.ts
 Expected: PASS, 6 tests. If `resolve()`'s cell shape differs from the parameter type
 above, **fix the type to match core** rather than casting.
 
-- [ ] **Step 6: Verify the whole suite and commit**
+- [x] **Step 6: Verify the whole suite and commit**
 
 ```bash
 npm run typecheck && npx vitest run 2>&1 | tail -3
@@ -869,7 +919,7 @@ Chromium events are the GUI's business — the shared thing is the `Action` voca
 **Files:**
 - Create: `packages/gui/src/keys.ts`, `packages/gui/test/keys.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `packages/gui/test/keys.test.ts`:
 
@@ -924,7 +974,7 @@ describe('actionForKey', () => {
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 ```bash
 npx vitest run packages/gui/test/keys.test.ts
@@ -932,7 +982,7 @@ npx vitest run packages/gui/test/keys.test.ts
 
 Expected: FAIL, cannot resolve `../src/keys.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/gui/src/keys.ts`:
 
@@ -1008,7 +1058,7 @@ export function actionForKey(e: KeyLike): Action | null {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```bash
 npx vitest run packages/gui/test/keys.test.ts
@@ -1016,7 +1066,7 @@ npx vitest run packages/gui/test/keys.test.ts
 
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run typecheck && npx vitest run 2>&1 | tail -3
@@ -1033,7 +1083,7 @@ git commit -m "feat(gui): map Chromium key events onto named 3270 actions"
 - Create: `packages/gui/test/args.test.ts`
 - Create: `packages/gui/src/args.ts`
 
-- [ ] **Step 1: Write the failing argument test**
+- [x] **Step 1: Write the failing argument test**
 
 The flags must be the TUI's, and the way to guarantee that is to parse with the same
 shared pieces. `packages/gui/test/args.test.ts`:
@@ -1068,7 +1118,7 @@ describe('parseGuiArgs', () => {
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 ```bash
 npx vitest run packages/gui/test/args.test.ts
@@ -1076,7 +1126,7 @@ npx vitest run packages/gui/test/args.test.ts
 
 Expected: FAIL, cannot resolve `../src/args.js`.
 
-- [ ] **Step 3: Implement by delegating**
+- [x] **Step 3: Implement by delegating**
 
 `packages/gui/src/args.ts` follows `packages/tui/src/main.ts`'s `parseArgs` closely — read
 that file and mirror its structure, using `takeTlsFlag`, `resolveTls` and
@@ -1085,7 +1135,7 @@ contradiction check and the `L:` versus `-insecure` check. **Do not re-implement
 rules**; the whole point of the frontend package is that these come from one place. Export
 a `UsageError` and a `GuiArgs` shaped like `TuiArgs` minus `colors`.
 
-- [ ] **Step 4: Run the tests, then wire the Session into main**
+- [x] **Step 4: Run the tests, then wire the Session into main**
 
 ```bash
 npx vitest run packages/gui/test/args.test.ts
@@ -1103,7 +1153,7 @@ an action from the renderer, check for `quit` and otherwise call `applyAction`.
 never sees a console, and `describeTlsError` exists precisely so the message names the
 flag that fixes it. Load an error page or send the text to the renderer.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run typecheck && npx vitest run 2>&1 | tail -3
@@ -1120,7 +1170,7 @@ git commit -m "feat(gui): parse the TUI's flags and drive a real Session"
   `packages/gui/src/blit.ts`
 - Modify: `packages/gui/src/main.ts`, `packages/gui/index.html`
 
-- [ ] **Step 1: The preload, exposing exactly two channels**
+- [x] **Step 1: The preload, exposing exactly two channels**
 
 `packages/gui/src/preload.ts`:
 
@@ -1144,7 +1194,7 @@ contextBridge.exposeInMainWorld('tn3270', {
 
 Add `preload: join(here, 'preload.js')` to the `webPreferences` in `main.ts`.
 
-- [ ] **Step 2: The blitter**
+- [x] **Step 2: The blitter**
 
 `packages/gui/src/blit.ts` walks a `DrawList` and draws: fill the background rect, then
 stamp the glyph from the atlas tinted with `fg`, then invert or block the cursor cell.
@@ -1155,7 +1205,7 @@ colour in use and caching it, or compositing with `globalCompositeOperation`. **
 per colour**: a 3279 has 16 colours at most, so the cache is bounded and small, and
 recompositing per cell would be 1920 composites per frame.
 
-- [ ] **Step 3: The renderer**
+- [x] **Step 3: The renderer**
 
 `packages/gui/src/renderer.ts`: fetch `atlas.bin` and `atlas.json`, build the tinted
 caches, size the canvas to `drawList` dimensions times the scale, subscribe to
@@ -1166,7 +1216,7 @@ caches, size the canvas to `drawList` dimensions times the scale, subscribe to
 **Choose the scale as the design states**: the largest integer scale whose letterboxed
 screen fits within 80% of the display work area, minimum 1×. Centre the result.
 
-- [ ] **Step 4: Run it against a host and look at it**
+- [x] **Step 4: Run it against a host and look at it**
 
 Bring up Hercules (the user IPLs it by hand), then:
 
@@ -1183,7 +1233,7 @@ $GUI/bin/Xvfb :99 -screen 0 1280x1024x24 & sleep 2
 There is no screen to look at yet — Task 10 adds the screenshot harness, which is how you
 actually see this. If you cannot wait, take one capture by hand with the spike from Task 1.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -1197,7 +1247,7 @@ git commit -m "feat(gui): preload bridge, canvas renderer and glyph blitter"
 **Files:**
 - Modify: `packages/gui/src/drawlist.ts`, `packages/gui/test/drawlist.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/gui/test/drawlist.test.ts`:
 
@@ -1223,14 +1273,14 @@ describe('the OIA', () => {
 });
 ```
 
-- [ ] **Step 2: Run, watch it fail, implement**
+- [x] **Step 2: Run, watch it fail, implement**
 
 Add an optional third parameter `oiaText?: string` to `drawList`, an `oia?: { text, y }`
 to `DrawList`, and one extra cell row of height when it is present. The renderer passes
 `session.oia.toText()` — the same source the TUI uses, so the two cannot disagree about
 status.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npx vitest run packages/gui/test/drawlist.test.ts
@@ -1248,12 +1298,19 @@ git commit -m "feat(gui): draw the OIA below the screen buffer"
 - Create: `packages/gui/test/shot-flags.test.ts`
 - Modify: `docs/live-testing.md`
 
-- [ ] **Step 1: Write the harness**
+- [x] **Step 1: Write the harness**
 
 `packages/gui/scripts/shot.mjs`: start Xvfb if `DISPLAY` is unset, launch the GUI against
 a host or a replayed trace, `capturePage()`, and compare against
 `packages/gui/test/golden/*.png` byte-for-byte, writing the actual image beside the golden
 on mismatch. `--update` regenerates goldens.
+
+**DO NOT COMMIT A GOLDEN OF A LOGGED-ON SCREEN.** Goldens live in git forever, and a real
+session's screen can contain a typed password — `hidden` keeps it off the display but a
+golden taken at the wrong moment, or of a field the host did not mark, still ends up in
+history. Capture goldens from a REPLAYED TRACE or an unauthenticated logon panel, and check
+what is in the image before committing it. `docs/live-testing.md` already warns that traces
+contain typed passwords in EBCDIC; this is the same hazard with a picture instead.
 
 **Byte-exact is the right comparison here** — bitmap glyphs at integer scale with
 antialiasing off are deterministic, which is the second reason the atlas beat `fillText`.
@@ -1262,7 +1319,7 @@ if it cannot be made deterministic, demote the goldens to a smoke check that ass
 "not blank" and let the draw-list tests carry the weight. A tolerance that hides a real
 one-pixel regression is worse than no golden at all.
 
-- [ ] **Step 2: Guard the invocation, because this script cannot run under `npm test`**
+- [x] **Step 2: Guard the invocation, because this script cannot run under `npm test`**
 
 `packages/gui/test/shot-flags.test.ts`, in the spirit of `harness-flags.test.ts`:
 
@@ -1294,7 +1351,7 @@ describe('the screenshot harness', () => {
 });
 ```
 
-- [ ] **Step 3: Run both, and mutation-check the guard**
+- [x] **Step 3: Run both, and mutation-check the guard**
 
 ```bash
 npx vitest run packages/gui/test/shot-flags.test.ts
@@ -1305,7 +1362,7 @@ Expected: the guard passes; the harness writes goldens, then passes against them
 Then remove `-insecure` from `ARGV`, re-run the guard, confirm it FAILS, and restore it.
 **A guard that has never failed has not been tested.**
 
-- [ ] **Step 4: Record it and commit**
+- [x] **Step 4: Record it and commit**
 
 ```bash
 git add -A
@@ -1320,7 +1377,7 @@ git commit -m "test(gui): screenshot goldens under Xvfb, with a guard on the har
 - Modify: `README.md`, `docs/HANDOFF.md`, `docs/live-testing.md`,
   `docs/superpowers/specs/2026-08-28-electron-gui-and-shared-frontend-design.md`
 
-- [ ] **Step 1: Drive it against both hosts**
+- [x] **Step 1: Drive it against both hosts**
 
 Hercules must be running — the user IPLs it. For each of VM/370 on `3270` and MVS 3.8j on
 `3271`: connect, log on, reach CMS or ISPF, type into a field, press Enter, use a PF key,
@@ -1330,13 +1387,13 @@ and log off. Capture a screenshot at the logged-on panel.
 model-2 client on a 3278-4 device gets a locked keyboard, zero fields and a program check
 755. Use `-model 3278-4-E` there.
 
-- [ ] **Step 2: Check the success criteria from the design, honestly**
+- [x] **Step 2: Check the success criteria from the design, honestly**
 
 Go through the six criteria in the design's *Success criteria* section and record which
 are met. **A criterion you could not test is recorded as untested, not dropped** — that is
 how stage 2b's "byte-identical against both Hercules hosts" row was handled.
 
-- [ ] **Step 3: The full gate**
+- [x] **Step 3: The full gate**
 
 ```bash
 npm run typecheck && npm run build
@@ -1351,19 +1408,19 @@ two older harnesses are in this list on purpose**: this stage added a package an
 nothing in `cli` or `tui`, so if either regresses, something was shared that should not
 have been.
 
-- [ ] **Step 4: Update README**
+- [x] **Step 4: Update README**
 
 The *Layout* section gains `packages/gui`; *What works today* gains the GUI with whatever
 qualification the live runs earned; *What is not implemented* loses "No GUI yet" and keeps
 the dialog, menus, preferences, mouse and packaging as the named remainder; the
 *Verification* table gains a GUI row and its test count is refreshed.
 
-- [ ] **Step 5: Update HANDOFF and the spec**
+- [x] **Step 5: Update HANDOFF and the spec**
 
 HANDOFF: what works, what is verified and against what, and what stage 4 is. Record
 outcomes against the design doc rather than in a session note.
 
-- [ ] **Step 6: Check every box in this plan and commit**
+- [x] **Step 6: Check every box in this plan and commit**
 
 ```bash
 git add -A

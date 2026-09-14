@@ -1357,6 +1357,80 @@ makes stage 2b unverifiable here in the first place.
 TN3270E gap is unchanged and is about the negotiation itself, not about strict addition:
 see *TN3270E against a real host*.
 
+## The Electron GUI against both hosts — verified 2026-09-14
+
+**It renders live 3270 screens from both Hercules systems, and typed input reaches the
+host.** Xvfb, Electron 44.3.0, `--no-sandbox --disable-gpu`.
+
+### How it was verified, since a screenshot proves less than it looks like
+
+A capture can be blank, or clipped, or show the wrong screen, and still be a perfectly valid
+PNG. So the GUI's rendered ink was compared **row by row against the text the CLI reports
+from the same host** — two independent front ends over the same protocol core.
+
+| host | model | window | rows agreeing on content-present |
+|---|---|---|---|
+| VM/370 CE, `:3270` | `3278-4-E` | 720x616 | **42 of 43**, and the 43rd is explained below |
+| MVS 3.8j TK5, `:3271` | `3278-2-E` | 720x350 | **24 of 24** |
+
+The VM "disagreement" is the CURSOR: row 41 carries exactly **27 ink pixels = 9 x 3**, which
+is one cursor bar at scale 1 on an otherwise empty row. `ScreenText` does not include a
+cursor, so the two views are both right. Finding that the count matched the bar's geometry
+exactly is what turned an anomaly into a confirmation.
+
+Colour is live on both: VM draws its logo in blue, TK5's logon panel uses blue, white and
+**red**. The OIA is drawn below the screen on both, through the same glyph atlas.
+
+### THE FIRST LIVE RUN CLIPPED THE HOST'S DATA, and that is the bug worth remembering
+
+Model 4 is 43 rows. With the OIA that is 44 x 14 = **616px**, and the window default was
+600 — so the bottom 16px vanished, taking the ENTIRE OIA row with it, silently and with no
+error anywhere. Geometry is not known until the host has spoken, because VM sends
+Erase/Write Alternate and *then* the screen is 43 rows.
+
+The window now resizes on the first frame whose size changes, to the largest integer scale
+fitting 80% of the work area. **The TUI refuses to draw rather than clip, because it cannot
+resize a terminal; a window can, so it does.** Note the asymmetry is deliberate, not an
+inconsistency: in both cases the rule is "never show the operator a partial screen".
+
+### Typed input, proved end to end — and the clock nearly faked it
+
+`TN3270_GUI_KEYS` delivers real key events through `webContents.sendInputEvent`, which
+enters at the top of Chromium's input pipeline and so exercises the one link nothing else
+reaches: the renderer's own `keydown` listener, `actionForKey`, the IPC hop and
+`applyAction`. Injecting at `ipcMain` instead would have skipped precisely the untested part.
+
+Typing `HERC01` at TK5's logon panel produced a capture that differed from the baseline —
+but **that alone proves nothing, because TK5's panel paints a clock**, the same trap that
+produced a false DIFFERS in the stage 2b comparison. Diffing the two images SPATIALLY
+settles it:
+
+```
+cell rows that differ: [1, 22]
+  row  1: columns 79..79   (1 cell)    <- the clock's seconds digit
+  row 22: columns 11..17   (7 cells)   <- the six typed characters, plus the cursor
+```
+
+Six characters and an advanced cursor, exactly where the input field is. **No logon was
+completed**: on VM that would arm the reconnect trap for the next run, and a capture of a
+logged-on screen can contain a password.
+
+### Reproduce it
+
+```bash
+npm run build
+GUI=$HOME/micromamba/envs/gui
+export LD_LIBRARY_PATH=$GUI/lib FONTCONFIG_PATH=$GUI/etc/fonts \
+       FONTCONFIG_FILE=$GUI/etc/fonts/fonts.conf
+[ -S /tmp/.X11-unix/X99 ] || { nohup $GUI/bin/Xvfb :99 -screen 0 1280x1024x24 & sleep 3; }
+export DISPLAY=:99
+./node_modules/.bin/electron packages/gui/dist/main.js --no-sandbox --disable-gpu \
+    -insecure -model 3278-4-E 127.0.0.1:3270
+```
+
+Screenshot goldens: `node packages/gui/scripts/shot.mjs`, one case, from a replayed
+synthetic trace rather than a live logon — see that script's header for why.
+
 ## Electron headless re-verification — 2026-08-28
 
 **PASSES, on the version we would actually ship, with three caveats that change how the

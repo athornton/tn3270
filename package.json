@@ -5,12 +5,14 @@
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/core packages/frontend packages/cli packages/tui"
+    "typecheck": "tsc --build packages/core packages/frontend packages/cli packages/tui packages/gui"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
