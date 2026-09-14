@@ -1,9 +1,12 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
 import { applyAction, defaultSession, describeTlsError, type Action } from '@tn3270/frontend';
 import { parseGuiArgs, UsageError } from './args.js';
+import { drawList, type AtlasGeometry } from './drawlist.js';
+import { blankColumns } from './blit.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -76,9 +79,20 @@ app.whenReady().then(async () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(here, 'preload.js'),
+      // `.cjs`, compiled from preload.cts: an ESM preload cannot load. See that file.
+      preload: join(here, 'preload.cjs'),
     },
   });
+  // Renderer console and load failures forwarded to stdout. Without this a renderer that
+  // throws produces a BLANK WINDOW and no explanation anywhere -- which is exactly how the
+  // first screenshot came out, and it is indistinguishable from a drawing bug.
+  win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    process.stdout.write(`renderer[${level}] ${sourceId}:${line} ${message}\n`);
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    process.stdout.write(`renderer failed to load ${url}: ${code} ${desc}\n`);
+  });
+
   await win.loadFile(join(here, '..', 'index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
 
@@ -113,15 +127,35 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // The renderer holds no protocol state, so a dropped or coalesced frame costs a repaint
-  // and never correctness -- the same property that lets the TUI diff its output safely.
+  /**
+   * The atlas is read HERE and shipped over IPC, not fetched by the renderer.
+   *
+   * Two reasons, both found by running it: `fetch` on a `file://` URL is blocked in
+   * Chromium, and a packaged app's resources live inside an asar archive that only the main
+   * process can read. Sending it once at startup avoids both and keeps the renderer with no
+   * filesystem access at all.
+   */
+  const geometry = JSON.parse(
+    readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
+  const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+  const blank = [...blankColumns(coverage, geometry)];
+  win.webContents.send('atlas', { geometry, coverage, blank });
+
+  /**
+   * Compute the DRAW LIST here and send that, rather than sending the snapshot.
+   *
+   * `drawList` needs core's palette and code page, and a browser cannot resolve a bare
+   * specifier like `@tn3270/core` without a bundler -- measured: the renderer failed with
+   * "Failed to resolve module specifier". Doing it in main means the renderer imports only
+   * its own relative modules, which is also less for it to know. It already owns no
+   * protocol state, so a dropped or coalesced frame costs a repaint and never correctness.
+   */
   const send = (): void => {
     const snapshot = session.screen.snapshot();
-    win.webContents.send('frame', {
-      snapshot,
-      resolved: resolve(snapshot),
-      oia: session.oia.toText(),
-    });
+    const oia = session.oia.toText();
+    win.webContents.send('frame', drawList(
+      snapshot, resolve(snapshot), geometry, oia === '' ? undefined : oia,
+    ));
   };
   session.on('screen', send);
   session.on('connect', send);
@@ -135,6 +169,25 @@ app.whenReady().then(async () => {
     send();
   });
 
+  /**
+   * A SECOND TEST SEAM: `TN3270_GUI_REPLAY=<trace>` paints a recorded trace instead of
+   * connecting.
+   *
+   * This is how screenshot goldens are made, and the reason is not convenience. A golden
+   * taken from a live logon can contain a typed password -- and goldens live in git
+   * forever. It also cannot be byte-reproducible if the host paints a clock, which TK5's
+   * VTAM logon panel does. A synthetic trace has neither problem and is identical on every
+   * run. `docs/live-testing.md` already warns that traces carry passwords in EBCDIC, so
+   * the trace CHOSEN matters as much as the mechanism.
+   */
+  const replayPath = process.env['TN3270_GUI_REPLAY'];
+  if (replayPath !== undefined && replayPath !== '') {
+    session.replay(readFileSync(replayPath, 'utf8'));
+    send();
+    await maybeCapture(win);
+    return;
+  }
+
   try {
     await session.connect(args.host!, args.port ?? 23,
       args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
@@ -144,6 +197,31 @@ app.whenReady().then(async () => {
     // handshake ... use -insecure' is the message that matters against Hercules.
     fail(explain(err, args.host, args.port));
   }
+
+  await maybeCapture(win);
 });
+
+/**
+ * A TEST SEAM, not a feature: `TN3270_GUI_SHOT=<path>` captures the window and exits.
+ *
+ * `capturePage()` is a main-process API, so a screenshot harness cannot reach it from
+ * outside -- something in here has to take the picture. This is the same instinct as
+ * `app.ts` injecting its streams rather than reaching for `process`: the alternative is a
+ * renderer nothing can check without a human looking at it.
+ *
+ * `TN3270_GUI_SHOT_MS` is how long to let the host finish painting first. It defaults
+ * generously because a missed frame produces a blank golden, which looks like a rendering
+ * bug rather than a timing one.
+ */
+async function maybeCapture(win: BrowserWindow): Promise<void> {
+  const path = process.env['TN3270_GUI_SHOT'];
+  if (path === undefined || path === '') return;
+  const waitMs = Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500');
+  await new Promise((r) => setTimeout(r, waitMs));
+  const image = await win.webContents.capturePage();
+  writeFileSync(path, image.toPNG());
+  process.stdout.write(`shot: ${path} ${image.getSize().width}x${image.getSize().height}\n`);
+  app.quit();
+}
 
 app.on('window-all-closed', () => { app.quit(); });

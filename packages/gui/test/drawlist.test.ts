@@ -106,6 +106,26 @@ describe('drawList', () => {
 });
 
 describe('the OIA', () => {
+  it('renders its text THROUGH THE ATLAS, not as canvas text', () => {
+    // fillText would pull in a system font, and font rasterisation is the machine-dependent
+    // thing that would stop screenshot goldens being byte-reproducible. So the OIA is glyphs
+    // from the same atlas as the screen.
+    const dl = listFor(screenWith([]), 'X Wait');
+    expect(dl.oia!.cells).toHaveLength(6);
+    // 'X' is EBCDIC 0xe7, which is CG-mapped like any other character.
+    expect(dl.oia!.cells[0]!.glyph).toBe(atlas.index[ebcdicToCg(0xe7)]);
+    // and the space in the middle is the blank glyph, not a gap in the array
+    expect(dl.oia!.cells[1]!.glyph).toBe(atlas.index[ebcdicToCg(0x40)]);
+    expect(dl.oia!.cells.every((c) => c.y === 24 * atlas.cellHeight)).toBe(true);
+  });
+
+  it('truncates the OIA at the screen width rather than wrapping', () => {
+    // A status line that reflowed would move the screen above it.
+    const dl = listFor(screenWith([]), 'y'.repeat(200));
+    expect(dl.oia!.cells).toHaveLength(80);
+    expect(dl.height).toBe(25 * atlas.cellHeight);
+  });
+
   it('is drawn BELOW the screen and is not one of the 1920 cells', () => {
     // The spec is explicit that the OIA lives outside the screen buffer. If it were a
     // cell, a host write could overwrite the status line.

@@ -1,4 +1,6 @@
-import { colourRgb, type Rgb, type ResolvedCell, type ScreenSnapshot } from '@tn3270/core';
+import {
+  colourRgb, cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
+} from '@tn3270/core';
 import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 
 /**
@@ -51,8 +53,20 @@ export interface DrawCell {
 
 export interface DrawList {
   readonly cells: readonly DrawCell[];
-  /** Absent when no OIA text was supplied, and the height is then the screen alone. */
-  readonly oia?: { readonly text: string; readonly y: number };
+  /**
+   * Absent when no OIA text was supplied, and the height is then the screen alone.
+   *
+   * `cells` is the OIA rendered THROUGH THE SAME ATLAS as the screen, not text for the
+   * canvas to typeset. That is not cosmetic consistency: `fillText` would pull in a system
+   * font, and font rasterisation is exactly the machine-dependent thing that would stop
+   * screenshot goldens being byte-reproducible. `text` is kept alongside for debugging and
+   * for tests to assert against something readable.
+   */
+  readonly oia?: {
+    readonly text: string;
+    readonly y: number;
+    readonly cells: readonly DrawCell[];
+  };
   readonly width: number;
   readonly height: number;
 }
@@ -94,14 +108,52 @@ export function drawList(
   }
 
   const rows = snapshot.rows + (oiaText !== undefined ? 1 : 0);
+  const oiaY = snapshot.rows * atlas.cellHeight;
   return {
     cells,
     ...(oiaText !== undefined
-      ? { oia: { text: oiaText, y: snapshot.rows * atlas.cellHeight } }
+      ? {
+        oia: {
+          text: oiaText,
+          y: oiaY,
+          cells: oiaCells(oiaText, oiaY, snapshot.cols, atlas),
+        },
+      }
       : {}),
     width: snapshot.cols * atlas.cellWidth,
     height: rows * atlas.cellHeight,
   };
+}
+
+/**
+ * The OIA as atlas cells on the row below the screen buffer.
+ *
+ * Neutral white on black, which is a presentation choice rather than a protocol fact: the
+ * OIA is OUR chrome, not one of the host's 1920 cells, so nothing in the data stream says
+ * what colour it should be. Truncated at the screen width rather than wrapped, because a
+ * status line that reflowed would move the screen.
+ */
+function oiaCells(
+  text: string, y: number, cols: number, atlas: AtlasGeometry,
+): readonly DrawCell[] {
+  const fg = colourRgb(Colour.NEUTRAL_WHITE);
+  const bg = colourRgb(Colour.NEUTRAL_BLACK);
+  const out: DrawCell[] = [];
+  const chars = [...text].slice(0, cols);
+  for (let i = 0; i < chars.length; i++) {
+    out.push({
+      x: i * atlas.cellWidth,
+      y,
+      glyph: column(atlas, ebcdicToCg(cp037.fromUnicode(chars[i]!))),
+      fg,
+      bg,
+      cursor: false,
+      underline: false,
+      blink: false,
+      intensify: false,
+    });
+  }
+  return out;
 }
 
 /**
