@@ -7,8 +7,11 @@
  */
 
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
+import { resolveHostSpec } from '@tn3270/frontend';
+// TLS names and `defaultSession` still come from `@tn3270/cli` here; tasks 3 and 4 of the
+// frontend extraction move them, and these two imports collapse into one then.
 import {
-  defaultSession, resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
+  defaultSession, takeTlsFlag, resolveTls, TLS_USAGE,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/cli';
 import { App, type HostProcess } from './app.js';

@@ -14,5 +14,8 @@
  * would be used by exactly one front end, it is in the wrong package.
  */
 
-/** Placeholder so the module is non-empty until Task 2 lands. Removed there. */
-export const FRONTEND_PACKAGE = '@tn3270/frontend';
+// The host argument's shape. Prefix meaning and port validation must be identical in
+// every front end -- `N:` disabling TN3270E in one and not another would be the drift
+// this package exists to prevent.
+export { parseHostSpec, resolveHostSpec } from './hostspec.js';
+export type { HostSpec, ResolvedHost } from './hostspec.js';

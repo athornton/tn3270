@@ -21,9 +21,5 @@ export {
   DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions } from './tls.js';
-// Host-argument shape, shared for the same reason the TLS flags are: `N:` and an LU
-// list must mean the same thing in both front ends. See resolveHostSpec.
-export { parseHostSpec, resolveHostSpec } from './hostspec.js';
-export type { HostSpec, ResolvedHost } from './hostspec.js';
 export { parseCommand } from './commands.js';
 export type { TransferFiles } from './transfer.js';

@@ -3,7 +3,7 @@ import {
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
-import { resolveHostSpec } from './hostspec.js';
+import { resolveHostSpec } from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
 import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';

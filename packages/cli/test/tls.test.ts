@@ -7,7 +7,7 @@ import { Session, type Connection } from '@tn3270/core';
 import { parseArgs, UsageError } from '../src/main.js';
 import { parseArgs as parseTuiArgs, UsageError as TuiUsageError } from '../../tui/src/main.js';
 import { Runner } from '../src/runner.js';
-import { resolveHostSpec } from '../src/hostspec.js';
+import { resolveHostSpec } from '@tn3270/frontend';
 import { resolveTls, describeTlsError, tcpConnect, type TlsFlags } from '../src/tls.js';
 // @ts-expect-error -- .mjs harness, deliberately untyped; tests are outside the tsc build
 import { startTlsProxy } from '../scripts/tls-proxy.mjs';
