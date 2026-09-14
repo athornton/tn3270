@@ -69,6 +69,9 @@ describe('the screenshot harness', () => {
     // quietly re-baseline to the wrong palette on the next --update. `npm test` cannot see
     // that; this file is the only thing standing between it and a silent wrong baseline.
     expect(shot).toMatch(/\.\.\.\(kase\.extraArgv \?\? \[\]\)/);
-    expect(shot).toMatch(/extraArgv:\s*\[['"]-scheme['"]/);
+    // `\s*` AFTER the bracket too, so reformatting the array across lines does not fail a
+    // guard on a purely cosmetic edit. A test that cries wolf gets deleted by the next
+    // person, which is worse than not having it.
+    expect(shot).toMatch(/extraArgv:\s*\[\s*['"]-scheme['"]/);
   });
 });
