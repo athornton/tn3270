@@ -1,4 +1,4 @@
-# Shared display palette, and the keys that were implemented but unreachable
+# Shared display palette, the keys nothing could reach, and the default terminal type
 
 **Date:** 2026-09-14
 **Status:** designed, not built
@@ -7,9 +7,14 @@ expected 80x43 window, and reported that **the dark blue is very hard to read on
 background**. Then asked which keys are PA1 and PA2.
 
 The answer to the second question turned out to be "none, in the GUI", and chasing that
-found a class of the same defect. So this design has two halves that share one principle:
+found a class of the same defect. So this design has several parts that share one principle:
 **a front end should not silently diverge from the others**, and where they do, the guard
 that was supposed to notice is itself part of the bug.
+
+**Amended 2026-09-14 after the user tested against MVS 3.8j TK5 and reported back.** That
+session found two more defects — the TUI's PA keys are broken too, and the default terminal
+type fails on MVS — and corrected one misconception about the light pen. Everything the user
+measured is recorded in *Live findings from the MVS session* below.
 
 ## Problem 1: the GUI never got the TUI's palette
 
@@ -77,6 +82,88 @@ where a button has no spelling problem.** This follows c3270, which made the sam
 SysReq. It also avoids inventing a keyboard spelling for SysReq, which **could not be
 verified against a live host here in any case** — SysReq only does anything under TN3270E,
 and both Hercules systems actively refuse option 40 (measured: they answer `ff fe 28`).
+
+## Problem 3: the TUI's PA keys are broken too, not merely awkward
+
+Reported by the user: in the TUI, `Esc` `1` **types the digit `1`**. Confirmed from the code,
+and the mechanism is certain.
+
+`ESC_TIMEOUT_MS = 50` (`tui/src/app.ts:32`). A lone `\x1b` is `PARTIAL`, so the timer is
+armed; if nothing follows within 50 ms **the buffer is discarded** (`app.ts:354-361`). A human
+pressing Esc and then 1 takes hundreds of milliseconds, so the ESC is thrown away and the `1`
+then arrives as a fresh printable run and is typed as text.
+
+**So the TUI's PA keys only ever worked when the terminal sent `\x1b1` as a single burst** —
+that is, via Option/Alt configured as Meta. `README.md:169-170` documents "`Esc` `1`/`2`/`3`
+are PA1/PA2/PA3", which describes bytes rather than a keystroke a human can perform. The
+keymap's own comment is accurate about the mechanism ("only a timeout can tell them apart")
+but the resulting behaviour was never exercised by a human, and no test could catch it: the
+unit tests hand `lookup()` a complete `\x1b1` buffer, which is exactly the case that works.
+
+**Fix (user's call): when the buffer is exactly a lone `\x1b`, do not discard it on the timer
+— hold it as a Meta prefix for one further keystroke.** Truncated escape sequences (`\x1b[`,
+`\x1bO`) keep the 50 ms discard, so that protection is unchanged. Then literal `Esc` `1` works
+in any terminal on any keyboard with no Option mapping, which also matches Emacs' Meta
+behaviour — the user's habitual editor, and the reason they like this spelling.
+
+The cost, stated plainly: a bare Escape pressed with no follow-up leaves one byte buffered
+until the next keystroke, and that next keystroke is then consumed by the failed `\x1b`+key
+lookup. **On a 3270 that costs nothing real** — Escape has no 3270 meaning and was already
+being discarded — but it is a behaviour change and needs its own test.
+
+## Problem 4: the default terminal type fails on MVS
+
+With no `-model`, we advertise a bare `IBM-3278-2` (`termtype.ts:139`, from `TERMINAL_TYPE`
+at `constants.ts:545`). **MVS 3.8j TSO rejects that with `IKT00405I` and no logon** — already
+recorded at `termtype.ts:10`, and now reproduced live through the GUI.
+
+**Decision (user's call): the default becomes `IBM-3278-2-E`.** The reasoning is support
+load, and it is the user's to make: both live systems work with `3278-2-E`, and a default that
+fails on one of the two most likely hosts generates "but it doesn't work" from every user who
+did not read the manual. A bare `IBM-3278-2` stays available via `-model 3278-2` or
+`--terminal-type`, and eventually a GUI model selector.
+
+### The blast radius was measured, not estimated
+
+The existing comment at `termtype.ts:132-138` warns that keeping the default at `IBM-3278-2`
+"is what lets the VM/370 conformance comparison stay valid". **That overstates the coupling,
+and the difference matters because it is the stated reason not to do this.** Measured by
+flipping the constant, rebuilding and running the whole suite:
+
+- **4 tests fail, in 3 files, and they are all expectation updates**: `termtype.test.ts:13`,
+  `telnet.test.ts:64`, `telnet.test.ts:77`, `session.test.ts:760`. 1279 of 1283 still pass.
+- **`conformance.test.ts` and `golden.test.ts` both PASS unchanged.** Two independent reasons:
+  the offline conformance test filters negotiation out of the comparison
+  (`conformance.test.ts:71`, `if (!isNegotiation(bytes))`), and the live conformance script
+  already pins `-model 3278-2` explicitly (`packages/cli/scripts/conformance-vm.txt`). So the
+  comparison is against a model-2 negotiation either way, and the committed capture is even
+  named `vm370-conformance-model2.trace`.
+
+**The comment therefore gets corrected rather than carried forward.** A stale warning that
+forbids a change for a reason that no longer holds is as costly as a missing one.
+
+### Harness audit, because a flipped default silently exempts everything outside `npm test`
+
+This is the documented lesson from default-on TLS, which left `pty-smoke.py` at 1 of 12 for
+two days. Audited, every script under `packages/*/scripts`:
+
+- **Already pin a model, so unaffected**: `conformance-vm.txt` (`3278-2`), `shot.mjs`,
+  `live-drive.py`, `drive-e.py`, `transfer-vm.txt`, `record-mvs.txt` (all `3278-2-E`).
+- **`record-vm.txt` passes no `-model`** and is the recorder for the committed VM fixture.
+  It gets an explicit **`-model 3278-2`**, so a re-record still reproduces
+  `vm370-conformance-model2.trace` instead of silently negotiating `-E`.
+- **`pty-smoke.py`** passes no model and asserts only that *a* terminal type was negotiated
+  (`pty-smoke.py:265`), not which — so it passes either way. Left alone deliberately; the
+  assertion is about negotiation happening, and narrowing it would couple a host-free smoke
+  test to a default it does not care about.
+- `count-orders.mjs`, `build-atlas.mjs`, `gen-test-certs.mjs` do not negotiate at all.
+
+### Comments that name the old default and become false
+
+`termtype.ts:126` ("Both spell IBM-3278-2 today"), `termtype.ts:132-138` (above),
+`queryreply.ts:357` ("TERMINAL_TYPE is IBM-3278-2 regardless"), and `cli/src/main.ts:122`
+("the same IBM-3278-2"). All four are load-bearing explanations, not decoration, so each is
+rewritten rather than deleted.
 
 ## Design
 
@@ -152,6 +239,23 @@ still be dark. If it survives, F9 is a separate question and must not be pre-emp
   the GUI cannot express then **fails** instead of vanishing. The `checked` floor rises with
   the new entries.
 
+### The lone-ESC Meta prefix
+
+In `tui/src/app.ts`, the timeout path (`app.ts:354-361`) splits on buffer content instead of
+discarding unconditionally: a buffer of exactly `[0x1b]` is **retained** across the timeout;
+anything longer is discarded as it is today. The `escTimer` still exists for the longer case,
+including its teardown at `app.ts:200-204` that stops an armed timer keeping the event loop
+alive at exit. `keymap.ts` needs no change at all — `\x1b1` is already in the table; it was
+the delivery that never happened.
+
+### The default terminal type
+
+`constants.ts:545` becomes `IBM-3278-2-E`. That is the whole code change; the work is the four
+expectation updates, the four stale comments, `record-vm.txt`'s new explicit `-model 3278-2`,
+and the live re-check with no flag. `KNOWN_MODELS` is untouched — `termtype.ts:125-130` is
+explicit that editing it must never change what a session with no options negotiates, and that
+separation is what makes this a one-line change.
+
 ### Documentation
 
 The README has **two** key paragraphs and **one palette paragraph**, and all three are
@@ -161,8 +265,9 @@ affected. Missing any of them leaves the README contradicting itself.
   Insert.
 - **`README.md:140` is wrong today** and gets corrected: it lists the GUI's "PA keys" under
   *implemented but not yet verified against a live host* when they are not implemented at all.
-- **`README.md:168-170`, the TUI's key list**: already documents `Esc` `1`/`2`/`3` correctly;
-  gains `Ctrl-A` and Insert.
+- **`README.md:168-170`, the TUI's key list**: gains `Ctrl-A` and Insert. Its `Esc` `1`/`2`/`3`
+  claim becomes true only once the Problem 3 fix lands — **it is a promise the code does not
+  currently keep**, so the fix and the sentence must ship together.
 - **`README.md:173-175` becomes false and must be rewritten.** It currently says "Colours are
   zti's, not core's: **the shared palette in `packages/core`** keeps saturated primaries, and
   **the TUI** renders the gentler values". After this change the gentler values are the shared
@@ -192,6 +297,15 @@ affected. Missing any of them leaves the README contradicting itself.
   and a main-side module.
 - **Key unit tests**: Alt-1/2/3 via `e.code` **including the macOS `key:'¡'` case**, `Ctrl-A`,
   `Insert`, and the repaired intent guard.
+- **The ESC-prefix fix needs a test no existing one could have caught.** Every current keymap
+  test hands `lookup()` a complete `\x1b1`, which is the case that already worked. The new
+  tests must drive `app.ts` with the bytes **split across two reads with the timer firing in
+  between** — that is the shape of the bug. Also pin the part that does *not* change:
+  `\x1b[` followed by nothing is still discarded after 50 ms.
+- **Four expectation updates for the default flip**, already located by measurement:
+  `termtype.test.ts:13`, `telnet.test.ts:64`, `telnet.test.ts:77`, `session.test.ts:760`.
+  `conformance.test.ts` and `golden.test.ts` must still pass **without being touched** — if
+  either needs editing, the premise of Problem 4 is wrong and the flip should stop.
 - **Build before test.** `frontend` resolves to its built `dist/index.js`, so `npm run build`
   must precede `vitest` or the move looks like a broken refactor.
 
@@ -200,8 +314,31 @@ affected. Missing any of them leaves the README contradicting itself.
 - **Colour**: run the GUI against VM/370 here and confirm blue is legible. Doable in this
   sandbox.
 - **PA1/PA2**: need a host that acts on them, which realistically means ISPF on MVS. **This
-  is the user's check on the Mac and must not be reported as verified here.**
+  is the user's check on the Mac and must not be reported as verified here.** What PA1 and PA2
+  actually do in TSO — conventionally Attention and a screen redisplay — is **unverified**:
+  there is no `pdftotext` on this box to search the TK5 manual, and the keys could not
+  transmit until now, so nothing has ever exercised them.
 - **Attn**: Telnet BREAK. Whether VM/370 acts on it is **to be measured, not assumed.**
+- **The default flip wants one live run per host with NO `-model` flag at all**, which is the
+  case that was broken. Expected: MVS TSO logs on where it previously gave `IKT00405I`, and
+  VM/370 is unaffected. Both are reachable from this sandbox.
+
+## Live findings from the MVS session (user, 2026-09-14)
+
+Recorded here and to be folded into `docs/live-testing.md`, because two of the three are new
+witnesses and the third corrects a note we already had.
+
+- **EWA IS NOW LIVE-VERIFIED ON MVS, not just VM/370.** With `-model 3278-4-E` the session
+  starts at 24x80 and resizes to **80x43 once HERC01 is logged on** — the `f5` (EW) then `7e`
+  (EWA) transition, previously witnessed only on VM. **`-model 3278-2-E` correctly stays at
+  24x80**, since model 2's alternate size *is* 24x80 and there is nothing to switch to.
+- **This sharpens an older finding rather than contradicting it.** We had concluded TSO does
+  not *need* more than 24x80 (ISPF reported `TERMINAL: 3277`). That still holds — but it is now
+  measured that **TSO will use 43 rows when they are offered.**
+- **`IKT00405I` reproduced with a bare `IBM-3278-2`**, which is what no `-model` sends. See
+  Problem 4. The user's transcription read `IKT004051` and `ERRIR`; the 3270 face makes
+  `I`/`1` and `O`/`0` hard to separate, which is worth knowing when reading host messages off
+  a screenshot.
 
 ## Follow-up, deliberately out of scope
 
@@ -210,8 +347,18 @@ affected. Missing any of them leaves the README contradicting itself.
   style). Its own spec. A native Electron menu needs no mouse plumbing; the keypad needs
   canvas hit-testing, which does not exist yet.
 - **Mouse input is three unrelated jobs**, and only the third is architected: keypad buttons
-  (pure UI hit-testing, no 3270 semantics), click-to-place-cursor, and the light pen. **The
-  keypad needs none of the 3270 side, which is why it can ship first.**
+  (pure UI hit-testing, no 3270 semantics), **text selection and cursor placement**, and the
+  light pen. **The keypad needs none of the 3270 side, which is why it can ship first.**
+- **Text selection is job 2, and it is NOT the light pen.** The user proposed implementing
+  mouse text selection *with* `lightpen_select()`; that would be actively harmful and the two
+  must stay separate. `lightpen_select()` **sends an AID to the host and mutates the buffer**
+  (designator `?` → `>`, sets MDT, transmits `0x7e`), so if drag-to-select ran it, **every
+  attempt to copy text would transmit to the host and modify fields.** x3270 keeps them apart
+  for exactly this reason — plain click is selection, the light pen is a separate action gated
+  behind Alt (`wc3270/screen.c:2357`).
+  Selection is hit-testing, a text extent and a clipboard write: **no protocol work, no core
+  changes.** It is also the mouse behaviour a Mac user misses first, so it is the strongest
+  candidate to ship before either the keypad or the light pen.
 
 ### Light pen / Cursor Select — measured groundwork for that spec
 
