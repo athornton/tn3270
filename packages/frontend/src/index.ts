@@ -33,3 +33,10 @@ export type { TlsFlags, TlsOptions } from './tls.js';
 // transport every front end needs -- and it defaults to VERIFIED TLS, so it must not be
 // reimplemented per front end where one copy could quietly default to plaintext.
 export { defaultSession } from './session.js';
+
+// The terminal keymap. Shared for its ACTION VOCABULARY, which every front end needs --
+// the byte-sequence table itself is terminal-specific, and the GUI will have its own
+// KeyboardEvent mapper beside it rather than a shared abstraction over both. See
+// keymap.ts on why the table is MOVED here rather than generalised.
+export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from './keymap.js';
+export type { Action } from './keymap.js';

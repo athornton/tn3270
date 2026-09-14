@@ -24,7 +24,9 @@
 import { AID, PA_AIDS, PF_AIDS, resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
-import { lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action } from './keymap.js';
+import {
+  lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action,
+} from '@tn3270/frontend';
 
 /** How long to wait before deciding a lone ESC really was Escape. */
 const ESC_TIMEOUT_MS = 50;
