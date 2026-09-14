@@ -2,8 +2,10 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
-import { Runner, defaultSession } from './runner.js';
-import { takeTlsFlag, resolveTls, type TlsFlags, type TlsOptions } from './tls.js';
+import { Runner } from './runner.js';
+import {
+  takeTlsFlag, resolveTls, defaultSession, type TlsFlags, type TlsOptions,
+} from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
 import type { TransferFiles } from './transfer.js';
 

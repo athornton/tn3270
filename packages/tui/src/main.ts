@@ -10,7 +10,7 @@ import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@t
 import {
   defaultSession, resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
   type TlsFlags, type TlsOptions,
-} from '@tn3270/cli';
+} from '@tn3270/frontend';
 import { App, type HostProcess } from './app.js';
 import { layout } from './render.js';
 import type { Depth } from './colours.js';

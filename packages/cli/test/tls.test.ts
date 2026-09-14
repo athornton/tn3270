@@ -7,50 +7,20 @@ import { Session, type Connection } from '@tn3270/core';
 import { parseArgs, UsageError } from '../src/main.js';
 import { parseArgs as parseTuiArgs, UsageError as TuiUsageError } from '../../tui/src/main.js';
 import { Runner } from '../src/runner.js';
-import { resolveHostSpec } from '../src/hostspec.js';
-import { resolveTls, describeTlsError, tcpConnect, type TlsFlags } from '../src/tls.js';
+import { tcpConnect } from '@tn3270/frontend';
 // @ts-expect-error -- .mjs harness, deliberately untyped; tests are outside the tsc build
 import { startTlsProxy } from '../scripts/tls-proxy.mjs';
 // @ts-expect-error -- see above
 import { generateCerts, haveOpenssl } from '../scripts/gen-test-certs.mjs';
 
-/** Design: docs/superpowers/specs/2026-08-25-tls-support-design.md */
-
-const usage = (m: string) => new UsageError(m);
-
-describe('TLS flag resolution', () => {
-  it('defaults to TLS with verification on', () => {
-    expect(resolveTls({}, usage)).toEqual({ kind: 'tls', verify: true });
-  });
-
-  it('-insecure turns TLS off entirely', () => {
-    expect(resolveTls({ insecure: true }, usage)).toEqual({ kind: 'plaintext' });
-  });
-
-  it('-noverifycert keeps TLS but stops verifying', () => {
-    expect(resolveTls({ verify: false }, usage)).toEqual({ kind: 'tls', verify: false });
-  });
-
-  it('-cafile keeps verification on and names the anchor', () => {
-    expect(resolveTls({ caFile: '/tmp/h.pem' }, usage))
-      .toEqual({ kind: 'tls', verify: true, caFile: '/tmp/h.pem' });
-  });
-
-  // Contradictions are refused rather than resolved by precedence: one of the two
-  // readings of `-insecure -cafile x` is an unencrypted connection, and a user who
-  // typed both cannot be assumed to have wanted that one.
-  it('refuses -insecure combined with any verification flag', () => {
-    for (const extra of [{ verify: true }, { verify: false }, { caFile: '/tmp/h.pem' }]) {
-      expect(() => resolveTls({ insecure: true, ...extra } as TlsFlags, usage))
-        .toThrow(/-insecure disables TLS/);
-    }
-  });
-
-  it('refuses -noverifycert combined with -cafile', () => {
-    expect(() => resolveTls({ verify: false, caFile: '/tmp/h.pem' }, usage))
-      .toThrow(/contradict each other/);
-  });
-});
+/**
+ * Design: docs/superpowers/specs/2026-08-25-tls-support-design.md
+ *
+ * The flag-resolution, `describeTlsError` and `resolveHostSpec` cases MOVED to
+ * packages/frontend/test/tls.test.ts with the module they test. What is left here needs
+ * something this package owns: the two front ends' arg parsers, the `Runner`, or the
+ * proxy harness under `packages/cli/scripts` whose path the runbook documents.
+ */
 
 describe('TLS flags on both front ends', () => {
   // The two parsers delegate to the same helper, so this asserts they cannot drift.
@@ -88,26 +58,6 @@ describe("s3270's L: host prefix", () => {
   // literally `L` and the failure is a baffling DNS error.
   const err = (m: string) => new Error(m);
 
-  it('is stripped, and reported', () => {
-    expect(resolveHostSpec('L:vm.example:992', err))
-      .toMatchObject({ host: 'vm.example', port: 992, tlsRequested: true });
-    expect(resolveHostSpec('l:vm.example', err))
-      .toMatchObject({ host: 'vm.example', port: 23, tlsRequested: true });
-  });
-
-  it('leaves an ordinary target alone, still defaulting to port 23', () => {
-    expect(resolveHostSpec('vm.example:3270', err))
-      .toMatchObject({ host: 'vm.example', port: 3270, tlsRequested: false });
-    expect(resolveHostSpec('vm.example', err))
-      .toMatchObject({ host: 'vm.example', port: 23, tlsRequested: false });
-  });
-
-  it('still loses only the last group of a bare IPv6 literal', () => {
-    // Unbracketed, so the last colon is the port separator. Carried over from the
-    // `splitTarget` this replaced, because it is the case that made it use lastIndexOf.
-    expect(resolveHostSpec('::1:3270', err)).toMatchObject({ host: '::1', port: 3270 });
-  });
-
   it('is a usage error with -insecure on the TUI, where both are in argv', () => {
     expect(() => parseTuiArgs(['-insecure', 'L:vm:992'])).toThrow(TuiUsageError);
     expect(() => parseTuiArgs(['-insecure', 'L:vm:992'])).toThrow(/-insecure disables TLS/);
@@ -125,31 +75,6 @@ describe("s3270's L: host prefix", () => {
     const reply = await runner.run('Connect(L:vm:992)');
     expect(reply).toMatch(/silent downgrade/);
     expect(reply.trimEnd().endsWith('error')).toBe(true);
-  });
-});
-
-describe('TLS error messages name the flag that fixes them', () => {
-  // This mapping is most of the feature's usability: a TLS failure against a
-  // plaintext host is otherwise indistinguishable from a host being down.
-  it('points a plaintext host at -insecure', () => {
-    expect(describeTlsError('HANDSHAKE_TIMEOUT', 'vm', 3270)).toMatch(/-insecure/);
-    expect(describeTlsError('ERR_SSL_WRONG_VERSION_NUMBER', 'vm', 3270)).toMatch(/-insecure/);
-  });
-
-  it('offers -cafile BEFORE -noverifycert for a self-signed cert', () => {
-    const msg = describeTlsError('DEPTH_ZERO_SELF_SIGNED_CERT', 'vm', 992);
-    expect(msg.indexOf('-cafile')).toBeLessThan(msg.indexOf('-noverifycert'));
-    // The advice has to say why, or -noverifycert is the one people will copy.
-    expect(msg).toMatch(/authenticates nothing/);
-  });
-
-  it('distinguishes a name mismatch from an untrusted chain', () => {
-    expect(describeTlsError('ERR_TLS_CERT_ALTNAME_INVALID', 'vm', 992))
-      .toMatch(/different name/);
-  });
-
-  it('names the host and port even for a code it does not know', () => {
-    expect(describeTlsError('ENETUNREACH', 'vm', 992)).toMatch(/vm:992/);
   });
 });
 

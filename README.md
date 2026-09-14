@@ -299,6 +299,8 @@ derived from a real session — procedure in `docs/live-testing.md`.
 ```
 packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
                    colour resolution, Query Reply, IND$FILE, trace
+packages/frontend  rules every front end shares: host argument, TLS flags, session
+                   factory, keymap, action dispatch, binding intent
 packages/cli       s3270-style scripting CLI
 packages/tui       c3270-style terminal front end, plus the live/pty harnesses
 packages/fixtures  recorded traces, golden screens, x3270 reference captures
@@ -441,7 +443,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1202 tests, 41 files |
+| `npm test` | **pass** — 1214 tests, 44 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

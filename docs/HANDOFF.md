@@ -24,17 +24,22 @@ asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST`
 byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
 an ABSENCE so that starting to ask for it would fail.
 
-**Next is roadmap item 2, the Electron GUI — AND IT IS ALREADY DESIGNED, PLANNED, AND ITS
-RISKIEST ASSUMPTION IS ALREADY PROVEN. Start here, in this order:**
+**`packages/frontend` EXISTS as of 2026-09-14 — part 1 of stage 3 is DONE** (branch
+`shared-frontend`). The dependency graph is now `core ← frontend ← { cli, tui }`, and
+**`tui` no longer depends on `cli` at all**, which was the point. What moved: `hostspec.ts`,
+`tls.ts`, `defaultSession`, `keymap.ts`, plus two new modules — `actions.ts` (`applyAction`)
+and `bindings.ts` (`BINDING_INTENT`). **1214 tests in 44 files**, no re-export shims left in
+`cli`.
+
+**Next is part 2, the Electron GUI, and its riskiest assumption is already proven. Start
+here:**
 
 1. Read `docs/superpowers/specs/2026-08-28-electron-gui-and-shared-frontend-design.md`.
-2. Execute `docs/superpowers/plans/2026-08-28-shared-frontend-extraction.md` — **8 tasks,
-   do this FIRST.** It creates `packages/frontend` and moves the shared front-end rules
-   (host argument, TLS flags, `defaultSession`, keymap, action dispatch) out of `cli` and
-   `tui`. Mostly a refactor, so the plan's own header explains why that inverts TDD: the
-   evidence is the existing **1202 tests passing with assertions unchanged**.
-3. Then `docs/superpowers/plans/2026-08-28-electron-gui.md` — 11 tasks. **Task 1 is already
-   DONE and passed**; the plan says so inline.
+2. Execute `docs/superpowers/plans/2026-08-28-electron-gui.md` — 11 tasks. **Task 1 is
+   already DONE and passed**; the plan says so inline. Its stated baseline is "1210 tests"
+   — the real number is **1214**, because the extraction added three assertions beyond what
+   its plan predicted (a PA2 case, a PF-number check, and an arrows-have-two-encodings
+   check).
 
 **THE ELECTRON GATE PASSED, 2026-08-28, on Electron 44.0.0** (not the 43 verified back in
 August's design, and there was no Electron installed on this box any more — it had to be

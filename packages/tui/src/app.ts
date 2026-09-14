@@ -21,10 +21,12 @@
  * to spawn a real TTY to check it would not get written.
  */
 
-import { AID, PA_AIDS, PF_AIDS, resolve, type Session } from '@tn3270/core';
+import { resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
-import { lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action } from './keymap.js';
+import {
+  applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action,
+} from '@tn3270/frontend';
 
 /** How long to wait before deciding a lone ESC really was Escape. */
 const ESC_TIMEOUT_MS = 50;
@@ -364,46 +366,25 @@ export class App {
   /**
    * Perform one action.
    *
-   * NOTE how thin this is: every branch delegates to `Keyboard` or `Session`.
-   * The field-aware typing rules, the tab order, the keyboard lock and the AID
-   * semantics all live in core and are already tested there. If a branch here
-   * grows logic, that logic is in the wrong package.
+   * THE 3270 HALF IS `applyAction` IN `@tn3270/frontend`, shared with every other
+   * front end, and it is thin for the reason its own comment gives: every branch
+   * delegates to `Keyboard` or `Session`, so if a branch grows logic that logic is in
+   * the wrong package.
+   *
+   * WHAT STAYS HERE IS `quit`, because teardown is this front end's and nobody
+   * else's: restoring raw mode on every exit path is what stands between a user and
+   * a terminal with no echo. A GUI closes a window instead. `applyAction` throws if
+   * handed `quit` rather than ignoring it, so a front end that forgot this check
+   * fails loudly instead of becoming unquittable.
    */
   private apply(action: Action): void {
-    const k = this.session.keyboard;
-    try {
-      switch (action.kind) {
-        case 'quit':
-          this.quitting = true;
-          this.restore();
-          this.host.exit(0);
-          return;                    // no draw: the terminal is no longer ours
-        // `typeString` REPORTS refusal with false rather than throwing, so the
-        // try/catch below would never see inhibited input. Nothing to do either
-        // way: the OIA already says why, and the draw at the end shows it.
-        case 'type': k.typeString(action.text); break;
-        case 'enter': this.session.sendAID(AID.ENTER); break;
-        case 'clear': this.session.sendAID(AID.CLEAR); break;
-        case 'pf': this.session.sendAID(PF_AIDS[action.n - 1]!); break;
-        case 'pa': this.session.sendAID(PA_AIDS[action.n - 1]!); break;
-        case 'reset': k.reset(); break;
-        case 'left': k.left(); break;
-        case 'right': k.right(); break;
-        case 'up': k.up(); break;
-        case 'down': k.down(); break;
-        case 'home': k.home(); break;
-        case 'tab': k.tab(); break;
-        case 'backTab': k.backTab(); break;
-        case 'backspace': k.backspace(); break;
-        case 'delete': k.deleteChar(); break;
-        case 'eraseEOF': k.eraseEOF(); break;
-        case 'eraseInput': k.eraseInput(); break;
-      }
-    } catch (err) {
-      // A rejected action (not connected, program check) is normal operation,
-      // not a crash. The OIA already says why, and draw() shows it.
-      void err;
+    if (action.kind === 'quit') {
+      this.quitting = true;
+      this.restore();
+      this.host.exit(0);
+      return;                    // no draw: the terminal is no longer ours
     }
+    applyAction(this.session, action);
     this.draw();
   }
 }
