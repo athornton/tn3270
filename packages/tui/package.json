@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@tn3270/core": "0.1.0",
-    "@tn3270/cli": "0.1.0",
     "@tn3270/frontend": "0.1.0"
   },
   "scripts": {

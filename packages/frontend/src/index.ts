@@ -28,3 +28,8 @@ export {
   DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions } from './tls.js';
+
+// The session factory. It wraps the TCP/TLS `Connection` adapter, which is the one
+// transport every front end needs -- and it defaults to VERIFIED TLS, so it must not be
+// reimplemented per front end where one copy could quietly default to plaintext.
+export { defaultSession } from './session.js';

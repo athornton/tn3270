@@ -8,11 +8,9 @@
 
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import {
-  resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
+  defaultSession, resolveHostSpec, takeTlsFlag, resolveTls, TLS_USAGE,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
-// `defaultSession` still comes from `@tn3270/cli`; task 4 moves it and these collapse.
-import { defaultSession } from '@tn3270/cli';
 import { App, type HostProcess } from './app.js';
 import { layout } from './render.js';
 import type { Depth } from './colours.js';

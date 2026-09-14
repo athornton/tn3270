@@ -7,12 +7,13 @@
  * that a second package needs (currently nothing) should move to a module that
  * has no side effects on import.
  *
- * `defaultSession` is the reason this file exists: it wraps the TCP `Connection`
- * adapter, and the TUI needs exactly that one transport rather than a second copy
- * of the socket code.
+ * `defaultSession` used to be the reason this file exists; it now lives in
+ * `@tn3270/frontend` along with the rest of the shared front-end surface, so what is
+ * left here is the s3270 line protocol: the `Runner`, the command parser and the
+ * transfer types.
  */
 
-export { defaultSession, Runner } from './runner.js';
+export { Runner } from './runner.js';
 export type { RunnerOptions } from './runner.js';
 export { parseCommand } from './commands.js';
 export type { TransferFiles } from './transfer.js';
