@@ -1,6 +1,36 @@
 # Shared front-end library extraction — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **COMPLETE, 2026-09-14, on branch `shared-frontend`.** All 8 tasks; every box below
+> checked. Final state: **1214 tests in 44 files**, typecheck and build clean,
+> `pty-smoke.py` 12/12, `drive-e.py` 7/7, and the graph is `core ← frontend ← { cli, tui }`
+> with **`tui` no longer depending on `cli`**.
+>
+> **Three places the plan was wrong, and the source won each time — as this plan's own
+> preamble said it should:**
+>
+> 1. **Task 3's split was mis-described.** It said to move the `L:` block "except its final
+>    case"; in fact two of its cases *and* the whole "both front ends" block need the TUI's
+>    and CLI's own arg parsers, which would make `frontend`'s tests depend on the packages
+>    that depend on it. They stayed in `cli`.
+> 2. **`tls-harness.test.ts` did not "follow its subject".** It imports nothing from our
+>    `tls.ts` at all — it characterises the openssl harness and platform facts — so it
+>    needed no change.
+> 3. **The proxy-driving tests stayed too**, because they run
+>    `packages/cli/scripts/tls-proxy.mjs`, whose path `docs/live-testing.md` documents in
+>    runnable commands.
+>
+> **A workflow fact the plan should have stated:** after a module moves into `frontend`,
+> `npm run build` MUST precede `vitest`. The package resolves to its built `dist/index.js`,
+> so testing before rebuilding failed 22 tests in a way that looked like a broken refactor
+> rather than a stale artifact.
+>
+> Final totals ran 4 above the plan's arithmetic (1214 vs 1210): a PA2 case in task 6, and
+> a PF-number check plus an arrows-have-two-encodings check in task 7. The PF-number check
+> earned its place — it is the only thing that catches F3 being given F4's sequence, which
+> a `kind`-only assertion passes happily.
+
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Create `packages/frontend` and move the front-end rules that `cli` and `tui`
 already share — host-argument parsing, TLS flags, the session factory, the keymap and the
@@ -74,7 +104,7 @@ change is needed**. The root `typecheck` script does need the new package added.
 - Create: `packages/frontend/src/index.ts`
 - Modify: `package.json` (the `typecheck` script)
 
-- [ ] **Step 1: Create the manifest**
+- [x] **Step 1: Create the manifest**
 
 `packages/frontend/package.json`. Copied from `packages/cli/package.json` minus the `bin`
 entry — this is a library, not a command.
@@ -100,7 +130,7 @@ entry — this is a library, not a command.
 }
 ```
 
-- [ ] **Step 2: Create the tsconfig**
+- [x] **Step 2: Create the tsconfig**
 
 `packages/frontend/tsconfig.json`:
 
@@ -113,7 +143,7 @@ entry — this is a library, not a command.
 }
 ```
 
-- [ ] **Step 3: Create a placeholder public surface**
+- [x] **Step 3: Create a placeholder public surface**
 
 `packages/frontend/src/index.ts`. It needs at least one export or `tsc` emits an empty
 module and the package cannot be imported:
@@ -139,7 +169,7 @@ module and the package cannot be imported:
 export const FRONTEND_PACKAGE = '@tn3270/frontend';
 ```
 
-- [ ] **Step 4: Add the package to the typecheck script**
+- [x] **Step 4: Add the package to the typecheck script**
 
 In the root `package.json`, the `typecheck` script names its projects explicitly. Change:
 
@@ -153,7 +183,7 @@ to:
     "typecheck": "tsc --build packages/core packages/frontend packages/cli packages/tui"
 ```
 
-- [ ] **Step 5: Install the workspace link**
+- [x] **Step 5: Install the workspace link**
 
 ```bash
 cd ~/git/tn3270 && npm install
@@ -161,7 +191,7 @@ cd ~/git/tn3270 && npm install
 
 Expected: npm adds `node_modules/@tn3270/frontend` as a symlink. No package downloads.
 
-- [ ] **Step 6: Verify nothing broke**
+- [x] **Step 6: Verify nothing broke**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -170,7 +200,7 @@ npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
 Expected: silent typecheck and build; `Tests 1202 passed (1202)`. The count is unchanged
 because no test moved yet.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/frontend package.json package-lock.json
@@ -189,7 +219,7 @@ git commit -m "build: add the empty @tn3270/frontend package"
 - Modify: `packages/frontend/src/index.ts`, `packages/cli/src/index.ts`,
   `packages/cli/src/runner.ts`, `packages/cli/package.json`, `packages/cli/tsconfig.json`
 
-- [ ] **Step 1: Find every importer, rather than trusting this list**
+- [x] **Step 1: Find every importer, rather than trusting this list**
 
 ```bash
 cd ~/git/tn3270
@@ -203,7 +233,7 @@ On 2026-08-28 this reported: `cli/src/runner.ts` (imports `resolveHostSpec`),
 `cli/src/tls.ts` and `tui/src/main.ts`. **Work from your grep output, not from this
 sentence.**
 
-- [ ] **Step 2: Move the files with git, so history follows**
+- [x] **Step 2: Move the files with git, so history follows**
 
 ```bash
 cd ~/git/tn3270
@@ -211,7 +241,7 @@ git mv packages/cli/src/hostspec.ts packages/frontend/src/hostspec.ts
 git mv packages/cli/test/hostspec.test.ts packages/frontend/test/hostspec.test.ts
 ```
 
-- [ ] **Step 3: Make `cli` depend on `frontend`**
+- [x] **Step 3: Make `cli` depend on `frontend`**
 
 `packages/cli/package.json` — add the dependency:
 
@@ -230,7 +260,7 @@ git mv packages/cli/test/hostspec.test.ts packages/frontend/test/hostspec.test.t
 
 Then `npm install` to link it.
 
-- [ ] **Step 4: Export it from `frontend`**
+- [x] **Step 4: Export it from `frontend`**
 
 Replace the placeholder in `packages/frontend/src/index.ts`:
 
@@ -241,7 +271,7 @@ export type { HostSpec, ResolvedHost } from './hostspec.js';
 
 Delete the `FRONTEND_PACKAGE` placeholder line and its comment.
 
-- [ ] **Step 5: Update the importers**
+- [x] **Step 5: Update the importers**
 
 `packages/cli/src/runner.ts` — change:
 
@@ -272,7 +302,7 @@ unchanged.
 `packages/cli/test/tls.test.ts` — change its `resolveHostSpec` import to
 `@tn3270/frontend`.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -281,7 +311,7 @@ npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
 Expected: `Test Files 41 passed (41)`, `Tests 1202 passed (1202)` — the same numbers.
 A test file moved between packages but the glob covers both, so the count does not move.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -303,7 +333,7 @@ git commit -m "refactor: move hostspec into @tn3270/frontend"
 - Modify: `packages/frontend/src/index.ts`, `packages/cli/src/index.ts`,
   `packages/cli/src/runner.ts`, `packages/cli/src/main.ts`, `packages/tui/src/main.ts`
 
-- [ ] **Step 1: Find every importer**
+- [x] **Step 1: Find every importer**
 
 ```bash
 cd ~/git/tn3270
@@ -311,13 +341,13 @@ grep -rn "from '\./tls\.js'\|from '\.\./src/tls\.js'\|takeTlsFlag\|resolveTls\|t
   packages/*/src packages/*/test --include="*.ts"
 ```
 
-- [ ] **Step 2: Move the module**
+- [x] **Step 2: Move the module**
 
 ```bash
 git mv packages/cli/src/tls.ts packages/frontend/src/tls.ts
 ```
 
-- [ ] **Step 3: Export from `frontend`**
+- [x] **Step 3: Export from `frontend`**
 
 Append to `packages/frontend/src/index.ts`:
 
@@ -331,7 +361,7 @@ export {
 export type { TlsFlags, TlsOptions } from './tls.js';
 ```
 
-- [ ] **Step 4: Update importers**
+- [x] **Step 4: Update importers**
 
 - `packages/cli/src/runner.ts`: `from './tls.js'` → `from '@tn3270/frontend'`.
 - `packages/cli/src/main.ts`: same change for whatever it imports (the grep in Step 1
@@ -345,7 +375,7 @@ export type { TlsFlags, TlsOptions } from './tls.js';
 - `packages/tui/package.json` and `tsconfig.json`: add the `@tn3270/frontend` dependency
   and project reference, then `npm install`.
 
-- [ ] **Step 5: Split the test file**
+- [x] **Step 5: Split the test file**
 
 Create `packages/frontend/test/tls.test.ts` and move into it, VERBATIM, the `describe`
 blocks that test the moved code: the TLS flag parsing, `describeTlsError`, and
@@ -364,7 +394,7 @@ subject. Check whether it references `packages/cli/scripts/tls-proxy.mjs` by rel
 path; if so, the path must be updated to reach across packages, and the scripts stay in
 `packages/cli/scripts` (they are invoked by the CLI's own runbook).
 
-- [ ] **Step 6: Verify, and expect the SAME test total**
+- [x] **Step 6: Verify, and expect the SAME test total**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -374,7 +404,7 @@ Expected: `Tests 1202 passed (1202)`. **A changed total means a test was dropped
 duplicated in the split — find it before committing.** That is the one real risk in this
 task.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -394,13 +424,13 @@ command loop, and it is what a front end needs to build a `Session` on the real 
   `packages/cli/src/index.ts`, `packages/cli/src/main.ts`, `packages/tui/src/main.ts`,
   `packages/frontend/src/index.ts`
 
-- [ ] **Step 1: Find its users**
+- [x] **Step 1: Find its users**
 
 ```bash
 grep -rn "defaultSession" packages/*/src packages/*/test --include="*.ts"
 ```
 
-- [ ] **Step 2: Create the new module**
+- [x] **Step 2: Create the new module**
 
 `packages/frontend/src/session.ts`. Move the whole `defaultSession` function and **its
 entire doc comment** across — the comment explains why `tls` defaults to `DEFAULT_TLS`
@@ -443,14 +473,14 @@ export function defaultSession(
 }
 ```
 
-- [ ] **Step 3: Delete it from `runner.ts`**
+- [x] **Step 3: Delete it from `runner.ts`**
 
 Remove the function and its comment from `packages/cli/src/runner.ts`. `runner.ts` no
 longer needs `DEFAULT_TLS`; check whether it still uses `tcpConnect` and `TlsOptions`
 (it does, for `RunnerOptions`), and keep only what remains referenced. The compiler will
 tell you — an unused import is an error under this tsconfig.
 
-- [ ] **Step 4: Export and re-point**
+- [x] **Step 4: Export and re-point**
 
 Append to `packages/frontend/src/index.ts`:
 
@@ -470,7 +500,7 @@ collapse into one from `@tn3270/frontend` plus whatever it still needs from
 its tsconfig.** That is the refactor paying off, and leaving a dead dependency edge would
 hide it.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -478,7 +508,7 @@ npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
 
 Expected: `Tests 1202 passed (1202)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -503,7 +533,7 @@ encoding-neutral form would risk a live-verified table for nothing. The GUI will
 - Delete: `packages/tui/test/keymap.test.ts`
 - Modify: `packages/frontend/src/index.ts`, `packages/tui/src/app.ts`
 
-- [ ] **Step 1: Find importers**
+- [x] **Step 1: Find importers**
 
 ```bash
 grep -rn "keymap\|lookup\|MAX_SEQUENCE_LENGTH\|PARTIAL\|printableRun\|isValidPf\|type Action" \
@@ -513,14 +543,14 @@ grep -rn "keymap\|lookup\|MAX_SEQUENCE_LENGTH\|PARTIAL\|printableRun\|isValidPf\
 Expect `tui/src/app.ts` and `tui/test/keymap.test.ts`. Note `app.test.ts` may import
 `Action` too.
 
-- [ ] **Step 2: Move**
+- [x] **Step 2: Move**
 
 ```bash
 git mv packages/tui/src/keymap.ts packages/frontend/src/keymap.ts
 git mv packages/tui/test/keymap.test.ts packages/frontend/test/keymap.test.ts
 ```
 
-- [ ] **Step 3: Export from `frontend`**
+- [x] **Step 3: Export from `frontend`**
 
 Append to `packages/frontend/src/index.ts`:
 
@@ -532,7 +562,7 @@ export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from '.
 export type { Action } from './keymap.js';
 ```
 
-- [ ] **Step 4: Update `tui/src/app.ts`**
+- [x] **Step 4: Update `tui/src/app.ts`**
 
 Change:
 
@@ -548,7 +578,7 @@ import { lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, type Action } from 
 
 The moved test's import (`../src/keymap.js`) is already correct in its new home.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -556,7 +586,7 @@ npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
 
 Expected: `Tests 1202 passed (1202)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -581,7 +611,7 @@ everything else.
 - Create: `packages/frontend/test/actions.test.ts`
 - Modify: `packages/tui/src/app.ts`, `packages/frontend/src/index.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `packages/frontend/test/actions.test.ts`:
 
@@ -648,7 +678,7 @@ describe('applyAction', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npx vitest run packages/frontend/test/actions.test.ts
@@ -656,7 +686,7 @@ npx vitest run packages/frontend/test/actions.test.ts
 
 Expected: FAIL — `Failed to resolve import "../src/actions.js"`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/frontend/src/actions.ts`:
 
@@ -720,7 +750,7 @@ export function applyAction(session: Session, action: Action): void {
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 ```bash
 npx vitest run packages/frontend/test/actions.test.ts
@@ -728,7 +758,7 @@ npx vitest run packages/frontend/test/actions.test.ts
 
 Expected: PASS, 5 tests.
 
-- [ ] **Step 5: Export it**
+- [x] **Step 5: Export it**
 
 Append to `packages/frontend/src/index.ts`:
 
@@ -736,7 +766,7 @@ Append to `packages/frontend/src/index.ts`:
 export { applyAction } from './actions.js';
 ```
 
-- [ ] **Step 6: Rewrite `App.apply` to delegate**
+- [x] **Step 6: Rewrite `App.apply` to delegate**
 
 In `packages/tui/src/app.ts`, replace the body of `apply` with:
 
@@ -760,7 +790,7 @@ makes an unused import an error, so the compiler will name them.
 Keep the doc comment above `apply` that explains the swallow and the "logic here is in the
 wrong package" rule, trimmed to what still applies locally.
 
-- [ ] **Step 7: Verify the TUI is unchanged**
+- [x] **Step 7: Verify the TUI is unchanged**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -770,7 +800,7 @@ Expected: `Tests 1207 passed (1207)` — 1202 plus the five new ones. **`app.tes
 pass untouched**: it is the evidence that delegating did not change behaviour, and if it
 needed editing, something moved that should not have.
 
-- [ ] **Step 8: Prove the extraction against the real terminal**
+- [x] **Step 8: Prove the extraction against the real terminal**
 
 The unit tests do not cover raw mode or the run loop, and this task touched the keystroke
 path of a live-verified front end:
@@ -782,7 +812,7 @@ npm run build && python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -14
 Expected: 12 PASS lines, including `echoed the typed characters back to the screen` —
 which is the one that exercises `apply` end to end.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A
@@ -803,7 +833,7 @@ table from it.
 - Create: `packages/frontend/test/bindings.test.ts`
 - Modify: `packages/frontend/src/index.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `packages/frontend/test/bindings.test.ts`:
 
@@ -842,7 +872,7 @@ describe('BINDING_INTENT', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npx vitest run packages/frontend/test/bindings.test.ts
@@ -850,7 +880,7 @@ npx vitest run packages/frontend/test/bindings.test.ts
 
 Expected: FAIL — cannot resolve `../src/bindings.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/frontend/src/bindings.ts`:
 
@@ -903,7 +933,7 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
 `terminal` sequence against `lookup`, so a guessed byte fails immediately — which is the
 point. Grow the table by reading `keymap.ts`, not from memory.
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 ```bash
 npx vitest run packages/frontend/test/bindings.test.ts
@@ -912,7 +942,7 @@ npx vitest run packages/frontend/test/bindings.test.ts
 Expected: PASS, 3 tests. **If the second test fails, believe the keymap** — it was
 measured with `tput` and this table was typed by hand.
 
-- [ ] **Step 5: Export**
+- [x] **Step 5: Export**
 
 Append to `packages/frontend/src/index.ts`:
 
@@ -921,7 +951,7 @@ export { BINDING_INTENT } from './bindings.js';
 export type { Binding } from './bindings.js';
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
@@ -937,7 +967,7 @@ git commit -m "feat(frontend): a binding-intent table, checked against the termi
 - Modify: `README.md` (the *Layout* section), `docs/HANDOFF.md`
 - Modify: `docs/superpowers/plans/2026-08-28-shared-frontend-extraction.md` (check the boxes)
 
-- [ ] **Step 1: Prove no shim survived**
+- [x] **Step 1: Prove no shim survived**
 
 ```bash
 cd ~/git/tn3270
@@ -952,7 +982,7 @@ ls packages/cli/src/hostspec.ts packages/cli/src/tls.ts packages/tui/src/keymap.
 
 Expected: three `No such file or directory` errors.
 
-- [ ] **Step 2: Confirm the dependency graph is what the design says**
+- [x] **Step 2: Confirm the dependency graph is what the design says**
 
 ```bash
 grep -A4 '"dependencies"' packages/*/package.json
@@ -963,7 +993,7 @@ Expected: `frontend` depends on `core` only; `cli` on `core` + `frontend`; `tui`
 **`frontend` must not depend on `cli` or `tui`.** That edge would make the graph cyclic in
 spirit even if npm tolerated it.
 
-- [ ] **Step 3: The full gate**
+- [x] **Step 3: The full gate**
 
 ```bash
 npm run typecheck && npm run build
@@ -980,7 +1010,7 @@ reaches `resolveHostSpec` across a package boundary. Neither runs under `npm tes
 this project's history is that such harnesses go stale unnoticed — `pty-smoke.py` sat at
 1/12 for two days when TLS went on by default.
 
-- [ ] **Step 4: Update the Layout section of README**
+- [x] **Step 4: Update the Layout section of README**
 
 The `packages/` listing gains a line and the existing ones narrow:
 
@@ -995,13 +1025,13 @@ packages/fixtures  recorded traces, golden screens, x3270 reference captures
 docs/              spec, plans, live-host runbook, handoff
 ```
 
-- [ ] **Step 5: Update HANDOFF**
+- [x] **Step 5: Update HANDOFF**
 
 Under *Where things stand*, record: `packages/frontend` exists and what moved into it; the
 test count; that the move changed no assertions; and that the Electron GUI (part 2 of the
 2026-08-28 design) is the next piece of work, with its plan not yet written.
 
-- [ ] **Step 6: Check every box in this plan and commit**
+- [x] **Step 6: Check every box in this plan and commit**
 
 ```bash
 git add -A
