@@ -50,6 +50,10 @@ export function applyAction(session: Session, action: Action): void {
       case 'delete': k.deleteChar(); break;
       case 'eraseEOF': k.eraseEOF(); break;
       case 'eraseInput': k.eraseInput(); break;
+      case 'attn': session.sendAttn(); break;
+      // Read-then-set rather than a stored flag: `Keyboard.insertMode` is the one truth and
+      // the OIA reads it too, so a second copy here could disagree with what is displayed.
+      case 'toggleInsert': k.setInsertMode(!k.insertMode); break;
     }
   } catch (err) {
     void err;

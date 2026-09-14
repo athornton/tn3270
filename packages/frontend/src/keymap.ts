@@ -54,6 +54,8 @@ export type Action =
   | { kind: 'delete' }
   | { kind: 'eraseEOF' }
   | { kind: 'eraseInput' }
+  | { kind: 'attn' }
+  | { kind: 'toggleInsert' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 
@@ -109,8 +111,14 @@ function buildTable(): Map<string, Action> {
   // following c3270; it is not a terminfo-derived mapping.
   t.set('\x1b[4~', { kind: 'eraseEOF' });
 
+  // The Insert key toggles insert mode, as x3270 does (fb-x3270:210). MEASURED:
+  // `tput kich1` is `\x1b[2~` on the development box.
+  t.set('\x1b[2~', { kind: 'toggleInsert' });
+
   // Control keys. Ctrl-C is Clear, not interrupt: Clear is an AID a 3270 user
   // needs constantly (it dismisses MORE...), and Ctrl-] is the way out.
+  // Attn is c3270's Ctrl-A (Common/fb-c3270:83). It is a Telnet BREAK, not an AID.
+  t.set('\x01', { kind: 'attn' });
   t.set('\x03', { kind: 'clear' });
   t.set('\x12', { kind: 'reset' });
   t.set('\x15', { kind: 'eraseInput' });
