@@ -1,0 +1,247 @@
+# Shared display palette, and the keys that were implemented but unreachable
+
+**Date:** 2026-09-14
+**Status:** designed, not built
+**Origin:** the user ran the Electron GUI as a Model 4 against VM/370 on a Mac, got the
+expected 80x43 window, and reported that **the dark blue is very hard to read on a black
+background**. Then asked which keys are PA1 and PA2.
+
+The answer to the second question turned out to be "none, in the GUI", and chasing that
+found a class of the same defect. So this design has two halves that share one principle:
+**a front end should not silently diverge from the others**, and where they do, the guard
+that was supposed to notice is itself part of the bug.
+
+## Problem 1: the GUI never got the TUI's palette
+
+`packages/gui/src/drawlist.ts` resolves colour through core's `colourRgb`, where blue F1 is
+**pure `#0000ff`** (`packages/core/src/palette.ts:92`). On black that is close to
+illegible, which is what the user saw.
+
+The TUI does not use that table. It has its own, `TUI_PALETTE`
+(`packages/tui/src/colours.ts:61`), where blue is **`(120,144,240)`** — zti's own value,
+read from `tnz/zti.py:2813-2820` and independently confirmed on the wire, with F8-FF taken
+from x3270's `rgbmap` (`c3270/screen.c:213-229`). Core's saturated primaries exist for one
+reason, stated in its own comment: so that seven base colours stay distinct when quantised
+to sixteen ANSI slots. **That reason no longer applies** — the TUI stopped relying on
+nearest-RGB when it gained the explicit `ANSI_16` slot table (`colours.ts:95`), and the GUI
+is truecolour and never quantises at all. So nothing is served by the GUI using them.
+
+The comment in `core/src/palette.ts:5-7` claims "The TUI quantises these, the GUI will fill
+canvas cells with them ... One table, three consumers." The first clause has been false
+since the TUI shipped its own table. **The stale comment is why this drifted**, and it is
+part of what gets fixed.
+
+## Problem 2: PA1/PA2/PA3, Attn, Insert and Newline are unreachable in the GUI
+
+`packages/gui/src/keys.ts:73` returns `null` for any Alt or Meta chord and has no PA entry,
+so **PA1/PA2/PA3 cannot be pressed in the GUI at all**. In the TUI they are `Esc`-`1`/`2`/`3`
+(`packages/frontend/src/keymap.ts:120`), which is what Alt-digit sends in a terminal and
+matches x3270's own default (`Alt <Key>1: PA(1)`, `Common/fb-c3270:43-45`).
+
+`BINDING_INTENT` exists precisely to catch this — "a key added to one front end is visibly
+missing from the other" — and it did not, because **the test skips what it cannot express**:
+`packages/gui/test/keys.test.ts:96` does `if (key === undefined) continue;` with the comment
+"e.g. Alt-1, a terminal-only spelling". Alt-1 is not a terminal-only spelling; Chromium
+reports Alt chords fine. **The guard has a hole, and fixing the binding without fixing the
+guard leaves the mechanism broken for the next key.**
+
+Auditing the rest of `BINDING_INTENT` against core found more of the same class:
+
+- **`Session.sendAttn()` exists** (`core/src/session.ts:606`, Telnet BREAK per RFC 1576 §8)
+  and is bound to no key in **either** front end. Implemented and unreachable.
+- **`Session.sysreq()` exists** (`session.ts:598`) — likewise unbound.
+- **`Keyboard.newline()` and `setInsertMode()` exist** (`keyboard.ts:196,286`) — likewise
+  unbound in both front ends.
+- **CursorSelect, Dup and FieldMark do not exist in core at all.** (CursorSelect is
+  reclassified below; see *Follow-up*.)
+
+### Two of those have no conflict-free spelling, and that decided the scope
+
+Measured, not assumed:
+
+- **Attn = `Ctrl-A`.** c3270's own default (`Common/fb-c3270:83`; x3270 also binds `Meta-a`,
+  `fb-x3270:306`). `\x01` is unbound in our table. Clean in both front ends.
+- **Insert = the `Insert` key**, toggling insert mode, as x3270 does
+  (`fb-x3270:210`, `Toggle(insertMode)`). **`tput kich1` measures `\x1b[2~`** on the
+  development box; it collides with and prefixes nothing in our table.
+- **SysReq has no shared default at all.** c3270 binds it to no key — it is reachable *only*
+  from the keypad (`Common/c3270/keypad.callbacks:7`, `g SysReq`). x3270 uses `Shift-F22`
+  and `F19`, keys nobody has. Any keyboard spelling here would be **invented**.
+- **Newline conflicts irreducibly in a terminal.** c3270 uses `Ctrl-J`
+  (`Common/fb-c3270:100`) — but `Ctrl-J` **is** `\n` (0x0a), and `keymap.ts:106` already maps
+  `\n` to Enter for terminals that send LF for Return. One byte cannot be both. x3270's
+  `Shift-Return` is unavailable too: terminals do not report modifiers on Return.
+
+**Decision (user's call): bind Attn and Insert now; leave SysReq and Newline to the keypad,
+where a button has no spelling problem.** This follows c3270, which made the same call for
+SysReq. It also avoids inventing a keyboard spelling for SysReq, which **could not be
+verified against a live host here in any case** — SysReq only does anything under TN3270E,
+and both Hercules systems actively refuse option 40 (measured: they answer `ff fe 28`).
+
+## Design
+
+### The shared display palette
+
+New `packages/frontend/src/palette.ts`, exported from `frontend/src/index.ts`:
+
+- **`DISPLAY_PALETTE`** — the sixteen RGB triples currently in `TUI_PALETTE`, moved verbatim
+  along with their provenance comment, which is rewritten: it is no longer "the TUI's own
+  palette" but every front end's.
+- **`displayRgb(code)`** — throws `RangeError` on a non-3279 code, matching core's
+  `colourRgb` contract that `drawlist.ts` already depends on.
+
+Both are exported because the two consumers need different failure behaviour: `sgrFor`
+deliberately returns `''` for a bad code rather than throwing, since "a throw here would take
+down the whole screen for one bad cell" (`colours.ts:184`). It keeps its tolerant lookup
+against the table; the GUI uses the throwing helper.
+
+`packages/frontend` may hold this: the graph is `core <- frontend <- { cli, tui, gui }`, and
+`frontend` already imports core types. No graph change.
+
+**Consumers:**
+
+| File | Change |
+|---|---|
+| `packages/tui/src/colours.ts` | delete `TUI_PALETTE`, import `DISPLAY_PALETTE`. **`ANSI_16` stays** — quantising to sixteen terminal slots is the TUI's problem and no other front end has it. |
+| `packages/gui/src/drawlist.ts:94,95,139,140` | `colourRgb` (core) → `displayRgb` (frontend). |
+| `packages/gui/test/blit.test.ts`, `drawlist.test.ts` | same swap, so the tests assert against the palette the GUI actually draws. |
+| `packages/core/src/palette.ts:5-7` | correct the false "TUI quantises these / GUI fills cells with them" comment; point at the frontend table. |
+
+**`PALETTE_3279` and `colourRgb` stay in core, untouched.** They are the architected table,
+pinned to the manual with the OCR-damage notes and their own tests, and a protocol library is
+the right home for "which colour does code F1 *mean*". The risk this creates is someone
+reaching for the wrong one, so **both files cross-reference each other by name**. Two
+palettes with no signpost is exactly how this drifted.
+
+**Trap #5 does not apply here, verified rather than assumed.** `drawlist.ts` is a
+main-process module: `dist/renderer.js` imports only `./keys.js` and `./blit.js`, and both
+reach `drawlist` through `import type` only, which erases. So adding a value import of
+`@tn3270/frontend` to `drawlist.ts` cannot put a workspace import in the renderer's runtime
+graph. `keys.ts` **does** run in the renderer, so its changes below are literals only and add
+no value import. A new test pins this rather than trusting the reasoning.
+
+**Visible consequences beyond blue,** since the whole table is adopted: F0 neutral-black
+`#1a1a1a` → **pure black** (the GUI background and the OIA go truly black), F7 neutral-white
+`#e0e0e0` → pure white, F5 turquoise `#00ffff` → `(88,240,240)`, F9 deep-blue `#000080` →
+`#0000cd`. Every cell shifts slightly; **blue F1 is the only one that changes character.**
+
+**Caveat, stated because it is not settled:** F9 deep-blue stays dark even in this table
+(x3270's `#0000cd`). Basic 3270 field colour reaches only F1-F7, so the user almost certainly
+saw F1 and this fixes it — but a panel sending *deep-blue* through extended attributes will
+still be dark. If it survives, F9 is a separate question and must not be pre-emptively
+"fixed" here on a guess.
+
+### The bindings
+
+- **`Action`** (`frontend/src/keymap.ts`) gains `{kind:'attn'}` and `{kind:'toggleInsert'}`.
+- **`applyAction`** (`frontend/src/actions.ts`) gains `case 'attn': session.sendAttn()` and
+  `case 'toggleInsert': k.setInsertMode(!k.insertMode)`. `Keyboard.insertMode` is a public
+  field (`keyboard.ts:14`), so the toggle needs no new core API. Both sit inside the existing
+  try/catch, which is correct: Attn on a closed connection is normal operation, and the OIA
+  already says why.
+- **`BINDING_INTENT`** gains PA3 (it listed only PA1/PA2), `Ctrl-A`/`\x01` for Attn, and
+  `\x1b[2~` for Insert. The Alt-digit entries gain a note that the GUI matches `e.code`.
+- **TUI `keymap.ts`**: add `\x01` → attn, `\x1b[2~` → toggleInsert. PA1-3 already present.
+- **GUI `keys.ts`**: handle Alt+digit **before** the `if (e.metaKey || e.altKey) return null`
+  bail, matched on **`e.code`** (`Digit1`..`Digit3`) — **not `e.key`**, because on macOS
+  Option-1 reports `e.key === '¡'`, so a `e.key`-based binding works on Linux and silently
+  fails on the user's Mac. `Ctrl-A` joins `CTRL`; `Insert` joins `NAMED`. Alt with any other
+  key still returns `null`.
+- **The guard gets repaired**: `keys.test.ts`'s silent `continue` becomes an explicit,
+  **currently empty** allowlist of terminal-only bindings. A future `BINDING_INTENT` entry
+  the GUI cannot express then **fails** instead of vanishing. The `checked` floor rises with
+  the new entries.
+
+### Documentation
+
+The README has **two** key paragraphs and **one palette paragraph**, and all three are
+affected. Missing any of them leaves the README contradicting itself.
+
+- **`README.md:123-125`, the GUI's key list**: gains PA (Alt-1/2/3), Attn (`Ctrl-A`) and
+  Insert.
+- **`README.md:140` is wrong today** and gets corrected: it lists the GUI's "PA keys" under
+  *implemented but not yet verified against a live host* when they are not implemented at all.
+- **`README.md:168-170`, the TUI's key list**: already documents `Esc` `1`/`2`/`3` correctly;
+  gains `Ctrl-A` and Insert.
+- **`README.md:173-175` becomes false and must be rewritten.** It currently says "Colours are
+  zti's, not core's: **the shared palette in `packages/core`** keeps saturated primaries, and
+  **the TUI** renders the gentler values". After this change the gentler values are the shared
+  ones, they live in `packages/frontend`, and every front end uses them — core's table is no
+  longer "the shared palette" in any sense a reader would take from that sentence.
+- The TUI `BANNER` (`tui/src/main.ts:177`) **stays as it is**. It deliberately names only
+  quit/Clear/Reset so that a short terminal still learns the way out; diluting it with Attn
+  would work against its stated purpose. The TUI's on-screen hint line (README:162-171) is the
+  same argument and also stays.
+
+## Testing
+
+- **The cross-front-end property, asserted directly**: for all sixteen codes, the RGB the GUI
+  resolves equals the RGB the TUI emits at truecolour depth. This is the actual requirement,
+  and it fails if either front end drifts again. Blue is pinned at `(120,144,240)` with its
+  zti provenance.
+- **A luminance-floor test was considered and rejected**: F8 black is legitimately black, so
+  any "every foreground must be legible on F0" assertion needs exemptions that make it
+  vacuous. The value pin plus the existing pairwise-distinctness test carry more.
+- **The GUI golden must be re-baselined** — `test/golden/synthetic-ispf.png` and its sha256.
+  The `TN3270_GUI_REPLAY` seam makes that host-free and clock-free (no password, no TK5
+  clock). **The diff must be inspected, not accepted**: colours should change and ink
+  positions should not. A moved glyph means something else broke.
+- **New renderer-import guard**: assert that the renderer's runtime graph (`dist/renderer.js`
+  plus its transitive *local* imports) contains no `@tn3270/*` value import. This is trap #5,
+  whose symptom is a blank window with no error, and this change edits both a renderer-side
+  and a main-side module.
+- **Key unit tests**: Alt-1/2/3 via `e.code` **including the macOS `key:'¡'` case**, `Ctrl-A`,
+  `Insert`, and the repaired intent guard.
+- **Build before test.** `frontend` resolves to its built `dist/index.js`, so `npm run build`
+  must precede `vitest` or the move looks like a broken refactor.
+
+### Live verification, and its honest limits
+
+- **Colour**: run the GUI against VM/370 here and confirm blue is legible. Doable in this
+  sandbox.
+- **PA1/PA2**: need a host that acts on them, which realistically means ISPF on MVS. **This
+  is the user's check on the Mac and must not be reported as verified here.**
+- **Attn**: Telnet BREAK. Whether VM/370 acts on it is **to be measured, not assumed.**
+
+## Follow-up, deliberately out of scope
+
+- **SysReq and Newline** — per the decision above, they arrive with the keypad.
+- **A menu of special keys, and/or a show/hide virtual keypad** (the user's request, x3270
+  style). Its own spec. A native Electron menu needs no mouse plumbing; the keypad needs
+  canvas hit-testing, which does not exist yet.
+- **Mouse input is three unrelated jobs**, and only the third is architected: keypad buttons
+  (pure UI hit-testing, no 3270 semantics), click-to-place-cursor, and the light pen. **The
+  keypad needs none of the 3270 side, which is why it can ship first.**
+
+### Light pen / Cursor Select — measured groundwork for that spec
+
+The user asked whether mouse input should be the light pen. Largely yes, and core is already
+half-built for it:
+
+- **"Selector pen detectable" is not a separate bit — it *is* the intensity field.** Manual
+  bits 4,5 (`~/3270/ref/pages.txt:3284-3287`): `00` normal/not detectable, `01`
+  normal/**detectable**, `10` intensified/**detectable**, `11` nondisplay/not detectable.
+  Core already parses exactly these (`FA.INT_NORM_SEL = 0x04`, `INT_HIGH_SEL = 0x08` — the
+  names already say `_SEL`) but `screen.ts:375-379` surfaces only `intensified` and `hidden`.
+  **Light pen needs no new data-stream parsing, just one derived boolean exposed.**
+- **The inbound half is already written.** `AID.SELECT = 0x7e` exists
+  (`constants.ts:460`), and `inbound.ts:30` already implements the rule that a SELECT AID
+  sends addresses but **no field contents** on Read Modified — `sendData = all || aid !==
+  AID.SELECT` — matching the manual (`pages.txt:2178`) and x3270 (`ctlr.c:788`). Tested, for
+  an AID nothing can currently generate.
+- **CursorSelect comes off the "core doesn't implement it" list.** In x3270 the Cursor Select
+  *key* and the light pen are the same function: `lightpen_select(baddr)`
+  (`Common/kybd.c:2906`), called with `cursor_addr` from the keyboard (`kybd.c:3001`) and
+  with the hit address from the mouse (`x3270/xkybd.c:123`). **One function, two callers** —
+  the keypad button passes the cursor address, a click passes the clicked address.
+- **Its whole logic** is the designator character at field-attribute+1 (`kybd.c:2960-2980`,
+  the non-DBCS `switch`), and it agrees with the manual (`pages.txt:12860-12960`):
+  `?` (X'6F') → `>` and set MDT; `>` (X'6E') → `?` and clear MDT; space or null → set MDT and
+  send AID `0x7e`; `&` → set MDT and send AID **`0x7d`** (Enter simulation, an optional
+  implementation feature per the manual); **anything else, including a non-detectable field,
+  rings the bell and sends nothing.**
+- **Light pen must not be the plain left-click.** x3270 does not do that: it is a distinct
+  action, and wc3270 gates it behind Alt unless `lightPenPrimary` is set
+  (`wc3270/screen.c:2357`, `include/appres.h:203`). Plain click is wanted for cursor
+  placement and text selection, both of which a Mac user will expect.
+- **Dup and FieldMark remain genuinely unimplemented** in core.
