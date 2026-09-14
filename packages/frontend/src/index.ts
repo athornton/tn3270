@@ -40,3 +40,8 @@ export { defaultSession } from './session.js';
 // keymap.ts on why the table is MOVED here rather than generalised.
 export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from './keymap.js';
 export type { Action } from './keymap.js';
+
+// The action dispatch. The one translation from a named action onto the session that
+// every front end needs and none should own -- the CLI's command table, the TUI's keymap
+// and the GUI's KeyboardEvent mapper all produce these same names.
+export { applyAction } from './actions.js';
