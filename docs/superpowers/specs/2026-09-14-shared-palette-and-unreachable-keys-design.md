@@ -1,4 +1,4 @@
-# Shared display palette, the keys nothing could reach, and the default terminal type
+# Shared palette schemes, the keys nothing could reach, and the default terminal type
 
 **Date:** 2026-09-14
 **Status:** designed, not built
@@ -15,6 +15,15 @@ that was supposed to notice is itself part of the bug.
 session found two more defects — the TUI's PA keys are broken too, and the default terminal
 type fails on MVS — and corrected one misconception about the light pen. Everything the user
 measured is recorded in *Live findings from the MVS session* below.
+
+**Amended again the same day** with Problem 5: the readable palette becomes the default rather
+than the only option, selectable by `-scheme` across four named schemes. Note that this
+**supersedes one earlier decision within this document** — `ANSI_16` moves out of the TUI after
+all; see *The shared palette registry*.
+
+**Five parts, in dependency order:** the palette registry (1, 5) must land before the GUI can
+draw from it; the bindings (2, 3) are independent of both; the default terminal type (4) is
+independent of everything else here and could ship alone.
 
 ## Problem 1: the GUI never got the TUI's palette
 
@@ -165,22 +174,74 @@ two days. Audited, every script under `packages/*/scripts`:
 ("the same IBM-3278-2"). All four are load-bearing explanations, not decoration, so each is
 rewritten rather than deleted.
 
+## Problem 5: no way to ask for the primary-colour palette
+
+Requested by the user once the default was settled: someone may want the unpleasant-but-
+saturated colours deliberately, so the readable table should be the default rather than the
+only option — a flag in the TUI, a menu item in the GUI and webserver later.
+
+**There is no "literal original 3270 palette" to serve, and the flag must not claim there is.**
+Core's `PALETTE_3279` is not it: its own comment says *"THE RGB VALUES ARE OUR OWN CHOICE,
+DELIBERATELY NOT X3270'S"*, chosen as saturated primaries so sixteen-colour ANSI quantisation
+keeps the seven base colours distinct — a TUI constraint, not fidelity. The same comment adds
+that *"a real 3279's phosphors matched none of these precisely — ours or x3270's."* The manual
+specifies which colour each code **is**, never its chromaticity. So the value is named
+**`3279`** — the architected colours at full saturation — and not `original` or `authentic`.
+A flag value is a claim users quote back.
+
+x3270 solves this with **named schemes** rather than an authenticity switch: `default`,
+`old-default`, `reverse`, `bright`, `cpe`, `GreenScreen` (`x3270/fb-x3270:49-99`), with its
+menu labelling the standard one "Default 3279" (`schemeList:104`). It also keeps `old-default`,
+which is precedent for our exact situation — change the look, keep the previous one named.
+
+**And the genuinely authentic option is not a colour palette at all**: a 3278 is a monochrome
+green display and colour is a 3279 feature, while we advertise `IBM-3278-2-E`. Hence `green`.
+
+### x3270's scheme format has a separate screen background, and ours does not
+
+Verified from `xfer_color_scheme` (`x3270/screen.c:4119-4180`), the 23 tokens are: **0-15** the
+IBM colours, **16** a fallback, **17 the screen background**, **18** select background,
+**19-22** attribute colours.
+
+So `GreenScreen` sets **F0 neutral-black to `#21a021` — green** — and gets its dark screen from
+`grey10` at token 17. **We resolve the background from F0** (the TUI's own note: "the default
+background resolves to F0, and F0 renders black"). **Copying that table literally would give us
+a green background.** Our `green` scheme therefore keeps F0 and F8 dark: a documented
+deviation forced by a structural difference, not a transcription slip.
+
 ## Design
 
-### The shared display palette
+### The shared palette registry
 
-New `packages/frontend/src/palette.ts`, exported from `frontend/src/index.ts`:
+New `packages/frontend/src/palette.ts`, exported from `frontend/src/index.ts`. **A scheme
+carries BOTH its RGB table and its sixteen-slot map** — not RGB alone:
 
-- **`DISPLAY_PALETTE`** — the sixteen RGB triples currently in `TUI_PALETTE`, moved verbatim
-  along with their provenance comment, which is rewritten: it is no longer "the TUI's own
-  palette" but every front end's.
-- **`displayRgb(code)`** — throws `RangeError` on a non-3279 code, matching core's
-  `colourRgb` contract that `drawlist.ts` already depends on.
+```
+interface Scheme { rgb: Record<number, Rgb>; ansi16: Record<number, [number, boolean]> }
+```
 
-Both are exported because the two consumers need different failure behaviour: `sgrFor`
-deliberately returns `''` for a bad code rather than throwing, since "a throw here would take
-down the whole screen for one bad cell" (`colours.ts:184`). It keeps its tolerant lookup
-against the table; the GUI uses the throwing helper.
+**Green is what forces that**, and it is worth stating because the RGB-only shape looks
+sufficient: with a shared slot map, one session would render green at truecolour and
+blue/red/yellow at sixteen colours. The slot map is part of a scheme's identity.
+
+| Scheme | RGB source | Slot map |
+|---|---|---|
+| `default` | zti F0-F7 (`tnz/zti.py:2813-2820`) + x3270 F8-FF — today's `TUI_PALETTE`, moved verbatim | standard |
+| `3279` | core's `PALETTE_3279` | standard |
+| `x3270` | the full `rgbmap`, all sixteen verified at `c3270/screen.c:213-229` (blue `#1e90ff`, green `#32cd32`, neutral-black `#1a1a1a`) | standard |
+| `green` | `#21a021` normal, `lime` bright, following x3270's per-code assignment (F2, F7, FF bright) — **F0 and F8 stay dark**, per the deviation above | **its own**: foreground codes → green slot, bright variants bright, F0/F8 → black |
+
+`default`'s F8-FF already match `rgbmap` byte for byte, so `x3270` is mostly data we hold.
+
+Also exported: **`DEFAULT_SCHEME = 'default'`**, **`resolveScheme(name?)`** (case-insensitive,
+`greenscreen` aliased to `green`, and on an unknown name it throws listing the valid ones
+rather than falling back — a silent fallback would render the wrong palette and blame the
+user's memory), and **`schemeRgb(scheme, code)`**, which throws on a non-3279 code exactly as
+core's `colourRgb` does.
+
+The throwing helper exists alongside the raw table because the consumers need opposite failure
+behaviour: `sgrFor` deliberately returns `''` for a bad code rather than throwing, since "a
+throw here would take down the whole screen for one bad cell" (`colours.ts:184`).
 
 `packages/frontend` may hold this: the graph is `core <- frontend <- { cli, tui, gui }`, and
 `frontend` already imports core types. No graph change.
@@ -189,16 +250,32 @@ against the table; the GUI uses the throwing helper.
 
 | File | Change |
 |---|---|
-| `packages/tui/src/colours.ts` | delete `TUI_PALETTE`, import `DISPLAY_PALETTE`. **`ANSI_16` stays** — quantising to sixteen terminal slots is the TUI's problem and no other front end has it. |
-| `packages/gui/src/drawlist.ts:94,95,139,140` | `colourRgb` (core) → `displayRgb` (frontend). |
-| `packages/gui/test/blit.test.ts`, `drawlist.test.ts` | same swap, so the tests assert against the palette the GUI actually draws. |
-| `packages/core/src/palette.ts:5-7` | correct the false "TUI quantises these / GUI fills cells with them" comment; point at the frontend table. |
+| `packages/tui/src/colours.ts` | delete `TUI_PALETTE` **and `ANSI_16`**; `sgrFor` gains a `scheme` argument and reads both tables from it. What stays is the genuinely terminal-specific part: `detectDepth`, `cube256`, and the depth quantisation itself. |
+| `packages/tui/src/main.ts` | parse `-scheme`; thread the resolved scheme to `Renderer`. |
+| `packages/gui/src/drawlist.ts:94,95,139,140` | `colourRgb` (core) → `schemeRgb(scheme, …)`; `drawList` takes the scheme. It runs in MAIN, which has the parsed args, so nothing new crosses IPC. |
+| `packages/gui/src/args.ts` | parse `-scheme`. |
+| `packages/gui/test/blit.test.ts`, `drawlist.test.ts` | assert against the scheme the GUI actually draws. |
+| `packages/core/src/palette.ts:5-7` | correct the false "TUI quantises these / GUI fills cells with them" comment; point at the registry. |
 
-**`PALETTE_3279` and `colourRgb` stay in core, untouched.** They are the architected table,
-pinned to the manual with the OCR-damage notes and their own tests, and a protocol library is
-the right home for "which colour does code F1 *mean*". The risk this creates is someone
-reaching for the wrong one, so **both files cross-reference each other by name**. Two
-palettes with no signpost is exactly how this drifted.
+**This supersedes an earlier decision in this spec**: `ANSI_16` was to stay in the TUI, on the
+grounds that terminal quantisation is the TUI's problem. Once a scheme owns its slot map that
+is no longer true — the slot map is scheme data, and leaving it behind would make `green`
+impossible to express. Recorded rather than silently rewritten, because the original reasoning
+was sound for a registry that held RGB only.
+
+**`PALETTE_3279` and `colourRgb` stay in core, untouched**, and core's table now has a job: it
+is the `3279` scheme's data. That resolves the "two palettes with no signpost" risk better
+than a cross-reference comment did — core states the architected meaning, and the registry
+decides what a front end draws.
+
+### The flag
+
+**`-scheme NAME`**, x3270's own spelling (`include/resources.h:529`,
+`OptColorScheme "-scheme"`), following the project's habit of taking x3270/s3270 spellings
+where one exists — as `-model`, `-cafile` and `-noverifycert` did. Note that **`-scheme` is
+X11-x3270 only; c3270 has no scheme support at all** (no hits in its sources), so there is no
+terminal-side precedent to contradict. Both front ends parse it; the GUI menu comes with the
+menu work.
 
 **Trap #5 does not apply here, verified rather than assumed.** `drawlist.ts` is a
 main-process module: `dist/renderer.js` imports only `./keys.js` and `./blit.js`, and both
@@ -272,7 +349,9 @@ affected. Missing any of them leaves the README contradicting itself.
   zti's, not core's: **the shared palette in `packages/core`** keeps saturated primaries, and
   **the TUI** renders the gentler values". After this change the gentler values are the shared
   ones, they live in `packages/frontend`, and every front end uses them — core's table is no
-  longer "the shared palette" in any sense a reader would take from that sentence.
+  longer "the shared palette" in any sense a reader would take from that sentence. The rewrite
+  documents `-scheme` and the four names, and says plainly that **`3279` is our saturated
+  choice rather than a phosphor measurement** — the same honesty the flag value is named for.
 - The TUI `BANNER` (`tui/src/main.ts:177`) **stays as it is**. It deliberately names only
   quit/Clear/Reset so that a short terminal still learns the way out; diluting it with Attn
   would work against its stated purpose. The TUI's on-screen hint line (README:162-171) is the
@@ -280,17 +359,29 @@ affected. Missing any of them leaves the README contradicting itself.
 
 ## Testing
 
-- **The cross-front-end property, asserted directly**: for all sixteen codes, the RGB the GUI
-  resolves equals the RGB the TUI emits at truecolour depth. This is the actual requirement,
-  and it fails if either front end drifts again. Blue is pinned at `(120,144,240)` with its
-  zti provenance.
+- **The cross-front-end property, asserted directly**: for **every scheme** and all sixteen
+  codes, the RGB the GUI resolves equals the RGB the TUI emits at truecolour depth. This is the
+  actual requirement, and it fails if either front end drifts again. `default`'s blue is pinned
+  at `(120,144,240)` with its zti provenance.
+- **Every scheme must be complete**: all sixteen codes present in both `rgb` and `ansi16`,
+  asserted table-driven over the registry so a scheme added later cannot ship half-defined.
+- **The pairwise-distinctness assertion must become PER-SCHEME, and `green` must assert the
+  opposite.** `green` deliberately aliases fourteen codes onto one value, so the existing
+  distinctness test applied blindly would report the new scheme as a defect. `green` instead
+  asserts that it *does* alias, and that F0/F8 are **not** green — the deviation that keeps our
+  background dark, and the one thing a literal transcription of x3270's table would have got
+  wrong.
 - **A luminance-floor test was considered and rejected**: F8 black is legitimately black, so
   any "every foreground must be legible on F0" assertion needs exemptions that make it
-  vacuous. The value pin plus the existing pairwise-distinctness test carry more.
+  vacuous. The value pins plus per-scheme distinctness carry more.
 - **The GUI golden must be re-baselined** — `test/golden/synthetic-ispf.png` and its sha256.
   The `TN3270_GUI_REPLAY` seam makes that host-free and clock-free (no password, no TK5
   clock). **The diff must be inspected, not accepted**: colours should change and ink
   positions should not. A moved glyph means something else broke.
+- **A second golden on `green`**, since replay is deterministic and that scheme is the one most
+  likely to break the blit path: `blit.ts` caches tinted glyph copies keyed by colour
+  (`tintKey`), and a scheme where fourteen codes share one RGB is the first thing that has ever
+  exercised a cache hit across *different* colour codes.
 - **New renderer-import guard**: assert that the renderer's runtime graph (`dist/renderer.js`
   plus its transitive *local* imports) contains no `@tn3270/*` value import. This is trap #5,
   whose symptom is a blank window with no error, and this change edits both a renderer-side
