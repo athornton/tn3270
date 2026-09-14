@@ -1108,10 +1108,29 @@ Expected: PASS, 3 tests.
 
 - [ ] **Step 3: Verify the test can actually fail (mutation check)**
 
-Temporarily add `import { SCHEMES } from '@tn3270/frontend';` to the top of
-`packages/gui/src/renderer.ts`, rebuild, and rerun.
+**CORRECTED 2026-09-14 — the obvious version of this check falsely PASSES.** Adding only
+`import { SCHEMES } from '@tn3270/frontend';` is not enough: with no `isolatedModules` or
+`verbatimModuleSyntax` in `tsconfig.base.json`, **`tsc` elides a value import that is never
+referenced**, so it never reaches `dist/renderer.js` and the guard correctly sees nothing.
+Measured twice, by the implementer and again by the reviewer.
 
-Expected: FAIL, naming `renderer.js` as an offender. **Then revert it:**
+So the binding must be **used**. Temporarily add both lines to the top of
+`packages/gui/src/renderer.ts`:
+
+```ts
+import { SCHEMES } from '@tn3270/frontend';
+console.log('schemes', Object.keys(SCHEMES).length);
+```
+
+then `npm run build` and rerun the test.
+
+Expected: FAIL, naming `renderer.js` as the sole offender —
+`expected [ Array(1) ] to deeply equal []`.
+
+**This is not a hole in the guard, and it is worth understanding why before you move on:** an
+elided import is absent from the shipped bundle, so it cannot blank the window either. The
+guard's coverage matches the real risk exactly — what breaks the renderer is an import that
+survives to runtime, and that is precisely what fails here. **Then revert it:**
 
 ```bash
 cd ~/git/tn3270 && git checkout packages/gui/src/renderer.ts && npm run build
