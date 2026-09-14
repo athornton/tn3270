@@ -73,18 +73,21 @@ export const tintKey = ([r, g, b]: Rgb): string => `${r},${g},${b}`;
 /**
  * The largest integer scale whose letterboxed screen fits `within`, minimum 1.
  *
+ * Takes a plain SIZE rather than a `DrawList`, because that is all it reads -- and main
+ * needs it before a frame exists, to size the window to the screen the host just described.
+ *
  * Stated as a rule rather than "fit to the window": a fractional fit would smear a bitmap
  * font, and refusing to draw at all when the window is small would be worse than drawing
  * small. 1 is the floor because there is no half-pixel glyph.
  */
-export function bestScale(list: DrawList, within: Surface): number {
+export function bestScale(list: Surface, within: Surface): number {
   const byWidth = Math.floor(within.width / list.width);
   const byHeight = Math.floor(within.height / list.height);
   return Math.max(1, Math.min(byWidth, byHeight));
 }
 
 /** Where to put the screen so it sits centred in `within` at `scale`. */
-export function centre(list: DrawList, within: Surface, scale: number): { x: number; y: number } {
+export function centre(list: Surface, within: Surface, scale: number): { x: number; y: number } {
   return {
     x: Math.max(0, Math.floor((within.width - list.width * scale) / 2)),
     y: Math.max(0, Math.floor((within.height - list.height * scale) / 2)),

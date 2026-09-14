@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -7,7 +7,7 @@ import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError }
 import { applyAction, defaultSession, describeTlsError, type Action } from '@tn3270/frontend';
 import { parseGuiArgs, UsageError } from './args.js';
 import { drawList, type AtlasGeometry } from './drawlist.js';
-import { blankColumns } from './blit.js';
+import { blankColumns, bestScale } from './blit.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -151,12 +151,39 @@ app.whenReady().then(async () => {
    * its own relative modules, which is also less for it to know. It already owns no
    * protocol state, so a dropped or coalesced frame costs a repaint and never correctness.
    */
+  /**
+   * Grow the window to hold the whole screen, once we know how big the screen is.
+   *
+   * NOT COSMETIC. The screen geometry is not known until the host has spoken -- VM sends
+   * Erase/Write Alternate and a model 4 becomes 43 rows -- and 44 rows of 14px is 616px,
+   * which does not fit the 600px default. The first live run against VM CLIPPED the bottom
+   * 16px, losing the entire OIA row: the host's own data and our status line, silently.
+   *
+   * The TUI refuses to draw rather than clip, because it cannot resize a terminal. A window
+   * CAN resize, so it does -- and the scale follows the design's rule: the largest integer
+   * multiple whose screen fits within 80% of the display work area, minimum 1.
+   */
+  let sized = '';
+  const fit = (list: { width: number; height: number }): void => {
+    const key = `${list.width}x${list.height}`;
+    if (key === sized) return;                       // most frames change nothing
+    sized = key;
+    const area = screen.getPrimaryDisplay().workAreaSize;
+    const scale = bestScale(list, {
+      width: Math.floor(area.width * 0.8),
+      height: Math.floor(area.height * 0.8),
+    });
+    win.setContentSize(list.width * scale, list.height * scale);
+  };
+
   const send = (): void => {
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
-    win.webContents.send('frame', drawList(
+    const list = drawList(
       snapshot, resolve(snapshot), geometry, oia === '' ? undefined : oia,
-    ));
+    );
+    fit(list);
+    win.webContents.send('frame', list);
   };
   session.on('screen', send);
   session.on('connect', send);
@@ -214,11 +241,39 @@ app.whenReady().then(async () => {
  * generously because a missed frame produces a blank golden, which looks like a rendering
  * bug rather than a timing one.
  */
+/**
+ * A THIRD TEST SEAM: `TN3270_GUI_KEYS=A,B,Enter` delivers REAL key events to the window.
+ *
+ * `webContents.sendInputEvent` goes in at the top of Chromium's input pipeline, so this
+ * exercises the ONE link nothing else can reach: the renderer's own `keydown` listener,
+ * `actionForKey`, the IPC hop and `applyAction`. A seam that injected actions at `ipcMain`
+ * instead would skip exactly the part that had never run.
+ *
+ * Deliberately does not type a logon. On VM a completed logon arms the reconnect trap for
+ * the next run (docs/live-testing.md), and a golden of a logged-on screen can contain a
+ * password.
+ */
+async function maybeSendKeys(win: BrowserWindow): Promise<void> {
+  const keys = process.env['TN3270_GUI_KEYS'];
+  if (keys === undefined || keys === '') return;
+  for (const key of keys.split(',')) {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+    win.webContents.sendInputEvent({ type: 'char', keyCode: key });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  process.stdout.write(`keys: sent ${keys}\n`);
+}
+
 async function maybeCapture(win: BrowserWindow): Promise<void> {
   const path = process.env['TN3270_GUI_SHOT'];
   if (path === undefined || path === '') return;
   const waitMs = Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500');
   await new Promise((r) => setTimeout(r, waitMs));
+  // Keys AFTER the host has painted: typing into a screen that has no field yet proves
+  // nothing, and the OIA would rightly refuse the input.
+  await maybeSendKeys(win);
+  await new Promise((r) => setTimeout(r, 800));
   const image = await win.webContents.capturePage();
   writeFileSync(path, image.toPNG());
 
