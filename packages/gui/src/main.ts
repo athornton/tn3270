@@ -1,6 +1,7 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
 import { applyAction, defaultSession, describeTlsError, type Action } from '@tn3270/frontend';
@@ -220,7 +221,21 @@ async function maybeCapture(win: BrowserWindow): Promise<void> {
   await new Promise((r) => setTimeout(r, waitMs));
   const image = await win.webContents.capturePage();
   writeFileSync(path, image.toPNG());
-  process.stdout.write(`shot: ${path} ${image.getSize().width}x${image.getSize().height}\n`);
+
+  /**
+   * The hash is of the RAW BITMAP, not of the PNG.
+   *
+   * Rendering is deterministic -- bitmap glyphs at integer scale with smoothing off have no
+   * hinting and no subpixel antialiasing -- but the PNG ENCODER is not part of that promise
+   * and can change between Electron versions. Hashing `toBitmap()` compares what was drawn;
+   * hashing the file would compare what was drawn AND how it was compressed, and a goldens
+   * suite that breaks on an Electron upgrade teaches people to run --update without looking.
+   *
+   * The PNG is still written, for a human to look at when a hash does differ.
+   */
+  writeFileSync(`${path}.sha256`, createHash('sha256').update(image.toBitmap()).digest('hex'));
+  const { width, height } = image.getSize();
+  process.stdout.write(`shot: ${path} ${width}x${height}\n`);
   app.quit();
 }
 
