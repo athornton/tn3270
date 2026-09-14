@@ -1,0 +1,18 @@
+/**
+ * Rules shared by every front end: the host argument, the TLS flags, the session
+ * factory, the keymap and the action dispatch.
+ *
+ * WHY THIS PACKAGE EXISTS. Two front ends already shared these by importing them from
+ * `@tn3270/cli`, which was the wrong home the moment a third front end appeared: a GUI
+ * has no business depending on the s3270 line protocol to find out what `-insecure`
+ * means. Both defects fixed on 2026-08-28 were one rule with two homes -- `splitTarget`
+ * beside `hostspec.ts`, and `-insecure` drifting between the two arg parsers until
+ * `harness-flags.test.ts` pinned it.
+ *
+ * WHAT DOES NOT BELONG HERE. Anything a front end owns because of HOW it presents:
+ * ANSI generation, SGR depth, canvas geometry, the s3270 reply format. If a symbol here
+ * would be used by exactly one front end, it is in the wrong package.
+ */
+
+/** Placeholder so the module is non-empty until Task 2 lands. Removed there. */
+export const FRONTEND_PACKAGE = '@tn3270/frontend';
