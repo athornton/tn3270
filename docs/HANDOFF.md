@@ -6,8 +6,22 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch **`main`**, **1202 tests passing in 41 files**, `npm run typecheck` clean,
-`npm run build` works, working tree clean.
+Branch **`main`** — the only branch, local and remote — at `908ab9c`, pushed and in sync.
+**1328 tests passing in 53 files**, `npm run typecheck` clean, `npm run build` works,
+`packages/tui/scripts/pty-smoke.py` 12 of 12, both GUI goldens matching without `--update`,
+working tree clean.
+
+**MOST RECENT WORK, merged 2026-09-15 as `43ec70d`:** four palette schemes in
+`packages/frontend/src/palette.ts` behind a new `-scheme` flag (`default`, `3279`, `x3270`,
+`green` — TUI and GUI only; the CLI has no renderer); PA1-3, Attn (`Ctrl-A`) and Insert bound
+in both front ends, which had been implemented in `core` and reachable from no key; a fix for
+`Esc`-then-`1` typing the digit in the TUI; and the default terminal type changed to
+`IBM-3278-2-E`, since MVS TSO rejects the bare form with `IKT00405I`. Design and plan are
+`docs/superpowers/specs/2026-09-14-shared-palette-and-unreachable-keys-design.md` and
+`docs/superpowers/plans/2026-09-14-palette-schemes-and-unreachable-keys.md`; the live results
+are in `docs/live-testing.md`. **The one known soft spot: PA's Alt-digit plumbing works — the
+author confirmed it by hand — but nothing in `npm test` guards it, because the
+`TN3270_GUI_KEYS` seam cannot send a modifier chord.**
 
 **STAGE 2b (TN3270E) IS COMPLETE, AND ITS VERIFICATION IS QUALIFIED.** All 15 plan
 tasks are done. The option, DEVICE-TYPE/FUNCTIONS, the 5-byte header, SNA responses,
