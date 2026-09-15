@@ -1662,6 +1662,23 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Create: `packages/web/src/wsserver.ts`
 - Test: `packages/web/test/wsserver.test.ts`
+- Modify: `packages/web/src/wsframe.ts` (two small hardenings, below)
+
+**ALSO IN THIS TASK — two Minor findings carried over from Task 3's review**, folded here because this
+is the task that consumes `OPCODE` and so is the natural place to tighten it:
+
+1. **`OPCODE` is `Object.freeze`d but not `as const`.** Verified under `tsc --strict`: without it,
+   `(typeof OPCODE)['TEXT']` widens to `number` rather than the literal `1`. That costs nothing today
+   — every use is an `=== opcode` comparison — but it means a future exhaustiveness `switch` gets no
+   literal-type protection. Add `as const` and confirm typecheck stays clean.
+2. **Nothing asserts `opcode` is within its 4-bit range** in `serializeFrame`. Byte 0 shares its high
+   nibble with FIN and the RSV bits, so an out-of-range opcode (say `0x10`) would silently set RSV1
+   and corrupt the frame rather than fail. Callers are all internal today, so a guard or a comment is
+   enough — pick one and say which, and if you add a guard give it a test.
+
+Not to change: `parseFrame` accepts a non-minimal extended-length encoding (byte 1 = 126 carrying a
+16-bit length below 126). The reviewer flagged this as an observation, not a defect — real
+implementations are commonly permissive here and rejecting it is out of scope.
 
 - [ ] **Step 1: Write the failing tests**
 
