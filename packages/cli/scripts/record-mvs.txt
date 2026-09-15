@@ -12,10 +12,13 @@
 # A FRESH LOG FILE PER RUN, never appended: appending once produced 31 "replies"
 # for 15 commands and several wrong conclusions drawn from that mapping.
 #
-# The ttype flag is what makes this work. Without `-model 3278-2-E` the default
-# is IBM-3278-2 and TSO answers IKT00405I SCREEN ERASURE CAUSED BY ERROR RECOVERY
-# PROCEDURE. Claiming -E makes TSO send a Read Partition (Query) it waits on,
-# which the client now answers with a three-unit Query Reply.
+# The ttype flag is what makes this work. Before 2026-09-14 the default was the
+# bare IBM-3278-2, which TSO answers with IKT00405I SCREEN ERASURE CAUSED BY
+# ERROR RECOVERY PROCEDURE and no logon -- the reason the default became
+# IBM-3278-2-E. `-model 3278-2-E` here is now belt-and-braces rather than the
+# thing that makes this work, but keep it: claiming -E makes TSO send a Read
+# Partition (Query) it waits on, which the client answers with a three-unit
+# Query Reply, and this script should not depend on the current default holding.
 #
 # Substitute HOST:PORT. On the machine this was captured from, TK5 is on
 # localhost:3271 because VM/370 holds 3270 -- check, do not assume.

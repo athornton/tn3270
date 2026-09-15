@@ -14,9 +14,8 @@
 # -model 3278-2 on OUR line is REQUIRED and must match the s3270 line's -model
 # 3278-2 below. The default terminal type became IBM-3278-2-E on 2026-09-14; without
 # this flag our client would negotiate -E while s3270 stays pinned at the bare
-# model 2, so the comparison would silently stop being like-for-like -- the same
-# trap documented for -insecure above, where a default moving on one side breaks a
-# comparison that assumes both sides are the same.
+# model 2, so the comparison would silently stop being like-for-like -- nothing
+# here fails loudly, it just quietly stops being a fair comparison.
 #
 # This script deliberately never sends a password: it presses a bare Enter at the
 # password prompt, because the point is to compare the inbound records that

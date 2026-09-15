@@ -392,11 +392,11 @@ describe('Color query reply', () => {
     // We always advertise the identity, and the reason is structural rather than
     // stylistic: x3270's mode3279 is a MODEL choice that also picks its terminal
     // type ("327" + '9' vs '8', model.c:135-137, telnet.c:2104), so for x3270 the
-    // two travel together. Ours does not: TERMINAL_TYPE is IBM-3278-2 regardless
-    // (constants.ts) and render.ts's mode3279 is a per-render presentation flag
-    // with no path to this module. Gating on it would mean the same session
-    // advertising different colour support depending on a rendering option, which
-    // is not something a Query Reply is allowed to depend on.
+    // two travel together. Ours does not: TERMINAL_TYPE is IBM-3278-2-E regardless
+    // of mode3279 (constants.ts), and render.ts's mode3279 is a per-render
+    // presentation flag with no path to this module. Gating on it would mean the
+    // same session advertising different colour support depending on a rendering
+    // option, which is not something a Query Reply is allowed to depend on.
     //
     // The claim also stays true under mode3279: false, because 0x00 does not mean
     // "no colour" — p. 6-36 says CI "identif[ies] the colors that are displayed"
