@@ -196,20 +196,33 @@ app.whenReady().then(async () => {
   session.on('disconnect', send);
 
   /**
-   * Every action the renderer sends, logged for the chord harness -- and ONLY while the
-   * keys seam is active.
+   * Every action the renderer sends, logged for the chord harness -- and ONLY while BOTH
+   * the keys seam and replay mode are active.
    *
    * THE GATE IS A PRIVACY REQUIREMENT, NOT TIDINESS. A `type` action carries the text
    * typed, so logging unconditionally would put a password on stdout in a live session --
-   * the same hazard that keeps goldens away from live logons. Under the seam every
-   * keystroke came from the environment variable, so there is nothing secret to leak.
+   * the same hazard that keeps goldens away from live logons.
+   *
+   * SEAM PRESENCE ALONE IS NOT ENOUGH -- do not "simplify" this back to one variable.
+   * `TN3270_GUI_KEYS` has been set against a LIVE host before (docs/live-testing.md,
+   * "Typed input, proved end to end"), and `keys.ts` builds a `type` action carrying the
+   * text for any printable keypress, seam-driven or not -- so the seam variable alone says
+   * nothing about what is on screen. REPLAY mode is what actually makes a logged keystroke
+   * safe: it cannot reach a host, so nothing typed while it is active can be a live
+   * credential. Both variables must be set together, which is how the Task 5 harness and
+   * the Task 3 manual smoke test already use them, so this costs no coverage.
    *
    * This is the ONE funnel every renderer action passes through, which is why the harness
    * asserts here rather than on pixels: in replay mode nothing is connected, `sendAID`
    * throws 'not connected', and `applyAction` swallows it, so a PA key has no other
    * observable consequence.
+   *
+   * Key order in `JSON.stringify(action)` is insertion order, not a stable contract -- a
+   * consumer of this log should parse and compare canonically rather than string-diffing
+   * the raw line.
    */
-  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== '';
+  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== ''
+    && (process.env['TN3270_GUI_REPLAY'] ?? '') !== '';
 
   ipcMain.on('action', (_e, action: Action) => {
     if (logActions) process.stdout.write(`action: ${JSON.stringify(action)}\n`);
