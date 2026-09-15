@@ -557,6 +557,19 @@ in `docs/live-testing.md`. Drop the affected cases from Task 5's list with a com
 why rather than changing the app's menu, which is product behaviour and out of scope here.
 The process must also exit on its own; if it hangs, `quitIfKeysOnly` is not being reached.
 
+**AS BUILT — a defect in this task's own plan text, found by measurement.** `parseKeySpec`
+throws, and `maybeSendKeys` runs inside `app.whenReady()`'s promise, so a refused spelling
+became an UNHANDLED REJECTION and `quitIfKeysOnly` never ran: the process printed the
+refusal and then HUNG until killed. That is the same failure this task exists to remove,
+merely on the error path. The implementation therefore (a) parses **every** spec before
+sending any, so a bad third spelling cannot half-deliver the first two, and (b) drains
+stderr and calls **`app.exit(2)`** on a refusal. **`Ctrl+A` was NOT swallowed by the default
+menu**, so the contingency above did not apply and no case was dropped.
+
+**Exit-code contract, which Task 5 and Task 7 both depend on:** a refused spelling exits
+**2** with a message on stderr naming the bad spelling and the valid form, and emits no
+`action:` or `keys:` line. A normal chord run exits 0.
+
 - [ ] **Step 7: Commit**
 
 ```bash
@@ -770,6 +783,12 @@ const canon = (o) => JSON.stringify(Object.entries(o).sort(([a], [b]) => (a < b 
 
 const specs = CASES.map((c) => c.spec).join(',');
 const expected = CASES.filter((c) => c.action !== null).map((c) => canon(c.action));
+
+// Every spelling here must be an Electron Accelerator name. A DOM code name is REFUSED by
+// parseKeySpec before any event is sent, and the client then exits 2 with the valid form
+// named on stderr -- measured while implementing Task 3, where an unhandled rejection made
+// that path HANG instead. So a non-zero exit with no action lines means a bad spelling in
+// this table, not a broken client.
 
 const result = spawnSync(electron, [main, ...ARGV, '127.0.0.1:1'], {
   encoding: 'utf8',
@@ -1010,7 +1029,10 @@ TN3270_GUI_KEYS='Alt+Digit1' \
   -insecure -model 3278-2-E 127.0.0.1:1 2>&1 | grep -iE "digit1|action:"
 ```
 Expected: an error naming `Digit1` and telling you to use `1`, and **no** `action:` line —
-the refusal happens before Chromium is asked for an empty event.
+the refusal happens before Chromium is asked for an empty event. The process must **exit 2
+promptly**, not hang: that error path was itself a defect found while implementing Task 3
+(an unhandled rejection in `app.whenReady()`'s promise), so it is worth re-confirming here
+rather than assuming.
 
 ---
 
