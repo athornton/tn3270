@@ -63,7 +63,8 @@ npm run build
 
 It takes the TUI's flags unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
 set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all three front ends parse
-them with the same code (`packages/frontend`).
+them with the same code (`packages/frontend`). `-scheme` is the one flag not shared with the
+CLI, since a script-driven client has nothing to render; see *Using the TUI*.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
 which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
@@ -118,11 +119,16 @@ npm run build
 The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
 set, and the full `[prefix:][LU,LU@]host[:port]` shape. That is not a coincidence or a
 promise to keep them in step: all three front ends parse them with the same code in
-`packages/frontend`.
+`packages/frontend`. `-scheme` is the one flag that is not shared with the CLI, since a
+script-driven client has nothing to render; see *Using the TUI* for what it picks between.
 
 **`Ctrl-]` quits. `Ctrl-C` does NOT** — it is the Clear AID, which a 3270 user needs
-constantly to dismiss VM's `MORE...` state. `Ctrl-R` is Reset, `Ctrl-U` is EraseInput, F1–F12
-are PF1–PF12 and shifted F1–F12 are PF13–PF24, following c3270.
+constantly to dismiss VM's `MORE...` state. `Ctrl-R` is Reset, `Ctrl-U` is EraseInput,
+`Ctrl-A` is Attn, `Insert` toggles insert mode, F1–F12 are PF1–PF12 and shifted F1–F12 are
+PF13–PF24, following c3270. **PA1/PA2/PA3 are `Option`/`Alt` + `1`/`2`/`3`** — matched on the
+physical key, so they work whatever your Option key is configured to type. On a Mac where
+left-Option is remapped to Command, use right-Option: `Cmd`-digit is deliberately left for
+menu accelerators.
 
 **The window sizes itself to the screen the host negotiates**, at the largest whole-number
 scale that fits 80% of your display. Whole numbers only: the font is a bitmap, and a
@@ -137,9 +143,14 @@ byte (`packages/gui/scripts/shot.mjs`).
 
 **What it does not have yet:** no connect dialog, no menus, no preferences, no mouse
 support, and no packaging — so the host goes on the command line and there is no `.app` to
-double-click. **What is implemented but not yet verified against a live host:** the PF, PA and
-Clear keys (they travel the same path as ordinary typing, which *is* verified end to end), the
-`Ctrl-]` quit, and the in-window error message for a failed connection.
+double-click. **What is implemented but not yet verified against a live host:** the PF and
+Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
+Attn (a Telnet BREAK — whether VM/370 acts on it is unmeasured), the `Ctrl-]` quit, and the
+in-window error message for a failed connection. **PA1/PA2 are less verified than that
+list, not more:** `actionForKey` maps Alt+digit to them and is unit-tested, but only against
+a synthetic key-like object — no automated test drives a real Chromium `KeyboardEvent`, and
+what a host does when it receives PA1/PA2 is itself unmeasured. A host that acts on them,
+realistically ISPF on MVS, is what would close that gap.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
@@ -149,7 +160,7 @@ against both hosts*.
 ## Using the TUI
 
 ```sh
-node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] \
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
     [-insecure] [-noverifycert] [-cafile FILE] host[:port]
 ```
 
@@ -166,14 +177,27 @@ once before raw mode starts instead. Never both. Vertical slack is spent in prio
 order — OIA, bottom border, hint, top border — so at exactly 27 rows the hint takes the
 row the top border would have had, on the same reasoning that gives the OIA precedence
 over the bottom border: functional beats decorative. `Ctrl-R` is Reset, `Ctrl-U`
-erases input, `F1`–`F12` are PF1–12 and `Shift+F1`–`F12` are PF13–24, and `Esc` `1`/`2`/`3`
-are PA1/PA2/PA3. Arrow keys are bound in **both** encodings, CSI and SS3, because
-terminfo reports only the application-mode one and any layer can flip the mode.
+erases input, `Ctrl-A` is Attn, `Insert` toggles insert mode, `F1`–`F12` are PF1–12 and
+`Shift+F1`–`F12` are PF13–24, and **`Esc` `1`/`2`/`3` are PA1/PA2/PA3.** A lone `Esc` is not
+held immediately — it arms the same 50ms timer as an unfinished function-key sequence, so a
+split arrow or function key that completes within the timeout still resolves normally.
+Only once the timer expires is the `Esc` promoted to a Meta prefix, and even then it
+combines with just the next byte, and only to complete a PA; anything else and the `Esc` is
+dropped. Arrow keys are bound in **both** encodings, CSI and SS3, because terminfo reports
+only the application-mode one and any layer can flip the mode.
 
-Colours are zti's, not core's: the shared palette in `packages/core` keeps saturated
-primaries, and the TUI renders the gentler values zti uses because they read better in a
-terminal. Quantisation to 16 colours is an explicit table rather than nearest-RGB — with
-any realistic palette, blue and turquoise both fall nearest to cyan and would collide.
+**Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
+`default` is the readable one — zti's values for the seven base colours (F0–F7), x3270's
+for the rest — and it is what every front end draws unless told otherwise. `3279` is
+core's own saturated table: **our own choice of primaries, not a phosphor measurement** —
+the manual names each colour without fixing its chromaticity, and a real 3279 matched
+neither this table nor x3270's — kept because someone comparing against the architected
+meaning may want the unambiguous version. `x3270` is that emulator's own `rgbmap`, for
+comparing against it. `green` is a monochrome 3278, **the only one of the four with any
+claim to authenticity**, because a 3278 had no colour at all — colour was a 3279 feature —
+and `greenscreen` is accepted as an alias for it, x3270's own spelling. Quantisation to 16
+colours is an explicit per-scheme table rather than nearest-RGB: with any pleasant palette,
+blue and turquoise both land nearest ANSI cyan and would collide.
 
 ## Screen models
 
@@ -413,9 +437,11 @@ Done:
 
 7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
    an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
-   the host negotiates. Two things about it are unverified and the spec says so: PF/PA/Clear
-   travel the same path as typing but were not exercised live, and no logon was completed,
-   because that arms VM's reconnect trap and could put a password in a screenshot.
+   the host negotiates. Not everything about it is live-verified, and the spec says so: PF
+   and Clear travel the same path as typing but were not exercised live, no logon was
+   completed (that arms VM's reconnect trap and could put a password in a screenshot), and
+   PA1/PA2 — added later, on Alt/Option+digit — have never reached a live host at all;
+   what a host does with them is unmeasured.
 
 Remaining, in the order the author wants it:
 

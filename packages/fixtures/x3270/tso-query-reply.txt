@@ -2,10 +2,11 @@
 # Captured 2026-08-17 against localhost:3271, ttype IBM-3278-2-E, with the
 # TN3270E telnet option NOT negotiated (no fffb28/fffd28 in the trace).
 #
-# This is the exchange our client cannot yet perform, and the reason TSO is
-# unreachable: TSO sends the Query below and waits. See docs/live-testing.md.
-# Kept as an implementation reference for the Query Reply work -- it is what a
-# real, accepted answer looks like on this host. Do NOT treat it as a spec:
+# SUPERSEDED CLAIM, corrected 2026-09-14: this header used to say the exchange was one our
+# client "cannot yet perform, and the reason TSO is unreachable". Query Reply landed in stage
+# 2a, and a live GUI session has since logged on to TSO at 43 rows -- which TSO only reaches
+# after this Query is answered. Kept as the byte-level reference for what a real accepted
+# answer looks like on this host, not as a description of a gap. Do NOT treat it as a spec:
 # x3270 sends more reply units than TSO necessarily requires, and the minimum
 # acceptable subset is untested. Verify each unit against GA23-0059 before
 # copying it, per the project's standing rule about wire constants.
