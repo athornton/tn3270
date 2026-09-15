@@ -41,6 +41,17 @@ const ESC = 0x1b;
  * because both mean "no more bytes arrived from what a terminal would have
  * sent as one burst" -- see the regression note at the bottom of `pump()`
  * for why a lone ESC cannot skip this wait and be held immediately instead.
+ *
+ * ANY fixed timeout leaves a boundary, and this one is worth stating rather than
+ * discovering: a function key genuinely split with an inter-byte gap NEAR 50ms
+ * resolves as the key when the gap lands under, and types its bytes literally
+ * when it lands over. That is inherent to disambiguating a byte which is both a
+ * legal keypress and a prefix, and it is unavoidable at some threshold. What
+ * matters is that it FAILS SAFE: a promoted ESC that does not complete a PA is
+ * dropped and the remainder re-enters the ordinary scan as text, so the boundary
+ * costs a literal `[C` on screen, never a cursor move the user did not ask for.
+ * The pre-2026-09-15 discard scheme had the same boundary and a worse failure --
+ * it lost the following keystroke entirely.
  */
 const ESC_TIMEOUT_MS = 50;
 
