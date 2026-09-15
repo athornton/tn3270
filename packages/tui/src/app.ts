@@ -29,7 +29,15 @@ import {
   type Action, type Scheme,
 } from '@tn3270/frontend';
 
-/** How long to wait before deciding a lone ESC really was Escape. */
+/** The byte a lone Escape keypress sends; also the first byte of every function key. */
+const ESC = 0x1b;
+
+/**
+ * How long to wait before giving up on an UNFINISHED multi-byte sequence, e.g. a
+ * `\x1b[` with nothing after it. Does NOT apply to a lone ESC by itself -- see
+ * `escHeld` -- only to a sequence that started down a specific escape path and
+ * then stalled.
+ */
 const ESC_TIMEOUT_MS = 50;
 
 /**
@@ -97,6 +105,14 @@ export class App {
   private readonly mode3279: boolean;
   private buffer: number[] = [];
   private escTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * True from the moment a lone ESC is HELD (see `pump()`) until the next
+   * `pump()` call resolves it. Distinguishes "this ESC already waited through
+   * one onInput call by itself" from "this ESC is the first byte of a sequence
+   * that arrived complete, in one burst" -- the two look identical in `buffer`,
+   * but only the former is narrowed to PA-only completion.
+   */
+  private escHeld = false;
   private restored = false;
   /** Last terminal size acted on, so a no-change SIGWINCH costs nothing. */
   private termRows = -1;
@@ -307,9 +323,11 @@ export class App {
    * - Otherwise prefixes are tried up to the longest sequence in the table.
    *   PARTIAL means keep extending; an Action is remembered and extension
    *   continues in case a longer key also matches; null stops the scan.
-   * - PARTIAL that reaches the end of the buffer means WAIT, and only then is
-   *   the timer armed. A lone ESC is both a legal key and the prefix of every
-   *   function key, and only elapsed time distinguishes them.
+   * - PARTIAL that reaches the end of the buffer means WAIT. A lone ESC is both
+   *   a legal key and the prefix of every function key, and it cannot be
+   *   resolved from the buffer alone -- see `escHeld` below for how a lone ESC
+   *   and an unfinished multi-byte sequence are now told apart, and treated
+   *   differently.
    */
   private pump(): void {
     if (this.escTimer !== undefined) {
@@ -319,6 +337,38 @@ export class App {
 
     while (this.buffer.length > 0) {
       const bytes = Uint8Array.from(this.buffer);
+
+      // Resume a PREVIOUSLY HELD lone ESC. `onInput` always appends at least
+      // one byte before calling `pump()`, so `bytes.length` is at least 2 here.
+      //
+      // A held ESC combines with ONLY the next byte, and ONLY to complete a PA
+      // (`\x1b1`/`\x1b2`/`\x1b3`) -- the one thing a human can genuinely type as
+      // two separate keystrokes. Every other ESC-prefixed key (CSI/SS3 function
+      // keys, e.g. `\x1b[A`) arrives from a real terminal as ONE burst, so the
+      // whole thing is already in `bytes` on pump()'s FIRST look at it and
+      // resolves through the ordinary scan below -- it never reaches this branch
+      // at all. So anything other than a completed PA here means the ESC was
+      // just Escape; the ESC is dropped and the rest of the buffer is
+      // reprocessed from the start, unrelated to it.
+      //
+      // THE HAZARD THIS CLOSES (found in review, 2026-09-15): without this
+      // narrowing, a held ESC combined with WHATEVER arrived next, so a paste
+      // beginning `[A`/`[B`/`[C`/`[D`/`[H` completed `\x1b[A` etc. as a genuine
+      // arrow/Home match two blocks down -- silently moving the cursor and
+      // landing the rest of the paste in the WRONG field. That is worse than
+      // the bug this file exists to fix. Narrowing to PA-only means that paste
+      // is now typed literally instead.
+      if (this.escHeld) {
+        this.escHeld = false;
+        const pa = lookup(bytes.subarray(0, 2));
+        if (pa !== null && pa !== PARTIAL) {
+          this.buffer.splice(0, 2);
+          this.apply(pa);
+          continue;
+        }
+        this.buffer.splice(0, 1);
+        continue;
+      }
 
       // A leading run of printable bytes is typed text, consumed in one go.
       const run = printableRun(bytes);
@@ -361,10 +411,17 @@ export class App {
       // meant the PA keys only ever worked when a terminal sent `\x1b1` as ONE burst, i.e.
       // via Option-as-Meta. Reported from a Mac 2026-09-14: `Esc 1` typed the digit.
       //
-      // The cost is real and small: a bare Escape with no follow-up leaves one byte buffered,
-      // and the next keystroke is consumed by the failed `\x1b`+key lookup. On a 3270 that
-      // costs nothing, because Escape has no meaning of its own and was already discarded.
-      if (bytes.length === 1 && bytes[0] === 0x1b) return;
+      // What "held" means now is narrower than it sounds: see the `escHeld` branch
+      // above, which resumes this on the NEXT `pump()` call and accepts only a
+      // completed PA, not any old continuation. What remains of the accepted cost is
+      // small and no longer a loss: a bare Escape with no PA follow-up is swallowed,
+      // and the very next keystroke is then processed normally -- typed if it is text,
+      // acted on if it is its own complete key. On a 3270 that costs nothing, because
+      // Escape has no meaning of its own and was already discarded.
+      if (bytes.length === 1 && bytes[0] === ESC) {
+        this.escHeld = true;
+        return;
+      }
 
       this.escTimer = setTimeout(() => {
         this.escTimer = undefined;
