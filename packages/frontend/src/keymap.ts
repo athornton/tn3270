@@ -31,10 +31,11 @@
  *
  * A lone ESC is both a legal keypress and the first byte of every function key,
  * so it cannot be resolved from the buffer alone. This module reports that fact
- * and refuses to guess; `app.ts` owns what happens next -- holding a lone ESC as
- * a Meta prefix for PA1/PA2/PA3, and timing out only a genuinely unfinished
- * multi-byte sequence such as `\x1b[`. Guessing here would either eat the
- * following keystroke or emit a spurious PA.
+ * and refuses to guess; `app.ts` owns what happens next -- arming a timer for a
+ * lone ESC just as it does for a genuinely unfinished multi-byte sequence like
+ * `\x1b[`, but PROMOTING it to a Meta prefix for PA1/PA2/PA3 on expiry rather
+ * than discarding it. Guessing here would either eat the following keystroke
+ * or emit a spurious PA.
  */
 
 import { PF_AIDS } from '@tn3270/core';
@@ -69,8 +70,9 @@ export type Action =
  * caller's two correct responses to those are opposite: keep buffering, versus
  * throw the bytes away. A bare ESC is the case that matters -- it is a legal key
  * AND the start of every function key, and this module cannot tell them apart
- * from bytes alone. app.ts owns what happens next -- holding it as a Meta
- * prefix rather than timing it out; this module stays pure.
+ * from bytes alone. app.ts owns what happens next -- timing it out the same as
+ * an unfinished sequence, but promoting it to a Meta prefix on expiry rather
+ * than discarding it; this module stays pure.
  */
 export const PARTIAL = Symbol('partial');
 

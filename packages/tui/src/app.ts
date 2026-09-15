@@ -33,10 +33,14 @@ import {
 const ESC = 0x1b;
 
 /**
- * How long to wait before giving up on an UNFINISHED multi-byte sequence, e.g. a
- * `\x1b[` with nothing after it. Does NOT apply to a lone ESC by itself -- see
- * `escHeld` -- only to a sequence that started down a specific escape path and
- * then stalled.
+ * How long to wait before giving up on an unresolved escape path -- either a
+ * lone ESC that might still be the start of a function key, or a multi-byte
+ * sequence like `\x1b[` that started down one and stalled. The two do
+ * DIFFERENT things on expiry: a lone ESC is PROMOTED to a Meta prefix (see
+ * `escHeld`), a truncated sequence is discarded. Both get the same window
+ * because both mean "no more bytes arrived from what a terminal would have
+ * sent as one burst" -- see the regression note at the bottom of `pump()`
+ * for why a lone ESC cannot skip this wait and be held immediately instead.
  */
 const ESC_TIMEOUT_MS = 50;
 
@@ -106,11 +110,13 @@ export class App {
   private buffer: number[] = [];
   private escTimer: ReturnType<typeof setTimeout> | undefined;
   /**
-   * True from the moment a lone ESC is HELD (see `pump()`) until the next
-   * `pump()` call resolves it. Distinguishes "this ESC already waited through
-   * one onInput call by itself" from "this ESC is the first byte of a sequence
-   * that arrived complete, in one burst" -- the two look identical in `buffer`,
-   * but only the former is narrowed to PA-only completion.
+   * True once a held lone ESC's timer has FIRED, promoting it to a Meta prefix,
+   * until the next `pump()` call resolves it. Before the timer fires, more
+   * bytes arriving clear it (at the top of `pump()`) and resolve through the
+   * ordinary full-table scan instead -- exactly as they did before this
+   * ESC-holding behaviour existed -- so a split function key delivered
+   * promptly still completes normally. Only a PROMOTED ESC is narrowed to
+   * PA-only completion.
    */
   private escHeld = false;
   private restored = false;
@@ -223,6 +229,11 @@ export class App {
       clearTimeout(this.escTimer);
       this.escTimer = undefined;
     }
+    // A promoted ESC left in `buffer` is harmless once restored -- `stdin.pause()`
+    // below stops any further `onInput`, so nothing will ever resume it -- but
+    // clear the flag anyway rather than leave a stale "waiting to resolve"
+    // state on an App that should be fully torn down.
+    this.escHeld = false;
     this.stdout.write(CURSOR_OFF);
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);
@@ -323,11 +334,11 @@ export class App {
    * - Otherwise prefixes are tried up to the longest sequence in the table.
    *   PARTIAL means keep extending; an Action is remembered and extension
    *   continues in case a longer key also matches; null stops the scan.
-   * - PARTIAL that reaches the end of the buffer means WAIT. A lone ESC is both
-   *   a legal key and the prefix of every function key, and it cannot be
-   *   resolved from the buffer alone -- see `escHeld` below for how a lone ESC
-   *   and an unfinished multi-byte sequence are now told apart, and treated
-   *   differently.
+   * - PARTIAL that reaches the end of the buffer means WAIT, and the timer is
+   *   armed. A lone ESC is both a legal key and the prefix of every function
+   *   key, and it cannot be resolved from the buffer alone -- so it gets the
+   *   same timer as an unfinished multi-byte sequence, but a different action
+   *   on expiry (promoted, not discarded). See `escHeld` below.
    */
   private pump(): void {
     if (this.escTimer !== undefined) {
@@ -338,26 +349,30 @@ export class App {
     while (this.buffer.length > 0) {
       const bytes = Uint8Array.from(this.buffer);
 
-      // Resume a PREVIOUSLY HELD lone ESC. `onInput` always appends at least
-      // one byte before calling `pump()`, so `bytes.length` is at least 2 here.
+      // Resume a PROMOTED lone ESC -- its timer already fired (see the bottom
+      // of this function), which is why `escHeld` is true rather than having
+      // just been set. `onInput` always appends at least one byte before
+      // calling `pump()`, so `bytes.length` is at least 2 here.
       //
-      // A held ESC combines with ONLY the next byte, and ONLY to complete a PA
-      // (`\x1b1`/`\x1b2`/`\x1b3`) -- the one thing a human can genuinely type as
-      // two separate keystrokes. Every other ESC-prefixed key (CSI/SS3 function
-      // keys, e.g. `\x1b[A`) arrives from a real terminal as ONE burst, so the
-      // whole thing is already in `bytes` on pump()'s FIRST look at it and
-      // resolves through the ordinary scan below -- it never reaches this branch
-      // at all. So anything other than a completed PA here means the ESC was
-      // just Escape; the ESC is dropped and the rest of the buffer is
-      // reprocessed from the start, unrelated to it.
+      // A promoted ESC combines with ONLY the next byte, and ONLY to complete a
+      // PA (`\x1b1`/`\x1b2`/`\x1b3`) -- the one thing a human can genuinely type
+      // as two separate keystrokes, slowly enough to cross ESC_TIMEOUT_MS. A
+      // split function key (CSI/SS3, e.g. `\x1b[A`) delivered WITHIN the
+      // timeout never reaches this branch at all: its second half arrives
+      // before the timer fires, clearing it (top of `pump()`), and the WHOLE
+      // sequence resolves through the ordinary scan below on that same call --
+      // so promptly-split arrows and function keys are unaffected. So anything
+      // other than a completed PA here means the ESC really was just Escape,
+      // followed seconds later by something unrelated; the ESC is dropped and
+      // the rest of the buffer is reprocessed from the start.
       //
       // THE HAZARD THIS CLOSES (found in review, 2026-09-15): without this
-      // narrowing, a held ESC combined with WHATEVER arrived next, so a paste
-      // beginning `[A`/`[B`/`[C`/`[D`/`[H` completed `\x1b[A` etc. as a genuine
-      // arrow/Home match two blocks down -- silently moving the cursor and
-      // landing the rest of the paste in the WRONG field. That is worse than
-      // the bug this file exists to fix. Narrowing to PA-only means that paste
-      // is now typed literally instead.
+      // narrowing, a promoted ESC combined with WHATEVER arrived next, so a
+      // paste beginning `[A`/`[B`/`[C`/`[D`/`[H` -- typed well after
+      // ESC_TIMEOUT_MS, since it is its own separate keystroke -- completed
+      // `\x1b[A` etc. as a genuine arrow/Home match two blocks down, silently
+      // moving the cursor and landing the rest of the paste in the WRONG
+      // field. Narrowing to PA-only means that paste is typed literally.
       if (this.escHeld) {
         this.escHeld = false;
         const pa = lookup(bytes.subarray(0, 2));
@@ -406,28 +421,41 @@ export class App {
 
       // Every prefix was PARTIAL and the buffer is exhausted: wait for more.
       //
-      // A LONE ESC IS HELD, NOT TIMED OUT. It is the Meta prefix -- PA1/PA2/PA3 are ESC-1/2/3
-      // -- and a human pressing Esc then 1 takes hundreds of milliseconds, so a 50ms discard
-      // meant the PA keys only ever worked when a terminal sent `\x1b1` as ONE burst, i.e.
-      // via Option-as-Meta. Reported from a Mac 2026-09-14: `Esc 1` typed the digit.
+      // A LONE ESC ARMS THE SAME TIMER AS AN UNFINISHED SEQUENCE, BUT IS PROMOTED
+      // ON EXPIRY, NOT DISCARDED. PA1/PA2/PA3 are ESC-1/2/3 -- Escape then a digit
+      // -- and a human pressing them takes hundreds of milliseconds, well past
+      // ESC_TIMEOUT_MS, so discarding on expiry meant the PA keys only ever
+      // worked when a terminal sent `\x1b1` as ONE burst, i.e. via
+      // Option-as-Meta. Reported from a Mac 2026-09-14: `Esc 1` typed the digit.
       //
-      // What "held" means now is narrower than it sounds: see the `escHeld` branch
-      // above, which resumes this on the NEXT `pump()` call and accepts only a
-      // completed PA, not any old continuation. What remains of the accepted cost is
-      // small and no longer a loss: a bare Escape with no PA follow-up is swallowed,
-      // and the very next keystroke is then processed normally -- typed if it is text,
-      // acted on if it is its own complete key. On a 3270 that costs nothing, because
-      // Escape has no meaning of its own and was already discarded.
+      // REGRESSION FOUND IN REVIEW, 2026-09-15, and why this timer is still here:
+      // an earlier version of this fix held a lone ESC with NO timer at all, so
+      // the very NEXT pump() call took the PA-only path unconditionally -- even
+      // one millisecond later, even for a split function key that would have
+      // completed fine before this file ever changed. That is a regression
+      // against what shipped before this fix existed. Arming the timer here
+      // means a promptly-delivered second half still clears it (top of this
+      // function) and resolves through the ordinary scan above, exactly as it
+      // always did; only a gap that actually EXCEEDS ESC_TIMEOUT_MS promotes the
+      // ESC to a Meta prefix, at which point the `escHeld` branch above narrows
+      // what it can combine with -- see the hazard comment there.
       if (bytes.length === 1 && bytes[0] === ESC) {
-        this.escHeld = true;
+        this.escTimer = setTimeout(() => {
+          this.escTimer = undefined;
+          // PROMOTED, not discarded -- the one difference from the truncated
+          // -sequence branch below. The ESC stays in `buffer`; the `escHeld`
+          // branch above resolves it on the NEXT pump() call.
+          this.escHeld = true;
+        }, ESC_TIMEOUT_MS);
         return;
       }
 
       this.escTimer = setTimeout(() => {
         this.escTimer = undefined;
-        // A TRUNCATED sequence is still DISCARDED, not typed: an unfinished `\x1b[?` is not
-        // text the user asked to send, and leaving `[` behind would type a bracket into the
-        // field. Only the lone-ESC case above is held.
+        // A TRUNCATED sequence is DISCARDED, not typed and not promoted: an
+        // unfinished `\x1b[?` is not text the user asked to send, and leaving
+        // `[` behind would type a bracket into the field. Only the lone-ESC
+        // case above survives its timer.
         this.buffer = [];
       }, ESC_TIMEOUT_MS);
       return;

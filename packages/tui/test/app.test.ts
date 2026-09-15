@@ -419,31 +419,28 @@ describe('the ambiguous Escape', () => {
     expect(cellText(h.session, 0)).toBe(' ');         // and never typed literally
   });
 
-  it('no longer completes a split arrow key -- only a split PA does that now', () => {
-    // Before the 2026-09-15 review fix, a held ESC combined with WHATEVER arrived
-    // next, so this used to complete `\x1b[C` as a right-arrow just because the two
-    // halves happened to arrive close together. That is the same mechanism as the
-    // paste hazard below, just less obviously dangerous. The only ESC-prefixed key a
-    // human can genuinely produce as two separate keystrokes is a PA, so completion
-    // is narrowed to that; a split arrow instead types its bytes literally -- which
-    // is also what shipped before Task 8's ESC-holding fix existed at all.
+  it('completes the sequence when the rest arrives in time', () => {
     const h = harness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
-    h.app.onInput(new TextEncoder().encode('[C'));    // ESC then [C: NOT a right-arrow
-
-    expect(cellText(h.session, 0)).toBe('[');
-    expect(cellText(h.session, 1)).toBe('C');
-    expect(h.session.screen.cursor).toBe(2);
+    h.app.onInput(new TextEncoder().encode('[C'));    // ESC then [C = right
+    expect(h.session.screen.cursor).toBe(1);
   });
 
   it('clears an armed ESC timer on restore, so exit does not hang', () => {
     // A pending timer keeps the event loop alive, so the process would sit for
     // ESC_TIMEOUT_MS after the terminal was already restored.
-    //
-    // DRIVEN BY A TRUNCATED SEQUENCE, not a lone ESC, since 2026-09-14: a lone ESC is now
-    // HELD as a Meta prefix and arms no timer, so it can no longer set this up. The
-    // truncated case is the one that still arms one, and the assertion is unchanged.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1b]));
+    expect(vi.getTimerCount()).toBe(1);
+    h.app.restore();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('also clears an armed timer for a TRUNCATED sequence on restore', () => {
+    // A SEPARATE setTimeout call site from the lone-ESC one above -- restore()
+    // must clear whichever one happens to be pending, and this pins the other.
     const h = harness();
     h.app.start();
     h.app.onInput(new TextEncoder().encode('\x1b['));
@@ -469,46 +466,42 @@ describe('the ambiguous Escape', () => {
     expect(cellText(h.session, 0)).toBe(' ');         // and NOT typed into the field
   });
 
-  it('arms no timer for a lone ESC, which is a stronger exit guarantee than clearing one', () => {
-    const h = harness();
-    h.app.start();
-    h.app.onInput(Uint8Array.from([0x1b]));
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('does not let a held ESC combine with a paste into an arrow -- THE HAZARD', () => {
+  it('does not let a PROMOTED ESC combine with a paste into an arrow -- THE HAZARD', () => {
     // Found in review, 2026-09-15, one level up from the bug this file exists to fix.
-    // Before the narrowing above existed, a held ESC combined with WHATEVER arrived
-    // next, so pasting text beginning `[A`/`[B`/`[C`/`[D`/`[H` right after pressing
-    // Escape -- plausible on a Mac, where Option-as-Meta users reach for both keys --
-    // completed `\x1b[A` etc. as a genuine up-arrow match and silently moved the
-    // cursor, landing the rest of the paste in the WRONG field. That is SILENT
-    // CORRUPTION, and it is worse than the bug this file exists to fix.
+    // GATED ON THE TIMEOUT HAVING FIRED: an earlier version of this fix held a lone
+    // ESC with no timer at all, so it combined with WHATEVER arrived next regardless
+    // of timing. That meant pasting text beginning `[A`/`[B`/`[C`/`[D`/`[H` right
+    // after pressing Escape -- plausible on a Mac, where Option-as-Meta users reach
+    // for both keys -- completed `\x1b[C` etc. as a genuine arrow match and silently
+    // moved the cursor, landing the rest of the paste in the WRONG field. That is
+    // SILENT CORRUPTION, and it is worse than the bug this file exists to fix.
     //
-    // MUST FAIL before the fix: the whole `\x1b[A` would be consumed as 'up' and
-    // only "XY" would be typed, at cell 0 -- not cell 2.
+    // A paste arriving WITHIN the timeout is, correctly, a different story: see
+    // 'completes the sequence when the rest arrives in time' above. This test is
+    // about a paste arriving well after Escape, once the ESC has been promoted.
     const h = harness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
-    h.app.onInput(new TextEncoder().encode('[AXY'));
+    vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
+    h.app.onInput(new TextEncoder().encode('[C'));    // NOT a right-arrow
 
-    // Typed literally, in order, from wherever the cursor already was --
-    // NOT consumed as an up-arrow, which would type nothing and jump the cursor.
+    // Typed literally, NOT consumed as a right-arrow, which would move the cursor
+    // and type nothing.
     expect(cellText(h.session, 0)).toBe('[');
-    expect(cellText(h.session, 1)).toBe('A');
-    expect(cellText(h.session, 2)).toBe('X');
-    expect(cellText(h.session, 3)).toBe('Y');
-    expect(h.session.screen.cursor).toBe(4);
+    expect(cellText(h.session, 1)).toBe('C');
+    expect(h.session.screen.cursor).toBe(2);
   });
 
-  it('types the byte after a held ESC literally when it is not a PA digit', () => {
-    // The improved cost, replacing the one Task 8 accepted: a bare Escape with no
-    // PA follow-up used to leave the NEXT keystroke consumed by a failed lookup;
-    // now it is just typed, because the held ESC is dropped and the buffer is
-    // reprocessed from the start.
+  it('types the byte after a PROMOTED ESC literally when it is not a PA digit', () => {
+    // The improved cost, gated on the timeout having fired: once promoted, a bare
+    // Escape with no PA follow-up is dropped and the buffer is reprocessed from the
+    // start, so the very next keystroke is typed instead of lost. (Within the
+    // timeout, an ESC followed by an unrelated byte is still discarded whole by the
+    // ordinary impossible-sequence rule -- unchanged, and not what this pins.)
     const h = harness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
     h.app.onInput(new TextEncoder().encode('a'));
     expect(cellText(h.session, 0)).toBe('a');
   });
