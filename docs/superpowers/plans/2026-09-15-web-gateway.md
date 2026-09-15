@@ -945,6 +945,31 @@ Change `if (!masked) throw` to `if (false) throw`, re-run, and confirm the unmas
 test FAILS. Restore. Then change `0x80 | opcode` in `serializeFrame` to `0x80 | 0x80 | opcode` (set
 the mask bit), re-run, and confirm the "does NOT mask" test FAILS. Restore. Report both messages.
 
+**AS BUILT — THE SECOND MUTATION ABOVE IS INERT, AND THAT IS THE POINT.** `0x80 | 0x80 | opcode`
+equals `0x80 | opcode`; the mask bit is bit 7 of **byte 1**, which it shares with the 7-bit length
+field, while byte 0 holds FIN/RSV/opcode. Applied as written, all 12 tests still pass — so following
+this step literally would report a guard as proven while testing nothing. The real mutation sets bit
+7 of byte 1 in all three length branches.
+
+**And doing it properly exposed a genuine coverage gap:** the 16-bit and 64-bit serialise tests
+asserted only `out[1] & 0x7f`, so they SURVIVED the correct mutation — and per the measured frame
+sizes the 16-bit path is the one production traffic actually uses, so the unpinned branch was the
+load-bearing one. Both tests now also assert `out[1] & 0x80` is 0.
+
+Two further as-built notes:
+
+- **The `!masked` guard must sit ABOVE the extended-length parse.** As first written it came after,
+  so an unmasked frame with a 127 length byte threw `frame length out of range` instead of the mask
+  error — sending a person debugging a misbehaving client to the wrong end of the problem. The mask
+  bit is fully known from byte 1 and has no dependency on the length parse. A **masked** frame with a
+  truncated header must still return `undefined`, because that is a TCP read boundary and not an
+  error; that case needs its own test.
+- **No tsconfig covers `test/`** — every package uses `include: ["src/**/*.ts"]` — so type errors in
+  test files are invisible to `npm run typecheck`. The plan's helper was not
+  `noUncheckedIndexedAccess`-clean (`masked[i] ^= mask[i % 4]!` raises TS2532); write test code to the
+  same strictness as `src`, since the existing tests are clean under those flags and that is the de
+  facto norm.
+
 - [ ] **Step 6: Commit**
 
 ```bash
