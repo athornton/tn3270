@@ -301,7 +301,7 @@ Co-Authored-By: SLAC AI"
 
 ---
 
-### Task 2: log every action arriving at `ipcMain`, gated on the seam
+### Task 2: log every action arriving at `ipcMain`, gated on the seam and replay mode
 
 **Files:**
 - Modify: `packages/gui/src/main.ts:198-204`

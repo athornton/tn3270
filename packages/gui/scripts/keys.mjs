@@ -137,7 +137,10 @@ if (expected.length === 0) {
  * it sat in the exact layer this harness claims as its unique coverage. Found in the
  * whole-branch review, after the per-task reviews had passed.
  */
-const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir)
+// RECURSIVE, because tsconfig's `include` is (`src/**/*.ts`): a file at `src/foo/bar.ts`
+// compiles to `dist/foo/bar.js` and would otherwise be invisible to BOTH sides of the
+// comparison -- the same false-GREEN class as the `.cts` bug below. `src/` is flat today.
+const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir, { recursive: true })
   .filter((f) => suffixes.some((s) => f.endsWith(s)))
   .map((f) => statSync(join(dir, f)).mtimeMs));
 if (!existsSync(main)) {

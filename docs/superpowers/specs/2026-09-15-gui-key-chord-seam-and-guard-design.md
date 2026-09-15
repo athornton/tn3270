@@ -91,7 +91,7 @@ actions; this is main-side and builds synthetic input. Different direction, diff
 consumer. Keeping it out of `keys.ts` also keeps it out of the renderer's import graph,
 which `renderer-imports.test.ts` polices.
 
-### 2. An action log at the one funnel, gated on the seam
+### 2. An action log at the one funnel, gated on the seam and replay mode
 
 `ipcMain.on('action')` in `main.ts:198` is the single point every renderer action passes
 through. When — and **only** when — `TN3270_GUI_KEYS` **and** `TN3270_GUI_REPLAY` are both
