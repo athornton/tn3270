@@ -153,10 +153,12 @@ should not be merged back together:** the CLI's `PA(n)` command makes the identi
 `sendAID` call the GUI's `Alt-1`/`Alt-2` bindings make, and driving it against MVS's ISPF
 got a real, quoted, distinct reaction to each — `ISP088E ... TERMINATED DUE TO ATTENTION
 INTERRUPT` for PA1, a bare `READY` redisplay for PA2 — so our AID bytes and the host's
-reaction to them are settled. What is **not** settled is the local half: `actionForKey`
-maps Alt+digit to them and is unit-tested, but only against a synthetic key-like object —
-no automated test drives a real Chromium `KeyboardEvent`, so whether a physical Alt-1/Alt-2
-keypress in the packaged app actually reaches that code is still the user's own check.
+reaction to them are settled. The local half is settled too, but by **hand, not by a test**:
+the author reported PA1 working from a real keypress in the app against MVS on 2026-09-15.
+`actionForKey` maps Alt+digit and is unit-tested, but only against a synthetic key-like
+object — **no automated test drives a real Chromium `KeyboardEvent`**, and the
+`TN3270_GUI_KEYS` seam cannot send a modifier chord as written, so nothing in `npm test`
+would notice if that plumbing broke again. Closing that is a small change to the seam.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than

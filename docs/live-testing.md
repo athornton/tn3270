@@ -1692,13 +1692,20 @@ probe confirmed `HERC03` free (password prompt, not `IN USE`).
 **What this closes and what it does not.** Closed: our AID bytes for PA1/PA2 are
 correct, and a real host (MVS/ISPF/TSO) visibly, distinctly reacts to each — this was
 OBSERVED, with the host's own message quoted above, not inferred from "the logon still
-worked." **Still open, and still the user's own check**: whether a physical key on their
-Mac keyboard, inside the packaged Electron app, actually generates the `Alt-1`/`Alt-2`
-keydown that reaches `actionForKey`/`applyAction` — this sandbox has no real keyboard and
-did not run the packaged app, so that specific local-input-plumbing link is untested
-here. PA3 was not exercised (not asked for). The 2026-09-14 GUI section already proved
-the analogous claim for ordinary typed keys via `TN3270_GUI_KEYS`; the same technique
-would close this for PA1/PA2 too, but doing so was outside this task's scope.
+worked." **Left open here**: whether a physical key on a Mac keyboard, inside the app,
+actually generates the `Alt-1`/`Alt-2` keydown that reaches `actionForKey`/`applyAction` —
+this sandbox has no real keyboard and did not run the packaged app. PA3 was not exercised
+(not asked for).
+
+**CLOSED BY HAND 2026-09-15, and the distinction matters:** the author reported PA1 working
+from a real keypress against MVS on their own Mac. So the local-input link is now known good
+on that machine, and **nothing in `npm test` knows it.** `keys.test.ts` drives a synthetic
+key-like object, and the `TN3270_GUI_KEYS` seam **cannot send a modifier chord at all** —
+`main.ts`'s `sendInputEvent` call passes no `modifiers` array. So this link has a live
+witness but no regression guard: if it broke tomorrow the suite would stay green. The
+2026-09-14 GUI section proved the analogous claim for ordinary typed keys via that same
+seam; teaching it modifiers would close this properly, and is the obvious next small job
+if PA regressions ever appear.
 
 ### What remains unverified, and why
 
