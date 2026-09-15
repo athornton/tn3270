@@ -458,6 +458,19 @@ describe('parseWebArgs', () => {
 });
 ```
 
+**AS BUILT — this test list has TWO GAPS, both found in review and both required:**
+
+1. **`--listen 0` must be accepted** (see the note on `positiveInt` below): the integration and TLS
+   harnesses depend on an ephemeral port. Add
+   `expect(parseWebArgs(['--listen', '0', 'vm:3270']).listen).toBe(0)` with a comment saying why, so
+   nobody tightens it back.
+2. **Nothing above exercises a HOST-SIDE flag at all** — `-insecure`, `-cafile`, `-model` and
+   `-scheme` appear only in the docstring. So `takeTlsFlag`'s integration, which is the one piece of
+   arithmetic in the file most likely to carry an off-by-one, has no test. Add the zero-extra-slot
+   case (`-insecure`), the one-extra-slot case (`-cafile /tmp/ca.pem`), and `-model`, each asserting
+   that **host and port are still correct afterwards** — that is what catches a swallowed argument.
+   Then mutation-check by changing `i += eaten` to `i += 0` and confirming the `-cafile` case fails.
+
 - [ ] **Step 2: Run it and confirm it fails to resolve the import**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/args.test.ts`
@@ -554,6 +567,12 @@ function positiveInt(raw: string, flag: string): number {
   if (!Number.isInteger(n) || n <= 0) throw new UsageError(`${flag} needs a positive integer`);
   return n;
 }
+
+// AS BUILT, and this plan contradicted itself here: `--listen` MUST accept 0, because port 0 means
+// "let the OS choose" and the integration and TLS harnesses in Tasks 10 and 11 pass `--listen 0` to
+// get an ephemeral port. `positiveInt` must NOT be loosened for every flag -- a zero grace window or
+// a zero session cap is a misconfiguration and keeps throwing -- so `--listen` gets its own
+// non-negative check.
 
 export function parseWebArgs(argv: readonly string[]): WebArgs {
   const rest: string[] = [];
