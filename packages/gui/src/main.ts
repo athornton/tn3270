@@ -57,6 +57,32 @@ const ELECTRON_SWITCHES: ReadonlySet<string> = new Set([
   '--disable-dev-shm-usage', '--enable-logging', '--in-process-gpu',
 ]);
 
+/**
+ * The test seams, read ONCE for the whole process.
+ *
+ * THREE PLACES ASK "IS THE KEYS SEAM ACTIVE?" -- the action log's privacy gate,
+ * `maybeSendKeys` and `quitIfKeysOnly`. When each re-read `process.env` with its own inline
+ * emptiness check they agreed only by coincidence: a later edit to what counts as empty
+ * (treating `' '` as unset, say) would have moved one gate and left the others, and one of
+ * them is the gate that keeps a typed password off stdout. The environment cannot change
+ * under a running process, so reading it once is not a cache with an invalidation problem --
+ * the action log already relied on exactly that.
+ *
+ * EMPTY STRING MEANS ABSENT throughout, so `TN3270_GUI_SHOT=` behaves as not setting it.
+ */
+const SEAM = Object.freeze({
+  /** Chord specs for `maybeSendKeys`, comma-separated Accelerator names. */
+  keys: process.env['TN3270_GUI_KEYS'] ?? '',
+  /** A recorded trace to paint instead of dialling a host. */
+  replay: process.env['TN3270_GUI_REPLAY'] ?? '',
+  /** Where `maybeCapture` writes its PNG. */
+  shot: process.env['TN3270_GUI_SHOT'] ?? '',
+  /** How long to let the host paint before capturing. */
+  shotMs: Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500'),
+  /** How long to let the host paint before typing -- a FLOOR applies; see `maybeSendKeys`. */
+  keysMs: Number(process.env['TN3270_GUI_KEYS_MS'] ?? '1200'),
+});
+
 /** Turn any startup failure into something a person can act on. */
 function explain(err: unknown, host?: string, port?: number): string {
   if (err instanceof UsageError) return err.message;
@@ -222,8 +248,7 @@ app.whenReady().then(async () => {
    * consumer of this log should parse and compare canonically rather than string-diffing
    * the raw line.
    */
-  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== ''
-    && (process.env['TN3270_GUI_REPLAY'] ?? '') !== '';
+  const logActions = SEAM.keys !== '' && SEAM.replay !== '';
 
   ipcMain.on('action', (_e, action: Action) => {
     if (logActions) process.stdout.write(`action: ${JSON.stringify(action)}\n`);
@@ -245,9 +270,8 @@ app.whenReady().then(async () => {
    * run. `docs/live-testing.md` already warns that traces carry passwords in EBCDIC, so
    * the trace CHOSEN matters as much as the mechanism.
    */
-  const replayPath = process.env['TN3270_GUI_REPLAY'];
-  if (replayPath !== undefined && replayPath !== '') {
-    session.replay(readFileSync(replayPath, 'utf8'));
+  if (SEAM.replay !== '') {
+    session.replay(readFileSync(SEAM.replay, 'utf8'));
     send();
     await maybeSendKeys(win);
     await maybeCapture(win);
@@ -285,13 +309,18 @@ app.whenReady().then(async () => {
  * Note that a spelling's CASE IS IGNORED by Chromium: both `A` and `a` deliver `key: 'a'`,
  * so this seam types lowercase unless `Shift+` is given.
  *
+ * THE MAC BEHAVIOUR HERE IS REASONED, NOT MEASURED. Accelerator names are Chromium's own
+ * vocabulary and ought to be platform-independent, but this seam has only ever run on Linux
+ * under Xvfb. Treat a Mac disagreement as likely rather than surprising: `Option-1` reports
+ * `key === '¡'` there, which is the whole reason `keys.ts` matches the PA keys on `e.code`,
+ * and this is the first place to look if a chord goes missing on a laptop.
+ *
  * Deliberately does not type a logon. On VM a completed logon arms the reconnect trap for
  * the next run (docs/live-testing.md), and a golden of a logged-on screen can contain a
  * password.
  */
 async function maybeSendKeys(win: BrowserWindow): Promise<void> {
-  const keys = process.env['TN3270_GUI_KEYS'];
-  if (keys === undefined || keys === '') return;
+  if (SEAM.keys === '') return;
   /**
    * EVERY spec is parsed before ANY key is delivered, and a refusal EXITS rather than throws.
    *
@@ -305,46 +334,83 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
    */
   let chords;
   try {
-    chords = keys.split(',').map((spec) => parseKeySpec(spec));
+    chords = SEAM.keys.split(',').map((spec) => parseKeySpec(spec));
   } catch (err) {
     // Drained before exiting, for the reason quitIfKeysOnly spells out: a write to a PIPE is
     // asynchronous, and app.exit would otherwise be free to discard the one line that says
     // what was wrong.
     await new Promise<void>((r) => { process.stderr.write(`${explain(err)}\n`, () => { r(); }); });
+    // 2 is this repo's usage-error code, as cli/src/main.ts and tui/src/main.ts both use it
+    // for a bad argument: a misspelled spec is the same kind of mistake, so it exits the same
+    // way. And this is the ONE failure that goes to stderr only, against the rule at the top
+    // of this file, because the only route to it is an env var somebody deliberately set --
+    // nobody who double-clicked a `.app` can reach it, so there is no console-less user to
+    // strand.
     app.exit(2);
     return;
   }
-  // Let the paint settle first: typing into a screen that has no field yet proves nothing,
-  // and the OIA would rightly refuse the input. Mirrors TN3270_GUI_SHOT_MS's reason for
-  // existing; a replay paints synchronously, so the default only has to cover startup.
-  await new Promise((r) => setTimeout(r, Number(process.env['TN3270_GUI_KEYS_MS'] ?? '1200')));
+  /**
+   * Let the paint settle first: typing into a screen that has no field yet proves nothing,
+   * and the OIA would rightly refuse the input.
+   *
+   * `TN3270_GUI_SHOT_MS` IS A FLOOR WHEN A SCREENSHOT IS ALSO BEING TAKEN. Keys used to be
+   * sent from inside `maybeCapture`, i.e. always after that deliberately generous wait, and
+   * making the seam independent would otherwise have quietly cut a shot run's settle from
+   * 2500ms to 1200ms -- a REGRESSION dressed as a refactor, and invisible to a replay smoke
+   * test because a replay paints synchronously. `Math.max` also means an explicit
+   * `TN3270_GUI_KEYS_MS` still wins whenever it is the larger number.
+   *
+   * The 1200ms default therefore only has to cover a synchronous replay paint plus startup.
+   * A LIVE OR SLOW HOST SHOULD RAISE `TN3270_GUI_KEYS_MS` EXPLICITLY: against VM the first
+   * screen can take seconds to arrive, and a chord delivered before it does is an input
+   * inhibit, not a failed mapping -- which is a confusing thing to debug from a log.
+   */
+  const settleMs = SEAM.shot !== '' ? Math.max(SEAM.keysMs, SEAM.shotMs) : SEAM.keysMs;
+  await new Promise((r) => setTimeout(r, settleMs));
   for (const { keyCode, modifiers } of chords) {
     // Spread conditionally: an empty `modifiers` array is not the same as absent under
     // exactOptionalPropertyTypes, and the rest of this file builds options the same way.
     const chord = { keyCode, ...(modifiers.length > 0 ? { modifiers: [...modifiers] } : {}) };
     win.webContents.sendInputEvent({ type: 'keyDown', ...chord });
-    win.webContents.sendInputEvent({ type: 'char', ...chord });
+    // `char` is the event that carries a TYPED CHARACTER, so it is sent for a bare key --
+    // that is what a printable keystroke does, and `keys.ts` turns it into a `type` action.
+    // A real Ctrl- or Alt-held keystroke produces NO char event, so sending one here would
+    // simulate a keyboard that does not exist. Harmless today (the renderer listens on
+    // `keydown` and the page has no editable node) and live the moment one appears.
+    if (modifiers.length === 0) win.webContents.sendInputEvent({ type: 'char', ...chord });
     win.webContents.sendInputEvent({ type: 'keyUp', ...chord });
     await new Promise((r) => setTimeout(r, 150));
   }
-  process.stdout.write(`keys: sent ${keys}\n`);
+  process.stdout.write(`keys: sent ${SEAM.keys}\n`);
 }
 
 /**
  * A keys-only run has to quit itself.
  *
  * `maybeCapture` quits when it has taken its picture, but a chord run takes none -- and
- * without this the process hangs, which reads as a broken client rather than a missing
- * exit. The drain is not superstition: `process.stdout.write` to a PIPE is asynchronous,
- * and `app.quit()` is otherwise free to tear the process down with the last `action:` line
- * still buffered, failing the harness on whichever case happened to be last.
+ * without this the process hangs, which reads as a broken client rather than a missing exit.
+ *
+ * ## THE DRAIN, AND WHY THERE IS NO SLEEP BESIDE IT
+ *
+ * MEASURED 2026-09-15, because a fixed sleep here would have been exactly the kind of
+ * unjustified number this file otherwise refuses. Writing ~5MB to a PIPE and exiting:
+ *
+ *  - with no drain at all, output stops at 64000 bytes -- one pipe buffer -- and the last
+ *    line is GONE, three runs out of three. So the hazard is real, not folklore.
+ *  - with `write('', cb)` and exit from the callback, all 5000005 bytes arrive, three out of
+ *    three. An EMPTY chunk still queues behind the pending ones, which is the property being
+ *    relied on here.
+ *
+ * A 200ms sleep after that callback was also tried and removed: the full chord sequence ran
+ * 20 times with the callback alone and all 20 kept every `action:` line and the trailing
+ * `keys:` line. The callback is the mechanism; the sleep only made it look like one.
+ *
+ * The seam's own output is a few hundred bytes and would fit the buffer regardless -- the
+ * drain earns its place for the run that adds a longer chord list or a slower reader.
  */
 async function quitIfKeysOnly(): Promise<void> {
-  const keys = process.env['TN3270_GUI_KEYS'] ?? '';
-  const shot = process.env['TN3270_GUI_SHOT'] ?? '';
-  if (keys === '' || shot !== '') return;
+  if (SEAM.keys === '' || SEAM.shot !== '') return;
   await new Promise<void>((resolve) => { process.stdout.write('', () => { resolve(); }); });
-  await new Promise((r) => setTimeout(r, 200));
   app.quit();
 }
 
@@ -360,12 +426,14 @@ async function quitIfKeysOnly(): Promise<void> {
  * generously because a missed frame produces a blank golden, which looks like a rendering
  * bug rather than a timing one. It runs AFTER `maybeSendKeys`, so a run with both seams set
  * still gets its full settle before the capture -- and the keys are in the picture.
+ * `maybeSendKeys` ALSO applies this value as a floor on its own wait, so making the keys seam
+ * independent did not shorten the settle a screenshot run used to get; the reasoning is
+ * there rather than here, next to the `Math.max` that does it.
  */
 async function maybeCapture(win: BrowserWindow): Promise<void> {
-  const path = process.env['TN3270_GUI_SHOT'];
-  if (path === undefined || path === '') return;
-  const waitMs = Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500');
-  await new Promise((r) => setTimeout(r, waitMs));
+  const path = SEAM.shot;
+  if (path === '') return;
+  await new Promise((r) => setTimeout(r, SEAM.shotMs));
   const image = await win.webContents.capturePage();
   writeFileSync(path, image.toPNG());
 
