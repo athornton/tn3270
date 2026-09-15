@@ -705,6 +705,65 @@ Co-Authored-By: SLAC AI"
 
 ---
 
+### Task 4b: tidy `xvfb.mjs`'s interface (added after Task 4's review)
+
+**Files:** Modify `packages/gui/scripts/xvfb.mjs`
+
+Three observations from Task 4's review, all of them defects in this plan's own code rather
+than in its execution. Do this AFTER Task 5 has committed, so `keys.mjs` exists as the second
+consumer and can be checked against the change.
+
+- [ ] **Step 1: Stop exporting `GUI_ENV`**
+
+`GUI_ENV` (a PATH) and `guiEnv()` (an ENVIRONMENT OBJECT) differ by one letter's case in the
+same module and are the kind of pair a reader transposes. Neither `shot.mjs` nor `keys.mjs`
+imports `GUI_ENV` — it is used only inside `xvfb.mjs` — so make it a module-private `const`
+and delete the `export`. That removes the collision instead of documenting it. Confirm no
+importer breaks: `grep -rn "GUI_ENV" packages/gui/scripts/`.
+
+- [ ] **Step 2: Say that building an environment STARTS A SERVER**
+
+`guiEnv()` reads like a pure value constructor and in fact spawns a detached `Xvfb` the first
+time it is called on a cold box. Add that to its docstring in one sentence, plus the
+concurrency caveat: two harnesses started from cold at the same instant can both observe no
+socket and both spawn an `Xvfb :99`, colliding on one display number. Note that the harnesses
+are run sequentially today and that a lockfile is the fix if that ever stops being true — a
+recorded limitation is worth more than a silent one.
+
+- [ ] **Step 3: Explain the fork-per-tick wait**
+
+`while (!existsSync(SOCKET) && Date.now() < deadline) spawnSync('sleep', ['0.2']);` forks a
+process per poll — up to ~75 over the 15s deadline. It is pre-existing and correct (node has
+no synchronous sleep), but a reader will wonder. One line saying why.
+
+- [ ] **Step 4: Verify and commit**
+
+```bash
+cd ~/git/tn3270
+node --check packages/gui/scripts/xvfb.mjs
+node packages/gui/scripts/keys.mjs
+npx vitest run packages/gui/test/shot-flags.test.ts
+node packages/gui/scripts/shot.mjs
+```
+Expected: `ok` from the chord harness, 8 tests passing, `2/2 goldens matched`. Both harnesses
+must still work, since this changes the module they share.
+
+```bash
+git add packages/gui/scripts/xvfb.mjs
+git commit -m "refactor(gui): un-export GUI_ENV, and admit that guiEnv starts a server
+
+GUI_ENV (a path) and guiEnv() (an environment) differed by one letter's case
+with no importer needing the former. The docstring now says that building an
+environment spawns Xvfb on a cold box, and records the cold-start race between
+two harnesses as a known sequential-only limitation.
+
+Generated with AI
+
+Co-Authored-By: SLAC AI"
+```
+
+---
+
 ### Task 5: the chord harness
 
 **Files:**
