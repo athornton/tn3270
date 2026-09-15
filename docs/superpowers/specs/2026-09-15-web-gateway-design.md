@@ -255,8 +255,10 @@ reachable without a browser at all.
   frames, close/ping/pong, and malformed input rejected rather than mis-parsed.
 - `auth.test.ts` — token accepted, rejected, length-mismatched, absent; `--auth off`; and that the
   comparison is `timingSafeEqual` rather than `===`.
-- `origin.test.ts` — same-origin accepted, cross-origin refused, absent `Origin` handled by a
-  stated rule.
+- `origin.test.ts` — same-origin accepted, cross-origin refused, and **absent accepted**, each
+  asserted rather than assumed. The absent case is the one a future editor is most likely to
+  "tighten" into a rejection, which would break the integration oracle, so its test carries the
+  reason.
 - `sessions.test.ts` — create, reattach by id, grace expiry on fake timers, expiry actually closing
   the 3270 session, the cap, and that an unknown id yields a NEW session rather than an error.
 - `protocol.test.ts` — **the deflate/`DecompressionStream('deflate')` pairing pinned by asserting
