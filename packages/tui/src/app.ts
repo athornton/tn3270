@@ -355,12 +355,22 @@ export class App {
       }
 
       // Every prefix was PARTIAL and the buffer is exhausted: wait for more.
+      //
+      // A LONE ESC IS HELD, NOT TIMED OUT. It is the Meta prefix -- PA1/PA2/PA3 are ESC-1/2/3
+      // -- and a human pressing Esc then 1 takes hundreds of milliseconds, so a 50ms discard
+      // meant the PA keys only ever worked when a terminal sent `\x1b1` as ONE burst, i.e.
+      // via Option-as-Meta. Reported from a Mac 2026-09-14: `Esc 1` typed the digit.
+      //
+      // The cost is real and small: a bare Escape with no follow-up leaves one byte buffered,
+      // and the next keystroke is consumed by the failed `\x1b`+key lookup. On a 3270 that
+      // costs nothing, because Escape has no meaning of its own and was already discarded.
+      if (bytes.length === 1 && bytes[0] === 0x1b) return;
+
       this.escTimer = setTimeout(() => {
         this.escTimer = undefined;
-        // Timed out. The bytes are DISCARDED, not typed: on a 3270 a bare ESC has
-        // no meaning of its own (PA1/PA2 are ESC-1/ESC-2), and an unfinished
-        // sequence is not text the user asked to send. The plan's comment here
-        // said "treat as literal" while its code discarded; the code was right.
+        // A TRUNCATED sequence is still DISCARDED, not typed: an unfinished `\x1b[?` is not
+        // text the user asked to send, and leaving `[` behind would type a bracket into the
+        // field. Only the lone-ESC case above is held.
         this.buffer = [];
       }, ESC_TIMEOUT_MS);
       return;

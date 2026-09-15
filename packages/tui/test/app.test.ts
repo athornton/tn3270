@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolve, Session, type Connection } from '@tn3270/core';
+import { AID, resolve, Session, type Connection } from '@tn3270/core';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 
 /**
@@ -430,11 +430,63 @@ describe('the ambiguous Escape', () => {
   it('clears an armed ESC timer on restore, so exit does not hang', () => {
     // A pending timer keeps the event loop alive, so the process would sit for
     // ESC_TIMEOUT_MS after the terminal was already restored.
+    //
+    // DRIVEN BY A TRUNCATED SEQUENCE, not a lone ESC, since 2026-09-14: a lone ESC is now
+    // HELD as a Meta prefix and arms no timer, so it can no longer set this up. The
+    // truncated case is the one that still arms one, and the assertion is unchanged.
     const h = harness();
     h.app.start();
-    h.app.onInput(Uint8Array.from([0x1b]));
+    h.app.onInput(new TextEncoder().encode('\x1b['));
     expect(vi.getTimerCount()).toBe(1);
     h.app.restore();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('resolves Esc then 1 as PA1 however long the gap is', () => {
+    // THE REPORTED BUG, 2026-09-14 from a Mac: ESC_TIMEOUT_MS is 50 and a human takes
+    // hundreds of ms, so the ESC was discarded and the digit then arrived as ordinary text
+    // -- `Esc 1` typed "1". No existing test could catch it: every keymap test hands
+    // lookup() a complete `\x1b1`, which is exactly the case that already worked.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(5000);                     // a hundred timeouts' worth
+    h.app.onInput(Uint8Array.from([0x31]));           // '1'
+
+    expect(sent).toHaveBeenCalledWith(AID.PA1);
+    expect(cellText(h.session, 0)).toBe(' ');         // and NOT typed into the field
+  });
+
+  it('arms no timer for a lone ESC, which is a stronger exit guarantee than clearing one', () => {
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1b]));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still discards a TRUNCATED sequence after the timeout', () => {
+    // The protection that must survive: `\x1b[` with nothing following is not a Meta prefix,
+    // and leaving `[` behind would type a literal bracket into the field.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(new TextEncoder().encode('\x1b['));
+    expect(vi.getTimerCount()).toBe(1);               // this one DOES arm a timer
+    vi.advanceTimersByTime(100);
+    h.app.onInput(new TextEncoder().encode('A'));
+
+    // 'A' is typed as text, NOT resolved as a right-arrow from the stale `\x1b[` prefix.
+    expect(cellText(h.session, 0)).toBe('A');
+    expect(h.session.screen.cursor).not.toBe(0);
+  });
+
+  it('types a digit normally when no ESC came first', () => {
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    h.app.onInput(Uint8Array.from([0x31]));
+    expect(sent).not.toHaveBeenCalled();
+    expect(cellText(h.session, 0)).toBe('1');
   });
 });
