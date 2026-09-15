@@ -79,8 +79,19 @@ describe('the chord harness', () => {
     // .endsWith('.ts')` is false, so the preload -- the IPC hop this harness claims to cover --
     // was exempt from the staleness check, which is a false GREEN rather than a false red.
     expect(keys).toMatch(
-      /newest\(join\(here, '\.\.', 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(here, '\.\.', 'src'\),\s*'\.ts',\s*'\.cts'\)/,
+      /newest\(join\(root, 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(root, 'src'\),\s*'\.ts',\s*'\.cts'\)/,
     );
+    // BOTH PACKAGES, or the check is blind to the files it exists to protect. `keys.ts` and
+    // `renderer.ts` live in @tn3270/canvas now -- the renderer keydown listener and
+    // `actionForKey` are this harness's unique coverage -- so a guard watching only `gui`
+    // cannot see the exact staleness it was written for (`dist/keys.js` older than
+    // `src/keys.ts`). Pinned as an ITERATION over both names rather than as two comparisons,
+    // because that is what keeps `canvas` from being dropped while the regex above still
+    // matches.
+    expect(keys).toMatch(/for \(const pkg of \[('gui',\s*'canvas'|'canvas',\s*'gui')\]\)/);
+    // Per package, not one max across both: a fresh `gui` build would otherwise mask a stale
+    // `canvas` one, since gui's newer output would win the max over canvas's newer source.
+    expect(keys).toMatch(/const root = join\(here, '\.\.', '\.\.', pkg\)/);
     // Recorded so nobody "simplifies" this into `tsc --build --dry`: that was MEASURED to
     // report "up to date" with an output file deleted, because --build trusts .tsbuildinfo
     // rather than looking at the outputs on disk.

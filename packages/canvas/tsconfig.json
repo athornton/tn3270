@@ -10,8 +10,7 @@
     ]
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.cts"
+    "src/**/*.ts"
   ],
   "references": [
     {
@@ -19,9 +18,6 @@
     },
     {
       "path": "../frontend"
-    },
-    {
-      "path": "../canvas"
     }
   ]
 }

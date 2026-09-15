@@ -7,9 +7,8 @@ import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError }
 import {
   applyAction, defaultSession, describeTlsError, resolveScheme, type Action,
 } from '@tn3270/frontend';
+import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
-import { drawList, type AtlasGeometry } from './drawlist.js';
-import { blankColumns, bestScale } from './blit.js';
 import { parseKeySpec } from './keyspec.js';
 
 /**
@@ -169,9 +168,7 @@ app.whenReady().then(async () => {
    * process can read. Sending it once at startup avoids both and keeps the renderer with no
    * filesystem access at all.
    */
-  const geometry = JSON.parse(
-    readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
-  const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+  const { geometry, coverage } = readAtlas();
   const blank = [...blankColumns(coverage, geometry)];
   win.webContents.send('atlas', { geometry, coverage, blank });
 
