@@ -69,6 +69,14 @@ describe('parseKeySpec', () => {
     expect(() => parseKeySpec('Ctl+1')).toThrow(/unknown modifier/i);
   });
 
+  it('refuses a segment that collides with Object.prototype members', () => {
+    // A frozen PLAIN object still inherits Object.prototype, so a bare index lookup
+    // returns a function for 'constructor' and an object for '__proto__' -- both truthy,
+    // neither a ChordModifier, and invisible to tsc.
+    expect(() => parseKeySpec('Constructor+1')).toThrow(/unknown modifier/i);
+    expect(() => parseKeySpec('__proto__+1')).toThrow(/unknown modifier/i);
+  });
+
   it('refuses modifiers with no key, and an empty spec', () => {
     expect(() => parseKeySpec('Alt+')).toThrow(/no key/i);
     expect(() => parseKeySpec('')).toThrow(/empty/i);

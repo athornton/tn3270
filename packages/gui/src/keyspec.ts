@@ -27,12 +27,15 @@ export interface KeySpec {
   readonly modifiers: readonly ChordModifier[];
 }
 
-const MODIFIER_ALIASES: Readonly<Record<string, ChordModifier>> = Object.freeze({
-  ctrl: 'control', control: 'control',
-  alt: 'alt', option: 'alt',
-  shift: 'shift',
-  meta: 'meta', cmd: 'meta', command: 'meta', super: 'meta',
-});
+// A Map, not a plain object: a frozen plain object still inherits Object.prototype, so a
+// bare index lookup on a segment like 'constructor' or '__proto__' returns a function or
+// object instead of undefined -- truthy, not a ChordModifier, and invisible to tsc.
+const MODIFIER_ALIASES: ReadonlyMap<string, ChordModifier> = new Map([
+  ['ctrl', 'control'], ['control', 'control'],
+  ['alt', 'alt'], ['option', 'alt'],
+  ['shift', 'shift'],
+  ['meta', 'meta'], ['cmd', 'meta'], ['command', 'meta'], ['super', 'meta'],
+]);
 
 /** The families of DOM code names, all of which arrive empty. */
 const DOM_CODE = /^(Digit|Key|Numpad|Arrow)/;
@@ -59,7 +62,7 @@ export function parseKeySpec(spec: string): KeySpec {
   // and 'Ctrl++' still name a literal plus. A `pop()` would turn both into an empty key,
   // and an empty key is an empty event.
   while (i < segments.length - 1) {
-    const alias = MODIFIER_ALIASES[segments[i]!.toLowerCase()];
+    const alias = MODIFIER_ALIASES.get(segments[i]!.toLowerCase());
     if (alias === undefined) break;
     if (!modifiers.includes(alias)) modifiers.push(alias);
     i += 1;
