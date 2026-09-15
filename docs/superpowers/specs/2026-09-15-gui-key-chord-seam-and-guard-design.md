@@ -2,7 +2,12 @@
 
 2026-09-15. Closes the one soft spot named in `docs/HANDOFF.md` and `README.md:160`:
 **PA1-3 work from a real keypress — the author confirmed it by hand against MVS — and
-nothing in `npm test` or in any committed harness would notice if that broke.**
+nothing in `npm test` or in any committed harness drives a real key event, so a break in the
+plumbing between a keypress and `actionForKey` would go unnoticed.**
+
+*(That sentence is the corrected form. It first read "nothing in `npm test` … would notice if
+that broke", which measurement showed to be false: a MAPPING break reddens `keys.test.ts`.
+See* What gets built *→* How this is verified *for the retraction in full.)*
 
 ## The gap, stated exactly
 

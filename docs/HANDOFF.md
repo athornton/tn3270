@@ -6,7 +6,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch **`gui-key-chord-guard`**, off **`main`** at `908ab9c` — `main` is pushed and in sync,
+Branch **`gui-key-chord-guard`**, off **`main`** at `52a35b2` — `main` is pushed and in sync,
 and the counts below are this branch's. **1352 tests passing in 55 files**, `npm run typecheck`
 clean, `npm run build` works, `packages/tui/scripts/pty-smoke.py` 12 of 12, both GUI goldens
 matching without `--update`, `packages/gui/scripts/keys.mjs` reporting 15 chords and 13 actions

@@ -84,6 +84,10 @@ function run(kase) {
       TN3270_GUI_KEYS: '',
     }),
   });
+  // Level 3 is 'error' in Electron's 0..3 console levels; level 2 (its CSP warning) arrives on
+  // every run, so this cannot be loosened to `renderer[`. The numeric level is deprecated in
+  // Electron 44's typings and will drift SILENTLY on upgrade -- keys.mjs carries the same
+  // filter and the same note, so fix both together.
   const rendererErrors = (result.stdout ?? '').split('\n').filter((l) => l.startsWith('renderer[3]'));
   return { shot, hash: `${shot}.sha256`, rendererErrors, stdout: result.stdout ?? '' };
 }

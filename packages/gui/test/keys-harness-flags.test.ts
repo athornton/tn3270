@@ -32,6 +32,11 @@ describe('the chord harness', () => {
   it('drives a replayed trace, never a live logon', () => {
     expect(keys).toContain('TN3270_GUI_REPLAY');
     expect(keys).toContain('TN3270_GUI_KEYS');
+    // Pin the WIRING and the trace, not just the strings: the names alone would still pass if
+    // TN3270_GUI_REPLAY drifted into a comment. `shot-flags.test.ts` pins its trace for the
+    // same reason, and tests 1-2 here already pin a constant AND its use.
+    expect(keys).toMatch(/TN3270_GUI_REPLAY:\s*trace/);
+    expect(keys).toContain('synthetic-ispf-like.trace');
   });
 
   it('still tests at least one Alt chord, which is the whole point', () => {
@@ -70,8 +75,11 @@ describe('the chord harness', () => {
     // dist/ is what actually RUNS; nothing in this harness builds it. Comparing newest output
     // against newest source (tolerant of exact spacing, since a cosmetic reformat should not
     // fail this) closes the gap where yesterday's mapping table still runs green today.
+    // `.cts` on the SOURCE side is load-bearing and was missing at first: `'preload.cts'
+    // .endsWith('.ts')` is false, so the preload -- the IPC hop this harness claims to cover --
+    // was exempt from the staleness check, which is a false GREEN rather than a false red.
     expect(keys).toMatch(
-      /newest\(join\(here, '\.\.', 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(here, '\.\.', 'src'\),\s*'\.ts'\)/,
+      /newest\(join\(here, '\.\.', 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(here, '\.\.', 'src'\),\s*'\.ts',\s*'\.cts'\)/,
     );
     // Recorded so nobody "simplifies" this into `tsc --build --dry`: that was MEASURED to
     // report "up to date" with an output file deleted, because --build trusts .tsbuildinfo

@@ -1740,8 +1740,8 @@ committed harness drove the seam at all, live witness or not.
 Everything below was measured on 2026-09-15 under Xvfb, `--no-sandbox --disable-gpu`, against
 the Electron this tree installs: `packages/gui/package.json` asks for `^44.0.0` and
 `node_modules/electron` reports **44.3.0**, which is the binary every run here used.
-(`keyspec.ts`, its test and the design doc all say "Electron 44.0.0"; that is the declared
-range, not the resolved build. Nothing below is version-sensitive as far as anyone has
+(`keyspec.ts`, its test and the design doc named 44.0.0 -- the declared range rather than the
+resolved build -- until `f33e7e6` corrected all three. Nothing below is version-sensitive as far as anyone has
 measured, but a chord that stops arriving after an upgrade should be re-probed with the table
 below rather than debugged in the mapper.)
 

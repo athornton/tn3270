@@ -130,8 +130,12 @@ if (expected.length === 0) {
  * The trade is deliberate: this check errs towards refusing to run, and a refusal that names
  * its own fix costs a rebuild, where a false pass costs a wrong belief about the PA keys.
  *
- * `.cts`/`.cjs` are caught by the same suffix tests, which is wanted: `preload.cts` becomes
- * the preload, and the IPC hop it implements is half of what this harness claims to cover.
+ * BOTH SIDES must name `.cts`/`.cjs` explicitly, and the first version of this check did not:
+ * `'preload.cts'.endsWith('.ts')` is FALSE, so the source side skipped the preload entirely.
+ * That was the one surviving route to a green run over broken chords -- edit `preload.cts`,
+ * forget the build, and the harness exercises yesterday's IPC bridge and reports `ok` -- and
+ * it sat in the exact layer this harness claims as its unique coverage. Found in the
+ * whole-branch review, after the per-task reviews had passed.
  */
 const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir)
   .filter((f) => suffixes.some((s) => f.endsWith(s)))
@@ -139,7 +143,7 @@ const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir)
 if (!existsSync(main)) {
   refuse(`there is no ${main} to run`, 'run: npm run build -w @tn3270/gui');
 }
-if (newest(join(here, '..', 'dist'), '.js', '.cjs') < newest(join(here, '..', 'src'), '.ts')) {
+if (newest(join(here, '..', 'dist'), '.js', '.cjs') < newest(join(here, '..', 'src'), '.ts', '.cts')) {
   refuse('dist/ is OLDER than src/, so this run would test stale code',
     'run: npm run build -w @tn3270/gui  (if that reports everything up to date, only a ' +
     'timestamp moved: npx tsc --build --force packages/gui)');

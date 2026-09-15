@@ -7,7 +7,8 @@ harness behind the GUI's chord keys — PA1-3 above all — that goes red when t
 
 **Architecture:** A pure `parseKeySpec` in a new `packages/gui/src/keyspec.ts` turns
 `'Alt+1'` into Electron's `{ keyCode, modifiers }`; `main.ts` logs every action arriving at
-`ipcMain` **only while the seam is active**; a new `packages/gui/scripts/keys.mjs` drives the
+`ipcMain` **only while the seam AND replay mode are both active** (seam-presence alone was the
+first version and is a privacy hole — see Task 2); a new `packages/gui/scripts/keys.mjs` drives the
 app under Xvfb in replay mode and asserts the exact ordered action sequence. Xvfb startup
 moves to a shared `packages/gui/scripts/xvfb.mjs`.
 
@@ -905,7 +906,7 @@ process.exit(failed > 0 ? 1 : 0);
 - [ ] **Step 2: Run it**
 
 Run: `cd ~/git/tn3270 && node packages/gui/scripts/keys.mjs`
-Expected: `ok       14 chords, 12 actions in order`.
+Expected: `ok       15 chords, 13 actions in order` (14/12 before `Ctrl+R` was added in review).
 
 If a Ctrl chord is missing, apply the contingency from Task 3 Step 6: diagnose it, record
 the finding, and remove that case with a comment naming the cause. Do **not** delete a
@@ -1090,7 +1091,7 @@ npm run build
 node packages/gui/scripts/keys.mjs
 git status --short
 ```
-Expected: `ok  14 chords, 12 actions in order`, and a clean status for `keys.ts`.
+Expected: `ok  15 chords, 13 actions in order`, and a clean status for `keys.ts`.
 
 - [ ] **Step 5: Second mutation — the parser's refusal in situ**
 
@@ -1210,8 +1211,8 @@ node packages/gui/scripts/shot.mjs
 node packages/gui/scripts/keys.mjs
 python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -3
 ```
-Expected: build and typecheck clean; **1347 tests** (1328 + 11 `keyspec` + 8
-`keys-harness-flags`) in 55 files; `2/2 goldens matched`; `ok 14 chords`; `pty-smoke.py`
+Expected: build and typecheck clean; **1352 tests** (1328 + 12 `keyspec` + 12
+`keys-harness-flags`) in 55 files; `2/2 goldens matched`; `ok 15 chords`; `pty-smoke.py`
 12/12. If the test count differs, reconcile it before merging rather than editing the number
 into the docs.
 
