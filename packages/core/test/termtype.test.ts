@@ -5,12 +5,11 @@ import {
 import { TERMINAL_TYPE } from '../src/constants.js';
 
 describe('terminal type resolution', () => {
-  it('defaults to IBM-3278-2, unchanged from stage 1', () => {
-    // Must not change: the VM/370 conformance run was recorded with our client
-    // negotiating this string. (The committed .trace fixtures replay recorded
-    // bytes, so they do not fail on their own if the default changes -- this
-    // assertion and telnet.test.ts are what actually catch it.)
-    expect(resolveTerminalType({})).toBe('IBM-3278-2');
+  it('defaults to IBM-3278-2-E, which is what MVS TSO requires', () => {
+    // Changed 2026-09-14: a bare IBM-3278-2 gets IKT00405I from MVS 3.8j TSO and no logon
+    // (termtype.ts header). Both live systems accept -E, so the default that works on both
+    // is the one a user who read no manual should get.
+    expect(resolveTerminalType({})).toBe('IBM-3278-2-E');
     expect(resolveTerminalType({})).toBe(TERMINAL_TYPE);
   });
 

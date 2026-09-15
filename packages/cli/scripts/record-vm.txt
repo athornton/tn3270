@@ -4,7 +4,12 @@
 # localhost:3270 with the unprivileged account CMSUSER: reaches CMS "Ready;" and
 # logs off cleanly, three runs for three.
 #
-#   node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
+#   node packages/cli/dist/main.js -insecure -model 3278-2 < packages/cli/scripts/record-vm.txt
+#
+# -model 3278-2 is REQUIRED here and is not a preference. The committed fixture is
+# vm370-conformance-model2.trace, recorded against a bare IBM-3278-2. The default became
+# IBM-3278-2-E on 2026-09-14, so without this flag a re-record would negotiate something
+# else and silently stop matching the capture it is supposed to reproduce.
 #
 # -insecure IS REQUIRED. TLS is on by default and Hercules cannot speak it; the
 # failure is a stall, not a refusal, because a plaintext host does not reject a TLS
