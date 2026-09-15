@@ -632,6 +632,31 @@ duplicate `frontend`'s TLS flag parsing here; that drift is exactly what `fronte
 prevent. Likewise use `resolveHostSpec`, never a local split — `splitTarget` was deleted for
 being a second home for prefix meaning.
 
+**AS BUILT — both signatures in the sketch above were wrong, and here they are:**
+
+- `takeTlsFlag(flags: TlsFlags, flag: string, value: string | undefined, usageError: (m: string) => Error): number | undefined`
+  returns the count of EXTRA argv slots consumed (0 for `-insecure`, 1 for `-cafile FILE`), or
+  `undefined` when the flag is not one of its own. There is no `.lastIndex`. The working precedent
+  is `packages/cli/src/main.ts` and `packages/tui/src/main.ts`:
+  `const eaten = takeTlsFlag(hostTls, a, args[i+1], (m) => new UsageError(m)); if (eaten !== undefined) { i += eaten; continue; }`
+- `resolveHostSpec(raw: string, mkError: (m: string) => Error): ResolvedHost` takes an
+  error constructor and **never takes TLS flags at all**. It returns
+  `{ host, port, lus, tn3270e, tlsRequested }` — five fields, not two.
+
+**A DEFERRED GAP THAT TASK 10 MUST CLOSE, recorded here so it is not lost.** `WebArgs.hostTls`
+holds RAW, unresolved flags, and `resolveHostSpec`'s `lus`, `tn3270e` and `tlsRequested` are
+currently dropped. Task 10 opens the actual mainframe connection and must therefore:
+
+- resolve `hostTls` into real TLS options the way the other front ends do, rather than passing raw
+  flags to `defaultSession`;
+- perform the **`L:`-prefix versus `-insecure` contradiction check** that `packages/tui/src/main.ts`
+  does at parse time. The recorded reason it exists: `L:` is accepted and stripped, and must be
+  REFUSED alongside `-insecure` rather than silently downgrading a connection the operator asked to
+  encrypt;
+- decide explicitly what a gateway does with `lus` and `tn3270e` — neither Hercules host offers
+  TN3270E, so the honest answer may be "pass them through and let the negotiation fail as it does
+  for every other front end", but it must be a decision and not an omission.
+
 - [ ] **Step 4: Register the package and run the test**
 
 Add `{ "path": "packages/web" }` to the root `tsconfig.json` references and `packages/web` to the
