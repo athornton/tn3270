@@ -137,9 +137,12 @@ export function resolveTerminalType(opts: TerminalTypeOptions): string {
   // COMPARISON. It is not, and the difference was measured rather than argued: flipping this
   // constant fails exactly four expectation tests, while conformance.test.ts and
   // golden.test.ts pass untouched. The offline comparison filters negotiation out of what it
-  // diffs (conformance.test.ts, `isNegotiation`), and the live script pins `-model 3278-2`
-  // explicitly (packages/cli/scripts/conformance-vm.txt). A stale prohibition costs as much
-  // as a missing one.
+  // diffs (conformance.test.ts, `isNegotiation`). The live script (conformance-vm.txt) has
+  // TWO invocations that must be checked separately: the s3270 reference line was already
+  // pinned to `-model 3278-2`, but our client's line originally passed no `-model` at all --
+  // that gap was the one place the audit for this change first missed and then had to fix, by
+  // adding `-model 3278-2` to our line too. Both invocations now name model 2 explicitly, so
+  // neither depends on this constant.
   if (opts.model === undefined) return TERMINAL_TYPE;
   return lookUpModel(opts)!.ttype;
 }
