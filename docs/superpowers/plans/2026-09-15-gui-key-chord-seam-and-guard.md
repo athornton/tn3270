@@ -11,7 +11,7 @@ harness behind the GUI's chord keys — PA1-3 above all — that goes red when t
 app under Xvfb in replay mode and asserts the exact ordered action sequence. Xvfb startup
 moves to a shared `packages/gui/scripts/xvfb.mjs`.
 
-**Tech Stack:** TypeScript, Electron 44.0.0, vitest, Xvfb from `~/micromamba/envs/gui`.
+**Tech Stack:** TypeScript, Electron 44.3.0 (declared `^44.0.0`), vitest, Xvfb from `~/micromamba/envs/gui`.
 
 **Spec:** `docs/superpowers/specs/2026-09-15-gui-key-chord-seam-and-guard-design.md`
 
@@ -21,7 +21,7 @@ moves to a shared `packages/gui/scripts/xvfb.mjs`.
 
 ---
 
-## Facts you must not re-derive (measured 2026-09-15, Electron 44.0.0, Xvfb)
+## Facts you must not re-derive (measured 2026-09-15, Electron 44.3.0, Xvfb)
 
 Read these before Task 1. Getting any of them wrong produces a test that passes while
 proving nothing, which is the failure this whole plan exists to prevent.
@@ -86,7 +86,7 @@ import { parseKeySpec } from '../src/keyspec.js';
 /**
  * The parser for the `TN3270_GUI_KEYS` seam.
  *
- * THE REFUSALS ARE THE POINT OF THIS FILE. Measured on Electron 44.0.0: a DOM code name
+ * THE REFUSALS ARE THE POINT OF THIS FILE. Measured on Electron 44.3.0: a DOM code name
  * like `Digit1` or `ArrowUp` is not an invalid keyCode, it is an EMPTY one -- Chromium
  * delivers `key: ''`, `code: ''`, `keyCode: 0`, `actionForKey` returns null, no action is
  * sent, and the harness still exits 0 reporting that it sent the key. Our own keymap is
@@ -177,7 +177,7 @@ Create `packages/gui/src/keyspec.ts`:
  *
  * ## WHY THIS REFUSES INSTEAD OF TRANSLATING
  *
- * MEASURED on Electron 44.0.0, 2026-09-15: `sendInputEvent` accepts Accelerator key names
+ * MEASURED on Electron 44.3.0, 2026-09-15: `sendInputEvent` accepts Accelerator key names
  * (`1`, `Up`, `F1`, `]`), and a DOM CODE NAME is not rejected -- it is delivered as an
  * EMPTY event, `key: ''` and `keyCode: 0`. `actionForKey` then returns null, no action is
  * sent, and the harness still reports that it sent the key. A guard written with the wrong

@@ -3,7 +3,8 @@
  *
  * ## WHY THIS REFUSES INSTEAD OF TRANSLATING
  *
- * MEASURED on Electron 44.0.0, 2026-09-15: `sendInputEvent` accepts Accelerator key names
+ * MEASURED on Electron 44.3.0, 2026-09-15 (`package.json` asks for `^44.0.0`; 44.3.0 is what
+ * this tree resolves to and what every run here used): `sendInputEvent` accepts Accelerator names
  * (`1`, `Up`, `F1`, `]`), and a DOM CODE NAME is not rejected -- it is delivered as an
  * EMPTY event, `key: ''` and `keyCode: 0`. `actionForKey` then returns null, no action is
  * sent, and the harness still reports that it sent the key. A guard written with the wrong

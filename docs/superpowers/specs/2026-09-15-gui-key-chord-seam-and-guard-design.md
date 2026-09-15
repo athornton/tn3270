@@ -28,7 +28,8 @@ before: Chromium's real event, the renderer's own `keydown` listener, the IPC ho
 
 ## Measured first: which spellings Chromium accepts
 
-Probed on Electron 44.0.0 under Xvfb, 2026-09-15, by sending each `keyCode` through
+Probed on Electron **44.3.0** under Xvfb, 2026-09-15 — `packages/gui/package.json` asks for
+`^44.0.0`, and 44.3.0 is what this tree resolves to and what every run here used — by sending each `keyCode` through
 `sendInputEvent` and logging what a `keydown` listener received. **This is the finding that
 shapes the design.**
 

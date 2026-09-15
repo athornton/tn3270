@@ -4,7 +4,7 @@ import { parseKeySpec } from '../src/keyspec.js';
 /**
  * The parser for the `TN3270_GUI_KEYS` seam.
  *
- * THE REFUSALS ARE THE POINT OF THIS FILE. Measured on Electron 44.0.0: a DOM code name
+ * THE REFUSALS ARE THE POINT OF THIS FILE. Measured on Electron 44.3.0: a DOM code name
  * like `Digit1` or `ArrowUp` is not an invalid keyCode, it is an EMPTY one -- Chromium
  * delivers `key: ''`, `code: ''`, `keyCode: 0`, `actionForKey` returns null, no action is
  * sent, and the harness still exits 0 reporting that it sent the key. Our own keymap is
