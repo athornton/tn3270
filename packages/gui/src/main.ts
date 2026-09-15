@@ -10,6 +10,7 @@ import {
 import { parseGuiArgs, UsageError } from './args.js';
 import { drawList, type AtlasGeometry } from './drawlist.js';
 import { blankColumns, bestScale } from './blit.js';
+import { parseKeySpec } from './keyspec.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -248,7 +249,9 @@ app.whenReady().then(async () => {
   if (replayPath !== undefined && replayPath !== '') {
     session.replay(readFileSync(replayPath, 'utf8'));
     send();
+    await maybeSendKeys(win);
     await maybeCapture(win);
+    await quitIfKeysOnly();
     return;
   }
 
@@ -262,8 +265,88 @@ app.whenReady().then(async () => {
     fail(explain(err, args.host, args.port));
   }
 
+  await maybeSendKeys(win);
   await maybeCapture(win);
+  await quitIfKeysOnly();
 });
+
+/**
+ * A THIRD TEST SEAM: `TN3270_GUI_KEYS='Alt+1,Ctrl+A,Enter'` delivers REAL key events.
+ *
+ * `webContents.sendInputEvent` goes in at the top of Chromium's input pipeline, so this
+ * exercises the ONE link nothing else can reach: the renderer's own `keydown` listener,
+ * `actionForKey`, the IPC hop and `applyAction`. A seam that injected actions at `ipcMain`
+ * instead would skip exactly the part that had never run.
+ *
+ * SPELLINGS ARE ELECTRON ACCELERATOR NAMES, NOT DOM CODE NAMES -- `1` and `Up`, never
+ * `Digit1` or `ArrowUp`, which are delivered as EMPTY events. `parseKeySpec` refuses those
+ * by name; see `keyspec.ts` for the measurement.
+ *
+ * Note that a spelling's CASE IS IGNORED by Chromium: both `A` and `a` deliver `key: 'a'`,
+ * so this seam types lowercase unless `Shift+` is given.
+ *
+ * Deliberately does not type a logon. On VM a completed logon arms the reconnect trap for
+ * the next run (docs/live-testing.md), and a golden of a logged-on screen can contain a
+ * password.
+ */
+async function maybeSendKeys(win: BrowserWindow): Promise<void> {
+  const keys = process.env['TN3270_GUI_KEYS'];
+  if (keys === undefined || keys === '') return;
+  /**
+   * EVERY spec is parsed before ANY key is delivered, and a refusal EXITS rather than throws.
+   *
+   * `parseKeySpec` throws by design, and this runs inside `app.whenReady()`'s promise, where
+   * a throw is an unhandled rejection: the steps after it -- including `quitIfKeysOnly` --
+   * never run. MEASURED: `TN3270_GUI_KEYS=Digit1` printed the refusal and then SAT until the
+   * harness timeout killed it, which reads as a broken client rather than as the typo it is.
+   * A non-zero exit keeps the diagnosis and loses the hang. Parsing the whole list up front
+   * also means a bad third spec cannot half-deliver the first two, which would leave the
+   * action log looking like a mapping bug.
+   */
+  let chords;
+  try {
+    chords = keys.split(',').map((spec) => parseKeySpec(spec));
+  } catch (err) {
+    // Drained before exiting, for the reason quitIfKeysOnly spells out: a write to a PIPE is
+    // asynchronous, and app.exit would otherwise be free to discard the one line that says
+    // what was wrong.
+    await new Promise<void>((r) => { process.stderr.write(`${explain(err)}\n`, () => { r(); }); });
+    app.exit(2);
+    return;
+  }
+  // Let the paint settle first: typing into a screen that has no field yet proves nothing,
+  // and the OIA would rightly refuse the input. Mirrors TN3270_GUI_SHOT_MS's reason for
+  // existing; a replay paints synchronously, so the default only has to cover startup.
+  await new Promise((r) => setTimeout(r, Number(process.env['TN3270_GUI_KEYS_MS'] ?? '1200')));
+  for (const { keyCode, modifiers } of chords) {
+    // Spread conditionally: an empty `modifiers` array is not the same as absent under
+    // exactOptionalPropertyTypes, and the rest of this file builds options the same way.
+    const chord = { keyCode, ...(modifiers.length > 0 ? { modifiers: [...modifiers] } : {}) };
+    win.webContents.sendInputEvent({ type: 'keyDown', ...chord });
+    win.webContents.sendInputEvent({ type: 'char', ...chord });
+    win.webContents.sendInputEvent({ type: 'keyUp', ...chord });
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  process.stdout.write(`keys: sent ${keys}\n`);
+}
+
+/**
+ * A keys-only run has to quit itself.
+ *
+ * `maybeCapture` quits when it has taken its picture, but a chord run takes none -- and
+ * without this the process hangs, which reads as a broken client rather than a missing
+ * exit. The drain is not superstition: `process.stdout.write` to a PIPE is asynchronous,
+ * and `app.quit()` is otherwise free to tear the process down with the last `action:` line
+ * still buffered, failing the harness on whichever case happened to be last.
+ */
+async function quitIfKeysOnly(): Promise<void> {
+  const keys = process.env['TN3270_GUI_KEYS'] ?? '';
+  const shot = process.env['TN3270_GUI_SHOT'] ?? '';
+  if (keys === '' || shot !== '') return;
+  await new Promise<void>((resolve) => { process.stdout.write('', () => { resolve(); }); });
+  await new Promise((r) => setTimeout(r, 200));
+  app.quit();
+}
 
 /**
  * A TEST SEAM, not a feature: `TN3270_GUI_SHOT=<path>` captures the window and exits.
@@ -275,41 +358,14 @@ app.whenReady().then(async () => {
  *
  * `TN3270_GUI_SHOT_MS` is how long to let the host finish painting first. It defaults
  * generously because a missed frame produces a blank golden, which looks like a rendering
- * bug rather than a timing one.
+ * bug rather than a timing one. It runs AFTER `maybeSendKeys`, so a run with both seams set
+ * still gets its full settle before the capture -- and the keys are in the picture.
  */
-/**
- * A THIRD TEST SEAM: `TN3270_GUI_KEYS=A,B,Enter` delivers REAL key events to the window.
- *
- * `webContents.sendInputEvent` goes in at the top of Chromium's input pipeline, so this
- * exercises the ONE link nothing else can reach: the renderer's own `keydown` listener,
- * `actionForKey`, the IPC hop and `applyAction`. A seam that injected actions at `ipcMain`
- * instead would skip exactly the part that had never run.
- *
- * Deliberately does not type a logon. On VM a completed logon arms the reconnect trap for
- * the next run (docs/live-testing.md), and a golden of a logged-on screen can contain a
- * password.
- */
-async function maybeSendKeys(win: BrowserWindow): Promise<void> {
-  const keys = process.env['TN3270_GUI_KEYS'];
-  if (keys === undefined || keys === '') return;
-  for (const key of keys.split(',')) {
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
-    win.webContents.sendInputEvent({ type: 'char', keyCode: key });
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  process.stdout.write(`keys: sent ${keys}\n`);
-}
-
 async function maybeCapture(win: BrowserWindow): Promise<void> {
   const path = process.env['TN3270_GUI_SHOT'];
   if (path === undefined || path === '') return;
   const waitMs = Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500');
   await new Promise((r) => setTimeout(r, waitMs));
-  // Keys AFTER the host has painted: typing into a screen that has no field yet proves
-  // nothing, and the OIA would rightly refuse the input.
-  await maybeSendKeys(win);
-  await new Promise((r) => setTimeout(r, 800));
   const image = await win.webContents.capturePage();
   writeFileSync(path, image.toPNG());
 
