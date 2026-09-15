@@ -1168,7 +1168,9 @@ export function checkUpgrade(req: UpgradeRequest): UpgradeResult {
 - [ ] **Step 4: Run the tests**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/handshake.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, **10 tests** — the test block above contains 10 `it()` calls (1 + 9). This plan said
+11; the CONTENT is the source of truth and an implementer correctly refused to invent an eleventh
+test to match a stale number.
 
 - [ ] **Step 5: Mutation-check the length guard and the Origin rule**
 
@@ -1192,6 +1194,44 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+---
+
+### Task 4b: make the Origin check survive a reverse proxy (added after Task 4's review)
+
+**Files:** modify `packages/web/src/handshake.ts`, `packages/web/src/args.ts`, and both their tests.
+
+**MEASURED PROBLEM, and it would break the user's stated deployment.** The Origin check compares
+`Origin` against the `Host` header. A TLS-terminating proxy that rewrites `Host` therefore 403s every
+legitimate browser: a browser at `https://gw.example` sends `Origin: https://gw.example`, but
+**nginx's default `proxy_set_header Host $proxy_host`** (and Apache's default `ProxyPreserveHost Off`)
+forwards `Host: 127.0.0.1:8270`, which can never match. nginx configured with `Host $host`, and Caddy
+by default, preserve it and work. Default ports are NOT the problem — a browser omits `:80`/`:443`
+from both `Origin` and `Host`, so those agree.
+
+The refusal is at least diagnosable: it logs `cross-origin upgrade from https://gw.example`.
+
+Do both halves:
+
+1. **Add a repeatable `--allow-origin ORIGIN` flag** in `args.ts` (`readonly allowOrigins: readonly string[]`,
+   default empty). `checkUpgrade` accepts an `Origin` that matches the `Host` **or** appears in that
+   list. Compare exactly — no wildcards, no suffix matching: a `*.example.com` rule is how these
+   controls get quietly widened into uselessness. Record in the comment that this exists BECAUSE the
+   common proxy default breaks the Host comparison, so nobody deletes it as redundant.
+2. **Document it as a deployment requirement** where an operator will meet it: either preserve `Host`
+   at the proxy, or pass `--allow-origin https://your.gateway`. This belongs in the web README that
+   Task 15 writes — add a note there rather than only in a comment.
+
+Tests: a matching `--allow-origin` accepted; a non-matching one still refused; the flag not affecting
+the absent-Origin rule; and that no wildcard is honoured (`--allow-origin https://*.example` must NOT
+match `https://a.example`). Mutation-check by removing the allow-list branch and confirming the
+proxy case fails again.
+
+**Also route this one item to Task 10, where it belongs:** the plan's `main.ts` sketch compares the
+token on the static path with `given !== args.token` — a plain, non-constant-time compare, unlike the
+`timingSafeEqual` this task uses for the upgrade. That is inconsistent and leaks the token by timing
+on the asset route. Task 10 must reuse the same helper for both paths; export it from `handshake.ts`
+rather than writing a second comparison.
 
 ---
 
