@@ -1704,6 +1704,14 @@ Co-Authored-By: SLAC AI"
 - Test: `packages/web/test/wsserver.test.ts`
 - Modify: `packages/web/src/wsframe.ts` (two small hardenings, below)
 
+**ALSO IN THIS TASK — A FRAME SIZE CAP, routed here from Task 5's review.** `decodeClientMessage`
+deliberately does not bound its input length, because the layer that knows how big a frame is is this
+one. Without a cap, a hostile client that has the token can send a multi-megabyte text frame and make
+the server buffer and `JSON.parse` all of it. The only inbound messages are a `hello` and small
+`action` objects, so the legitimate maximum is tiny — pick a generous bound (a few KB), refuse a
+frame that exceeds it by closing that connection the same way a framing error does, and record in the
+comment WHY the cap is small: nothing a browser legitimately sends approaches it. Give it a test.
+
 **ALSO IN THIS TASK — two Minor findings carried over from Task 3's review**, folded here because this
 is the task that consumes `OPCODE` and so is the natural place to tighten it:
 
