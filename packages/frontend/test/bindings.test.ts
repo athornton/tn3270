@@ -44,6 +44,23 @@ describe('BINDING_INTENT', () => {
     for (const needed of ['clear', 'reset', 'enter']) expect(kinds).toContain(needed);
   });
 
+  it('keeps the keys that were once unreachable, so they cannot vanish again', () => {
+    // THE DEFECT THIS TABLE EXISTS TO PREVENT, AND DID NOT. The GUI shipped with no PA keys
+    // at all while its own test claimed to check itself against this table -- it skipped
+    // what it could not express. All five below were implemented in core and bound by no
+    // key in either front end until 2026-09-14.
+    //
+    // Both front ends now check themselves AGAINST this table, which means an entry
+    // disappearing from here silently takes both front ends' coverage with it: the GUI's
+    // guard only fires for entries that are PRESENT but unmapped, and it walks this same
+    // array, so a vanished entry is invisible to it. Measured, not assumed -- deleting an
+    // entry was verified not to fail that guard. This is where the loss must be caught.
+    const keys = BINDING_INTENT.map((b) => b.key);
+    for (const needed of ['Alt-1', 'Alt-2', 'Alt-3', 'Ctrl-A', 'Insert']) {
+      expect(keys, `${needed} vanished from BINDING_INTENT`).toContain(needed);
+    }
+  });
+
   it('documents the way OUT, because Ctrl-C cannot be it', () => {
     // Ctrl-C is the Clear AID here. That is correct for a 3270 and surprising to
     // everyone, so the escape hatch has to be written down somewhere both front ends
