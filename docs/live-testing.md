@@ -1915,6 +1915,17 @@ legitimately emitting nothing, and then no ordinary build can restore the orderi
 why the remedy line names `npx tsc --build --force` as the fallback. The trade is deliberate:
 a refusal costs a rebuild, a false pass costs a wrong belief about the PA keys.
 
+**AND `git checkout` IS THAT CASE — measured immediately after merging this work, so expect
+it.** A checkout rewrites the mtime of every file it touches without changing content, so
+switching branches reddens the guard, and `npm run build` reports everything up to date and
+**cannot clear it**. Run `npx tsc --build --force packages/gui` once after a branch switch.
+The correction to the source-side suffix list is worth recording too: it originally read
+`'.ts'` alone, and `'preload.cts'.endsWith('.ts')` is **false**, so the preload — the IPC
+bridge this harness names as its own coverage — was exempt from the staleness check. That is
+a false GREEN, not a false red, and it survived every per-task review; the whole-branch review
+found it. The list now matches `packages/gui/tsconfig.json`'s own `include`
+(`.ts` and `.cts`), and the directory scan is recursive because that `include` is.
+
 ### A signal-killed client produced a FALSE PASS
 
 MEASURED with a fake client that printed the whole expected sequence plus `keys: sent` and

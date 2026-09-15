@@ -125,6 +125,11 @@ if (expected.length === 0) {
  *    DELETED, because `--build` trusts its `.tsbuildinfo` rather than looking at the outputs.
  *
  * A CONTENT-PRESERVING `touch` IS THE ONE FALSE RED, and it is why the remedy names `--force`.
+ * MEASURED IMMEDIATELY AFTER MERGING THIS BRANCH: `git checkout` is exactly that case, because
+ * it rewrites the mtime of every file it touches without changing content. So a routine branch
+ * switch reddens this guard and `npm run build` CANNOT clear it -- run
+ * `npx tsc --build --force packages/gui` once after switching branches. Annoying, and still the
+ * right trade: this refuses to run rather than reporting a green over stale code.
  * tsc keys its incremental state on content, so after a bare touch it correctly emits nothing
  * -- and then no ordinary build can restore the ordering. `--force` re-emits and clears it.
  * The trade is deliberate: this check errs towards refusing to run, and a refusal that names
