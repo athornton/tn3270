@@ -1525,3 +1525,189 @@ Two further things to measure while connected, since the opportunity is rare:
   cannot be tested here at all — `e-server.py` accepts any name. Under Hercules we can
   only take whichever display is free.
 - **Whether a printer session works.** Its harness now exists; nothing has driven it.
+
+## Task 11 — the no-flag default, the schemes, and the unreachable keys — verified 2026-09-15
+
+Both Hercules systems reachable throughout (`/dev/tcp` probe; `ss`/`netstat` show no
+listeners in this sandbox and must not be used). **Both hosts left clean at the end**: no
+VM logon was attempted (only pre-logon Attn), and MVS's `HERC03` was confirmed free by a
+follow-up bare-userid probe that got the password prompt, not `IKJ56425I ... IN USE`.
+Neither `packages/tui/scripts/live-drive.py` nor `packages/cli/scripts/record-mvs.txt`
+was touched — the no-`-model` and PA probes were separate throwaway scripts in `/tmp`.
+
+### The no-flag default — the headline fix, confirmed on both hosts
+
+`node packages/tui/dist/main.js -insecure --colors 256 <host>`, **with no `-model` at
+all**, driven over a pty (a throwaway script, not `live-drive.py`, which is pinned to
+`-model 3278-2-E` by `harness-flags.test.ts` and was left untouched).
+
+Against MVS TK5 (`127.0.0.1:3271`) the panel rendered is the TSO/VTAM logon screen:
+
+```
+Terminal   CUU0C0                                                 Date  15.09.26
+...
+Logon ===>
+                                                            RUNNING  TK5
+4 A
+```
+
+**Not** `IKT00405I`. Against VM/370 CE (`127.0.0.1:3270`), unaffected as expected:
+
+```
+VM/370 Online
+...
+                     VM/370 Community Edition V1 Release 1.2
+                                                            RUNNING   VM370CE
+4 A
+```
+
+Both captured fresh in this session, immediately before writing this section.
+
+### The Query Reply exchange, seen in a trace, not inferred from a working logon
+
+CLI `Trace(on)` / `TraceText`, connecting to MVS with no `-model`, stopping right after
+the bare userid is submitted (before any password, so no session is armed):
+
+```
+data: 0.432 < f3 00 05 01 ff ff 02 ff ef
+data: 0.432 = # WriteStructuredField ReadPartition(pid=0xff,type=0x02)
+data: 0.433 > 88 00 09 81 80 80 81 86 87 a6 00 17 81 81 01 00 ...
+```
+
+The host's Read Partition Query (`f3 00 05 01 ff ff 02 ff ef` — the `ff ff` is the
+doubled IAC for `pid=0xff`, "any partition") arrived at 0.432s; our answer went out at
+0.433s. **Byte offsets inside our reply** (offset 0 = the leading `88`, `AID.SF` in
+`constants.ts:461` — the "this is a structured field" indicator, not itself a Query
+Reply; `QUERY_REPLY: 0x81` at `constants.ts:243` is the SFID each unit below carries):
+
+| offset | LL | SFID | QCODE | reply unit |
+|---|---|---|---|---|
+| 0 | — | — | — | `AID.SF` (`0x88`) |
+| 1–9 | 9 | 0x81 | 0x80 | Summary — lists `80 81 86 87 a6` |
+| 10–32 | 23 | 0x81 | 0x81 | UsableArea |
+| 33–72 | 38 | 0x81 | 0x86 | Color (wire span is 40 bytes, not 38 — one colour pair is `ff,ff`, and each `0xff` doubles on the wire; the `LL` field itself counts logical, not wire, bytes) |
+| 73–87 | 15 | 0x81 | 0x87 | Highlighting |
+| 88–104 | 17 | 0x81 | 0xa6 | ImplicitPartitions |
+| 105–106 | — | — | — | `ff ef` (IAC EOR) |
+
+The host accepted it and continued: `ENTER CURRENT PASSWORD FOR HERC01-` followed
+immediately, which is the proof the exchange succeeded rather than merely completed.
+Cross-checked against VM (`127.0.0.1:3270`): its Read Partition arrives as
+`f3 00 07 01 ff ff 03 80 00 ff ef` — `type=0x03` (QueryList) with `qcodes=[0x00]`
+(Null, meaning "all") rather than MVS's plain `type=0x02` — and our reply is
+byte-identical for its first 10 bytes (`88 00 09 81 80 80 81 86 87 a6`). Two different
+Read Partition variants, same five-unit answer, which is architecturally correct: Null
+QueryList means "send everything you have," same as a plain Query.
+
+### The three colour schemes, live against VM at `-model 3278-4-E`
+
+`DISPLAY=:99` Electron, `--no-sandbox --disable-gpu`, `TN3270_GUI_SHOT`, genuinely
+connected (not replayed) to `127.0.0.1:3270`. Three captures, three distinct SHA-256
+digests (`30f38ff5…`, `56b48bc6…`, `2011afd4…` — no scheme is a no-op).
+
+**Row-by-row against the CLI**, the same method used for the 2026-09-14 GUI check: CLI
+`ScreenText` at `-model 3278-4-E` reports non-blank rows `[0, 13–26, 28, 42]`; all three
+screenshots show ink on rows `[0, 12–28, 40–42]` — identically, across all three
+schemes. The one-row shift in the middle band is pixel-height/row-count rounding (same
+kind of off-by-one the 2026-09-14 section already explains); rows 40–41 are the cursor,
+at status-line row 41, matching the CLI's own `41 0` cursor report. **All three schemes
+paint the same content**; only the palette changes.
+
+Dominant colours (`PIL`, most frequent RGB triples, background excluded from the count
+below):
+
+| scheme | background | "blue" foreground | relative luminance of that blue |
+|---|---|---|---|
+| default (no `-scheme`) | `(0,0,0)` pure black | `(120,144,240)` | ≈57% |
+| `3279` | `(26,26,26)` dark grey, not pure black | `(0,0,255)` pure architected blue | ≈7.2% |
+| `green` | `(0,0,0)` pure black | `(33,160,33)` — routed through green | ≈49% |
+
+This is a direct, measured corroboration of `palette.ts`'s own comment: architected pure
+blue (`0,0,255`) is close to illegible on pure black (≈7.2% luminance), which is exactly
+why the default scheme lightens it to `(120,144,240)` (≈57%). The `3279` scheme ships
+the pure architected colours as-is, legible only because its background is not pure
+black either. The `green` scheme reroutes every colour through green tones, which is
+visibly, measurably a different rendering, not a cosmetic tint of the same one.
+
+### Attn against VM/370 — measured, and the answer is a null result
+
+Sent to VM at the pre-logon banner (`ff f3`, a Telnet BREAK per RFC 1576 §8), traced:
+
+```
+data: 0.415 > ff f3  # Attn (IAC BREAK)
+```
+
+`ScreenText` captured immediately before and immediately after (with a 5-second settle)
+are **byte-for-byte identical** — the same 24 lines of the VM/370 banner — and no
+inbound (`<`) trace line follows the Attn in the capture. **CP did not visibly react to
+Attn at the pre-logon banner.** This is a measured null result, not an absence of
+testing: the BREAK was sent, observed on the wire, and produced no observable host
+response at this point in VM's state. Whether CP reacts to Attn once logged on to CMS
+is a different, untested state and is not claimed here either way.
+
+### PA1 and PA2 — a real host reaction, observed, not the user's Mac check after all
+
+The plan anticipated this could not be closed here (Task 11's own text: "state plainly
+that PA1/PA2 end-to-end is the user's check on their Mac"). It could be, this time,
+because MVS's ISPF gave an unambiguous, quoted answer. The CLI's `PA(n)` command
+(`packages/cli/src/runner.ts:200-205`) calls `s.sendAID(PA_AIDS[n-1])` — **the exact same
+call the GUI/TUI's `Alt-1`/`Alt-2` bindings make** (`packages/frontend/src/actions.ts:40`,
+`packages/frontend/src/bindings.ts:67-72`) — so this exercises the identical wire path a
+real keypress would, short of the physical key event itself.
+
+Logged on to MVS TK5 as `HERC03`, reached the ISPF primary option menu (confirmed:
+`USERID   : HERC03`, `PANEL    : ISP@PRIM`, `SYSTEMID : TK5R`). Sent `PA(1)`:
+
+```
+data: 4.973 > 6c ff ef
+data: 4.984 < f1 c1 11 c1 50 1d c8 c9 e2 d7 f0 f8 f8 c5 40 d7 ...
+```
+
+`0x6c` is `AID.PA1` (`constants.ts:455`). Decoding the host's EBCDIC reply
+(`cp037`) gives, verbatim:
+
+```
+ISP088E PANEL ISP@PRIM TERMINATED DUE TO ATTENTION INTERRUPT
+CLST020  LIST data set not allocated
+READY
+```
+
+**ISPF's own message says it treated PA1 as an attention interrupt and tore down its own
+panel**, dropping the session to the TSO `READY` prompt. Sent `PA(2)` (`0x6e`,
+`AID.PA2`) from `READY`:
+
+```
+data: 5.894 > 6e ff ef
+data: 5.896 < f1 c3 11 c2 60 1d c8 d9 c5 c1 c4 e8 40 1d 40 11 c3 f0 13 ff ef
+```
+
+which decodes to a bare `READY` again — TSO re-displays its prompt with no further
+message, since nothing was pending. To confirm ISPF had genuinely exited (not merely
+that the screen looked like it had), `X` was then typed at the command line and got
+`COMMAND X NOT FOUND` — the TSO command processor's answer, not ISPF's "Enter END
+command" — proving the session really was at `READY`, not still inside ISPF. `LOGOFF`
+then returned the terminal to the fresh TK5 VTAM logon banner, and a separate follow-up
+probe confirmed `HERC03` free (password prompt, not `IN USE`).
+
+**What this closes and what it does not.** Closed: our AID bytes for PA1/PA2 are
+correct, and a real host (MVS/ISPF/TSO) visibly, distinctly reacts to each — this was
+OBSERVED, with the host's own message quoted above, not inferred from "the logon still
+worked." **Still open, and still the user's own check**: whether a physical key on their
+Mac keyboard, inside the packaged Electron app, actually generates the `Alt-1`/`Alt-2`
+keydown that reaches `actionForKey`/`applyAction` — this sandbox has no real keyboard and
+did not run the packaged app, so that specific local-input-plumbing link is untested
+here. PA3 was not exercised (not asked for). The 2026-09-14 GUI section already proved
+the analogous claim for ordinary typed keys via `TN3270_GUI_KEYS`; the same technique
+would close this for PA1/PA2 too, but doing so was outside this task's scope.
+
+### What remains unverified, and why
+
+- **Whether CP reacts to Attn once logged on to CMS** (only the pre-logon banner state
+  was measured here, to avoid arming the VM reconnect trap).
+- **The GUI's own `Alt-1`/`Alt-2` key bindings, via a real keyboard in the packaged app**
+  (see above) — the AID-byte-to-host-reaction link is closed; the physical-key-to-AID
+  link inside a packaged app on the user's own machine is not.
+- **A cell-by-cell colour comparison against `zti`'s truecolor output for the new
+  schemes** — the 2026-08-25 section already marks the equivalent check PARTIAL for the
+  default scheme, for reasons (relative-cursor curses app, whole-stream colour tally)
+  that apply here unchanged; not repeated for `3279`/`green`.
