@@ -109,6 +109,22 @@ const bail = (why) => {
   process.exit(1);
 };
 
+/**
+ * The client must have SUCCEEDED, which is a stronger claim than the seam reporting.
+ *
+ * `keys: sent` says the last chord was delivered; it says nothing about what happened next,
+ * so a crash after the final chord would otherwise pass with a complete-looking log.
+ * MEASURED: a healthy keys-only run exits 0, three runs out of three, because
+ * `quitIfKeysOnly` calls `app.quit()` once the stdout drain completes.
+ *
+ * CHECKED BEFORE THE SEAM BAIL, deliberately: the everyday failure here is a bad spelling in
+ * the table above, which exits 2 and prints no `keys: sent` line, so the bail below would
+ * report that silence -- reading as a broken client rather than as the typo the stderr line
+ * names. A `status` of null means the client never exited at all (a missing `electron`, or a
+ * timeout's SIGTERM); those runs have no exit code to name and no `keys: sent` line either,
+ * so they fall through to that bail, where `result.error` is what says ENOENT or ETIMEDOUT.
+ */
+if (result.status !== null && result.status !== 0) bail(`the client exited ${result.status}`);
 // The seam must have RUN. Without this, a client that exited early would produce zero
 // action lines, zero mismatches on a zero-length comparison, and a false pass.
 if (!stdout.includes('keys: sent ')) bail('the keys seam never reported sending anything');
