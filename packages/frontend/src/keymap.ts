@@ -31,8 +31,11 @@
  *
  * A lone ESC is both a legal keypress and the first byte of every function key,
  * so it cannot be resolved from the buffer alone. This module reports that fact
- * and refuses to guess; `app.ts` owns the timer that breaks the tie. Guessing
- * here would either eat the following keystroke or emit a spurious PA.
+ * and refuses to guess; `app.ts` owns what happens next -- arming a timer for a
+ * lone ESC just as it does for a genuinely unfinished multi-byte sequence like
+ * `\x1b[`, but PROMOTING it to a Meta prefix for PA1/PA2/PA3 on expiry rather
+ * than discarding it. Guessing here would either eat the following keystroke
+ * or emit a spurious PA.
  */
 
 import { PF_AIDS } from '@tn3270/core';
@@ -54,6 +57,8 @@ export type Action =
   | { kind: 'delete' }
   | { kind: 'eraseEOF' }
   | { kind: 'eraseInput' }
+  | { kind: 'attn' }
+  | { kind: 'toggleInsert' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 
@@ -64,8 +69,10 @@ export type Action =
  * Returning `null` instead would conflate "wait" with "impossible", and the
  * caller's two correct responses to those are opposite: keep buffering, versus
  * throw the bytes away. A bare ESC is the case that matters -- it is a legal key
- * AND the start of every function key, and only a timeout can tell them apart.
- * app.ts owns that timer; this module stays pure.
+ * AND the start of every function key, and this module cannot tell them apart
+ * from bytes alone. app.ts owns what happens next -- timing it out the same as
+ * an unfinished sequence, but promoting it to a Meta prefix on expiry rather
+ * than discarding it; this module stays pure.
  */
 export const PARTIAL = Symbol('partial');
 
@@ -109,8 +116,14 @@ function buildTable(): Map<string, Action> {
   // following c3270; it is not a terminfo-derived mapping.
   t.set('\x1b[4~', { kind: 'eraseEOF' });
 
+  // The Insert key toggles insert mode, as x3270 does (fb-x3270:210). MEASURED:
+  // `tput kich1` is `\x1b[2~` on the development box.
+  t.set('\x1b[2~', { kind: 'toggleInsert' });
+
   // Control keys. Ctrl-C is Clear, not interrupt: Clear is an AID a 3270 user
   // needs constantly (it dismisses MORE...), and Ctrl-] is the way out.
+  // Attn is c3270's Ctrl-A (Common/fb-c3270:83). It is a Telnet BREAK, not an AID.
+  t.set('\x01', { kind: 'attn' });
   t.set('\x03', { kind: 'clear' });
   t.set('\x12', { kind: 'reset' });
   t.set('\x15', { kind: 'eraseInput' });

@@ -51,14 +51,14 @@ describe('option negotiation', () => {
     expect(layer.is3270Mode()).toBe(true);
   });
 
-  it('answers a terminal-type query with IBM-3278-2 in ASCII', () => {
+  it('answers a terminal-type query with IBM-3278-2-E in ASCII', () => {
     const { layer, sent } = harness();
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TERMINAL_TYPE));
     sent.length = 0;
     layer.receive(Uint8Array.of(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE));
     const expected = [
       T.IAC, T.SB, O.TERMINAL_TYPE, S.IS,
-      ...Array.from('IBM-3278-2', (c) => c.charCodeAt(0)),
+      ...Array.from('IBM-3278-2-E', (c) => c.charCodeAt(0)),
       T.IAC, T.SE,
     ];
     expect(sent[0]).toEqual(expected);
@@ -74,7 +74,7 @@ describe('option negotiation', () => {
       expect(code).toBeGreaterThanOrEqual(0x20);
       expect(code).toBeLessThanOrEqual(0x7e);
     }
-    expect(String.fromCharCode(...payload)).toBe('IBM-3278-2');
+    expect(String.fromCharCode(...payload)).toBe('IBM-3278-2-E');
   });
 
   it('doubles an IAC inside the terminal-type body but not the framing', () => {

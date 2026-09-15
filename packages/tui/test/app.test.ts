@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolve, Session, type Connection } from '@tn3270/core';
+import { AID, resolve, Session, type Connection } from '@tn3270/core';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 
 /**
@@ -436,5 +436,101 @@ describe('the ambiguous Escape', () => {
     expect(vi.getTimerCount()).toBe(1);
     h.app.restore();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('also clears an armed timer for a TRUNCATED sequence on restore', () => {
+    // A SEPARATE setTimeout call site from the lone-ESC one above -- restore()
+    // must clear whichever one happens to be pending, and this pins the other.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(new TextEncoder().encode('\x1b['));
+    expect(vi.getTimerCount()).toBe(1);
+    h.app.restore();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('resolves Esc then 1 as PA1 however long the gap is', () => {
+    // THE REPORTED BUG, 2026-09-14 from a Mac: ESC_TIMEOUT_MS is 50 and a human takes
+    // hundreds of ms, so the ESC was discarded and the digit then arrived as ordinary text
+    // -- `Esc 1` typed "1". No existing test could catch it: every keymap test hands
+    // lookup() a complete `\x1b1`, which is exactly the case that already worked.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(5000);                     // a hundred timeouts' worth
+    h.app.onInput(Uint8Array.from([0x31]));           // '1'
+
+    expect(sent).toHaveBeenCalledWith(AID.PA1);
+    expect(cellText(h.session, 0)).toBe(' ');         // and NOT typed into the field
+  });
+
+  it('does not let a PROMOTED ESC combine with a paste into an arrow -- THE HAZARD', () => {
+    // Found in review, 2026-09-15, one level up from the bug this file exists to fix.
+    // GATED ON THE TIMEOUT HAVING FIRED: an earlier version of this fix held a lone
+    // ESC with no timer at all, so it combined with WHATEVER arrived next regardless
+    // of timing. That meant pasting text beginning `[A`/`[B`/`[C`/`[D`/`[H` right
+    // after pressing Escape -- plausible on a Mac, where Option-as-Meta users reach
+    // for both keys -- completed `\x1b[C` etc. as a genuine arrow match and silently
+    // moved the cursor, landing the rest of the paste in the WRONG field. That is
+    // SILENT CORRUPTION, and it is worse than the bug this file exists to fix.
+    //
+    // A paste arriving WITHIN the timeout is, correctly, a different story: see
+    // 'completes the sequence when the rest arrives in time' above. This test is
+    // about a paste arriving well after Escape, once the ESC has been promoted.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
+    h.app.onInput(new TextEncoder().encode('[C'));    // NOT a right-arrow
+
+    // Typed literally, NOT consumed as a right-arrow, which would move the cursor
+    // and type nothing.
+    expect(cellText(h.session, 0)).toBe('[');
+    expect(cellText(h.session, 1)).toBe('C');
+    expect(h.session.screen.cursor).toBe(2);
+  });
+
+  it('types the byte after a PROMOTED ESC literally when it is not a PA digit', () => {
+    // The improved cost, gated on the timeout having fired: once promoted, a bare
+    // Escape with no PA follow-up is dropped and the buffer is reprocessed from the
+    // start, so the very next keystroke is typed instead of lost. (Within the
+    // timeout, an ESC followed by an unrelated byte is still discarded whole by the
+    // ordinary impossible-sequence rule -- unchanged, and not what this pins.)
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
+    h.app.onInput(new TextEncoder().encode('a'));
+    expect(cellText(h.session, 0)).toBe('a');
+  });
+
+  it('still discards a TRUNCATED sequence after the timeout', () => {
+    // The protection that must survive: `\x1b[` with nothing following is not a Meta prefix,
+    // and leaving `[` behind would type a literal bracket into the field.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(new TextEncoder().encode('\x1b['));
+    expect(vi.getTimerCount()).toBe(1);               // this one DOES arm a timer
+    vi.advanceTimersByTime(100);
+    h.app.onInput(new TextEncoder().encode('A'));
+
+    // 'A' is typed as text, NOT resolved as a right-arrow from the stale `\x1b[` prefix.
+    expect(cellText(h.session, 0)).toBe('A');
+    expect(h.session.screen.cursor).not.toBe(0);
+  });
+
+  it('types a digit normally when no ESC came first', () => {
+    // Duplicates coverage elsewhere in this file, deliberately: it is the paired
+    // control for 'resolves Esc then 1 as PA1' above, proving the ESC-holding guard
+    // above did not overreach into ordinary un-prefixed digits. Do not delete this as
+    // redundant.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    h.app.onInput(Uint8Array.from([0x31]));
+    expect(sent).not.toHaveBeenCalled();
+    expect(cellText(h.session, 0)).toBe('1');
   });
 });

@@ -65,9 +65,19 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
   },
   {
     key: 'Alt-1', action: { kind: 'pa', n: 1 }, terminal: '\x1b1',
-    note: 'the PA keys have no terminal equivalent, so ESC-digit, as c3270 does',
+    note: 'the PA keys have no terminal equivalent, so ESC-digit, as c3270 does. The GUI '
+      + 'matches e.code (Digit1), NOT e.key: on macOS Option-1 reports key "¡".',
   },
   { key: 'Alt-2', action: { kind: 'pa', n: 2 }, terminal: '\x1b2' },
+  { key: 'Alt-3', action: { kind: 'pa', n: 3 }, terminal: '\x1b3' },
+  {
+    key: 'Ctrl-A', action: { kind: 'attn' }, terminal: '\x01',
+    note: 'c3270\'s own default (Common/fb-c3270:83). A Telnet BREAK, not an AID.',
+  },
+  {
+    key: 'Insert', action: { kind: 'toggleInsert' }, terminal: '\x1b[2~',
+    note: 'x3270\'s Toggle(insertMode) (fb-x3270:210); `tput kich1` measured \\x1b[2~',
+  },
 
   // Sequence-less on purpose: two encodings each. See the header note on DECCKM.
   { key: 'Up', action: { kind: 'up' } },

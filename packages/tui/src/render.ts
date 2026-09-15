@@ -16,6 +16,7 @@
  */
 
 import { sgrFor, type Depth } from './colours.js';
+import { type Scheme } from '@tn3270/frontend';
 import type { ResolvedCell } from '@tn3270/core';
 
 export interface Geometry { rows: number; cols: number; }
@@ -145,6 +146,8 @@ export function layout(terminal: Geometry, screen: Geometry): Layout {
 
 interface RendererOptions extends Geometry {
   depth: Depth;
+  /** Which palette to draw. `App` resolves it from `-scheme`. */
+  scheme: Scheme;
   /**
    * Where the screen, OIA and border go. Defaults to flush at the top left with
    * the OIA directly below and no border, which is what a caller that has not
@@ -180,6 +183,7 @@ export class TerminalRenderer {
   private rows: number;
   private cols: number;
   private readonly depth: Depth;
+  private readonly scheme: Scheme;
   private readonly hint: string | undefined;
   private place: Layout;
   /** Set when the layout moved, so the next full paint clears the old drawing. */
@@ -192,6 +196,7 @@ export class TerminalRenderer {
     this.rows = opts.rows;
     this.cols = opts.cols;
     this.depth = opts.depth;
+    this.scheme = opts.scheme;
     this.hint = opts.hint;
     this.place = opts.layout ?? {
       rowOffset: 0, colOffset: 0, statusRow: opts.rows + 1,
@@ -386,8 +391,8 @@ export class TerminalRenderer {
     if (cell.reverse) params.push('7');
     if (cell.underscore) params.push('4');
     if (cell.intensify) params.push('1');
-    const fg = sgrFor(cell.fg, this.depth, 'fg');
-    const bg = sgrFor(cell.bg, this.depth, 'bg');
+    const fg = sgrFor(cell.fg, this.depth, 'fg', this.scheme);
+    const bg = sgrFor(cell.bg, this.depth, 'bg', this.scheme);
     if (fg) params.push(fg);
     if (bg) params.push(bg);
     return params.join(';');

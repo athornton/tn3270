@@ -4,7 +4,7 @@ import { actionForKey, type KeyLike } from '../src/keys.js';
 
 /** The subset of KeyboardEvent this maps on. Constructing a real one needs a DOM. */
 const ev = (init: Partial<KeyLike> & { key: string }): KeyLike =>
-  ({ ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...init });
+  ({ code: '', ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...init });
 
 describe('actionForKey', () => {
   it('maps Enter, Tab and the arrows', () => {
@@ -67,8 +67,7 @@ describe('actionForKey', () => {
   it('satisfies the shared BINDING_INTENT table for every key it names', () => {
     // The point of that table: the terminal keymap and this mapper are checked against one
     // written-down intent, so a key added to one front end is visibly missing from the
-    // other. Only the entries this mapper can express are checked -- the table also names
-    // terminal-only spellings.
+    // other.
     const named: Record<string, KeyLike> = {
       Enter: ev({ key: 'Enter' }),
       'Ctrl-C': ev({ key: 'c', ctrlKey: true }),
@@ -89,15 +88,76 @@ describe('actionForKey', () => {
       Left: ev({ key: 'ArrowLeft' }),
       Right: ev({ key: 'ArrowRight' }),
       Home: ev({ key: 'Home' }),
+      'Alt-1': ev({ key: '1', code: 'Digit1', altKey: true }),
+      'Alt-2': ev({ key: '2', code: 'Digit2', altKey: true }),
+      'Alt-3': ev({ key: '3', code: 'Digit3', altKey: true }),
+      'Ctrl-A': ev({ key: 'a', code: 'KeyA', ctrlKey: true }),
+      Insert: ev({ key: 'Insert', code: 'Insert' }),
     };
+    // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
+    // written reason does not type-check. The hole this replaced was exactly an unexamined
+    // one-line dismissal ("Alt-1, a terminal-only spelling" -- it is not), so "you must say
+    // why" is enforced by the shape rather than by a comment asking nicely. EMPTY on purpose.
+    const TERMINAL_ONLY: Readonly<Record<string, string>> = {};
     let checked = 0;
     for (const b of BINDING_INTENT) {
       const key = named[b.key];
-      if (key === undefined) continue;      // e.g. Alt-1, a terminal-only spelling
+      if (key === undefined) {
+        expect(Object.hasOwn(TERMINAL_ONLY, b.key), `BINDING_INTENT has ${b.key} and the GUI does not`)
+          .toBe(true);
+        continue;
+      }
       expect(actionForKey(key), b.key).toEqual(b.action);
       checked++;
     }
-    // Guard against the loop silently checking nothing if a name is ever changed.
-    expect(checked).toBeGreaterThanOrEqual(18);
+    // NOT redundant with the allowlist above: that check only runs when named[b.key] is
+    // undefined, so it can never notice a STALE TERMINAL_ONLY entry -- one that claims a key
+    // is unmappable when `named` actually has it, which the loop would otherwise validate and
+    // count without complaint. This line catches exactly that mismatch (verified by mutation:
+    // listing an already-mapped key as exempt makes `checked` come in one HIGHER than this
+    // formula expects, and the allowlist check never even looks at it, since named[b.key] is
+    // defined). It does NOT catch a key vanishing from BINDING_INTENT itself -- also verified
+    // by mutation -- because the loop walks that same array, so both sides shrink together;
+    // that is not this test's job. Still exact rather than a floor: with TERMINAL_ONLY empty,
+    // every entry must be checked, and a floor would silently tolerate a wrongly-exempted one.
+    expect(checked).toBe(BINDING_INTENT.length - Object.keys(TERMINAL_ONLY).length);
+  });
+});
+
+describe('the keys the GUI could not reach at all', () => {
+  it('maps Alt+digit to PA1-3', () => {
+    expect(actionForKey(ev({ key: '1', code: 'Digit1', altKey: true })))
+      .toEqual({ kind: 'pa', n: 1 });
+    expect(actionForKey(ev({ key: '2', code: 'Digit2', altKey: true })))
+      .toEqual({ kind: 'pa', n: 2 });
+    expect(actionForKey(ev({ key: '3', code: 'Digit3', altKey: true })))
+      .toEqual({ kind: 'pa', n: 3 });
+  });
+
+  it('matches on e.code, because macOS Option-1 reports key "¡"', () => {
+    // THE trap on the reporter's machine. An e.key-based binding works on Linux and
+    // silently fails on a Mac, which is the worst of both.
+    expect(actionForKey(ev({ key: '¡', code: 'Digit1', altKey: true })))
+      .toEqual({ kind: 'pa', n: 1 });
+    expect(actionForKey(ev({ key: '™', code: 'Digit2', altKey: true })))
+      .toEqual({ kind: 'pa', n: 2 });
+  });
+
+  it('does not turn Alt+other into a PA or into text', () => {
+    expect(actionForKey(ev({ key: '4', code: 'Digit4', altKey: true }))).toBeNull();
+    expect(actionForKey(ev({ key: 'f', code: 'KeyF', altKey: true }))).toBeNull();
+  });
+
+  it('leaves Cmd-digit alone, because that is where menu accelerators live', () => {
+    // The reporter has left-Option mapped to Command at the OS level, so this arrives as a
+    // metaKey chord. Binding it would collide with the menus on the roadmap.
+    expect(actionForKey(ev({ key: '1', code: 'Digit1', metaKey: true }))).toBeNull();
+  });
+
+  it('maps Ctrl-A to Attn and Insert to the insert toggle', () => {
+    expect(actionForKey(ev({ key: 'a', code: 'KeyA', ctrlKey: true })))
+      .toEqual({ kind: 'attn' });
+    expect(actionForKey(ev({ key: 'Insert', code: 'Insert' })))
+      .toEqual({ kind: 'toggleInsert' });
   });
 });

@@ -542,4 +542,4 @@ export const MODEL_3 = { rows: 32, cols: 80 } as const;
 export const MODEL_4 = { rows: 43, cols: 80 } as const;
 export const MODEL_5 = { rows: 27, cols: 132 } as const;
 
-export const TERMINAL_TYPE = 'IBM-3278-2';
+export const TERMINAL_TYPE = 'IBM-3278-2-E';

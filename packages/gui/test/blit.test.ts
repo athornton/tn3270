@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Screen, resolve, colourRgb, Colour } from '@tn3270/core';
+import { Screen, resolve, Colour } from '@tn3270/core';
+import { SCHEMES, schemeRgb } from '@tn3270/frontend';
 import { drawList, type AtlasGeometry } from '../src/drawlist.js';
 import {
   blit, bestScale, centre, rgbCss, tintKey, blankColumns, type Ctx2D,
@@ -16,7 +17,7 @@ const listFor = (chars: readonly [number, number][] = [], oia?: string) => {
   const s = new Screen({ rows: 24, cols: 80 });
   for (const [addr, e] of chars) s.setChar(addr, e);
   const snap = s.snapshot();
-  return drawList(snap, resolve(snap), atlas, oia);
+  return drawList(snap, resolve(snap), atlas, SCHEMES.default!, oia);
 };
 
 /** Records what was asked of the context, so the arithmetic can be asserted. */
@@ -152,13 +153,13 @@ describe('blankColumns', () => {
 
 describe('colour helpers', () => {
   it('formats an Rgb as CSS', () => {
-    expect(rgbCss(colourRgb(Colour.GREEN))).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
+    expect(rgbCss(schemeRgb(SCHEMES.default!, Colour.GREEN))).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
   });
 
   it('keys the tint cache by colour, so it is bounded by the palette', () => {
     // A 3279 has sixteen colours, so tinting per COLOUR is at most sixteen composites
     // where tinting per cell would be 1920 a frame.
-    const keys = new Set(Object.values(Colour).map((c) => tintKey(colourRgb(c))));
+    const keys = new Set(Object.values(Colour).map((c) => tintKey(schemeRgb(SCHEMES.default!, c))));
     expect(keys.size).toBeLessThanOrEqual(16);
   });
 });

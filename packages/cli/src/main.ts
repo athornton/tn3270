@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   });
 
   // Resolved unconditionally, so there is exactly one path from argv to the
-  // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2
+  // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2-E
   // the telnet layer would have defaulted to on its own.
   const args = parseArgs(process.argv.slice(2));
   const session = defaultSession(

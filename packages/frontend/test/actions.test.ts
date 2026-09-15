@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Session, AID, type Connection } from '@tn3270/core';
 import { applyAction } from '../src/actions.js';
 
@@ -71,5 +71,33 @@ describe('applyAction', () => {
     // that forgot to check it simply unquittable, so it throws instead.
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'quit' })).toThrow(/quit/i);
+  });
+});
+
+describe('applyAction: the newly-bound actions', () => {
+  it('sends Attn as a Telnet BREAK, not an AID', () => {
+    // Session.sendAttn() -> telnet BREAK, RFC 1576 section 8. Attn is NOT an AID, so this
+    // must not go anywhere near sendAID.
+    const { session } = newSession();
+    const attn = vi.spyOn(session, 'sendAttn');
+    const aid = vi.spyOn(session, 'sendAID');
+    applyAction(session, { kind: 'attn' });
+    expect(attn).toHaveBeenCalledOnce();
+    expect(aid).not.toHaveBeenCalled();
+  });
+
+  it('toggles insert mode both ways', () => {
+    const { session } = newSession();
+    expect(session.keyboard.insertMode).toBe(false);
+    applyAction(session, { kind: 'toggleInsert' });
+    expect(session.keyboard.insertMode).toBe(true);
+    applyAction(session, { kind: 'toggleInsert' });
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+
+  it('keeps the OIA in step with insert mode, since it reads the same flag', () => {
+    const { session } = newSession();
+    applyAction(session, { kind: 'toggleInsert' });
+    expect(session.oia.insertMode).toBe(true);
   });
 });

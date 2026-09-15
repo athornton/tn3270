@@ -55,6 +55,13 @@ const CASES = [
     // Not a real host: the trace is replayed, so nothing is dialled. A parseable target is
     // still required because the host argument is mandatory in every front end.
     host: '127.0.0.1:1',
+    // no extraArgv: draws the readable 'default' scheme
+  },
+  {
+    name: 'synthetic-ispf-green',
+    trace: join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace'),
+    host: '127.0.0.1:3270',
+    extraArgv: ['-scheme', 'green'],
   },
 ];
 
@@ -82,7 +89,7 @@ function ensureDisplay() {
 function run(kase) {
   const gui = join(process.env.HOME ?? '', 'micromamba', 'envs', 'gui');
   const shot = join('/tmp', `tn3270-shot-${kase.name}.png`);
-  const result = spawnSync(electron, [main, ...ARGV, kase.host], {
+  const result = spawnSync(electron, [main, ...ARGV, ...(kase.extraArgv ?? []), kase.host], {
     encoding: 'utf8',
     timeout: 120000,
     env: {

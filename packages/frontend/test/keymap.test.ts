@@ -151,9 +151,11 @@ describe('ordinary characters', () => {
 
   it('does not treat a control byte as printable', () => {
     // 0x00-0x1f and 0x80+ are not typeable on a 3270; an unmapped one must be
-    // discarded rather than sent to the host as text.
+    // discarded rather than sent to the host as text. 0x01 is excluded here: it
+    // is now bound to Attn (see "the keys that were implemented in core but
+    // bound nowhere", below), so it is no longer an example of an unmapped byte.
     expect(lookup(Uint8Array.from([0x00]))).toBeNull();
-    expect(lookup(Uint8Array.from([0x01]))).toBeNull();
+    expect(lookup(Uint8Array.from([0x02]))).toBeNull();
     expect(lookup(Uint8Array.from([0xff]))).toBeNull();
   });
 });
@@ -192,5 +194,23 @@ describe('the ambiguous-Escape problem', () => {
     // app.ts calls this whenever stdin fires; a zero-length chunk must not put
     // the reader into a waiting state that only a timeout can leave.
     expect(lookup(Uint8Array.from([]))).toBeNull();
+  });
+});
+
+describe('the keys that were implemented in core but bound nowhere', () => {
+  it('maps Ctrl-A to Attn, as c3270 does', () => {
+    // Common/fb-c3270:83. Session.sendAttn() has existed since stage 1 and no key reached it.
+    expect(lookup(Uint8Array.of(0x01))).toEqual({ kind: 'attn' });
+  });
+
+  it('maps the Insert key to an insert-mode toggle, as x3270 does', () => {
+    // fb-x3270:210, Toggle(insertMode). `tput kich1` measures \x1b[2~ on this box.
+    expect(lookup(new TextEncoder().encode('\x1b[2~'))).toEqual({ kind: 'toggleInsert' });
+  });
+
+  it('still resolves the three PA keys', () => {
+    expect(lookup(new TextEncoder().encode('\x1b1'))).toEqual({ kind: 'pa', n: 1 });
+    expect(lookup(new TextEncoder().encode('\x1b2'))).toEqual({ kind: 'pa', n: 2 });
+    expect(lookup(new TextEncoder().encode('\x1b3'))).toEqual({ kind: 'pa', n: 3 });
   });
 });

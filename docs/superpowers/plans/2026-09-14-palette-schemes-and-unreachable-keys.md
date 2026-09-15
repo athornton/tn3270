@@ -1108,10 +1108,29 @@ Expected: PASS, 3 tests.
 
 - [ ] **Step 3: Verify the test can actually fail (mutation check)**
 
-Temporarily add `import { SCHEMES } from '@tn3270/frontend';` to the top of
-`packages/gui/src/renderer.ts`, rebuild, and rerun.
+**CORRECTED 2026-09-14 — the obvious version of this check falsely PASSES.** Adding only
+`import { SCHEMES } from '@tn3270/frontend';` is not enough: with no `isolatedModules` or
+`verbatimModuleSyntax` in `tsconfig.base.json`, **`tsc` elides a value import that is never
+referenced**, so it never reaches `dist/renderer.js` and the guard correctly sees nothing.
+Measured twice, by the implementer and again by the reviewer.
 
-Expected: FAIL, naming `renderer.js` as an offender. **Then revert it:**
+So the binding must be **used**. Temporarily add both lines to the top of
+`packages/gui/src/renderer.ts`:
+
+```ts
+import { SCHEMES } from '@tn3270/frontend';
+console.log('schemes', Object.keys(SCHEMES).length);
+```
+
+then `npm run build` and rerun the test.
+
+Expected: FAIL, naming `renderer.js` as the sole offender —
+`expected [ Array(1) ] to deeply equal []`.
+
+**This is not a hole in the guard, and it is worth understanding why before you move on:** an
+elided import is absent from the shipped bundle, so it cannot blank the window either. The
+guard's coverage matches the real risk exactly — what breaks the renderer is an import that
+survives to runtime, and that is precisely what fails here. **Then revert it:**
 
 ```bash
 cd ~/git/tn3270 && git checkout packages/gui/src/renderer.ts && npm run build
@@ -1172,8 +1191,112 @@ and where the case is spawned (line 85), thread that through:
 cd ~/git/tn3270 && DISPLAY=:99 node packages/gui/scripts/shot.mjs --update
 ```
 
-Then confirm what changed is only colour. Save the old golden first, then compare ink-pixel
-**sets** — where ink is, not what colour it is:
+Then confirm what changed is only colour.
+
+> **CORRECTED 2026-09-14 — the "compare ink-pixel sets" script below is WRONG for this
+> re-baseline and will always report `MOVED`.** It defines ink as "any non-pure-black pixel",
+> but the OLD golden's background is F0 neutral-black `#1a1a1a`, so the entire old background
+> counted as ink (242,873 px) while the new pure-black background is correctly excluded. It
+> also silently swallows a **hardcoded canvas-clear fill** (`renderer.ts:100-101`, a solid
+> 594x14 = 8,316 px rectangle drawn before any cell and belonging to no F-code), which was
+> `(0,0,0)` all along and becomes indistinguishable from the new background.
+>
+> **Do the ground-truth replay below instead.** The difference matters: "does *some*
+> consistent old→new colour mapping exist" is inferred from the images and can be satisfied by
+> a coincidental swap of two equal-population colours, whereas replaying the mapping the code
+> is *supposed* to implement checks the images against the source of truth. Both were run on
+> this re-baseline; the replay gave **0 mismatches across all 252,000 pixels**.
+
+```bash
+cd ~/git/tn3270 && git show HEAD:packages/gui/test/golden/synthetic-ispf.png > /tmp/golden-before.png
+python3 - <<'PY'
+import zlib
+from struct import unpack
+
+# Transcribed BY HAND from the two sources, which is the point -- old from
+# packages/core/src/palette.ts (PALETTE_3279), new from packages/frontend/src/palette.ts
+# (DEFAULT_RGB). Do not generate this from the images; that is what makes it ground truth.
+TABLE = {
+    (0x1a,0x1a,0x1a): (0,0,0),          # F0 neutral-black -> pure black
+    (0x00,0x00,0xff): (120,144,240),    # F1 blue -> zti blue  <-- the reported defect
+    (0xff,0x00,0x00): (240,24,24),      # F2 red
+    (0xff,0x00,0xff): (255,0,255),      # F3 pink (unchanged)
+    (0x00,0xff,0x00): (36,216,48),      # F4 green -> zti green
+    (0x00,0xff,0xff): (88,240,240),     # F5 turquoise
+    (0xff,0xff,0x00): (255,255,0),      # F6 yellow (unchanged)
+    (0xe0,0xe0,0xe0): (255,255,255),    # F7 neutral-white -> pure white
+    (0x00,0x00,0x80): (0,0,205),        # F9 deep blue
+    (0xff,0x80,0x00): (255,165,0),      # FA orange
+    (0x80,0x00,0xff): (160,32,240),     # FB purple
+    (0x80,0xff,0x80): (144,238,144),    # FC pale green
+    (0x80,0xff,0xff): (150,205,205),    # FD pale turquoise
+    (0x80,0x80,0x80): (119,136,153),    # FE grey
+    (0xff,0xff,0xff): (245,245,245),    # FF white
+}
+# F8 black is DELIBERATELY ABSENT. Old F8 is (0,0,0), which in this golden is also the
+# canvas-clear fill -- so an old (0,0,0) pixel is ambiguous between "F8 cell, should become
+# (47,79,79)" and "canvas clear, must stay (0,0,0)". This golden contains no F8 cells, so
+# (0,0,0) maps to itself via the identity default below. IF A FUTURE GOLDEN PAINTS F8, this
+# replay cannot disambiguate from pixels alone and must be driven from the draw list instead.
+
+def pixels(path):
+    """Decode to a list of rows of (r,g,b). Handles PNG filter types 0-4: these rows use
+    1, 2 and 4, and a decoder handling only type 0 reports every pixel black -- which has
+    produced a false 'the canvas is blank' reading in this project before."""
+    d = open(path, 'rb').read()
+    i, w, h, idat = 8, None, None, b''
+    while i < len(d):
+        ln = unpack('>I', d[i:i+4])[0]
+        typ = d[i+4:i+8]
+        if typ == b'IHDR': w, h = unpack('>II', d[i+8:i+16])
+        elif typ == b'IDAT': idat += d[i+8:i+8+ln]
+        i += 12 + ln
+    raw, stride, prev, pos, out = zlib.decompress(idat), w*3, bytearray(w*3), 0, []
+    for _ in range(h):
+        f = raw[pos]; pos += 1
+        line = bytearray(raw[pos:pos+stride]); pos += stride
+        for x in range(stride):
+            a = line[x-3] if x >= 3 else 0
+            b = prev[x]
+            c = prev[x-3] if x >= 3 else 0
+            if f == 1:   line[x] = (line[x] + a) & 0xff
+            elif f == 2: line[x] = (line[x] + b) & 0xff
+            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 0xff
+            elif f == 4:
+                pa, pb, pc = abs(b-c), abs(a-c), abs(a+b-2*c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[x] = (line[x] + pr) & 0xff
+        out.append([tuple(line[x:x+3]) for x in range(0, stride, 3)])
+        prev = line
+    return out
+
+old = pixels('/tmp/golden-before.png')
+new = pixels('packages/gui/test/golden/synthetic-ispf.png')
+assert len(old) == len(new) and len(old[0]) == len(new[0]), 'DIMENSIONS CHANGED'
+
+bad = []
+for y, (orow, nrow) in enumerate(zip(old, new)):
+    for x, (o, n) in enumerate(zip(orow, nrow)):
+        want = TABLE.get(o, o)          # unknown colours must stay put
+        if n != want: bad.append((x, y, o, want, n))
+print(f'pixels={len(old)*len(old[0])} mismatches={len(bad)}')
+for row in bad[:5]: print('  (x,y)=%s,%s old=%s expected=%s actual=%s' % row)
+print('GROUND TRUTH CONFIRMED' if not bad else 'MISMATCH <-- STOP AND DIAGNOSE')
+PY
+```
+
+Expected: `mismatches=0` and `GROUND TRUTH CONFIRMED`. That proves both halves at once —
+every colour changed to exactly what the new palette specifies, **and** nothing moved, since a
+moved glyph would put an unexpected colour at some coordinate.
+
+**A mismatch means stop and diagnose, not re-baseline again.**
+
+The superseded script is kept below only because its failure is instructive: a verification
+heuristic that buckets pixels by "blackness" cannot survive a change to what black means.
+
+<details><summary>Superseded ink-set comparison — do not rely on it</summary>
+
+Compare ink-pixel **sets** — where ink is, not what colour it is:
 
 ```bash
 cd ~/git/tn3270 && git show HEAD:packages/gui/test/golden/synthetic-ispf.png > /tmp/golden-before.png
@@ -1225,8 +1348,10 @@ print('IDENTICAL INK POSITIONS' if before == after
 PY
 ```
 
-Expected: `IDENTICAL INK POSITIONS`. Only RGB changed. **`MOVED` means a glyph moved and
-something other than colour broke** — diagnose it rather than accepting the new baseline.
+It reports `MOVED: +0 -242873` here, which is a **false positive** for the reasons given
+above. Kept for the lesson, not for use.
+
+</details>
 
 - [ ] **Step 4: Confirm the green golden is actually green**
 

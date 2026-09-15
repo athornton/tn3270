@@ -46,7 +46,7 @@ export interface SessionOptions {
   alternateRows?: number;
   alternateCols?: number;
   codePage?: CodePage;
-  /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2. */
+  /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2-E. */
   terminalType?: string;
   /** Offer TN3270E. Defaults to true; `-tn3270e off` and the N: prefix clear it. */
   tn3270e?: boolean;

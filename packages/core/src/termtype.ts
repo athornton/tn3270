@@ -122,20 +122,27 @@ export function resolveTerminalType(opts: TerminalTypeOptions): string {
     return opts.terminalType;
   }
 
-  // The default comes from TERMINAL_TYPE, not from KNOWN_MODELS['3278-2'].
-  // Both spell IBM-3278-2 today, but TERMINAL_TYPE is the single source of
-  // truth that telnet.ts already defaults to (`opts.terminalType ??
-  // TERMINAL_TYPE`), so the two default paths cannot drift. KNOWN_MODELS is a
-  // convenience list of what a user may ask for by number; editing it must
-  // never change what a session with no options negotiates.
+  // The default comes from TERMINAL_TYPE, not from KNOWN_MODELS['3278-2-E']. Both spell
+  // IBM-3278-2-E today, but TERMINAL_TYPE is the single source of truth that telnet.ts
+  // already defaults to (`opts.terminalType ?? TERMINAL_TYPE`), so the two default paths
+  // cannot drift. KNOWN_MODELS is a convenience list of what a user may ask for by number;
+  // editing it must never change what a session with no options negotiates.
   //
-  // Keeping the default at IBM-3278-2 is what lets the VM/370 conformance
-  // comparison stay valid: that run was recorded with our client negotiating
-  // IBM-3278-2, so a live re-record after changing this would negotiate
-  // something else. Note the committed .trace fixtures replay recorded bytes
-  // and so do NOT themselves fail if this changes — verified by flipping
-  // TERMINAL_TYPE and watching golden.test.ts and conformance.test.ts still
-  // pass. The tests that do catch it are telnet.test.ts and termtype.test.ts.
+  // WHY -E IS THE DEFAULT, changed 2026-09-14. A bare IBM-3278-2 is REJECTED by MVS 3.8j
+  // TSO with IKT00405I and no logon -- documented at the top of this file since stage 2a and
+  // reproduced live through the GUI. Both live systems accept -E, so the flagless default is
+  // the one that works on both. `-model 3278-2` still asks for the bare type.
+  //
+  // AN EARLIER COMMENT HERE CLAIMED THIS WAS LOAD-BEARING FOR THE VM/370 CONFORMANCE
+  // COMPARISON. It is not, and the difference was measured rather than argued: flipping this
+  // constant fails exactly four expectation tests, while conformance.test.ts and
+  // golden.test.ts pass untouched. The offline comparison filters negotiation out of what it
+  // diffs (conformance.test.ts, `isNegotiation`). The live script (conformance-vm.txt) has
+  // TWO invocations that must be checked separately: the s3270 reference line was already
+  // pinned to `-model 3278-2`, but our client's line originally passed no `-model` at all --
+  // that gap was the one place the audit for this change first missed and then had to fix, by
+  // adding `-model 3278-2` to our line too. Both invocations now name model 2 explicitly, so
+  // neither depends on this constant.
   if (opts.model === undefined) return TERMINAL_TYPE;
   return lookUpModel(opts)!.ttype;
 }

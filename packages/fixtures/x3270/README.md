@@ -6,11 +6,13 @@
   `conformance.test.ts` picks up `*.trace` files here automatically and runs
   against this one, so the test is live rather than skipped.
 - `tso-query-reply.txt` — **not** a conformance capture. It is the Read Partition
-  (Query) / Query Reply exchange that s3270 performs with MVS 3.8j TK5's TSO, kept
-  as an implementation reference for work we have not done yet. The `.txt`
-  extension is deliberate: it keeps this file out of the `*.trace` glob, because it
-  is an excerpt of two records rather than a whole session and would be meaningless
-  as a replay fixture.
+  (Query) / Query Reply exchange that s3270 performs with MVS 3.8j TK5's TSO. Query
+  Reply landed in stage 2a, and a live GUI session has since logged on to TSO at 43
+  rows — which TSO only reaches after this Query is answered — so this is kept as
+  the byte-level reference for what a real, accepted answer looks like on this host,
+  not as a description of a gap. The `.txt` extension is deliberate: it keeps this
+  file out of the `*.trace` glob, because it is an excerpt of two records rather than
+  a whole session and would be meaningless as a replay fixture.
 
 ## What belongs here
 

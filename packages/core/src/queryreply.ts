@@ -354,8 +354,8 @@ const implicitPartition: Capability = {
  * oversight, and the reason is structural: x3270's mode3279 is a MODEL choice
  * that also selects its terminal type ("327" + '9' vs '8', model.c:135-137,
  * telnet.c:2104), so for x3270 the negotiation and the rendering travel
- * together. Ours do not. TERMINAL_TYPE is IBM-3278-2 regardless, and render.ts's
- * mode3279 is a per-render presentation flag with no path into this module.
+ * together. Ours do not. TERMINAL_TYPE is IBM-3278-2-E regardless of mode3279,
+ * which is a per-render presentation flag with no path into this module.
  * Gating on it would make the same session advertise different colour support
  * depending on a rendering option the host cannot see.
  *
