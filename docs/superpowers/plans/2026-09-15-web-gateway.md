@@ -231,6 +231,16 @@ export { parseBdf } from './bdf.js';
 **Check the last two export names against the real files and correct them if they differ** —
 `cg.ts` and `bdf.ts` were written before this plan and their export names are what they are.
 
+**AS BUILT: `cg.ts` exports `ebcdicToCg` and `CG_BOXSOLID`, NOT `EBCDIC_TO_CG`.** `parseBdf` was
+right. Two further things this plan missed, both found by running it:
+
+- **`packages/gui/assets/3270.bdf` must move to `packages/canvas/assets/`.** `build-atlas.mjs`,
+  `bdf.test.ts` and `cg.test.ts` all reach it as `../assets/3270.bdf` relative to themselves, so
+  moving it keeps all three working with zero content edits — which is itself the argument that the
+  font belongs to `canvas`. Leaving it behind breaks the canvas build and two test files.
+- **`packages/gui/package.json`'s build script must drop `&& node scripts/build-atlas.mjs`**, since
+  that script moved. Otherwise `npm run build` fails on a missing file.
+
 - [ ] **Step 5: Update `packages/gui`**
 
 `packages/gui/package.json` — add the dependency:
@@ -280,8 +290,13 @@ still true and still load-bearing.
 
 - [ ] **Step 6: Update the root tsconfig's project references**
 
-Add `{ "path": "packages/canvas" }` to the root `tsconfig.json` references, and add `canvas` to the
-`typecheck` script's project list in the root `package.json`, before `gui`:
+**AS BUILT — this step's first clause has no target: there is no root `tsconfig.json`**, only
+`tsconfig.base.json`, which packages extend and which carries no `references`. Reference
+registration is therefore fully covered by `packages/gui/tsconfig.json`'s `../canvas` entry plus the
+root `typecheck` project list below. **Also required and missing from this plan: `npm install`**, to
+create the `node_modules/@tn3270/canvas` symlink — `@tn3270/canvas` does not resolve without it.
+
+Add `canvas` to the `typecheck` script's project list in the root `package.json`, before `gui`:
 
 ```json
     "typecheck": "tsc --build packages/core packages/frontend packages/canvas packages/cli packages/tui packages/gui"
@@ -308,6 +323,26 @@ node packages/gui/scripts/keys.mjs
 Expected: `2/2 goldens matched` and `ok 15 chords, 13 actions in order`. **A moved golden is a
 STOP-and-report condition — never run `--update`.** If `keys.mjs` refuses with `dist/ is OLDER than
 src/`, that is the documented `git`-mtime case: `npx tsc --build --force packages/gui`.
+
+- [ ] **Step 8b: THE MOVE BLINDS `keys.mjs`'s STALENESS GUARD — repair it**
+
+**Found while running this task, and it is the defect with teeth.** `packages/gui/scripts/keys.mjs`
+refuses to run when `dist/` is older than `src/`, and its docstring records why: `dist/keys.js` was
+once found a day older than `src/keys.ts`. But it compared **`gui/dist` against `gui/src`**, and
+`keys.ts` and `renderer.ts` — the renderer's `keydown` listener and `actionForKey`, which are this
+harness's *entire unique coverage* — have just moved to `canvas`. Post-move it would report `ok` over
+exactly the stale code it exists to catch.
+
+Make it iterate both packages, comparing **per package** rather than one `max` across both: a fresh
+`gui` build would otherwise mask a stale `canvas` one, because `gui`'s newer output would win the max
+over `canvas`'s newer source. Re-pin `packages/gui/test/keys-harness-flags.test.ts` to the stronger
+expression — pin the ITERATION over both package names, not two comparisons, so `canvas` cannot be
+dropped while the regex still matches — and prove it: `touch packages/canvas/src/keys.ts`, confirm
+the harness refuses naming `canvas`, then `npx tsc --build --force packages/canvas packages/gui` and
+confirm green again.
+
+This is in scope: it is a direct consequence of the move, and leaving it would silently disarm a
+guard whose failure was deliberately observed one branch ago.
 
 - [ ] **Step 9: Prove the moved files are byte-identical**
 
