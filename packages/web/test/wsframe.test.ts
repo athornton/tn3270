@@ -79,6 +79,54 @@ describe('parseFrame', () => {
     expect(() => parseFrame(buf)).toThrow(/mask/i);
   });
 
+  it('blames the MASK, not the length, when an unmasked frame has an extended length header', () => {
+    // The mask bit is bit 7 of byte 1, so it is known the moment byte 1 is in hand -- it does not
+    // depend on the extended length at all. If the length is parsed first, an unmasked frame is
+    // diagnosed by whatever those length bytes happen to say: bytes that are really PAYLOAD get
+    // read as a 64-bit length, and the reported fault becomes `frame length out of range`.
+    //
+    // WHY THIS MATTERS EVEN THOUGH REAL CLIENTS ALWAYS MASK: this message is what a person reads
+    // when the client is hand-rolled, half-finished or misbehaving -- exactly the situation in
+    // which someone is staring at this module. `frame length out of range` sends them to the wrong
+    // end of the problem entirely, hunting an oversized frame that does not exist, when the actual
+    // fault is one bit in the second byte.
+    //
+    // A truncated header is the same story: for an UNMASKED frame there is nothing to wait for, so
+    // reporting the mask beats returning `undefined` and stalling until more bytes arrive.
+    const unmaskedExtended: readonly [string, Buffer][] = [
+      // Complete 64-bit length whose top bit is set; the length bytes here are really payload.
+      ['64-bit header', Buffer.concat([Buffer.from([0x80 | OPCODE.TEXT, 127]),
+        Buffer.from([0xff, 0, 0, 0, 0, 0, 0, 0])])],
+      ['64-bit header, truncated', Buffer.from([0x80 | OPCODE.TEXT, 127, 0, 0, 0])],
+      ['16-bit header, truncated', Buffer.from([0x80 | OPCODE.TEXT, 126, 0x01])],
+      ['16-bit header, complete', Buffer.from([0x80 | OPCODE.TEXT, 126, 0x01, 0x00])],
+    ];
+    // Soft, so a regression names EVERY header shape that stopped blaming the mask rather than
+    // stopping at the first and hiding the rest -- the same "fail near the cause" reason the
+    // boundaries above are each spelled out.
+    for (const [what, buf] of unmaskedExtended) {
+      expect.soft(() => parseFrame(buf), what).toThrow(/mask/i);
+    }
+  });
+
+  it('still returns undefined for a MASKED frame whose header is split across reads', () => {
+    // The other half of the case above, and the one a real client hits constantly: a MASKED frame
+    // that arrived in pieces is a TCP read boundary, not a protocol error. Throwing here would
+    // drop legitimate traffic, so every one of these must still be "come back with more bytes".
+    const partialMasked: readonly [string, Buffer][] = [
+      ['16-bit header, truncated', Buffer.from([0x80 | OPCODE.BINARY, 0x80 | 126, 0x01])],
+      ['16-bit header, no masking key', Buffer.from([0x80 | OPCODE.BINARY, 0x80 | 126, 0x01, 0x00])],
+      ['64-bit header, truncated', Buffer.from([0x80 | OPCODE.BINARY, 0x80 | 127, 0, 0, 0])],
+      ['64-bit header, no masking key', Buffer.concat([Buffer.from([0x80 | OPCODE.BINARY, 0x80 | 127]),
+        Buffer.from([0, 0, 0, 0, 0, 1, 0, 0])])],
+      ['key present, payload short', Buffer.concat([Buffer.from([0x80 | OPCODE.BINARY, 0x80 | 5]),
+        mask, Buffer.from('ab')])],
+    ];
+    for (const [what, buf] of partialMasked) {
+      expect.soft(parseFrame(buf), what).toBeUndefined();
+    }
+  });
+
   it('reports a non-final frame so the caller can reassemble', () => {
     const f = parseFrame(clientFrame(OPCODE.TEXT, Buffer.from('par'), false))!;
     expect(f.fin).toBe(false);

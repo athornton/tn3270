@@ -38,6 +38,15 @@ export function parseFrame(buf: Buffer): Frame | undefined {
   let len = buf[1]! & 0x7f;
   let off = 2;
 
+  // CHECKED BEFORE THE LENGTH, DELIBERATELY. The mask bit is bit 7 of byte 1, so it is already
+  // known here and this test has no dependency on the extended length. Do it afterwards and an
+  // unmasked frame gets diagnosed by bytes that are really PAYLOAD read as a length -- reported as
+  // `frame length out of range`, which sends whoever is debugging a hand-rolled or half-finished
+  // client hunting an oversized frame that does not exist instead of one bit in the second byte.
+  // An unmasked frame is also never worth waiting for more bytes on, so this precedes the
+  // short-buffer returns below rather than following them.
+  if (!masked) throw new Error('client frame is not masked, which RFC 6455 §5.1 requires');
+
   if (len === 126) {
     if (buf.length < off + 2) return undefined;
     len = buf.readUInt16BE(off);
@@ -51,7 +60,6 @@ export function parseFrame(buf: Buffer): Frame | undefined {
     off += 8;
   }
 
-  if (!masked) throw new Error('client frame is not masked, which RFC 6455 §5.1 requires');
   if (buf.length < off + 4) return undefined;
   const key = buf.subarray(off, off + 4);
   off += 4;
