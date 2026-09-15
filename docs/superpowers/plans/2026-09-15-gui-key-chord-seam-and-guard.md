@@ -662,6 +662,11 @@ and replace the `env:` block inside `run()` with:
       TN3270_GUI_REPLAY: kase.trace,
       TN3270_GUI_SHOT: shot,
       TN3270_GUI_SHOT_MS: '2500',
+      // CLEARED, not merely unset by us: this env is inherited from the caller's shell, and
+      // a stray TN3270_GUI_KEYS there would type into the goldens AND stretch their settle
+      // to max(KEYS_MS, SHOT_MS). A golden that silently depends on the operator's
+      // environment is not a golden. Found while measuring the settle floor in Task 3.
+      TN3270_GUI_KEYS: '',
     }),
 ```
 
