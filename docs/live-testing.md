@@ -1699,13 +1699,20 @@ this sandbox has no real keyboard and did not run the packaged app. PA3 was not 
 
 **CLOSED BY HAND 2026-09-15, and the distinction matters:** the author reported PA1 working
 from a real keypress against MVS on their own Mac. So the local-input link is now known good
-on that machine, and **nothing in `npm test` knows it.** `keys.test.ts` drives a synthetic
-key-like object, and the `TN3270_GUI_KEYS` seam **cannot send a modifier chord at all** —
-`main.ts`'s `sendInputEvent` call passes no `modifiers` array. So this link has a live
-witness but no regression guard: if it broke tomorrow the suite would stay green. The
-2026-09-14 GUI section proved the analogous claim for ordinary typed keys via that same
-seam; teaching it modifiers would close this properly, and is the obvious next small job
-if PA regressions ever appear.
+on that machine. The 2026-09-14 GUI section had already proved the analogous claim for
+ordinary typed keys through the `TN3270_GUI_KEYS` seam.
+
+**SUPERSEDED THE SAME DAY, and the superseded text is kept because it names the gap:** the
+rest of this paragraph used to read *"nothing in `npm test` knows it. `keys.test.ts` drives
+a synthetic key-like object, and the `TN3270_GUI_KEYS` seam could not express a modifier
+chord at all — `main.ts`'s `sendInputEvent` call passes no `modifiers` array. So this link
+has a live witness but no regression guard: if it broke tomorrow the suite would stay green
+… teaching it modifiers would close this properly, and is the obvious next small job if PA
+regressions ever appear."* **The seam sends chords now, and `packages/gui/scripts/keys.mjs`
+drives 15 of them through real Chromium key events** — see *The GUI's key chords, and which
+spellings Chromium accepts*, at the end of this file. Read that section rather than this
+paragraph before quoting what the guard covers: it turned out to cover the renderer/IPC
+plumbing and NOT the mapping, which `keys.test.ts` was already guarding all along.
 
 ### What remains unverified, and why
 
@@ -1713,8 +1720,231 @@ if PA regressions ever appear.
   was measured here, to avoid arming the VM reconnect trap).
 - **The GUI's own `Alt-1`/`Alt-2` key bindings, via a real keyboard in the packaged app**
   (see above) — the AID-byte-to-host-reaction link is closed; the physical-key-to-AID
-  link inside a packaged app on the user's own machine is not.
+  link inside a packaged app on the user's own machine is not. Narrowed since, not closed:
+  the chord harness below drives a real Chromium key event through the renderer, but it
+  injects it with `sendInputEvent` under Xvfb, so a physical keyboard and a packaged `.app`
+  remain untested — and the Mac spelling behaviour is reasoned, not measured.
 - **A cell-by-cell colour comparison against `zti`'s truecolor output for the new
   schemes** — the 2026-08-25 section already marks the equivalent check PARTIAL for the
   default scheme, for reasons (relative-cursor curses app, whole-stream colour tally)
   that apply here unchanged; not repeated for `3279`/`green`.
+
+## The GUI's key chords, and which spellings Chromium accepts — verified 2026-09-15
+
+**The `TN3270_GUI_KEYS` seam sends modifier chords now, and a committed harness drives 15 of
+them through real Chromium key events.** This closes the soft spot the Task 11 section above
+left open. Before it, the seam could not express a chord at all, so PA1-3 (`Alt`+digit), Attn
+(`Ctrl+A`), Clear (`Ctrl+C`) and PF13 (`Shift+F1`) were unreachable through it — and no
+committed harness drove the seam at all, live witness or not.
+
+Everything below was measured on 2026-09-15 under Xvfb, `--no-sandbox --disable-gpu`, against
+the Electron this tree installs: `packages/gui/package.json` asks for `^44.0.0` and
+`node_modules/electron` reports **44.3.0**, which is the binary every run here used.
+(`keyspec.ts`, its test and the design doc named 44.0.0 -- the declared range rather than the
+resolved build -- until `f33e7e6` corrected all three. Nothing below is version-sensitive as far as anyone has
+measured, but a chord that stops arriving after an upgrade should be re-probed with the table
+below rather than debugged in the mapper.)
+
+### `keys.mjs` is NOT part of `npm test` — run it by hand
+
+```bash
+node packages/gui/scripts/keys.mjs
+```
+
+```
+ok       15 chords, 13 actions in order
+         negatives asserted: Ctrl+Z, F13
+```
+
+It spawns Electron, so it sits outside the fast gate exactly as `packages/gui/scripts/shot.mjs`
+and `packages/tui/scripts/pty-smoke.py` do: **`npm test` never runs it**, and a green suite
+therefore says nothing at all about the chords. What `npm test` does carry is
+`packages/gui/test/keys-harness-flags.test.ts` (12 tests), which reads `keys.mjs` as TEXT and
+pins the things whose absence would disable it silently — the argv constant *and* the spread
+that passes it, the replay-only wiring, at least one `Alt`+digit case, both negatives, and the
+ORDER of its three bail conditions. Same treatment `harness-flags.test.ts` gives
+`live-drive.py`, for the reason recorded there: a harness outside the gate is exempt from
+every change until somebody remembers it, and `pty-smoke.py` sat at 1 of 12 for two days
+proving it. Xvfb startup and the GL-less environment are now shared with `shot.mjs` through
+`packages/gui/scripts/xvfb.mjs`, so the traps in it cannot be re-learned separately.
+
+The run is a replayed trace against `127.0.0.1:1`, never a live host, and the case table
+covers every entry in `keys.ts`'s Ctrl table **except `Ctrl+]`**, which quits and would
+truncate the run — so a chord dropped from that table cannot hide.
+
+Suite with all of this in: **1352 tests in 55 files** (1340 in 54 before the pin file was
+added, 1328 in 53 before the branch). Both screenshot goldens still match without `--update`.
+
+### Which seam spellings Chromium accepts — the table, and why it is the finding
+
+`sendInputEvent` takes Electron **Accelerator** names, never DOM code names. Each `keyCode`
+was sent through the seam and logged by a `keydown` listener in the renderer:
+
+| seam spelling | what the renderer received | verdict |
+|---|---|---|
+| `1`, `2`, `3` | `key: '1'`, `code: 'Digit1'` | valid — and `code` is what the PA path matches on |
+| `Digit1` | `key: ''`, `code: ''`, `keyCode: 0` | **invalid, and SILENT** |
+| `Up` / `Down` / `Left` / `Right` | `key: 'ArrowUp'` etc. | valid |
+| `ArrowUp` | `key: ''`, `code: ''` | **invalid, and SILENT** |
+| `A` and `a` | both `key: 'a'` | the case of the spelling is IGNORED |
+| `Space` | a space | valid |
+| `Home` / `End` / `Delete` / `Backspace` / `Tab` / `Escape` / `Insert` | same as the spelling | valid |
+| `F1` / `F12` / `F13` | `key: 'F1'` etc. | valid; `F13` is a deliberate negative |
+| `]` | `key: ']'`, `code: 'BracketRight'` | valid |
+| `Alt+1` | `key: '1'`, `code: 'Digit1'`, `altKey: true` | valid — the gate the design needed |
+| `Ctrl+Z` | `key: 'z'`, `ctrlKey: true` | valid; a deliberate negative |
+
+**The consequence is the whole point: an invalid spelling is not refused, it is delivered as
+an EMPTY event.** `actionForKey` then returns null, no action is sent, the client still exits
+0, and a harness would still report success. **And the invalid spellings are exactly the ones
+a reader of our own keymap reaches for**, because that keymap is written in terms of `e.code`
+— `Digit1` is literally what the PA table matches on (`keys.ts`, and the reason is macOS:
+Option-1 reports `key === '¡'`). So `parseKeySpec` **throws** on anything matching
+`/^(Digit|Key|Numpad|Arrow)/` and names the valid form in the message. It deliberately does
+NOT translate `Digit1` into `1`, which would teach a spelling only our own harness accepts.
+
+Two smaller results from the same probe. The seam's old docstring example — the spec list
+`A,B,Enter` — types **"ab"**, not "AB", since the case of the spelling is dropped; the seam
+types lowercase unless `Shift+` is given, and the docstring now shows a chord instead. And
+**whether `Shift+A` yields a capital was NOT measured**: no case needs it, so nothing here
+assumes it either way.
+
+### What this guard proves, and what it does NOT — this CORRECTS the plan and the design doc
+
+**The plan and the spec both claimed that unbinding `PA_CODES` would leave `npm test` green,
+which is how the harness's unique value was to be demonstrated. That was false, and
+measurement caught it.** Unbinding `PA_CODES` reddens `npm test` too:
+
+```
+Tests  3 failed | 1349 passed
+```
+
+All three failures are in `packages/gui/test/keys.test.ts` — *satisfies the shared
+BINDING_INTENT table for every key it names*, *maps Alt+digit to PA1-3*, and *matches on
+e.code, because macOS Option-1 reports key "¡"*. The reason, obvious only in hindsight: the
+mutation is INSIDE `actionForKey`, which is exactly what those synthetic-`KeyLike` tests call.
+A PA2→PA3 transposition reddens `npm test` the same way (3 failures), and giving `Ctrl+Z` a
+binding reddens it (1).
+
+**The honest proof is a PLUMBING mutation.** Add `if (e.altKey) return;` to `renderer.ts`'s
+`keydown` listener — the original bug's shape, chords never reaching the mapper — and
+`npm test` stays **fully green at 1352 passed in 55 files** while `keys.mjs` fails all 13
+positions and exits 1. `actionForKey` is untouched and correct; the chords are simply dead in
+the real GUI. **That is this guard's first OBSERVED failure, and it settles the claim to make
+for it: the renderer `keydown` listener, the IPC hop and `ipcMain`'s dispatch — not the
+mapping, which `keys.test.ts` was already covering.** Anyone quoting `keys.mjs` as the guard
+on the PA *mapping* is quoting the retracted version of this claim.
+
+### The mapping mutations still taught two things
+
+- **The failure is cleanly localised, so this catches a realistic regression and not only
+  wholesale removal.** The PA2→PA3 transposition reports `FAIL at position 1`, expected
+  `pa 2`, actual `pa 3` — one position, not a cascade, and the offending chord is named.
+- **The comparison being ORDERED is load-bearing, not stylistic.** Binding `Ctrl+Z` is caught
+  because of it: the action it injected was `reset`, which already appears in the sequence
+  from `Ctrl+R`, so a set-of-sightings comparison would have seen **nothing new** and passed.
+  That retires "ordered comparison" as a matter of taste.
+
+### The action log is gated on REPLAY as well as the seam, and that is a privacy control
+
+`main.ts` logs each action at the `ipcMain` funnel — the one place every renderer action
+passes through, and the only observable consequence a PA key has in replay mode, since
+nothing is connected, `sendAID` throws `not connected` and `applyAction` swallows it.
+
+The gate is `SEAM.keys !== '' && SEAM.replay !== ''`, and **the second half is not tidiness.**
+A `type` action carries the text typed. Gating on seam-presence alone was wrong because
+`TN3270_GUI_KEYS` has been driven against a LIVE host before — this document's own *Typed
+input, proved end to end* section records typing `HERC01` at TK5's logon panel through that
+very seam. A replayed session cannot reach a host, so replay mode is what makes a logged
+keystroke impossible to be a credential; the seam variable alone says nothing about what is on
+screen. Found in code review, not by the author. Do not "simplify" it back to one variable —
+every caller sets both anyway, so the gate costs no coverage.
+
+### A refused spelling used to HANG, which read as a broken client
+
+`parseKeySpec` throws by design, and `maybeSendKeys` runs inside `app.whenReady()`'s promise,
+so the throw became an unhandled rejection and every step after it — including the keys-only
+quit path — never ran. MEASURED: `TN3270_GUI_KEYS=Digit1` printed the refusal and then SAT
+until it was killed. Confirmed independently with a standalone Electron repro: an unhandled
+rejection there does not crash the process, it leaves the window alive with nothing left to
+call `app.quit()`. Same shape as the `show: false` stall and the TLS-against-plaintext hang
+recorded elsewhere in this file — **a failure in Electron is usually a stall, not an error.**
+
+Now: **all specs are parsed BEFORE any is sent**, so a bad third spelling cannot half-deliver
+the first two (which would leave the action log looking like a mapping bug), and a refusal
+exits **2** with the valid form named on stderr, in about a second. `2` is this repo's
+usage-error code — `packages/cli/src/main.ts` and `packages/tui/src/main.ts` both use it for a
+bad argument, and a misspelled spec is the same kind of mistake.
+
+### Truncation on exit is real, not folklore
+
+Because a fixed sleep before `app.quit()` would have been exactly the sort of unmeasured
+number this code refuses. Writing ~5MB to a PIPE and exiting immediately:
+
+- with **no drain at all**, exactly **64000 bytes** arrived — one pipe buffer — and the last
+  line was LOST. Three runs out of three.
+- with `process.stdout.write('', cb)` and the exit moved into the callback, all **5000005
+  bytes** arrived. Three out of three.
+
+So an empty-chunk write does queue behind the pending ones, and it is sufficient on its own: a
+200ms sleep after the callback was tried and REMOVED, because 20 out of 20 full chord runs
+kept every `action:` line and the trailing `keys:` line with the callback alone. The seam's own
+output is a few hundred bytes and would survive regardless; the drain earns its place for the
+run that adds a longer chord list or a slower reader.
+
+### `tsc --build --dry` is NOT a staleness oracle
+
+`dist/` is what the harness runs, and nothing in the harness builds it — and `dist/keys.js`
+was found a day older than `src/keys.ts` in this tree during review. It happened to still
+agree, so those runs were honest, but **a mutation proof run against a stale `dist/` proves
+nothing**, which is the one thing this harness cannot afford.
+
+Two obvious checks were tried and both fail:
+
+- **`tsc --build --dry` reported "up to date" with `dist/keys.js` DELETED**, because `--build`
+  trusts its `.tsbuildinfo` rather than looking at the outputs.
+- **Comparing `dist/main.js` alone against the newest source is wrong and fails honest work**:
+  `tsc --build` re-emits only what changed, so editing `keys.ts` and rebuilding leaves
+  `main.js` at its old mtime, and no honest build would clear the red.
+
+So the harness compares the **newest output** (`.js`/`.cjs`, so `preload.cts`'s output counts —
+the IPC hop it implements is half of what the harness claims to cover) against the **newest
+`.ts` under `src/`**, and refuses before spawning Electron. One residual false red is
+documented in the code and worth knowing: a content-preserving `touch` leaves `tsc`
+legitimately emitting nothing, and then no ordinary build can restore the ordering — which is
+why the remedy line names `npx tsc --build --force` as the fallback. The trade is deliberate:
+a refusal costs a rebuild, a false pass costs a wrong belief about the PA keys.
+
+### A signal-killed client produced a FALSE PASS
+
+MEASURED with a fake client that printed the whole expected sequence plus `keys: sent` and
+then `kill -SEGV $$`: `spawnSync` reports `status: null`, `signal: 'SIGSEGV'`,
+`error: undefined` and **stdout INTACT**. The guard as first written — `status !== null &&
+status !== 0` — skipped that death outright, and the harness printed `ok` and exited 0. **A
+Chromium process is likelier to be killed than to exit non-zero**, and a timeout has the same
+shape (`status: null`, `signal: 'SIGTERM'`), so a regression that stopped the client quitting
+would have burned 120s and then said `ok`.
+
+Fixed with three bails in a pinned ORDER: `error` first, because ENOENT and a timeout both
+leave `status` null and `error.message` is then the only diagnosis of either (a missing
+`electron` gives ENOENT with both streams empty); `signal` next, which carries no exit code to
+report; `status` last and unguarded, safe once neither null case can reach it. All three come
+before the "did the seam run at all" check, because the everyday failure is a bad spelling in
+the case table, which exits 2 having sent nothing — the explanation is already on stderr, and
+reporting the silence instead would read as a broken client. Found in code review, after the
+author had already tried to close this exact gap once.
+
+### Two anticipated risks: one did not materialise, one will bite on upgrade
+
+- **`Ctrl+A` is NOT swallowed by Electron's default application menu.** This was an
+  anticipated risk that could have forced a chord to be dropped from the case table; it did
+  not, and Attn is asserted like every other chord.
+- **`renderer[3]` is the error level on a scale Electron has DEPRECATED.** `0..3` is verbose,
+  info, warning, error, and the harness fails a run in which the renderer threw by filtering
+  on that literal — a renderer exception otherwise presents as a window that receives keys and
+  does nothing with them. Electron 44's own typings mark the numeric argument `@deprecated` in
+  favour of an event object, and a run prints that notice on stderr, so **the literal will
+  drift silently on an upgrade**: the filter would just stop matching. It cannot be loosened
+  to `renderer[` either, because level 2 arrives on EVERY run here as Chromium's own CSP
+  warning and would fail every run. `shot.mjs` filters on the same literal; if the level
+  moves, that is the other place to fix.

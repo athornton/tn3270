@@ -6,10 +6,11 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## Where things stand
 
-Branch **`main`** — the only branch, local and remote — at `908ab9c`, pushed and in sync.
-**1328 tests passing in 53 files**, `npm run typecheck` clean, `npm run build` works,
-`packages/tui/scripts/pty-smoke.py` 12 of 12, both GUI goldens matching without `--update`,
-working tree clean.
+Branch **`gui-key-chord-guard`**, off **`main`** at `52a35b2` — `main` is pushed and in sync,
+and the counts below are this branch's. **1352 tests passing in 55 files**, `npm run typecheck`
+clean, `npm run build` works, `packages/tui/scripts/pty-smoke.py` 12 of 12, both GUI goldens
+matching without `--update`, `packages/gui/scripts/keys.mjs` reporting 15 chords and 13 actions
+in order, working tree clean.
 
 **MOST RECENT WORK, merged 2026-09-15 as `43ec70d`:** four palette schemes in
 `packages/frontend/src/palette.ts` behind a new `-scheme` flag (`default`, `3279`, `x3270`,
@@ -19,9 +20,28 @@ in both front ends, which had been implemented in `core` and reachable from no k
 `IBM-3278-2-E`, since MVS TSO rejects the bare form with `IKT00405I`. Design and plan are
 `docs/superpowers/specs/2026-09-14-shared-palette-and-unreachable-keys-design.md` and
 `docs/superpowers/plans/2026-09-14-palette-schemes-and-unreachable-keys.md`; the live results
-are in `docs/live-testing.md`. **The one known soft spot: PA's Alt-digit plumbing works — the
-author confirmed it by hand — but nothing in `npm test` guards it, because the
-`TN3270_GUI_KEYS` seam cannot send a modifier chord.**
+are in `docs/live-testing.md`.
+
+**THAT WORK'S ONE SOFT SPOT IS NOW CLOSED, on branch `gui-key-chord-guard`.** The
+`TN3270_GUI_KEYS` seam sends modifier chords (`packages/gui/src/keyspec.ts` parses the
+spellings), and `packages/gui/scripts/keys.mjs` is a committed harness that drives **15 chords
+through real Chromium key events and asserts 13 actions in order, plus two required
+absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **Be precise about what
+is newly guarded:** the Alt-digit *mapping* was already unit-tested — `keys.test.ts` calls
+`actionForKey` directly, and unbinding `PA_CODES` reddens `npm test` too (3 failures) — so what
+this harness adds is the **renderer `keydown` listener, the IPC hop and `ipcMain`'s dispatch**,
+the plumbing the original bug lived in. **Its failure has been OBSERVED, not assumed:** adding
+`if (e.altKey) return;` to `renderer.ts`'s `keydown` listener leaves `npm test` fully green at
+1352 and reddens only `keys.mjs`, which fails all 13 positions.
+
+**`keys.mjs` is NOT part of `npm test`** — it spawns Electron, so run it by hand
+(`node packages/gui/scripts/keys.mjs`, expecting `ok       15 chords, 13 actions in order`),
+like `shot.mjs` and `pty-smoke.py`. What `npm test` carries is
+`packages/gui/test/keys-harness-flags.test.ts`, which pins that harness's argv, cases and
+pass conditions as text so it cannot rot unnoticed. **Read `docs/live-testing.md`, *The GUI's
+key chords, and which spellings Chromium accepts*, before touching the seam:** an invalid
+`keyCode` is not refused by Chromium, it is delivered as an EMPTY event, and the invalid
+spellings are the ones our own keymap makes natural.
 
 **STAGE 2b (TN3270E) IS COMPLETE, AND ITS VERIFICATION IS QUALIFIED.** All 15 plan
 tasks are done. The option, DEVICE-TYPE/FUNCTIONS, the 5-byte header, SNA responses,

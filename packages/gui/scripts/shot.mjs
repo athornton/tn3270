@@ -23,10 +23,11 @@
  *
  *     node packages/gui/scripts/shot.mjs [--update]
  */
-import { spawnSync, spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guiEnv } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
@@ -67,42 +68,26 @@ const CASES = [
 
 const update = process.argv.includes('--update');
 
-/** Start Xvfb if there is no display, and PROVE it came up before trusting DISPLAY. */
-function ensureDisplay() {
-  if (process.env.DISPLAY) return process.env.DISPLAY;
-  const gui = join(process.env.HOME ?? '', 'micromamba', 'envs', 'gui');
-  const sock = '/tmp/.X11-unix/X99';
-  if (!existsSync(sock)) {
-    // Detached, because a backgrounded child dies with the shell that started it -- and the
-    // symptom is Electron reporting "Missing X server" WITH DISPLAY set, which reads as
-    // misconfiguration rather than as a dead server. Cost two runs to spot.
-    spawn(join(gui, 'bin', 'Xvfb'), [':99', '-screen', '0', '1280x1024x24'],
-      { detached: true, stdio: 'ignore', env: { ...process.env, LD_LIBRARY_PATH: join(gui, 'lib') } })
-      .unref();
-    const deadline = Date.now() + 15000;
-    while (!existsSync(sock) && Date.now() < deadline) spawnSync('sleep', ['0.2']);
-  }
-  if (!existsSync(sock)) throw new Error('Xvfb did not create /tmp/.X11-unix/X99');
-  return ':99';
-}
-
 function run(kase) {
-  const gui = join(process.env.HOME ?? '', 'micromamba', 'envs', 'gui');
   const shot = join('/tmp', `tn3270-shot-${kase.name}.png`);
   const result = spawnSync(electron, [main, ...ARGV, ...(kase.extraArgv ?? []), kase.host], {
     encoding: 'utf8',
     timeout: 120000,
-    env: {
-      ...process.env,
-      DISPLAY: ensureDisplay(),
-      LD_LIBRARY_PATH: join(gui, 'lib'),
-      FONTCONFIG_PATH: join(gui, 'etc', 'fonts'),
-      FONTCONFIG_FILE: join(gui, 'etc', 'fonts', 'fonts.conf'),
+    env: guiEnv({
       TN3270_GUI_REPLAY: kase.trace,
       TN3270_GUI_SHOT: shot,
       TN3270_GUI_SHOT_MS: '2500',
-    },
+      // CLEARED, not merely unset by us: this env is inherited from the caller's shell, and
+      // a stray TN3270_GUI_KEYS there would type into the goldens AND stretch their settle
+      // to max(KEYS_MS, SHOT_MS). A golden that silently depends on the operator's
+      // environment is not a golden. Found while measuring the settle floor in Task 3.
+      TN3270_GUI_KEYS: '',
+    }),
   });
+  // Level 3 is 'error' in Electron's 0..3 console levels; level 2 (its CSP warning) arrives on
+  // every run, so this cannot be loosened to `renderer[`. The numeric level is deprecated in
+  // Electron 44's typings and will drift SILENTLY on upgrade -- keys.mjs carries the same
+  // filter and the same note, so fix both together.
   const rendererErrors = (result.stdout ?? '').split('\n').filter((l) => l.startsWith('renderer[3]'));
   return { shot, hash: `${shot}.sha256`, rendererErrors, stdout: result.stdout ?? '' };
 }

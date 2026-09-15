@@ -100,7 +100,7 @@ Electron.
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1283 tests, 51 files
+npm test           # 1352 tests, 55 files
 npm run typecheck
 ```
 
@@ -153,12 +153,17 @@ should not be merged back together:** the CLI's `PA(n)` command makes the identi
 `sendAID` call the GUI's `Alt-1`/`Alt-2` bindings make, and driving it against MVS's ISPF
 got a real, quoted, distinct reaction to each — `ISP088E ... TERMINATED DUE TO ATTENTION
 INTERRUPT` for PA1, a bare `READY` redisplay for PA2 — so our AID bytes and the host's
-reaction to them are settled. The local half is settled too, but by **hand, not by a test**:
-the author reported PA1 working from a real keypress in the app against MVS on 2026-09-15.
-`actionForKey` maps Alt+digit and is unit-tested, but only against a synthetic key-like
-object — **no automated test drives a real Chromium `KeyboardEvent`**, and the
-`TN3270_GUI_KEYS` seam cannot send a modifier chord as written, so nothing in `npm test`
-would notice if that plumbing broke again. Closing that is a small change to the seam.
+reaction to them are settled. The local half is settled too — first by **hand**: the author
+reported PA1 working from a real keypress in the app against MVS on 2026-09-15, and now by a
+guard as well. `actionForKey` maps Alt+digit and is unit-tested against a synthetic key-like
+object; the plumbing from a real keypress to that mapper — the renderer's `keydown` listener,
+the IPC hop,
+`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **15 chords as real
+Chromium key events and asserts the 13 actions that must arrive, in order, plus two that must
+not**. It is **not part of `npm test`** (it spawns Electron): run it by hand,
+`node packages/gui/scripts/keys.mjs`, as you would `shot.mjs` or `pty-smoke.py`. `npm test`
+only pins its invocation. Its failure has been observed rather than assumed — breaking the
+renderer's `keydown` listener leaves the suite green and reddens only the harness.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
@@ -564,7 +569,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1283 tests, 51 files |
+| `npm test` | **pass** — 1352 tests, 55 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
