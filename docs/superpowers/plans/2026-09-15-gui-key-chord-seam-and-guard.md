@@ -1065,11 +1065,21 @@ Expected: `FAIL at position 0`, expecting `pa 1` and finding `attn`, and `exit=1
 the actual output in the commit message of Task 8's docs commit — a guard's first observed
 failure is worth quoting.
 
-- [ ] **Step 3: Confirm `npm test` alone would NOT have caught it**
+- [ ] **Step 3: Find out whether `npm test` alone would have caught it**
 
 Run: `cd ~/git/tn3270 && npm test 2>&1 | tail -5`
-Expected: still all green with the PA keys unbound. This is the gap being closed, and it is
-worth seeing once: `keys.test.ts` builds a synthetic `KeyLike` and cannot notice.
+
+**MEASURED, and this step's original expectation was WRONG — it said "still all green".**
+`npm test` goes RED: `Tests 3 failed | 1349 passed`, all three in `packages/gui/test/keys.test.ts`
+(`satisfies the shared BINDING_INTENT table`, `maps Alt+digit to PA1-3`, and `matches on
+e.code, because macOS Option-1 reports key "¡"`). The reason is simple in hindsight: the
+mutation is INSIDE `actionForKey`, which is exactly what those synthetic-`KeyLike` tests call.
+The plan's claim that a synthetic object "cannot notice" confused the mapping with the
+plumbing.
+
+So this mutation shows the guard catches the obvious case; it does NOT show incremental value
+over `npm test`. **The mutation that does is Step 8 below**, and that is the one to quote in
+the docs.
 
 - [ ] **Step 4: Revert, rebuild, and confirm green**
 
@@ -1096,7 +1106,42 @@ Expected: an error naming `Digit1` and telling you to use `1`, and **no** `actio
 the refusal happens before Chromium is asked for an empty event. The process must **exit 2
 promptly**, not hang: that error path was itself a defect found while implementing Task 3
 (an unhandled rejection in `app.whenReady()`'s promise), so it is worth re-confirming here
-rather than assuming.
+rather than assuming. Measured: exit 2 in about 1 second.
+
+- [ ] **Step 6: A subtler break than deletion — the PA2→PA3 transposition**
+
+Change `Digit2` in `PA_CODES` to `{ kind: 'pa', n: 3 }`, rebuild, run the harness.
+**Measured: CAUGHT, and cleanly localised** — `FAIL at position 1`, expected `pa 2`, actual
+`pa 3`, one position rather than a cascade. A guard that only catches wholesale removal would
+be much weaker than one that catches a transposition, which is the realistic regression.
+Revert with `git checkout`.
+
+- [ ] **Step 7: Prove the two NEGATIVE cases are load-bearing**
+
+Add `z: { kind: 'reset' }` to the `CTRL` table, rebuild, run the harness. **Measured: CAUGHT**
+— an extra `reset` appears at position 7 and shifts everything after it, ending in
+`FAIL at position 13 / expected (nothing) / actual [["kind","enter"]]`. Note WHY this works:
+the injected action is `reset`, which legitimately appears elsewhere in the sequence from
+`Ctrl+R`, so a set-of-sightings comparison would have seen **nothing new**. The ORDERED
+comparison is what makes the negative bite. Revert.
+
+- [ ] **Step 8: THE mutation that justifies this harness — break the PLUMBING, not the mapping**
+
+Steps 1, 6 and 7 all mutate the mapping table, and all three are caught by `npm test` as well
+(see Step 3). Mutate the path between a real keypress and the mapper instead. In
+`packages/gui/src/renderer.ts`'s `keydown` listener, add one line:
+
+```ts
+window.addEventListener('keydown', (e) => {
+  if (e.altKey) return;   // TEMPORARY MUTATION PROOF -- revert with git checkout
+  const action = actionForKey(e);
+```
+
+Rebuild and run both. **Measured: `npm test` stays FULLY GREEN at 1352 passed in 55 files,
+while `keys.mjs` fails all 13 positions and exits 1.** `actionForKey` is untouched and
+correct; the chords are simply dead in the real GUI, and only the harness notices. **This is
+the guard's first observed failure in the sense that matters, and it is what Task 8 should
+quote.** Revert with `git checkout packages/gui/src/renderer.ts`, rebuild, and confirm green.
 
 ---
 

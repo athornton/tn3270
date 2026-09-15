@@ -13,11 +13,20 @@
  * swallows it: a PA key has NO other observable consequence. Pixels would pin an absence.
  * `main.ts` logs each action at the `ipcMain` funnel while this seam is active.
  *
- * ## WHAT IT PROVES THAT keys.test.ts CANNOT
+ * ## WHAT IT PROVES THAT keys.test.ts CANNOT -- AND WHAT IT DOES NOT
  *
- * That test hands `actionForKey` a synthetic object. This drives Chromium's own event
- * pipeline, so it covers the renderer's `keydown` listener, the IPC hop and `ipcMain` --
- * the links that were broken when the PA keys were unreachable, and which no unit test saw.
+ * MEASURED 2026-09-15, and the first draft of this comment had it wrong. Breaking the
+ * MAPPING is caught by both: unbind `PA_CODES` and `keys.test.ts` reddens too, because it
+ * calls `actionForKey` directly, which is where the mapping lives. Same for a PA2->PA3
+ * transposition and for giving `Ctrl+Z` a binding.
+ *
+ * What ONLY this harness catches is the PLUMBING between a real keypress and that mapper.
+ * Proof, run as a mutation: add `if (e.altKey) return;` to `renderer.ts`'s `keydown`
+ * listener -- the original bug's shape, chords never reaching the mapper -- and `npm test`
+ * stays FULLY GREEN at 1352 while this harness fails all 13 positions. `actionForKey` is
+ * untouched and correct; the keys are simply dead in the real GUI.
+ *
+ * So the claim to make for this file is the renderer/IPC/`ipcMain` path, not the mapping.
  *
  *     node packages/gui/scripts/keys.mjs
  */

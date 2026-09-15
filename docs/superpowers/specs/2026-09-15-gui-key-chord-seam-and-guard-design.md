@@ -185,6 +185,29 @@ comment out `PA_CODES` in `keys.ts` (or its lookup in `actionForKey`), rebuild, 
 already found one test that was unfalsifiable and one that passed vacuously against an
 unimplemented branch; a guard whose failure has never been seen is in that family.
 
+**CORRECTED BY MEASUREMENT, 2026-09-15 — the mutation above does NOT show what this design
+claimed it would.** Unbinding `PA_CODES` reddens `npm test` as well: `keys.test.ts` calls
+`actionForKey` directly, and that is where the mapping lives, so three of its tests fail. The
+same is true of a PA2→PA3 transposition (3 failures) and of giving `Ctrl+Z` a binding (1).
+**So no mapping-table mutation demonstrates anything this harness catches that the unit tests
+do not**, and quoting one as proof of incremental value would be a false claim of exactly the
+kind this repo has shipped before.
+
+**The honest proof is a PLUMBING mutation.** Add `if (e.altKey) return;` to `renderer.ts`'s
+`keydown` listener — the original bug's shape, chords never reaching the mapper — and
+`npm test` stays **fully green at 1352** while `keys.mjs` fails all 13 positions. That is the
+gap: the renderer's own listener, the IPC hop and `ipcMain`, none of which a synthetic
+`KeyLike` can reach. The mapping mutations remain worth running, but as a demonstration that
+the guard also catches the obvious case — not as the argument for its existence.
+
+Two further mutations worth keeping, because they answer questions the obvious one does not:
+the **PA2→PA3 transposition** proves the guard catches a realistic regression rather than only
+wholesale removal (it reports one position, not a cascade); and **binding `Ctrl+Z`** proves the
+negatives are load-bearing. The second is subtler than it looks — the injected action is
+`reset`, which legitimately appears elsewhere in the sequence from `Ctrl+R`, so a
+set-of-sightings comparison would have seen nothing new. **The ordered comparison is what makes
+the negative bite**, which retires it as a stylistic choice.
+
 A second mutation worth one run: change a seam spelling to `Digit1` and confirm the parser
 refuses it *before* Electron starts, rather than the run passing with a missing action.
 
