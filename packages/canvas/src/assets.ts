@@ -33,9 +33,38 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
   'renderer.js', 'blit.js', 'keys.js',
 ]);
 
-/** Read the baked atlas. Throws if the package was not built. */
+/**
+ * Read the baked atlas. Throws NAMING THE BUILD when the package was not built.
+ *
+ * ## A SCOPED BUILD OF A CONSUMER LEAVES THE ATLAS UNBUILT
+ *
+ * MEASURED 2026-09-15, from a clean tree: `npm run build -w @tn3270/gui` EXITS 0 and fills
+ * `packages/canvas/dist` with compiled `.js` -- and no `atlas.json` or `atlas.bin`. Project
+ * references chain TYPESCRIPT COMPILATION and nothing else: `tsc --build` follows
+ * `gui`'s reference to this package and compiles it, but it has no idea this package's own
+ * `build` script has a SECOND step (`node scripts/build-atlas.mjs`) that bakes the atlas.
+ * Only `npm run build` at the root, or `-w @tn3270/canvas`, runs that step.
+ *
+ * `gui` used to carry `&& node scripts/build-atlas.mjs` in its own build script, so a scoped
+ * gui build was self-sufficient; extracting this package moved that step behind a reference
+ * that cannot pull it. Hence the message below names the command rather than letting a bare
+ * `ENOENT ... dist/atlas.json` be the whole diagnosis -- that failure surfaced as an
+ * unhandled rejection and a BLANK WINDOW that never quit, which is the shape this repo keeps
+ * writing comments to prevent.
+ *
+ * The original error is kept as `cause` so a developer can still see which file was missing.
+ */
 export function readAtlas(): { geometry: AtlasGeometry; coverage: Uint8Array } {
-  const geometry = JSON.parse(readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
-  const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
-  return { geometry, coverage };
+  try {
+    const geometry = JSON.parse(readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
+    const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+    return { geometry, coverage };
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ENOENT') {
+      throw new Error(
+        '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas',
+        { cause: err });
+    }
+    throw err;
+  }
 }

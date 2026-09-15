@@ -4,9 +4,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "lib": [
-      "ES2023",
-      "DOM",
-      "DOM.Iterable"
+      "ES2023"
     ]
   },
   "include": [

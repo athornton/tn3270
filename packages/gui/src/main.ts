@@ -122,6 +122,10 @@ app.whenReady().then(async () => {
     process.stdout.write(`renderer failed to load ${url}: ${code} ${desc}\n`);
   });
 
+  // That HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui` and
+  // `canvas` stay siblings on disk. True in the workspace and false in an asar bundle, so
+  // packaging -- explicitly out of scope in the stage-3 spec -- has to copy or rewrite that
+  // path. The failure would be a blank window with a `did-fail-load` line above it.
   await win.loadFile(join(here, '..', 'index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
 
@@ -168,7 +172,24 @@ app.whenReady().then(async () => {
    * process can read. Sending it once at startup avoids both and keeps the renderer with no
    * filesystem access at all.
    */
-  const { geometry, coverage } = readAtlas();
+  /**
+   * GUARDED like the two startup failures above, because a missing atlas is a REAL user's
+   * broken install and not only a developer's half-built tree.
+   *
+   * `readAtlas` throws synchronously, and this runs inside `app.whenReady().then(async ...)`
+   * where an uncaught throw is an unhandled rejection: MEASURED, that produced a warning on
+   * stderr and then a BLANK WINDOW that sat until the harness timeout -- console-only
+   * diagnosis, which is exactly what the rule at the top of this file forbids. A scoped
+   * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
+   */
+  let atlas;
+  try {
+    atlas = readAtlas();
+  } catch (err) {
+    fail(explain(err));
+    return;
+  }
+  const { geometry, coverage } = atlas;
   const blank = [...blankColumns(coverage, geometry)];
   win.webContents.send('atlas', { geometry, coverage, blank });
 

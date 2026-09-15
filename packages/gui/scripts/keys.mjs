@@ -162,20 +162,30 @@ if (expected.length === 0) {
 const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir, { recursive: true })
   .filter((f) => suffixes.some((s) => f.endsWith(s)))
   .map((f) => statSync(join(dir, f)).mtimeMs));
+/**
+ * EVERY REMEDY HERE NAMES THE WHOLE-WORKSPACE BUILD, not `-w @tn3270/gui`.
+ *
+ * It used to say `-w @tn3270/gui`, and that command is now the one that PRODUCES a broken
+ * tree: MEASURED, a scoped gui build exits 0, compiles `canvas` through the project reference
+ * and never runs `canvas`'s second build step, so `atlas.json` is missing and the client dies
+ * at startup. `readAtlas` in `packages/canvas/src/assets.ts` carries the full measurement.
+ * A refusal that names its own fix is worthless if the fix is the cause, so these say
+ * `npm run build`, which runs every workspace's own build script and bakes the atlas.
+ */
+const REBUILD = 'run: npm run build';
 if (!existsSync(main)) {
-  refuse(`there is no ${main} to run`, 'run: npm run build -w @tn3270/gui');
+  refuse(`there is no ${main} to run`, REBUILD);
 }
 for (const pkg of ['gui', 'canvas']) {
   const root = join(here, '..', '..', pkg);
   if (!existsSync(join(root, 'dist'))) {
-    refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`,
-      `run: npm run build -w @tn3270/${pkg}`);
+    refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`, REBUILD);
   }
   if (newest(join(root, 'dist'), '.js', '.cjs') < newest(join(root, 'src'), '.ts', '.cts')) {
     refuse(`packages/${pkg}/dist is OLDER than packages/${pkg}/src, so this run would test ` +
       'stale code',
-      `run: npm run build -w @tn3270/${pkg}  (if that reports everything up to date, only a ` +
-      `timestamp moved: npx tsc --build --force packages/${pkg})`);
+      `${REBUILD}  (if that reports everything up to date, only a timestamp moved: ` +
+      `npx tsc --build --force packages/${pkg})`);
   }
 }
 
