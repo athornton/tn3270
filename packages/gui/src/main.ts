@@ -195,7 +195,24 @@ app.whenReady().then(async () => {
   session.on('connect', send);
   session.on('disconnect', send);
 
+  /**
+   * Every action the renderer sends, logged for the chord harness -- and ONLY while the
+   * keys seam is active.
+   *
+   * THE GATE IS A PRIVACY REQUIREMENT, NOT TIDINESS. A `type` action carries the text
+   * typed, so logging unconditionally would put a password on stdout in a live session --
+   * the same hazard that keeps goldens away from live logons. Under the seam every
+   * keystroke came from the environment variable, so there is nothing secret to leak.
+   *
+   * This is the ONE funnel every renderer action passes through, which is why the harness
+   * asserts here rather than on pixels: in replay mode nothing is connected, `sendAID`
+   * throws 'not connected', and `applyAction` swallows it, so a PA key has no other
+   * observable consequence.
+   */
+  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== '';
+
   ipcMain.on('action', (_e, action: Action) => {
+    if (logActions) process.stdout.write(`action: ${JSON.stringify(action)}\n`);
     // `quit` is THIS front end's business: applyAction throws on it rather than ignoring
     // it, so a front end that forgot this check fails loudly instead of being unquittable.
     if (action.kind === 'quit') { app.quit(); return; }
