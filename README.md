@@ -145,12 +145,18 @@ byte (`packages/gui/scripts/shot.mjs`).
 support, and no packaging — so the host goes on the command line and there is no `.app` to
 double-click. **What is implemented but not yet verified against a live host:** the PF and
 Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
-Attn (a Telnet BREAK — whether VM/370 acts on it is unmeasured), the `Ctrl-]` quit, and the
-in-window error message for a failed connection. **PA1/PA2 are less verified than that
-list, not more:** `actionForKey` maps Alt+digit to them and is unit-tested, but only against
-a synthetic key-like object — no automated test drives a real Chromium `KeyboardEvent`, and
-what a host does when it receives PA1/PA2 is itself unmeasured. A host that acts on them,
-realistically ISPF on MVS, is what would close that gap.
+the `Ctrl-]` quit, and the in-window error message for a failed connection. **Attn is a
+Telnet BREAK, measured against VM/370's pre-logon banner with no visible reaction** — a real
+null result, not a gap in testing; whether CP responds once logged into CMS is a different,
+untested state. **PA1/PA2 are verified on one half and not the other, and the two halves
+should not be merged back together:** the CLI's `PA(n)` command makes the identical
+`sendAID` call the GUI's `Alt-1`/`Alt-2` bindings make, and driving it against MVS's ISPF
+got a real, quoted, distinct reaction to each — `ISP088E ... TERMINATED DUE TO ATTENTION
+INTERRUPT` for PA1, a bare `READY` redisplay for PA2 — so our AID bytes and the host's
+reaction to them are settled. What is **not** settled is the local half: `actionForKey`
+maps Alt+digit to them and is unit-tested, but only against a synthetic key-like object —
+no automated test drives a real Chromium `KeyboardEvent`, so whether a physical Alt-1/Alt-2
+keypress in the packaged app actually reaches that code is still the user's own check.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
@@ -187,8 +193,8 @@ dropped. Arrow keys are bound in **both** encodings, CSI and SS3, because termin
 only the application-mode one and any layer can flip the mode.
 
 **Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
-`default` is the readable one — zti's values for the seven base colours (F0–F7), x3270's
-for the rest — and it is what every front end draws unless told otherwise. `3279` is
+`default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
+rest — and it is what every front end draws unless told otherwise. `3279` is
 core's own saturated table: **our own choice of primaries, not a phosphor measurement** —
 the manual names each colour without fixing its chromaticity, and a real 3279 matched
 neither this table nor x3270's — kept because someone comparing against the architected
@@ -438,10 +444,14 @@ Done:
 7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
    an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
    the host negotiates. Not everything about it is live-verified, and the spec says so: PF
-   and Clear travel the same path as typing but were not exercised live, no logon was
-   completed (that arms VM's reconnect trap and could put a password in a screenshot), and
-   PA1/PA2 — added later, on Alt/Option+digit — have never reached a live host at all;
-   what a host does with them is unmeasured.
+   and Clear travel the same path as typing but were not exercised live in this sandbox, and
+   no VM logon has been attempted here — that arms VM's reconnect trap and could put a
+   password in a screenshot. **An MVS TSO logon has been completed live, though**: through
+   the GUI itself, by the user on their own Mac, at 43 rows; and separately in this sandbox
+   as `HERC03`, over the CLI's identical AID wire path — which is what confirmed PA1 and PA2
+   each get a real, distinct host reaction. See *Using the GUI*. That closes the protocol
+   half of the PA1/PA2 gap; the physical-keypress half — a real Alt-digit
+   `KeyboardEvent` reaching `actionForKey` in the packaged app — is still open.
 
 Remaining, in the order the author wants it:
 
