@@ -31,6 +31,13 @@ describe('parseWebArgs', () => {
     expect(parseWebArgs(['--listen', '9999', 'vm:3270']).listen).toBe(9999);
   });
 
+  // 0 is not a typo here: it means "let the OS pick an ephemeral port", which is what the
+  // integration and TLS harnesses (later tasks) rely on to avoid colliding on a fixed port.
+  // Do not "tighten" this back to positiveInt.
+  it('accepts --listen 0 for an ephemeral port, which the integration harnesses rely on', () => {
+    expect(parseWebArgs(['--listen', '0', 'vm:3270']).listen).toBe(0);
+  });
+
   it('generates a token when none is given, and keeps auth on', () => {
     const a = parseWebArgs(['vm:3270']);
     expect(a.auth).toBe(true);
@@ -61,5 +68,32 @@ describe('parseWebArgs', () => {
 
   it('refuses an unknown flag rather than ignoring it', () => {
     expect(() => parseWebArgs(['--wat', 'vm:3270'])).toThrow(UsageError);
+  });
+
+  /**
+   * The host-side TLS flags (frontend's `takeTlsFlag`) are the one piece of logic in this file
+   * most likely to carry an off-by-one in how many argv slots it consumes. These three tests
+   * are not really about `-insecure`/`-cafile`/`-model` themselves -- they are about the
+   * ARITHMETIC: that the host positional argument is still parsed correctly afterwards, which
+   * only happens if `i += eaten` advances past exactly the right number of slots.
+   */
+  it('parses -insecure (the zero-extra-slot case) without disturbing the host', () => {
+    const a = parseWebArgs(['-insecure', 'vm:3270']);
+    expect(a.host).toBe('vm');
+    expect(a.port).toBe(3270);
+  });
+
+  it('parses -cafile FILE (the one-extra-slot case) without disturbing the host', () => {
+    const a = parseWebArgs(['-cafile', '/tmp/ca.pem', 'vm:3270']);
+    expect(a.host).toBe('vm');
+    expect(a.port).toBe(3270);
+    expect(a.hostTls.caFile).toBe('/tmp/ca.pem');
+  });
+
+  it('parses -model VALUE without disturbing the host', () => {
+    const a = parseWebArgs(['-model', '3278-4-E', 'vm:3270']);
+    expect(a.model).toBe('3278-4-E');
+    expect(a.host).toBe('vm');
+    expect(a.port).toBe(3270);
   });
 });

@@ -25,7 +25,12 @@ import { resolveHostSpec, takeTlsFlag, type TlsFlags } from '@tn3270/frontend';
  * deliberately left to whichever later task opens the connection to the mainframe -- this file
  * is argument parsing only, per the plan for this task.
  */
-export class UsageError extends Error {}
+export class UsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UsageError';
+  }
+}
 
 export interface WebArgs {
   readonly host: string;
@@ -56,6 +61,19 @@ function positiveInt(raw: string, flag: string): number {
   return n;
 }
 
+/**
+ * Like `positiveInt`, but for `--listen` only: 0 is a real value there, not a typo. Port 0 means
+ * "let the OS pick an ephemeral port", which the integration and TLS harnesses rely on to avoid
+ * colliding on a fixed port. `--grace 0` and `--max-sessions 0` are still nonsense -- a zero-length
+ * grace window and a zero-session cap describe a gateway that can do nothing -- so they keep using
+ * `positiveInt` and must keep throwing.
+ */
+function nonNegativeInt(raw: string, flag: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new UsageError(`${flag} needs a non-negative integer`);
+  return n;
+}
+
 export function parseWebArgs(argv: readonly string[]): WebArgs {
   const rest: string[] = [];
   const hostTls: TlsFlags = {};
@@ -83,7 +101,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     if (eaten !== undefined) { i += eaten; continue; }
     switch (a) {
       case '--bind': bind = value(args, i, a); i += 1; continue;
-      case '--listen': listen = positiveInt(value(args, i, a), a); i += 1; continue;
+      case '--listen': listen = nonNegativeInt(value(args, i, a), a); i += 1; continue;
       case '--token': token = value(args, i, a); i += 1; continue;
       case '--auth': {
         const v = value(args, i, a); i += 1;
