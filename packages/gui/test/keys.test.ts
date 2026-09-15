@@ -94,24 +94,33 @@ describe('actionForKey', () => {
       'Ctrl-A': ev({ key: 'a', code: 'KeyA', ctrlKey: true }),
       Insert: ev({ key: 'Insert', code: 'Insert' }),
     };
-    // An explicit allowlist, EMPTY on purpose. The old `continue` skipped anything it had no
-    // spelling for, with a comment calling Alt-1 "a terminal-only spelling" -- it is not,
-    // and that is exactly how the GUI shipped with no PA keys at all. Now an intent entry
-    // the GUI cannot express FAILS here until it is either bound or listed below with a
-    // reason.
-    const TERMINAL_ONLY: readonly string[] = [];
+    // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
+    // written reason does not type-check. The hole this replaced was exactly an unexamined
+    // one-line dismissal ("Alt-1, a terminal-only spelling" -- it is not), so "you must say
+    // why" is enforced by the shape rather than by a comment asking nicely. EMPTY on purpose.
+    const TERMINAL_ONLY: Readonly<Record<string, string>> = {};
     let checked = 0;
     for (const b of BINDING_INTENT) {
       const key = named[b.key];
       if (key === undefined) {
-        expect(TERMINAL_ONLY, `BINDING_INTENT has ${b.key} and the GUI does not`)
-          .toContain(b.key);
+        expect(Object.hasOwn(TERMINAL_ONLY, b.key), `BINDING_INTENT has ${b.key} and the GUI does not`)
+          .toBe(true);
         continue;
       }
       expect(actionForKey(key), b.key).toEqual(b.action);
       checked++;
     }
-    expect(checked).toBeGreaterThanOrEqual(24);
+    // NOT redundant with the allowlist above: that check only runs when named[b.key] is
+    // undefined, so it can never notice a STALE TERMINAL_ONLY entry -- one that claims a key
+    // is unmappable when `named` actually has it, which the loop would otherwise validate and
+    // count without complaint. This line catches exactly that mismatch (verified by mutation:
+    // listing an already-mapped key as exempt makes `checked` come in one HIGHER than this
+    // formula expects, and the allowlist check never even looks at it, since named[b.key] is
+    // defined). It does NOT catch a key vanishing from BINDING_INTENT itself -- also verified
+    // by mutation -- because the loop walks that same array, so both sides shrink together;
+    // that is not this test's job. Still exact rather than a floor: with TERMINAL_ONLY empty,
+    // every entry must be checked, and a floor would silently tolerate a wrongly-exempted one.
+    expect(checked).toBe(BINDING_INTENT.length - Object.keys(TERMINAL_ONLY).length);
   });
 });
 

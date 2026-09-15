@@ -69,9 +69,11 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   a: { kind: 'attn' },
 });
 
-/** Physical digit keys that carry the PA keys when Alt is held. */
-const PA_CODES: Readonly<Record<string, number>> = Object.freeze({
-  Digit1: 1, Digit2: 2, Digit3: 3,
+/** Physical digit keys that carry the PA keys when Alt is held. Same shape as CTRL. */
+const PA_CODES: Readonly<Record<string, Action>> = Object.freeze({
+  Digit1: { kind: 'pa', n: 1 },
+  Digit2: { kind: 'pa', n: 2 },
+  Digit3: { kind: 'pa', n: 3 },
 });
 
 export function actionForKey(e: KeyLike): Action | null {
@@ -84,10 +86,11 @@ export function actionForKey(e: KeyLike): Action | null {
   }
   // The PA keys, on Alt+digit as x3270 and c3270 both have them (Common/fb-c3270:43-45).
   // Matched on e.code and not e.key: see the note on KeyLike.code. Checked BEFORE the bail
-  // below, which is what used to make every PA key unreachable in this front end.
+  // below, which is what used to make every PA key unreachable in this front end. The
+  // `!ctrlKey && !metaKey` guard leaves Ctrl-Alt-digit and Cmd-Alt-digit falling through to
+  // that bail as `null`, unchanged from before this patch.
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
-    const pa = PA_CODES[e.code];
-    return pa !== undefined ? { kind: 'pa', n: pa } : null;
+    return PA_CODES[e.code] ?? null;
   }
 
   // A Meta or Alt chord belongs to the window or the OS, never to the field. Cmd-digit is
