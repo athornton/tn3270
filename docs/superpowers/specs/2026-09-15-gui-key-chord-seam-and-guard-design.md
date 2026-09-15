@@ -88,13 +88,26 @@ which `renderer-imports.test.ts` polices.
 ### 2. An action log at the one funnel, gated on the seam
 
 `ipcMain.on('action')` in `main.ts:198` is the single point every renderer action passes
-through. When — and **only** when — `TN3270_GUI_KEYS` is set, it writes
-`action: {"kind":"pa","n":1}` to stdout before dispatching.
+through. When — and **only** when — `TN3270_GUI_KEYS` **and** `TN3270_GUI_REPLAY` are both
+set, it writes `action: {"kind":"pa","n":1}` to stdout before dispatching.
 
 **The gate is a privacy requirement, not tidiness.** `type` actions carry the text typed,
 so an unconditional log would put a password on stdout in a live session — the same hazard
-that keeps goldens away from live logons. Under the seam, every keystroke came from the
-environment variable, so there is nothing secret to leak.
+that keeps goldens away from live logons.
+
+**Corrected during review: gating on the seam variable ALONE was the wrong condition.**
+The first draft of this design reasoned that under the seam every keystroke came from the
+environment variable, so nothing secret could exist. That premise is false. Nothing stops
+`TN3270_GUI_KEYS` being set on a run that connects to a live host, and
+`docs/live-testing.md`, *Typed input, proved end to end*, records exactly that — this seam
+driven against live MVS TK5 with `HERC01` typed at its logon panel by hand. `keys.ts` builds
+`{ kind: 'type', text: e.key }` for **any** printable keypress, seam-driven or not, so the
+log would have carried a hand-typed password. **Replay mode is the condition that actually
+makes a logged keystroke impossible to be a credential**, because a replayed session is
+connected to nothing. It costs no coverage: the harness sets both variables together.
+
+Key order in `JSON.stringify(action)` is insertion order and not a contract, so a consumer
+compares canonically rather than string-diffing the raw line.
 
 ### 3. Lifting the seam out of the screenshot path
 

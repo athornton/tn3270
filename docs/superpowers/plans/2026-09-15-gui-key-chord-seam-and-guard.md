@@ -316,15 +316,22 @@ In `main.ts`, immediately **above** the `ipcMain.on('action', ...)` block, add:
    *
    * THE GATE IS A PRIVACY REQUIREMENT, NOT TIDINESS. A `type` action carries the text
    * typed, so logging unconditionally would put a password on stdout in a live session --
-   * the same hazard that keeps goldens away from live logons. Under the seam every
-   * keystroke came from the environment variable, so there is nothing secret to leak.
+   * the same hazard that keeps goldens away from live logons.
+   *
+   * IT REQUIRES REPLAY MODE, AND SEAM-PRESENCE ALONE IS NOT ENOUGH. Corrected in review:
+   * `TN3270_GUI_KEYS` has been set against a LIVE host before -- docs/live-testing.md,
+   * *Typed input, proved end to end* -- and `keys.ts` builds a `type` action carrying the
+   * text for ANY printable keypress, seam-driven or not. A replayed session is connected to
+   * nothing, so it is replay that makes a logged keystroke impossible to be a credential.
    *
    * This is the ONE funnel every renderer action passes through, which is why the harness
    * asserts here rather than on pixels: in replay mode nothing is connected, `sendAID`
    * throws 'not connected', and `applyAction` swallows it, so a PA key has no other
-   * observable consequence.
+   * observable consequence. Key order in the JSON is insertion order and not a contract, so
+   * a consumer must compare canonically rather than diffing the raw line.
    */
-  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== '';
+  const logActions = (process.env['TN3270_GUI_KEYS'] ?? '') !== ''
+    && (process.env['TN3270_GUI_REPLAY'] ?? '') !== '';
 ```
 
 Then replace the body of the handler so the log comes first — **before** the `quit` check,
@@ -346,13 +353,32 @@ so a quit is visible too:
 Run: `cd ~/git/tn3270 && npm run build && npm run typecheck`
 Expected: both clean.
 
-- [ ] **Step 3: Confirm the log is silent when the seam is off**
+- [ ] **Step 3: Confirm the log is silent when the seam is off, and prove BOTH halves of the gate**
 
 The two existing goldens run with no `TN3270_GUI_KEYS`, and `shot.mjs` fails a case whose
 stdout contains renderer errors. Prove the log adds nothing to a normal run:
 
 Run: `cd ~/git/tn3270 && node packages/gui/scripts/shot.mjs 2>&1 | tail -5`
 Expected: `2/2 goldens matched`, and no `action:` lines anywhere in the output.
+
+Then prove the conjunction, because a gate with one half untested is a gate with one half
+missing. Both runs need `TN3270_GUI_SHOT` only because the seam is still reachable solely
+from inside `maybeCapture` until Task 3:
+
+```bash
+# (a) replay + seam -> logging ON: expect a NON-ZERO count
+DISPLAY=:99 LD_LIBRARY_PATH=$HOME/micromamba/envs/gui/lib \
+TN3270_GUI_REPLAY=packages/fixtures/traces/synthetic-ispf-like.trace \
+TN3270_GUI_KEYS='Enter' TN3270_GUI_SHOT=/tmp/gate-a.png TN3270_GUI_SHOT_MS=1200 \
+./node_modules/.bin/electron packages/gui/dist/main.js --no-sandbox --disable-gpu \
+  -insecure -model 3278-2-E 127.0.0.1:1 2>&1 | grep -cE "^action:"
+
+# (b) seam set, NO replay -> logging OFF: expect 0
+DISPLAY=:99 LD_LIBRARY_PATH=$HOME/micromamba/envs/gui/lib \
+TN3270_GUI_KEYS='Enter' TN3270_GUI_SHOT=/tmp/gate-b.png TN3270_GUI_SHOT_MS=1200 \
+./node_modules/.bin/electron packages/gui/dist/main.js --no-sandbox --disable-gpu \
+  -insecure -model 3278-2-E 127.0.0.1:1 2>&1 | grep -cE "^action:"
+```
 
 - [ ] **Step 4: Commit**
 
