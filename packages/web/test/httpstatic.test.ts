@@ -7,11 +7,14 @@ import { resolveAsset, tokenCookie, parseCookies } from '../src/httpstatic.js';
 
 /**
  * A FIXED TABLE, not a path mapping. There is no traversal to defend against because there is no
- * arithmetic on the request path -- the only reachable files are the five named here.
+ * arithmetic on the request path -- the only reachable files are the ones the table names. Written
+ * without a COUNT on purpose: the count said "five" while the table held six, and the keypad's
+ * `hittest.js` has since made it seven.
  */
 describe('resolveAsset', () => {
-  it('serves the five files the browser needs', () => {
-    for (const p of ['/', '/index.html', '/bridge.js', '/renderer.js', '/blit.js', '/keys.js']) {
+  it('serves the page and every browser module by path', () => {
+    for (const p of ['/', '/index.html', '/bridge.js', '/bridgecore.js',
+                     '/renderer.js', '/blit.js', '/keys.js', '/hittest.js']) {
       expect(resolveAsset(p), `for ${p}`).toBeDefined();
     }
   });
@@ -53,9 +56,9 @@ describe('resolveAsset', () => {
 
   it('serves every module `canvas` declares a browser needs', () => {
     // The drift guard. `BROWSER_MODULES` is the list `canvas` publishes for exactly this consumer,
-    // so naming the three files again here would be a second copy to keep in step -- which is the
-    // failure `assets.ts` was extracted to prevent.
-    expect(BROWSER_MODULES.length).toBe(3);
+    // so naming those files again here would be a second copy to keep in step -- which is the
+    // failure `assets.ts` was extracted to prevent. Four since the keypad's `hittest.js` joined it.
+    expect(BROWSER_MODULES.length).toBe(4);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 
@@ -68,7 +71,7 @@ describe('resolveAsset', () => {
     // `/bridge.js` IS NOT IN THIS LOOP, and the reason is a trap rather than an omission -- see the
     // separate test below. Adding it here fails, because the two kinds of path in the table resolve
     // differently under vitest.
-    for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js']) {
+    for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js', '/hittest.js']) {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }

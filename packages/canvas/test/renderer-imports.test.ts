@@ -73,4 +73,15 @@ describe('the renderer bundle', () => {
     const graph = graphFrom(join(distDir, 'renderer.js'));
     expect(graph.some((f) => f.endsWith('drawlist.js'))).toBe(false);
   });
+
+  it('can import hittest.js, whose whole graph is itself', () => {
+    // The keypad's hit test is the one part of `keypad.ts` the RENDERER needs, and importing it from
+    // `keypad.js` would pull in `drawlist.js`, `@tn3270/core` and `@tn3270/frontend` -- MEASURED
+    // during review: both assertions above failed. So it lives in its own module whose only import
+    // is `import type { Action }`, which erases. This pins that property BEFORE the renderer takes
+    // the import, because afterwards the failure is a blank window rather than a red test.
+    const graph = graphFrom(join(distDir, 'hittest.js'));
+    expect(graph.map((f) => f.replace(`${distDir}/`, ''))).toEqual(['hittest.js']);
+    expect(/@tn3270\//.test(readFileSync(join(distDir, 'hittest.js'), 'utf8'))).toBe(false);
+  });
 });

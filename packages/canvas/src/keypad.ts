@@ -1,12 +1,16 @@
 import { cp037, Colour } from '@tn3270/core';
-import {
-  KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, type Action, type Scheme,
-} from '@tn3270/frontend';
+import { KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg } from './cg.js';
 import { column, type AtlasGeometry, type DrawCell } from './drawlist.js';
+import type { KeypadButton } from './hittest.js';
 
 /**
  * The virtual keypad, as cells and rectangles.
+ *
+ * THIS FILE RUNS IN THE MAIN PROCESS ONLY, like `drawlist.js` and for the same reason: the value
+ * imports above are bare `@tn3270/` specifiers, which a browser cannot resolve. The renderer gets
+ * the finished region inside the draw list, and reaches `hitTest` through `hittest.js` -- a separate
+ * file with no runtime import at all, which is what lets the browser have it.
  *
  * ## SCALE-1 PIXELS THROUGHOUT
  *
@@ -29,21 +33,6 @@ import { column, type AtlasGeometry, type DrawCell } from './drawlist.js';
  * (2) a second baked bitmap font, and `fillText` not at all without demoting the goldens in
  * writing. Options 1 and 2 change only this file, which is why the drawing decisions are local.
  */
-export interface KeypadButton {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-  /**
-   * Copied from the table alongside `label` and NEVER derived from it. A label/action mismatch is
-   * invisible to property tests and to pixel goldens -- the glyphs are identical either way -- so
-   * `frontend/test/keypad.test.ts` pins the pair with a deliberately-duplicated map. Deriving
-   * either side here would discard that.
-   */
-  readonly action: Action;
-  readonly label: string;
-}
-
 export interface KeypadRegion {
   readonly y: number;
   readonly width: number;
@@ -126,11 +115,4 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
     cells,
     buttons,
   };
-}
-
-/** Half-open on the right and bottom, so adjacent buttons cannot both claim a pixel. */
-export function hitTest(
-  buttons: readonly KeypadButton[], x: number, y: number,
-): KeypadButton | undefined {
-  return buttons.find((b) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
 }

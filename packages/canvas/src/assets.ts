@@ -28,9 +28,16 @@ export function assetDir(): string {
   return here;
 }
 
-/** The three modules a browser must be served, in load order. */
+/**
+ * The modules a browser must be served: the entry point and every module its runtime graph reaches.
+ *
+ * `hittest.js` is here because the renderer hit-tests a keypad click itself. A module the entry
+ * point imports and this list omits 404s, and the page is then a BLACK CANVAS WITH NO ERROR in any
+ * console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts` walks the built import
+ * graph rather than trusting this list to be complete.
+ */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js',
+  'renderer.js', 'blit.js', 'keys.js', 'hittest.js',
 ]);
 
 /**
