@@ -60,13 +60,23 @@ const MODIFIERS: ReadonlySet<string> = new Set([
   'Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph', 'NumLock', 'ScrollLock',
 ]);
 
-/** The Ctrl chords a 3270 uses. Anything else with Ctrl held is dropped. */
+/**
+ * The Ctrl chords a 3270 uses. Anything else with Ctrl held is dropped.
+ *
+ * `d`, `f` and `k` are c3270's own, from the keymap a terminal build reads:
+ * `Ctrl<Key>d: Dup()`, `Ctrl<Key>f: FieldMark()`, `Ctrl<Key>k: Keypad()`
+ * (Common/fb-c3270:186-187, :191). Matching the terminal keymap here is the point -- an
+ * operator moving between the TUI and a window should not have to learn two sets.
+ */
 const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   c: { kind: 'clear' },
   r: { kind: 'reset' },
   u: { kind: 'eraseInput' },
   ']': { kind: 'quit' },
   a: { kind: 'attn' },
+  d: { kind: 'dup' },
+  f: { kind: 'fieldMark' },
+  k: { kind: 'toggleKeypad' },
 });
 
 /** Physical digit keys that carry the PA keys when Alt is held. Same shape as CTRL. */
@@ -90,6 +100,19 @@ export function actionForKey(e: KeyLike): Action | null {
   // `!ctrlKey && !metaKey` guard leaves Ctrl-Alt-digit and Cmd-Alt-digit falling through to
   // that bail as `null`, unchanged from before this patch.
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    // Alt-K is how c3270's _WIN32 keymap spells `Keypad()` (Common/fb-c3270:48-49, which binds
+    // both `k` and `K`), so it is honoured here alongside the Ctrl-K its terminal keymap uses
+    // (:191). A terminal cannot have both -- Alt-K arrives there as `ESC k` and this project
+    // keeps new bindings off the ESC path -- but a real KeyboardEvent carries no such ambiguity.
+    //
+    // `e.code`, NOT `e.key.toLowerCase()`, and for the reason the note on `KeyLike.code` gives:
+    // Option-K on macOS reports `key === '˚'`, exactly as Option-1 reports `'¡'`. A `key`-based
+    // test here would work on Linux, fail on a Mac and pass every test written on Linux --
+    // the same defect that once made the PA keys unreachable. Matching the physical key also
+    // makes Alt-Shift-K work, as c3270's pair of `k`/`K` bindings does.
+    //
+    // Checked BEFORE PA_CODES so a future Alt entry in that table cannot shadow it silently.
+    if (e.code === 'KeyK') return { kind: 'toggleKeypad' };
     return PA_CODES[e.code] ?? null;
   }
 

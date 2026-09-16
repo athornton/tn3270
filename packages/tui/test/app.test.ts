@@ -538,14 +538,16 @@ describe('the ambiguous Escape', () => {
 });
 
 /**
- * Dispatch one Action the way a keystroke will once Task 4 binds a chord to it.
+ * Dispatch `toggleKeypad` as an Action, skipping the keymap.
  *
- * NO BYTE PRODUCES `toggleKeypad` TODAY: Task 4 adds the Ctrl-K row to the keymap, and this task
- * runs before it deliberately -- `applyAction` THROWS on the action and `pump()` calls `apply()`
- * unguarded, so binding the chord before this interception existed would kill the process on a
- * keystroke. So the opening of the overlay is driven by the action, not by `0x0b`; every other key
- * below is a real byte, because arrows, Enter and Esc are already bound. Task 4 adds the byte-level
- * test for the chord itself.
+ * The interception was written BEFORE any byte produced this action, deliberately: `applyAction`
+ * THROWS on it and `pump()` calls `apply()` unguarded, so binding the chord first would have killed
+ * the process on a keystroke. That is why most tests below open the list by action rather than by
+ * `0x0b`; every other key in them is a real byte, because arrows, Enter and Esc were already bound.
+ *
+ * Ctrl-K IS bound now, and 'OPENS on the Ctrl-K byte' below is the one test that goes through the
+ * keymap. The rest keep using this on purpose: they are about the interception, and routing them
+ * through the keymap as well would make each of them fail for two unrelated reasons.
  *
  * `apply` is private and reached by cast rather than widened for a test: `overlayOpen` below is the
  * one thing this feature adds to the public surface for testability, matching `onInput`.
@@ -701,9 +703,26 @@ describe('the special-keys overlay', () => {
     expect(sent).toHaveBeenCalledWith(AID.PF15);         // KEYPAD_KEYS[2], i.e. both arrows acted on
   });
 
+  it('OPENS on the Ctrl-K byte, not just on the action, and sends nothing to the host', () => {
+    // THE LOOP THE TASK ORDER OPENED, closed here. Every test above opens the list by dispatching
+    // `toggleKeypad` directly, because when this interception was written no byte produced that
+    // action -- `applyAction` throws on it and `pump()` calls `apply()` unguarded, so binding the
+    // chord first would have killed the process on a keystroke. This is the only test that proves a
+    // real keypress reaches the overlay: 0x0b gets there only because `keymap.ts` maps it, so
+    // dropping that row reddens HERE and in `keymap.test.ts`, and nowhere else in this file.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    h.app.onInput(Uint8Array.from([0x0b]));
+    expect(h.app.overlayOpen).toBe(true);
+    expect(h.stdout.all).toContain(marked(0));      // drawn, not merely flagged open
+    expect(sent).not.toHaveBeenCalled();            // nothing reached the host
+    expect(cellText(h.session, 0)).toBe(' ');       // and 0x0b was not typed into the field
+  });
+
   it('closes on a second Ctrl-K', () => {
-    // Task 4 binds the chord; this interception must handle the byte itself either way, because it
-    // sits in front of the keymap and would otherwise swallow the very key that opened the list.
+    // The chord is bound in `keymap.ts`, but this interception sits IN FRONT of the keymap, so it
+    // has to handle the byte itself or it would swallow the very key that opened the list.
     const h = harness();
     h.app.start();
     dispatchToggle(h.app);

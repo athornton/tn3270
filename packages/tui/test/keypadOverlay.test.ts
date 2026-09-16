@@ -62,13 +62,15 @@ describe('overlayLines', () => {
     // `System Request` is the longest name, so its padding is empty and its line is exact.
     expect(lineFor('System Request')).toBe('  System Request');
 
-    // Chords that BINDING_INTENT holds TODAY. The plan asked for `Dup  Ctrl-D` and
-    // `Field Mark  Ctrl-F`; those two rows are Task 4's to add and do not exist yet
-    // (`frontend/src/bindings.ts` has no `dup`, `fieldMark` or `toggleKeypad` entry), so
-    // asserting them here would fail for a reason that is not this module's. The mechanism test
-    // below covers them the moment Task 4 lands, with no edit to this file.
     expect(lineFor('Reset')).toBe(`  Reset${' '.repeat(CHORD_COL - 7)}Ctrl-R`);
     expect(lineFor('Back Tab')).toBe(`  Back Tab${' '.repeat(CHORD_COL - 10)}Shift-Tab`);
+
+    // Dup and Field Mark, blank until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT` and filled in
+    // here with NO EDIT to `keypadOverlay.ts`. Added as GROUND TRUTH now that the rows exist:
+    // the sweep below recomputes the module's own lookup rule, so it would agree with a rule
+    // that was wrong the same way in both places; these two lines would not.
+    expect(lineFor('Dup')).toBe(`  Dup${' '.repeat(CHORD_COL - 5)}Ctrl-D`);
+    expect(lineFor('Field Mark')).toBe(`  Field Mark${' '.repeat(CHORD_COL - 12)}Ctrl-F`);
 
     // The `n`-discriminated pair, written out as GROUND TRUTH rather than derived. The sweep below
     // recomputes the module's own matching rule, so a rule that is wrong the same way in both

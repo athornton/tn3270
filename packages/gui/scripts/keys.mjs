@@ -65,7 +65,15 @@ const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'
  * pass condition is the whole ORDERED sequence rather than a set of sightings.
  *
  * Ctrl+] is deliberately absent: it quits, and would truncate the run. Every OTHER entry in
- * `keys.ts`'s CTRL table is here, so a chord dropped from that table cannot hide.
+ * `keys.ts`'s CTRL table is here, so a chord dropped from that table cannot hide. THAT CLAIM IS
+ * LOAD-BEARING and it is why Ctrl+D, Ctrl+F and Ctrl+K appear below: adding them to that table
+ * and not to this one would have left the claim quietly false.
+ *
+ * Ctrl+K is the one whose interception is in `main.ts` rather than in `applyAction`, so this run
+ * also proves the log-then-intercept ORDER there -- log it after intercepting and this position
+ * goes red. Alt+K, the canvas front ends' second spelling of it, is NOT here: two toggles in one
+ * run would leave the keypad hidden again, which is fine, but the accelerator that reaches the
+ * renderer for a letter-with-Alt is the part `keys.test.ts` already covers directly.
  */
 const CASES = [
   { spec: 'Alt+1', action: { kind: 'pa', n: 1 } },
@@ -73,6 +81,9 @@ const CASES = [
   { spec: 'Alt+3', action: { kind: 'pa', n: 3 } },
   { spec: 'Ctrl+A', action: { kind: 'attn' } },
   { spec: 'Ctrl+C', action: { kind: 'clear' } },
+  { spec: 'Ctrl+D', action: { kind: 'dup' } },
+  { spec: 'Ctrl+F', action: { kind: 'fieldMark' } },
+  { spec: 'Ctrl+K', action: { kind: 'toggleKeypad' } },
   { spec: 'Ctrl+R', action: { kind: 'reset' } },
   { spec: 'Ctrl+U', action: { kind: 'eraseInput' } },
   { spec: 'Ctrl+Z', action: null },

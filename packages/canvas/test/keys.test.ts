@@ -93,6 +93,12 @@ describe('actionForKey', () => {
       'Alt-3': ev({ key: '3', code: 'Digit3', altKey: true }),
       'Ctrl-A': ev({ key: 'a', code: 'KeyA', ctrlKey: true }),
       Insert: ev({ key: 'Insert', code: 'Insert' }),
+      // The keypad-era three. Spelled as the CTRL chord in every case, including Ctrl-K: the
+      // table names ONE key per action, and the canvas front ends' extra Alt-K is an addition
+      // this loop cannot express. It is asserted directly in 'the keypad toggle' below.
+      'Ctrl-D': ev({ key: 'd', code: 'KeyD', ctrlKey: true }),
+      'Ctrl-F': ev({ key: 'f', code: 'KeyF', ctrlKey: true }),
+      'Ctrl-K': ev({ key: 'k', code: 'KeyK', ctrlKey: true }),
     };
     // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
     // written reason does not type-check. The hole this replaced was exactly an unexamined
@@ -159,5 +165,55 @@ describe('the keys the GUI could not reach at all', () => {
       .toEqual({ kind: 'attn' });
     expect(actionForKey(ev({ key: 'Insert', code: 'Insert' })))
       .toEqual({ kind: 'toggleInsert' });
+  });
+});
+
+describe('the keypad toggle', () => {
+  it('is Ctrl-K', () => {
+    // c3270's own terminal binding (Common/fb-c3270:191), and the one the TUI uses too.
+    expect(actionForKey({ key: 'k', code: 'KeyK', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('is ALSO Alt-K, which is what c3270 uses on Windows', () => {
+    // Common/fb-c3270:48-49. A terminal could not honour that without going down the ESC
+    // path; a real KeyboardEvent carries no such ambiguity, so both work here.
+    expect(actionForKey({ key: 'k', code: 'KeyK', ctrlKey: false, altKey: true, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'toggleKeypad' });
+    // Alt-Shift-K too, as c3270 binds both `k` and `K`.
+    expect(actionForKey({ key: 'K', code: 'KeyK', ctrlKey: false, altKey: true, metaKey: false, shiftKey: true }))
+      .toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('matches Alt-K on e.code, because macOS Option-K reports key "˚"', () => {
+    // THE SAME TRAP as Option-1 reporting "¡", one row up in this file. The plan for this task
+    // asked for `e.key.toLowerCase() === 'k'`, which works on Linux, fails on a Mac and passes
+    // every test written on Linux -- the precise defect that left the PA keys unreachable.
+    expect(actionForKey({ key: '˚', code: 'KeyK', ctrlKey: false, altKey: true, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('does not fire on Alt+digit, which is still a PA key', () => {
+    // The Alt branch gained a case; the keys already in it must be untouched by it.
+    expect(actionForKey({ key: '1', code: 'Digit1', ctrlKey: false, altKey: true, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'pa', n: 1 });
+  });
+
+  it('leaves Cmd-K and Ctrl-Alt-K to the window, as it does every other chord', () => {
+    // The `!metaKey`/`!ctrlKey` guards on both branches. Cmd-K is where menu accelerators
+    // live, and neither branch may claim a chord the other half-matches.
+    expect(actionForKey({ key: 'k', code: 'KeyK', ctrlKey: false, altKey: false, metaKey: true, shiftKey: false }))
+      .toBeNull();
+    expect(actionForKey({ key: 'k', code: 'KeyK', ctrlKey: true, altKey: true, metaKey: false, shiftKey: false }))
+      .toBeNull();
+  });
+
+  it('maps Ctrl-D and Ctrl-F the same way the terminal does', () => {
+    // Common/fb-c3270:186-187. Written out one per line, not looped over a pair table, so a
+    // dup/fieldMark transposition in `CTRL` reddens both with the key named.
+    expect(actionForKey({ key: 'd', code: 'KeyD', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'dup' });
+    expect(actionForKey({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false }))
+      .toEqual({ kind: 'fieldMark' });
   });
 });

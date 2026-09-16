@@ -5,7 +5,7 @@ import { parseFrame, serializeFrame, OPCODE } from './wsframe.js';
  * The largest inbound message this gateway will accept.
  *
  * MEASURED against what a browser legitimately sends: the only inbound messages are a `hello`
- * (a kind and an optional session id) and an `action`, and `keys.ts:114` emits `type` ONE CHARACTER
+ * (a kind and an optional session id) and an `action`, and `keys.ts:137` emits `type` ONE CHARACTER
  * at a time, so the real maximum is well under 100 bytes. 8 KB is roughly eighty times that, chosen
  * so that a future paste path -- a whole 43x80 screenful is 3440 characters -- still fits without a
  * protocol change, while nothing near the megabytes a hostile client would like is admitted.

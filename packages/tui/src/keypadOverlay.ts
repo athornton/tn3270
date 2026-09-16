@@ -21,12 +21,13 @@
  * That table already records key-to-action with a note, and `keymap.test.ts` already pins the
  * terminal keymap against it. Reading it here means the on-screen help cannot drift from the
  * bindings -- which is exactly the kind of documentation that otherwise rots. A key with no entry
- * shows a blank, and today 23 of the 46 do: PF2, PF4-PF11, PF14-PF24, Dup, Field Mark and Sys Req.
+ * shows a blank, and 21 of the 46 do: PF2, PF4-PF11, PF14-PF24 and Sys Req.
  *
- * Sys Req's blank is the whole reason this module exists. c3270 defines no chord for it, so the
- * overlay is its only keyboard route; a blank there is correct rather than missing. Dup and Field
- * Mark are blank only until Task 4 adds their rows to `BINDING_INTENT`, at which point they fill
- * in here with no edit to this file -- which is the property the indirection buys.
+ * Sys Req's blank is the whole reason this module exists. c3270 defines no chord for it in either
+ * of its keymaps, so the overlay is its only keyboard route; a blank there is correct rather than
+ * missing. Dup and Field Mark were blank too until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT`, and
+ * they filled in here WITH NO EDIT TO THIS FILE -- which is the property the indirection buys, and
+ * it was measured rather than assumed.
  */
 
 import { BINDING_INTENT, KEYPAD_KEYS, type Action } from '@tn3270/frontend';

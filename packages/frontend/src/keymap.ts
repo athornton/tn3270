@@ -142,6 +142,20 @@ function buildTable(): Map<string, Action> {
   t.set('\x15', { kind: 'eraseInput' });
   t.set('\x1d', { kind: 'quit' });
 
+  // Dup and Field Mark are c3270's own Ctrl-D and Ctrl-F, and BOTH of its keymaps agree:
+  // `Ctrl<Key>d: Dup()` / `Ctrl<Key>f: FieldMark()` at Common/fb-c3270:186-187 (the
+  // non-Windows table, which a terminal build reads) and the same pair at :88 and :93 in the
+  // _WIN32 one. They are TYPED CHARACTERS, not AIDs -- see the note on the Action union.
+  t.set('\x04', { kind: 'dup' });
+  t.set('\x06', { kind: 'fieldMark' });
+  // The keypad/overlay toggle, ALSO c3270's own: `Ctrl<Key>k: Keypad()`, fb-c3270:191. Its
+  // _WIN32 keymap spells the same command Alt-K (:48), which would arrive here as `ESC k` --
+  // and new bindings do not go down the ESC path, whose two regressions are recorded in
+  // app.ts. The canvas front ends, which read a real KeyboardEvent and so have no ESC
+  // ambiguity, accept both. Sys Req gets NO chord: c3270 defines none in either keymap, which
+  // is why the TUI's overlay is its only keyboard route.
+  t.set('\x0b', { kind: 'toggleKeypad' });
+
   // The PA keys have no terminal equivalent, so ESC-digit, as c3270 does.
   t.set('\x1b1', { kind: 'pa', n: 1 });
   t.set('\x1b2', { kind: 'pa', n: 2 });

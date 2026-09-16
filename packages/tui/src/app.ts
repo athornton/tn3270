@@ -42,7 +42,7 @@ const ESC = 0x1b;
  */
 const OVERLAY_CR = 0x0d;
 const OVERLAY_LF = 0x0a;
-const OVERLAY_TOGGLE = 0x0b;      // Ctrl-K, which Task 4 binds to `toggleKeypad`
+const OVERLAY_TOGGLE = 0x0b;      // Ctrl-K, which the terminal keymap maps to `toggleKeypad`
 const OVERLAY_CSI = 0x5b;         // the `[` of `\x1b[A`
 const OVERLAY_SS3 = 0x4f;         // the `O` of `\x1bOA`, which DECCKM makes equally likely
 const OVERLAY_UP = 0x41;

@@ -78,6 +78,28 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
     key: 'Insert', action: { kind: 'toggleInsert' }, terminal: '\x1b[2~',
     note: 'x3270\'s Toggle(insertMode) (fb-x3270:210); `tput kich1` measured \\x1b[2~',
   },
+  {
+    key: 'Ctrl-D', action: { kind: 'dup' }, terminal: '\x04',
+    note: 'c3270\'s own binding (Common/fb-c3270:186, and :88 in its _WIN32 keymap). Writes '
+      + 'EBCDIC 0x1c and then TABS to the next unprotected field: kybd.c:1435 suppresses '
+      + '`key_Character`\'s auto-skip for a keyboard Dup, but `Dup_action` moves the cursor '
+      + 'itself at kybd.c:2790, so the tab happens exactly ONCE. The manual says so outright '
+      + '(p. 7-12, "a Tab key operation to be performed")',
+  },
+  {
+    key: 'Ctrl-F', action: { kind: 'fieldMark' }, terminal: '\x06',
+    note: 'c3270\'s own binding (Common/fb-c3270:187, and :93 in its _WIN32 keymap). Writes '
+      + 'EBCDIC 0x1e and auto-skips normally, as any typed character does -- the Dup '
+      + 'suppression above is specific to EBC_dup',
+  },
+  {
+    key: 'Ctrl-K', action: { kind: 'toggleKeypad' }, terminal: '\x0b',
+    note: 'shows the keypad (GUI, browser) or the special-keys overlay (TUI). ALSO c3270\'s '
+      + 'own: `Ctrl<Key>k: Keypad()` at Common/fb-c3270:191. Its _WIN32 keymap spells the same '
+      + 'command Alt-K (:48), which would be ESC k in a terminal and so is not bound there; the '
+      + 'canvas front ends accept both. NOT a 3270 key -- `applyAction` throws on it and each '
+      + 'front end owns its own display',
+  },
 
   // Sequence-less on purpose: two encodings each. See the header note on DECCKM.
   { key: 'Up', action: { kind: 'up' } },
