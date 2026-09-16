@@ -55,17 +55,28 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  * KNOWN kind carrying a bogus field is a different animal, and `pf`/`pa` are the case in point --
  * see below.
  *
- * ## AN ACTION `applyAction` REFUSES MUST BE REJECTED HERE, AND THAT IS A SECOND RULE
+ * ## AN ACTION `applyAction` REFUSES MUST BE ACCOUNTED FOR, AND THAT IS A SECOND RULE
  *
  * This note used to say a new action name needs no change in this file, full stop. THAT WAS WRONG,
  * and `toggleKeypad` is the counterexample that proved it: `applyAction` throws on the actions a
- * front end must own -- `quit` and now `toggleKeypad` -- and `main.ts:186` calls it OUTSIDE any try,
- * inside a socket 'data' handler. So the "harmless no-op" reasoning holds only for kinds
- * `applyAction` ignores; for a kind it THROWS on, the throw ends the gateway process and every
- * other operator's session with it.
+ * front end must own -- `quit` and `toggleKeypad` -- and `main.ts` calls it OUTSIDE any try, inside
+ * a socket 'data' handler. So the "harmless no-op" reasoning holds only for kinds `applyAction`
+ * IGNORES; for a kind it THROWS on, the throw ends the gateway process and every other operator's
+ * session with it.
  *
- * So: when `applyAction` grows a refusal, this function grows a rejection in the same change. There
- * is no compile-time link between the two files, which is why it is written down here.
+ * So: when `applyAction` grows a refusal, the gateway grows one of exactly two things in the SAME
+ * change, and either closes the hole --
+ *
+ *  - a rejection here, which is right when a browser must not have the action at all. `quit` is
+ *    that: it stops the gateway, so the bridge intercepts it client-side AND this refuses it,
+ *    because served code is not code a client is obliged to run.
+ *  - or an interception in `main.ts` that returns BEFORE `applyAction`, which is right when the
+ *    action is the sender's own business. `toggleKeypad` is that: it toggles one socket's own
+ *    display, so it is accepted here and handled there.
+ *
+ * WHAT IS NOT ALLOWED IS NEITHER, and `toggleKeypad` spent a commit in that state. There is no
+ * compile-time link between these files -- `applyAction`'s own `satisfies never` catches a missing
+ * case in `frontend`, not a missing one here -- which is why it is written down.
  *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
@@ -99,19 +110,11 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
-    // `toggleKeypad` is the second one, and it arrived by the route the note above predicted would
-    // never happen. Same shape as `quit`: `applyAction` THROWS on it rather than ignoring it,
-    // because showing a keypad is a display decision no `Session` knows about. `main.ts`'s
-    // `applyAction` call is NOT wrapped in a try, and it runs inside a socket 'data' handler, so
-    // without this line one 48-byte frame from any client ends the gateway PROCESS and disconnects
-    // every other operator's mainframe session mid-session -- exactly what `wsserver.ts` says must
-    // not be possible. Rejecting HERE is safe because this function's throw is caught (main.ts:134)
-    // and returned to that one client as an error message.
-    //
-    // Showing the keypad for a browser client is server-side state, so this is not the final word:
-    // the flag and the repaint belong here later, at which point this becomes a real case rather
-    // than a refusal.
-    if (aKind === 'toggleKeypad') throw new Error('toggleKeypad is not accepted from a client');
+    // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
+    // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
+    // already threw on it and nothing in `main.ts` intercepted it; now `main.ts` handles it and
+    // returns before `applyAction`, so the reason to refuse it is gone. It toggles the SENDER's own
+    // display and reaches no `Session`, so there is nothing here to bound.
     // AN OUT-OF-RANGE PF/PA NUMBER PUTS A BOGUS AID BYTE ON THE WIRE. Traced chain, all measured:
     // `applyAction` does `session.sendAID(PF_AIDS[action.n - 1]!)`, so n=-1 or n=1e9 indexes past
     // the table and the `!` hands `undefined` to `sendAID`; that reaches `buildReadModified`, which

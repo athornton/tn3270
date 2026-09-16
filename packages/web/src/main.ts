@@ -129,6 +129,17 @@ export function buildServer(args: WebArgs) {
      * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
      */
     let stopListening: (() => void) | undefined;
+    /**
+     * Per CONNECTION, and that is the one thing this differs from Electron in (`gui/src/main.ts:261`,
+     * where the same flag is per WINDOW and the two coincide).
+     *
+     * Here they do not. A gateway `Session` deliberately OUTLIVES its socket so a reload reattaches,
+     * so a flag hung off the session would follow it to whoever attached next: two browsers on one
+     * id are two operators at two windows, and one of them showing a keypad must not resize and
+     * repaint the other's. Declared in the `upgrade` scope, so it dies with the socket -- which is
+     * exactly the lifetime the preference has -- and a reattaching client starts with it hidden.
+     */
+    let showKeypad = false;
     conn.onText((text) => {
       let msg;
       try { msg = decodeClientMessage(text); } catch (err) {
@@ -156,8 +167,11 @@ export function buildServer(args: WebArgs) {
           const oia = mine.oia.toText();
           conn.sendBinary(encodeServerMessage({
             kind: 'frame',
+            // The VARIABLE is closed over, so this reads whatever it holds at paint time and the
+            // toggle below needs no more than a repaint. Every route into this closure -- a host
+            // frame, a local action, a reattach -- therefore draws what THIS socket last asked for.
             list: drawList(snapshot, resolve(snapshot), atlas.geometry, scheme,
-              oia === '' ? undefined : oia),
+              oia === '' ? undefined : oia, showKeypad),
           }));
         };
         mine.on('screen', send);
@@ -183,6 +197,24 @@ export function buildServer(args: WebArgs) {
       // Gated on `--log-actions`, which `parseWebArgs` refuses without `--replay`. The action
       // carries typed text, so on a live gateway this line would be a password in a log file.
       if (args.logActions) process.stdout.write(`action: ${JSON.stringify(msg.action)}\n`);
+      /**
+       * INTERCEPTED, and this is what makes the kind safe to admit at all.
+       *
+       * `applyAction` THROWS on `toggleKeypad` (`frontend/src/actions.ts:43-45`) rather than ignoring
+       * it, deliberately, so a front end that forgot to own its own display fails loudly. But the
+       * call below is outside any try and runs inside a socket 'data' handler, where `wsserver.ts`
+       * records that a throw ends the PROCESS and every other operator's session with it. So
+       * `protocol.ts` rejected this kind outright until now; that rejection is gone, and THIS
+       * `return` is the whole of what replaces it. It is unconditional for the kind and sits above
+       * every path to `applyAction`, so the kind cannot reach it.
+       *
+       * AFTER the log line above, on purpose: `--log-actions` is the only thing the browser chord
+       * harness can observe, and in replay mode a toggle changes no screen.
+       *
+       * A repaint and nothing else, because `send` reads `showKeypad` itself -- and a repaint IS
+       * required, since no `Session` event fires for a decision no `Session` knows about.
+       */
+      if (msg.action.kind === 'toggleKeypad') { showKeypad = !showKeypad; repaint?.(); return; }
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:347-348`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
