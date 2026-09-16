@@ -104,8 +104,13 @@ describe('applyAction', () => {
     // Teardown differs per front end: the TUI restores raw mode, the GUI closes a
     // window. A shared dispatch that silently ignored `quit` would make a front end
     // that forgot to check it simply unquittable, so it throws instead.
+    //
+    // THE PATTERN MATCHES THE DELIBERATE MESSAGE, not just the word. `/quit/i` -- as this
+    // read until now -- passes on any incidental error that happens to name the action,
+    // including the `TypeError: ...quit is not a function` Node raises for a typo'd method
+    // call. MEASURED on the `toggleKeypad` twin below, which had the identical weakness.
     const { session } = newSession();
-    expect(() => applyAction(session, { kind: 'quit' })).toThrow(/quit/i);
+    expect(() => applyAction(session, { kind: 'quit' })).toThrow(/does not handle quit/);
   });
 });
 
@@ -148,17 +153,33 @@ describe('the keypad-era actions', () => {
     expect(spy).toHaveBeenCalledOnce();
   });
 
-  it('dup and fieldMark reach the keyboard, not sendAID', () => {
+  it('dup and fieldMark reach their OWN keyboard method, not each other s, and not sendAID', () => {
     // They are typed characters. A version that routed them through sendAID would put a
     // bogus AID byte on the wire, which is the class of defect pfAID/VALID_AIDS exist for.
+    //
+    // EACH SPY IS ASSERTED BEFORE THE OTHER KEY IS PRESSED, and that ordering is the whole
+    // test rather than a style choice. Written as two calls followed by two
+    // `toHaveBeenCalledOnce()` assertions -- which is how it first shipped -- the test is
+    // VACUOUS against a transposition: MEASURED, swapping the two case bodies to
+    // `case 'dup': k.fieldMark()` / `case 'fieldMark': k.dup()` left all 13 tests green,
+    // because each spy still saw exactly one call and `sendAID` was still untouched.
+    // A swap is not cosmetic. The two differ in three ways (keyboard.ts:126, :164): the
+    // byte written (0x1c versus 0x1e), the cursor rule (`'tab'` versus `'advance'`) and the
+    // numeric-field policy (permitted versus refused). It would put the wrong control byte
+    // on the wire, move the cursor wrongly, and invert the numeric rule.
     const { session } = newSession();
     const dup = vi.spyOn(session.keyboard, 'dup');
     const fm = vi.spyOn(session.keyboard, 'fieldMark');
     const aid = vi.spyOn(session, 'sendAID');
+
     applyAction(session, { kind: 'dup' });
+    expect(dup, 'dup went somewhere other than Keyboard.dup').toHaveBeenCalledOnce();
+    expect(fm, 'dup was routed to Keyboard.fieldMark').not.toHaveBeenCalled();
+
     applyAction(session, { kind: 'fieldMark' });
-    expect(dup).toHaveBeenCalledOnce();
-    expect(fm).toHaveBeenCalledOnce();
+    expect(fm, 'fieldMark went somewhere other than Keyboard.fieldMark').toHaveBeenCalledOnce();
+    expect(dup, 'fieldMark was routed to Keyboard.dup').toHaveBeenCalledOnce();
+
     expect(aid).not.toHaveBeenCalled();
   });
 
@@ -167,7 +188,12 @@ describe('the keypad-era actions', () => {
     // intercept this would show a dead button rather than an error, because the switch
     // below treats an unrecognised kind as a no-op. Throwing makes the omission loud.
     // See applyAction's docstring.
+    //
+    // `/does not handle toggleKeypad/` rather than `/toggleKeypad/`: MEASURED, the loose
+    // pattern passes when the throw is replaced by a call to a nonexistent method, because
+    // Node's own `TypeError: ...toggleKeypad is not a function` contains the word. The
+    // deliberate refusal and an accidental crash are not the same outcome.
     const { session } = newSession();
-    expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/toggleKeypad/);
+    expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/does not handle toggleKeypad/);
   });
 });
