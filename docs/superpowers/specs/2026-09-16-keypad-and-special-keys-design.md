@@ -79,9 +79,9 @@ So the keypad is a third `DrawList` region, mirroring `oia`:
 
 ```ts
 readonly keypad?: {
-  readonly y: number;                          // first cell row of the keypad
+  readonly y: number;                          // top of the keypad, in scale-1 pixels
   readonly cells: readonly DrawCell[];         // same atlas, same blitter
-  readonly buttons: readonly KeypadButton[];   // hit-testing, in CELL coordinates
+  readonly buttons: readonly KeypadButton[];   // hit-testing, in scale-1 pixels
 };
 ```
 
@@ -90,10 +90,14 @@ showing it never moves or covers a row the host wrote — the rule that the TUI'
 the GUI's resize both come from. `list.height` grows by the keypad's rows while `oia.y` is
 unchanged.
 
-`KeypadButton` is `{ x, y, w, h, action, label }` in cell coordinates; the renderer converts a
-pixel click through the scale and offset it already computes for drawing. Cell coordinates rather
-than pixels because the scale is chosen at paint time and a rectangle in pixels would be stale the
-moment the window resized.
+`KeypadButton` is `{ x, y, w, h, action, label }` in **scale-1 pixels — the same coordinate space
+`DrawCell` already uses**, since `drawList` emits `x: col * atlas.cellWidth` and `oia.y:
+snapshot.rows * atlas.cellHeight`. An earlier draft of this spec said cell coordinates, on the
+reasoning that a pixel rectangle would go stale when the window resized; that reasoning is wrong,
+because these are BASE pixels that the renderer multiplies by the scale it picks at paint time,
+exactly as it already does for every cell. Using cells would introduce a second coordinate
+convention in the same structure for no benefit. The renderer converts a click the inverse way:
+subtract the centring offset, divide by the scale, then compare.
 
 Everything then works through paths that exist: main resizes to a taller list for free, the gateway
 ships whole frames for free, and `browser-shot.mjs` can compare the keypad's pixels because it is
