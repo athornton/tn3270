@@ -2252,22 +2252,40 @@ no host), the `Ctrl+K` that shows the keypad, `Math.max(expected.length, actual.
 zero-length bail, the `NO BUTTON` bail, the ordered `error`/`signal`/`status` checks, and the
 absence of `spawnSync(`. **Say on each test what its absence would cost.**
 
-- [ ] **Step 5a: THE HARNESS MUST RUN AT SCALE ≥ 2 WITH A NON-ZERO CENTRING OFFSET, or it proves
-      nothing. This is the single most important line in this task.**
+- [ ] **Step 5a: WHAT THIS HARNESS DOES AND DOES NOT HAVE TO PROVE — read before sizing anything**
 
-Established in Task 7, by the implementer reasoning about its own unproven code. The click arithmetic is
-`(offsetX - at.x) / scale` — the exact inverse of `paint`'s `at.x + cell.x * scale`. **Every existing
-pixel harness runs at exactly viewport == drawing extent (720x350), so `bestScale` is 1 and `centre` is
-`(0,0)`.** At those values:
+**THE COORDINATE ARITHMETIC IS ALREADY UNIT-TESTED, so this harness does not have to carry it.** Task 7
+extracted `hitTestAt(buttons, offsetX, offsetY, at, scale)` into `hittest.ts` — import-free, so it stays
+inside the renderer's clean graph — and pinned it at `scale: 3` with `at: {x: 40, y: 17}`, where both
+fatal mutations (multiplying instead of dividing, and dropping the centring offset) redden `npm test`.
+That was worth doing because of what this file is: **`renderer.ts` is executed by nothing in the suite**,
+and the project has measured that `if (e.altKey) return;` in its `keydown` listener leaves the suite
+fully green while every Alt chord is dead.
 
-- multiplying by the scale instead of dividing is **indistinguishable from correct**, and
-- dropping the centring offset entirely is **indistinguishable from correct**.
+**So this task's job is the PLUMBING, not the geometry**: `mousedown` → the `e.button` guard → `hitTest`
+→ `sendAction` → IPC → `applyAction`. That is exactly what the chord guard established as the thing only
+a harness can reach, and it is provable at any scale.
 
-So a click harness sized like the goldens would pass with the arithmetic inverted *and* the offset
-missing. **Size the window so the scale is at least 2 and the drawing does not fill it** — then a wrong
-scale puts the hit a multiple of the scale from the finger, and a missing offset puts it a fixed distance
-off, and both miss the button. Assert the window size in the harness so a later resize cannot quietly
-return it to scale 1.
+**Why the tempting "just run it at scale ≥ 2 with a non-zero offset" is harder than it sounds — three
+measured facts, so nobody re-derives them:**
+
+1. **In native Electron mode the centring offset can NEVER be non-zero, at any scale.** `main.ts:290`
+   sets the content size to exactly `list.width * scale` × `list.height * scale`, so
+   `window.innerWidth === list.width * scale` and `centre` returns `(0,0)` for every model.
+   `TN3270_GUI_SIZE` is meaningful **only alongside `url`** (`main.ts:101`), where `fit()` never runs — so
+   an offset test must go through the URL seam, `browser-shot.mjs`-style.
+2. **720x350 is derived, not chosen.** `xvfb.mjs:26` starts `:99` at `1280x1024`; `fit()` takes 80% of the
+   work area and `bestScale(720x350)` there is 1. **Enlarging that screen would change `fit()`'s scale and
+   move both GUI goldens**, so do not touch `:99`.
+3. **A narrow geometry is NOT the way out.** 40 columns gives `list.width` 360 against a keypad 648 wide,
+   so the buttons fall outside the drawing extent — the horizontal overflow Task 6 pinned
+   (`keypad.width <= list.width` holds only from 72 columns up). And an 80-column screen with the keypad
+   is 720x434, which at scale 2 is 1440x868 and does not fit in 1280 wide.
+
+**If you do want the offset exercised end to end, the honest route is a SECOND Xvfb display** (say `:98`
+at 1600x1200) used only by this harness in URL mode, leaving `:99` and the goldens alone —
+`xvfb.mjs:40-42` already warns that two harnesses sharing a display number collide. Treat that as
+optional: the arithmetic has a unit test, and this harness's value is the plumbing.
 
 Note also that `renderer.ts` now really does contain `if (e.button !== 0) return;` — a deliberate guard,
 because `mousedown` fires for the right button too and a right-click on `Clear` would otherwise send it
