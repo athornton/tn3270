@@ -8,7 +8,7 @@ import { keypadRegion, KEYPAD_ROWS_TALL, type KeypadRegion } from '../src/keypad
 // From `hittest.js`, not `keypad.js`: the renderer hit-tests in the BROWSER, so this function lives
 // in the one keypad module with no runtime import. See hittest.ts, and the graph assertion in
 // `renderer-imports.test.ts`.
-import { hitTest, type KeypadButton } from '../src/hittest.js';
+import { hitTest, hitTestAt, type KeypadButton } from '../src/hittest.js';
 import type { AtlasGeometry, DrawCell } from '../src/drawlist.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 
@@ -264,6 +264,73 @@ describe('hitTest', () => {
     }
     for (const cell of [18, 23, 42, 71]) {
       expect(at(cell, 5), `cell ${cell} on drawn row 5`).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * The click arithmetic, AT SCALE 3 WITH A NON-ZERO CENTRING OFFSET, and that is the whole point.
+ *
+ * `paint` draws a scale-1 coordinate at `offset + coordinate * scale` (`blit.ts:105-106`), so a click
+ * must subtract the offset and DIVIDE by the scale. At scale 1 with no centring, multiplying instead
+ * of dividing and dropping the offset altogether are BOTH INVISIBLE -- and scale 1 with no centring
+ * is exactly what both screenshot harnesses run at, since `browser-shot.mjs` sizes the viewport from
+ * the golden. `renderer.ts` cannot be unit-tested at all (`index.ts:8-10`), so this describe is the
+ * only thing in the suite that can fail for either mistake.
+ *
+ * BOTH MUTATIONS WERE RUN against these assertions, verbatim:
+ *   `* scale` for `/ scale`    -> two failures, the first being "finds the button under the centre of
+ *                                every button": `PF13: expected undefined to deeply equal
+ *                                { x: +0, y: 350, w: 54, h: 14, ... }`.
+ *   dropping `- at.x`/`- at.y` -> the centre probes still PASS -- `at.x / scale` is 13.3 scale-1
+ *                                pixels of slop inside a 54-wide button -- and only the
+ *                                last-device-pixel test fails: `PF13: expected { x: 54, y: 364, ... }
+ *                                to deeply equal { x: +0, y: 350, ... }`, i.e. PF2. THAT is why the
+ *                                edge probe is here and not just the centre one.
+ */
+describe('hitTestAt', () => {
+  const scale = 3;
+  const at = { x: 40, y: 17 };
+  // y=350 is where `drawList` puts the region under a 24-row screen and its OIA: 25 * 14.
+  const r = keypadRegion(atlas, scheme, 350);
+  /** Where a scale-1 point lands on the canvas -- i.e. exactly what `paint` would draw. */
+  const onCanvas = (x: number, y: number) => ({ x: at.x + x * scale, y: at.y + y * scale });
+
+  it('finds the button under the centre of every button', () => {
+    for (const b of r.buttons) {
+      const p = onCanvas(b.x + b.w / 2, b.y + b.h / 2);
+      expect(hitTestAt(r.buttons, p.x, p.y, at, scale), b.label).toEqual(b);
+    }
+  });
+
+  it('finds it from the LAST DEVICE PIXEL of every button, which is what pins the offset', () => {
+    // A centre probe cannot catch a dropped offset: `at.x / scale` is 13.3 scale-1 pixels and a
+    // button is 54 wide, so the centre of one stays inside it. The last pixel does not -- it lands in
+    // the neighbouring button, or outside the keypad at the end of a row.
+    for (const b of r.buttons) {
+      const p = onCanvas(b.x + b.w, b.y + b.h);
+      expect(hitTestAt(r.buttons, p.x - 1, p.y - 1, at, scale), b.label).toEqual(b);
+    }
+  });
+
+  it('excludes the first device pixel PAST a button on both axes', () => {
+    // Half-open survives the scaling: `b.x + b.w` at scale belongs to the neighbour, not to `b`.
+    for (const b of r.buttons) {
+      const p = onCanvas(b.x + b.w, b.y + b.h);
+      expect(hitTestAt(r.buttons, p.x, p.y, at, scale), b.label).not.toEqual(b);
+    }
+  });
+
+  it('returns undefined for a click before the region starts', () => {
+    expect(hitTestAt(r.buttons, at.x - 1, at.y - 1, at, scale)).toBeUndefined();
+    expect(hitTestAt(r.buttons, 0, 0, at, scale)).toBeUndefined();
+  });
+
+  it('is hitTest itself when the scale is 1 and nothing is centred', () => {
+    // Written down because it is the DEGENERATE case, not the interesting one: this assertion is
+    // green under both mutations above, which is precisely why the harnesses cannot be the check.
+    for (const b of r.buttons) {
+      expect(hitTestAt(r.buttons, b.x, b.y, { x: 0, y: 0 }, 1)).toEqual(hitTest(r.buttons, b.x, b.y));
     }
   });
 });

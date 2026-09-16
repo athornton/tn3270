@@ -55,6 +55,9 @@ describe('the renderer bundle', () => {
     // into a scan of nothing.
     expect(graph.some((f) => f.endsWith('keys.js')), 'keys.js not reached').toBe(true);
     expect(graph.some((f) => f.endsWith('blit.js')), 'blit.js not reached').toBe(true);
+    // The third real edge, since the renderer hit-tests a keypad click itself. Named for the same
+    // reason as the other two: an unnamed edge is one the walker may quietly stop following.
+    expect(graph.some((f) => f.endsWith('hittest.js')), 'hittest.js not reached').toBe(true);
     const offenders: string[] = [];
     for (const file of graph) {
       const text = readFileSync(file, 'utf8');

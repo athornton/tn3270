@@ -46,3 +46,29 @@ export function hitTest(
 ): KeypadButton | undefined {
   return buttons.find((b) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
 }
+
+/**
+ * The button under an element-relative click, given the paint's centring offset and scale.
+ *
+ * THE ONE LINE OF THE CLICK PATH THAT IS ARITHMETIC, PULLED OUT OF `renderer.ts` SO A TEST CAN
+ * REACH IT. The renderer is a browser entry point -- it throws at module load outside a browser, so
+ * the barrel cannot export it and no unit test can execute a line of it. That is not a theoretical
+ * gap: adding `if (e.altKey) return;` to the renderer's `keydown` listener leaves this repo's suite
+ * fully green while every Alt chord is dead. This function is the same risk in the mouse path, and
+ * it is the half that does not need a browser.
+ *
+ * THE EXACT INVERSE of what `paint` draws: `blit.ts:105-106` puts a scale-1 cell at
+ * `offset + coordinate * scale`, so a click subtracts the offset and DIVIDES by the scale. Both
+ * mistakes -- multiplying instead of dividing, and forgetting the offset -- are INVISIBLE AT SCALE 1
+ * WITH NO CENTRING, which is exactly the configuration both screenshot harnesses run in
+ * (`browser-shot.mjs` sizes the viewport from the golden, so `bestScale` returns 1 and `centre`
+ * returns 0,0). `keypad.test.ts`'s `hitTestAt` describe therefore probes at scale 3 with a non-zero
+ * offset, and both mutations were run against it: multiplying fails a CENTRE probe, while dropping
+ * the offset passes every centre probe and fails only the last-device-pixel one.
+ */
+export function hitTestAt(
+  buttons: readonly KeypadButton[], offsetX: number, offsetY: number,
+  at: { readonly x: number; readonly y: number }, scale: number,
+): KeypadButton | undefined {
+  return hitTest(buttons, (offsetX - at.x) / scale, (offsetY - at.y) / scale);
+}

@@ -30,5 +30,5 @@ export { parseBdf } from './bdf.js';
 // does to the renderer's graph.
 export { keypadRegion, KEYPAD_ROWS_TALL } from './keypad.js';
 export type { KeypadRegion } from './keypad.js';
-export { hitTest } from './hittest.js';
+export { hitTest, hitTestAt } from './hittest.js';
 export type { KeypadButton } from './hittest.js';

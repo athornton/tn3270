@@ -2,7 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry, DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
 import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
-import { hitTest, type KeypadButton } from './hittest.js';
+import { hitTestAt, type KeypadButton } from './hittest.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -62,11 +62,21 @@ let last: DrawList | undefined;
 /**
  * The keypad button under the finger right now, if any.
  *
- * PURELY RENDERER-LOCAL, and deliberately: see the highlight at the end of `paint`. Cleared on
- * `mouseup` anywhere in the window, not just on the canvas, so a release outside the button that
- * was pressed cannot leave the highlight stuck on.
+ * PURELY RENDERER-LOCAL, and deliberately: see the highlight at the end of `paint`. Cleared by
+ * `release()`, on `mouseup` anywhere in the window and on `blur`, so no way of ending a press can
+ * leave the highlight stuck on.
  */
 let pressed: KeypadButton | undefined;
+/**
+ * True while the canvas holds an ERROR MESSAGE rather than a screen.
+ *
+ * `onError` repaints the canvas as text but leaves `last` alone, so without this a click at a
+ * button's former position still passed the keypad guard: it sent the action into a session that is
+ * failing or already gone, and its `paint(last)` WIPED THE ONLY EXPLANATION OF THE FAILURE off the
+ * screen, restoring a stale one. Someone who double-clicked a `.app` has no console to recover it
+ * from -- the same argument `onError` itself is written on.
+ */
+let errored = false;
 
 const tints = new Map<string, ImageBitmap>();
 const building = new Set<string>();
@@ -159,7 +169,12 @@ function paint(list: DrawList): void {
   // Drawn LAST so it sits over the label, and gated on `list.keypad` as well as on `pressed`: a
   // frame with the keypad off must draw nothing extra even if a press is still outstanding.
   // `fillRect` is on `Ctx2D` already (`blit.ts:34`), so no cast and no widening.
-  if (pressed !== undefined && list.keypad !== undefined) {
+  //
+  // `includes` is an IDENTITY check and not a search: `pressed` is always an element of some frame's
+  // `buttons`, so this asks "of THIS frame's?". Without it, a frame whose geometry changed while a
+  // button was held -- a host that switches model, so the keypad's `y` moves -- would highlight a
+  // rectangle no button occupies until the release.
+  if (pressed !== undefined && list.keypad !== undefined && list.keypad.buttons.includes(pressed)) {
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillRect(
       at.x + pressed.x * scale, at.y + pressed.y * scale,
@@ -171,16 +186,20 @@ function paint(list: DrawList): void {
 window.tn3270.onAtlas((message) => {
   atlas = message;
   blank = new Set(message.blank);
-  if (last !== undefined) paint(last);
+  // This repaint also PAINTS OVER an error message, so the click guard lifts with it -- inside the
+  // `if`, because with no frame yet there is nothing to paint and the message stays up.
+  if (last !== undefined) { errored = false; paint(last); }
 });
 
-window.tn3270.onFrame(paint);
+// A frame means the session is drawing again, so whatever `onError` put up is both gone and stale.
+window.tn3270.onFrame((list) => { errored = false; paint(list); });
 
 window.tn3270.onError((message) => {
   // Failures must be VISIBLE: someone who double-clicked a .app has no console. This is the
   // one place canvas text is used, deliberately -- an error message is our own chrome, is
   // never compared against a golden, and must stay readable at any window size.
   if (canvas === null || real === null) return;
+  errored = true;
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   real.fillStyle = '#000';
@@ -215,12 +234,21 @@ window.addEventListener('keydown', (e) => {
  * `mousedown`, not `click`: the press highlight should appear under the finger, and a `click` only
  * arrives after release.
  *
- * `offsetX`/`offsetY` and NOT `clientX - getBoundingClientRect().left`. Both are element-relative,
- * so both survive page scrolling -- which the web front end has, since `paint` sizes the canvas to
- * the drawing and `web/static/index.html:10` is `overflow:auto`. `offsetX` is the simpler of the two
- * and needs no rect. Neither is right if the canvas is ever given a CSS size that differs from its
- * attribute size, because both are then in CSS pixels of a stretched box; both pages style the
- * canvas `display:block` and nothing else, so the two spaces are the same and no ratio is needed.
+ * `offsetX`/`offsetY` and NOT `clientX - getBoundingClientRect().left`, and the reason is NOT that
+ * one is element-relative and the other is not: it is that `offsetX` and `at` are measured from the
+ * SAME ORIGIN, the canvas's own box, so the expression has NO SCROLL TERM AT ALL to get wrong. The
+ * web page really does scroll -- `paint` sizes the canvas to the drawing and
+ * `web/static/index.html:10` is `overflow:auto` -- and the rect form would reach the same number
+ * only because the rect moves with the scroll.
+ *
+ * Two things a reader will suspect, neither of which is a problem here. `devicePixelRatio`: the
+ * backing store and the CSS box are 1:1 at any dpr, because `paint` assigns `canvas.width` from
+ * `window.innerWidth`, which is already CSS pixels. A CSS `width`/`height` on the canvas WOULD break
+ * this -- `offsetX` would be in CSS pixels of a stretched box and would need a
+ * `canvas.width / rect.width` factor, as would the rect form -- and both pages style the canvas
+ * `display:block` and nothing else. A `transform: scale()` is NOT that case: `offsetX` stays in the
+ * element's own untransformed space, where the rect form does not, so there it is the better API
+ * rather than an equally wrong one.
  *
  * Primary button only. `mousedown` fires for the right and middle buttons too, and a keypad that
  * sent `clear` or a PF key to a live host on a right-click -- while the context menu opened over
@@ -230,24 +258,38 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   // Read the module state ONCE: everything below must agree about which frame was clicked.
   const list = last;
-  if (list?.keypad === undefined) return;
+  if (errored || list?.keypad === undefined) return;
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(list, within);
-  const at = centre(list, within, scale);
-  const x = (e.offsetX - at.x) / scale;
-  const y = (e.offsetY - at.y) / scale;
-  const button = hitTest(list.keypad.buttons, x, y);
+  // The arithmetic is `hitTestAt`'s, not this file's, and DELIBERATELY: nothing can execute a line
+  // of this module (`index.ts:8-10`), so the inverse lives where `keypad.test.ts` can mutate it.
+  const button = hitTestAt(
+    list.keypad.buttons, e.offsetX, e.offsetY, centre(list, within, scale), scale,
+  );
   if (button === undefined) return;           // a gap, or the screen: not ours
   pressed = button;
   paint(list);                                // draw the highlight immediately
   window.tn3270.sendAction(button.action);
 });
 
-window.addEventListener('mouseup', () => {
+/**
+ * Drop the press highlight.
+ *
+ * `mouseup` ON THE WINDOW covers a release outside the button, and outside the window too: Chromium
+ * takes native mouse capture on `mousedown`, so the release is still delivered here. `blur` covers
+ * what capture cannot -- focus lost while the button is held, by Alt+Tab, an X grab or a lock screen,
+ * or a native context menu opening over it. Damage either way is highlight-only, since `pressed` is
+ * never read on the action path, but it would persist INDEFINITELY: `paint` redraws the highlight on
+ * every later frame.
+ */
+function release(): void {
   if (pressed === undefined) return;
   pressed = undefined;
   if (last !== undefined) paint(last);
-});
+}
+
+window.addEventListener('mouseup', release);
+window.addEventListener('blur', release);
 
 window.addEventListener('resize', () => { if (last !== undefined) paint(last); });
 
