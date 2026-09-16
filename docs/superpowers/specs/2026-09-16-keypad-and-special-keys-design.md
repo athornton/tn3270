@@ -343,6 +343,17 @@ rather than implying the keypad as a whole is live-verified.
    is asserted, along with the fact that it happens only once** (an earlier wording of this criterion
    said "Dup's auto-skip suppression is asserted", which was the inverted rule; see the three-keys
    section).
-5. The TUI overlay lists every special key with its chord, fires one, and refuses to open in a
-   terminal too small to hold it.
+5. The TUI overlay lists every special key with its chord and fires one. **The "refuses to open in a
+   terminal too small to hold it" half is UNREACHABLE IN A LIVE SESSION, measured in Task 11 — do not
+   claim it as verified behaviour.** `tooSmall` (`tui/src/render.ts:43`) already refuses any terminal
+   below 24x80 before a session runs at all, and the smallest 3270 screen *is* 24x80, so every terminal
+   that can reach the overlay is at least 24x80, which comfortably exceeds `OVERLAY_MIN` (12x29). The
+   guard is therefore a floor for a caller passing a **sub-window**, not a refusal an operator can
+   provoke. Task 11 encoded that as a test — `OVERLAY_MIN` must never exceed 24x80 — rather than
+   inflating the minimum to manufacture a reachable refusal, which would have been a fabricated
+   success criterion.
+
+   Related, from the same task: **`OVERLAY_MIN.cols` was over-declared at 34 when the widest line is
+   27.** A too-large minimum only ever *refuses*, so nothing reddens — the same over-declaration class
+   as Tasks 5 and 6. It is now pinned from both directions.
 6. `npm test`, both goldens, `pty-smoke.py` and all four by-hand harnesses pass.
