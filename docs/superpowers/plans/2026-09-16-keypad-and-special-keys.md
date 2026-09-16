@@ -48,6 +48,24 @@ crashing or shipping a documented dead key for ten commits.
 that catches it must not be separated. If a plan splits them, reorder the plan or merge the commit —
 the gap is a live defect, not a to-do.**
 
+### THE FULL REVISED ORDER: 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4, 13, 14, 15
+
+**Task 4 moves to LAST-BUT-THREE, because it is the task that arms the chord.** Every front end must be
+able to intercept `toggleKeypad` before any keystroke can produce it: Task 8 gives Electron its flag,
+Task 9 gives the gateway its per-connection flag, and Task 12 gives the TUI its overlay. Only then is
+binding `Ctrl-K` safe.
+
+**The dependency that forces this, and it is mutual:** Task 12's sketched tests drive the TUI with byte
+`0x0b`, which needs Task 4's binding — while Task 4's binding needs Task 12's interception or the TUI
+dies on the keystroke. **Resolution: Task 12 tests its interception by dispatching the ACTION directly
+(`apply({ kind: 'toggleKeypad' })`), and Task 4 adds the byte-level test when it binds the chord.** So
+each task is verifiable at the commit where it lands, and no commit in between has a reachable throw.
+
+**Consequence for Task 8's step 3:** it cannot use `TN3270_GUI_KEYS='Ctrl+K'`, because nothing is bound
+yet. Capture the font PNG by **temporarily defaulting `showKeypad = true`**, looking at the image, then
+reverting — and say in the report that this is what was done. The chord path gets exercised for real at
+Task 4.
+
 ---
 
 ### Task 1: DUP and Field Mark in core's keyboard
