@@ -11,13 +11,22 @@ export interface Command {
   args: string[];
 }
 
-/** Canonical spelling of every command stage 1 implements. */
+/**
+ * Canonical spelling of every command the CLI implements.
+ *
+ * A NAME MUST BE IN BOTH THIS TABLE AND `Runner.dispatch`. `parseCommand` validates
+ * against this list, so a verb present only in the switch is rejected here as
+ * "unknown command" and never reaches its `case` — the failure then looks like an
+ * unimplemented action rather than a missing table entry. Measured, not inferred:
+ * adding the dispatch half of Dup/FieldMark/SysReq alone left all seven of their
+ * tests failing on `unknown command: Dup`.
+ */
 export const COMMAND_NAMES = [
   'Connect', 'Disconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
   'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
-  'BackSpace', 'Delete', 'Insert', 'Transfer',
+  'BackSpace', 'Delete', 'Insert', 'Transfer', 'Dup', 'FieldMark', 'SysReq',
 ] as const;
 
 const CANONICAL = new Map(COMMAND_NAMES.map((n) => [n.toLowerCase(), n]));

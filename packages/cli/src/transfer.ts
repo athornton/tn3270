@@ -378,7 +378,7 @@ function positiveInt(keyword: string, value: string): number {
  *
  * s3270 also accepts `keyword,value` as two arguments (ft.c:865-877). We do not,
  * and cannot usefully: `commands.ts` splits arguments on commas AND spaces
- * (splitArgs, commands.ts:75-79), so `Transfer(Direction,send)` and
+ * (splitArgs, commands.ts:84-88), so `Transfer(Direction,send)` and
  * `Transfer(Direction=send, Mode=ascii)` arrive as indistinguishable token lists
  * and a parser that guessed would misread one of them. A bare token therefore
  * gets an error that says what to type instead.
