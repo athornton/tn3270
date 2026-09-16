@@ -27,6 +27,32 @@ the task's report rather than making the code match the plan.
 
 ### Task 1: DUP and Field Mark in core's keyboard
 
+> **AS BUILT (commit `58384ef`). THREE DEFECTS IN THIS TASK'S TEXT, one of them its headline fact.
+> Read this before writing any test that touches Dup.**
+>
+> 1. **`dup()` TABS; it does not "advance one position and stop".** Step 4 below is wrong. `kybd.c:1435`
+>    does suppress `key_Character`'s auto-skip for a keyboard Dup, but `Dup_action` then moves the
+>    cursor itself (`kybd.c:2790`), and the manual states the net behaviour outright (p. 7-12: "a Tab
+>    key operation to be performed"). What the suppression buys is that the tab happens ONCE — our
+>    `advanceAfterType` already tabs at end-of-field, so advancing first would skip a whole field.
+>    Implemented as `write; setMDT; tab()`, with both halves mutation-checked.
+> 2. **A numeric field TAKES Dup and refuses Field Mark.** The manual's permitted set names "the
+>    duplicate (DUP) control" explicitly (p. 4-13). x3270's byte test refuses DUP too but is gated on
+>    `appres.numeric_lock`, which has no default assignment and is therefore off.
+> 3. **The MDT assertion in Step 1 would have passed VACUOUSLY.**
+>    `screen.cellAt(field.attrAddr).ebcdic & FA.MODIFY` is always 0, because `setFieldAttribute`
+>    stores the attribute in `attrs[]` and zeroes `chars[]`. Used the file's own idiom,
+>    `s.fieldAt(3)!.modified`.
+>
+> Also: the constants went beside `Order`, not `PF_AIDS` — they are format control orders, not AIDs.
+> The plan's four helper names were dropped for the file's existing `twoFields()`/`kb(s)` idiom plus a
+> local `threeFields()`. `writeControl`'s second parameter is `'tab' | 'autoSkip'`, not a boolean,
+> because a boolean could not express the correct behaviour. **7 tests, not 6. Suite at 1521.**
+>
+> **Found but NOT fixed, deliberately:** neither `type()` nor `writeControl()` refuses a cursor parked
+> *on* a field attribute byte, where x3270 does (`kybd.c:1221`). Parity with `type()` was kept; fixing
+> it belongs in its own commit covering both and is not part of this feature.
+
 **Files:**
 - Modify: `packages/core/src/constants.ts` (add two constants near `PF_AIDS`)
 - Modify: `packages/core/src/keyboard.ts` (add `dup`, `fieldMark`, private `writeControl`)
