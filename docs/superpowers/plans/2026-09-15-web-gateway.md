@@ -1222,6 +1222,18 @@ Do both halves:
    at the proxy, or pass `--allow-origin https://your.gateway`. This belongs in the web README that
    Task 15 writes — add a note there rather than only in a comment.
 
+**AS BUILT (`df48ca6`).** Items 1, 3, 4 and 5 and the `--allow-origin` flag are done; `handshake.test.ts`
+is 20 tests and `args.test.ts` 17. Three things to carry forward:
+
+- **`UpgradeRequest.allowOrigins` was made REQUIRED, not optional** — nothing constructs an
+  `UpgradeRequest` outside the test yet, so the cost is zero and it means the task that writes the
+  server cannot forget to thread the flag through. **Ratified: keep it required.**
+- **Item 2's documentation half is NOT done** and belongs to Task 15: there is no
+  `packages/web/README.md` yet. Task 15 must carry the note "preserve `Host` at the proxy, or pass
+  `--allow-origin https://your.gateway`".
+- The no-wildcard test was itself mutation-checked by widening `includes` to a suffix rule, which
+  failed it — so that assertion is not merely decorative.
+
 Tests: a matching `--allow-origin` accepted; a non-matching one still refused; the flag not affecting
 the absent-Origin rule; and that no wildcard is honoured (`--allow-origin https://*.example` must NOT
 match `https://a.example`). Mutation-check by removing the allow-list branch and confirming the
