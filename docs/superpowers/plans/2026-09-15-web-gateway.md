@@ -29,7 +29,9 @@ runtime dependencies), vitest, Electron 44.3.0 + Xvfb for the by-hand browser ha
   tested because nothing guarantees a future frame stays small.
 - **`DecompressionStream('deflate')` requires the zlib wrapper** (RFC 1950), which is what
   `zlib.deflateSync` emits — first bytes `78 9c`. `zlib.deflateRawSync` emits raw DEFLATE
-  (`ab a8`) and would need `'deflate-raw'`. Mismatch these and every frame silently fails to
+  (which has NO header — its leading bytes are payload-dependent compressed data, measured `ab 56`,
+  `4b 04`, `cb 48`, so there is no signature, only the absence of a valid zlib header) and would need
+  `'deflate-raw'`. Mismatch these and every frame silently fails to
   inflate.
 - **Node v26.8.2 has a WebSocket CLIENT (`typeof WebSocket === 'function'`) and NO server.** The
   built-in client is the independent oracle for our framing. Its constructor takes ONE argument and
@@ -1265,7 +1267,7 @@ import { encodeServerMessage, decodeClientMessage } from '../src/protocol.js';
 describe('encodeServerMessage', () => {
   it('emits a ZLIB-wrapped deflate stream, because that is what the browser expects', () => {
     // MEASURED: DecompressionStream('deflate') wants RFC 1950 (first bytes 78 9c), which
-    // zlib.deflateSync emits. deflateRawSync emits RFC 1951 (ab a8) and would need
+    // zlib.deflateSync emits. deflateRawSync emits RFC 1951, which has no header at all, and would need
     // 'deflate-raw'. Mismatch these and EVERY frame silently fails to inflate in the browser.
     const out = encodeServerMessage({ kind: 'error', message: 'x' });
     expect(out[0]).toBe(0x78);
@@ -1357,7 +1359,8 @@ import type { Action } from '@tn3270/frontend';
  *
  * `deflateSync` emits the ZLIB wrapper (RFC 1950, first bytes 78 9c) and the browser's
  * `DecompressionStream('deflate')` requires exactly that. `deflateRawSync` emits raw DEFLATE
- * (ab a8) and would need `'deflate-raw'`. Mismatch them and every frame silently fails to inflate,
+ * (no header at all; its leading bytes are payload-dependent) and would need `'deflate-raw'`. Mismatch
+ * them and every frame silently fails to inflate,
  * with a blank canvas and no error -- the same signature as four other traps already recorded for
  * this renderer. `protocol.test.ts` pins the header bytes.
  */
@@ -1715,6 +1718,15 @@ Co-Authored-By: SLAC AI"
 - Create: `packages/web/src/wsserver.ts`
 - Test: `packages/web/test/wsserver.test.ts`
 - Modify: `packages/web/src/wsframe.ts` (two small hardenings, below)
+
+**THE FRAME SIZE CAP IN THIS TASK IS NOW LOAD-BEARING FOR A COMMENT THAT ALREADY SHIPPED.**
+`protocol.ts` says, in the present tense, that the WebSocket server caps payload size before a frame
+reaches `decodeClientMessage`. That cap does not exist yet — `wsframe.ts` reads the extended lengths
+and only refuses above `Number.MAX_SAFE_INTEGER`. If this task does not land the cap, that comment
+becomes a false reassurance pointing at nothing, so **land it or correct the comment; do not leave the
+pair inconsistent.** It is also what bounds a hostile `{kind:'type', text: <multi-megabyte string>}`,
+which on an UNFORMATTED screen (`advanceAfterType` has no overflow check, and VM/370's own logon panel
+is unformatted) stalls the single-process event loop for every other session.
 
 **ALSO IN THIS TASK — A FRAME SIZE CAP, routed here from Task 5's review.** `decodeClientMessage`
 deliberately does not bound its input length, because the layer that knows how big a frame is is this

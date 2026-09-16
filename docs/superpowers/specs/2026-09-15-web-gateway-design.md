@@ -72,7 +72,9 @@ deflate round-trip through `CompressionStream`/`DecompressionStream` returned th
 
 **5. THE COMPRESSION PAIRING IS A SILENT TRAP.** `DecompressionStream('deflate')` expects the
 **zlib wrapper** (RFC 1950) and `zlib.deflateSync` produces it — first bytes `78 9c`, confirmed.
-`zlib.deflateRawSync` produces raw DEFLATE (first bytes `ab a8`) and needs
+`zlib.deflateRawSync` produces raw DEFLATE, which has **no header at all** — its leading bytes are
+compressed data and vary with the payload (measured `ab 56`, `4b 04`, `cb 48` for different inputs),
+so there is no signature to look for, only the ABSENCE of a valid zlib header — and needs
 `DecompressionStream('deflate-raw')`. Mismatch these and every frame fails to inflate. Pin the
 pairing in a test.
 
