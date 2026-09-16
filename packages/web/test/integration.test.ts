@@ -25,12 +25,15 @@ const trace = join(process.cwd(), 'packages/fixtures/traces/synthetic-ispf-like.
  * These messages have been through `JSON.stringify` and `inflateSync`, so they are plain data and
  * NOT a `DrawList` -- `coverage` arrives as base64 in the atlas message for exactly that reason.
  * The optional `keypad` mirrors `canvas/src/drawlist.ts:85`.
+ *
+ * `keypad.height` is deliberately ABSENT: the assertions below measure the region against the
+ * buttons that occupy it instead, so declaring the field would invite exactly the tautology they
+ * were written to avoid.
  */
 type FrameList = {
   readonly height: number;
   readonly keypad?: {
     readonly y: number;
-    readonly height: number;
     readonly buttons: ReadonlyArray<{ readonly y: number; readonly h: number }>;
   };
 };
@@ -51,6 +54,103 @@ async function start(extra: string[] = []): Promise<{ url: string; token: string
   const port = (server.address() as { port: number }).port;
   stop = () => { registry.closeAll(); server.close(); };
   return { url: `ws://127.0.0.1:${port}/ws?t=${args.token}`, token: args.token, port };
+}
+
+/**
+ * Every `kind` in the `Action` union, read out of its DECLARATION at run time.
+ *
+ * ## WHY A SOURCE SCAN AND NOT A TYPE
+ *
+ * The property being enforced is that the gateway ACCOUNTS FOR every action a client can name --
+ * see the second rule in `protocol.ts`'s docstring -- and that is a runtime property of a socket,
+ * so the list has to be a runtime value. There is no such value to import: `Action` is a type-only
+ * union, `applyAction`'s `satisfies never` proves exhaustiveness inside `frontend` and says nothing
+ * about this package, and no test file in this repo is typechecked at all, so a type-level trick
+ * here would compile to nothing and enforce nothing. Hand-listing the kinds would rot the moment
+ * someone adds a member -- which is the exact failure this exists to prevent -- so the declaration
+ * is parsed instead. `main.ts`'s `tokenMatches` case and `renderer-imports.test.ts` already read
+ * source for properties no assertion can otherwise see.
+ *
+ * A FLOOR IS ASSERTED at the call site, because a scan that silently matches nothing would leave
+ * the loop below iterating an empty list and passing.
+ */
+function actionKinds(): readonly string[] {
+  const source = readFileSync(new URL('../../frontend/src/keymap.ts', import.meta.url), 'utf8');
+  // Bounded to the union's own declaration, so a `{ kind: 'x' }` in a doc comment or a table
+  // elsewhere in that file cannot smuggle in a kind the type does not have.
+  const union = /export type Action =([\s\S]*?);\n/.exec(source);
+  if (union === null) throw new Error('cannot find the `Action` union in frontend/src/keymap.ts');
+  return [...union[1]!.matchAll(/\|\s*\{\s*kind:\s*'([A-Za-z]+)'/g)].map((m) => m[1]!);
+}
+
+/**
+ * The fields a kind cannot travel without. Anything absent here is sent bare.
+ *
+ * `pf`/`pa` carry a number `decodeClientMessage` bounds against core's AID tables, and `type`
+ * carries text. A NEW kind with a required field and no entry here still gets sent bare, and that is
+ * deliberate: the test then asserts the gateway answers a malformed action rather than dying on it,
+ * which is a property worth having too.
+ */
+const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  pf: { n: 1 },
+  pa: { n: 1 },
+  type: { text: 'a' },
+};
+
+/**
+ * Kinds the GATEWAY must refuse outright, rather than answer.
+ *
+ * An expected-refusal list and NOT an exemption list: a kind named here must still produce an
+ * `error` naming it, so a rejection that silently stopped happening still fails. `quit` is the only
+ * member and the bar for a second one is high -- see `protocol.ts`'s two-branch rule. A front end
+ * action that is the SENDER's own business, like `toggleKeypad`, belongs in `main.ts` as an
+ * interception and must be answered here, not added to this list.
+ */
+const REFUSED: readonly string[] = ['quit'];
+
+/**
+ * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop
+ * and discards whatever is left.
+ *
+ * `collect(ws, n)` cannot serve the loop below, because it needs an exact count per send and a kind
+ * that produced two frames -- a local action that also emitted `screen` -- would desynchronise every
+ * later step and be reported against the wrong kind.
+ */
+function reader(ws: WebSocket): {
+  next(what: string): Promise<Record<string, unknown>>;
+  settle(): Promise<void>;
+} {
+  const got: Array<Record<string, unknown>> = [];
+  let last = Date.now();
+  let read = 0;
+  ws.binaryType = 'arraybuffer';
+  ws.addEventListener('message', (e) => {
+    got.push(JSON.parse(inflateSync(Buffer.from(e.data as ArrayBuffer)).toString()) as Record<string, unknown>);
+    last = Date.now();
+  });
+  return {
+    async next(what: string): Promise<Record<string, unknown>> {
+      // 2s, DELIBERATELY UNDER vitest's 5s per-test timeout, so a kind that hangs fails with
+      // `no reply to the sysreq action` and names itself. MEASURED against a temporary throwing
+      // guard in `applyAction`: with a deadline above the test timeout, vitest's anonymous
+      // `Test timed out in 5000ms` won the race and left the next reader to bisect 24 kinds. The
+      // caller raises the TEST timeout to match, since one hang must not starve the kinds after it.
+      const deadline = Date.now() + 2000;
+      while (read >= got.length) {
+        if (Date.now() > deadline) throw new Error(`no reply to ${what}`);
+        await new Promise((r) => { setTimeout(r, 5); });
+      }
+      read += 1;
+      return got[read - 1]!;
+    },
+    async settle(): Promise<void> {
+      // 25ms of quiet. Frames for one action are written synchronously inside the `data` handler, so
+      // this is a boundary between sends and not a race with one: without it an extra frame would be
+      // read as the answer to the NEXT thing sent.
+      while (Date.now() - last < 25) await new Promise((r) => { setTimeout(r, 25); });
+      read = got.length;
+    },
+  };
 }
 
 /** Collect inflated server messages until `want` of them have arrived. */
@@ -387,6 +487,69 @@ describe('the gateway end to end', () => {
     ws.close();
   });
 
+  it('accounts for EVERY kind in the Action union, and stays up after each one', async () => {
+    /**
+     * THE CLASS, NOT THE INSTANCE. `protocol.ts`'s second rule says a kind `applyAction` throws on
+     * must grow either a rejection there or an interception in `main.ts` -- and until this test that
+     * rule was PROSE WITH NO ENFORCEMENT. `toggleKeypad` spent a commit in the forbidden "neither"
+     * state for exactly that reason: one 48-byte frame from any client ended the gateway process and
+     * every other operator's session with it, and the whole suite stayed green. Nothing mechanical
+     * could have caught it -- `applyAction`'s `satisfies never` proves exhaustiveness in `frontend`
+     * and nothing here, and no test in this package enumerated the union.
+     *
+     * So every kind is sent over a live socket and every kind must be answered. The next
+     * `applyAction` refusal reddens this the moment it lands, rather than depending on its author
+     * reading a docstring in another package.
+     *
+     * THE SECOND HALF OF EACH STEP IS THE LOAD-BEARING ONE. A gateway that answers and then dies
+     * passes the first assertion, because the reply is written before the process goes; the `tab`
+     * afterwards is what proves it survived. In-process the throw surfaces as an unhandled error
+     * rather than an exit, so the reply assertion is what actually reddens here -- but the pair is
+     * what the property is, and `dist/main.js` driven as a child process is where the exit is
+     * visible.
+     */
+    const kinds = actionKinds();
+    // A FLOOR, not an equality: adding an action must not fail this, but a scan that stopped
+    // matching must. 24 members at the time of writing.
+    expect(kinds.length, 'the Action union scan found too few kinds to be right').toBeGreaterThanOrEqual(24);
+    for (const canary of ['pf', 'type', 'toggleKeypad', 'quit', 'fieldMark']) {
+      expect(kinds, 'the Action union scan missed a known kind').toContain(canary);
+    }
+
+    const { url } = await start();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    for (const want of ['session', 'atlas', 'frame']) {
+      expect((await io.next('hello'))['kind']).toBe(want);
+    }
+    await io.settle();
+
+    for (const kind of kinds) {
+      const action = { kind, ...(ACTION_FIELDS[kind] ?? {}) };
+      ws.send(JSON.stringify({ kind: 'action', action }));
+      const reply = await io.next(`the ${kind} action`);
+      if (REFUSED.includes(kind)) {
+        expect(reply['kind'], `${kind} must be refused, not applied`).toBe('error');
+        expect(String(reply['message']), `${kind}'s refusal must name it`).toContain(kind);
+      } else {
+        // An `error` here means the gateway refused a kind nothing documents as refusable; a
+        // timeout in `next` above means `applyAction` threw and took the handler with it.
+        expect(reply['kind'], `${kind} must be answered with a frame`).toBe('frame');
+      }
+      await io.settle();
+      ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+      expect((await io.next(`a tab after ${kind}`))['kind'],
+        `the gateway must still serve actions after ${kind}`).toBe('frame');
+      await io.settle();
+    }
+    ws.close();
+    // 48 sends and a 25ms settle between them, so this is the one case here that does not fit the
+    // 5s default -- and it must not, or a single hanging kind would be reported as a whole-test
+    // timeout instead of by name. See `reader`'s own 2s deadline.
+  }, 30_000);
+
   it('toggles the keypad per CONNECTION, and does not force it on a reattaching client', async () => {
     const { url } = await start();
     const a = new WebSocket(url);
@@ -462,11 +625,16 @@ describe('the gateway end to end', () => {
     // replay mode a keypad toggle changes no screen, so an interception placed ABOVE the log line
     // would make Task 4's Ctrl-K chord unprovable while every other test here stayed green.
     const written: string[] = [];
+    // CALLS THROUGH, rather than returning `true` and swallowing the write. Nothing else writes to
+    // stdout in this window today, so a swallowing spy would be harmless -- and silently wrong the
+    // day `buildServer` or `start` logs anything, which is the sort of gap that turns into a lost
+    // diagnostic hours later. `bind` because the original needs its `this`.
+    const through = process.stdout.write.bind(process.stdout);
     const spy = vi.spyOn(process.stdout, 'write')
-      .mockImplementation((chunk: string | Uint8Array): boolean => {
+      .mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
         written.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
-        return true;
-      });
+        return (through as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stdout.write);
     try {
       // `--log-actions` needs `--replay`, which `start` always passes; `args.ts:173` refuses the
       // pair otherwise, because the log carries typed text.

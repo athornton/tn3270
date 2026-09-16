@@ -133,11 +133,16 @@ export function buildServer(args: WebArgs) {
      * Per CONNECTION, and that is the one thing this differs from Electron in (`gui/src/main.ts:261`,
      * where the same flag is per WINDOW and the two coincide).
      *
-     * Here they do not. A gateway `Session` deliberately OUTLIVES its socket so a reload reattaches,
-     * so a flag hung off the session would follow it to whoever attached next: two browsers on one
-     * id are two operators at two windows, and one of them showing a keypad must not resize and
-     * repaint the other's. Declared in the `upgrade` scope, so it dies with the socket -- which is
-     * exactly the lifetime the preference has -- and a reattaching client starts with it hidden.
+     * Here they do not, and the harm is SEQUENTIAL rather than concurrent. Two sockets can never
+     * hold one `Session` at the same time -- `attach` reattaches only a DETACHED entry
+     * (`sessions.ts:61`) and an id someone is using falls through to a new session, which is the
+     * anti-hijacking rule, and `bridge.ts:35` keeps the id in `sessionStorage`, which is per TAB. So
+     * there is no other window to resize. What a session-scoped flag would do instead is hand the
+     * preference to whoever attaches NEXT: a gateway `Session` deliberately outlives its socket so a
+     * reload reattaches, and the next attacher is a different window -- possibly a different person
+     * -- that never asked for a keypad and would find its screen 6 rows taller than it left it.
+     * Declared in the `upgrade` scope, so it dies with the socket, which is exactly the lifetime the
+     * preference has; a reattaching client therefore starts with the keypad hidden.
      */
     let showKeypad = false;
     conn.onText((text) => {
