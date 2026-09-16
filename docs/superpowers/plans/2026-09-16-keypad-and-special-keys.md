@@ -1124,6 +1124,34 @@ Co-Authored-By: SLAC AI"
 
 ### Task 6: The keypad as a `DrawList` region
 
+> **AS BUILT. THE HEIGHT ASSERTION IN STEP 1 IS A TAUTOLOGY — measured twice, by the implementer and
+> again by the reviewer running the plan's four tests in isolation.**
+>
+> `expect(list.height).toBe(list.keypad!.y + list.keypad!.height)` restates the implementation's own
+> expression, so an **over-declaration survives it**: with `KEYPAD_ROWS_TALL` 6 → 7 the plan's four tests
+> **all pass**. So does a constant-derived form like `(25 + KEYPAD_ROWS_TALL) * cellHeight`, because the
+> mutation moves the constant. **Only `max(button.y + button.h)` measured against `list.height` catches
+> it** — the extent has to be derived from the buttons, not from anything that computes it. **This is the
+> same failure mode as Task 5's extent constants, recurring one layer up**, which is why it is worth
+> stating as a rule: *pin a declared size against what occupies it, never against the arithmetic that
+> declared it.* It matters here because `list.height` sizes the Electron window.
+>
+> Also: **the step-1 sketches do not compile** — `drawlist.test.ts` has no `snapshot`, `resolved` or
+> `scheme` in scope and builds screens with `screenWith([])` / `resolve(snap)` / `SCHEMES.default!`.
+> The plan's fourth test does catch cell leakage, but `toEqual` alone would be satisfied by a leak into
+> *both* lists, so an explicit `toHaveLength(24 * 80)` was added. Heights verified in **all four**
+> combinations (336 / 350 / 420 / 434) plus model-4 43x80. `structuredClone` of the region succeeds, so
+> it crosses Electron IPC. **1569 tests in 68 files.**
+>
+> **AN ESM IMPORT CYCLE APPEARED AND WAS REMOVED STRUCTURALLY.** `keypad.ts` needs `column()` and
+> `drawlist.ts` needs `keypadRegion`. The cycle was *safe* — `column` is a hoisted function declaration,
+> both entry orders resolve — but **the safety was contingent on a property nothing pinned**: the moment
+> either module wants a module-level `const` from the other, it becomes a TDZ `ReferenceError` at import
+> time, which in Electron main is a blank window that never quits. `column()` therefore **moved to
+> `cg.ts`**, which already owns the CG mapping and `CG_BOXSOLID`, taking `AtlasGeometry` as a **type-only**
+> import so no runtime edge is created. Duplicating `column()` was not an option — that is Task 5's font
+> bug. A type-level cycle remains and is fine.
+
 **Files:**
 - Modify: `packages/canvas/src/drawlist.ts`
 - Test: `packages/canvas/test/drawlist.test.ts`
@@ -2424,6 +2452,18 @@ isolation is the part that matters — it is exactly what the `dup`/`fieldMark` 
 
 **Do not skip this on the grounds that it is pre-existing.** The branch has now been bitten three times
 by tests that were not falsifiable, and this table is where the remaining instances live.
+
+- [ ] **Step 3b: Re-check EVERY cross-file line citation on the branch**
+
+**Editing a file that other files cite by line is itself a change to those files**, and this branch has
+proved it: Task 6 inserted 36 lines into `drawlist.ts` and silently invalidated three citations in
+`keypad.ts` (`105-106` → `124-125`, `60-68` → `65-73`, `146-147` → `176-177`), all of which had been
+correct against the parent commit. **Nine other citations were corrected during the branch**, so this is
+the dominant recurring defect in a codebase whose house style is to cite by file and line.
+
+Walk every `file.ts:NN` reference added or touched by this branch and confirm it still points at what the
+prose says. Prefer citing by **name** (`advanceAfterType`, not `keyboard.ts:98`) for anything inside a
+file that keeps moving — one citation was already converted for exactly that reason.
 
 - [ ] **Step 4: Read the whole diff**
 
