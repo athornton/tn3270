@@ -144,9 +144,13 @@ describe('applyAction: the newly-bound actions', () => {
 
 describe('the keypad-era actions', () => {
   it('sysreq reaches Session.sysreq, which no front end could call before', () => {
-    // `Session.sysreq()` has existed since stage 2b with nothing able to invoke it. There is
-    // no wire assertion available: it is a no-op unless TN3270E negotiated the SYSREQ
-    // function (session.ts), so a spy on the method is the only observable at this layer.
+    // `Session.sysreq()` has existed since stage 2b with nothing able to invoke it.
+    //
+    // A spy rather than the wire because sysreq is a no-op unless TN3270E negotiated the
+    // SYSREQ function, so a wire assertion would mean replicating core's TN3270E negotiation
+    // here -- `core/test/tn3270e-session.test.ts:465` does assert `[[T.IAC, T.AO]]`, using a
+    // file-local `negotiateE()` helper that is not exported. It is reachable, in other words,
+    // just not cheaply; if that helper is ever shared, strengthen this.
     const { session } = newSession();
     const spy = vi.spyOn(session, 'sysreq');
     applyAction(session, { kind: 'sysreq' });
@@ -154,8 +158,13 @@ describe('the keypad-era actions', () => {
   });
 
   it('dup and fieldMark reach their OWN keyboard method, not each other s, and not sendAID', () => {
-    // They are typed characters. A version that routed them through sendAID would put a
-    // bogus AID byte on the wire, which is the class of defect pfAID/VALID_AIDS exist for.
+    // They are typed characters, and the `sendAID` assertion is the class of defect
+    // pfAID/VALID_AIDS exist for. What a version that routed them through `sendAID` would
+    // actually do is NOT a bogus byte on the wire, though: 0x1c/0x1e are not in `AID`,
+    // `VALID_AIDS` is built from its values (constants.ts:544), and `sendAID` throws
+    // `RangeError` before the connected check (session.ts:609-611), which `applyAction`
+    // swallows. The result is a silently dead key -- which is why the assertion is worth
+    // keeping and why the claim needed correcting.
     //
     // EACH SPY IS ASSERTED BEFORE THE OTHER KEY IS PRESSED, and that ordering is the whole
     // test rather than a style choice. Written as two calls followed by two

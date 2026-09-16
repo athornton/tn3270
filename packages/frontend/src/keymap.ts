@@ -65,8 +65,12 @@ export type Action =
   | { kind: 'fieldMark' }
   | { kind: 'toggleInsert' }
   // Not a 3270 key at all: it shows or hides the front end's own virtual keypad, and
-  // `applyAction` throws on it exactly as it does on `quit`. It lives in this union
-  // because a keypad button and a chord must name it the same way the rest do.
+  // `applyAction` throws on it exactly as it does on `quit`. It lives in this union because
+  // the chord that opens the keypad, the GUI's Alt-K and the `BINDING_INTENT` row must all
+  // name it the way every other action is named.
+  //
+  // NOT because a keypad BUTTON needs it: `KEYPAD_KEYS` must contain neither this nor
+  // `quit`, since a drawn button for either would be a button whose only effect is to throw.
   | { kind: 'toggleKeypad' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
