@@ -390,10 +390,10 @@ describe('Dup and Field Mark', () => {
     return s;
   }
 
-  /** Both keys, so a failure names the one that broke. */
-  const bothKeys: [string, (k: Keyboard) => boolean][] = [
-    ['Dup', (k) => k.dup()],
-    ['Field Mark', (k) => k.fieldMark()],
+  /** Both keys and the byte each writes, so a failure names the one that broke. */
+  const bothKeys: [string, (k: Keyboard) => boolean, number][] = [
+    ['Dup', (k) => k.dup(), 0x1c],
+    ['Field Mark', (k) => k.fieldMark(), 0x1e],
   ];
 
   /**
@@ -503,6 +503,38 @@ describe('Dup and Field Mark', () => {
     expect(s.cursor).toBe(11); // B, not C at 21
   });
 
+  /**
+   * AN UNFORMATTED SCREEN, where there is no field to protect, no MDT to set and
+   * no field to tab into. The whole buffer is writable by definition, so both keys
+   * write — and the cursor lands where x3270's does, which is the part that looks
+   * accidental and is not.
+   *
+   * Dup ends up at address 0. That is `next_unprotected`'s documented answer when
+   * there is no unprotected field: "Returns the address following the unprotected
+   * attribute byte, or 0 if no nonzero-width unprotected field can be found"
+   * (ctlr.c:518-521), and x3270 reaches it the same way — key_Character's
+   * auto-skip loop `while (ea_buf[baddr].fa)` never runs on a screen with no
+   * attributes, so Dup_action calls next_unprotected on a buffer that has none.
+   * Our `tab()` spells the same fallback as `if (fields.length === 0) cursor = 0`.
+   * Pinned because it is agreement between two independently written fallbacks,
+   * and a change to either would otherwise break it silently.
+   *
+   * Field Mark just advances, x3270's auto-skip loop having nothing to skip.
+   */
+  it('write into an unformatted screen, Dup homing and Field Mark advancing', () => {
+    const d = new Screen();
+    d.cursor = 5;
+    expect(kb(d).dup()).toBe(true); // and the absent field does not throw
+    expect(d.cellAt(5).ebcdic).toBe(0x1c);
+    expect(d.cursor).toBe(0);
+
+    const fm = new Screen();
+    fm.cursor = 5;
+    expect(kb(fm).fieldMark()).toBe(true);
+    expect(fm.cellAt(5).ebcdic).toBe(0x1e);
+    expect(fm.cursor).toBe(6);
+  });
+
   it('are refused in a protected field, with the reason in the OIA', () => {
     for (const [name, press] of bothKeys) {
       const s = twoFields();
@@ -527,40 +559,61 @@ describe('Dup and Field Mark', () => {
    *
    * x3270's numeric test permits only EBC_0..EBC_9, plus, minus, period and
    * comma (kybd.c:1232-1238), so it happens to refuse DUP as well. We do not
-   * follow it there: that test is gated on `appres.numeric_lock`, which is off by
-   * default (no default in glue.c:914), so x3270 out of the box refuses neither
+   * follow it there: that test is gated on `appres.numeric_lock`, which defaults
+   * to ResFalse (x3270/resources.c:337), so x3270 out of the box refuses neither
    * — the byte set is the shape of the numeric-lock feature rather than a
    * considered ruling on DUP.
+   *
+   * The Dup half asserts the FULL key, not just a non-refusal: permitting it has
+   * to leave a working Dup, so the byte, the MDT bit and the tab are all checked.
+   * Each half gets its own screen, so neither depends on the other's leftover OIA
+   * state.
    */
   it('permit Dup in a numeric field and refuse Field Mark there', () => {
-    const s = new Screen();
-    s.setFieldAttribute(0, FA.NUMERIC);
-    s.setFieldAttribute(10, 0x00);
-    s.cursor = 3;
-    const k = kb(s);
-    expect(k.fieldMark()).toBe(false);
-    expect(k.oia.keyboard).toBe(KeyboardState.Numeric);
-    expect(s.cellAt(3).ebcdic).toBe(0x00);
-    expect(k.dup()).toBe(true);
-    expect(s.cellAt(3).ebcdic).toBe(0x1c);
+    const numericThenTypable = (): Screen => {
+      const s = new Screen();
+      s.setFieldAttribute(0, FA.NUMERIC); // numeric, unprotected: data 1-9
+      s.setFieldAttribute(10, 0x00);      // an ordinary field to tab into: data 11-
+      s.cursor = 3;
+      return s;
+    };
+
+    const fm = numericThenTypable();
+    const kfm = kb(fm);
+    expect(kfm.fieldMark()).toBe(false);
+    expect(kfm.oia.keyboard).toBe(KeyboardState.Numeric);
+    expect(fm.cellAt(3).ebcdic).toBe(0x00);
+    expect(fm.fieldAt(3)!.modified).toBe(false);
+
+    const d = numericThenTypable();
+    expect(kb(d).dup()).toBe(true);
+    expect(d.cellAt(3).ebcdic).toBe(0x1c);
+    expect(d.fieldAt(3)!.modified).toBe(true);
+    expect(d.cursor).toBe(11); // and it still tabs
   });
 
   /**
    * Insert mode pushes the field right first, exactly as for a typed character.
    * x3270 makes no exception for these two bytes: key_Character's `ins_prep` call
    * is reached whatever `ebc` is (kybd.c:1365-1366, the SBCS case).
+   *
+   * Both keys, because Dup's insert path is `shiftRight` followed by `tab()` and
+   * nothing else exercises that combination. The cursor is deliberately left out:
+   * where it ends up is the two keys' own rule, asserted above.
    */
   it('insert rather than overwrite in insert mode', () => {
-    const s = threeFields();
-    s.setChar(1, 0xc1);
-    s.setChar(2, 0xc2);
-    s.cursor = 1;
-    const k = kb(s);
-    k.insertMode = true;
-    expect(k.fieldMark()).toBe(true);
-    expect(s.cellAt(1).ebcdic).toBe(0x1e);
-    expect(s.cellAt(2).ebcdic).toBe(0xc1); // A pushed right
-    expect(s.cellAt(3).ebcdic).toBe(0xc2); // B pushed right
+    for (const [name, press, byte] of bothKeys) {
+      const s = threeFields();
+      s.setChar(1, 0xc1);
+      s.setChar(2, 0xc2);
+      s.cursor = 1;
+      const k = kb(s);
+      k.insertMode = true;
+      expect(press(k), name).toBe(true);
+      expect(s.cellAt(1).ebcdic, name).toBe(byte);
+      expect(s.cellAt(2).ebcdic, name).toBe(0xc1); // A pushed right
+      expect(s.cellAt(3).ebcdic, name).toBe(0xc2); // B pushed right
+    }
   });
 
   it('are refused when an insert would overflow the field', () => {

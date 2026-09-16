@@ -124,20 +124,50 @@ export class Keyboard {
    * filter costs nothing, an auto-skip field being protected by definition.
    */
   dup(): boolean {
-    return this.writeControl(EBCDIC_DUP, 'tab');
+    return this.writeControl(EBCDIC_DUP, {
+      cursorAfter: 'tab',
+      // A NUMERIC FIELD TAKES DUP, and it is the manual's list that says so rather
+      // than x3270's byte test. The permitted set names DUP explicitly (p. 4-13,
+      // pages.txt:3261-3262): "Numeric fields are limited to numeric characters,
+      // the minus and decimal sign characters, and the duplicate (DUP) control."
+      // Duplicating the previous record's date in a numeric data-entry field is
+      // the key's whole purpose, so refusing it there would break the one thing it
+      // is for.
+      //
+      // x3270's numeric test permits only EBC_0..EBC_9, plus, minus, period and
+      // comma (kybd.c:1232-1238) and so refuses DUP as well — but it is gated on
+      // `appres.numeric_lock`, which defaults to ResFalse (x3270/resources.c:337),
+      // so stock x3270 refuses NEITHER Dup nor Field Mark here. That byte set is
+      // the shape of the numeric-lock feature, not a ruling on DUP; the manual is,
+      // so the manual wins.
+      allowedInNumericField: true,
+    });
   }
 
   /**
    * The Field Mark key: write 0x1e and advance like any other typed character.
    *
    * `kybd.c:2825` is a bare `return key_Character(EBC_fm, ...)` with nothing after
-   * it, so FM gets the ordinary auto-skip — right, because a field mark marks a
-   * boundary INSIDE a field (the manual: it "informs the application program of
-   * the end of a field in an unformatted buffer or subfield in a formatted
-   * buffer", p. 7-12), so there may well be more to type after it.
+   * it, so FM gets the ordinary typed-character advance — right, because a field
+   * mark marks a boundary INSIDE a field, so there may well be more to type after
+   * it. The manual (p. 7-13, pages.txt:12653-12655): the field mark character
+   * "informs the application program of the end of a field in an unformatted
+   * buffer or subfield in a formatted buffer" — quoted with its OCR repaired, the
+   * scan reading "formatted butter", so do not grep for the clean phrase.
+   *
+   * THE MANUAL CORROBORATES THE ASYMMETRY BY OMISSION, which is worth more than
+   * the x3270 code alone: its Field Mark paragraph describes the byte and the MDT
+   * bit and names NO cursor operation, where Dup's paragraph one page earlier
+   * spells out "a Tab key operation to be performed". Two keys documented side by
+   * side, one given a tab and the other not.
    */
   fieldMark(): boolean {
-    return this.writeControl(EBCDIC_FIELD_MARK, 'autoSkip');
+    return this.writeControl(EBCDIC_FIELD_MARK, {
+      cursorAfter: 'advance',
+      // Field Mark is NOT in the manual's permitted set for a numeric field; see
+      // the note on `dup()` for the set and for why we enforce it at all.
+      allowedInNumericField: false,
+    });
   }
 
   /**
@@ -152,8 +182,26 @@ export class Keyboard {
    * there: a host-imposed lock refuses outright while an operator error does not,
    * a protected field is an operator error, and insert mode shifts the field
    * right first.
+   *
+   * BOTH PER-KEY POLICIES ARE THE CALLER'S, and neither is optional. An earlier
+   * version took the cursor rule as a parameter but decided the numeric rule in
+   * here by comparing the byte against `EBCDIC_DUP` — so a function promising to
+   * write "one EBCDIC control byte" applied a Dup-only exemption to whatever byte
+   * it was handed. Table 4-3 has two more members this codebase already names,
+   * NUL and SUB, and a later `nul()` routed through here would have been refused
+   * in a numeric field — nulls being exactly what an empty numeric cell holds —
+   * with nobody having edited this method to cause it. Required fields make that
+   * unwritable: a new key cannot compile without stating both answers.
    */
-  private writeControl(ebcdic: number, cursorAfter: 'tab' | 'autoSkip'): boolean {
+  private writeControl(
+    ebcdic: number,
+    policy: {
+      /** `'tab'` is the manual's own word for what Dup does; `'advance'` is what a typed character does. */
+      cursorAfter: 'tab' | 'advance';
+      /** Whether a numeric field accepts this byte. Per-KEY, so it cannot be inferred here. */
+      allowedInNumericField: boolean;
+    },
+  ): boolean {
     const s = this.screen;
     if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
 
@@ -163,21 +211,10 @@ export class Keyboard {
         this.oia.inhibit(KeyboardState.ProtectedField);
         return false;
       }
-      // A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK. The manual's permitted
-      // set names DUP explicitly (p. 4-13, pages.txt:3261-3262): "Numeric fields
-      // are limited to numeric characters, the minus and decimal sign characters,
-      // and the duplicate (DUP) control." Duplicating the previous record's date
-      // in a numeric data-entry field is the key's whole purpose, so refusing it
-      // there would break the one thing it is for. Field Mark is not in that set.
-      //
-      // x3270's numeric test permits only EBC_0..EBC_9, plus, minus, period and
-      // comma (kybd.c:1232-1238) and so refuses DUP as well — but it is gated on
-      // `appres.numeric_lock`, which has no default in glue.c:914 and is
-      // therefore off, so stock x3270 refuses NEITHER key here. That byte set is
-      // the shape of the numeric-lock feature, not a ruling on DUP; the manual
-      // is, so the manual wins. This is a test on the EBCDIC BYTE either way —
-      // no character-class test is possible or wanted for a control code.
-      if (field.numeric && ebcdic !== EBCDIC_DUP) {
+      // The caller's flag, not a byte test: which control characters a numeric
+      // field accepts is a fact about each KEY and is documented on each one. No
+      // character-class test is possible or wanted for a control code.
+      if (field.numeric && !policy.allowedInNumericField) {
         this.oia.inhibit(KeyboardState.Numeric);
         return false;
       }
@@ -192,7 +229,7 @@ export class Keyboard {
 
     s.setChar(s.cursor, ebcdic);
     if (field !== null) s.setMDT(field.attrAddr);
-    if (cursorAfter === 'tab') this.tab();
+    if (policy.cursorAfter === 'tab') this.tab();
     else this.advanceAfterType(field);
     return true;
   }
