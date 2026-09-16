@@ -262,6 +262,42 @@ Co-Authored-By: SLAC AI"
 
 ### Task 2: The four new actions, and the two that front ends must own
 
+> **AS BUILT (`8f14fcb`, `b681a71`, `c94979f`, `6958def`). ONE OF THESE IS A SECURITY FIX AND THE PLAN
+> CAUSED IT.**
+>
+> 1. **THIS PLAN'S TASK ORDERING OPENED A REMOTELY-TRIGGERABLE GATEWAY KILL.** Task 2 makes
+>    `applyAction` throw on `toggleKeypad`; Task 9 was to add the gateway's rejection. In between, a
+>    48-byte WebSocket frame from any client reached `applyAction` inside a `data` handler with **no
+>    `try`** (`web/src/main.ts:186`) — and `wsserver.ts:30-33` documents the consequence itself: "a
+>    throw from a 'data' handler is an unhandled exception that would end the process, so one
+>    malformed frame from one browser would disconnect everybody else's mainframe session."
+>    `protocol.ts` already rejects `quit` for exactly this reason. **Closed in Task 2 instead**
+>    (`protocol.ts:114`), leaving Task 9 the flag, the repaint and the `bridgecore.ts` half.
+>    **THE GENERAL RULE: when a plan adds a throw in one task and the guard against it in a later
+>    task, the gap between them is a live vulnerability, not a to-do.**
+> 2. **The `dup`/`fieldMark` test in Step 1 below is VACUOUS — copy it and you inherit the defect.**
+>    It calls `applyAction` for both keys before asserting either, so transposing the two switch cases
+>    leaves the whole suite green while putting the wrong control byte on the wire and inverting the
+>    numeric policy. **All three of the task's original mutation checks DELETED something and none
+>    SWAPPED anything; deletion and transposition are different mutation classes, and a spy-based test
+>    is far more vulnerable to the second.**
+> 3. **`toThrow(/toggleKeypad/)` passed on an unrelated `TypeError`**, because Node's
+>    `session.toggleKeypad is not a function` contains the word. Both it and the **pre-existing**
+>    `quit` assertion (`/quit/i`, same hole) now match `/does not handle .../`.
+> 4. **`default: action satisfies never;` was added and beats the comment it replaces.** Deleting
+>    either guard is now a compile error (`TS1360`), where before only prose stood between a
+>    maintainer and "the least diagnosable outcome available". **Zero runtime footprint** — the emitted
+>    JS is `default: action;`, so an unknown `kind` from untrusted JSON is still a silent no-op and
+>    `protocol.ts`'s defence is preserved.
+> 5. **The guard MUST sit outside the `try`.** `applyAction`'s `try` wraps the entire switch and its
+>    catch swallows errors, so a guard folded into the switch is swallowed and the dead-button no-op
+>    returns. Mutation-pinned.
+>
+> **NO TEST FILE IN THIS REPO IS TYPECHECKED BY ANYTHING** — every `tsconfig.json` includes only
+> `src/**/*.ts` and vitest strips types. So a bogus action `kind` or a wrong argument type in a test is
+> caught by no tool. This also corrects Step 2's prediction that the new tests "will not compile":
+> they compile fine and fail at runtime. **1529 tests.**
+
 **Files:**
 - Modify: `packages/frontend/src/keymap.ts` (the `Action` union)
 - Modify: `packages/frontend/src/actions.ts` (`applyAction`)
@@ -2259,6 +2295,24 @@ Expected: build and typecheck clean; all tests green; `3/3 goldens matched`;
 **Reconcile the test count rather than editing a number into the docs.** Add up the new tests per
 file and check the total against what vitest reports. If they disagree, find out why — the last two
 branches both had a real finding hiding in that gap.
+
+- [ ] **Step 3a: `applyAction`'s dispatch table is 59% unfalsifiable — MEASURED, and it is this
+      branch's outstanding debt**
+
+Found by Task 2's quality review, pre-existing, and left alone deliberately so that commit stayed
+reviewable. **13 of `applyAction`'s 22 cases have no test asserting their target.** All thirteen were
+transposed AT ONCE — `left`↔`right`, `tab`↔`backTab`, `eraseEOF`↔`eraseInput`, `backspace`↔`deleteChar`,
+`home`→`reset`, `clear`→`AID.ENTER` — and the suite stayed **fully green at 1529 in 66 files**. Nothing
+in the repo, including the TUI and GUI suites, notices that Left moves right, Tab back-tabs and Ctrl-C
+sends Enter.
+
+Close it with one data-driven test in `packages/frontend/test/actions.test.ts`: a table of
+`[Action, keyof Keyboard]` rows, each row getting its own `newSession()`, spying the expected method
+**plus at least its transposition partner**, and asserting before the next row runs. The per-row
+isolation is the part that matters — it is exactly what the `dup`/`fieldMark` test got wrong.
+
+**Do not skip this on the grounds that it is pre-existing.** The branch has now been bitten three times
+by tests that were not falsifiable, and this table is where the remaining instances live.
 
 - [ ] **Step 4: Read the whole diff**
 
