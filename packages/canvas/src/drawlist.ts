@@ -169,7 +169,13 @@ function oiaCells(
  * A MISS MUST NOT BECOME AN OUT-OF-RANGE COLUMN. Sampling past the end of the atlas draws
  * whichever glyph sits next along, which reads as corruption rather than as a missing
  * character -- so an unknown code gets x3270's visible unprintable marker instead.
+ *
+ * EXPORTED FOR `keypad.ts`, WHICH MUST NOT HAVE ITS OWN COPY. `atlas.index` is a sparse map and
+ * emphatically not the identity: 175 of its 431 entries differ from their CG code, because the
+ * font's encodings run 0..543 with holes and the atlas is packed. Any second calculation --
+ * `cg % atlas.cols` was the one proposed -- both loses the fallback above and returns the wrong
+ * column for every code past 256, which is a font bug only a golden could catch.
  */
-function column(atlas: AtlasGeometry, cg: number): number {
+export function column(atlas: AtlasGeometry, cg: number): number {
   return atlas.index[cg] ?? atlas.index[CG_BOXSOLID] ?? 0;
 }

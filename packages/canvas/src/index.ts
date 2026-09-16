@@ -24,3 +24,7 @@ export type { KeyLike } from './keys.js';
 export { assetDir, readAtlas, BROWSER_MODULES } from './assets.js';
 export { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 export { parseBdf } from './bdf.js';
+// The virtual keypad's geometry: scale-1 pixels, so a consumer needs no cell arithmetic of its
+// own. `hitTest` comes with it because a click arrives in the same space the buttons are in.
+export { keypadRegion, hitTest, KEYPAD_ROWS_TALL } from './keypad.js';
+export type { KeypadButton, KeypadRegion } from './keypad.js';
