@@ -1284,7 +1284,8 @@ window.addEventListener('mouseup', () => {
 ```
 
 with `let pressed: KeypadButton | undefined;` beside the other module state, and `hitTest` /
-`KeypadButton` imported from `./keypad.js`.
+`KeypadButton` imported from **`./hittest.js`** — NOT from `./keypad.js`, which drags two workspace
+packages into the renderer's graph and is not served to the browser. See Step 4.
 
 - [ ] **Step 3: Draw the press highlight**
 
@@ -1310,10 +1311,24 @@ that interface, and widen `Ctx2D` in `blit.ts` if it is not, rather than casting
 Run: `cd ~/git/tn3270 && npm run build && npm test && node packages/gui/scripts/shot.mjs && node packages/gui/scripts/keys.mjs`
 Expected: all green, `2/2 goldens matched`, `ok 15 chords, 13 actions in order`.
 
-**The renderer imports must stay relative.** Run
-`npx vitest run packages/canvas/test/renderer-imports.test.ts` and confirm it passes: a runtime
-import of `@tn3270/frontend` here would blank the window with no error. `./keypad.js` is relative
-and fine; importing `KEYPAD_KEYS` directly here would not be.
+**THIS PARAGRAPH WAS WRONG AND IS CORRECTED — 2026-09-16, Task 5's review.** It used to say
+"`./keypad.js` is relative and fine". **Relative-ness is not graph-cleanliness**, which is the very
+point `canvas/src/index.ts:12-16` already makes about `drawlist.js`. `keypad.ts` value-imports
+`column` from `drawlist.js` plus `cp037`/`Colour` from `@tn3270/core` and
+`KEYPAD_KEYS`/`schemeRgb` from `@tn3270/frontend`, so importing it into the renderer:
+
+1. **fails `renderer-imports.test.ts`** — demonstrated, both assertions, by pulling `dist/drawlist.js`
+   and two bare `@tn3270/` specifiers into the renderer's runtime graph; and
+2. **is not in `BROWSER_MODULES`** (`assets.ts:32`, exactly `renderer.js`, `blit.js`, `keys.js`), so the
+   browser would 404 the module and paint a black canvas with **no error anywhere** — the closure
+   failure this project has already been bitten by once.
+
+**So the hit-test code must live in a dependency-free module of its own.** Task 5 moves `hitTest` and
+`KeypadButton` into `packages/canvas/src/hittest.ts` (pure integer arithmetic, zero imports) and adds it
+to `BROWSER_MODULES`; `keypadRegion`, `KeypadRegion` and `KEYPAD_ROWS_TALL` stay in `keypad.ts`, which
+runs in main. **Import `./hittest.js` here, never `./keypad.js`.** Run
+`npx vitest run packages/canvas/test/renderer-imports.test.ts` and confirm it passes — a runtime import
+of a workspace package here blanks the window with no error.
 
 - [ ] **Step 5: Commit**
 
