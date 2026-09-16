@@ -97,6 +97,18 @@ const SEAM = Object.freeze({
    * argument, which is also what keeps it unable to dial anything.
    */
   url: process.env['TN3270_GUI_URL'] ?? '',
+  /**
+   * `TN3270_GUI_SIZE=720x350` sets the CONTENT size, and it is meaningful only alongside `url`.
+   *
+   * On the normal path the window sizes itself from the first draw list, because main computes that
+   * list. In URL mode main sees no frames at all -- the page does -- so the window would stay at its
+   * 800x600 default, `renderer.ts` would centre a 720x350 drawing inside it, and a capture would
+   * differ from the GUI golden by a black border alone. That is a difference in the HARNESS's
+   * geometry rather than in anything drawn, which is the least interesting reason for a golden to
+   * fail. `browser-shot.mjs` reads the size out of the golden PNG itself, so the golden defines the
+   * geometry rather than a constant repeated somewhere else.
+   */
+  size: process.env['TN3270_GUI_SIZE'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -157,6 +169,18 @@ app.whenReady().then(async () => {
   // path. The failure would be a blank window with a `did-fail-load` line above it.
   // The URL seam branches HERE, before anything reads argv or builds a Session -- see SEAM.url.
   if (SEAM.url !== '') {
+    if (SEAM.size !== '') {
+      const [w, h] = SEAM.size.split('x').map(Number);
+      if (Number.isInteger(w) && Number.isInteger(h) && w! > 0 && h! > 0) {
+        win.setContentSize(w!, h!);
+      } else {
+        // Refused by name rather than ignored: a silently-dropped size produces a golden mismatch
+        // that reads as a rendering change, which is the diagnosis this seam exists to avoid.
+        process.stderr.write(`TN3270_GUI_SIZE must be WxH, not ${JSON.stringify(SEAM.size)}\n`);
+        app.exit(2);
+        return;
+      }
+    }
     await win.loadURL(SEAM.url);
     globalShortcut.register('Control+]', () => { app.quit(); });
     await maybeSendKeys(win);

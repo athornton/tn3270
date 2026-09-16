@@ -3362,10 +3362,39 @@ Co-Authored-By: SLAC AI"
 
 ### Task 13: `browser-shot.mjs` — prove the reuse claim in pixels
 
+**AS BUILT — PIXEL-IDENTICAL ON THE FIRST RUN, 720x350, `0e327b1504bc1f6f`.** No fallback was needed
+and no tolerance was added. This is the check that distinguishes SHARING `renderer.ts` from merely
+behaving like it: every other test in `packages/web` would pass against a second renderer that
+happened to behave similarly, and identical pixels cannot.
+
+Three findings:
+
+1. **THE WINDOW HAD TO BE TOLD ITS SIZE, because in URL mode main sees no draw lists.** On the normal
+   path main computes the list and calls `setContentSize(list.width * scale, ...)`; in URL mode the
+   PAGE owns the protocol, so the window would have stayed at its 800x600 default,
+   `renderer.ts` would have centred a 720x350 drawing inside it, and the capture would have differed
+   from the golden **by a black border alone** -- a difference in the harness's geometry rather than in
+   anything drawn, which is the least interesting reason for a golden to fail. Hence a fifth seam,
+   `TN3270_GUI_SIZE`, which REFUSES a malformed value by name rather than ignoring it.
+2. **THE GOLDEN DEFINES THE GEOMETRY, read from its own PNG IHDR (bytes 16..24).** The alternative was
+   to recompute `bestScale` in the harness, which would put a second copy of the sizing rule where it
+   could drift -- and a drifted copy would make this compare two differently-sized renderings and
+   report a *rendering* change. It compares against the GUI's OWN golden, deliberately not a second
+   golden of ours, because two goldens can drift apart while both stay green.
+3. **Falsified by serving `-scheme green`**: hash `f1d7850620cbfcd1` against the golden's
+   `0e327b1504bc1f6f`, so the comparison is genuinely sensitive to what is drawn. **Note the flag
+   spelling** -- the gateway's own options are `--double-dashed` while the client options it inherits
+   keep s3270's single dash (`-scheme`, `-model`, `-insecure`). `--scheme` is refused as an unknown
+   flag, and the first attempt at this mutation used it and proved nothing until the harness's own
+   "gateway exited 2 before serving" message named the cause.
+
+**Both GUI goldens still match (2/2) after the changes to `gui/src/main.ts`**, which is what says the
+two new seams cost the Electron path nothing. Suite unchanged at 1493 in 66 files.
+
 **Files:**
 - Create: `packages/web/scripts/browser-shot.mjs`
 
-- [ ] **Step 1: Write the harness**
+- [x] **Step 1: Write the harness**
 
 Serve the same `synthetic-ispf-like.trace` through the gateway, load the page in Electron at a
 content size equal to the draw list's `width`×`height`, capture, and hash the RAW BITMAP exactly as
@@ -3375,7 +3404,7 @@ content size equal to the draw list's `width`×`height`, capture, and hash the R
 **Identical pixels are the expected result** — same renderer, same atlas, same scheme — and that is
 what makes this the check that proves reuse rather than mere coexistence.
 
-- [ ] **Step 2: Run it, and choose the fallback honestly if it does not match**
+- [x] **Step 2: Run it, and choose the fallback honestly if it does not match**
 
 Run: `cd ~/git/tn3270 && node packages/web/scripts/browser-shot.mjs`
 
@@ -3387,7 +3416,7 @@ back to the documented method — **compare rendered INK ROW BY ROW against what
 the same trace**, which is how the GUI was verified in the first place — and record why pixel
 identity was unreachable.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd ~/git/tn3270
