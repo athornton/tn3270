@@ -17,13 +17,21 @@
  * 3270 keypad is expected to carry: `Common/c3270/keypad.callbacks:1-44` is exactly PA1-3, Attn,
  * Erase EOF, Erase Input, Sys Req, Clear, Home, Cursor Select, Compose, Insert, Delete, Dup,
  * Field Mark, Tab, Reset, Back Tab, Newline, Enter and PF1-24 -- 44 keys. This table is that set
- * with three dropped and five added, and the differences are deliberate:
+ * with three dropped and five added: 44 - 3 + 5 = 46.
  *
- * **Dropped.** *Cursor Select*: `AID.SELECT` exists, but the key needs the field-intensity parse
- * and belongs with the light-pen work. *Compose*: it is x3270's own input method, not a 3270 key.
- * *Newline*: `Keyboard.newline` exists in core (`core/src/keyboard.ts:348`) but `Action` has no
- * member for it, so a button would have nothing to dispatch; adding one is a keymap change, not a
- * keypad change.
+ * **Dropped by decision.** *Cursor Select*: `AID.SELECT` exists, but the key needs the
+ * field-intensity parse and belongs with the light-pen work. *Compose*: it is x3270's own input
+ * method, not a 3270 key.
+ *
+ * **Dropped as an OPEN QUESTION, not a decision -- Newline.** It is on c3270's keypad,
+ * `Keyboard.newline()` exists in core (`core/src/keyboard.ts:348`), and the CLI can already call it
+ * as `Newline()` (`cli/src/runner.ts:219`) -- but no interactive front end can reach it, and this
+ * table inherited its absence from a spec that dropped it without noticing. That is the same shape
+ * as `Session.sysreq()` before this branch: a capability with no interactive route, which is what
+ * this feature exists to fix. It is NOT absent for a reason like the two above. Raised with the
+ * user 2026-09-16; see the OPEN QUESTION in
+ * `docs/superpowers/specs/2026-09-16-keypad-and-special-keys-design.md:32-41`, which also records
+ * that row 4 has the free column. Adding it is the user's call, so do not add it here first.
  *
  * **Added.** The four cursor arrows and Backspace. c3270's keypad has none of these -- there are
  * no cursor callbacks in `keypad.callbacks`, and the arrow glyphs its layout draws are Tab, Back
