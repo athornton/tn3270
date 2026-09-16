@@ -231,6 +231,24 @@ export const Order = {
 } as const;
 
 /**
+ * The two format control orders the Dup and Field Mark keys write (Table 4-3,
+ * pages.txt:3196-3197: "DUP Duplicate X'1C'", "FM Field Mark X'1E'"), confirmed
+ * against x3270's `include/3270ds.h:364-365` — `EBC_dup 0x1c`, `EBC_fm 0x1e`.
+ *
+ * THEY ARE CHARACTERS, NOT AIDS, which is why they live here beside `Order` and
+ * not beside the `AID` table a reader might look in first. x3270's Dup and
+ * FieldMark actions both call `key_Character(...)` (`Common/kybd.c:2788`,
+ * `:2825`), so they go into the buffer and set MDT exactly as a typed letter
+ * does. Nothing about them reaches `sendAID`. Table 4-3 is where the manual puts
+ * them too, alongside NUL and SUB.
+ *
+ * Stored in the buffer they display as an overscored asterisk and an overscored
+ * semicolon respectively (same table); we render neither yet.
+ */
+export const EBCDIC_DUP = 0x1c;
+export const EBCDIC_FIELD_MARK = 0x1e;
+
+/**
  * Structured field identifiers (SFID), GA23-0059 p. 5-51 and chapter 6.
  *
  * 0x81 is BOTH the Query Reply SFID (inbound — i.e. sent by us; chapter 6 is

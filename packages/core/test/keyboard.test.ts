@@ -374,3 +374,161 @@ describe('enter-inhibit refuses input', () => {
     expect(k.oia.keyboard).toBe(KeyboardState.ProtectedField);
   });
 });
+
+describe('Dup and Field Mark', () => {
+  /**
+   * Three adjacent unprotected fields: A (attr 0, data 1-9), B (attr 10, data
+   * 11-19) and C (attr 20, data 21-...). Three, not two, because the Dup tests
+   * below have to tell "moved to the next field" apart from "moved to the field
+   * after that" — with only two fields those two answers coincide.
+   */
+  function threeFields(): Screen {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(10, 0x00);
+    s.setFieldAttribute(20, 0x00);
+    return s;
+  }
+
+  /** Both keys, so a failure names the one that broke. */
+  const bothKeys: [string, (k: Keyboard) => boolean][] = [
+    ['Dup', (k) => k.dup()],
+    ['Field Mark', (k) => k.fieldMark()],
+  ];
+
+  /**
+   * Both are TYPED CHARACTERS, not AIDs: x3270 implements them as
+   * `key_Character(EBC_dup/EBC_fm, ...)` at kybd.c:2788 and :2825. The bytes are
+   * EBC_dup = 0x1c and EBC_fm = 0x1e, from 3270ds.h:364-365.
+   */
+  it('write 0x1c and 0x1e into the buffer', () => {
+    const a = threeFields();
+    a.cursor = 3;
+    expect(kb(a).dup()).toBe(true);
+    expect(a.cellAt(3).ebcdic).toBe(0x1c);
+
+    const b = threeFields();
+    b.cursor = 3;
+    expect(kb(b).fieldMark()).toBe(true);
+    expect(b.cellAt(3).ebcdic).toBe(0x1e);
+  });
+
+  it('set MDT, because the host must see the field changed', () => {
+    for (const [name, press] of bothKeys) {
+      const s = threeFields();
+      s.cursor = 3;
+      expect(s.fieldAt(3)!.modified, name).toBe(false);
+      press(kb(s));
+      expect(s.fieldAt(3)!.modified, name).toBe(true);
+    }
+  });
+
+  /**
+   * THE NON-OBVIOUS ONE, and it is the OPPOSITE way round from "Dup does not
+   * auto-skip".
+   *
+   * kybd.c:1435 does suppress key_Character's auto-skip for a keyboard Dup —
+   * `if (auto_skip && (pasting || (ebc != EBC_dup)))`, commented "for all pasted
+   * data (even DUP), and for all keyboard-generated data except DUP" — but that
+   * is not the whole key. Dup_action goes on to move the cursor itself
+   * (kybd.c:2788-2792):
+   *
+   *     if (key_Character(EBC_dup, false, false, oerr_fail, &consumed)) {
+   *         if (consumed) { cursor_move(next_unprotected(cursor_addr)); }
+   *
+   * so the NET effect of the Dup key is always a tab to the next unprotected
+   * field, from anywhere in the field. The manual says so in one sentence
+   * (GA23-0059 p. 7-12, pages.txt:12637-12639): "Operation of this key causes a
+   * X'1C' code to be entered into the presentation space, a Tab key operation to
+   * be performed, and the MDT bit to be set to 1." That is what Dup is FOR — it
+   * tells the program "duplicate the rest of this field", so there is nothing
+   * left to type in the field and the operator is finished with it.
+   *
+   * Field Mark marks a boundary WITHIN a field, so it advances one position like
+   * any other typed character (kybd.c:2825 passes it to key_Character and does
+   * nothing afterwards).
+   */
+  it('Dup performs a Tab operation and Field Mark just advances', () => {
+    const a = threeFields();
+    a.cursor = 3; // mid-field, six data cells still to its right
+    kb(a).dup();
+    expect(a.cursor).toBe(11); // start of field B
+
+    const b = threeFields();
+    b.cursor = 3;
+    kb(b).fieldMark();
+    expect(b.cursor).toBe(4); // one position on, still inside field A
+  });
+
+  /**
+   * What the auto-skip suppression at kybd.c:1435 actually buys, and the reason
+   * `dup()` must not advance BEFORE tabbing. At the last data cell of a field,
+   * our `advanceAfterType` already tabs to the next field (keyboard.ts:98); a
+   * Dup that ran it and then tabbed again would land two fields away, skipping
+   * field B entirely. x3270 avoids that by suppressing the auto-skip so that
+   * `next_unprotected` starts from the field attribute rather than from the next
+   * field's first data cell.
+   */
+  it('Dup at the end of a field lands on the next field, not the one after', () => {
+    const s = threeFields();
+    s.cursor = 9; // last data cell of field A; 10 is field B's attribute
+    kb(s).dup();
+    expect(s.cursor).toBe(11); // B, not C at 21
+  });
+
+  it('are refused in a protected field, with the reason in the OIA', () => {
+    for (const [name, press] of bothKeys) {
+      const s = twoFields();
+      s.cursor = 11; // inside the protected field at 10
+      const k = kb(s);
+      expect(press(k), name).toBe(false);
+      expect(s.cellAt(11).ebcdic, name).toBe(0x00);
+      expect(s.cursor, name).toBe(11);
+      expect(k.oia.keyboard, name).toBe(KeyboardState.ProtectedField);
+    }
+  });
+
+  /**
+   * A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK, which is the manual's list
+   * and not x3270's byte test.
+   *
+   * GA23-0059 p. 4-13 (pages.txt:3262-3263): "Numeric fields are limited to
+   * numeric characters, the minus and decimal sign characters, and the duplicate
+   * (DUP) control." DUP is IN the permitted set — duplicating the previous
+   * record's date or account number in a numeric data-entry field is the key's
+   * whole purpose — and Field Mark is not.
+   *
+   * x3270's numeric test permits only EBC_0..EBC_9, plus, minus, period and
+   * comma (kybd.c:1232-1238), so it happens to refuse DUP as well. We do not
+   * follow it there: that test is gated on `appres.numeric_lock`, which is off by
+   * default (no default in glue.c:914), so x3270 out of the box refuses neither
+   * — the byte set is the shape of the numeric-lock feature rather than a
+   * considered ruling on DUP.
+   */
+  it('permit Dup in a numeric field and refuse Field Mark there', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.NUMERIC);
+    s.setFieldAttribute(10, 0x00);
+    s.cursor = 3;
+    const k = kb(s);
+    expect(k.fieldMark()).toBe(false);
+    expect(k.oia.keyboard).toBe(KeyboardState.Numeric);
+    expect(s.cellAt(3).ebcdic).toBe(0x00);
+    expect(k.dup()).toBe(true);
+    expect(s.cellAt(3).ebcdic).toBe(0x1c);
+  });
+
+  it('are refused while the host holds the keyboard locked', () => {
+    for (const [name, press] of bothKeys) {
+      const s = threeFields();
+      s.cursor = 3;
+      const k = kb(s);
+      k.oia.inhibit(KeyboardState.SystemWait);
+      expect(press(k), name).toBe(false);
+      expect(s.cellAt(3).ebcdic, name).toBe(0x00);
+      expect(s.cursor, name).toBe(3);
+      // The host-imposed lock survives, for the host to clear. See Keyboard.type.
+      expect(k.oia.keyboard, name).toBe(KeyboardState.SystemWait);
+    }
+  });
+});

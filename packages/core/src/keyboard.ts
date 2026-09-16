@@ -1,4 +1,5 @@
 import { cp037, type CodePage } from './codepage.js';
+import { EBCDIC_DUP, EBCDIC_FIELD_MARK } from './constants.js';
 import { Oia, KeyboardState } from './oia.js';
 import type { Screen, Field } from './screen.js';
 
@@ -92,8 +93,122 @@ export class Keyboard {
   }
 
   /**
+   * The Dup key: write 0x1c, set MDT, then TAB.
+   *
+   * THE TAB IS THE PART THAT LOOKS WRONG AND IS RIGHT. `kybd.c:1435` suppresses
+   * key_Character's auto-skip for a keyboard-generated Dup — `if (auto_skip &&
+   * (pasting || (ebc != EBC_dup)))`, commented "for all pasted data (even DUP),
+   * and for all keyboard-generated data except DUP" — so it is easy to conclude
+   * that Dup advances one position and stops. It does not: `Dup_action` moves the
+   * cursor itself once key_Character returns (`kybd.c:2788-2792`),
+   *
+   *     if (key_Character(EBC_dup, false, false, oerr_fail, &consumed)) {
+   *         if (consumed) { cursor_move(next_unprotected(cursor_addr)); }
+   *
+   * so the NET effect of the key is always a move to the next unprotected field,
+   * from anywhere in the field. The manual states it directly (p. 7-12,
+   * pages.txt:12637-12639): "Operation of this key causes a X'1C' code to be
+   * entered into the presentation space, a Tab key operation to be performed, and
+   * the MDT bit to be set to 1." It is what the key MEANS — "duplicate the rest
+   * of this field from the previous record" leaves nothing more to type here.
+   *
+   * What the suppression buys is that the tab happens ONCE. `advanceAfterType`
+   * already tabs at the end of a field, so advancing first and tabbing after
+   * would skip a whole field when Dup is pressed in the last cell. That is
+   * exactly what x3270 avoids by starting `next_unprotected` from the field
+   * attribute instead of from the next field's first data cell.
+   *
+   * `tab()` is the faithful equivalent of `next_unprotected` (ctlr.c:518-539)
+   * here: both look for the next unprotected field of non-zero width, both wrap,
+   * and both fall back to address 0 when there is none. Its extra `!autoSkip`
+   * filter costs nothing, an auto-skip field being protected by definition.
+   */
+  dup(): boolean {
+    return this.writeControl(EBCDIC_DUP, 'tab');
+  }
+
+  /**
+   * The Field Mark key: write 0x1e and advance like any other typed character.
+   *
+   * `kybd.c:2825` is a bare `return key_Character(EBC_fm, ...)` with nothing after
+   * it, so FM gets the ordinary auto-skip — right, because a field mark marks a
+   * boundary INSIDE a field (the manual: it "informs the application program of
+   * the end of a field in an unformatted buffer or subfield in a formatted
+   * buffer", p. 7-12), so there may well be more to type after it.
+   */
+  fieldMark(): boolean {
+    return this.writeControl(EBCDIC_FIELD_MARK, 'autoSkip');
+  }
+
+  /**
+   * Write one EBCDIC control byte as if typed, then move the cursor.
+   *
+   * DELIBERATELY NOT `type(ch)`: these bytes have no sensible Unicode source
+   * character, so routing them through `codePage.fromUnicode` would mean
+   * inventing one. It also leaves `type()`'s numeric test — a Unicode regex —
+   * untouched, and states the equivalent EBCDIC rule here instead.
+   *
+   * Everything up to the write is `type()`'s sequence, for the reasons documented
+   * there: a host-imposed lock refuses outright while an operator error does not,
+   * a protected field is an operator error, and insert mode shifts the field
+   * right first.
+   */
+  private writeControl(ebcdic: number, cursorAfter: 'tab' | 'autoSkip'): boolean {
+    const s = this.screen;
+    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+
+    const field = s.fieldAt(s.cursor);
+    if (field !== null) {
+      if (field.protected) {
+        this.oia.inhibit(KeyboardState.ProtectedField);
+        return false;
+      }
+      // A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK. The manual's permitted
+      // set names DUP explicitly (p. 4-13, pages.txt:3262-3263): "Numeric fields
+      // are limited to numeric characters, the minus and decimal sign characters,
+      // and the duplicate (DUP) control." Duplicating the previous record's date
+      // in a numeric data-entry field is the key's whole purpose, so refusing it
+      // there would break the one thing it is for. Field Mark is not in that set.
+      //
+      // x3270's numeric test permits only EBC_0..EBC_9, plus, minus, period and
+      // comma (kybd.c:1232-1238) and so refuses DUP as well — but it is gated on
+      // `appres.numeric_lock`, which has no default in glue.c:914 and is
+      // therefore off, so stock x3270 refuses NEITHER key here. That byte set is
+      // the shape of the numeric-lock feature, not a ruling on DUP; the manual
+      // is, so the manual wins. This is a test on the EBCDIC BYTE either way —
+      // no character-class test is possible or wanted for a control code.
+      if (field.numeric && ebcdic !== EBCDIC_DUP) {
+        this.oia.inhibit(KeyboardState.Numeric);
+        return false;
+      }
+    }
+
+    if (this.insertMode && field !== null) {
+      if (!this.shiftRight(field, s.cursor)) {
+        this.oia.inhibit(KeyboardState.Overflow);
+        return false;
+      }
+    }
+
+    s.setChar(s.cursor, ebcdic);
+    if (field !== null) s.setMDT(field.attrAddr);
+    if (cursorAfter === 'tab') this.tab();
+    else this.advanceAfterType(field);
+    return true;
+  }
+
+  /**
    * Move on after typing. At the end of a field, skip to the next typable one —
    * this is what makes "type into a panel" work.
+   *
+   * NOT byte-for-byte x3270's auto-skip, and the difference is here rather than
+   * hidden: x3270's loop (kybd.c:1436-1442) walks off attribute bytes one at a
+   * time and stops at the first position that is not one, calling
+   * next_unprotected only for a field flagged auto-skip — so it can leave the
+   * cursor in a PROTECTED non-auto-skip field, whereas `tab()` always finds a
+   * typable one. Dup and Field Mark inherit that difference rather than
+   * introduce it; what matters for them is that Field Mark advances exactly as a
+   * typed character does, which it does by construction.
    */
   private advanceAfterType(field: Field | null): void {
     const s = this.screen;
