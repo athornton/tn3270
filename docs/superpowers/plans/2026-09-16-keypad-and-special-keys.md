@@ -50,10 +50,14 @@ the task's report rather than making the code match the plan.
 > Also: the constants went beside `Order`, not `PF_AIDS` — they are format control orders, not AIDs.
 > The plan's four helper names were dropped for the file's existing `twoFields()`/`kb(s)` idiom plus a
 > local `threeFields()`. `writeControl`'s second parameter is `'tab' | 'autoSkip'`, not a boolean,
-> because a boolean could not express the correct behaviour. **7 tests, not 6. Suite at 1521.**
+> because a boolean could not express the correct behaviour. **10 tests, not 6. Suite at 1524.**
+> (This line said "7 tests, suite at 1521" until the quality review caught it: `46d6b4b` added three
+> more and the commit that rewrote the lines directly above left this one alone. That is the exact
+> failure shape this repo keeps hitting — a later fix reaches the prose body and never the count that
+> summarises it.)
 >
 > **Found but NOT fixed, deliberately:** neither `type()` nor `writeControl()` refuses a cursor parked
-> *on* a field attribute byte, where x3270 does (`kybd.c:1221`). Parity with `type()` was kept; fixing
+> *on* a field attribute byte, where x3270 does (`kybd.c:1219`). Parity with `type()` was kept; fixing
 > it belongs in its own commit covering both and is not part of this feature.
 
 **Files:**

@@ -225,10 +225,17 @@ where our `tab()` always finds a typable one. Dup and Field Mark inherit that pr
 rather than introduce it.
 
 **A related gap was found and deliberately NOT fixed in Task 1:** neither `type()` nor `writeControl()`
-refuses a cursor parked *on* a field attribute byte, where x3270 does (`kybd.c:1221`) and the manual
-says the keyboard is disabled for both these keys. Writing there destroys the field boundary. Task 1
-kept parity with `type()` rather than making the two inconsistent; fixing it belongs in its own commit
-covering both, and is **not** part of this feature.
+refuses a cursor parked *on* a field attribute byte, where x3270 does (**`kybd.c:1219`** — `:1221`,
+which an earlier draft of this line cited, is a comment opener inside that branch) and the manual
+disables the keyboard for both these keys **by name**, at `pages.txt:12645-12647` and `:12660-12662`:
+"Operation of this key when the cursor is positioned at a field attribute location or is within a
+protected field disables the keyboard; no character locations are cleared, the cursor is not moved,
+and the MDT bit is not set." Writing there destroys the field boundary — reproduced through the new
+key: `dup()` with the cursor on an attribute overwrites it, and the screen drops from two fields to
+one. Task 1 kept parity with `type()` rather than making the two inconsistent; fixing it belongs in
+its own commit covering both, and is **not** part of this feature. Note for whoever takes it: x3270's
+refusal there is conditional on `auto_skip`, and the overlay-paste arm drops the byte and advances
+instead.
 
 New actions: `{ kind: 'sysreq' }`, `{ kind: 'dup' }`, `{ kind: 'fieldMark' }`,
 `{ kind: 'toggleKeypad' }`.
