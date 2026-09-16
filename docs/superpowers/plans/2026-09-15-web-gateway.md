@@ -2698,11 +2698,75 @@ Co-Authored-By: SLAC AI"
 
 ### Task 10: `main.ts` and the end-to-end integration test
 
+**AS BUILT — THE SKETCH HAD SIX DEFECTS, TWO OF THEM SEVERE. This task asked for three API shapes to
+be checked; all three were right, and the damage was elsewhere.**
+
+**The three it asked about, verified:** `Session.disconnect()` exists (`session.ts:202`), so the
+sketch's `disconnect?.()` needed no optional call; `resolveScheme(name?)` takes an OPTIONAL argument,
+so the conditional around it collapses to `resolveScheme(args.scheme)`; and `defaultSession`'s
+parameters are `(terminalType?, tls, alternate?, tn3270e?)` exactly as used. Also confirmed:
+`SessionEvent` is `'screen' | 'connect' | 'disconnect' | 'alarm'`, `drawList`'s five parameters,
+`blankColumns(bytes, atlas)`, `SessionHandle {session, close()}`, `AttachResult {id, session,
+created}`, `closeAll()`, `--listen 0`, and the `synthetic-ispf-like.trace` fixture.
+
+1. **SEVERE — `registry.attach(id)` PER ACTION IS NOT A CHEAP LOOKUP, and the sketch's comment
+   claiming it "returns the same" is false.** The anti-hijacking rule reattaches only a **DETACHED**
+   entry (`sessions.ts:61`, the very guard Task 6's annotation celebrates), so an id that is
+   currently attached **falls through and BUILDS A NEW SESSION**. Shipped, every keystroke would
+   have opened a fresh connection to the mainframe, applied the action to a screen nobody was
+   looking at, and exhausted `--max-sessions` (default 16) within about a dozen keys. The session is
+   now held in the connection's closure. **The plan's own five tests do NOT catch this** — the
+   repaint closure holds the `hello` session, so a frame still arrives and every assertion passes. A
+   new test with `--max-sessions 1` makes the second session impossible rather than merely wasteful.
+2. **SEVERE — NOTHING REPAINTED AFTER A LOCAL ACTION.** `emit('screen')` fires for host data and for
+   a replay, but tab, the arrow keys, Home and an ordinary typed character only move the cursor or
+   write into the buffer. The three event listeners are therefore not enough, and Electron's main has
+   always known this: `gui/src/main.ts:276-277` is `applyAction(session, action); send();`. Without
+   the unconditional repaint **a browser shows nothing at all until the host next speaks** — you
+   type and the screen never changes. Found as a 5-second timeout in the `tab` test, which is the
+   only reason it was not shipped.
+3. **`checkUpgrade` was called WITHOUT `allowOrigins`, which is a required field** — so `--allow-origin`,
+   the whole of Task 4b, would have been silently dropped and every browser behind a Host-rewriting
+   proxy refused.
+4. **The static route used `given !== args.token`, the exact comparison `handshake.ts` exports
+   `tokenMatches` to prevent.** Its docstring says so in as many words: a plain compare "would leak
+   the token by timing on the asset route while the upgrade path was careful". Same secret, same
+   leak, and the plan reintroduced it on the other route.
+5. **`args.hostTls` is raw `TlsFlags` and `defaultSession` needs resolved `TlsOptions`** — a compile
+   error. `resolveTls` is the missing step, as in `cli/src/main.ts:81` and `tui/src/main.ts:143`. It
+   is called ONCE in `buildServer`, not in the session factory: it THROWS on contradictory flags, and
+   inside the factory that throw would land on the first browser's `hello` as a failed session rather
+   than on the operator's terminal at startup. `buildServer` therefore moved inside `run`'s try.
+6. **Bytes arriving in the SAME packet as the upgrade were dropped.** Node hands them over as
+   `head`, already read off the socket before `Connection` attaches its listener, so a client that
+   pipelines its `hello` behind the handshake would have had it vanish — the session never starts and
+   the browser waits forever with no error. `socket.unshift(head)` puts them back.
+
+**Also recorded, and NOT fixed here: `Session` has no `off()`.** Listeners go into a `Set` with no
+removal, so every reattach permanently adds three more, and each would compute a full draw list and
+deflate it on every later screen change. A `live` flag now skips the work for a dead connection
+(`sendBinary` alone would drop the result having already paid for it), but the entries still
+accumulate. **A `Session.off()` in core is the real fix and is a question for the user**, alongside the
+`PF_AIDS` one.
+
+**THREE MUTATIONS WERE INERT AGAINST THE PLAN'S FIVE TESTS, and closing them needed a RAW socket
+client.** Node's built-in WebSocket sends no `Origin` and offers no way to add one, and it never
+writes payload before the 101, so neither the `--allow-origin` wiring nor the `head` bytes had any
+behavioural test at all. A raw upgrade written in ONE `socket.write` covers both. The timing-safe
+comparison is invisible to behaviour by construction — a plain `!==` rejects exactly the same tokens
+and every functional test passes either way — so it is pinned by a SOURCE SCAN, the same instinct as
+`renderer-imports.test.ts`. **A helper's completion condition matters: waiting for a fixed byte count
+HANGS on an accepted upgrade**, which answers only the ~130-byte 101 and then waits for a `hello`.
+
+**Result: 9 tests against the 5 planned. Suite 1469 → 1478 in 64 files, typecheck and build clean.
+Five mutations run, all five now falsifying:** no repaint after an action, attach-per-action, plain
+token compare, `allowOrigins` dropped, and `head` discarded.
+
 **Files:**
 - Create: `packages/web/src/main.ts`
 - Test: `packages/web/test/integration.test.ts`
 
-- [ ] **Step 1: Write `packages/web/src/main.ts`**
+- [x] **Step 1: Write `packages/web/src/main.ts`**
 
 ```ts
 import { createServer as createHttp } from 'node:http';
@@ -2878,7 +2942,7 @@ find:** whether `Session` has a `disconnect()` method (and use whatever ends a c
 whether `resolveScheme` takes an argument; and `defaultSession`'s real parameter list. All three are
 used above from memory of their shapes.
 
-- [ ] **Step 2: Write the integration test**
+- [x] **Step 2: Write the integration test**
 
 `packages/web/test/integration.test.ts`:
 
@@ -3005,14 +3069,14 @@ describe('the gateway end to end', () => {
 });
 ```
 
-- [ ] **Step 3: Build and run**
+- [x] **Step 3: Build and run**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/web/test/integration.test.ts`
 Expected: PASS, 5 tests. **If the handshake fails here, the bug is in `handshake.ts` or
 `wsframe.ts`, not in the test** — Node's client is the reference. Report the exact failure rather
 than adjusting the test to match our output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd ~/git/tn3270
