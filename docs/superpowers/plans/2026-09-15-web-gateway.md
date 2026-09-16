@@ -1693,6 +1693,38 @@ Delete the `clearTimeout` line in `attach`, re-run, and confirm the "cancels the
 FAILS. That mutation is the realistic bug — the session dies a minute after a successful reconnect
 — so watching it fail is what makes the test worth having. Restore and report the message.
 
+**AS BUILT (`a2359c3`) — the implementation was right; its PROTECTION was missing.** The nine tests
+above never call `detach` twice, never reattach more than once, and never look at the timer count, so
+four separate mutations were invisible to them. Five tests were added, and one of them pins a
+**security property nobody had stated**:
+
+- **An already-attached id must NOT be reattachable.** A leaked or guessed session id would otherwise
+  become a way to watch — and type into — another operator's logged-on session. The guard
+  `found !== undefined && !found.attached` is what prevents it, and "simplifying" it to
+  `found !== undefined` would produce a session-hijacking gateway with a green suite. Pinned now.
+- **A duplicate `detach` must be a no-op.** A socket firing both `error` and `close` is ordinary, and
+  without `detach`'s `!entry.attached` guard a second reaper is armed while the first is orphaned —
+  still armed, unclearable, and able to `close()` a session a later reattach has made live again.
+  Measured: `vi.getTimerCount()` goes to 2.
+- Reconnect-storm coverage: five detach/reattach cycles keep the timer count at exactly 1 while
+  detached and 0 while attached, so a flapping link neither accumulates reapers nor exhausts a
+  cumulative budget.
+
+`get size()` was dropped as YAGNI (nothing read it), and cancellation was factored into a private
+`disarm(entry)` so no caller can clear the timer without dropping the handle.
+
+**THREE THINGS TASK 10 MUST HANDLE, carried forward from this task's report:**
+
+1. **`closeAll()` on shutdown is mandatory.** A detached session's `setTimeout` holds the Node event
+   loop open for `graceMs`, so a gateway that stops listening without calling it hangs for up to a
+   minute on exit.
+2. **`SessionHandle.close()` must not throw.** An exception inside the timer callback is uncaught and
+   would take the process down. The registry cannot sensibly decide that policy, so the real factory
+   is where it belongs.
+3. **Two tabs mean two host sockets**, because an attached id is deliberately not reattachable. That
+   is the intended terminal-lines model, but it is what `--max-sessions` is really sizing, and the
+   operator docs should say so.
+
 - [ ] **Step 6: Commit**
 
 ```bash
