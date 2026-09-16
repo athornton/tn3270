@@ -154,7 +154,29 @@ unaffected either way.
 
 ## Data flow
 
-**Toggling.** `Ctrl-K`, hidden by default. In the canvas front ends the chord maps to a new
+**The chords come from c3270's own default keymap where it has one** (`Common/fb-c3270`), which is
+where our `Ctrl-A` = Attn came from too:
+
+| key | chord | source |
+| --- | --- | --- |
+| Dup | `Ctrl-D` | `fb-c3270:88` |
+| Field Mark | `Ctrl-F` | `fb-c3270:93` |
+| show/hide the keypad or overlay | `Ctrl-K`, **plus `Alt-K` in the canvas front ends only** | diverges; see below |
+| Sys Req | **no chord** | c3270 has none either |
+
+**The keypad toggle diverges from c3270 deliberately.** c3270 uses `Alt-K` (`fb-c3270:48`) and a
+two-key `Ctrl-A K` (`:136`). In a terminal `Alt-K` arrives as `ESC k`, and this project does not put
+new bindings through the ESC path: `app.ts` records two regressions there and warns against
+touching it. So the TUI uses `Ctrl-K`, which is ESC-free and unclaimed. The canvas front ends accept
+**both** `Ctrl-K` and `Alt-K`, since they see a real `KeyboardEvent` with no ESC ambiguity and `Alt`
+is already an established modifier there (Alt+digit is PA1-3) — so c3270 muscle memory works in the
+GUI and the browser.
+
+**Sys Req gets no chord**, because c3270 defines none and inventing one is how a keymap accretes
+bindings nobody can predict. It is reachable from the keypad, from the TUI overlay, and from the
+CLI as `SysReq()` — which is the overlay's whole purpose: a home for keys too rare to memorise.
+
+**Toggling.** `Ctrl-K` (or `Alt-K` on a canvas front end), hidden by default. In the canvas front ends the chord maps to a new
 `{ kind: 'toggleKeypad' }` action, which travels the ordinary action path to Electron's main or the
 gateway's server; that side holds the boolean and recomputes the frame with the region present or
 absent. State lives in one place, and the web gateway inherits it with no protocol change.
