@@ -2252,6 +2252,28 @@ no host), the `Ctrl+K` that shows the keypad, `Math.max(expected.length, actual.
 zero-length bail, the `NO BUTTON` bail, the ordered `error`/`signal`/`status` checks, and the
 absence of `spawnSync(`. **Say on each test what its absence would cost.**
 
+- [ ] **Step 5a: THE HARNESS MUST RUN AT SCALE ≥ 2 WITH A NON-ZERO CENTRING OFFSET, or it proves
+      nothing. This is the single most important line in this task.**
+
+Established in Task 7, by the implementer reasoning about its own unproven code. The click arithmetic is
+`(offsetX - at.x) / scale` — the exact inverse of `paint`'s `at.x + cell.x * scale`. **Every existing
+pixel harness runs at exactly viewport == drawing extent (720x350), so `bestScale` is 1 and `centre` is
+`(0,0)`.** At those values:
+
+- multiplying by the scale instead of dividing is **indistinguishable from correct**, and
+- dropping the centring offset entirely is **indistinguishable from correct**.
+
+So a click harness sized like the goldens would pass with the arithmetic inverted *and* the offset
+missing. **Size the window so the scale is at least 2 and the drawing does not fill it** — then a wrong
+scale puts the hit a multiple of the scale from the finger, and a missing offset puts it a fixed distance
+off, and both miss the button. Assert the window size in the harness so a later resize cannot quietly
+return it to scale 1.
+
+Note also that `renderer.ts` now really does contain `if (e.button !== 0) return;` — a deliberate guard,
+because `mousedown` fires for the right button too and a right-click on `Clear` would otherwise send it
+to a live host while the context menu opened. **So that line is no longer available as this task's
+mutation**; use the bare `return;` the next step already specifies.
+
 - [ ] **Step 6: Run it, and mutation-check it**
 
 ```bash
