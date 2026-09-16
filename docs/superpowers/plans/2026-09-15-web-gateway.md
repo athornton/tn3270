@@ -2102,11 +2102,46 @@ Co-Authored-By: SLAC AI"
 
 ### Task 8: `httpstatic.ts` and the page
 
+**AS BUILT — FOUR FINDINGS. The traversal claim was sound; the table had a DIFFERENT lookup hole.**
+
+1. **THE PLAIN-OBJECT TABLE RESOLVES INHERITED NAMES, MEASURED:** `table['constructor']` returns
+   `Function`, `table['__proto__']` returns `Object.prototype`, and `toString`/`valueOf`/
+   `hasOwnProperty` all likewise. Each is a truthy non-`Asset`, so a caller trusting the documented
+   "refuses everything else" contract reaches `readFileSync(undefined)`. **No real request path gets
+   there** — every key begins with `/` — so this is a contract hole rather than a live exploit, but
+   it is the SAME shape that already bit this branch once (a frozen plain object still inherits, so
+   `'Constructor+1'` parsed as a key modifier). Now a `Map`, which cannot have the bug at all
+   instead of merely not exhibiting it. **The plan's traversal reasoning was right and is
+   unchanged** — a table lookup still cannot be walked out of.
+2. **`parseCookies` had the same hole at the WRITE end, and there it IS reachable from a request
+   header.** `out[name] = value` on an object literal with the name `__proto__` does not set a
+   cookie, it replaces the prototype — process-wide corruption from an untrusted header. And since
+   `handshake.ts` looks the token up by name in this result, a `constructor=x` cookie could make
+   that lookup yield a function rather than a string. The result is now `Object.create(null)`.
+3. **The three browser modules were retyped instead of derived from `BROWSER_MODULES`.** That list
+   is what Task 1 had `canvas` publish for exactly this consumer, and `assets.ts`'s own docstring
+   says a second copy of an asset list is how this breaks silently when the owning package moves.
+   The table now derives its module entries from it, so drift is impossible rather than merely
+   unlikely. **Checked the runtime graph while doing it: `renderer.js` imports `blit.js` and
+   `keys.js`, and neither imports anything further — so three IS the complete set**, and a missing
+   fourth module would have been a 404 and a blank canvas with no error.
+4. **Two tests were added for gaps, and one is a class of bug the plan could not see.** Resolving a
+   path only proves the table has an entry: a renamed or unbuilt module still resolves and then 404s
+   at runtime, which is the blank-canvas-no-error signature this renderer has produced four separate
+   ways. A test now asserts every served file EXISTS on disk after a build. **`/bridge.js` is
+   deliberately excluded from it until Task 9 creates that file**, and Task 9 must add it.
+
+**Count correction: this task says "PASS, 10 tests" but its own test block contains NINE.** As built
+there are 13 (the nine, plus the inherited-name refusal, the cookie-name pollution guard, the
+`BROWSER_MODULES` drift guard and the existence check). Suite 1447 → 1460 in 62 files, typecheck and
+build clean. Four mutations run, all four falsifying: plain-object table, plain-object cookie result,
+hardcoded module list, and a wrong filename in the table.
+
 **Files:**
 - Create: `packages/web/src/httpstatic.ts`, `packages/web/static/index.html`
 - Test: `packages/web/test/httpstatic.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/web/test/httpstatic.test.ts`:
 
@@ -2180,12 +2215,12 @@ describe('parseCookies', () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/httpstatic.test.ts`
 Expected: FAIL, unresolved import.
 
-- [ ] **Step 3: Implement `packages/web/src/httpstatic.ts`**
+- [x] **Step 3: Implement `packages/web/src/httpstatic.ts`**
 
 ```ts
 import { fileURLToPath } from 'node:url';
@@ -2257,7 +2292,7 @@ export function parseCookies(header: string | undefined): Record<string, string>
 }
 ```
 
-- [ ] **Step 4: Write `packages/web/static/index.html`**
+- [x] **Step 4: Write `packages/web/static/index.html`**
 
 ```html
 <!DOCTYPE html>
@@ -2275,12 +2310,12 @@ export function parseCookies(header: string | undefined): Record<string, string>
 </body></html>
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/web/test/httpstatic.test.ts`
 Expected: PASS, 10 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd ~/git/tn3270

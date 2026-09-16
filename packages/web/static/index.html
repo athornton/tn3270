@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>tn3270</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+</head><body><canvas id="screen"></canvas>
+<!--
+  ORDER MATTERS. Module scripts execute in document order, and `renderer.js` reads
+  `window.tn3270` in its module body, so the bridge must install it first. `bridge.js` ALSO
+  queues messages that arrive before the renderer registers its handlers -- see bridgecore.ts;
+  without that queue the atlas can be delivered to nobody and the canvas stays black with no error.
+-->
+<script type="module" src="./bridge.js"></script>
+<script type="module" src="./renderer.js"></script>
+</body></html>
