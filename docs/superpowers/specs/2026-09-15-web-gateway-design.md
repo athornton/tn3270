@@ -308,6 +308,22 @@ server never opens a socket to a host, so no test can leak a credential.
    screen, and takes typed input.
 2. `renderer.ts` is byte-identical to its pre-branch content after being moved, and both GUI
    goldens still match without `--update`.
+
+   **AS BUILT 2026-09-16 — MET IN PART, AND THE SHORTFALL IS DELIBERATE. `renderer.ts` differs from
+   its pre-branch content by TWO LINES.** Live verification found that a model-4 screen (43 rows =
+   616px with the OIA) had its entire OIA row clipped in a viewport shorter than that, silently. The
+   Electron app fixes this by calling `setContentSize`; **a browser page cannot resize its own
+   window**, and `bestScale` floors at 1 while `centre` clamps at 0, so nothing else rescued it. The
+   canvas is now sized to `max(viewport, drawing)`, and the page's CSS scrolls. Measured both ways:
+   `800x600 scrollable=false` before, `800x616 scrollable=true` after.
+
+   The rest of the criterion holds, and was checked by diffing against `main` rather than assumed:
+   every OTHER line of `renderer.ts` and all five of `blit.ts`, `keys.ts`, `drawlist.ts`, `cg.ts` and
+   `bdf.ts` are byte-identical, both GUI goldens match without `--update`, and the served page is
+   pixel-identical to the GUI's own golden. **So the sharing claim is stronger than this criterion
+   was: it is verified in pixels rather than by file comparison alone.** The criterion was written
+   expecting the renderer to need no change at all, and one class of change turned out to be
+   unavoidable — the one where the two hosts genuinely differ in what they can do about geometry.
 3. Reload and a 30-second network interruption both reattach to the same 3270 session rather than
    starting a new one; a 90-second interruption does not.
 4. The token, the `Origin` check and the loopback default are each demonstrated to refuse, not

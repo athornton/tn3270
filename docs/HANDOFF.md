@@ -4,66 +4,118 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## Where things stand — PAUSED MID-BRANCH, 2026-09-16
+## Where things stand — THE WEB GATEWAY IS COMPLETE, 2026-09-16
 
-**`main` is at `7501c27`, pushed and in sync.** The chord-guard work described further down is
-merged into it and closed.
-
-**IN PROGRESS: branch `web-gateway` at `900d16f`, 24 commits, NOT merged and NOT pushed.** This is
-roadmap item (3), the web gateway. **1428 tests passing in 60 files**, `npm run typecheck` clean,
-`npm run build` clean, working tree clean. Read
-`docs/superpowers/specs/2026-09-15-web-gateway-design.md` and then
+**Branch `web-gateway`, ALL 15 TASKS DONE, pushed, NOT yet merged.** This is roadmap item (3).
+**1493 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
+clean, both GUI goldens matching, `pty-smoke.py` 12/12, and both by-hand browser harnesses passing.
+Spec `docs/superpowers/specs/2026-09-15-web-gateway-design.md`, plan
 `docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
-notes recording eighteen defects found while executing it, and those annotations are the most
-valuable thing in it.** Do not re-derive them.
+notes recording the defects found while executing it, and those annotations are the most valuable
+thing in it.** Do not re-derive them.
 
-### What is DONE on `web-gateway` (Tasks 1-6 plus 4b, each spec- and quality-reviewed)
+**FOUR FRONT ENDS NOW**, and the package graph is `core <- frontend <- { cli, tui }` and
+`core <- canvas <- { gui, web }`. `packages/web` adds no runtime dependency.
 
-- **`packages/canvas` extracted from `packages/gui`** (Task 1). `renderer.ts`, `blit.ts`, `keys.ts`,
-  `drawlist.ts`, `cg.ts`, `bdf.ts`, the atlas baker and the BDF font moved **byte-identical**
-  (hash-verified), plus `assets.ts` (`assetDir()`, `readAtlas()`, `BROWSER_MODULES`) and a barrel
-  that deliberately does NOT export `renderer.ts` (a browser entry point that throws at module load
-  outside a browser). Graph is now `core ← canvas ← { gui, web }`. **Both GUI goldens still match
-  and `keys.mjs` still reports 15 chords / 13 actions**, which is what made an extraction this size
-  checkable rather than hopeful.
-- **`packages/web`** with five pure modules, all TDD'd and mutation-proven: `args.ts`,
-  `wsframe.ts` (RFC 6455 framing), `handshake.ts` (upgrade, token, Origin), `protocol.ts` (messages
-  and deflate), `sessions.ts` (registry, detach, grace window).
+```sh
+node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
+```
 
-### What REMAINS: Tasks 7-15 of that plan
+### What the branch delivers
 
-`wsserver.ts` (+ a mandatory frame-size cap), `httpstatic.ts` and the page, the browser bridge,
-`main.ts` wiring, the integration test driven by **Node's built-in WebSocket as an independent
-oracle**, in-server TLS, `browser-keys.mjs` and `browser-shot.mjs`, live verification against both
-Hercules systems, then docs and merge.
+- **`packages/canvas`**, extracted from `packages/gui`: `renderer.ts`, `blit.ts`, `keys.ts`,
+  `drawlist.ts`, `cg.ts`, `bdf.ts`, the atlas baker and the BDF font, all moved byte-identical.
+- **`packages/web`**: `args`, `wsframe` (RFC 6455), `handshake` (upgrade, token, Origin),
+  `protocol` (messages and deflate), `sessions` (registry, detach, grace), `wsserver` (the
+  `Connection` seam and the frame-size cap), `httpstatic` (a fixed asset table), `bridgecore` and
+  `bridge` (the browser side), and `main` (the server, and the gateway's entry point).
+- **`renderer.ts` IS SHARED, AND ITS ONLY CHANGE IS TWO LINES** — the canvas-sizing fix below.
+  Verified by diffing against `main`: every other line of `renderer.ts`, and all five of `blit.ts`,
+  `keys.ts`, `drawlist.ts`, `cg.ts` and `bdf.ts`, are byte-identical to the pre-branch version. That
+  the sharing is real and not merely similar is proven in PIXELS, not asserted: `browser-shot.mjs`
+  compares the served page against the Electron app's OWN golden and they are identical.
+- **Live-verified against both Hercules systems** — see `docs/live-testing.md`, *The web gateway
+  against both hosts*: VM/370 42 of 43 rows agreeing with the CLI (the 43rd is the cursor, at
+  exactly 9x3 ink pixels), MVS TK5 24 of 24, two concurrent sessions on two devices, and
+  reattachment across a real interruption.
 
-### Two questions left for the user, recorded so they are not lost
+### By-hand harnesses — NOT in `npm test`
+
+Like `shot.mjs`, `keys.mjs` and `pty-smoke.py`, these need Xvfb and a real browser:
+
+```sh
+node packages/web/scripts/browser-keys.mjs   # 12 chords, 10 actions in order over a WebSocket
+node packages/web/scripts/browser-shot.mjs   # served pixels against the GUI golden
+```
+
+Both pass `--no-proxy-server`, which is MANDATORY here: with `HTTP_PROXY` set, Chromium routes even
+a loopback request through the proxy and the failure is completely silent — no load error, no
+renderer error, and not one request in the server's log.
+
+### What is NOT done on the gateway
+
+No connect dialog, no menus, no preferences, no mouse — the same list as the GUI. A screen larger
+than the viewport now SCROLLS rather than being clipped (see below); it does not reflow or scale
+fractionally, because integer scaling is a design rule.
+
+### THE DEFECT LIVE VERIFICATION FOUND, and it is the one worth remembering
+
+**A browser cannot resize its own window, so the GUI's old clipping bug is worse in a page.** A
+model-4 screen is 43 rows = 616px with the OIA; in an 800x600 viewport the ENTIRE OIA row fell off
+the bottom, silently. Electron fixes this in `main.ts` with `setContentSize`; a page has no such
+power, and `bestScale` floors at 1 while `centre` clamps at 0, so neither rescues it.
+`canvas/src/renderer.ts` now sizes the canvas to `max(viewport, drawing)` and the web page's CSS is
+`overflow:auto`. **Measured both ways: `800x600 scrollable=false` before, `800x616 scrollable=true`
+after.** It costs Electron nothing, because main sizes its window to exactly the drawing, and both
+GUI goldens still match byte for byte — which is what made changing a SHARED file safe.
+
+### Two questions left for the user, still unanswered
 
 1. **`packages/frontend/src/actions.ts` uses `PF_AIDS[action.n - 1]!`.** The live hole is closed at
-   the gateway boundary (see below), but making it structurally impossible means typing core's
-   tables as tuples or adding a `pfAID(n)` accessor — touching core's public types and all four
-   front ends. Its own change, or leave it?
+   the gateway boundary — `protocol.ts` bounds `pf`/`pa` from the tables' own lengths — but making
+   it structurally impossible means typing core's tables as tuples or adding a `pfAID(n)` accessor,
+   touching core's public types and all four front ends. Its own change, or leave it?
 2. **The gateway's token defaults ON** (`--auth off` opts out). Now that in-server TLS exists the
    user may want that default reversed; it was left on because the process types at a mainframe.
 
-### THREE FINDINGS FROM THIS BRANCH THAT NO AMOUNT OF REASONING WOULD HAVE PRODUCED
+**A THIRD, added 2026-09-16: `Session` has no `off()`.** Listeners go into a `Set` with no removal,
+so every reattach permanently adds three more, and each would compute a full draw list and deflate
+it on every later screen change. `main.ts` guards with a `live` flag so a dead connection does no
+work, but the entries still accumulate. A `Session.off()` in core is the real fix.
+
+### FINDINGS FROM THIS BRANCH THAT NO AMOUNT OF REASONING WOULD HAVE PRODUCED
 
 1. **`packages/gui/scripts/keys.mjs`'s staleness guard went BLIND when its subject moved packages.**
    It compared `gui/dist` against `gui/src`, and `keys.ts`/`renderer.ts` — its entire unique
-   coverage — moved to `canvas`, so it would have reported `ok` over exactly the stale code it
-   exists to catch. It now iterates both packages **per package**: one `max` across both lets a
-   fresh `gui` build mask a stale `canvas` one, measured as dist-max 1789510298049 beating src-max
-   1789510297038.
+   coverage — moved to `canvas`. It now iterates both packages **per package**: one `max` across
+   both lets a fresh `gui` build mask a stale `canvas` one.
 2. **A hostile `{"kind":"pf","n":-1}` put a bogus `0x00` AID byte on the wire to a live mainframe.**
-   `PF_AIDS` has 24 entries and `PA_AIDS` 3, so an out-of-range index is `undefined`, the `!` hides
-   it, and `Uint8Array.from([undefined])` coerces to `0` — all inside `applyAction`'s swallow-all
-   catch, which also leaves the keyboard locked. The other three front ends are safe only because
-   their `n` comes from a trusted keymap table; **the gateway is the first front end where a remote
-   party supplies it.** `protocol.ts` now bounds `pf`/`pa` from `PF_AIDS.length`/`PA_AIDS.length`.
+   `PF_AIDS` has 24 entries, so an out-of-range index is `undefined`, the `!` hides it, and
+   `Uint8Array.from([undefined])` coerces to `0`. The other three front ends are safe only because
+   their `n` comes from a trusted keymap; **the gateway is the first front end where a remote party
+   supplies it.**
 3. **The session registry's anti-hijacking guard was unasserted.** `found !== undefined &&
-   !found.attached` is what stops a leaked or guessed session id attaching to another operator's
-   logged-on session; simplifying it to `found !== undefined` would have produced a session-hijacking
-   gateway **with a green suite**. Now pinned and mutation-proved.
+   !found.attached` is what stops a leaked id attaching to another operator's logged-on session.
+4. **`registry.attach(id)` IS NOT A CHEAP LOOKUP.** Because it reattaches only a DETACHED entry, an
+   already-attached id falls through and BUILDS A NEW SESSION. Calling it per action — which the
+   plan's own sketch did — would have opened a fresh mainframe connection on every keystroke.
+5. **A LOCAL action emits no session event.** `emit('screen')` fires for host data and for a replay,
+   but tab, the arrows, Home and a typed character only move the cursor. The gateway must repaint
+   unconditionally after `applyAction`, exactly as Electron's main always has.
+6. **`vitest` DOES NOT TYPECHECK.** 15 tests passed green while `npm run build` failed on
+   `Buffer<ArrayBufferLike>`. Build before believing a suite.
+7. **`spawnSync` BLOCKS THE EVENT LOOP, so a harness that reads another child's pipe sees nothing.**
+   `browser-keys.mjs` reported the product broken while the product was fine. Any harness of that
+   shape has this bug.
+8. **The served module graph must be CLOSED.** `bridge.js` imports `./bridgecore.js`, which the
+   asset table did not serve: a 404, then a black canvas with no error anywhere. A per-file
+   existence check cannot find it, because the missing file is missing from the table.
+9. **A review finding that CLAIMED to be verified was false.** `Object.freeze` already preserves
+   literal types, so a requested `as const` on `OPCODE` was dead syntax. Re-measure a "verified"
+   claim before implementing it.
+10. **A wrong working directory produces plausible non-evidence.** A mutation check reported INERT
+    because `npx vitest` ran from `packages/` instead of the repo root, found no tests, and printed
+    nothing. Pin the cwd in every command.
 
 ### Environment notes for whoever resumes
 

@@ -10,15 +10,19 @@ terminal-mode client in a window that does not know it is pretending to be a
 data-stream implementation with a native-feeling GUI, correct enough that a host
 cannot tell it from the hardware.
 
-**Status: there is a working GUI, and a working terminal client, and a scripting CLI.**
+**Status: there is a working GUI, a working terminal client, a scripting CLI, and a
+browser gateway.**
 The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
 Reply, 3279 colour, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
-c3270-style TUI and an Electron GUI are all done, and everything but TN3270E is verified
-against two live hosts — VM/370 and MVS 3.8j.
+c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
+TN3270E is verified against two live hosts — VM/370 and MVS 3.8j.
+
+**There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
+gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
 **It is not yet something you can hand to someone else.** There is no packaging, so no
 `.app` to download; the GUI has no connect dialog, menus, preferences or mouse support, and
-takes its host on the command line like the other two front ends. See *What is not
+takes its host on the command line like the other front ends. See *What is not
 implemented* below, which is the honest part of this file.
 
 ## What works today
@@ -62,9 +66,29 @@ npm run build
 ```
 
 It takes the TUI's flags unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
-set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all three front ends parse
+set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all the front ends parse
 them with the same code (`packages/frontend`). `-scheme` is the one flag not shared with the
 CLI, since a script-driven client has nothing to render; see *Using the TUI*.
+
+**And there is a browser gateway.** `packages/web` serves that same canvas renderer — the
+same file, differing by two lines — to a browser, with a WebSocket where the Electron app has IPC:
+
+```sh
+npm run build
+node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
+```
+
+It prints a URL with a token. Loopback by default, a token by default, a cross-origin
+upgrade refused, and `wss://` in-process given `--tls-cert`, so a terminating proxy is
+optional rather than required. It renders live screens from both Hercules systems, and a
+session outlives its socket for `--grace` seconds so a reload reattaches instead of logging
+on again. **Without `--tls-cert`, keystrokes — including passwords — cross the network in
+the clear**, which it says out loud on startup. Full flag list and the security notes:
+`packages/web/README.md`.
+
+That the renderer is genuinely shared rather than merely similar is checked in pixels:
+`packages/web/scripts/browser-shot.mjs` compares the served page against the Electron app's
+own screenshot golden and requires them to be identical.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
 which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
@@ -94,13 +118,15 @@ no other version has been tried; the code targets ES2023 with `NodeNext` modules
 only `node:crypto`, `node:fs`, `node:net`, `node:path`, `node:readline`, `node:tls` and
 `node:url`, so Node 18+ ought to work, but that is inference rather than a tested claim.
 Only `packages/gui` depends on anything outside the standard library, and its dependency is
-Electron.
+Electron. **`packages/web` adds none** — Node has a WebSocket client but no server, so the
+framing is hand-rolled behind a seam that a `ws` wrapper could replace wholesale. The package
+graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`.
 
 ```sh
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1352 tests, 55 files
+npm test           # 1493 tests, 66 files
 npm run typecheck
 ```
 
@@ -380,6 +406,49 @@ documents a real case of this at length.
 what you wanted.** Read the `ScreenText` output. A script of blind `Enter`s can
 report `ok` throughout while silently failing a logon.
 
+## Using the web gateway
+
+```sh
+npm run build
+node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
+```
+
+It prints the URL to open, with a one-time token in it:
+
+```
+serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
+```
+
+The browser then draws the screen with the GUI's own renderer — literally the same file, which
+differs from its pre-gateway version by two lines, both about a page's inability to resize its
+own window — over a WebSocket instead of Electron's IPC. Frames are whole and deflated; measured, a 24x80
+draw list is 237220 bytes of JSON and 6760 compressed, which is why dirty-cell diffing is
+deliberately not part of the design.
+
+Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
+`--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
+`-model`, `-scheme`). **`--scheme` is refused as an unknown flag** — that asymmetry is
+deliberate, since those flags mean the same thing in every front end.
+
+Three defaults are what make it safe to run, and two of them you can turn off:
+
+- **loopback** — `--bind 0.0.0.0` warns when you choose otherwise;
+- **a token** — `--auth off` means anything that can reach the port can type at your
+  mainframe;
+- **plaintext unless you say otherwise** — without `--tls-cert` every keystroke, passwords
+  included, crosses the network in the clear, and it says so on startup.
+
+A cross-origin WebSocket upgrade is refused. Behind a reverse proxy that rewrites `Host`,
+which is nginx's and Apache's default, name what the browser actually sees with
+`--allow-origin` or every legitimate browser will be refused.
+
+A session outlives its socket by `--grace` seconds (60 by default), so a reload or a wifi
+handoff reattaches to the running 3270 session instead of dropping it. An id naming a session
+someone else is currently attached to is refused a handover.
+
+See `packages/web/README.md` for every flag and `docs/live-testing.md` under *The web gateway
+against both hosts* for what was measured against VM/370 and MVS.
+
 ## Trace format
 
 `Trace(on)` records the wire; `TraceText` emits it. Each line is
@@ -409,9 +478,12 @@ packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboar
                    colour resolution, Query Reply, IND$FILE, trace
 packages/frontend  rules every front end shares: host argument, TLS flags, session
                    factory, keymap, action dispatch, binding intent
+packages/canvas    the canvas renderer, glyph atlas and keymap-to-action layer, shared
+                   by the GUI and the web gateway
 packages/cli       s3270-style scripting CLI
 packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas
 packages/tui       c3270-style terminal front end, plus the live/pty harnesses
+packages/web       browser gateway: the same renderer, served over a WebSocket
 packages/fixtures  recorded traces, golden screens, x3270 reference captures
 docs/              spec, plans, live-host runbook, handoff
 ```
@@ -569,10 +641,15 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1352 tests, 55 files |
+| `npm test` | **pass** — 1493 tests, 66 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
+| `browser-shot.mjs` — served page vs the GUI's own golden | **pass** — pixel-identical, which is what says the renderer is shared and not merely similar |
+| `browser-keys.mjs` — real chords through a real browser | **pass** — 12 chords, 10 actions in order over a WebSocket, 2 asserted absences |
+| web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
+| web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |
+| web gateway reattachment, live | **pass** — same session returned inside the grace window, a new one after it |
 | TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
