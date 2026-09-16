@@ -130,7 +130,7 @@ export function buildServer(args: WebArgs) {
      */
     let stopListening: (() => void) | undefined;
     /**
-     * Per CONNECTION, and that is the one thing this differs from Electron in (`gui/src/main.ts:261`,
+     * Per CONNECTION, and that is the one thing this differs from Electron in (`gui/src/main.ts:279`,
      * where the same flag is per WINDOW and the two coincide).
      *
      * Here they do not, and the harm is SEQUENTIAL rather than concurrent. Two sockets can never
@@ -221,7 +221,7 @@ export function buildServer(args: WebArgs) {
        */
       if (msg.action.kind === 'toggleKeypad') { showKeypad = !showKeypad; repaint?.(); return; }
       applyAction(session, msg.action);
-      // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:347-348`).
+      // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
       // replay, but tab, the arrow keys, Home and an ordinary typed character only move the cursor
       // or write into the buffer. Relying on the event listeners alone therefore leaves a browser

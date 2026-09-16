@@ -109,6 +109,24 @@ const SEAM = Object.freeze({
    * geometry rather than a constant repeated somewhere else.
    */
   size: process.env['TN3270_GUI_SIZE'] ?? '',
+  /**
+   * A FIFTH TEST SEAM: `TN3270_GUI_CLICKS='PF1,PA2,SysRq'` clicks keypad buttons by LABEL.
+   *
+   * Labels, not coordinates. A coordinate list would be a second copy of the layout, and it would
+   * pass while the layout was wrong -- which is the one thing this seam exists to catch. Main asks
+   * the renderer for the button's centre and delivers a real `mouseDown`/`mouseUp` pair through
+   * `sendInputEvent`, so the click enters at the top of Chromium's input pipeline exactly as
+   * `TN3270_GUI_KEYS` does for keys.
+   *
+   * IT DOES NOT IMPLY THE KEYPAD, and the plan for it said it did -- so this is written down rather
+   * than left as an omission. The keypad is a per-window display flag toggled by a `toggleKeypad`
+   * action (see `showKeypad` below), and a run with the keypad hidden has no `list.keypad`, so
+   * `__tn3270ButtonCentre` returns `null` and every label reports `NO BUTTON`. Turning it on from
+   * here would ALSO be wrong: `clicks.mjs` shows the keypad with `TN3270_GUI_KEYS=Ctrl+K`, which
+   * proves the chord and the click path in one run, and a second on-switch here would toggle it
+   * straight back off. So the caller shows the keypad; this seam only clicks.
+   */
+  clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -363,6 +381,9 @@ app.whenReady().then(async () => {
     session.replay(readFileSync(SEAM.replay, 'utf8'));
     send();
     await maybeSendKeys(win);
+    // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
+    // keypad to click before that chord has been delivered and repainted.
+    await maybeSendClicks(win);
     await maybeCapture(win);
     await quitIfKeysOnly();
     return;
@@ -379,6 +400,7 @@ app.whenReady().then(async () => {
   }
 
   await maybeSendKeys(win);
+  await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
   await maybeCapture(win);
   await quitIfKeysOnly();
 });
@@ -474,10 +496,105 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
 }
 
 /**
+ * A FIFTH TEST SEAM: `TN3270_GUI_CLICKS='PF1,PA2,SysRq'` clicks keypad buttons by LABEL.
+ *
+ * The click path -- canvas `mousedown`, the primary-button guard, `hitTestAt`, `sendAction`, the IPC
+ * hop, `applyAction` -- is plumbing no unit test can reach, for the reason `hittest.ts:53-58` gives:
+ * `renderer.ts` throws at module load outside a browser, so the barrel cannot export it. The same
+ * argument the chord seam won. `hitTestAt`'s ARITHMETIC is separately unit-tested at scale 3 with a
+ * non-zero offset (`canvas/test/keypad.test.ts:291`), so what this seam carries is the wiring, which
+ * is provable at any scale -- and just as well, because in native Electron mode the centring offset
+ * can never be non-zero at ANY scale: `fit` sets the content size to exactly `list.width * scale` by
+ * `list.height * scale`, so `centre` returns (0,0) for every model on every display. The SCALE does
+ * vary with the display -- `fit` takes 80% of the work area -- and this seam does not care, because
+ * it asks the renderer for a point rather than computing one.
+ *
+ * ASKS THE RENDERER WHERE THE BUTTON IS, rather than carrying coordinates. A coordinate list here
+ * would be a second copy of the layout that agreed with itself while the layout was wrong -- the one
+ * failure this seam exists to catch. `__tn3270ButtonCentre` returns a point; the CLICK still goes in
+ * through Chromium, so nothing about the path under test is bypassed.
+ *
+ * THE SETTLE IS NOT DECORATION. `clicks.mjs` shows the keypad with a real `Ctrl+K` first, and that
+ * action makes the window GROW (`fit` re-sizes from the new draw list: 720x350 to 720x434 for a
+ * model 2). Every keypad button is in the pixels that resize adds, so a click delivered before it
+ * lands outside the content area entirely and hits nothing. `maybeSendKeys` has already waited
+ * `keysMs` before its own first chord; this waits again because the chord that matters is the LAST
+ * one, and because a clicks-only run gets no settle from `maybeSendKeys` at all.
+ *
+ * NOT CALLED FROM THE URL BRANCH, unlike `maybeSendKeys`. In that mode the served page owns the
+ * protocol and main sees no frames, so nothing here would be wrong -- `__tn3270ButtonCentre` reads
+ * the renderer's own `last` -- but no harness drives it that way and an untested call site is a
+ * claim this file has not earned. `TN3270_GUI_CLICKS` is therefore IGNORED alongside
+ * `TN3270_GUI_URL`, which fails loudly rather than quietly: no `clicks: sent` line is printed, and
+ * `clicks.mjs`'s seam-ran bail is exactly the check for that.
+ */
+async function maybeSendClicks(win: BrowserWindow): Promise<void> {
+  if (SEAM.clicks === '') return;
+  await new Promise((r) => setTimeout(r, SEAM.keysMs));
+  for (const label of SEAM.clicks.split(',')) {
+    /**
+     * VIEWPORT PIXELS, which is what `sendInputEvent` wants -- and that equality is a property of
+     * `gui/index.html`, not of the renderer: `html,body{margin:0}`, `canvas{display:block}` and
+     * `overflow:hidden`, so the canvas box starts at the viewport origin and cannot scroll away
+     * from it. The renderer computes the point from the canvas's own origin (that is where its
+     * `offsetX` is measured from too). Give the page a body margin and every click here misses by
+     * it.
+     */
+    let at;
+    try {
+      at = await win.webContents.executeJavaScript(
+        `window.__tn3270ButtonCentre(${JSON.stringify(label)})`,
+      ) as { x: number; y: number } | null;
+    } catch (err) {
+      /**
+       * A REJECTION HERE WOULD OTHERWISE HANG THE PROCESS, which is the exact trap `maybeSendKeys`
+       * measured for `parseKeySpec`: a throw inside `app.whenReady()`'s promise is an unhandled
+       * rejection, so `quitIfKeysOnly` never runs and the client SITS until the harness's 120s
+       * timeout -- which reads as a broken client rather than as the broken renderer it is.
+       *
+       * The reachable cause is a renderer that threw before installing the probe: it is a `window`
+       * global set in `renderer.js`'s module body, and if the canvas or the 2D context is missing
+       * that module throws at load, leaving `window.__tn3270ButtonCentre` undefined and this call
+       * rejecting with a TypeError. Exiting 2 keeps the diagnosis and loses the hang, exactly as the
+       * bad-spelling path above does -- and `clicks.mjs`'s status bail then dumps the stdout, which
+       * has the renderer's own `renderer[3]` line in it.
+       */
+      await new Promise<void>((r) => {
+        process.stdout.write(`clicks: PROBE FAILED ${label}: ${explain(err)}\n`, () => { r(); });
+      });
+      app.exit(2);
+      return;
+    }
+    if (at === null) {
+      // NOT a plumbing failure and reported as its own thing: either the keypad is hidden -- so
+      // there is no `list.keypad` to search -- or the label is not in the table. `clicks.mjs` bails
+      // on this line separately for that reason.
+      process.stdout.write(`clicks: NO BUTTON ${label}\n`);
+      continue;
+    }
+    // A PAIR, because a press without a release leaves Chromium holding the button down and the
+    // renderer holding its highlight: `release()` runs on `mouseup`, and the next `mousedown`
+    // would arrive during a drag.
+    for (const type of ['mouseDown', 'mouseUp'] as const) {
+      win.webContents.sendInputEvent({ type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
+    }
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  process.stdout.write(`clicks: sent ${SEAM.clicks}\n`);
+}
+
+/**
  * A keys-only run has to quit itself.
  *
  * `maybeCapture` quits when it has taken its picture, but a chord run takes none -- and
  * without this the process hangs, which reads as a broken client rather than a missing exit.
+ *
+ * A CLICKS-ONLY RUN IS THE SAME RUN, hence the second half of the condition rather than a second
+ * quit path: it also produces only stdout, and `clicks.mjs` reads that stdout with a 120s timeout,
+ * so a client that did not quit would burn the timeout and arrive as `error`/SIGTERM -- diagnosable,
+ * but as "the client never ran to completion" rather than as the missing exit it is. The NAME still
+ * says keys because `keys.mjs` and the docs cite it, and a rename would invalidate those citations
+ * for no gain; read it as "an input-seam-only run".
  *
  * ## THE DRAIN, AND WHY THERE IS NO SLEEP BESIDE IT
  *
@@ -498,7 +615,7 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
  * drain earns its place for the run that adds a longer chord list or a slower reader.
  */
 async function quitIfKeysOnly(): Promise<void> {
-  if (SEAM.keys === '' || SEAM.shot !== '') return;
+  if ((SEAM.keys === '' && SEAM.clicks === '') || SEAM.shot !== '') return;
   await new Promise<void>((resolve) => { process.stdout.write('', () => { resolve(); }); });
   app.quit();
 }

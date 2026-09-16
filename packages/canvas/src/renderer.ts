@@ -293,6 +293,49 @@ window.addEventListener('blur', release);
 
 window.addEventListener('resize', () => { if (last !== undefined) paint(last); });
 
+/**
+ * TEST SEAM, and the only thing in this file that exists for a test.
+ *
+ * Returns the CENTRE of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
+ * without knowing the layout, the scale or the offset. Returning COORDINATES rather than firing the
+ * action is what keeps the seam honest: the click still goes in through Chromium's input pipeline,
+ * so `mousedown`, the primary-button guard, `hitTestAt`, `sendAction` and the IPC hop are all still
+ * under test. A seam that called `sendAction` here would skip exactly the plumbing that has never
+ * run in a test.
+ *
+ * NOT A FIFTH BRIDGE FUNCTION. `bridgecore.ts` says a fifth function in the bridge means the
+ * renderer has stopped being shared between Electron and the browser; this is a `window` global,
+ * which both hosts get for free because both load this file, and neither has to implement it.
+ *
+ * VIEWPORT pixels only because both pages put the canvas box at the viewport origin -- `margin:0`
+ * on `html,body` and `display:block` on the canvas, in `gui/index.html` and
+ * `web/static/index.html`. The arithmetic below is the canvas's own space, the same space `paint`
+ * draws in and `mousedown` reads `offsetX` in; a body margin, or a scrolled `overflow:auto` page,
+ * would put a term between the two that only the caller could add.
+ *
+ * `null` FOR BOTH "no keypad" AND "no such label", deliberately not distinguished: main reports it
+ * as `NO BUTTON`, and both causes are a mistake in the CALLER -- clicking before showing the keypad,
+ * or naming a key that is not in the table -- rather than a failure of the path under test. Note it
+ * does NOT consult `errored`: this answers where the button IS, and whether a click on it is
+ * refused while an error message is up is behaviour for the click path to decide.
+ */
+(window as unknown as { __tn3270ButtonCentre: (label: string) => { x: number; y: number } | null })
+  .__tn3270ButtonCentre = (label) => {
+    // Read the module state ONCE, as the `mousedown` listener does: the scale, the offset and the
+    // button must all come from the same frame.
+    const list = last;
+    if (list?.keypad === undefined) return null;
+    const button = list.keypad.buttons.find((b) => b.label === label);
+    if (button === undefined) return null;
+    const within = { width: window.innerWidth, height: window.innerHeight };
+    const scale = bestScale(list, within);
+    const at = centre(list, within, scale);
+    return {
+      x: at.x + (button.x + button.w / 2) * scale,
+      y: at.y + (button.y + button.h / 2) * scale,
+    };
+  };
+
 /** Break a message at word boundaries so an error is readable rather than clipped. */
 function wrap(text: string, cols: number): string[] {
   const out: string[] = [];
