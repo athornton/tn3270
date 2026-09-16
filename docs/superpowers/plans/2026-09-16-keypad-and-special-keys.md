@@ -23,6 +23,31 @@ implementation, and one (Dup suppressing auto-skip) is invisible from the key's 
 rather than in the code. If a signature here disagrees with the source, the source wins — say so in
 the task's report rather than making the code match the plan.
 
+## EXECUTION ORDER WAS CHANGED, 2026-09-16: RUN 5, 6, 7 BEFORE 4
+
+**As numbered, this plan bound `Ctrl-K` to `toggleKeypad` (Task 4) roughly ten commits before any front
+end intercepted it (Tasks 8, 9, 12) — and `applyAction` THROWS on that action. Measured consequences of
+the original order:**
+
+- **TUI: process death on a keystroke.** `tui/src/app.ts:497` calls `applyAction` unguarded, from the
+  stdin `data` handler.
+- **Electron: main-process death on a keystroke.** `gui/src/main.ts:339` calls it unguarded inside
+  `ipcMain.on('action', ...)`.
+- **Web: safe, as it happens.** `decodeClientMessage`'s throw is caught at `web/src/main.ts:134` and
+  answered with an `error` frame, so a browser would see a banner rather than a dropped session. That
+  safety comes from Task 2's rejection at `protocol.ts:114`, which itself had to be pulled forward from
+  Task 9 — see Task 2's AS BUILT note.
+
+**The fix is ordering, not a patch.** Tasks 5, 6 and 7 (the cell layout, the `DrawList` region, and the
+renderer's drawing plus hit-testing) depend on the key TABLE and on `Action`, both of which Tasks 2-3
+already landed. **None of them needs a chord.** Running them first means that when Task 4 binds `Ctrl-K`
+it can land each front end's real flag in the same commit, with visible effect — instead of either
+crashing or shipping a documented dead key for ten commits.
+
+**THE GENERAL RULE, now twice-earned on this branch: a task that makes a throw REACHABLE and the task
+that catches it must not be separated. If a plan splits them, reorder the plan or merge the commit —
+the gap is a live defect, not a to-do.**
+
 ---
 
 ### Task 1: DUP and Field Mark in core's keyboard
