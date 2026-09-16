@@ -24,7 +24,7 @@
  *     node packages/gui/scripts/shot.mjs [--update]
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, copyFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { guiEnv } from './xvfb.mjs';
@@ -79,6 +79,12 @@ const update = process.argv.includes('--update');
 
 function run(kase) {
   const shot = join('/tmp', `tn3270-shot-${kase.name}.png`);
+  // DELETED FIRST, because the caller's pass condition asks whether a capture EXISTS: this path is
+  // stable across runs, so a run that captured nothing at all would otherwise be compared against
+  // the file the LAST run left here -- and would pass. `browser-shot.mjs` clears its own for the
+  // same reason.
+  rmSync(shot, { force: true });
+  rmSync(`${shot}.sha256`, { force: true });
   const result = spawnSync(electron, [main, ...ARGV, ...(kase.extraArgv ?? []), kase.host], {
     encoding: 'utf8',
     timeout: 120000,
