@@ -136,3 +136,38 @@ describe('applyAction: the newly-bound actions', () => {
     expect(session.oia.insertMode).toBe(true);
   });
 });
+
+describe('the keypad-era actions', () => {
+  it('sysreq reaches Session.sysreq, which no front end could call before', () => {
+    // `Session.sysreq()` has existed since stage 2b with nothing able to invoke it. There is
+    // no wire assertion available: it is a no-op unless TN3270E negotiated the SYSREQ
+    // function (session.ts), so a spy on the method is the only observable at this layer.
+    const { session } = newSession();
+    const spy = vi.spyOn(session, 'sysreq');
+    applyAction(session, { kind: 'sysreq' });
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('dup and fieldMark reach the keyboard, not sendAID', () => {
+    // They are typed characters. A version that routed them through sendAID would put a
+    // bogus AID byte on the wire, which is the class of defect pfAID/VALID_AIDS exist for.
+    const { session } = newSession();
+    const dup = vi.spyOn(session.keyboard, 'dup');
+    const fm = vi.spyOn(session.keyboard, 'fieldMark');
+    const aid = vi.spyOn(session, 'sendAID');
+    applyAction(session, { kind: 'dup' });
+    applyAction(session, { kind: 'fieldMark' });
+    expect(dup).toHaveBeenCalledOnce();
+    expect(fm).toHaveBeenCalledOnce();
+    expect(aid).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES toggleKeypad, which is the front end s own business', () => {
+    // Same reasoning as `quit`, and the same failure mode: a front end that forgot to
+    // intercept this would show a dead button rather than an error, because the switch
+    // below treats an unrecognised kind as a no-op. Throwing makes the omission loud.
+    // See applyAction's docstring.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/toggleKeypad/);
+  });
+});

@@ -58,7 +58,16 @@ export type Action =
   | { kind: 'eraseEOF' }
   | { kind: 'eraseInput' }
   | { kind: 'attn' }
+  | { kind: 'sysreq' }
+  // Dup and Field Mark are TYPED CHARACTERS, not AIDs -- see `applyAction` and
+  // `Keyboard.dup`/`Keyboard.fieldMark` in core.
+  | { kind: 'dup' }
+  | { kind: 'fieldMark' }
   | { kind: 'toggleInsert' }
+  // Not a 3270 key at all: it shows or hides the front end's own virtual keypad, and
+  // `applyAction` throws on it exactly as it does on `quit`. It lives in this union
+  // because a keypad button and a chord must name it the same way the rest do.
+  | { kind: 'toggleKeypad' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 
