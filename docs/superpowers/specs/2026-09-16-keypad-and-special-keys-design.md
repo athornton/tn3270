@@ -180,13 +180,30 @@ where our `Ctrl-A` = Attn came from too:
 | show/hide the keypad or overlay | `Ctrl-K`, **plus `Alt-K` in the canvas front ends only** | diverges; see below |
 | Sys Req | **no chord** | c3270 has none either |
 
-**The keypad toggle diverges from c3270 deliberately.** c3270 uses `Alt-K` (`fb-c3270:48`) and a
-two-key `Ctrl-A K` (`:136`). In a terminal `Alt-K` arrives as `ESC k`, and this project does not put
-new bindings through the ESC path: `app.ts` records two regressions there and warns against
-touching it. So the TUI uses `Ctrl-K`, which is ESC-free and unclaimed. The canvas front ends accept
-**both** `Ctrl-K` and `Alt-K`, since they see a real `KeyboardEvent` with no ESC ambiguity and `Alt`
-is already an established modifier there (Alt+digit is PA1-3) — so c3270 muscle memory works in the
-GUI and the browser.
+**THERE IS NO DIVERGENCE — THIS PARAGRAPH WAS WRONG AND THE REASON IT GAVE WAS FICTION. Corrected
+2026-09-16 in Task 4.** It claimed the TUI uses `Ctrl-K` *instead of* c3270's `Alt-K`, to stay off the
+ESC path. **`Ctrl-K` IS c3270's terminal binding.** `Common/fb-c3270` is split: `#ifdef _WIN32` at
+`:41`, `#else` at `:126`, `#endif` at `:204`. **Every citation this spec and the plan gave — `:48`,
+`:88`, `:93` — is inside the WINDOWS branch.** The non-Windows keymap, which is what a terminal build
+reads, has `Ctrl<Key>d: Dup()` (`:186`), `Ctrl<Key>f: FieldMark()` (`:187`) and
+**`Ctrl<Key>k: Keypad()` (`:191`)**.
+
+So `Alt-K` is merely the Windows spelling, and the outcome here was right by accident: the TUI uses
+`Ctrl-K` **because that is what c3270 uses**, not in spite of it. The canvas front ends accept **both**,
+which now reads as supporting the Windows spelling too rather than as a deliberate departure. Dup and
+Field Mark are `Ctrl-D`/`Ctrl-F` in *both* branches, so those two citations were right by luck while
+pointing at the wrong lines.
+
+**The ESC-path caution remains true and remains the reason not to add an `Alt-` binding to the TUI** —
+`app.ts` records two regressions there. It just is not why `Ctrl-K` was chosen.
+
+> **A RELATED PRE-EXISTING DEFECT, found in passing and NOT fixed here.** `keymap.ts` and `bindings.ts`
+> cite `fb-c3270:83` for `Ctrl-A` = Attn — **also the Windows branch.** In the non-Windows keymap
+> `Ctrl-A` is c3270's **escape prefix** and Attn is the two-key `Ctrl<Key>a <Key>a` (`:182`). So this
+> project's plain `Ctrl-A` for Attn is a real divergence from terminal c3270 that nobody knew they were
+> making, and its citation points at the wrong keymap. It came in with the palette-schemes work, not
+> with the keypad. Decide separately whether to keep the binding (defensible — we have no escape prefix)
+> and fix only the citation, or to follow c3270.
 
 **Sys Req gets no chord**, because c3270 defines none and inventing one is how a keymap accretes
 bindings nobody can predict. It is reachable from the keypad, from the TUI overlay, and from the
