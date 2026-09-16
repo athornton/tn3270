@@ -4,11 +4,14 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## Where things stand — THE WEB GATEWAY IS COMPLETE, 2026-09-16
+## Where things stand — THE WEB GATEWAY IS DONE AND MERGED, 2026-09-16
 
-**Branch `web-gateway`, ALL 15 TASKS DONE, pushed, NOT yet merged.** This is roadmap item (3).
-**1509 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
-clean, both GUI goldens matching, `pty-smoke.py` 12/12, and both by-hand browser harnesses passing.
+**`main` is at `d52ee57`, pushed and in sync, and it is the ONLY branch — `web-gateway` was merged
+`--no-ff` and deleted, local and remote.** Roadmap item (3) is closed: all 15 tasks, plus the three
+follow-up questions the user then answered. **1509 tests passing in 66 files**, `npm run typecheck`
+and `npm run build` clean, working tree clean, both GUI goldens matching, `pty-smoke.py` 12/12, and
+both by-hand browser harnesses passing — all re-run on the MERGE COMMIT itself, not just on the
+branch.
 Spec `docs/superpowers/specs/2026-09-15-web-gateway-design.md`, plan
 `docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
 notes recording the defects found while executing it, and those annotations are the most valuable
