@@ -39,10 +39,13 @@ the task's report rather than making the code match the plan.
 > 2. **A numeric field TAKES Dup and refuses Field Mark.** The manual's permitted set names "the
 >    duplicate (DUP) control" explicitly (p. 4-13). x3270's byte test refuses DUP too but is gated on
 >    `appres.numeric_lock`, which has no default assignment and is therefore off.
-> 3. **The MDT assertion in Step 1 would have passed VACUOUSLY.**
+> 3. **The MDT assertion in Step 1 could not work**, though NOT for the reason first recorded here.
 >    `screen.cellAt(field.attrAddr).ebcdic & FA.MODIFY` is always 0, because `setFieldAttribute`
->    stores the attribute in `attrs[]` and zeroes `chars[]`. Used the file's own idiom,
->    `s.fieldAt(3)!.modified`.
+>    stores the attribute in `attrs[]` (`screen.ts:394`) and zeroes `chars[]` (`screen.ts:323`).
+>    **The first version of this note said it would "pass vacuously"; the reviewer ran it and it
+>    FAILS loudly** (`expected +0 to be 1`) — only the *pre*-assertion is vacuous. Used the file's own
+>    idiom, `s.fieldAt(3)!.modified`, confirmed non-vacuous by deleting `setMDT`. A wrong diagnosis of
+>    a real defect is still worth correcting: "vacuous" and "fails" call for opposite responses.
 >
 > Also: the constants went beside `Order`, not `PF_AIDS` — they are format control orders, not AIDs.
 > The plan's four helper names were dropped for the file's existing `twoFields()`/`kb(s)` idiom plus a
