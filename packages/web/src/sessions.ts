@@ -78,6 +78,23 @@ export class SessionRegistry {
   }
 
   /**
+   * Look at a session WITHOUT changing whether anyone is attached to it.
+   *
+   * ## THIS IS NOT `attach`, AND THE DIFFERENCE BIT ME WRITING A TEST
+   *
+   * `attach` MUTATES: given an id nobody holds it reattaches and disarms the reaper, and given an id
+   * someone already holds it deliberately falls through and BUILDS A NEW SESSION -- the
+   * anti-hijacking rule. So `attach` is unusable for observation. A test that polled it to watch a
+   * listener count saw a fresh session with zero listeners on its second call and passed while the
+   * leak it was checking for was fully present.
+   *
+   * Returns `undefined` for an unknown or already-reaped id rather than creating anything.
+   */
+  peek(id: string): Session | undefined {
+    return this.entries.get(id)?.handle.session;
+  }
+
+  /**
    * The socket closed. Keep the 3270 session alive briefly in case they come back.
    *
    * A duplicate call for an already-detached session is a no-op, not a second reaper: a socket can

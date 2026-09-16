@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## Where things stand — THE WEB GATEWAY IS COMPLETE, 2026-09-16
 
 **Branch `web-gateway`, ALL 15 TASKS DONE, pushed, NOT yet merged.** This is roadmap item (3).
-**1504 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
+**1509 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
 clean, both GUI goldens matching, `pty-smoke.py` 12/12, and both by-hand browser harnesses passing.
 Spec `docs/superpowers/specs/2026-09-15-web-gateway-design.md`, plan
 `docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
@@ -94,10 +94,22 @@ GUI goldens still match byte for byte — which is what made changing a SHARED f
    EXPLICITLY now, because the flip silently removed its token coverage — the "refuses the upgrade
    without a token" case went red, having had nothing left to refuse.
 
-**ONE QUESTION REMAINS: `Session` has no `off()`.** Listeners go into a `Set` with no removal, so
-every reattach permanently adds three more, and each would compute a full draw list and deflate it on
-every later screen change. `main.ts` guards with a `live` flag so a dead connection does no work, but
-the entries still accumulate. A `Session.off()` in core is the real fix.
+3. **`Session.off()` IS DONE TOO, and the `live` flag it replaces is gone.** Core gained
+   `off(event, fn)` — a no-op for an unregistered function, because the gateway calls it on every
+   socket close including ones that never reached `hello` — plus **`listenerCount(event)`, which
+   exists so the leak is OBSERVABLE**: without it the only symptom is wasted CPU, which no assertion
+   can see. `main.ts` now removes its three listeners in `onClose`, BEFORE `detach`, so the grace
+   window never holds a session pointing at a socket that has gone.
+
+   **THE TEST FOR IT PASSED VACUOUSLY AT FIRST, and the cause is a trap this branch already
+   documented.** It polled `registry.attach(id)` to read the count — but `attach` on an
+   ALREADY-ATTACHED id falls through and BUILDS A NEW SESSION, so the second poll read a fresh object
+   with zero listeners and the test went green with the leak fully present. `SessionRegistry.peek(id)`
+   now exists for observation without mutation, and with it the mutation is caught at the FIRST
+   reconnect (`expected 1 to be 0`). **Re-read a registry API's mutation semantics before using it to
+   observe anything.**
+
+**No open questions remain.**
 
 ### FINDINGS FROM THIS BRANCH THAT NO AMOUNT OF REASONING WOULD HAVE PRODUCED
 

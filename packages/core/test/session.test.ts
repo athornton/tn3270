@@ -287,6 +287,68 @@ describe('sending AIDs', () => {
     expect(() => session.sendAID(AID.ENTER)).toThrow(/not connected/i);
   });
 
+  describe('off', () => {
+    /**
+     * WHY A LISTENER MUST BE REMOVABLE, and it is a leak with teeth rather than tidiness.
+     *
+     * The web gateway's sessions OUTLIVE their sockets by design, so an operator can reload or
+     * survive a wifi handoff and reattach. Each attach registered three listeners and there was no
+     * way to take them off again, so a session reattached ten times carried thirty, and every later
+     * screen change ran `drawList` and `deflateSync` thirty times -- twenty-nine of them for dead
+     * connections that would discard the result. Unbounded in the number of reconnections.
+     */
+    it('removes a listener, and only that one', () => {
+      const { session } = newSession();
+      const a = vi.fn();
+      const b = vi.fn();
+      session.on('screen', a);
+      session.on('screen', b);
+      session.off('screen', a);
+      session.replay('< f5 c1 11 40 40 c8 c9\n');       // any host write emits 'screen'
+      expect(a).not.toHaveBeenCalled();
+      expect(b).toHaveBeenCalled();
+    });
+
+    it('counts what is registered, so a leak is observable', () => {
+      const { session } = newSession();
+      const fn = (): void => {};
+      expect(session.listenerCount('screen')).toBe(0);
+      session.on('screen', fn);
+      expect(session.listenerCount('screen')).toBe(1);
+      // The SAME function twice is one listener, because the store is a Set -- which is also why
+      // `off` can be exact rather than removing the first match.
+      session.on('screen', fn);
+      expect(session.listenerCount('screen')).toBe(1);
+      session.off('screen', fn);
+      expect(session.listenerCount('screen')).toBe(0);
+    });
+
+    it('is a no-op for a function that was never registered, or an event with none', () => {
+      // The gateway calls this on every socket close, including ones that never got as far as
+      // `hello` and so registered nothing. Throwing there would turn a normal disconnect into an
+      // error on a path with no caller to tell.
+      const { session } = newSession();
+      expect(() => session.off('screen', () => {})).not.toThrow();
+      session.on('screen', () => {});
+      expect(() => session.off('connect', () => {})).not.toThrow();
+      expect(session.listenerCount('screen')).toBe(1);
+    });
+
+    it('does not disturb emit while it is running', () => {
+      // A listener that removes itself is the shape that breaks a naive `for` over a mutating
+      // collection. Iterating a Set that is modified during iteration is defined in JS, but the
+      // behaviour is worth pinning rather than assuming.
+      const { session } = newSession();
+      const seen: string[] = [];
+      const once = (): void => { seen.push('once'); session.off('screen', once); };
+      session.on('screen', once);
+      session.on('screen', () => { seen.push('always'); });
+      session.replay('< f5 c1 11 40 40 c8 c9\n');
+      session.replay('< f5 c1 11 40 40 c8 c9\n');
+      expect(seen).toEqual(['once', 'always', 'always']);
+    });
+  });
+
   it('refuses a byte that is not an AID, and sends NOTHING', async () => {
     /**
      * THE BACKSTOP FOR A DEFECT THAT REACHED A LIVE MAINFRAME.

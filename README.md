@@ -127,7 +127,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1504 tests, 66 files
+npm test           # 1509 tests, 66 files
 npm run typecheck
 ```
 
@@ -645,7 +645,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1504 tests, 66 files |
+| `npm test` | **pass** — 1509 tests, 66 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

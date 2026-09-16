@@ -3698,7 +3698,21 @@ nothing.
 and the CLI was re-checked live against VM/370: `PF(3)` and `PA(1)` still reach the host, and
 `PF(99)`/`PA(0)` still refuse with their existing message shape.
 
-**One question remains open: `Session` has no `off()`.**
+### 3. `Session.off()`, and the vacuous test that nearly hid it
+
+Core gained `off(event, fn)` and `listenerCount(event)`; `main.ts` removes its three listeners in
+`onClose` before `detach`, and the `live` flag that merely made a dead listener return early is gone.
+
+**THE FIRST VERSION OF THE TEST PASSED WITH THE LEAK FULLY PRESENT.** It polled
+`registry.attach(id)` to read the listener count, and `attach` on an ALREADY-ATTACHED id falls
+through and BUILDS A NEW SESSION -- the anti-hijacking rule from Task 6, and the same semantics whose
+misuse was Task 10's severe defect. So the second poll read a fresh object with zero listeners.
+`SessionRegistry.peek(id)` now exists to observe without mutating, and the mutation is then caught at
+the FIRST reconnect: `expected 1 to be 0`. **This is the second time on this branch that `attach`'s
+semantics produced a confident wrong result -- read them before using it to observe anything.**
+
+**Suite 1504 -> 1509 in 66 files.** Both goldens, both browser harnesses and `pty-smoke.py` 12/12
+still pass. **No open questions remain.**
 
 ## Self-review notes
 

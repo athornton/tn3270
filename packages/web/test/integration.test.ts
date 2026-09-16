@@ -236,6 +236,48 @@ describe('the gateway end to end', () => {
     ws.close();
   });
 
+  it('takes its listeners OFF a session that outlives the socket, however often it reattaches', async () => {
+    // THE LEAK THIS PINS. A gateway session outlives its socket by design so a reload reattaches, and
+    // each attach registers three listeners. Without `Session.off` they accumulated: ten reconnects
+    // left thirty, and every later screen change ran `drawList` and `deflateSync` thirty times --
+    // twenty-nine for dead sockets that discard the result. Unbounded in reconnections, and
+    // INVISIBLE, because the output stayed correct throughout. Wasted CPU is not something an
+    // assertion can see, which is why `listenerCount` exists.
+    //
+    // `--grace 30` keeps the session alive across the loop; the registry hands back the same one.
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '--auth', 'on', '--grace', '30',
+      '127.0.0.1:3270']);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+    const url = `ws://127.0.0.1:${port}/ws?t=${args.token}`;
+
+    let id: string | undefined;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const ws = new WebSocket(url);
+      await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+      const want = collect(ws, id === undefined ? 3 : 2);
+      ws.send(JSON.stringify(id === undefined ? { kind: 'hello' } : { kind: 'hello', sessionId: id }));
+      const got = await want;
+      id ??= got.find((m) => m['kind'] === 'session')?.['id'] as string;
+      ws.close();
+      // `peek`, NEVER `attach`. MEASURED: a version of this polled `attach` and passed with the leak
+      // fully present, because `attach` on an ALREADY-ATTACHED id falls through and builds a fresh
+      // session -- so the second poll read a brand-new object with zero listeners. `peek` observes
+      // without changing attachment.
+      for (let waited = 0; waited < 40; waited += 1) {
+        await new Promise((r) => { setTimeout(r, 25); });
+        if ((registry.peek(id)?.listenerCount('screen') ?? -1) === 0) break;
+      }
+      const session = registry.peek(id);
+      expect(session, `session ${id} should still exist inside the grace window`).toBeDefined();
+      for (const event of ['screen', 'connect', 'disconnect'] as const) {
+        expect(session!.listenerCount(event), `${event} after close ${attempt + 1}`).toBe(0);
+      }
+    }
+  });
+
   it('accepts a proxied browser Origin ONLY when --allow-origin names it', async () => {
     // Pins Task 4b's flag all the way through `main.ts`. Without the wiring, `checkUpgrade` is
     // called with an empty list and every browser behind a Host-rewriting proxy is refused -- which

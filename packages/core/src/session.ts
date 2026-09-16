@@ -124,6 +124,35 @@ export class Session {
     set.add(fn);
   }
 
+  /**
+   * Stop calling `fn` for `event`. A no-op if it was never registered.
+   *
+   * ## WHY THIS EXISTS: A SESSION CAN OUTLIVE ITS LISTENER
+   *
+   * For three of the four front ends it does not — a TUI or a GUI registers once and lives as long
+   * as the process. The web gateway is different BY DESIGN: its sessions outlive their sockets so an
+   * operator can reload, or survive a wifi handoff, and reattach to the running 3270 session. Each
+   * attach registers three listeners, and with no way to remove them a session reattached ten times
+   * carried thirty. Every later screen change then ran `drawList` and `deflateSync` thirty times,
+   * twenty-nine of them for dead connections that discard the result — unbounded in the number of
+   * reconnections, and invisible because the output was correct throughout.
+   *
+   * A no-op rather than a throw for an unknown function, because the gateway calls this on every
+   * socket close, including sockets that never reached `hello` and so registered nothing. Throwing
+   * there would turn an ordinary disconnect into an error on a path with nobody to tell.
+   */
+  off(event: SessionEvent, fn: () => void): void {
+    this.listeners.get(event)?.delete(fn);
+  }
+
+  /**
+   * How many listeners `event` has. Exists so a leak is OBSERVABLE to a test: without it the only
+   * symptom of the bug above is wasted CPU, which no assertion can see.
+   */
+  listenerCount(event: SessionEvent): number {
+    return this.listeners.get(event)?.size ?? 0;
+  }
+
   private emit(event: SessionEvent): void {
     for (const fn of this.listeners.get(event) ?? []) fn();
   }

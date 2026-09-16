@@ -120,11 +120,15 @@ export function buildServer(args: WebArgs) {
     // Set on `hello`. Called after EVERY action, because a local one emits no session event -- see
     // the comment at its call site below.
     let repaint: (() => void) | undefined;
-    // `Session` has no `off()`, so the listeners registered below outlive this socket. Guarding on
-    // this flag is what stops a dead connection from computing a full draw list and deflating it on
-    // every later screen change -- `sendBinary` alone would drop the result, having already paid for
-    // it. See the follow-up question in the plan about giving core a way to remove a listener.
-    let live = true;
+    /**
+     * Set on `hello`: takes this socket's listeners OFF the session, which outlives it.
+     *
+     * This replaces a `live` boolean that made a dead connection's listeners return early. That
+     * worked, but it left them REGISTERED, so a session reattached ten times carried thirty
+     * listeners and every screen change walked all thirty. `Session.off` removes them instead, which
+     * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
+     */
+    let stopListening: (() => void) | undefined;
     conn.onText((text) => {
       let msg;
       try { msg = decodeClientMessage(text); } catch (err) {
@@ -148,7 +152,6 @@ export function buildServer(args: WebArgs) {
           kind: 'atlas', geometry: atlas.geometry, coverage: atlas.coverage, blank,
         }));
         const send = (): void => {
-          if (!live) return;
           const snapshot = mine.screen.snapshot();
           const oia = mine.oia.toText();
           conn.sendBinary(encodeServerMessage({
@@ -160,6 +163,13 @@ export function buildServer(args: WebArgs) {
         mine.on('screen', send);
         mine.on('connect', send);
         mine.on('disconnect', send);
+        // Paired with the three lines above, in one place, so a fourth event cannot be added to one
+        // list and forgotten in the other.
+        stopListening = () => {
+          mine.off('screen', send);
+          mine.off('connect', send);
+          mine.off('disconnect', send);
+        };
         repaint = send;
         send();                                     // repaint immediately, which is what makes
         return;                                     // a reattach show the CURRENT screen
@@ -183,7 +193,9 @@ export function buildServer(args: WebArgs) {
       repaint?.();
     });
     conn.onClose(() => {
-      live = false;
+      // BEFORE `detach`, so the grace window never holds a session with listeners pointing at a
+      // socket that has gone. `stopListening` is undefined for a socket that closed before `hello`.
+      stopListening?.();
       if (id !== undefined) registry.detach(id);
     });
   });
