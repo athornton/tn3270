@@ -215,6 +215,27 @@ the ESC state machine, whose own comments record two regressions and warn agains
 `applyAction` and in both keymaps. It is currently unreachable from any front end, which is worth
 stating plainly — the capability has been in core since stage 2b with no way to press it.
 
+> **BUT SYS REQ IS INERT ON BOTH OF THIS PROJECT'S LIVE HOSTS, and Task 10 is what exposed it.**
+> `Session.sysreq()` (`core/src/session.ts:641`) returns early unless `Tn3270eFunc.SYSREQ` was
+> negotiated — and **neither Hercules host offers TN3270E at all**; both answer `IAC WILL TN3270E`
+> with `ff fe 28` = DONT, measured three times. So the key this feature exists to make reachable
+> **puts nothing on the wire against either host the user has.** The keypad's `SysRq` button and the
+> new CLI `SysReq()` both answer `ok` and do nothing.
+>
+> **What x3270 does instead, checked at source rather than guessed — and it is not what you would
+> assume.** `SysReq_action` is `if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }`
+> (`Common/kybd.c:2856-2864`), so a classic 3270 session takes the second branch. That branch does
+> **not** send AID `0xf0`: `ctlr_read_modified` has a dedicated `case AID_SYSREQ: /* test request */`
+> (`Common/ctlr.c:770-777`) which emits a **four-byte TEST REQUEST record** —
+> `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` — and then `break`s, skipping the ordinary-AID path
+> entirely. **No AID byte, no cursor address, no field data.** `AID.SYSREQ = 0xf0` exists in our
+> `constants.ts` and is never the thing on the wire for this key.
+>
+> **This is core protocol surface, not keypad work**, so it is deliberately NOT being folded into this
+> feature. But the docs must not claim Sys Req "works": it is reachable from every front end and inert
+> on every host available here. Decide before Task 15 whether to add the non-E path (small — one
+> record-sending method plus the branch) or to document the limitation precisely.
+
 **Dup** and **Field Mark** need new `Keyboard` methods. Both write an EBCDIC control byte —
 0x1C and 0x1E — **directly into the buffer, bypassing code-page translation**, because they are
 EBCDIC controls with no sensible Unicode source character; routing them through `type(ch)` would
