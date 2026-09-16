@@ -2,8 +2,11 @@
  * The special-keys overlay: the keypad table as a navigable list.
  *
  * PURE. Every function here is a total function of its arguments; nothing draws, nothing holds
- * state and nothing reads the terminal. `app.ts` owns the selection index and `render.ts` owns the
- * frame and the scroll window.
+ * state and nothing reads the terminal. `app.ts` owns the selection index AND the scroll window
+ * (`overlayWindow`, which follows the selection), and `render.ts` draws the lines it is handed --
+ * over the top-left of the screen region, with the marked line in reverse video. (This paragraph
+ * gave the window to `render.ts` until Task 12 wired it up: the renderer is handed lines and has no
+ * selection index to scroll towards, so the window could only live with the state.)
  *
  * ## WHY A LIST AND NOT c3270'S KEYPAD
  *
@@ -39,6 +42,11 @@ import type { Geometry } from './render.js';
  *
  * `rows` is a judgement, not a derivation: 12 terminal rows leave 10 lines of list inside a frame,
  * and below that a window onto 46 entries shows so little that scrolling is worse than nothing.
+ *
+ * NO FRAME IS ACTUALLY DRAWN as of Task 12 -- the list is written straight over the screen's
+ * top-left corner -- so the frame cells both figures allow for are slack in a floor that is already
+ * unreachable (below). Keeping them costs nothing and leaves room for a frame; shrinking the
+ * constant to 27x11 would only make an unreachable check marginally less conservative.
  *
  * Both are deliberately BELOW the 24x80 floor that `tooSmall` (`render.ts:43`) already imposes on
  * the session, so this never refuses a terminal the session itself accepted. That does mean

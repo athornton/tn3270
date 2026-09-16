@@ -23,6 +23,7 @@
 
 import { resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
+import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import {
   applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, resolveScheme,
@@ -31,6 +32,21 @@ import {
 
 /** The byte a lone Escape keypress sends; also the first byte of every function key. */
 const ESC = 0x1b;
+
+/**
+ * The bytes the special-keys overlay reads while it is open, and nowhere else.
+ *
+ * Compared as BYTES rather than as a decoded string: a chunk can carry more than one keystroke, and
+ * `seq === '\r'` on the whole chunk answers "was this read exactly one Return", which is a
+ * different question from "does the next key begin with Return". See `overlayKey`.
+ */
+const OVERLAY_CR = 0x0d;
+const OVERLAY_LF = 0x0a;
+const OVERLAY_TOGGLE = 0x0b;      // Ctrl-K, which Task 4 binds to `toggleKeypad`
+const OVERLAY_CSI = 0x5b;         // the `[` of `\x1b[A`
+const OVERLAY_SS3 = 0x4f;         // the `O` of `\x1bOA`, which DECCKM makes equally likely
+const OVERLAY_UP = 0x41;
+const OVERLAY_DOWN = 0x42;
 
 /**
  * How long to wait before giving up on an unresolved escape path -- either a
@@ -162,6 +178,26 @@ export class App {
    * cells over the user's shell prompt. Every write goes through this guard.
    */
   private quitting = false;
+  /** Which of the 46 keys the overlay's `>` marks. */
+  private overlaySelected = 0;
+  private overlayShown = false;
+  /**
+   * The first line of the 46 currently in the window, moved only when the selection would leave
+   * it -- see `overlayWindow`.
+   */
+  private overlayTop = 0;
+  /**
+   * An escape prefix the overlay has read but cannot yet resolve, with its own timer.
+   *
+   * SEPARATE FROM `buffer` AND `escHeld` ON PURPOSE. Those two are the most delicate thing in this
+   * file and the interception exists so that nothing the overlay does can perturb them; see
+   * `consumeOverlayKey` for why a prefix has to be held at all.
+   */
+  private overlayPending: number[] = [];
+  private overlayTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Public for tests, like `onInput`: a test should not have to infer this from bytes. */
+  get overlayOpen(): boolean { return this.overlayShown; }
 
   constructor(opts: AppOptions) {
     this.session = opts.session;
@@ -245,6 +281,10 @@ export class App {
     // clear the flag anyway rather than leave a stale "waiting to resolve"
     // state on an App that should be fully torn down.
     this.escHeld = false;
+    // The overlay's own held prefix is a THIRD timer, and it keeps the event loop alive after the
+    // terminal is restored exactly as the two above do.
+    this.clearOverlayTimer();
+    this.overlayPending = [];
     this.stdout.write(CURSOR_OFF);
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);
@@ -315,12 +355,22 @@ export class App {
     // note on `quitting`. Nor while suspended -- see that field.
     if (this.quitting || this.restored || this.suspended) return;
     const cells = resolve(this.session.screen.snapshot(), { mode3279: this.mode3279 });
-    const out = this.renderer.paint(cells, this.session.screen.cursor, this.session.oia.toText());
+    const out = this.renderer.paint(
+      cells, this.session.screen.cursor, this.session.oia.toText(),
+      this.overlayShown ? this.overlayWindow() : undefined,
+    );
     if (out !== '') this.stdout.write(out);
   }
 
   /** Feed terminal bytes in. Public so a test needs no real TTY. */
   onInput(bytes: Uint8Array): void {
+    // WHILE THE OVERLAY IS OPEN IT OWNS THE KEYBOARD. Falling through to `pump` would type letters
+    // into the field behind it, silently corrupting whatever was half-entered -- and it would send
+    // AIDs to the host from a list the operator was only reading.
+    //
+    // BEFORE the buffer and before `pump`, deliberately: the ESC state machine below is untouched
+    // by anything the overlay does, and the overlay does not have to reason about `escHeld`.
+    if (this.overlayShown) { this.consumeOverlayKey(bytes); return; }
     for (const b of bytes) this.buffer.push(b);
     this.pump();
   }
@@ -481,13 +531,20 @@ export class App {
    * delegates to `Keyboard` or `Session`, so if a branch grows logic that logic is in
    * the wrong package.
    *
-   * WHAT STAYS HERE IS `quit`, because teardown is this front end's and nobody
-   * else's: restoring raw mode on every exit path is what stands between a user and
-   * a terminal with no echo. A GUI closes a window instead. `applyAction` throws if
-   * handed `quit` rather than ignoring it, so a front end that forgot this check
-   * fails loudly instead of becoming unquittable.
+   * WHAT STAYS HERE IS `quit` AND `toggleKeypad`, the two `applyAction` refuses: teardown is this
+   * front end's and nobody else's -- restoring raw mode on every exit path is what stands between a
+   * user and a terminal with no echo, and a GUI closes a window instead -- and what a keypad LOOKS
+   * like is equally local, which is why this one is a list of 46 lines and the canvas front ends
+   * draw buttons. `applyAction` THROWS on both rather than ignoring them, so a front end that
+   * forgot either check fails loudly instead of becoming unquittable, or offering a chord that
+   * silently does nothing.
    */
   private apply(action: Action): void {
+    // THE OVERLAY IS THIS FRONT END'S ANSWER TO `toggleKeypad`: a navigable list, not a keypad --
+    // c3270's keypad is 16x78 and would hide two thirds of the screen (`keypadOverlay.ts`).
+    // `applyAction` THROWS on the action rather than ignoring it, so a front end that forgot to
+    // intercept it dies on the keystroke instead of presenting a chord that does nothing.
+    if (action.kind === 'toggleKeypad') { this.toggleOverlay(); return; }
     if (action.kind === 'quit') {
       this.quitting = true;
       this.restore();
@@ -496,5 +553,186 @@ export class App {
     }
     applyAction(this.session, action);
     this.draw();
+  }
+
+  /** Open the special-keys list, or close an open one. */
+  private toggleOverlay(): void {
+    if (this.overlayShown) { this.closeOverlay(); return; }
+    // NOT WHILE SUSPENDED. `draw()` paints nothing then, so opening would leave the list INVISIBLE
+    // and yet owning the keyboard -- every keystroke swallowed by something the user cannot see,
+    // and the list appearing out of nowhere when the terminal grew back. A 20x80 terminal is
+    // suspended and still clears OVERLAY_MIN, so the fits check below does not cover this.
+    if (this.suspended) return;
+    if (!overlayFits(this.terminal())) {
+      // NOT REACHABLE FROM A LIVE SESSION, and deliberately kept anyway: `tooSmall` already
+      // demands 24x80 before a session runs and `OVERLAY_MIN` is 12x29, so every terminal that
+      // reaches here clears it. What it guards is the gap between a shrink and its SIGWINCH, where
+      // `terminal()` reads a size `replace()` has not acted on yet. `OVERLAY_MIN` was NOT inflated
+      // to make this branch reachable -- see the note on it in keypadOverlay.ts.
+      this.showMessage('terminal too small for the special-keys list');
+      return;
+    }
+    this.overlayShown = true;
+    this.overlaySelected = 0;
+    this.overlayTop = 0;
+    this.draw();
+  }
+
+  private closeOverlay(): void {
+    this.overlayShown = false;
+    this.clearOverlayTimer();
+    // `overlayPending` is deliberately NOT emptied here: the byte that closed the list is still at
+    // the front of it, and its caller both consumes that byte and forwards whatever shared the read
+    // to `pump()`. Clearing it here dropped that remainder -- a silent lost keystroke.
+    this.draw();
+  }
+
+  /**
+   * Read the bytes as the overlay's, one key at a time.
+   *
+   * Esc closes, Enter fires the selection, CSI/SS3 `A`/`B` move it, Ctrl-K closes it again, and
+   * EVERYTHING ELSE IS SWALLOWED -- see the interception in `onInput` for why.
+   *
+   * ## A SPLIT ARROW MUST NOT READ AS ESCAPE
+   *
+   * `\x1b` and `[B` can arrive in SEPARATE reads: that is the delivery `pump()`'s `escHeld` comment
+   * records a regression for, so it is not hypothetical. Closing the overlay on the first of those
+   * two reads would make the down arrow close it on any terminal that splits, which the user cannot
+   * predict and cannot see. So an incomplete prefix is HELD here, with the same 50ms window
+   * `pump()` uses, and only a lone ESC that OUTLIVES the window closes. A truncated `\x1b[` is
+   * discarded and the list stays up, which mirrors `pump()`'s discard rather than its promotion.
+   *
+   * The cost is that Esc closes 50ms late. That is the same boundary `ESC_TIMEOUT_MS` documents,
+   * and it fails safe in both directions: nothing is typed and nothing is sent either way.
+   *
+   * ## ONE READ, SEVERAL KEYS
+   *
+   * A loop, not a match on the whole chunk, for the reason `pump()` gives: autorepeat coalesced by
+   * a slow link delivers `\x1b[B\x1b[B` as one read, which no whole-chunk comparison recognises --
+   * the selection would appear to stop moving while the key was held.
+   */
+  private consumeOverlayKey(bytes: Uint8Array): void {
+    for (const b of bytes) this.overlayPending.push(b);
+    this.clearOverlayTimer();
+
+    while (this.overlayShown && this.overlayPending.length > 0) {
+      const taken = this.overlayKey(this.overlayPending);
+      if (taken === 0) { this.holdOverlayPrefix(); return; }
+      this.overlayPending.splice(0, taken);
+    }
+
+    if (this.overlayPending.length > 0) {
+      // Bytes that shared a read with the keystroke that CLOSED the list belong to the screen
+      // again. Dropping them would be the silent lost keystroke `pump()`'s docstring exists to
+      // prevent, so they re-enter the ordinary path -- which is safe now that `overlayShown` is
+      // false, so `onInput` will not intercept them a second time.
+      for (const b of this.overlayPending) this.buffer.push(b);
+      this.overlayPending = [];
+      this.pump();
+    }
+  }
+
+  /**
+   * Act on the ONE key at the front of `pending`, returning how many bytes it consumed, or 0 when
+   * the front is a prefix that more bytes could still complete.
+   */
+  private overlayKey(pending: readonly number[]): number {
+    if (pending[0] !== ESC) {
+      if (pending[0] === OVERLAY_CR || pending[0] === OVERLAY_LF) this.fireOverlay();
+      else if (pending[0] === OVERLAY_TOGGLE) this.closeOverlay();
+      return 1;
+    }
+    if (pending.length === 1) return 0;                         // Escape, or an arrow's first byte
+    if (pending[1] === OVERLAY_CSI || pending[1] === OVERLAY_SS3) {
+      if (pending.length === 2) return 0;                       // no final byte yet
+      // BOTH FORMS, for the reason `bindings.ts` gives: any layer can flip DECCKM, so accepting
+      // one of `\x1b[A`/`\x1bOA` would work in some terminals and not others.
+      if (pending[2] === OVERLAY_UP) this.moveOverlay(-1);
+      else if (pending[2] === OVERLAY_DOWN) this.moveOverlay(1);
+      return 3;                            // any other function key: swallowed, whole
+    }
+    // ESC followed by something that cannot continue an arrow: it really was Escape.
+    this.closeOverlay();
+    return 1;
+  }
+
+  /** Wait out `ESC_TIMEOUT_MS` on a prefix the overlay cannot yet resolve. */
+  private holdOverlayPrefix(): void {
+    this.overlayTimer = setTimeout(() => {
+      this.overlayTimer = undefined;
+      const lone = this.overlayPending.length === 1 && this.overlayPending[0] === ESC;
+      this.overlayPending = [];
+      // A LONE ESC that outlived the window really was Escape, so it closes. A truncated
+      // `\x1b[` is discarded with the list left open: an unfinished sequence is not a keypress.
+      if (lone && this.overlayShown) this.closeOverlay();
+    }, ESC_TIMEOUT_MS);
+  }
+
+  private clearOverlayTimer(): void {
+    if (this.overlayTimer === undefined) return;
+    clearTimeout(this.overlayTimer);
+    this.overlayTimer = undefined;
+  }
+
+  private moveOverlay(delta: number): void {
+    this.overlaySelected = moveSelection(this.overlaySelected, delta);
+    this.draw();
+  }
+
+  /** Fire the selected key and close. */
+  private fireOverlay(): void {
+    const action = selectedAction(this.overlaySelected);
+    // CLOSED BEFORE THE ACTION RUNS, and closing is what stops the next Return re-firing the same
+    // key: with the list down, Return is the Enter AID again.
+    this.overlayShown = false;
+    this.clearOverlayTimer();
+    applyAction(this.session, action);
+    this.draw();
+  }
+
+  /**
+   * The lines to draw: as many as fit, scrolled to keep the selection visible.
+   *
+   * SELECTION-FOLLOWING, NOT FIRST-N. `overlayLines` returns all 46 and Task 11 left the window to
+   * its caller; a 24-row screen holds 24, so showing the first N would leave every key from the
+   * 25th down -- Attention through Backspace, and Sys Req, whose only keyboard route this is --
+   * permanently unreachable. The window moves only when the selection would leave it, so holding an
+   * arrow scrolls a line at a time rather than jumping a page.
+   *
+   * Bounded by the TERMINAL as well as the screen. A live session's terminal is never smaller than
+   * its screen (`tooSmall`), but addressing a row the terminal does not have would scroll the window
+   * and corrupt every address computed afterwards, so the smaller of the two wins.
+   */
+  private overlayWindow(): readonly string[] {
+    const lines = overlayLines(this.overlaySelected);
+    const rows = Math.max(1, Math.min(this.session.screen.rows, this.terminal().rows));
+    if (this.overlaySelected < this.overlayTop) this.overlayTop = this.overlaySelected;
+    else if (this.overlaySelected >= this.overlayTop + rows) {
+      this.overlayTop = this.overlaySelected - rows + 1;
+    }
+    this.overlayTop = Math.min(this.overlayTop, Math.max(0, lines.length - rows));
+    return lines.slice(this.overlayTop, this.overlayTop + rows);
+  }
+
+  /**
+   * Write one transient line, leaving the screen otherwise intact.
+   *
+   * THERE WAS NO MESSAGE FACILITY HERE TO REUSE, and this is the third kind rather than a fourth
+   * mechanism: the key-binding hint is a RENDERER option fixed at construction (`hintParts` in
+   * render.ts), the OIA text is the session's own, and the only other message -- the too-small
+   * notice in `replace()` -- clears the whole terminal, which is right for a session that has
+   * stopped painting and wrong for a refusal that must leave the screen readable.
+   *
+   * So: the terminal's first row, no `\x1b[2J`, and `invalidate()` WITHOUT a draw, so the message
+   * survives until the next paint (a keystroke, or a screen event) and that paint -- a full one,
+   * border and hint included -- puts back the row it sat on.
+   */
+  private showMessage(text: string): void {
+    // The same three guards `draw()` has, and `suspended` for the same reason it does: the too-small
+    // notice sits at 1;1 too, and overwriting "Resize to continue" with anything else would replace
+    // the one instruction that gets the user out of that state.
+    if (this.quitting || this.restored || this.suspended) return;
+    this.stdout.write(`\x1b[1;1H\x1b[0m\x1b[K${text}`);
+    this.renderer.invalidate();
   }
 }

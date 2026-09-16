@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AID, resolve, Session, type Connection } from '@tn3270/core';
+import type { Action } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
+import { overlayLines } from '../src/keypadOverlay.js';
 
 /**
  * A real `Session`, never a mock, with a fake socket.
@@ -532,5 +534,262 @@ describe('the ambiguous Escape', () => {
     h.app.onInput(Uint8Array.from([0x31]));
     expect(sent).not.toHaveBeenCalled();
     expect(cellText(h.session, 0)).toBe('1');
+  });
+});
+
+/**
+ * Dispatch one Action the way a keystroke will once Task 4 binds a chord to it.
+ *
+ * NO BYTE PRODUCES `toggleKeypad` TODAY: Task 4 adds the Ctrl-K row to the keymap, and this task
+ * runs before it deliberately -- `applyAction` THROWS on the action and `pump()` calls `apply()`
+ * unguarded, so binding the chord before this interception existed would kill the process on a
+ * keystroke. So the opening of the overlay is driven by the action, not by `0x0b`; every other key
+ * below is a real byte, because arrows, Enter and Esc are already bound. Task 4 adds the byte-level
+ * test for the chord itself.
+ *
+ * `apply` is private and reached by cast rather than widened for a test: `overlayOpen` below is the
+ * one thing this feature adds to the public surface for testability, matching `onInput`.
+ */
+function dispatchToggle(app: App): void {
+  (app as unknown as { apply(action: Action): void }).apply({ kind: 'toggleKeypad' });
+}
+
+const enc = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** The selected line's text, exactly as the overlay renders it -- it begins with `>`. */
+const marked = (selected: number): string => overlayLines(selected)[selected]!;
+
+/**
+ * Only the MOST RECENT write, so a growing `all` cannot satisfy an assertion about what the last
+ * keystroke drew. One overlay keystroke is one `draw()`, so one write.
+ */
+const latest = (h: Harness): string => h.stdout.written[h.stdout.written.length - 1] ?? '';
+
+describe('the special-keys overlay', () => {
+  // The overlay holds a lone ESC for the same 50ms window `pump()` does, so closing it is a timed
+  // event; see 'does not mistake an arrow key split across two reads for Escape' below.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Longer than ESC_TIMEOUT_MS, so a held lone ESC has resolved. */
+  const AFTER_ESC = 60;
+
+  it('opens on the toggle action and closes on Esc, without sending anything to the host', () => {
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    dispatchToggle(h.app);
+    expect(h.app.overlayOpen).toBe(true);
+    expect(h.stdout.all).toContain(marked(0));            // and it is actually drawn
+
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(sent).not.toHaveBeenCalled();                  // nothing reached the host
+    expect(cellText(h.session, 0)).toBe(' ');             // and nothing reached the screen
+  });
+
+  it('marks the selection in reverse video, inside the screen region and not the terminal corner', () => {
+    // 40x100: the screen's top-left is terminal row 9, column 11 -- the same address 'centres the
+    // screen in a roomy terminal' pins. Drawing at 1;1 instead would put the list outside the
+    // border, over whatever the terminal had there.
+    const h = harness(40, 100);
+    h.app.start();
+    dispatchToggle(h.app);
+    expect(h.stdout.all).toContain(`\x1b[9;11H\x1b[0;7m${marked(0)}`);
+  });
+
+  it('fires the selected action on Enter and closes', () => {
+    // Enter must fire the SELECTED key, not the Enter AID: while the overlay is up it belongs to
+    // the overlay. Closing afterwards is what stops a second Enter re-firing it.
+    for (const key of ['\r', '\n']) {
+      const h = harness();
+      h.app.start();
+      const sent = vi.spyOn(h.session, 'sendAID');
+      dispatchToggle(h.app);
+      h.app.onInput(enc(key));
+
+      expect(sent, key).toHaveBeenCalledWith(AID.PF13);     // KEYPAD_KEYS[0]
+      expect(sent, key).not.toHaveBeenCalledWith(AID.ENTER);
+      expect(h.app.overlayOpen, key).toBe(false);
+
+      // The second Enter is the host's again, and does NOT re-fire the key.
+      h.app.onInput(enc(key));
+      expect(sent, key).toHaveBeenCalledWith(AID.ENTER);
+      expect(sent.mock.calls.filter((c) => c[0] === AID.PF13), key).toHaveLength(1);
+    }
+  });
+
+  it('moves the selection with either encoding of the arrow keys', () => {
+    // ASSERTED AFTER EACH STEP, because the end state alone does not pin the DIRECTIONS: measured
+    // by mutation, transposing the two handlers still lands 'down, down, up' on KEYPAD_KEYS[1] --
+    // clamped twice at the top, then one step down -- so the obvious form of this test passed while
+    // proving nothing. The first down is the assertion that cannot survive a swap.
+    for (const [down, up] of [['\x1b[B', '\x1b[A'], ['\x1bOB', '\x1bOA']]) {
+      const h = harness();
+      h.app.start();
+      const sent = vi.spyOn(h.session, 'sendAID');
+      dispatchToggle(h.app);
+      h.app.onInput(enc(down!));
+      expect(latest(h), down).toContain(marked(1));
+      h.app.onInput(enc(down!));
+      expect(latest(h), down).toContain(marked(2));
+      h.app.onInput(enc(up!));
+      expect(latest(h), down).toContain(marked(1));
+      h.app.onInput(enc('\r'));
+      expect(sent, down).toHaveBeenCalledWith(AID.PF14);
+    }
+  });
+
+  it('does NOT type into the screen while the overlay is up', () => {
+    // The overlay owns the keyboard while open. A letter reaching the field would be a silent
+    // corruption of whatever the operator was in the middle of typing.
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    h.app.onInput(enc('A'));
+    expect(cellText(h.session, 0)).toBe(' ');
+    expect(h.session.screen.cursor).toBe(0);
+
+    // The paired control: the keyboard comes BACK when the overlay closes, so the interception
+    // cannot be a permanently swallowed keyboard.
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(AFTER_ESC);
+    h.app.onInput(enc('A'));
+    expect(cellText(h.session, 0)).toBe('A');
+  });
+
+  it('does not mistake an arrow key split across two reads for Escape', () => {
+    // THE REAL HAZARD IN THIS INTERCEPTION. `\x1b` and `[B` can arrive in separate reads -- that is
+    // the delivery `pump()`'s escHeld comment records a regression for, so it is not hypothetical.
+    // Closing on the first read would make the down arrow close the overlay on any terminal that
+    // splits, which is a coin toss the user cannot see.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    dispatchToggle(h.app);
+    h.app.onInput(Uint8Array.from([0x1b]));
+    expect(h.app.overlayOpen).toBe(true);               // held, not closed: it may be an arrow
+    vi.advanceTimersByTime(10);                          // inside the window
+    h.app.onInput(enc('[B'));
+    expect(h.app.overlayOpen).toBe(true);
+    h.app.onInput(enc('\r'));
+    expect(sent).toHaveBeenCalledWith(AID.PF14);         // the split arrow moved the selection
+  });
+
+  it('closes on a lone ESC only once the window has passed, and never types it', () => {
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(10);
+    expect(h.app.overlayOpen).toBe(true);
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(cellText(h.session, 0)).toBe(' ');
+  });
+
+  it('acts on two arrows delivered in ONE read', () => {
+    // A slow link or a busy event loop coalesces autorepeat, and a chunk-at-a-time matcher would
+    // recognise neither -- the selection would silently stop moving while the key was held.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    dispatchToggle(h.app);
+    h.app.onInput(enc('\x1b[B\x1b[B'));
+    h.app.onInput(enc('\r'));
+    expect(sent).toHaveBeenCalledWith(AID.PF15);         // KEYPAD_KEYS[2], i.e. both arrows acted on
+  });
+
+  it('closes on a second Ctrl-K', () => {
+    // Task 4 binds the chord; this interception must handle the byte itself either way, because it
+    // sits in front of the keymap and would otherwise swallow the very key that opened the list.
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    h.app.onInput(Uint8Array.from([0x0b]));
+    expect(h.app.overlayOpen).toBe(false);
+  });
+
+  it('hands back a keystroke that shared a read with the key that closed it', () => {
+    // The overlay owns the keyboard only while it is UP. Bytes behind the closing key belong to the
+    // screen, and swallowing them would be the silent dropped keystroke `pump()`'s docstring is
+    // about -- likelier the faster the user types, and invisible when it happens.
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    h.app.onInput(enc('\x0bA'));
+    expect(h.app.overlayOpen).toBe(false);
+    expect(cellText(h.session, 0)).toBe('A');
+  });
+
+  it('does not open while the session is suspended in a too-small terminal', () => {
+    // 20x80 is suspended -- it cannot hold the 3270 screen -- but it CLEARS OVERLAY_MIN, so the
+    // fits check does not cover this. `draw()` paints nothing while suspended, so opening would
+    // leave a list that is invisible and yet owns the keyboard, and that appeared from nowhere when
+    // the terminal grew back.
+    const h = harness(30, 80);
+    h.app.start();
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    const after = h.stdout.written.length;
+    dispatchToggle(h.app);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(h.stdout.written.length).toBe(after);   // and nothing painted over 'Resize to continue'
+  });
+
+  it('scrolls to keep the selection visible instead of showing only the first screenful', () => {
+    // 46 keys and a 24-row screen: a first-N window would make every key from the 25th down
+    // UNREACHABLE, which is a real limitation and not one to ship silently.
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    for (let i = 0; i < 29; i++) h.app.onInput(enc('\x1b[B'));
+    const before = h.stdout.written.length;
+    h.app.onInput(enc('\x1b[B'));                        // the 30th, selecting KEYPAD_KEYS[30]
+    const emitted = h.stdout.written.slice(before).join('');
+    expect(emitted).toContain(marked(30));
+    expect(emitted).not.toContain(overlayLines(30)[0]!);  // the top of the list has scrolled off
+  });
+
+  it('repaints the screen underneath when it closes, leaving no litter', () => {
+    // The renderer's diff cannot see behind the overlay: the cells it remembers are the ones the
+    // list is drawn over, so without an invalidation the list stays on screen after it closes.
+    const h = harness();
+    h.app.start();
+    h.session.keyboard.typeString('AB');
+    dispatchToggle(h.app);
+    const before = h.stdout.written.length;
+    h.app.onInput(Uint8Array.from([0x1b]));
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.stdout.written.slice(before).join('')).toContain('AB');
+  });
+
+  it('refuses to open in a terminal too small to hold it, and says so', () => {
+    // THE ONLY WAY TO REACH THIS BRANCH. `overlayFits` cannot be false for a terminal a live
+    // session is running in -- `tooSmall` already demands 24x80 and OVERLAY_MIN is 12x29 -- so this
+    // shrinks the terminal WITHOUT delivering SIGWINCH, which is the genuine window between a
+    // resize and its signal and the only geometry App re-reads live. OVERLAY_MIN is deliberately
+    // NOT inflated to manufacture a refusal.
+    const h = harness(30, 80);
+    h.app.start();
+    h.stdout.resize(10, 20);
+    dispatchToggle(h.app);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(h.stdout.all).not.toContain(marked(0));
+    expect(h.stdout.all).toContain('too small');
+    expect(h.stdout.all).toContain('special-keys');       // not the suspended-session message
+  });
+
+  it('leaves the ESC machinery untouched: no timer of its own outlives restore()', () => {
+    // An armed timer keeps the event loop alive after the terminal is handed back, which is the
+    // hang restore() already clears pump()'s two timers for. The overlay's hold is a third.
+    const h = harness();
+    h.app.start();
+    dispatchToggle(h.app);
+    h.app.onInput(Uint8Array.from([0x1b]));
+    expect(vi.getTimerCount()).toBe(1);
+    h.app.restore();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

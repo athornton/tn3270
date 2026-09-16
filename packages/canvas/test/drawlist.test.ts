@@ -71,7 +71,7 @@ describe('drawList', () => {
   it('DRAWS A HIDDEN CELL BLANK, never its text', () => {
     // THE SECURITY CASE. core's own comment: `hidden` "is the ONLY thing standing between
     // a password field and the screen", and `text`/`ebcdic` are deliberately NOT
-    // pre-redacted. The TUI blanks it at render.ts:343 and the GUI matches. Without this
+    // pre-redacted. The TUI blanks it at render.ts:369 and the GUI matches. Without this
     // the window shows passwords -- and Task 10 commits screenshots to git.
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();

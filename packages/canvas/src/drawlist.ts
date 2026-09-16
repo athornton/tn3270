@@ -33,7 +33,7 @@ import { keypadRegion, type KeypadRegion } from './keypad.js';
  * password field and the screen", and neither `text` nor the snapshot's `ebcdic` is
  * pre-redacted. A renderer that draws the glyph without checking this puts the password on
  * screen -- and in this project's case into committed screenshot goldens. Blanked here,
- * matching the TUI at `render.ts:343`.
+ * matching the TUI at `render.ts:369`.
  */
 export interface AtlasGeometry {
   readonly cellWidth: number;
