@@ -164,9 +164,11 @@ describe('the keypad region', () => {
     const list = keypadList('X Wait', true);
     expect(list.oia!.y).toBe(24 * atlas.cellHeight);
     expect(list.keypad!.y).toBe(25 * atlas.cellHeight);
-    // Pinned against the ROW COUNT and not against `keypad.y + keypad.height`, which is the
-    // expression the implementation uses: asserting that back is a tautology that holds for
-    // any height the region happens to declare, including a wrong one.
+    // Pins the OIA-inclusive offset and that the keypad is counted at all; the over-declaration
+    // is caught by the button extent below, not here. MEASURED: this form imports the same
+    // constant the mutation moves, so at KEYPAD_ROWS_TALL 6 -> 7 it stays green -- as does
+    // `expect(height).toBe(keypad.y + keypad.height)`, which is a tautology over the
+    // implementation's own expression.
     expect(list.height).toBe((25 + KEYPAD_ROWS_TALL) * atlas.cellHeight);
   });
 

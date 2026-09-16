@@ -132,9 +132,9 @@ describe('keypadRegion', () => {
   });
 
   it('looks labels up through the CG MAP, like the screen and the OIA', () => {
-    // The font is in CG order, not EBCDIC order (`cg.ts:1-30`). A label indexed by its EBCDIC byte
+    // The font is in CG order, not EBCDIC order (`cg.ts:6-43`). A label indexed by its EBCDIC byte
     // would draw a different glyph, which only a screenshot golden would catch. This must agree
-    // with `column()` in drawlist.ts -- it is the same function, imported.
+    // with the screen and the OIA -- `column()` in `cg.ts` is the one copy, imported by all three.
     const r = region();
     const enter = r.buttons.find((b) => b.label === 'Enter')!;
     const cells = labelCells(r, enter);
