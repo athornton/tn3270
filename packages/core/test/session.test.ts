@@ -286,6 +286,34 @@ describe('sending AIDs', () => {
     const { session } = newSession();
     expect(() => session.sendAID(AID.ENTER)).toThrow(/not connected/i);
   });
+
+  it('refuses a byte that is not an AID, and sends NOTHING', async () => {
+    /**
+     * THE BACKSTOP FOR A DEFECT THAT REACHED A LIVE MAINFRAME.
+     *
+     * `PF_AIDS[n - 1]!` on an out-of-range `n` is `undefined`, and `buildReadModified`'s
+     * `Uint8Array.from` coerces that to **0** -- so a bogus `0x00` AID was transmitted and the
+     * local keyboard locked. `pfAID`/`paAID` fix the two callers that existed; this is what makes
+     * the byte unsendable by a caller written later.
+     *
+     * `0x00` is the exact value the coercion produced, and `undefined` is what produced it, so both
+     * are asserted rather than a tidier representative sample.
+     */
+    const { session, conn } = newSession();
+    await session.connect('h', 23);
+    for (const bad of [0x00, 0xff, 0x01, -1, 1.5, undefined as unknown as number]) {
+      conn.sent = [];
+      expect(() => session.sendAID(bad), `sendAID(${String(bad)})`).toThrow(RangeError);
+      expect(conn.sent, `sendAID(${String(bad)}) must write nothing`).toEqual([]);
+    }
+  });
+
+  it('refuses a bogus AID BEFORE complaining about the connection', () => {
+    // Order matters for the diagnosis: hearing 'not connected' first would send whoever passed a
+    // nonsense AID looking at the transport, when their bug is the argument.
+    const { session } = newSession();
+    expect(() => session.sendAID(0x00)).toThrow(/not an AID byte/);
+  });
 });
 
 describe('trace and replay', () => {

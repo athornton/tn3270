@@ -12,11 +12,19 @@ import { resolveHostSpec, takeTlsFlag, type TlsFlags } from '@tn3270/frontend';
  * mistake one direction for the other. Treat any new flag that could be read either way as a
  * defect.
  *
- * ## AUTH IS ON BY DEFAULT
+ * ## AUTH IS OFF BY DEFAULT, AND THE LOOPBACK BIND IS WHAT MAKES THAT DEFENSIBLE
  *
- * This process types at a mainframe on behalf of whoever reaches it. A token is generated when
- * none is given and printed at startup; `--auth off` exists for a fronting proxy that
- * authenticates, and main.ts warns loudly when it is used.
+ * The user's call, 2026-09-16, having previously had it the other way. The two defaults are a
+ * PAIR and must be read together: the gateway binds `127.0.0.1`, so out of the box only a process
+ * on this machine can reach it, and requiring a token from a local operator against their own
+ * emulator is friction that buys nothing. `--auth on` generates a token, prints it once in the
+ * startup URL, and thereafter carries it in an `HttpOnly` cookie.
+ *
+ * **THE DANGEROUS COMBINATION IS `--bind` OFF LOOPBACK WITH AUTH OFF**, and that is not a warning
+ * about a flag someone typed -- it is now the DEFAULT half of it. `main.ts` therefore warns on
+ * exactly that pair rather than on `--auth off` alone, which would otherwise print on every single
+ * run and be learned as noise. Note also what a token is and is not: `--tls-cert` protects the
+ * traffic, the token protects ACCESS, and neither substitutes for the other.
  *
  * ## `hostTls` IS RAW, NOT RESOLVED
  *
@@ -101,7 +109,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   const allowOrigins: string[] = [];
   let bind = '127.0.0.1';
   let listen = 8270;
-  let auth = true;
+  // OFF by default; see the note above on why the loopback bind is the other half of this.
+  let auth = false;
   let token: string | undefined;
   let graceMs = 60_000;
   let maxSessions = 16;

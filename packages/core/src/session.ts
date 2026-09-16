@@ -1,6 +1,6 @@
 import {
   AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
-  Tn3270eSense,
+  Tn3270eSense, VALID_AIDS,
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
@@ -564,8 +564,22 @@ export class Session {
     this.oia.enterInhibit();
   }
 
-  /** Operator pressed a key that generates an AID. */
+  /**
+   * Operator pressed a key that generates an AID.
+   *
+   * THE BYTE IS CHECKED, and that check is the backstop for a defect that reached a live host: an
+   * out-of-range `PF_AIDS[n - 1]!` is `undefined`, and `buildReadModified`'s `Uint8Array.from`
+   * coerces that to **0**, so a bogus `0x00` AID went to a mainframe and locked the keyboard.
+   * `pfAID`/`paAID` fix the callers; this makes the bad byte unsendable by any caller written later.
+   *
+   * Checked BEFORE the connected test, so the diagnosis does not depend on whether a socket happens
+   * to be open: a caller passing a nonsense AID has a bug either way, and hearing 'not connected'
+   * first would send them looking at the transport.
+   */
   sendAID(aid: number): void {
+    if (!VALID_AIDS.has(aid)) {
+      throw new RangeError(`${aid} is not an AID byte; use AID, pfAID(n) or paAID(n)`);
+    }
     if (this.telnet === undefined) throw new Error('not connected');
 
     const payload = buildReadModified(this.screen, aid, false);

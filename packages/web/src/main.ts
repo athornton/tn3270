@@ -216,11 +216,25 @@ export function run(argv: readonly string[]): void {
     const bound = (server.address() as { port: number } | null)?.port ?? args.listen;
     process.stdout.write(`serving ${args.host}:${args.port} at ${scheme}://${shown}:${bound}/`
       + (args.auth ? `?t=${args.token}\n` : '\n'));
-    if (!args.auth) {
-      process.stderr.write('WARNING: --auth off. Anything that can reach this port can type at '
-        + `${args.host}:${args.port}.\n`);
+    /**
+     * THE WARNINGS FIRE ON THE COMBINATION, NOT ON THE FLAG.
+     *
+     * Auth is off by DEFAULT now, so warning about `--auth off` alone would print on every single
+     * run — and a warning that appears every time is read as decoration and then not read at all,
+     * which would cost more than it buys on the one run that matters. What is actually dangerous is
+     * being reachable from the network WITHOUT a token, so that pair is what speaks up.
+     *
+     * `loopback` is a prefix test rather than a `=== '127.0.0.1'` comparison: `127.0.0.53` and
+     * `::1` are equally unreachable from elsewhere, and the old exact test would have called them
+     * exposed and cried wolf.
+     */
+    const loopback = args.bind.startsWith('127.') || args.bind === '::1' || args.bind === 'localhost';
+    if (!args.auth && !loopback) {
+      process.stderr.write(`WARNING: bound to ${args.bind} with --auth off. Anything that can reach `
+        + `this port can type at ${args.host}:${args.port}, with no token required. `
+        + 'Use --auth on.\n');
     }
-    if (args.tls === undefined && args.bind !== '127.0.0.1') {
+    if (args.tls === undefined && !loopback) {
       process.stderr.write('WARNING: no --tls-cert and not bound to loopback. Keystrokes, '
         + 'including passwords, cross the network in the clear.\n');
     }

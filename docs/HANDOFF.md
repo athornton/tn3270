@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## Where things stand — THE WEB GATEWAY IS COMPLETE, 2026-09-16
 
 **Branch `web-gateway`, ALL 15 TASKS DONE, pushed, NOT yet merged.** This is roadmap item (3).
-**1493 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
+**1504 tests passing in 66 files**, `npm run typecheck` and `npm run build` clean, working tree
 clean, both GUI goldens matching, `pty-smoke.py` 12/12, and both by-hand browser harnesses passing.
 Spec `docs/superpowers/specs/2026-09-15-web-gateway-design.md`, plan
 `docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
@@ -69,19 +69,35 @@ power, and `bestScale` floors at 1 while `centre` clamps at 0, so neither rescue
 after.** It costs Electron nothing, because main sizes its window to exactly the drawing, and both
 GUI goldens still match byte for byte — which is what made changing a SHARED file safe.
 
-### Two questions left for the user, still unanswered
+### Both earlier questions ANSWERED by the user, 2026-09-16, and done
 
-1. **`packages/frontend/src/actions.ts` uses `PF_AIDS[action.n - 1]!`.** The live hole is closed at
-   the gateway boundary — `protocol.ts` bounds `pf`/`pa` from the tables' own lengths — but making
-   it structurally impossible means typing core's tables as tuples or adding a `pfAID(n)` accessor,
-   touching core's public types and all four front ends. Its own change, or leave it?
-2. **The gateway's token defaults ON** (`--auth off` opts out). Now that in-server TLS exists the
-   user may want that default reversed; it was left on because the process types at a mainframe.
+1. **THE AID HOLE IS NOW STRUCTURALLY IMPOSSIBLE, in two layers.** Core gained `pfAID(n)`/`paAID(n)`,
+   which throw a `RangeError` naming a bound taken from the table's own length, and **`Session.sendAID`
+   now refuses any byte that is not in `VALID_AIDS`** (built from `AID` itself, so a new key needs no
+   second edit). Only TWO call sites indexed the tables unsafely — `frontend/src/actions.ts` and
+   `cli/src/runner.ts` — not all four front ends as the question assumed, so the change was much
+   cheaper than feared. `runner.ts` also stopped hardcoding 24 and 3.
 
-**A THIRD, added 2026-09-16: `Session` has no `off()`.** Listeners go into a `Set` with no removal,
-so every reattach permanently adds three more, and each would compute a full draw list and deflate
-it on every later screen change. `main.ts` guards with a `live` flag so a dead connection does no
-work, but the entries still accumulate. A `Session.off()` in core is the real fix.
+   **THE MUTATION MATRIX IS THE INTERESTING PART, because it is not what it looks like.** Measured,
+   all four combinations, with `{kind:'pf', n:-1}`: both guards → nothing sent; accessor removed →
+   nothing sent, `sendAID` refuses `undefined`; backstop removed → nothing sent, `pfAID` throws
+   first; **both removed → `[0x00, 0x40, 0x40, 0xff, 0xef]` on the wire, the original defect.** So
+   `sendAID`'s check is the load-bearing one and the accessors are the API-level fix that keeps the
+   unsafe index unreachable — and `actions.test.ts` pins the pair rather than either, with each guard
+   falsified separately in `constants.test.ts` and `session.test.ts`.
+2. **THE TOKEN NOW DEFAULTS OFF** (`--auth on` opts in). **Read it together with the loopback bind:**
+   out of the box only this machine can reach the port, and a token against your own emulator is
+   friction that buys nothing. `main.ts` therefore warns on the COMBINATION — bound off loopback with
+   auth off — and not on `--auth off` alone, which would now print on every run and be learned as
+   noise. Verified by running all three configurations: loopback+off is silent, `0.0.0.0`+off gives
+   both warnings, `0.0.0.0`+on gives only the TLS one. `integration.test.ts` passes `--auth on`
+   EXPLICITLY now, because the flip silently removed its token coverage — the "refuses the upgrade
+   without a token" case went red, having had nothing left to refuse.
+
+**ONE QUESTION REMAINS: `Session` has no `off()`.** Listeners go into a `Set` with no removal, so
+every reattach permanently adds three more, and each would compute a full draw list and deflate it on
+every later screen change. `main.ts` guards with a `live` flag so a dead connection does no work, but
+the entries still accumulate. A `Session.off()` in core is the real fix.
 
 ### FINDINGS FROM THIS BRANCH THAT NO AMOUNT OF REASONING WOULD HAVE PRODUCED
 

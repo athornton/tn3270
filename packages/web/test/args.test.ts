@@ -38,15 +38,27 @@ describe('parseWebArgs', () => {
     expect(parseWebArgs(['--listen', '0', 'vm:3270']).listen).toBe(0);
   });
 
-  it('generates a token when none is given, and keeps auth on', () => {
+  it('leaves auth OFF by default, paired with the loopback bind', () => {
+    // The user's call, 2026-09-16, reversing the earlier default. The two are a PAIR: nothing off
+    // this machine can reach the port out of the box, so a token would be friction against your own
+    // emulator. Both halves are asserted here, because the safety of one depends on the other and a
+    // future change to `bind` must fail this test rather than quietly widen the exposure.
     const a = parseWebArgs(['vm:3270']);
-    expect(a.auth).toBe(true);
-    expect(a.token).toMatch(/^[0-9a-f]{32}$/);
+    expect(a.auth).toBe(false);
+    expect(a.bind).toBe('127.0.0.1');
   });
 
-  it('accepts an explicit token, and --auth off', () => {
+  it('still generates a token, so --auth on needs no second flag', () => {
+    // Generated regardless of `auth`, which keeps `--auth on` a one-flag change and means the token
+    // is never an empty string that some comparison might treat as absent.
+    expect(parseWebArgs(['vm:3270']).token).toMatch(/^[0-9a-f]{32}$/);
+    expect(parseWebArgs(['--auth', 'on', 'vm:3270']).token).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('accepts an explicit token, and --auth on or off', () => {
     expect(parseWebArgs(['--token', 'sekrit', 'vm:3270']).token).toBe('sekrit');
     expect(parseWebArgs(['--auth', 'off', 'vm:3270']).auth).toBe(false);
+    expect(parseWebArgs(['--auth', 'on', 'vm:3270']).auth).toBe(true);
   });
 
   it('refuses --tls-cert without --tls-key rather than downgrading silently', () => {

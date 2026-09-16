@@ -23,7 +23,13 @@ afterEach(() => { stop?.(); stop = undefined; });
 
 /** Start on an ephemeral port and return its URL and token. */
 async function start(extra: string[] = []): Promise<{ url: string; token: string; port: number }> {
-  const args = parseWebArgs(['--replay', trace, '--listen', '0', ...extra, '127.0.0.1:3270']);
+  // `--auth on` EXPLICITLY, because the default is now OFF and these tests are about the
+  // authenticated path. Relying on the default would have made every one of them silently stop
+  // exercising the token the moment that default changed -- which is exactly what happened: the
+  // "refuses the upgrade without a token" case went green-to-red on the flip, because with no token
+  // required there was nothing to refuse. The unauthenticated default has its own test below.
+  const args = parseWebArgs(['--replay', trace, '--listen', '0', '--auth', 'on', ...extra,
+    '127.0.0.1:3270']);
   const { server, registry } = buildServer(args);
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   const port = (server.address() as { port: number }).port;
@@ -205,6 +211,29 @@ describe('the gateway end to end', () => {
       ws.addEventListener('close', () => r('close'), { once: true });
     });
     expect(err).toMatch(/error|close/);
+  });
+
+  it('by DEFAULT needs no token, which is the flipped default paired with loopback', async () => {
+    // Pins the new default from the OUTSIDE rather than trusting `args.auth === false`: a browser
+    // reaching the default gateway must actually get a session with no token anywhere.
+    //
+    // Note what this does and does not say. It says a LOCAL operator is not asked for a token, which
+    // is the intent. It says nothing about safety off the loopback interface -- there, `--auth on` is
+    // required and `main.ts` warns on exactly that pair. The token protects ACCESS; `--tls-cert`
+    // protects the traffic; neither substitutes for the other.
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '127.0.0.1:3270']);
+    expect(args.auth).toBe(false);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);       // no ?t= at all
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const messages = collect(ws, 3);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    expect((await messages).map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    ws.close();
   });
 
   it('accepts a proxied browser Origin ONLY when --allow-origin names it', async () => {

@@ -1,4 +1,4 @@
-import { AID, PA_AIDS, PF_AIDS, type Session } from '@tn3270/core';
+import { AID, pfAID, paAID, type Session } from '@tn3270/core';
 import type { Action } from './keymap.js';
 
 /**
@@ -36,8 +36,11 @@ export function applyAction(session: Session, action: Action): void {
       case 'type': k.typeString(action.text); break;
       case 'enter': session.sendAID(AID.ENTER); break;
       case 'clear': session.sendAID(AID.CLEAR); break;
-      case 'pf': session.sendAID(PF_AIDS[action.n - 1]!); break;
-      case 'pa': session.sendAID(PA_AIDS[action.n - 1]!); break;
+      // `pfAID`/`paAID`, NOT `PF_AIDS[action.n - 1]!`. The index form put a bogus 0x00 AID on the
+      // wire to a live mainframe for an out-of-range `n`, because `undefined` coerces to 0 inside
+      // `Uint8Array.from`. These throw instead, and the `catch` below means nothing is sent at all.
+      case 'pf': session.sendAID(pfAID(action.n)); break;
+      case 'pa': session.sendAID(paAID(action.n)); break;
       case 'reset': k.reset(); break;
       case 'left': k.left(); break;
       case 'right': k.right(); break;

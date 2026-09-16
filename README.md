@@ -78,9 +78,10 @@ npm run build
 node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
 
-It prints a URL with a token. Loopback by default, a token by default, a cross-origin
-upgrade refused, and `wss://` in-process given `--tls-cert`, so a terminating proxy is
-optional rather than required. It renders live screens from both Hercules systems, and a
+Loopback by default, a cross-origin upgrade refused, and `wss://` in-process given
+`--tls-cert`, so a terminating proxy is optional rather than required. The access token is
+**off** by default and paired with that loopback bind — `--auth on` turns it on and prints
+it in the URL, and is what you want the moment you `--bind` anything wider. It renders live screens from both Hercules systems, and a
 session outlives its socket for `--grace` seconds so a reload reattaches instead of logging
 on again. **Without `--tls-cert`, keystrokes — including passwords — cross the network in
 the clear**, which it says out loud on startup. Full flag list and the security notes:
@@ -126,7 +127,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1493 tests, 66 files
+npm test           # 1504 tests, 66 files
 npm run typecheck
 ```
 
@@ -430,13 +431,16 @@ Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-ori
 `-model`, `-scheme`). **`--scheme` is refused as an unknown flag** — that asymmetry is
 deliberate, since those flags mean the same thing in every front end.
 
-Three defaults are what make it safe to run, and two of them you can turn off:
+What makes it safe to run out of the box is the **loopback bind**, and the two things you
+should change before widening it:
 
-- **loopback** — `--bind 0.0.0.0` warns when you choose otherwise;
-- **a token** — `--auth off` means anything that can reach the port can type at your
-  mainframe;
+- **no token by default** — `--auth on` requires one. Anything that can reach the port can
+  otherwise type at your mainframe, so binding wider without it is the combination the
+  gateway warns about on startup;
 - **plaintext unless you say otherwise** — without `--tls-cert` every keystroke, passwords
-  included, crosses the network in the clear, and it says so on startup.
+  included, crosses the network in the clear, and it says so too.
+
+The two are not substitutes: TLS protects the traffic, the token protects access.
 
 A cross-origin WebSocket upgrade is refused. Behind a reverse proxy that rewrites `Host`,
 which is nginx's and Apache's default, name what the browser actually sees with
@@ -641,7 +645,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1493 tests, 66 files |
+| `npm test` | **pass** — 1504 tests, 66 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

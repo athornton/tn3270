@@ -3639,6 +3639,67 @@ git branch -d web-gateway
 
 ---
 
+## The two open questions, ANSWERED by the user 2026-09-16 and implemented
+
+### 1. The AID hole is now structurally impossible, in TWO layers
+
+**The question assumed this would touch core's public types and all four front ends. It did not:
+only TWO call sites ever indexed the tables unsafely** — `frontend/src/actions.ts` and
+`cli/src/runner.ts`. The other front ends reach the tables only through `applyAction`.
+
+- Core gained **`pfAID(n)` / `paAID(n)`**, throwing a `RangeError` whose message takes its bound from
+  the table's own `length` rather than a literal 24 or 3.
+- **`Session.sendAID` now refuses any byte not in `VALID_AIDS`**, a set built from `AID` itself so a
+  new key needs no second edit. This is the backstop that makes the bad byte unsendable by a caller
+  written later.
+- `runner.ts` also stopped hardcoding 24 and 3, which were a drift risk against the tables.
+
+**THE MUTATION MATRIX IS NOT WHAT IT FIRST LOOKS LIKE, and measuring it corrected me.** With
+`{kind:'pf', n:-1}`:
+
+| guards present | result |
+|---|---|
+| both | nothing sent |
+| accessor removed | nothing sent — `sendAID` refuses `undefined` |
+| backstop removed | nothing sent — `pfAID` throws first |
+| **both removed** | **`[0x00, 0x40, 0x40, 0xff, 0xef]` on the wire — the original defect** |
+
+So `sendAID`'s check is the load-bearing one, and the accessors are the API-level fix that keeps the
+unsafe index unreachable from a caller at all. `actions.test.ts` therefore pins the PAIR rather than
+either guard, which is stated in the test; each guard is falsified separately in `constants.test.ts`
+and `session.test.ts`.
+
+**A STALE BUILD FAKED THIS MEASUREMENT ONCE.** The first run of the accessor mutation showed the
+bogus bytes and looked like a clean falsification — but `dist/session.js` did not yet contain the
+backstop, because repeated `cp` restores had confused `tsc`'s incremental state. So it was really
+measuring the pre-backstop code. `npx tsc --build --force` and the answer inverted. **This is the
+third time on this branch that a build-staleness artefact produced a confident wrong reading**;
+force the build before trusting a mutation result.
+
+### 2. The token now defaults OFF
+
+`--auth on` opts in. **Read it with the loopback bind, because the two are a pair**: out of the box
+only this machine can reach the port, and a token against your own emulator is friction that buys
+nothing.
+
+- **The warning moved to the COMBINATION.** Warning on `--auth off` alone would now print on every
+  single run and be learned as noise; what is dangerous is being reachable from the network without a
+  token. Verified by running all three configurations: loopback + off is silent, `0.0.0.0` + off
+  gives both warnings (and names `--auth on` as the fix), `0.0.0.0` + on gives only the TLS one. The
+  loopback test is a prefix match, so `127.0.0.53` and `::1` no longer read as exposed.
+- **`integration.test.ts` now passes `--auth on` EXPLICITLY.** The flip silently removed its token
+  coverage: "refuses the upgrade without a token" went red because there was nothing left to refuse.
+  A new test pins the unauthenticated default from the outside instead — a browser with no `?t=` at
+  all must get a session.
+- A token is still generated regardless of `auth`, so `--auth on` stays a one-flag change and the
+  token is never an empty string some comparison might treat as absent.
+
+**Suite 1493 → 1504 in 66 files.** Both GUI goldens still match, both browser harnesses still pass,
+and the CLI was re-checked live against VM/370: `PF(3)` and `PA(1)` still reach the host, and
+`PF(99)`/`PA(0)` still refuse with their existing message shape.
+
+**One question remains open: `Session` has no `off()`.**
+
 ## Self-review notes
 
 Spec coverage, section by section:

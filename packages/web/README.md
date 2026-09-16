@@ -15,17 +15,25 @@ serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
 
 ## READ THIS BEFORE EXPOSING IT TO A NETWORK
 
-This process types at a mainframe. Three things decide whether that is safe, and two of them are
-on by default:
+This process types at a mainframe. Three things decide whether that is safe, and **the one that
+controls ACCESS is off by default** — the loopback bind is what makes that defensible:
 
 - **Without `--tls-cert` every byte crosses the network in the clear**, including the password
   typed at a logon panel. The gateway says so on startup when it is not bound to loopback. Give it
   `--tls-cert` and `--tls-key` and it serves `https://` and `wss://` in-process, so a terminating
   proxy is optional rather than required.
-- **`--auth off` means anything that can reach the port can type at your mainframe.** The token is
-  on by default; it is printed once in the URL and then carried by an `HttpOnly`,
-  `SameSite=Strict` cookie, so it leaves the address bar after the first load.
-- **The default bind is `127.0.0.1`.** `--bind 0.0.0.0` is how you choose otherwise, and it warns.
+- **The token is OFF by default, so anything that can reach the port can type at your mainframe.**
+  Out of the box only this machine can, which is the point: asking a local operator for a token
+  against their own emulator is friction that buys nothing. `--auth on` generates one, prints it
+  once in the startup URL, and thereafter carries it in an `HttpOnly`, `SameSite=Strict` cookie so
+  it leaves the address bar after the first load.
+- **The default bind is `127.0.0.1`.** `--bind 0.0.0.0` is how you choose otherwise.
+  **`--bind` off loopback WITHOUT `--auth on` is the dangerous combination**, and it is the one the
+  gateway warns about on startup — not `--auth off` on its own, which would print on every run and
+  be learned as noise.
+
+A token and TLS are not substitutes: **`--tls-cert` protects the traffic, the token protects
+access.** Exposing this beyond loopback wants both.
 
 A cross-origin upgrade is refused. Behind a reverse proxy that rewrites `Host` — which is nginx's
 and Apache's DEFAULT — you must name what the browser actually sees with `--allow-origin`, or every
@@ -40,7 +48,7 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 |---|---|---|
 | `--bind ADDR` | `127.0.0.1` | interface to listen on |
 | `--listen PORT` | `8270` | port; `0` means let the kernel choose |
-| `--auth on\|off` | `on` | require the token |
+| `--auth on\|off` | `off` | require the token. **On is what you want off loopback** |
 | `--token STR` | random | use this token instead of a generated one |
 | `--grace SECONDS` | `60` | how long a session outlives its socket, for reattachment |
 | `--max-sessions N` | `16` | cap on concurrent sessions |
