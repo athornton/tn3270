@@ -3096,11 +3096,33 @@ Co-Authored-By: SLAC AI"
 
 ### Task 11: TLS on the browser side
 
+**AS BUILT — the sketch was RIGHT, including both API shapes it flagged for checking.**
+`generateCerts(dir, opts)` really does return `{certPath, keyPath, certPem}`, `haveOpenssl()` is
+exported, and importing the `.mjs` from a vitest test in another package works with no adjustment.
+**It did not skip**, which the task said would mean a broken guard: openssl 3.5.6 is present.
+
+Three things worth recording:
+
+1. **127.0.0.1 verifies only because the generated cert carries `IP:127.0.0.1` in its SAN**
+   (`gen-test-certs.mjs:44`) as well as `DNS:localhost`. Its CN is `localhost` alone, so a CN-only
+   certificate would have failed hostname verification against the address this test connects to --
+   and the failure would have looked like a gateway bug rather than a fixture one.
+2. **The cross-package import is test-only and adds NO workspace edge.** `gen-test-certs.mjs`
+   imports nothing but node builtins, so a relative path to it does not create a `web -> cli`
+   dependency or invert `core <- frontend <- {cli, tui}`. Moving the script would break the paths
+   `docs/live-testing.md` documents for the TLS runbook, which is the worse trade.
+3. **Falsified two ways, because a passing TLS test proves least of all.** Making `main.ts` ignore
+   `--tls-cert` and serve plain HTTP reddens it, and so does removing the client's `ca` -- so it is
+   really checking that WE serve TLS and that the chain genuinely verifies, not merely that a socket
+   opened. That second one is the distinction `socket.authorized` exists for.
+
+**Result: 2 tests as planned, no production change. Suite 1478 -> 1480 in 65 files.**
+
 **Files:**
 - Create: `packages/web/test/tls.test.ts`
 - Modify: none — `main.ts` already branches on `args.tls`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 `packages/web/test/tls.test.ts`:
 
@@ -3181,13 +3203,13 @@ instead of `certPath`/`keyPath` if they differ. Also confirm importing a `.mjs` 
 in another package works here; if it does not, copy the two-line `execFileSync` openssl invocation
 rather than duplicating the whole script.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/web/test/tls.test.ts`
 Expected: PASS, 2 tests (or skipped if `openssl` is absent — it is present on this box, version
 3.5.6, so a skip means the guard is wrong).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd ~/git/tn3270
