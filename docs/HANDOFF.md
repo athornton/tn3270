@@ -1,16 +1,87 @@
-# Handoff — state as of 2026-08-28
+# Handoff — state as of 2026-09-16
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## Where things stand
+## Where things stand — PAUSED MID-BRANCH, 2026-09-16
 
-Branch **`gui-key-chord-guard`**, off **`main`** at `52a35b2` — `main` is pushed and in sync,
-and the counts below are this branch's. **1352 tests passing in 55 files**, `npm run typecheck`
-clean, `npm run build` works, `packages/tui/scripts/pty-smoke.py` 12 of 12, both GUI goldens
-matching without `--update`, `packages/gui/scripts/keys.mjs` reporting 15 chords and 13 actions
-in order, working tree clean.
+**`main` is at `7501c27`, pushed and in sync.** The chord-guard work described further down is
+merged into it and closed.
+
+**IN PROGRESS: branch `web-gateway` at `900d16f`, 24 commits, NOT merged and NOT pushed.** This is
+roadmap item (3), the web gateway. **1428 tests passing in 60 files**, `npm run typecheck` clean,
+`npm run build` clean, working tree clean. Read
+`docs/superpowers/specs/2026-09-15-web-gateway-design.md` and then
+`docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
+notes recording eighteen defects found while executing it, and those annotations are the most
+valuable thing in it.** Do not re-derive them.
+
+### What is DONE on `web-gateway` (Tasks 1-6 plus 4b, each spec- and quality-reviewed)
+
+- **`packages/canvas` extracted from `packages/gui`** (Task 1). `renderer.ts`, `blit.ts`, `keys.ts`,
+  `drawlist.ts`, `cg.ts`, `bdf.ts`, the atlas baker and the BDF font moved **byte-identical**
+  (hash-verified), plus `assets.ts` (`assetDir()`, `readAtlas()`, `BROWSER_MODULES`) and a barrel
+  that deliberately does NOT export `renderer.ts` (a browser entry point that throws at module load
+  outside a browser). Graph is now `core ← canvas ← { gui, web }`. **Both GUI goldens still match
+  and `keys.mjs` still reports 15 chords / 13 actions**, which is what made an extraction this size
+  checkable rather than hopeful.
+- **`packages/web`** with five pure modules, all TDD'd and mutation-proven: `args.ts`,
+  `wsframe.ts` (RFC 6455 framing), `handshake.ts` (upgrade, token, Origin), `protocol.ts` (messages
+  and deflate), `sessions.ts` (registry, detach, grace window).
+
+### What REMAINS: Tasks 7-15 of that plan
+
+`wsserver.ts` (+ a mandatory frame-size cap), `httpstatic.ts` and the page, the browser bridge,
+`main.ts` wiring, the integration test driven by **Node's built-in WebSocket as an independent
+oracle**, in-server TLS, `browser-keys.mjs` and `browser-shot.mjs`, live verification against both
+Hercules systems, then docs and merge.
+
+### Two questions left for the user, recorded so they are not lost
+
+1. **`packages/frontend/src/actions.ts` uses `PF_AIDS[action.n - 1]!`.** The live hole is closed at
+   the gateway boundary (see below), but making it structurally impossible means typing core's
+   tables as tuples or adding a `pfAID(n)` accessor — touching core's public types and all four
+   front ends. Its own change, or leave it?
+2. **The gateway's token defaults ON** (`--auth off` opts out). Now that in-server TLS exists the
+   user may want that default reversed; it was left on because the process types at a mainframe.
+
+### THREE FINDINGS FROM THIS BRANCH THAT NO AMOUNT OF REASONING WOULD HAVE PRODUCED
+
+1. **`packages/gui/scripts/keys.mjs`'s staleness guard went BLIND when its subject moved packages.**
+   It compared `gui/dist` against `gui/src`, and `keys.ts`/`renderer.ts` — its entire unique
+   coverage — moved to `canvas`, so it would have reported `ok` over exactly the stale code it
+   exists to catch. It now iterates both packages **per package**: one `max` across both lets a
+   fresh `gui` build mask a stale `canvas` one, measured as dist-max 1789510298049 beating src-max
+   1789510297038.
+2. **A hostile `{"kind":"pf","n":-1}` put a bogus `0x00` AID byte on the wire to a live mainframe.**
+   `PF_AIDS` has 24 entries and `PA_AIDS` 3, so an out-of-range index is `undefined`, the `!` hides
+   it, and `Uint8Array.from([undefined])` coerces to `0` — all inside `applyAction`'s swallow-all
+   catch, which also leaves the keyboard locked. The other three front ends are safe only because
+   their `n` comes from a trusted keymap table; **the gateway is the first front end where a remote
+   party supplies it.** `protocol.ts` now bounds `pf`/`pa` from `PF_AIDS.length`/`PA_AIDS.length`.
+3. **The session registry's anti-hijacking guard was unasserted.** `found !== undefined &&
+   !found.attached` is what stops a leaked or guessed session id attaching to another operator's
+   logged-on session; simplifying it to `found !== undefined` would have produced a session-hijacking
+   gateway **with a green suite**. Now pinned and mutation-proved.
+
+### Environment notes for whoever resumes
+
+- **Both Hercules systems were UP and verified reachable on 2026-09-15**: VM/370 on `127.0.0.1:3270`
+  (22 fields, logo painted) and MVS 3.8j TK5 on `127.0.0.1:3271`. `ss`/`netstat` show nothing in this
+  sandbox — probe with `/dev/tcp/127.0.0.1/PORT`.
+- **Xvfb does not survive a container restart.** Start it detached and prove the socket:
+  `[ -S /tmp/.X11-unix/X99 ]`. Never `pgrep -f "Xvfb :99"`, which matches the shell command
+  containing the pattern.
+- **A `git checkout` reddens `keys.mjs`'s staleness guard** (it rewrites mtimes without changing
+  content, which `npm run build` cannot clear). Now that two packages are watched, the fix is
+  `npx tsc --build --force packages/canvas packages/gui`.
+- **Pin the working directory in every command.** A bare `npx vitest` from outside the repo silently
+  downloads a DIFFERENT vitest (measured: 5.0.1 against the workspace's 3.2.7) and reports plausible
+  non-evidence. Use `./node_modules/.bin/vitest`.
+- **Do not run two agents that both mutate the same package.** Mutation checks in a shared checkout
+  cross-contaminate: two agents reported opposite results for the same mutation, and resolving it
+  required re-running it on a quiet tree. Serialize, or give each agent its own worktree.
 
 **MOST RECENT WORK, merged 2026-09-15 as `43ec70d`:** four palette schemes in
 `packages/frontend/src/palette.ts` behind a new `-scheme` flag (`default`, `3279`, `x3270`,
