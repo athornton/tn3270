@@ -3436,10 +3436,36 @@ Co-Authored-By: SLAC AI"
 
 ### Task 14: live verification against both Hercules systems
 
-Both are UP and were verified reachable this session: **VM/370 on `127.0.0.1:3270`** and
-**MVS 3.8j TK5 on `127.0.0.1:3271`**.
+**AS BUILT — ALL FIVE STEPS DONE against both live hosts, and it found ONE REAL PRODUCT DEFECT.**
+Full measurements in `docs/live-testing.md`, *The web gateway against both hosts*.
 
-- [ ] **Step 1: VM/370, model 4, no logon**
+1. **THIS TASK'S OWN STEP 1 COMMAND IS WRONG: it omits `-insecure`, and the absence HANGS rather
+   than failing.** The gateway dials the host with the same default-on TLS as every other front end,
+   and Hercules answers a TLS handshake by writing `IAC DO TERMINAL-TYPE` and waiting. This is the
+   trap that silently broke every live harness in this repo once already.
+2. **VM/370: 42 of 43 rows agree with the CLI, and the 43rd is the CURSOR** -- row 41 carries exactly
+   **27 ink pixels = 9 x 3**, one cursor bar at scale 1. **MVS TK5: 24 of 24.** The OIA band carries
+   ink on both. **Both numbers are IDENTICAL to the Electron GUI's**, which is the result that
+   matters: same renderer, same atlas, different transport. Neither host was logged on.
+3. **THE CLIPPING BUG IS REAL IN A BROWSER AND WORSE THERE, which is what Step 2 asked about.** In an
+   800x600 viewport the whole OIA row fell OFF THE BOTTOM -- measured as `row OIA: OFF THE BOTTOM OF
+   THE IMAGE`. The GUI fixes this by calling `setContentSize`; **a page cannot resize its window**, and
+   `bestScale` floors at 1 while `centre` clamps at 0, so neither rescues it. Fixed in
+   `canvas/src/renderer.ts` by sizing the canvas to `max(viewport, drawing)`, with the web page's CSS
+   at `overflow:auto`. **Measured both ways** by instrumenting the built renderer: `800x600
+   scrollable=false` before, `800x616 scrollable=true` after. **It costs Electron nothing** -- main
+   sizes its window to exactly the drawing, so the `max` picks the viewport -- and both GUI goldens
+   plus the pixel-identity check still hold, which is what made changing a SHARED file safe.
+4. **Two concurrent sessions: two distinct ids, both painting a full 43x80 screen** -- two Hercules
+   devices, both being driven. Neither showed the documented **0 fields** case, so that remains a
+   possibility rather than something observed here.
+5. **Reattachment works across a real interruption**, and the load-bearing observation is the ABSENCE
+   of a fresh `session` message, which is what says the registry handed back the existing `Session`
+   rather than building another. Past the grace window a new id is issued instead. Driven with Node's
+   built-in WebSocket, since the browser half is already proven by the two harnesses and what is under
+   test here is the registry against a real host holding a connection open.
+
+- [x] **Step 1: VM/370, model 4, no logon**
 
 ```bash
 cd ~/git/tn3270
@@ -3456,21 +3482,21 @@ Expected: the gateway shows the same VM/370 logo screen the CLI reports. **Do no
 logged-on VM session left running makes the next `LOGON` reconnect past the IPL and land at
 `CP READ`, which has produced three false failures here. Record the row-by-row result.
 
-- [ ] **Step 2: MVS TK5, and the resize**
+- [x] **Step 2: MVS TK5, and the resize**
 
 Repeat against `127.0.0.1:3271`. With `-model 3278-4-E` the session starts 24×80 and TSO resizes it
 to 43 rows once logged on; without a logon it should show the TSO logon panel. Confirm the page
 resizes rather than clipping — the GUI's first live run CLIPPED 16px and lost the whole OIA row, so
 this is a known failure mode and worth checking explicitly.
 
-- [ ] **Step 3: Two tabs, two sessions**
+- [x] **Step 3: Two tabs, two sessions**
 
 Open the URL twice and confirm two independent sessions with two Hercules devices. Per the
 measured device-selection behaviour, one may land on a device the host is not driving and show
 **0 fields** — that is the host's logon process painting one device, not a client defect. Record
 which happened rather than treating it as a bug.
 
-- [ ] **Step 4: Reattach, live**
+- [x] **Step 4: Reattach, live**
 
 With a live VM session showing, kill the browser page, wait 30 seconds, reload with the same
 `sessionStorage` (same tab, reload — not a new tab), and confirm the SAME screen returns rather
@@ -3478,13 +3504,13 @@ than a fresh connection. Then wait past the grace window and confirm a new sessi
 the one success criterion no unit test covers, because it depends on a real host holding the
 connection open.
 
-- [ ] **Step 5: Record it all in `docs/live-testing.md`**
+- [x] **Step 5: Record it all in `docs/live-testing.md`**
 
 A new section, *The web gateway against both hosts*, with the row-by-row comparison result, the
 resize result, the two-tab result, the reattach timings, and anything that surprised you. Follow
 the file's convention: the measurement, then what it means for someone changing this code.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd ~/git/tn3270
