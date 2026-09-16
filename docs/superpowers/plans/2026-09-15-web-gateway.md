@@ -1746,6 +1746,60 @@ Co-Authored-By: SLAC AI"
 
 ### Task 7: `wsserver.ts` — framing bound to a socket
 
+**AS BUILT — SIX FINDINGS, and one of this task's two carried-over "Minor" review findings is
+REFUTED by measurement rather than implemented.**
+
+1. **THE PLAN'S TEST HARNESS WAS BROKEN: a single `PassThrough` is a LOOPBACK.** Its readable and
+   writable halves are the same pipe, so two of the eight tests failed as written, each with a
+   measured symptom worth keeping:
+   - **`written` is a transcript of BOTH directions.** The ping test read back the client's own PING
+     and asserted `expected 9 to be 10` — opcode 9 against 10. A collector fed by
+     `socket.on('data')` cannot tell which party wrote a byte.
+   - **Every frame the server writes re-enters its own `receive()`**, where it is correctly
+     diagnosed as an unmasked client frame and closes the connection. `sendBinary` observed
+     `'payload� '`, that tail being the CLOSE frame the server sent *itself*.
+   Replaced with a `FakeSocket extends EventEmitter` exposing `write`/`end`/`deliver` — the whole of
+   `Connection`'s contract, with the two directions independent as a real socket has them.
+2. **The frame size cap and both Task 3 minors were absent from this task's own code blocks**,
+   though the prose requires all three. The cap is `MAX_MESSAGE_BYTES = 8192` in `wsserver.ts`,
+   applied through a new optional `maxPayload` parameter on `parseFrame`. It has to live in the
+   codec: refusing a frame that merely DECLARES four gigabytes must happen from its header alone,
+   before the promised payload is waited for. The value is reasoned from measurement —
+   `keys.ts:114` emits `type` ONE CHARACTER at a time, so the real maximum is under 100 bytes; 8 KB
+   leaves room for a future paste path (a 43x80 screenful is 3440 characters) without a protocol
+   change.
+3. **A HOLE THE PLAN DID NOT MENTION: the per-frame cap alone leaves fragment reassembly
+   unbounded.** Each 1 KB fragment with FIN=0 is legal and under the cap, and a client that never
+   sends a final frame grows the accumulator without limit — the same exhaustion the cap refuses,
+   reached one legal frame at a time. `fragmentBytes` is now checked on every fragment.
+4. **THE `as const` FINDING IS FALSE, and it claimed to have been verified.** Its premise was that
+   `(typeof OPCODE)['TEXT']` widens to `number` without it. MEASURED on the real six-key shape under
+   `tsc --strict`: `Object.freeze` ALREADY preserves the literal type (`const t: (typeof
+   OPCODE)['TEXT'] = 999` is rejected as "Type '999' is not assignable to type '1'"), and the
+   exhaustiveness `switch` the finding said was unprotected compiles clean with a `const never:
+   never = x` default. `Object.freeze`'s lib overload constrains its values to primitives, so `T`
+   infers with literals intact. **`as const` was written, measured, and reverted**; the reason is now
+   a comment in `wsframe.ts` so the finding is not raised a third time. The other minor became a
+   guard with a test, since an out-of-range opcode silently sets RSV1 rather than failing.
+5. **THE PLAN'S IMPLEMENTATION DOES NOT COMPILE, AND A GREEN SUITE HID IT.** `private buffer =
+   Buffer.alloc(0)` infers the narrow `Buffer<ArrayBuffer>`, while a socket chunk and
+   `Buffer.concat` are `Buffer<ArrayBufferLike>` — which admits `SharedArrayBuffer` and is therefore
+   not assignable. All 15 tests passed while `npm run build` failed, because **`vitest` does not
+   typecheck**. The field needs an explicit `: Buffer` annotation. Build before believing a suite.
+6. **ONE MUTATION WAS INERT ON THE FIRST TRY, and the test was the thing at fault.** The
+   declared-length test appended the 4-byte masking key, which satisfied the parser's `off + 4`
+   wait, so a cap checked LATE still threw and the mutation proved nothing. Both versions of the
+   test now stop at the **10 header bytes**, the earliest point the length is known, which makes
+   every later placement fail. A late check is in any case near-harmless — waiting four more bytes
+   exhausts nothing — so the mutation that matters is moving the check past the PAYLOAD wait, and
+   that is the one now pinned.
+
+**Result: 15 tests in `wsserver.test.ts` and 4 added to `wsframe.test.ts` (18 total), against the 8
+this task planned. Suite 1428 → 1447 in 61 files, typecheck and build clean. SEVEN mutations run, all
+seven falsifying:** partial-frame discard, error containment removed, per-frame cap removed, fragment
+bound removed, cap moved past the mask key, cap moved past the payload wait, and the opcode guard
+removed.
+
 **Files:**
 - Create: `packages/web/src/wsserver.ts`
 - Test: `packages/web/test/wsserver.test.ts`
@@ -1784,7 +1838,7 @@ Not to change: `parseFrame` accepts a non-minimal extended-length encoding (byte
 16-bit length below 126). The reviewer flagged this as an observation, not a defect — real
 implementations are commonly permissive here and rejecting it is out of scope.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/web/test/wsserver.test.ts`:
 
@@ -1913,12 +1967,12 @@ function parseFrameFromServer(buf: Buffer): { opcode: number; payload: Buffer } 
 }
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/wsserver.test.ts`
 Expected: FAIL, unresolved import.
 
-- [ ] **Step 3: Implement `packages/web/src/wsserver.ts`**
+- [x] **Step 3: Implement `packages/web/src/wsserver.ts`**
 
 ```ts
 import type { Duplex } from 'node:stream';
@@ -2015,19 +2069,19 @@ export class Connection {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/wsserver.test.ts`
 Expected: PASS, 8 tests.
 
-- [ ] **Step 5: Mutation-check the byte-by-byte path and the error containment**
+- [x] **Step 5: Mutation-check the byte-by-byte path and the error containment**
 
 Replace `if (frame === undefined) return;` with `if (frame === undefined) { this.buffer = Buffer.alloc(0); return; }`
 (discarding partial frames), re-run, and confirm the byte-by-byte test FAILS. Restore. Then remove
 the `try`/`catch` around `parseFrame`, re-run, and confirm the framing-error test FAILS (or the run
 reports an unhandled error). Restore. Report both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd ~/git/tn3270

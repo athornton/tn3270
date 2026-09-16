@@ -11,6 +11,13 @@
  * `serializeFrame` never masks. Getting this backwards produces a stream that desynchronises a
  * few frames later, failing far from the cause.
  */
+// NO `as const` HERE, AND THAT IS DELIBERATE: it would be dead syntax. A review asked for one on
+// the grounds that `(typeof OPCODE)['TEXT']` otherwise widens to `number` and a future
+// exhaustiveness `switch` would lose its literal-type protection. MEASURED on this exact six-key
+// shape under `tsc --strict`, and the premise is FALSE both ways -- `const t: (typeof
+// OPCODE)['TEXT'] = 999` is rejected as "Type '999' is not assignable to type '1'", and a `switch`
+// over `keyof` values with a `const never: never = x` default compiles clean. `Object.freeze`'s lib
+// overload constrains its values to primitives, so T infers with literal types already preserved.
 export const OPCODE = Object.freeze({
   CONTINUATION: 0x0, TEXT: 0x1, BINARY: 0x2, CLOSE: 0x8, PING: 0x9, PONG: 0xa,
 });
@@ -29,8 +36,14 @@ export interface Frame {
  * Returning `undefined` rather than throwing on a short buffer is the important half: a TCP read
  * boundary is not a protocol error, and treating it as one would drop a legitimate frame that had
  * merely arrived in two pieces.
+ *
+ * `maxPayload` is the SERVER's policy, not the codec's, which is why it is a parameter and why it
+ * defaults to no cap: the pure framing tests exercise encodings without taking a view on size, and
+ * `Connection` -- the only production caller -- always passes one. It has to be checked HERE rather
+ * than by the caller, because refusing a frame that merely DECLARES four gigabytes has to happen
+ * from its header alone, before the payload it promised is waited for and buffered.
  */
-export function parseFrame(buf: Buffer): Frame | undefined {
+export function parseFrame(buf: Buffer, maxPayload = Number.MAX_SAFE_INTEGER): Frame | undefined {
   if (buf.length < 2) return undefined;
   const fin = (buf[0]! & 0x80) !== 0;
   const opcode = buf[0]! & 0x0f;
@@ -60,6 +73,10 @@ export function parseFrame(buf: Buffer): Frame | undefined {
     off += 8;
   }
 
+  // Before the masking key and the payload are waited for, so an oversized declaration costs one
+  // read rather than however much memory it asked for.
+  if (len > maxPayload) throw new Error(`frame payload of ${len} exceeds the ${maxPayload} cap`);
+
   if (buf.length < off + 4) return undefined;
   const key = buf.subarray(off, off + 4);
   off += 4;
@@ -72,6 +89,13 @@ export function parseFrame(buf: Buffer): Frame | undefined {
 
 /** Serialise one unmasked server frame. Always final; we never fragment outbound. */
 export function serializeFrame(opcode: number, payload: Buffer): Buffer {
+  // A GUARD RATHER THAN A COMMENT, because the failure is silent and downstream. Byte 0 shares its
+  // high nibble with FIN and the three RSV bits, so `0x10` would not be rejected by anything -- it
+  // would set RSV1, which a browser reads as "an extension negotiated that we never agreed", and
+  // the connection would fail somewhere unrelated to the caller that passed the wrong number.
+  if (!Number.isInteger(opcode) || opcode < 0 || opcode > 0x0f) {
+    throw new Error(`opcode ${opcode} does not fit the 4 bits RFC 6455 gives it`);
+  }
   let head: Buffer;
   if (payload.length < 126) {
     head = Buffer.from([0x80 | opcode, payload.length]);

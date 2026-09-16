@@ -174,4 +174,41 @@ describe('serializeFrame', () => {
     // itself the property that keeps the two directions from being confused.
     expect(() => parseFrame(serializeFrame(OPCODE.TEXT, Buffer.from('x')))).toThrow(/mask/i);
   });
+
+  it('refuses an opcode that does not fit its 4 bits', () => {
+    // Byte 0's high nibble is FIN and the three RSV bits, so 0x10 would not corrupt the opcode --
+    // it would quietly set RSV1, which a browser reads as an extension nobody negotiated, and the
+    // connection would then fail somewhere with no relation to the caller that caused it.
+    for (const bad of [0x10, -1, 1.5, 0xff]) {
+      expect(() => serializeFrame(bad, Buffer.alloc(0))).toThrow(/4 bits/);
+    }
+    expect(serializeFrame(0x0f, Buffer.alloc(0))[0]).toBe(0x8f);
+  });
+});
+
+describe('parseFrame with a payload cap', () => {
+  it('accepts a payload at the cap and refuses one byte more', () => {
+    expect(parseFrame(clientFrame(OPCODE.TEXT, Buffer.alloc(100)), 100)!.payload.length).toBe(100);
+    expect(() => parseFrame(clientFrame(OPCODE.TEXT, Buffer.alloc(101)), 100)).toThrow(/exceeds/);
+  });
+
+  it('refuses a DECLARED length from the 10 header bytes alone, mask key not yet arrived', () => {
+    // The point of the cap. A 64-bit length announcing 4 GB must cost one read to refuse, not 4 GB
+    // of buffering while the payload it promised is waited for.
+    //
+    // TEN BYTES, NOT FOURTEEN, AND THAT IS THE WHOLE TEST. Written with the 4-byte masking key
+    // appended, this passed with the cap checked LATE -- `off + 4` was already satisfied, so the
+    // late check still threw and the mutation was INERT. Stopping at the length pins the earliest
+    // point the cap CAN be applied, which makes every later placement fail.
+    const header = Buffer.alloc(10);
+    header[0] = 0x80 | OPCODE.TEXT;
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(4 * 1024 * 1024 * 1024), 2);
+    expect(header.length).toBe(10);
+    expect(() => parseFrame(header, 8192)).toThrow(/exceeds/);
+  });
+
+  it('is uncapped by default, so the pure framing tests take no view on size', () => {
+    expect(parseFrame(clientFrame(OPCODE.TEXT, Buffer.alloc(70000)))!.payload.length).toBe(70000);
+  });
 });
