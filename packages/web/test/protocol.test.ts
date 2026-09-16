@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { inflateSync } from 'node:zlib';
+import { PA_AIDS, PF_AIDS } from '@tn3270/core';
 import type { DrawCell } from '@tn3270/canvas';
 import { encodeServerMessage, decodeClientMessage } from '../src/protocol.js';
 
@@ -24,12 +25,19 @@ function screenful(): DrawCell[] {
 
 describe('encodeServerMessage', () => {
   it('emits a ZLIB-wrapped deflate stream, because that is what the browser expects', () => {
-    // MEASURED: DecompressionStream('deflate') wants RFC 1950 (first bytes 78 9c), which
-    // zlib.deflateSync emits. deflateRawSync emits RFC 1951 (ab a8) and would need
-    // 'deflate-raw'. Mismatch these and EVERY frame silently fails to inflate in the browser.
+    // MEASURED: DecompressionStream('deflate') wants RFC 1950, which zlib.deflateSync emits.
+    // deflateRawSync emits RFC 1951, which has NO header -- its leading bytes are compressed data
+    // (measured `ab 56` for this payload but `4b 04` for "a", so the `ab a8` quoted elsewhere is
+    // payload-specific rather than a signature) -- and would need 'deflate-raw'. Mismatch these and
+    // EVERY frame silently fails to inflate in the browser.
     const out = encodeServerMessage({ kind: 'error', message: 'x' });
     expect(out[0]).toBe(0x78);
-    expect(out[1]).toBe(0x9c);
+    // This pins the FORMAT, not the compression LEVEL. MEASURED: the second byte is 01/5e/9c/da for
+    // levels 0/1/6/9, so `toBe(0x9c)` would break on a level change that still emits perfectly
+    // valid zlib. RFC 1950's FCHECK rule is level-independent: CMF*256 + FLG must be a multiple of
+    // 31. VERIFIED to still catch the trap this test exists for -- under deflateRawSync this
+    // assertion fails on its own (0xab56 = 43862, which is 28 mod 31), not just via the byte above.
+    expect((out[0]! * 256 + out[1]!) % 31).toBe(0);
   });
 
   it('round-trips a frame message', () => {
@@ -81,8 +89,45 @@ describe('decodeClientMessage', () => {
   });
 
   it('refuses malformed input rather than passing it on', () => {
-    for (const bad of ['', 'not json', '{}', '[]', '{"kind":"nope"}', '{"kind":"action"}']) {
+    // `{"kind":"action","action":{}}` is here because the `typeof aKind !== 'string'` branch was
+    // otherwise VACUOUS: mutating it to `if (false)` left every test passing.
+    const bads = [
+      '', 'not json', '{}', '[]', '{"kind":"nope"}', '{"kind":"action"}',
+      '{"kind":"action","action":{}}',
+    ];
+    for (const bad of bads) {
       expect(() => decodeClientMessage(bad), `for ${JSON.stringify(bad)}`).toThrow();
+    }
+  });
+
+  it('accepts pf/pa numbers at both ends of core\'s AID tables', () => {
+    // 1..PF_AIDS.length and 1..PA_AIDS.length -- 24 and 3 as measured, but the test reads the
+    // tables so it moves with them rather than pinning literals.
+    for (const n of [1, PF_AIDS.length]) {
+      expect(decodeClientMessage(`{"kind":"action","action":{"kind":"pf","n":${n}}}`))
+        .toEqual({ kind: 'action', action: { kind: 'pf', n } });
+    }
+    for (const n of [1, PA_AIDS.length]) {
+      expect(decodeClientMessage(`{"kind":"action","action":{"kind":"pa","n":${n}}}`))
+        .toEqual({ kind: 'action', action: { kind: 'pa', n } });
+    }
+  });
+
+  it('REFUSES an out-of-range pf/pa number, which would put a bogus AID on the wire', () => {
+    // `applyAction` does `PF_AIDS[action.n - 1]!`; out of range that is `undefined`, and
+    // `Uint8Array.from([undefined])` in `buildReadModified` coerces to 0 -- so an unbounded `n`
+    // transmits AID 0x00 to the live host and locks the keyboard. The other front ends are safe
+    // only because their `n` comes from a trusted keymap.
+    const bad = ['0', '-1', '1e9', '1.5', '"1"', 'null', 'true'];
+    for (const kind of ['pf', 'pa'] as const) {
+      const past = (kind === 'pf' ? PF_AIDS.length : PA_AIDS.length) + 1;
+      for (const n of [...bad, String(past)]) {
+        const text = `{"kind":"action","action":{"kind":"${kind}","n":${n}}}`;
+        expect(() => decodeClientMessage(text), `for ${text}`).toThrow(/integer/i);
+      }
+      // A missing `n` must not sneak through as `undefined - 1` = NaN either.
+      expect(() => decodeClientMessage(`{"kind":"action","action":{"kind":"${kind}"}}`))
+        .toThrow(/integer/i);
     }
   });
 

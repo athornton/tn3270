@@ -1,4 +1,5 @@
 import { deflateSync } from 'node:zlib';
+import { PA_AIDS, PF_AIDS } from '@tn3270/core';
 import type { AtlasGeometry, DrawList } from '@tn3270/canvas';
 import type { Action } from '@tn3270/frontend';
 
@@ -13,10 +14,15 @@ import type { Action } from '@tn3270/frontend';
  * is NOT in this design.
  *
  * `deflateSync` emits the ZLIB wrapper (RFC 1950, first bytes 78 9c) and the browser's
- * `DecompressionStream('deflate')` requires exactly that. `deflateRawSync` emits raw DEFLATE
- * (ab a8) and would need `'deflate-raw'`. Mismatch them and every frame silently fails to inflate,
- * with a blank canvas and no error -- the same signature as four other traps already recorded for
- * this renderer. `protocol.test.ts` pins the header bytes.
+ * `DecompressionStream('deflate')` requires exactly that. `deflateRawSync` emits raw DEFLATE, which
+ * has no header at all, and would need `'deflate-raw'`. Mismatch them and every frame silently
+ * fails to inflate, with a blank canvas and no error -- the same signature as four other traps
+ * already recorded for this renderer.
+ *
+ * `protocol.test.ts` pins the FORMAT and not the compression level: the first byte must be 78, and
+ * the two header bytes as a big-endian 16-bit value must be a multiple of 31 (RFC 1950's FCHECK).
+ * MEASURED: the second byte is 01/5e/9c/da at levels 0/1/6/9, so asserting `9c` would have pinned
+ * the LEVEL and broken on a change that still emitted valid zlib.
  */
 export type ServerMessage =
   | { kind: 'atlas'; geometry: AtlasGeometry; coverage: Uint8Array; blank: readonly number[] }
@@ -39,7 +45,24 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
   return deflateSync(Buffer.from(JSON.stringify(wire)));
 }
 
-/** Parse and VALIDATE one client message. Throws on anything unexpected. */
+/**
+ * Parse and VALIDATE one client message. Throws on anything unexpected.
+ *
+ * ## UNKNOWN KINDS ARE HARMLESS; KNOWN KINDS WITH OUT-OF-RANGE FIELDS ARE NOT
+ *
+ * This deliberately does not enumerate `Action` variants: an unrecognised `kind` falls through
+ * `applyAction`'s `switch` as a no-op, so a new action name needs no change here. But a KNOWN kind
+ * carrying a bogus field is a different animal, and `pf`/`pa` are the case in point -- see below.
+ *
+ * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
+ *
+ * `Keyboard.typeString` loops char by char, and on an UNFORMATTED screen `advanceAfterType` has no
+ * overflow check, so a multi-megabyte `text` just wraps the cursor and is consumed synchronously --
+ * a CPU stall for every other session on this single-process gateway, and reachable because
+ * VM/370's own logon panel is unformatted. The bound belongs on the frame, not on this one field:
+ * the WebSocket server caps payload size before a frame ever reaches `decodeClientMessage`, which
+ * covers every oversized field at once instead of one per `Action` variant.
+ */
 export function decodeClientMessage(text: string): ClientMessage {
   const raw: unknown = JSON.parse(text);
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -63,6 +86,29 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
+    // AN OUT-OF-RANGE PF/PA NUMBER PUTS A BOGUS AID BYTE ON THE WIRE. Traced chain, all measured:
+    // `applyAction` does `session.sendAID(PF_AIDS[action.n - 1]!)`, so n=-1 or n=1e9 indexes past
+    // the table and the `!` hands `undefined` to `sendAID`; that reaches `buildReadModified`, which
+    // does `Uint8Array.from(out)`, and `Uint8Array.from([undefined])` SILENTLY COERCES TO 0. So
+    // `{"kind":"pf","n":-1}` transmits AID 0x00 to the live host, locks the local keyboard
+    // (`waitingForHost`), and `applyAction`'s catch-all swallows any complaint. The message is a
+    // few dozen bytes, so no frame-size cap stops it.
+    //
+    // The `!` is defensible in the other three front ends because their `n` comes from a trusted
+    // keymap table (1-24, 1-3). This gateway is the first front end where a REMOTE party supplies
+    // `n`, and `actions.ts` says in its own docstring that it decides nothing about 3270 semantics,
+    // so the boundary that admits untrusted input is where the bound belongs.
+    //
+    // Bounds come from core's tables rather than literal 24/3 so this cannot drift from them.
+    if (aKind === 'pf' || aKind === 'pa') {
+      const table = aKind === 'pf' ? PF_AIDS : PA_AIDS;
+      const n = (action as { n?: unknown }).n;
+      // `Number.isInteger` also rejects NaN, 1.5 and the string "1", all of which a browser can
+      // send and any of which would index the table with a non-index.
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > table.length) {
+        throw new Error(`${aKind} number must be an integer in 1..${table.length}`);
+      }
+    }
     return { kind: 'action', action: action as Action };
   }
 
