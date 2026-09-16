@@ -2335,11 +2335,53 @@ Co-Authored-By: SLAC AI"
 
 ### Task 9: the bridge — `bridgecore.ts` and `bridge.ts`
 
+**AS BUILT — FOUR FINDINGS. One of them refutes a prediction I made against this plan, so record it
+as a NON-defect: the plan was right and the "fix" was wrong.**
+
+1. **`BridgeDeps.socket` DOES NOT ACCEPT A REAL `WebSocket`, and the failure is two levels deep.**
+   The plan's spelling (`onmessage?: ((e: { data: unknown }) => void) | undefined`) fails three
+   separate ways, each found only by compiling: a `WebSocket`'s handlers are `| null` and never
+   `| undefined`; `onopen`/`onclose` are called WITH an argument, and a function needing one
+   parameter is not assignable to a zero-parameter type; and `{ data: unknown }` is not a supertype
+   of `MessageEvent`, so parameter contravariance rejects it. **`onclose` also takes a `CloseEvent`,
+   not an `Event`** — `Event` is missing `code`/`reason`/`wasClean`. The deps now name the DOM types
+   (`MessageEvent`, `Event`, `CloseEvent`), which is what lets `bridge.ts` pass the socket with **no
+   cast at all** — and a cast there is precisely where one would hide a real break. The test fakes
+   pass `as never` and are unaffected.
+2. **`window.tn3270 = ...` does not compile, and re-declaring it would not fix it.** `renderer.ts`
+   augments `Window` with `tn3270`, but it does so in `packages/canvas` and that package's barrel
+   deliberately does not export it, so nothing in `packages/web` brings the augmentation into scope.
+   A second `declare global` must be structurally IDENTICAL, and the renderer's is typed in its own
+   `AtlasMessage`/`DrawList` while the bridge deals in `unknown` payloads — they would collide as
+   "subsequent property declarations must have the same type". Assigned through a cast so the
+   augmentation stays single-sourced in the package owning the renderer.
+3. **I PREDICTED THE PLAN'S `await Promise.resolve()` WAS TOO THIN, AND MEASUREMENT REFUTED IT.**
+   One microtask tick is sufficient here, because the tests' `inflate` returns an already-resolved
+   promise. The evidence is not that the assertions pass — **they pass either way**, since a message
+   dispatched late still reaches a handler registered early and the totals match. It is that the
+   mutations are CAUGHT: dropping unclaimed messages and reversing the flush order each redden the
+   queueing test, which is what proves the tick lands between arrival and registration. A
+   `setTimeout` drain was measured too and catches the same mutations. **No change was made.** A
+   comment now records this so the tick is not "hardened" by someone else's same guess.
+4. **A PATH TRAP IN TASK 8'S EXISTENCE GUARD, found by extending it to `/bridge.js` as Task 8
+   promised.** The asset table holds two kinds of path and **under vitest they resolve into different
+   trees**: `/bridge.js` is `join(here, 'bridge.js')` from `import.meta.url`, which vitest sets to
+   the SOURCE file, so it lands on `packages/web/src/bridge.js` — a file that cannot exist, since the
+   source is `bridge.ts`. In production `httpstatic.js` and `bridge.js` are siblings in `dist` and
+   the path is correct. The canvas modules go through `assetDir()`, and `@tn3270/canvas` resolves to
+   its BUILT dist even under vitest, which is why those were checkable. The bridge is asserted in two
+   halves instead: that the entry names the file beside the module, and that
+   `packages/web/dist/bridge.js` really exists. Falsified by renaming the built file.
+
+**Result: 8 tests as planned in `bridgecore.test.ts`, plus one added to `httpstatic.test.ts` (14).
+Suite 1460 → 1469 in 63 files, typecheck and build clean. Four mutations run, all four falsifying:**
+no queue, flush reversed, session id not stored, `quit` forwarded — plus the renamed built bridge.
+
 **Files:**
 - Create: `packages/web/src/bridgecore.ts`, `packages/web/src/bridge.ts`
 - Test: `packages/web/test/bridgecore.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/web/test/bridgecore.test.ts`:
 
@@ -2477,12 +2519,12 @@ describe('createBridge', () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/web/test/bridgecore.test.ts`
 Expected: FAIL, unresolved import.
 
-- [ ] **Step 3: Implement `packages/web/src/bridgecore.ts`**
+- [x] **Step 3: Implement `packages/web/src/bridgecore.ts`**
 
 ```ts
 /**
@@ -2591,7 +2633,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
 missing in this Node, inject a `base64ToBytes` in `BridgeDeps` rather than reaching for `Buffer`,
 which does not exist in a browser.
 
-- [ ] **Step 4: Implement `packages/web/src/bridge.ts`, the shim**
+- [x] **Step 4: Implement `packages/web/src/bridge.ts`, the shim**
 
 ```ts
 import { createBridge } from './bridgecore.js';
@@ -2623,18 +2665,18 @@ window.tn3270 = createBridge({ socket, storage: sessionStorage, inflate });
 if (location.search !== '') history.replaceState(null, '', location.pathname);
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/web/test/bridgecore.test.ts`
 Expected: PASS, 8 tests.
 
-- [ ] **Step 6: Mutation-check the queue and the quit interception**
+- [x] **Step 6: Mutation-check the queue and the quit interception**
 
 Change `dispatch` to drop unclaimed messages (`if (fn === undefined) return;`), re-run, and confirm
 the queueing test FAILS. Restore. Then make `sendAction` forward `quit` like any other action,
 re-run, and confirm the interception test FAILS. Restore. Report both.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ~/git/tn3270

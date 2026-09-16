@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BROWSER_MODULES } from '@tn3270/canvas';
 import { resolveAsset, tokenCookie, parseCookies } from '../src/httpstatic.js';
 
@@ -63,13 +65,33 @@ describe('resolveAsset', () => {
     // renderer has already produced four separate ways. Reads the built tree deliberately, as
     // `renderer-imports.test.ts` does.
     //
-    // `/bridge.js` IS DELIBERATELY ABSENT FROM THIS LIST: it is built by Task 9 and does not exist
-    // yet, so including it now would make this task's suite red for a reason unrelated to it.
-    // Task 9 adds it, and until then the existence of the served bridge is unguarded.
+    // `/bridge.js` IS NOT IN THIS LOOP, and the reason is a trap rather than an omission -- see the
+    // separate test below. Adding it here fails, because the two kinds of path in the table resolve
+    // differently under vitest.
     for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js']) {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }
+  });
+
+  it('serves the bridge from beside itself, and the BUILT bridge exists', () => {
+    // WHY `/bridge.js` CANNOT JOIN THE LOOP ABOVE, measured by trying it: the table holds two kinds
+    // of path, and under vitest they resolve into different trees.
+    //
+    // `/bridge.js` is `join(here, 'bridge.js')` where `here` comes from `import.meta.url` -- which
+    // vitest sets to the SOURCE file, so it lands on `packages/web/src/bridge.js`, a file that never
+    // exists because the source is `bridge.ts`. In production `httpstatic.js` and `bridge.js` are
+    // siblings in `dist` and the path is right. The canvas modules resolve through `assetDir()`
+    // instead, and `@tn3270/canvas` resolves to its BUILT dist even under vitest, so those are
+    // checkable directly. Same table, two trees.
+    //
+    // So the two halves are asserted separately: that the entry names the file beside the module,
+    // and that the built file is really there. This matters as much as any other asset -- the page
+    // loads the bridge FIRST and `renderer.js` reads `window.tn3270` in its module body, so a
+    // missing bridge means nothing renders and nothing says why.
+    expect(resolveAsset('/bridge.js')!.file).toMatch(/[/\\]bridge\.js$/);
+    const pkgDir = dirname(dirname(fileURLToPath(import.meta.url)));
+    expect(existsSync(join(pkgDir, 'dist', 'bridge.js'))).toBe(true);
   });
 });
 
