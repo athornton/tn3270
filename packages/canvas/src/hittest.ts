@@ -8,7 +8,7 @@ import type { Action } from '@tn3270/frontend';
  * The renderer receives a finished draw list and turns a mouse position into an action, so `hitTest`
  * has to be reachable from `renderer.ts` -- and `renderer.ts` may not have a single RUNTIME import
  * of a workspace package: a browser cannot resolve `@tn3270/core` and there is no bundler, so the
- * window goes BLANK WITH NO ERROR (`renderer.ts:9-20`, measured). `keypad.ts` value-imports
+ * window goes BLANK WITH NO ERROR (`renderer.ts:10-22`, measured). `keypad.ts` value-imports
  * `@tn3270/core`, `@tn3270/frontend` and `drawlist.js`, so importing `hitTest` from there would drag
  * all three into the renderer's graph. MEASURED during review: both assertions of
  * `renderer-imports.test.ts` fail when it does.

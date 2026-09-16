@@ -2,6 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry, DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
 import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
+import { hitTest, type KeypadButton } from './hittest.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -13,7 +14,9 @@ import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
  * assumed: an earlier version imported `drawList` and died with "Failed to resolve module
  * specifier", leaving a blank window and no clue anywhere. So the draw list arrives finished
  * over IPC, the atlas arrives as bytes over IPC, and the only runtime imports are
- * `./blit.js` and `./keys.js`, whose own imports are all `import type` and thus erased.
+ * `./blit.js`, `./keys.js` and `./hittest.js`, whose own imports are all `import type` and
+ * thus erased. Each of the three is also listed in `BROWSER_MODULES` (`assets.ts:39`),
+ * without which the web front end serves a 404 for it and the canvas goes black instead.
  *
  * IF YOU ADD A RUNTIME IMPORT FROM A WORKSPACE PACKAGE HERE, THE WINDOW GOES BLANK.
  * Compute it in main and send the result instead.
@@ -56,6 +59,14 @@ const ctx = real as unknown as Ctx2D;
 let atlas: AtlasMessage | undefined;
 let blank: ReadonlySet<number> = new Set();
 let last: DrawList | undefined;
+/**
+ * The keypad button under the finger right now, if any.
+ *
+ * PURELY RENDERER-LOCAL, and deliberately: see the highlight at the end of `paint`. Cleared on
+ * `mouseup` anywhere in the window, not just on the canvas, so a release outside the button that
+ * was pressed cannot leave the highlight stuck on.
+ */
+let pressed: KeypadButton | undefined;
 
 const tints = new Map<string, ImageBitmap>();
 const building = new Set<string>();
@@ -132,6 +143,29 @@ function paint(list: DrawList): void {
   if (list.oia !== undefined) {
     blit(ctx, { cells: list.oia.cells, width: list.width, height: list.height }, options);
   }
+
+  // The keypad goes through the SAME blitter and atlas as the screen and the OIA -- one drawing
+  // primitive, three regions -- and for the same reason the OIA does (`drawlist.ts:61-69`).
+  // `list.width`/`list.height` and not the region's own: `blit` reads only `cells` (`blit.ts:97-104`),
+  // and the cells' coordinates are in the WHOLE DRAWING's scale-1 space, including the region's `y`
+  // offset, so `keypad.width`/`keypad.height` would describe a surface these cells do not live in.
+  if (list.keypad !== undefined) {
+    blit(ctx, { cells: list.keypad.cells, width: list.width, height: list.height }, options);
+  }
+
+  // PURELY LOCAL, and deliberately: over a WebSocket a round trip for a press highlight would lag
+  // visibly behind the finger. Nothing about it reaches the host -- only the action does.
+  //
+  // Drawn LAST so it sits over the label, and gated on `list.keypad` as well as on `pressed`: a
+  // frame with the keypad off must draw nothing extra even if a press is still outstanding.
+  // `fillRect` is on `Ctx2D` already (`blit.ts:34`), so no cast and no widening.
+  if (pressed !== undefined && list.keypad !== undefined) {
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(
+      at.x + pressed.x * scale, at.y + pressed.y * scale,
+      pressed.w * scale, pressed.h * scale,
+    );
+  }
 }
 
 window.tn3270.onAtlas((message) => {
@@ -167,6 +201,52 @@ window.addEventListener('keydown', (e) => {
   // Tab does not move focus out of the canvas.
   e.preventDefault();
   window.tn3270.sendAction(action);
+});
+
+/**
+ * A click on a keypad button.
+ *
+ * THE INVERSE OF THE DRAWING ARITHMETIC: the draw list is in scale-1 pixels and `paint` multiplies
+ * by `scale` and adds the centring offset, so a click subtracts that offset and divides by the
+ * scale. Getting it backwards puts the hit some multiple of the scale away from the finger, and at
+ * scale 1 it would look correct -- which is why `browser-shot.mjs` runs at a size where the scale is
+ * 1 and the click harness must not.
+ *
+ * `mousedown`, not `click`: the press highlight should appear under the finger, and a `click` only
+ * arrives after release.
+ *
+ * `offsetX`/`offsetY` and NOT `clientX - getBoundingClientRect().left`. Both are element-relative,
+ * so both survive page scrolling -- which the web front end has, since `paint` sizes the canvas to
+ * the drawing and `web/static/index.html:10` is `overflow:auto`. `offsetX` is the simpler of the two
+ * and needs no rect. Neither is right if the canvas is ever given a CSS size that differs from its
+ * attribute size, because both are then in CSS pixels of a stretched box; both pages style the
+ * canvas `display:block` and nothing else, so the two spaces are the same and no ratio is needed.
+ *
+ * Primary button only. `mousedown` fires for the right and middle buttons too, and a keypad that
+ * sent `clear` or a PF key to a live host on a right-click -- while the context menu opened over
+ * it -- would be a misfire the operator never asked for.
+ */
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  // Read the module state ONCE: everything below must agree about which frame was clicked.
+  const list = last;
+  if (list?.keypad === undefined) return;
+  const within = { width: window.innerWidth, height: window.innerHeight };
+  const scale = bestScale(list, within);
+  const at = centre(list, within, scale);
+  const x = (e.offsetX - at.x) / scale;
+  const y = (e.offsetY - at.y) / scale;
+  const button = hitTest(list.keypad.buttons, x, y);
+  if (button === undefined) return;           // a gap, or the screen: not ours
+  pressed = button;
+  paint(list);                                // draw the highlight immediately
+  window.tn3270.sendAction(button.action);
+});
+
+window.addEventListener('mouseup', () => {
+  if (pressed === undefined) return;
+  pressed = undefined;
+  if (last !== undefined) paint(last);
 });
 
 window.addEventListener('resize', () => { if (last !== undefined) paint(last); });
