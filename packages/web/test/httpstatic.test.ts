@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_MODULES } from '@tn3270/canvas';
@@ -72,6 +72,41 @@ describe('resolveAsset', () => {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }
+  });
+
+  it('serves EVERY module reachable from the ones it serves', () => {
+    // THE GUARD THAT CATCHES WHAT A TABLE CANNOT NOTICE ABOUT ITSELF, and it is not hypothetical:
+    // the planned table listed five files and omitted `bridgecore.js`, which `bridge.js` imports.
+    // MEASURED against the running gateway -- `/bridge.js` answered 200 and `/bridgecore.js` 404,
+    // so the module never loaded, `window.tn3270` never appeared, the renderer's registrations went
+    // nowhere, and the page was a BLACK CANVAS with no error in any console. The only evidence
+    // anywhere was one 404 in a log nobody was reading. Every existing test passed.
+    //
+    // A per-file existence check cannot find this, because the missing file is missing from the
+    // TABLE, so nothing iterates it. Closure over the import graph is the property that matters, and
+    // it is the same instinct as `canvas`'s `renderer-imports.test.ts` -- read the BUILT javascript,
+    // since `import type` erases and only the runtime graph can 404.
+    const served = ['/bridge.js', '/bridgecore.js', '/renderer.js', '/blit.js', '/keys.js'];
+    const queue = [...served];
+    const seen = new Set<string>();
+    const missing: string[] = [];
+    while (queue.length > 0) {
+      const path = queue.pop()!;
+      if (seen.has(path)) continue;
+      seen.add(path);
+      const asset = resolveAsset(path);
+      if (asset === undefined) { missing.push(path); continue; }
+      // Built output only; a source tree has no `.js` to read here.
+      if (!existsSync(asset.file)) continue;
+      const source = readFileSync(asset.file, 'utf8');
+      for (const m of source.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
+        // Every served path is flat at the root, so a relative specifier maps to `/basename`.
+        queue.push(`/${m[1]!.replace(/^\.\//, '')}`);
+      }
+    }
+    expect(missing, `imported but not served: ${missing.join(', ')}`).toEqual([]);
+    // The walk must have actually read something, or an empty graph would pass vacuously.
+    expect(seen.size).toBeGreaterThanOrEqual(served.length);
   });
 
   it('serves the bridge from beside itself, and the BUILT bridge exists', () => {

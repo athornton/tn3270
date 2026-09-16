@@ -53,6 +53,16 @@ export interface WebArgs {
   readonly allowOrigins: readonly string[];
   readonly tls?: { cert: string; key: string; chain?: string };
   readonly replay?: string;
+  /**
+   * Print every action applied, for `browser-keys.mjs`.
+   *
+   * REFUSED WITHOUT `--replay`, and that is a privacy control rather than tidiness. A `type`
+   * action carries the text typed, so on a live gateway this would put an operator's PASSWORD on
+   * stdout -- and unlike the GUI's equivalent seam, a gateway is a long-lived server whose stdout
+   * is routinely a log file. Replay can reach no host, which is what makes a logged keystroke safe.
+   * The GUI gates its own action log the same way (`gui/src/main.ts`, `logActions`).
+   */
+  readonly logActions: boolean;
   readonly hostTls: TlsFlags;
   readonly model?: string;
   readonly scheme?: string;
@@ -98,6 +108,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let cert: string | undefined;
   let key: string | undefined;
   let chain: string | undefined;
+  let logActions = false;
   let replay: string | undefined;
   let model: string | undefined;
   let scheme: string | undefined;
@@ -128,6 +139,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
       case '--tls-key': key = value(args, i, a); i += 1; continue;
       case '--tls-chain': chain = value(args, i, a); i += 1; continue;
       case '--replay': replay = value(args, i, a); i += 1; continue;
+      case '--log-actions': logActions = true; continue;
       case '-model': model = value(args, i, a); i += 1; continue;
       case '-scheme': scheme = value(args, i, a); i += 1; continue;
       default:
@@ -147,6 +159,12 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   // which it never consults -- and returns the LU list and TN3270E preference alongside host
   // and port. Only host/port are surfaced here; threading LUs and TN3270E through is for
   // whichever later task actually opens the mainframe connection.
+  // See `WebArgs.logActions`: the log carries typed text, so it is refused unless the session can
+  // reach no host at all.
+  if (logActions && replay === undefined) {
+    throw new UsageError('--log-actions needs --replay: it prints typed text, including passwords');
+  }
+
   const resolved = resolveHostSpec(rest[0]!, (m) => new UsageError(m));
 
   return {
@@ -158,6 +176,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(cert !== undefined && key !== undefined
       ? { tls: { cert, key, ...(chain !== undefined ? { chain } : {}) } } : {}),
     ...(replay !== undefined ? { replay } : {}),
+    logActions,
     hostTls,
     ...(model !== undefined ? { model } : {}),
     ...(scheme !== undefined ? { scheme } : {}),

@@ -3229,10 +3229,68 @@ Co-Authored-By: SLAC AI"
 
 ### Task 12: `browser-keys.mjs` — a real browser, driven
 
+**AS BUILT — `ok 12 chords, 10 actions in order, over a WebSocket`. FIVE findings, and THREE of them
+made the harness report the PRODUCT broken while the product was fine.** That is the failure mode
+`docs/HANDOFF.md` already warns about for new harnesses, hit three times in one task: suspect the
+harness until it has satisfied a known-good path.
+
+1. **THE SERVED MODULE GRAPH WAS BROKEN: `bridge.js` imports `./bridgecore.js`, which Task 8's table
+   did not serve.** MEASURED against the running gateway -- `/bridge.js` answered 200 and
+   `/bridgecore.js` 404 -- so the module never loaded, `window.tn3270` never appeared, the renderer's
+   registrations went nowhere, and the page was a BLACK CANVAS with no error in any console. The only
+   evidence anywhere was a single 404 in a log nobody reads, and every test in the suite passed.
+   A per-file existence check CANNOT find this, because the missing file is missing from the table, so
+   nothing iterates it. **`httpstatic.test.ts` now asserts CLOSURE over the import graph** of the
+   built javascript, in the spirit of `renderer-imports.test.ts`; falsified by removing
+   `bridgecore.js` again.
+2. **The GUI's preload made `window.tn3270` READ-ONLY on the served page.** `contextBridge.exposeInMainWorld`
+   defines a non-writable property, so the gateway's own `bridge.js` died with "Cannot assign to read
+   only property 'tn3270' of object '#<Window>'". The two bridges are alternatives, never both -- one
+   over IPC, one over a WebSocket -- so the URL seam creates the window with NO preload. A real
+   browser has no preload, so this asymmetry belongs to the test shell and not to the product.
+3. **`HTTP_PROXY` IS SET ON THIS BOX AND CHROMIUM SENT THE LOOPBACK REQUEST TO IT**, ignoring
+   `no_proxy` -- which names both `localhost` and `127.0.0.1` -- because Chromium does not honour that
+   variable the way curl does. The symptom is the worst available: window opens, `did-fail-load` never
+   fires, no renderer error, keys delivered to a blank page, and **not one HTTP request in the
+   gateway's log**. Diagnosed only by patching the built server to log every request and seeing
+   nothing arrive. `--no-proxy-server` is mandatory and is pinned by the guard test.
+4. **`spawnSync` MADE THE HARNESS LIE, and this generalises to any harness of this shape.** It BLOCKS
+   THE EVENT LOOP, so while the browser ran this process could not service the `data` events carrying
+   the gateway's output; the bytes sat in the pipe, and the harness then read `serverOut`
+   SYNCHRONOUSLY and saw only the "serving" line written before the browser started. It reported "the
+   gateway applied NO actions at all" while running the same two processes BY HAND showed all six
+   asset requests and `action: {"kind":"enter"}`. Now an async `spawn` awaited on `close`, plus a
+   BOUNDED poll for the expected count -- deterministic on success, costing its bound only on a real
+   failure, which is the opposite trade to a fixed sleep. The guard test pins the absence of the CALL
+   (not the word: the file discusses `spawnSync` at length to explain why it is not used).
+5. **`--listen 0` printed a URL THAT CANNOT BE OPENED.** `run()` echoed `args.listen` rather than the
+   bound port, so the first run of the gateway as a program advertised `http://127.0.0.1:0/`. The port
+   now comes from `server.address()`. This package's arg parser goes out of its way to accept 0, so
+   the two halves disagreed.
+
+**Also built here, both required by the task:** `TN3270_GUI_URL` as a FOURTH GUI test seam (loads a
+URL and creates NO `Session`, since the page's own bridge owns the protocol in that mode), and
+`--log-actions` on the gateway, **refused without `--replay`** for the same privacy reason as the
+GUI's action log -- a `type` action carries typed text, and a gateway's stdout is routinely a log
+file. `packages/web` also gained the self-invoking `import.meta.url` entry point the TUI uses; without
+it there was no way to start the gateway at all.
+
+**A METHOD NOTE WORTH MORE THAN ANY OF THE ABOVE: one mutation check reported INERT and was WRONG.**
+The script ran `npx vitest` with `cwd` set to `packages/` instead of the repo root, found no tests,
+printed nothing, and the absence of failure lines read as "the mutation changed nothing". Re-run from
+the repo root, the same mutation reddens the guard immediately. **A wrong working directory produces
+plausible non-evidence** -- pin the cwd in every command.
+
+**Result: 12 tests in `browser-harness-flags.test.ts`, 1 added to `httpstatic.test.ts` (16). Suite
+1480 -> 1493 in 66 files, typecheck and build clean. Both required mutations confirmed:** unbinding
+the Alt branch in `packages/canvas/src/keys.ts` reddens the harness (PA actions vanish and the whole
+sequence shifts), and dropping `--replay` reddens the guard test. `keys.ts` restored and
+`git status` clean; the GUI harness still reports `ok 15 chords, 13 actions`.
+
 **Files:**
 - Create: `packages/web/scripts/browser-keys.mjs`, `packages/web/test/browser-harness-flags.test.ts`
 
-- [ ] **Step 1: Write the harness**
+- [x] **Step 1: Write the harness**
 
 `packages/web/scripts/browser-keys.mjs` starts the gateway on an ephemeral port with `--replay`,
 then runs Electron pointed at `http://127.0.0.1:PORT/?t=TOKEN`, driving chords with the same
@@ -3259,7 +3317,7 @@ Cases: `Alt+1`→`pa 1`, `Alt+2`→`pa 2`, `Ctrl+A`→`attn`, `Ctrl+C`→`clear`
 two negatives `Ctrl+Z` and `F13` asserting NO action. `Ctrl+]` is excluded: here it would close the
 socket, which is a different test.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `cd ~/git/tn3270 && node packages/web/scripts/browser-keys.mjs`
 Expected: `ok 12 chords, 10 actions in order`.
@@ -3268,7 +3326,7 @@ Expected: `ok 12 chords, 10 actions in order`.
 `bridge.js` loading before `renderer.js`; the queue in `bridgecore.ts` actually flushing; the
 `deflate` pairing (`78 9c`); and whether `renderer.js` is being served from `packages/canvas/dist`.
 
-- [ ] **Step 3: Pin the harness in `npm test`**
+- [x] **Step 3: Pin the harness in `npm test`**
 
 `packages/web/test/browser-harness-flags.test.ts` reads `browser-keys.mjs` as TEXT and pins:
 `--no-sandbox` and `--disable-gpu` present; `--replay` used so it never touches a host;
@@ -3277,14 +3335,14 @@ Expected: `ok 12 chords, 10 actions in order`.
 the server is torn down in a `finally`. Follow `packages/gui/test/keys-harness-flags.test.ts`
 exactly — same register, a comment on each test saying what its absence would cost.
 
-- [ ] **Step 4: Mutation-check both**
+- [x] **Step 4: Mutation-check both**
 
 Unbind the Alt branch in `packages/canvas/src/keys.ts`, rebuild, and confirm
 `browser-keys.mjs` goes RED. Revert with `git checkout` and rebuild. Then drop `--replay` from the
 harness's argv and confirm the pin test FAILS. Restore. Report both, and confirm
 `git status --porcelain` is clean afterwards.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd ~/git/tn3270

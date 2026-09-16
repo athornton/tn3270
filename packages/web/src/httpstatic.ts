@@ -38,8 +38,15 @@ function table(): Map<string, Asset> {
   const built = new Map<string, Asset>([
     ['/', page],
     ['/index.html', page],
-    ['/bridge.js', { file: join(here, 'bridge.js'), type: JS }],
   ]);
+  // THIS PACKAGE'S OWN browser modules, and `bridgecore.js` is not optional: `bridge.js` imports it,
+  // so serving only the entry point 404s the import and the module never loads. MEASURED -- the page
+  // then has no `window.tn3270`, the renderer's registrations go nowhere, and the result is a black
+  // canvas with NO error in any console and nothing on the server but a 404. `renderer-imports`-style
+  // graph closure is asserted in `httpstatic.test.ts`, because a table cannot notice its own gap.
+  for (const module of ['bridge.js', 'bridgecore.js']) {
+    built.set(`/${module}`, { file: join(here, module), type: JS });
+  }
   // DERIVED FROM `BROWSER_MODULES`, not retyped. That list is what `canvas` publishes for this
   // consumer, and `assets.ts` exists precisely because a second copy of an asset list drifts
   // silently when the package that owns the files changes. `assetDir()` answers WHERE, so this file

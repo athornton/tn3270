@@ -80,6 +80,23 @@ const SEAM = Object.freeze({
   shotMs: Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500'),
   /** How long to let the host paint before typing -- a FLOOR applies; see `maybeSendKeys`. */
   keysMs: Number(process.env['TN3270_GUI_KEYS_MS'] ?? '1200'),
+  /**
+   * A FOURTH TEST SEAM: `TN3270_GUI_URL=http://127.0.0.1:PORT/?t=TOKEN` loads a URL instead of
+   * this package's own `index.html`, and creates NO `Session` at all.
+   *
+   * It exists so the WEB gateway's served page can be driven by a real browser with real key
+   * events, which is the one thing no test in `packages/web` can reach: vitest has no DOM, and
+   * `bridgecore.test.ts` deliberately injects a fake socket. Pointing this Electron shell at the
+   * gateway exercises the served `bridge.js`, the WebSocket hop and the renderer's own `keydown`
+   * listener in one path.
+   *
+   * WHY IT SKIPS EVERYTHING ELSE: in this mode the PAGE's bridge owns the protocol. A `Session`
+   * here would be a second, unrelated 3270 connection whose frames nothing displays, and the
+   * atlas would be sent over an IPC channel the served page does not listen on. So this returns
+   * before argv parsing, before `defaultSession` and before `readAtlas` -- and takes no host
+   * argument, which is also what keeps it unable to dial anything.
+   */
+  url: process.env['TN3270_GUI_URL'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -108,8 +125,20 @@ app.whenReady().then(async () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      /**
+       * NO PRELOAD IN URL MODE, and this was MEASURED as a hard failure rather than reasoned.
+       *
+       * `preload.cts` calls `contextBridge.exposeInMainWorld('tn3270', ...)`, which defines a
+       * NON-WRITABLE property on `window`. The gateway's own served `bridge.js` then does
+       * `window.tn3270 = createBridge(...)` and dies with "Cannot assign to read only property
+       * 'tn3270' of object '#<Window>'" -- so the page loads, receives keys, and does nothing.
+       *
+       * The two bridges are alternatives, never both: Electron's supplies the four functions over
+       * IPC, the gateway's supplies them over a WebSocket. A real browser has no preload at all, so
+       * this asymmetry belongs to the test shell and not to the served page.
+       */
       // `.cjs`, compiled from preload.cts: an ESM preload cannot load. See that file.
-      preload: join(here, 'preload.cjs'),
+      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: join(here, 'preload.cjs') }),
     },
   });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
@@ -126,6 +155,16 @@ app.whenReady().then(async () => {
   // `canvas` stay siblings on disk. True in the workspace and false in an asar bundle, so
   // packaging -- explicitly out of scope in the stage-3 spec -- has to copy or rewrite that
   // path. The failure would be a blank window with a `did-fail-load` line above it.
+  // The URL seam branches HERE, before anything reads argv or builds a Session -- see SEAM.url.
+  if (SEAM.url !== '') {
+    await win.loadURL(SEAM.url);
+    globalShortcut.register('Control+]', () => { app.quit(); });
+    await maybeSendKeys(win);
+    await maybeCapture(win);
+    await quitIfKeysOnly();
+    return;
+  }
+
   await win.loadFile(join(here, '..', 'index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
 

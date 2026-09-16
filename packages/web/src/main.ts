@@ -170,6 +170,9 @@ export function buildServer(args: WebArgs) {
       // an attached id falls through and BUILDS A NEW SESSION. Calling it per action would open a
       // fresh connection to the mainframe on every keystroke, apply the action to a screen nobody is
       // looking at, and exhaust `--max-sessions` (default 16) within a dozen keys.
+      // Gated on `--log-actions`, which `parseWebArgs` refuses without `--replay`. The action
+      // carries typed text, so on a live gateway this line would be a password in a log file.
+      if (args.logActions) process.stdout.write(`action: ${JSON.stringify(msg.action)}\n`);
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:276-277`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
@@ -206,7 +209,12 @@ export function run(argv: readonly string[]): void {
   server.listen(args.listen, args.bind, () => {
     const scheme = args.tls !== undefined ? 'https' : 'http';
     const shown = args.bind === '0.0.0.0' ? 'YOUR-HOST' : args.bind;
-    process.stdout.write(`serving ${args.host}:${args.port} at ${scheme}://${shown}:${args.listen}/`
+    // THE PORT COMES FROM THE SOCKET, NOT FROM `args.listen`. With `--listen 0` -- which this
+    // package's own args parser goes out of its way to accept, because 0 means "let the kernel
+    // choose" -- echoing the argument prints `http://127.0.0.1:0/`, a URL that cannot be opened.
+    // Measured on the first run of the gateway as a program.
+    const bound = (server.address() as { port: number } | null)?.port ?? args.listen;
+    process.stdout.write(`serving ${args.host}:${args.port} at ${scheme}://${shown}:${bound}/`
       + (args.auth ? `?t=${args.token}\n` : '\n'));
     if (!args.auth) {
       process.stderr.write('WARNING: --auth off. Anything that can reach this port can type at '
@@ -217,4 +225,11 @@ export function run(argv: readonly string[]): void {
         + 'including passwords, cross the network in the clear.\n');
     }
   });
+}
+
+// The same self-invoking guard the TUI uses (`tui/src/main.ts`), so this file is both the module the
+// tests import and the program `node packages/web/dist/main.js` runs. Without it there is no way to
+// start the gateway at all, and `browser-keys.mjs` has nothing to spawn.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run(process.argv.slice(2));
 }
