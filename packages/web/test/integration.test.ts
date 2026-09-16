@@ -336,4 +336,32 @@ describe('the gateway end to end', () => {
     expect(String(got[0]!['message'])).toMatch(/quit/i);
     ws.close();
   });
+
+  it('refuses toggleKeypad and STAYS UP to serve the next action', async () => {
+    // THE SAME HOLE AS `quit`, AND IT WAS LIVE. `applyAction` throws on `toggleKeypad`, `main.ts`
+    // calls it outside any try, and that runs in a socket 'data' handler -- so before
+    // `decodeClientMessage` rejected this kind, one frame from any client ended the gateway PROCESS
+    // and took every other operator's session down with it.
+    //
+    // THE SECOND HALF IS THE POINT. Asserting the error message alone would pass just as well
+    // against a gateway that answered and then died, since the reply is written before the process
+    // goes. Sending a real action afterwards and getting a frame back is what proves it survived.
+    const { url } = await start();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 3);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    await first;
+
+    const refusal = collect(ws, 1);
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
+    const got = await refusal;
+    expect(got[0]!['kind']).toBe('error');
+    expect(String(got[0]!['message'])).toMatch(/toggleKeypad/);
+
+    const after = collect(ws, 1);
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await after)[0]!['kind']).toBeTypeOf('string');
+    ws.close();
+  });
 });
