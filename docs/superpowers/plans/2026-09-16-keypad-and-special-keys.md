@@ -829,6 +829,43 @@ Co-Authored-By: SLAC AI"
 ---
 ### Task 5: The keypad's cell layout, in `packages/canvas`
 
+> **AS BUILT (`3937e79`). THE CODE BELOW CONTAINS A FONT BUG THIS TASK'S OWN PROSE WARNS ABOUT ONE
+> PARAGRAPH EARLIER. Do not copy `columnFor`.**
+>
+> 1. **`column()` was PRIVATE in `drawlist.ts`; it is now exported and must be used.** The plan's
+>    `columnFor` computed `cg % atlas.cols`, **a different function**: `atlas.index` is a sparse packed
+>    map, **175 of its 431 entries differ from their CG code** (first divergence exactly CG 257 → 256,
+>    max CG 543), and `%` also drops the `CG_BOXSOLID` fallback, so an unknown character samples a
+>    neighbouring glyph and reads as corruption. Latent only by luck — all 44 distinct label characters
+>    land where the index is the identity — **and the spec's own ranked font fallback #1 is box-drawing
+>    borders, which is exactly where the non-identity entries live.** Now pinned by two tests against
+>    hand-built non-identity atlases.
+> 2. **`Colour` comes from `@tn3270/core`, not `@tn3270/frontend`.** The plan's import list would not
+>    have compiled.
+> 3. **`hitTest` AND `KeypadButton` LIVE IN `hittest.ts`, NOT HERE** — see Task 7 Step 4, whose
+>    "`./keypad.js` is relative and fine" was wrong. `dist/hittest.js` is arithmetic with **no import
+>    statement at all**, and it is in `BROWSER_MODULES`. Importing `keypad.js` into the renderer instead
+>    fails **three** guards: both assertions of `renderer-imports.test.ts` and `httpstatic.test.ts`'s
+>    graph-closure walk, the last being the 404-then-black-canvas path.
+> 4. **`DRAWN_ROW[key.row]` THROWS rather than `!`-asserting.** `undefined * cellHeight` is `NaN`, and a
+>    NaN rectangle draws nowhere and matches no hit test — a silently-lost keypad row.
+> 5. **The plan's `as never` atlas fixture is unusable**: `index: {}` makes every glyph lookup miss, so
+>    it yields zero signal on any CG-mapping defect. Use the real baked atlas via `drawlist.test.ts:11`.
+>    **A cast in a test fixture is unchecked — no test file in this repo is typechecked.**
+>
+> **THE PLAN'S 11 TESTS ARE BLIND TO SIX MUTATIONS, measured twice.** All 11 pass while: the blank
+> separator row is collapsed, the two PF rows are transposed, label cells sit on the wrong row, every
+> label character is drawn on one cell, `hitTest` rounds to the nearest key, and `ebcdicToCg` is dropped.
+> Its cell test is `>= total`, its width test ignores height, and **nothing in it asserts which row is
+> where** — so the separator row (the whole reason `KEYPAD_ROWS_TALL` is 6 for a 5-row table) and
+> c3270's PF13-above-PF1 order were both unpinned. **`width` and `height` were also unpinned in the
+> growing direction** (`KEYPAD_ROWS_TALL = 7` and a 13-key width both stayed green), which matters
+> because `DrawList.height` sizes the Electron window. **23 tests as built. 1564 in 68 files.**
+>
+> Fixed in passing: `httpstatic.test.ts` claimed to serve "five files" while listing six paths and
+> omitting `/bridgecore.js`. Labels are **left-aligned** in each 6-cell key; centring is one expression,
+> and is worth deciding alongside Task 8's font PNG.
+
 **Files:**
 - Create: `packages/canvas/src/keypad.ts`
 - Modify: `packages/canvas/src/index.ts` (export it)
