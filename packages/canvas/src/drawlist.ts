@@ -3,6 +3,11 @@ import {
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
+// A CYCLE ON PURPOSE, AND TYPE-SAFE: `keypad.js` imports `column` from here. Both directions are
+// function calls made long after module evaluation, and neither module reads the other at load
+// time, so ESM's hoisting resolves it either way round. The alternative -- a second copy of
+// `column()` -- is the font bug `column`'s own comment below describes.
+import { keypadRegion, type KeypadRegion } from './keypad.js';
 
 /**
  * Turn a screen snapshot plus its resolved attributes into per-cell draw instructions.
@@ -58,7 +63,7 @@ export interface DrawCell {
 export interface DrawList {
   readonly cells: readonly DrawCell[];
   /**
-   * Absent when no OIA text was supplied, and the height is then the screen alone.
+   * Absent when no OIA text was supplied, and the height then omits its row.
    *
    * `cells` is the OIA rendered THROUGH THE SAME ATLAS as the screen, not text for the
    * canvas to typeset. That is not cosmetic consistency: `fillText` would pull in a system
@@ -71,6 +76,17 @@ export interface DrawList {
     readonly y: number;
     readonly cells: readonly DrawCell[];
   };
+  /**
+   * The virtual keypad, absent unless the front end asked for it.
+   *
+   * Present in the DRAW LIST rather than owned by the renderer, and that is decided by
+   * `gui/src/main.ts:290`, which sizes the window from `list.height`. A renderer-owned keypad would
+   * leave main unaware the drawing had grown, and the Electron page is `overflow:hidden`
+   * (`gui/index.html:3`) -- so the keypad would be clipped, which is exactly the model-4 OIA bug
+   * live verification found. The alternative was a fifth bridge function, and
+   * `web/src/bridgecore.ts:5` says a fifth function means the renderer has stopped being shared.
+   */
+  readonly keypad?: KeypadRegion;
   readonly width: number;
   readonly height: number;
 }
@@ -79,13 +95,16 @@ export interface DrawList {
 const EBCDIC_SPACE = 0x40;
 
 // `scheme` comes BEFORE `oiaText`: an existing call passing OIA text positionally would
-// otherwise silently take it as the scheme, with no type error and no failing test.
+// otherwise silently take it as the scheme, with no type error and no failing test. For the same
+// reason `showKeypad` is APPENDED and defaults to off, so every existing caller keeps its meaning
+// and neither screenshot golden moves.
 export function drawList(
   snapshot: ScreenSnapshot,
   resolved: readonly ResolvedCell[],
   atlas: AtlasGeometry,
   scheme: Scheme,
   oiaText?: string,
+  showKeypad = false,
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
   const cells: DrawCell[] = [];
@@ -116,6 +135,11 @@ export function drawList(
 
   const rows = snapshot.rows + (oiaText !== undefined ? 1 : 0);
   const oiaY = snapshot.rows * atlas.cellHeight;
+  // BELOW BOTH: `rows` already counts the OIA's row when there is one, so this is the screen's
+  // bottom edge with no OIA and the OIA's with one. `oiaY` is deliberately NOT reused here -- the
+  // two coincide only in the no-OIA case, which is why the tests pin both.
+  const keypadY = rows * atlas.cellHeight;
+  const keypad = showKeypad ? keypadRegion(atlas, scheme, keypadY) : undefined;
   return {
     cells,
     ...(oiaText !== undefined
@@ -127,8 +151,14 @@ export function drawList(
         },
       }
       : {}),
+    // A conditional spread and not `keypad,`: `exactOptionalPropertyTypes` makes an explicit
+    // `undefined` a type error for an optional property, as it already does for `oia` above.
+    ...(keypad !== undefined ? { keypad } : {}),
+    // The keypad is narrower than any 3270 screen (72 columns against 80), so it never widens the
+    // window; the height it adds is measured from the region's OWN extent rather than recomputed
+    // from a row count, so `keypad.ts` stays the only place that knows how tall the keypad is.
     width: snapshot.cols * atlas.cellWidth,
-    height: rows * atlas.cellHeight,
+    height: keypad !== undefined ? keypadY + keypad.height : rows * atlas.cellHeight,
   };
 }
 
