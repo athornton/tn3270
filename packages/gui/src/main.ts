@@ -256,6 +256,10 @@ app.whenReady().then(async () => {
   const blank = [...blankColumns(coverage, geometry)];
   win.webContents.send('atlas', { geometry, coverage, blank });
 
+  // Per WINDOW, not per session: whether the keypad is shown is a property of this display, and
+  // `Session` knows nothing about it. Off by default -- the keypad is toggled, not permanent.
+  let showKeypad = false;
+
   /**
    * Compute the DRAW LIST here and send that, rather than sending the snapshot.
    *
@@ -294,7 +298,7 @@ app.whenReady().then(async () => {
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
     const list = drawList(
-      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia,
+      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia, showKeypad,
     );
     fit(list);
     win.webContents.send('frame', list);
@@ -336,6 +340,10 @@ app.whenReady().then(async () => {
     // `quit` is THIS front end's business: applyAction throws on it rather than ignoring
     // it, so a front end that forgot this check fails loudly instead of being unquittable.
     if (action.kind === 'quit') { app.quit(); return; }
+    // INTERCEPTED HERE, like `quit`, because `applyAction` throws on it: showing a keypad is a
+    // display decision, and this is the front end that owns this display. Recomputing the frame is
+    // what makes the window resize, since `fit` sizes from the draw list.
+    if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
     applyAction(session, action);
     send();
   });

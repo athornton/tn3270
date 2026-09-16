@@ -76,7 +76,7 @@ export interface DrawList {
    * The virtual keypad, absent unless the front end asked for it.
    *
    * Present in the DRAW LIST rather than owned by the renderer, and that is decided by
-   * `gui/src/main.ts:290`, which sizes the window from `list.height`. A renderer-owned keypad would
+   * `gui/src/main.ts:294`, which sizes the window from `list.height`. A renderer-owned keypad would
    * leave main unaware the drawing had grown, and the Electron page is `overflow:hidden`
    * (`gui/index.html:3`) -- so the keypad would be clipped, which is exactly the model-4 OIA bug
    * live verification found. The alternative was a fifth bridge function, and

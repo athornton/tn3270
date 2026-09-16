@@ -184,7 +184,7 @@ export function buildServer(args: WebArgs) {
       // carries typed text, so on a live gateway this line would be a password in a log file.
       if (args.logActions) process.stdout.write(`action: ${JSON.stringify(msg.action)}\n`);
       applyAction(session, msg.action);
-      // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:276-277`).
+      // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:347-348`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
       // replay, but tab, the arrow keys, Home and an ordinary typed character only move the cursor
       // or write into the buffer. Relying on the event listeners alone therefore leaves a browser

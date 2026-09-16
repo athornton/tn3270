@@ -180,7 +180,7 @@ describe('the keypad region', () => {
 
   it('reserves room for EVERY button it declares, and not a pixel more', () => {
     // Independent of both `KEYPAD_ROWS_TALL` and the height arithmetic: measured off the
-    // buttons themselves. `main.ts:290` sizes the window from `height` and the page is
+    // buttons themselves. `main.ts:294` sizes the window from `height` and the page is
     // `overflow:hidden` (`gui/index.html:3`), so a height short of the bottom button clips it
     // -- the model-4 OIA bug -- while an over-declared one leaves dead space no test would
     // otherwise notice.
