@@ -107,7 +107,7 @@ export class Keyboard {
    *
    * so the NET effect of the key is always a move to the next unprotected field,
    * from anywhere in the field. The manual states it directly (p. 7-12,
-   * pages.txt:12637-12639): "Operation of this key causes a X'1C' code to be
+   * pages.txt:12637-12638): "Operation of this key causes a X'1C' code to be
    * entered into the presentation space, a Tab key operation to be performed, and
    * the MDT bit to be set to 1." It is what the key MEANS — "duplicate the rest
    * of this field from the previous record" leaves nothing more to type here.
@@ -164,7 +164,7 @@ export class Keyboard {
         return false;
       }
       // A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK. The manual's permitted
-      // set names DUP explicitly (p. 4-13, pages.txt:3262-3263): "Numeric fields
+      // set names DUP explicitly (p. 4-13, pages.txt:3261-3262): "Numeric fields
       // are limited to numeric characters, the minus and decimal sign characters,
       // and the duplicate (DUP) control." Duplicating the previous record's date
       // in a numeric data-entry field is the key's whole purpose, so refusing it

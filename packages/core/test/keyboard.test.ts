@@ -438,7 +438,7 @@ describe('Dup and Field Mark', () => {
    *
    * so the NET effect of the Dup key is always a tab to the next unprotected
    * field, from anywhere in the field. The manual says so in one sentence
-   * (GA23-0059 p. 7-12, pages.txt:12637-12639): "Operation of this key causes a
+   * (GA23-0059 p. 7-12, pages.txt:12637-12638): "Operation of this key causes a
    * X'1C' code to be entered into the presentation space, a Tab key operation to
    * be performed, and the MDT bit to be set to 1." That is what Dup is FOR — it
    * tells the program "duplicate the rest of this field", so there is nothing
@@ -461,13 +461,40 @@ describe('Dup and Field Mark', () => {
   });
 
   /**
+   * The OTHER half of the rule above, and the one a bare `cursor = inc(cursor)`
+   * would silently satisfy: at the last data cell of a field, Field Mark must run
+   * the auto-skip, because it is an ordinary typed character and that is what
+   * `type()` does there. Position 10 is field B's ATTRIBUTE byte — parking the
+   * cursor on one is the bug `advanceAfterType` exists to prevent, and the next
+   * keystroke there would destroy the field boundary.
+   *
+   * Pinning this is the point of the whole task: Dup's cursor rule and Field
+   * Mark's differ, so both directions have to be falsifiable, not just Dup's.
+   */
+  it('Field Mark at the end of a field auto-skips like any typed character', () => {
+    const s = threeFields();
+    s.cursor = 9; // last data cell of field A; 10 is field B's attribute
+    kb(s).fieldMark();
+    expect(s.cellAt(9).ebcdic).toBe(0x1e);
+    expect(s.cursor).toBe(11); // field B's first data cell, not the attribute at 10
+    expect(s.isFieldAttribute(s.cursor)).toBe(false);
+
+    // And the same screen and position with `type()` agrees, which is the actual
+    // claim: Field Mark's advance IS the typed-character advance.
+    const t = threeFields();
+    t.cursor = 9;
+    kb(t).type('A');
+    expect(t.cursor).toBe(s.cursor);
+  });
+
+  /**
    * What the auto-skip suppression at kybd.c:1435 actually buys, and the reason
    * `dup()` must not advance BEFORE tabbing. At the last data cell of a field,
-   * our `advanceAfterType` already tabs to the next field (keyboard.ts:98); a
-   * Dup that ran it and then tabbed again would land two fields away, skipping
-   * field B entirely. x3270 avoids that by suppressing the auto-skip so that
-   * `next_unprotected` starts from the field attribute rather than from the next
-   * field's first data cell.
+   * `advanceAfterType` already tabs to the next field — as the test above
+   * asserts — so a Dup that ran it and then tabbed again would land two fields
+   * away, skipping field B entirely. x3270 avoids that by suppressing the
+   * auto-skip so that `next_unprotected` starts from the field attribute rather
+   * than from the next field's first data cell.
    */
   it('Dup at the end of a field lands on the next field, not the one after', () => {
     const s = threeFields();
@@ -492,7 +519,7 @@ describe('Dup and Field Mark', () => {
    * A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK, which is the manual's list
    * and not x3270's byte test.
    *
-   * GA23-0059 p. 4-13 (pages.txt:3262-3263): "Numeric fields are limited to
+   * GA23-0059 p. 4-13 (pages.txt:3261-3262): "Numeric fields are limited to
    * numeric characters, the minus and decimal sign characters, and the duplicate
    * (DUP) control." DUP is IN the permitted set — duplicating the previous
    * record's date or account number in a numeric data-entry field is the key's
@@ -516,6 +543,40 @@ describe('Dup and Field Mark', () => {
     expect(s.cellAt(3).ebcdic).toBe(0x00);
     expect(k.dup()).toBe(true);
     expect(s.cellAt(3).ebcdic).toBe(0x1c);
+  });
+
+  /**
+   * Insert mode pushes the field right first, exactly as for a typed character.
+   * x3270 makes no exception for these two bytes: key_Character's `ins_prep` call
+   * is reached whatever `ebc` is (kybd.c:1365-1366, the SBCS case).
+   */
+  it('insert rather than overwrite in insert mode', () => {
+    const s = threeFields();
+    s.setChar(1, 0xc1);
+    s.setChar(2, 0xc2);
+    s.cursor = 1;
+    const k = kb(s);
+    k.insertMode = true;
+    expect(k.fieldMark()).toBe(true);
+    expect(s.cellAt(1).ebcdic).toBe(0x1e);
+    expect(s.cellAt(2).ebcdic).toBe(0xc1); // A pushed right
+    expect(s.cellAt(3).ebcdic).toBe(0xc2); // B pushed right
+  });
+
+  it('are refused when an insert would overflow the field', () => {
+    for (const [name, press] of bothKeys) {
+      const s = new Screen();
+      s.setFieldAttribute(0, 0x00);
+      s.setFieldAttribute(3, FA.PROTECT); // field data is 1-2 only, and both are full
+      s.setChar(1, 0xc1);
+      s.setChar(2, 0xc2);
+      s.cursor = 1;
+      const k = kb(s);
+      k.insertMode = true;
+      expect(press(k), name).toBe(false);
+      expect(k.oia.keyboard, name).toBe(KeyboardState.Overflow);
+      expect(s.cellAt(1).ebcdic, name).toBe(0xc1);
+    }
   });
 
   it('are refused while the host holds the keyboard locked', () => {
