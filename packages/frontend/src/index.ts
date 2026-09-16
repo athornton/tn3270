@@ -41,6 +41,12 @@ export { defaultSession } from './session.js';
 export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from './keymap.js';
 export type { Action } from './keymap.js';
 
+// The virtual keypad's key set, as data. Here rather than in `canvas` because the TUI's
+// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 46 keys
+// would drift silently. Pure data: no pixels, no cells-to-pixels arithmetic.
+export { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH } from './keypad.js';
+export type { KeypadKey } from './keypad.js';
+
 // The action dispatch. The one translation from a named action onto the session that
 // every front end needs and none should own -- the CLI's command table, the TUI's keymap
 // and the GUI's KeyboardEvent mapper all produce these same names.
