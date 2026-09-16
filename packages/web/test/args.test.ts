@@ -138,4 +138,45 @@ describe('parseWebArgs', () => {
     expect(a.host).toBe('vm');
     expect(a.port).toBe(3270);
   });
+
+  describe('the parts of a host argument this gateway cannot honour', () => {
+    /**
+     * MEASURED BEFORE THE FIX: `LUA,LUB@127.0.0.1:3270` started the gateway and served happily,
+     * having SILENTLY DROPPED the LU selection. `resolveHostSpec` parses the whole
+     * `[prefix:][LU,LU@]host[:port]` shape and this parser used only `host` and `port` from it.
+     *
+     * That is the same defect stage 2b's Task 12 fixed for the CLI and TUI, reintroduced here, and
+     * it breaks the project's own rule: something that changes what goes on the wire but is not
+     * implemented is refused BY NAME rather than ignored.
+     */
+    it('refuses an LU list rather than ignoring it', () => {
+      expect(() => parseWebArgs(['LUA,LUB@vm:3270'])).toThrow(/LU list is not supported/);
+      expect(() => parseWebArgs(['LUA@vm:3270'])).toThrow(/LU list is not supported/);
+    });
+
+    it('refuses the N: prefix rather than ignoring it', () => {
+      // `N:` turns TN3270E OFF for a host, so ignoring it would negotiate something the operator
+      // explicitly declined.
+      expect(() => parseWebArgs(['N:vm:3270'])).toThrow(/N: host prefix is not supported/);
+    });
+
+    it('ACCEPTS L: on its own, because TLS to the host is already the default', () => {
+      // Not everything unhandled is refused: `L:` asks for what would happen anyway, so refusing it
+      // would be noise. The pair below is the case that actually contradicts itself.
+      const a = parseWebArgs(['L:vm:3270']);
+      expect(a.host).toBe('vm');
+      expect(a.port).toBe(3270);
+    });
+
+    it('refuses L: together with -insecure, which is a silent downgrade', () => {
+      // Obeying one means disobeying the other, and connecting in the clear to a host the operator
+      // marked as TLS is the one outcome worth an error -- the same reasoning as `runner.ts`.
+      expect(() => parseWebArgs(['-insecure', 'L:vm:3270'])).toThrow(/silent downgrade/);
+    });
+
+    it('still refuses an unimplemented prefix by name, through resolveHostSpec', () => {
+      // Unchanged behaviour, asserted so this file's new checks cannot be read as the only ones.
+      expect(() => parseWebArgs(['C:vm:3270'])).toThrow(/C:/);
+    });
+  });
 });

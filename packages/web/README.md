@@ -7,7 +7,13 @@ npm run build
 node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
 ```
 
-It prints the URL to open, including a token:
+It prints the URL to open. By default there is no token, so that is just the address:
+
+```
+serving 127.0.0.1:3270 at http://127.0.0.1:8270/
+```
+
+With `--auth on` the token appears in it once, and is carried by a cookie thereafter:
 
 ```
 serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
@@ -59,8 +65,28 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 | `--replay FILE` | none | paint a recorded trace and open no host socket |
 | `--log-actions` | off | print every action applied; **requires `--replay`** |
 | `-insecure` | — | the HOST connection is plaintext. Required for Hercules |
+| `-cafile FILE` | — | verify the host against this PEM |
+| `-noverifycert` | — | make the TLS connection without verifying the host |
+| `-verifycert` | — | verify (the default; explicit for symmetry with s3270) |
 | `-model NAME` | `IBM-3278-2-E` | screen model, e.g. `3278-4-E` |
 | `-scheme NAME` | `default` | colour scheme: `default`, `3279`, `x3270`, `green` |
+
+## The host argument, and what this gateway will NOT take
+
+`HOST:PORT`, and of the full `[prefix:][LU,LU@]host[:port]` shape the other front ends accept, only
+`host:port` is honoured. The rest is **refused by name rather than ignored**, which is this project's
+rule for anything that would change what goes on the wire without being implemented:
+
+| written | result |
+|---|---|
+| `LUA,LUB@host` or `LU@host` | **refused** — an LU is a property of one connection, and this serves many sessions from one command line |
+| `N:host` | **refused** — it turns TN3270E off for a host, and ignoring it would negotiate what the operator declined |
+| `L:host` | accepted; TLS to the host is already the default |
+| `L:host` with `-insecure` | **refused** — obeying one disobeys the other, and connecting in the clear to a host marked TLS is a silent downgrade |
+| `A:` `C:` `P:` `S:` `T:` `Y:` | refused by name, as in every front end |
+
+**`--terminal-type` and `-tn3270e` are not accepted either.** A gateway session always offers
+TN3270E (backing off if the host refuses) and takes its terminal type from `-model`.
 
 `--log-actions` is refused without `--replay` on purpose: a `type` action carries the text typed, so
 on a live gateway it would put an operator's password into a log file.

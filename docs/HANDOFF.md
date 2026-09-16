@@ -8,7 +8,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 **`main` is at `d52ee57`, pushed and in sync, and it is the ONLY branch — `web-gateway` was merged
 `--no-ff` and deleted, local and remote.** Roadmap item (3) is closed: all 15 tasks, plus the three
-follow-up questions the user then answered. **1509 tests passing in 66 files**, `npm run typecheck`
+follow-up questions the user then answered. **1514 tests passing in 66 files**, `npm run typecheck`
 and `npm run build` clean, working tree clean, both GUI goldens matching, `pty-smoke.py` 12/12, and
 both by-hand browser harnesses passing — all re-run on the MERGE COMMIT itself, not just on the
 branch.

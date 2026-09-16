@@ -66,9 +66,10 @@ npm run build
 ```
 
 It takes the TUI's flags unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
-set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all the front ends parse
-them with the same code (`packages/frontend`). `-scheme` is the one flag not shared with the
-CLI, since a script-driven client has nothing to render; see *Using the TUI*.
+set, and the full `[prefix:][LU,LU@]host[:port]` shape — because all three of those front ends
+parse them with the same code (`packages/frontend`). `-scheme` is the one flag not shared with
+the CLI, since a script-driven client has nothing to render; see *Using the TUI*. The web
+gateway takes a deliberately smaller set; see *Using the web gateway*.
 
 **And there is a browser gateway.** `packages/web` serves that same canvas renderer — the
 same file, differing by two lines — to a browser, with a WebSocket where the Electron app has IPC:
@@ -115,9 +116,14 @@ Two test harnesses come with it, because "it looked right" is not a result:
 ## Build and test
 
 Developed and tested on Node 26. `package.json` declares no `engines` floor and
-no other version has been tried; the code targets ES2023 with `NodeNext` modules and imports
-only `node:crypto`, `node:fs`, `node:net`, `node:path`, `node:readline`, `node:tls` and
-`node:url`, so Node 18+ ought to work, but that is inference rather than a tested claim.
+no other version has been tried; the code targets ES2023 with `NodeNext` modules and its
+runtime imports are only `node:child_process`, `node:crypto`, `node:fs`, `node:http`,
+`node:https`, `node:net`, `node:path`, `node:readline`, `node:tls`, `node:url` and
+`node:zlib` — taken from the BUILT output, so the type-only `node:stream` is excluded. All
+are long-standing, so Node 18+ ought to work for the client, but that is inference rather
+than a tested claim. **The test suite needs more than the client does**: `integration.test.ts`
+drives the gateway with Node's own built-in `WebSocket`, which is what makes it an independent
+check of our hand-rolled framing, and that global is only unflagged from Node 22.
 Only `packages/gui` depends on anything outside the standard library, and its dependency is
 Electron. **`packages/web` adds none** — Node has a WebSocket client but no server, so the
 framing is hand-rolled behind a seam that a `ws` wrapper could replace wholesale. The package
@@ -127,7 +133,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1509 tests, 66 files
+npm test           # 1514 tests, 66 files
 npm run typecheck
 ```
 
@@ -414,7 +420,13 @@ npm run build
 node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
 
-It prints the URL to open, with a one-time token in it:
+It prints the URL to open. With the default (no token) that is just the address:
+
+```
+serving 127.0.0.1:3270 at http://127.0.0.1:8270/
+```
+
+and with `--auth on` the token is in it, once:
 
 ```
 serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
@@ -428,8 +440,18 @@ deliberately not part of the design.
 
 Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
 `--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
-`-model`, `-scheme`). **`--scheme` is refused as an unknown flag** — that asymmetry is
-deliberate, since those flags mean the same thing in every front end.
+`-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-scheme`). **`--scheme` is refused as an
+unknown flag** — that asymmetry is deliberate, since those flags mean the same thing in every
+front end.
+
+**It shares FEWER client flags than the other three, and refuses the rest by name rather than
+ignoring them.** `--terminal-type` and `-tn3270e` are not accepted at all, so a gateway
+session always offers TN3270E and takes its terminal type from `-model`. Of the host
+argument's full `[prefix:][LU,LU@]host[:port]` shape it honours only `host:port`: an **LU
+list** and the **`N:`** prefix are refused, because both are properties of one connection and
+this serves many sessions from a single command line. `L:` is accepted, since TLS to the host
+is already the default — but `L:` together with `-insecure` is refused as a silent
+downgrade.
 
 What makes it safe to run out of the box is the **loopback bind**, and the two things you
 should change before widening it:
@@ -532,19 +554,33 @@ Done:
    password in a screenshot. **An MVS TSO logon has been completed live, though**: through
    the GUI itself, by the user on their own Mac, at 43 rows; and separately in this sandbox
    as `HERC03`, over the CLI's identical AID wire path — which is what confirmed PA1 and PA2
-   each get a real, distinct host reaction. See *Using the GUI*. That closes the protocol
-   half of the PA1/PA2 gap; the physical-keypress half — a real Alt-digit
-   `KeyboardEvent` reaching `actionForKey` in the packaged app — is still open.
+   each get a real, distinct host reaction. See *Using the GUI*. **Both halves of the PA1/PA2
+   gap are now closed**: the protocol half by those host reactions, and the local half first by
+   hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
+   then by `packages/gui/scripts/keys.mjs`, which drives 15 real Chromium chords and asserts 13
+   ordered actions plus two required absences. What remains untested is only the *packaged* app,
+   because there is no packaging yet.
+
+8. **A webserver serving the same front end** over HTTP — done, and verified against both
+   live hosts. `packages/web` serves the GUI's own canvas renderer to a browser over a
+   WebSocket; the canvas layer moved to `packages/canvas`, which both front ends now share.
+   That the renderer is genuinely shared rather than merely similar is checked in pixels
+   against the Electron app's own screenshot golden. See *Using the web gateway*.
 
 Remaining, in the order the author wants it:
 
-8. **A webserver serving the same front end** over HTTP.
-9. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
+9. **A menu of special keys, and/or a show/hide virtual keypad** in x3270's style. Requested
+   2026-09-14 and moved ahead of Programmable Symbol Sets on 2026-09-15. It needs canvas
+   hit-testing, which does not exist yet, so it gets its own spec. Note that text selection is
+   **not** the light pen and must not be implemented with it: `lightpen_select()` sends an AID
+   and sets MDT, so drag-to-select would transmit on every copy attempt. x3270 keeps the two
+   apart deliberately.
+10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
    glyph is a host-supplied bitmap, which is exactly what it already draws, so PS should be
    an addition rather than a second renderer.
-10. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
+11. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
    **printer sessions**.
 
 **In flight, not on `main`:** alternate screen sizes and models 3, 4 and 5 are complete
@@ -613,6 +649,14 @@ worse than one that says which quarter is missing.
   is **no connect dialog, no menus, no preferences and no mouse support** — the host and
   every flag come from the command line, exactly as the TUI takes them. Packaging is also
   still to come, so there is no `.app` to download yet.
+- **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
+  from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
+  **no connect dialog, no menus, no preferences and no mouse support**. It also does **not**
+  accept `--terminal-type` or `-tn3270e`, and of the host argument it honours only `host:port` —
+  an LU list and `N:` are refused by name rather than ignored. A screen taller than the browser
+  viewport **scrolls**; it does not reflow, and it will not scale fractionally, because integer
+  scaling is a design rule. There is no session list or admin view: sessions are addressed only
+  by the id the browser keeps in `sessionStorage`.
 - **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
   deliberately dropped. `Cell` is already a tagged variant so that a renderer dispatches
   on `kind` rather than assuming a font lookup — that variant exists for nothing but PS.
@@ -645,7 +689,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1509 tests, 66 files |
+| `npm test` | **pass** — 1514 tests, 66 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

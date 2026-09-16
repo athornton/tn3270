@@ -176,6 +176,40 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
 
   const resolved = resolveHostSpec(rest[0]!, (m) => new UsageError(m));
 
+  /**
+   * WHAT THIS GATEWAY CANNOT HONOUR IN A HOST ARGUMENT, REFUSED BY NAME.
+   *
+   * `resolveHostSpec` parses the full `[prefix:][LU,LU@]host[:port]` shape, and this file used only
+   * `host` and `port` from it — so an LU list and `N:` were accepted and SILENTLY IGNORED. Measured:
+   * `LUA,LUB@127.0.0.1:3270` started the gateway and served happily, having quietly dropped the LU
+   * selection an operator had asked for. That is exactly the defect stage 2b's Task 12 fixed for the
+   * CLI and TUI, reintroduced here, and it breaks this project's own stated rule: a prefix that
+   * changes what goes on the wire but is not implemented is refused by name rather than ignored.
+   *
+   * Both are per-CONNECTION properties, and this gateway opens one connection per session from a
+   * single command line, so honouring them would mean deciding what an LU list even means across
+   * sixteen concurrent sessions. Refusing is honest until that question has an answer.
+   *
+   * `L:` is NOT refused: it asks for TLS to the host, which is already this client's default. It is
+   * refused only alongside `-insecure`, where obeying one means disobeying the other — the same
+   * silent-downgrade reasoning as `runner.ts`.
+   */
+  if (resolved.lus.length > 0) {
+    throw new UsageError(
+      'an LU list is not supported by the gateway: an LU is a property of one connection, and this '
+      + 'serves many sessions from one command line',
+    );
+  }
+  if (resolved.tn3270e === false) {
+    throw new UsageError('the N: host prefix is not supported by the gateway');
+  }
+  if (resolved.tlsRequested && hostTls.insecure === true) {
+    throw new UsageError(
+      'the L: host prefix asks for TLS to the host, but -insecure disables it; connecting in the '
+      + 'clear would be a silent downgrade',
+    );
+  }
+
   return {
     host: resolved.host,
     port: resolved.port,
