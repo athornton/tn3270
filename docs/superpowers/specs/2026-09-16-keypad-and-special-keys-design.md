@@ -29,6 +29,20 @@ Explicitly NOT in this spec, and each for its own reason:
   lacks; a clickable QWERTY duplicates hardware, triples the hit-testing surface and eats the
   screen area the 3270 display needs.
 
+**OPEN QUESTION FOR THE USER, raised 2026-09-16 during Task 3 — NEWLINE.** It is on c3270's keypad,
+`Keyboard.newline()` has existed in core (`core/src/keyboard.ts:348`), and **the CLI can already call
+it** as `Newline()` (`cli/src/runner.ts:219`) — but **no interactive front end can**, and this spec's
+key set dropped it without noticing. That is the same shape as `Session.sysreq()` before this branch:
+a capability with no interactive route, which is precisely what this feature exists to fix. So its
+absence is an oversight rather than a decision, unlike Cursor Select and Compose.
+
+Adding it is **cheap, and cheapest now**: `default: action satisfies never` in `applyAction` makes a new
+union member a compile error until handled, the handler is one line, row 4 ends at column 36 so column
+42 is free with a right edge of 48 (inside 72), and the cost is one union member, one `case`, one table
+row, one count in a test, plus a `BINDING_INTENT` row. **After Task 13 fixes its `CASES` and Task 14
+commits its goldens, adding it also invalidates a golden.** Not taken unilaterally — it is scope the
+user did not ask for.
+
 ## Facts established from sources before designing
 
 Checked rather than remembered, per this repo's standing rule:
@@ -39,7 +53,8 @@ Checked rather than remembered, per this repo's standing rule:
 | **Dup and Field Mark are typed CHARACTERS, not AIDs** | `Common/kybd.c:2788` and `:2825` both call `key_Character(EBC_dup/EBC_fm, ...)` |
 | **The Dup KEY performs a TAB.** `kybd.c:1435` suppresses `key_Character`'s auto-skip for a keyboard Dup — `if (auto_skip && (pasting \|\| (ebc != EBC_dup)))`, commented "for all pasted data (even DUP), and for all keyboard-generated data except DUP" — but `Dup_action` then moves the cursor ITSELF, so the net effect is a tab. **CORRECTED 2026-09-16 during Task 1; this table's first version read the suppression alone and concluded the opposite.** What the suppression buys is that the tab happens ONCE rather than twice. | `Common/kybd.c:1435` **and `:2788-2792`** (`cursor_move(next_unprotected(cursor_addr))` after `key_Character` returns), settled by the manual p. 7-12: "Operation of this key causes a X'1C' code to be entered into the presentation space, **a Tab key operation to be performed**, and the MDT bit to be set to 1" |
 | **A numeric field TAKES Dup and refuses Field Mark** | manual p. 4-13: "Numeric fields are limited to numeric characters, the minus and decimal sign characters, **and the duplicate (DUP) control**." x3270's byte test (`kybd.c:1232-1238`) refuses DUP too, but is gated on `appres.numeric_lock`, which has **no default assignment anywhere** (`glue.c:914` registers the resource only) and is therefore off — so stock x3270 refuses neither, and that byte set is the shape of the numeric-lock feature rather than a ruling on DUP |
-| Which keys a 3270 keypad is expected to carry | c3270's own keypad: `Common/c3270/keypad.labels` — PA1-3, Attn, Erase EOF, Erase Input, Sys Req, Clear, PF1-24, Home, Cursor Select, Compose, Insert, Delete, Dup, Field Mark, Reset, Enter, arrows |
+| Which keys a 3270 keypad is expected to carry. **CORRECTED 2026-09-16 in Task 3: the authoritative list is `keypad.callbacks`, which is exactly 44 lines, and it has NO CURSOR ARROWS.** The `-->|`, `\|<--` and `<-+` glyphs in `keypad.full:8-11` are **Tab, BackTab and Newline**, which this table's first version misread as arrows. c3270 can omit cursor keys because a real keyboard sits beside it; a mouse-driven keypad cannot. | `Common/c3270/keypad.callbacks` (44 keys: PA1-3, Attn, Erase EOF, Erase Input, Sys Req, Clear, Home, Cursor Select, Compose, Insert, Delete, Dup, Field Mark, Tab, Reset, BackTab, **Newline**, Enter, PF1-24), with `keypad.labels` / `keypad.full` as its rendering |
+| **Our 46 keys are c3270's 44 minus three, plus five** — dropping Cursor Select, Compose and **Newline**, adding the four cursor arrows and Backspace | arithmetic checked in Task 3: 44 − 3 + 5 = 46 |
 | `Session.sysreq()` exists in core and **no front end can reach it** | `packages/core/src/session.ts:641`; no `sysreq` anywhere in any front end |
 | Dup and Field Mark are absent from core entirely | not even the 0x1C/0x1E constants exist |
 | `Ctrl-K` is free in both keymaps | canvas `keys.ts` binds only `c r u ] a`; the TUI adds `0x7f` |

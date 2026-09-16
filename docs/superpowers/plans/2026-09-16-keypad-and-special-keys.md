@@ -419,6 +419,30 @@ Co-Authored-By: SLAC AI"
 
 ### Task 3: The key table, in `packages/frontend`
 
+> **AS BUILT (`5251b49`). THE SIX TESTS BELOW ARE BLIND TO THE LAYOUT THEY CLAIM TO CHECK — measured
+> twice, by the implementer and again by the reviewer running the plan's six in isolation.**
+>
+> The "within 72 columns" test takes only a `max`, so **all six pass** while: two keys share cells
+> (`Reset` col 60 → 48), a key sits off the 6-cell boundary (`Home` col 24 → 25), or a key is on a row
+> `KEYPAD_ROWS` does not declare (`BkSp` row 4 → 5). **9 tests as built**, adding no-overlap-within-a-row,
+> a whole-key column-boundary-and-declared-row check, and `name` non-empty and unique (`name` was
+> asserted by nothing, and Task 11 renders it).
+>
+> **The provenance claim in the doc comment below is WRONG and was rewritten.** c3270's authoritative
+> set is `keypad.callbacks` (exactly 44 keys) and **has no cursor arrows**; the arrow-looking glyphs in
+> `keypad.full:8-11` are Tab, BackTab and Newline. Ours is that set **minus three, plus five** — it also
+> drops **Newline**, and adds the four arrows and Backspace. See the spec's open question on Newline.
+>
+> **`as const` in `pfRow` is DEAD SYNTAX** beside the explicit `KeypadKey[]` return annotation — either
+> mechanism suffices alone, verified by compiling all four combinations. Dropped.
+>
+> **THE RESIDUAL GAP, and it is not the obvious one: a LABEL/ACTION MISMATCH is invisible to both the
+> tests and the goldens.** Swap `Del`'s and `BkSp`'s actions and all nine tests stay green *and the
+> drawn pixels are identical*, so Task 14 cannot see it either. Only Task 13 covers it, by clicking a
+> label and asserting the action — for **8 of 46 keys**. Positional swaps (two keys trading rows at the
+> same column, the whole PF block inverted) do change pixels, so a golden catches them **as drift only**,
+> never in the baseline it was generated from. **1538 tests in 67 files.**
+
 **Files:**
 - Create: `packages/frontend/src/keypad.ts`
 - Modify: `packages/frontend/src/index.ts` (export it)
@@ -2196,6 +2220,16 @@ cd ~/git/tn3270 && npm run build && node packages/gui/scripts/shot.mjs --update
 Then look at `packages/gui/test/golden/synthetic-ispf-keypad.png` and confirm it is a 24-row screen,
 an OIA row, and a legible keypad. **Do not commit a golden you have not looked at** — a golden of a
 blank or clipped keypad would lock in the bug.
+
+**A GOLDEN CANNOT VALIDATE THE BASELINE IT WAS GENERATED FROM. Read these off the image, deliberately,
+before committing it** — an error already in the table gets baked into the PNG and its `.sha256`, and
+then nothing ever catches it:
+- **the PF row order** — PF13-24 on top, PF1-12 below. Task 3 measured that inverting the two blocks
+  leaves all nine table tests green, so this image is the only check on it;
+- that no two labels overlap or run together, and that the cluster gaps are where the spec draws them;
+- **that each label sits over the key it names.** A LABEL/ACTION MISMATCH IS INVISIBLE HERE — swapping
+  `Del`'s and `BkSp`'s actions changes no pixel at all — so this image cannot help with that one, and
+  Task 13's click-by-label cases are its only cover, for 8 of 46 keys.
 
 - [ ] **Step 3: Confirm it reproduces**
 
