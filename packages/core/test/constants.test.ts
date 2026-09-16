@@ -3,7 +3,7 @@ import {
   TelnetCmd, TelnetOpt, TelnetSubopt,
   Cmd, SnaCmd, Order, AID, FA, WCC,
   ADDRESS_CODE_TABLE, isShortReadAID,
-  PF_AIDS, PA_AIDS,
+  PF_AIDS, PA_AIDS, pfAID, paAID, VALID_AIDS,
   Sfid, PID_QUERY, ReadPartitionType, ReqTyp, REQTYP_MASK, Qcode, XA_3270,
   XA, XAH, XAC_DEFAULT,
 } from '../src/constants.js';
@@ -115,6 +115,58 @@ describe('PF_AIDS and PA_AIDS', () => {
     expect(PA_AIDS[0]).toBe(AID.PA1);
     expect(PA_AIDS[1]).toBe(AID.PA2);
     expect(PA_AIDS[2]).toBe(AID.PA3);
+  });
+});
+
+describe('pfAID and paAID', () => {
+  /**
+   * The accessors exist because `PF_AIDS[n - 1]!` sent AID 0x00 TO A LIVE MAINFRAME.
+   *
+   * An out-of-range index is `undefined`, the non-null assertion hides it, and
+   * `Uint8Array.from([undefined])` coerces it to 0. Refusing here is what makes the whole class
+   * unreachable rather than merely unused: see the docstring on `pfAID`.
+   */
+  it('answer the same bytes the tables do, for every key', () => {
+    for (let n = 1; n <= PF_AIDS.length; n += 1) expect(pfAID(n)).toBe(PF_AIDS[n - 1]);
+    for (let n = 1; n <= PA_AIDS.length; n += 1) expect(paAID(n)).toBe(PA_AIDS[n - 1]);
+  });
+
+  it('pin the ends by value, so an off-by-one cannot pass', () => {
+    expect(pfAID(1)).toBe(AID.PF1);
+    expect(pfAID(24)).toBe(AID.PF24);
+    expect(paAID(1)).toBe(AID.PA1);
+    expect(paAID(3)).toBe(AID.PA3);
+  });
+
+  it('refuse everything outside the range, including the non-integers a remote party can send', () => {
+    // 1e9 and -1 are the measured hostile cases from the gateway; 1.5, NaN and Infinity are the
+    // ones a JSON number can be while still being `typeof 'number'`.
+    for (const n of [0, -1, 25, 1e9, 1.5, Number.NaN, Infinity, -Infinity]) {
+      expect(() => pfAID(n), `pfAID(${n})`).toThrow(RangeError);
+    }
+    for (const n of [0, -1, 4, 1e9, 1.5, Number.NaN]) {
+      expect(() => paAID(n), `paAID(${n})`).toThrow(RangeError);
+    }
+  });
+
+  it('name the real bound in the message, taken from the table and not a literal', () => {
+    // A message naming 24 while the table held some other number would be worse than none: it is
+    // the thing a caller trusts when deciding what to pass.
+    expect(() => pfAID(99)).toThrow(new RegExp(`1\\.\\.${PF_AIDS.length}`));
+    expect(() => paAID(99)).toThrow(new RegExp(`1\\.\\.${PA_AIDS.length}`));
+  });
+});
+
+describe('VALID_AIDS', () => {
+  it('holds every AID and NOT the 0 that the old coercion produced', () => {
+    for (const aid of Object.values(AID)) expect(VALID_AIDS.has(aid)).toBe(true);
+    // 0x00 is the exact byte `Uint8Array.from([undefined])` produced and put on the wire.
+    expect(VALID_AIDS.has(0x00)).toBe(false);
+    expect(VALID_AIDS.has(0xff)).toBe(false);
+  });
+
+  it('covers the PF and PA tables, so the accessors can never yield a byte it rejects', () => {
+    for (const aid of [...PF_AIDS, ...PA_AIDS]) expect(VALID_AIDS.has(aid)).toBe(true);
   });
 });
 

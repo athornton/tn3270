@@ -7,9 +7,8 @@ import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError }
 import {
   applyAction, defaultSession, describeTlsError, resolveScheme, type Action,
 } from '@tn3270/frontend';
+import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
-import { drawList, type AtlasGeometry } from './drawlist.js';
-import { blankColumns, bestScale } from './blit.js';
 import { parseKeySpec } from './keyspec.js';
 
 /**
@@ -81,6 +80,35 @@ const SEAM = Object.freeze({
   shotMs: Number(process.env['TN3270_GUI_SHOT_MS'] ?? '2500'),
   /** How long to let the host paint before typing -- a FLOOR applies; see `maybeSendKeys`. */
   keysMs: Number(process.env['TN3270_GUI_KEYS_MS'] ?? '1200'),
+  /**
+   * A FOURTH TEST SEAM: `TN3270_GUI_URL=http://127.0.0.1:PORT/?t=TOKEN` loads a URL instead of
+   * this package's own `index.html`, and creates NO `Session` at all.
+   *
+   * It exists so the WEB gateway's served page can be driven by a real browser with real key
+   * events, which is the one thing no test in `packages/web` can reach: vitest has no DOM, and
+   * `bridgecore.test.ts` deliberately injects a fake socket. Pointing this Electron shell at the
+   * gateway exercises the served `bridge.js`, the WebSocket hop and the renderer's own `keydown`
+   * listener in one path.
+   *
+   * WHY IT SKIPS EVERYTHING ELSE: in this mode the PAGE's bridge owns the protocol. A `Session`
+   * here would be a second, unrelated 3270 connection whose frames nothing displays, and the
+   * atlas would be sent over an IPC channel the served page does not listen on. So this returns
+   * before argv parsing, before `defaultSession` and before `readAtlas` -- and takes no host
+   * argument, which is also what keeps it unable to dial anything.
+   */
+  url: process.env['TN3270_GUI_URL'] ?? '',
+  /**
+   * `TN3270_GUI_SIZE=720x350` sets the CONTENT size, and it is meaningful only alongside `url`.
+   *
+   * On the normal path the window sizes itself from the first draw list, because main computes that
+   * list. In URL mode main sees no frames at all -- the page does -- so the window would stay at its
+   * 800x600 default, `renderer.ts` would centre a 720x350 drawing inside it, and a capture would
+   * differ from the GUI golden by a black border alone. That is a difference in the HARNESS's
+   * geometry rather than in anything drawn, which is the least interesting reason for a golden to
+   * fail. `browser-shot.mjs` reads the size out of the golden PNG itself, so the golden defines the
+   * geometry rather than a constant repeated somewhere else.
+   */
+  size: process.env['TN3270_GUI_SIZE'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -109,8 +137,20 @@ app.whenReady().then(async () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      /**
+       * NO PRELOAD IN URL MODE, and this was MEASURED as a hard failure rather than reasoned.
+       *
+       * `preload.cts` calls `contextBridge.exposeInMainWorld('tn3270', ...)`, which defines a
+       * NON-WRITABLE property on `window`. The gateway's own served `bridge.js` then does
+       * `window.tn3270 = createBridge(...)` and dies with "Cannot assign to read only property
+       * 'tn3270' of object '#<Window>'" -- so the page loads, receives keys, and does nothing.
+       *
+       * The two bridges are alternatives, never both: Electron's supplies the four functions over
+       * IPC, the gateway's supplies them over a WebSocket. A real browser has no preload at all, so
+       * this asymmetry belongs to the test shell and not to the served page.
+       */
       // `.cjs`, compiled from preload.cts: an ESM preload cannot load. See that file.
-      preload: join(here, 'preload.cjs'),
+      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: join(here, 'preload.cjs') }),
     },
   });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
@@ -122,6 +162,32 @@ app.whenReady().then(async () => {
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     process.stdout.write(`renderer failed to load ${url}: ${code} ${desc}\n`);
   });
+
+  // That HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui` and
+  // `canvas` stay siblings on disk. True in the workspace and false in an asar bundle, so
+  // packaging -- explicitly out of scope in the stage-3 spec -- has to copy or rewrite that
+  // path. The failure would be a blank window with a `did-fail-load` line above it.
+  // The URL seam branches HERE, before anything reads argv or builds a Session -- see SEAM.url.
+  if (SEAM.url !== '') {
+    if (SEAM.size !== '') {
+      const [w, h] = SEAM.size.split('x').map(Number);
+      if (Number.isInteger(w) && Number.isInteger(h) && w! > 0 && h! > 0) {
+        win.setContentSize(w!, h!);
+      } else {
+        // Refused by name rather than ignored: a silently-dropped size produces a golden mismatch
+        // that reads as a rendering change, which is the diagnosis this seam exists to avoid.
+        process.stderr.write(`TN3270_GUI_SIZE must be WxH, not ${JSON.stringify(SEAM.size)}\n`);
+        app.exit(2);
+        return;
+      }
+    }
+    await win.loadURL(SEAM.url);
+    globalShortcut.register('Control+]', () => { app.quit(); });
+    await maybeSendKeys(win);
+    await maybeCapture(win);
+    await quitIfKeysOnly();
+    return;
+  }
 
   await win.loadFile(join(here, '..', 'index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
@@ -169,9 +235,24 @@ app.whenReady().then(async () => {
    * process can read. Sending it once at startup avoids both and keeps the renderer with no
    * filesystem access at all.
    */
-  const geometry = JSON.parse(
-    readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
-  const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+  /**
+   * GUARDED like the two startup failures above, because a missing atlas is a REAL user's
+   * broken install and not only a developer's half-built tree.
+   *
+   * `readAtlas` throws synchronously, and this runs inside `app.whenReady().then(async ...)`
+   * where an uncaught throw is an unhandled rejection: MEASURED, that produced a warning on
+   * stderr and then a BLANK WINDOW that sat until the harness timeout -- console-only
+   * diagnosis, which is exactly what the rule at the top of this file forbids. A scoped
+   * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
+   */
+  let atlas;
+  try {
+    atlas = readAtlas();
+  } catch (err) {
+    fail(explain(err));
+    return;
+  }
+  const { geometry, coverage } = atlas;
   const blank = [...blankColumns(coverage, geometry)];
   win.webContents.send('atlas', { geometry, coverage, blank });
 

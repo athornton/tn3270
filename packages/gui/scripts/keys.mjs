@@ -141,6 +141,20 @@ if (expected.length === 0) {
  * forget the build, and the harness exercises yesterday's IPC bridge and reports `ok` -- and
  * it sat in the exact layer this harness claims as its unique coverage. Found in the
  * whole-branch review, after the per-task reviews had passed.
+ *
+ * ## BOTH PACKAGES, COMPARED SEPARATELY
+ *
+ * `keys.ts` and `renderer.ts` MOVED TO `@tn3270/canvas`, so a check that watched only `gui`
+ * would no longer see the very staleness quoted above -- `dist/keys.js` older than
+ * `src/keys.ts` is now entirely a `canvas` fact, and this harness's unique coverage is the
+ * renderer's `keydown` listener and `actionForKey`, both of which now live there. A guard that
+ * cannot see the files it exists to protect is a false GREEN, not a smaller guard.
+ *
+ * PER PACKAGE, NOT IN AGGREGATE. One newest-dist against one newest-src across both would let
+ * a fresh `gui` rebuild MASK a stale `canvas` one: `gui`'s newer output would win the `max` and
+ * sit above `canvas`'s newer source. Each package is its own `tsc --build` project with its own
+ * outputs and its own `.tsbuildinfo`, so each is compared against its own sources -- and the
+ * refusal names WHICH package to rebuild, since `--force` on the wrong one clears nothing.
  */
 // RECURSIVE, because tsconfig's `include` is (`src/**/*.ts`): a file at `src/foo/bar.ts`
 // compiles to `dist/foo/bar.js` and would otherwise be invisible to BOTH sides of the
@@ -148,13 +162,31 @@ if (expected.length === 0) {
 const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir, { recursive: true })
   .filter((f) => suffixes.some((s) => f.endsWith(s)))
   .map((f) => statSync(join(dir, f)).mtimeMs));
+/**
+ * EVERY REMEDY HERE NAMES THE WHOLE-WORKSPACE BUILD, not `-w @tn3270/gui`.
+ *
+ * It used to say `-w @tn3270/gui`, and that command is now the one that PRODUCES a broken
+ * tree: MEASURED, a scoped gui build exits 0, compiles `canvas` through the project reference
+ * and never runs `canvas`'s second build step, so `atlas.json` is missing and the client dies
+ * at startup. `readAtlas` in `packages/canvas/src/assets.ts` carries the full measurement.
+ * A refusal that names its own fix is worthless if the fix is the cause, so these say
+ * `npm run build`, which runs every workspace's own build script and bakes the atlas.
+ */
+const REBUILD = 'run: npm run build';
 if (!existsSync(main)) {
-  refuse(`there is no ${main} to run`, 'run: npm run build -w @tn3270/gui');
+  refuse(`there is no ${main} to run`, REBUILD);
 }
-if (newest(join(here, '..', 'dist'), '.js', '.cjs') < newest(join(here, '..', 'src'), '.ts', '.cts')) {
-  refuse('dist/ is OLDER than src/, so this run would test stale code',
-    'run: npm run build -w @tn3270/gui  (if that reports everything up to date, only a ' +
-    'timestamp moved: npx tsc --build --force packages/gui)');
+for (const pkg of ['gui', 'canvas']) {
+  const root = join(here, '..', '..', pkg);
+  if (!existsSync(join(root, 'dist'))) {
+    refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`, REBUILD);
+  }
+  if (newest(join(root, 'dist'), '.js', '.cjs') < newest(join(root, 'src'), '.ts', '.cts')) {
+    refuse(`packages/${pkg}/dist is OLDER than packages/${pkg}/src, so this run would test ` +
+      'stale code',
+      `${REBUILD}  (if that reports everything up to date, only a timestamp moved: ` +
+      `npx tsc --build --force packages/${pkg})`);
+  }
 }
 
 const result = spawnSync(electron, [main, ...ARGV, '127.0.0.1:1'], {

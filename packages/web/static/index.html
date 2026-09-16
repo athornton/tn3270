@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>tn3270</title>
+<!--
+  `overflow:auto`, NOT `hidden`, and that differs deliberately from the Electron page's CSS.
+  MEASURED against live VM/370: a 43-row model-4 screen is 616px tall with its OIA, and in a
+  shorter viewport `overflow:hidden` put the entire operator status line beyond the edge with
+  nothing to reach it by. Electron resizes its window instead; a page cannot, so it scrolls.
+  See the matching note in `canvas/src/renderer.ts` about the canvas size.
+-->
+<style>html,body{margin:0;background:#000;overflow:auto}canvas{display:block}</style>
+</head><body><canvas id="screen"></canvas>
+<!--
+  ORDER MATTERS. Module scripts execute in document order, and `renderer.js` reads
+  `window.tn3270` in its module body, so the bridge must install it first. `bridge.js` ALSO
+  queues messages that arrive before the renderer registers its handlers -- see bridgecore.ts;
+  without that queue the atlas can be delivered to nobody and the canvas stays black with no error.
+-->
+<script type="module" src="./bridge.js"></script>
+<script type="module" src="./renderer.js"></script>
+</body></html>

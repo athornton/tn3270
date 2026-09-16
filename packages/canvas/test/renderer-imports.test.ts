@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url';
  * runtime from a variable (e.g. `import(pkgName)`) -- no regex can, and catching that would
  * need real bundler-grade analysis, not a text scan.
  */
-const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const distDir = join(guiDir, 'dist');
+const pkgDir = dirname(dirname(fileURLToPath(import.meta.url)));
+const distDir = join(pkgDir, 'dist');
 
 /** Every local module reachable from an entry point, following relative imports. */
 function graphFrom(entry: string): string[] {

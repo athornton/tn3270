@@ -1959,3 +1959,82 @@ author had already tried to close this exact gap once.
   to `renderer[` either, because level 2 arrives on EVERY run here as Chromium's own CSP
   warning and would fail every run. `shot.mjs` filters on the same literal; if the level
   moves, that is the other place to fix.
+
+## The web gateway against both hosts — verified 2026-09-16
+
+**It serves live 3270 screens from both Hercules systems to a real browser, and the session
+registry survives a real interruption.** Xvfb, Electron 44 as the browser, gateway on an
+ephemeral port, `-insecure` throughout.
+
+### `-insecure` IS REQUIRED and its absence HANGS rather than failing
+
+The gateway makes the HOST connection with the same default-on TLS as every other front end, so
+against plaintext Hercules it must be given `-insecure`. Without it the socket does not get
+refused — Hercules writes `IAC DO TERMINAL-TYPE` and waits, OpenSSL reads that leading `0xff` as a
+record content type, and the connection stalls. Note the two flag families do not share a prefix:
+the GATEWAY's own options are double-dashed (`--listen`, `--grace`, `--replay`, `--allow-origin`),
+while the client options it inherits keep s3270's single dash (`-insecure`, `-model`, `-scheme`).
+`--scheme` is refused as an unknown flag.
+
+### Row-by-row ink, the same method used for the Electron GUI
+
+A capture can be blank, clipped, or of the wrong screen and still be a valid PNG, so the rendered
+ink was compared **row by row against what the CLI reports for the same host** — two independent
+front ends over the same protocol core, one of them not even a browser.
+
+| host | model | window | rows agreeing on content-present |
+|---|---|---|---|
+| VM/370 CE, `:3270` | `3278-4-E` | 720x616 | **42 of 43**, the 43rd explained below |
+| MVS 3.8j TK5, `:3271` | `3278-4-E` | 720x350 | **24 of 24** |
+
+**The VM disagreement is the CURSOR, and it is the same one the GUI produced**: row 41 carries
+exactly **27 ink pixels = 9 x 3**, one cursor bar at scale 1 on an otherwise empty row.
+`ScreenText` does not include a cursor, so both views are right. The OIA band carries ink (44 px)
+on both hosts. Neither host was logged on: a logged-on VM account makes the next `LOGON`
+reconnect past the IPL to `CP READ`, which has produced three false failures here.
+
+**These numbers are IDENTICAL to the Electron GUI's**, which is the point — same renderer, same
+atlas, different transport.
+
+### THE CLIPPING BUG IS REAL IN A BROWSER, AND A BROWSER CANNOT RESIZE ITS WINDOW
+
+Model 4 is 43 rows, which with the OIA is 44 x 14 = **616px**. In an 800x600 viewport the entire
+OIA row fell **off the bottom of the image** — measured, `row OIA: OFF THE BOTTOM OF THE IMAGE`.
+This is the same failure the GUI hit on its first live run, and there `main.ts` fixes it by
+calling `setContentSize`. A page has no such power.
+
+`bestScale` floors at 1 and `centre` clamps its offsets at 0, so neither rescues it.
+
+The fix is in `canvas/src/renderer.ts`: the canvas is sized to
+`max(viewport, drawing)` rather than to the viewport, and the web page's CSS is `overflow:auto`
+rather than `hidden`, so the operator can scroll to data that does not fit. Measured both ways
+against live VM/370, by instrumenting the built renderer:
+
+| canvas sizing | canvas | viewport | page scrollable |
+|---|---|---|---|
+| viewport only (before) | 800x600 | 800x600 | **false** — the OIA is unreachable |
+| `max(viewport, drawing)` | 800x616 | 800x600 | **true** — the OIA is reachable |
+
+**It costs the Electron path nothing**, which is why changing a shared file was safe: main sets the
+content size to exactly `list.width * scale` by `list.height * scale`, so the `max` picks the
+viewport and the line does what it always did. **Both GUI goldens still match byte for byte**, and
+the served page remains pixel-identical to `synthetic-ispf.sha256`.
+
+### Two sessions, and reattachment across a real interruption
+
+Driven with Node's built-in WebSocket rather than a browser: the browser half is already proven by
+`browser-keys.mjs` and `browser-shot.mjs`, and what is under test here is the registry against a
+real host holding a real connection open, which no unit test can do. Run with `--grace 8` so the
+expiry half does not take a minute.
+
+| step | measured |
+|---|---|
+| two concurrent sessions | two DISTINCT ids, **both painting a full 43x80 screen** — two Hercules devices, both being driven |
+| reattach after 4s (grace 8s) | **no fresh `session` message**, so the SAME session was handed back and repainted |
+| reconnect after grace expiry | a **new** id, differing from the old, and a fresh screen |
+
+The absence of the `session` message is the load-bearing observation for reattachment: it is what
+says the registry returned the existing `Session` rather than building another one. Note that
+neither host showed the documented **0 fields** case here — both devices were being driven — so
+that remains a possibility rather than something seen on this run.
+

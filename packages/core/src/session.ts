@@ -1,6 +1,6 @@
 import {
   AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
-  Tn3270eSense,
+  Tn3270eSense, VALID_AIDS,
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
@@ -122,6 +122,35 @@ export class Session {
     let set = this.listeners.get(event);
     if (!set) { set = new Set(); this.listeners.set(event, set); }
     set.add(fn);
+  }
+
+  /**
+   * Stop calling `fn` for `event`. A no-op if it was never registered.
+   *
+   * ## WHY THIS EXISTS: A SESSION CAN OUTLIVE ITS LISTENER
+   *
+   * For three of the four front ends it does not — a TUI or a GUI registers once and lives as long
+   * as the process. The web gateway is different BY DESIGN: its sessions outlive their sockets so an
+   * operator can reload, or survive a wifi handoff, and reattach to the running 3270 session. Each
+   * attach registers three listeners, and with no way to remove them a session reattached ten times
+   * carried thirty. Every later screen change then ran `drawList` and `deflateSync` thirty times,
+   * twenty-nine of them for dead connections that discard the result — unbounded in the number of
+   * reconnections, and invisible because the output was correct throughout.
+   *
+   * A no-op rather than a throw for an unknown function, because the gateway calls this on every
+   * socket close, including sockets that never reached `hello` and so registered nothing. Throwing
+   * there would turn an ordinary disconnect into an error on a path with nobody to tell.
+   */
+  off(event: SessionEvent, fn: () => void): void {
+    this.listeners.get(event)?.delete(fn);
+  }
+
+  /**
+   * How many listeners `event` has. Exists so a leak is OBSERVABLE to a test: without it the only
+   * symptom of the bug above is wasted CPU, which no assertion can see.
+   */
+  listenerCount(event: SessionEvent): number {
+    return this.listeners.get(event)?.size ?? 0;
   }
 
   private emit(event: SessionEvent): void {
@@ -564,8 +593,22 @@ export class Session {
     this.oia.enterInhibit();
   }
 
-  /** Operator pressed a key that generates an AID. */
+  /**
+   * Operator pressed a key that generates an AID.
+   *
+   * THE BYTE IS CHECKED, and that check is the backstop for a defect that reached a live host: an
+   * out-of-range `PF_AIDS[n - 1]!` is `undefined`, and `buildReadModified`'s `Uint8Array.from`
+   * coerces that to **0**, so a bogus `0x00` AID went to a mainframe and locked the keyboard.
+   * `pfAID`/`paAID` fix the callers; this makes the bad byte unsendable by any caller written later.
+   *
+   * Checked BEFORE the connected test, so the diagnosis does not depend on whether a socket happens
+   * to be open: a caller passing a nonsense AID has a bug either way, and hearing 'not connected'
+   * first would send them looking at the transport.
+   */
   sendAID(aid: number): void {
+    if (!VALID_AIDS.has(aid)) {
+      throw new RangeError(`${aid} is not an AID byte; use AID, pfAID(n) or paAID(n)`);
+    }
     if (this.telnet === undefined) throw new Error('not connected');
 
     const payload = buildReadModified(this.screen, aid, false);

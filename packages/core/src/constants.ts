@@ -473,6 +473,59 @@ export const PF_AIDS: readonly number[] = [
 export const PA_AIDS: readonly number[] = [AID.PA1, AID.PA2, AID.PA3];
 
 /**
+ * The AID byte for PF key `n`, or a `RangeError` naming the range.
+ *
+ * ## USE THIS RATHER THAN INDEXING THE TABLE, AND THE REASON IS A MEASURED LIVE DEFECT
+ *
+ * `PF_AIDS[n - 1]!` looks safe and is not. An out-of-range `n` yields `undefined`, the non-null
+ * assertion hides it from the compiler, and `buildReadModified` finishes the job:
+ * `Uint8Array.from([undefined])` SILENTLY COERCES TO 0. So `{kind:'pf', n:-1}` did not fail --
+ * it transmitted **AID 0x00 to a live mainframe**, then locked the local keyboard while
+ * `applyAction`'s catch-all swallowed any complaint. Measured on the wire as
+ * `[0x00, 0x40, 0x40, 0xff, 0xef]`.
+ *
+ * Three of the four front ends were safe only by accident, because their `n` comes from a trusted
+ * keymap table. The web gateway is the first where a REMOTE party supplies it. Bounding it at that
+ * boundary closed the live hole; this closes the CLASS, by making the unchecked index unreachable
+ * from the API rather than merely unused today.
+ *
+ * It throws rather than returning `undefined` deliberately: a caller that must handle `undefined`
+ * can still forget, and `sendAID` would take it. A throw from inside `applyAction`'s `try` puts
+ * nothing on the wire at all, which is the correct outcome for a number no key can produce.
+ *
+ * The bound is the table's own length, never a literal 24, so the two cannot drift apart.
+ */
+export function pfAID(n: number): number {
+  const aid = Number.isInteger(n) ? PF_AIDS[n - 1] : undefined;
+  if (aid === undefined) {
+    throw new RangeError(`PF number must be an integer in 1..${PF_AIDS.length}, not ${n}`);
+  }
+  return aid;
+}
+
+/** The AID byte for PA key `n`, or a `RangeError`. See `pfAID` for why this is not an index. */
+export function paAID(n: number): number {
+  const aid = Number.isInteger(n) ? PA_AIDS[n - 1] : undefined;
+  if (aid === undefined) {
+    throw new RangeError(`PA number must be an integer in 1..${PA_AIDS.length}, not ${n}`);
+  }
+  return aid;
+}
+
+/**
+ * Every byte that is a legitimate AID, for `sendAID` to check against.
+ *
+ * The BACKSTOP behind `pfAID`/`paAID`: those two fix the callers that exist, and this makes a bogus
+ * AID unsendable by any caller, including one written later. `0x00` -- the exact value the coercion
+ * above produced -- is not in this set, and neither is `undefined`.
+ *
+ * Built from `AID` itself so a new key added there is accepted without a second edit here. That is
+ * also why this is a `Set` of the values rather than a hand-written list: a list would be the same
+ * drift risk in a new place.
+ */
+export const VALID_AIDS: ReadonlySet<number> = new Set(Object.values(AID));
+
+/**
  * Short-read AIDs send the AID byte ALONE — no cursor address, no field data.
  * GA23-0059-07: "During the short-read operation, only an AID byte is
  * transferred to the application program." x3270's ctlr_read_modified jumps to

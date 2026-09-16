@@ -40,6 +40,41 @@ describe('applyAction', () => {
     expect(conn.sent[0]).toBe(0xf3);        // PF3
   });
 
+  it('puts NOTHING on the wire for an out-of-range pf or pa number', async () => {
+    // THE DEFECT THIS PINS, measured before the fix: `PF_AIDS[action.n - 1]!` on an out-of-range
+    // `n` is `undefined`, the `!` hides it, and `buildReadModified`'s `Uint8Array.from([undefined])`
+    // SILENTLY COERCES IT TO 0 -- so `{kind:'pf', n:-1}` transmitted AID 0x00 to a live mainframe
+    // and locked the local keyboard, with `applyAction`'s catch-all swallowing any complaint.
+    //
+    // The other front ends were safe only because their `n` comes from a trusted keymap table. The
+    // web gateway is the first where a REMOTE party supplies it, and bounding it there closed the
+    // live hole -- but at the boundary, not structurally.
+    //
+    // THIS IS A DEFENCE-IN-DEPTH TEST, and the mutation matrix is worth stating because it is not
+    // what it first looks like. TWO independent guards now stand behind it: `pfAID`/`paAID` refuse
+    // the number, and `Session.sendAID` refuses the resulting byte. MEASURED, all four combinations:
+    //
+    //   both guards            -> nothing sent (this test passes)
+    //   accessor removed only  -> nothing sent; `sendAID` refuses `undefined`
+    //   backstop removed only  -> nothing sent; `pfAID` throws first
+    //   BOTH removed           -> [0x00, 0x40, 0x40, 0xff, 0xef] on the wire, the original defect
+    //
+    // So this test alone does NOT pin either guard -- it pins that at least one survives, which is
+    // the property that actually matters here. Each guard has its own falsifying test:
+    // `constants.test.ts` for the accessors and `session.test.ts` for `sendAID`.
+    for (const action of [
+      { kind: 'pf', n: -1 }, { kind: 'pf', n: 0 }, { kind: 'pf', n: 25 }, { kind: 'pf', n: 1e9 },
+      { kind: 'pf', n: 1.5 }, { kind: 'pf', n: Number.NaN },
+      { kind: 'pa', n: 0 }, { kind: 'pa', n: 4 }, { kind: 'pa', n: -1 },
+    ] as const) {
+      const { session, conn } = newSession();
+      await session.connect('h', 23);
+      conn.sent = [];
+      applyAction(session, action);
+      expect(conn.sent, `for ${JSON.stringify(action)}`).toEqual([]);
+    }
+  });
+
   it('sends PA2 as its own AID too', async () => {
     // The same off-by-one risk on the other table, which has only three entries.
     const { session, conn } = newSession();

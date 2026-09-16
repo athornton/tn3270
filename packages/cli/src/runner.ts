@@ -1,5 +1,5 @@
 import {
-  Session, AID, PF_AIDS, PA_AIDS, KeyboardState,
+  Session, AID, PF_AIDS, PA_AIDS, pfAID, paAID, KeyboardState,
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import {
@@ -191,16 +191,24 @@ export class Runner {
       case 'Enter': s.sendAID(AID.ENTER); return;
       case 'Clear': s.sendAID(AID.CLEAR); return;
 
+      // THE BOUNDS COME FROM CORE'S TABLES, not from the literals 24 and 3 that used to be here:
+      // `pfAID`/`paAID` refuse an out-of-range number themselves. The explicit check remains only to
+      // keep this action's own message shape, which scripts and `runner.test.ts` read -- the
+      // accessor is what makes the unchecked index unreachable.
       case 'PF': {
         const n = Number(args[0]);
-        if (!Number.isInteger(n) || n < 1 || n > 24) throw new Error(`PF number out of range: ${args[0]}`);
-        s.sendAID(PF_AIDS[n - 1]!);
+        if (!Number.isInteger(n) || n < 1 || n > PF_AIDS.length) {
+          throw new Error(`PF number out of range: ${args[0]}`);
+        }
+        s.sendAID(pfAID(n));
         return;
       }
       case 'PA': {
         const n = Number(args[0]);
-        if (!Number.isInteger(n) || n < 1 || n > 3) throw new Error(`PA number out of range: ${args[0]}`);
-        s.sendAID(PA_AIDS[n - 1]!);
+        if (!Number.isInteger(n) || n < 1 || n > PA_AIDS.length) {
+          throw new Error(`PA number out of range: ${args[0]}`);
+        }
+        s.sendAID(paAID(n));
         return;
       }
       case 'Attn': s.sendAttn(); return;

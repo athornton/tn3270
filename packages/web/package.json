@@ -1,17 +1,17 @@
 {
-  "name": "@tn3270/gui",
+  "name": "@tn3270/web",
   "version": "0.1.0",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
   "main": "./dist/main.js",
+  "bin": {
+    "tn3270-web": "./dist/main.js"
+  },
   "dependencies": {
     "@tn3270/canvas": "0.1.0",
     "@tn3270/core": "0.1.0",
     "@tn3270/frontend": "0.1.0"
-  },
-  "devDependencies": {
-    "electron": "^44.0.0"
   },
   "scripts": {
     "build": "tsc --build"

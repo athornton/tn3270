@@ -95,8 +95,24 @@ function paint(list: DrawList): void {
   const scale = bestScale(list, within);
   const at = centre(list, within, scale);
 
-  canvas.width = within.width;
-  canvas.height = within.height;
+  /**
+   * THE CANVAS IS AT LEAST AS BIG AS THE DRAWING, NEVER JUST THE VIEWPORT.
+   *
+   * MEASURED against live VM/370 through the web gateway, 2026-09-16: a model-4 screen is 43 rows,
+   * which with the OIA is 44 x 14 = 616px, and in an 800x600 viewport the OIA row was **entirely off
+   * the bottom of the capture** -- the whole operator status line gone, silently, with no error
+   * anywhere. That is the same bug the Electron GUI hit on ITS first live run, and there main can fix
+   * it by resizing the window. A BROWSER PAGE CANNOT RESIZE ITS WINDOW, so the renderer has to stop
+   * losing the data instead: sizing the canvas to the drawing lets the page scroll to reach it.
+   *
+   * `bestScale` floors at 1 and `centre` clamps its offsets at 0, so neither of them saves this.
+   *
+   * NO EFFECT ON ELECTRON, which is why it is safe to change a file both front ends share: main sets
+   * the content size to exactly `list.width * scale` by `list.height * scale`, so the `max` picks the
+   * viewport and this line does what it always did. Both GUI goldens still match byte for byte.
+   */
+  canvas.width = Math.max(within.width, list.width * scale);
+  canvas.height = Math.max(within.height, list.height * scale);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
