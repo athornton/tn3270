@@ -3529,7 +3529,52 @@ Co-Authored-By: SLAC AI"
 
 ### Task 15: documentation, whole-branch verification, merge
 
-- [ ] **Step 1: Write the docs**
+**AS BUILT — steps 1-3 done; step 4, the merge, is left for the user to authorise.**
+
+**THE TEST COUNT RECONCILES EXACTLY, which this task asked for instead of editing a number in.**
+The plan predicted **1445 in 66 files**; the real number is **1493 in 66 files**.
+- **The file count is exactly right**: 55 on `main` plus the eleven new test files. The `canvas`
+  extraction moved tests between packages without adding any, so it nets to zero here.
+- **The 48-test excess is per-file additions, and they sum precisely**: args +7, wsframe +6,
+  handshake +9, protocol +2, sessions +4, wsserver +7, httpstatic +5, integration +4,
+  browser-harness-flags +4, with bridgecore and tls exactly as estimated. 1445 + 48 = 1493. Every
+  one of those additions is a gap recorded in the AS BUILT note for its task -- the frame-size cap,
+  the prototype-lookup refusals, the module-graph closure, the raw-socket Origin and `head` tests,
+  and the source scan for the timing-safe compare.
+
+**A CLAIM HAD GONE FALSE AND THE DIFF REVIEW CAUGHT IT.** Three documents said `renderer.ts` is
+reused **UNMODIFIED**, and after Task 14's clipping fix it differs by two lines. Corrected in the
+root README, `packages/web/README.md` and `docs/HANDOFF.md`, and the SPEC's success criterion 2 is
+annotated as *met in part* rather than left reading as satisfied. Verified by diffing against `main`
+that every other line of `renderer.ts` and all five of `blit.ts`, `keys.ts`, `drawlist.ts`, `cg.ts`
+and `bdf.ts` ARE byte-identical -- which also confirms the Task 12 mutation of `keys.ts` was fully
+reverted. This is the recurring documentation failure in this project: **the fix reaches the prose
+body and never the summary line.**
+
+**The diff review found nothing else.** No leftover mutation in the shared files, no stray
+`console.log` in any `src`, the action log gated on `--log-actions` which is itself refused without
+`--replay`, and the two flag families still apart -- `--tls-cert/--tls-key/--tls-chain` for the
+BROWSER side, and `takeTlsFlag`'s `-insecure/-cafile/-noverifycert` from the shared frontend parser
+for the HOST side. 57 files changed, 8112 insertions.
+
+**THE WHOLE GATE, run at the end and all of it green:**
+
+| check | result |
+|---|---|
+| `npm run build`, `npm run typecheck` | clean, silent |
+| `npx vitest run` | **1493 passed in 66 files** |
+| `pty-smoke.py` | **12/12** |
+| `gui/scripts/shot.mjs` | **2/2 goldens matched** |
+| `gui/scripts/keys.mjs` | **ok 15 chords, 13 actions in order** |
+| `web/scripts/browser-keys.mjs` | **ok 12 chords, 10 actions in order, over a WebSocket** |
+| `web/scripts/browser-shot.mjs` | **ok pixel-identical to the GUI golden (720x350)** |
+
+**Step 4 was NOT executed.** The branch is pushed and complete; merging to `main` and deleting the
+branch is the user's call, and two design questions were still unanswered when the work finished
+(the `PF_AIDS` structural fix and whether the token should still default ON), plus a third found
+here: `Session` has no `off()`.
+
+- [x] **Step 1: Write the docs**
 
 - `packages/web/README.md`: what it is, the invocation, every flag, and — prominently — that
   without `--tls-cert` keystrokes cross the network in the clear, that `--auth off` means anything
@@ -3540,7 +3585,7 @@ Co-Authored-By: SLAC AI"
   (`core ← canvas ← { gui, web }`), the new counts, and that `browser-keys.mjs` and
   `browser-shot.mjs` are by-hand harnesses like `shot.mjs`, `keys.mjs` and `pty-smoke.py`.
 
-- [ ] **Step 2: Verify everything**
+- [x] **Step 2: Verify everything**
 
 ```bash
 cd ~/git/tn3270
@@ -3559,7 +3604,7 @@ expected total is 1352 plus the new files: `args` 10, `wsframe` 12, `handshake` 
 `sessions` 10, `wsserver` 8, `httpstatic` 10, `bridgecore` 8, `integration` 5, `tls` 2,
 `browser-harness-flags` 8 — **1445 in 66 files**. If the real number differs, find out why.
 
-- [ ] **Step 3: Read the whole diff**
+- [x] **Step 3: Read the whole diff**
 
 Run: `cd ~/git/tn3270 && git diff main...HEAD`
 Look for: a mutation left behind in `packages/canvas/src/keys.ts` or `renderer.ts`; a stray
