@@ -1,5 +1,17 @@
+// TYPE-ONLY, AND IT MUST STAY THAT WAY. `drawlist.js` imports this module at runtime, so a value
+// import here would close a cycle; `import type` erases, and `dist/cg.js` therefore has NO imports
+// at all. That is also what keeps this module usable from anywhere, the way `hittest.ts` is.
+import type { AtlasGeometry } from './drawlist.js';
+
 /**
- * EBCDIC code point to 3270 Character Generator (CG) index.
+ * EBCDIC code point to 3270 Character Generator (CG) index, and CG index to atlas column.
+ *
+ * BOTH LINKS OF THE GLYPH CHAIN LIVE HERE, in the order a character travels them: an EBCDIC byte
+ * becomes a CG code (`ebcdicToCg`), and a CG code becomes the atlas column that holds its bitmap
+ * (`column`). They are consecutive steps of one lookup and both fall back to `CG_BOXSOLID` below,
+ * so splitting them across two modules bought nothing and cost an import cycle -- `column` used to
+ * live in `drawlist.ts`, which `keypad.ts` then had to import at runtime while `drawlist.ts`
+ * imported `keypad.ts` back.
  *
  * ## WHY THIS TABLE HAS TO EXIST, AGAINST WHAT THE SPEC ORIGINALLY CLAIMED
  *
@@ -74,4 +86,21 @@ export const CG_BOXSOLID = 0xdf;
  */
 export function ebcdicToCg(ebcdic: number): number {
   return EBC2CG[ebcdic & 0xff] ?? CG_BOXSOLID;
+}
+
+/**
+ * The atlas column for a CG code, falling back to the solid box.
+ *
+ * A MISS MUST NOT BECOME AN OUT-OF-RANGE COLUMN. Sampling past the end of the atlas draws
+ * whichever glyph sits next along, which reads as corruption rather than as a missing
+ * character -- so an unknown code gets x3270's visible unprintable marker instead.
+ *
+ * THE ONE COPY, SHARED BY `drawlist.ts` AND `keypad.ts`. `atlas.index` is a sparse map and
+ * emphatically not the identity: 175 of its 431 entries differ from their CG code, because the
+ * font's encodings run 0..543 with holes and the atlas is packed. Any second calculation --
+ * `cg % atlas.cols` was the one proposed for the keypad -- both loses the fallback above and
+ * returns the wrong column for every code past 256, which is a font bug only a golden could catch.
+ */
+export function column(atlas: AtlasGeometry, cg: number): number {
+  return atlas.index[cg] ?? atlas.index[CG_BOXSOLID] ?? 0;
 }

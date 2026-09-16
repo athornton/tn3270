@@ -2,11 +2,7 @@ import {
   cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
-import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
-// A CYCLE ON PURPOSE, AND TYPE-SAFE: `keypad.js` imports `column` from here. Both directions are
-// function calls made long after module evaluation, and neither module reads the other at load
-// time, so ESM's hoisting resolves it either way round. The alternative -- a second copy of
-// `column()` -- is the font bug `column`'s own comment below describes.
+import { ebcdicToCg, column } from './cg.js';
 import { keypadRegion, type KeypadRegion } from './keypad.js';
 
 /**
@@ -154,9 +150,13 @@ export function drawList(
     // A conditional spread and not `keypad,`: `exactOptionalPropertyTypes` makes an explicit
     // `undefined` a type error for an optional property, as it already does for `oia` above.
     ...(keypad !== undefined ? { keypad } : {}),
-    // The keypad is narrower than any 3270 screen (72 columns against 80), so it never widens the
-    // window; the height it adds is measured from the region's OWN extent rather than recomputed
-    // from a row count, so `keypad.ts` stays the only place that knows how tall the keypad is.
+    // The keypad is narrower than any 3270 MODEL (72 columns against 80, and 132 on a model 5), so
+    // it never widens the window. Not narrower than any GEOMETRY: `checkGeometry`
+    // (`core/src/screen.ts:101`) accepts any positive `cols`, and 40 columns would be 360 pixels
+    // against the keypad's 648 -- `drawlist.test.ts` writes the assumption down as
+    // `keypad.width <= width`. The height it adds is measured from the region's OWN extent rather
+    // than recomputed from a row count, so `keypad.ts` stays the only place that knows how tall
+    // the keypad is.
     width: snapshot.cols * atlas.cellWidth,
     height: keypad !== undefined ? keypadY + keypad.height : rows * atlas.cellHeight,
   };
@@ -191,21 +191,4 @@ function oiaCells(
     });
   }
   return out;
-}
-
-/**
- * The atlas column for a CG code, falling back to the solid box.
- *
- * A MISS MUST NOT BECOME AN OUT-OF-RANGE COLUMN. Sampling past the end of the atlas draws
- * whichever glyph sits next along, which reads as corruption rather than as a missing
- * character -- so an unknown code gets x3270's visible unprintable marker instead.
- *
- * EXPORTED FOR `keypad.ts`, WHICH MUST NOT HAVE ITS OWN COPY. `atlas.index` is a sparse map and
- * emphatically not the identity: 175 of its 431 entries differ from their CG code, because the
- * font's encodings run 0..543 with holes and the atlas is packed. Any second calculation --
- * `cg % atlas.cols` was the one proposed -- both loses the fallback above and returns the wrong
- * column for every code past 256, which is a font bug only a golden could catch.
- */
-export function column(atlas: AtlasGeometry, cg: number): number {
-  return atlas.index[cg] ?? atlas.index[CG_BOXSOLID] ?? 0;
 }
