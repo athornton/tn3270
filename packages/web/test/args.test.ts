@@ -66,6 +66,36 @@ describe('parseWebArgs', () => {
     expect(parseWebArgs(['--replay', '/tmp/t.trace', 'vm:3270']).replay).toBe('/tmp/t.trace');
   });
 
+  /**
+   * `--allow-origin` is REPEATABLE, and it exists because nginx's default
+   * `proxy_set_header Host $proxy_host` (and Apache's default `ProxyPreserveHost Off`) rewrites Host
+   * to the upstream address, which no browser's Origin can match. Without this the Origin check
+   * refuses every legitimate browser behind such a proxy. Do not "simplify" it to a single value.
+   */
+  it('defaults --allow-origin to an empty list and COLLECTS repeats', () => {
+    expect(parseWebArgs(['vm:3270']).allowOrigins).toEqual([]);
+    expect(parseWebArgs(['--allow-origin', 'https://gw.example', 'vm:3270']).allowOrigins)
+      .toEqual(['https://gw.example']);
+    const a = parseWebArgs([
+      '--allow-origin', 'https://gw.example', '--allow-origin', 'https://alt.example', 'vm:3270',
+    ]);
+    expect(a.allowOrigins).toEqual(['https://gw.example', 'https://alt.example']);
+    // The arithmetic check, as with the TLS flags: the host must survive two value-taking flags.
+    expect(a.host).toBe('vm');
+    expect(a.port).toBe(3270);
+  });
+
+  it('refuses --allow-origin with no value instead of eating the host', () => {
+    expect(() => parseWebArgs(['vm:3270', '--allow-origin'])).toThrow(/--allow-origin/);
+  });
+
+  it('stores the value verbatim -- no normalising, so no accidental wildcard support', () => {
+    // handshake.ts compares these as exact strings. Parsing must not helpfully strip a trailing
+    // slash or lowercase a scheme, or the flag would start matching more than the operator wrote.
+    expect(parseWebArgs(['--allow-origin', 'https://*.example', 'vm:3270']).allowOrigins)
+      .toEqual(['https://*.example']);
+  });
+
   it('refuses an unknown flag rather than ignoring it', () => {
     expect(() => parseWebArgs(['--wat', 'vm:3270'])).toThrow(UsageError);
   });

@@ -24,6 +24,14 @@ import { resolveHostSpec, takeTlsFlag, type TlsFlags } from '@tn3270/frontend';
  * decide anything. Turning that into an actual `TlsOptions` is `resolveTls`'s job, and it is
  * deliberately left to whichever later task opens the connection to the mainframe -- this file
  * is argument parsing only, per the plan for this task.
+ *
+ * ## `--allow-origin` EXISTS BECAUSE THE COMMON PROXY DEFAULT BREAKS THE HOST COMPARISON
+ *
+ * It is REPEATABLE and it is NOT redundant with `handshake.ts`'s Origin-versus-Host check.
+ * MEASURED: nginx's default `proxy_set_header Host $proxy_host` and Apache's default
+ * `ProxyPreserveHost Off` rewrite Host to the upstream address, so a browser at `https://gw.example`
+ * reaches us as `Host: 127.0.0.1:8270` and no legitimate browser can ever match. Exact strings
+ * only -- see the note in `handshake.ts` for why no wildcard form is accepted.
  */
 export class UsageError extends Error {
   constructor(message: string) {
@@ -41,6 +49,8 @@ export interface WebArgs {
   readonly token: string;
   readonly graceMs: number;
   readonly maxSessions: number;
+  /** Extra Origins the upgrade check accepts verbatim, in the order given. Empty by default. */
+  readonly allowOrigins: readonly string[];
   readonly tls?: { cert: string; key: string; chain?: string };
   readonly replay?: string;
   readonly hostTls: TlsFlags;
@@ -77,6 +87,8 @@ function nonNegativeInt(raw: string, flag: string): number {
 export function parseWebArgs(argv: readonly string[]): WebArgs {
   const rest: string[] = [];
   const hostTls: TlsFlags = {};
+  // Repeatable, so it accumulates rather than being overwritten by the last occurrence.
+  const allowOrigins: string[] = [];
   let bind = '127.0.0.1';
   let listen = 8270;
   let auth = true;
@@ -109,6 +121,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
         auth = v === 'on';
         continue;
       }
+      case '--allow-origin': allowOrigins.push(value(args, i, a)); i += 1; continue;
       case '--grace': graceMs = positiveInt(value(args, i, a), a) * 1000; i += 1; continue;
       case '--max-sessions': maxSessions = positiveInt(value(args, i, a), a); i += 1; continue;
       case '--tls-cert': cert = value(args, i, a); i += 1; continue;
@@ -141,7 +154,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     port: resolved.port,
     bind, listen, auth,
     token: token ?? randomBytes(16).toString('hex'),
-    graceMs, maxSessions,
+    graceMs, maxSessions, allowOrigins,
     ...(cert !== undefined && key !== undefined
       ? { tls: { cert, key, ...(chain !== undefined ? { chain } : {}) } } : {}),
     ...(replay !== undefined ? { replay } : {}),
