@@ -69,6 +69,14 @@ describe('overlayLines', () => {
     // below covers them the moment Task 4 lands, with no edit to this file.
     expect(lineFor('Reset')).toBe(`  Reset${' '.repeat(CHORD_COL - 7)}Ctrl-R`);
     expect(lineFor('Back Tab')).toBe(`  Back Tab${' '.repeat(CHORD_COL - 10)}Shift-Tab`);
+
+    // The `n`-discriminated pair, written out as GROUND TRUTH rather than derived. The sweep below
+    // recomputes the module's own matching rule, so a rule that is wrong the same way in both
+    // would pass it; these two do not. A lookup that matched on `kind` alone hands every PF key
+    // the first `pf` row's chord, so PF13 would read F1 -- and PF1 alone cannot tell the two
+    // apart. Source: bindings.ts binds F1 to PF1 and Shift-F1 to PF13 (Shift+F(n) is PF(n+12)).
+    expect(lineFor('PF1')).toBe(`  PF1${' '.repeat(CHORD_COL - 5)}F1`);
+    expect(lineFor('PF13')).toBe(`  PF13${' '.repeat(CHORD_COL - 6)}Shift-F1`);
   });
 
   it('derives the chord column from BINDING_INTENT rather than a second list', () => {
