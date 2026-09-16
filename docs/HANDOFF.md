@@ -4,14 +4,78 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## Where things stand — THE WEB GATEWAY IS DONE AND MERGED, 2026-09-16
+## START HERE — NEXT ACTION, 2026-09-16
 
-**`main` is at `d52ee57`, pushed and in sync, and it is the ONLY branch — `web-gateway` was merged
-`--no-ff` and deleted, local and remote.** Roadmap item (3) is closed: all 15 tasks, plus the three
-follow-up questions the user then answered. **1514 tests passing in 66 files**, `npm run typecheck`
-and `npm run build` clean, working tree clean, both GUI goldens matching, `pty-smoke.py` 12/12, and
-both by-hand browser harnesses passing — all re-run on the MERGE COMMIT itself, not just on the
-branch.
+**Nothing is in progress. `main` is clean, pushed, and the only branch. The next piece of work is
+DESIGNED AND PLANNED BUT NOT STARTED: roadmap item (9), the virtual keypad.**
+
+1. Read `docs/superpowers/specs/2026-09-16-keypad-and-special-keys-design.md`, then
+   `docs/superpowers/plans/2026-09-16-keypad-and-special-keys.md` (**15 tasks, 92 steps**). Do not
+   re-design it and do not re-derive the spec's *Facts established from sources* table — four of
+   those facts change the implementation.
+2. **Create a branch first.** The last three features each ran on their own branch and merged
+   `--no-ff` (`web-gateway`, `electron-gui`, `shared-frontend`). Nothing has been branched for this.
+3. **TWO DECISIONS ARE WAITING ON THE USER, and both were asked at the end of the last session:**
+   - **How to execute**: subagent-driven (a fresh subagent per task, reviewed between tasks) or
+     inline. **Subagent-driven needs the user's explicit go-ahead**, because this environment's
+     guidance says not to use the Agent tool unless asked. Worth telling them: telling implementers
+     that THE SOURCE BEATS THE PLAN is what surfaced ten plan defects on the web-gateway branch and
+     six on the one before.
+   - **The keypad font.** The spec records it as PROVISIONAL — the user is not convinced the x3270
+     glyph atlas suits keypad labels and agreed to try it and see. Task 8 step 4 and Task 15 step 5
+     are the points where they look at a PNG and decide. The spec ranks the fallbacks; the one to
+     resist is `fillText`, which would stop the screenshot goldens being byte-reproducible.
+
+**Also asked for and not yet scheduled: more TN3270E.** The user said on 2026-09-16 that they want
+to "add tn3270e support pretty soon". **TN3270E is already done and merged** (stage 2b) — that was
+corrected in the conversation, and what actually remains inside it is **BIND/UNBIND**, **printer
+sessions**, and **`IBM-DYNAMIC`** with Query-Reply-driven geometry. `IBM-DYNAMIC` is the one with a
+live path today: TK5's TSO issues a Read Partition to any `-E` client. Offer these as the next spec
+after the keypad, or before it if they prefer.
+
+### What the keypad work already established, so it is not re-derived
+
+Checked against sources during design, 2026-09-16. All of it is in the spec's own table; this is the
+short version for anyone deciding whether to read further.
+
+- **`EBC_dup = 0x1c`, `EBC_fm = 0x1e`** (x3270 `include/3270ds.h:364-365`).
+- **Dup and Field Mark are typed CHARACTERS, not AIDs** — `Common/kybd.c:2788` and `:2825` both call
+  `key_Character(...)`. Nothing about them touches `sendAID`.
+- **A keyboard Dup SUPPRESSES auto-skip; a pasted one does not** (`kybd.c:1435`, with x3270's own
+  comment saying exactly that). Our `advanceAfterType` IS that auto-skip, so `dup()` must not run it.
+  This is invisible from the key's name and is the finding most likely to be lost.
+- **A numeric field refuses both**, because `key_Character` tests the EBCDIC byte and permits only
+  digits, plus, minus, period and comma (`kybd.c:1232-1238`).
+- **`Session.sysreq()` has existed since stage 2b with no front end able to call it.**
+- **Chords come from c3270's own keymap**: `Ctrl-D` = Dup, `Ctrl-F` = FieldMark (`Common/fb-c3270:88`,
+  `:93`). c3270 toggles its keypad with `Alt-K` (`:48`) — which reaches a terminal as `ESC k`, so the
+  TUI uses `Ctrl-K` instead and the canvas front ends accept both. **Sys Req gets no chord; c3270
+  defines none either.**
+- **The key SET is c3270's keypad** (`Common/c3270/keypad.labels`), which is worth reading — it is a
+  character-cell keypad, and `keypad.outline` is literal ASCII art of one.
+- **The layout is 46 buttons**, not 43. The spec's first draft said 43 and was wrong; it was caught
+  by counting the rows mechanically rather than by eye.
+
+### One architectural fact that decides more than it looks like
+
+**`packages/gui/src/main.ts:290` sizes the window from the DRAW LIST** —
+`setContentSize(list.width * scale, list.height * scale)`. That is why the keypad is a third
+`DrawList` region rather than something the renderer owns: a renderer-owned keypad would leave main
+unaware the drawing had grown, and the Electron page is `overflow:hidden`, so it would be clipped
+exactly as model 4's OIA row was. The alternative was a fifth bridge function, and `bridgecore.ts`
+states that a fifth function means the renderer has stopped being shared.
+
+## The state of the tree
+
+**`main` at `eb9c306`, pushed, the ONLY branch, working tree clean. 1514 tests in 66 files**,
+`npm run typecheck` and `npm run build` clean, both GUI goldens matching, `pty-smoke.py` 12/12, and
+both by-hand browser harnesses passing.
+
+**THE WEB GATEWAY IS DONE AND MERGED** as `d52ee57` (`--no-ff`, 39 commits; branch deleted local and
+remote). Roadmap item (3) is closed: all 15 tasks plus the three follow-up questions the user then
+answered — the token now defaults OFF, the AID hole is structurally closed in two layers, and
+`Session.off()`/`listenerCount()` exist. The whole gate was re-run **on the merge commit itself**,
+not only on the branch.
 Spec `docs/superpowers/specs/2026-09-15-web-gateway-design.md`, plan
 `docs/superpowers/plans/2026-09-15-web-gateway.md` — **the plan is heavily annotated with AS BUILT
 notes recording the defects found while executing it, and those annotations are the most valuable
@@ -364,6 +428,26 @@ BIND-IMAGE by design) and the **printer session now has its harness but nothing 
 driven it**.
 
 ## Roadmap, from the user 2026-08-25
+
+**STATUS AS OF 2026-09-16 — the list below is kept as WRITTEN, not rewritten.** This file's practice
+is to leave superseded items in place, because that is what let a correction land cleanly once
+before. Read the status here and the reasoning there.
+
+| item | state |
+| --- | --- |
+| 1. the rest of TN3270E | **DONE** (stage 2b), except **BIND/UNBIND** and **printer sessions**; `IBM-DYNAMIC` also outstanding |
+| 2. the Electron app | **DONE** and merged |
+| 3. a webserver serving the same front end | **DONE** and merged, 2026-09-16 |
+| 4. Programmable Symbol Sets + VMGIF | not started; **the user moved the keypad ahead of it** on 2026-09-15 |
+| 5. packaging | not started |
+| 6. TLS | **DONE** and live-verified |
+| 7. the printer session | not started |
+| 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | not started. `IBM-DYNAMIC` has a live path; the negotiation does not, since both Hercules hosts refuse option 40 |
+| 9. keypad / special-keys menu (added 2026-09-14) | **SPEC AND PLAN WRITTEN, NOT STARTED** — this is the next action; see the top of this file |
+
+**So the order from here is: (9) the keypad, then (4) PS + VMGIF, with packaging, the printer
+session, BIND/UNBIND and `IBM-DYNAMIC` unscheduled.** The user asked about more TN3270E on
+2026-09-16, so those last two may move up.
 
 **THIS LIST IS NOT EXHAUSTIVE, AND THE USER HAS SAID SO EXPLICITLY.** It was first
 written down as "I think that will be everything", and was then corrected three times in
