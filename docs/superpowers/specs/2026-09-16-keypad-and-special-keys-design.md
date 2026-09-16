@@ -125,6 +125,29 @@ rasterisation is the machine-dependent thing that would stop them reproducing. I
 keypad looks like a 3270 rather than like a native widget, which for a virtual terminal keyboard is
 the intent.
 
+### The font choice is PROVISIONAL, and the fallback is not what you would guess
+
+**Recorded 2026-09-16: the user is not convinced the x3270 font is right for keypad labels, and
+agreed to try it and see.** So treat this as a decision to revisit after looking at it, not a
+settled one — and if it does look wrong, reach for the cheaper fix first:
+
+1. **Restyle within the atlas.** Inverse-video buttons, box-drawn borders, a dimmer label for a
+   disabled key. The baked atlas carries **431 glyph columns** at 9x14 and the BDF has 137 glyphs in
+   the CG range where x3270 keeps its line-drawing characters, so borders and fills are available
+   without new machinery. This keeps every property below intact.
+2. **A second bitmap font**, baked into its own atlas the way `3270.bdf` is. More work, but still
+   deterministic.
+3. **`fillText` in a system font.** This is the one to avoid, and not on taste grounds:
+   font rasterisation is machine-dependent, so it would **stop the screenshot goldens being
+   byte-reproducible** — which is what makes `shot.mjs` and `browser-shot.mjs` evidence rather than
+   decoration, and what proves the served page and the Electron app draw the same pixels. Trading
+   that for nicer labels is a bad trade; if it is ever wanted anyway, the goldens have to be
+   demoted to a "not blank" smoke check deliberately and in writing, not quietly widened.
+
+The layout table carries a `label` per button, so options 1 and 2 change only how a button is drawn,
+not what the table says or where the rectangles are. Hit-testing and the tests around it are
+unaffected either way.
+
 ## Data flow
 
 **Toggling.** `Ctrl-K`, hidden by default. In the canvas front ends the chord maps to a new
