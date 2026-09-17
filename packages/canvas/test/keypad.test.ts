@@ -13,7 +13,7 @@ import type { AtlasGeometry, DrawCell } from '../src/geometry.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 
 /**
- * The REAL atlas, exactly as `drawlist.test.ts:11` does it.
+ * The REAL atlas, exactly as `drawlist.test.ts`'s own `atlas` const does it (`:12-14`).
  *
  * The plan's sketch fabricated `{ cellWidth: 9, cellHeight: 14, cols: 431, index: {} } as never`.
  * Two problems: no test file in this repo is typechecked, so `as never` would hide a wrong shape
