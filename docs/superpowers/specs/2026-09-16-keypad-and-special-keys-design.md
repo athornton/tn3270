@@ -73,7 +73,7 @@ Checked rather than remembered, per this repo's standing rule:
 | **A numeric field TAKES Dup and refuses Field Mark** | manual p. 4-13: "Numeric fields are limited to numeric characters, the minus and decimal sign characters, **and the duplicate (DUP) control**." x3270's byte test (`kybd.c:1232-1238`) refuses DUP too, but is gated on `appres.numeric_lock`, which has **no default assignment anywhere** (`glue.c:914` registers the resource only) and is therefore off — so stock x3270 refuses neither, and that byte set is the shape of the numeric-lock feature rather than a ruling on DUP |
 | Which keys a 3270 keypad is expected to carry. **CORRECTED 2026-09-16 in Task 3: the authoritative list is `keypad.callbacks`, which is exactly 44 lines, and it has NO CURSOR ARROWS.** The `-->|`, `\|<--` and `<-+` glyphs in `keypad.full:8-11` are **Tab, BackTab and Newline**, which this table's first version misread as arrows. c3270 can omit cursor keys because a real keyboard sits beside it; a mouse-driven keypad cannot. | `Common/c3270/keypad.callbacks` (44 keys: PA1-3, Attn, Erase EOF, Erase Input, Sys Req, Clear, Home, Cursor Select, Compose, Insert, Delete, Dup, Field Mark, Tab, Reset, BackTab, **Newline**, Enter, PF1-24), with `keypad.labels` / `keypad.full` as its rendering |
 | ~~**Our 46 keys are c3270's 44 minus three, plus five**~~ **47 AS SHIPPED: c3270's 44 minus TWO, plus five** — dropping only Cursor Select and Compose, adding the four cursor arrows and Backspace. Newline was the third dropped key and is dropped no longer | arithmetic re-derived in `a039287`, not incremented: 44 − 2 + 5 = 47, and the specials are 47 − 27 = 20, which `keypad.test.ts` now states from both sides |
-| `Session.sysreq()` exists in core and **no front end can reach it** | `packages/core/src/session.ts:641`; no `sysreq` anywhere in any front end |
+| `Session.sysreq()` exists in core and **no front end can reach it** | `packages/core/src/session.ts`, the `sysreq` method (cited by name: the line has moved twice); no `sysreq` anywhere in any front end |
 | Dup and Field Mark are absent from core entirely | not even the 0x1C/0x1E constants exist |
 | `Ctrl-K` is free in both keymaps | canvas `keys.ts` binds only `c r u ] a`; the TUI adds `0x7f` |
 | `advanceAfterType` IS our auto-skip | **`advanceAfterType` in `packages/core/src/keyboard.ts`** (currently `:250`), "At the end of a field, skip to the next typable one". **Cited BY NAME as of 2026-09-17: this said `:98`, which the two new key methods pushed 150 lines down — and `:98` now lands inside `dup()`'s own docstring, so the stale form reads plausibly.** |
@@ -262,26 +262,40 @@ the ESC state machine, whose own comments record two regressions and warn agains
 `applyAction` and in both keymaps. It is currently unreachable from any front end, which is worth
 stating plainly — the capability has been in core since stage 2b with no way to press it.
 
+> **RESOLVED 2026-09-17, AFTER TASK 15: the user authorised the non-E path and it is implemented.**
+> The decision this block asks for at its end was taken the second way round from how it reads —
+> add the path, do not merely document the limitation. Everything below is the analysis as it stood
+> when the question was open, kept because the reasoning is still the reasoning, with two factual
+> corrections marked inline. Sys Req is now **implemented on both paths and verified on neither**;
+> `docs/live-testing.md` carries what to run.
+>
 > **BUT SYS REQ IS INERT ON BOTH OF THIS PROJECT'S LIVE HOSTS, and Task 10 is what exposed it.**
-> `Session.sysreq()` (`core/src/session.ts:641`) returns early unless `Tn3270eFunc.SYSREQ` was
-> negotiated — and **neither Hercules host offers TN3270E at all**; both answer `IAC WILL TN3270E`
-> with `ff fe 28` = DONT, measured three times. So the key this feature exists to make reachable
-> **puts nothing on the wire against either host the user has.** The keypad's `SysRq` button and the
-> new CLI `SysReq()` both answer `ok` and do nothing.
+> ~~`Session.sysreq()` returns early unless `Tn3270eFunc.SYSREQ` was negotiated~~ — **no longer: it
+> now falls through to the classic path instead of returning.** And **neither Hercules host offers
+> TN3270E at all**; both answer `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times, so
+> both take that classic path. ~~So the key this feature exists to make reachable puts nothing on the
+> wire against either host the user has.~~ It now does. The keypad's `SysRq` button and the CLI's
+> `SysReq()` still both answer `ok` — they report no refusal by design — but they are no longer inert.
 >
 > **What x3270 does instead, checked at source rather than guessed — and it is not what you would
 > assume.** `SysReq_action` is `if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }`
-> (`Common/kybd.c:2856-2864`), so a classic 3270 session takes the second branch. That branch does
+> (`Common/kybd.c:2849-2870`), so a classic 3270 session takes the second branch. That branch does
 > **not** send AID `0xf0`: `ctlr_read_modified` has a dedicated `case AID_SYSREQ: /* test request */`
-> (`Common/ctlr.c:770-777`) which emits a **four-byte TEST REQUEST record** —
-> `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` — and then `break`s, skipping the ordinary-AID path
-> entirely. **No AID byte, no cursor address, no field data.** `AID.SYSREQ = 0xf0` exists in our
-> `constants.ts` and is never the thing on the wire for this key.
+> (`Common/ctlr.c:770-777`) which emits the **four-byte TEST REQUEST READ heading** —
+> `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` = `01 6c 61 02` — and then `break`s.
+> ~~skipping the ordinary-AID path entirely. **No AID byte, no cursor address, no field data.**~~
+> **CORRECTED 2026-09-17 while implementing it: no AID byte and no cursor address, but the MODIFIED
+> FIELD DATA DOES FOLLOW.** That `break` leaves the switch, not the function, so the field scan below
+> it runs. The manual says the same and does not contradict x3270 — the stream is the heading then
+> "the same as described previously for read-modified operations, excluding the 3-byte read heading
+> (AID and cursor address)" (`pages.txt:13786-13789`) — and there is no ETX, that being BSC framing
+> (`pages.txt:14180-14184`). `AID.SYSREQ = 0xf0` exists in our `constants.ts` and is never the thing
+> on the wire for this key, which remains the counterintuitive core of it.
 >
-> **This is core protocol surface, not keypad work**, so it is deliberately NOT being folded into this
-> feature. But the docs must not claim Sys Req "works": it is reachable from every front end and inert
-> on every host available here. Decide before Task 15 whether to add the non-E path (small — one
-> record-sending method plus the branch) or to document the limitation precisely.
+> **This is core protocol surface, not keypad work**, so it was deliberately NOT folded into this
+> feature; it landed as its own change afterwards, on the same branch, with its own commit. The docs
+> must still not claim Sys Req "works" in the sense of *verified*: it is implemented everywhere and
+> witnessed nowhere.
 
 **Dup** and **Field Mark** need new `Keyboard` methods. Both write an EBCDIC control byte —
 0x1C and 0x1E — **directly into the buffer, bypassing code-page translation**, because they are
@@ -376,7 +390,9 @@ No live-host verification is required for this feature: a keypad press produces 
 as the equivalent keystroke, and those are already live-verified. PA1 and PA2 in particular have
 observed host reactions on MVS (`ISP088E ... TERMINATED DUE TO ATTENTION INTERRUPT` and a bare
 `READY` redisplay). **Sys Req, Dup, Field Mark and Newline** have no live witness and the docs must say so
-rather than implying the keypad as a whole is live-verified.
+rather than implying the keypad as a whole is live-verified. **Still true on 2026-09-17**, after the
+non-E Sys Req path landed: that made Sys Req *capable* of a witness on both hosts, which is not the
+same as having one.
 
 ## Success criteria
 
@@ -390,9 +406,11 @@ rather than implying the keypad as a whole is live-verified.
    `SysReq()`, `Dup()`, `FieldMark()` and `Newline()` — and **Dup's tab
    is asserted, along with the fact that it happens only once** (an earlier wording of this criterion
    said "Dup's auto-skip suppression is asserted", which was the inverted rule; see the four-keys
-   section). **"Reachable" is not "effective": Sys Req is inert on both of this project's hosts**,
-   and the note under *The four missing keys* is the qualification that must travel with this
-   criterion.
+   section). ~~**"Reachable" is not "effective": Sys Req is inert on both of this project's
+   hosts**~~ — **superseded 2026-09-17: the non-E path landed, so Sys Req is now effective against
+   both.** The qualification that must travel with this criterion is now the *other* one:
+   **"implemented" is not "verified"**, and none of the four keys has been pressed at a host. See
+   the note under *The four missing keys* and `docs/live-testing.md`.
 5. The TUI overlay lists every special key with its chord and fires one. **The "refuses to open in a
    terminal too small to hold it" half is UNREACHABLE IN A LIVE SESSION, measured in Task 11 — do not
    claim it as verified behaviour.** `tooSmall` (`tui/src/render.ts:43`) already refuses any terminal

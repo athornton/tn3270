@@ -23,8 +23,10 @@ serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
 
 **`Ctrl-K` shows and hides it; `Alt-K` does the same.** It is the 47-key clickable keypad the
 Electron app draws — PF1–PF24, PA1–PA3 and the special keys a PC keyboard lacks, including
-**Dup**, **Field Mark**, **Sys Req** and **Newline**, the four with no chord or no host reaction of
-their own. `Ctrl-K` is c3270's own terminal binding for its keypad (`Common/fb-c3270:191`) and
+**Dup**, **Field Mark**, **Sys Req** and **Newline** — the four that `core` could do and no
+interactive front end could press before the keypad. Sys Req and Newline get no chord in any front
+end, so this is their only route besides the CLI. `Ctrl-K` is c3270's own terminal binding for its
+keypad (`Common/fb-c3270:191`) and
 `Alt-K` is how its Windows keymap spells the same command, so both are honoured rather than one
 being a divergence.
 

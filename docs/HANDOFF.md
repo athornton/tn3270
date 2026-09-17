@@ -8,11 +8,12 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 **THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
 MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
-typecheck clean, **1669 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
+typecheck clean, **1688 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
 **18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
 **13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
 
-**THREE THINGS ARE WAITING ON THE USER. Do not do any of them unasked.**
+**TWO THINGS ARE WAITING ON THE USER. Do not do either unasked.** (There were three; the user
+authorised the third, the non-TN3270E Sys Req path, on 2026-09-17 and it is now done.)
 
 1. **THE MERGE.** The plan's last step is `git merge --no-ff` to `main` and a push; **the user has
    not authorised it.** The branch sits on `main` at `7ca0269` and the tree is clean.
@@ -27,9 +28,12 @@ typecheck clean, **1669 tests in 71 files**, `shot.mjs` **3/3 goldens matched**,
    restyle anything without being asked.** A restyle changes only `canvas/src/keypad.ts` and
    regenerates exactly one golden (`synthetic-ispf-keypad`), because the key table, the button
    rectangles and every hit test are independent of how a button is drawn.
-3. **THE NON-TN3270E SYS REQ PATH.** Open decision, and the reason is below under *Sys Req is
-   reachable and inert*. Small — one record-sending method plus a branch — but it is core protocol
-   surface, not keypad work.
+**DONE, NOT WAITING: THE NON-TN3270E SYS REQ PATH.** Authorised by the user 2026-09-17 and
+implemented. Sys Req now sends a **test request read** against a classic host, so all four front
+ends do something against VM/370 and TK5 where they previously did nothing. **It is IMPLEMENTED and
+NOT VERIFIED** — no host has been driven with it. It is on `docs/live-testing.md`'s next-run list.
+See *Sys Req on both paths* below for the bytes and the two things about them that are wrong on a
+first reading.
 
 **THEN: `IBM-DYNAMIC`, which the user scheduled IMMEDIATELY AFTER THE KEYPAD on 2026-09-16**, then
 (4) Programmable Symbol Sets + VMGIF. `IBM-DYNAMIC` is the one remaining TN3270E item with a live
@@ -71,19 +75,55 @@ that forgot to own its own display fails loudly instead of showing a dead button
 `default: action satisfies never` makes deleting either guard a **compile error** with zero runtime
 footprint.
 
-**SYS REQ IS REACHABLE FROM EVERY FRONT END AND INERT ON BOTH OF THIS PROJECT'S HOSTS, and the docs
-say so rather than claiming it works.** `Session.sysreq()` returns early unless the TN3270E SYSREQ
-function was negotiated, and **neither Hercules host offers TN3270E** — both answer `IAC WILL
-TN3270E` with `ff fe 28` = DONT, measured three times. **x3270's non-E path does not send AID
-`0xf0`**: `ctlr_read_modified` has a dedicated `case AID_SYSREQ /* test request */`
-(`Common/ctlr.c:770`) emitting a **four-byte TEST REQUEST record** (`EBC_soh`, `EBC_percent`,
-`EBC_slash`, `EBC_stx`) and then breaking — no AID byte, no cursor address, no field data. So
-`AID.SYSREQ` exists in our `constants.ts` and is never what goes on the wire for this key.
+### Sys Req on both paths
+
+**SYS REQ IS IMPLEMENTED FROM EVERY FRONT END ON BOTH PATHS, AND VERIFIED AGAINST NEITHER HOST.**
+Keep those two halves apart; the docs used to say "reachable and inert", which was true until
+2026-09-17 and is now wrong. `Session.sysreq()` picks by whether the session is TN3270E, which is
+exactly what x3270's `SysReq_action` does (`Common/kybd.c:2849-2870`) — it splits on `IN_E` and on
+nothing else:
+
+- **TN3270E**: Telnet `IAC AO`. `net_abort()` then tests the SYSREQ function bit itself
+  (`Common/telnet.c:3632-3648`), so an E session that declined the function sends **nothing** — and
+  specifically not the classic form as a fallback, because x3270 never reaches the `else` arm on an
+  E session. **Never exercised live**: neither Hercules host offers TN3270E, both answering
+  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times.
+- **CLASSIC**: a **test request read**, which is what both Hercules hosts get.
+
+**THREE THINGS ABOUT THE CLASSIC FORM THAT ARE WRONG ON A FIRST READING.** All three were checked
+against `Common/ctlr.c` and `pages.txt` before the code was written; do not re-derive them.
+
+1. **IT IS NOT AID `0xf0`.** x3270 reaches `key_AID(AID_SYSREQ)` (`kybd.c:2864`), which looks like
+   it transmits the AID and does not: `ctlr_read_modified` has a dedicated
+   `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770-777`) writing `EBC_soh`,
+   `EBC_percent`, `EBC_slash`, `EBC_stx` = **`01 6c 61 02`** in place of the AID byte and the
+   cursor address. `AID.SYSREQ` exists in our `constants.ts`, selects this heading, and is never
+   itself on the wire for this key.
+2. **THE MODIFIED FIELD DATA STILL FOLLOWS IT.** The phrase "four-byte record" — which earlier
+   drafts of this file and of the README both used — invites the opposite conclusion, and that
+   `break` leaves the **switch**, not the function, so the field scan below it runs.
+   GA23-0059-07 agrees and settles it: the stream is the heading then "the same as described
+   previously for read-modified operations, excluding the 3-byte read heading (AID and cursor
+   address)" (`pages.txt:13786-13789`). **The manual and x3270 do not disagree here**; both say
+   heading-plus-data.
+3. **NO ETX.** The manual's BSC form ends in one (`pages.txt:13780-13785`); the non-SNA form is
+   "the same as for the BSC environment, except there is no ETX" (`pages.txt:14180-14184`). ETX is
+   BSC block framing. A telnet record ends at `IAC EOR`, which `sendRecord` appends, and the
+   heading bytes are none of them `0xff` so IAC doubling never touches them — though it does still
+   protect a `0xff` in the field data, by construction, because the record goes out through the
+   same `sendRecord` as any AID.
+
+**ON AN INHIBITED KEYBOARD WE REFUSE, WHERE x3270 QUEUES.** It refuses outright on `KL_OIA_MINUS`
+and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). **This codebase has no action queue and
+one was not invented for a single key**; both become a refusal into the OIA, which `applyAction`
+swallows. If an action queue is ever added for other reasons, this is a caller to revisit.
 
 **NO LIVE VERIFICATION WAS RUN FOR THIS FEATURE, deliberately, and the argument has a limit.** A
 keypad press produces the same wire bytes as the equivalent keystroke, and those are already
-live-verified — but **Dup, Field Mark, Sys Req and Newline have NO live witness at all**, and Sys
-Req cannot get one here. Do not let the keypad's verification read as covering the four keys.
+live-verified — but **Dup, Field Mark, Sys Req and Newline have NO live witness at all.** Sys Req
+can now get one, which it could not before; the other three still cannot be told apart from
+nothing-happened without a host that reacts. Do not let the keypad's verification read as covering
+the four keys.
 
 ### Four measured facts about these keys that are all counterintuitive
 
@@ -142,8 +182,9 @@ above; read those.
 - ~~**A numeric field refuses both**, because `key_Character` tests the EBCDIC byte
   (`kybd.c:1232-1238`).~~ **WRONG, corrected in Task 1: a numeric field TAKES Dup and refuses Field
   Mark.** See fact 2 above; x3270's byte test is gated on `numeric_lock`, which is off by default.
-- **`Session.sysreq()` has existed since stage 2b with no front end able to call it.** Still true,
-  and now reachable — and inert here; see above.
+- **`Session.sysreq()` has existed since stage 2b with no front end able to call it.** Still true of
+  history, and now reachable. ~~And inert here.~~ **No longer inert: the classic path landed
+  2026-09-17** and it sends a test request read to both Hercules hosts. See *Sys Req on both paths*.
 - ~~**Chords come from c3270's own keymap**: `Ctrl-D` = Dup, `Ctrl-F` = FieldMark
   (`Common/fb-c3270:88`, `:93`); c3270 toggles its keypad with `Alt-K` (`:48`), which reaches a
   terminal as `ESC k`, so the TUI uses `Ctrl-K` instead.~~ **THE CITATIONS ARE ALL IN THE `_WIN32`
@@ -177,7 +218,7 @@ renderer has stopped being shared.
 (`git rev-list --count main..HEAD` for the number; it is not written down here, for the same reason
 `eb9c306` was worth marking.)
 
-**On the branch head: 1669 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
+**On the branch head: 1688 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
 **all three** GUI goldens matching, `pty-smoke.py` 12/12, and all four by-hand harnesses passing
 (`keys.mjs` 18 chords / 16 actions, `clicks.mjs` 9 buttons / 10 actions, `browser-keys.mjs` 13
 chords / 11 actions, `browser-shot.mjs` 2/2 cases).
@@ -593,7 +634,7 @@ before. Read the status here and the reasoning there.
 | 6. TLS | **DONE** and live-verified |
 | 7. the printer session | not started |
 | 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | **`IBM-DYNAMIC` IS NEXT** — the user scheduled it immediately after the keypad on 2026-09-16. It has a live path (TK5's Read Partition); the negotiation does not, both Hercules hosts refusing option 40 |
-| 9. keypad / special-keys menu (added 2026-09-14) | **BUILT AND VERIFIED on branch `keypad-and-special-keys`, NOT MERGED.** All 15 tasks; the whole gate passes. Three things wait on the user — the merge, the keypad's styling, and whether to add the non-TN3270E Sys Req path. See the top of this file |
+| 9. keypad / special-keys menu (added 2026-09-14) | **BUILT AND VERIFIED on branch `keypad-and-special-keys`, NOT MERGED.** All 15 tasks, plus the non-TN3270E Sys Req path the user authorised on 2026-09-17; the whole gate passes. Two things wait on the user — the merge and the keypad's styling. See the top of this file |
 
 **So the order from here is: land (9), then `IBM-DYNAMIC` from (8), then (4) PS + VMGIF, with
 packaging, the printer session and BIND/UNBIND unscheduled.** The user asked about more TN3270E on

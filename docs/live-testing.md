@@ -12,8 +12,12 @@ and the Recording log says what happened when they were run.
 - **THE VIRTUAL KEYPAD — NOTHING WAS RUN AGAINST A HOST, 2026-09-17, and that is a decision rather
   than a gap.** A button press produces the same wire bytes as the equivalent keystroke, and those
   are already verified below. **But Sys Req, Dup, Field Mark and Newline have NO live witness at
-  all**, and Sys Req cannot get one here — see *The virtual keypad and the four new keys* at the end
-  of this document, which also lists what to run on the first real host that appears.
+  all** — see *The virtual keypad and the four new keys* at the end of this document, which also
+  lists what to run on the first real host that appears. ~~And Sys Req cannot get one here.~~
+  **Corrected 2026-09-17: Sys Req CAN now get a witness on both existing hosts**, the non-TN3270E
+  test-request path having landed. It is the first item on that list, and it needs a **trace**, not
+  a screenshot: a host is free to ignore a test request, so "nothing visible happened" would not
+  distinguish a working key from the inert one it used to be.
 - **VM/370 R6 (VM/CE 1.2) on `localhost:3270` — recorded 2026-08-17.** 43
   commands, 0 errors, 0 program checks. Fixture and golden committed. Five real
   bugs found and fixed; one spec claim falsified. Details in the Recording log.
@@ -2070,31 +2074,48 @@ because no interactive front end could reach them, so there is no earlier run to
 | **Dup** | writes EBCDIC `0x1c`, sets MDT, then TABs; mutation-checked both halves | **none** |
 | **Field Mark** | writes `0x1e` and advances as a typed character; the distinguishing last-cell case is pinned | **none** |
 | **Newline** | `Keyboard.newline()` has existed since stage 1 and the CLI could always call it | **none** — and nothing on this branch changed it, only its reachability |
-| **Sys Req** | `Session.sysreq()` reached from all four front ends | **none, AND UNOBTAINABLE HERE** — see below |
+| **Sys Req** | the classic **test request read**, `01 6c 61 02` plus modified field data, byte-exact in `core/test/session.test.ts`; the TN3270E `IAC AO` separately in `core/test/tn3270e-session.test.ts` | **none — but now OBTAINABLE on both hosts**; see below |
 
-### SYS REQ CANNOT GET A LIVE WITNESS ON EITHER OF THIS PROJECT'S HOSTS
+### SYS REQ IS NOW REACHABLE *AND ACTIVE* ON BOTH HOSTS, AND STILL HAS NO LIVE WITNESS
 
-Not "was not tested" — **cannot be**, and the reason is measured rather than assumed.
-`Session.sysreq()` returns early unless the TN3270E **SYSREQ** function was negotiated, and
-**neither Hercules system offers TN3270E at all**: send `IAC WILL TN3270E` (`ff fb 28`) and both
-answer `ff fe 28` = **DONT**, measured three separate times and recorded under *Both hosts REFUSE
-TN3270E when offered* above. So the keypad's `SysRq` button, the TUI list's entry and the CLI's
-`SysReq()` all answer `ok` and put **not one byte on the wire** here.
+**This section used to say a live witness was UNOBTAINABLE here. That stopped being true on
+2026-09-17**, when the non-TN3270E path landed. What has not changed is that nobody has driven the
+key at VM/370 or TK5 and watched the result. Implemented, not verified.
 
-**The non-TN3270E path is not implemented, and it is not the AID anyone would guess.** x3270's
-`SysReq_action` is `if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }`
-(`Common/kybd.c:2856-2864`), and that second branch does **not** put AID `0xf0` on the wire:
-`ctlr_read_modified` has a dedicated `case AID_SYSREQ: /* test request */` (`Common/ctlr.c:770-777`)
-which emits a **four-byte TEST REQUEST record** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx`
-— and then `break`s, skipping the ordinary-AID path entirely. No AID byte, no cursor address, no
-field data. `AID.SYSREQ = 0xf0` exists in our `constants.ts` and is **never** the thing on the wire
-for this key. Adding that path is core protocol surface rather than keypad work; it is an open
-decision, and until it is taken Sys Req is reachable-and-inert everywhere.
+The TN3270E half is still unobtainable here, and for the measured reason it always was: send
+`IAC WILL TN3270E` (`ff fb 28`) and both Hercules systems answer `ff fe 28` = **DONT**, measured
+three separate times and recorded under *Both hosts REFUSE TN3270E when offered* above. So neither
+host will ever take the `IAC AO` branch. **Both take the classic branch instead, and that branch now
+sends something.** x3270 splits on exactly this and nothing else — `SysReq_action` is
+`if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }` (`Common/kybd.c:2849-2870`).
+
+**WHAT TO EXPECT ON THE WIRE, and it is not the AID anyone would guess.** That `else` branch does
+**not** put AID `0xf0` on the wire. `ctlr_read_modified` has a dedicated
+`case AID_SYSREQ: /* test request */` (`Common/ctlr.c:770-777`) emitting the four-byte **TEST
+REQUEST READ heading** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` = **`01 6c 61 02`** — in
+place of the AID byte and the two-byte cursor address. `AID.SYSREQ = 0xf0` exists in our
+`constants.ts`, selects that heading, and is **never** the thing on the wire for this key.
+
+**Two corrections to what this section previously claimed, both found by reading the source rather
+than trusting the summary:**
+
+- **The record is NOT four bytes.** It said the `break` "skips the ordinary-AID path entirely. No
+  AID byte, no cursor address, no field data." The first two are right and the third is **wrong**:
+  the `break` leaves the **switch**, not the function, so the field scan below it runs and the
+  modified field data follows the heading. GA23-0059-07 settles it and agrees with x3270 — the
+  stream is the heading then "the same as described previously for read-modified operations,
+  excluding the 3-byte read heading (AID and cursor address)" (`pages.txt:13786-13789`). So on an
+  unformatted VM/370 logon screen expect `01 6c 61 02` followed by every non-null byte in the
+  buffer; with nothing modified, expect the heading alone.
+- **There is no ETX.** The manual's BSC form ends in one (`pages.txt:13780-13785`) because ETX is
+  BSC block framing; the non-SNA form is "the same as for the BSC environment, except there is no
+  ETX" (`pages.txt:14180-14184`). Expect `IAC EOR` instead, as for any inbound record.
 
 ### WHAT TO RUN IF A HOST IS EVER AVAILABLE FOR THIS
 
-Cheap, and worth doing on the first real host that appears — a modern z/VM or z/OS would also
-unblock Sys Req, since it would actually negotiate TN3270E:
+Cheap, and worth doing on the first real host that appears. **Sys Req's classic half needs no new
+host — do it on the next VM/370 or TK5 run**; only its TN3270E half still waits on a modern z/VM or
+z/OS:
 
 1. **Dup on a real data-entry panel.** On MVS/TSO, put the cursor mid-field and press the keypad's
    `Dup`. Expect `0x1c` in the buffer and the cursor at the **next unprotected field** — the tab is
@@ -2102,10 +2123,20 @@ unblock Sys Req, since it would actually negotiate TN3270E:
    it (p. 4-13) where Field Mark must be refused.
 2. **Field Mark in the last data cell of a field**, which is where it differs from Dup: it must
    auto-skip like a typed character rather than park on the attribute byte.
-3. **Sys Req against a host that grants the TN3270E SYSREQ function.** Watch for `IAC AO` on the
-   wire (that is what `Session.sysreq()` sends), and watch what the host does with it.
-4. **Newline**, which needs no host at all to be interesting — but confirm the host does not treat
+3. **SYS REQ AGAINST VM/370 AND TK5 — the newly available one, and the first thing to do on the
+   next live run.** Both take the classic path. Trace the session (`-trace`) and check the inbound
+   record is exactly `01 6c 61 02` plus whatever is modified, terminated by `ff ef`, **with no
+   `f0` anywhere in it** — a stray `f0` means the ordinary-AID path ran. Then watch the host:
+   CP/CMS and MVS are each free to ignore a test request, so **"nothing visible happened" is a
+   valid result and is NOT the same as "nothing was sent"** — that is what the trace is for, and
+   it is the whole reason this key needed a wire-level witness rather than a screen-level one.
+   Worth trying twice: once on the unformatted VM/370 logon screen (expect buffer contents to
+   follow the heading) and once on a formatted panel with nothing typed (expect the heading alone).
+   Note the keyboard **locks** afterwards, as it does after Enter, until the host writes.
+4. **Sys Req against a host that grants the TN3270E SYSREQ function**, which neither Hercules
+   system will ever be. Watch for `IAC AO` on the wire, and watch what the host does with it.
+5. **Newline**, which needs no host at all to be interesting — but confirm the host does not treat
    the resulting cursor position as an AID, which it should not, Newline being purely local.
 
-Do all four **through the keypad button**, not through the CLI: the CLI path is the one already
+Do all five **through the keypad button**, not through the CLI: the CLI path is the one already
 covered offline, and the button is the path a user actually has.

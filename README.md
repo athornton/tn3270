@@ -107,8 +107,9 @@ from the same binding table the keymap is checked against so the on-screen help 
 
 Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
 press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
-two get no chord — see *Using the TUI* and *What is not implemented*, because **Sys Req cannot
-do anything against either Hercules host** and the docs should not imply otherwise.
+two get no chord — see *Using the TUI*. **Sys Req now puts bytes on the wire against a classic
+host**, as a four-byte test request read rather than the AID you would expect; it has no live
+witness yet. See *What is not implemented*.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
 which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
@@ -466,8 +467,10 @@ on the invocation and cannot be written into the script.
 these names (`Common/kybd.c:223`, `:230`, `:254`), so a script written for it should not fail
 here. All three take no arguments — s3270's optional `FailOnError`/`NoFailOnError` on `Dup` and
 `FieldMark` is refused by name rather than accepted and ignored, because failing on an operator
-error already *is* s3270's behaviour for a scripted call. **`SysReq()` answers `ok` and puts
-nothing on the wire against either Hercules host**; see *What is not implemented*. There is no
+error already *is* s3270's behaviour for a scripted call. **`SysReq()` answers `ok` whatever
+happens** — it reports no refusal, because the key exists on the keyboard whatever the host
+granted. What it sends depends on the session: a four-byte test request read against a classic
+host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
 command for the keypad toggle: a script-driven client has no renderer, which is why `-scheme` is
 absent here too.
 
@@ -658,8 +661,9 @@ Done:
    in Electron and in the browser. **The mouse does keypad buttons and nothing else.** Text
    selection, click-to-place-cursor and the light pen are all still absent, and text selection is
    **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so drag-to-select would
-   transmit on every copy attempt. x3270 keeps the two apart deliberately. **Sys Req is reachable
-   and inert here** — see *What is not implemented*.
+   transmit on every copy attempt. x3270 keeps the two apart deliberately. **Sys Req was
+   reachable but inert on this branch until the classic path landed**; it now sends a test
+   request read, still with no live witness — see *What is not implemented*.
 
 Remaining, in the order the author wants it:
 
@@ -742,19 +746,26 @@ worse than one that says which quarter is missing.
   not be implemented with `lightpen_select()`, which sends an AID and sets MDT — drag-to-select
   would then transmit on every copy attempt. x3270 keeps them apart deliberately
   (`wc3270/screen.c:2357`).
-- **SYS REQ IS REACHABLE FROM EVERY FRONT END AND INERT ON BOTH OF THIS PROJECT'S HOSTS.** The
-  keypad's `SysRq` button, the TUI overlay's entry and the CLI's `SysReq()` all answer `ok` and
-  put **nothing on the wire** against VM/370 or MVS 3.8j. `Session.sysreq()` returns early unless
-  the TN3270E SYSREQ function was negotiated, and neither Hercules system offers TN3270E at all —
-  both answer `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times. **The non-TN3270E
-  path is not implemented**, and it is not the AID you would expect: x3270's classic-3270 branch
-  does **not** send AID `0xf0`. `ctlr_read_modified` has a dedicated
-  `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770`) that emits a **four-byte TEST REQUEST
-  record** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` — and then breaks: no AID byte, no
-  cursor address, no field data. `AID.SYSREQ = 0xf0` exists in our `constants.ts` and is never
-  what goes on the wire for this key. Adding that path is core protocol surface rather than keypad
-  work, and is an open decision.
-- **Dup, Field Mark, Sys Req and Newline have NO live witness.** They are unit-tested against the
+- **SYS REQ IS IMPLEMENTED ON BOTH PATHS AND HAS NO LIVE WITNESS.** Implemented is not verified,
+  and this entry is here for the second half. The keypad's `SysRq` button, the TUI overlay's entry
+  and the CLI's `SysReq()` now all put bytes on the wire against VM/370 and MVS 3.8j — but nobody
+  has yet driven the key at either host and watched what came back. On the next live run: see
+  `docs/live-testing.md`.
+  **It is not the AID you would expect.** Neither Hercules system offers TN3270E — both answer
+  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times — so both take the classic path,
+  and x3270's classic branch does **not** send AID `0xf0`. `ctlr_read_modified` has a dedicated
+  `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770-777`) that emits a **four-byte TEST
+  REQUEST READ heading** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx`, i.e. `01 6c 61 02` —
+  in place of the AID byte and cursor address. `AID.SYSREQ = 0xf0` exists in our `constants.ts`
+  and is never what goes on the wire for this key. The modified field data **does** still follow
+  the heading, which the phrase "four-byte record" invites you to get wrong: GA23-0059-07 says the
+  stream is "the same as described previously for read-modified operations, excluding the 3-byte
+  read heading (AID and cursor address)", and x3270's `break` leaves the switch rather than the
+  function. There is no ETX; that is BSC framing, and a telnet record ends at `IAC EOR`.
+  On an inhibited keyboard the key is **refused**, where x3270 would queue it — we have no action
+  queue and did not invent one for a single key.
+- **Dup, Field Mark, Sys Req and Newline have NO live witness.** All four are implemented; none has
+  been pressed at a host. They are unit-tested against the
   manual and x3270's source, and the keypad's *plumbing* is proven by harnesses — but no host has
   ever been observed reacting to any of the four. The keypad as a whole needs no live verification,
   because a button press produces the same wire bytes as the equivalent keystroke and those *are*
@@ -828,7 +839,7 @@ visible there.
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
-| Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE, and not planned** — no host has been observed reacting to any of the four. See *What is not implemented*: Sys Req is inert here by construction |
+| Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
