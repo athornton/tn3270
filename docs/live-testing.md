@@ -1550,12 +1550,18 @@ well-formed `DEVICE-TYPE REQUEST` either way.
    is the whole value of the run.** `drive-e.py`'s refusal cases are a DEVICE-TYPE
    **REJECT** (`--reject`, reaching `refuseTn3270e()` once the LU list is exhausted) or *us*
    declining (`--expect-refuse`: `-tn3270e off`, `N:`). z/VM sent `IAC DONT TN3270E` **after
-   our `WILL`**, which takes the `St.Dont` arm instead
-   (`packages/core/src/telnet.ts:212-215` — drop it from `myOpts`, reply `WONT`). Nothing
+   our `WILL`**, which takes the `St.Dont` arm of `TelnetLayer.step` instead
+   (`packages/core/src/telnet.ts` — drop it from `myOpts`, reply `WONT`). Nothing
    had ever driven that arm on option 40: our client never volunteers `WILL 40`, so the
    Hercules hosts' willingness to answer a bare `ff fb 28` with `ff fe 28` was only ever
-   measured by a **passive probe**, never by us. It deserves a unit test now that a host is
-   known to do it.
+   measured by a **passive probe**, never by us. **AND DRIVING IT FOUND A BUG** — that arm
+   did not clear `tn3270eNegotiated`, which short-circuits `is3270Mode()`, so a host
+   withdrawing option 40 *after* the negotiation completed would have kept the client
+   framing TN3270E (header prepended outbound, header stripped inbound) against a host that
+   had stopped being TN3270E; `Session.e` had the same hole, and a mid-session `DONT` closes
+   no connection so `handleClose()` never ran. Here the flag was still false when the `DONT`
+   arrived, which is the only reason the run was clean. Fixed on branch
+   `tn3270e-dont-teardown`, with the unit tests this arm had never had.
 4. **The TLS trap generalises to a third host.** Omitting `-insecure` against a plaintext
    host **HANGS** rather than failing: the leading `0xff` of `IAC DO TERMINAL-TYPE` is read
    as a TLS record content type and the read blocks for a length that never arrives. Same
@@ -1647,9 +1653,12 @@ answers are recorded there under *Live host, 2026-09-17*.
 - **Whether a host that completes TN3270E exists at all among the public systems.** z/VM
   4.4 here offers and withdraws; another public z/OS or z/VM may not.
 - **The explicit `-tn3270e off` run against this host**, for question 4's literal wording.
-- **A unit test for `IAC DONT TN3270E` arriving after our `WILL`** — the `St.Dont` arm on
-  option 40, which this run is currently the only evidence for. Not a live-testing item,
-  but it was found by a live test and would otherwise be forgotten.
+- ~~**A unit test for `IAC DONT TN3270E` arriving after our `WILL`** — the `St.Dont` arm on
+  option 40, which this run is currently the only evidence for.~~ **DONE, and it found a
+  real teardown bug at both layers** (see item 3 above): branch
+  `tn3270e-dont-teardown`, ten tests. Not a live-testing item, but it was found by a live
+  test and would otherwise have been forgotten — which is the argument for writing these
+  down here.
 
 ## Task 11 — the no-flag default, the schemes, and the unreachable keys — verified 2026-09-15
 

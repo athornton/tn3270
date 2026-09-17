@@ -61,10 +61,18 @@ required — without it the client HANGS**) and the committed probe was run, no 
 since neither Hercules host ever mentions option 40 — **then withdraws the option (`ff fe 28`)
 after our well-formed `DEVICE-TYPE REQUEST`**, identically with and without the `-E` suffix. Our
 backoff carried the session to z/VM's logon screen, **so the backoff path finally has a live
-witness** — and specifically the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), a
+witness** — and specifically the `St.Dont` arm of `TelnetLayer.step`
+(`packages/core/src/telnet.ts`), a
 *different* path from the DEVICE-TYPE REJECT and `-tn3270e off` cases `drive-e.py` drives, and
-one nothing had ever exercised because our client never volunteers `WILL 40`. It has no unit
-test on option 40, so it should get one. But the negotiation does not complete and **TN3270E
+one nothing had ever exercised because our client never volunteers `WILL 40`. **WRITING ITS
+MISSING UNIT TEST FOUND A REAL BUG, 2026-09-17, branch `tn3270e-dont-teardown`:** that arm did
+not clear `tn3270eNegotiated`, which short-circuits `is3270Mode()`, so a host withdrawing option
+40 *after* the negotiation completed kept the client framing TN3270E — header prepended outbound,
+header stripped inbound — against a host that had stopped being TN3270E; `Session.e` had the
+identical hole, and a mid-session `DONT` closes no connection so `handleClose()` never ran. Both
+teardowns are now single functions (`TelnetLayer.disableTn3270e`, `Session.forgetTn3270e`) reached
+by every path, and the arm has ten tests. The live run was clean only because the flag was still
+false when the `DONT` arrived. But the negotiation does not complete and **TN3270E
 remains functionally unverified against a host**. Whose fault the refusal is is **unresolved**: there is no s3270 on this box and
 no compiler to build one, so the known-good comparison this project's discipline demands could
 not be run. **NEXT STEP, and it is cheap:** get an LU name from whoever runs that system and try
