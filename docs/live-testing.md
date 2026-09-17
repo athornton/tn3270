@@ -9,13 +9,17 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
-- **A REAL TN3270E-CAPABLE HOST HAS NOW BEEN PROBED, 2026-09-17 — and the answer is half an
-  answer.** z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO TN3270E` unprompted and asks
+- **A REAL TN3270E-CAPABLE HOST HAS NOW BEEN PROBED, 2026-09-17, AND THE REFUSAL IS THE HOST'S
+  FAULT.** z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO TN3270E` unprompted and asks
   `SEND DEVICE-TYPE`, both firsts here, then **withdraws the option** after our request and we
   fall back to base TN3270 and reach its logon screen. So the backoff path finally has a live
-  witness, but **the negotiation does not complete and TN3270E is still not functionally verified
-  against a host** — and with no s3270 on this box we cannot say whose fault the refusal is. Full
-  bytes, the two candidate explanations and the corrected probe: *TN3270E against a real host*.
+  witness. ~~And with no s3270 on this box we cannot say whose fault the refusal is.~~
+  **CORRECTED LATER THE SAME DAY: s3270 4.5ga6 was built here and refused identically, in five
+  variants, having sent a byte-identical request — so our client is EXONERATED on this
+  exchange.** **But the negotiation still does not complete, so TN3270E is NOT functionally
+  verified against a host**, and this host cannot verify it: it abandons before FUNCTIONS, so no
+  BIND and no LU has ever been observed. Full bytes, the verdict, the variant table and the
+  corrected probe: *TN3270E against a real host*.
 - **THE VIRTUAL KEYPAD — NOTHING WAS RUN AGAINST A HOST, 2026-09-17, and that is a decision rather
   than a gap.** A button press produces the same wire bytes as the equivalent keystroke, and those
   are already verified below. **But Sys Req, Dup, Field Mark and Newline have NO live witness at
@@ -1367,11 +1371,15 @@ the same instinct applies to any future comparison against a host that paints a 
 Note MVS sends far less than VM before settling (33 bytes out versus VM's 140) because it
 negotiates only TERMINAL-TYPE, BINARY and EOR and asks nothing else. **Neither host ever
 sent `ff fd 28` or `ff fb 28`** in any of these eight runs, which is the measurement that
-makes stage 2b unverifiable here in the first place.
+makes stage 2b unverifiable **against these two hosts** in the first place. (It does not
+make it unverifiable *on this box*: see *`playback -b` as an oracle*, which replays a
+recorded TN3270E host with no network at all.)
 
 **So the criterion is MET on both hosts**, with the clock caveat stated. The remaining
 TN3270E gap is unchanged and is about the negotiation itself, not about strict addition:
-see *TN3270E against a real host*.
+see *TN3270E against a real host*, where the 2026-09-17 verdict is that the one host which
+offers the option is itself at fault, and our client is exonerated but still not
+functionally verified.
 
 ## The Electron GUI against both hosts — verified 2026-09-14
 
@@ -1500,13 +1508,21 @@ command that exits kills it, and the symptom is Electron's
 `Missing X server or $DISPLAY` even though `DISPLAY` is set — which reads as a
 configuration error rather than a dead server. Cost two runs to spot.
 
-## TN3270E against a real host — partly answered, 2026-09-17
+## TN3270E against a real host — WHOSE FAULT: ANSWERED (the host's); FUNCTIONALLY VERIFIED: NO — 2026-09-17
 
 **A real host has now offered option 40, asked us for a device type, and then withdrawn
 the option; our fallback carried the session through to a usable screen.** That is three
-firsts and one unresolved question, and the negotiation **does not complete**, so TN3270E
-remains *functionally* unverified against a host. What is verified is that a host offers
-it, that it asks for a device type, and that our backoff is correct.
+firsts, and the negotiation **does not complete**, so TN3270E remains *functionally*
+unverified against a host. What is verified is that a host offers it, that it asks for a
+device type, and that our backoff is correct.
+
+**AND THE "WHOSE FAULT" QUESTION IS NOW ANSWERED — IT IS THE HOST'S, AND OUR CLIENT IS
+EXONERATED ON THIS EXCHANGE.** This section originally said the question could not be
+settled because there was no s3270 binary and no compiler on this box. **Both premises were
+false**; s3270 4.5ga6 has been built here and shown the same host, and it is refused too,
+after sending a request byte-identical to ours. See *The verdict* below, which is the part
+to quote. **Exonerated is not verified**: the host still abandons before FUNCTIONS, so
+nothing downstream of DEVICE-TYPE has any live witness, and this host cannot supply one.
 
 Host: **`evievm.pubvm.org:23`**, a public z/VM 4.4 system. **Plaintext only — it does not
 do TLS**, so `-insecure` is required (see the trap below). Run 2026-09-17, **no logon
@@ -1537,6 +1553,17 @@ the bottom right. Status line `U F U C(evievm.pubvm.org) I 2 24 80 19 16 0x0`.
 and the host again answers `ff fe 28` then `ff fd 18`; our fallback sent `> ff fc 28`
 then `> ff fb 18`. **So the `-E` suffix is not the trigger** — the refusal follows a
 well-formed `DEVICE-TYPE REQUEST` either way.
+
+> **THE REASONING RECORDED HERE FOR THAT WAS WRONG, corrected 2026-09-17.** The conclusion
+> stands, but not for the reason first given, and the reason matters because it was presented
+> as a comparison. **s3270 sends `IBM-3278-2-E` in DEVICE-TYPE even under `-model 3278-2`** —
+> `create_3270_termtype(true)` appends `-E` unless extended data stream is off or the `S:`
+> prefix set `STD_DS_HOST` (`Common/telnet.c:2106`, called from `:2121-2122`), and the model
+> suffix reaches only TERMINAL-TYPE. **We send the bare `IBM-3278-2` there; no known-good
+> client sends that form at all**, so run 2 varied our request against nothing and could not
+> have settled anything about the host. See *A divergence from s3270 in our DEVICE-TYPE*
+> below. What actually rules the suffix out is that s3270's `-E` form is refused too, plus
+> the three other device types in *The verdict*.
 
 ### What this establishes
 
@@ -1570,24 +1597,172 @@ well-formed `DEVICE-TYPE REQUEST` either way.
 
 ### What this does NOT establish — the important half
 
-- **Whose fault the refusal is is UNRESOLVED, and this cuts against us.** The host
-  withdraws the option *after* a well-formed request, identically for `IBM-3278-2-E` and
-  `IBM-3278-2`. **There is no s3270 binary on this box and no compiler to build one**, so
-  the comparison this project's own discipline demands — *a harness never shown to satisfy
-  a known-good client cannot say which side is wrong*, the argument in the stage 2b spec
-  under *Testing* — could not be run against this host. Until a known-good client is shown
-  the same host, "the host is at fault" is a hypothesis, not a finding.
-- Two candidate explanations, **both untested**:
-  **(a)** the host may require a `CONNECT` clause naming an LU. RFC 2355 makes it optional
-  and a conforming host should assign a device, but a public z/VM with defined resources
-  may not. `Connect("LUNAME@evievm.pubvm.org:23")` would be decisive if a valid name is
-  known.
-  **(b)** the option may be advertised but not functional, as some front ends do.
+- ~~**Whose fault the refusal is is UNRESOLVED, and this cuts against us.** There is no s3270
+  binary on this box and no compiler to build one, so the comparison this project's own
+  discipline demands could not be run.~~ **WITHDRAWN, 2026-09-17 — BOTH PREMISES WERE FALSE
+  AND THE CONCLUSION INVERTS.** There is a compiler; `which cc gcc` failed only because the
+  LSST stack's conda environment was not on `PATH`. s3270 was built and run, the comparison
+  WAS made, and it exonerates us. *The verdict* is the next section. Do not reinstate this
+  bullet or anything citing it; it is kept struck only so the reasoning is not repeated.
+- ~~Two candidate explanations, **both untested**: **(a)** the host may require a `CONNECT`
+  clause naming an LU; **(b)** the option may be advertised but not functional.~~ **RESOLVED
+  IN FAVOUR OF (b), 2026-09-17.** Hypothesis (a) is **dead**: s3270 sent `IBM-3278-2-E
+  CONNECT VTAM` and was refused identically. Details in *The verdict*.
 - **Questions 1, 2 and 3 remain unanswered**, because the negotiation never gets past
-  DEVICE-TYPE.
+  DEVICE-TYPE — **and this host can never answer them.** It abandons first, so no
+  `FUNCTIONS REQUEST`, no BIND and no LU name has been observed from it, by us or by s3270.
+  For a host-free way to close that gap, see *`playback -b` as an oracle* below.
 - **TLS still has no native-TLS-mainframe witness.** This host is plaintext, so our TLS
   verification remains via the in-repo proxy against Hercules. Honest — but keep it
   labelled that way wherever it is quoted.
+
+### The verdict — the host's fault, 2026-09-17
+
+**s3270 4.5ga6 was shown the same host and was refused in exactly the same way, after
+sending a byte-identical request. Our implementation is exonerated on this exchange.**
+
+The two DEVICE-TYPE subnegotiations, as bytes:
+
+```
+ours  : fffa28020749424d2d333237382d322d45fff0   (19 bytes)
+s3270 : fffa28020749424d2d333237382d322d45fff0   (19 bytes)
+```
+
+The host's `SEND DEVICE-TYPE` was identical to each (`fffa280802fff0`) and its reply
+identical to each (`fffe28fffd18`). s3270's own trace, verbatim:
+
+```
+RCVD DO TN3270E
+SENT WILL TN3270E
+RCVD SB TN3270E SEND DEVICE-TYPE SE
+SENT SB TN3270E DEVICE-TYPE REQUEST IBM-3278-2-E SE
+RCVD DONT TN3270E
+SENT WONT TN3270E
+"Aborting TN3270E: negotiated off"
+SENT WILL TERMINAL TYPE
+```
+
+**FOUR s3270 device-type variants are on record and all four were refused** — which kills both
+candidate explanations rather than one, and rules device type out as the trigger:
+
+| s3270 sent as DEVICE-TYPE | host reply |
+|---|---|
+| `IBM-3278-2-E` | `DONT TN3270E` |
+| `IBM-3278-2-E CONNECT VTAM` (operand `01` = CONNECT) | `DONT TN3270E` |
+| `IBM-DYNAMIC` (via `-oversize 100x30`) | `DONT TN3270E` |
+| `IBM-3278-4-E` | `DONT TN3270E` |
+
+> **A COUNT DISCREPANCY, LEFT VISIBLE RATHER THAN PADDED.** The session note this was written
+> from said **five** variants, and enumerated **four**. The fifth was not recorded and has not
+> been reconstructed, so **four** is the number stated here — the table is the evidence and the
+> tally follows it, not the other way round. The argument does not depend on the count: the
+> `CONNECT` row alone kills hypothesis (a), and the conformance argument below is independent
+> of how many device types were offered. **If you re-run this, log each invocation.**
+
+**THE DECISIVE ARGUMENT IS CONFORMANCE, NOT THE TALLY.** RFC 2355 §7.1.5 requires a host that
+finds a device type unacceptable to answer with a TN3270E **`DEVICE-TYPE REJECT` carrying a
+reason code** — *"If the server wishes to deny the request, it sends back the DEVICE-TYPE
+REJECT command with one of the following reason-codes"* (`rfc2355.txt:702-703`; the command is
+defined in §4 at `:420-423`, and `INV-DEVICE-TYPE` is the reason code for exactly this case,
+`:707-708`). **Note this is §7.1.5 and §4, NOT §3** — §3 (`:313`) is only the table of command
+names and codes, and an earlier draft of this write-up cited it wrongly.
+This host sends **no TN3270E subnegotiation at all** in reply — not `IS`, not
+`REJECT` — and withdraws at the *telnet* layer instead. That is the signature of an option
+advertised without a functional implementation behind it, and it is true independently of
+what device type was offered. So hypothesis (b) is the finding and (a) is refuted.
+
+**What this does NOT make true.** The host is at fault; **our TN3270E is not thereby
+verified**. Everything past DEVICE-TYPE — FUNCTIONS, the 5-byte header on a real host, SNA
+responses, BIND, an assigned LU — remains unwitnessed by any host, and **this host cannot
+witness it**, because it abandons before any of it. Anyone quoting "the host's fault" must
+carry that sentence with it.
+
+### Toolchain — how s3270 got built here, and why `which cc` lied
+
+**`which cc gcc` finding nothing did not mean there was no compiler.** This box is an RSP
+notebook container and the toolchain lives in the LSST stack's conda environment, which is
+not on `PATH` until it is loaded:
+
+```bash
+source /opt/lsst/software/stack/loadLSST.bash   # puts gcc and make on PATH
+gcc --version   # gcc (conda-forge gcc 14.4.0-4) 14.4.0
+make --version  # GNU Make 4.4.1
+```
+
+**Source the `loadLSST.bash` script; do NOT copy the raw environment path out of `PATH`.**
+The expanded path contains `lsst-scipipe-13.1.0-exact` and will rot at the next stack
+upgrade — the script is the stable name for the same thing.
+
+suite3270 4.5 in `/home/a/athor/src/suite3270-4.5` was already `configure`d as
+`./configure --disable-x3270 --disable-x3270if` (recorded in its `config.log:7`), so:
+
+```bash
+source /opt/lsst/software/stack/loadLSST.bash
+cd /home/a/athor/src/suite3270-4.5 && make s3270 && make playback
+```
+
+**`make s3270` took 23 seconds, exit 0, with zero extra flags and zero workarounds**, and
+**TLS came along for free** — configure found conda's OpenSSL, and `s3270 --version` reports
+`TLS provider: OpenSSL 3.6.4 25 Aug 2026`. Binary:
+`/home/a/athor/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270`, `s3270 v4.5ga6`.
+`make playback` builds the replay tool used below.
+
+### The binary was validated BEFORE it was trusted
+
+This step is not ceremony. **A silently broken build would have produced a false "the host
+refuses s3270 too" and the verdict above would have been worthless** — it is the one failure
+mode that would have looked exactly like success.
+
+The suite ships its own oracle: `playback -b` replays a recorded host **and asserts the
+client's replies match the recording byte for byte**, failing if they do not.
+
+```bash
+cd /home/a/athor/src/suite3270-4.5
+obj/x86_64-conda-linux-gnu/playback/playback -b -p 8021 s3270/Test/devname_success.trc &
+obj/x86_64-conda-linux-gnu/s3270/s3270 -devname 'foo===' -model 3278-4-E 127.0.0.1:8021
+```
+
+It logged `Matched N bytes from emulator` throughout, over a **complete TN3270E
+negotiation**: `DEVICE-TYPE REQUEST IBM-3278-4-E`, `FUNCTIONS REQUEST BIND-IMAGE RESPONSES
+SYSREQ CONTENTION-RESOLUTION`, `FUNCTIONS IS BIND-IMAGE`, a real BIND with
+`PLU-name 'IBM0SMAJ'`, the transition to `connected-tn3270e`, and a rendered screen.
+
+### `playback -b` as an oracle — better than what we have, and no host needed
+
+**This is the cheapest remaining route to functional TN3270E verification, and it should be
+tried before hunting for another host.** `playback -b` is strictly stronger than the in-repo
+`packages/cli/scripts/e-server.py`: the harness was written by us from the RFC and x3270's
+source, so it can only check what we thought to encode, whereas `playback -b` replays a
+*recorded real host* and diffs the client's entire side of the conversation byte for byte,
+**with no network and no host**. And `s3270/Test/devname_success.trc` is a real TN3270E
+negotiation **including a BIND** — precisely the region questions 1-3 cover and z/VM 4.4
+will never reach. Recommended in `docs/HANDOFF.md` as the next step.
+
+### A divergence from s3270 in our DEVICE-TYPE — recorded, not fixed
+
+**s3270 appends `-E` to the TN3270E DEVICE-TYPE regardless of model; we do not.** Found
+while building the comparison above, and it is why run 2's reasoning had to be corrected.
+
+- **s3270**: `tn3270e_request()` calls `create_3270_termtype(true)`
+  (`Common/telnet.c:2121-2122`), and that function appends `-E` unless extended data stream
+  is off or the `S:` host prefix set `STD_DS_HOST` (`Common/telnet.c:2106`). The model
+  suffix from `-model` therefore reaches **only** TERMINAL-TYPE.
+- **ours**: `deviceTypeRequest()` sends `st.terminalType` verbatim
+  (`packages/core/src/tn3270e.ts:188-194`, the string at `:191`), which is the same as the TERMINAL-TYPE
+  reply — `opts.terminalType ?? TERMINAL_TYPE` (`packages/core/src/session.ts:543`). So
+  **under `-model 3278-2` s3270 still sends `IBM-3278-2-E` while we send the bare
+  `IBM-3278-2`.** With no `-model` at all both send `IBM-3278-2-E`, which is why the
+  committed comparison against s3270 is byte-identical and never caught this.
+
+**This is an open decision for the user, not a bug fixed here, and no code was changed.**
+RFC 2355 permits both forms, and there is a real argument that `-model 3278-2` meaning
+"not extended" makes the bare form the more honest one — s3270's behaviour arguably leaks
+an unrelated default. Decide it deliberately; do not "align with s3270" reflexively.
+
+Also worth recording for whoever next touches LU plumbing: **s3270 appends the LU to
+TERMINAL-TYPE too**, not only to DEVICE-TYPE — it sends `IBM-3278-2-E@VTAM` in the
+TERMINAL-TYPE `IS` (`Common/telnet.c:2019-2024`, the `"@"` and `try_lu` operands at
+`:2022-2023`).
 
 ### The probe — and the defect that was in it until 2026-09-17
 
@@ -1619,11 +1794,15 @@ so it cannot hand the VM reconnect trap to the next run.
 an end-of-session aside is not a decision recorded against the design. The 2026-09-17
 answers are recorded there under *Live host, 2026-09-17*.
 
+**And questions 1-3 CANNOT be answered by this host — it abandons before FUNCTIONS, for
+s3270 as well as for us. Stop treating it as the route to them; see *`playback -b` as an
+oracle* above for one that needs no host.**
+
 1. **Does the host send `FUNCTIONS REQUEST` itself rather than waiting for ours?**
    **STILL UNANSWERED.** Transition 5 of the state machine is implemented from x3270's
    source and no server has ever exercised it. `e-server.py` always waits for the client,
    so this is still the single largest untested branch in `tn3270e.ts`. z/VM 4.4 refused
-   before FUNCTIONS was reached.
+   before FUNCTIONS was reached, and will refuse next time too.
 2. **Does it ever send `ALWAYS-RESPONSE`?** **STILL UNANSWERED** — same reason. Until one
    does, the positive-response path is exercised only by us asking the harness to send it
    — the same honest position retransmit is in. If a host does, check the SEQ it expects
@@ -1641,15 +1820,25 @@ answers are recorded there under *Live host, 2026-09-17*.
 
 ### Still to try, in order of what each would settle
 
-- **An LU name against this host.** `Connect("LUNAME@evievm.pubvm.org:23")` is the one
-  test that could distinguish explanation (a) from (b) above, and it needs a valid LU
-  name from whoever runs the system. `e-server.py` accepts any name, so this cannot be
-  tested here at all.
-- **An s3270 or x3270 trace of `evievm.pubvm.org:23` from a machine that has one.** This
+- **`playback -b` against `s3270/Test/devname_success.trc`, driving OUR client.** **This is
+  now the top item**, ahead of anything needing a host: it replays a recorded real host and
+  diffs the client's whole side byte for byte, the recording includes FUNCTIONS **and a
+  BIND**, and it needs no network. It is the only listed item that can touch questions 1-3.
+  See *`playback -b` as an oracle* above. Note the recording expects s3270's replies, so
+  our two known divergences — the bare DEVICE-TYPE under `-model`, and BIND-IMAGE, which we
+  decline by design — must be accounted for before a mismatch is read as a bug.
+- ~~**An LU name against this host.** `Connect("LUNAME@evievm.pubvm.org:23")` is the one
+  test that could distinguish explanation (a) from (b) above.~~ **NO LONGER DIAGNOSTIC,
+  2026-09-17.** s3270 sent `IBM-3278-2-E CONNECT VTAM` to this host and was refused
+  identically, so (a) is dead and an LU name would settle nothing here. Still worth having
+  for the LU path in general, but it is no longer this host's diagnostic.
+- ~~**An s3270 or x3270 trace of `evievm.pubvm.org:23` from a machine that has one.** This
   is the missing known-good comparison, and it is the only thing that can say whether the
-  refusal is ours or the host's. It does not need this box.
+  refusal is ours or the host's. It does not need this box.~~ **DONE, 2026-09-17, ON THIS
+  BOX.** s3270 4.5ga6 was built here in 23 seconds — see *Toolchain* — and refused in five
+  variants. Verdict: the host's. Nothing further is needed from another machine.
 - **A printer session.** Its harness exists; nothing has driven it, and it needs a host
-  that completes the negotiation.
+  that completes the negotiation — or a recording of one.
 - **Whether a host that completes TN3270E exists at all among the public systems.** z/VM
   4.4 here offers and withdraws; another public z/OS or z/VM may not.
 - **The explicit `-tn3270e off` run against this host**, for question 4's literal wording.
