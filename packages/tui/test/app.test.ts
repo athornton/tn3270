@@ -643,6 +643,67 @@ describe('the special-keys overlay', () => {
     }
   });
 
+  it('moves the selection with the vi and wasd letters, in either case', () => {
+    // ONE KEYSTROKE PER ASSERTION, from a freshly opened list, for the reason the arrow test above
+    // records: a net position after several moves is satisfied by transposed handlers. Each letter
+    // is checked against the LATEST write alone, and the up letters are checked from a selection
+    // that is NOT already clamped at 0 -- a move up from the top is a no-op, and a no-op is exactly
+    // what an unbound letter produces, so testing up from index 0 would pass with no handler at all.
+    for (const down of ['j', 'J', 's', 'S']) {
+      const h = harness();
+      h.app.start();
+      dispatchToggle(h.app);
+      h.app.onInput(enc(down));
+      expect(latest(h), down).toContain(marked(1));
+    }
+    for (const up of ['k', 'K', 'w', 'W']) {
+      const h = harness();
+      h.app.start();
+      dispatchToggle(h.app);
+      h.app.onInput(enc('\x1b[B\x1b[B'));                  // to index 2, by arrow, not by letter
+      expect(latest(h), up).toContain(marked(2));
+      h.app.onInput(enc(up));
+      expect(latest(h), up).toContain(marked(1));
+    }
+  });
+
+  it('fires the key a letter selected, and sends nothing to the host on the way', () => {
+    // The letters are navigation, not AIDs: the only thing that reaches the host is the key Enter
+    // fires afterwards. `PF15` is KEYPAD_KEYS[2], so this also pins that two `j`s moved two lines.
+    const h = harness();
+    h.app.start();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    dispatchToggle(h.app);
+    h.app.onInput(enc('jj'));                              // both letters from ONE read, as autorepeat
+    expect(sent).not.toHaveBeenCalled();
+    expect(cellText(h.session, 0)).toBe(' ');              // and neither letter was typed
+    h.app.onInput(enc('\r'));
+    expect(sent).toHaveBeenCalledWith(AID.PF15);
+  });
+
+  it('still swallows h, l, a and d: a one-column list has no left or right', () => {
+    // DELIBERATELY UNBOUND, not forgotten -- see OVERLAY_UP_LETTERS. Both halves matter: they must
+    // not move the selection, AND they must not reach the field behind the list. Without the second
+    // assertion the overlay would be a keylogger for whatever the operator was half-way through
+    // typing, which is the whole point of the interception in `onInput`.
+    for (const key of ['h', 'H', 'l', 'L', 'a', 'A', 'd', 'D']) {
+      const h = harness();
+      h.app.start();
+      const sent = vi.spyOn(h.session, 'sendAID');
+      dispatchToggle(h.app);
+      h.app.onInput(enc('\x1b[B'));                        // off 0, so a stray move either way shows
+      const before = latest(h);
+      h.app.onInput(enc(key));
+      expect(latest(h), key).toBe(before);                 // nothing repainted, so nothing moved
+      expect(h.app.overlayOpen, key).toBe(true);           // nor did it close the list
+      expect(cellText(h.session, 0), key).toBe(' ');       // and nothing reached the field
+      expect(h.session.screen.cursor, key).toBe(0);
+      expect(sent, key).not.toHaveBeenCalled();            // nor the host
+      h.app.onInput(enc('\r'));
+      expect(sent, key).toHaveBeenCalledWith(AID.PF14);    // KEYPAD_KEYS[1]: still where the arrow left it
+    }
+  });
+
   it('does NOT type into the screen while the overlay is up', () => {
     // The overlay owns the keyboard while open. A letter reaching the field would be a silent
     // corruption of whatever the operator was in the middle of typing.
