@@ -156,7 +156,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1697 tests, 71 files
+npm test           # 1718 tests, 71 files
 npm run typecheck
 ```
 
@@ -204,6 +204,16 @@ your finger over a WebSocket.
 Sys Req chord either; Newline's would be `Ctrl-J`, which *is* `\n` (0x0a) and already means Enter
 in a terminal — one byte cannot be both, and turning Return into a cursor move is not a trade
 worth making. The keypad button is their route, which is a large part of why the keypad exists.
+
+**While disconnected, `Enter` and `Ctrl-C` (Clear) reconnect to the same host and port**, and send
+nothing. VM prints `Press Enter or Clear to continue` in the instant a `LOGOFF` drops the line, on
+the last screen it ever painted — and until now both keys did nothing whatever, because a
+disconnected `sendAID` throws and the shared dispatch swallows it. The status line says so too:
+`X Disconnected -- press Enter to reconnect`, and only once there is a host to go back to, so a
+replayed trace does not offer a key that cannot work. **This is a deliberate divergence from
+x3270**, which binds no key to its `Reconnect()` action; the TLS decision, the port and any `N:` or
+`LU@` from the original host argument are all replayed, never re-derived, and a second press while
+the first attempt is still dialling is refused rather than opening a second socket.
 
 **The window sizes itself to the screen the host negotiates**, at the largest whole-number
 scale that fits 80% of your display. Whole numbers only: the font is a bitmap, and a
@@ -286,6 +296,10 @@ Only once the timer expires is the `Esc` promoted to a Meta prefix, and even the
 combines with just the next byte, and only to complete a PA; anything else and the `Esc` is
 dropped. Arrow keys are bound in **both** encodings, CSI and SS3, because terminfo reports
 only the application-mode one and any layer can flip the mode.
+
+**Disconnected, `Enter` and `Ctrl-C` reconnect** to the same host, port and per-host options
+rather than sending their AID — see *Using the GUI* for the whole rule; the behaviour is shared
+code and identical in all three interactive front ends.
 
 **`Ctrl-D` is Dup and `Ctrl-F` is Field Mark**, both c3270's own bindings
 (`Common/fb-c3270:186-187`). Dup writes EBCDIC `0x1C` and then TABs — the manual's own wording,
@@ -476,11 +490,18 @@ node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 `Connect()` routes through the same TLS decision as the command line, so the flag goes
 on the invocation and cannot be written into the script.
 
-**Commands.** `Connect` `Disconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
+**Commands.** `Connect` `Disconnect` `Reconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
 `MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` `Dup` `FieldMark` ·
 `ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
 · `Wait`
+
+**`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route
+to that: **`Enter()` here does NOT reconnect**, unlike the interactive front ends' Enter key,
+because a script that types Enter into a dead session must not silently open a socket to a
+mainframe. s3270 has the action under this name, so a script written for it works; both refusals
+are s3270's own words — `Reconnect(): Already connected` and `Reconnect(): No previous host to
+connect to`.
 
 `Dup`, `FieldMark` and `SysReq` are conformance rather than symmetry: s3270 has all three by
 these names (`Common/kybd.c:223`, `:230`, `:254`), so a script written for it should not fail
@@ -541,6 +562,13 @@ socket so a reload reattaches, and a keypad forced on whoever attaches next — 
 person, whose screen would come back six rows taller than they left it — is not a preference worth
 inheriting. A reattaching client therefore starts with the keypad hidden. A screen plus keypad
 taller than the viewport **scrolls**, which is what the browser already did for a model 4.
+
+**A browser pressing `Enter` on a disconnected session makes the GATEWAY redial the mainframe.**
+That is the intended reading: the `Session` is server-side, so it is the server's own socket that
+comes back, and the browser cannot name a host — the action carries no argument and the target is
+the one the gateway was started with. The host, port and TLS decision are the server's throughout,
+which is also why a client that reattaches to a session someone else started can only ever
+reconnect it to the same place.
 
 Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
 `--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
@@ -840,7 +868,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1697 tests, 71 files |
+| `npm test` | **pass** — 1718 tests, 71 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
