@@ -175,8 +175,33 @@ function paint(list: DrawList): void {
   // `buttons`, so this asks "of THIS frame's?". Without it, a frame whose geometry changed while a
   // button was held -- a host that switches model, so the keypad's `y` moves -- would highlight a
   // rectangle no button occupies until the release.
+  //
+  // ## DARKENS, AND IT USED TO LIGHTEN
+  //
+  // `rgba(255,255,255,0.35)` while the keys were white-on-black, which was the right way round then
+  // and became a NO-OP the moment `keypad.ts` went to inverse video: a white wash over an
+  // already-white button is invisible, and press feedback is the ONLY zero-latency feedback in the
+  // whole design -- deliberately local, because over a WebSocket a round trip for it would lag behind
+  // the finger. So the highlight follows the styling: the key is now the LIGHT element, so the
+  // overlay has to be the dark one.
+  //
+  // Black at the same 0.35 takes the default scheme's white key to grey 166 (255 * 0.65) and the
+  // green scheme's lime one to (0,166,0) -- unmistakable against the unpressed key beside it, and
+  // against the black gutter around it, while the label stays BLACK ON GREY and legible. That last
+  // part is why this is not an opaque fill: an opaque dark rectangle would black out the label, and
+  // over a black gutter the pressed key would read as having vanished rather than as pressed.
+  //
+  // The other candidate was re-inverting the pressed key to normal video. Rejected: a key drawn
+  // white-on-black sits on a black keypad background, so its RECTANGLE disappears and only the
+  // letters remain -- the key looks broken rather than held. It would also mean filtering the
+  // region's cells and blitting a modified copy, i.e. new logic in the one file no test can execute.
+  //
+  // UNPROVEN IN PIXELS, and there is no way to prove it here: nothing in the suite executes a line of
+  // this file (`index.ts` deliberately does not export it), `shot.mjs` photographs no press, and
+  // `clicks.mjs` drives a real `mousedown` through this listener but asserts actions, not pixels. The
+  // arithmetic and the guards are unchanged from the version that was measured; only the colour moved.
   if (pressed !== undefined && list.keypad !== undefined && list.keypad.buttons.includes(pressed)) {
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(
       at.x + pressed.x * scale, at.y + pressed.y * scale,
       pressed.w * scale, pressed.h * scale,

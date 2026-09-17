@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { cp037 } from '@tn3270/core';
-import { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH, SCHEMES } from '@tn3270/frontend';
+import { cp037, Colour } from '@tn3270/core';
+import { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH, SCHEMES, schemeRgb } from '@tn3270/frontend';
 import { keypadRegion, KEYPAD_ROWS_TALL, type KeypadRegion } from '../src/keypad.js';
 // From `hittest.js`, not `keypad.js`: the renderer hit-tests in the BROWSER, so this function lives
 // in the one keypad module with no runtime import. See hittest.ts, and the graph assertion in
@@ -26,9 +26,26 @@ const atlas: AtlasGeometry = JSON.parse(readFileSync(
 const scheme = SCHEMES.default!;
 const region = () => keypadRegion(atlas, scheme, 0);
 
-/** The cells drawn inside one button, in emission order. */
+/** The cells drawn inside one button, in emission order. All five of them, since the change. */
 const labelCells = (r: KeypadRegion, b: KeypadButton): readonly DrawCell[] =>
   r.cells.filter((c) => c.y === b.y && c.x >= b.x && c.x < b.x + b.w);
+
+/**
+ * How wide the PAINTED block is, in cells: one less than the key, the last cell being the separator
+ * column. Written here as `- 1` and not as a copy of the source's own constant, which is private.
+ */
+const BLOCK = KEYPAD_KEY_WIDTH - 1;
+
+/**
+ * How many pad cells precede a centred label in its 5-cell block.
+ *
+ * This DOES restate the implementation's expression, and only the whole-layout loop below uses it,
+ * where the alternative is 47 hand-written offsets. The independent statement of the same rule is
+ * `centres the label, so a one-character arrow sits in the middle of its block`, which writes the
+ * offsets down for four label lengths and would fail if this helper and the source were wrong
+ * together.
+ */
+const centreOffset = (label: string): number => Math.floor((BLOCK - label.length) / 2);
 
 describe('keypadRegion', () => {
   it('produces one button per key in the table', () => {
@@ -89,59 +106,167 @@ describe('keypadRegion', () => {
     }
   });
 
-  it('leaves the separator row under the PF block EMPTY', () => {
-    // The gap is why KEYPAD_ROWS_TALL is 6 for a 5-row table, and NOTHING else here can see it:
-    // collapsing the map to [0,1,2,3,4] keeps the buttons disjoint, inside the width and inside
-    // the height, so every other test in this file still passes.
+  it('leaves a blank separator row BETWEEN EVERY PAIR of key rows', () => {
+    // 5 key rows with a gap after all but the last is 9 drawn rows, the keys on the EVEN ones and a
+    // separator on each of the 4 odd ones -- drawn 1, 3, 5 and 7. That is why KEYPAD_ROWS_TALL is 9
+    // for a 5-row table, and NOTHING else here can see it: collapsing the map to [0,1,2,3,4] keeps
+    // every button disjoint, inside the width and inside the height.
+    //
+    // WRITTEN DOWN, not derived from the region. "Which rows hold no button" would be satisfied by
+    // the collapsed map too, since drawn rows 5-8 would then be the empty ones -- a check that
+    // cannot fail for the mutation it exists to catch.
     const r = keypadRegion(atlas, scheme, 350);
-    const gapY = r.y + 2 * atlas.cellHeight;
-    for (const b of r.buttons) expect(b.y, b.label).not.toBe(gapY);
-    for (let x = 0; x < r.width; x += atlas.cellWidth) {
-      expect(hitTest(r.buttons, x, gapY), `x=${x}`).toBeUndefined();
+    expect(KEYPAD_ROWS_TALL).toBe(2 * KEYPAD_ROWS.length - 1);
+    for (const drawnRow of [1, 3, 5, 7]) {
+      const gapY = r.y + drawnRow * atlas.cellHeight;
+      for (const b of r.buttons) expect(b.y, `${b.label} on gap row ${drawnRow}`).not.toBe(gapY);
+      for (let x = 0; x < r.width; x += atlas.cellWidth) {
+        expect(hitTest(r.buttons, x, gapY), `x=${x} on gap row ${drawnRow}`).toBeUndefined();
+      }
+      expect(r.cells.some((c) => c.y === gapY), `cells on gap row ${drawnRow}`).toBe(false);
     }
-    expect(r.cells.some((c) => c.y === gapY)).toBe(false);
+  });
+
+  it('never puts two buttons in vertically-touching rows', () => {
+    // THE PROPERTY THE INVERSE-VIDEO STYLING ACTUALLY NEEDS, stated on the buttons rather than on
+    // the row map. A key is one cell tall and is drawn as a solid white block across five of its six
+    // cells, so two buttons sharing a column with `a.y + a.h === b.y` draw ONE block two cells tall
+    // -- which is what naive inverse video looked like, and why it was rejected. Disjointness cannot
+    // catch it: touching rectangles are disjoint.
+    const bs = region().buttons;
+    for (const a of bs) {
+      for (const b of bs) {
+        if (a === b) continue;
+        const sameColumns = a.x < b.x + b.w && b.x < a.x + a.w;
+        if (!sameColumns) continue;
+        expect(a.y + a.h, `${a.label} touches ${b.label}`).not.toBe(b.y);
+      }
+    }
   });
 
   it('draws PF13-24 ABOVE PF1-12, and starts at the region y', () => {
-    // c3270's order (`Common/c3270/keypad.labels:2` and `:4`), recorded in
-    // `frontend/src/keypad.ts:61-62`. A transposed row map keeps every button disjoint, so only an
+    // c3270's order (`Common/c3270/keypad.labels:2` and `:4`), recorded in the header of
+    // `frontend/src/keypad.ts`. A transposed row map keeps every button disjoint, so only an
     // assertion about WHICH row is where can catch it.
+    //
+    // PF1 is TWO cell rows down, not one: table row 1 is drawn at row 2 because a separator sits
+    // between them. This is the second thing the collapsed map reddens.
     const bs = keypadRegion(atlas, scheme, 350).buttons;
     const pf = (label: string) => bs.find((b) => b.label === label)!;
     expect(pf('PF13').y).toBe(350);
-    expect(pf('PF1').y).toBe(350 + atlas.cellHeight);
+    expect(pf('PF1').y).toBe(350 + 2 * atlas.cellHeight);
     expect(pf('PF13').y).toBeLessThan(pf('PF1').y);
   });
 
-  it('emits a cell for every character of every label', () => {
-    const total = KEYPAD_KEYS.reduce((n, k) => n + k.label.length, 0);
-    expect(region().cells.length).toBeGreaterThanOrEqual(total);
+  it('draws every cell INVERSE: black ink on white paper', () => {
+    // THE STYLING ITSELF. `blit` fills `cell.bg` over the whole cell and then stamps the glyph
+    // tinted `cell.fg`, so black-on-white IS a reverse-video cell -- no new field, no new glyph.
+    // These are the OIA's own two colours exchanged, and not two arbitrary ones.
+    const r = region();
+    const ink = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
+    const paper = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
+    // Otherwise the assertions below would hold for a keypad drawn in one colour on itself.
+    expect(ink).not.toEqual(paper);
+    expect(r.cells.length).toBeGreaterThan(0);
+    for (const c of r.cells) {
+      expect(c.fg, `fg of ${c.x},${c.y}`).toEqual(ink);
+      expect(c.bg, `bg of ${c.x},${c.y}`).toEqual(paper);
+      // And nothing else may paint `fg`: `underline` or `cursor` would now draw a BLACK bar across
+      // the bottom of a white key, which would read as a border nobody asked for.
+      expect([c.underline, c.cursor, c.blink, c.intensify], `flags of ${c.x},${c.y}`)
+        .toEqual([false, false, false, false]);
+    }
   });
 
-  it("places each label's cells at its own button, left to right", () => {
-    // The count assertion above cannot tell a correctly-placed label from 47 labels piled on one
-    // key: this pins x, y and ORDER against the button the label belongs to.
+  it('paints a FULL BLOCK of cells for every key, not just its label', () => {
+    // Inverse video makes the CELL paint the button, so a short label must still fill the block or
+    // the key is a white patch the width of its text -- and `^`, `v`, `<`, `>` would each be a lone
+    // 9x14 speck with no click target. 47 keys x 5 cells = 235.
+    const r = region();
+    expect(r.cells).toHaveLength(KEYPAD_KEYS.length * BLOCK);
+    expect(r.cells).toHaveLength(47 * 5);
+    // Strictly MORE than the labels themselves need -- 199 characters over 47 keys -- and the
+    // difference is the padding, which is the point of the change.
+    expect(r.cells.length)
+      .toBeGreaterThan(KEYPAD_KEYS.reduce((n, k) => n + k.label.length, 0));
+  });
+
+  it('LEAVES THE LAST CELL OF EVERY KEY UNPAINTED, as a separator column', () => {
+    // The blank rows' argument on the other axis, and it is just as load-bearing. The 12 PF keys sit
+    // at columns 0, 6, 12 ... 66 with NO GUTTER between them, so painting all six cells of each makes
+    // the twelve white blocks a single 648-pixel white bar and no key is a rectangle any more.
+    // MEASURED: that is what the first capture of this change looked like.
+    //
+    // The button is still 6 cells wide -- the hit rectangle covers the separator, so a click there
+    // still works the key -- which is exactly why NOTHING else in this file can see this: the
+    // rectangles, the hit tests, the gutters and the declared extent are all unchanged by it.
+    const r = keypadRegion(atlas, scheme, 350);
+    for (const b of r.buttons) {
+      const lastCellX = b.x + b.w - atlas.cellWidth;
+      expect(r.cells.some((c) => c.y === b.y && c.x === lastCellX), `${b.label} separator column`)
+        .toBe(false);
+      // and the cell before it IS painted, or "unpainted" could be satisfied by drawing nothing
+      expect(r.cells.some((c) => c.y === b.y && c.x === lastCellX - atlas.cellWidth), b.label)
+        .toBe(true);
+    }
+  });
+
+  it("fills each button with its own 5 cells, left to right", () => {
+    // The count assertion above cannot tell 47 correctly-placed blocks from 47 blocks piled on one
+    // key: this pins x, y and ORDER against the button the cells belong to.
     const r = keypadRegion(atlas, scheme, 350);
     for (const b of r.buttons) {
       const mine = labelCells(r, b);
-      expect(mine, b.label).toHaveLength(b.label.length);
-      for (let i = 0; i < b.label.length; i++) {
+      expect(mine, b.label).toHaveLength(BLOCK);
+      for (let i = 0; i < BLOCK; i++) {
         expect(mine[i]!.x, `${b.label}[${i}]`).toBe(b.x + i * atlas.cellWidth);
       }
+      // The label's characters sit at the centred offset, and every other cell is a SPACE rather
+      // than a repeat of a label character or a leftover from the key before.
+      const space = atlas.index[ebcdicToCg(cp037.fromUnicode(' '))];
+      for (let i = 0; i < BLOCK; i++) {
+        const ch = b.label[i - centreOffset(b.label)];
+        const want = ch === undefined ? space : atlas.index[ebcdicToCg(cp037.fromUnicode(ch))];
+        expect(mine[i]!.glyph, `${b.label} cell ${i}`).toBe(want);
+      }
     }
+  });
+
+  it('centres the label, so a one-character arrow sits in the middle of its block', () => {
+    // HAND-DERIVED rather than a restatement of the implementation's expression. The block is FIVE
+    // cells, which is odd, so a 1-character label starts at cell 2 with two blanks either side --
+    // exactly centred -- a 3-character at 1, and a 4- or 5-character at 0. Left-aligning instead
+    // would put every one of these at 0, which is the mutation this catches.
+    const r = region();
+    const space = atlas.index[ebcdicToCg(cp037.fromUnicode(' '))];
+    const startOf = (label: string) => {
+      const b = r.buttons.find((c) => c.label === label)!;
+      return labelCells(r, b).findIndex((c) => c.glyph !== space);
+    };
+    expect(startOf('^'), '^').toBe(2);
+    expect(startOf('v'), 'v').toBe(2);
+    expect(startOf('PA1'), 'PA1').toBe(1);
+    expect(startOf('Ins'), 'Ins').toBe(1);
+    expect(startOf('Home'), 'Home').toBe(0);
+    expect(startOf('Enter'), 'Enter').toBe(0);
   });
 
   it('looks labels up through the CG MAP, like the screen and the OIA', () => {
     // The font is in CG order, not EBCDIC order (`cg.ts:8-45`). A label indexed by its EBCDIC byte
     // would draw a different glyph, which only a screenshot golden would catch. This must agree
     // with the screen and the OIA -- `column()` in `cg.ts` is the one copy, imported by all three.
+    //
+    // `+ centreOffset` because the six cells now include the centring pad. `Enter` is 5 characters
+    // in a 6-cell key so its offset is 0 today, and the term is written anyway: without it this test
+    // would silently start comparing pad cells if the alignment ever moved.
     const r = region();
     const enter = r.buttons.find((b) => b.label === 'Enter')!;
     const cells = labelCells(r, enter);
+    const at = centreOffset('Enter');
     for (let i = 0; i < 'Enter'.length; i++) {
       const ebcdic = cp037.fromUnicode('Enter'[i]!);
-      expect(cells[i]!.glyph).toBe(atlas.index[ebcdicToCg(ebcdic)]);
-      expect(cells[i]!.glyph).not.toBe(atlas.index[ebcdic]);
+      expect(cells[at + i]!.glyph).toBe(atlas.index[ebcdicToCg(ebcdic)]);
+      expect(cells[at + i]!.glyph).not.toBe(atlas.index[ebcdic]);
     }
   });
 
@@ -165,18 +290,20 @@ describe('keypadRegion', () => {
     const r = keypadRegion(shifted, scheme, 0);
     const enter = r.buttons.find((b) => b.label === 'Enter')!;
     const cells = labelCells(r, enter);
+    const at = centreOffset('Enter');
     for (let i = 0; i < 'Enter'.length; i++) {
       const cg = ebcdicToCg(cp037.fromUnicode('Enter'[i]!));
-      expect(cells[i]!.glyph).toBe(cg + shift);
-      expect(cells[i]!.glyph).not.toBe(cg % shifted.cols);
+      expect(cells[at + i]!.glyph).toBe(cg + shift);
+      expect(cells[at + i]!.glyph).not.toBe(cg % shifted.cols);
     }
   });
 
   it('falls back to boxsolid for a label character the atlas has no glyph for', () => {
     // The other half of `column()`: a miss must not become an out-of-range column, which would
-    // sample whichever glyph sits next along and read as corruption. No current label can miss, so
-    // an atlas carrying boxsolid ALONE is the only way to assert it -- and it also fails under
-    // `cg % atlas.cols`, which has no fallback at all.
+    // sample whichever glyph sits next along and read as corruption. No current label character can
+    // miss, and nor can the space the centring pads with, so an atlas carrying boxsolid ALONE is the
+    // only way to assert it -- and it also fails under `cg % atlas.cols`, which has no fallback at
+    // all.
     const bare: AtlasGeometry = {
       cellWidth: atlas.cellWidth,
       cellHeight: atlas.cellHeight,
@@ -251,26 +378,26 @@ describe('hitTest', () => {
 
   it('misses the columns the clusters leave blank', () => {
     // A hit test that rounded a click to the nearest key would return a button in a gutter. Table
-    // rows 2 and 3 (drawn 3 and 4) each have THREE 6-cell gutters -- at cells 18, 42 and 54, since
-    // their keys sit at 0,6,12,24,30,36,48,60 -- and they stop at cell 66. Table row 4 (drawn 5) has
-    // one gutter, at 18, and stops at 48: its keys are 0,6,12,24,30,36 and NOW 42, which is
-    // `NewLn`. Cell 42 on that row was in the list below until Newline took it, and this test is
-    // what noticed -- the only assertion anywhere that a keypad column is EMPTY. Every gutter is
-    // probed at its first and last cell.
+    // rows 2 and 3 (drawn 4 and 6, since table row r is drawn at 2r) each have THREE 6-cell gutters
+    // -- at cells 18, 42 and 54, since their keys sit at 0,6,12,24,30,36,48,60 -- and they stop at
+    // cell 66. Table row 4 (drawn 8) has one gutter, at 18, and stops at 48: its keys are
+    // 0,6,12,24,30,36 and NOW 42, which is `NewLn`. Cell 42 on that row was in the list below until
+    // Newline took it, and this test is what noticed -- the only assertion anywhere that a keypad
+    // column is EMPTY. Every gutter is probed at its first and last cell.
     const r = keypadRegion(atlas, scheme, 350);
     const at = (cell: number, drawnRow: number) =>
       hitTest(r.buttons, cell * atlas.cellWidth, r.y + drawnRow * atlas.cellHeight);
-    for (const drawnRow of [3, 4]) {
+    for (const drawnRow of [4, 6]) {
       for (const cell of [18, 23, 42, 47, 54, 59, 66, 71]) {
         expect(at(cell, drawnRow), `cell ${cell} on drawn row ${drawnRow}`).toBeUndefined();
       }
     }
     for (const cell of [18, 23, 48, 71]) {
-      expect(at(cell, 5), `cell ${cell} on drawn row 5`).toBeUndefined();
+      expect(at(cell, 8), `cell ${cell} on drawn row 8`).toBeUndefined();
     }
     // And the other side of the same change: the cell that STOPPED being a gutter must now be a
     // button, or moving a key to 42 and forgetting to probe it would read as a pass above.
-    expect(at(42, 5)?.label, 'cell 42 on drawn row 5').toBe('NewLn');
+    expect(at(42, 8)?.label, 'cell 42 on drawn row 8').toBe('NewLn');
   });
 });
 
