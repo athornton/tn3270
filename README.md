@@ -151,7 +151,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1643 tests, 71 files
+npm test           # 1669 tests, 71 files
 npm run typecheck
 ```
 
@@ -244,8 +244,9 @@ by label** with real Chromium mouse events and asserts the 10 actions that must 
 guard, the scale-and-offset inverse, `hitTest`, `sendAction`, IPC, `applyAction` — none of which
 any unit test can execute, because `renderer.ts` throws at module load outside a browser. Proved
 as a mutation: a bare `return` at the top of the `mousedown` listener leaves build, typecheck and
-all 1643 tests clean while every keypad button is dead, and only this harness reddens. Like
-`keys.mjs` it is not part of `npm test`; `npm test` pins its invocation.
+every test clean — 1643 of them, as the suite stood when that mutation was measured — while every
+keypad button is dead, and only this harness reddens. Like `keys.mjs` it is not part of `npm test`;
+`npm test` pins its invocation.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
@@ -809,7 +810,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1643 tests, 71 files |
+| `npm test` | **pass** — 1669 tests, 71 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |

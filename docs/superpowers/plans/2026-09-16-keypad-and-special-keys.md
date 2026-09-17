@@ -2773,7 +2773,10 @@ Co-Authored-By: SLAC AI"
 > the delta is right either way; a reconciliation that used vitest's number on one side and `grep -c`
 > on the other would have shown a phantom gap of 5 and sent someone looking for a defect.
 >
-> **Step 3a WAS NOT DONE — see its own note below. It is the one part of this task left open.**
+> **Step 3a IS NOW DONE, in `e66ed81`, after this note's gate was measured — see its own AS BUILT
+> note below for the three mutations. The gate above stands as measured at that commit; the suite is
+> **1669 tests in 71 files** with the dispatch table in it (+26: 25 rows and the completeness
+> assertion), and no production code changed.**
 
 - `README.md`: add the keypad and the **four** keys to *What works today* (Newline arrived after this
   step was written); move the keypad OUT of
@@ -2867,21 +2870,49 @@ task.**
 file and check the total against what vitest reports. If they disagree, find out why — the last two
 branches both had a real finding hiding in that gap.
 
-- [ ] **Step 3a: `applyAction`'s dispatch table is 59% unfalsifiable — MEASURED, and it is this
-      branch's outstanding debt**
+- [x] **Step 3a: `applyAction`'s dispatch table WAS 59% unfalsifiable — CLOSED in `e66ed81`**
 
-> **AS BUILT: NOT DONE. STILL OPEN, AND STILL THE RIGHT THING TO DO.** Task 15's execution brief
-> scoped the task to the docs, the gate, the citation sweep, the whole-diff read and this plan's
-> annotations, and did not carry this step — so it was neither done nor silently dropped, and it is
-> recorded here rather than left to be rediscovered. **Confirmed still open by reading
-> `frontend/test/actions.test.ts` at the branch head:** it has 14 tests, and the new ones cover
-> `sysreq`, `dup`/`fieldMark` (each spied before the other key is pressed, per Task 2's finding),
-> `newline` against the moves it sits beside, and the `toggleKeypad` refusal. **There is no
-> data-driven table covering the thirteen, so `left`↔`right`, `tab`↔`backTab`,
-> `eraseEOF`↔`eraseInput`, `backspace`↔`deleteChar`, `home`→`reset` and `clear`→`AID.ENTER` remain
-> transposable with the suite fully green — now at 1643 rather than 1529.** A reviewer should treat
-> this as the one thing worth doing before or immediately after the merge; it is a single test file
-> and it touches no production code.
+> **AS BUILT: DONE. All 25 union members have a row, 23 switch cases plus the two guards, and the
+> three mutations that matter were measured rather than argued. `e66ed81`, no production code
+> touched; the suite goes 1643 → 1669 in the same 71 files.**
+>
+> **MUTATION 1 — THE THIRTEEN AT ONCE**, `left`↔`right`, `up`↔`down`, `home`↔`reset`, `tab`↔`backTab`,
+> `backspace`↔`deleteChar`, `eraseEOF`↔`eraseInput`, `clear`→`AID.ENTER`. Thirteen rows red, each
+> naming where the key actually went:
+>
+> ```
+> AssertionError: clear reached session.sendAID with the wrong argument: expected "sendAID" to be called with arguments: [ 109 ]
+> AssertionError: left was routed to keyboard.right: expected "right" to not be called at all, but actually been called 1 times
+> AssertionError: eraseEOF was routed to keyboard.eraseInput: expected "eraseInput" to not be called at all, but actually been called 1 times
+> ```
+>
+> **MUTATION 2 — `left`↔`right` ALONE:** exactly the `left` and `right` rows, with the same "was
+> routed to" message. A table that only caught the mass swap would be much weaker.
+>
+> **MUTATION 3 — A UNION MEMBER WITH NO ROW** (`| { kind: 'cursorSelect' }` added to `Action`):
+> `AssertionError: the table and the Action union disagree: expected [ 'attn', 'backTab', …(23) ] to
+> deeply equal [ 'attn', 'backTab', …(24) ]`, with `cursorSelect` named in the diff.
+>
+> **ONE CORRECTION TO THIS STEP'S OWN FINDING, and it is the rebuild trap.** "The suite stayed fully
+> green" holds only against a STALE `frontend/dist`. With `tsc --build packages/frontend` run first,
+> the 13-way transposition also reddens two pre-existing TUI tests — `app.test.ts`'s *acts on both
+> encodings of an arrow key* and *completes the sequence when the rest arrives in time* — because both
+> observe a cursor COLUMN and so see `left`↔`right`. Neither sees any of the other eleven, so the
+> finding's substance holds: **11 of the 13 cases were invisible to all 1643 tests even after a
+> rebuild**, and the arrows were covered only incidentally, by a test about ESC timing.
+>
+> **TWO FACTS ABOUT `Keyboard`, read rather than assumed** (`core/src/keyboard.ts`): the `delete`
+> action dispatches to `deleteChar` (`:413`; `delete` is a reserved word) and `type` to `typeString`
+> (`:88`), not to the single-character `type` (`:26`). Everything else shares its name. And
+> `keyboard.type` CANNOT serve as the `type` row's transposition partner — `typeString` delegates to
+> it once per character, so `not.toHaveBeenCalled()` fails against correct code ("Number of calls: 2"
+> for `'HI'`); the positive assertion catches that swap instead, and the row says so.
+>
+> **THE `Action`-UNION SCAN IS NOW SHARED, NOT COPIED.** `web/test/integration.test.ts` had it for its
+> own every-kind test; it moved to `frontend/test/helpers/actionKinds.ts` with the floor and the
+> canaries, and both callers import it. The bounding of that regex to the union's own declaration is
+> the only reason the scan can be trusted, and a second copy could lose it and still pass.
+> `core/test/helpers/trace.ts` is the precedent, and it exists for the same reason.
 
 Found by Task 2's quality review, pre-existing, and left alone deliberately so that commit stayed
 reviewable. **13 of `applyAction`'s 22 cases have no test asserting their target.** All thirteen were

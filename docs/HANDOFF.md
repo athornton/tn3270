@@ -8,7 +8,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 **THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
 MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
-typecheck clean, **1643 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
+typecheck clean, **1669 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
 **18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
 **13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
 
@@ -177,7 +177,7 @@ renderer has stopped being shared.
 (`git rev-list --count main..HEAD` for the number; it is not written down here, for the same reason
 `eb9c306` was worth marking.)
 
-**On the branch head: 1643 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
+**On the branch head: 1669 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
 **all three** GUI goldens matching, `pty-smoke.py` 12/12, and all four by-hand harnesses passing
 (`keys.mjs` 18 chords / 16 actions, `clicks.mjs` 9 buttons / 10 actions, `browser-keys.mjs` 13
 chords / 11 actions, `browser-shot.mjs` 2/2 cases).
@@ -395,8 +395,8 @@ the plumbing the original bug lived in. **Its failure has been OBSERVED, not ass
 `if (e.altKey) return;` to `renderer.ts`'s `keydown` listener leaves `npm test` fully green at
 1352 and reddens only `keys.mjs`, which fails all 13 positions. **The keypad branch then repeated
 the whole experiment in the MOUSE path** and got the same shape: a bare `return` at the top of
-`renderer.ts`'s `mousedown` listener leaves build, typecheck and all 1643 tests clean while every
-keypad button is dead, and only `clicks.mjs` reddens.
+`renderer.ts`'s `mousedown` listener leaves build, typecheck and every test clean — 1643 at the time
+of that measurement — while every keypad button is dead, and only `clicks.mjs` reddens.
 
 **`keys.mjs` is NOT part of `npm test`** — it spawns Electron, so run it by hand
 (`node packages/gui/scripts/keys.mjs`, expecting `ok       18 chords, 16 actions in order`),
