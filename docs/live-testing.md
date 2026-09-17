@@ -1585,9 +1585,10 @@ data: 0.433 > 88 00 09 81 80 80 81 86 87 a6 00 17 81 81 01 00 ...
 
 The host's Read Partition Query (`f3 00 05 01 ff ff 02 ff ef` — the `ff ff` is the
 doubled IAC for `pid=0xff`, "any partition") arrived at 0.432s; our answer went out at
-0.433s. **Byte offsets inside our reply** (offset 0 = the leading `88`, `AID.SF` in
-`constants.ts:461` — the "this is a structured field" indicator, not itself a Query
-Reply; `QUERY_REPLY: 0x81` at `constants.ts:243` is the SFID each unit below carries):
+0.433s. **Byte offsets inside our reply** (offset 0 = the leading `88`,
+`AID.SF` in `constants.ts` — the "this is a structured field" indicator, not itself a Query
+Reply; `Sfid.QUERY_REPLY: 0x81`, also in `constants.ts`, is the SFID each unit below carries.
+Both cited by name: these line numbers were stale twice over and have been dropped):
 
 | offset | LL | SFID | QCODE | reply unit |
 |---|---|---|---|---|
@@ -1672,7 +1673,9 @@ data: 4.973 > 6c ff ef
 data: 4.984 < f1 c1 11 c1 50 1d c8 c9 e2 d7 f0 f8 f8 c5 40 d7 ...
 ```
 
-`0x6c` is `AID.PA1` (`constants.ts:455`). Decoding the host's EBCDIC reply
+`0x6c` is `AID.PA1` (in `constants.ts`, cited by name; note the same byte is
+`EBCDIC_PERCENT`, the second byte of the test request heading, which is a
+collision and not a use). Decoding the host's EBCDIC reply
 (`cp037`) gives, verbatim:
 
 ```
