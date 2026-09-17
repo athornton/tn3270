@@ -109,7 +109,7 @@ const fail = (kase, why, extra = '') => {
  * The alternative was to recompute `bestScale` here, which would put a second copy of the sizing
  * rule in a harness -- and if that copy drifted, this check would compare two differently-sized
  * renderings and report a rendering change. Bytes 16..24 of a PNG are width and height. It is also
- * what makes the taller keypad case size itself: 720x434 rather than 720x350, from the file.
+ * what makes the taller keypad case size itself: 720x476 rather than 720x350, from the file.
  */
 async function runCase(kase, url) {
   const goldenPng = join(goldenDir, `${kase.golden}.png`);

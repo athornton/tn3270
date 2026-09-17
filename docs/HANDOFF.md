@@ -8,12 +8,13 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 **THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
 MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
-typecheck clean, **1688 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
+typecheck clean, **1692 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
 **18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
 **13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
 
-**TWO THINGS ARE WAITING ON THE USER. Do not do either unasked.** (There were three; the user
-authorised the third, the non-TN3270E Sys Req path, on 2026-09-17 and it is now done.)
+**ONE THING IS WAITING ON THE USER. Do not do it unasked.** (There were three; the user authorised
+the non-TN3270E Sys Req path on 2026-09-17, and chose the keypad's styling the same day. Both are
+done, and the second is below as a correction to what this file predicted about it.)
 
 1. **THE MERGE.** The plan's last step is `git merge --no-ff` to `main` and a push; **the user has
    not authorised it.** The branch sits on `main` at `7ca0269` and the tree is clean.
@@ -21,13 +22,24 @@ authorised the third, the non-TN3270E Sys Req path, on 2026-09-17 and it is now 
    and a number written down goes stale on the next commit, which is the same defect as a stale line
    citation and it bit this very paragraph twice. When told: re-run the whole gate **on the merge
    commit**, not only on the branch — that is what the last three merges did.
-2. **THE KEYPAD'S STYLING.** The user is choosing between the current x3270-atlas look and
-   **inverse video on a spaced grid**, having already rejected a proportional font. That was
-   measured, not argued: Helvetica's capital `I` is a bare stem, so `ErInp` renders as "Erlnp", and
-   Inter Light puts 0.4% of its ink pixels at full white against the screen's 100%. **Do not
-   restyle anything without being asked.** A restyle changes only `canvas/src/keypad.ts` and
-   regenerates exactly one golden (`synthetic-ispf-keypad`), because the key table, the button
-   rectangles and every hit test are independent of how a button is drawn.
+
+**DONE, NOT WAITING: THE KEYPAD'S STYLING.** The user chose **inverse video on a spaced grid** on
+2026-09-17, having rejected a proportional font — measured, not argued: Helvetica's capital `I` is a
+bare stem, so `ErInp` renders as "Erlnp", and Inter Light puts 0.4% of its ink pixels at full white
+against the screen's 100%. Every key is now a 45x14 white block with a black label, with a blank row
+between key rows and a blank column at the end of every key. The keypad is 9 cell rows tall rather
+than 6, so a model 2 with it shown is **720x476**, and one golden moved (`synthetic-ispf-keypad`).
+
+**THIS FILE PREDICTED THE BLAST RADIUS WRONG, AND THE CORRECTION IS THE USEFUL PART.** It said a
+restyle "changes only `canvas/src/keypad.ts`". It also changed `canvas/src/renderer.ts`: the press
+highlight was `rgba(255,255,255,0.35)`, which over a now-white button is a **no-op**, so it is black
+at the same alpha. That is the one piece of local, zero-latency feedback in the design and nothing
+in the suite executes a line of `renderer.ts`, so the colour is **unproven in pixels** — the
+appearance was checked by compositing 0.35 black over the regenerated capture, not by photographing
+a real press. The rest of the prediction held: the key table, the button rectangles and every hit
+test are indeed independent of how a button is drawn, and `clicks.mjs` still passes 9 for 9 with
+every hit rectangle moved.
+
 **DONE, NOT WAITING: THE NON-TN3270E SYS REQ PATH.** Authorised by the user 2026-09-17 and
 implemented. Sys Req now sends a **test request read** against a classic host, so all four front
 ends do something against VM/370 and TK5 where they previously did nothing. **It is IMPLEMENTED and
@@ -44,7 +56,9 @@ sessions** stay unscheduled and have no live path at all, both hosts refusing op
 
 - **A clickable 47-button virtual keypad** in both canvas front ends, toggled by `Ctrl-K` (and
   `Alt-K`), hidden by default. PF1–24, PA1–3 and the special keys, drawn through the same glyph
-  atlas and the same blitter as the screen and the OIA — one drawing primitive, three regions.
+  atlas and the same blitter as the screen and the OIA — one drawing primitive, three regions — each
+  key **inverse video on a spaced grid**, which is the user's choice of 2026-09-17 and needed no
+  second font.
 - **A keyboard-navigable special-keys list in the TUI**, same 47 keys, same chord `Ctrl-K`, because
   a terminal has no mouse. Arrows move, Enter fires, Esc closes; while it is open **it owns the
   keyboard**, and the window follows the selection rather than showing the first N (first-N would

@@ -47,7 +47,7 @@ concurrency.** Two sockets can never hold one `Session` at the same time — `at
 a *detached* entry, and the id lives in per-tab `sessionStorage` — so what a session-scoped flag
 would actually do is hand the preference to **whoever attaches next**. A gateway session
 deliberately outlives its socket so a reload reattaches, and the next attacher is a different
-window, possibly a different person, whose screen would come back six rows taller than they left
+window, possibly a different person, whose screen would come back nine rows taller than they left
 it. A reattaching client therefore starts with the keypad hidden.
 
 **The mouse does keypad buttons and nothing else.** No click-to-place-cursor, no drag-to-select, no

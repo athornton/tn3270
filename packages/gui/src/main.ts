@@ -515,7 +515,7 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
  * through Chromium, so nothing about the path under test is bypassed.
  *
  * THE SETTLE IS NOT DECORATION. `clicks.mjs` shows the keypad with a real `Ctrl+K` first, and that
- * action makes the window GROW (`fit` re-sizes from the new draw list: 720x350 to 720x434 for a
+ * action makes the window GROW (`fit` re-sizes from the new draw list: 720x350 to 720x476 for a
  * model 2). Every keypad button is in the pixels that resize adds, so a click delivered before it
  * lands outside the content area entirely and hits nothing. `maybeSendKeys` has already waited
  * `keysMs` before its own first chord; this waits again because the chord that matters is the LAST

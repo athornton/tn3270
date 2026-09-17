@@ -26,7 +26,7 @@
  * and dropping the offset -- are invisible at scale 1 with no centring, and that is the ONLY
  * configuration this harness can run in: `main.ts`'s `fit` sets the content size to exactly
  * `list.width * scale` by `list.height * scale`, so `centre` returns (0,0) for every model in native
- * Electron mode, and an 80-column screen with the keypad is 720x434, which at scale 2 is 1440x868
+ * Electron mode, and an 80-column screen with the keypad is 720x476, which at scale 2 is 1440x952
  * and does not fit Xvfb's 1280x1024. So this run is the PLUMBING, which is scale-independent, and
  * the offset arithmetic lives where a unit test can mutate it.
  *

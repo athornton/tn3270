@@ -96,7 +96,9 @@ own screenshot golden and requires them to be identical, with and without the ke
 **There is a virtual keypad, and four keys that had no way to be pressed.** `Ctrl-K` shows and
 hides a 47-button keypad in the Electron GUI and in a browser — PF1–PF24, PA1–PA3, and the
 special keys a PC keyboard has not got — drawn through the same glyph atlas as the screen, so it
-looks like a 3270 rather than like a native widget. It is a third region of the draw list,
+looks like a 3270 rather than like a native widget. Each key is **inverse video**, a black label on a
+white block, on a grid spaced by a blank row between key rows and a blank column at the end of every
+key: one cell tall and butted together, the blocks would merge into bars instead of reading as keys. It is a third region of the draw list,
 appended *below* the screen and the status line, so showing it never moves or covers a row the
 host wrote: the Electron window grows to fit and a browser page scrolls. Clicking a button fires
 exactly the action its label names; a click anywhere else is ignored.

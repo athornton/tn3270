@@ -140,7 +140,7 @@ export function buildServer(args: WebArgs) {
      * there is no other window to resize. What a session-scoped flag would do instead is hand the
      * preference to whoever attaches NEXT: a gateway `Session` deliberately outlives its socket so a
      * reload reattaches, and the next attacher is a different window -- possibly a different person
-     * -- that never asked for a keypad and would find its screen 6 rows taller than it left it.
+     * -- that never asked for a keypad and would find its screen 9 rows taller than it left it.
      * Declared in the `upgrade` scope, so it dies with the socket, which is exactly the lifetime the
      * preference has; a reattaching client therefore starts with the keypad hidden.
      */
