@@ -205,7 +205,7 @@ export function buildServer(args: WebArgs) {
       /**
        * INTERCEPTED, and this is what makes the kind safe to admit at all.
        *
-       * `applyAction` THROWS on `toggleKeypad` (`frontend/src/actions.ts:43-45`) rather than ignoring
+       * `applyAction` THROWS on `toggleKeypad` (its guard in `frontend/src/actions.ts`) rather than ignoring
        * it, deliberately, so a front end that forgot to own its own display fails loudly. But the
        * call below is outside any try and runs inside a socket 'data' handler, where `wsserver.ts`
        * records that a throw ends the PROCESS and every other operator's session with it. So

@@ -573,7 +573,7 @@ describe('extended attribute storage', () => {
     // EW/EWA "resets any extended field attributes and character attributes
     // associated with the nulled characters to their default values"
     // (pages.txt:2990-2992). clear() is also what the Clear AID calls
-    // (session.ts:350-351), which is the manual's fourth SA reset trigger.
+    // (`Session.sendAID`'s `AID.CLEAR` branch), which is the manual's fourth SA reset trigger.
     const s = new Screen();
     s.setExtended(5, { fg: 0xf2 });
     s.clear();

@@ -71,6 +71,17 @@ export interface RunnerOptions {
 export class Runner {
   shouldQuit = false;
   private host: string | undefined;
+  /**
+   * The last host `Connect()` named, kept for `Reconnect()` to put back in the status line.
+   *
+   * SEPARATE FROM `host` BECAUSE THE TWO HAVE DIFFERENT LIFETIMES, which is the same split
+   * `Session` makes between `per` and its remembered target. `host` is what field 4 of the status
+   * line reports and `Disconnect()` clears it, since `C(<host>)` while disconnected would be a
+   * lie; this one is what the session is FOR, and it outlives the connection exactly as the
+   * session's own target does. x3270 keeps one variable, `current_host`, and that is precisely
+   * what makes its `Reconnect()` possible.
+   */
+  private lastHost: string | undefined;
   private readonly clock: () => number;
   private readonly defaultWait: number;
   private readonly files: TransferFiles | undefined;
@@ -173,12 +184,44 @@ export class Runner {
         // Verified by running s3270 against the same host: it reports
         // C(127.0.0.1) where we were reporting C(127.0.0.1:3270).
         this.host = spec.host;
+        this.lastHost = spec.host;
         return;
       }
       case 'Disconnect':
         s.disconnect();
         this.host = undefined;
         return;
+
+      /**
+       * Connect again to the last host, with NO argument at all.
+       *
+       * CONFORMANCE, exactly as `Dup`/`FieldMark`/`SysReq` are: s3270 has this action under
+       * this name -- `Reconnect_action`, `AnReconnect` (Common/host.c) -- so a script written
+       * for s3270 must not fail here. It is NOT the interactive front ends' Enter key: those
+       * reconnect on Enter or Clear (`frontend/src/actions.ts`), and a SCRIPT's `Enter()`
+       * deliberately does not, because a script that types Enter into a dead session must not
+       * silently open a socket to a mainframe. This is the deliberate spelling.
+       *
+       * `check_argc(AnReconnect, argc, 0, 0)` is s3270's own rule, with check_argc's wording
+       * as `Connect` above uses it. Both REFUSALS come from `Session.reconnect()` and are
+       * passed straight through: "Reconnect(): Already connected" and "Reconnect(): No
+       * previous host to connect to" are x3270's messages verbatim, which is why core spells
+       * them with the action's capital R.
+       *
+       * `this.host` is restored for the status line's field 4 -- `C(<host>)`, hostname only,
+       * as `Connect` sets it. Set AFTER the await, so a failed reconnect reports the
+       * disconnected status rather than claiming a host we did not reach; and read back from
+       * the SESSION rather than from a saved copy would be nicer still, except that the
+       * session deliberately exposes no target (see `reconnect()`: no argument, and nothing to
+       * read one from). A `Disconnect()` clears it and a later `Reconnect()` puts it back,
+       * which is the only route by which it can be stale.
+       */
+      case 'Reconnect': {
+        if (args.length !== 0) throw new Error('Reconnect() requires 0 arguments');
+        await s.reconnect();
+        this.host = this.lastHost;
+        return;
+      }
 
       case 'Quit':
         this.shouldQuit = true;
@@ -656,7 +699,7 @@ export class Runner {
         // Deliberately tests EnterInhibit BY NAME rather than isInhibited(),
         // narrow to the one state that was missing. The broad version would
         // also start blocking on ProgramCheck, which today returns immediately
-        // because programCheck() clears waitingForHost (session.ts:269) — and
+        // because programCheck() clears waitingForHost (`Session.programCheck`) — and
         // blocking there would be wrong as well as out of scope, since only the
         // operator's Reset clears a program check, so the wait could do nothing
         // but burn its timeout. x3270's mask likewise omits the operator-error

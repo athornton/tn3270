@@ -33,10 +33,17 @@ export interface Binding {
 }
 
 export const BINDING_INTENT: readonly Binding[] = Object.freeze([
-  { key: 'Enter', action: { kind: 'enter' }, terminal: '\r' },
+  {
+    key: 'Enter', action: { kind: 'enter' }, terminal: '\r',
+    note: 'the Enter AID -- EXCEPT while disconnected, when it RECONNECTS to the same host '
+      + 'instead of sending anything. VM prints "Press Enter or Clear to continue" as a LOGOFF '
+      + 'drops the line, and both keys used to do nothing at all. A deliberate divergence: '
+      + 'x3270 binds no key to `Reconnect()`. See `applyAction`, and the OIA, which says so',
+  },
   {
     key: 'Ctrl-C', action: { kind: 'clear' }, terminal: '\x03',
-    note: 'the Clear AID, not an interrupt: it dismisses VM\'s MORE... state',
+    note: 'the Clear AID, not an interrupt: it dismisses VM\'s MORE... state. Also RECONNECTS '
+      + 'while disconnected, exactly as Enter does -- VM names both keys',
   },
   {
     key: 'Ctrl-]', action: { kind: 'quit' }, terminal: '\x1d',

@@ -105,6 +105,35 @@ export class Session {
   private eSeq = 0;
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
   private per: ConnectOptions = {};
+  /**
+   * The last target `connect()` was ASKED for, kept so `reconnect()` can replay it.
+   *
+   * ## IT SURVIVES `handleClose()`, AND THAT IS NOT A VIOLATION OF ITS RULE
+   *
+   * `handleClose` discards everything that belongs to the connection — the telnet layer, the
+   * TN3270E state, `per` — because a second connection must not inherit the first one's
+   * negotiation. This field is the one thing here that is NOT a property of the connection: it
+   * is a property of the session's CONFIGURATION, the answer to "which host is this session
+   * for", and it is read only when there is no connection at all. Clearing it on close would
+   * make `reconnect()` unreachable by construction, since the only time anyone wants to
+   * reconnect is after a close.
+   *
+   * `per` is copied in rather than aliased, and stored HERE as well as in `this.per`, precisely
+   * because the two have different lifetimes: `this.per` dies with the connection (see
+   * `ConnectOptions`), while the remembered copy is part of the target. `N:` and `LU@` are
+   * written in the HOST argument, so "the host we were told to talk to" includes them —
+   * replaying the host and port without them would silently reconnect with TN3270E back on to a
+   * host the operator spelled `N:`.
+   *
+   * NOT the resolved socket, and NOT a TLS decision: see `reconnect()` for why that matters.
+   */
+  private target: { host: string; port: number; per: ConnectOptions } | undefined;
+  /**
+   * A `reconnect()` between its call and its socket. See that method: this is the half of
+   * x3270's `PCONNECTED` that `isConnected()` does not cover, and it is what stops two quick
+   * presses of the reconnect key opening two sockets.
+   */
+  private reconnecting = false;
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -180,6 +209,17 @@ export class Session {
     // before and disconnect() would wipe the ones just passed in.
     this.per = per;
 
+    // REMEMBERED BEFORE THE AWAIT, so a target that never came up is still a target: a refused
+    // socket or a TLS handshake that failed is exactly the case an operator wants to retry, and
+    // recording it only on success would leave the reconnect key dead after the one failure
+    // that makes it useful. Copied, not aliased: a caller that reuses and mutates its options
+    // object must not silently change where this session reconnects to.
+    //
+    // The OIA carries the same fact so the STATUS LINE can offer the key, and it is set here for
+    // the same reason: see `Oia.reconnectable`.
+    this.target = { host, port, per: { ...per } };
+    this.oia.reconnectable = true;
+
     const conn = await this.opts.connect(host, port);
     this.conn = conn;
     this.error = undefined;
@@ -233,6 +273,79 @@ export class Session {
     this.handleClose();
   }
 
+  /**
+   * Connect again to the host this session was last asked for.
+   *
+   * ## WHY IT REUSES `this.opts.connect` AND TAKES NO ARGUMENTS — THE TLS TRAP
+   *
+   * `SessionOptions.connect` is INJECTED, and the injected function is where the TLS decision
+   * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` (`tcpConnect(h, p, tls)`),
+   * chosen once from the command line. Replaying the remembered host and port THROUGH THAT SAME
+   * FUNCTION therefore reuses the original decision by construction, and there is nothing here
+   * that could re-derive it.
+   *
+   * That is not a stylistic preference. A PLAINTEXT HOST DOES NOT REJECT A TLS HANDSHAKE, IT
+   * HANGS: Hercules writes `IAC DO TERMINAL-TYPE` and waits, and OpenSSL reads that leading 0xff
+   * as a record content type and blocks for a length that never arrives. TLS is ON by default in
+   * this client and the Hercules hosts are reached with `-insecure`, so anything that re-parsed
+   * the front end's arguments — or built a fresh socket factory — would turn a keypress into a
+   * hung client against the two hosts this project actually tests against. No parameters is also
+   * what keeps the WEB gateway safe: a browser pressing Enter cannot name a host or a scheme,
+   * because there is no argument for it to name one in.
+   *
+   * ## THE TWO REFUSALS, BOTH x3270's
+   *
+   * `Reconnect_action` (`Common/host.c`, verified against the current source) is exactly these
+   * two checks and nothing else:
+   *
+   *     if (PCONNECTED) { popup_an_error(AnReconnect "(): Already connected"); return false; }
+   *     if (current_host == NULL) {
+   *         popup_an_error(AnReconnect "(): No previous host to connect to"); return false; }
+   *     host_reconnect();
+   *
+   * So both are refusals rather than no-ops, and the wording is x3270's own — including the
+   * capitalised `Reconnect()` prefix, which is the s3270 ACTION name: `cli/src/runner.ts` passes
+   * these messages straight through to a script, exactly as it copies `check_argc`'s wording for
+   * `Connect()`, so a script written for s3270 reads the same text from us.
+   *
+   * `PCONNECTED` in x3270 is "connected OR half-connected", which is why the first check also
+   * covers a reconnect ALREADY IN FLIGHT and not just `this.conn`. Our `isConnected()` sees only
+   * the completed case, and this method is reachable from a KEY: two quick presses would
+   * otherwise start two connects, both of which passed `connect()`'s teardown check while
+   * `this.conn` was still undefined, so the first socket would be replaced without being closed
+   * and left open on the mainframe forever — an LU leaked per impatient keypress.
+   *
+   * ## `async`, BECAUSE `connect` IS
+   *
+   * It resolves when the connection is up, so the CLI's `Reconnect()` can report failure the way
+   * `Connect()` does. INTERACTIVE CALLERS MUST STILL CONTAIN THE REJECTION: `applyAction` is
+   * synchronous and an unhandled rejection ends the process on modern Node — in the web gateway
+   * that would take every other operator's session with it. See `applyAction`.
+   *
+   * The failure is recorded in `lastError()` and in the trace before it is rethrown, so a front
+   * end that can only swallow it still leaves the reason somewhere findable.
+   */
+  async reconnect(): Promise<void> {
+    if (this.conn !== undefined || this.reconnecting) {
+      throw new Error('Reconnect(): Already connected');
+    }
+    const target = this.target;
+    if (target === undefined) throw new Error('Reconnect(): No previous host to connect to');
+    this.reconnecting = true;
+    try {
+      // The remembered ConnectOptions are copied out again, so the session's memory of its target
+      // cannot be reached through the object handed to `connect()`.
+      await this.connect(target.host, target.port, { ...target.per });
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      this.error = why;
+      this.trace.note(`reconnect to ${target.host}:${target.port} failed: ${why}`);
+      throw err;
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
   private handleClose(): void {
     if (this.conn === undefined) return;
     this.conn = undefined;
@@ -258,6 +371,11 @@ export class Session {
     // The connection's own overrides go with it, for the same reason: `N:` applied to
     // one host must not silently disable TN3270E for the next one.
     this.per = {};
+    // `this.target` AND `this.oia.reconnectable` ARE DELIBERATELY NOT CLEARED HERE, and this is
+    // the one exception to the rule above. They record which host this SESSION is for, not
+    // anything the closing connection negotiated, and `reconnect()` runs only after this method
+    // has already run — clearing them would make the feature unreachable rather than clean. See
+    // the field's own comment.
     this.emit('disconnect');
   }
 

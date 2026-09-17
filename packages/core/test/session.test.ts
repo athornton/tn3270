@@ -3,7 +3,7 @@ import { Session, type Connection, type SessionOptions } from '../src/session.js
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Cmd, Order, AID, FA, Qcode, Sfid,
 } from '../src/constants.js';
-import { KeyboardState } from '../src/oia.js';
+import { KeyboardState, Oia } from '../src/oia.js';
 
 /** An in-memory connection that records what the session sends. */
 class FakeConnection implements Connection {
@@ -119,6 +119,222 @@ describe('connection lifecycle', () => {
     session.disconnect();
 
     expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * `reconnect()`: THE SAME TARGET, THROUGH THE SAME INJECTED `connect`.
+ *
+ * The interactive front ends reach this from the Enter and Clear keys while disconnected, and the
+ * CLI from `Reconnect()`. What is asserted here is the three-part memory (host, port, options) and
+ * the two refusals; the KEY BINDING is `frontend/test/actions.test.ts`'s business.
+ */
+describe('reconnect() replays the remembered target', () => {
+  /**
+   * A session whose injected `connect` records what it was asked for AND the decision it closes
+   * over -- which is how the real one carries TLS.
+   *
+   * `frontend`'s `defaultSession` builds `connect: (h, p) => tcpConnect(h, p, tls)`, so the TLS
+   * choice is not a parameter of `connect()` at all: it is captured in the closure. THAT IS THE
+   * WHOLE SAFETY ARGUMENT FOR `reconnect()`, and it is worth a test that would fail if reconnecting
+   * ever routed around `opts.connect`, because the failure mode is not an error -- a plaintext
+   * Hercules does not reject a TLS handshake, it HANGS.
+   */
+  function dialRecorder(scheme: 'tls' | 'plaintext') {
+    const dialled: { host: string; port: number; scheme: string }[] = [];
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: (host, port) => {
+        // `scheme` is read from the closure, exactly as `tcpConnect(h, p, tls)` reads `tls`.
+        dialled.push({ host, port, scheme });
+        const conn = new FakeConnection();
+        conns.push(conn);
+        return conn;
+      },
+    });
+    return { session, dialled, conns };
+  }
+
+  it('dials the SAME host and port, through the SAME injected connect', async () => {
+    const { session, dialled, conns } = dialRecorder('plaintext');
+    await session.connect('vm.example', 3270);
+    conns[0]!.close();                                  // the host hangs up, as a LOGOFF does
+
+    await session.reconnect();
+
+    // THE PORT IS AS LOAD-BEARING AS THE HOST. Replaying 23 -- the default every host spec falls
+    // back to -- would dial the wrong service on the right machine, and 3270 versus 23 is exactly
+    // the transposition a from-memory reimplementation makes.
+    expect(dialled).toEqual([
+      { host: 'vm.example', port: 3270, scheme: 'plaintext' },
+      { host: 'vm.example', port: 3270, scheme: 'plaintext' },
+    ]);
+    // The second dial's connection is the live one, so the reconnect really produced the session's
+    // transport rather than leaving the closed socket in place.
+    expect(session.isConnected()).toBe(true);
+    expect(conns).toHaveLength(2);
+    conns[1]!.negotiate();
+    expect(session.is3270Mode()).toBe(true);
+  });
+
+  it('carries the original TLS decision, because it cannot do anything else', async () => {
+    // The same run with the other decision. Neither dial can differ from the other, because
+    // `reconnect()` has no host argument and therefore nothing to re-derive a scheme FROM -- the
+    // property is structural, and this is the assertion that would notice if it stopped being.
+    const { session, dialled, conns } = dialRecorder('tls');
+    await session.connect('secure.example', 992);
+    conns[0]!.close();
+    await session.reconnect();
+    expect(dialled.map((d) => d.scheme)).toEqual(['tls', 'tls']);
+  });
+
+  it('works AFTER handleClose, which is the entire point', async () => {
+    // `handleClose` is documented as the one place a connection ends and it discards everything the
+    // connection owned. The remembered target deliberately survives it: reconnecting happens only
+    // after a close, so clearing it there would make this unreachable by construction. Both routes
+    // into `handleClose` are exercised -- the host's own close and our `disconnect()`.
+    const { session, dialled, conns } = dialRecorder('plaintext');
+    await session.connect('vm.example', 3270);
+    conns[0]!.close();                                  // route 1: the socket closed on us
+    await session.reconnect();
+    expect(session.isConnected()).toBe(true);
+
+    session.disconnect();                               // route 2: we closed it
+    expect(session.isConnected()).toBe(false);
+    await session.reconnect();
+    expect(session.isConnected()).toBe(true);
+    expect(dialled).toHaveLength(3);
+  });
+
+  it('REFUSES when nothing has ever been connected, in x3270 s own words', async () => {
+    // `Reconnect_action`: `if (current_host == NULL) { popup_an_error(AnReconnect "(): No previous
+    // host to connect to"); return false; }` (Common/host.c). A refusal and not a no-op, and the
+    // wording is passed through to a script by the CLI's `Reconnect()`.
+    //
+    // THIS IS THE STATE EVERY REPLAY-MODE FRONT END IS IN -- `TN3270_GUI_REPLAY` and the gateway's
+    // `--replay` never connect at all -- so it is reached by more than a hypothetical.
+    const { session, dialled } = dialRecorder('tls');
+    await expect(session.reconnect()).rejects.toThrow('Reconnect(): No previous host to connect to');
+    expect(dialled, 'a session with no target dialled something anyway').toEqual([]);
+  });
+
+  it('REFUSES while connected, rather than silently redialling', async () => {
+    // x3270's first check: `if (PCONNECTED) { popup_an_error(AnReconnect "(): Already connected");
+    // return false; }`. `connect()` would happily tear down the live socket and build another, which
+    // is what `Connect()` is for; a reconnect asked for while up is a caller's mistake and saying so
+    // is more useful than a silent reconnection an operator did not ask for.
+    const { session, dialled } = dialRecorder('plaintext');
+    await session.connect('vm.example', 3270);
+    await expect(session.reconnect()).rejects.toThrow('Reconnect(): Already connected');
+    expect(dialled).toHaveLength(1);
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('REFUSES a second reconnect while the first is still in flight', async () => {
+    // x3270's `PCONNECTED` is "connected OR HALF-connected"; `isConnected()` only sees the completed
+    // case. Without the pending half, two presses of the reconnect key both pass `connect()`'s
+    // teardown check while `this.conn` is undefined, so the first socket is replaced WITHOUT being
+    // closed -- an LU left open on the mainframe per impatient keypress, and invisible from here.
+    const conns: FakeConnection[] = [];
+    let release: (() => void) | undefined;
+    const session = new Session({
+      connect: async () => {
+        const conn = new FakeConnection();
+        conns.push(conn);                               // pushed BEFORE the wait: a dial is a dial
+        await new Promise<void>((r) => { release = r; });
+        return conn;
+      },
+    });
+    const first = session.connect('vm.example', 3270);
+    release!();
+    await first;
+    conns[0]!.close();
+
+    const pending = session.reconnect();
+    expect(conns, 'the first reconnect did not dial').toHaveLength(2);
+    await expect(session.reconnect()).rejects.toThrow('Reconnect(): Already connected');
+    expect(conns, 'the refused reconnect opened a socket anyway').toHaveLength(2);
+    release!();
+    await pending;
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('records a failed reconnect in lastError and the trace, and rethrows it', async () => {
+    // A front end that can only swallow the rejection -- `applyAction` is synchronous -- must still
+    // leave the reason somewhere findable, so the failure is recorded before it is rethrown. The
+    // rethrow is what lets the CLI report `error` for `Reconnect()`.
+    let fail = false;
+    const conn = new FakeConnection();
+    const session = new Session({
+      connect: () => {
+        if (fail) throw new Error('ECONNREFUSED');
+        return conn;
+      },
+    });
+    session.trace.setEnabled(true);
+    await session.connect('vm.example', 3270);
+    conn.close();
+    fail = true;
+
+    await expect(session.reconnect()).rejects.toThrow('ECONNREFUSED');
+    expect(session.lastError()).toContain('ECONNREFUSED');
+    expect(session.trace.toText()).toContain('reconnect to vm.example:3270 failed');
+    // AND THE TARGET SURVIVES THE FAILURE: an operator whose host was down retries the same key.
+    // Recording the target only on a SUCCESSFUL connect would make the key dead in exactly the
+    // situation that produced it.
+    fail = false;
+    await session.reconnect();
+    expect(session.isConnected()).toBe(true);
+  });
+
+  it('remembers a target that NEVER came up, so the first key press can retry it', async () => {
+    // The initial `connect()` failed -- a refused socket, or the TLS-against-Hercules hang's
+    // eventual timeout. The OIA offers the key, so the key must work.
+    let fail = true;
+    const conn = new FakeConnection();
+    const session = new Session({
+      connect: () => {
+        if (fail) throw new Error('ECONNREFUSED');
+        return conn;
+      },
+    });
+    await expect(session.connect('vm.example', 3270)).rejects.toThrow('ECONNREFUSED');
+    expect(session.oia.reconnectable).toBe(true);
+    fail = false;
+    await session.reconnect();
+    expect(session.isConnected()).toBe(true);
+  });
+});
+
+describe('the OIA says the reconnect key exists', () => {
+  it('offers Enter once there is a host to go back to, and not before', async () => {
+    // GATED ON A REMEMBERED TARGET, deliberately: a session that never connected -- which is what
+    // every replay-mode front end is -- has nothing to reconnect to, and offering the key there
+    // would be an instruction that silently does nothing. It is also what keeps the GUI and browser
+    // screenshot goldens still, since both are taken in replay mode.
+    const { session, conn } = newSession();
+    expect(session.oia.toText()).toBe('X Disconnected');
+
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.close();
+    expect(session.oia.toText()).toContain('X Disconnected -- press Enter to reconnect');
+  });
+
+  it('fits the status line, worst case included', () => {
+    // The OIA is a 3270 status line with a real layout: both renderers TRUNCATE rather than wrap
+    // (`canvas/src/drawlist.ts`'s `oiaCells`, `tui/src/render.ts`), so a line over 80 columns
+    // silently loses its tail. Asserted with every other part this method can add while
+    // disconnected -- a program check and the insert caret; `waitingForHost` is cleared by
+    // `handleClose` -- rather than for the phrase alone.
+    const oia = new Oia();
+    oia.reconnectable = true;
+    oia.programCheck(754);
+    oia.insertMode = true;
+    const text = oia.toText();
+    expect(text).toContain('press Enter to reconnect');
+    expect(text).toContain('X PROG754');
+    expect(text.length, `the OIA no longer fits 80 columns: ${text}`).toBeLessThanOrEqual(80);
   });
 });
 
