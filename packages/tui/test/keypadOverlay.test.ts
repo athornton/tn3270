@@ -28,6 +28,33 @@ const sameAction = (a: Action, b: Action): boolean =>
   && ('n' in a ? 'n' in b && a.n === b.n : !('n' in b))
   && ('text' in a ? 'text' in b && a.text === b.text : !('text' in b));
 
+/** The chord for a key, by the same rule the module uses and recomputed here, as `CHORD_COL` is. */
+const chordOf = (action: Action): string =>
+  BINDING_INTENT.find((b) => sameAction(b.action, action))?.key ?? '';
+
+/**
+ * The width of the chord column, and of the whole line, recomputed here for `CHORD_COL`'s reason.
+ *
+ * Every line is padded to `LINE_WIDTH` so the list paints an OPAQUE rectangle; a natural-length line
+ * let the host's own cells show through in the chord column, which reads as a chord the key has not
+ * got. A module that padded to the wrong width would still be uniform, so the width itself is pinned
+ * in two directions: too wide and the `OVERLAY_MIN.cols` test below reddens (it recomputes the
+ * widest line and demands 29), too narrow and the long lines are not padded at all, so the
+ * uniform-width test reddens.
+ */
+const CHORD_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => chordOf(k.action).length));
+const LINE_WIDTH = CHORD_COL + CHORD_WIDTH;
+
+/**
+ * The whole line a key should render as: mark, space, the name in its column, the chord, padding.
+ *
+ * Built from the chord as GROUND TRUTH (the caller writes `Ctrl-R` out) and the geometry as
+ * derivation, which is what the `' '.repeat(CHORD_COL - n)` expressions this replaces did before the
+ * padding existed.
+ */
+const row = (name: string, chord: string): string =>
+  `  ${name}${' '.repeat(CHORD_COL - 2 - name.length)}${chord}`.padEnd(LINE_WIDTH);
+
 /** The line for a named key, found by its index so that `PF1` cannot match `PF13`. */
 const lineFor = (name: string): string => {
   const i = KEYPAD_KEYS.findIndex((k) => k.name === name);
@@ -57,36 +84,43 @@ describe('overlayLines', () => {
     //
     // Asserted as a WHOLE LINE with `toBe`, not as /System Request\s*$/m -- that regex is also
     // satisfied by a line with no chord column at all, by one with the wrong selection mark, and
-    // by one that never trimmed its padding, so it would pass over a broken overlay.
+    // by one padded to the wrong width, so it would pass over a broken overlay.
     //
-    // `System Request` is the longest name, so its padding is empty and its line is exact.
-    expect(lineFor('System Request')).toBe('  System Request');
+    // A BLANK CHORD IS NOW REAL PADDING, not absent text: this was `toBe('  System Request')`, a
+    // trimmed 18-column line, until the trim proved to be what let the host's cells show through
+    // the chord column. `System Request` is the longest name, so the whole tail of this line is the
+    // empty chord column, which makes it the strongest single line in the file for the padding.
+    expect(lineFor('System Request')).toBe(row('System Request', ''));
+    expect(lineFor('System Request')).toHaveLength(LINE_WIDTH);
 
     // NEWLINE'S BLANK IS THE SAME PROPERTY WITH A DIFFERENT CAUSE, and it is the reason this
     // assertion is here rather than left to the sweep below: c3270 DOES bind Newline, to Ctrl-J
     // (`Common/fb-c3270:190`), and this project deliberately does not -- Ctrl-J is `\n`, which the
     // terminal keymap already reads as `enter`. So a Ctrl-J row appearing in `BINDING_INTENT` would
     // make this line claim a chord that, in the TUI, submits the screen instead. Pinned as a whole
-    // line, and NOT trimmed: the padding must be gone, exactly as Sys Req's is.
-    expect(lineFor('Newline')).toBe('  Newline');
+    // line, blanks and all, exactly as Sys Req's is.
+    expect(lineFor('Newline')).toBe(row('Newline', ''));
 
-    expect(lineFor('Reset')).toBe(`  Reset${' '.repeat(CHORD_COL - 7)}Ctrl-R`);
-    expect(lineFor('Back Tab')).toBe(`  Back Tab${' '.repeat(CHORD_COL - 10)}Shift-Tab`);
+    expect(lineFor('Reset')).toBe(row('Reset', 'Ctrl-R'));
+    // `Shift-Tab` is a widest chord, so this line is the one that reaches `LINE_WIDTH` with content
+    // rather than with padding -- it is what the padding above is padding TO.
+    expect(lineFor('Back Tab')).toBe(row('Back Tab', 'Shift-Tab'));
+    expect(lineFor('Back Tab').trimEnd()).toHaveLength(LINE_WIDTH);
 
     // Dup and Field Mark, blank until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT` and filled in
     // here with NO EDIT to `keypadOverlay.ts`. Added as GROUND TRUTH now that the rows exist:
     // the sweep below recomputes the module's own lookup rule, so it would agree with a rule
     // that was wrong the same way in both places; these two lines would not.
-    expect(lineFor('Dup')).toBe(`  Dup${' '.repeat(CHORD_COL - 5)}Ctrl-D`);
-    expect(lineFor('Field Mark')).toBe(`  Field Mark${' '.repeat(CHORD_COL - 12)}Ctrl-F`);
+    expect(lineFor('Dup')).toBe(row('Dup', 'Ctrl-D'));
+    expect(lineFor('Field Mark')).toBe(row('Field Mark', 'Ctrl-F'));
 
     // The `n`-discriminated pair, written out as GROUND TRUTH rather than derived. The sweep below
     // recomputes the module's own matching rule, so a rule that is wrong the same way in both
     // would pass it; these two do not. A lookup that matched on `kind` alone hands every PF key
     // the first `pf` row's chord, so PF13 would read F1 -- and PF1 alone cannot tell the two
     // apart. Source: bindings.ts binds F1 to PF1 and Shift-F1 to PF13 (Shift+F(n) is PF(n+12)).
-    expect(lineFor('PF1')).toBe(`  PF1${' '.repeat(CHORD_COL - 5)}F1`);
-    expect(lineFor('PF13')).toBe(`  PF13${' '.repeat(CHORD_COL - 6)}Shift-F1`);
+    expect(lineFor('PF1')).toBe(row('PF1', 'F1'));
+    expect(lineFor('PF13')).toBe(row('PF13', 'Shift-F1'));
   });
 
   it('derives the chord column from BINDING_INTENT rather than a second list', () => {
@@ -96,8 +130,11 @@ describe('overlayLines', () => {
     const lines = overlayLines(-1);
     let withChord = 0;
     KEYPAD_KEYS.forEach((k, i) => {
-      const want = BINDING_INTENT.find((b) => sameAction(b.action, k.action))?.key ?? '';
-      expect(lines[i]!.slice(CHORD_COL), `chord for ${k.name}`).toBe(want);
+      const want = chordOf(k.action);
+      // `padEnd`, because the column is a fixed width now: a key with no chord must show blanks IN
+      // THE COLUMN rather than nothing at all, and asserting the trimmed chord would pass either
+      // way. All 22 chordless keys assert the padding here, not just Sys Req and Newline above.
+      expect(lines[i]!.slice(CHORD_COL), `chord for ${k.name}`).toBe(want.padEnd(CHORD_WIDTH));
       if (want !== '') withChord += 1;
     });
     // Both halves must be non-empty or the sweep proves nothing: all-blank would satisfy it just
@@ -108,12 +145,36 @@ describe('overlayLines', () => {
 
   it('aligns the chord column across every line', () => {
     for (const line of overlayLines(-1)) {
-      // Either the line stopped at the name (no chord, padding trimmed) or its chord starts at
-      // exactly the shared column with a gap before it.
-      if (line.length <= CHORD_COL) continue;
-      expect(line[CHORD_COL - 1]).toBe(' ');
-      expect(line.slice(CHORD_COL)).toMatch(/^\S/);
+      // The gap before the column, on every line: a name that ran into its chord would lose this.
+      expect(line[CHORD_COL - 1], line).toBe(' ');
+      const chord = line.slice(CHORD_COL);
+      // A chordless key is now all blanks in the column, and this used to `continue` on a line that
+      // simply ENDED there. Either shape satisfies "no chord", which is why the width is asserted.
+      if (chord.trim() === '') {
+        expect(chord, line).toHaveLength(CHORD_WIDTH);
+        continue;
+      }
+      // A chord starts at exactly the shared column -- never one cell late, which a `padStart` or an
+      // off-by-one gap would produce and which would still look plausible in a screenshot.
+      expect(chord, line).toMatch(/^\S/);
     }
+  });
+
+  it('pads every line to ONE width, so the list paints an opaque rectangle', () => {
+    // THE FIX THIS TEST EXISTS FOR. The lines were `trimEnd()`ed to their natural length, so the 22
+    // keys with no chord ended at the name and the host's own cells stayed visible to the right of
+    // them -- landing in the chord column, reading as a chord the key has not got. Measured over a
+    // real pty against a fake host whose screen row 1 read `HELLO TN3270`, the PF16 row rendered as
+    // `  PF16 TN3270`. Restore the `trimEnd()` and this reddens: the trimmed lines take 11 widths
+    // (5, 6, 9, 16, 20-24, 26, 27), measured, not one.
+    //
+    // The MARKED line is in here too (`overlayLines(0)`), because it is the one drawn in reverse
+    // video: a short bar would be the same bleed with a highlight on it.
+    const widths = new Set(overlayLines(0).map((l) => l.length));
+    expect(widths.size).toBe(1);
+    // ...and the one width holds the whole content, so 'uniform' cannot mean 'all truncated'. Too
+    // wide is caught by the `OVERLAY_MIN.cols` test below, which recomputes the widest line.
+    expect([...widths][0]).toBe(LINE_WIDTH);
   });
 
   it('marks exactly one line as selected, and it is the requested one', () => {
@@ -162,11 +223,14 @@ describe('overlayFits', () => {
     expect(OVERLAY_MIN.cols).toBeLessThanOrEqual(80);
   });
 
-  it('is exactly wide enough for the widest line plus one cell of frame each side', () => {
+  it('is exactly wide enough for the line width plus one cell of frame each side', () => {
     // The other half of the over-declaration pin: written down in the module, recomputed from the
     // content here, so the two can disagree. Too narrow and the caller must truncate a chord; too
     // wide and the overlay refuses room it does not need.
-    const widest = Math.max(...overlayLines(-1).map((l) => l.length));
+    //
+    // Every line is that width now rather than only the longest, so this ALSO pins the module's
+    // `LINE_WIDTH` from above: pad to 30 and every line is 30, and 29 !== 32 reddens here.
+    const widest = Math.max(...overlayLines(0).map((l) => l.length));
     expect(OVERLAY_MIN.cols).toBe(widest + 2);
   });
 });

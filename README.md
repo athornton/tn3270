@@ -105,7 +105,9 @@ exactly the action its label names; a click anywhere else is ignored.
 
 The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 47 keys
 instead — arrows move (`k`/`w` and `j`/`s` too), Enter fires, `Esc` closes — with each key's chord shown beside it, read
-from the same binding table the keymap is checked against so the on-screen help cannot drift.
+from the same binding table the keymap is checked against so the on-screen help cannot drift. Every
+line is padded to one width, so the list is an opaque block rather than 47 ragged lines with the
+host's screen showing through the chord column.
 
 Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
 press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
@@ -154,7 +156,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1695 tests, 71 files
+npm test           # 1697 tests, 71 files
 npm run typecheck
 ```
 
@@ -300,6 +302,14 @@ follows the selection rather than showing only the first screenful, or everythin
 two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
 the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
 against, so 22 of the 47 correctly show a blank rather than a guess.
+
+**The list is opaque, and that took fixing.** Every line is padded to one width — 27 columns: the
+selection mark, the name column, a two-space gap and the widest chord — so the 3270 screen behind
+it never shows through. It used to draw each line at its natural length, and the 22 lines with no
+chord therefore ended at the name: on a pty against a host whose first row read `HELLO TN3270`, the
+PF16 line rendered as `  PF16 TN3270`, which reads as though `TN3270` were PF16's chord. Against a
+real MVS or VM screen every chordless line would have invented one that way. The selected line is
+a full-width reverse-video bar for the same reason.
 
 **`k`/`w` also move up and `j`/`s` down**, in either case, while the list is open. Bare letters are
 bindable nowhere else in this emulator — everywhere else a letter is data you type into a field —
@@ -830,7 +840,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1695 tests, 71 files |
+| `npm test` | **pass** — 1697 tests, 71 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
