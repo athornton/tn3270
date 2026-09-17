@@ -26,7 +26,7 @@
  *
  * **Newline is HERE, and it was the branch's one open question.** It is on c3270's keypad,
  * `Keyboard.newline()` has existed in core (`core/src/keyboard.ts:348`) and the CLI could already
- * call it as `Newline()` (`cli/src/runner.ts:259`) -- but no interactive front end could reach it,
+ * call it as `Newline()` (the `Newline` case in `cli/src/runner.ts`) -- but no interactive front end could reach it,
  * and this table inherited its absence from a spec that dropped it without noticing. That is the
  * same shape as `Session.sysreq()` before this branch: a capability with no interactive route,
  * which is precisely what this feature exists to fix, so its absence was never a decision like the

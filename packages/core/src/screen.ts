@@ -430,7 +430,7 @@ export class Screen {
     // EW/EWA "resets any extended field attributes and character attributes
     // associated with the nulled characters to their default values"
     // (pages.txt:2990-2992). This is also the path the Clear AID takes
-    // (session.ts:350-351), which is the manual's fourth SA reset trigger --
+    // (`Session.sendAID`'s `AID.CLEAR` branch), which is the manual's fourth SA reset trigger --
     // "The Clear key is pressed" (pages.txt:2979). So implementing it here
     // satisfies both rules at once.
     this.fgs.fill(0);

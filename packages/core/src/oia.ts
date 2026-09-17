@@ -63,6 +63,16 @@ export enum KeyboardState {
 
 export class Oia {
   connected = false;
+  /**
+   * There is a host to reconnect TO, i.e. `Session.reconnect()` would be accepted.
+   *
+   * Set by `Session.connect` and deliberately NOT cleared when the connection ends, because the
+   * whole point is what the status line says while disconnected. It exists so `toText` can offer
+   * the key HONESTLY: a session that has never connected — the state the GUI's replay seam and
+   * the gateway's `--replay` mode sit in permanently — has nothing to reconnect to, and telling
+   * its operator to press Enter would be an instruction that silently does nothing.
+   */
+  reconnectable = false;
   tn3270Mode = false;
   waitingForHost = false;
   insertMode = false;
@@ -164,7 +174,29 @@ export class Oia {
   toText(): string {
     const parts: string[] = [];
     if (!this.connected) {
-      parts.push('X Disconnected');
+      // ONE PART, NOT TWO, so the ` -- ` phrase cannot be separated from the state it explains by
+      // the two-space join below, and so every existing `toContain('X Disconnected')` still holds.
+      //
+      // WHY THE STATUS LINE ADVERTISES A KEY AT ALL, which nothing else in this OIA does: the key
+      // is a DIVERGENCE from x3270, whose Enter never reconnects (`Enter_action`, Common/kybd.c,
+      // has no such branch — its `Reconnect()` action is the only route, and there is no keyboard
+      // binding for it). An operator coming from x3270 has no reason to guess, and VM prints
+      // "Press Enter or Clear to continue" after a LOGOFF, which is precisely the moment this
+      // helps. `X Disconnected` alone does not tell anyone the key exists.
+      //
+      // THE WIDTH BUDGET, MEASURED rather than assumed: 42 columns here, and the worst case with
+      // every other part this method can add while disconnected — `X PROG754` (9) and the insert
+      // caret (1), `waitingForHost` being cleared by `handleClose` — is 42 + 2 + 9 + 2 + 1 = 56,
+      // inside the 80 of any real 3270 model, and `session.test.ts` asserts that bound. Both renderers TRUNCATE rather than wrap
+      // (`canvas/src/drawlist.ts`'s `oiaCells`, `tui/src/render.ts`'s status line), so anything
+      // longer would silently lose its tail on a narrow geometry.
+      //
+      // CLEAR RECONNECTS TOO and is deliberately not named: the OIA is a status line with a
+      // column budget, not a help screen, and naming the key an operator already has their hand on
+      // is enough to say the route exists. The README and `BINDING_INTENT` carry both.
+      parts.push(this.reconnectable
+        ? 'X Disconnected -- press Enter to reconnect'
+        : 'X Disconnected');
     } else if (this.tn3270Mode) {
       parts.push('4 A');
     } else {

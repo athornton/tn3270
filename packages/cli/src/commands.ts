@@ -22,7 +22,7 @@ export interface Command {
  * tests failing on `unknown command: Dup`.
  */
 export const COMMAND_NAMES = [
-  'Connect', 'Disconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
+  'Connect', 'Disconnect', 'Reconnect', 'String', 'Enter', 'Clear', 'PF', 'PA', 'Tab',
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
   'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',

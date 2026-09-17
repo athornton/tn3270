@@ -8,6 +8,7 @@ import {
   O_UP_DATA, O_UP_FRAME_SEQ, O_UP_LEN, RO_FRAME_TYPE, RO_REASON_CODE,
 } from '@tn3270/core';
 import { Runner } from '../src/runner.js';
+import { parseCommand } from '../src/commands.js';
 
 class FakeConnection implements Connection {
   sent: number[] = [];
@@ -133,6 +134,98 @@ describe("Connect()'s host argument", () => {
     const { runner } = spyingRunner();
     const reply = await runner.run('Connect(N:LUA@vm.example:3270)');
     expect(reply).toContain('C(vm.example)');
+  });
+});
+
+/**
+ * `Reconnect()` — CONFORMANCE, exactly as `Dup()`/`FieldMark()`/`SysReq()` are: s3270 has the
+ * action under this name (`Reconnect_action`, `AnReconnect`, Common/host.c), so a script written
+ * for s3270 must not fail against us.
+ *
+ * AND `Enter()` IS DELIBERATELY NOT THIS. The interactive front ends reconnect on Enter or Clear;
+ * a script's `Enter()` must not silently open a socket to a mainframe, which is the whole reason
+ * this is a separate verb. The last test in this block is what pins that divergence.
+ */
+describe('Reconnect()', () => {
+  it('dials the last host again after a Disconnect, options included', async () => {
+    // `spyingRunner` wraps the INSTANCE's `connect`, and `Session.reconnect()` calls `this.connect`
+    // -- so the replayed call lands in `calls` and all three parts of the target are visible from
+    // here. `N:` is in the host argument on purpose: it is a property of the HOST, so it has to come
+    // back with the host, and a reconnect that dropped it would silently offer TN3270E to a host the
+    // script said not to. (Core asserts the same thing on the wire, in
+    // `tn3270e-session.test.ts`; this is the CLI's own end of it.)
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect(N:vm.example:3270)');
+    await runner.run('Disconnect()');
+    const reply = await runner.run('Reconnect()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(calls).toEqual([
+      { host: 'vm.example', port: 3270, per: { tn3270e: false } },
+      { host: 'vm.example', port: 3270, per: { tn3270e: false } },
+    ]);
+    expect(reply).toContain('C(vm.example)');
+  });
+
+  it('puts the host back in field 4 of the status line', async () => {
+    // `Disconnect()` clears it, since `C(<host>)` while disconnected would be a lie, so a
+    // `Reconnect()` that did not restore it would answer `N` for a live connection -- a difference
+    // from s3270 visible in every subsequent reply.
+    const { runner } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    await runner.run('Disconnect()');
+    expect(await runner.run('Enter()')).toContain(' N N ');
+    const reply = await runner.run('Reconnect()');
+    expect(reply).toContain('C(localhost)');
+  });
+
+  it('reports x3270 s own refusals, verbatim', async () => {
+    // `Reconnect_action` is exactly two checks (Common/host.c): `if (PCONNECTED) {
+    // popup_an_error(AnReconnect "(): Already connected"); ... }` and `if (current_host == NULL) {
+    // popup_an_error(AnReconnect "(): No previous host to connect to"); ... }`. Core raises both and
+    // this runner passes the message straight through, the same way `Connect()` passes check_argc's
+    // wording -- so the MESSAGE is the assertion, not the `error` line: a bare `error` is also what
+    // `parseCommand` produces for an unknown verb, which would pass with the action unimplemented.
+    const fresh = newRunner();
+    const never = await fresh.runner.run('Reconnect()');
+    expect(never.split('\n').pop()).toBe('error');
+    expect(never).toContain('data: Reconnect(): No previous host to connect to');
+
+    const { runner } = newRunner();
+    await runner.run('Connect(localhost:3270)');
+    const live = await runner.run('Reconnect()');
+    expect(live.split('\n').pop()).toBe('error');
+    expect(live).toContain('data: Reconnect(): Already connected');
+  });
+
+  it('takes no arguments', async () => {
+    const { runner } = newRunner();
+    const reply = await runner.run('Reconnect(vm.example:3270)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Reconnect() requires 0 arguments');
+  });
+
+  it('is in COMMAND_NAMES, so parseCommand admits it', () => {
+    // A NAME MISSING FROM THAT TABLE IS REJECTED BEFORE `dispatch` EVER RUNS -- as "unknown
+    // command", i.e. reading like an unimplemented action rather than a missing table entry. That is
+    // measured history in this repo: the dispatch half of Dup/FieldMark/SysReq alone left all seven
+    // of their tests failing on `unknown command: Dup`.
+    expect(parseCommand('Reconnect()')).toEqual({ name: 'Reconnect', args: [] });
+    expect(parseCommand('reconnect')!.name).toBe('Reconnect');
+  });
+
+  it('does NOT reconnect on Enter(), which the interactive front ends do', async () => {
+    // THE DIVERGENCE, ASSERTED. `applyAction` reconnects on `enter`/`clear` while disconnected, and
+    // the CLI deliberately does not share that: a script that types Enter into a dead session gets
+    // s3270's own error, not a new socket to a mainframe. Without this test the two behaviours could
+    // be unified by accident and nothing would notice.
+    const { runner, calls } = spyingRunner();
+    await runner.run('Connect(vm.example:3270)');
+    await runner.run('Disconnect()');
+    const reply = await runner.run('Enter()');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('not connected');
+    expect(calls, 'Enter() dialled a host from a script').toHaveLength(1);
+    expect(reply).toContain(' N N ');                 // still disconnected, field 4 and 5
   });
 });
 

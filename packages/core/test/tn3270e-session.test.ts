@@ -356,6 +356,56 @@ describe('per-connection TN3270E settings', () => {
     conn.host(T.IAC, T.DO, O.TN3270E);
     expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
   });
+
+  /**
+   * `reconnect()` REPLAYS THE ConnectOptions TOO, AND THAT IS NOT SYMMETRY FOR ITS OWN SAKE.
+   *
+   * `N:` and `LU@` are written in the HOST ARGUMENT, so they are part of the answer to "which host
+   * is this session for" -- which is exactly what the remembered target is. Replaying the host and
+   * port ALONE would silently reconnect with TN3270E back on to a host the operator spelled `N:`,
+   * and the symptom is not an error: the host offers option 40, we accept where the operator said
+   * not to, and a session that worked before the reconnect is negotiated differently after it.
+   *
+   * The wire is what is asserted, not a stored field: `WONT TN3270E` on the SECOND connection is
+   * only reachable if `per.tn3270e === false` came back with the target, and the two-connection
+   * shape is the one `does NOT leak a per-connection setting` above uses in the other direction.
+   * Both tests are needed -- one pins that the options are forgotten by a NEW `connect()`, the other
+   * that they are remembered by a `reconnect()`.
+   */
+  it('replays a per-connection N: on reconnect, rather than losing it', async () => {
+    const { session, conn } = newSession();          // session default: TN3270E on
+    await session.connect('127.0.0.1', 3270, { tn3270e: false });
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+
+    conn.close();                                    // the host hangs up
+    conn.clear();
+    conn.closed = false;
+    await session.reconnect();
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    expect(conn.writes, 'the reconnect forgot the N: it was connected with')
+      .toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+
+  it('replays a per-connection LU list on reconnect', async () => {
+    // The other half of `ConnectOptions`, and the one with a name on the wire to assert: `CONNLU`
+    // over the session's own `SESSLU`. A reconnect that dropped `per.lus` would fall back to the
+    // session default and request the WRONG LU -- which a host may well grant, so the failure is a
+    // session on someone else's terminal rather than an error.
+    const { session, conn } = newSession({ lus: ['SESSLU'] });
+    await session.connect('127.0.0.1', 992, { lus: ['CONNLU'] });
+    conn.close();
+    conn.clear();
+    conn.closed = false;
+    await session.reconnect();
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    conn.clear();
+    conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
+    expect(conn.writes[0]).toEqual([
+      T.IAC, T.SB, O.TN3270E, Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST,
+      ...ascii('IBM-3278-2-E'), Tn3270eOp.CONNECT, ...ascii('CONNLU'), T.IAC, T.SE,
+    ]);
+  });
 });
 
 describe('TN3270E RESPONSES', () => {

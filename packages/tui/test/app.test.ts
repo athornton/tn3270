@@ -618,12 +618,21 @@ describe('the special-keys overlay', () => {
     expect(emitted.indexOf(marked(0))).toBeGreaterThan(emitted.indexOf('AB'));
   });
 
-  it('fires the selected action on Enter and closes', () => {
+  it('fires the selected action on Enter and closes', async () => {
     // Enter must fire the SELECTED key, not the Enter AID: while the overlay is up it belongs to
     // the overlay. Closing afterwards is what stops a second Enter re-firing it.
+    //
+    // THE SESSION IS CONNECTED HERE, AND THAT IS NOT SCENERY. The second half of this test asserts
+    // that Enter goes back to being the host's key once the overlay closes -- and on a DISCONNECTED
+    // session Enter no longer submits at all: it reconnects to the last host instead
+    // (`frontend/src/actions.ts`, `reconnectInstead`). Written against the unconnected harness --
+    // which is how it shipped, and which passed only because a disconnected `sendAID` was a spied
+    // no-op -- this now reads "Enter did nothing" as a pass for "Enter reached the host". A real
+    // connection makes the assertion mean what its comment says.
     for (const key of ['\r', '\n']) {
       const h = harness();
       h.app.start();
+      await h.session.connect('h', 23);
       const sent = vi.spyOn(h.session, 'sendAID');
       dispatchToggle(h.app);
       h.app.onInput(enc(key));

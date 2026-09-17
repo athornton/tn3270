@@ -30,8 +30,8 @@ export class Keyboard {
     // alone for the host to clear.
     //
     // Before this guard nothing enforced any lock on typing: only the CLI's
-    // Wait(Settle) and Wait(InputField) consulted isInhibited (runner.ts:691,
-    // :721, both `if (this.session.oia.isInhibited()) return false;`), so a
+    // Wait(Settle) and Wait(InputField) consulted isInhibited (both predicates in
+    // `cli/src/runner.ts`, spelled `if (this.session.oia.isInhibited()) return false;`), so a
     // caller reaching Keyboard.type directly could write into a screen the host
     // had frozen — and after answering a Query that is precisely the screen it
     // would be writing into. An unenforced state is not a fix.

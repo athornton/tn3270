@@ -132,7 +132,7 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
     } catch (e) {
       // Surface SF framing errors as ParseError so session.ts maps them to
       // X PROG the same way as every other malformed record. This is not
-      // cosmetic: session.ts:201-207 program-checks ParseError/AddressError and
+      // cosmetic: `Session.handleRecord`'s catch program-checks ParseError/AddressError and
       // RETHROWS anything else as "our own bug", which drops the connection. An
       // SfParseError escaping here would disconnect on a malformed host record.
       //

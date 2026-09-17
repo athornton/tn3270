@@ -207,7 +207,8 @@ export interface ExecuteResult {
    * X'00' reset are applied now, and counting those would break what this field
    * is for: a zero must keep meaning "we never saw one we had to throw away"
    * rather than "we stopped looking". The session reports it as dropped work
-   * (session.ts:250-252), so an applied order appearing here would be a false
+   * (`Session.handleRecord`'s `ignored orders:` trace line), so an applied order
+   * appearing here would be a false
    * report of a gap.
    *
    * Per-record, and nothing sums these across a session: the live run measures
@@ -381,7 +382,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
           // ONLY the types still dropped, now that four of them are applied
           // below. Counting an implemented type would make a nonzero here mean
           // "some SA arrived" rather than "an SA was thrown away", and the
-          // session's trace line (session.ts:250-252) reports it as the latter.
+          // session's `ignored orders:` trace line reports it as the latter.
           // The predicate is shared with the case that does the applying, so the
           // two cannot drift; see saTypeImplemented.
           if (!saTypeImplemented(token.data[0]!)) result.setAttributeIgnored++;

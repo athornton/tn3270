@@ -144,6 +144,114 @@ describe('applyAction: the newly-bound actions', () => {
   });
 });
 
+describe('applyAction: Enter and Clear reconnect while disconnected', () => {
+  // VM/370 prints "Press Enter or Clear to continue" as it drops the connection, and both keys used
+  // to do NOTHING: `sendAID` throws 'not connected' and `applyAction` swallows it. BOTH DIRECTIONS
+  // ARE ASSERTED, here and in the dispatch table, because either one alone is satisfied by a
+  // one-line mutation: a body that always reconnects passes the tests below, and a body that never
+  // does passes the table's `enter`/`clear` rows.
+
+  it('reconnects to the SAME host and port, and sends NOTHING, for both keys', async () => {
+    for (const kind of ['enter', 'clear'] as const) {
+      const dialled: [string, number][] = [];
+      const conn = new FakeConnection();
+      const session = new Session({
+        connect: (h, p) => { dialled.push([h, p]); return conn; },
+      });
+      await session.connect('vm.example', 3270);
+      conn.sent = [];
+      // The host hangs up, exactly as a LOGOFF does.
+      conn.close();
+      expect(session.isConnected(), kind).toBe(false);
+
+      const aid = vi.spyOn(session, 'sendAID');
+      applyAction(session, { kind });
+      // `reconnect()` is async and `applyAction` cannot await it: one microtask turn is what the
+      // fake connection needs, and awaiting here is also what would surface an unhandled rejection.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(aid, `${kind} put an AID on the wire instead of reconnecting`).not.toHaveBeenCalled();
+      expect(conn.sent, `${kind} sent bytes to a session it had just reopened`).toEqual([]);
+      // THE PORT IS THE ASSERTION, not just the host: replaying 23 -- the default every host spec
+      // falls back to -- is the transposition this catches, and it would silently dial the WRONG
+      // SERVICE on the right machine.
+      expect(dialled, kind).toEqual([['vm.example', 3270], ['vm.example', 3270]]);
+      expect(session.isConnected(), `${kind} did not bring the session back up`).toBe(true);
+    }
+  });
+
+  it('does NOT throw, and leaves no unhandled rejection, when there is nothing to reconnect to', async () => {
+    // THE CASE EVERY REPLAY-MODE FRONT END SITS IN: `TN3270_GUI_REPLAY` and the gateway's
+    // `--replay` never connect, so there is no target and `Session.reconnect()` rejects. It is
+    // `async`, so that refusal arrives as a REJECTED PROMISE rather than as a throw -- and an
+    // unhandled rejection ends the process on modern Node, which in the gateway would take every
+    // other operator's session with it. `applyAction` contains it; this asserts that it does.
+    const rejections: unknown[] = [];
+    const onRejection = (err: unknown): void => { rejections.push(err); };
+    process.on('unhandledRejection', onRejection);
+    try {
+      const { session } = newSession();
+      expect(() => applyAction(session, { kind: 'enter' })).not.toThrow();
+      expect(() => applyAction(session, { kind: 'clear' })).not.toThrow();
+      // Two turns of the microtask queue, then a macrotask: Node reports an unhandled rejection at
+      // the end of the turn in which it was rejected, so a `setTimeout` is what makes the absence
+      // of a report meaningful rather than merely early.
+      await new Promise((r) => { setTimeout(r, 0); });
+      expect(rejections, 'a reconnect refusal escaped applyAction').toEqual([]);
+      expect(session.isConnected()).toBe(false);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('refuses a SECOND press while the first reconnect is still in flight', async () => {
+    // Two sockets to one mainframe is an LU leaked per impatient keypress: `connect()` tears down a
+    // live predecessor, but both presses pass that check while `this.conn` is still undefined, so
+    // the first socket would be replaced WITHOUT being closed and left open forever. x3270's own
+    // guard is `PCONNECTED`, which covers the half-connected case; `isConnected()` does not, which
+    // is why `Session` tracks the pending reconnect itself.
+    // EVERY DIAL HANGS UNTIL RELEASED, and the array of connections IS the record of how many dials
+    // happened -- the socket is pushed before the wait, so a refused press cannot hide inside it.
+    const conns: FakeConnection[] = [];
+    let release: (() => void) | undefined;
+    const session = new Session({
+      connect: async () => {
+        const conn = new FakeConnection();
+        conns.push(conn);
+        await new Promise<void>((r) => { release = r; });
+        return conn;
+      },
+    });
+    const first = session.connect('vm.example', 3270);
+    release!();
+    await first;
+    expect(conns).toHaveLength(1);
+    conns[0]!.close();                                  // the host hangs up
+    expect(session.isConnected()).toBe(false);
+
+    release = undefined;
+    applyAction(session, { kind: 'enter' });             // dials, then waits for `release`
+    await Promise.resolve();
+    expect(conns, 'the first press did not dial at all').toHaveLength(2);
+    applyAction(session, { kind: 'clear' });             // must be refused, not dialled
+    await Promise.resolve();
+    expect(conns, 'a second press opened a second socket').toHaveLength(2);
+
+    release!();                                         // let the in-flight reconnect finish
+    await new Promise((r) => { setTimeout(r, 0); });
+    expect(session.isConnected(), 'the in-flight reconnect never completed').toBe(true);
+    // AND THE GUARD LIFTS: a flag left set would make the session unreconnectable for good, which is
+    // a worse bug than the leak it prevents. Reachable only through a further disconnect.
+    session.disconnect();
+    applyAction(session, { kind: 'enter' });
+    await Promise.resolve();
+    expect(conns, 'the pending-reconnect guard was never cleared').toHaveLength(3);
+    release!();
+    await new Promise((r) => { setTimeout(r, 0); });
+  });
+});
+
 describe('the keypad-era actions', () => {
   it('sysreq reaches Session.sysreq, which no front end could call before', () => {
     // `Session.sysreq()` has existed since stage 2b with nothing able to invoke it.
@@ -166,7 +274,8 @@ describe('the keypad-era actions', () => {
     // actually do is NOT a bogus byte on the wire, though: 0x1c/0x1e are not in `AID`,
     // `VALID_AIDS` is built from its values (constants.ts, cited by name because the line
     // moves), and `sendAID` throws `RangeError` before the connected check
-    // (session.ts:609-611), which `applyAction` swallows. The result is a silently dead key --
+    // (`Session.sendAID`'s AID-byte check, by name: the line moves), which `applyAction`
+    // swallows. The result is a silently dead key --
     // which is why the assertion is worth keeping and why the claim needed correcting.
     //
     // EACH SPY IS ASSERTED BEFORE THE OTHER KEY IS PRESSED, and that ordering is the whole
@@ -298,6 +407,15 @@ interface Row {
   readonly args?: readonly unknown[];
   /** For the two kinds that throw instead of dispatching. A message pattern, never a bare throw. */
   readonly throws?: RegExp;
+  /**
+   * Connect the session before applying, for the rows whose dispatch DEPENDS on that.
+   *
+   * Only `enter` and `clear` need it, and they need it absolutely: while disconnected they
+   * reconnect instead of sending, so a row that ran disconnected would assert the wrong half of the
+   * behaviour. Everything else here is state-independent, and the note above the AID senders says
+   * why the rest of the table deliberately stays unconnected.
+   */
+  readonly connected?: true;
 }
 
 /**
@@ -312,12 +430,20 @@ const ROWS: readonly Row[] = [
   // THE AID SENDERS. All four reach the same method, so the BYTE is the assertion: without it,
   // `case 'clear': session.sendAID(AID.ENTER)` -- one of the 13 transpositions -- would pass.
   // `sendAID` refuses on a disconnected session and `applyAction` swallows that, but the spy has
-  // already recorded the call, so no `connect` is needed here. The wire-level assertions are
-  // above, where they belong.
-  { action: { kind: 'enter' }, target: 'session.sendAID', args: [AID.ENTER],
-    notCalled: ['keyboard.newline'] },
-  { action: { kind: 'clear' }, target: 'session.sendAID', args: [AID.CLEAR],
-    notCalled: ['keyboard.eraseInput'] },
+  // already recorded the call, so `pf` and `pa` need no `connect` here. The wire-level assertions
+  // are above, where they belong.
+  //
+  // `enter` AND `clear` DO NEED ONE, and the reason is the behaviour, not the harness: while
+  // disconnected those two RECONNECT and send nothing at all
+  // (`actions.ts`'s `reconnectInstead`). `connected: true` is what keeps these two rows asserting
+  // the AID rather than accidentally asserting the reconnect. Their partner list names
+  // `session.reconnect` for the same reason the arrows name each other: the mis-wiring that renders
+  // plausibly is a state test inverted, and it would send nothing to a live host while looking
+  // exactly like a working key. The other direction has its own test above.
+  { action: { kind: 'enter' }, target: 'session.sendAID', args: [AID.ENTER], connected: true,
+    notCalled: ['keyboard.newline', 'session.reconnect'] },
+  { action: { kind: 'clear' }, target: 'session.sendAID', args: [AID.CLEAR], connected: true,
+    notCalled: ['keyboard.eraseInput', 'session.reconnect'] },
   // `pf`/`pa` carry an `n`, and the byte is the only thing distinguishing them from each other:
   // 0xf3 is PF3 and 0x6e is PA2 (constants.ts, x3270 3270ds.h).
   { action: { kind: 'pf', n: 3 }, target: 'session.sendAID', args: [0xf3],
@@ -414,10 +540,14 @@ function spyOnTarget(session: Session, target: string): ReturnType<typeof vi.spy
 }
 
 describe('applyAction: the dispatch table, one falsifiable row per case', () => {
-  it.each(ROWS)('routes $action.kind to its own target and to nothing else', (row) => {
+  it.each(ROWS)('routes $action.kind to its own target and to nothing else', async (row) => {
     // A FRESH SESSION PER ROW, and one `applyAction` call in it. See the header note: this is
     // what makes `toHaveBeenCalledOnce()` mean anything here.
     const { session } = newSession();
+    // BEFORE THE SPIES: `connect` calls nothing this table watches, but a spy installed first would
+    // see the connect's own bookkeeping if that ever changed. Only the two state-dependent rows ask
+    // for it -- see `Row.connected`.
+    if (row.connected === true) await session.connect('h', 23);
 
     if (row.throws !== undefined) {
       expect(() => applyAction(session, row.action)).toThrow(row.throws);
