@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
   encodeAddress, cp037, checksum, from6, to6, hostToLocal, localToHost,
@@ -284,6 +284,106 @@ describe('typing and keys', () => {
     conn.sent = [];
     await runner.run('Attn');
     expect(conn.sent).toEqual([T.IAC, T.BREAK]);
+  });
+});
+
+/**
+ * `Dup()`, `FieldMark()` and `SysReq()` — CONFORMANCE, not symmetry with the other
+ * front ends. s3270 has all three under exactly these names (`Common/kybd.c:223`,
+ * `:230`, `:254`), so a script written for s3270 must not fail here.
+ *
+ * The field is built the way the `String()` test above builds one, from the same
+ * `newRunner()`: Erase/Write with a WCC that unlocks the keyboard, one field
+ * attribute at address 0, then `MoveCursor` into the first data cell. `0x00` is an
+ * unprotected attribute and `FA.PROTECT` a protected one, which is the only
+ * difference between the two setups.
+ *
+ * The refusal and argument tests ASSERT THE MESSAGE, not just the `error` line. A
+ * bare `error` would also be produced by `parseCommand` rejecting the verb as
+ * unknown, so a test that only looked at the last line would pass just as well with
+ * these three actions never implemented at all.
+ */
+describe('Dup, FieldMark and SysReq', () => {
+  /** A connected runner with the cursor in the first cell of a one-field screen. */
+  async function onAField(attr: number) {
+    const built = newRunner();
+    await built.runner.run('Connect(localhost:3270)');
+    built.conn.negotiate();
+    built.conn.host(SnaCmd.EW, 0xc3, Order.SF, attr, T.IAC, T.EOR);
+    await built.runner.run('MoveCursor(0,1)');
+    return built;
+  }
+
+  it('Dup() writes 0x1c into the field', async () => {
+    const { runner, session } = await onAField(0x00);
+    const at = session.screen.cursor;
+    const reply = await runner.run('Dup()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.screen.cellAt(at).ebcdic).toBe(0x1c);
+  });
+
+  it('FieldMark() writes 0x1e into the field', async () => {
+    const { runner, session } = await onAField(0x00);
+    const at = session.screen.cursor;
+    const reply = await runner.run('FieldMark()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.screen.cellAt(at).ebcdic).toBe(0x1e);
+  });
+
+  it('accepts the bare-verb spelling too, s3270 taking either', async () => {
+    const { runner, session } = await onAField(0x00);
+    const at = session.screen.cursor;
+    expect((await runner.run('Dup')).split('\n').pop()).toBe('ok');
+    expect(session.screen.cellAt(at).ebcdic).toBe(0x1c);
+  });
+
+  /**
+   * `Session.sysreq()` is spied rather than watched on the wire because SYSREQ is a
+   * TN3270E function: without it negotiated the session deliberately sends nothing
+   * (session.ts, `SYSREQ ignored: function not negotiated`). That IAC AO reaches the
+   * socket once the function is agreed is core's, and is covered end to end by
+   * `core/test/tn3270e-session.test.ts` ("sends IAC AO when SYSREQ was agreed").
+   * What was untested until this task is the only thing this task adds: that the
+   * command reaches the session at all. Before it, no front end could call sysreq().
+   */
+  it('SysReq() reaches Session.sysreq', async () => {
+    const { runner, session } = await onAField(0x00);
+    const spy = vi.spyOn(session, 'sysreq');
+    const reply = await runner.run('SysReq()');
+    expect(spy).toHaveBeenCalledOnce();
+    expect(reply.split('\n').pop()).toBe('ok');
+  });
+
+  it('reports a protected field as an error reply carrying the OIA reason', async () => {
+    const { runner, session } = await onAField(FA.PROTECT);
+    const reply = await runner.run('Dup()');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Dup(): input inhibited (4 A  X Protected)');
+    // Nothing was written: a refusal must not half-apply.
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+  });
+
+  it('refuses Field Mark in a numeric field, where Dup is allowed', async () => {
+    // The manual's permitted set for a numeric field names the DUP control and not
+    // the field mark (p. 4-13); core owns the rule, this pins that the CLI reports
+    // its two different outcomes rather than flattening them.
+    const dup = await onAField(FA.NUMERIC);
+    expect((await dup.runner.run('Dup()')).split('\n').pop()).toBe('ok');
+    expect(dup.session.screen.cellAt(1).ebcdic).toBe(0x1c);
+
+    const fm = await onAField(FA.NUMERIC);
+    const reply = await fm.runner.run('FieldMark()');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: FieldMark(): input inhibited (4 A  X Numeric)');
+  });
+
+  it('takes no arguments', async () => {
+    const { runner } = await onAField(0x00);
+    for (const name of ['Dup', 'FieldMark', 'SysReq']) {
+      const reply = await runner.run(`${name}(1)`);
+      expect(reply.split('\n').pop()).toBe('error');
+      expect(reply).toContain(`data: ${name}() requires 0 arguments`);
+    }
   });
 });
 

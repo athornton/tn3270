@@ -58,7 +58,32 @@ export type Action =
   | { kind: 'eraseEOF' }
   | { kind: 'eraseInput' }
   | { kind: 'attn' }
+  | { kind: 'sysreq' }
+  // Dup and Field Mark are TYPED CHARACTERS, not AIDs -- see `applyAction` and
+  // `Keyboard.dup`/`Keyboard.fieldMark` in core.
+  | { kind: 'dup' }
+  | { kind: 'fieldMark' }
   | { kind: 'toggleInsert' }
+  // NO CHORD, IN EITHER FRONT END, AND THAT IS A MEASURED DECISION RATHER THAN AN OVERSIGHT.
+  // c3270 binds Newline to Ctrl-J in BOTH its keymaps -- `Ctrl<Key>j: Newline()` at
+  // Common/fb-c3270:190 in the non-Windows table a terminal build reads, and `Ctrl <Key>j:
+  // Newline()` at :100 in the _WIN32 one -- but Ctrl-J IS `\n` (0x0a), which `buildTable` below
+  // already maps to `enter` for terminals that send LF for Return. ONE BYTE CANNOT BE BOTH, and
+  // Enter is the AID that submits the screen; quietly turning Return into a cursor move is not a
+  // trade this feature gets to make. x3270's Shift-Return is no help either: terminals do not
+  // report modifiers on Return. Recorded as the user's call on 2026-09-14 --
+  // "leave SysReq and Newline to the keypad, where a button has no spelling problem" --
+  // and this member is the other half of that decision, not a reversal of it: the keypad button
+  // and the TUI overlay are Newline's routes, exactly as they are Sys Req's.
+  | { kind: 'newline' }
+  // Not a 3270 key at all: it shows or hides the front end's own virtual keypad, and
+  // `applyAction` throws on it exactly as it does on `quit`. It lives in this union because
+  // the chord that opens the keypad, the GUI's Alt-K and the `BINDING_INTENT` row must all
+  // name it the way every other action is named.
+  //
+  // NOT because a keypad BUTTON needs it: `KEYPAD_KEYS` must contain neither this nor
+  // `quit`, since a drawn button for either would be a button whose only effect is to throw.
+  | { kind: 'toggleKeypad' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 
@@ -128,6 +153,20 @@ function buildTable(): Map<string, Action> {
   t.set('\x12', { kind: 'reset' });
   t.set('\x15', { kind: 'eraseInput' });
   t.set('\x1d', { kind: 'quit' });
+
+  // Dup and Field Mark are c3270's own Ctrl-D and Ctrl-F, and BOTH of its keymaps agree:
+  // `Ctrl<Key>d: Dup()` / `Ctrl<Key>f: FieldMark()` at Common/fb-c3270:186-187 (the
+  // non-Windows table, which a terminal build reads) and the same pair at :88 and :93 in the
+  // _WIN32 one. They are TYPED CHARACTERS, not AIDs -- see the note on the Action union.
+  t.set('\x04', { kind: 'dup' });
+  t.set('\x06', { kind: 'fieldMark' });
+  // The keypad/overlay toggle, ALSO c3270's own: `Ctrl<Key>k: Keypad()`, fb-c3270:191. Its
+  // _WIN32 keymap spells the same command Alt-K (:48), which would arrive here as `ESC k` --
+  // and new bindings do not go down the ESC path, whose two regressions are recorded in
+  // app.ts. The canvas front ends, which read a real KeyboardEvent and so have no ESC
+  // ambiguity, accept both. Sys Req gets NO chord: c3270 defines none in either keymap, which
+  // is why the TUI's overlay is its only keyboard route.
+  t.set('\x0b', { kind: 'toggleKeypad' });
 
   // The PA keys have no terminal equivalent, so ESC-digit, as c3270 does.
   t.set('\x1b1', { kind: 'pa', n: 1 });

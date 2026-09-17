@@ -1,4 +1,7 @@
-import { AID, Order, isShortReadAID, ADDRESS_CODE_TABLE } from './constants.js';
+import {
+  AID, Order, isShortReadAID, ADDRESS_CODE_TABLE,
+  EBCDIC_SOH, EBCDIC_PERCENT, EBCDIC_SLASH, EBCDIC_STX,
+} from './constants.js';
 import { encodeAddress } from './address.js';
 import type { Screen } from './screen.js';
 
@@ -16,9 +19,41 @@ import type { Screen } from './screen.js';
  * ctlr_read_modified writes the AID and jumps to rm_done for PA1-3 and Clear
  * when `all` is false. Read Modified All suppresses the short read, and
  * Selector Pen sends the cursor but no field data.
+ *
+ * `AID.SYSREQ` is the fourth case and the strange one: it produces a TEST REQUEST READ,
+ * which carries the SOH `%` `/` STX heading INSTEAD OF the AID and cursor address. See the
+ * branch below. This function mirrors x3270's `ctlr_read_modified` switch case for case,
+ * which is why the branch lives here rather than in a function of its own: in x3270 the
+ * heading and the ordinary AID are two arms of one `switch` over the same `aid_byte`
+ * (`Common/ctlr.c:768-808`), and both fall into the same field scan afterwards.
  */
 export function buildReadModified(screen: Screen, aid: number, all: boolean): Uint8Array {
-  const out: number[] = [aid];
+  const out: number[] = [];
+
+  // TEST REQUEST READ — the Sys Req / Test Req key on a classic session.
+  //
+  // FOUR HEADING BYTES AND NO AID. Not a variation on the ordinary read: the AID byte and
+  // the two-byte cursor address are both REPLACED, not prefixed. GA23-0059-07: the heading
+  // is followed by data that is "the same as described previously for read-modified
+  // operations, excluding the 3-byte read heading (AID and cursor address)"
+  // (pages.txt:13786-13789). x3270's `case AID_SYSREQ` writes exactly these four and
+  // `break`s (ctlr.c:770-777) — the `break` leaves the SWITCH, not the function, so the
+  // field scan below still runs and the data DOES follow. Only the 3-byte heading is gone.
+  //
+  // Confirming that the manual and x3270 agree here mattered, because it is easy to read
+  // that `break` as "send four bytes and stop". It is not.
+  //
+  // No ETX terminates it. The manual's BSC form has one (pages.txt:13780-13785); the
+  // non-SNA form is "the same as for the BSC environment, except there is no ETX"
+  // (pages.txt:14180-14184). We are neither: a telnet record ends at IAC EOR, which
+  // sendRecord appends.
+  if (aid === AID.SYSREQ) {
+    out.push(EBCDIC_SOH, EBCDIC_PERCENT, EBCDIC_SLASH, EBCDIC_STX);
+    out.push(...modifiedData(screen, all));
+    return Uint8Array.from(out);
+  }
+
+  out.push(aid);
 
   if (!all && isShortReadAID(aid)) {
     return Uint8Array.from(out); // AID alone
@@ -29,6 +64,22 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
   // Selector Pen reports position only.
   const sendData = all || aid !== AID.SELECT;
   if (!sendData) return Uint8Array.from(out);
+
+  out.push(...modifiedData(screen, all));
+
+  return Uint8Array.from(out);
+}
+
+/**
+ * The data portion of a read: everything after the heading, whichever heading it was.
+ *
+ * Shared by the ordinary AID path and the test request read because x3270 shares it too —
+ * both arms of the `aid_byte` switch fall through to the same field scan
+ * (`Common/ctlr.c:810-960`). Extracted verbatim from `buildReadModified`; the comments are
+ * the original ones and the behaviour is unchanged for every existing caller.
+ */
+function modifiedData(screen: Screen, all: boolean): number[] {
+  const out: number[] = [];
 
   // UNFORMATTED SCREEN: there are no fields to iterate, so walk the whole buffer
   // and send every non-null character, with no SBA orders at all. x3270 does
@@ -44,7 +95,7 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
       const ebcdic = screen.cellAt(a).ebcdic;
       if (ebcdic !== 0x00) out.push(ebcdic);
     }
-    return Uint8Array.from(out);
+    return out;
   }
 
   for (const field of screen.fields()) {
@@ -72,7 +123,7 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
     out.push(Order.SBA, ...encodeAddress(field.start, screen.size), ...data);
   }
 
-  return Uint8Array.from(out);
+  return out;
 }
 
 /**

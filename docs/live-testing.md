@@ -9,6 +9,15 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE VIRTUAL KEYPAD — NOTHING WAS RUN AGAINST A HOST, 2026-09-17, and that is a decision rather
+  than a gap.** A button press produces the same wire bytes as the equivalent keystroke, and those
+  are already verified below. **But Sys Req, Dup, Field Mark and Newline have NO live witness at
+  all** — see *The virtual keypad and the four new keys* at the end of this document, which also
+  lists what to run on the first real host that appears. ~~And Sys Req cannot get one here.~~
+  **Corrected 2026-09-17: Sys Req CAN now get a witness on both existing hosts**, the non-TN3270E
+  test-request path having landed. It is the first item on that list, and it needs a **trace**, not
+  a screenshot: a host is free to ignore a test request, so "nothing visible happened" would not
+  distinguish a working key from the inert one it used to be.
 - **VM/370 R6 (VM/CE 1.2) on `localhost:3270` — recorded 2026-08-17.** 43
   commands, 0 errors, 0 program checks. Fixture and golden committed. Five real
   bugs found and fixed; one spec claim falsified. Details in the Recording log.
@@ -1576,9 +1585,10 @@ data: 0.433 > 88 00 09 81 80 80 81 86 87 a6 00 17 81 81 01 00 ...
 
 The host's Read Partition Query (`f3 00 05 01 ff ff 02 ff ef` — the `ff ff` is the
 doubled IAC for `pid=0xff`, "any partition") arrived at 0.432s; our answer went out at
-0.433s. **Byte offsets inside our reply** (offset 0 = the leading `88`, `AID.SF` in
-`constants.ts:461` — the "this is a structured field" indicator, not itself a Query
-Reply; `QUERY_REPLY: 0x81` at `constants.ts:243` is the SFID each unit below carries):
+0.433s. **Byte offsets inside our reply** (offset 0 = the leading `88`,
+`AID.SF` in `constants.ts` — the "this is a structured field" indicator, not itself a Query
+Reply; `Sfid.QUERY_REPLY: 0x81`, also in `constants.ts`, is the SFID each unit below carries.
+Both cited by name: these line numbers were stale twice over and have been dropped):
 
 | offset | LL | SFID | QCODE | reply unit |
 |---|---|---|---|---|
@@ -1663,7 +1673,9 @@ data: 4.973 > 6c ff ef
 data: 4.984 < f1 c1 11 c1 50 1d c8 c9 e2 d7 f0 f8 f8 c5 40 d7 ...
 ```
 
-`0x6c` is `AID.PA1` (`constants.ts:455`). Decoding the host's EBCDIC reply
+`0x6c` is `AID.PA1` (in `constants.ts`, cited by name; note the same byte is
+`EBCDIC_PERCENT`, the second byte of the test request heading, which is a
+collision and not a use). Decoding the host's EBCDIC reply
 (`cp037`) gives, verbatim:
 
 ```
@@ -2038,3 +2050,96 @@ says the registry returned the existing `Session` rather than building another o
 neither host showed the documented **0 fields** case here — both devices were being driven — so
 that remains a possibility rather than something seen on this run.
 
+
+## The virtual keypad and the four new keys — NO LIVE RUN, 2026-09-17
+
+**Nothing was driven against a host for this feature, deliberately, and this section exists so that
+absence is on the record rather than inferred from silence.**
+
+**The argument for not running one, and it is sound as far as it goes.** A keypad button press
+produces *the same wire bytes as the equivalent keystroke* — the button carries an `Action`, and that
+`Action` goes through the same `applyAction` a chord does — and those bytes are already live-verified
+on both hosts. PF and PA in particular have observed host reactions on MVS/ISPF, quoted under *Task
+11* above: `ISP088E ... TERMINATED DUE TO ATTENTION INTERRUPT` for PA1 and a bare `READY` redisplay
+for PA2. The parts of the keypad that are genuinely new are *local* — a rectangle, a hit test, a
+press highlight and a window resize — and every one of them is checked offline, in pixels
+(`shot.mjs` 3/3, `browser-shot.mjs` 2/2) or through real Chromium input events (`clicks.mjs`,
+9 buttons / 10 actions).
+
+### WHERE THAT ARGUMENT STOPS: FOUR KEYS WITH NO LIVE WITNESS
+
+**Sys Req, Dup, Field Mark and Newline have never been pressed at a host by anything, and the
+keypad's verification must not be read as covering them.** They are new in this branch precisely
+because no interactive front end could reach them, so there is no earlier run to inherit.
+
+| key | offline evidence | live witness |
+|---|---|---|
+| **Dup** | writes EBCDIC `0x1c`, sets MDT, then TABs; mutation-checked both halves | **none** |
+| **Field Mark** | writes `0x1e` and advances as a typed character; the distinguishing last-cell case is pinned | **none** |
+| **Newline** | `Keyboard.newline()` has existed since stage 1 and the CLI could always call it | **none** — and nothing on this branch changed it, only its reachability |
+| **Sys Req** | the classic **test request read**, `01 6c 61 02` plus modified field data, byte-exact in `core/test/session.test.ts`; the TN3270E `IAC AO` separately in `core/test/tn3270e-session.test.ts` | **none — but now OBTAINABLE on both hosts**; see below |
+
+### SYS REQ IS NOW REACHABLE *AND ACTIVE* ON BOTH HOSTS, AND STILL HAS NO LIVE WITNESS
+
+**This section used to say a live witness was UNOBTAINABLE here. That stopped being true on
+2026-09-17**, when the non-TN3270E path landed. What has not changed is that nobody has driven the
+key at VM/370 or TK5 and watched the result. Implemented, not verified.
+
+The TN3270E half is still unobtainable here, and for the measured reason it always was: send
+`IAC WILL TN3270E` (`ff fb 28`) and both Hercules systems answer `ff fe 28` = **DONT**, measured
+three separate times and recorded under *Both hosts REFUSE TN3270E when offered* above. So neither
+host will ever take the `IAC AO` branch. **Both take the classic branch instead, and that branch now
+sends something.** x3270 splits on exactly this and nothing else — `SysReq_action` is
+`if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }` (`Common/kybd.c:2849-2870`).
+
+**WHAT TO EXPECT ON THE WIRE, and it is not the AID anyone would guess.** That `else` branch does
+**not** put AID `0xf0` on the wire. `ctlr_read_modified` has a dedicated
+`case AID_SYSREQ: /* test request */` (`Common/ctlr.c:770-777`) emitting the four-byte **TEST
+REQUEST READ heading** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` = **`01 6c 61 02`** — in
+place of the AID byte and the two-byte cursor address. `AID.SYSREQ = 0xf0` exists in our
+`constants.ts`, selects that heading, and is **never** the thing on the wire for this key.
+
+**Two corrections to what this section previously claimed, both found by reading the source rather
+than trusting the summary:**
+
+- **The record is NOT four bytes.** It said the `break` "skips the ordinary-AID path entirely. No
+  AID byte, no cursor address, no field data." The first two are right and the third is **wrong**:
+  the `break` leaves the **switch**, not the function, so the field scan below it runs and the
+  modified field data follows the heading. GA23-0059-07 settles it and agrees with x3270 — the
+  stream is the heading then "the same as described previously for read-modified operations,
+  excluding the 3-byte read heading (AID and cursor address)" (`pages.txt:13786-13789`). So on an
+  unformatted VM/370 logon screen expect `01 6c 61 02` followed by every non-null byte in the
+  buffer; with nothing modified, expect the heading alone.
+- **There is no ETX.** The manual's BSC form ends in one (`pages.txt:13780-13785`) because ETX is
+  BSC block framing; the non-SNA form is "the same as for the BSC environment, except there is no
+  ETX" (`pages.txt:14180-14184`). Expect `IAC EOR` instead, as for any inbound record.
+
+### WHAT TO RUN IF A HOST IS EVER AVAILABLE FOR THIS
+
+Cheap, and worth doing on the first real host that appears. **Sys Req's classic half needs no new
+host — do it on the next VM/370 or TK5 run**; only its TN3270E half still waits on a modern z/VM or
+z/OS:
+
+1. **Dup on a real data-entry panel.** On MVS/TSO, put the cursor mid-field and press the keypad's
+   `Dup`. Expect `0x1c` in the buffer and the cursor at the **next unprotected field** — the tab is
+   the counterintuitive half. Then repeat in a **numeric** field, which the manual says must accept
+   it (p. 4-13) where Field Mark must be refused.
+2. **Field Mark in the last data cell of a field**, which is where it differs from Dup: it must
+   auto-skip like a typed character rather than park on the attribute byte.
+3. **SYS REQ AGAINST VM/370 AND TK5 — the newly available one, and the first thing to do on the
+   next live run.** Both take the classic path. Trace the session (`-trace`) and check the inbound
+   record is exactly `01 6c 61 02` plus whatever is modified, terminated by `ff ef`, **with no
+   `f0` anywhere in it** — a stray `f0` means the ordinary-AID path ran. Then watch the host:
+   CP/CMS and MVS are each free to ignore a test request, so **"nothing visible happened" is a
+   valid result and is NOT the same as "nothing was sent"** — that is what the trace is for, and
+   it is the whole reason this key needed a wire-level witness rather than a screen-level one.
+   Worth trying twice: once on the unformatted VM/370 logon screen (expect buffer contents to
+   follow the heading) and once on a formatted panel with nothing typed (expect the heading alone).
+   Note the keyboard **locks** afterwards, as it does after Enter, until the host writes.
+4. **Sys Req against a host that grants the TN3270E SYSREQ function**, which neither Hercules
+   system will ever be. Watch for `IAC AO` on the wire, and watch what the host does with it.
+5. **Newline**, which needs no host at all to be interesting — but confirm the host does not treat
+   the resulting cursor position as an AID, which it should not, Newline being purely local.
+
+Do all five **through the keypad button**, not through the CLI: the CLI path is the one already
+covered offline, and the button is the path a user actually has.

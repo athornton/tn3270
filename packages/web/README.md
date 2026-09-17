@@ -19,6 +19,41 @@ With `--auth on` the token appears in it once, and is carried by a cookie therea
 serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
 ```
 
+## The virtual keypad
+
+**`Ctrl-K` shows and hides it; `Alt-K` does the same.** It is the 47-key clickable keypad the
+Electron app draws — PF1–PF24, PA1–PA3 and the special keys a PC keyboard lacks, including
+**Dup**, **Field Mark**, **Sys Req** and **Newline** — the four that `core` could do and no
+interactive front end could press before the keypad. Sys Req and Newline get no chord in any front
+end, so this is their only route besides the CLI. `Ctrl-K` is c3270's own terminal binding for its
+keypad (`Common/fb-c3270:191`) and
+`Alt-K` is how its Windows keymap spells the same command, so both are honoured rather than one
+being a divergence.
+
+**NOTHING ABOUT THE PROTOCOL CHANGED TO ADD IT, and that is the whole design.** A click is hit-
+tested in the browser against rectangles the server already sent, and a hit sends the *ordinary*
+`{"kind":"action"}` message the equivalent keystroke sends — the same `sendAction` the bridge has
+always had. There is no new message kind, no new bridge function (a fifth would mean the renderer
+had stopped being shared) and nothing new for `protocol.ts` to bound: `toggleKeypad` carries no
+numeric field. The press highlight is drawn locally and never leaves the renderer, because a round
+trip for it would visibly lag behind the finger over a WebSocket.
+
+The keypad is a third region of the draw list, appended **below** the screen and the OIA, so
+showing it never moves or covers a row the host wrote. A screen plus keypad taller than the
+viewport **scrolls**, which is what the page already did for a model 4.
+
+**The flag is per CONNECTION, not per session, and the reason is a lifetime rather than
+concurrency.** Two sockets can never hold one `Session` at the same time — `attach` reattaches only
+a *detached* entry, and the id lives in per-tab `sessionStorage` — so what a session-scoped flag
+would actually do is hand the preference to **whoever attaches next**. A gateway session
+deliberately outlives its socket so a reload reattaches, and the next attacher is a different
+window, possibly a different person, whose screen would come back nine rows taller than they left
+it. A reattaching client therefore starts with the keypad hidden.
+
+**The mouse does keypad buttons and nothing else.** No click-to-place-cursor, no drag-to-select, no
+light pen; the right and middle buttons do nothing, so a right-click on `Clear` cannot send it to a
+live host while the context menu opens over the label.
+
 ## READ THIS BEFORE EXPOSING IT TO A NETWORK
 
 This process types at a mainframe. Three things decide whether that is safe, and **the one that
@@ -93,12 +128,19 @@ on a live gateway it would put an operator's password into a log file.
 
 ## How it works, and why it is small
 
-`renderer.ts` comes from `@tn3270/canvas` and is shared with the Electron app **with one two-line
-exception**: the canvas is sized to `max(viewport, drawing)` rather than to the viewport, because a
-page cannot resize its own window and would otherwise clip the OIA row off a model-4 screen. Every
-other line, and all five of the other moved modules, are byte-identical to the pre-gateway version.
+`renderer.ts` comes from `@tn3270/canvas` and is the **same file** both front ends load — not a
+copy, and not a version with a browser branch in it. The one place the two hosts differ is that the
+canvas is sized to `max(viewport, drawing)` rather than to the viewport, because a page cannot
+resize its own window and would otherwise clip the OIA row off a model-4 screen; Electron pays
+nothing for that, since main sizes its window to exactly the drawing. (An earlier version of this
+paragraph added that every *other* line was byte-identical to the pre-gateway version. It was true
+when written and is not now — the keypad work added the keypad blit, the click path and a test
+seam to this file. What is still checked, and is the claim worth making, is that the served page and
+the Electron app produce **identical pixels**, keypad and all.)
 It already spoke to a four-function bridge — `onAtlas`, `onFrame`, `onError`, `sendAction` — and
-imported only relative modules.
+imported only relative modules. Hit-testing lives in `canvas/src/hittest.ts`, which is import-free
+for exactly that reason: a runtime import of a workspace package here blanks the window with no
+error anywhere.
 Electron supplies that bridge over IPC from `preload.cts`; here `bridge.js` supplies the same four
 functions over a WebSocket. Nothing above the transport knows the difference, and
 `browser-shot.mjs` proves it in pixels by comparing the served page against the Electron app's own
@@ -127,9 +169,14 @@ handover, so a leaked id cannot become a way into another operator's logged-on s
 Not in `npm test` — they need Xvfb and a real browser. Run them like `packages/gui/scripts/keys.mjs`:
 
 ```bash
-node packages/web/scripts/browser-keys.mjs   # real chords through a real browser
-node packages/web/scripts/browser-shot.mjs   # served pixels against the GUI golden
+node packages/web/scripts/browser-keys.mjs   # 13 chords, 11 actions in order over a WebSocket
+node packages/web/scripts/browser-shot.mjs   # 2 cases of served pixels vs the GUI's own goldens
 ```
+
+`browser-shot.mjs` runs **two** cases, not one: the plain screen and the same screen with the keypad
+shown, each sized from its own golden's PNG header. The second is the one that matters — it says the
+keypad the browser draws is the same keypad Electron draws, which is what makes this one
+implementation with two front ends rather than two implementations that agree today.
 
 Both need `--no-proxy-server`, which they pass: with `HTTP_PROXY` set, Chromium routes even a
 loopback request through the proxy and the failure is completely silent.

@@ -1,9 +1,3 @@
-import {
-  cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
-} from '@tn3270/core';
-import { schemeRgb, type Scheme } from '@tn3270/frontend';
-import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
-
 /**
  * Turn a screen snapshot plus its resolved attributes into per-cell draw instructions.
  *
@@ -32,33 +26,32 @@ import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
  * password field and the screen", and neither `text` nor the snapshot's `ebcdic` is
  * pre-redacted. A renderer that draws the glyph without checking this puts the password on
  * screen -- and in this project's case into committed screenshot goldens. Blanked here,
- * matching the TUI at `render.ts:343`.
+ * matching the TUI at `render.ts:369`.
+ *
+ * ## `AtlasGeometry` AND `DrawCell` ARE NOT DECLARED HERE ANY MORE
+ *
+ * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `keypad.ts`,
+ * `assets.ts` and `blit.ts` all took them from here with `import type` -- while this module
+ * value-imports `column` from `cg.ts` and `keypadRegion` from `keypad.ts`. That is an import
+ * cycle in the type position: harmless while the imports erase, and a module-initialisation
+ * ordering bug the day one of them becomes a value. See `geometry.ts` and the guard in
+ * `test/module-cycles.test.ts`.
+ *
+ * `DrawList` below stays, because it names `KeypadRegion` and so cannot live in a leaf.
  */
-export interface AtlasGeometry {
-  readonly cellWidth: number;
-  readonly cellHeight: number;
-  readonly cols: number;
-  /** CG code to atlas column. Sparse: the font's encodings run 0..543 with holes. */
-  readonly index: Readonly<Record<number, number>>;
-}
 
-export interface DrawCell {
-  readonly x: number;
-  readonly y: number;
-  /** Atlas COLUMN, already resolved through the CG map. */
-  readonly glyph: number;
-  readonly fg: Rgb;
-  readonly bg: Rgb;
-  readonly cursor: boolean;
-  readonly underline: boolean;
-  readonly blink: boolean;
-  readonly intensify: boolean;
-}
+import {
+  cp037, Colour, type ResolvedCell, type ScreenSnapshot,
+} from '@tn3270/core';
+import { schemeRgb, type Scheme } from '@tn3270/frontend';
+import { ebcdicToCg, column } from './cg.js';
+import { keypadRegion, type KeypadRegion } from './keypad.js';
+import type { AtlasGeometry, DrawCell } from './geometry.js';
 
 export interface DrawList {
   readonly cells: readonly DrawCell[];
   /**
-   * Absent when no OIA text was supplied, and the height is then the screen alone.
+   * Absent when no OIA text was supplied, and the height then omits its row.
    *
    * `cells` is the OIA rendered THROUGH THE SAME ATLAS as the screen, not text for the
    * canvas to typeset. That is not cosmetic consistency: `fillText` would pull in a system
@@ -71,6 +64,17 @@ export interface DrawList {
     readonly y: number;
     readonly cells: readonly DrawCell[];
   };
+  /**
+   * The virtual keypad, absent unless the front end asked for it.
+   *
+   * Present in the DRAW LIST rather than owned by the renderer, and that is decided by
+   * `gui/src/main.ts:312`, which sizes the window from `list.height`. A renderer-owned keypad would
+   * leave main unaware the drawing had grown, and the Electron page is `overflow:hidden`
+   * (`gui/index.html:3`) -- so the keypad would be clipped, which is exactly the model-4 OIA bug
+   * live verification found. The alternative was a fifth bridge function, and
+   * `web/src/bridgecore.ts:5` says a fifth function means the renderer has stopped being shared.
+   */
+  readonly keypad?: KeypadRegion;
   readonly width: number;
   readonly height: number;
 }
@@ -79,13 +83,16 @@ export interface DrawList {
 const EBCDIC_SPACE = 0x40;
 
 // `scheme` comes BEFORE `oiaText`: an existing call passing OIA text positionally would
-// otherwise silently take it as the scheme, with no type error and no failing test.
+// otherwise silently take it as the scheme, with no type error and no failing test. For the same
+// reason `showKeypad` is APPENDED and defaults to off, so every existing caller keeps its meaning
+// and neither screenshot golden moves.
 export function drawList(
   snapshot: ScreenSnapshot,
   resolved: readonly ResolvedCell[],
   atlas: AtlasGeometry,
   scheme: Scheme,
   oiaText?: string,
+  showKeypad = false,
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
   const cells: DrawCell[] = [];
@@ -116,6 +123,11 @@ export function drawList(
 
   const rows = snapshot.rows + (oiaText !== undefined ? 1 : 0);
   const oiaY = snapshot.rows * atlas.cellHeight;
+  // BELOW BOTH: `rows` already counts the OIA's row when there is one, so this is the screen's
+  // bottom edge with no OIA and the OIA's with one. `oiaY` is deliberately NOT reused here -- the
+  // two coincide only in the no-OIA case, which is why the tests pin both.
+  const keypadY = rows * atlas.cellHeight;
+  const keypad = showKeypad ? keypadRegion(atlas, scheme, keypadY) : undefined;
   return {
     cells,
     ...(oiaText !== undefined
@@ -127,8 +139,18 @@ export function drawList(
         },
       }
       : {}),
+    // A conditional spread and not `keypad,`: `exactOptionalPropertyTypes` makes an explicit
+    // `undefined` a type error for an optional property, as it already does for `oia` above.
+    ...(keypad !== undefined ? { keypad } : {}),
+    // The keypad is narrower than any 3270 MODEL (72 columns against 80, and 132 on a model 5), so
+    // it never widens the window. Not narrower than any GEOMETRY: `checkGeometry`
+    // (`core/src/screen.ts:101`) accepts any positive `cols`, and 40 columns would be 360 pixels
+    // against the keypad's 648 -- `drawlist.test.ts` writes the assumption down as
+    // `keypad.width <= width`. The height it adds is measured from the region's OWN extent rather
+    // than recomputed from a row count, so `keypad.ts` stays the only place that knows how tall
+    // the keypad is.
     width: snapshot.cols * atlas.cellWidth,
-    height: rows * atlas.cellHeight,
+    height: keypad !== undefined ? keypadY + keypad.height : rows * atlas.cellHeight,
   };
 }
 
@@ -161,15 +183,4 @@ function oiaCells(
     });
   }
   return out;
-}
-
-/**
- * The atlas column for a CG code, falling back to the solid box.
- *
- * A MISS MUST NOT BECOME AN OUT-OF-RANGE COLUMN. Sampling past the end of the atlas draws
- * whichever glyph sits next along, which reads as corruption rather than as a missing
- * character -- so an unknown code gets x3270's visible unprintable marker instead.
- */
-function column(atlas: AtlasGeometry, cg: number): number {
-  return atlas.index[cg] ?? atlas.index[CG_BOXSOLID] ?? 0;
 }

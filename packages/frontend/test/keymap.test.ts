@@ -214,3 +214,33 @@ describe('the keys that were implemented in core but bound nowhere', () => {
     expect(lookup(new TextEncoder().encode('\x1b3'))).toEqual({ kind: 'pa', n: 3 });
   });
 });
+
+describe('the keypad-era chords', () => {
+  it('maps Ctrl-D to Dup and Ctrl-F to Field Mark, as c3270 does', () => {
+    // c3270's OWN bindings, and both of its keymaps agree: the non-Windows table has
+    // `Ctrl<Key>d: Dup()` and `Ctrl<Key>f: FieldMark()` (Common/fb-c3270:186-187), the
+    // _WIN32 one the same pair at :88 and :93.
+    //
+    // Asserted SEPARATELY rather than in a loop over a pair table, so a transposition
+    // reddens with the byte named: swap 0x04 and 0x06 in `keymap.ts` and both lines fail.
+    expect(lookup(new Uint8Array([0x04]))).toEqual({ kind: 'dup' });
+    expect(lookup(new Uint8Array([0x06]))).toEqual({ kind: 'fieldMark' });
+  });
+
+  it('maps Ctrl-K to the keypad toggle, as c3270 does in a terminal', () => {
+    // Common/fb-c3270:191, `Ctrl<Key>k: Keypad()` -- the non-Windows keymap, which is the
+    // one a terminal build reads. c3270's _WIN32 keymap spells it Alt-K (:48); that would
+    // arrive here as `ESC k`, and this project keeps new bindings off the ESC path.
+    expect(lookup(new Uint8Array([0x0b]))).toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('gives Sys Req NO chord, deliberately', () => {
+    // c3270 defines none, in either keymap, so the overlay is the TUI's only route to it.
+    // Swept over every C0 byte rather than spot-checked, because "no chord" is only worth
+    // asserting if no chord AT ALL reaches it.
+    const reachable = [...Array(32).keys()]
+      .map((b) => lookup(new Uint8Array([b])))
+      .filter((a) => a !== null && a !== undefined && (a as { kind: string }).kind === 'sysreq');
+    expect(reachable).toEqual([]);
+  });
+});

@@ -24,7 +24,7 @@
  *     node packages/gui/scripts/shot.mjs [--update]
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, copyFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { guiEnv } from './xvfb.mjs';
@@ -64,12 +64,27 @@ const CASES = [
     host: '127.0.0.1:3270',
     extraArgv: ['-scheme', 'green'],
   },
+  {
+    name: 'synthetic-ispf-keypad',
+    trace: join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace'),
+    host: '127.0.0.1:1',
+    // Ctrl+K SHOWS the keypad. Without it this would be a duplicate of the first case, and it
+    // would pass -- a golden that silently checks nothing new is worse than no golden. MEASURED
+    // by deleting this line: the capture came back byte-identical to synthetic-ispf's hash.
+    keys: 'Ctrl+K',
+  },
 ];
 
 const update = process.argv.includes('--update');
 
 function run(kase) {
   const shot = join('/tmp', `tn3270-shot-${kase.name}.png`);
+  // DELETED FIRST, because the caller's pass condition asks whether a capture EXISTS: this path is
+  // stable across runs, so a run that captured nothing at all would otherwise be compared against
+  // the file the LAST run left here -- and would pass. `browser-shot.mjs` clears its own for the
+  // same reason.
+  rmSync(shot, { force: true });
+  rmSync(`${shot}.sha256`, { force: true });
   const result = spawnSync(electron, [main, ...ARGV, ...(kase.extraArgv ?? []), kase.host], {
     encoding: 'utf8',
     timeout: 120000,
@@ -77,11 +92,15 @@ function run(kase) {
       TN3270_GUI_REPLAY: kase.trace,
       TN3270_GUI_SHOT: shot,
       TN3270_GUI_SHOT_MS: '2500',
-      // CLEARED, not merely unset by us: this env is inherited from the caller's shell, and
-      // a stray TN3270_GUI_KEYS there would type into the goldens AND stretch their settle
-      // to max(KEYS_MS, SHOT_MS). A golden that silently depends on the operator's
+      // DEFAULTS TO CLEARED, not merely unset by us: this env is inherited from the caller's
+      // shell, and a stray TN3270_GUI_KEYS there would type into the goldens AND stretch their
+      // settle to max(KEYS_MS, SHOT_MS). A golden that silently depends on the operator's
       // environment is not a golden. Found while measuring the settle floor in Task 3.
-      TN3270_GUI_KEYS: '',
+      //
+      // A case may ASK for keys -- the keypad case asks for Ctrl+K, because that chord is the
+      // only way to show the keypad it exists to photograph -- but `?? ''` keeps the default
+      // empty, so the protection above still covers every case that does not.
+      TN3270_GUI_KEYS: kase.keys ?? '',
     }),
   });
   // Level 3 is 'error' in Electron's 0..3 console levels; level 2 (its CSP warning) arrives on

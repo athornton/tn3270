@@ -1,4 +1,4 @@
-# The virtual keypad, the special-keys overlay, and three missing keys
+# The virtual keypad, the special-keys overlay, and four missing keys
 
 Roadmap item (9), requested 2026-09-14 and moved ahead of Programmable Symbol Sets on
 2026-09-15. Design settled 2026-09-16.
@@ -6,13 +6,15 @@ Roadmap item (9), requested 2026-09-14 and moved ahead of Programmable Symbol Se
 ## What this is for
 
 A 3270 keyboard has keys a PC keyboard has not got. Some of them are reachable today through
-chords nobody would guess, and three of them are not reachable at all. This adds:
+chords nobody would guess, and four of them are not reachable at all. This adds:
 
 - a **clickable virtual keypad** in the two canvas front ends (the Electron GUI and the web
   gateway), laid out like the special-key clusters of a 122-key tn327x keyboard;
 - a **keyboard-navigable overlay** in the TUI, which has no mouse, listing every special key and
   able to fire one;
-- the three keys that are missing from the stack: **Sys Req**, **Dup** and **Field Mark**.
+- the keys that are missing from the stack: **Sys Req**, **Dup** and **Field Mark** — and
+  **Newline**, added on the user's decision once Task 3 found this spec had dropped it (see above).
+  Three at design time, four as shipped.
 
 Explicitly NOT in this spec, and each for its own reason:
 
@@ -29,6 +31,36 @@ Explicitly NOT in this spec, and each for its own reason:
   lacks; a clickable QWERTY duplicates hardware, triples the hit-testing surface and eats the
   screen area the 3270 display needs.
 
+**~~OPEN QUESTION~~ ANSWERED BY THE USER — NEWLINE IS IN, AS THE 47TH KEY, WITH NO CHORD.** Raised
+2026-09-16 during Task 3, decided during Task 15's run-up, shipped in `a039287`. It is on c3270's
+keypad, `Keyboard.newline()` has existed in core (`Keyboard.newline`, `core/src/keyboard.ts:348`), and
+**the CLI could already call it** as `Newline()` (`cli/src/runner.ts:259` — this said `:219`, which the
+CLI task's own 40 added lines invalidated) — but **no interactive front end could**, and this spec's
+key set dropped it without noticing. That is the same shape as `Session.sysreq()` before this branch:
+a capability with no interactive route, which is precisely what this feature exists to fix. So its
+absence was an oversight rather than a decision, unlike Cursor Select and Compose.
+
+Adding it was **cheap, and cheapest then**: `default: action satisfies never` in `applyAction` makes a
+new union member a compile error until handled, the handler is one line, row 4 ended at column 36 so
+column 42 was free with a right edge of 48 (inside 72), and the cost was one union member, one `case`,
+one table row and one count in a test. **After Task 13 fixes its `CASES` and Task 14 commits its
+goldens, adding it also invalidates a golden** — which is exactly what happened; the keypad golden was
+regenerated and looked at again, and the two non-keypad goldens stayed byte-identical because no new
+row was needed.
+
+**THIS ESTIMATE SAID "plus a `BINDING_INTENT` row" AND THAT PART WAS WRONG — reconciled here rather
+than left to contradict the other spec.** Newline got **no** `BINDING_INTENT` row, no canvas `CTRL`
+entry and no chord in either front end, because **`Ctrl-J` — c3270's own binding for it
+(`Common/fb-c3270:190`, the non-Windows keymap) — IS `\n` (0x0a), which the terminal keymap already
+maps to `enter`.** One byte cannot be both, and Enter is the AID that submits the screen. That
+collision was already measured and already decided by the user on **2026-09-14**, recorded in
+`docs/superpowers/specs/2026-09-14-shared-palette-and-unreachable-keys-design.md:84-89` — "leave
+SysReq and Newline to the keypad, where a button has no spelling problem". So the estimate above was
+costing a row that a *standing decision in another spec* had already ruled out; the keypad button and
+the TUI list ARE Newline's keyboard route, exactly as they are Sys Req's. A `BINDING_INTENT` row would
+also have been actively harmful, since the TUI list *renders* that table and would have told a
+terminal operator "Newline: Ctrl-J" while Ctrl-J there submits the screen.
+
 ## Facts established from sources before designing
 
 Checked rather than remembered, per this repo's standing rule:
@@ -37,12 +69,14 @@ Checked rather than remembered, per this repo's standing rule:
 | --- | --- |
 | `EBC_dup = 0x1c`, `EBC_fm = 0x1e` | x3270 `include/3270ds.h:364-365` |
 | **Dup and Field Mark are typed CHARACTERS, not AIDs** | `Common/kybd.c:2788` and `:2825` both call `key_Character(EBC_dup/EBC_fm, ...)` |
-| **A keyboard Dup SUPPRESSES auto-skip; a pasted one does not** | `Common/kybd.c:1435`: `if (auto_skip && (pasting \|\| (ebc != EBC_dup)))`, commented "for all pasted data (even DUP), and for all keyboard-generated data except DUP" |
-| Which keys a 3270 keypad is expected to carry | c3270's own keypad: `Common/c3270/keypad.labels` — PA1-3, Attn, Erase EOF, Erase Input, Sys Req, Clear, PF1-24, Home, Cursor Select, Compose, Insert, Delete, Dup, Field Mark, Reset, Enter, arrows |
-| `Session.sysreq()` exists in core and **no front end can reach it** | `packages/core/src/session.ts:641`; no `sysreq` anywhere in any front end |
+| **The Dup KEY performs a TAB.** `kybd.c:1435` suppresses `key_Character`'s auto-skip for a keyboard Dup — `if (auto_skip && (pasting \|\| (ebc != EBC_dup)))`, commented "for all pasted data (even DUP), and for all keyboard-generated data except DUP" — but `Dup_action` then moves the cursor ITSELF, so the net effect is a tab. **CORRECTED 2026-09-16 during Task 1; this table's first version read the suppression alone and concluded the opposite.** What the suppression buys is that the tab happens ONCE rather than twice. | `Common/kybd.c:1435` **and `:2788-2792`** (`cursor_move(next_unprotected(cursor_addr))` after `key_Character` returns), settled by the manual p. 7-12: "Operation of this key causes a X'1C' code to be entered into the presentation space, **a Tab key operation to be performed**, and the MDT bit to be set to 1" |
+| **A numeric field TAKES Dup and refuses Field Mark** | manual p. 4-13: "Numeric fields are limited to numeric characters, the minus and decimal sign characters, **and the duplicate (DUP) control**." x3270's byte test (`kybd.c:1232-1238`) refuses DUP too, but is gated on `appres.numeric_lock`, which has **no default assignment anywhere** (`glue.c:914` registers the resource only) and is therefore off — so stock x3270 refuses neither, and that byte set is the shape of the numeric-lock feature rather than a ruling on DUP |
+| Which keys a 3270 keypad is expected to carry. **CORRECTED 2026-09-16 in Task 3: the authoritative list is `keypad.callbacks`, which is exactly 44 lines, and it has NO CURSOR ARROWS.** The `-->|`, `\|<--` and `<-+` glyphs in `keypad.full:8-11` are **Tab, BackTab and Newline**, which this table's first version misread as arrows. c3270 can omit cursor keys because a real keyboard sits beside it; a mouse-driven keypad cannot. | `Common/c3270/keypad.callbacks` (44 keys: PA1-3, Attn, Erase EOF, Erase Input, Sys Req, Clear, Home, Cursor Select, Compose, Insert, Delete, Dup, Field Mark, Tab, Reset, BackTab, **Newline**, Enter, PF1-24), with `keypad.labels` / `keypad.full` as its rendering |
+| ~~**Our 46 keys are c3270's 44 minus three, plus five**~~ **47 AS SHIPPED: c3270's 44 minus TWO, plus five** — dropping only Cursor Select and Compose, adding the four cursor arrows and Backspace. Newline was the third dropped key and is dropped no longer | arithmetic re-derived in `a039287`, not incremented: 44 − 2 + 5 = 47, and the specials are 47 − 27 = 20, which `keypad.test.ts` now states from both sides |
+| `Session.sysreq()` exists in core and **no front end can reach it** | `packages/core/src/session.ts`, the `sysreq` method (cited by name: the line has moved twice); no `sysreq` anywhere in any front end |
 | Dup and Field Mark are absent from core entirely | not even the 0x1C/0x1E constants exist |
 | `Ctrl-K` is free in both keymaps | canvas `keys.ts` binds only `c r u ] a`; the TUI adds `0x7f` |
-| `advanceAfterType` IS our auto-skip | `packages/core/src/keyboard.ts:98`, "At the end of a field, skip to the next typable one" |
+| `advanceAfterType` IS our auto-skip | **`advanceAfterType` in `packages/core/src/keyboard.ts`** (currently `:250`), "At the end of a field, skip to the next typable one". **Cited BY NAME as of 2026-09-17: this said `:98`, which the two new key methods pushed 150 lines down — and `:98` now lands inside `dup()`'s own docstring, so the stale form reads plausibly.** |
 | `DrawList` already carries an optional second region | `packages/canvas/src/drawlist.ts`: `oia?: { text, y, cells }` |
 
 ## Architecture
@@ -66,8 +100,14 @@ TUI's reach and guarantee two lists that drift.
 
 ### Why the keypad is part of the draw list
 
-**`gui/src/main.ts:290` sizes the window from the draw list**: `setContentSize(list.width * scale,
-list.height * scale)`. That single line decides the architecture.
+**`fit()` in `gui/src/main.ts` sizes the window from the draw list**: `setContentSize(list.width *
+scale, list.height * scale)`, currently `main.ts:312`. That single line decides the architecture.
+
+**Cited by NAME as of 2026-09-17, because the line moved three times on this one branch** — `:290`
+→ `:294` (Task 8, when `showKeypad` went in above it) → `:312` (Task 13, when the click seam went in
+above it). Two documents and two source files pointed at `:290` after the first move. This is the
+branch's most frequent defect by a wide margin, and the rule earned from it is in the plan's Task 6
+note: *editing a file that other files cite by line is itself a change to those files.*
 
 If the keypad were owned by the renderer, main would never learn the drawing had grown, and the
 Electron page is `overflow:hidden` — so the keypad would be clipped. That is precisely the bug live
@@ -105,7 +145,9 @@ in the canvas.
 
 ## The key set and the layout
 
-46 buttons. Six cell-rows, at most 72 columns wide so it never exceeds an 80-column screen:
+**47 buttons as shipped** (46 at design time; `NewLn` was added last and took a free slot on the
+bottom row rather than a new one). Six cell-rows, at most 72 columns wide so it never exceeds an
+80-column screen:
 
 ```
 PF13 PF14 PF15 PF16 PF17 PF18 PF19 PF20 PF21 PF22 PF23 PF24
@@ -113,11 +155,14 @@ PF1  PF2  PF3  PF4  PF5  PF6  PF7  PF8  PF9  PF10 PF11 PF12
 
 PA1   PA2   PA3     Home   ^    Ins      Dup     Reset
 Attn  SysRq Clear    <     v     >       FldMk   Enter
-ErEOF ErInp Tab     BkTab Del   BkSp
+ErEOF ErInp Tab     BkTab Del   BkSp     NewLn
 ```
 
 Six rows is 84px at scale 1, about a seventh of a model-2 screen. Each PF button is 6 cells wide
-(a 4-character label plus padding), so the PF block is 72 cells.
+(a 4-character label plus padding), so the PF block is 72 cells. `NewLn` at column 42 has a right
+edge of 48, well inside 72 — **which is why adding the 47th key resized nothing**: the Electron
+window, the two non-keypad goldens and `browser-shot.mjs`'s viewport (sized from the golden's own
+IHDR) were all untouched.
 
 The arrangement follows a 122-key keyboard in the way that matters for muscle memory: the PF keys
 in a 2x12 block across the top, the modal keys in a left-hand cluster, cursor and edit keys on the
@@ -163,14 +208,32 @@ where our `Ctrl-A` = Attn came from too:
 | Field Mark | `Ctrl-F` | `fb-c3270:93` |
 | show/hide the keypad or overlay | `Ctrl-K`, **plus `Alt-K` in the canvas front ends only** | diverges; see below |
 | Sys Req | **no chord** | c3270 has none either |
+| Newline | **no chord**, in EITHER front end | c3270 has one — `Ctrl<Key>j: Newline()`, `fb-c3270:190` — but `Ctrl-J` IS `\n` (0x0a), already `enter`. The user's decision, 2026-09-14. See the Newline note at the top |
 
-**The keypad toggle diverges from c3270 deliberately.** c3270 uses `Alt-K` (`fb-c3270:48`) and a
-two-key `Ctrl-A K` (`:136`). In a terminal `Alt-K` arrives as `ESC k`, and this project does not put
-new bindings through the ESC path: `app.ts` records two regressions there and warns against
-touching it. So the TUI uses `Ctrl-K`, which is ESC-free and unclaimed. The canvas front ends accept
-**both** `Ctrl-K` and `Alt-K`, since they see a real `KeyboardEvent` with no ESC ambiguity and `Alt`
-is already an established modifier there (Alt+digit is PA1-3) — so c3270 muscle memory works in the
-GUI and the browser.
+**THERE IS NO DIVERGENCE — THIS PARAGRAPH WAS WRONG AND THE REASON IT GAVE WAS FICTION. Corrected
+2026-09-16 in Task 4.** It claimed the TUI uses `Ctrl-K` *instead of* c3270's `Alt-K`, to stay off the
+ESC path. **`Ctrl-K` IS c3270's terminal binding.** `Common/fb-c3270` is split: `#ifdef _WIN32` at
+`:41`, `#else` at `:126`, `#endif` at `:204`. **Every citation this spec and the plan gave — `:48`,
+`:88`, `:93` — is inside the WINDOWS branch.** The non-Windows keymap, which is what a terminal build
+reads, has `Ctrl<Key>d: Dup()` (`:186`), `Ctrl<Key>f: FieldMark()` (`:187`) and
+**`Ctrl<Key>k: Keypad()` (`:191`)**.
+
+So `Alt-K` is merely the Windows spelling, and the outcome here was right by accident: the TUI uses
+`Ctrl-K` **because that is what c3270 uses**, not in spite of it. The canvas front ends accept **both**,
+which now reads as supporting the Windows spelling too rather than as a deliberate departure. Dup and
+Field Mark are `Ctrl-D`/`Ctrl-F` in *both* branches, so those two citations were right by luck while
+pointing at the wrong lines.
+
+**The ESC-path caution remains true and remains the reason not to add an `Alt-` binding to the TUI** —
+`app.ts` records two regressions there. It just is not why `Ctrl-K` was chosen.
+
+> **A RELATED PRE-EXISTING DEFECT, found in passing and NOT fixed here.** `keymap.ts` and `bindings.ts`
+> cite `fb-c3270:83` for `Ctrl-A` = Attn — **also the Windows branch.** In the non-Windows keymap
+> `Ctrl-A` is c3270's **escape prefix** and Attn is the two-key `Ctrl<Key>a <Key>a` (`:182`). So this
+> project's plain `Ctrl-A` for Attn is a real divergence from terminal c3270 that nobody knew they were
+> making, and its citation points at the wrong keymap. It came in with the palette-schemes work, not
+> with the keypad. Decide separately whether to keep the binding (defensible — we have no escape prefix)
+> and fix only the citation, or to follow c3270.
 
 **Sys Req gets no chord**, because c3270 defines none and inventing one is how a keymap accretes
 bindings nobody can predict. It is reachable from the keypad, from the TUI overlay, and from the
@@ -193,22 +256,83 @@ from `BINDING_INTENT` plus the new table, so the on-screen help cannot drift fro
 there is already a test that the terminal keymap agrees with `BINDING_INTENT`. Nothing here touches
 the ESC state machine, whose own comments record two regressions and warn against simplification.
 
-## The three missing keys
+## The four missing keys
 
 **Sys Req** is nearly free: `Session.sysreq()` exists, so `{ kind: 'sysreq' }` is an entry in
 `applyAction` and in both keymaps. It is currently unreachable from any front end, which is worth
 stating plainly — the capability has been in core since stage 2b with no way to press it.
+
+> **RESOLVED 2026-09-17, AFTER TASK 15: the user authorised the non-E path and it is implemented.**
+> The decision this block asks for at its end was taken the second way round from how it reads —
+> add the path, do not merely document the limitation. Everything below is the analysis as it stood
+> when the question was open, kept because the reasoning is still the reasoning, with two factual
+> corrections marked inline. Sys Req is now **implemented on both paths and verified on neither**;
+> `docs/live-testing.md` carries what to run.
+>
+> **BUT SYS REQ IS INERT ON BOTH OF THIS PROJECT'S LIVE HOSTS, and Task 10 is what exposed it.**
+> ~~`Session.sysreq()` returns early unless `Tn3270eFunc.SYSREQ` was negotiated~~ — **no longer: it
+> now falls through to the classic path instead of returning.** And **neither Hercules host offers
+> TN3270E at all**; both answer `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times, so
+> both take that classic path. ~~So the key this feature exists to make reachable puts nothing on the
+> wire against either host the user has.~~ It now does. The keypad's `SysRq` button and the CLI's
+> `SysReq()` still both answer `ok` — they report no refusal by design — but they are no longer inert.
+>
+> **What x3270 does instead, checked at source rather than guessed — and it is not what you would
+> assume.** `SysReq_action` is `if (IN_E) net_abort(); else { ... key_AID(AID_SYSREQ); }`
+> (`Common/kybd.c:2849-2870`), so a classic 3270 session takes the second branch. That branch does
+> **not** send AID `0xf0`: `ctlr_read_modified` has a dedicated `case AID_SYSREQ: /* test request */`
+> (`Common/ctlr.c:770-777`) which emits the **four-byte TEST REQUEST READ heading** —
+> `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx` = `01 6c 61 02` — and then `break`s.
+> ~~skipping the ordinary-AID path entirely. **No AID byte, no cursor address, no field data.**~~
+> **CORRECTED 2026-09-17 while implementing it: no AID byte and no cursor address, but the MODIFIED
+> FIELD DATA DOES FOLLOW.** That `break` leaves the switch, not the function, so the field scan below
+> it runs. The manual says the same and does not contradict x3270 — the stream is the heading then
+> "the same as described previously for read-modified operations, excluding the 3-byte read heading
+> (AID and cursor address)" (`pages.txt:13786-13789`) — and there is no ETX, that being BSC framing
+> (`pages.txt:14180-14184`). `AID.SYSREQ = 0xf0` exists in our `constants.ts` and is never the thing
+> on the wire for this key, which remains the counterintuitive core of it.
+>
+> **This is core protocol surface, not keypad work**, so it was deliberately NOT folded into this
+> feature; it landed as its own change afterwards, on the same branch, with its own commit. The docs
+> must still not claim Sys Req "works" in the sense of *verified*: it is implemented everywhere and
+> witnessed nowhere.
 
 **Dup** and **Field Mark** need new `Keyboard` methods. Both write an EBCDIC control byte —
 0x1C and 0x1E — **directly into the buffer, bypassing code-page translation**, because they are
 EBCDIC controls with no sensible Unicode source character; routing them through `type(ch)` would
 mean inventing one. Both set MDT, as any typed character does.
 
-**Dup must not run `advanceAfterType`'s end-of-field skip.** Per `kybd.c:1435` auto-skip is
-suppressed for a keyboard-generated Dup, so the cursor advances one position and stops there even
-if that lands on a field attribute. The implementation must check our `advanceAfterType` semantics
-against that rather than assume they match; if they differ, the difference is documented, not
-papered over.
+**Dup performs a TAB, and this paragraph said the opposite until Task 1 checked it.** The original
+reasoning stopped at `kybd.c:1435` — auto-skip is suppressed for a keyboard-generated Dup — and
+concluded that the cursor advances one position and stops. It does not: `Dup_action` moves the cursor
+itself once `key_Character` returns (`kybd.c:2790`, `cursor_move(next_unprotected(cursor_addr))`), so
+the **net effect of the key is always a move to the next unprotected field**. The manual settles it in
+one sentence (p. 7-12): a X'1C' is entered, **a Tab key operation is performed**, and MDT is set. It is
+also what the key means — "duplicate the rest of this field" leaves nothing more to type there.
+
+**What the suppression actually buys is that the tab happens ONCE.** Our `advanceAfterType` already
+tabs at the end of a field, so advancing first and tabbing after would skip a whole field when Dup is
+pressed in the last cell — exactly what x3270 avoids by starting `next_unprotected` from the field
+attribute rather than from the next field's first data cell. So `dup()` is `write; setMDT; tab()`, and
+both halves are mutation-checked.
+
+**`advanceAfterType` is NOT byte-for-byte x3270's auto-skip, and the difference is documented on it
+rather than papered over:** x3270's loop can leave the cursor in a protected non-auto-skip field,
+where our `tab()` always finds a typable one. Dup and Field Mark inherit that pre-existing difference
+rather than introduce it.
+
+**A related gap was found and deliberately NOT fixed in Task 1:** neither `type()` nor `writeControl()`
+refuses a cursor parked *on* a field attribute byte, where x3270 does (**`kybd.c:1219`** — `:1221`,
+which an earlier draft of this line cited, is a comment opener inside that branch) and the manual
+disables the keyboard for both these keys **by name**, at `pages.txt:12645-12647` and `:12660-12662`:
+"Operation of this key when the cursor is positioned at a field attribute location or is within a
+protected field disables the keyboard; no character locations are cleared, the cursor is not moved,
+and the MDT bit is not set." Writing there destroys the field boundary — reproduced through the new
+key: `dup()` with the cursor on an attribute overwrites it, and the screen drops from two fields to
+one. Task 1 kept parity with `type()` rather than making the two inconsistent; fixing it belongs in
+its own commit covering both, and is **not** part of this feature. Note for whoever takes it: x3270's
+refusal there is conditional on `auto_skip`, and the overlay-paste arm drops the byte and advances
+instead.
 
 New actions: `{ kind: 'sysreq' }`, `{ kind: 'dup' }`, `{ kind: 'fieldMark' }`,
 `{ kind: 'toggleKeypad' }`.
@@ -265,8 +389,10 @@ By hand, following the existing harnesses:
 No live-host verification is required for this feature: a keypad press produces the same wire bytes
 as the equivalent keystroke, and those are already live-verified. PA1 and PA2 in particular have
 observed host reactions on MVS (`ISP088E ... TERMINATED DUE TO ATTENTION INTERRUPT` and a bare
-`READY` redisplay). Sys Req, Dup and Field Mark have no live witness and the docs must say so
-rather than implying the keypad as a whole is live-verified.
+`READY` redisplay). **Sys Req, Dup, Field Mark and Newline** have no live witness and the docs must say so
+rather than implying the keypad as a whole is live-verified. **Still true on 2026-09-17**, after the
+non-E Sys Req path landed: that made Sys Req *capable* of a witness on both hosts, which is not the
+same as having one.
 
 ## Success criteria
 
@@ -275,9 +401,27 @@ rather than implying the keypad as a whole is live-verified.
 2. Clicking every button produces exactly the action its label names, proven by a real mouse event
    through the new seam, not by calling the handler.
 3. The keypad is pixel-identical between the Electron app and the served page.
-4. Sys Req, Dup and Field Mark are reachable from **every** front end — the TUI and both canvas
-   keymaps, the keypad itself, and the CLI as `SysReq()`, `Dup()` and `FieldMark()` — and Dup's
-   auto-skip suppression is asserted.
-5. The TUI overlay lists every special key with its chord, fires one, and refuses to open in a
-   terminal too small to hold it.
+4. Sys Req, Dup, Field Mark and Newline are reachable from **every** front end — the TUI and both canvas
+   keymaps where they have a chord, the keypad and the TUI list where they do not, and the CLI as
+   `SysReq()`, `Dup()`, `FieldMark()` and `Newline()` — and **Dup's tab
+   is asserted, along with the fact that it happens only once** (an earlier wording of this criterion
+   said "Dup's auto-skip suppression is asserted", which was the inverted rule; see the four-keys
+   section). ~~**"Reachable" is not "effective": Sys Req is inert on both of this project's
+   hosts**~~ — **superseded 2026-09-17: the non-E path landed, so Sys Req is now effective against
+   both.** The qualification that must travel with this criterion is now the *other* one:
+   **"implemented" is not "verified"**, and none of the four keys has been pressed at a host. See
+   the note under *The four missing keys* and `docs/live-testing.md`.
+5. The TUI overlay lists every special key with its chord and fires one. **The "refuses to open in a
+   terminal too small to hold it" half is UNREACHABLE IN A LIVE SESSION, measured in Task 11 — do not
+   claim it as verified behaviour.** `tooSmall` (`tui/src/render.ts:43`) already refuses any terminal
+   below 24x80 before a session runs at all, and the smallest 3270 screen *is* 24x80, so every terminal
+   that can reach the overlay is at least 24x80, which comfortably exceeds `OVERLAY_MIN` (12x29). The
+   guard is therefore a floor for a caller passing a **sub-window**, not a refusal an operator can
+   provoke. Task 11 encoded that as a test — `OVERLAY_MIN` must never exceed 24x80 — rather than
+   inflating the minimum to manufacture a reachable refusal, which would have been a fabricated
+   success criterion.
+
+   Related, from the same task: **`OVERLAY_MIN.cols` was over-declared at 34 when the widest line is
+   27.** A too-large minimum only ever *refuses*, so nothing reddens — the same over-declaration class
+   as Tasks 5 and 6. It is now pinned from both directions.
 6. `npm test`, both goldens, `pty-smoke.py` and all four by-hand harnesses pass.

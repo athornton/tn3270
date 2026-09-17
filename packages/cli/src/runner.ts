@@ -213,6 +213,49 @@ export class Runner {
       }
       case 'Attn': s.sendAttn(); return;
 
+      // ALL THREE ARE CONFORMANCE, NOT SYMMETRY with the other front ends: s3270 has them
+      // under exactly these names -- `{ AnDup, Dup_action, ACTION_KE }` (Common/kybd.c:223),
+      // AnFieldMark (:230), AnSysReq (:254), spelled "Dup", "FieldMark" and "SysReq"
+      // (include/names.h:62, :78, :140) -- so a script written for s3270 must not fail here.
+      //
+      // DUP AND FIELD MARK ARE TYPED CHARACTERS, so they go to the KEYBOARD and never to
+      // sendAID: both x3270 actions end in `key_Character` (kybd.c:2789, :2825), and core's
+      // dup()/fieldMark() write EBCDIC 0x1c/0x1e into the buffer directly. Their refusal is
+      // reported the way `String()`'s is, with the OIA's reason appended -- "X Protected" and
+      // "X Numeric" send a script author to different fixes, and Dup and Field Mark differ on
+      // the second (a numeric field takes Dup and refuses Field Mark; see core's dup()).
+      //
+      // THE ARGUMENT RULE DIVERGES FROM s3270, deliberately and only in the safe direction.
+      // SysReq really takes none (`check_argc(AnSysReq, argc, 0, 0)`, kybd.c:2852), but Dup
+      // and FieldMark take `0, 1` (:2769, :2807) where the one optional argument is the
+      // keyword FailOnError or NoFailOnError; anything else is refused by `action_args_are`
+      // (:2776, :2814), so `Dup(1)` errors there exactly as it does here. We reject the two
+      // keywords as well rather than accept and ignore them, because our behaviour already IS
+      // the one they choose between: `oerr_fail = !IA_IS_KEY(ia)` (:2766) is TRUE for anything
+      // that did not come from a key press, i.e. for every scripted call, so failing on an
+      // operator error is s3270's own default for this client. Accepting NoFailOnError while
+      // still failing would answer `error` where s3270 answers `ok` -- silently wrong, where
+      // refusing the word is loudly wrong. The wording is check_argc's own
+      // ("%s%s requires %d argument%s", Common/actions.c:159-161), as `Connect` above uses.
+      case 'Dup':
+        if (args.length !== 0) throw new Error('Dup() requires 0 arguments');
+        if (!k.dup()) throw new Error(`Dup(): input inhibited (${s.oia.toText()})`);
+        return;
+      case 'FieldMark':
+        if (args.length !== 0) throw new Error('FieldMark() requires 0 arguments');
+        if (!k.fieldMark()) throw new Error(`FieldMark(): input inhibited (${s.oia.toText()})`);
+        return;
+      // No refusal to report, UNLIKE `Dup`/`FieldMark` above: `Session.sysreq()` returns void
+      // and is deliberately silent on every refusal -- not connected, TN3270E negotiated
+      // without the SYSREQ function, or an inhibited keyboard on a classic session (see that
+      // method). The key exists on the keyboard whatever the host granted, so there is no
+      // boolean to test and nothing to report. What it DOES send depends on the session: IAC
+      // AO under TN3270E, a test request read (SOH `%` `/` STX) on a classic one.
+      case 'SysReq':
+        if (args.length !== 0) throw new Error('SysReq() requires 0 arguments');
+        s.sysreq();
+        return;
+
       case 'Tab': k.tab(); return;
       case 'BackTab': k.backTab(); return;
       case 'Home': k.home(); return;

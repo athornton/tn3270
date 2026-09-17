@@ -1,75 +1,245 @@
-# Handoff — state as of 2026-09-16
+# Handoff — state as of 2026-09-17
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-16
+## START HERE — NEXT ACTION, 2026-09-17
 
-**Nothing is in progress. `main` is clean, pushed, and the only branch. The next piece of work is
-DESIGNED AND PLANNED BUT NOT STARTED: roadmap item (9), the virtual keypad.**
+**THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
+MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
+typecheck clean, **1692 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
+**18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
+**13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
 
-1. Read `docs/superpowers/specs/2026-09-16-keypad-and-special-keys-design.md`, then
-   `docs/superpowers/plans/2026-09-16-keypad-and-special-keys.md` (**15 tasks, 92 steps**). Do not
-   re-design it and do not re-derive the spec's *Facts established from sources* table — four of
-   those facts change the implementation.
-2. **Create a branch first.** The last three features each ran on their own branch and merged
-   `--no-ff` (`web-gateway`, `electron-gui`, `shared-frontend`). Nothing has been branched for this.
-3. **TWO DECISIONS ARE WAITING ON THE USER, and both were asked at the end of the last session:**
-   - **How to execute**: subagent-driven (a fresh subagent per task, reviewed between tasks) or
-     inline. **Subagent-driven needs the user's explicit go-ahead**, because this environment's
-     guidance says not to use the Agent tool unless asked. Worth telling them: telling implementers
-     that THE SOURCE BEATS THE PLAN is what surfaced ten plan defects on the web-gateway branch and
-     six on the one before.
-   - **The keypad font.** The spec records it as PROVISIONAL — the user is not convinced the x3270
-     glyph atlas suits keypad labels and agreed to try it and see. Task 8 step 4 and Task 15 step 5
-     are the points where they look at a PNG and decide. The spec ranks the fallbacks; the one to
-     resist is `fillText`, which would stop the screenshot goldens being byte-reproducible.
+**ONE THING IS WAITING ON THE USER. Do not do it unasked.** (There were three; the user authorised
+the non-TN3270E Sys Req path on 2026-09-17, and chose the keypad's styling the same day. Both are
+done, and the second is below as a correction to what this file predicted about it.)
 
-**Also asked for and not yet scheduled: more TN3270E.** The user said on 2026-09-16 that they want
-to "add tn3270e support pretty soon". **TN3270E is already done and merged** (stage 2b) — that was
-corrected in the conversation, and what actually remains inside it is **BIND/UNBIND**, **printer
-sessions**, and **`IBM-DYNAMIC`** with Query-Reply-driven geometry. `IBM-DYNAMIC` is the one with a
-live path today: TK5's TSO issues a Read Partition to any `-E` client. Offer these as the next spec
-after the keypad, or before it if they prefer.
+1. **THE MERGE.** The plan's last step is `git merge --no-ff` to `main` and a push; **the user has
+   not authorised it.** The branch sits on `main` at `7ca0269` and the tree is clean.
+   **No commit count is quoted here on purpose** — `git rev-list --count main..HEAD` is the answer,
+   and a number written down goes stale on the next commit, which is the same defect as a stale line
+   citation and it bit this very paragraph twice. When told: re-run the whole gate **on the merge
+   commit**, not only on the branch — that is what the last three merges did.
 
-### What the keypad work already established, so it is not re-derived
+**DONE, NOT WAITING: THE KEYPAD'S STYLING.** The user chose **inverse video on a spaced grid** on
+2026-09-17, having rejected a proportional font — measured, not argued: Helvetica's capital `I` is a
+bare stem, so `ErInp` renders as "Erlnp", and Inter Light puts 0.4% of its ink pixels at full white
+against the screen's 100%. Every key is now a 45x14 white block with a black label, with a blank row
+between key rows and a blank column at the end of every key. The keypad is 9 cell rows tall rather
+than 6, so a model 2 with it shown is **720x476**, and one golden moved (`synthetic-ispf-keypad`).
+
+**THIS FILE PREDICTED THE BLAST RADIUS WRONG, AND THE CORRECTION IS THE USEFUL PART.** It said a
+restyle "changes only `canvas/src/keypad.ts`". It also changed `canvas/src/renderer.ts`: the press
+highlight was `rgba(255,255,255,0.35)`, which over a now-white button is a **no-op**, so it is black
+at the same alpha. That is the one piece of local, zero-latency feedback in the design and nothing
+in the suite executes a line of `renderer.ts`, so the colour is **unproven in pixels** — the
+appearance was checked by compositing 0.35 black over the regenerated capture, not by photographing
+a real press. The rest of the prediction held: the key table, the button rectangles and every hit
+test are indeed independent of how a button is drawn, and `clicks.mjs` still passes 9 for 9 with
+every hit rectangle moved.
+
+**DONE, NOT WAITING: THE NON-TN3270E SYS REQ PATH.** Authorised by the user 2026-09-17 and
+implemented. Sys Req now sends a **test request read** against a classic host, so all four front
+ends do something against VM/370 and TK5 where they previously did nothing. **It is IMPLEMENTED and
+NOT VERIFIED** — no host has been driven with it. It is on `docs/live-testing.md`'s next-run list.
+See *Sys Req on both paths* below for the bytes and the two things about them that are wrong on a
+first reading.
+
+**THEN: `IBM-DYNAMIC`, which the user scheduled IMMEDIATELY AFTER THE KEYPAD on 2026-09-16**, then
+(4) Programmable Symbol Sets + VMGIF. `IBM-DYNAMIC` is the one remaining TN3270E item with a live
+path today: TK5's TSO issues a Read Partition to any `-E` client. **BIND/UNBIND** and **printer
+sessions** stay unscheduled and have no live path at all, both hosts refusing option 40.
+
+### WHAT THE KEYPAD BRANCH DELIVERED
+
+- **A clickable 47-button virtual keypad** in both canvas front ends, toggled by `Ctrl-K` (and
+  `Alt-K`), hidden by default. PF1–24, PA1–3 and the special keys, drawn through the same glyph
+  atlas and the same blitter as the screen and the OIA — one drawing primitive, three regions — each
+  key **inverse video on a spaced grid**, which is the user's choice of 2026-09-17 and needed no
+  second font.
+- **A keyboard-navigable special-keys list in the TUI**, same 47 keys, same chord `Ctrl-K`, because
+  a terminal has no mouse. Arrows move, Enter fires, Esc closes; while it is open **it owns the
+  keyboard**, and the window follows the selection rather than showing the first N (first-N would
+  leave everything from `Attention` down, Sys Req included, permanently unreachable).
+- **Four keys that `core` could do and no interactive front end could press**: **Dup** (`Ctrl-D`),
+  **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline** — the last two deliberately chordless.
+  Plus `Dup()`, `FieldMark()` and `SysReq()` in the CLI, which is conformance with s3270 rather than
+  symmetry.
+- **`TN3270_GUI_CLICKS`, a fifth test seam**, and `packages/gui/scripts/clicks.mjs`: real Chromium
+  mouse events at buttons addressed **by label**, main asking the renderer where each one is.
+- **A third GUI golden and a second `browser-shot` case**, so the keypad is proven pixel-identical
+  between Electron and the served page.
+
+**THE ARCHITECTURE, in one paragraph, because it is not obvious and it was decided by one line.**
+The key **table** is data in `packages/frontend/src/keypad.ts` (47 keys) — there and not in `canvas`
+because **both package graphs reach `frontend` and the TUI cannot import `canvas`**, and two copies
+of a 47-key list drift silently. The cell **layout** is `packages/canvas/src/keypad.ts`, in scale-1
+pixels throughout. `hitTest`/`hitTestAt`/`KeypadButton` are in `packages/canvas/src/hittest.ts`,
+which is **import-free and in `BROWSER_MODULES`** — the renderer needs them and a runtime import of
+a workspace package there blanks the window with no error. Shared drawing types moved to the leaf
+`packages/canvas/src/geometry.ts` to break the last import cycle. The keypad is a **third
+`DrawList` region appended below the screen and the OIA**; see the next section for why that single
+fact decided the rest.
+
+**WHO HOLDS THE FLAG: Electron per WINDOW, the gateway per CONNECTION, the TUI opens a list
+instead.** `applyAction` **throws** on `toggleKeypad`, exactly as it does on `quit`, so a front end
+that forgot to own its own display fails loudly instead of showing a dead button — and
+`default: action satisfies never` makes deleting either guard a **compile error** with zero runtime
+footprint.
+
+### Sys Req on both paths
+
+**SYS REQ IS IMPLEMENTED FROM EVERY FRONT END ON BOTH PATHS, AND VERIFIED AGAINST NEITHER HOST.**
+Keep those two halves apart; the docs used to say "reachable and inert", which was true until
+2026-09-17 and is now wrong. `Session.sysreq()` picks by whether the session is TN3270E, which is
+exactly what x3270's `SysReq_action` does (`Common/kybd.c:2849-2870`) — it splits on `IN_E` and on
+nothing else:
+
+- **TN3270E**: Telnet `IAC AO`. `net_abort()` then tests the SYSREQ function bit itself
+  (`Common/telnet.c:3632-3648`), so an E session that declined the function sends **nothing** — and
+  specifically not the classic form as a fallback, because x3270 never reaches the `else` arm on an
+  E session. **Never exercised live**: neither Hercules host offers TN3270E, both answering
+  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times.
+- **CLASSIC**: a **test request read**, which is what both Hercules hosts get.
+
+**THREE THINGS ABOUT THE CLASSIC FORM THAT ARE WRONG ON A FIRST READING.** All three were checked
+against `Common/ctlr.c` and `pages.txt` before the code was written; do not re-derive them.
+
+1. **IT IS NOT AID `0xf0`.** x3270 reaches `key_AID(AID_SYSREQ)` (`kybd.c:2864`), which looks like
+   it transmits the AID and does not: `ctlr_read_modified` has a dedicated
+   `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770-777`) writing `EBC_soh`,
+   `EBC_percent`, `EBC_slash`, `EBC_stx` = **`01 6c 61 02`** in place of the AID byte and the
+   cursor address. `AID.SYSREQ` exists in our `constants.ts`, selects this heading, and is never
+   itself on the wire for this key.
+2. **THE MODIFIED FIELD DATA STILL FOLLOWS IT.** The phrase "four-byte record" — which earlier
+   drafts of this file and of the README both used — invites the opposite conclusion, and that
+   `break` leaves the **switch**, not the function, so the field scan below it runs.
+   GA23-0059-07 agrees and settles it: the stream is the heading then "the same as described
+   previously for read-modified operations, excluding the 3-byte read heading (AID and cursor
+   address)" (`pages.txt:13786-13789`). **The manual and x3270 do not disagree here**; both say
+   heading-plus-data.
+3. **NO ETX.** The manual's BSC form ends in one (`pages.txt:13780-13785`); the non-SNA form is
+   "the same as for the BSC environment, except there is no ETX" (`pages.txt:14180-14184`). ETX is
+   BSC block framing. A telnet record ends at `IAC EOR`, which `sendRecord` appends, and the
+   heading bytes are none of them `0xff` so IAC doubling never touches them — though it does still
+   protect a `0xff` in the field data, by construction, because the record goes out through the
+   same `sendRecord` as any AID.
+
+**ON AN INHIBITED KEYBOARD WE REFUSE, WHERE x3270 QUEUES.** It refuses outright on `KL_OIA_MINUS`
+and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). **This codebase has no action queue and
+one was not invented for a single key**; both become a refusal into the OIA, which `applyAction`
+swallows. If an action queue is ever added for other reasons, this is a caller to revisit.
+
+**NO LIVE VERIFICATION WAS RUN FOR THIS FEATURE, deliberately, and the argument has a limit.** A
+keypad press produces the same wire bytes as the equivalent keystroke, and those are already
+live-verified — but **Dup, Field Mark, Sys Req and Newline have NO live witness at all.** Sys Req
+can now get one, which it could not before; the other three still cannot be told apart from
+nothing-happened without a host that reacts. Do not let the keypad's verification read as covering
+the four keys.
+
+### Four measured facts about these keys that are all counterintuitive
+
+Every one of these was checked against the manual or x3270's source on the branch, and every one
+contradicted a first reading. Do not re-derive them and do not "simplify" them back.
+
+1. **THE DUP KEY PERFORMS A TAB.** `kybd.c:1435` really does suppress `key_Character`'s auto-skip
+   for a keyboard Dup — but `Dup_action` then calls `cursor_move(next_unprotected(cursor_addr))`
+   itself (`kybd.c:2790`), and the manual states the net effect outright (p. 7-12: a X'1C' is
+   entered, **a Tab key operation is performed**, and MDT is set). **What the suppression buys is
+   that the tab happens ONCE** — our `advanceAfterType` already tabs at the end of a field, so
+   advancing first would skip a whole field.
+2. **A NUMERIC FIELD TAKES DUP AND REFUSES FIELD MARK.** The manual's permitted set names "the
+   duplicate (DUP) control" explicitly (p. 4-13). x3270's byte test refuses DUP too, but is gated on
+   `numeric_lock`, which has **no default assignment**, so stock x3270 refuses neither. The manual
+   wins.
+3. **`Ctrl-K` IS c3270's OWN TERMINAL BINDING — there was never a divergence.** `Common/fb-c3270`
+   is split at `#ifdef _WIN32` (`:41`) / `#else` (`:126`), and the non-Windows keymap a terminal
+   build reads has `Ctrl<Key>k: Keypad()` at `:191`. `Alt-K` is merely the Windows spelling, which
+   is why the canvas front ends take both. **Every citation the spec and plan originally gave —
+   `:48`, `:88`, `:93` — was inside the Windows branch.** The ESC-path caution is real and is still
+   the reason not to add an `Alt-` binding to the TUI; it just is not why `Ctrl-K` was chosen.
+   (**Pre-existing and NOT fixed:** `Ctrl-A` for Attn cites the Windows branch too, and in the
+   non-Windows keymap `Ctrl-A` is c3270's *escape prefix* while Attn is the two-key `Ctrl-A a`. So
+   that binding is a real divergence nobody knew they were making. Decide it separately.)
+4. **NEWLINE HAS NO CHORD, AND THAT IS A SETTLED USER DECISION.** c3270 binds
+   `Ctrl<Key>j: Newline()` (`:190`, non-Windows) — but **`Ctrl-J` IS `\n` (0x0a), which the terminal
+   keymap already maps to `enter`**. One byte cannot be both, and Enter is the AID that submits the
+   screen. Recorded as the user's call on 2026-09-14 in
+   `docs/superpowers/specs/2026-09-14-shared-palette-and-unreachable-keys-design.md:84-89`. The
+   keypad button and the TUI list ARE Newline's route, exactly as they are Sys Req's.
+
+**ALSO WORTH KNOWING, because it is the honest limit of what the TUI list does:** its "refuses to
+open in a terminal too small" behaviour is **UNREACHABLE IN A LIVE SESSION.** `tooSmall`
+(`tui/src/render.ts:43`) already refuses anything below 24x80 before a session runs, and the
+smallest 3270 screen *is* 24x80 — so every terminal that can reach the list clears `OVERLAY_MIN`
+(12x29) comfortably. It is a floor for a caller passing a sub-window, not a refusal an operator can
+provoke, and it was encoded as "`OVERLAY_MIN` must never exceed 24x80" rather than by inflating the
+minimum to manufacture a reachable refusal.
+
+### What the keypad work established during DESIGN, so it is not re-derived
 
 Checked against sources during design, 2026-09-16. All of it is in the spec's own table; this is the
-short version for anyone deciding whether to read further.
+short version for anyone deciding whether to read further. **THREE OF THESE WERE LATER FOUND WRONG
+BY IMPLEMENTERS AND ARE LEFT IN PLACE, MARKED** — this file's practice, because it is what let a
+roadmap correction land cleanly once before. The corrected versions are in the four numbered facts
+above; read those.
 
 - **`EBC_dup = 0x1c`, `EBC_fm = 0x1e`** (x3270 `include/3270ds.h:364-365`).
 - **Dup and Field Mark are typed CHARACTERS, not AIDs** — `Common/kybd.c:2788` and `:2825` both call
   `key_Character(...)`. Nothing about them touches `sendAID`.
-- **A keyboard Dup SUPPRESSES auto-skip; a pasted one does not** (`kybd.c:1435`, with x3270's own
-  comment saying exactly that). Our `advanceAfterType` IS that auto-skip, so `dup()` must not run it.
-  This is invisible from the key's name and is the finding most likely to be lost.
-- **A numeric field refuses both**, because `key_Character` tests the EBCDIC byte and permits only
-  digits, plus, minus, period and comma (`kybd.c:1232-1238`).
-- **`Session.sysreq()` has existed since stage 2b with no front end able to call it.**
-- **Chords come from c3270's own keymap**: `Ctrl-D` = Dup, `Ctrl-F` = FieldMark (`Common/fb-c3270:88`,
-  `:93`). c3270 toggles its keypad with `Alt-K` (`:48`) — which reaches a terminal as `ESC k`, so the
-  TUI uses `Ctrl-K` instead and the canvas front ends accept both. **Sys Req gets no chord; c3270
-  defines none either.**
-- **The key SET is c3270's keypad** (`Common/c3270/keypad.labels`), which is worth reading — it is a
-  character-cell keypad, and `keypad.outline` is literal ASCII art of one.
-- **The layout is 46 buttons**, not 43. The spec's first draft said 43 and was wrong; it was caught
-  by counting the rows mechanically rather than by eye.
+- ~~**A keyboard Dup SUPPRESSES auto-skip; a pasted one does not** (`kybd.c:1435`). Our
+  `advanceAfterType` IS that auto-skip, so `dup()` must not run it.~~ **WRONG, corrected in Task 1:
+  the suppression is real but `Dup_action` then tabs itself, so THE KEY PERFORMS A TAB.** See fact 1
+  above. The half that survives is that the tab must happen once, not twice.
+- ~~**A numeric field refuses both**, because `key_Character` tests the EBCDIC byte
+  (`kybd.c:1232-1238`).~~ **WRONG, corrected in Task 1: a numeric field TAKES Dup and refuses Field
+  Mark.** See fact 2 above; x3270's byte test is gated on `numeric_lock`, which is off by default.
+- **`Session.sysreq()` has existed since stage 2b with no front end able to call it.** Still true of
+  history, and now reachable. ~~And inert here.~~ **No longer inert: the classic path landed
+  2026-09-17** and it sends a test request read to both Hercules hosts. See *Sys Req on both paths*.
+- ~~**Chords come from c3270's own keymap**: `Ctrl-D` = Dup, `Ctrl-F` = FieldMark
+  (`Common/fb-c3270:88`, `:93`); c3270 toggles its keypad with `Alt-K` (`:48`), which reaches a
+  terminal as `ESC k`, so the TUI uses `Ctrl-K` instead.~~ **THE CITATIONS ARE ALL IN THE `_WIN32`
+  BRANCH and the reasoning was fiction, corrected in Task 4.** The chords are right; `Ctrl-K` is
+  c3270's own terminal binding (`:191`) rather than a divergence. See fact 3 above.
+- **The key SET is c3270's keypad** — authoritatively `Common/c3270/keypad.callbacks`, **exactly 44
+  keys and NO CURSOR ARROWS**; the arrow-looking glyphs in `keypad.full:8-11` are Tab, BackTab and
+  Newline. `keypad.labels`/`keypad.full` are its rendering and `keypad.outline` is literal ASCII art
+  of one, worth reading.
+- ~~**The layout is 46 buttons**, not 43.~~ **47 as shipped**: c3270's 44, minus Cursor Select and
+  Compose, plus the four cursor arrows and Backspace. The spec's first draft said 43, Task 3 made it
+  46 by also dropping Newline, and Newline was then added on the user's decision — so the count
+  moved twice and each time by counting rather than by eye.
 
 ### One architectural fact that decides more than it looks like
 
-**`packages/gui/src/main.ts:290` sizes the window from the DRAW LIST** —
-`setContentSize(list.width * scale, list.height * scale)`. That is why the keypad is a third
-`DrawList` region rather than something the renderer owns: a renderer-owned keypad would leave main
-unaware the drawing had grown, and the Electron page is `overflow:hidden`, so it would be clipped
-exactly as model 4's OIA row was. The alternative was a fifth bridge function, and `bridgecore.ts`
-states that a fifth function means the renderer has stopped being shared.
+**`fit()` in `packages/gui/src/main.ts` sizes the window from the DRAW LIST** —
+`setContentSize(list.width * scale, list.height * scale)`, currently `main.ts:312`, **and cited by
+name here because that line has now moved three times on one branch** (`:290` → `:294` → `:312`).
+That is why the keypad is a third `DrawList` region rather than something the renderer owns: a
+renderer-owned keypad would leave main unaware the drawing had grown, and the Electron page is
+`overflow:hidden` (`gui/index.html:3`), so it would be clipped exactly as model 4's OIA row was. The
+alternative was a fifth bridge function, and `bridgecore.ts` states that a fifth function means the
+renderer has stopped being shared.
 
 ## The state of the tree
 
-**`main` at `eb9c306`, pushed, the ONLY branch, working tree clean. 1514 tests in 66 files**,
-`npm run typecheck` and `npm run build` clean, both GUI goldens matching, `pty-smoke.py` 12/12, and
-both by-hand browser harnesses passing.
+**`main` at `7ca0269`, pushed** — an earlier version of this line said `eb9c306`, which was
+`main`'s tip when the paragraph was written and is now one commit behind it. **The branch
+`keypad-and-special-keys` is ahead of it and is NOT MERGED — see *START HERE*.** Working tree clean.
+(`git rev-list --count main..HEAD` for the number; it is not written down here, for the same reason
+`eb9c306` was worth marking.)
+
+**On the branch head: 1688 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
+**all three** GUI goldens matching, `pty-smoke.py` 12/12, and all four by-hand harnesses passing
+(`keys.mjs` 18 chords / 16 actions, `clicks.mjs` 9 buttons / 10 actions, `browser-keys.mjs` 13
+chords / 11 actions, `browser-shot.mjs` 2/2 cases).
+
+**On `main` itself: 1514 tests in 66 files**, two GUI goldens, `browser-keys.mjs` 12 chords / 10
+actions, `browser-shot.mjs` one case. Quote whichever you mean; the two sets are six weeks and one
+feature apart.
 
 **THE WEB GATEWAY IS DONE AND MERGED** as `d52ee57` (`--no-ff`, 39 commits; branch deleted local and
 remote). Roadmap item (3) is closed: all 15 tasks plus the three follow-up questions the user then
@@ -88,19 +258,24 @@ thing in it.** Do not re-derive them.
 node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
 ```
 
-### What the branch delivers
+### What the WEB GATEWAY branch delivered (2026-09-16, merged)
 
 - **`packages/canvas`**, extracted from `packages/gui`: `renderer.ts`, `blit.ts`, `keys.ts`,
   `drawlist.ts`, `cg.ts`, `bdf.ts`, the atlas baker and the BDF font, all moved byte-identical.
+  (The keypad branch then added `keypad.ts`, `hittest.ts` and the leaf `geometry.ts`, and the
+  package graph inside it is now a DAG pinned by `test/module-cycles.test.ts`.)
 - **`packages/web`**: `args`, `wsframe` (RFC 6455), `handshake` (upgrade, token, Origin),
   `protocol` (messages and deflate), `sessions` (registry, detach, grace), `wsserver` (the
   `Connection` seam and the frame-size cap), `httpstatic` (a fixed asset table), `bridgecore` and
   `bridge` (the browser side), and `main` (the server, and the gateway's entry point).
-- **`renderer.ts` IS SHARED, AND ITS ONLY CHANGE IS TWO LINES** — the canvas-sizing fix below.
-  Verified by diffing against `main`: every other line of `renderer.ts`, and all five of `blit.ts`,
-  `keys.ts`, `drawlist.ts`, `cg.ts` and `bdf.ts`, are byte-identical to the pre-branch version. That
-  the sharing is real and not merely similar is proven in PIXELS, not asserted: `browser-shot.mjs`
-  compares the served page against the Electron app's OWN golden and they are identical.
+- **`renderer.ts` IS SHARED, AND AS OF THAT BRANCH ITS ONLY CHANGE WAS TWO LINES** — the
+  canvas-sizing fix below. Verified by diffing against `main`: every other line of `renderer.ts`, and
+  all five of `blit.ts`, `keys.ts`, `drawlist.ts`, `cg.ts` and `bdf.ts`, were byte-identical to the
+  pre-branch version. **THE TWO-LINE CLAIM IS NOW HISTORICAL** — the keypad branch added the keypad
+  blit, the whole click path and the `__tn3270ButtonCentre` test seam to this file, so do not repeat
+  it as current. What is still true, and is the claim worth making, is that the sharing is proven in
+  PIXELS rather than asserted: `browser-shot.mjs` compares the served page against the Electron
+  app's OWN goldens and they are identical, **in both of its cases** — with the keypad and without.
 - **Live-verified against both Hercules systems** — see `docs/live-testing.md`, *The web gateway
   against both hosts*: VM/370 42 of 43 rows agreeing with the CLI (the 43rd is the cursor, at
   exactly 9x3 ink pixels), MVS TK5 24 of 24, two concurrent sessions on two devices, and
@@ -108,22 +283,43 @@ node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
 
 ### By-hand harnesses — NOT in `npm test`
 
-Like `shot.mjs`, `keys.mjs` and `pty-smoke.py`, these need Xvfb and a real browser:
+**There are FIVE now.** None is in `npm test`; each spawns Electron or a browser, and what `npm
+test` carries instead is a flags test per harness pinning its argv, cases and pass conditions as
+text so it cannot rot unnoticed. Figures are the keypad branch's:
 
 ```sh
-node packages/web/scripts/browser-keys.mjs   # 12 chords, 10 actions in order over a WebSocket
-node packages/web/scripts/browser-shot.mjs   # served pixels against the GUI golden
+node packages/gui/scripts/shot.mjs           # 3/3 goldens matched
+node packages/gui/scripts/keys.mjs           # ok 18 chords, 16 actions in order
+node packages/gui/scripts/clicks.mjs         # ok 9 buttons, 10 actions in order (toggleKeypad + 9)
+node packages/web/scripts/browser-keys.mjs   # ok 13 chords, 11 actions in order, over a WebSocket
+node packages/web/scripts/browser-shot.mjs   # 2/2 cases matched the GUI's own goldens
+python3 packages/tui/scripts/pty-smoke.py    # 12/12, and it needs no X at all
 ```
 
-Both pass `--no-proxy-server`, which is MANDATORY here: with `HTTP_PROXY` set, Chromium routes even
-a loopback request through the proxy and the failure is completely silent — no load error, no
-renderer error, and not one request in the server's log.
+**`browser-shot.mjs` RUNS TWO CASES, NOT ONE.** An earlier version of this line described it as
+comparing "served pixels against the GUI golden", singular; it now runs the plain screen *and* the
+keypad, each sized from its own golden's PNG header. The keypad case is the one that matters — it
+says the keypad the browser draws is the same keypad Electron draws.
+
+All the browser ones pass `--no-proxy-server`, which is MANDATORY here: with `HTTP_PROXY` set,
+Chromium routes even a loopback request through the proxy and the failure is completely silent — no
+load error, no renderer error, and not one request in the server's log.
+
+**Two false-pass traps these harnesses have already had, both about a STABLE OUTPUT PATH.**
+`shot.mjs` scored **3/3 and exit 0 on three stale files** from a previous run, because
+`/tmp/tn3270-shot-<case>.png` never changed between runs and the pass condition asked only whether a
+capture EXISTED — an Electron that died in 0.24s with "Cannot find module" passed. Both it and
+`browser-shot.mjs` now `rmSync` first. And **`process.exit` does not run `finally`**, so
+`browser-shot.mjs`'s teardown was skipped by every bail, orphaning a listening gateway with a
+replayed session open; it now counts per-case failures and returns instead. **`browser-keys.mjs`
+still has that shape and was deliberately left alone** — one line, whenever someone is in there.
 
 ### What is NOT done on the gateway
 
-No connect dialog, no menus, no preferences, no mouse — the same list as the GUI. A screen larger
-than the viewport now SCROLLS rather than being clipped (see below); it does not reflow or scale
-fractionally, because integer scaling is a design rule.
+No connect dialog, no menus, no preferences. **The mouse works the keypad's buttons and nothing
+else** — no click-to-place-cursor, no drag-to-select, no light pen — which is the same list as the
+GUI. A screen larger than the viewport SCROLLS rather than being clipped (see below); it does not
+reflow or scale fractionally, because integer scaling is a design rule.
 
 ### THE DEFECT LIVE VERIFICATION FOUND, and it is the one worth remembering
 
@@ -242,19 +438,24 @@ are in `docs/live-testing.md`.
 
 **THAT WORK'S ONE SOFT SPOT IS NOW CLOSED, on branch `gui-key-chord-guard`.** The
 `TN3270_GUI_KEYS` seam sends modifier chords (`packages/gui/src/keyspec.ts` parses the
-spellings), and `packages/gui/scripts/keys.mjs` is a committed harness that drives **15 chords
-through real Chromium key events and asserts 13 actions in order, plus two required
-absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **Be precise about what
+spellings), and `packages/gui/scripts/keys.mjs` is a committed harness that drove **15 chords
+through real Chromium key events and asserted 13 actions in order, plus two required
+absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **It is 18 chords / 16 actions
+as of the keypad branch**, which added `Ctrl-D`, `Ctrl-F` and `Ctrl-K`; the figures in this
+paragraph are the ones that were measured when the guard was built. **Be precise about what
 is newly guarded:** the Alt-digit *mapping* was already unit-tested — `keys.test.ts` calls
 `actionForKey` directly, and unbinding `PA_CODES` reddens `npm test` too (3 failures) — so what
 this harness adds is the **renderer `keydown` listener, the IPC hop and `ipcMain`'s dispatch**,
 the plumbing the original bug lived in. **Its failure has been OBSERVED, not assumed:** adding
 `if (e.altKey) return;` to `renderer.ts`'s `keydown` listener leaves `npm test` fully green at
-1352 and reddens only `keys.mjs`, which fails all 13 positions.
+1352 and reddens only `keys.mjs`, which fails all 13 positions. **The keypad branch then repeated
+the whole experiment in the MOUSE path** and got the same shape: a bare `return` at the top of
+`renderer.ts`'s `mousedown` listener leaves build, typecheck and every test clean — 1643 at the time
+of that measurement — while every keypad button is dead, and only `clicks.mjs` reddens.
 
 **`keys.mjs` is NOT part of `npm test`** — it spawns Electron, so run it by hand
-(`node packages/gui/scripts/keys.mjs`, expecting `ok       15 chords, 13 actions in order`),
-like `shot.mjs` and `pty-smoke.py`. What `npm test` carries is
+(`node packages/gui/scripts/keys.mjs`, expecting `ok       18 chords, 16 actions in order`),
+like `shot.mjs`, `clicks.mjs` and `pty-smoke.py`. What `npm test` carries is
 `packages/gui/test/keys-harness-flags.test.ts`, which pins that harness's argv, cases and
 pass conditions as text so it cannot rot unnoticed. **Read `docs/live-testing.md`, *The GUI's
 key chords, and which spellings Chromium accepts*, before touching the seam:** an invalid
@@ -283,6 +484,8 @@ SYSTEMS and accepts typed input. **1283 tests in 51 files.**
 
 **What the GUI is not, yet:** no connect dialog, no menus, no preferences, no mouse, no
 packaging. The host and flags come from the command line exactly as the TUI takes them.
+(**"no mouse" was superseded by the keypad branch** — the mouse now presses keypad buttons, and
+only keypad buttons. Everything else in this line still holds.)
 
 **Two success criteria are PARTLY met and say so in the spec:** PF/PA/Clear travel the same
 verified path as typing but were not exercised live, and no logon was completed (it would arm
@@ -422,14 +625,16 @@ with a real signal in `pty-smoke.py`.
 still parsed and dropped, and `Cell` is already a tagged variant so the renderer
 can dispatch on `kind` when PS lands); MF orders (parsed, counted as
 `modifyFieldIgnored`, never applied — TK5's ISPF sends zero of them); mouse
-support; the Electron GUI (stage 3); and the web front end. **TN3270E (stage 2b) is
+support **beyond keypad buttons, which the keypad branch added — no click-to-place-cursor, no
+drag-to-select, no light pen**; the Electron GUI (stage 3, since DONE); and the web front end
+(**also since DONE**). **TN3270E (stage 2b) is
 now done** — see *Where things stand*. Within it, BIND/UNBIND stays undone (we decline
 BIND-IMAGE by design) and the **printer session now has its harness but nothing has
 driven it**.
 
 ## Roadmap, from the user 2026-08-25
 
-**STATUS AS OF 2026-09-16 — the list below is kept as WRITTEN, not rewritten.** This file's practice
+**STATUS AS OF 2026-09-17 — the list below is kept as WRITTEN, not rewritten.** This file's practice
 is to leave superseded items in place, because that is what let a correction land cleanly once
 before. Read the status here and the reasoning there.
 
@@ -442,12 +647,12 @@ before. Read the status here and the reasoning there.
 | 5. packaging | not started |
 | 6. TLS | **DONE** and live-verified |
 | 7. the printer session | not started |
-| 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | not started. `IBM-DYNAMIC` has a live path; the negotiation does not, since both Hercules hosts refuse option 40 |
-| 9. keypad / special-keys menu (added 2026-09-14) | **SPEC AND PLAN WRITTEN, NOT STARTED** — this is the next action; see the top of this file |
+| 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | **`IBM-DYNAMIC` IS NEXT** — the user scheduled it immediately after the keypad on 2026-09-16. It has a live path (TK5's Read Partition); the negotiation does not, both Hercules hosts refusing option 40 |
+| 9. keypad / special-keys menu (added 2026-09-14) | **BUILT AND VERIFIED on branch `keypad-and-special-keys`, NOT MERGED.** All 15 tasks, plus the non-TN3270E Sys Req path the user authorised on 2026-09-17; the whole gate passes. Two things wait on the user — the merge and the keypad's styling. See the top of this file |
 
-**So the order from here is: (9) the keypad, then (4) PS + VMGIF, with packaging, the printer
-session, BIND/UNBIND and `IBM-DYNAMIC` unscheduled.** The user asked about more TN3270E on
-2026-09-16, so those last two may move up.
+**So the order from here is: land (9), then `IBM-DYNAMIC` from (8), then (4) PS + VMGIF, with
+packaging, the printer session and BIND/UNBIND unscheduled.** The user asked about more TN3270E on
+2026-09-16, so BIND/UNBIND and printer sessions may move up — but neither has a live path here.
 
 **THIS LIST IS NOT EXHAUSTIVE, AND THE USER HAS SAID SO EXPLICITLY.** It was first
 written down as "I think that will be everything", and was then corrected three times in

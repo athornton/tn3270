@@ -55,8 +55,15 @@ describe('BINDING_INTENT', () => {
     // guard only fires for entries that are PRESENT but unmapped, and it walks this same
     // array, so a vanished entry is invisible to it. Measured, not assumed -- deleting an
     // entry was verified not to fail that guard. This is where the loss must be caught.
+    //
+    // Ctrl-D, Ctrl-F and Ctrl-K joined the list when the keypad chords landed, and MEASURED at
+    // the time: deleting the Ctrl-K row left ALL 1621 TESTS GREEN. The keymap still maps \x0b, so
+    // the chord kept working; what vanished silently was the written intent, which is the one
+    // thing this table is for. Ctrl-D and Ctrl-F at least redden the TUI overlay's chord column
+    // in another package -- Ctrl-K is not a keypad BUTTON, so not even that saw it go.
     const keys = BINDING_INTENT.map((b) => b.key);
-    for (const needed of ['Alt-1', 'Alt-2', 'Alt-3', 'Ctrl-A', 'Insert']) {
+    for (const needed of ['Alt-1', 'Alt-2', 'Alt-3', 'Ctrl-A', 'Insert',
+      'Ctrl-D', 'Ctrl-F', 'Ctrl-K']) {
       expect(keys, `${needed} vanished from BINDING_INTENT`).toContain(needed);
     }
   });

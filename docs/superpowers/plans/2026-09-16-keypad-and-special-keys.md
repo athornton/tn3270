@@ -23,9 +23,93 @@ implementation, and one (Dup suppressing auto-skip) is invisible from the key's 
 rather than in the code. If a signature here disagrees with the source, the source wins — say so in
 the task's report rather than making the code match the plan.
 
+## EXECUTION ORDER WAS CHANGED, 2026-09-16: RUN 5, 6, 7 BEFORE 4
+
+**As numbered, this plan bound `Ctrl-K` to `toggleKeypad` (Task 4) roughly ten commits before any front
+end intercepted it (Tasks 8, 9, 12) — and `applyAction` THROWS on that action. Measured consequences of
+the original order:**
+
+**The line numbers in the three bullets below were measured against the tree AS IT WAS when this
+section was written, and every one of them has since moved — Tasks 8, 12 and 13 inserted code above
+each. They are kept as the historical measurement and each is followed by the current NAME**, which
+is the form Task 15's sweep converted them to; see step 3b.
+
+- **TUI: process death on a keystroke.** `tui/src/app.ts:497` called `applyAction` unguarded, from the
+  stdin `data` handler. **Now `App.apply` (`app.ts:554`), which intercepts `toggleKeypad` above the
+  call**, and `App.fireOverlay` (`:689`), which is reached only from the list.
+- **Electron: main-process death on a keystroke.** `gui/src/main.ts:339` called it unguarded inside
+  `ipcMain.on('action', ...)`. **Now `main.ts:365`, with the `toggleKeypad` intercept at `:361`.**
+- **Web: safe, as it happens.** `decodeClientMessage`'s throw is caught at `web/src/main.ts:134`
+  (**now `:150`**) and answered with an `error` frame, so a browser would see a banner rather than a
+  dropped session. That safety came from Task 2's rejection at `protocol.ts:114`, which itself had to
+  be pulled forward from Task 9 — see Task 2's AS BUILT note. **That rejection is GONE as of Task 9**,
+  which replaced it with the real per-connection intercept; `protocol.ts:113-118` is now the comment
+  explaining why the kind is deliberately *accepted*, which is a different claim at the same address.
+
+**The fix is ordering, not a patch.** Tasks 5, 6 and 7 (the cell layout, the `DrawList` region, and the
+renderer's drawing plus hit-testing) depend on the key TABLE and on `Action`, both of which Tasks 2-3
+already landed. **None of them needs a chord.** Running them first means that when Task 4 binds `Ctrl-K`
+it can land each front end's real flag in the same commit, with visible effect — instead of either
+crashing or shipping a documented dead key for ten commits.
+
+**THE GENERAL RULE, now twice-earned on this branch: a task that makes a throw REACHABLE and the task
+that catches it must not be separated. If a plan splits them, reorder the plan or merge the commit —
+the gap is a live defect, not a to-do.**
+
+### THE FULL REVISED ORDER: 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4, 13, 14, 15
+
+**Task 4 moves to LAST-BUT-THREE, because it is the task that arms the chord.** Every front end must be
+able to intercept `toggleKeypad` before any keystroke can produce it: Task 8 gives Electron its flag,
+Task 9 gives the gateway its per-connection flag, and Task 12 gives the TUI its overlay. Only then is
+binding `Ctrl-K` safe.
+
+**The dependency that forces this, and it is mutual:** Task 12's sketched tests drive the TUI with byte
+`0x0b`, which needs Task 4's binding — while Task 4's binding needs Task 12's interception or the TUI
+dies on the keystroke. **Resolution: Task 12 tests its interception by dispatching the ACTION directly
+(`apply({ kind: 'toggleKeypad' })`), and Task 4 adds the byte-level test when it binds the chord.** So
+each task is verifiable at the commit where it lands, and no commit in between has a reachable throw.
+
+**Consequence for Task 8's step 3:** it cannot use `TN3270_GUI_KEYS='Ctrl+K'`, because nothing is bound
+yet. Capture the font PNG by **temporarily defaulting `showKeypad = true`**, looking at the image, then
+reverting — and say in the report that this is what was done. The chord path gets exercised for real at
+Task 4.
+
 ---
 
 ### Task 1: DUP and Field Mark in core's keyboard
+
+> **AS BUILT (commit `58384ef`). THREE DEFECTS IN THIS TASK'S TEXT, one of them its headline fact.
+> Read this before writing any test that touches Dup.**
+>
+> 1. **`dup()` TABS; it does not "advance one position and stop".** Step 4 below is wrong. `kybd.c:1435`
+>    does suppress `key_Character`'s auto-skip for a keyboard Dup, but `Dup_action` then moves the
+>    cursor itself (`kybd.c:2790`), and the manual states the net behaviour outright (p. 7-12: "a Tab
+>    key operation to be performed"). What the suppression buys is that the tab happens ONCE — our
+>    `advanceAfterType` already tabs at end-of-field, so advancing first would skip a whole field.
+>    Implemented as `write; setMDT; tab()`, with both halves mutation-checked.
+> 2. **A numeric field TAKES Dup and refuses Field Mark.** The manual's permitted set names "the
+>    duplicate (DUP) control" explicitly (p. 4-13). x3270's byte test refuses DUP too but is gated on
+>    `appres.numeric_lock`, which has no default assignment and is therefore off.
+> 3. **The MDT assertion in Step 1 could not work**, though NOT for the reason first recorded here.
+>    `screen.cellAt(field.attrAddr).ebcdic & FA.MODIFY` is always 0, because `setFieldAttribute`
+>    stores the attribute in `attrs[]` (`screen.ts:394`) and zeroes `chars[]` (`screen.ts:323`).
+>    **The first version of this note said it would "pass vacuously"; the reviewer ran it and it
+>    FAILS loudly** (`expected +0 to be 1`) — only the *pre*-assertion is vacuous. Used the file's own
+>    idiom, `s.fieldAt(3)!.modified`, confirmed non-vacuous by deleting `setMDT`. A wrong diagnosis of
+>    a real defect is still worth correcting: "vacuous" and "fails" call for opposite responses.
+>
+> Also: the constants went beside `Order`, not `PF_AIDS` — they are format control orders, not AIDs.
+> The plan's four helper names were dropped for the file's existing `twoFields()`/`kb(s)` idiom plus a
+> local `threeFields()`. `writeControl`'s second parameter is `'tab' | 'autoSkip'`, not a boolean,
+> because a boolean could not express the correct behaviour. **10 tests, not 6. Suite at 1524.**
+> (This line said "7 tests, suite at 1521" until the quality review caught it: `46d6b4b` added three
+> more and the commit that rewrote the lines directly above left this one alone. That is the exact
+> failure shape this repo keeps hitting — a later fix reaches the prose body and never the count that
+> summarises it.)
+>
+> **Found but NOT fixed, deliberately:** neither `type()` nor `writeControl()` refuses a cursor parked
+> *on* a field attribute byte, where x3270 does (`kybd.c:1219`). Parity with `type()` was kept; fixing
+> it belongs in its own commit covering both and is not part of this feature.
 
 **Files:**
 - Modify: `packages/core/src/constants.ts` (add two constants near `PF_AIDS`)
@@ -229,6 +313,47 @@ Co-Authored-By: SLAC AI"
 
 ### Task 2: The four new actions, and the two that front ends must own
 
+> **AS BUILT (`8f14fcb`, `b681a71`, `c94979f`, `6958def`). ONE OF THESE IS A SECURITY FIX AND THE PLAN
+> CAUSED IT.**
+>
+> 1. **THIS PLAN'S TASK ORDERING OPENED A REMOTELY-TRIGGERABLE GATEWAY KILL.** Task 2 makes
+>    `applyAction` throw on `toggleKeypad`; Task 9 was to add the gateway's rejection. In between, a
+>    48-byte WebSocket frame from any client reached `applyAction` inside a `data` handler with **no
+>    `try`** (`web/src/main.ts:186` as measured then; **`:224` now**) — and `wsserver.ts:30-33`
+>    documents the consequence itself: "a
+>    throw from a 'data' handler is an unhandled exception that would end the process, so one
+>    malformed frame from one browser would disconnect everybody else's mainframe session."
+>    `protocol.ts` already rejects `quit` for exactly this reason. **Closed in Task 2 instead**
+>    (`protocol.ts:114`), leaving Task 9 the flag, the repaint and the `bridgecore.ts` half.
+>    **THAT REJECTION WAS A STOP-GAP AND TASK 9 REMOVED IT**, replacing it with the real
+>    per-connection intercept above `applyAction`; `protocol.ts:113-118` now explains why the kind is
+>    deliberately *accepted*. The two halves landed together so the process-kill window never
+>    reopened.
+>    **THE GENERAL RULE: when a plan adds a throw in one task and the guard against it in a later
+>    task, the gap between them is a live vulnerability, not a to-do.**
+> 2. **The `dup`/`fieldMark` test in Step 1 below is VACUOUS — copy it and you inherit the defect.**
+>    It calls `applyAction` for both keys before asserting either, so transposing the two switch cases
+>    leaves the whole suite green while putting the wrong control byte on the wire and inverting the
+>    numeric policy. **All three of the task's original mutation checks DELETED something and none
+>    SWAPPED anything; deletion and transposition are different mutation classes, and a spy-based test
+>    is far more vulnerable to the second.**
+> 3. **`toThrow(/toggleKeypad/)` passed on an unrelated `TypeError`**, because Node's
+>    `session.toggleKeypad is not a function` contains the word. Both it and the **pre-existing**
+>    `quit` assertion (`/quit/i`, same hole) now match `/does not handle .../`.
+> 4. **`default: action satisfies never;` was added and beats the comment it replaces.** Deleting
+>    either guard is now a compile error (`TS1360`), where before only prose stood between a
+>    maintainer and "the least diagnosable outcome available". **Zero runtime footprint** — the emitted
+>    JS is `default: action;`, so an unknown `kind` from untrusted JSON is still a silent no-op and
+>    `protocol.ts`'s defence is preserved.
+> 5. **The guard MUST sit outside the `try`.** `applyAction`'s `try` wraps the entire switch and its
+>    catch swallows errors, so a guard folded into the switch is swallowed and the dead-button no-op
+>    returns. Mutation-pinned.
+>
+> **NO TEST FILE IN THIS REPO IS TYPECHECKED BY ANYTHING** — every `tsconfig.json` includes only
+> `src/**/*.ts` and vitest strips types. So a bogus action `kind` or a wrong argument type in a test is
+> caught by no tool. This also corrects Step 2's prediction that the new tests "will not compile":
+> they compile fine and fail at runtime. **1529 tests.**
+
 **Files:**
 - Modify: `packages/frontend/src/keymap.ts` (the `Action` union)
 - Modify: `packages/frontend/src/actions.ts` (`applyAction`)
@@ -349,6 +474,30 @@ Co-Authored-By: SLAC AI"
 ---
 
 ### Task 3: The key table, in `packages/frontend`
+
+> **AS BUILT (`5251b49`). THE SIX TESTS BELOW ARE BLIND TO THE LAYOUT THEY CLAIM TO CHECK — measured
+> twice, by the implementer and again by the reviewer running the plan's six in isolation.**
+>
+> The "within 72 columns" test takes only a `max`, so **all six pass** while: two keys share cells
+> (`Reset` col 60 → 48), a key sits off the 6-cell boundary (`Home` col 24 → 25), or a key is on a row
+> `KEYPAD_ROWS` does not declare (`BkSp` row 4 → 5). **9 tests as built**, adding no-overlap-within-a-row,
+> a whole-key column-boundary-and-declared-row check, and `name` non-empty and unique (`name` was
+> asserted by nothing, and Task 11 renders it).
+>
+> **The provenance claim in the doc comment below is WRONG and was rewritten.** c3270's authoritative
+> set is `keypad.callbacks` (exactly 44 keys) and **has no cursor arrows**; the arrow-looking glyphs in
+> `keypad.full:8-11` are Tab, BackTab and Newline. Ours is that set **minus three, plus five** — it also
+> drops **Newline**, and adds the four arrows and Backspace. See the spec's open question on Newline.
+>
+> **`as const` in `pfRow` is DEAD SYNTAX** beside the explicit `KeypadKey[]` return annotation — either
+> mechanism suffices alone, verified by compiling all four combinations. Dropped.
+>
+> **THE RESIDUAL GAP, and it is not the obvious one: a LABEL/ACTION MISMATCH is invisible to both the
+> tests and the goldens.** Swap `Del`'s and `BkSp`'s actions and all nine tests stay green *and the
+> drawn pixels are identical*, so Task 14 cannot see it either. Only Task 13 covers it, by clicking a
+> label and asserting the action — for **8 of 46 keys**. Positional swaps (two keys trading rows at the
+> same column, the whole PF block inverted) do change pixels, so a golden catches them **as drift only**,
+> never in the baseline it was generated from. **1538 tests in 67 files.**
 
 **Files:**
 - Create: `packages/frontend/src/keypad.ts`
@@ -542,6 +691,45 @@ Co-Authored-By: SLAC AI"
 
 ### Task 4: Bindings — `BINDING_INTENT`, the TUI keymap, the canvas keymap
 
+> **AS BUILT (`8585c71`, `662009f`; Newline's half in `a039287`). RAN TWELFTH, NOT FOURTH — see the
+> reordering section at the top. THIS TASK'S HEADLINE CLAIM WAS FICTION AND THE IMPLEMENTER FOUND IT
+> BY READING THE WHOLE FILE.**
+>
+> 1. **THERE WAS NEVER A DIVERGENCE. `Ctrl-K` IS c3270's OWN TERMINAL BINDING.** `Common/fb-c3270`
+>    splits at `#ifdef _WIN32` (`:41`) / `#else` (`:126`) / `#endif` (`:204`), and **every citation
+>    this task and the spec gave — `:48`, `:88`, `:93` — is inside the WINDOWS branch.** The
+>    non-Windows keymap, which is what a terminal build reads, has `Ctrl<Key>d: Dup()` (`:186`),
+>    `Ctrl<Key>f: FieldMark()` (`:187`) and **`Ctrl<Key>k: Keypad()` (`:191`)**. So the whole "the TUI
+>    uses `Ctrl-K` *instead of* c3270's `Alt-K`, to stay off the ESC path" paragraph described a
+>    departure that does not exist: the outcome was right by accident. `Alt-K` is merely the Windows
+>    spelling, which is now why the canvas front ends take both. Dup and Field Mark are
+>    `Ctrl-D`/`Ctrl-F` in *both* branches, so those two were right by luck while pointing at the wrong
+>    lines. **The ESC-path caution remains true and remains the reason not to add an `Alt-` binding to
+>    the TUI; it is just not why `Ctrl-K` was chosen.**
+> 2. **THE PLAN'S ALT-K BRANCH WAS THE macOS DEFECT THIS PROJECT HAS ALREADY BEEN BITTEN BY.** It
+>    matched `e.key.toLowerCase() === 'k'`, and **Option-K on macOS reports `key === '˚'`** — exactly
+>    as Option-1 reports `'¡'`, the case `KeyLike.code`'s own note warns about and that once left the
+>    PA keys unreachable. Matched on `e.code` instead, with a test carrying the real macOS `key` value.
+> 3. **REMOVING THE `Ctrl-K` ROW FROM `BINDING_INTENT` LEFT ALL 1621 TESTS GREEN.** The keymap still
+>    mapped `\x0b`, so only the *written intent* vanished — and `Ctrl-K` is not a keypad button, so not
+>    even the TUI list noticed. It joins `Ctrl-D` and `Ctrl-F` in the vanish guard that exists for
+>    precisely this.
+> 4. **A PRE-EXISTING DIVERGENCE FOUND IN PASSING AND DELIBERATELY NOT FIXED:** `keymap.ts` and
+>    `bindings.ts` cite `fb-c3270:83` for `Ctrl-A` = Attn — **also the Windows branch.** In the
+>    non-Windows keymap `Ctrl-A` is c3270's *escape prefix* and Attn is the two-key
+>    `Ctrl<Key>a <Key>a` (`:182`). So this project's plain `Ctrl-A` for Attn is a real divergence
+>    nobody knew they were making. It came in with the palette-schemes work, not with the keypad.
+>    Decide it separately.
+>
+> **What the `BINDING_INTENT` indirection bought, measured:** `Ctrl-D` and `Ctrl-F` appeared in the TUI
+> list with **no edit to `keypadOverlay.ts`** — 23 blank chord columns became 21. Sys Req stays
+> chordless in both the keymap and `BINDING_INTENT`, pinned by a sweep over all 32 C0 bytes; Step 5's
+> question about whether `bindings.test.ts` needed an exemption answered itself, since it does not
+> require every `Action` to appear. `keys.mjs` went 15 → 18 chords (it claims to cover every entry of
+> `keys.ts`'s `CTRL` table, so the claim would otherwise have gone quietly false) and
+> `browser-keys.mjs` gained `Ctrl+K`, the only observable for that chord over the gateway path.
+> **1621 tests.**
+
 **Files:**
 - Modify: `packages/frontend/src/bindings.ts`
 - Modify: `packages/frontend/src/keymap.ts` (the terminal table)
@@ -710,6 +898,44 @@ Co-Authored-By: SLAC AI"
 
 ---
 ### Task 5: The keypad's cell layout, in `packages/canvas`
+
+> **AS BUILT (`3937e79`). THE CODE BELOW CONTAINS A FONT BUG THIS TASK'S OWN PROSE WARNS ABOUT ONE
+> PARAGRAPH EARLIER. Do not copy `columnFor`.**
+>
+> 1. **`column()` was PRIVATE in `drawlist.ts`; it is now exported and must be used.** The plan's
+>    `columnFor` computed `cg % atlas.cols`, **a different function**: `atlas.index` is a sparse packed
+>    map, **175 of its 431 entries differ from their CG code** (first divergence exactly CG 257 → 256,
+>    max CG 543), and `%` also drops the `CG_BOXSOLID` fallback, so an unknown character samples a
+>    neighbouring glyph and reads as corruption. Latent only by luck — all 44 distinct label characters
+>    land where the index is the identity — **and the spec's own ranked font fallback #1 is box-drawing
+>    borders, which is exactly where the non-identity entries live.** Now pinned by two tests against
+>    hand-built non-identity atlases.
+> 2. **`Colour` comes from `@tn3270/core`, not `@tn3270/frontend`.** The plan's import list would not
+>    have compiled.
+> 3. **`hitTest` AND `KeypadButton` LIVE IN `hittest.ts`, NOT HERE** — see Task 7 Step 4, whose
+>    "`./keypad.js` is relative and fine" was wrong. `dist/hittest.js` is arithmetic with **no import
+>    statement at all**, and it is in `BROWSER_MODULES`. Importing `keypad.js` into the renderer instead
+>    fails **three** guards: both assertions of `renderer-imports.test.ts` and `httpstatic.test.ts`'s
+>    graph-closure walk, the last being the 404-then-black-canvas path.
+> 4. **`DRAWN_ROW[key.row]` THROWS rather than `!`-asserting.** `undefined * cellHeight` is `NaN`, and a
+>    NaN rectangle draws nowhere and matches no hit test — a silently-lost keypad row.
+> 5. **The plan's `as never` atlas fixture is unusable**: `index: {}` makes every glyph lookup miss, so
+>    it yields zero signal on any CG-mapping defect. Use the real baked atlas the way `drawlist.test.ts` does (its `atlas` const, `:12-14` — this said
+>    `:11`, which is the blank line above the docstring).
+>    **A cast in a test fixture is unchecked — no test file in this repo is typechecked.**
+>
+> **THE PLAN'S 11 TESTS ARE BLIND TO SIX MUTATIONS, measured twice.** All 11 pass while: the blank
+> separator row is collapsed, the two PF rows are transposed, label cells sit on the wrong row, every
+> label character is drawn on one cell, `hitTest` rounds to the nearest key, and `ebcdicToCg` is dropped.
+> Its cell test is `>= total`, its width test ignores height, and **nothing in it asserts which row is
+> where** — so the separator row (the whole reason `KEYPAD_ROWS_TALL` is 6 for a 5-row table) and
+> c3270's PF13-above-PF1 order were both unpinned. **`width` and `height` were also unpinned in the
+> growing direction** (`KEYPAD_ROWS_TALL = 7` and a 13-key width both stayed green), which matters
+> because `DrawList.height` sizes the Electron window. **23 tests as built. 1564 in 68 files.**
+>
+> Fixed in passing: `httpstatic.test.ts` claimed to serve "five files" while listing six paths and
+> omitting `/bridgecore.js`. Labels are **left-aligned** in each 6-cell key; centring is one expression,
+> and is worth deciding alongside Task 8's font PNG.
 
 **Files:**
 - Create: `packages/canvas/src/keypad.ts`
@@ -969,6 +1195,34 @@ Co-Authored-By: SLAC AI"
 
 ### Task 6: The keypad as a `DrawList` region
 
+> **AS BUILT. THE HEIGHT ASSERTION IN STEP 1 IS A TAUTOLOGY — measured twice, by the implementer and
+> again by the reviewer running the plan's four tests in isolation.**
+>
+> `expect(list.height).toBe(list.keypad!.y + list.keypad!.height)` restates the implementation's own
+> expression, so an **over-declaration survives it**: with `KEYPAD_ROWS_TALL` 6 → 7 the plan's four tests
+> **all pass**. So does a constant-derived form like `(25 + KEYPAD_ROWS_TALL) * cellHeight`, because the
+> mutation moves the constant. **Only `max(button.y + button.h)` measured against `list.height` catches
+> it** — the extent has to be derived from the buttons, not from anything that computes it. **This is the
+> same failure mode as Task 5's extent constants, recurring one layer up**, which is why it is worth
+> stating as a rule: *pin a declared size against what occupies it, never against the arithmetic that
+> declared it.* It matters here because `list.height` sizes the Electron window.
+>
+> Also: **the step-1 sketches do not compile** — `drawlist.test.ts` has no `snapshot`, `resolved` or
+> `scheme` in scope and builds screens with `screenWith([])` / `resolve(snap)` / `SCHEMES.default!`.
+> The plan's fourth test does catch cell leakage, but `toEqual` alone would be satisfied by a leak into
+> *both* lists, so an explicit `toHaveLength(24 * 80)` was added. Heights verified in **all four**
+> combinations (336 / 350 / 420 / 434) plus model-4 43x80. `structuredClone` of the region succeeds, so
+> it crosses Electron IPC. **1569 tests in 68 files.**
+>
+> **AN ESM IMPORT CYCLE APPEARED AND WAS REMOVED STRUCTURALLY.** `keypad.ts` needs `column()` and
+> `drawlist.ts` needs `keypadRegion`. The cycle was *safe* — `column` is a hoisted function declaration,
+> both entry orders resolve — but **the safety was contingent on a property nothing pinned**: the moment
+> either module wants a module-level `const` from the other, it becomes a TDZ `ReferenceError` at import
+> time, which in Electron main is a blank window that never quits. `column()` therefore **moved to
+> `cg.ts`**, which already owns the CG mapping and `CG_BOXSOLID`, taking `AtlasGeometry` as a **type-only**
+> import so no runtime edge is created. Duplicating `column()` was not an option — that is Task 5's font
+> bug. A type-level cycle remains and is fine.
+
 **Files:**
 - Modify: `packages/canvas/src/drawlist.ts`
 - Test: `packages/canvas/test/drawlist.test.ts`
@@ -1107,6 +1361,43 @@ Co-Authored-By: SLAC AI"
 
 ### Task 7: Draw it, and hit-test a click
 
+> **AS BUILT (`37334bb`, `ee2499d`, plus `abc9943` and `3e20b3e` cleaning up after it). THE PLAN PUT
+> THE ONE DANGEROUS LINE IN THE ONE FILE NOTHING IN THIS REPO CAN EXECUTE.**
+>
+> 1. **THE COORDINATE INVERSION MOVED OUT, INTO `hitTestAt` IN `hittest.ts`.** `renderer.ts` throws at
+>    module load outside a browser, so the barrel cannot export it and no unit test runs a line of it —
+>    and the measured precedent is that `if (e.altKey) return;` in its `keydown` listener leaves the
+>    suite fully green while every Alt chord is dead. `keypad.test.ts` now probes `hitTestAt` **at
+>    scale 3 with a non-zero centring offset**, the configuration that makes both plausible mistakes
+>    fatal. Both were run: multiplying instead of dividing fails a CENTRE probe, and dropping the
+>    offset **passes every centre probe** and fails only the last-device-pixel one — which is why both
+>    probes exist. That narrowed Task 13's job to the plumbing.
+> 2. **A CLICK ON AN ERROR SCREEN ERASED THE ERROR.** `onError` repaints as text but leaves `last`
+>    intact, so a `mousedown` at a button's former position passed the keypad guard, sent the action
+>    into a dying session, and its repaint **wiped the only explanation of the failure off the screen**.
+>    An `errored` flag — set there, cleared when a frame or an atlas repaints — closes it. Someone who
+>    double-clicked a `.app` has no console to recover it from, which is the argument `onError` itself
+>    is written on.
+> 3. **TWO ADDITIONS BEYOND THE PLAN'S TEXT.** The press is taken on the **primary button only**:
+>    `mousedown` fires for the right button too, and a right-click on `Clear` or a PF key would send it
+>    to a live host while the context menu opened over the label. And `release()` is bound to **`blur`
+>    as well as `mouseup`** — native capture covers a release outside the window, but not Alt+Tab, an X
+>    grab or a lock screen, and a stuck highlight would persist on every later frame.
+> 4. **THE HIGHLIGHT GUARD ASKS WHETHER `pressed` IS ONE OF *THIS FRAME'S* BUTTONS.** An identity
+>    `includes`, not a search: a geometry change under a held button — a host switching model, so the
+>    keypad's `y` moves — would otherwise highlight a rectangle no button occupies.
+> 5. **`offsetX`/`offsetY` RATHER THAN `clientX - getBoundingClientRect().left`, and the reason is not
+>    the obvious one.** It is that `offsetX` and the centring offset are measured from the SAME origin,
+>    so the expression has **no scroll term at all to get wrong** — and the web page really does
+>    scroll. The docstring records the two things a reader will suspect and why neither bites here
+>    (`devicePixelRatio`, and a CSS `width`/`height` on the canvas).
+>
+> Two structural cleanups this task's import triggered are recorded on Tasks 5 and 6: `column()` moved
+> to `cg.ts` (`abc9943`) and the shared types to the leaf `geometry.ts` (`3e20b3e`), the second of
+> which removed **two type-position cycles** that `tsc --build` resolved silently and that
+> `module-cycles.test.ts` now guards by reading the SOURCE — a `dist`-only scan cannot see an
+> `import type`.
+
 **Files:**
 - Modify: `packages/canvas/src/renderer.ts`
 - Test: none directly — this file is a browser entry point that throws at module load outside a
@@ -1166,7 +1457,8 @@ window.addEventListener('mouseup', () => {
 ```
 
 with `let pressed: KeypadButton | undefined;` beside the other module state, and `hitTest` /
-`KeypadButton` imported from `./keypad.js`.
+`KeypadButton` imported from **`./hittest.js`** — NOT from `./keypad.js`, which drags two workspace
+packages into the renderer's graph and is not served to the browser. See Step 4.
 
 - [ ] **Step 3: Draw the press highlight**
 
@@ -1192,10 +1484,25 @@ that interface, and widen `Ctx2D` in `blit.ts` if it is not, rather than casting
 Run: `cd ~/git/tn3270 && npm run build && npm test && node packages/gui/scripts/shot.mjs && node packages/gui/scripts/keys.mjs`
 Expected: all green, `2/2 goldens matched`, `ok 15 chords, 13 actions in order`.
 
-**The renderer imports must stay relative.** Run
-`npx vitest run packages/canvas/test/renderer-imports.test.ts` and confirm it passes: a runtime
-import of `@tn3270/frontend` here would blank the window with no error. `./keypad.js` is relative
-and fine; importing `KEYPAD_KEYS` directly here would not be.
+**THIS PARAGRAPH WAS WRONG AND IS CORRECTED — 2026-09-16, Task 5's review.** It used to say
+"`./keypad.js` is relative and fine". **Relative-ness is not graph-cleanliness**, which is the very
+point `canvas/src/index.ts:12-16` already makes about `drawlist.js`. `keypad.ts` value-imports
+`column` from `drawlist.js` plus `cp037`/`Colour` from `@tn3270/core` and
+`KEYPAD_KEYS`/`schemeRgb` from `@tn3270/frontend`, so importing it into the renderer:
+
+1. **fails `renderer-imports.test.ts`** — demonstrated, both assertions, by pulling `dist/drawlist.js`
+   and two bare `@tn3270/` specifiers into the renderer's runtime graph; and
+2. **is not in `BROWSER_MODULES`** (`assets.ts:39` — this said `:32`; the list has since gained
+   `hittest.js`, and the declaration moved when its docstring grew), so the
+   browser would 404 the module and paint a black canvas with **no error anywhere** — the closure
+   failure this project has already been bitten by once.
+
+**So the hit-test code must live in a dependency-free module of its own.** Task 5 moves `hitTest` and
+`KeypadButton` into `packages/canvas/src/hittest.ts` (pure integer arithmetic, zero imports) and adds it
+to `BROWSER_MODULES`; `keypadRegion`, `KeypadRegion` and `KEYPAD_ROWS_TALL` stay in `keypad.ts`, which
+runs in main. **Import `./hittest.js` here, never `./keypad.js`.** Run
+`npx vitest run packages/canvas/test/renderer-imports.test.ts` and confirm it passes — a runtime import
+of a workspace package here blanks the window with no error.
 
 - [ ] **Step 5: Commit**
 
@@ -1219,6 +1526,24 @@ Co-Authored-By: SLAC AI"
 
 ---
 ### Task 8: The Electron GUI holds the flag
+
+> **AS BUILT (`086dbbe`). WENT AS PLANNED, and Step 2's question answered itself.**
+>
+> **`fit()` caches on `` `${list.width}x${list.height}` ``**, so a taller list resizes the window on
+> the first frame after a toggle with no change needed — which is exactly what Step 2 asked to be
+> verified by reading rather than assumed.
+>
+> **Step 3's capture was taken the way the reordering section required**, since no chord existed yet:
+> the flag was temporarily defaulted to `true`, the shot came back **720x434** — 24 screen rows plus
+> the OIA plus six keypad rows at 14px — with the keypad drawn in that band, and it was reverted to
+> `false` before committing so both goldens still matched. The chord that reaches this at runtime
+> arrived in Task 4.
+>
+> **The only extra work was citations, and it is the same lesson twice:** this diff moved
+> `main.ts:290` to `:294`, invalidating the two places `canvas` cites it — and `web/src/main.ts`'s own
+> `:276-277` was found **already stale**, pointing into `fit()`'s comment rather than at the
+> `applyAction`/`send` pair it describes. Both retargeted in the same commit. (`:294` then became
+> `:312` at Task 13, and Task 15 converted the citation to a NAME.)
 
 **Files:**
 - Modify: `packages/gui/src/main.ts`
@@ -1302,6 +1627,34 @@ Co-Authored-By: SLAC AI"
 ---
 
 ### Task 9: The gateway holds one flag per connection
+
+> **AS BUILT (`2fb921c`, `b1fd951`). THE PLAN'S REATTACH TEST WOULD HAVE PASSED AGAINST THE WRONG
+> IMPLEMENTATION.**
+>
+> 1. **THE REATTACH ASSERTION NEEDED A *THIRD* TOGGLE TO MEAN ANYTHING.** With the planned two, the
+>    socket closed with the keypad **already hidden** — so the test passed against a
+>    `WeakMap<Session, boolean>` in `buildServer`'s scope, i.e. against exactly the session-scoped flag
+>    this task exists to avoid. It was satisfied by the *state*, not by the *lifetime*. It now closes
+>    with the keypad showing. Likewise the height was pinned to the keypad's own top edge and lowest
+>    button rather than to `toBeLessThan`, which any positive number satisfies.
+> 2. **THIS TASK'S OWN STATED REASON FOR PER-CONNECTION WAS WRONG, and the corrected one is better.**
+>    It claimed two browsers on one session are two *concurrent* windows; they cannot be — `attach`
+>    admits only a DETACHED entry (`sessions.ts:61`) and `bridge.ts:35` keeps the id in per-tab
+>    `sessionStorage`. The real harm is **sequential inheritance by the next attacher**: a gateway
+>    `Session` deliberately outlives its socket, so the next window — possibly a different person —
+>    would find its screen six rows taller than it left it. That is what the test drives.
+> 3. **Step 5's answer changed the design.** `protocol.ts` did NOT need to leave the kind alone: Task 2
+>    had added a stop-gap *rejection* there, and this task **removed it**, replacing it with the
+>    per-connection intercept. Both halves landed in one commit so the process-kill window never
+>    reopened. `protocol.ts:113-118` now records why the kind is deliberately accepted.
+> 4. **`b1fd951` ADDED THE GUARD THE WHOLE EPISODE ARGUED FOR.** `protocol.ts`'s two-file rule was
+>    prose with no enforcement, and this branch is the evidence of how fast that decays. Now **every
+>    kind in the `Action` union is sent over a live socket**, each must be answered, and **a `tab`
+>    after each must still return a frame** — the second half being what a gateway that replies and
+>    then dies would otherwise pass. The kind list is **parsed out of the `Action` declaration at
+>    runtime** rather than hand-listed, because no test file here is typechecked and a type-level trick
+>    would enforce nothing; `quit` gets an expected-refusal branch rather than an exemption, so a
+>    rejection that silently stopped happening still fails.
 
 **Files:**
 - Modify: `packages/web/src/main.ts`
@@ -1427,6 +1780,35 @@ Co-Authored-By: SLAC AI"
 
 ### Task 10: `Dup()`, `FieldMark()` and `SysReq()` in the CLI
 
+> **AS BUILT (`7eb6334`, `55dc6c8`). STEP 4's WARNING WAS EXACTLY RIGHT, AND THIS TASK IS WHAT
+> DISCOVERED THAT SYS REQ DOES NOTHING HERE.**
+>
+> 1. **A NAME MUST BE REGISTERED TWICE.** `COMMAND_NAMES` in `commands.ts` is what `parseCommand`
+>    validates against, so the `dispatch` half alone leaves every call failing as **"unknown
+>    command"** — measured, all seven new tests failed that way before the table entry went in. Now
+>    recorded on the table itself so the next command does not repeat it.
+> 2. **SYS REQ IS REACHABLE FROM EVERYWHERE AND INERT ON BOTH LIVE HOSTS**, and making it callable is
+>    what exposed that. `Session.sysreq()` returns early unless the TN3270E SYSREQ function was
+>    negotiated, and neither Hercules host offers TN3270E — both answer `ff fe 28` = DONT. **x3270's
+>    non-E path does not send AID `0xf0` either:** `ctlr_read_modified` has a dedicated
+>    `case AID_SYSREQ` (`ctlr.c:770`) emitting a **four-byte TEST REQUEST record** and then breaking —
+>    no AID byte, no cursor address, no field data. Recorded rather than fixed: core protocol surface,
+>    not keypad work. **What must not happen is the docs claiming Sys Req works**, and Task 15's job
+>    was to make sure they do not.
+> 3. **ONE DELIBERATE DIVERGENCE ON ARGUMENTS, and it is defensible rather than lazy.** `SysReq`
+>    really takes none (`check_argc 0,0`, `kybd.c:2852`), but s3270's `Dup` and `FieldMark` take 0
+>    **or 1** (`:2769`, `:2807`), the optional argument being `FailOnError`/`NoFailOnError`. Both
+>    keywords are **refused** rather than accepted-and-ignored: `oerr_fail = !IA_IS_KEY(ia)` (`:2766`)
+>    is true for every scripted call, so failing on an operator error already IS s3270's default here
+>    — and accepting `NoFailOnError` while still failing would answer `error` where s3270 answers
+>    `ok`. The plan's `Dup(1)` assertion holds either way.
+> 4. **Their refusal carries the OIA's reason**, because a numeric field takes Dup and refuses Field
+>    Mark, and "X Protected" and "X Numeric" need different fixes.
+>
+> Three inbound citations retargeted for `runner.ts` growing 40 lines — including `core/keyboard.ts`'s
+> `runner.ts:334`/`:364` for `Wait(Settle)`/`Wait(InputField)`, which was **already stale before this
+> change** and is now `:691`/`:721`.
+
 **Files:**
 - Modify: `packages/cli/src/runner.ts`
 - Modify: `packages/cli/src/commands.ts` if it holds a list of known command names — check
@@ -1543,6 +1925,38 @@ Co-Authored-By: SLAC AI"
 
 ---
 ### Task 11: The TUI's special-keys overlay
+
+> **AS BUILT (`44b4177`, `dcb644f`, `edc814c`). THREE DEPARTURES FROM THE PLAN, EACH BECAUSE THE
+> SOURCE DISAGREED WITH IT.**
+>
+> 1. **THE PLAN'S TWO HEADLINE ASSERTIONS COULD NOT PASS YET.** `Dup  Ctrl-D` and
+>    `Field Mark  Ctrl-F` require `BINDING_INTENT` rows that are **Task 4's**, and Task 4 now runs
+>    *after* this. Rather than fabricate them, the test asserts the **mechanism over every key** in
+>    the table against whatever `BINDING_INTENT` holds — so the two chords appeared the moment Task 4
+>    landed, with no edit to the test. That is the property the indirection was bought for, and it was
+>    observed rather than assumed.
+> 2. **`OVERLAY_MIN.cols` IS 29, NOT 34.** The widest line is 27 cells (mark, space, the 14-character
+>    `System Request`, two spaces, the 9-character `Shift-Tab`) plus a cell of frame each side; 34 was
+>    five cells of refusal nothing needed. **A too-large minimum only ever refuses, so nothing
+>    reddens** — the third over-declaration on this branch after Tasks 5 and 6. Pinned from both
+>    directions now.
+> 3. **`chordFor` COMPARES ACTIONS STRUCTURALLY, NOT BY `JSON.stringify`.** Stringify compares
+>    *serialisations*: reordering `{ kind, n }` in either table would stop matching and show a blank —
+>    and **a blank here reads as "no chord exists", a wrong answer indistinguishable from a right
+>    one.**
+> 4. **THE SWEEP OVER EVERY KEY IS A MIRROR TEST, and `dcb644f` backed it with ground truth.** It
+>    recomputes the module's own matching rule, so a rule wrong the same way in both would pass. The
+>    two hardcoded lines behind it were `Reset` and `Back Tab`, both `kind`-only, so neither exercised
+>    the `n` field — the one place structural matching does any work. **PF13 is the discriminating
+>    case**: a lookup matching on `kind` alone hands every PF key the first `pf` row's chord, so PF13
+>    would read `F1`. Verified by mutation, and PF1 alone cannot tell the two apart, which is why both
+>    are pinned.
+>
+> **AND THE FINDING THAT CHANGED A SUCCESS CRITERION:** `overlayFits` **cannot return false for any
+> terminal a live session runs in**, because `tooSmall` (`tui/src/render.ts:43`) already refuses below
+> 24x80 and the smallest 3270 screen *is* 24x80. Criterion 5 claimed a refusal an operator cannot
+> provoke. Encoded as "`OVERLAY_MIN` must never exceed 24x80" **rather than by inflating the minimum
+> to manufacture a reachable refusal**, which would have been a fabricated success criterion.
 
 **Files:**
 - Create: `packages/tui/src/keypadOverlay.ts`
@@ -1696,6 +2110,35 @@ Co-Authored-By: SLAC AI"
 ---
 
 ### Task 12: Wire the overlay into the TUI
+
+> **AS BUILT (`eeb591f`). THE INTERCEPT IS THE WHOLE TASK, AND THE PLAN'S KEY HANDLING WOULD HAVE
+> BROKEN THE DOWN ARROW ON HALF OF ALL TERMINALS.**
+>
+> 1. **A SPLIT ARROW MUST NOT READ AS ESCAPE.** `\x1b` and `[B` can arrive in **separate reads** —
+>    that is the delivery `escHeld` exists for — so the plan's `if (seq === '\x1b')` close would make
+>    the **down arrow close the list** on any terminal that splits. An incomplete prefix is now held
+>    for the same 50ms, **with its own timer and its own pending bytes** rather than perturbing
+>    `buffer`/`escHeld`, and only a lone ESC that outlives the window closes. The scan is a **loop**,
+>    not a match on the whole chunk, so coalesced autorepeat (`\x1b[B\x1b[B` in one read) moves twice
+>    rather than not at all — and a keystroke sharing a read with the closing key is handed back to
+>    `pump()` instead of dropped.
+> 2. **THE WINDOW FOLLOWS THE SELECTION.** Step 4 offered first-N as an acceptable first cut provided
+>    it was reported; it was **not taken**, because first-N leaves everything from `Attention` down —
+>    **including Sys Req, whose only keyboard route this is** — permanently unreachable. That is not a
+>    limitation worth shipping for the sake of a smaller diff.
+> 3. **THE CELL DIFF CANNOT SEE WHAT THE LIST IS DRAWN OVER**, so `paint` invalidates those lines
+>    whenever they change. Without that, **closing the list would leave it on screen.**
+> 4. **THE FOCUS RULE IS MUTATION-CONFIRMED, and it reddens ten tests, not one.** Removing the
+>    `overlayShown` intercept fails the "does not type into the screen" case with
+>    `expected 'A' to be ' '`. Without it, letters reach the field behind the list and **AIDs are sent
+>    from something the operator was only reading.**
+> 5. **The intercept sits in `onInput` ahead of the buffer and `pump()`**, exactly as Step 3 required,
+>    so the ESC state machine and its two recorded regressions are untouched.
+>
+> Step 3's guessed names: the geometry comes from the app's own terminal measurement and the message
+> goes through the existing one-line banner slot — read from `app.ts` rather than invented. **`Ctrl-K`
+> was NOT bound yet** (Task 4 runs after this), so the tests open the list by dispatching the action;
+> Task 4 then added the byte-level `0x0b` test.
 
 **Files:**
 - Modify: `packages/tui/src/app.ts`
@@ -1920,6 +2363,41 @@ Co-Authored-By: SLAC AI"
 ---
 ### Task 13: `TN3270_GUI_CLICKS` — real mouse events at real buttons
 
+> **AS BUILT (`24c36ae`, with `a95dbd2` and `044f9e8` narrowing the task first). THREE PLACES THE PLAN
+> AND THE SOURCE DISAGREED, ALL RESOLVED IN THE SOURCE'S FAVOUR.**
+>
+> 1. **THE SEAM DOES NOT IMPLY THE KEYPAD, AND CANNOT.** Step 1's comment said it turns the keypad on;
+>    two on-switches would toggle it back **off**. `clicks.mjs` shows it with a real `Ctrl+K` instead —
+>    which is why `toggleKeypad` is the first expected action and why the run reports **one more action
+>    than it has buttons**.
+> 2. **THE ZERO-LENGTH BAIL IS ON `CASES.length`, NOT `expected.length`.** The latter always holds at
+>    least `toggleKeypad`, so it could never redden.
+> 3. **`spawnSync` IS CORRECT HERE AND IS PINNED *PRESENT*.** Pinning it absent is
+>    `browser-harness-flags.test.ts`'s check, and it belongs to a harness that reads a *second*
+>    child's pipe. Copying the wrong guard would have been cargo cult.
+>
+> **THE MUTATION IS THE POINT AND IT WAS RUN.** A bare `return` at the top of the `mousedown` listener
+> leaves `npm run build`, `npm run typecheck` and `npm test` **all clean** while every keypad button is
+> dead; `clicks.mjs` fails all the click positions **and passes position 0**, so it says "the keypad
+> appeared and the clicks did nothing" rather than merely "something is wrong". (The `e.button !== 0`
+> guard was no longer available as the mutation, being a real guard by then — recorded in `a95dbd2`.)
+>
+> **`maybeSendClicks` CATCHES A REJECTED PROBE rather than letting it hang**: an unhandled rejection
+> inside `app.whenReady()` skips `quitIfKeysOnly` and the client sits until the harness timeout — the
+> trap `maybeSendKeys` already measured for a bad key spelling.
+>
+> **ONE CLAIM THIS TASK MADE ABOUT ITSELF WAS TOO STRONG.** Swapping `Dup`'s and `FldMk`'s actions
+> fails this harness at two positions — **but it also fails two unit tests**, so the plan's "this is the
+> only cover for the label/action pairing" is wrong. The true claim is narrower: **the goldens cannot
+> see it, and this is the only place the pairing is checked *through the drawn button*.**
+>
+> Step 5a's three sizing facts (above) are why this harness runs at scale 1 and does **not** try to
+> exercise the centring offset: Task 7 pulled the arithmetic into `hitTestAt` and unit-tested it at
+> scale 3 with a non-zero offset, so both fatal mutations already redden `npm test`. `a039287` later
+> added a ninth case, `NewLn` — newest button, only one on its row past `BkSp`, and the only one whose
+> column had been asserted *empty* until it arrived. **Final figure: `ok 9 buttons, 10 actions in
+> order (toggleKeypad + 9)`.**
+
 **Files:**
 - Modify: `packages/gui/src/main.ts` (a fifth test seam)
 - Create: `packages/gui/scripts/clicks.mjs`
@@ -2054,6 +2532,47 @@ no host), the `Ctrl+K` that shows the keypad, `Math.max(expected.length, actual.
 zero-length bail, the `NO BUTTON` bail, the ordered `error`/`signal`/`status` checks, and the
 absence of `spawnSync(`. **Say on each test what its absence would cost.**
 
+- [ ] **Step 5a: WHAT THIS HARNESS DOES AND DOES NOT HAVE TO PROVE — read before sizing anything**
+
+**THE COORDINATE ARITHMETIC IS ALREADY UNIT-TESTED, so this harness does not have to carry it.** Task 7
+extracted `hitTestAt(buttons, offsetX, offsetY, at, scale)` into `hittest.ts` — import-free, so it stays
+inside the renderer's clean graph — and pinned it at `scale: 3` with `at: {x: 40, y: 17}`, where both
+fatal mutations (multiplying instead of dividing, and dropping the centring offset) redden `npm test`.
+That was worth doing because of what this file is: **`renderer.ts` is executed by nothing in the suite**,
+and the project has measured that `if (e.altKey) return;` in its `keydown` listener leaves the suite
+fully green while every Alt chord is dead.
+
+**So this task's job is the PLUMBING, not the geometry**: `mousedown` → the `e.button` guard → `hitTest`
+→ `sendAction` → IPC → `applyAction`. That is exactly what the chord guard established as the thing only
+a harness can reach, and it is provable at any scale.
+
+**Why the tempting "just run it at scale ≥ 2 with a non-zero offset" is harder than it sounds — three
+measured facts, so nobody re-derives them:**
+
+1. **In native Electron mode the centring offset can NEVER be non-zero, at any scale.** `fit()`
+   (`main.ts:312`; this said `:290`, one of the four places that number went stale)
+   sets the content size to exactly `list.width * scale` × `list.height * scale`, so
+   `window.innerWidth === list.width * scale` and `centre` returns `(0,0)` for every model.
+   `TN3270_GUI_SIZE` is meaningful **only alongside `url`** (`main.ts:101`), where `fit()` never runs — so
+   an offset test must go through the URL seam, `browser-shot.mjs`-style.
+2. **720x350 is derived, not chosen.** `xvfb.mjs:26` starts `:99` at `1280x1024`; `fit()` takes 80% of the
+   work area and `bestScale(720x350)` there is 1. **Enlarging that screen would change `fit()`'s scale and
+   move both GUI goldens**, so do not touch `:99`.
+3. **A narrow geometry is NOT the way out.** 40 columns gives `list.width` 360 against a keypad 648 wide,
+   so the buttons fall outside the drawing extent — the horizontal overflow Task 6 pinned
+   (`keypad.width <= list.width` holds only from 72 columns up). And an 80-column screen with the keypad
+   is 720x434, which at scale 2 is 1440x868 and does not fit in 1280 wide.
+
+**If you do want the offset exercised end to end, the honest route is a SECOND Xvfb display** (say `:98`
+at 1600x1200) used only by this harness in URL mode, leaving `:99` and the goldens alone —
+`xvfb.mjs:40-42` already warns that two harnesses sharing a display number collide. Treat that as
+optional: the arithmetic has a unit test, and this harness's value is the plumbing.
+
+Note also that `renderer.ts` now really does contain `if (e.button !== 0) return;` — a deliberate guard,
+because `mousedown` fires for the right button too and a right-click on `Clear` would otherwise send it
+to a live host while the context menu opened. **So that line is no longer available as this task's
+mutation**; use the bare `return;` the next step already specifies.
+
 - [ ] **Step 6: Run it, and mutation-check it**
 
 ```bash
@@ -2094,6 +2613,49 @@ Co-Authored-By: SLAC AI"
 
 ### Task 14: Goldens — the keypad in pixels, in both front ends
 
+> **AS BUILT (`8dd0bae`, `ae225fe`). BOTH SCREENSHOT HARNESSES COULD PASS ON STALE FILES, AND ONE OF
+> THEM DID — THAT IS THIS TASK'S REAL FINDING.**
+>
+> 1. **`shot.mjs` SCORED `3/3 goldens matched` AND EXIT 0 WITH A CLIENT THAT COULD NOT START.**
+>    `/tmp/tn3270-shot-<case>.png` is a **stable path across runs** and the pass condition asks only
+>    whether a capture EXISTS — so a run that captured nothing compared **the file the last run left
+>    there**. Measured by pointing `main` at a nonexistent script: Electron exits in 0.24s with
+>    "Cannot find module" and writes nothing, and the harness said 3/3. With two `rmSync` calls it says
+>    `0/3` and three `no capture produced` lines. **Found while adding the keypad case, whose stale
+>    file would have been the CORRECT keypad image** — so this would have hidden a broken run of
+>    exactly the harness this task extends. `browser-shot.mjs` had the same hole and got the same fix.
+> 2. **`process.exit` DOES NOT RUN `finally` — measured.** Every bail inside `browser-shot.mjs`'s `try`
+>    therefore orphaned a **listening gateway with a replayed session open**, which is precisely what
+>    that `finally` says it prevents. Per-case failures now count and return, and the only exits left
+>    are before the server exists and after the teardown. **`browser-keys.mjs` has the same shape and
+>    was deliberately left alone here** — one line, whenever someone is next in that file.
+> 3. **`Ctrl+K` IS PART OF THE CASE, NOT OF THE HARNESS, and the plan was right to insist.** Nothing
+>    else can show a keypad — no flag, no URL, no setting, deliberately — so without that chord this
+>    golden would have been a byte-identical **duplicate** of `synthetic-ispf` and would have passed
+>    while checking nothing new. **MEASURED by deleting the line: hash `0e327b1504bc`, i.e. exactly the
+>    first case's golden.** Transposing the keys onto the first case reddens both, with the two hashes
+>    exchanged. `TN3270_GUI_KEYS: kase.keys ?? ''` keeps the default EMPTY, so the protection against a
+>    stray value in the operator's shell still covers every case that does not ask;
+>    `shot-flags.test.ts` pins both halves, because `npm test` cannot run this harness and the failure
+>    it would otherwise hide is a **silent re-baseline to a keypad-less screen on the next `--update`**.
+> 4. **THE IMAGE WAS READ, NOT MERELY GENERATED — a golden cannot validate the baseline it came from.**
+>    Decoded independently (PNG filters 1, 2 and 4 in these rows) and transcribed cell by cell against
+>    the baked atlas: **PF13-24 on the top row and PF1-12 below**, which is c3270's order
+>    (`Common/c3270/keypad.labels:2` and `:4`); all labels inside their own key's six cells with the
+>    rest of each key blank; no inked cell below the OIA that is not part of a label; the cluster gaps
+>    at key slots 3, 7 and 9; and **the first 350 rows pixel-identical to `synthetic-ispf`**, so
+>    showing the keypad moves nothing above it. Regenerated and read again when `a039287` added
+>    `NewLn`.
+>
+> Step 4's browser case is the assertion that matters and it passes: **2/2, byte-identical**, the
+> viewport sized from each golden's own IHDR so the taller keypad case sizes itself.
+>
+> **THE STYLING IS AN OPEN USER DECISION and it touches exactly one golden.** The user is choosing
+> between this atlas look and inverse video on a spaced grid, having rejected a proportional font
+> (measured: Helvetica's capital `I` is a bare stem, so `ErInp` reads "Erlnp"). A restyle changes only
+> `canvas/src/keypad.ts` and regenerates `synthetic-ispf-keypad` — the table, the rectangles and every
+> hit test are independent of how a button is drawn. **Look at the regenerated image, per item 4.**
+
 **Files:**
 - Modify: `packages/gui/scripts/shot.mjs` (a third case)
 - Modify: `packages/gui/test/shot-flags.test.ts` if it counts the cases
@@ -2127,6 +2689,16 @@ cd ~/git/tn3270 && npm run build && node packages/gui/scripts/shot.mjs --update
 Then look at `packages/gui/test/golden/synthetic-ispf-keypad.png` and confirm it is a 24-row screen,
 an OIA row, and a legible keypad. **Do not commit a golden you have not looked at** — a golden of a
 blank or clipped keypad would lock in the bug.
+
+**A GOLDEN CANNOT VALIDATE THE BASELINE IT WAS GENERATED FROM. Read these off the image, deliberately,
+before committing it** — an error already in the table gets baked into the PNG and its `.sha256`, and
+then nothing ever catches it:
+- **the PF row order** — PF13-24 on top, PF1-12 below. Task 3 measured that inverting the two blocks
+  leaves all nine table tests green, so this image is the only check on it;
+- that no two labels overlap or run together, and that the cluster gaps are where the spec draws them;
+- **that each label sits over the key it names.** A LABEL/ACTION MISMATCH IS INVISIBLE HERE — swapping
+  `Del`'s and `BkSp`'s actions changes no pixel at all — so this image cannot help with that one, and
+  Task 13's click-by-label cases are its only cover, for 8 of 46 keys.
 
 - [ ] **Step 3: Confirm it reproduces**
 
@@ -2174,31 +2746,96 @@ Co-Authored-By: SLAC AI"
 
 - [ ] **Step 1: Update the docs**
 
-- `README.md`: add the keypad and the three keys to *What works today*; move the keypad OUT of
+> **AS BUILT (Task 15). THE WHOLE GATE PASSES ON THE BRANCH HEAD AND THE TEST COUNT RECONCILES
+> EXACTLY — which, after two branches where it did not, is itself the result. NOT MERGED: the user
+> has not authorised it.**
+>
+> **Gate, verbatim:** build and typecheck clean; **1643 tests in 71 files**;
+> `3/3 goldens matched`; `ok       18 chords, 16 actions in order`;
+> `ok       9 buttons, 10 actions in order (toggleKeypad + 9)`;
+> `ok       13 chords, 11 actions in order, over a WebSocket`;
+> `2/2 cases matched the GUI's own goldens`; `pty-smoke.py` 12 PASS / 0 FAIL.
+>
+> **THE RECONCILIATION, and it closes to zero.** 1643 − 1514 = **+129**, and the per-file sum is
+> exactly 129: five NEW files contribute 71 (`canvas/keypad` 28, `frontend/keypad` 11,
+> `gui/clicks-harness-flags` 16, `tui/keypadOverlay` 12, `canvas/module-cycles` 4) and ten modified
+> files contribute 58 (`tui/app` +16, `core/keyboard` +11, `cli/runner` +7, `canvas/keys` +6,
+> `canvas/drawlist` +5, `frontend/actions` +4, `web/integration` +4, `frontend/keymap` +3,
+> `canvas/renderer-imports` +1, `gui/shot-flags` +1). Three modified files contribute **zero**
+> (`canvas/blit`, `frontend/bindings`, `web/httpstatic`) — each was edited for a citation or a
+> retargeted import, not for coverage, which is the honest reason a diff can touch a test file
+> without changing the count.
+>
+> **THE ONE TRAP IN COUNTING THIS: `tui/test/app.test.ts` reports 61 tests from 56 `it(` lines**,
+> because `it.each(paths)` expands one line into six over the six teardown paths. The static count is
+> a valid oracle for every other file in the repo — verified file by file against vitest's own JSON
+> reporter — and for this one only if you remember the multiplier. It is unchanged on both sides, so
+> the delta is right either way; a reconciliation that used vitest's number on one side and `grep -c`
+> on the other would have shown a phantom gap of 5 and sent someone looking for a defect.
+>
+> **Step 3a IS NOW DONE, in `e66ed81`, after this note's gate was measured — see its own AS BUILT
+> note below for the three mutations. The gate above stands as measured at that commit; the suite is
+> **1669 tests in 71 files** with the dispatch table in it (+26: 25 rows and the completeness
+> assertion), and no production code changed.**
+
+- `README.md`: add the keypad and the **four** keys to *What works today* (Newline arrived after this
+  step was written); move the keypad OUT of
   *Remaining* in *Staging* (it is item 9 there) and into the done list; update the test count and
-  the *Verification* table with the new goldens and `clicks.mjs`; add Dup/Field Mark/Sys Req to the
+  the *Verification* table with the new goldens and `clicks.mjs`; add Dup/Field Mark/Sys Req/Newline
+  to the
   key documentation for the TUI and GUI sections. **Remove "no mouse support" for the canvas front
   ends only where it is now false** — the mouse does keypad buttons and nothing else, so say that
   precisely rather than deleting the caveat.
+
+  **AS BUILT: the claim appeared in FOUR places, not one, and only three were false.** The intro
+  (`:24`), *Using the GUI* (`:177`) and both bullets in *What is not implemented* (`:649`, `:654`)
+  all had to change; **`No mouse support in the TUI` (`:672`) is STILL TRUE** and was kept, with a
+  line added saying the `Ctrl-K` list is the keyboard substitute rather than a step towards a mouse.
+  The `**Commands.**` list needed `Dup`, `FieldMark` and `SysReq`; **`Newline` was already there**,
+  the CLI having had it since stage 1 — which is the whole reason it was worth adding a button for.
+  **Three STALE CLAIMS UNRELATED TO THIS BRANCH were found while editing and fixed**, all the same
+  shape as the citations: the *Verification* table said the GUI goldens were "1 case" when they had
+  been two since the palette work; an *In flight, not on `main`* paragraph still described
+  `alternate-screen-size` as pushed-but-unmerged, which stopped being true on 2026-08-27; and two
+  places said `renderer.ts` "differs by two lines" from its pre-gateway version, which this branch
+  itself made false.
 - `packages/web/README.md`: the keypad, its toggle, and that a click is an ordinary action so
   nothing about the protocol changed.
 - `docs/HANDOFF.md`: rewrite *Where things stand*.
+
+  **AS BUILT: every harness baseline figure in it was stale, and one was stale in a way that would
+  mislead.** `HANDOFF.md:115` described `browser-shot.mjs` as comparing "served pixels against the
+  GUI golden", **singular**, when it now runs two cases — and the second is the one that carries the
+  keypad claim. The by-hand harness block is now **five harnesses with their current figures**, the
+  tree section quotes the branch's numbers and `main`'s **separately and says which is which** (they
+  are one feature apart, and conflating them is how a wrong number gets copied), and the `keys.mjs`
+  15-chords/13-actions paragraph is marked as the measurement taken when that guard was built rather
+  than as current. The `main.ts:290` citation became a NAME.
 - `docs/live-testing.md`: **only if you ran against a host.** This feature needs no live
   verification — a keypad press produces the same bytes as the keystroke, and those are already
   live-verified — but if you did drive it against VM or MVS, record what you saw. Sys Req, Dup and
   Field Mark have **no live witness**; say so rather than letting the keypad's verification read as
   covering them.
 
+  **AS BUILT: NO HOST WAS DRIVEN, and the section was written anyway — because the absence needed to
+  be on the record rather than inferred from silence.** A new *The virtual keypad and the four new
+  keys — NO LIVE RUN* section states the argument for not running one and, more importantly, **where
+  that argument stops**: a per-key table showing all four with no live witness, why **Sys Req cannot
+  obtain one here** (neither host offers TN3270E, and the non-E TEST REQUEST path is unimplemented),
+  and a four-item list of what to run on the first real host that appears — through the keypad
+  button, not the CLI, since the CLI path is the one already covered offline.
+
 - [ ] **Step 2: Commit the docs**
 
 ```bash
 cd ~/git/tn3270
 git add README.md packages/web/README.md docs/HANDOFF.md docs/live-testing.md
-git commit -m "docs: the virtual keypad, the special-keys overlay, and three new keys
+git commit -m "docs: the virtual keypad, the special-keys overlay, and four new keys
 
 Moves the keypad out of Staging's Remaining list, states the mouse's scope
 precisely rather than deleting the no-mouse caveat -- it does keypad buttons and
-nothing else -- and records that Sys Req, Dup and Field Mark have no live witness.
+nothing else -- and records that Sys Req, Dup, Field Mark and Newline have no live
+witness.
 
 Generated with AI
 
@@ -2219,15 +2856,143 @@ python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -3
 ```
 
 Expected: build and typecheck clean; all tests green; `3/3 goldens matched`;
-`ok 15 chords, 13 actions in order`; `ok 8 buttons, 8 actions in order`;
-`ok 12 chords, 10 actions in order, over a WebSocket`; both browser-shot cases identical;
-`pty-smoke.py` 12/12.
+~~`ok 15 chords, 13 actions in order`~~ **`ok 18 chords, 16 actions in order`** (Task 4 added three);
+~~`ok 8 buttons, 8 actions in order`~~ **`ok 9 buttons, 10 actions in order (toggleKeypad + 9)`**
+(the seam cannot imply the keypad, so the toggle is an action too — Task 13's finding — and `NewLn`
+is a ninth case);
+~~`ok 12 chords, 10 actions in order, over a WebSocket`~~ **`ok 13 chords, 11 actions in order, over
+a WebSocket`** (Task 4 added `Ctrl+K`, the only observable for that chord over the gateway path);
+both browser-shot cases identical (**`2/2 cases matched the GUI's own goldens`**);
+`pty-smoke.py` 12/12. **ALL MEASURED on the branch head; see the AS BUILT note at the top of this
+task.**
 
 **Reconcile the test count rather than editing a number into the docs.** Add up the new tests per
 file and check the total against what vitest reports. If they disagree, find out why — the last two
 branches both had a real finding hiding in that gap.
 
+- [x] **Step 3a: `applyAction`'s dispatch table WAS 59% unfalsifiable — CLOSED in `e66ed81`**
+
+> **AS BUILT: DONE. All 25 union members have a row, 23 switch cases plus the two guards, and the
+> three mutations that matter were measured rather than argued. `e66ed81`, no production code
+> touched; the suite goes 1643 → 1669 in the same 71 files.**
+>
+> **MUTATION 1 — THE THIRTEEN AT ONCE**, `left`↔`right`, `up`↔`down`, `home`↔`reset`, `tab`↔`backTab`,
+> `backspace`↔`deleteChar`, `eraseEOF`↔`eraseInput`, `clear`→`AID.ENTER`. Thirteen rows red, each
+> naming where the key actually went:
+>
+> ```
+> AssertionError: clear reached session.sendAID with the wrong argument: expected "sendAID" to be called with arguments: [ 109 ]
+> AssertionError: left was routed to keyboard.right: expected "right" to not be called at all, but actually been called 1 times
+> AssertionError: eraseEOF was routed to keyboard.eraseInput: expected "eraseInput" to not be called at all, but actually been called 1 times
+> ```
+>
+> **MUTATION 2 — `left`↔`right` ALONE:** exactly the `left` and `right` rows, with the same "was
+> routed to" message. A table that only caught the mass swap would be much weaker.
+>
+> **MUTATION 3 — A UNION MEMBER WITH NO ROW** (`| { kind: 'cursorSelect' }` added to `Action`):
+> `AssertionError: the table and the Action union disagree: expected [ 'attn', 'backTab', …(23) ] to
+> deeply equal [ 'attn', 'backTab', …(24) ]`, with `cursorSelect` named in the diff.
+>
+> **ONE CORRECTION TO THIS STEP'S OWN FINDING, and it is the rebuild trap.** "The suite stayed fully
+> green" holds only against a STALE `frontend/dist`. With `tsc --build packages/frontend` run first,
+> the 13-way transposition also reddens two pre-existing TUI tests — `app.test.ts`'s *acts on both
+> encodings of an arrow key* and *completes the sequence when the rest arrives in time* — because both
+> observe a cursor COLUMN and so see `left`↔`right`. Neither sees any of the other eleven, so the
+> finding's substance holds: **11 of the 13 cases were invisible to all 1643 tests even after a
+> rebuild**, and the arrows were covered only incidentally, by a test about ESC timing.
+>
+> **TWO FACTS ABOUT `Keyboard`, read rather than assumed** (`core/src/keyboard.ts`): the `delete`
+> action dispatches to `deleteChar` (`:413`; `delete` is a reserved word) and `type` to `typeString`
+> (`:88`), not to the single-character `type` (`:26`). Everything else shares its name. And
+> `keyboard.type` CANNOT serve as the `type` row's transposition partner — `typeString` delegates to
+> it once per character, so `not.toHaveBeenCalled()` fails against correct code ("Number of calls: 2"
+> for `'HI'`); the positive assertion catches that swap instead, and the row says so.
+>
+> **THE `Action`-UNION SCAN IS NOW SHARED, NOT COPIED.** `web/test/integration.test.ts` had it for its
+> own every-kind test; it moved to `frontend/test/helpers/actionKinds.ts` with the floor and the
+> canaries, and both callers import it. The bounding of that regex to the union's own declaration is
+> the only reason the scan can be trusted, and a second copy could lose it and still pass.
+> `core/test/helpers/trace.ts` is the precedent, and it exists for the same reason.
+
+Found by Task 2's quality review, pre-existing, and left alone deliberately so that commit stayed
+reviewable. **13 of `applyAction`'s 22 cases have no test asserting their target.** All thirteen were
+transposed AT ONCE — `left`↔`right`, `tab`↔`backTab`, `eraseEOF`↔`eraseInput`, `backspace`↔`deleteChar`,
+`home`→`reset`, `clear`→`AID.ENTER` — and the suite stayed **fully green at 1529 in 66 files**. Nothing
+in the repo, including the TUI and GUI suites, notices that Left moves right, Tab back-tabs and Ctrl-C
+sends Enter.
+
+Close it with one data-driven test in `packages/frontend/test/actions.test.ts`: a table of
+`[Action, keyof Keyboard]` rows, each row getting its own `newSession()`, spying the expected method
+**plus at least its transposition partner**, and asserting before the next row runs. The per-row
+isolation is the part that matters — it is exactly what the `dup`/`fieldMark` test got wrong.
+
+**Do not skip this on the grounds that it is pre-existing.** The branch has now been bitten three times
+by tests that were not falsifiable, and this table is where the remaining instances live.
+
+- [ ] **Step 3b: Re-check EVERY cross-file line citation on the branch**
+
+**Editing a file that other files cite by line is itself a change to those files**, and this branch has
+proved it: Task 6 inserted 36 lines into `drawlist.ts` and silently invalidated three citations in
+`keypad.ts` (`105-106` → `124-125`, `60-68` → `65-73`, `146-147` → `176-177`), all of which had been
+correct against the parent commit. **Nine other citations were corrected during the branch**, so this is
+the dominant recurring defect in a codebase whose house style is to cite by file and line.
+
+Walk every `file.ts:NN` reference added or touched by this branch and confirm it still points at what the
+prose says. Prefer citing by **name** (`advanceAfterType`, whose own line moved from `:98` to `:250` on
+this branch and whose old number now lands inside `dup()`'s docstring) for anything inside a file that
+keeps moving — one citation was already converted for exactly that reason.
+
+> **AS BUILT (Task 15). 38 citations were corrected across the branch before this step, and the sweep
+> found SEVEN more, all in `docs/`: `gui/src/main.ts:290` in `HANDOFF.md:61`, in this spec's
+> architecture section and in this plan's Task-13 note (the line had moved twice, to `:294` then
+> `:312`); `gui/src/main.ts:339` and `web/src/main.ts:134`/`:186` and `tui/src/app.ts:497` in this
+> plan's reordering section; `cli/src/runner.ts:219` and `keyboard.ts:98` in the spec; and
+> `drawlist.test.ts:11` in this plan and in `canvas/test/keypad.test.ts`. **FOUR were converted to
+> NAMES** — `fit()`/`setContentSize`, `advanceAfterType`, `Keyboard.newline` and `drawlist.test.ts`'s
+> `atlas` const — because each sits in a file this branch kept editing. **EVERY in-source citation
+> added by the branch checked out**, except that one `drawlist.test.ts:11`: the per-commit retargeting
+> discipline (`7e58425`, `086dbbe`, `7eb6334`, `24c36ae`, `8585c71` each retarget their own inbound
+> citations) held, and the residue was entirely in the two documents nobody was editing per-commit.
+> **THE RULE THAT FALLS OUT: a doc that describes code is as much a citation site as the code is, and
+> it is the one with no commit to remind you.**
+
 - [ ] **Step 4: Read the whole diff**
+
+> **AS BUILT: DONE, 54 files, +4808 / -171. NOTHING HAD TO BE FIXED — which is worth stating with the
+> evidence rather than as a shrug, because every item on this checklist exists because it happened
+> once.**
+>
+> - **No mutation left behind.** `renderer.ts` has its real `if (e.button !== 0) return;` guard and no
+>   bare `return`; `keys.ts`'s `CTRL` table has all eight entries; `keyboard.ts`'s `writeControl` and
+>   `drawlist.ts`'s `showKeypad` path are intact. Each is the mutation its own task used, so a
+>   forgotten restore would have been invisible to `npm test` in three of the four cases.
+> - **No `console.log`, no `debugger`, no `TODO`/`FIXME` added anywhere under `packages/*/src`.** The
+>   harnesses use `process.stdout.write`, deliberately — see `quitIfKeysOnly` on why a write to a pipe
+>   plus an immediate exit once lost the last line.
+> - **The click seam IS reachable without `--replay`, and that is CORRECT and consistent.**
+>   `maybeSendClicks` is called from both the replay branch and the connected path, exactly as
+>   `maybeSendKeys` is; what is gated on replay is the **action LOG**
+>   (`logActions = SEAM.keys !== '' && SEAM.replay !== ''`), which is where the privacy control
+>   belongs, because a logged `type` action carries the text typed. Gating the seam itself would be a
+>   different and weaker rule. It is **not** called from the URL branch, which is documented on the
+>   function: in that mode the served page owns the input path.
+> - **The two hardcoded numbers in `keypadRegion` are deliberate and documented.** `width: 12 *
+>   KEYPAD_KEY_WIDTH * atlas.cellWidth` is written down **rather than measured from the table on
+>   purpose**, so a key placed past the right edge fails a test instead of silently widening the
+>   window — the same reasoning as Tasks 5 and 6's "pin a declared size against what occupies it". The
+>   5-character label limit lives in the table's own doc comment and in a test, not in the layout. The
+>   TUI's `NAME_WIDTH` is computed from the table.
+> - **No cell coordinates leaked into a pixel file.** `canvas/src/keypad.ts` emits scale-1 pixels
+>   only, and takes `key.row`/`key.col` in cells at exactly one place each (`DRAWN_ROW[key.row]` and
+>   `key.col * atlas.cellWidth`). `render.ts`'s `overlayParts` uses 1-based terminal rows, which is
+>   that file's own convention throughout.
+>
+> **The two things worth a reviewer's eye, neither a defect:** `__tn3270ButtonCentre` is installed on
+> `window` unconditionally rather than behind the seam env var, so it exists in a shipped renderer —
+> it returns coordinates only, reaches no `Session` and fires no action, and being a `window` global
+> rather than a fifth bridge function is what keeps the renderer shared. And `keypadRegion`'s
+> `RangeError` for an undeclared `row` is reachable only from a bad table edit, which is a build-time
+> mistake, not a runtime one.
 
 Run: `cd ~/git/tn3270 && git diff main...HEAD`
 
@@ -2238,6 +3003,21 @@ file uses scale-1 pixels.
 
 - [ ] **Step 5: Ask about the font**
 
+> **AS BUILT: ASKED AND STILL OPEN — the user is choosing between the current x3270-atlas look and
+> INVERSE VIDEO ON A SPACED GRID, having already REJECTED a proportional font.** That rejection was
+> measured rather than argued, and both measurements are worth keeping: **Helvetica's capital `I` is a
+> bare stem, so `ErInp` renders as "Erlnp"** — an abbreviation that becomes a different word is worse
+> than an ugly one — and **Inter Light puts 0.4% of its ink pixels at full white against the screen's
+> 100%**, so the labels read as greyed-out/disabled beside live host data. `fillText` was never
+> reached as an option, which is the outcome the spec's ranking wanted.
+>
+> **NOTHING WAS RESTYLED**, deliberately: the decision is the user's, and Task 15 documented the code
+> as it stands. **A later restyle is cheap and its blast radius is exactly one golden**
+> (`synthetic-ispf-keypad`) plus `canvas/src/keypad.ts` — the key table, the button rectangles and
+> every hit test are independent of how a button is drawn, which is the property the spec's ranking
+> was chosen to preserve. **Look at the regenerated image**, per Task 14's item 4: a golden cannot
+> validate the baseline it came from.
+
 The spec records that the x3270 font for keypad labels is **provisional** and the user agreed to try
 it and see. By now there are three PNGs of it. **Ask the user to look and decide**, and quote the
 spec's ranked fallbacks: restyle within the atlas first (borders and inverse video are available,
@@ -2245,6 +3025,14 @@ spec's ranked fallbacks: restyle within the atlas first (borders and inverse vid
 not at all without deliberately demoting the goldens in writing.
 
 - [ ] **Step 6: Merge, after the user says so**
+
+> **AS BUILT: NOT DONE. THE USER HAS NOT AUTHORISED THE MERGE**, and Task 15 stopped after
+> verification and reporting. The branch sits on `main` at `7ca0269`, the tree is clean, and nothing
+> was pushed, no
+> branch created or deleted, and no existing commit amended. When the go-ahead comes, **re-run the
+> whole gate on the merge commit itself** — that is what the last three merges did, and `git checkout`
+> reddens the build-staleness guard, so clear it with
+> `npx tsc --build --force packages/canvas packages/gui` rather than with `npm run build`.
 
 Do not merge unasked. When told:
 

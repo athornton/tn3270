@@ -231,6 +231,55 @@ export const Order = {
 } as const;
 
 /**
+ * The two format control orders the Dup and Field Mark keys write (Table 4-3,
+ * pages.txt:3196-3197: "DUP Duplicate X'1C'", "FM Field Mark X'1E'"), confirmed
+ * against x3270's `include/3270ds.h:364-365` — `EBC_dup 0x1c`, `EBC_fm 0x1e`.
+ *
+ * THEY ARE CHARACTERS, NOT AIDS, which is why they live here beside `Order` and
+ * not beside the `AID` table a reader might look in first. x3270's Dup and
+ * FieldMark actions both call `key_Character(...)` (`Common/kybd.c:2788`,
+ * `:2825`), so they go into the buffer and set MDT exactly as a typed letter
+ * does. Nothing about them reaches `sendAID`. Table 4-3 is where the manual puts
+ * them too, alongside NUL and SUB.
+ *
+ * Stored in the buffer they display as an overscored asterisk and an overscored
+ * semicolon respectively (same table); we render neither yet.
+ */
+export const EBCDIC_DUP = 0x1c;
+export const EBCDIC_FIELD_MARK = 0x1e;
+
+/**
+ * The four EBCDIC bytes of the TEST REQUEST READ heading, which is what the Sys Req
+ * (TEST REQ) key puts on the wire on a classic, non-TN3270E session.
+ *
+ * Values from x3270's `include/3270ds.h`: `EBC_soh 0x01` and `EBC_stx 0x02` at `:356-357`,
+ * `EBC_slash 0x61` at `:373`, `EBC_percent 0x6c` at `:375`. In order the heading reads
+ * SOH, `%`, `/`, STX — see `buildReadModified`, which assembles it.
+ *
+ * THEY ARE NOT AN AID, and this is the counterintuitive part of the whole key. `AID.SYSREQ`
+ * (0xf0) is a real architected AID — GA23-0059-07 Table 3-4 lists "Test Req and Sys Req F0"
+ * (pages.txt:2017) — and it is what SELECTS this heading, but it is never itself
+ * transmitted for this key. The manual is explicit: the test request read data stream is
+ * "the same as described previously for read-modified operations, EXCLUDING the 3-byte read
+ * heading (AID and cursor address)" (pages.txt:13786-13789). x3270 implements exactly that:
+ * `ctlr_read_modified`'s `case AID_SYSREQ` writes these four bytes and `break`s out of the
+ * AID switch without ever emitting the AID (`Common/ctlr.c:770-777`).
+ *
+ * `EBCDIC_PERCENT` IS THE SAME BYTE AS `AID.PA1` — both 0x6c, and a wire dump cannot tell
+ * them apart. Named separately so the code that builds the heading says which it means, and
+ * so a reader decoding a capture does not conclude a PA1 went out.
+ *
+ * There is no ETX here. The manual's BSC form ends in one (pages.txt:13780-13785) because
+ * ETX is BSC block framing; the non-SNA form is "the same as for the BSC environment,
+ * except there is no ETX" (pages.txt:14180-14184), and a telnet record is terminated by
+ * IAC EOR instead.
+ */
+export const EBCDIC_SOH = 0x01;
+export const EBCDIC_PERCENT = 0x6c;
+export const EBCDIC_SLASH = 0x61;
+export const EBCDIC_STX = 0x02;
+
+/**
  * Structured field identifiers (SFID), GA23-0059 p. 5-51 and chapter 6.
  *
  * 0x81 is BOTH the Query Reply SFID (inbound — i.e. sent by us; chapter 6 is
@@ -423,7 +472,17 @@ export const XAH = {
 /** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
 export const XAC_DEFAULT = 0x00;
 
-/** Attention identifiers (Table 3-4). */
+/**
+ * Attention identifiers (Table 3-4).
+ *
+ * `SYSREQ` IS THE ONE MEMBER THAT IS NEVER TRANSMITTED. Table 3-4 lists it — "Test Req and
+ * Sys Req F0" (pages.txt:2017) — and it is a genuine AID in the sense that it is what
+ * `buildReadModified` switches on. But that function turns it into the four-byte TEST
+ * REQUEST READ heading (`EBCDIC_SOH`/`EBCDIC_PERCENT`/`EBCDIC_SLASH`/`EBCDIC_STX` above)
+ * and drops the AID, exactly as x3270's `ctlr_read_modified` does (`Common/ctlr.c:770-777`).
+ * So 0xf0 never reaches the wire for the Sys Req key. Under TN3270E the key is not an AID at
+ * all: it is Telnet IAC AO. See `Session.sysreq`.
+ */
 export const AID = {
   NONE: 0x60,
   QREPLY: 0x61,

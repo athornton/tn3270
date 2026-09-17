@@ -78,12 +78,19 @@ const ELECTRON_ARGV = ['--no-sandbox', '--disable-gpu', '--no-proxy-server'];
  * The negatives carry as much weight as the positives: Ctrl+Z must be dropped rather than typing
  * "z", and F13 must not become PF13. Both are asserted as absences, which is why the pass
  * condition is the whole ORDERED sequence rather than a set of sightings.
+ *
+ * `Ctrl+K` IS THE ONLY OBSERVABLE FOR THE KEYPAD CHORD OVER THIS PATH, and `integration.test.ts`'s
+ * 'logs a toggleKeypad BEFORE intercepting it' names this harness as the reason that order matters:
+ * the gateway swallows the action, a keypad changes no screen in replay mode, so an interception
+ * placed above the log line would make the chord unprovable here while every unit test stayed
+ * green. Alt+K, the second spelling, is covered directly in `keys.test.ts`.
  */
 const CASES = [
   { spec: 'Alt+1', action: { kind: 'pa', n: 1 } },
   { spec: 'Alt+2', action: { kind: 'pa', n: 2 } },
   { spec: 'Ctrl+A', action: { kind: 'attn' } },
   { spec: 'Ctrl+C', action: { kind: 'clear' } },
+  { spec: 'Ctrl+K', action: { kind: 'toggleKeypad' } },
   { spec: 'Ctrl+Z', action: null },
   { spec: 'Shift+Tab', action: { kind: 'backTab' } },
   { spec: 'Tab', action: { kind: 'tab' } },

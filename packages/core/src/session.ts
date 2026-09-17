@@ -627,25 +627,67 @@ export class Session {
     this.oia.inhibit(KeyboardState.SystemWait);
   }
 
-  /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
   /**
-   * The SYSREQ key.
+   * The Sys Req key. TWO COMPLETELY DIFFERENT THINGS ON THE WIRE, chosen by whether the
+   * session is TN3270E.
    *
-   * A no-op unless the function was agreed, and deliberately silent rather than an
-   * error: the key exists on the keyboard whatever the host granted, so pressing it
-   * on a session without the function is not the operator's mistake. Sending IAC AO
-   * anyway would put a command on the wire the host has no handler for.
+   * x3270's `SysReq_action` splits on `IN_E`, and nothing else (`Common/kybd.c:2849-2870`):
    *
+   *   if (IN_E) net_abort();
+   *   else { ...; key_AID(AID_SYSREQ); }
+   *
+   * TN3270E: Telnet IAC AO, via `sendSysreq()`. `net_abort()` then checks the SYSREQ
+   * function bit itself (`Common/telnet.c:3632-3648`), which is what the guard below
+   * mirrors. An E session that declined the function sends NOTHING — and specifically not
+   * the classic form as a fallback, because x3270 never reaches the `else` arm on an E
+   * session. A host that negotiated TN3270E and refused SYSREQ has said what it wants.
    * Not a data message, so it spends no sequence number.
+   *
+   * CLASSIC: a TEST REQUEST READ — the four bytes SOH `%` `/` STX, then the modified field
+   * data, and NO AID BYTE AT ALL. `key_AID(AID_SYSREQ)` looks like it transmits 0xf0 and
+   * does not; `ctlr_read_modified` intercepts that AID and substitutes the heading
+   * (`Common/ctlr.c:770-777`). `buildReadModified` carries the same branch and the
+   * citations. THIS IS THE PATH BOTH OF THIS PROJECT'S LIVE HOSTS TAKE: VM/370 CE and MVS
+   * 3.8j TK5 each answer `IAC WILL TN3270E` with DONT, measured three times.
+   *
+   * Routed through `sendAID` because that is this codebase's `key_AID`: the keyboard lock it
+   * sets is not incidental, it is what x3270 does for every AID including this one
+   * (`kybd.c:918-923`). `sendAID` validates 0xf0 against `VALID_AIDS`, where `AID.SYSREQ`
+   * already sits, and hands the record to `sendInbound`, so the framing question is answered
+   * the same way as for Enter.
+   *
+   * SILENT, NEVER THROWING, on every refusal. The key exists on the keyboard whatever the
+   * host granted or the transport is doing, so pressing it is not the operator's mistake;
+   * `applyAction` swallows refusals into the OIA and the CLI's `SysReq()` reports none.
+   * That is why the not-connected check is here rather than left to `sendAID`, which throws.
+   *
+   * REFUSES ON AN INHIBITED KEYBOARD, WHERE x3270 WOULD QUEUE. It refuses outright on
+   * `KL_OIA_MINUS` and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). We have no
+   * action queue and one is not worth inventing for a single key, so both become a refusal:
+   * the press is declined rather than deferred, nothing goes on the wire out of turn, and
+   * the OIA already shows the operator why.
    */
   sysreq(): void {
-    if (!this.e?.agreed.includes(Tn3270eFunc.SYSREQ)) {
-      this.trace.note('SYSREQ ignored: function not negotiated');
+    if (this.telnet === undefined) {
+      this.trace.note('SYSREQ ignored: not connected');
       return;
     }
-    this.telnet?.sendSysreq();
+    if (this.inTn3270e()) {
+      if (!this.e?.agreed.includes(Tn3270eFunc.SYSREQ)) {
+        this.trace.note('SYSREQ ignored: function not negotiated');
+        return;
+      }
+      this.telnet.sendSysreq();
+      return;
+    }
+    if (this.oia.isInhibited()) {
+      this.trace.note(`SYSREQ refused: input inhibited (${this.oia.toText()})`);
+      return;
+    }
+    this.sendAID(AID.SYSREQ);
   }
 
+  /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
   sendAttn(): void {
     if (this.telnet === undefined) throw new Error('not connected');
     this.telnet.sendAttn();

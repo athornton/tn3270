@@ -191,6 +191,8 @@ export class TerminalRenderer {
   private previous: ResolvedCell[] | undefined;
   private previousCursor = -1;
   private previousStatus = '';
+  /** The overlay lines last drawn, joined, so a change to any of them can be spotted. */
+  private previousOverlay = '';
 
   constructor(opts: RendererOptions) {
     this.rows = opts.rows;
@@ -288,7 +290,26 @@ export class TerminalRenderer {
     return [`${ESC}${hintRow};${colOffset + 1}H${ESC}0;2m${text}${ESC}0m`];
   }
 
-  paint(cells: readonly ResolvedCell[], cursor: number, status: string): string {
+  /**
+   * `overlay` is the special-keys list, already windowed by the caller (`app.ts`'s
+   * `overlayWindow`), or `undefined` for no overlay -- which is what every caller but the TUI's
+   * own `draw()` passes.
+   */
+  paint(
+    cells: readonly ResolvedCell[], cursor: number, status: string,
+    overlay?: readonly string[],
+  ): string {
+    // THE DIFF CANNOT SEE BEHIND THE OVERLAY. Its lines are written over cells that `previous`
+    // still describes, so ANY change to them -- opening, closing, or moving the mark one row --
+    // has to repaint every cell: without this, closing the list would leave it on the screen and
+    // moving the selection would leave the old mark behind. Costs one full repaint per arrow key,
+    // which is what an overlay is worth; an unchanged overlay costs nothing.
+    const shown = overlay === undefined ? '' : overlay.join('\n');
+    if (shown !== this.previousOverlay) {
+      this.previous = undefined;
+      this.previousOverlay = shown;
+    }
+
     const parts: string[] = [];
     const fullRepaint = this.previous === undefined;
     if (fullRepaint) {
@@ -371,6 +392,11 @@ export class TerminalRenderer {
       this.previousStatus = status;
     }
 
+    // LAST of the drawing, so it sits on top of the cells, and BEFORE the cursor placement below,
+    // so the terminal's cursor still ends up where the 3270 cursor is rather than at the end of the
+    // final list line.
+    parts.push(...this.overlayParts(overlay));
+
     // The terminal's own cursor goes where the 3270 cursor is, so a user sees it
     // in the field they are typing into.
     if (parts.length > 0 || cursor !== this.previousCursor) {
@@ -382,6 +408,27 @@ export class TerminalRenderer {
     this.previous = cells.slice();
     this.previousCursor = cursor;
     return parts.join('');
+  }
+
+  /**
+   * The special-keys list, drawn one line per row over the top-left of the SCREEN region.
+   *
+   * The screen's corner, not the terminal's: aligned like the OIA and the hint, so a centred block
+   * keeps the list inside its border instead of putting it over whatever the terminal had at 1;1.
+   *
+   * Reverse video for the selected line, which `keypadOverlay.ts` marks with a leading `>`. Each
+   * line RESETS FIRST -- SGR parameters accumulate, exactly as the cell loop's comment explains, so
+   * a line drawn after a reverse-video one would inherit it -- and closes with a reset so nothing
+   * leaks into the cursor placement or the row below. That is `hintParts`' shape.
+   *
+   * Neither padded nor cleared: `paint` invalidates whenever these lines change, so the cells
+   * underneath have already been rewritten before this draws over them.
+   */
+  private overlayParts(overlay: readonly string[] | undefined): string[] {
+    if (overlay === undefined) return [];
+    const { rowOffset, colOffset } = this.place;
+    return overlay.map((line, i) => `${ESC}${rowOffset + i + 1};${colOffset + 1}H`
+      + (line.startsWith('>') ? `${ESC}0;7m${line}${ESC}0m` : `${ESC}0m${line}`));
   }
 
   /** The full SGR parameter list for one cell: colours plus highlighting. */

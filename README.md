@@ -21,9 +21,10 @@ TN3270E is verified against two live hosts — VM/370 and MVS 3.8j.
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
 **It is not yet something you can hand to someone else.** There is no packaging, so no
-`.app` to download; the GUI has no connect dialog, menus, preferences or mouse support, and
-takes its host on the command line like the other front ends. See *What is not
-implemented* below, which is the honest part of this file.
+`.app` to download; the GUI has no connect dialog, menus or preferences, and takes its host on
+the command line like the other front ends. The mouse does exactly one thing — press the
+virtual keypad's buttons — and nothing else: no click-to-place-cursor, no drag-to-select, no
+light pen. See *What is not implemented* below, which is the honest part of this file.
 
 ## What works today
 
@@ -72,7 +73,7 @@ the CLI, since a script-driven client has nothing to render; see *Using the TUI*
 gateway takes a deliberately smaller set; see *Using the web gateway*.
 
 **And there is a browser gateway.** `packages/web` serves that same canvas renderer — the
-same file, differing by two lines — to a browser, with a WebSocket where the Electron app has IPC:
+same file, not a copy — to a browser, with a WebSocket where the Electron app has IPC:
 
 ```sh
 npm run build
@@ -90,7 +91,27 @@ the clear**, which it says out loud on startup. Full flag list and the security 
 
 That the renderer is genuinely shared rather than merely similar is checked in pixels:
 `packages/web/scripts/browser-shot.mjs` compares the served page against the Electron app's
-own screenshot golden and requires them to be identical.
+own screenshot golden and requires them to be identical, with and without the keypad shown.
+
+**There is a virtual keypad, and four keys that had no way to be pressed.** `Ctrl-K` shows and
+hides a 47-button keypad in the Electron GUI and in a browser — PF1–PF24, PA1–PA3, and the
+special keys a PC keyboard has not got — drawn through the same glyph atlas as the screen, so it
+looks like a 3270 rather than like a native widget. Each key is **inverse video**, a black label on a
+white block, on a grid spaced by a blank row between key rows and a blank column at the end of every
+key: one cell tall and butted together, the blocks would merge into bars instead of reading as keys. It is a third region of the draw list,
+appended *below* the screen and the status line, so showing it never moves or covers a row the
+host wrote: the Electron window grows to fit and a browser page scrolls. Clicking a button fires
+exactly the action its label names; a click anywhere else is ignored.
+
+The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 47 keys
+instead — arrows move, Enter fires, `Esc` closes — with each key's chord shown beside it, read
+from the same binding table the keymap is checked against so the on-screen help cannot drift.
+
+Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
+press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
+two get no chord — see *Using the TUI*. **Sys Req now puts bytes on the wire against a classic
+host**, as a four-byte test request read rather than the AID you would expect; it has no live
+witness yet. See *What is not implemented*.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
 which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
@@ -133,7 +154,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1514 tests, 66 files
+npm test           # 1692 tests, 71 files
 npm run typecheck
 ```
 
@@ -157,11 +178,30 @@ script-driven client has nothing to render; see *Using the TUI* for what it pick
 
 **`Ctrl-]` quits. `Ctrl-C` does NOT** — it is the Clear AID, which a 3270 user needs
 constantly to dismiss VM's `MORE...` state. `Ctrl-R` is Reset, `Ctrl-U` is EraseInput,
-`Ctrl-A` is Attn, `Insert` toggles insert mode, F1–F12 are PF1–PF12 and shifted F1–F12 are
+`Ctrl-A` is Attn, `Ctrl-D` is **Dup**, `Ctrl-F` is **Field Mark**, `Insert` toggles insert mode,
+F1–F12 are PF1–PF12 and shifted F1–F12 are
 PF13–PF24, following c3270. **PA1/PA2/PA3 are `Option`/`Alt` + `1`/`2`/`3`** — matched on the
 physical key, so they work whatever your Option key is configured to type. On a Mac where
 left-Option is remapped to Command, use right-Option: `Cmd`-digit is deliberately left for
 menu accelerators.
+
+`Ctrl-D` and `Ctrl-F` are c3270's own bindings (`Common/fb-c3270:186-187`). **Dup writes EBCDIC
+`0x1C` and then performs a TAB** — the manual's own wording, p. 7-12 — which is the opposite of
+what x3270's auto-skip suppression looks like on its own; **Field Mark writes `0x1E` and advances
+like an ordinary typed character.** A numeric field accepts Dup and refuses Field Mark, per the
+manual's permitted set (p. 4-13).
+
+**`Ctrl-K` shows and hides the virtual keypad**, and `Alt-K` does the same — `Ctrl-K` is c3270's
+terminal binding (`Common/fb-c3270:191`) and `Alt-K` is how its Windows keymap spells the same
+command, so both are honoured here rather than one being a divergence. The window grows and
+shrinks to fit; nothing above the keypad moves. **Clicking a button is the only thing the mouse
+does.** A press highlight is drawn locally and never reaches the host, so it cannot lag behind
+your finger over a WebSocket.
+
+**Sys Req and Newline have no chord, in any front end, and that is deliberate.** c3270 defines no
+Sys Req chord either; Newline's would be `Ctrl-J`, which *is* `\n` (0x0a) and already means Enter
+in a terminal — one byte cannot be both, and turning Return into a cursor move is not a trade
+worth making. The keypad button is their route, which is a large part of why the keypad exists.
 
 **The window sizes itself to the screen the host negotiates**, at the largest whole-number
 scale that fits 80% of your display. Whole numbers only: the font is a bitmap, and a
@@ -174,9 +214,11 @@ The glyphs come from x3270's own 3270 bitmap font, baked into a sprite atlas by
 than a terminal in a window, and it is also why screenshots of it can be compared byte for
 byte (`packages/gui/scripts/shot.mjs`).
 
-**What it does not have yet:** no connect dialog, no menus, no preferences, no mouse
-support, and no packaging — so the host goes on the command line and there is no `.app` to
-double-click. **What is implemented but not yet verified against a live host:** the PF and
+**What it does not have yet:** no connect dialog, no menus, no preferences, and no packaging —
+so the host goes on the command line and there is no `.app` to double-click. **The mouse presses
+keypad buttons and does nothing else**: clicking the screen does not place the cursor, dragging
+does not select text, and there is no light pen. **What is implemented but not yet verified
+against a live host:** the PF and
 Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
 the `Ctrl-]` quit, and the in-window error message for a failed connection. **Attn is a
 Telnet BREAK, measured against VM/370's pre-logon banner with no visible reaction** — a real
@@ -191,12 +233,23 @@ reported PA1 working from a real keypress in the app against MVS on 2026-09-15, 
 guard as well. `actionForKey` maps Alt+digit and is unit-tested against a synthetic key-like
 object; the plumbing from a real keypress to that mapper — the renderer's `keydown` listener,
 the IPC hop,
-`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **15 chords as real
-Chromium key events and asserts the 13 actions that must arrive, in order, plus two that must
+`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **18 chords as real
+Chromium key events and asserts the 16 actions that must arrive, in order, plus two that must
 not**. It is **not part of `npm test`** (it spawns Electron): run it by hand,
 `node packages/gui/scripts/keys.mjs`, as you would `shot.mjs` or `pty-smoke.py`. `npm test`
 only pins its invocation. Its failure has been observed rather than assumed — breaking the
 renderer's `keydown` listener leaves the suite green and reddens only the harness.
+
+**The mouse path has the same kind of guard, for the same reason.**
+`packages/gui/scripts/clicks.mjs` shows the keypad with a real `Ctrl-K`, then clicks **9 buttons
+by label** with real Chromium mouse events and asserts the 10 actions that must arrive in order
+(the toggle plus one per button). Its value is the plumbing — `mousedown`, the primary-button
+guard, the scale-and-offset inverse, `hitTest`, `sendAction`, IPC, `applyAction` — none of which
+any unit test can execute, because `renderer.ts` throws at module load outside a browser. Proved
+as a mutation: a bare `return` at the top of the `mousedown` listener leaves build, typecheck and
+every test clean — 1643 of them, as the suite stood when that mutation was measured — while every
+keypad button is dead, and only this harness reddens. Like `keys.mjs` it is not part of `npm test`;
+`npm test` pins its invocation.
 
 **On a headless Linux box** add `--no-sandbox --disable-gpu` and point `DISPLAY` at an X
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
@@ -231,6 +284,22 @@ Only once the timer expires is the `Esc` promoted to a Meta prefix, and even the
 combines with just the next byte, and only to complete a PA; anything else and the `Esc` is
 dropped. Arrow keys are bound in **both** encodings, CSI and SS3, because terminfo reports
 only the application-mode one and any layer can flip the mode.
+
+**`Ctrl-D` is Dup and `Ctrl-F` is Field Mark**, both c3270's own bindings
+(`Common/fb-c3270:186-187`). Dup writes EBCDIC `0x1C` and then TABs — the manual's own wording,
+p. 7-12 — and Field Mark writes `0x1E` and advances like a typed character; a numeric field takes
+Dup and refuses Field Mark (manual p. 4-13).
+
+**`Ctrl-K` opens the special-keys list.** A terminal has no mouse, so this is the TUI's answer to
+the canvas front ends' keypad: the same 47 keys as a scrolling list over the top-left of the
+screen, arrows to move, `Enter` to fire the marked key, `Esc` or `Ctrl-K` again to close. `Ctrl-K`
+is c3270's own binding for its keypad (`Common/fb-c3270:191`), not a divergence. While the list is
+open **it owns the keyboard** — nothing falls through to the field behind it — and the window
+follows the selection rather than showing only the first screenful, or everything past `Attention`
+(**Sys Req** and **Newline** included) would be unreachable. That is the point of the list: those
+two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
+the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
+against, so 22 of the 47 correctly show a blank rather than a guess.
 
 **Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
 `default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
@@ -391,10 +460,21 @@ node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 on the invocation and cannot be written into the script.
 
 **Commands.** `Connect` `Disconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
-`Attn` `Reset` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
-`MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` ·
+`Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
+`MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` `Dup` `FieldMark` ·
 `ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
 · `Wait`
+
+`Dup`, `FieldMark` and `SysReq` are conformance rather than symmetry: s3270 has all three by
+these names (`Common/kybd.c:223`, `:230`, `:254`), so a script written for it should not fail
+here. All three take no arguments — s3270's optional `FailOnError`/`NoFailOnError` on `Dup` and
+`FieldMark` is refused by name rather than accepted and ignored, because failing on an operator
+error already *is* s3270's behaviour for a scripted call. **`SysReq()` answers `ok` whatever
+happens** — it reports no refusal, because the key exists on the keyboard whatever the host
+granted. What it sends depends on the session: a four-byte test request read against a classic
+host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
+command for the keypad toggle: a script-driven client has no renderer, which is why `-scheme` is
+absent here too.
 
 **`Transfer`** is `IND$FILE`, CUT mode, and it works on both hosts in both directions.
 Two things that will otherwise cost you an afternoon: quote CMS file names, because the
@@ -432,11 +512,18 @@ and with `--auth on` the token is in it, once:
 serving 127.0.0.1:3270 at http://127.0.0.1:8270/?t=4f3c...
 ```
 
-The browser then draws the screen with the GUI's own renderer — literally the same file, which
-differs from its pre-gateway version by two lines, both about a page's inability to resize its
-own window — over a WebSocket instead of Electron's IPC. Frames are whole and deflated; measured, a 24x80
+The browser then draws the screen with the GUI's own renderer — literally the same file — over a
+WebSocket instead of Electron's IPC. Frames are whole and deflated; measured, a 24x80
 draw list is 237220 bytes of JSON and 6760 compressed, which is why dirty-cell diffing is
 deliberately not part of the design.
+
+**`Ctrl-K` (or `Alt-K`) shows the virtual keypad here too, and clicking a button is an ordinary
+action** — the same message a keystroke sends, so **nothing about the protocol changed** to add
+it. The flag is held **per connection**, not per session: a 3270 session deliberately outlives its
+socket so a reload reattaches, and a keypad forced on whoever attaches next — possibly a different
+person, whose screen would come back six rows taller than they left it — is not a preference worth
+inheriting. A reattaching client therefore starts with the keypad hidden. A screen plus keypad
+taller than the viewport **scrolls**, which is what the browser already did for a model 4.
 
 Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
 `--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
@@ -503,9 +590,9 @@ derived from a real session — procedure in `docs/live-testing.md`.
 packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
                    colour resolution, Query Reply, IND$FILE, trace
 packages/frontend  rules every front end shares: host argument, TLS flags, session
-                   factory, keymap, action dispatch, binding intent
-packages/canvas    the canvas renderer, glyph atlas and keymap-to-action layer, shared
-                   by the GUI and the web gateway
+                   factory, keymap, action dispatch, binding intent, the keypad key table
+packages/canvas    the canvas renderer, glyph atlas, keymap-to-action layer and the virtual
+                   keypad's layout and hit-testing, shared by the GUI and the web gateway
 packages/cli       s3270-style scripting CLI
 packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas
 packages/tui       c3270-style terminal front end, plus the live/pty harnesses
@@ -557,7 +644,7 @@ Done:
    each get a real, distinct host reaction. See *Using the GUI*. **Both halves of the PA1/PA2
    gap are now closed**: the protocol half by those host reactions, and the local half first by
    hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
-   then by `packages/gui/scripts/keys.mjs`, which drives 15 real Chromium chords and asserts 13
+   then by `packages/gui/scripts/keys.mjs`, which drives 18 real Chromium chords and asserts 16
    ordered actions plus two required absences. What remains untested is only the *packaged* app,
    because there is no packaging yet.
 
@@ -567,14 +654,21 @@ Done:
    That the renderer is genuinely shared rather than merely similar is checked in pixels
    against the Electron app's own screenshot golden. See *Using the web gateway*.
 
+9. **A menu of special keys, and a show/hide virtual keypad** — done. Requested 2026-09-14 and
+   moved ahead of Programmable Symbol Sets on 2026-09-15. `Ctrl-K` shows a clickable 47-button
+   keypad in the Electron GUI and in a browser, and opens a keyboard-navigable list of the same
+   keys in the TUI, which has no mouse. It brought canvas hit-testing with it, and made **Dup,
+   Field Mark, Sys Req and Newline** reachable — four keys `core` could do and no interactive
+   front end could press. Proven with real mouse events (`clicks.mjs`) and in pixels, identically
+   in Electron and in the browser. **The mouse does keypad buttons and nothing else.** Text
+   selection, click-to-place-cursor and the light pen are all still absent, and text selection is
+   **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so drag-to-select would
+   transmit on every copy attempt. x3270 keeps the two apart deliberately. **Sys Req was
+   reachable but inert on this branch until the classic path landed**; it now sends a test
+   request read, still with no live witness — see *What is not implemented*.
+
 Remaining, in the order the author wants it:
 
-9. **A menu of special keys, and/or a show/hide virtual keypad** in x3270's style. Requested
-   2026-09-14 and moved ahead of Programmable Symbol Sets on 2026-09-15. It needs canvas
-   hit-testing, which does not exist yet, so it gets its own spec. Note that text selection is
-   **not** the light pen and must not be implemented with it: `lightpen_select()` sends an AID
-   and sets MDT, so drag-to-select would transmit on every copy attempt. x3270 keeps the two
-   apart deliberately.
 10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
@@ -583,10 +677,10 @@ Remaining, in the order the author wants it:
 11. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
    **printer sessions**.
 
-**In flight, not on `main`:** alternate screen sizes and models 3, 4 and 5 are complete
-and live-verified on the `alternate-screen-size` branch, which is pushed but unmerged.
-Adding screen sizes turned out not to be part of TN3270E at all — the geometry rides in
-the terminal-type string — so it does not depend on item 6.
+Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
+ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped
+being true on 2026-08-27. Adding screen sizes turned out not to be part of TN3270E at all — the
+geometry rides in the terminal-type string — so it never depended on item 6.
 
 ### Graphics: the fidelity target, and why GDDM is not the route
 
@@ -644,14 +738,48 @@ worse than one that says which quarter is missing.
   accepting and refusing: each opens `IAC DO TERMINAL-TYPE` and never mentions option
   40. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
   design) and **printer sessions**, whose harness now exists.
+- **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
+  on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
+  between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
+  click-to-place-cursor, no drag-to-select and no light pen**, and the right and middle buttons do
+  nothing at all (deliberately: a right-click on `Clear` would otherwise send it to a live host
+  while the context menu opened over the label). Mouse support is three separate jobs and only
+  the first is built. Whoever takes the others: text selection is **not** the light pen, and must
+  not be implemented with `lightpen_select()`, which sends an AID and sets MDT — drag-to-select
+  would then transmit on every copy attempt. x3270 keeps them apart deliberately
+  (`wc3270/screen.c:2357`).
+- **SYS REQ IS IMPLEMENTED ON BOTH PATHS AND HAS NO LIVE WITNESS.** Implemented is not verified,
+  and this entry is here for the second half. The keypad's `SysRq` button, the TUI overlay's entry
+  and the CLI's `SysReq()` now all put bytes on the wire against VM/370 and MVS 3.8j — but nobody
+  has yet driven the key at either host and watched what came back. On the next live run: see
+  `docs/live-testing.md`.
+  **It is not the AID you would expect.** Neither Hercules system offers TN3270E — both answer
+  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times — so both take the classic path,
+  and x3270's classic branch does **not** send AID `0xf0`. `ctlr_read_modified` has a dedicated
+  `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770-777`) that emits a **four-byte TEST
+  REQUEST READ heading** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx`, i.e. `01 6c 61 02` —
+  in place of the AID byte and cursor address. `AID.SYSREQ = 0xf0` exists in our `constants.ts`
+  and is never what goes on the wire for this key. The modified field data **does** still follow
+  the heading, which the phrase "four-byte record" invites you to get wrong: GA23-0059-07 says the
+  stream is "the same as described previously for read-modified operations, excluding the 3-byte
+  read heading (AID and cursor address)", and x3270's `break` leaves the switch rather than the
+  function. There is no ETX; that is BSC framing, and a telnet record ends at `IAC EOR`.
+  On an inhibited keyboard the key is **refused**, where x3270 would queue it — we have no action
+  queue and did not invent one for a single key.
+- **Dup, Field Mark, Sys Req and Newline have NO live witness.** All four are implemented; none has
+  been pressed at a host. They are unit-tested against the
+  manual and x3270's source, and the keypad's *plumbing* is proven by harnesses — but no host has
+  ever been observed reacting to any of the four. The keypad as a whole needs no live verification,
+  because a button press produces the same wire bytes as the equivalent keystroke and those *are*
+  live-verified; that argument does not extend to four keys nothing ever pressed at a host.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
-  is **no connect dialog, no menus, no preferences and no mouse support** — the host and
+  is **no connect dialog, no menus and no preferences** — the host and
   every flag come from the command line, exactly as the TUI takes them. Packaging is also
   still to come, so there is no `.app` to download yet.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
-  **no connect dialog, no menus, no preferences and no mouse support**. It also does **not**
+  **no connect dialog, no menus and no preferences**. It also does **not**
   accept `--terminal-type` or `-tn3270e`, and of the host argument it honours only `host:port` —
   an LU list and `N:` are refused by name rather than ignored. A screen taller than the browser
   viewport **scrolls**; it does not reflow, and it will not scale fractionally, because integer
@@ -669,9 +797,10 @@ worse than one that says which quarter is missing.
   `-oversize` are not offered. Oversize is an emulator extension rather than 3270
   architecture, and it is the only case that crosses 4096 cells into 14-bit addressing,
   which `address.ts` already handles.
-- **No mouse support** in the TUI.
+- **No mouse support** in the TUI. `Ctrl-K`'s special-keys list is the keyboard substitute for
+  the canvas front ends' clickable keypad, not a step towards one.
 
-The TUI has two limits worth knowing before you run it:
+The TUI has three limits worth knowing before you run it:
 
 - **It needs at least 24 rows and 80 columns**, and refuses smaller rather than drawing
   a misleading partial screen. At exactly 24 rows it drops the status line and keeps the
@@ -680,6 +809,11 @@ The TUI has two limits worth knowing before you run it:
 - **Its cursor colour is best-effort.** OSC 12 is not universally implemented, so the
   shape is set via DECSCUSR as well; a terminal that ignores both still shows its own
   cursor.
+- **The special-keys list's "terminal too small" refusal cannot be provoked**, and is documented
+  that way rather than claimed as tested behaviour. The 24x80 floor above already refuses any
+  smaller terminal before a session runs, and the smallest 3270 screen *is* 24x80 — so every
+  terminal that can reach the list comfortably clears its 12x29 minimum. The check is a floor for
+  a caller that hands the list a sub-window, not something an operator can hit.
 
 ## Verification
 
@@ -689,12 +823,14 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1514 tests, 66 files |
+| `npm test` | **pass** — 1692 tests, 71 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
-| `browser-shot.mjs` — served page vs the GUI's own golden | **pass** — pixel-identical, which is what says the renderer is shared and not merely similar |
-| `browser-keys.mjs` — real chords through a real browser | **pass** — 12 chords, 10 actions in order over a WebSocket, 2 asserted absences |
+| `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **2 of 2 cases** pixel-identical, with and without the keypad, which is what says the renderer is shared and not merely similar |
+| `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 11 actions in order over a WebSocket, 2 asserted absences |
+| `keys.mjs` — real Chromium key events in Electron | **pass** — 18 chords, 16 actions in order, 2 asserted absences |
+| `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |
 | web gateway reattachment, live | **pass** — same session returned inside the grace window, a new one after it |
@@ -704,7 +840,8 @@ visible there.
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
-| GUI screenshot goldens under Xvfb | **pass** — 1 case from a replayed synthetic trace, reproducible; raw-bitmap hash, not the PNG |
+| GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
+| Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both

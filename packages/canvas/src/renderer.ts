@@ -1,7 +1,9 @@
 import type { Rgb } from '@tn3270/core';
-import type { AtlasGeometry, DrawList } from './drawlist.js';
+import type { AtlasGeometry } from './geometry.js';
+import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
 import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
+import { hitTestAt, type KeypadButton } from './hittest.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -13,7 +15,9 @@ import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
  * assumed: an earlier version imported `drawList` and died with "Failed to resolve module
  * specifier", leaving a blank window and no clue anywhere. So the draw list arrives finished
  * over IPC, the atlas arrives as bytes over IPC, and the only runtime imports are
- * `./blit.js` and `./keys.js`, whose own imports are all `import type` and thus erased.
+ * `./blit.js`, `./keys.js` and `./hittest.js`, whose own imports are all `import type` and
+ * thus erased. Each of the three is also listed in `BROWSER_MODULES` (`assets.ts:39`),
+ * without which the web front end serves a 404 for it and the canvas goes black instead.
  *
  * IF YOU ADD A RUNTIME IMPORT FROM A WORKSPACE PACKAGE HERE, THE WINDOW GOES BLANK.
  * Compute it in main and send the result instead.
@@ -56,6 +60,24 @@ const ctx = real as unknown as Ctx2D;
 let atlas: AtlasMessage | undefined;
 let blank: ReadonlySet<number> = new Set();
 let last: DrawList | undefined;
+/**
+ * The keypad button under the finger right now, if any.
+ *
+ * PURELY RENDERER-LOCAL, and deliberately: see the highlight at the end of `paint`. Cleared by
+ * `release()`, on `mouseup` anywhere in the window and on `blur`, so no way of ending a press can
+ * leave the highlight stuck on.
+ */
+let pressed: KeypadButton | undefined;
+/**
+ * True while the canvas holds an ERROR MESSAGE rather than a screen.
+ *
+ * `onError` repaints the canvas as text but leaves `last` alone, so without this a click at a
+ * button's former position still passed the keypad guard: it sent the action into a session that is
+ * failing or already gone, and its `paint(last)` WIPED THE ONLY EXPLANATION OF THE FAILURE off the
+ * screen, restoring a stale one. Someone who double-clicked a `.app` has no console to recover it
+ * from -- the same argument `onError` itself is written on.
+ */
+let errored = false;
 
 const tints = new Map<string, ImageBitmap>();
 const building = new Set<string>();
@@ -132,21 +154,78 @@ function paint(list: DrawList): void {
   if (list.oia !== undefined) {
     blit(ctx, { cells: list.oia.cells, width: list.width, height: list.height }, options);
   }
+
+  // The keypad goes through the SAME blitter and atlas as the screen and the OIA -- one drawing
+  // primitive, three regions -- and for the same reason the OIA does (`drawlist.ts:53-61`).
+  // `list.width`/`list.height` and not the region's own: `blit` reads only `cells` (`blit.ts:98-105`),
+  // and the cells' coordinates are in the WHOLE DRAWING's scale-1 space, including the region's `y`
+  // offset, so `keypad.width`/`keypad.height` would describe a surface these cells do not live in.
+  if (list.keypad !== undefined) {
+    blit(ctx, { cells: list.keypad.cells, width: list.width, height: list.height }, options);
+  }
+
+  // PURELY LOCAL, and deliberately: over a WebSocket a round trip for a press highlight would lag
+  // visibly behind the finger. Nothing about it reaches the host -- only the action does.
+  //
+  // Drawn LAST so it sits over the label, and gated on `list.keypad` as well as on `pressed`: a
+  // frame with the keypad off must draw nothing extra even if a press is still outstanding.
+  // `fillRect` is on `Ctx2D` already (`blit.ts:35`), so no cast and no widening.
+  //
+  // `includes` is an IDENTITY check and not a search: `pressed` is always an element of some frame's
+  // `buttons`, so this asks "of THIS frame's?". Without it, a frame whose geometry changed while a
+  // button was held -- a host that switches model, so the keypad's `y` moves -- would highlight a
+  // rectangle no button occupies until the release.
+  //
+  // ## DARKENS, AND IT USED TO LIGHTEN
+  //
+  // `rgba(255,255,255,0.35)` while the keys were white-on-black, which was the right way round then
+  // and became a NO-OP the moment `keypad.ts` went to inverse video: a white wash over an
+  // already-white button is invisible, and press feedback is the ONLY zero-latency feedback in the
+  // whole design -- deliberately local, because over a WebSocket a round trip for it would lag behind
+  // the finger. So the highlight follows the styling: the key is now the LIGHT element, so the
+  // overlay has to be the dark one.
+  //
+  // Black at the same 0.35 takes the default scheme's white key to grey 166 (255 * 0.65) and the
+  // green scheme's lime one to (0,166,0) -- unmistakable against the unpressed key beside it, and
+  // against the black gutter around it, while the label stays BLACK ON GREY and legible. That last
+  // part is why this is not an opaque fill: an opaque dark rectangle would black out the label, and
+  // over a black gutter the pressed key would read as having vanished rather than as pressed.
+  //
+  // The other candidate was re-inverting the pressed key to normal video. Rejected: a key drawn
+  // white-on-black sits on a black keypad background, so its RECTANGLE disappears and only the
+  // letters remain -- the key looks broken rather than held. It would also mean filtering the
+  // region's cells and blitting a modified copy, i.e. new logic in the one file no test can execute.
+  //
+  // UNPROVEN IN PIXELS, and there is no way to prove it here: nothing in the suite executes a line of
+  // this file (`index.ts` deliberately does not export it), `shot.mjs` photographs no press, and
+  // `clicks.mjs` drives a real `mousedown` through this listener but asserts actions, not pixels. The
+  // arithmetic and the guards are unchanged from the version that was measured; only the colour moved.
+  if (pressed !== undefined && list.keypad !== undefined && list.keypad.buttons.includes(pressed)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(
+      at.x + pressed.x * scale, at.y + pressed.y * scale,
+      pressed.w * scale, pressed.h * scale,
+    );
+  }
 }
 
 window.tn3270.onAtlas((message) => {
   atlas = message;
   blank = new Set(message.blank);
-  if (last !== undefined) paint(last);
+  // This repaint also PAINTS OVER an error message, so the click guard lifts with it -- inside the
+  // `if`, because with no frame yet there is nothing to paint and the message stays up.
+  if (last !== undefined) { errored = false; paint(last); }
 });
 
-window.tn3270.onFrame(paint);
+// A frame means the session is drawing again, so whatever `onError` put up is both gone and stale.
+window.tn3270.onFrame((list) => { errored = false; paint(list); });
 
 window.tn3270.onError((message) => {
   // Failures must be VISIBLE: someone who double-clicked a .app has no console. This is the
   // one place canvas text is used, deliberately -- an error message is our own chrome, is
   // never compared against a golden, and must stay readable at any window size.
   if (canvas === null || real === null) return;
+  errored = true;
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   real.fillStyle = '#000';
@@ -169,7 +248,119 @@ window.addEventListener('keydown', (e) => {
   window.tn3270.sendAction(action);
 });
 
+/**
+ * A click on a keypad button.
+ *
+ * THE INVERSE OF THE DRAWING ARITHMETIC: the draw list is in scale-1 pixels and `paint` multiplies
+ * by `scale` and adds the centring offset, so a click subtracts that offset and divides by the
+ * scale. Getting it backwards puts the hit some multiple of the scale away from the finger, and at
+ * scale 1 it would look correct -- which is why `browser-shot.mjs` runs at a size where the scale is
+ * 1 and the click harness must not.
+ *
+ * `mousedown`, not `click`: the press highlight should appear under the finger, and a `click` only
+ * arrives after release.
+ *
+ * `offsetX`/`offsetY` and NOT `clientX - getBoundingClientRect().left`, and the reason is NOT that
+ * one is element-relative and the other is not: it is that `offsetX` and `at` are measured from the
+ * SAME ORIGIN, the canvas's own box, so the expression has NO SCROLL TERM AT ALL to get wrong. The
+ * web page really does scroll -- `paint` sizes the canvas to the drawing and
+ * `web/static/index.html:10` is `overflow:auto` -- and the rect form would reach the same number
+ * only because the rect moves with the scroll.
+ *
+ * Two things a reader will suspect, neither of which is a problem here. `devicePixelRatio`: the
+ * backing store and the CSS box are 1:1 at any dpr, because `paint` assigns `canvas.width` from
+ * `window.innerWidth`, which is already CSS pixels. A CSS `width`/`height` on the canvas WOULD break
+ * this -- `offsetX` would be in CSS pixels of a stretched box and would need a
+ * `canvas.width / rect.width` factor, as would the rect form -- and both pages style the canvas
+ * `display:block` and nothing else. A `transform: scale()` is NOT that case: `offsetX` stays in the
+ * element's own untransformed space, where the rect form does not, so there it is the better API
+ * rather than an equally wrong one.
+ *
+ * Primary button only. `mousedown` fires for the right and middle buttons too, and a keypad that
+ * sent `clear` or a PF key to a live host on a right-click -- while the context menu opened over
+ * it -- would be a misfire the operator never asked for.
+ */
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  // Read the module state ONCE: everything below must agree about which frame was clicked.
+  const list = last;
+  if (errored || list?.keypad === undefined) return;
+  const within = { width: window.innerWidth, height: window.innerHeight };
+  const scale = bestScale(list, within);
+  // The arithmetic is `hitTestAt`'s, not this file's, and DELIBERATELY: nothing can execute a line
+  // of this module (`index.ts:8-10`), so the inverse lives where `keypad.test.ts` can mutate it.
+  const button = hitTestAt(
+    list.keypad.buttons, e.offsetX, e.offsetY, centre(list, within, scale), scale,
+  );
+  if (button === undefined) return;           // a gap, or the screen: not ours
+  pressed = button;
+  paint(list);                                // draw the highlight immediately
+  window.tn3270.sendAction(button.action);
+});
+
+/**
+ * Drop the press highlight.
+ *
+ * `mouseup` ON THE WINDOW covers a release outside the button, and outside the window too: Chromium
+ * takes native mouse capture on `mousedown`, so the release is still delivered here. `blur` covers
+ * what capture cannot -- focus lost while the button is held, by Alt+Tab, an X grab or a lock screen,
+ * or a native context menu opening over it. Damage either way is highlight-only, since `pressed` is
+ * never read on the action path, but it would persist INDEFINITELY: `paint` redraws the highlight on
+ * every later frame.
+ */
+function release(): void {
+  if (pressed === undefined) return;
+  pressed = undefined;
+  if (last !== undefined) paint(last);
+}
+
+window.addEventListener('mouseup', release);
+window.addEventListener('blur', release);
+
 window.addEventListener('resize', () => { if (last !== undefined) paint(last); });
+
+/**
+ * TEST SEAM, and the only thing in this file that exists for a test.
+ *
+ * Returns the CENTRE of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
+ * without knowing the layout, the scale or the offset. Returning COORDINATES rather than firing the
+ * action is what keeps the seam honest: the click still goes in through Chromium's input pipeline,
+ * so `mousedown`, the primary-button guard, `hitTestAt`, `sendAction` and the IPC hop are all still
+ * under test. A seam that called `sendAction` here would skip exactly the plumbing that has never
+ * run in a test.
+ *
+ * NOT A FIFTH BRIDGE FUNCTION. `bridgecore.ts` says a fifth function in the bridge means the
+ * renderer has stopped being shared between Electron and the browser; this is a `window` global,
+ * which both hosts get for free because both load this file, and neither has to implement it.
+ *
+ * VIEWPORT pixels only because both pages put the canvas box at the viewport origin -- `margin:0`
+ * on `html,body` and `display:block` on the canvas, in `gui/index.html` and
+ * `web/static/index.html`. The arithmetic below is the canvas's own space, the same space `paint`
+ * draws in and `mousedown` reads `offsetX` in; a body margin, or a scrolled `overflow:auto` page,
+ * would put a term between the two that only the caller could add.
+ *
+ * `null` FOR BOTH "no keypad" AND "no such label", deliberately not distinguished: main reports it
+ * as `NO BUTTON`, and both causes are a mistake in the CALLER -- clicking before showing the keypad,
+ * or naming a key that is not in the table -- rather than a failure of the path under test. Note it
+ * does NOT consult `errored`: this answers where the button IS, and whether a click on it is
+ * refused while an error message is up is behaviour for the click path to decide.
+ */
+(window as unknown as { __tn3270ButtonCentre: (label: string) => { x: number; y: number } | null })
+  .__tn3270ButtonCentre = (label) => {
+    // Read the module state ONCE, as the `mousedown` listener does: the scale, the offset and the
+    // button must all come from the same frame.
+    const list = last;
+    if (list?.keypad === undefined) return null;
+    const button = list.keypad.buttons.find((b) => b.label === label);
+    if (button === undefined) return null;
+    const within = { width: window.innerWidth, height: window.innerHeight };
+    const scale = bestScale(list, within);
+    const at = centre(list, within, scale);
+    return {
+      x: at.x + (button.x + button.w / 2) * scale,
+      y: at.y + (button.y + button.h / 2) * scale,
+    };
+  };
 
 /** Break a message at word boundaries so an error is readable rather than clipped. */
 function wrap(text: string, cols: number): string[] {

@@ -16,7 +16,11 @@
  * it.
  */
 export { drawList } from './drawlist.js';
-export type { AtlasGeometry, DrawCell, DrawList } from './drawlist.js';
+export type { DrawList } from './drawlist.js';
+// The two shapes every drawing module here shares, from the LEAF module that declares them. They
+// were `drawlist.ts`'s, and consumers outside this package are unaffected by the move: they take
+// them from this barrel, which is the only import path `packages/gui` and `packages/web` use.
+export type { AtlasGeometry, DrawCell } from './geometry.js';
 export { blit, blankColumns, bestScale, centre, rgbCss, tintKey } from './blit.js';
 export type { Surface, Ctx2D, BlitOptions } from './blit.js';
 export { actionForKey } from './keys.js';
@@ -24,3 +28,11 @@ export type { KeyLike } from './keys.js';
 export { assetDir, readAtlas, BROWSER_MODULES } from './assets.js';
 export { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 export { parseBdf } from './bdf.js';
+// The virtual keypad's geometry: scale-1 pixels, so a consumer needs no cell arithmetic of its own.
+// `hitTest` is in its OWN module because a click is hit-tested IN THE BROWSER, and `keypad.js`
+// value-imports core, frontend and `drawlist.js` -- see hittest.ts on what importing it from there
+// does to the renderer's graph.
+export { keypadRegion, KEYPAD_ROWS_TALL } from './keypad.js';
+export type { KeypadRegion } from './keypad.js';
+export { hitTest, hitTestAt } from './hittest.js';
+export type { KeypadButton } from './hittest.js';
