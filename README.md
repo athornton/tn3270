@@ -125,8 +125,9 @@ responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3
 server, **not against a live host**. Neither Hercules system offers the option at all,
 and the one real host that does — public z/VM 4.4, probed 2026-09-17 — **offers it and
 then withdraws it** after our device-type request, so what has a live witness is the
-*offer* and our *fallback*, not a completed negotiation. See *TN3270E* and
-*Verification*.
+*offer* and our *fallback*, not a completed negotiation. **That withdrawal is the host's
+own non-conformance, not ours** — real s3270 was refused by it identically — but that
+exonerates the implementation rather than verifying it. See *TN3270E* and *Verification*.
 
 Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
 the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
@@ -159,7 +160,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1718 tests, 71 files
+npm test           # 1728 tests, 71 files
 npm run typecheck
 ```
 
@@ -470,6 +471,14 @@ Two things worth knowing:
   (§8.1.4). With RESPONSES agreed the counter advances, so that byte arrives after 255
   records — reachable in a long session, not theoretical.
 
+**One deliberate difference from s3270, still an open question (found 2026-09-17).**
+`-model 3278-2` makes us send the bare `IBM-3278-2` as the TN3270E DEVICE-TYPE. **s3270 sends
+`IBM-3278-2-E` there whatever the model** — it appends `-E` unless extended data stream is
+off or the `S:` prefix is used, so `-model` reaches only its TERMINAL-TYPE. RFC 2355 permits
+both, and `-model 3278-2` meaning "not extended" arguably makes the bare form the more honest
+one, so this is **recorded as a decision to make rather than a bug**; no host has been
+observed caring. With no `-model` flag both clients send `IBM-3278-2-E`.
+
 Design and every measurement:
 `docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`.
 
@@ -678,8 +687,9 @@ Done:
    item 2 deliberately: measurement shows TSO needs neither the option nor any of this,
    so bundling them would have delayed a working TSO session for no benefit. **Done
    except BIND/UNBIND, and it is the first stage with no live-host verification path** —
-   neither Hercules system offers the option, so it is checked against real s3270 and an
-   in-repo server instead. See *TN3270E*.
+   neither Hercules system offers the option, and the one public host that does withdraws
+   it (its own fault: real s3270 is refused too), so it is checked against real s3270 and
+   an in-repo server instead. See *TN3270E*.
 
 7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
    an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
@@ -789,12 +799,16 @@ worse than one that says which quarter is missing.
   `IAC DO TN3270E` unprompted and asks for our device type, then answers our well-formed
   request with `IAC DONT TN3270E`, identically with and without the `-E` suffix; we fell
   back to base TN3270 and reached its logon screen. **So the offer and our backoff have a
-  live witness and the negotiation does not**, and whose fault the refusal is is
-  unresolved — there is no s3270 on that machine to compare against, which is the
-  comparison this project's own rules demand. Bytes and next steps:
-  `docs/live-testing.md`, *TN3270E against a real host*. What is still missing within it:
-  **BIND/UNBIND** (we decline BIND-IMAGE by design) and **printer sessions**, whose
-  harness now exists.
+  live witness and the negotiation does not.** ~~And whose fault the refusal is is
+  unresolved — there is no s3270 on that machine to compare against.~~ **THE REFUSAL IS THE
+  HOST'S FAULT, settled 2026-09-17: s3270 4.5ga6 was built on that machine and refused
+  identically in all four recorded device-type variants, after sending a byte-identical request, and the host answers
+  with no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`.**
+  **That EXONERATES our client on that one exchange; it does NOT verify our TN3270E** — the
+  host abandons before FUNCTIONS for s3270 too, so FUNCTIONS, BIND and LU assignment remain
+  unwitnessed by any host. Bytes and next steps: `docs/live-testing.md`, *TN3270E against a
+  real host*. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
+  design) and **printer sessions**, whose harness now exists.
 - **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
   on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
   between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
@@ -880,7 +894,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1718 tests, 71 files |
+| `npm test` | **pass** — 1728 tests, 71 files (measured 2026-09-17; the ten `St.Dont` teardown tests had landed without these two counts being updated) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -900,7 +914,7 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
-| TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** The negotiation does **not** complete, so FUNCTIONS, responses and BIND are still untried against any host, and with no s3270 available for comparison we cannot say which side is wrong |
+| TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last

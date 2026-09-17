@@ -6,9 +6,18 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, 2026-09-17
 
+> **THIS SECTION IS TWO BRANCHES BEHIND — CORRECTED 2026-09-17, git facts only.** The keypad
+> **IS merged**: `189f4c3` *Merge keypad-and-special-keys* is on `main`, and `main` has since
+> taken `reconnect-on-enter` and `tn3270e-dont-teardown`, its head now `d1ec19d`. The count
+> below is stale too: **`npm test` is now 1728 tests in 71 files** (measured 2026-09-17 on
+> `zvm44-verdict`, exit 0), not 1692. Item 1's merge instruction is spent; read the rest of
+> this section as the keypad *record*, not as the next action. **Nothing else in this file was
+> re-verified against the tree for this correction** — only the merge state and the count.
+
 **THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
 MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
-typecheck clean, **1692 tests in 71 files**, `shot.mjs` **3/3 goldens matched**, `keys.mjs`
+typecheck clean, **1692 tests in 71 files** ~~current~~ (**superseded: 1728 in 71, see the note
+above**), `shot.mjs` **3/3 goldens matched**, `keys.mjs`
 **18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
 **13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
 
@@ -50,11 +59,16 @@ first reading.
 **THEN: `IBM-DYNAMIC`, which the user scheduled IMMEDIATELY AFTER THE KEYPAD on 2026-09-16**, then
 (4) Programmable Symbol Sets + VMGIF. `IBM-DYNAMIC` is the one remaining TN3270E item with a live
 path today: TK5's TSO issues a Read Partition to any `-E` client. **BIND/UNBIND** and **printer
-sessions** stay unscheduled and have no live path at all ~~, both hosts refusing option 40~~ —
+sessions** stay unscheduled and have no *live* path ~~at all, both hosts refusing option 40~~ —
 **no host that COMPLETES the negotiation is reachable; see the next paragraph, which changes
-what "no live path" means without yet removing the obstacle.**
+what "no live path" means without yet removing the obstacle.** ~~And no path at all.~~
+**CORRECTED 2026-09-17: "no live path" no longer means "no path". `playback -b` replays a
+recorded real host with no network, and the recording it ships INCLUDES A BIND** — so
+BIND/UNBIND has a host-free verification path today, described two paragraphs down. Only the
+printer session still wants a host.
 
-**A REAL TN3270E-CAPABLE HOST NOW EXISTS, 2026-09-17, AND IT ONLY HALF WORKS.** The user
+**A REAL TN3270E-CAPABLE HOST NOW EXISTS, 2026-09-17, IT ONLY HALF WORKS, AND THE HALF THAT
+FAILS IS ITS OWN FAULT — measured, not assumed.** The user
 obtained access to public z/VM 4.4 at `evievm.pubvm.org:23` (**plaintext, so `-insecure` is
 required — without it the client HANGS**) and the committed probe was run, no logon attempted.
 **It sends `IAC DO TN3270E` unprompted and asks `SEND DEVICE-TYPE` itself** — both firsts here,
@@ -73,14 +87,78 @@ identical hole, and a mid-session `DONT` closes no connection so `handleClose()`
 teardowns are now single functions (`TelnetLayer.disableTn3270e`, `Session.forgetTn3270e`) reached
 by every path, and the arm has ten tests. The live run was clean only because the flag was still
 false when the `DONT` arrived. But the negotiation does not complete and **TN3270E
-remains functionally unverified against a host**. Whose fault the refusal is is **unresolved**: there is no s3270 on this box and
-no compiler to build one, so the known-good comparison this project's discipline demands could
-not be run. **NEXT STEP, and it is cheap:** get an LU name from whoever runs that system and try
-`Connect("LUNAME@evievm.pubvm.org:23")`, which is the one test that distinguishes "the host wants
-a `CONNECT` clause" from "the option is advertised but not functional"; failing that, an
-s3270/x3270 trace of that host from any machine that has one. Bytes, both candidate explanations
-and the four questions with a status each: `docs/live-testing.md`, *TN3270E against a real host*;
-recorded against the design in the spec's *Live host, 2026-09-17*.
+remains functionally unverified against a host**.
+
+**AND WHOSE FAULT THE REFUSAL IS IS NOW SETTLED, LATER THE SAME DAY: IT IS THE HOST'S, AND OUR
+CLIENT IS EXONERATED.** ~~There is no s3270 on this box and no compiler to build one, so the
+known-good comparison this project's discipline demands could not be run. NEXT STEP: get an LU
+name and try `Connect("LUNAME@evievm.pubvm.org:23")`; failing that, an s3270/x3270 trace of that
+host from any machine that has one.~~ **BOTH PREMISES OF THAT WERE FALSE AND THE CONCLUSION
+INVERTS — do not repeat the reasoning.** `which cc gcc` found nothing only because the LSST
+stack's conda environment is not on `PATH`; **`source /opt/lsst/software/stack/loadLSST.bash`
+puts gcc 14.4.0 (conda-forge) and GNU Make 4.4.1 there** (this box is an RSP notebook container
+and `/opt/lsst` is the stack — **source the script, never paste the raw path, which contains
+`lsst-scipipe-13.1.0-exact` and rots at the next stack upgrade**). suite3270 4.5 in
+`/home/a/athor/src/suite3270-4.5` was already configured (`--disable-x3270 --disable-x3270if`),
+and **`make s3270` took 23 SECONDS, exit 0, TLS included, zero extra flags and zero
+workarounds** — `s3270 v4.5ga6`, OpenSSL 3.6.4, at
+`obj/x86_64-conda-linux-gnu/s3270/s3270`. `make playback` built too. So the comparison ran:
+
+- **The two DEVICE-TYPE requests are BYTE-IDENTICAL** —
+  `fffa28020749424d2d333237382d322d45fff0`, 19 bytes each — and the host's `SEND DEVICE-TYPE`
+  and its `DONT` were identical to each. s3270 logged `Aborting TN3270E: negotiated off`.
+- **FOUR s3270 device-type variants, all refused**: `IBM-3278-2-E`, `IBM-3278-2-E CONNECT VTAM`,
+  `IBM-DYNAMIC`, `IBM-3278-4-E`. **The CONNECT-clause hypothesis is DEAD** — the LU test above
+  is no longer diagnostic, so do not spend the favour asking for an LU name for that reason.
+- **The decisive argument is conformance:** RFC 2355 §7.1.5 requires an unacceptable device type to
+  draw a TN3270E `DEVICE-TYPE REJECT` with a reason code. **This host sends no TN3270E
+  subnegotiation at all** — not `IS`, not `REJECT` — and withdraws at the *telnet* layer. That
+  is an option advertised with no working implementation behind it.
+- **EXONERATED IS NOT VERIFIED, and this host can never verify it.** It abandons before
+  FUNCTIONS for s3270 as well as for us, so no `FUNCTIONS REQUEST`, no BIND and no LU name has
+  ever been observed from any host. Probe questions 1-3 stay open.
+
+**NEXT STEP, AND IT IS NOT ANOTHER HOST — USE `playback -b`.** It is the project's new
+reference oracle and it is **strictly stronger than the in-repo `e-server.py`**: it replays a
+**recorded real host** and asserts the client's replies match byte for byte, **with no network
+and no host at all**, whereas `e-server.py` was written by us from the RFC and x3270's source
+and so can only check what we thought to encode. And `s3270/Test/devname_success.trc` is a
+**complete TN3270E negotiation including a real BIND** (`PLU-name 'IBM0SMAJ'`), FUNCTIONS and
+all — precisely the region questions 1-3 cover:
+
+```bash
+source /opt/lsst/software/stack/loadLSST.bash
+cd /home/a/athor/src/suite3270-4.5
+obj/x86_64-conda-linux-gnu/playback/playback -b -p 8021 s3270/Test/devname_success.trc &
+obj/x86_64-conda-linux-gnu/s3270/s3270 -devname 'foo===' -model 3278-4-E 127.0.0.1:8021
+```
+
+That is exactly how the fresh binary was validated before the live comparison was trusted —
+**a silently broken build would have produced a false "the host refuses s3270 too"**, the one
+failure mode that looks identical to success. It logged `Matched N bytes from emulator`
+throughout. **Pointing it at OUR client is the cheapest remaining path to functional TN3270E
+verification and should be tried before hunting for another host.** Two known divergences must
+be accounted for first or a mismatch will be misread: BIND-IMAGE, which we decline by design,
+and the bare DEVICE-TYPE below.
+
+**A REAL DIVERGENCE FROM s3270, RECORDED AND NOT FIXED — it is the user's decision.**
+**s3270 appends `-E` to the TN3270E DEVICE-TYPE regardless of model; we do not.**
+`tn3270e_request()` calls `create_3270_termtype(true)` (`Common/telnet.c:2121-2122`), which
+appends `-E` unless extended data stream is off or the `S:` prefix set `STD_DS_HOST`
+(`Common/telnet.c:2106`) — the `-model` suffix reaches only TERMINAL-TYPE. Ours sends
+`st.terminalType` verbatim (`packages/core/src/tn3270e.ts:188-194`, the string at `:191`; the
+value from `packages/core/src/session.ts:543`). **So under `-model 3278-2` s3270 sends
+`IBM-3278-2-E` and we send the bare `IBM-3278-2`.** Two consequences: (1) it **weakened**
+yesterday's "the `-E` suffix is not the trigger" test, which varied our request against a form
+no known-good client sends — the conclusion holds only because s3270's `-E` form was refused
+too; (2) RFC 2355 permits both forms and `-model 3278-2` meaning "not extended" arguably makes
+the bare form more honest, so **decide it deliberately rather than aligning with s3270 by
+reflex. No code was changed.** Also for whoever next touches LU plumbing: **s3270 appends the
+LU to TERMINAL-TYPE too** — `IBM-3278-2-E@VTAM` (`Common/telnet.c:2019-2024`).
+
+Bytes, the variant table, the toolchain recipe and the four questions with a status each:
+`docs/live-testing.md`, *TN3270E against a real host*; recorded against the design in the
+spec's *Live host, 2026-09-17* and as testing layer 2b.
 
 ### WHAT THE KEYPAD BRANCH DELIVERED
 
@@ -510,6 +588,16 @@ it sends `SEND DEVICE-TYPE` itself, and that our backoff reaches a usable sessio
 Whether a host sends `FUNCTIONS REQUEST` first is still the largest branch no server has
 ever exercised.
 
+**AND THE REFUSAL IS DIAGNOSED, 2026-09-17: THE HOST'S FAULT.** s3270 4.5ga6 was built on this
+box — the compiler was always here, behind `source /opt/lsst/software/stack/loadLSST.bash` —
+and refused identically in all four recorded device-type variants after sending a byte-identical request; the host
+answers with no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE
+REJECT`. **So the qualifier changes shape but does not lift: our client is EXONERATED on that
+exchange and still NOT functionally verified.** Never quote the first half without the second.
+**The oracle that can lift it is `playback -b`, not a host** — details in *Where things stand*
+above. Two known divergences from s3270 to account for before reading any mismatch as a bug:
+BIND-IMAGE, declined by design, and the bare DEVICE-TYPE under `-model`.
+
 `packages/cli/scripts/drive-e.py` is the committed driver: seven configurations,
 asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST` is
 byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
@@ -748,15 +836,21 @@ the 3279 screen directly.
      and is no longer true of this box. z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO
      TN3270E` unprompted and asks `SEND DEVICE-TYPE`, then withdraws the option after our
      request — so option 40 CAN be reached from here; a COMPLETED negotiation still cannot,
-     and the reason is unresolved.** So
+     and the reason is ~~unresolved~~ **the host's own non-conformance, settled later that
+     same day by building s3270 here and being refused identically — see *Where things
+     stand*.** So
      what item 1 lacks is a live witness, not an implementation: the negotiation is verified
      against real s3270 4.5ga6 and the in-repo `e-server.py`. Quote that qualification every
      time — **the 2026-09-17 run does not lift it; it witnesses the OFFER and the BACKOFF,
-     not the negotiation.** The genuinely unbuilt parts that a real host would unlock:
+     not the negotiation, and "the host's fault" is an exoneration rather than a
+     verification.** The genuinely unbuilt parts that a real host would unlock:
      BIND-IMAGE with a real
      BIND (deliberately not requested — granting it and sending no BIND stops s3270 entering
      3270 mode at all), the printer session, and LU/device names actually being honoured —
-     and an LU name is now also the **diagnostic** for why z/VM 4.4 refuses.
+     ~~and an LU name is now also the **diagnostic** for why z/VM 4.4 refuses.~~ **THAT LAST
+     CLAUSE IS DEAD: s3270 sent `IBM-3278-2-E CONNECT VTAM` to this host and was refused too,
+     so an LU name diagnoses nothing here.** And BIND no longer needs a host at all —
+     `playback -b`'s recording contains one.
    - **`IBM-DYNAMIC` is NOT blocked in the same way.** Its client-side prerequisite is Read
      Partition (Query) / Query Reply, and **MVS 3.8j TK5's TSO issues one** — captured
      2026-08-17 in `packages/fixtures/x3270/tso-query-reply.txt`, with ttype `IBM-3278-2-E`
@@ -952,11 +1046,29 @@ a symptom.
 
 ## Environment facts that took effort to establish
 
-- **No compiler, no X, no root on this box.** A userspace GUI toolchain was built
+- ~~**No compiler**~~, **no X, no root on this box.** A userspace GUI toolchain was built
   with a static micromamba into `~/micromamba/envs/gui` (Chromium/Electron libs,
   gtk3, libcups, fontconfig + fonts, Xvfb). **Re-verified 2026-08-28 on Electron 44.0.0
   with `--no-sandbox --disable-gpu`** — see *Where things stand*. Real Electron renders and
   screenshots under Xvfb. Invocation is in the spec's *Development Environment*.
+- **THERE IS A C COMPILER. `which cc gcc` FINDING NOTHING DOES NOT MEAN THERE ISN'T ONE**
+  — corrected 2026-09-17, after the "no compiler" clause above cost a day and produced a
+  wrong verdict in three documents. This box is an RSP notebook container and the toolchain
+  lives in the LSST stack's conda environment, which is not on `PATH` until loaded:
+
+  ```bash
+  source /opt/lsst/software/stack/loadLSST.bash   # gcc 14.4.0 (conda-forge), GNU Make 4.4.1
+  ```
+
+  **Source that script; never paste the expanded `PATH` entry**, which contains
+  `lsst-scipipe-13.1.0-exact` and rots at the next stack upgrade. With it loaded,
+  `make s3270` in the already-configured suite3270 tree takes **23 seconds, exit 0, TLS
+  included, no extra flags**. `make playback` likewise.
+
+  **The false claim was refutable from THIS FILE.** The next bullet has recorded an s3270
+  binary built here since 2026-08-17 — the same day the "no compiler" clause was written, in
+  the same document. A stated environment limit was never re-tested against the evidence
+  sitting one bullet below it.
 - **s3270 4.5ga6** at
   `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270`. Use
   `-model 3278-2`. By default it advertises the `-E` (extended data stream) ttype
@@ -971,6 +1083,26 @@ a symptom.
     together as `SC:...` is a syntax error (`double ':'`) — tested.
   None of these turn on the TN3270E telnet option (40); check for `fffb28`/`fffd28`
   in the trace if you need to know whether TN3270E was actually negotiated.
+
+  **AND THE `-model` SUFFIX DOES NOT REACH THE TN3270E DEVICE-TYPE — added 2026-09-17.**
+  `-model 3278-2` gives s3270 a bare `IBM-3278-2` TERMINAL-TYPE but it still sends
+  `IBM-3278-2-E` as its DEVICE-TYPE: `tn3270e_request()` calls `create_3270_termtype(true)`
+  (`Common/telnet.c:2121-2122`), which appends `-E` unless extended data stream is off or
+  `S:` set `STD_DS_HOST` (`Common/telnet.c:2106`). **We send the bare form there; s3270 never
+  does.** So `-model` is NOT a way to compare device types, and only `S:` or `-tn3270e off`
+  moves that field. An open conformance decision, not a bug — see *Where things stand*.
+  Note also **s3270 appends the LU to TERMINAL-TYPE**, `IBM-3278-2-E@VTAM`
+  (`Common/telnet.c:2019-2024`), not only to DEVICE-TYPE.
+- **`playback` 4.5, built 2026-09-17, at
+  `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/playback/playback` — THE PROJECT'S NEW
+  REFERENCE ORACLE.** `playback -b -p PORT file.trc` replays a recorded host **and asserts
+  the client's replies match the recording byte for byte** (`Matched N bytes from emulator`),
+  needing **no network and no live host**. `usage: playback [-b] [-w] [-p [address:]port]
+  file`. Recordings ship in the suite; `s3270/Test/devname_success.trc` is a **complete
+  TN3270E negotiation including a real BIND** (`PLU-name 'IBM0SMAJ'`). **Prefer it to the
+  in-repo `e-server.py`**, which we wrote ourselves and which can only check what we thought
+  to encode. Use it to validate any freshly built s3270 before trusting a comparison — a
+  broken build looks exactly like a hostile host.
 - **Reference sources on disk.** `~/3270/ref/ga23-0059-07.pdf` plus `pages.txt`
   (greppable extracted text; Appendix F is the hex index). x3270 source at
   `~/src/suite3270-4.5/Common/`. Source for **`zti`** — the client the user actually
@@ -1041,6 +1173,20 @@ a symptom.
     s3270 was built locally the whole time. Every wrong turn today would have been
     caught in minutes by reading its successful exchange rather than reasoning about
     what a host "must" want.
+12. **A STATED ENVIRONMENT LIMIT IS A CLAIM, AND IT DECAYS — RE-TEST IT BEFORE BUILDING A
+    CONCLUSION ON IT (2026-09-17).** "There is no s3270 binary on this box and no compiler
+    to build one" was written into `docs/live-testing.md`, the stage 2b spec and this file,
+    and used to reason that we could not tell whether z/VM 4.4's TN3270E refusal was our
+    fault — **explicitly recorded as cutting against us**. Both halves were false. The
+    compiler was behind `source /opt/lsst/software/stack/loadLSST.bash`, and `make s3270`
+    took 23 seconds. **The refutation was already in this file, in two places**: the
+    environment bullet giving the path of an s3270 built here on 2026-08-17, and lesson 11
+    above saying in as many words that "s3270 was built locally the whole time". The real
+    verdict is the opposite of the one recorded: **the host is at fault and our client is
+    exonerated.** Two habits, both cheap: when `which X` fails on a box with a scientific
+    software stack, look for the stack's activation script before concluding X is absent;
+    and when a conclusion rests on "we cannot do Y here", grep the handoff for Y before
+    accepting it.
 
 ## Bug tally, for calibration
 
