@@ -58,7 +58,62 @@ within limits; gating 3270 data until bound, with the recovering timeout.
 
 **Out, deliberately:** oversize and `IBM-DYNAMIC` (the next feature — and the range-check is
 what keeps this one from silently becoming it, since growing past `-model` is precisely
-`IBM-DYNAMIC`'s job); the printer session; SNA responses beyond what already exists.
+oversize's job); the printer session; SNA responses beyond what already exists.
+
+### What `IBM-DYNAMIC` is and is not — measured 2026-09-17, so the next session need not re-derive it
+
+Two user questions forced this into the source, and both answers change how the next feature
+should be framed.
+
+**`IBM-DYNAMIC` does NOT give a host a way to resize a session on the fly.** It is sent on
+exactly one condition, and that condition is settled at startup:
+
+```c
+/* Common/telnet.c:2100-2101 */
+if (ov_rows || ov_cols)
+    ret = NewString("IBM-DYNAMIC");
+```
+
+That is the **only** occurrence of the string in the whole of `Common/*.c` and `include/*.h`.
+It is purely the terminal-type name advertised when oversize is configured, and it carries no
+mechanism of its own. The real host-driven geometry channels remain the two already known:
+**Query Reply** (the host asks, we answer) and **BIND** (the host dictates, within limits) —
+this spec's subject.
+
+x3270 does support changing model and oversize at run time, but that is **local, not
+host-driven**: `Common/model.c` exists for it and is wired to
+`register_extended_toggle(ResModel, ...)` with `pending_model`/`pending_oversize` reconciled
+before `screen_change_model()`. That is a preferences dialog, not the protocol. It is a
+plausible future feature for us (a GUI model switcher) and it is **unrelated to
+`IBM-DYNAMIC`**.
+
+So `IBM-DYNAMIC` means "my geometry is not a standard model, ask me via Query Reply" — which
+is why it is close to a no-op on its own, given we already answer Read Partition with real
+default and alternate geometry (`queryreply.ts:305`).
+
+**The oversize maximum is NOT 160x62, and the binding constraint is the CELL PRODUCT, not
+either dimension** (`ctlr.c:257-273`):
+
+```c
+ovc > MAX_ROWS_COLS || ovr > MAX_ROWS_COLS || ovc * ovr > MAX_ROWS_COLS
+```
+
+`MAX_ROWS_COLS = 0x3fff` = 16383, which is 14-bit buffer addressing — exactly what
+`address.ts` already handles. **160x62 is 9920 cells, comfortably inside it**, so it is one
+valid oversize among many rather than a ceiling: x3270 accepts 200x80 (16000) and refuses
+200x82 (16400). The 3290's own native geometry is **unverified** — the IBM manual in
+`~/3270/ref/pages.txt` mentions the 3290 only twice, a bibliography entry (GA23-0021, which we
+do not have) and a Query Reply (Color) column, neither giving dimensions. It does not matter
+for the implementation, since the limit is the product.
+
+There is also a **lower** bound, and it mirrors this spec's BIND range-check: oversize may not
+be smaller than the model in either dimension (`ovc < mxc`, `ovr < mxr`). **Oversize only ever
+grows.**
+
+**Consequence for the next feature:** the substance is entirely in **oversize** — building a
+bigger buffer, honouring the product limit, and the front-end consequences (a 100x50 window; a
+TUI that refuses at 50 rows). The advertisement is a by-product. So the next spec should be
+*"oversize, which advertises `IBM-DYNAMIC`"*, not *"`IBM-DYNAMIC`, which needs oversize"*.
 
 ## A naming trap, pinned before it bites
 
