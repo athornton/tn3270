@@ -245,9 +245,12 @@ export class Runner {
         if (args.length !== 0) throw new Error('FieldMark() requires 0 arguments');
         if (!k.fieldMark()) throw new Error(`FieldMark(): input inhibited (${s.oia.toText()})`);
         return;
-      // No refusal to report: `Session.sysreq()` returns void and is deliberately silent when
-      // the TN3270E function was not negotiated (session.ts), the key existing on the keyboard
-      // whatever the host granted.
+      // No refusal to report, UNLIKE `Dup`/`FieldMark` above: `Session.sysreq()` returns void
+      // and is deliberately silent on every refusal -- not connected, TN3270E negotiated
+      // without the SYSREQ function, or an inhibited keyboard on a classic session (see that
+      // method). The key exists on the keyboard whatever the host granted, so there is no
+      // boolean to test and nothing to report. What it DOES send depends on the session: IAC
+      // AO under TN3270E, a test request read (SOH `%` `/` STX) on a classic one.
       case 'SysReq':
         if (args.length !== 0) throw new Error('SysReq() requires 0 arguments');
         s.sysreq();

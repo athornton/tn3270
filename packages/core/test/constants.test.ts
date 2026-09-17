@@ -6,6 +6,7 @@ import {
   PF_AIDS, PA_AIDS, pfAID, paAID, VALID_AIDS,
   Sfid, PID_QUERY, ReadPartitionType, ReqTyp, REQTYP_MASK, Qcode, XA_3270,
   XA, XAH, XAC_DEFAULT,
+  EBCDIC_SOH, EBCDIC_PERCENT, EBCDIC_SLASH, EBCDIC_STX,
 } from '../src/constants.js';
 
 describe('telnet constants', () => {
@@ -98,6 +99,30 @@ describe('AID constants', () => {
     expect(isShortReadAID(AID.ENTER)).toBe(false);
     expect(isShortReadAID(AID.PF1)).toBe(false);
     expect(isShortReadAID(AID.SELECT)).toBe(false);
+  });
+
+  it('does not treat SYSREQ as a short read', () => {
+    // If it did, `buildReadModified` would return a bare 0xf0 instead of the test request
+    // heading — the one byte this key must never put on the wire.
+    expect(isShortReadAID(AID.SYSREQ)).toBe(false);
+  });
+});
+
+describe('test request read heading', () => {
+  it('matches x3270 3270ds.h:356-357,373,375', () => {
+    // `EBC_soh 0x01`, `EBC_stx 0x02`, `EBC_slash 0x61`, `EBC_percent 0x6c`. Read from the
+    // header rather than inferred from a code page table: the manual gives the graphics
+    // (SOH, %, /, STX; pages.txt:13780-13785) and x3270 gives the bytes.
+    expect(EBCDIC_SOH).toBe(0x01);
+    expect(EBCDIC_PERCENT).toBe(0x6c);
+    expect(EBCDIC_SLASH).toBe(0x61);
+    expect(EBCDIC_STX).toBe(0x02);
+  });
+
+  it('shares its second byte with AID.PA1, which is a coincidence and not a use', () => {
+    // Both 0x6c. Pinned so a reader decoding a capture — or an editor "deduplicating"
+    // constants — has the collision stated rather than discovered.
+    expect(EBCDIC_PERCENT).toBe(AID.PA1);
   });
 });
 

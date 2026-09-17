@@ -287,6 +287,113 @@ describe('sending AIDs', () => {
     expect(() => session.sendAID(AID.ENTER)).toThrow(/not connected/i);
   });
 
+  /**
+   * SYS REQ ON A CLASSIC SESSION, i.e. every session either of this project's live hosts
+   * will ever give us: VM/370 CE and MVS 3.8j TK5 both answer `IAC WILL TN3270E` with
+   * DONT (`ff fe 28`).
+   *
+   * The TN3270E form — Telnet IAC AO — is asserted separately in tn3270e-session.test.ts,
+   * on a session that negotiated the function. The two must not share a test: a single
+   * assertion loose enough to accept either would accept neither being right.
+   *
+   * Raw byte literals rather than the constants under test, for the reason given at the
+   * head of inbound.test.ts's test-request block.
+   */
+  describe('Sys Req on a classic session', () => {
+    /** Erase/Write, WCC 0xc3 (restore keyboard, reset MDT). Leaves the screen unformatted. */
+    function connected() {
+      const { session, conn } = newSession();
+      return session.connect('localhost', 3270).then(() => {
+        conn.negotiate();
+        conn.host(SnaCmd.EW, 0xc3, T.IAC, T.EOR);
+        conn.sent = [];
+        return { session, conn };
+      });
+    }
+
+    it('sends the four-byte test request heading and nothing else', async () => {
+      const { session, conn } = await connected();
+      session.sysreq();
+      expect(conn.sent).toEqual([0x01, 0x6c, 0x61, 0x02, T.IAC, T.EOR]);
+    });
+
+    it('sends the heading then the modified field data, with no AID and no cursor', async () => {
+      const { session, conn } = newSession();
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      conn.host(SnaCmd.EW, 0xc3, Order.SF, 0x00, T.IAC, T.EOR);
+      session.keyboard.moveCursor(1);
+      session.keyboard.type('X');
+      conn.sent = [];
+
+      session.sysreq();
+
+      expect(conn.sent).toEqual([
+        0x01, 0x6c, 0x61, 0x02, // SOH % / STX
+        Order.SBA, 0x40, 0xc1,  // the modified field's data starts at address 1
+        0xe7,                   // the 'X' the operator typed
+        T.IAC, T.EOR,
+      ]);
+    });
+
+    it('goes out as an ordinary inbound record, terminated by IAC EOR', async () => {
+      // NOT like Attn or the TN3270E Sys Req, both of which are bare Telnet commands with
+      // no EOR. A test request is 3270 data: it is what a Read Modified returns.
+      const { session, conn } = await connected();
+      session.sysreq();
+      expect(conn.sent.slice(-2)).toEqual([T.IAC, T.EOR]);
+    });
+
+    it('never sends AID 0xf0', async () => {
+      const { session, conn } = await connected();
+      session.sysreq();
+      expect(conn.sent).not.toContain(AID.SYSREQ);
+    });
+
+    it('locks the keyboard, as x3270 does for every key_AID', async () => {
+      // key_AID sets KL_OIA_TWAIT | KL_OIA_LOCKED before calling ctlr_read_modified
+      // (kybd.c:918-923), and SysReq_action reaches ctlr_read_modified through key_AID on
+      // a non-E session (kybd.c:2857). So the operator waits, exactly as after Enter.
+      const { session, conn } = await connected();
+      session.sysreq();
+      expect(session.oia.waitingForHost).toBe(true);
+      expect(session.oia.toText()).toContain('X SYSTEM');
+      conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // keyboard restore
+      expect(session.oia.waitingForHost).toBe(false);
+    });
+
+    it('refuses, writing nothing, when the keyboard is inhibited', async () => {
+      // x3270 refuses outright on KL_OIA_MINUS and QUEUES on any other lock, via enq_ta
+      // (kybd.c:2858-2864). WE HAVE NO ACTION QUEUE, and inventing one for a single key
+      // would be a new mechanism nothing else in this codebase uses. Refusing is the
+      // honest analogue of both: the operator's press is declined rather than deferred,
+      // the OIA already says why, and nothing goes on the wire out of turn.
+      const { session, conn } = await connected();
+      session.oia.inhibit(KeyboardState.ProtectedField);
+      session.sysreq();
+      expect(conn.sent).toEqual([]);
+    });
+
+    it('refuses before the host\'s first write, when the connect-time lock is up', async () => {
+      // The realistic case: negotiation is done, the keyboard is AwaitingFirstWrite, and
+      // the operator hits Sys Req. Nothing should go out.
+      const { session, conn } = newSession();
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      conn.sent = [];
+      session.sysreq();
+      expect(conn.sent).toEqual([]);
+    });
+
+    it('is silent rather than throwing when not connected', async () => {
+      // Unlike sendAID, which throws. The key exists on the keyboard whatever the
+      // transport is doing, and the CLI's SysReq() reports no refusal (cli/src/runner.ts).
+      const { session, conn } = newSession();
+      expect(() => { session.sysreq(); }).not.toThrow();
+      expect(conn.sent).toEqual([]);
+    });
+  });
+
   describe('off', () => {
     /**
      * WHY A LISTENER MUST BE REMOVABLE, and it is a leak with teeth rather than tidiness.

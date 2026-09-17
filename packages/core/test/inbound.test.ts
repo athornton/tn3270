@@ -200,6 +200,91 @@ describe('all-protected screens (the Hercules connect-time banner)', () => {
   });
 });
 
+/**
+ * THE TEST REQUEST READ, which is what the Sys Req key produces on a classic session.
+ *
+ * The bytes below are written as raw numbers, NOT as the `EBCDIC_SOH`/`EBCDIC_PERCENT`/
+ * `EBCDIC_SLASH`/`EBCDIC_STX` constants the builder uses, deliberately: asserting a
+ * constant against itself would pass however wrong the constant is. They come from
+ * x3270's `include/3270ds.h:356-357,373,375` — `EBC_soh 0x01`, `EBC_stx 0x02`,
+ * `EBC_slash 0x61`, `EBC_percent 0x6c`.
+ *
+ * NOTE 0x6c IS ALSO `AID.PA1`. In a wire dump the two are indistinguishable; here it is
+ * the EBCDIC graphic `%`, the second byte of the heading, and nothing to do with PA1.
+ */
+describe('the test request read (Sys Req / Test Req)', () => {
+  it('sends SOH % / STX then the modified field data, with NO AID and NO cursor address', () => {
+    // GA23-0059-07 (pages.txt:13776-13795): the heading, then "the same as described
+    // previously for read-modified operations, excluding the 3-byte read heading (AID
+    // and cursor address)". x3270's ctlr_read_modified writes the four bytes and
+    // `break`s out of the AID switch (ctlr.c:770-777) — the break leaves the SWITCH,
+    // not the function, so the field scan below it still runs.
+    const s = screenWithModifiedField();
+    const out = buildReadModified(s, AID.SYSREQ, false);
+    expect(Array.from(out)).toEqual([
+      0x01, 0x6c, 0x61, 0x02, // SOH % / STX
+      Order.SBA, 0x40, 0xc1,  // the modified field, whose data starts at address 1
+      0xc1, 0xc2,             // "AB"
+    ]);
+  });
+
+  it('never puts AID 0xf0 on the wire, even though the AID exists', () => {
+    // `AID.SYSREQ` is a real architected AID byte — GA23-0059-07 Table 3-4 lists
+    // "Test Req and Sys Req  F0" (pages.txt:2017) — and it is what selects this branch.
+    // It is still never TRANSMITTED for this key. This is the counterintuitive part.
+    const out = buildReadModified(screenWithModifiedField(), AID.SYSREQ, false);
+    expect(Array.from(out)).not.toContain(AID.SYSREQ);
+    expect(out[0]).not.toBe(AID.SYSREQ);
+  });
+
+  it('sends the heading ALONE when no field has its MDT set', () => {
+    // "If no MDT bits are set, the read data stream consists of the Test Request Read
+    // heading only" (pages.txt:13793-13794).
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setChar(1, 0xc1); // typed by the host, not the operator: MDT stays clear
+    expect(Array.from(buildReadModified(s, AID.SYSREQ, false))).toEqual([0x01, 0x6c, 0x61, 0x02]);
+  });
+
+  it('sends every non-null byte after the heading on an unformatted screen', () => {
+    // "If the buffer is unformatted, all the alphanumeric data in the buffer is included
+    // in the data stream (nulls suppressed), starting at address 0" (pages.txt:13788-13790).
+    // Not a corner case: VM/370's logon screen is unformatted, and it is one of the two
+    // hosts this key will meet.
+    const s = new Screen();
+    s.setChar(0, 0xc1);
+    s.setChar(500, 0xc2);
+    const out = buildReadModified(s, AID.SYSREQ, false);
+    expect(Array.from(out)).toEqual([0x01, 0x6c, 0x61, 0x02, 0xc1, 0xc2]);
+    expect(Array.from(out)).not.toContain(Order.SBA);
+  });
+
+  it('sends the heading alone on an empty screen — no cursor address leaks in', () => {
+    // The regression this catches: an implementation that emitted the heading and then
+    // fell into the ordinary path's `encodeAddress(screen.cursor)` would send two extra
+    // bytes here, and on a NON-zero cursor they would not even look like padding.
+    const s = new Screen();
+    s.cursor = 3;
+    expect(Array.from(buildReadModified(s, AID.SYSREQ, false))).toEqual([0x01, 0x6c, 0x61, 0x02]);
+  });
+
+  it('appends no ETX, because this is not BSC', () => {
+    // The manual's BSC form ends in ETX (pages.txt:13780-13785); the non-SNA form is
+    // "the same as for the BSC environment, except there is no ETX"
+    // (pages.txt:14180-14184). ETX is EBCDIC 0x03. x3270 emits none either.
+    const out = buildReadModified(screenWithModifiedField(), AID.SYSREQ, false);
+    expect(Array.from(out)).not.toContain(0x03);
+    expect(out.at(-1)).toBe(0xc2); // the last data byte, nothing after it
+  });
+
+  it('is not treated as a short read', () => {
+    // `isShortReadAID` covers Clear and PA1-3 only. If SYSREQ ever joined that set the
+    // heading would be replaced by a bare 0xf0, which is the one byte it must never be.
+    const out = buildReadModified(screenWithModifiedField(), AID.SYSREQ, false);
+    expect(out.length).toBeGreaterThan(4);
+  });
+});
+
 describe('Read Buffer', () => {
   it('returns AID, cursor, and the whole buffer with attributes in place', () => {
     const s = new Screen();

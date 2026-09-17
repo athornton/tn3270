@@ -74,22 +74,26 @@ export function applyAction(session: Session, action: Action): void {
       case 'eraseInput': k.eraseInput(); break;
       case 'attn': session.sendAttn(); break;
       // `Session.sysreq()` has existed since stage 2b with no front end able to call it;
-      // this case is what makes it reachable. It sends Telnet IAC AO, and is a no-op when the
-      // host did not negotiate the SYSREQ function.
+      // this case is what makes it reachable. TWO FORMS, and `Session.sysreq` picks: Telnet
+      // IAC AO on a TN3270E session that agreed the SYSREQ function, and a TEST REQUEST READ
+      // -- the four bytes SOH `%` `/` STX plus modified field data -- on a classic one. The
+      // classic form is what both of this project's live hosts get, since neither offers
+      // TN3270E. Refused silently either way; see that method for every refusal.
       //
-      // SYSREQ IS AN AID ARCHITECTURALLY -- 0xf0 (`constants.ts:477`, x3270 `3270ds.h:307`),
-      // and x3270 does send it with `key_AID` on a non-E session (`kybd.c:2857`). It is only
-      // THIS path that is not an AID send: `Session.sysreq` implements the TN3270E form.
+      // SYSREQ IS AN AID ARCHITECTURALLY -- `AID.SYSREQ` 0xf0 in `@tn3270/core`'s constants,
+      // x3270 `3270ds.h:307` -- and x3270 does route it through `key_AID` on a non-E session
+      // (`kybd.c:2864`). IT IS STILL NEVER THE BYTE ON THE WIRE FOR THIS KEY: the AID selects
+      // the heading and is then discarded. Cited by name, not line: `constants.ts` moves.
       case 'sysreq': session.sysreq(); break;
       // Typed CHARACTERS, not AIDs: they write one EBCDIC control byte into the buffer and
       // set MDT -- see the keyboard methods and kybd.c:2788,2825.
       //
       // What routing them through `sendAID` would ACTUALLY do, traced rather than assumed:
       // 0x1c and 0x1e are not in `AID`, `VALID_AIDS` is built from its values
-      // (`constants.ts:544`), and `sendAID` throws `RangeError` before it even checks for a
-      // connection (`session.ts:609-611`) -- which the `catch` below swallows. So the outcome
-      // is NOT a wrong byte on the wire but a key that does nothing at all, silently. Same
-      // class of defect, worse diagnosability.
+      // (`constants.ts`, by name: the line moves), and `sendAID` throws `RangeError` before it
+      // even checks for a connection (`session.ts:609-611`) -- which the `catch` below
+      // swallows. So the outcome is NOT a wrong byte on the wire but a key that does nothing
+      // at all, silently. Same class of defect, worse diagnosability.
       case 'dup': k.dup(); break;
       case 'fieldMark': k.fieldMark(); break;
       // Read-then-set rather than a stored flag: `Keyboard.insertMode` is the one truth and

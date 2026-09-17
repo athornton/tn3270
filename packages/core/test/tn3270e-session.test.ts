@@ -475,10 +475,17 @@ describe('TN3270E SYSREQ', () => {
   });
 
   it('sends nothing when SYSREQ was negotiated away', async () => {
-    // A deliberate no-op rather than an error: the key exists on the keyboard
-    // whatever the host granted, and pressing it on a session without the function
-    // is not the operator's mistake. Sending IAC AO anyway would put a command on
-    // the wire the host has no handler for.
+    // A deliberate no-op rather than an error: the key exists on the keyboard whatever
+    // the host granted, and pressing it on a session without the function is not the
+    // operator's mistake. Sending IAC AO anyway would put a command on the wire the host
+    // has no handler for.
+    //
+    // AND NOT THE TEST REQUEST EITHER, even though nothing else goes out. x3270 splits on
+    // `IN_E`, not on the function bit: an E session takes net_abort(), which then checks
+    // the bit itself and does nothing (telnet.c:3632-3648). The classic test request is
+    // reached only through the `else` branch (kybd.c:2853-2865). A host that negotiated
+    // TN3270E and declined SYSREQ has said what it wants; SOH % / STX is not a fallback
+    // it asked for.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
     conn.negotiateE([Tn3270eFunc.RESPONSES]);  // no SYSREQ
@@ -487,13 +494,35 @@ describe('TN3270E SYSREQ', () => {
     expect(conn.writes).toEqual([]);
   });
 
-  it('sends nothing on a classic session that never saw TN3270E', async () => {
+  it('sends the classic test request on a session that never saw TN3270E', async () => {
+    // THE PATH BOTH OF THIS PROJECT'S LIVE HOSTS TAKE: VM/370 CE and MVS 3.8j TK5 each
+    // answer `IAC WILL TN3270E` with DONT. x3270's `else` branch calls
+    // key_AID(AID_SYSREQ) (kybd.c:2864), and ctlr_read_modified turns that AID into the
+    // four-byte test request heading rather than transmitting it (ctlr.c:770-777).
+    //
+    // The host write is required, not decoration: it releases the connect-time keyboard
+    // lock, and Sys Req refuses on an inhibited keyboard. See session.test.ts.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
     conn.negotiateClassic();
+    conn.host(...WRITE_FIELD, T.IAC, T.EOR);
     conn.clear();
     session.sysreq();
-    expect(conn.writes).toEqual([]);
+    expect(conn.writes).toEqual([[0x01, 0x6c, 0x61, 0x02, T.IAC, T.EOR]]);
+  });
+
+  it('sends IAC AO and NOT the test request when the function was agreed', async () => {
+    // The strict separation: the E path must not have quietly become the classic path.
+    // Same call as the classic test above, different bytes, and neither assertion could
+    // pass against the other's session.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.host(...hdr(), ...WRITE_FIELD, T.IAC, T.EOR);
+    conn.clear();
+    session.sysreq();
+    expect(conn.writes).toEqual([[T.IAC, T.AO]]);
+    expect(conn.sent).not.toContain(0x6c);
   });
 
   it('does not disturb the outbound sequence counter', async () => {

@@ -148,11 +148,12 @@ describe('the keypad-era actions', () => {
   it('sysreq reaches Session.sysreq, which no front end could call before', () => {
     // `Session.sysreq()` has existed since stage 2b with nothing able to invoke it.
     //
-    // A spy rather than the wire because sysreq is a no-op unless TN3270E negotiated the
-    // SYSREQ function, so a wire assertion would mean replicating core's TN3270E negotiation
-    // here -- `core/test/tn3270e-session.test.ts:465` does assert `[[T.IAC, T.AO]]`, using a
-    // file-local `negotiateE()` helper that is not exported. It is reachable, in other words,
-    // just not cheaply; if that helper is ever shared, strengthen this.
+    // A spy rather than the wire because the BYTES depend on the session and belong to core,
+    // which asserts both forms separately: the TN3270E `[[T.IAC, T.AO]]` in
+    // `core/test/tn3270e-session.test.ts` ("TN3270E SYSREQ"), which needs that file's
+    // unexported `negotiateE()` helper, and the classic four-byte test request in
+    // `core/test/session.test.ts` ("Sys Req on a classic session"). Duplicating either here
+    // would only re-test core through a thinner harness. What this file owns is the dispatch.
     const { session } = newSession();
     const spy = vi.spyOn(session, 'sysreq');
     applyAction(session, { kind: 'sysreq' });
@@ -163,10 +164,10 @@ describe('the keypad-era actions', () => {
     // They are typed characters, and the `sendAID` assertion is the class of defect
     // pfAID/VALID_AIDS exist for. What a version that routed them through `sendAID` would
     // actually do is NOT a bogus byte on the wire, though: 0x1c/0x1e are not in `AID`,
-    // `VALID_AIDS` is built from its values (constants.ts:544), and `sendAID` throws
-    // `RangeError` before the connected check (session.ts:609-611), which `applyAction`
-    // swallows. The result is a silently dead key -- which is why the assertion is worth
-    // keeping and why the claim needed correcting.
+    // `VALID_AIDS` is built from its values (constants.ts, cited by name because the line
+    // moves), and `sendAID` throws `RangeError` before the connected check
+    // (session.ts:609-611), which `applyAction` swallows. The result is a silently dead key --
+    // which is why the assertion is worth keeping and why the claim needed correcting.
     //
     // EACH SPY IS ASSERTED BEFORE THE OTHER KEY IS PRESSED, and that ordering is the whole
     // test rather than a style choice. Written as two calls followed by two
@@ -352,9 +353,17 @@ const ROWS: readonly Row[] = [
   { action: { kind: 'eraseEOF' }, target: 'keyboard.eraseEOF', notCalled: ['keyboard.eraseInput'] },
   { action: { kind: 'eraseInput' }, target: 'keyboard.eraseInput', notCalled: ['keyboard.eraseEOF'] },
 
-  // THE SESSION-LEVEL KEYS, neither of which is an AID send on this path. Attn is a Telnet BREAK
-  // (RFC 1576 section 8); `Session.sysreq` is the TN3270E form and sends IAC AO. Each names the
-  // other, plus `sendAID` -- the mis-wiring the note in `actions.ts` traces.
+  // THE SESSION-LEVEL KEYS. Attn is a Telnet BREAK (RFC 1576 section 8). `Session.sysreq` is
+  // two things: IAC AO under TN3270E, and a test request read on a classic session. Each row
+  // names the other key, plus `sendAID` -- the mis-wiring the note in `actions.ts` traces.
+  //
+  // `sysreq`'s `session.sendAID` ABSENCE IS TRUE ONLY BECAUSE THIS TABLE RUNS DISCONNECTED, and
+  // saying so is the point: the classic path DOES go through `sendAID(AID.SYSREQ)` -- that is
+  // how it inherits x3270's key_AID keyboard lock -- and `Session.sysreq` returns at its
+  // not-connected guard before reaching it here. What this row pins is the DISPATCH, that
+  // `sysreq` reaches `sysreq` and not `sendAttn`. The bytes are core's business and are
+  // asserted there, separately per path: `core/test/session.test.ts` ("Sys Req on a classic
+  // session") and `core/test/tn3270e-session.test.ts` ("TN3270E SYSREQ").
   { action: { kind: 'attn' }, target: 'session.sendAttn',
     notCalled: ['session.sysreq', 'session.sendAID'] },
   { action: { kind: 'sysreq' }, target: 'session.sysreq',
