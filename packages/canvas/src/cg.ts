@@ -1,7 +1,9 @@
-// TYPE-ONLY, AND IT MUST STAY THAT WAY. `drawlist.js` imports this module at runtime, so a value
-// import here would close a cycle; `import type` erases, and `dist/cg.js` therefore has NO imports
-// at all. That is also what keeps this module usable from anywhere, the way `hittest.ts` is.
-import type { AtlasGeometry } from './drawlist.js';
+// TYPE-ONLY, AND IT MUST STAY THAT WAY: `dist/cg.js` therefore has NO imports at all, which is what
+// keeps this module usable from anywhere, the way `hittest.ts` is. `geometry.ts` is a leaf and
+// imports nothing, so this edge is not a cycle even as a type -- it used to come from
+// `drawlist.js`, which imports THIS module at runtime, and that was one. `module-cycles.test.ts`
+// pins both properties.
+import type { AtlasGeometry } from './geometry.js';
 
 /**
  * EBCDIC code point to 3270 Character Generator (CG) index, and CG index to atlas column.

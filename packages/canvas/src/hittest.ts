@@ -8,7 +8,7 @@ import type { Action } from '@tn3270/frontend';
  * The renderer receives a finished draw list and turns a mouse position into an action, so `hitTest`
  * has to be reachable from `renderer.ts` -- and `renderer.ts` may not have a single RUNTIME import
  * of a workspace package: a browser cannot resolve `@tn3270/core` and there is no bundler, so the
- * window goes BLANK WITH NO ERROR (`renderer.ts:10-22`, measured). `keypad.ts` value-imports
+ * window goes BLANK WITH NO ERROR (`renderer.ts:11-23`, measured). `keypad.ts` value-imports
  * `@tn3270/core`, `@tn3270/frontend` and `drawlist.js`, so importing `hitTest` from there would drag
  * all three into the renderer's graph. MEASURED during review: both assertions of
  * `renderer-imports.test.ts` fail when it does.
@@ -57,7 +57,7 @@ export function hitTest(
  * fully green while every Alt chord is dead. This function is the same risk in the mouse path, and
  * it is the half that does not need a browser.
  *
- * THE EXACT INVERSE of what `paint` draws: `blit.ts:105-106` puts a scale-1 cell at
+ * THE EXACT INVERSE of what `paint` draws: `blit.ts:106-107` puts a scale-1 cell at
  * `offset + coordinate * scale`, so a click subtracts the offset and DIVIDES by the scale. Both
  * mistakes -- multiplying instead of dividing, and forgetting the offset -- are INVISIBLE AT SCALE 1
  * WITH NO CENTRING, which is exactly the configuration both screenshot harnesses run in

@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Screen, resolve, Colour } from '@tn3270/core';
 import { SCHEMES, schemeRgb } from '@tn3270/frontend';
-import { drawList, type AtlasGeometry } from '../src/drawlist.js';
+import { drawList } from '../src/drawlist.js';
+import type { AtlasGeometry } from '../src/geometry.js';
 import {
   blit, bestScale, centre, rgbCss, tintKey, blankColumns, type Ctx2D,
 } from '../src/blit.js';

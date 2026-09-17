@@ -1,10 +1,12 @@
 import { cp037, Colour } from '@tn3270/core';
 import { KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
-// TYPE-ONLY, DELIBERATELY: `drawlist.js` imports THIS module for `keypadRegion`, so a value import
-// of it here would be a cycle. `column()` moved to `cg.js` for exactly that reason, and the type
-// import erases, so `dist/keypad.js` does not reach `drawlist.js` at all.
-import type { AtlasGeometry, DrawCell } from './drawlist.js';
+// FROM `geometry.js`, NOT `drawlist.js`, and that is the point: `drawlist.js` imports THIS module
+// for `keypadRegion`, so any import of it from here -- even a type one -- closes a cycle.
+// `column()` moved to `cg.js` for the runtime half of the same problem, and these two interfaces
+// moved to a leaf module for the type half. `module-cycles.test.ts` reads the SOURCE, because a
+// type import is invisible in `dist`.
+import type { AtlasGeometry, DrawCell } from './geometry.js';
 import type { KeypadButton } from './hittest.js';
 
 /**
@@ -18,7 +20,7 @@ import type { KeypadButton } from './hittest.js';
  * ## SCALE-1 PIXELS THROUGHOUT
  *
  * The same coordinate space `DrawCell.x/.y` and `DrawList.oia.y` already use
- * (`drawlist.ts:120-121` emits `x: col * atlas.cellWidth`). The renderer multiplies by whatever
+ * (`drawlist.ts:112-113` emits `x: col * atlas.cellWidth`). The renderer multiplies by whatever
  * integer scale it picks at paint time and adds the centring offset, exactly as it does for the
  * screen, so nothing here goes stale on a resize. There are deliberately NO cell coordinates in
  * this file's output: two conventions in one structure is how an off-by-one becomes invisible.
@@ -26,9 +28,9 @@ import type { KeypadButton } from './hittest.js';
  * ## DRAWN THROUGH THE GLYPH ATLAS, NOT WITH `fillText`
  *
  * Labels are EBCDIC-encoded and looked up in the atlas like any other cell, through the SAME
- * `column()` the screen and the OIA use (`cg.ts:104`, the one copy). That is what keeps the screenshot goldens
+ * `column()` the screen and the OIA use (`cg.ts:106`, the one copy). That is what keeps the screenshot goldens
  * byte-reproducible: `fillText` would pull in a system font, and font rasterisation is the
- * machine-dependent thing that stops a golden reproducing -- the reason `drawlist.ts:61-69` gives
+ * machine-dependent thing that stops a golden reproducing -- the reason `drawlist.ts:53-61` gives
  * for the OIA taking the same route.
  *
  * The FONT CHOICE is provisional: the user has not yet seen the labels in the 3270 font and the
@@ -64,7 +66,7 @@ const DRAWN_ROW: readonly number[] = Object.freeze([0, 1, 3, 4, 5]);
  */
 export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): KeypadRegion {
   // Our chrome, not one of the host's cells, so no byte in the data stream says what colour it is
-  // -- the same argument and the same pair `oiaCells` uses at `drawlist.ts:176-177`.
+  // -- the same argument and the same pair `oiaCells` uses at `drawlist.ts:168-169`.
   const fg = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
   const bg = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
   const cells: DrawCell[] = [];

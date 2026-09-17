@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Screen, resolve, Colour, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
-import { drawList, type AtlasGeometry } from '../src/drawlist.js';
+import { drawList } from '../src/drawlist.js';
+import type { AtlasGeometry } from '../src/geometry.js';
 import { KEYPAD_ROWS_TALL } from '../src/keypad.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 

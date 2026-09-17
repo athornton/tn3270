@@ -1,5 +1,6 @@
 import type { Rgb } from '@tn3270/core';
-import type { AtlasGeometry, DrawList } from './drawlist.js';
+import type { AtlasGeometry } from './geometry.js';
+import type { DrawList } from './drawlist.js';
 
 /**
  * Draw a `DrawList` onto a 2D canvas context.

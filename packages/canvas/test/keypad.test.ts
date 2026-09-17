@@ -9,7 +9,7 @@ import { keypadRegion, KEYPAD_ROWS_TALL, type KeypadRegion } from '../src/keypad
 // in the one keypad module with no runtime import. See hittest.ts, and the graph assertion in
 // `renderer-imports.test.ts`.
 import { hitTest, hitTestAt, type KeypadButton } from '../src/hittest.js';
-import type { AtlasGeometry, DrawCell } from '../src/drawlist.js';
+import type { AtlasGeometry, DrawCell } from '../src/geometry.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 
 /**
@@ -132,7 +132,7 @@ describe('keypadRegion', () => {
   });
 
   it('looks labels up through the CG MAP, like the screen and the OIA', () => {
-    // The font is in CG order, not EBCDIC order (`cg.ts:6-43`). A label indexed by its EBCDIC byte
+    // The font is in CG order, not EBCDIC order (`cg.ts:8-45`). A label indexed by its EBCDIC byte
     // would draw a different glyph, which only a screenshot golden would catch. This must agree
     // with the screen and the OIA -- `column()` in `cg.ts` is the one copy, imported by all three.
     const r = region();
@@ -271,7 +271,7 @@ describe('hitTest', () => {
 /**
  * The click arithmetic, AT SCALE 3 WITH A NON-ZERO CENTRING OFFSET, and that is the whole point.
  *
- * `paint` draws a scale-1 coordinate at `offset + coordinate * scale` (`blit.ts:105-106`), so a click
+ * `paint` draws a scale-1 coordinate at `offset + coordinate * scale` (`blit.ts:106-107`), so a click
  * must subtract the offset and DIVIDE by the scale. At scale 1 with no centring, multiplying instead
  * of dividing and dropping the offset altogether are BOTH INVISIBLE -- and scale 1 with no centring
  * is exactly what both screenshot harnesses run at, since `browser-shot.mjs` sizes the viewport from

@@ -1,10 +1,3 @@
-import {
-  cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
-} from '@tn3270/core';
-import { schemeRgb, type Scheme } from '@tn3270/frontend';
-import { ebcdicToCg, column } from './cg.js';
-import { keypadRegion, type KeypadRegion } from './keypad.js';
-
 /**
  * Turn a screen snapshot plus its resolved attributes into per-cell draw instructions.
  *
@@ -34,27 +27,26 @@ import { keypadRegion, type KeypadRegion } from './keypad.js';
  * pre-redacted. A renderer that draws the glyph without checking this puts the password on
  * screen -- and in this project's case into committed screenshot goldens. Blanked here,
  * matching the TUI at `render.ts:369`.
+ *
+ * ## `AtlasGeometry` AND `DrawCell` ARE NOT DECLARED HERE ANY MORE
+ *
+ * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `keypad.ts`,
+ * `assets.ts` and `blit.ts` all took them from here with `import type` -- while this module
+ * value-imports `column` from `cg.ts` and `keypadRegion` from `keypad.ts`. That is an import
+ * cycle in the type position: harmless while the imports erase, and a module-initialisation
+ * ordering bug the day one of them becomes a value. See `geometry.ts` and the guard in
+ * `test/module-cycles.test.ts`.
+ *
+ * `DrawList` below stays, because it names `KeypadRegion` and so cannot live in a leaf.
  */
-export interface AtlasGeometry {
-  readonly cellWidth: number;
-  readonly cellHeight: number;
-  readonly cols: number;
-  /** CG code to atlas column. Sparse: the font's encodings run 0..543 with holes. */
-  readonly index: Readonly<Record<number, number>>;
-}
 
-export interface DrawCell {
-  readonly x: number;
-  readonly y: number;
-  /** Atlas COLUMN, already resolved through the CG map. */
-  readonly glyph: number;
-  readonly fg: Rgb;
-  readonly bg: Rgb;
-  readonly cursor: boolean;
-  readonly underline: boolean;
-  readonly blink: boolean;
-  readonly intensify: boolean;
-}
+import {
+  cp037, Colour, type ResolvedCell, type ScreenSnapshot,
+} from '@tn3270/core';
+import { schemeRgb, type Scheme } from '@tn3270/frontend';
+import { ebcdicToCg, column } from './cg.js';
+import { keypadRegion, type KeypadRegion } from './keypad.js';
+import type { AtlasGeometry, DrawCell } from './geometry.js';
 
 export interface DrawList {
   readonly cells: readonly DrawCell[];

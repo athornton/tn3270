@@ -16,7 +16,11 @@
  * it.
  */
 export { drawList } from './drawlist.js';
-export type { AtlasGeometry, DrawCell, DrawList } from './drawlist.js';
+export type { DrawList } from './drawlist.js';
+// The two shapes every drawing module here shares, from the LEAF module that declares them. They
+// were `drawlist.ts`'s, and consumers outside this package are unaffected by the move: they take
+// them from this barrel, which is the only import path `packages/gui` and `packages/web` use.
+export type { AtlasGeometry, DrawCell } from './geometry.js';
 export { blit, blankColumns, bestScale, centre, rgbCss, tintKey } from './blit.js';
 export type { Surface, Ctx2D, BlitOptions } from './blit.js';
 export { actionForKey } from './keys.js';

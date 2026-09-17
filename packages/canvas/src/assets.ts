@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { AtlasGeometry } from './drawlist.js';
+import type { AtlasGeometry } from './geometry.js';
 
 /**
  * Where this package's BUILT assets live, and how to read the atlas.

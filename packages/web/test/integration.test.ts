@@ -24,7 +24,7 @@ const trace = join(process.cwd(), 'packages/fixtures/traces/synthetic-ispf-like.
  *
  * These messages have been through `JSON.stringify` and `inflateSync`, so they are plain data and
  * NOT a `DrawList` -- `coverage` arrives as base64 in the atlas message for exactly that reason.
- * The optional `keypad` mirrors `canvas/src/drawlist.ts:85`.
+ * The optional `keypad` mirrors `canvas/src/drawlist.ts:77`.
  *
  * `keypad.height` is deliberately ABSENT: the assertions below measure the region against the
  * buttons that occupy it instead, so declaring the field would invite exactly the tautology they
@@ -578,7 +578,7 @@ describe('the gateway end to end', () => {
      * a region an inch taller than its own buttons. So the two edges are pinned to the drawn
      * content instead -- the keypad's top edge must be exactly where the frame used to end (no gap,
      * no row of the OIA covered), and the frame's new bottom edge must be exactly the bottom of the
-     * lowest BUTTON (nothing clipped, no slack). `drawlist.ts:134-137` warns that `keypadY` and
+     * lowest BUTTON (nothing clipped, no slack). `drawlist.ts:126-129` warns that `keypadY` and
      * `oiaY` coincide only when there is no OIA; this trace paints one, so the first of these two
      * would fail against that confusion.
      */

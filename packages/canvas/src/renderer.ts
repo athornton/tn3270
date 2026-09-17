@@ -1,5 +1,6 @@
 import type { Rgb } from '@tn3270/core';
-import type { AtlasGeometry, DrawList } from './drawlist.js';
+import type { AtlasGeometry } from './geometry.js';
+import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
 import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
 import { hitTestAt, type KeypadButton } from './hittest.js';
@@ -155,8 +156,8 @@ function paint(list: DrawList): void {
   }
 
   // The keypad goes through the SAME blitter and atlas as the screen and the OIA -- one drawing
-  // primitive, three regions -- and for the same reason the OIA does (`drawlist.ts:61-69`).
-  // `list.width`/`list.height` and not the region's own: `blit` reads only `cells` (`blit.ts:97-104`),
+  // primitive, three regions -- and for the same reason the OIA does (`drawlist.ts:53-61`).
+  // `list.width`/`list.height` and not the region's own: `blit` reads only `cells` (`blit.ts:98-105`),
   // and the cells' coordinates are in the WHOLE DRAWING's scale-1 space, including the region's `y`
   // offset, so `keypad.width`/`keypad.height` would describe a surface these cells do not live in.
   if (list.keypad !== undefined) {
@@ -168,7 +169,7 @@ function paint(list: DrawList): void {
   //
   // Drawn LAST so it sits over the label, and gated on `list.keypad` as well as on `pressed`: a
   // frame with the keypad off must draw nothing extra even if a press is still outstanding.
-  // `fillRect` is on `Ctx2D` already (`blit.ts:34`), so no cast and no widening.
+  // `fillRect` is on `Ctx2D` already (`blit.ts:35`), so no cast and no widening.
   //
   // `includes` is an IDENTITY check and not a search: `pressed` is always an element of some frame's
   // `buttons`, so this asks "of THIS frame's?". Without it, a frame whose geometry changed while a

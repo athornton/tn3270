@@ -4,7 +4,7 @@
  * ## ONE TABLE, TWO FRONT-END FAMILIES
  *
  * This lives in `frontend` because both package graphs reach it: `canvas` already imports from
- * here (`canvas/src/keys.ts:1` takes `Action`, `canvas/src/drawlist.ts:4` takes `schemeRgb`), and
+ * here (`canvas/src/keys.ts:1` takes `Action`, `canvas/src/drawlist.ts:46` takes `schemeRgb`), and
  * so the Electron GUI and the web gateway get it; `tui` imports from here too. A copy in `canvas`
  * would be out of the TUI's reach, and two lists of 46 keys drift silently.
  *
