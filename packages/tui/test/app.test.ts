@@ -601,6 +601,23 @@ describe('the special-keys overlay', () => {
     expect(h.stdout.all).toContain(`\x1b[9;11H\x1b[0;7m${marked(0)}`);
   });
 
+  it('draws the list OVER the cells it covers, not under them', () => {
+    // THE OTHER HALF OF AN OPAQUE LIST. `overlayLines` pads every line to one width so the host's
+    // own text cannot show through the chord column -- but padding hides nothing unless it is
+    // written AFTER the cells it covers. Opening invalidates the diff (the renderer cannot see
+    // behind the list), so this one write carries every cell AND the list, in order: measured by
+    // mutation, moving `overlayParts` ahead of the cell loop in `render.ts` leaves the rest of this
+    // file green while `AB` is drawn on top of the first list line.
+    const h = harness();
+    h.app.start();
+    h.session.keyboard.typeString('AB');                 // screen row 1, columns 1-2: under the list
+    const before = h.stdout.written.length;
+    dispatchToggle(h.app);
+    const emitted = h.stdout.written.slice(before).join('');
+    expect(emitted).toContain('AB');                     // the cells really are in this write
+    expect(emitted.indexOf(marked(0))).toBeGreaterThan(emitted.indexOf('AB'));
+  });
+
   it('fires the selected action on Enter and closes', () => {
     // Enter must fire the SELECTED key, not the Enter AID: while the overlay is up it belongs to
     // the overlay. Closing afterwards is what stops a second Enter re-firing it.

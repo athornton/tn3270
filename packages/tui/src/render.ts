@@ -421,8 +421,11 @@ export class TerminalRenderer {
    * a line drawn after a reverse-video one would inherit it -- and closes with a reset so nothing
    * leaks into the cursor placement or the row below. That is `hintParts`' shape.
    *
-   * Neither padded nor cleared: `paint` invalidates whenever these lines change, so the cells
-   * underneath have already been rewritten before this draws over them.
+   * Not padded HERE and not cleared. Nothing is cleared because `paint` invalidates whenever these
+   * lines change, so the cells underneath have already been rewritten before this draws over them.
+   * Nothing is padded because the lines ARRIVE padded to a uniform width -- `keypadOverlay.ts`'s
+   * `LINE_WIDTH`, which explains why the padding cannot live here: this method sees only the window
+   * the caller chose, so the widest line it can measure is not the widest line in the list.
    */
   private overlayParts(overlay: readonly string[] | undefined): string[] {
     if (overlay === undefined) return [];

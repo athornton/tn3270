@@ -42,10 +42,14 @@ import type { Geometry } from './render.js';
 /**
  * The smallest terminal this overlay will open in.
  *
- * `cols` is the widest line (27: mark, space, the 14-character `System Request`, two spaces and
- * the 9-character `Shift-Tab`) plus one cell of frame on each side. Written down rather than
- * derived from `overlayLines`, so that the two can DISAGREE -- deriving it would make it correct
- * by construction and unable to catch a change in either. `keypadOverlay.test.ts` recomputes it.
+ * `cols` is the line width (27: mark, space, the 14-character `System Request`, two spaces and the
+ * 9-character `Shift-Tab`) plus one cell of frame on each side. Every line is that wide -- see
+ * `LINE_WIDTH`, which is why this is "the line width" and not "the widest line" -- and no single
+ * key contributes both halves: Sys Req is the longest name and has no chord at all.
+ *
+ * Written down rather than derived from `overlayLines`, so that the two can DISAGREE -- deriving it
+ * would make it correct by construction and unable to catch a change in either.
+ * `keypadOverlay.test.ts` recomputes it, which is also what pins `LINE_WIDTH` from above.
  *
  * `rows` is a judgement, not a derivation: 12 terminal rows leave 10 lines of list inside a frame,
  * and below that a window onto 47 entries shows so little that scrolling is worse than nothing.
@@ -84,6 +88,36 @@ const chordFor = (action: Action): string =>
   BINDING_INTENT.find((b) => sameAction(b.action, action))?.key ?? '';
 
 /**
+ * Widest chord any key in the table has, so the chord column has a width of its own.
+ *
+ * Over the chords of `KEYPAD_KEYS` and not over all of `BINDING_INTENT`: a chord bound to an action
+ * no key in the table names would widen every line for nothing. (Both give 9 today -- `Shift-Tab`
+ * and `Backspace` -- so no test can tell them apart; recorded as intent, not as measured.)
+ */
+const CHORD_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => chordFor(k.action).length));
+
+/**
+ * The width of EVERY line, which is what makes the list OPAQUE.
+ *
+ * Mark and space (2), the name column, the two-space gap, and the chord column. Lines used to be
+ * `trimEnd()`ed to their natural length, and the 22 keys with no chord therefore ended at the name
+ * -- so the host's own cells stayed visible to the right of them, LANDING IN THE CHORD COLUMN and
+ * reading as a chord the key has not got. Measured over a real pty against a host whose screen row 1
+ * read `HELLO TN3270`: the PF16 row rendered as `  PF16 TN3270`.
+ *
+ * PADDED HERE AND NOT IN `render.ts`, although opacity is a drawing concern: the renderer is handed
+ * a WINDOW of these lines (`app.ts`'s `overlayWindow`), so the widest line it can see is not the
+ * widest line in the list -- a screenful of chordless PF keys would pad to a narrower rectangle and
+ * bleed again. This module is the only place that knows all 47.
+ *
+ * Never truncates: `padEnd` alone, so a chord longer than `CHORD_WIDTH` could not silently lose its
+ * tail. It cannot happen -- the width is derived from the same chords -- and if the derivation broke,
+ * the lines would differ in length and the uniform-width test would redden rather than the overlay
+ * lying about a chord.
+ */
+const LINE_WIDTH = 2 + NAME_WIDTH + 2 + CHORD_WIDTH;
+
+/**
  * One line per key, in table order: a selection mark, the name, then the chord.
  *
  * Returns all 47, which is taller than `OVERLAY_MIN.rows`. SCROLLING IS THE CALLER'S JOB -- the
@@ -92,11 +126,15 @@ const chordFor = (action: Action): string =>
  *
  * A `selected` outside the list marks nothing, so a caller with no selection yet can render the
  * list unmarked rather than having to fake an index.
+ *
+ * EVERY LINE IS `LINE_WIDTH` WIDE, padding included -- see that constant for why. One visible
+ * consequence: the selected line is a full-width reverse-video bar rather than a highlighted
+ * fragment, which is what a selection in a list should look like anyway.
  */
 export function overlayLines(selected: number): readonly string[] {
   return KEYPAD_KEYS.map((k, i) => {
     const mark = i === selected ? '>' : ' ';
-    return `${mark} ${k.name.padEnd(NAME_WIDTH)}  ${chordFor(k.action)}`.trimEnd();
+    return `${mark} ${k.name.padEnd(NAME_WIDTH)}  ${chordFor(k.action)}`.padEnd(LINE_WIDTH);
   });
 }
 
