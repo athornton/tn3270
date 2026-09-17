@@ -5,6 +5,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildServer } from '../src/main.js';
 import { parseWebArgs } from '../src/args.js';
+// The `Action`-union scan MOVED to `frontend/test/helpers/actionKinds.ts` when
+// `frontend/test/actions.test.ts` grew its dispatch table and needed the identical list. It is
+// shared rather than copied because the bounding of that regex to the union's own declaration is
+// what makes it trustworthy, and a second copy could lose it and still pass. This package already
+// depends on `@tn3270/frontend`, and `cli/test/tls.test.ts:8` is the precedent for a test reaching
+// into a sibling package.
+import { actionKinds, ACTION_KIND_FLOOR, ACTION_KIND_CANARIES }
+  from '../../frontend/test/helpers/actionKinds.js';
 
 /**
  * THE WHOLE GATEWAY, DRIVEN BY NODE'S BUILT-IN WebSocket.
@@ -54,33 +62,6 @@ async function start(extra: string[] = []): Promise<{ url: string; token: string
   const port = (server.address() as { port: number }).port;
   stop = () => { registry.closeAll(); server.close(); };
   return { url: `ws://127.0.0.1:${port}/ws?t=${args.token}`, token: args.token, port };
-}
-
-/**
- * Every `kind` in the `Action` union, read out of its DECLARATION at run time.
- *
- * ## WHY A SOURCE SCAN AND NOT A TYPE
- *
- * The property being enforced is that the gateway ACCOUNTS FOR every action a client can name --
- * see the second rule in `protocol.ts`'s docstring -- and that is a runtime property of a socket,
- * so the list has to be a runtime value. There is no such value to import: `Action` is a type-only
- * union, `applyAction`'s `satisfies never` proves exhaustiveness inside `frontend` and says nothing
- * about this package, and no test file in this repo is typechecked at all, so a type-level trick
- * here would compile to nothing and enforce nothing. Hand-listing the kinds would rot the moment
- * someone adds a member -- which is the exact failure this exists to prevent -- so the declaration
- * is parsed instead. `main.ts`'s `tokenMatches` case and `renderer-imports.test.ts` already read
- * source for properties no assertion can otherwise see.
- *
- * A FLOOR IS ASSERTED at the call site, because a scan that silently matches nothing would leave
- * the loop below iterating an empty list and passing.
- */
-function actionKinds(): readonly string[] {
-  const source = readFileSync(new URL('../../frontend/src/keymap.ts', import.meta.url), 'utf8');
-  // Bounded to the union's own declaration, so a `{ kind: 'x' }` in a doc comment or a table
-  // elsewhere in that file cannot smuggle in a kind the type does not have.
-  const union = /export type Action =([\s\S]*?);\n/.exec(source);
-  if (union === null) throw new Error('cannot find the `Action` union in frontend/src/keymap.ts');
-  return [...union[1]!.matchAll(/\|\s*\{\s*kind:\s*'([A-Za-z]+)'/g)].map((m) => m[1]!);
 }
 
 /**
@@ -510,10 +491,11 @@ describe('the gateway end to end', () => {
      */
     const kinds = actionKinds();
     // A FLOOR, not an equality: adding an action must not fail this, but a scan that stopped
-    // matching must. 25 members at the time of writing -- 24 until `newline` joined, which this
-    // floor deliberately did not need to move for.
-    expect(kinds.length, 'the Action union scan found too few kinds to be right').toBeGreaterThanOrEqual(24);
-    for (const canary of ['pf', 'type', 'toggleKeypad', 'quit', 'fieldMark']) {
+    // matching must. Both the floor and the canaries now live beside the scan itself, so the
+    // dispatch-table test in `frontend` sanity-checks it the same way.
+    expect(kinds.length, 'the Action union scan found too few kinds to be right')
+      .toBeGreaterThanOrEqual(ACTION_KIND_FLOOR);
+    for (const canary of ACTION_KIND_CANARIES) {
       expect(kinds, 'the Action union scan missed a known kind').toContain(canary);
     }
 

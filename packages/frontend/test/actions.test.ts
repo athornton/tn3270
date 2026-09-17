@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Session, AID, type Connection } from '@tn3270/core';
 import { applyAction } from '../src/actions.js';
+import type { Action } from '../src/keymap.js';
+import { actionKinds, ACTION_KIND_FLOOR, ACTION_KIND_CANARIES } from './helpers/actionKinds.js';
 
 class FakeConnection implements Connection {
   sent: number[] = [];
@@ -232,5 +234,232 @@ describe('the keypad-era actions', () => {
     // deliberate refusal and an accidental crash are not the same outcome.
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/does not handle toggleKeypad/);
+  });
+});
+
+/**
+ * ONE ROW PER CASE IN `applyAction`'s SWITCH, AND THE ROW IS WHAT MAKES THE CASE FALSIFIABLE.
+ *
+ * ## THE DEFECT THIS EXISTS FOR, AND WHAT THE MUTATIONS ACTUALLY MEASURED
+ *
+ * Before this table, 13 of the switch's cases had NO test asserting their target. The reviewer's
+ * finding was that transposing all thirteen at once -- `left`<->`right`, `up`<->`down`,
+ * `tab`<->`backTab`, `home`<->`reset`, `backspace`<->`deleteChar`, `eraseEOF`<->`eraseInput`,
+ * `clear`->`AID.ENTER` -- left the whole suite green, first at 1529 tests and then at 1643.
+ *
+ * RE-MEASURED HERE, AND THE FINDING NEEDS ONE CORRECTION. With `tsc --build packages/frontend` run
+ * before the suite -- without it every other package reads a stale `frontend/dist` and sees nothing,
+ * which is the most likely reading of "fully green" -- the 13-way transposition reddens 13 rows of
+ * this table plus exactly TWO pre-existing tests, `tui/test/app.test.ts`'s "acts on both encodings
+ * of an arrow key" and "completes the sequence when the rest arrives in time". Both observe a cursor
+ * COLUMN, so both see `left`<->`right` and neither sees any of the other eleven: 11 of the 13 cases
+ * were invisible to all 1643 tests even after a rebuild.
+ *
+ * The single swap is the sharper measurement. `left`<->`right` alone reddens exactly four tests in
+ * 1669 -- the two rows here and those same two TUI tests, which is why the arrows are the ONE pair
+ * this table did not have to catch alone. A table that only caught a mass transposition would be
+ * much weaker than one that catches one case, so the swap was measured on its own.
+ *
+ * ## WHY EVERY ROW GETS ITS OWN `newSession()`, AND ASSERTS BEFORE THE NEXT ROW RUNS
+ *
+ * This is the part that decides whether the table is worth anything, and it is the exact defect
+ * that made the `dup`/`fieldMark` test above vacuous when it first shipped: two `applyAction`
+ * calls followed by two `toHaveBeenCalledOnce()` assertions are satisfied by a transposition,
+ * because each spy still sees exactly one call. `it.each` gives each row its own session, its own
+ * spies and its own pass/fail, so the pair of assertions below is evaluated with exactly ONE
+ * action ever applied.
+ *
+ * ## WHAT THE TWO HALVES OF A ROW BUY
+ *
+ * `toHaveBeenCalledOnce()` on the target is what catches a swap, GIVEN the isolation above. The
+ * `notCalled` partners are the diagnostic -- "left was routed to keyboard.right" instead of
+ * "keyboard.left was not called" -- and the guard for the day someone folds these rows back into a
+ * shared session, at which point the positive assertion stops catching anything and the partner
+ * assertion is all that is left. They are also the reason a row names its partner explicitly
+ * rather than the loop guessing: the plausible mis-wirings are a fact about 3270 semantics
+ * (EraseEOF versus EraseInput, Tab versus Newline), not something derivable from the names.
+ *
+ * ## WHAT IS DELIBERATELY NOT HERE
+ *
+ * The correspondence between the SWITCH CASES and the union is not this table's job: `default:
+ * action satisfies never` makes a missing case a compile error, and `npm run typecheck` covers
+ * `src`. What no compiler can see is a case whose body calls the wrong method, which is all this
+ * table asserts. The out-of-range `pf`/`pa` numbers have their own test above -- these rows are
+ * the happy path only.
+ */
+interface Row {
+  readonly action: Action;
+  /** `keyboard.<method>` or `session.<method>`: the ONE call this case must make. */
+  readonly target?: string;
+  /** Targets that must NOT be called -- this case's plausible transposition partners. */
+  readonly notCalled?: readonly string[];
+  /** Asserted arguments, where the ARGUMENT is the behaviour: the AID byte, the text, the flag. */
+  readonly args?: readonly unknown[];
+  /** For the two kinds that throw instead of dispatching. A message pattern, never a bare throw. */
+  readonly throws?: RegExp;
+}
+
+/**
+ * NOTE THE TWO NAMES THAT ARE NOT THE ACTION'S OWN, both verified in `core/src/keyboard.ts`:
+ * `delete` dispatches to `Keyboard.deleteChar` (`delete` is a reserved word, keyboard.ts:413) and
+ * `type` to `Keyboard.typeString` (keyboard.ts:88), NOT to the single-character `Keyboard.type`
+ * (keyboard.ts:26). Every other action kind and the keyboard method it reaches share a name; the
+ * session-level kinds (`enter`, `clear`, `pf`, `pa`, `attn`, `sysreq`) are named after the key
+ * rather than the method, which is what the `target` column spells out.
+ */
+const ROWS: readonly Row[] = [
+  // THE AID SENDERS. All four reach the same method, so the BYTE is the assertion: without it,
+  // `case 'clear': session.sendAID(AID.ENTER)` -- one of the 13 transpositions -- would pass.
+  // `sendAID` refuses on a disconnected session and `applyAction` swallows that, but the spy has
+  // already recorded the call, so no `connect` is needed here. The wire-level assertions are
+  // above, where they belong.
+  { action: { kind: 'enter' }, target: 'session.sendAID', args: [AID.ENTER],
+    notCalled: ['keyboard.newline'] },
+  { action: { kind: 'clear' }, target: 'session.sendAID', args: [AID.CLEAR],
+    notCalled: ['keyboard.eraseInput'] },
+  // `pf`/`pa` carry an `n`, and the byte is the only thing distinguishing them from each other:
+  // 0xf3 is PF3 and 0x6e is PA2 (constants.ts, x3270 3270ds.h).
+  { action: { kind: 'pf', n: 3 }, target: 'session.sendAID', args: [0xf3],
+    notCalled: ['session.sendAttn'] },
+  { action: { kind: 'pa', n: 2 }, target: 'session.sendAID', args: [0x6e],
+    notCalled: ['session.sendAttn'] },
+
+  // THE CURSOR MOVES. Each names the opposite direction, which is the swap that renders
+  // plausibly and is therefore invisible to every front-end test.
+  { action: { kind: 'left' }, target: 'keyboard.left', notCalled: ['keyboard.right'] },
+  { action: { kind: 'right' }, target: 'keyboard.right', notCalled: ['keyboard.left'] },
+  { action: { kind: 'up' }, target: 'keyboard.up', notCalled: ['keyboard.down'] },
+  { action: { kind: 'down' }, target: 'keyboard.down', notCalled: ['keyboard.up'] },
+  // `home` and `reset` are each other's partner because `home`->`reset` was one of the measured
+  // 13: both are single local operations that put the session in a plausible state.
+  { action: { kind: 'home' }, target: 'keyboard.home',
+    notCalled: ['keyboard.reset', 'keyboard.tab', 'keyboard.newline'] },
+  { action: { kind: 'reset' }, target: 'keyboard.reset', notCalled: ['keyboard.home'] },
+  // Tab, BackTab and Newline all move to somewhere else on the screen and none of them throws,
+  // so an unasserted swap is a silently wrong move rather than a failure.
+  { action: { kind: 'tab' }, target: 'keyboard.tab',
+    notCalled: ['keyboard.backTab', 'keyboard.newline'] },
+  { action: { kind: 'backTab' }, target: 'keyboard.backTab', notCalled: ['keyboard.tab'] },
+  { action: { kind: 'newline' }, target: 'keyboard.newline',
+    notCalled: ['keyboard.tab', 'keyboard.backTab', 'keyboard.home'] },
+
+  // THE ERASERS, the two pairs where a swap is destructive rather than merely wrong: Backspace
+  // destroys one character to the LEFT and Delete one under the cursor, and EraseEOF clears to the
+  // end of ONE field while EraseInput clears EVERY unprotected field on the screen.
+  { action: { kind: 'backspace' }, target: 'keyboard.backspace',
+    notCalled: ['keyboard.deleteChar'] },
+  { action: { kind: 'delete' }, target: 'keyboard.deleteChar', notCalled: ['keyboard.backspace'] },
+  { action: { kind: 'eraseEOF' }, target: 'keyboard.eraseEOF', notCalled: ['keyboard.eraseInput'] },
+  { action: { kind: 'eraseInput' }, target: 'keyboard.eraseInput', notCalled: ['keyboard.eraseEOF'] },
+
+  // THE SESSION-LEVEL KEYS, neither of which is an AID send on this path. Attn is a Telnet BREAK
+  // (RFC 1576 section 8); `Session.sysreq` is the TN3270E form and sends IAC AO. Each names the
+  // other, plus `sendAID` -- the mis-wiring the note in `actions.ts` traces.
+  { action: { kind: 'attn' }, target: 'session.sendAttn',
+    notCalled: ['session.sysreq', 'session.sendAID'] },
+  { action: { kind: 'sysreq' }, target: 'session.sysreq',
+    notCalled: ['session.sendAttn', 'session.sendAID'] },
+
+  // TYPED CHARACTERS, not AIDs. The `sendAID` partner is added to every keyboard row below, so
+  // these rows keep the assertion the standalone `dup`/`fieldMark` test makes without restating it.
+  { action: { kind: 'dup' }, target: 'keyboard.dup', notCalled: ['keyboard.fieldMark'] },
+  { action: { kind: 'fieldMark' }, target: 'keyboard.fieldMark', notCalled: ['keyboard.dup'] },
+  // `typeString`, NOT `type`: see the note above the table. The text is asserted because dropping
+  // it -- `k.typeString('')` -- is a passing no-op otherwise.
+  //
+  // `keyboard.type` IS DELIBERATELY NOT THE PARTNER HERE, and the attempt is worth recording:
+  // `typeString` DELEGATES to `type` once per character (keyboard.ts:88-93), so
+  // `not.toHaveBeenCalled()` on it fails against the correct code -- MEASURED, "Number of calls: 2"
+  // for 'HI'. The transposition it would have guarded, `case 'type': k.type(action.text)`, is
+  // caught by the positive assertion instead: `typeString` is then never called at all.
+  { action: { kind: 'type', text: 'HI' }, target: 'keyboard.typeString', args: ['HI'],
+    notCalled: ['keyboard.dup'] },
+  // Read-then-set, so the ARGUMENT is the behaviour: a fresh keyboard has insert mode off, and
+  // `setInsertMode(false)` here would be the toggle that never turns on.
+  { action: { kind: 'toggleInsert' }, target: 'keyboard.setInsertMode', args: [true],
+    notCalled: ['keyboard.reset'] },
+
+  // THE TWO THAT THROW, which is the front end's business and not a dispatch at all. The patterns
+  // match the DELIBERATE message: `/quit/` also matches Node's own `TypeError: session.quit is not
+  // a function`, which is how two assertions on this branch passed against an unrelated crash.
+  { action: { kind: 'quit' }, throws: /does not handle quit/ },
+  { action: { kind: 'toggleKeypad' }, throws: /does not handle toggleKeypad/ },
+];
+
+/**
+ * Spy on a dotted target, REFUSING a name that does not exist.
+ *
+ * The guard is not decoration: `expect(spy).not.toHaveBeenCalled()` on a spy for a misspelt
+ * method is vacuously true, so a typo in a `notCalled` list would silently delete an assertion --
+ * the same class of hole as the vacuous `dup`/`fieldMark` test this table was written to answer.
+ */
+function spyOnTarget(session: Session, target: string): ReturnType<typeof vi.spyOn> {
+  const dot = target.indexOf('.');
+  const host = (target.slice(0, dot) === 'keyboard' ? session.keyboard : session) as
+    unknown as Record<string, unknown>;
+  const method = target.slice(dot + 1);
+  if (typeof host[method] !== 'function') {
+    throw new Error(`the dispatch table names a method that does not exist: ${target}`);
+  }
+  return vi.spyOn(host as never, method as never);
+}
+
+describe('applyAction: the dispatch table, one falsifiable row per case', () => {
+  it.each(ROWS)('routes $action.kind to its own target and to nothing else', (row) => {
+    // A FRESH SESSION PER ROW, and one `applyAction` call in it. See the header note: this is
+    // what makes `toHaveBeenCalledOnce()` mean anything here.
+    const { session } = newSession();
+
+    if (row.throws !== undefined) {
+      expect(() => applyAction(session, row.action)).toThrow(row.throws);
+      return;
+    }
+
+    const target = spyOnTarget(session, row.target!);
+    // Every keyboard case gets `session.sendAID` as an implicit partner: a local key that puts a
+    // byte on the wire is a defect in its own right, and this is the cheap way to assert it for
+    // all of them rather than 17 identical table entries.
+    const partners = [...(row.notCalled ?? [])];
+    if (row.target!.startsWith('keyboard.') && !partners.includes('session.sendAID')) {
+      partners.push('session.sendAID');
+    }
+    const spies = partners.map((name) => [name, spyOnTarget(session, name)] as const);
+
+    applyAction(session, row.action);
+
+    // THE PARTNERS ARE ASSERTED FIRST, for the diagnostic and not for the coverage: a transposition
+    // fails both halves, and this order reports it as "left was routed to keyboard.right" rather
+    // than the "keyboard.left was not called" that leaves the reader to find where it went.
+    for (const [name, spy] of spies) {
+      expect(spy, `${row.action.kind} was routed to ${name}`).not.toHaveBeenCalled();
+    }
+    expect(target, `${row.action.kind} did not reach ${row.target}`).toHaveBeenCalledOnce();
+    if (row.args !== undefined) {
+      expect(target, `${row.action.kind} reached ${row.target} with the wrong argument`)
+        .toHaveBeenCalledWith(...row.args);
+    }
+  });
+
+  it('has a row for EVERY member of the Action union, and exactly one each', () => {
+    // WITHOUT THIS THE TABLE ROTS SILENTLY: a new union member needs a new case (the compiler says
+    // so) but nothing would demand a row, and the case would land as unfalsifiable as the 13 were.
+    // The kinds are read out of the union's declaration at run time because no test file in this
+    // repo is typechecked -- see `helpers/actionKinds.ts` for why that rules out a type-level trick.
+    const kinds = actionKinds();
+    expect(kinds.length, 'the Action union scan found too few kinds to be right')
+      .toBeGreaterThanOrEqual(ACTION_KIND_FLOOR);
+    for (const canary of ACTION_KIND_CANARIES) {
+      expect(kinds, 'the Action union scan missed a known kind').toContain(canary);
+    }
+
+    const rows = ROWS.map((r) => r.action.kind);
+    expect(new Set(rows).size, 'two rows claim the same kind').toBe(rows.length);
+    // SET EQUALITY, BOTH WAYS: a union member with no row fails, and a row for a kind the union
+    // dropped fails too -- the second being a row that asserts nothing about anything.
+    expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
+    // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
+    // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
+    // a decision someone has to write down. 25 members, 23 switch cases plus the 2 guards.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(25);
   });
 });
