@@ -49,6 +49,36 @@ const OVERLAY_UP = 0x41;
 const OVERLAY_DOWN = 0x42;
 
 /**
+ * `k`/`w` for up and `j`/`s` for down, as alternatives to the arrows -- ONLY while the list is open.
+ *
+ * A BARE LETTER IS BINDABLE NOWHERE ELSE IN THIS EMULATOR. Letters are data the operator types into
+ * fields; `pump()` hands every printable run to `typeString`. It is safe here for exactly one
+ * reason: the interception in `onInput` gives the overlay the whole keyboard and `overlayKey`
+ * already swallows every byte it does not recognise, so these letters replace a no-op rather than
+ * displacing anything. Nothing about this generalises past `overlayShown`.
+ *
+ * NO `h`, `l`, `a` OR `d`, on purpose, and they are NOT an oversight: the overlay is a
+ * single-column scrolling list of all 47 `KEYPAD_KEYS`, so there is no left or right to move in.
+ * They stay swallowed like any other letter. Giving them an invented meaning -- page up, jump to
+ * the end -- would be a binding the user cannot guess from the list on screen and cannot undo.
+ *
+ * CASE-FOLDED, so `K` moves up as well as `k`. This DIVERGES FROM VI, where `K` is a different
+ * command from `k`; the reason is the same one the `CTRL` table in canvas/src/keys.ts case-folds
+ * for (Ctrl-Shift-C is still Clear) -- caps lock, or a held shift, must not silently make the
+ * list unnavigable. There is nothing for a shifted form to mean here, so nothing is given up.
+ */
+const OVERLAY_UP_LETTERS: ReadonlySet<number> = new Set(Array.from('kKwW', (c) => c.charCodeAt(0)));
+const OVERLAY_DOWN_LETTERS: ReadonlySet<number> = new Set(Array.from('jJsS', (c) => c.charCodeAt(0)));
+
+/** -1, 1, or 0 for a byte that is not one of the letters above. `undefined` cannot be a member. */
+function overlayLetterDelta(byte: number | undefined): number {
+  if (byte === undefined) return 0;
+  if (OVERLAY_UP_LETTERS.has(byte)) return -1;
+  if (OVERLAY_DOWN_LETTERS.has(byte)) return 1;
+  return 0;
+}
+
+/**
  * How long to wait before giving up on an unresolved escape path -- either a
  * lone ESC that might still be the start of a function key, or a multi-byte
  * sequence like `\x1b[` that started down one and stalled. The two do
@@ -590,8 +620,9 @@ export class App {
   /**
    * Read the bytes as the overlay's, one key at a time.
    *
-   * Esc closes, Enter fires the selection, CSI/SS3 `A`/`B` move it, Ctrl-K closes it again, and
-   * EVERYTHING ELSE IS SWALLOWED -- see the interception in `onInput` for why.
+   * Esc closes, Enter fires the selection, CSI/SS3 `A`/`B` move it -- as do `k`/`w` and `j`/`s`, see
+   * `OVERLAY_UP_LETTERS` -- Ctrl-K closes it again, and EVERYTHING ELSE IS SWALLOWED, including the
+   * `h`/`l`/`a`/`d` a reader may expect beside those letters. See the interception in `onInput`.
    *
    * ## A SPLIT ARROW MUST NOT READ AS ESCAPE
    *
@@ -638,8 +669,12 @@ export class App {
    */
   private overlayKey(pending: readonly number[]): number {
     if (pending[0] !== ESC) {
+      // The letters are single bytes with no prefix ambiguity, so they sit here with the other
+      // single-byte keys and never reach the hold/timer path below.
+      const letter = overlayLetterDelta(pending[0]);
       if (pending[0] === OVERLAY_CR || pending[0] === OVERLAY_LF) this.fireOverlay();
       else if (pending[0] === OVERLAY_TOGGLE) this.closeOverlay();
+      else if (letter !== 0) this.moveOverlay(letter);
       return 1;
     }
     if (pending.length === 1) return 0;                         // Escape, or an arrow's first byte
