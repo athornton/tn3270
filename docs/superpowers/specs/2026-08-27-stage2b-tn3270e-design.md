@@ -362,7 +362,7 @@ this repo are Python already.
 | Full negotiation, reaching 3270 submode and round-tripping an Erase/Write and an Enter | **met** — `drive-e.py` case 1; inbound `00000000007d40c31140c1c8c9` |
 | `DEVICE-TYPE REQUEST` byte-identical to s3270's capture | **met** — `020749424d2d333237382d322d45`, both |
 | `FUNCTIONS REQUEST` identical except the omitted BIND-IMAGE | **met** — ours `0307020405`, s3270's `030700020405`; pinned as a subtraction |
-| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **Now also met LIVE, 2026-09-17**: z/VM 4.4 refused mid-negotiation and the session reached its logon screen — see *Live host, 2026-09-17* |
+| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBOURING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), not `refuseTn3270e()`. See *Live host, 2026-09-17* |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
 | `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **MET, 2026-08-28, both hosts.** VM/370: `-tn3270e off`, `N:` and an LU list each byte-identical in both directions (140 sent, 1806 received). MVS 3.8j TK5: all four runs identical in what we SENT (33 bytes); received differs by one byte, decoded and shown to be a digit of the clock on TK5's logon panel |
@@ -422,9 +422,24 @@ logon attempted**.
    confirmed by a third, independent source.**
 3. **The backoff path has a live witness.** After the refusal we sent `IAC WONT TN3270E`
    then `IAC WILL TERMINAL-TYPE`, fell back to base TN3270, and reached z/VM's logon
-   screen. Success-criterion row *"A host that refuses option 40 still reaches a working
-   session"* was previously met only by `drive-e.py` case 4 against our own harness. It is
-   what makes TN3270E-on-by-default safe, and it is no longer harness-only.
+   screen. It is what makes TN3270E-on-by-default safe, and it is no longer harness-only.
+
+   **Be precise about WHICH backoff, because it is not the one the success criteria
+   tabulate.** `drive-e.py`'s refusal cases are a DEVICE-TYPE **REJECT** subnegotiation
+   (`--reject`, driving `refuseTn3270e()` after the LU list is exhausted) and *us*
+   declining (`--expect-refuse`, i.e. `-tn3270e off` and `N:`). **No harness case, and no
+   host before this one, ever sent `IAC DONT TN3270E` after our `WILL`** — our client never
+   volunteers `WILL 40`, so the Hercules hosts' known willingness to answer a bare
+   `ff fb 28` with `ff fe 28` was measured by a passive probe and never by us. z/VM 4.4
+   took the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`: delete from `myOpts`,
+   reply `WONT`), which has no dedicated unit test for option 40: the only test of a
+   *received* `DONT` is "drops out of 3270 mode when the host DONTs BINARY"
+   (`packages/core/test/telnet.test.ts:165-171`). **So the live run is
+   currently the ONLY evidence for that arm on option 40, which makes it worth a unit test
+   rather than worth relying on.** Note also that `St.Dont` does not clear
+   `tn3270eNegotiated`, where `refuseTn3270e()` does; harmless here because the flag was
+   still false when the `DONT` arrived, and nothing was observed going wrong — flagged as an
+   asymmetry to check, not as a diagnosed bug.
 
 ### The negotiation does NOT complete, and the reason is UNRESOLVED
 

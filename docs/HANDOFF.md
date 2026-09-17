@@ -61,8 +61,11 @@ required — without it the client HANGS**) and the committed probe was run, no 
 since neither Hercules host ever mentions option 40 — **then withdraws the option (`ff fe 28`)
 after our well-formed `DEVICE-TYPE REQUEST`**, identically with and without the `-E` suffix. Our
 backoff carried the session to z/VM's logon screen, **so the backoff path finally has a live
-witness**, but the negotiation does not complete and **TN3270E remains functionally unverified
-against a host**. Whose fault the refusal is is **unresolved**: there is no s3270 on this box and
+witness** — and specifically the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), a
+*different* path from the DEVICE-TYPE REJECT and `-tn3270e off` cases `drive-e.py` drives, and
+one nothing had ever exercised because our client never volunteers `WILL 40`. It has no unit
+test on option 40, so it should get one. But the negotiation does not complete and **TN3270E
+remains functionally unverified against a host**. Whose fault the refusal is is **unresolved**: there is no s3270 on this box and
 no compiler to build one, so the known-good comparison this project's discipline demands could
 not be run. **NEXT STEP, and it is cheap:** get an LU name from whoever runs that system and try
 `Connect("LUNAME@evievm.pubvm.org:23")`, which is the one test that distinguishes "the host wants

@@ -1546,7 +1546,16 @@ well-formed `DEVICE-TYPE REQUEST` either way.
    only because it was written to; now a host has been seen doing it.
 3. **The backoff path has a live witness — this answers question 4 below.** It had only
    ever been exercised against our own harness, and it is what makes TN3270E-on-by-default
-   safe.
+   safe. **But it is a DIFFERENT backoff from the one the harness drives, and saying which
+   is the whole value of the run.** `drive-e.py`'s refusal cases are a DEVICE-TYPE
+   **REJECT** (`--reject`, reaching `refuseTn3270e()` once the LU list is exhausted) or *us*
+   declining (`--expect-refuse`: `-tn3270e off`, `N:`). z/VM sent `IAC DONT TN3270E` **after
+   our `WILL`**, which takes the `St.Dont` arm instead
+   (`packages/core/src/telnet.ts:212-215` — drop it from `myOpts`, reply `WONT`). Nothing
+   had ever driven that arm on option 40: our client never volunteers `WILL 40`, so the
+   Hercules hosts' willingness to answer a bare `ff fb 28` with `ff fe 28` was only ever
+   measured by a **passive probe**, never by us. It deserves a unit test now that a host is
+   known to do it.
 4. **The TLS trap generalises to a third host.** Omitting `-insecure` against a plaintext
    host **HANGS** rather than failing: the leading `0xff` of `IAC DO TERMINAL-TYPE` is read
    as a TLS record content type and the read blocks for a length that never arrives. Same
@@ -1618,8 +1627,11 @@ answers are recorded there under *Live host, 2026-09-17*.
    a conforming host should send no BIND; one that does anyway is worth knowing about, and
    the record is traced and dropped rather than handed to the 3270 executor.
 4. **Does `-tn3270e off` still reach a usable session there?** **ANSWERED YES, 2026-09-17,
-   and by the stronger route** — we did not have to ask for `off`. The host's own
-   `IAC DONT TN3270E` drove the same backoff, and the session reached z/VM's logon screen.
+   and by a route the harness cannot produce** — we did not have to ask for `off`. The
+   host's own `IAC DONT TN3270E` drove the backoff and the session reached z/VM's logon
+   screen. Note the literal flag `-tn3270e off` was **not** run against this host; what was
+   run is on-by-default meeting a host that withdraws. Worth doing the explicit `off` run
+   too next time, since it is free.
 
 ### Still to try, in order of what each would settle
 
@@ -1634,6 +1646,10 @@ answers are recorded there under *Live host, 2026-09-17*.
   that completes the negotiation.
 - **Whether a host that completes TN3270E exists at all among the public systems.** z/VM
   4.4 here offers and withdraws; another public z/OS or z/VM may not.
+- **The explicit `-tn3270e off` run against this host**, for question 4's literal wording.
+- **A unit test for `IAC DONT TN3270E` arriving after our `WILL`** — the `St.Dont` arm on
+  option 40, which this run is currently the only evidence for. Not a live-testing item,
+  but it was found by a live test and would otherwise be forgotten.
 
 ## Task 11 — the no-flag default, the schemes, and the unreachable keys — verified 2026-09-15
 
