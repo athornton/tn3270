@@ -502,7 +502,7 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
  * hop, `applyAction` -- is plumbing no unit test can reach, for the reason `hittest.ts:53-58` gives:
  * `renderer.ts` throws at module load outside a browser, so the barrel cannot export it. The same
  * argument the chord seam won. `hitTestAt`'s ARITHMETIC is separately unit-tested at scale 3 with a
- * non-zero offset (`canvas/test/keypad.test.ts:291`), so what this seam carries is the wiring, which
+ * non-zero offset (`canvas/test/keypad.test.ts:297`), so what this seam carries is the wiring, which
  * is provable at any scale -- and just as well, because in native Electron mode the centring offset
  * can never be non-zero at ANY scale: `fit` sets the content size to exactly `list.width * scale` by
  * `list.height * scale`, so `centre` returns (0,0) for every model on every display. The SCALE does

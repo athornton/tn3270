@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
  * gate is exempt from every change until somebody remembers it, and `pty-smoke.py` sat at 1 of 12 for
  * two days proving it. This reads `clicks.mjs` as TEXT and pins the things whose absence would
  * disable it SILENTLY -- and silence is the specific hazard, because `clicks.mjs` is the only cover
- * anywhere for the keypad's click path and for the label/action pairing of 8 of its 46 keys.
+ * anywhere for the keypad's click path and for the label/action pairing of 9 of its 47 keys.
  */
 const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const clicks = readFileSync(join(guiDir, 'scripts', 'clicks.mjs'), 'utf8');
@@ -79,12 +79,16 @@ describe('the click harness', () => {
   });
 
   it('keeps the buttons whose actions are new on this branch', () => {
-    // `dup`, `fieldMark` and `sysreq` are the capabilities this whole feature exists to make
-    // reachable -- they were in core with no interactive route. A CASES table that proved the
-    // plumbing for PF1 while dropping these would prove it for the keys nobody was worried about.
+    // `dup`, `fieldMark`, `sysreq` and `newline` are the capabilities this whole feature exists to
+    // make reachable -- every one of them sat in core with no interactive route. A CASES table that
+    // proved the plumbing for PF1 while dropping these would prove it for the keys nobody was
+    // worried about.
     expect(clicks).toMatch(/label: 'Dup',\s*action: \{ kind: 'dup' \}/);
     expect(clicks).toMatch(/label: 'FldMk',\s*action: \{ kind: 'fieldMark' \}/);
     expect(clicks).toMatch(/label: 'SysRq',\s*action: \{ kind: 'sysreq' \}/);
+    // The newest of the four, and the one whose column `canvas/test/keypad.test.ts` asserted EMPTY
+    // until it arrived. It is also the only case here that sits in no layout block.
+    expect(clicks).toMatch(/label: 'NewLn',\s*action: \{ kind: 'newline' \}/);
   });
 
   it('covers both PF rows, which are the two halves of the block', () => {

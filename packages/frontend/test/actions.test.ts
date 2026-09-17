@@ -192,6 +192,34 @@ describe('the keypad-era actions', () => {
     expect(aid).not.toHaveBeenCalled();
   });
 
+  it('newline reaches Keyboard.newline, and not one of the moves it sits beside', () => {
+    // `Keyboard.newline()` has existed since stage 1 and no interactive front end could call it;
+    // this case is what makes it reachable, so its own dispatch is worth an assertion.
+    //
+    // THE NEGATIVES ARE THE TEST. `case 'newline': k.newline()` sits between `tab` and
+    // `backspace`, and its plausible defect is not a missing case -- `satisfies never` makes that
+    // a compile error -- but a case body pointing at a NEIGHBOUR. Every candidate moves the cursor
+    // and none of them throws, so an unasserted transposition is a silent wrong move: `tab()` goes
+    // to the next FIELD rather than the next LINE, and `home()` to the first field on the screen.
+    // On a screen with no fields those two even agree with `newline` about where to land, which is
+    // why this asserts the CALL and not the resulting cursor.
+    const { session } = newSession();
+    const nl = vi.spyOn(session.keyboard, 'newline');
+    const tab = vi.spyOn(session.keyboard, 'tab');
+    const backTab = vi.spyOn(session.keyboard, 'backTab');
+    const home = vi.spyOn(session.keyboard, 'home');
+    const aid = vi.spyOn(session, 'sendAID');
+
+    applyAction(session, { kind: 'newline' });
+    expect(nl, 'newline went somewhere other than Keyboard.newline').toHaveBeenCalledOnce();
+    expect(tab, 'newline was routed to Keyboard.tab').not.toHaveBeenCalled();
+    expect(backTab, 'newline was routed to Keyboard.backTab').not.toHaveBeenCalled();
+    expect(home, 'newline was routed to Keyboard.home').not.toHaveBeenCalled();
+    // A local cursor move, NOT an AID: c3270 calls `Newline()` from its keypad and nothing goes on
+    // the wire until the operator sends one.
+    expect(aid, 'newline put an AID on the wire').not.toHaveBeenCalled();
+  });
+
   it('REFUSES toggleKeypad, which is the front end s own business', () => {
     // Same reasoning as `quit`, and the same failure mode: a front end that forgot to
     // intercept this would show a dead button rather than an error, because the switch

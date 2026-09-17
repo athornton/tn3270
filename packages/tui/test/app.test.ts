@@ -758,7 +758,7 @@ describe('the special-keys overlay', () => {
   });
 
   it('scrolls to keep the selection visible instead of showing only the first screenful', () => {
-    // 46 keys and a 24-row screen: a first-N window would make every key from the 25th down
+    // 47 keys and a 24-row screen: a first-N window would make every key from the 25th down
     // UNREACHABLE, which is a real limitation and not one to ship silently.
     const h = harness();
     h.app.start();

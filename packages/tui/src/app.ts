@@ -178,11 +178,11 @@ export class App {
    * cells over the user's shell prompt. Every write goes through this guard.
    */
   private quitting = false;
-  /** Which of the 46 keys the overlay's `>` marks. */
+  /** Which of the 47 keys the overlay's `>` marks. */
   private overlaySelected = 0;
   private overlayShown = false;
   /**
-   * The first line of the 46 currently in the window, moved only when the selection would leave
+   * The first line of the 47 currently in the window, moved only when the selection would leave
    * it -- see `overlayWindow`.
    */
   private overlayTop = 0;
@@ -534,7 +534,7 @@ export class App {
    * WHAT STAYS HERE IS `quit` AND `toggleKeypad`, the two `applyAction` refuses: teardown is this
    * front end's and nobody else's -- restoring raw mode on every exit path is what stands between a
    * user and a terminal with no echo, and a GUI closes a window instead -- and what a keypad LOOKS
-   * like is equally local, which is why this one is a list of 46 lines and the canvas front ends
+   * like is equally local, which is why this one is a list of 47 lines and the canvas front ends
    * draw buttons. `applyAction` THROWS on both rather than ignoring them, so a front end that
    * forgot either check fails loudly instead of becoming unquittable, or offering a chord that
    * silently does nothing.
@@ -693,7 +693,7 @@ export class App {
   /**
    * The lines to draw: as many as fit, scrolled to keep the selection visible.
    *
-   * SELECTION-FOLLOWING, NOT FIRST-N. `overlayLines` returns all 46 and Task 11 left the window to
+   * SELECTION-FOLLOWING, NOT FIRST-N. `overlayLines` returns all 47 and Task 11 left the window to
    * its caller; a 24-row screen holds 24, so showing the first N would leave every key from the
    * 25th down -- Attention through Backspace, and Sys Req, whose only keyboard route this is --
    * permanently unreachable. The window moves only when the selection would leave it, so holding an

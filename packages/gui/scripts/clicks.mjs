@@ -39,7 +39,7 @@
  *
  * IT IS NOT THE ONLY COVER FOR THAT PAIRING, and the plan for this task said it was. The SAME swap
  * also reddens `frontend/test/keypad.test.ts`'s independently-written label-to-action map and
- * `tui/test/keypadOverlay.test.ts` -- two unit failures, in the fast gate, for all 46 keys rather
+ * `tui/test/keypadOverlay.test.ts` -- two unit failures, in the fast gate, for all 47 keys rather
  * than these 8. What is true is the narrower claim: the pixel goldens cannot see it (the glyphs are
  * identical either way), and this is the only place the pairing is checked THROUGH the drawn button
  * -- the rectangle `keypadRegion` built, the frame the renderer hit-tested, the IPC hop -- rather
@@ -94,15 +94,20 @@ const SHOW_KEYPAD = 'Ctrl+K';
  * the TOP row and `PF1` on the bottom, because PF13-24 sits above PF1-12 -- then the left-hand block
  * at columns 0-17 (`PA2` on its row 2, `SysRq` on its row 3), the middle block at columns 24-41
  * (`BkSp`, on its bottom row) and the right-hand block at columns 48-65 (`Dup`, `FldMk`, `Enter`).
+ * `NewLn` is outside all three: it is alone at column 42 on the bottom row, which is the middle
+ * block's gutter on the two rows above it.
  *
- * BOTH BUTTONS WHOSE ACTIONS ARE NEW ON THIS BRANCH ARE HERE, `Dup` and `FldMk`, plus `SysRq`:
- * those are the capabilities this feature exists to make reachable, so a run that proved the
- * plumbing while leaving them out would prove it for the keys nobody was worried about.
+ * EVERY BUTTON WHOSE ACTION IS NEW ON THIS BRANCH IS HERE -- `Dup`, `FldMk`, `SysRq` and now
+ * `NewLn`: those are the capabilities this feature exists to make reachable, each of them a method
+ * that sat in core with no interactive route, so a run that proved the plumbing while leaving them
+ * out would prove it for the keys nobody was worried about. `NewLn` earns its place twice over: it
+ * is the NEWEST button, the only one on its row past `BkSp`, and the only one whose column was
+ * asserted EMPTY until it arrived.
  *
  * THE OTHER 38 KEYS ARE NOT CLICKED, and that is a deliberate limit rather than an oversight. What
  * this run costs is real -- 1.2s of settle plus 120ms a click -- and what a 39th click would add is
- * one more instance of a path the first eight already exercised end to end. Their label-to-action
- * pairing is checked as DATA, for all 46, by `frontend/test/keypad.test.ts`; their rectangles by
+ * one more instance of a path the first nine already exercised end to end. Their label-to-action
+ * pairing is checked as DATA, for all 47, by `frontend/test/keypad.test.ts`; their rectangles by
  * `canvas/test/keypad.test.ts`; their pixels by the goldens. If a whole block ever falls out of that
  * list above, add a case for it here rather than trusting the neighbour.
  */
@@ -115,6 +120,7 @@ const CASES = [
   { label: 'FldMk', action: { kind: 'fieldMark' } },
   { label: 'Enter', action: { kind: 'enter' } },
   { label: 'BkSp', action: { kind: 'backspace' } },
+  { label: 'NewLn', action: { kind: 'newline' } },
 ];
 
 /** Key order in JSON is an implementation detail; compare canonically. */

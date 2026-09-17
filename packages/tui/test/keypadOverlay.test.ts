@@ -21,7 +21,7 @@ const CHORD_COL = 2 + Math.max(...KEYPAD_KEYS.map((k) => k.name.length)) + 2;
  * Deliberately structural and NOT `JSON.stringify`, so that this test agrees with the module only
  * when the module is right rather than when it happens to serialise its literals in the same key
  * order. `pf`/`pa` carry `n` and `type` carries `text`; every other member of the union is its
- * `kind` alone (`frontend/src/keymap.ts:43-76`).
+ * `kind` alone (`frontend/src/keymap.ts:43-88`).
  */
 const sameAction = (a: Action, b: Action): boolean =>
   a.kind === b.kind
@@ -39,13 +39,13 @@ describe('overlayLines', () => {
   it('lists every key in the table, one line each, in table order', () => {
     // `KEYPAD_KEYS` is non-empty, which the module's `Math.max(...names)` relies on: an empty
     // table would make the name width -Infinity and `padEnd` throw. Asserted rather than guarded,
-    // because a guard for a frozen 46-entry table would be unreachable code.
+    // because a guard for a frozen 47-entry table would be unreachable code.
     expect(KEYPAD_KEYS.length).toBeGreaterThan(0);
 
     const lines = overlayLines(0);
     expect(lines).toHaveLength(KEYPAD_KEYS.length);
     // Position, not `toContain` over the joined text: `toContain('PF1')` is satisfied by the PF13
-    // line, and by a single line holding all 46 names, and by any order at all.
+    // line, and by a single line holding all 47 names, and by any order at all.
     KEYPAD_KEYS.forEach((k, i) => {
       expect(lines[i]!.slice(2, 2 + k.name.length)).toBe(k.name);
     });
@@ -61,6 +61,14 @@ describe('overlayLines', () => {
     //
     // `System Request` is the longest name, so its padding is empty and its line is exact.
     expect(lineFor('System Request')).toBe('  System Request');
+
+    // NEWLINE'S BLANK IS THE SAME PROPERTY WITH A DIFFERENT CAUSE, and it is the reason this
+    // assertion is here rather than left to the sweep below: c3270 DOES bind Newline, to Ctrl-J
+    // (`Common/fb-c3270:190`), and this project deliberately does not -- Ctrl-J is `\n`, which the
+    // terminal keymap already reads as `enter`. So a Ctrl-J row appearing in `BINDING_INTENT` would
+    // make this line claim a chord that, in the TUI, submits the screen instead. Pinned as a whole
+    // line, and NOT trimmed: the padding must be gone, exactly as Sys Req's is.
+    expect(lineFor('Newline')).toBe('  Newline');
 
     expect(lineFor('Reset')).toBe(`  Reset${' '.repeat(CHORD_COL - 7)}Ctrl-R`);
     expect(lineFor('Back Tab')).toBe(`  Back Tab${' '.repeat(CHORD_COL - 10)}Shift-Tab`);
@@ -83,7 +91,7 @@ describe('overlayLines', () => {
 
   it('derives the chord column from BINDING_INTENT rather than a second list', () => {
     // The point of reading BINDING_INTENT: on-screen help that cannot drift from the bindings.
-    // This sweeps all 46 keys, so a lookup that matched on `kind` alone -- and therefore gave
+    // This sweeps all 47 keys, so a lookup that matched on `kind` alone -- and therefore gave
     // every PF key F1's chord -- reddens here even though the Reset line above still passes.
     const lines = overlayLines(-1);
     let withChord = 0;
@@ -120,7 +128,7 @@ describe('overlayLines', () => {
 
 describe('moveSelection', () => {
   it('moves by one and CLAMPS rather than wrapping', () => {
-    // Clamped, not wrapped: a wrap at 46 entries means holding an arrow silently cycles past the
+    // Clamped, not wrapped: a wrap at 47 entries means holding an arrow silently cycles past the
     // key you were aiming at, which is worse than stopping.
     expect(moveSelection(0, -1)).toBe(0);
     expect(moveSelection(0, 1)).toBe(1);

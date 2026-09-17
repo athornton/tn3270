@@ -3,8 +3,11 @@ import { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH } from '../src/keypad.js';
 import { PF_AIDS, PA_AIDS } from '@tn3270/core';
 
 describe('KEYPAD_KEYS', () => {
-  it('has 46 keys, which is the layout in the spec', () => {
-    expect(KEYPAD_KEYS).toHaveLength(46);
+  it('has 47 keys, which is the layout in the spec', () => {
+    // 47 = c3270's 44 (`Common/c3270/keypad.callbacks`) minus Cursor Select and Compose, plus the
+    // four cursor arrows and Backspace. It was 46 until Newline -- which c3270's keypad has and
+    // this table had dropped without noticing -- was added on the user's decision.
+    expect(KEYPAD_KEYS).toHaveLength(47);
   });
 
   it('carries every PF and PA key exactly once', () => {
@@ -44,7 +47,7 @@ describe('KEYPAD_KEYS', () => {
   });
 
   it('labels every PF and PA key with its own number', () => {
-    // Mechanical, and so free for 27 of the 46: a `PF7` button that sends PF8 is invisible to
+    // Mechanical, and so free for 27 of the 47: a `PF7` button that sends PF8 is invisible to
     // every other test here and to a pixel golden, since both labels draw fine.
     for (const k of KEYPAD_KEYS) {
       if (k.action.kind === 'pf') expect(k.label).toBe(`PF${(k.action as { n: number }).n}`);
@@ -52,19 +55,20 @@ describe('KEYPAD_KEYS', () => {
     }
   });
 
-  it('gives each of the 19 special keys the action its label names', () => {
+  it('gives each of the 20 special keys the action its label names', () => {
     // THE DUPLICATION BELOW IS DELIBERATE. This restates the source's label-to-action mapping, and
     // that is the point: it is a second, independently written statement of a critical lookup
     // table, which is the only thing that can catch a label naming the wrong action. Swap `Del`'s
     // action with `BkSp`'s and every other test here stays green -- and the drawn pixels are
-    // IDENTICAL, so Task 14's goldens cannot see it either. Task 13 clicks only 8 of the 46.
+    // IDENTICAL, so Task 14's goldens cannot see it either. Task 13 clicks only 9 of the 47.
     //
     // Grouped by what the key DOES, deliberately not in the source table's row-by-row order, so a
     // mismatch has to survive being read in two different arrangements.
     const expected = new Map<string, string>([
-      // Moving the cursor.
+      // Moving the cursor. `NewLn` is one of these and not an AID: `Keyboard.newline()` moves to
+      // the first unprotected cell of the next line and sends nothing.
       ['^', 'up'], ['v', 'down'], ['<', 'left'], ['>', 'right'],
-      ['Home', 'home'], ['Tab', 'tab'], ['BkTab', 'backTab'],
+      ['Home', 'home'], ['Tab', 'tab'], ['BkTab', 'backTab'], ['NewLn', 'newline'],
       // Changing what is in the field.
       ['BkSp', 'backspace'], ['Del', 'delete'],
       ['ErEOF', 'eraseEOF'], ['ErInp', 'eraseInput'], ['Ins', 'toggleInsert'],
@@ -74,7 +78,12 @@ describe('KEYPAD_KEYS', () => {
       ['Enter', 'enter'], ['Clear', 'clear'], ['Attn', 'attn'],
       ['SysRq', 'sysreq'], ['Reset', 'reset'],
     ]);
-    expect(expected.size).toBe(19);
+    // RE-DERIVED, not bumped: the table is 12 + 12 PF keys and 3 PA keys, which is 27 the loop
+    // below excludes by `kind`, so the specials are 47 - 27 = 20. This line and the length check on
+    // `special` come at it from the two different sides -- what this map says, and what the source
+    // table holds -- so adding a key here and not there (or there and not here) fails.
+    expect(expected.size).toBe(20);
+    expect(KEYPAD_KEYS).toHaveLength(27 + expected.size);
 
     const special = KEYPAD_KEYS.filter((k) => k.action.kind !== 'pf' && k.action.kind !== 'pa');
     expect(special).toHaveLength(expected.size);

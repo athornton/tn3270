@@ -510,7 +510,8 @@ describe('the gateway end to end', () => {
      */
     const kinds = actionKinds();
     // A FLOOR, not an equality: adding an action must not fail this, but a scan that stopped
-    // matching must. 24 members at the time of writing.
+    // matching must. 25 members at the time of writing -- 24 until `newline` joined, which this
+    // floor deliberately did not need to move for.
     expect(kinds.length, 'the Action union scan found too few kinds to be right').toBeGreaterThanOrEqual(24);
     for (const canary of ['pf', 'type', 'toggleKeypad', 'quit', 'fieldMark']) {
       expect(kinds, 'the Action union scan missed a known kind').toContain(canary);
@@ -545,9 +546,9 @@ describe('the gateway end to end', () => {
       await io.settle();
     }
     ws.close();
-    // 48 sends and a 25ms settle between them, so this is the one case here that does not fit the
-    // 5s default -- and it must not, or a single hanging kind would be reported as a whole-test
-    // timeout instead of by name. See `reader`'s own 2s deadline.
+    // Two sends a kind -- 50 for the 25 members -- and a 25ms settle between them, so this is the
+    // one case here that does not fit the 5s default. And it must not, or a single hanging kind
+    // would be reported as a whole-test timeout instead of by name. See `reader`'s own 2s deadline.
   }, 30_000);
 
   it('toggles the keypad per CONNECTION, and does not force it on a reattaching client', async () => {

@@ -52,7 +52,7 @@ export const KEYPAD_ROWS_TALL = 6;
 /**
  * Which table row sits on which drawn row: rows 0 and 1 are the PF block, then a gap, then 2-4.
  *
- * Indexed by `KeypadKey.row`, whose declared values are `KEYPAD_ROWS` (`frontend/src/keypad.ts:80`).
+ * Indexed by `KeypadKey.row`, whose declared values are `KEYPAD_ROWS` (`frontend/src/keypad.ts:93`).
  * The blank drawn row 2 separates the PF block from the clusters, and is the whole reason
  * `KEYPAD_ROWS_TALL` is 6 for a five-row table.
  */
@@ -93,7 +93,7 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
     });
 
     // Left-aligned in the key. Labels are at most 5 characters against a 6-cell key
-    // (`frontend/src/keypad.ts:57` and the test that pins it), so a label cannot spill into its
+    // (`frontend/src/keypad.ts:70` and the test that pins it), so a label cannot spill into its
     // neighbour.
     for (let i = 0; i < key.label.length; i++) {
       cells.push({
@@ -113,7 +113,7 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
   return {
     y,
     // The PF block is the widest row: 12 keys of 6 cells span 72, inside an 80-column screen
-    // (`frontend/src/keypad.ts:82-83`). Written down rather than measured from the table, so a key
+    // (`frontend/src/keypad.ts:95-96`). Written down rather than measured from the table, so a key
     // placed past the right edge fails a test instead of silently widening the window.
     width: 12 * KEYPAD_KEY_WIDTH * atlas.cellWidth,
     height: KEYPAD_ROWS_TALL * atlas.cellHeight,

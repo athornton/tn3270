@@ -62,6 +62,12 @@ export function applyAction(session: Session, action: Action): void {
       case 'home': k.home(); break;
       case 'tab': k.tab(); break;
       case 'backTab': k.backTab(); break;
+      // BESIDE `tab`/`backTab` because it is the same kind of thing: a local cursor move, not an
+      // AID. `Keyboard.newline()` has existed since stage 1 (`core/src/keyboard.ts:348`) and the
+      // CLI could already call it as `Newline()` (`cli/src/runner.ts:259`) -- this case is what
+      // makes it reachable from an interactive front end, which is the same shape of gap
+      // `Session.sysreq()` had. It has NO CHORD: see the note on the union member.
+      case 'newline': k.newline(); break;
       case 'backspace': k.backspace(); break;
       case 'delete': k.deleteChar(); break;
       case 'eraseEOF': k.eraseEOF(); break;

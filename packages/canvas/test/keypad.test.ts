@@ -104,7 +104,7 @@ describe('keypadRegion', () => {
 
   it('draws PF13-24 ABOVE PF1-12, and starts at the region y', () => {
     // c3270's order (`Common/c3270/keypad.labels:2` and `:4`), recorded in
-    // `frontend/src/keypad.ts:48-49`. A transposed row map keeps every button disjoint, so only an
+    // `frontend/src/keypad.ts:61-62`. A transposed row map keeps every button disjoint, so only an
     // assertion about WHICH row is where can catch it.
     const bs = keypadRegion(atlas, scheme, 350).buttons;
     const pf = (label: string) => bs.find((b) => b.label === label)!;
@@ -119,7 +119,7 @@ describe('keypadRegion', () => {
   });
 
   it("places each label's cells at its own button, left to right", () => {
-    // The count assertion above cannot tell a correctly-placed label from 46 labels piled on one
+    // The count assertion above cannot tell a correctly-placed label from 47 labels piled on one
     // key: this pins x, y and ORDER against the button the label belongs to.
     const r = keypadRegion(atlas, scheme, 350);
     for (const b of r.buttons) {
@@ -240,7 +240,7 @@ describe('hitTest', () => {
     }
   });
 
-  it('finds the button a click lands on, for all 46 of them', () => {
+  it('finds the button a click lands on, for all 47 of them', () => {
     // The happy-path test above uses one button, and one button cannot tell a right-answer hit
     // test from one that always returns `buttons[0]`.
     for (const b of bs) {
@@ -253,7 +253,10 @@ describe('hitTest', () => {
     // A hit test that rounded a click to the nearest key would return a button in a gutter. Table
     // rows 2 and 3 (drawn 3 and 4) each have THREE 6-cell gutters -- at cells 18, 42 and 54, since
     // their keys sit at 0,6,12,24,30,36,48,60 -- and they stop at cell 66. Table row 4 (drawn 5) has
-    // one gutter, at 18, and stops at 42. Every gutter is probed at its first and last cell.
+    // one gutter, at 18, and stops at 48: its keys are 0,6,12,24,30,36 and NOW 42, which is
+    // `NewLn`. Cell 42 on that row was in the list below until Newline took it, and this test is
+    // what noticed -- the only assertion anywhere that a keypad column is EMPTY. Every gutter is
+    // probed at its first and last cell.
     const r = keypadRegion(atlas, scheme, 350);
     const at = (cell: number, drawnRow: number) =>
       hitTest(r.buttons, cell * atlas.cellWidth, r.y + drawnRow * atlas.cellHeight);
@@ -262,9 +265,12 @@ describe('hitTest', () => {
         expect(at(cell, drawnRow), `cell ${cell} on drawn row ${drawnRow}`).toBeUndefined();
       }
     }
-    for (const cell of [18, 23, 42, 71]) {
+    for (const cell of [18, 23, 48, 71]) {
       expect(at(cell, 5), `cell ${cell} on drawn row 5`).toBeUndefined();
     }
+    // And the other side of the same change: the cell that STOPPED being a gutter must now be a
+    // button, or moving a key to 42 and forgetting to probe it would read as a pass above.
+    expect(at(42, 5)?.label, 'cell 42 on drawn row 5').toBe('NewLn');
   });
 });
 

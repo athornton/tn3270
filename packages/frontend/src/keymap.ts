@@ -64,6 +64,18 @@ export type Action =
   | { kind: 'dup' }
   | { kind: 'fieldMark' }
   | { kind: 'toggleInsert' }
+  // NO CHORD, IN EITHER FRONT END, AND THAT IS A MEASURED DECISION RATHER THAN AN OVERSIGHT.
+  // c3270 binds Newline to Ctrl-J in BOTH its keymaps -- `Ctrl<Key>j: Newline()` at
+  // Common/fb-c3270:190 in the non-Windows table a terminal build reads, and `Ctrl <Key>j:
+  // Newline()` at :100 in the _WIN32 one -- but Ctrl-J IS `\n` (0x0a), which `buildTable` below
+  // already maps to `enter` for terminals that send LF for Return. ONE BYTE CANNOT BE BOTH, and
+  // Enter is the AID that submits the screen; quietly turning Return into a cursor move is not a
+  // trade this feature gets to make. x3270's Shift-Return is no help either: terminals do not
+  // report modifiers on Return. Recorded as the user's call on 2026-09-14 --
+  // "leave SysReq and Newline to the keypad, where a button has no spelling problem" --
+  // and this member is the other half of that decision, not a reversal of it: the keypad button
+  // and the TUI overlay are Newline's routes, exactly as they are Sys Req's.
+  | { kind: 'newline' }
   // Not a 3270 key at all: it shows or hides the front end's own virtual keypad, and
   // `applyAction` throws on it exactly as it does on `quit`. It lives in this union because
   // the chord that opens the keypad, the GUI's Alt-K and the `BINDING_INTENT` row must all

@@ -42,7 +42,7 @@ export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from '.
 export type { Action } from './keymap.js';
 
 // The virtual keypad's key set, as data. Here rather than in `canvas` because the TUI's
-// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 46 keys
+// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 47 keys
 // would drift silently. Pure data: no pixels, no cells-to-pixels arithmetic.
 export { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH } from './keypad.js';
 export type { KeypadKey } from './keypad.js';

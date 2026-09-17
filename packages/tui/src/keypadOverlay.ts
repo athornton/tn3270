@@ -21,13 +21,19 @@
  * That table already records key-to-action with a note, and `keymap.test.ts` already pins the
  * terminal keymap against it. Reading it here means the on-screen help cannot drift from the
  * bindings -- which is exactly the kind of documentation that otherwise rots. A key with no entry
- * shows a blank, and 21 of the 46 do: PF2, PF4-PF11, PF14-PF24 and Sys Req.
+ * shows a blank, and 22 of the 47 do: PF2, PF4-PF11, PF14-PF24, Sys Req and Newline.
  *
  * Sys Req's blank is the whole reason this module exists. c3270 defines no chord for it in either
  * of its keymaps, so the overlay is its only keyboard route; a blank there is correct rather than
- * missing. Dup and Field Mark were blank too until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT`, and
- * they filled in here WITH NO EDIT TO THIS FILE -- which is the property the indirection buys, and
- * it was measured rather than assumed.
+ * missing. NEWLINE'S BLANK IS THE SAME AND FOR A DIFFERENT REASON: c3270 does bind it, to Ctrl-J
+ * (`Common/fb-c3270:190`), but Ctrl-J is `\n` and the terminal keymap already reads that as `enter`
+ * -- one byte cannot be both, and Enter is the AID that submits. See the note on the union member
+ * in `frontend/src/keymap.ts`.
+ *
+ * Dup and Field Mark were blank too until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT`, and they
+ * filled in here WITH NO EDIT TO THIS FILE -- which is the property the indirection buys, and it
+ * was measured rather than assumed. Newline arriving in `KEYPAD_KEYS` is the other half of the same
+ * property: it appears as a row here, with a blank chord, also with no edit to this file.
  */
 
 import { BINDING_INTENT, KEYPAD_KEYS, type Action } from '@tn3270/frontend';
@@ -42,7 +48,7 @@ import type { Geometry } from './render.js';
  * by construction and unable to catch a change in either. `keypadOverlay.test.ts` recomputes it.
  *
  * `rows` is a judgement, not a derivation: 12 terminal rows leave 10 lines of list inside a frame,
- * and below that a window onto 46 entries shows so little that scrolling is worse than nothing.
+ * and below that a window onto 47 entries shows so little that scrolling is worse than nothing.
  *
  * NO FRAME IS ACTUALLY DRAWN as of Task 12 -- the list is written straight over the screen's
  * top-left corner -- so the frame cells both figures allow for are slack in a floor that is already
@@ -66,7 +72,7 @@ const NAME_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => k.name.length));
  * writing `{ n: 1, kind: 'pf' }` in either table would silently stop matching. The failure mode
  * would be a blank chord, which this overlay renders as "no chord exists" -- a wrong answer that
  * looks exactly like a right one. `pf`/`pa` carry `n` and `type` carries `text`; every other
- * member of the union is its `kind` alone (`frontend/src/keymap.ts:43-76`).
+ * member of the union is its `kind` alone (`frontend/src/keymap.ts:43-88`).
  */
 const sameAction = (a: Action, b: Action): boolean =>
   a.kind === b.kind
@@ -80,7 +86,7 @@ const chordFor = (action: Action): string =>
 /**
  * One line per key, in table order: a selection mark, the name, then the chord.
  *
- * Returns all 46, which is taller than `OVERLAY_MIN.rows`. SCROLLING IS THE CALLER'S JOB -- the
+ * Returns all 47, which is taller than `OVERLAY_MIN.rows`. SCROLLING IS THE CALLER'S JOB -- the
  * caller takes a window of these. Keeping the window out of here is what lets the whole list be
  * asserted without a terminal.
  *
