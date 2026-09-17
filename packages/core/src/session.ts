@@ -243,6 +243,7 @@ export class Session {
       ...(this.opts.terminalType ? { terminalType: this.opts.terminalType } : {}),
       tn3270eEnabled: this.per.tn3270e ?? this.opts.tn3270e ?? true,
       onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, this.telnet); },
+      onTn3270eDisabled: () => { this.tn3270eDisabled(); },
     });
 
     // Each callback checks identity against the `conn` it closes over, not just
@@ -365,9 +366,9 @@ export class Session {
     // connect() tears down a live predecessor through disconnect(), so both routes
     // pass through here. `eSeq` too — it is only reset on a completed negotiation
     // (below), so a second session that never negotiates would keep counting from the
-    // first one's total.
-    this.e = undefined;
-    this.eSeq = 0;
+    // first one's total. Both live in `forgetTn3270e()`, because a connection ending is
+    // not the only way a negotiation ends: see that method.
+    this.forgetTn3270e();
     // The connection's own overrides go with it, for the same reason: `N:` applied to
     // one host must not silently disable TN3270E for the next one.
     this.per = {};
@@ -555,10 +556,58 @@ export class Session {
     } else if (r.effect?.kind === 'backoff') {
       // Tell the host no and forget the option, so the classic BINARY/EOR route is
       // still reachable on this same connection. x3270's backoff_tn3270e().
+      //
+      // The reason is traced BEFORE the state goes, and the state goes before
+      // refuseTn3270e(): that call reaches `tn3270eDisabled()` back through the layer,
+      // which traces a line of its own only if there is still state to discard. So the
+      // specific reason above is what a trace of this path shows, not a generic one.
       this.trace.note(`TN3270E abandoned: ${r.effect.why}`);
-      this.e = undefined;
+      this.forgetTn3270e();
       layer?.refuseTn3270e();
     }
+  }
+
+  /**
+   * Forget a TN3270E negotiation: `e`, and the sequence counter that belongs to it.
+   *
+   * ONE place, THREE callers — the connection ending (`handleClose`), our own backoff
+   * (`handleTn3270eSubneg`) and the HOST withdrawing option 40 mid-session
+   * (`tn3270eDisabled`). The third was missing, and it is the same defect as the first
+   * one layer along: `e` outliving the negotiation makes `inTn3270e()` true on a session
+   * that is no longer TN3270E, so `handleRecord` eats five bytes off the front of every
+   * inbound record and `sendInbound` prepends five the host has no parser for. That
+   * exact corruption shipped once already, through `connect()` rather than through a
+   * `DONT` — see the comment in `handleClose`.
+   *
+   * `eSeq` goes with it: it is zeroed only on a COMPLETED negotiation, so a
+   * renegotiation on this same connection would otherwise keep counting from the
+   * abandoned one's total. Nothing observes that today, because a session with no
+   * negotiation writes no SEQ-NUMBER — which is the argument for putting it here rather
+   * than at each caller, where "nothing observes it" would have to be re-derived.
+   */
+  private forgetTn3270e(): void {
+    this.e = undefined;
+    this.eSeq = 0;
+  }
+
+  /**
+   * The telnet layer turned TN3270E off. Our negotiation goes with it.
+   *
+   * Wired to `TelnetLayerOptions.onTn3270eDisabled`, so it runs for BOTH ways the option
+   * dies — the host's `IAC DONT 40` and our own `refuseTn3270e()` — rather than only the
+   * one whose call site remembered. The host's is the one that had no route here at all:
+   * a mid-session `DONT` does not close the connection, so `handleClose` never runs and
+   * `e` survived a host that had stopped speaking TN3270E.
+   *
+   * The trace line is conditional because the backoff path clears `e` itself and has
+   * already traced its own, more specific reason before calling `refuseTn3270e()`. A
+   * line here regardless would report the same event twice with the second one vaguer.
+   */
+  private tn3270eDisabled(): void {
+    if (this.e !== undefined) {
+      this.trace.note('TN3270E turned off; negotiation state discarded');
+    }
+    this.forgetTn3270e();
   }
 
   /** True once TN3270E negotiation completed, i.e. records carry a header. */
@@ -834,6 +883,10 @@ export class Session {
       // 5-byte header and every replayed record is parsed one command byte early.
       // `telnet` rather than `this.telnet`, which replay leaves undefined.
       onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, telnet); },
+      // Wired here too, and for the same reason the subnegotiation callback is: a
+      // recorded trace can contain the host's `IAC DONT TN3270E`, and a replay that kept
+      // `e` past it would strip a header from every later record that has none.
+      onTn3270eDisabled: () => { this.tn3270eDisabled(); },
     });
     for (const ev of events) {
       if (ev.dir === 'recv') telnet.receive(ev.bytes);

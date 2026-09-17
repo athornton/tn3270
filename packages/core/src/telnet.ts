@@ -18,6 +18,16 @@ export interface TelnetLayerOptions {
   tn3270eEnabled?: boolean;
   /** Receives a TN3270E subnegotiation body with the option byte stripped. */
   onTn3270eSubneg?: (body: Uint8Array) => void;
+  /**
+   * Called whenever TN3270E goes OFF, so the owner can discard its negotiation.
+   *
+   * The mirror of `onTn3270eSubneg`, and an inbound event in the same sense: the host
+   * withdrawing option 40 mid-session is something only this layer sees. The layer's
+   * own flag is not the whole of the session's TN3270E state -- `Session.e` decides
+   * whether records carry a 5-byte header -- so a teardown here that nobody was told
+   * about leaves the framing on. See `disableTn3270e`.
+   */
+  onTn3270eDisabled?: () => void;
 }
 
 enum St { Data, Iac, Will, Wont, Do, Dont, Sb, SbIac }
@@ -73,7 +83,14 @@ export class TelnetLayer {
   private readonly terminalType: string;
   private readonly tn3270eEnabled: boolean;
   private readonly onTn3270eSubneg: ((body: Uint8Array) => void) | undefined;
-  /** Set once DEVICE-TYPE and FUNCTIONS have both completed. */
+  private readonly onTn3270eDisabled: (() => void) | undefined;
+  /**
+   * Set once DEVICE-TYPE and FUNCTIONS have both completed.
+   *
+   * ONE writer for `true` (`setTn3270eNegotiated`) and ONE for `false`
+   * (`disableTn3270e`). Both of the ways TN3270E ends go through the latter, because
+   * for a while only one of them did: see that method.
+   */
   private tn3270eNegotiated = false;
 
   private state = St.Data;
@@ -94,6 +111,7 @@ export class TelnetLayer {
     this.terminalType = opts.terminalType ?? TERMINAL_TYPE;
     this.tn3270eEnabled = opts.tn3270eEnabled ?? true;
     this.onTn3270eSubneg = opts.onTn3270eSubneg;
+    this.onTn3270eDisabled = opts.onTn3270eDisabled;
   }
 
   /**
@@ -117,6 +135,12 @@ export class TelnetLayer {
     // Negotiation COMPLETE, not merely the option agreed: during DEVICE-TYPE and
     // FUNCTIONS there is no datastream yet. That is the distinction s3270 draws
     // between its connected-unbound and connected-tn3270e states.
+    //
+    // THIS SHORT-CIRCUIT IS WHAT MAKES THE TEARDOWN LOAD-BEARING. It bypasses the
+    // classic test below, so a session that keeps this flag after option 40 has gone
+    // away keeps framing TN3270E against a host that stopped being TN3270E. Every path
+    // that turns the option off therefore goes through `disableTn3270e`, which is the
+    // only writer of `false`; read that method before adding a second one.
     if (this.tn3270eNegotiated) return true;
     return (
       this.myOpts.has(O.BINARY) && this.hisOpts.has(O.BINARY) &&
@@ -124,9 +148,27 @@ export class TelnetLayer {
     );
   }
 
-  /** Called by the session when TN3270E negotiation completes, or is abandoned. */
+  /**
+   * Called by the session when TN3270E negotiation completes, or is abandoned.
+   *
+   * `false` IS NOT A BARE FLAG WRITE, and that asymmetry is the point. Turning TN3270E
+   * ON is genuinely just this flag -- the option was already agreed by DO/WILL, and
+   * completing DEVICE-TYPE and FUNCTIONS adds nothing on the wire. Turning it OFF is
+   * three things (the flag, `myOpts`, and telling the host), and a caller that cleared
+   * only the flag would leave the exact half-teardown this class of bug is made of: the
+   * host still believes we do option 40. So `false` routes through `refuseTn3270e()`,
+   * which means there is NO way through this class to clear the flag alone.
+   *
+   * Nothing in the tree passes `false` today; the signature stays symmetric because
+   * the name reads as a setter and a caller who writes one has to get it right whether
+   * or not we anticipated them.
+   */
   setTn3270eNegotiated(v: boolean): void {
-    this.tn3270eNegotiated = v;
+    if (!v) {
+      this.refuseTn3270e();
+      return;
+    }
+    this.tn3270eNegotiated = true;
   }
 
   receive(chunk: Uint8Array): void {
@@ -209,10 +251,36 @@ export class TelnetLayer {
         this.state = St.Data;
         return;
 
-      case St.Dont:
-        if (this.myOpts.delete(c)) this.reply(T.WONT, c);
+      case St.Dont: {
+        // OPTION 40 IS NOT JUST A BIT IN `myOpts`, so this arm cannot merely delete it:
+        // a COMPLETED TN3270E negotiation also short-circuits is3270Mode() (see there),
+        // and a host that withdraws the option after negotiating it would otherwise
+        // leave us framing TN3270E -- a 5-byte data header prepended for a host with no
+        // parser for it, and five bytes eaten off the front of inbound records that
+        // never carried one. Measured 2026-09-17: a real z/VM 4.4 sends `IAC DONT
+        // TN3270E` after our WILL, so this arm on option 40 is a live path and not a
+        // theoretical one; there it arrived before the negotiation completed, which is
+        // the only reason nothing broke.
+        //
+        // Routed through the SAME `disableTn3270e()` that refuseTn3270e() runs, rather
+        // than clearing the flag here as well: two copies of one rule is how the two
+        // paths diverged in the first place, and `Session.e` had the identical hole
+        // twice (session.ts, `forgetTn3270e`).
+        //
+        // THE TEARDOWN IS UNCONDITIONAL AND ONLY THE REPLY IS GUARDED. `myOpts` and the
+        // flag are two records of the same fact; guarding the teardown on the first
+        // would leave the second stuck on if they ever disagreed, which is precisely
+        // the failure being fixed -- and `refuseTn3270e()` has always cleared it
+        // unconditionally. The reply stays guarded because it is an ACKNOWLEDGEMENT,
+        // and RFC 854 requires that a request to enter a mode we are already in go
+        // unacknowledged, "essential to prevent endless loops in the negotiation".
+        // x3270's TNS_DONT guards the whole block the same way with `if (myopts[c])`
+        // (Common/telnet.c:2039-2048, verified against the current source).
+        const wasAgreed = c === O.TN3270E ? this.disableTn3270e() : this.myOpts.delete(c);
+        if (wasAgreed) this.reply(T.WONT, c);
         this.state = St.Data;
         return;
+      }
 
       case St.Will:
         this.onWill(c);
@@ -442,11 +510,46 @@ export class TelnetLayer {
    * the option, so both the classic BINARY/EOR route and a later renegotiation are
    * still reachable on this same layer. Latching it off would make a reconnect
    * silently decline. This is what makes on-by-default safe.
+   *
+   * The WONT is UNCONDITIONAL, unlike the one the St.Dont arm sends: this is us
+   * INITIATING the change rather than acknowledging one, so RFC 854's
+   * do-not-acknowledge-a-mode-you-are-in rule does not apply. x3270 writes it before
+   * it clears `myopts` and never tests the bit (Common/telnet.c:2224-2240).
    */
   refuseTn3270e(): void {
-    this.myOpts.delete(O.TN3270E);
-    this.tn3270eNegotiated = false;
+    this.disableTn3270e();
     this.reply(T.WONT, O.TN3270E);
+  }
+
+  /**
+   * Turn TN3270E off. THE ONE PLACE THAT DOES, which is the whole point of it existing.
+   *
+   * TN3270E ends two ways -- WE abandon it (`refuseTn3270e`, on a DEVICE-TYPE REJECT
+   * with the LU list exhausted, or a FUNCTIONS set we will not accept) and the HOST
+   * withdraws it (`IAC DONT 40`, the St.Dont arm). For a while only the first cleared
+   * `tn3270eNegotiated`, so the second left that flag true with the option off, and the
+   * flag short-circuits is3270Mode(). Both callers now run this, so the two cannot
+   * drift: adding a third way off means calling this, not copying it.
+   *
+   * Returns whether the option HAD been agreed. That is the caller's business, not
+   * ours, because the two callers owe the host different replies -- see each.
+   *
+   * x3270 gets there from the other end and it is worth knowing why we cannot copy it.
+   * Its TNS_DONT clears `myopts[c]` and calls check_in3270() (Common/telnet.c:2039-2048),
+   * and check_in3270 tests `myopts[TELOPT_TN3270E]` BEFORE `tn3270e_negotiated`
+   * (:3104-3130) -- so there the mode is DERIVED, clearing the option bit is enough, and
+   * `tn3270e_negotiated` may stay set harmlessly. Ours is a stored predicate, so ours
+   * has to be cleared, here. Deliberately NOT also guarded inside is3270Mode() the way
+   * check_in3270 guards it: that would make a missed teardown unobservable, and a
+   * defect that no test can see is worse than one that reddens.
+   */
+  private disableTn3270e(): boolean {
+    const wasAgreed = this.myOpts.delete(O.TN3270E);
+    this.tn3270eNegotiated = false;
+    // The owner's copy of the negotiation dies with ours. Fired from HERE and not from
+    // the two callers for exactly the reason the teardown itself is here.
+    this.onTn3270eDisabled?.();
+    return wasAgreed;
   }
 
   private reply(cmd: number, opt: number): void {
