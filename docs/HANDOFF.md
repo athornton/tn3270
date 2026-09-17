@@ -118,7 +118,68 @@ workarounds** — `s3270 v4.5ga6`, OpenSSL 3.6.4, at
   FUNCTIONS for s3270 as well as for us, so no `FUNCTIONS REQUEST`, no BIND and no LU name has
   ever been observed from any host. Probe questions 1-3 stay open.
 
-**NEXT STEP, AND IT IS NOT ANOTHER HOST — USE `playback -b`.** It is the project's new
+**DONE, 2026-09-17 — `playback -b` IS NOW A COMMITTED HARNESS: `packages/cli/scripts/drive-playback.py`,
+5 of 5 cases, and it found nothing wrong with our client.** Run it by hand like the other
+harnesses (it needs the out-of-tree suite3270 build, so it is NOT in `npm test`); its four
+invariants are pinned by `packages/tui/test/harness-flags.test.ts`, which is. What it proves and
+what it CANNOT are different claims, so quote them apart:
+
+- **PROVED, against five different real hosts' recorded bytes** (two commercial VTAM systems
+  among them): our `IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` including the model the flag
+  asked for, and — on `wont-tn3270e.trc`, whose host answers `WONT 40` before FUNCTIONS — our
+  whole backoff to classic TN3270. **Mutation-verified twice**: corrupting the device-type string
+  and reversing the DEVICE-TYPE operand order each turn all five cases red. **The operand-order
+  bug is the one real s3270 accepts SILENTLY** (`DEVICE-TYPE ??8`, then a stall), so this is new
+  coverage, not a second opinion on what unit tests already catch.
+- **NOT PROVED, AND THIS ORACLE CANNOT: everything from FUNCTIONS onward, which is still
+  questions 1-3.** **ALL 46 traces with an emulator side request BIND-IMAGE**, and we decline it
+  by design (granting it and getting no BIND hangs a real client — measured). So our 10-byte
+  `fffa280307020405fff0` meets an expected 11-byte `fffa28030700020405fff0` and the match stops
+  one block short in EVERY trace, `devname_success.trc` included. **Confirmed to be the only
+  difference** by temporarily adding `BIND_IMAGE` to `REQUESTED_FUNCTIONS`: the FUNCTIONS block
+  then matched byte-for-byte and play advanced. **That change was reverted and must not be
+  committed to make these pass** — it would trade a measured hang for a green harness.
+  So the BIND in `devname_success.trc` is still unreached, and BIND/UNBIND still has no witness.
+
+**THREE PROPERTIES OF `playback` THAT CAN EACH MANUFACTURE A FALSE PASS, all measured here:**
+1. **IT EXITS 0 WHETHER OR NOT IT MATCHED ANYTHING.** `Common/playback.c:373` is literally
+   `exit(0); /* needs to be smarter */`. A mismatch exits 2, but a run that matched NOTHING and
+   hit `Socket EOF` exits 0 exactly like a perfect run. **Assert on the `Matched N bytes from
+   emulator` lines; never on the returncode.** The guard test forbids `pb.returncode`.
+2. **It only ever compares what the trace already contains** — and **16 of the 71 shipped traces
+   have no emulator side at all** (host recordings for renderer tests), so `-b` against those
+   asserts precisely nothing while looking like a pass.
+3. **A TRACE IS A RECORDING OF ONE CLIENT VERSION, NOT A SPEC.** `sruvm.trc` and `rpqnames.trc`
+   are **c3270 v3.3.10alpha1 (2009)** recordings that expect `IBM-3279-4-E` in TERMINAL-TYPE.
+   **Today's s3270 4.5ga6 sends `IBM-3278-4-E` and mismatches them IDENTICALLY to us** — the only
+   reason we know the trace is at fault and not our client, and it needed
+   `-xrm '*wrongTerminalName: true'` to satisfy them (with it, s3270 gets as far as Query Reply
+   and then diverges on its own RPQ names). Excluded by name, with the reason, in the harness.
+   **`ft_cut.trc` is excluded for a related reason worth knowing: x3270 builds `3279` for
+   TERMINAL-TYPE and `3278` for DEVICE-TYPE** (`Common/model.c:135-138` `create_model`, called
+   from `Common/telnet.c:2103-2106` with `force_3278` true only at `:2122`), so a colour model's
+   two strings differ by one digit. We always send 3278.
+
+**TWO HARNESS DEFECTS FOUND BY THE HARNESS CLAIMING OUR CLIENT WAS BROKEN — the shape recurs, so
+suspect a new harness before the product:**
+1. **A readiness CONNECT PROBE IS ACCEPTED AS THE EMULATOR.** `playback` serves one connection at
+   a time (`playback.c:350`, then the whole bidirectional loop), so the probe consumed the
+   session and the real client was never served: a false **"0 of 5 cases passed"**, its log
+   showing one expectation then `Socket EOF` — indistinguishable from our client connecting and
+   saying nothing. **This is the same defect that once made `drive-e.py` fail all seven cases.**
+   Wait on playback's own announcement instead.
+2. **`playback` never `fflush`es that announcement** (`playback.c:283`), so waiting for it on a
+   PIPE **hangs forever** — and a chatty trace would deadlock on one pipe buffer anyway. The
+   harness gives it a log FILE under `stdbuf -oL`.
+
+**AND ONE ABOUT THE GUARD TEST, which is the [[implementers-should-verify-not-trust-plans]] shape
+turned on myself:** its four assertions were each mutation-falsified, but **the first attempt at
+the fourth was a silent no-op whose anchor never matched the source**, so it reported "8 passed"
+while proving nothing. Asserting the anchor before mutating is what exposed it. A mutation check
+that cannot fail is worth less than no mutation check, because it certifies.
+
+**THE ORIGINAL PLAN FOR THIS, kept because its reasoning about WHY this oracle matters still
+stands:** ~~NEXT STEP, AND IT IS NOT ANOTHER HOST~~ — USE `playback -b`. It is the project's new
 reference oracle and it is **strictly stronger than the in-repo `e-server.py`**: it replays a
 **recorded real host** and asserts the client's replies match byte for byte, **with no network
 and no host at all**, whereas `e-server.py` was written by us from the RFC and x3270's source
@@ -141,7 +202,17 @@ verification and should be tried before hunting for another host.** Two known di
 be accounted for first or a mismatch will be misread: BIND-IMAGE, which we decline by design,
 and the bare DEVICE-TYPE below.
 
-**A REAL DIVERGENCE FROM s3270, RECORDED AND NOT FIXED — it is the user's decision.**
+**A REAL DIVERGENCE FROM s3270 — NOW DECIDED BY THE USER, 2026-09-17: WE DO NOT APPEND `-E`
+UNCONDITIONALLY, AND THE DIVERGENCE STAYS.** No code changed, because our behaviour was already
+this; what changed is that it is now a decision rather than an open question, and it is pinned by
+a test. `packages/core/test/tn3270e.test.ts` *sends the terminal type VERBATIM, appending no -E of
+its own* asserts the bare `IBM-3278-2` for `-model 3278-2` and separately asserts the reply
+contains no `-E` at all. **Mutation-verified**: making `deviceTypeRequest` append `-E` when absent
+reddens it. That test exists because **every other test in that file passes a `-E` terminal type**,
+so nothing could distinguish "we pass the string through" from "we append `-E`" — and appending it
+is the natural way to make one more `playback` block match, which is exactly the pressure it must
+resist. The original reasoning follows.
+
 **s3270 appends `-E` to the TN3270E DEVICE-TYPE regardless of model; we do not.**
 `tn3270e_request()` calls `create_3270_termtype(true)` (`Common/telnet.c:2121-2122`), which
 appends `-E` unless extended data stream is off or the `S:` prefix set `STD_DS_HOST`
@@ -153,7 +224,8 @@ yesterday's "the `-E` suffix is not the trigger" test, which varied our request 
 no known-good client sends — the conclusion holds only because s3270's `-E` form was refused
 too; (2) RFC 2355 permits both forms and `-model 3278-2` meaning "not extended" arguably makes
 the bare form more honest, so **decide it deliberately rather than aligning with s3270 by
-reflex. No code was changed.** Also for whoever next touches LU plumbing: **s3270 appends the
+reflex. No code was changed.** ~~Awaiting the user.~~ **DECIDED as above, 2026-09-17: the bare
+form stays.** Also for whoever next touches LU plumbing: **s3270 appends the
 LU to TERMINAL-TYPE too** — `IBM-3278-2-E@VTAM` (`Common/telnet.c:2019-2024`).
 
 Bytes, the variant table, the toolchain recipe and the four questions with a status each:
@@ -393,9 +465,12 @@ node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
 
 ### By-hand harnesses — NOT in `npm test`
 
-**There are FIVE now.** None is in `npm test`; each spawns Electron or a browser, and what `npm
-test` carries instead is a flags test per harness pinning its argv, cases and pass conditions as
-text so it cannot rot unnoticed. Figures are the keypad branch's:
+**SIX run with no host, and TWO more need one.** ~~There are FIVE now.~~ **The old "FIVE" counted
+only the host-free ones and did not say so** — `drive-e.py` and `live-drive.py` are harnesses too,
+and an undercount here is how one gets forgotten when a default flips. None is in `npm test`; each
+spawns Electron, a browser, a pty or an out-of-tree binary, and what `npm test` carries instead is a
+flags test per harness pinning its argv, cases and pass conditions as text so it cannot rot
+unnoticed. Figures are as measured on `playback-oracle`, 2026-09-17:
 
 ```sh
 node packages/gui/scripts/shot.mjs           # 3/3 goldens matched
@@ -404,6 +479,15 @@ node packages/gui/scripts/clicks.mjs         # ok 9 buttons, 10 actions in order
 node packages/web/scripts/browser-keys.mjs   # ok 13 chords, 11 actions in order, over a WebSocket
 node packages/web/scripts/browser-shot.mjs   # 2/2 cases matched the GUI's own goldens
 python3 packages/tui/scripts/pty-smoke.py    # 12/12, and it needs no X at all
+python3 packages/cli/scripts/drive-playback.py  # 5/5 traces; needs the suite3270 build, no host
+```
+
+**These two need something this sandbox does not always have**, which is why they are listed apart
+rather than folded into a single count:
+
+```sh
+python3 packages/cli/scripts/drive-e.py      # 7 configurations against the in-repo e-server.py
+python3 packages/tui/scripts/live-drive.py   # needs a LIVE Hercules host on 3270/3271
 ```
 
 **`browser-shot.mjs` RUNS TWO CASES, NOT ONE.** An earlier version of this line described it as
