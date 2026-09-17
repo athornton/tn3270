@@ -132,13 +132,17 @@ exonerates the implementation rather than verifying it. See *TN3270E* and *Verif
 Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
 the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
 
-Two test harnesses come with it, because "it looked right" is not a result:
+These terminal harnesses come with it, because "it looked right" is not a result
+(the GUI and browser ones are listed under *Verification*):
 
 - `packages/tui/scripts/live-drive.py <tk5|vm>` drives the TUI against a real host over
   a pty and reconstructs what was actually drawn. It counts reverse-video cells and
   solid blocks, and reports whether it confirmed its own logoff.
 - `packages/tui/scripts/pty-smoke.py` does the same host-free against a local minimal
   TN3270 server: 12 checks, including that your terminal still echoes afterwards.
+- `packages/cli/scripts/drive-playback.py` replays **recorded real hosts** through
+  x3270's own `playback -b`, which asserts our replies byte for byte with no host and
+  no network. It needs a built suite3270 alongside this repo; 5 of 5 traces pass.
 
 ## Build and test
 
@@ -894,7 +898,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1728 tests, 71 files (measured 2026-09-17; the ten `St.Dont` teardown tests had landed without these two counts being updated) |
+| `npm test` | **pass** — 1732 tests, 71 files (measured 2026-09-17 on `playback-oracle`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -914,6 +918,7 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
+| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 5 of 5 traces**, host-free, by `drive-playback.py`. Replays five different real hosts (two commercial VTAM systems) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all five, and **that operand-order bug is one real s3270 accepts silently**. **The match stops at FUNCTIONS in every trace**: all 46 traces with an emulator side request BIND-IMAGE and we decline it by design, so nothing past that point — including the real BIND in `devname_success.trc` — is verified by this |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both

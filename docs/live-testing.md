@@ -2457,3 +2457,100 @@ z/OS:
 
 Do all five **through the keypad button**, not through the CLI: the CLI path is the one already
 covered offline, and the button is the path a user actually has.
+
+## `playback -b` as a reference oracle — the traces, and how to read them, 2026-09-17
+
+**What this is.** x3270 ships `playback`, which replays a recorded trace as if it were the host,
+and in bidirectional mode (`-b`) asserts that the connected emulator's replies match, byte for
+byte, what the client that made the recording really sent. **No host and no network are involved**,
+which is why it works in this sandbox where TN3270E has never once completed against a reachable
+host. It is a stronger oracle than our own `e-server.py` in one specific way: `e-server.py` was
+written by us from RFC 2355 and x3270's source, so a misreading we share with it passes; a trace is
+a recording of a real host and a known-good client, so it cannot agree with our mistakes.
+
+Committed driver: `packages/cli/scripts/drive-playback.py`, **5 of 5 cases**. Build the tools with:
+
+```bash
+source /opt/lsst/software/stack/loadLSST.bash    # never paste the raw conda path; it is version-pinned
+cd ~/src/suite3270-4.5 && make s3270 playback    # ~23 s, exit 0, no extra flags
+```
+
+### THREE PROPERTIES OF THE INSTRUMENT, EACH OF WHICH CAN MANUFACTURE A FALSE PASS
+
+1. **`playback` EXITS 0 WHETHER OR NOT IT MATCHED ANYTHING.** `Common/playback.c:373` is literally
+   `exit(0); /* needs to be smarter */` at the end of the bidirectional loop. A data mismatch does
+   exit 2 (`:961`), but a run that matched **nothing** and hit `Socket EOF` exits 0 exactly like a
+   perfect run. **Assert on the `Matched N bytes from emulator` lines.** The guard test in
+   `packages/tui/test/harness-flags.test.ts` forbids a `returncode` check for this reason.
+2. **It compares only what the trace already contains.** **16 of the 71 shipped traces have no
+   emulator side at all** — they are host recordings for renderer tests — so `-b` against one of
+   those asserts precisely nothing while printing and exiting like a success.
+3. **A TRACE IS A RECORDING OF ONE CLIENT VERSION, NOT A SPECIFICATION.** See the excluded traces
+   below; two of them fail against **today's s3270** just as they fail against us.
+
+### THE STRUCTURAL LIMIT: BIND-IMAGE, AND WHY WE DO NOT MAKE IT GO AWAY
+
+**All 46 traces with an emulator side ask for BIND-IMAGE** in FUNCTIONS (`07 00 ...`). We
+deliberately do not (`REQUESTED_FUNCTIONS`, `packages/core/src/tn3270e.ts`): granting BIND-IMAGE
+and then receiving no BIND makes a real client never enter 3270 mode, which is measured, not
+theorised. So in every trace that reaches FUNCTIONS, our 10-byte `fffa280307020405fff0` meets an
+expected 11-byte `fffa28030700020405fff0` and the comparison stops there, one block short.
+
+**That was confirmed to be the ONLY difference**, by temporarily adding `BIND_IMAGE` to
+`REQUESTED_FUNCTIONS` and re-running: the FUNCTIONS block then matched byte-for-byte and play
+advanced to the next expectation. **The change was reverted. Do not commit it to make these traces
+go further** — it would trade a measured hang for a greener harness. The consequence to state
+honestly: **the real BIND in `devname_success.trc` (`PLU-name 'IBM0SMAJ'`) is still unreached, so
+BIND/UNBIND remains without any witness**, and probe questions 1-3 stay open.
+
+### WHAT THE FIVE CASES DO PROVE
+
+Against five different real hosts' recorded bytes — two commercial VTAM systems among them — our
+`IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` carrying the model the flag asked for, and (on
+`wont-tn3270e.trc`, whose host sends `WONT 40` before FUNCTIONS is ever arbitrated) **the whole
+backoff to classic TN3270**. Mutation-verified twice: corrupting the device-type string, and
+reversing the DEVICE-TYPE operand order, each turn all five cases red. **The operand-order bug is
+the one real s3270 accepts SILENTLY** — it logs `DEVICE-TYPE ??8` and stalls — so this is genuinely
+new coverage rather than a second opinion on what the unit tests already catch.
+
+### THE EXCLUDED TRACES, EACH WITH ITS MEASURED REASON
+
+An unexplained absence invites someone to add the trace back and misread the failure, so:
+
+- **`sruvm.trc`, `rpqnames.trc`** — recorded by **c3270 v3.3.10alpha1 (2009)**, and they expect
+  `IBM-3279-4-E` in TERMINAL-TYPE. **Modern s3270 4.5ga6 sends `IBM-3278-4-E` and mismatches them
+  IDENTICALLY to us**, which is the only reason we can say the trace is stale rather than our
+  client wrong — run the known-good binary before believing any mismatch. With
+  `-xrm '*wrongTerminalName: true'` s3270 satisfies TERMINAL-TYPE and gets all the way into Query
+  Reply, then diverges on its own RPQ names, which we do not implement.
+- **`ft_cut.trc`, `ft_cut_ewa.trc`, `ft_dft.trc`** — classic TN3270 with no option 40 at all, which
+  would otherwise make them ideal. They were recorded in colour mode, and **x3270 builds `3279` for
+  TERMINAL-TYPE but `3278` for the TN3270E DEVICE-TYPE**: `create_model()`
+  (`Common/model.c:135-138`) picks the digit from `mode3279`, and `create_3270_termtype`'s
+  `force_3278` argument (`Common/telnet.c:2103-2106`) is true only at the TN3270E call site
+  (`:2122`). We always send `3278`, so TERMINAL-TYPE differs by one digit.
+- **The 16 host-only traces** (`b3270/Test/*`, `s3270/Test/930.trc` and others) — no emulator side,
+  so `-b` asserts nothing.
+
+### TWO HARNESS DEFECTS THAT PRESENTED AS CLIENT BUGS
+
+The lesson generalises and this project has now hit it three times: **when a NEW harness says the
+client is broken, suspect the harness until it has satisfied a known-good client.**
+
+1. **A readiness CONNECT PROBE is accepted AS the emulator.** `playback` serves one connection at a
+   time (`playback.c:350` accepts, then the entire bidirectional loop runs before the next accept),
+   so the probe consumed the session and the real client was never served. Result: a confident
+   **"0 of 5 cases passed"** whose log showed one expectation then `Socket EOF` — indistinguishable
+   from our client connecting and saying nothing. **This is the same defect that once made
+   `drive-e.py` fail all seven of its cases.** Wait on playback's own stdout announcement instead.
+2. **`playback` never `fflush`es that announcement** (`playback.c:283`), and stdout to a pipe is
+   fully buffered — so waiting for the line on a **pipe hangs forever**. A chatty trace would also
+   deadlock on one pipe buffer with nobody draining it, which this project has been bitten by
+   before. The harness gives playback a log **file** under `stdbuf -oL` and tails that.
+
+### AND ONE ABOUT THE GUARD TEST ITSELF
+
+Its four assertions were each mutation-falsified separately — but **the first attempt at the fourth
+was a silent no-op whose anchor never matched the source**, so it reported "8 passed" while proving
+nothing about the assertion under test. Asserting the anchor exists *before* mutating is what
+exposed it. **A mutation check that cannot fail is worse than none, because it certifies.**

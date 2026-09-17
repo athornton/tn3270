@@ -245,6 +245,29 @@ describe('TN3270E negotiation — DEVICE-TYPE', () => {
     expect(r.effect).toBeUndefined();
   });
 
+  it('sends the terminal type VERBATIM, appending no -E of its own', () => {
+    // A DELIBERATE, USER-DECIDED DIVERGENCE FROM s3270 (2026-09-17). s3270 appends -E
+    // to the TN3270E DEVICE-TYPE regardless of model -- tn3270e_request() calls
+    // create_3270_termtype(TRUE) (Common/telnet.c:2121-2122), and the -model suffix
+    // reaches only TERMINAL-TYPE -- so under `-model 3278-2` it sends IBM-3278-2-E
+    // where we send the bare IBM-3278-2. RFC 2355 permits both forms, and `-model
+    // 3278-2` meaning "not extended data stream" makes the bare form the more honest
+    // of the two, which is why this is not being aligned with s3270 by reflex.
+    //
+    // This test exists because every other test in this file passes a -E terminal
+    // type, so nothing here could tell "we pass the string through" from "we append
+    // -E" -- and appending it is the natural way to make the playback traces match one
+    // block further. It must not be done to satisfy a trace.
+    const st = initialState({ terminalType: 'IBM-3278-2', lus: [] });
+    const r = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
+    expect([...r.reply!]).toEqual([
+      Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST, ...ascii('IBM-3278-2'),
+    ]);
+    // Said twice on purpose: the equality above would also pass if `-E` were appended
+    // to a DIFFERENT string, and this names the actual prohibition.
+    expect(Buffer.from(r.reply!).toString('ascii')).not.toContain('-E');
+  });
+
   it('appends CONNECT <lu> when an LU was named', () => {
     const st = initialState({ terminalType: 'IBM-3278-2-E', lus: ['TESTLU01'] });
     const r = negotiate(st, Uint8Array.of(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE));
