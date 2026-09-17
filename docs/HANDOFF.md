@@ -50,7 +50,29 @@ first reading.
 **THEN: `IBM-DYNAMIC`, which the user scheduled IMMEDIATELY AFTER THE KEYPAD on 2026-09-16**, then
 (4) Programmable Symbol Sets + VMGIF. `IBM-DYNAMIC` is the one remaining TN3270E item with a live
 path today: TK5's TSO issues a Read Partition to any `-E` client. **BIND/UNBIND** and **printer
-sessions** stay unscheduled and have no live path at all, both hosts refusing option 40.
+sessions** stay unscheduled and have no live path at all ~~, both hosts refusing option 40~~ —
+**no host that COMPLETES the negotiation is reachable; see the next paragraph, which changes
+what "no live path" means without yet removing the obstacle.**
+
+**A REAL TN3270E-CAPABLE HOST NOW EXISTS, 2026-09-17, AND IT ONLY HALF WORKS.** The user
+obtained access to public z/VM 4.4 at `evievm.pubvm.org:23` (**plaintext, so `-insecure` is
+required — without it the client HANGS**) and the committed probe was run, no logon attempted.
+**It sends `IAC DO TN3270E` unprompted and asks `SEND DEVICE-TYPE` itself** — both firsts here,
+since neither Hercules host ever mentions option 40 — **then withdraws the option (`ff fe 28`)
+after our well-formed `DEVICE-TYPE REQUEST`**, identically with and without the `-E` suffix. Our
+backoff carried the session to z/VM's logon screen, **so the backoff path finally has a live
+witness** — and specifically the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), a
+*different* path from the DEVICE-TYPE REJECT and `-tn3270e off` cases `drive-e.py` drives, and
+one nothing had ever exercised because our client never volunteers `WILL 40`. It has no unit
+test on option 40, so it should get one. But the negotiation does not complete and **TN3270E
+remains functionally unverified against a host**. Whose fault the refusal is is **unresolved**: there is no s3270 on this box and
+no compiler to build one, so the known-good comparison this project's discipline demands could
+not be run. **NEXT STEP, and it is cheap:** get an LU name from whoever runs that system and try
+`Connect("LUNAME@evievm.pubvm.org:23")`, which is the one test that distinguishes "the host wants
+a `CONNECT` clause" from "the option is advertised but not functional"; failing that, an
+s3270/x3270 trace of that host from any machine that has one. Bytes, both candidate explanations
+and the four questions with a status each: `docs/live-testing.md`, *TN3270E against a real host*;
+recorded against the design in the spec's *Live host, 2026-09-17*.
 
 ### WHAT THE KEYPAD BRANCH DELIVERED
 
@@ -101,7 +123,9 @@ nothing else:
   (`Common/telnet.c:3632-3648`), so an E session that declined the function sends **nothing** — and
   specifically not the classic form as a fallback, because x3270 never reaches the `else` arm on an
   E session. **Never exercised live**: neither Hercules host offers TN3270E, both answering
-  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times.
+  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times. **Still never exercised live
+  after 2026-09-17** — z/VM 4.4 at `evievm.pubvm.org:23` does offer option 40, but withdraws it
+  before FUNCTIONS, so no session has ever agreed the SYSREQ function bit with a host.
 - **CLASSIC**: a **test request read**, which is what both Hercules hosts get.
 
 **THREE THINGS ABOUT THE CLASSIC FORM THAT ARE WRONG ON A FIRST READING.** All three were checked
@@ -467,9 +491,15 @@ tasks are done. The option, DEVICE-TYPE/FUNCTIONS, the 5-byte header, SNA respon
 SYSREQ, LU selection and the `N:` prefix all work end to end — **against real s3270
 4.5ga6 and `packages/cli/scripts/e-server.py`, NOT against a live host.** Neither
 Hercules system offers option 40; measured on both, accepting and refusing. Do not
-quote this result without that qualifier. When a real z/VM or z/OS appears, run the
-probe in `docs/live-testing.md`, *TN3270E against a real host* — four questions, the
-largest being whether a host sends `FUNCTIONS REQUEST` first, a branch no server has
+quote this result without that qualifier. ~~When a real z/VM or z/OS appears, run the
+probe~~ **The probe WAS run, 2026-09-17, against a real z/VM 4.4 — see
+`docs/live-testing.md`, *TN3270E against a real host*, and the spec's *Live host,
+2026-09-17*. One of the four questions is answered; three are not, because the host
+withdraws the option after our `DEVICE-TYPE REQUEST` and the negotiation never reaches
+FUNCTIONS. The qualifier above therefore STANDS: TN3270E is still not functionally
+verified against a host. What is now verified live is that a host offers option 40, that
+it sends `SEND DEVICE-TYPE` itself, and that our backoff reaches a usable session.**
+Whether a host sends `FUNCTIONS REQUEST` first is still the largest branch no server has
 ever exercised.
 
 `packages/cli/scripts/drive-e.py` is the committed driver: seven configurations,
@@ -647,7 +677,7 @@ before. Read the status here and the reasoning there.
 | 5. packaging | not started |
 | 6. TLS | **DONE** and live-verified |
 | 7. the printer session | not started |
-| 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | **`IBM-DYNAMIC` IS NEXT** — the user scheduled it immediately after the keypad on 2026-09-16. It has a live path (TK5's Read Partition); the negotiation does not, both Hercules hosts refusing option 40 |
+| 8. real TN3270E + `IBM-DYNAMIC` (added 2026-09-14) | **`IBM-DYNAMIC` IS NEXT** — the user scheduled it immediately after the keypad on 2026-09-16. It has a live path (TK5's Read Partition); the negotiation still does not — both Hercules hosts refuse option 40, and z/VM 4.4 (`evievm.pubvm.org:23`, probed 2026-09-17) offers it and then withdraws it, so the offer and the backoff have live witnesses and a completed negotiation does not |
 | 9. keypad / special-keys menu (added 2026-09-14) | **BUILT AND VERIFIED on branch `keypad-and-special-keys`, NOT MERGED.** All 15 tasks, plus the non-TN3270E Sys Req path the user authorised on 2026-09-17; the whole gate passes. Two things wait on the user — the merge and the keypad's styling. See the top of this file |
 
 **So the order from here is: land (9), then `IBM-DYNAMIC` from (8), then (4) PS + VMGIF, with
@@ -698,17 +728,27 @@ thing deliberately NOT on the roadmap: IBM is sunsetting it, and the route is PS
 the 3279 screen directly.
 
 8. **Real TN3270E, and `IBM-DYNAMIC` screen size.** Added by the user 2026-09-14, position
-   not stated. **Blocked on access to a real modern z/VM or z/OS, which the user had still
-   not arranged as of 2026-09-14** (first mentioned as being arranged 2026-08-27).
+   not stated. ~~**Blocked on access to a real modern z/VM or z/OS, which the user had still
+   not arranged as of 2026-09-14**~~ (first mentioned as being arranged 2026-08-27).
+   **ACCESS ARRIVED 2026-09-17** — public z/VM 4.4 at `evievm.pubvm.org:23`, plaintext —
+   **and it moved the first half only part way; see *Where things stand* at the top.**
    **The two halves are NOT equally blocked, and the difference is worth acting on:**
-   - **Live TN3270E is genuinely blocked.** Both Hercules systems *refuse* option 40 rather
-     than merely not offering it — send `ff fb 28` and both answer `ff fe 28`, measured
-     passively, accepting and refusing. **No client can get TN3270E here by any route.** So
+   - **Live TN3270E is partly unblocked as of 2026-09-17.** Both Hercules systems *refuse*
+     option 40 rather than merely not offering it — send `ff fb 28` and both answer
+     `ff fe 28`, measured passively, accepting and refusing. ~~**No client can get TN3270E
+     here by any route.**~~ **CORRECTED 2026-09-17: that was true of the two Hercules hosts
+     and is no longer true of this box. z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO
+     TN3270E` unprompted and asks `SEND DEVICE-TYPE`, then withdraws the option after our
+     request — so option 40 CAN be reached from here; a COMPLETED negotiation still cannot,
+     and the reason is unresolved.** So
      what item 1 lacks is a live witness, not an implementation: the negotiation is verified
      against real s3270 4.5ga6 and the in-repo `e-server.py`. Quote that qualification every
-     time. The genuinely unbuilt parts that a real host would unlock: BIND-IMAGE with a real
+     time — **the 2026-09-17 run does not lift it; it witnesses the OFFER and the BACKOFF,
+     not the negotiation.** The genuinely unbuilt parts that a real host would unlock:
+     BIND-IMAGE with a real
      BIND (deliberately not requested — granting it and sending no BIND stops s3270 entering
-     3270 mode at all), the printer session, and LU/device names actually being honoured.
+     3270 mode at all), the printer session, and LU/device names actually being honoured —
+     and an LU name is now also the **diagnostic** for why z/VM 4.4 refuses.
    - **`IBM-DYNAMIC` is NOT blocked in the same way.** Its client-side prerequisite is Read
      Partition (Query) / Query Reply, and **MVS 3.8j TK5's TSO issues one** — captured
      2026-08-17 in `packages/fixtures/x3270/tso-query-reply.txt`, with ttype `IBM-3278-2-E`

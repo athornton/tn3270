@@ -9,6 +9,13 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **A REAL TN3270E-CAPABLE HOST HAS NOW BEEN PROBED, 2026-09-17 — and the answer is half an
+  answer.** z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO TN3270E` unprompted and asks
+  `SEND DEVICE-TYPE`, both firsts here, then **withdraws the option** after our request and we
+  fall back to base TN3270 and reach its logon screen. So the backoff path finally has a live
+  witness, but **the negotiation does not complete and TN3270E is still not functionally verified
+  against a host** — and with no s3270 on this box we cannot say whose fault the refusal is. Full
+  bytes, the two candidate explanations and the corrected probe: *TN3270E against a real host*.
 - **THE VIRTUAL KEYPAD — NOTHING WAS RUN AGAINST A HOST, 2026-09-17, and that is a decision rather
   than a gap.** A button press produces the same wire bytes as the equivalent keystroke, and those
   are already verified below. **But Sys Req, Dup, Field Mark and Newline have NO live witness at
@@ -1493,47 +1500,156 @@ command that exits kills it, and the symptom is Electron's
 `Missing X server or $DISPLAY` even though `DISPLAY` is set — which reads as a
 configuration error rather than a dead server. Cost two runs to spot.
 
-## TN3270E against a real host — NOT YET DONE
+## TN3270E against a real host — partly answered, 2026-09-17
 
-This is verification against **x3270 and a harness, not against a host**, and it is a
-weaker claim. Say so wherever the result is quoted: neither Hercules system on this box
-speaks option 40, measured on both, accepting and refusing.
+**A real host has now offered option 40, asked us for a device type, and then withdrawn
+the option; our fallback carried the session through to a usable screen.** That is three
+firsts and one unresolved question, and the negotiation **does not complete**, so TN3270E
+remains *functionally* unverified against a host. What is verified is that a host offers
+it, that it asks for a device type, and that our backoff is correct.
 
-When real z/VM or z/OS access arrives, run this first — it needs no logon, so it cannot
-hand the VM reconnect trap to the next run:
+Host: **`evievm.pubvm.org:23`**, a public z/VM 4.4 system. **Plaintext only — it does not
+do TLS**, so `-insecure` is required (see the trap below). Run 2026-09-17, **no logon
+attempted**, so the VM reconnect trap was not armed for the next run. Two connections.
+
+### Run 1 — `-insecure -model 3278-2-E`
+
+```
+data: 0.000 < ff fd 28
+data: 0.000 > ff fb 28
+data: 0.078 < ff fa 28 08 02 ff f0
+data: 0.079 > ff fa 28 02 07 49 42 4d 2d 33 32 37 38 2d 32 2d
+data: 0.079 + 45 ff f0  # TN3270E subnegotiation
+data: 0.157 < ff fe 28 ff fd 18
+```
+
+Read that as: `IAC DO TN3270E` unprompted; our `IAC WILL TN3270E`; the host's
+`SB TN3270E SEND DEVICE-TYPE`; our `DEVICE-TYPE REQUEST IBM-3278-2-E`; then
+`IAC DONT TN3270E` followed immediately by `IAC DO TERMINAL-TYPE`. We answered
+`IAC WONT TN3270E` and `IAC WILL TERMINAL-TYPE`, fell back to base TN3270, and reached
+the **z/VM logon screen**: the `z/VM ONLINE` logo, `Fill in your USERID and PASSWORD and
+press ENTER`, `USERID ===>`, `PASSWORD ===>`, `COMMAND ===>` and `RUNNING   EVIEVM` in
+the bottom right. Status line `U F U C(evievm.pubvm.org) I 2 24 80 19 16 0x0`.
+
+### Run 2 — `-insecure -model 3278-2`, no `-E`
+
+**Byte-identical outcome.** Same `SEND DEVICE-TYPE`, our request carries `IBM-3278-2`,
+and the host again answers `ff fe 28` then `ff fd 18`; our fallback sent `> ff fc 28`
+then `> ff fb 18`. **So the `-E` suffix is not the trigger** — the refusal follows a
+well-formed `DEVICE-TYPE REQUEST` either way.
+
+### What this establishes
+
+1. **A real host DOES offer TN3270E.** `< ff fd 28` is `IAC DO TN3270E`, unprompted. No
+   host on this box had ever sent it.
+2. **A real host sends `SEND DEVICE-TYPE` itself** (`08 02`). `e-server.py` does that
+   only because it was written to; now a host has been seen doing it.
+3. **The backoff path has a live witness — this answers question 4 below.** It had only
+   ever been exercised against our own harness, and it is what makes TN3270E-on-by-default
+   safe. **But it is a DIFFERENT backoff from the one the harness drives, and saying which
+   is the whole value of the run.** `drive-e.py`'s refusal cases are a DEVICE-TYPE
+   **REJECT** (`--reject`, reaching `refuseTn3270e()` once the LU list is exhausted) or *us*
+   declining (`--expect-refuse`: `-tn3270e off`, `N:`). z/VM sent `IAC DONT TN3270E` **after
+   our `WILL`**, which takes the `St.Dont` arm instead
+   (`packages/core/src/telnet.ts:212-215` — drop it from `myOpts`, reply `WONT`). Nothing
+   had ever driven that arm on option 40: our client never volunteers `WILL 40`, so the
+   Hercules hosts' willingness to answer a bare `ff fb 28` with `ff fe 28` was only ever
+   measured by a **passive probe**, never by us. It deserves a unit test now that a host is
+   known to do it.
+4. **The TLS trap generalises to a third host.** Omitting `-insecure` against a plaintext
+   host **HANGS** rather than failing: the leading `0xff` of `IAC DO TERMINAL-TYPE` is read
+   as a TLS record content type and the read blocks for a length that never arrives. Same
+   shape as the two Hercules hosts and as the headless-Electron stall — a plaintext host
+   failing under default TLS is a stall, not an error.
+
+### What this does NOT establish — the important half
+
+- **Whose fault the refusal is is UNRESOLVED, and this cuts against us.** The host
+  withdraws the option *after* a well-formed request, identically for `IBM-3278-2-E` and
+  `IBM-3278-2`. **There is no s3270 binary on this box and no compiler to build one**, so
+  the comparison this project's own discipline demands — *a harness never shown to satisfy
+  a known-good client cannot say which side is wrong*, the argument in the stage 2b spec
+  under *Testing* — could not be run against this host. Until a known-good client is shown
+  the same host, "the host is at fault" is a hypothesis, not a finding.
+- Two candidate explanations, **both untested**:
+  **(a)** the host may require a `CONNECT` clause naming an LU. RFC 2355 makes it optional
+  and a conforming host should assign a device, but a public z/VM with defined resources
+  may not. `Connect("LUNAME@evievm.pubvm.org:23")` would be decisive if a valid name is
+  known.
+  **(b)** the option may be advertised but not functional, as some front ends do.
+- **Questions 1, 2 and 3 remain unanswered**, because the negotiation never gets past
+  DEVICE-TYPE.
+- **TLS still has no native-TLS-mainframe witness.** This host is plaintext, so our TLS
+  verification remains via the in-repo proxy against Hercules. Honest — but keep it
+  labelled that way wherever it is quoted.
+
+### The probe — and the defect that was in it until 2026-09-17
+
+**`Trace(on)` MUST come FIRST, before `Connect()`.** The version of this probe committed
+between 2026-08-27 and 2026-09-17 put `Trace(on)` *after* `Connect()` and
+`Wait(3270Mode)`, which captures **none of the negotiation** — the entire point of all
+four questions. `Trace.setEnabled` (`packages/core/src/trace.ts:47`) only flips a boolean;
+it retains nothing from before it was called. And there is **no `-trace` argv flag** to
+work around it: `parseArgs` (`packages/cli/src/main.ts:52-78`) accepts only `-tn3270e`,
+`-model`, `--terminal-type` and the TLS flags, and throws `UsageError` on anything else.
+**Do not reorder these lines back.** The run above is what the corrected order produces.
 
 ```bash
 npm run build
-printf 'Connect(HOST:PORT)\nWait(3270Mode,20)\nWait(Settle,10)\nTrace(on)\nScreenText\nTraceText\nQuit\n' \
-  | node packages/cli/dist/main.js -model 3278-2-E > /tmp/e-live.log 2>&1
+printf 'Trace(on)\nConnect(HOST:PORT)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nTraceText\nQuit\n' \
+  | node packages/cli/dist/main.js -insecure -model 3278-2-E > /tmp/e-live.log 2>&1
 grep -iE 'TN3270E|DEVICE.TYPE|FUNCTIONS|BIND' /tmp/e-live.log
 ```
 
-Four questions only a real host can answer. **Record the answers against the spec**
+**`-insecure` is required for a plaintext host** such as `evievm.pubvm.org:23`. Omit it
+and the probe hangs, silently, for the reason in point 4 above — you will read the empty
+log as "the host said nothing" rather than "we never spoke TCP-clear". It needs no logon,
+so it cannot hand the VM reconnect trap to the next run.
+
+### The four questions, with status
+
+**Record the answers against the spec**
 (`docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`), not in a session note —
-an end-of-session aside is not a decision recorded against the design.
+an end-of-session aside is not a decision recorded against the design. The 2026-09-17
+answers are recorded there under *Live host, 2026-09-17*.
 
 1. **Does the host send `FUNCTIONS REQUEST` itself rather than waiting for ours?**
-   Transition 5 of the state machine is implemented from x3270's source and no server
-   has ever exercised it. `e-server.py` always waits for the client, so this is the
-   single largest untested branch in `tn3270e.ts`.
-2. **Does it ever send `ALWAYS-RESPONSE`?** Until one does, the positive-response path is
-   exercised only by us asking the harness to send it — the same honest position
-   retransmit is in. If a host does, check the SEQ it expects copied back.
+   **STILL UNANSWERED.** Transition 5 of the state machine is implemented from x3270's
+   source and no server has ever exercised it. `e-server.py` always waits for the client,
+   so this is still the single largest untested branch in `tn3270e.ts`. z/VM 4.4 refused
+   before FUNCTIONS was reached.
+2. **Does it ever send `ALWAYS-RESPONSE`?** **STILL UNANSWERED** — same reason. Until one
+   does, the positive-response path is exercised only by us asking the harness to send it
+   — the same honest position retransmit is in. If a host does, check the SEQ it expects
+   copied back.
 3. **Does it send a BIND we are declining to ask for, and does it assign an LU we did
-   not request?** We deny BIND-IMAGE deliberately, so a conforming host should send no
-   BIND; one that does anyway is worth knowing about, and the record is traced and
-   dropped rather than handed to the 3270 executor.
-4. **Does `-tn3270e off` still reach a usable session there?** The backoff path is what
-   makes on-by-default safe, and it has only ever been exercised against our own
-   harness.
+   not request?** **STILL UNANSWERED** — same reason. We deny BIND-IMAGE deliberately, so
+   a conforming host should send no BIND; one that does anyway is worth knowing about, and
+   the record is traced and dropped rather than handed to the 3270 executor.
+4. **Does `-tn3270e off` still reach a usable session there?** **ANSWERED YES, 2026-09-17,
+   and by a route the harness cannot produce** — we did not have to ask for `off`. The
+   host's own `IAC DONT TN3270E` drove the backoff and the session reached z/VM's logon
+   screen. Note the literal flag `-tn3270e off` was **not** run against this host; what was
+   run is on-by-default meeting a host that withdraws. Worth doing the explicit `off` run
+   too next time, since it is free.
 
-Two further things to measure while connected, since the opportunity is rare:
+### Still to try, in order of what each would settle
 
-- **A device address by LU name.** `Connect("LUNAME@HOST:PORT")` is the one thing that
-  cannot be tested here at all — `e-server.py` accepts any name. Under Hercules we can
-  only take whichever display is free.
-- **Whether a printer session works.** Its harness now exists; nothing has driven it.
+- **An LU name against this host.** `Connect("LUNAME@evievm.pubvm.org:23")` is the one
+  test that could distinguish explanation (a) from (b) above, and it needs a valid LU
+  name from whoever runs the system. `e-server.py` accepts any name, so this cannot be
+  tested here at all.
+- **An s3270 or x3270 trace of `evievm.pubvm.org:23` from a machine that has one.** This
+  is the missing known-good comparison, and it is the only thing that can say whether the
+  refusal is ours or the host's. It does not need this box.
+- **A printer session.** Its harness exists; nothing has driven it, and it needs a host
+  that completes the negotiation.
+- **Whether a host that completes TN3270E exists at all among the public systems.** z/VM
+  4.4 here offers and withdraws; another public z/OS or z/VM may not.
+- **The explicit `-tn3270e off` run against this host**, for question 4's literal wording.
+- **A unit test for `IAC DONT TN3270E` arriving after our `WILL`** — the `St.Dont` arm on
+  option 40, which this run is currently the only evidence for. Not a live-testing item,
+  but it was found by a live test and would otherwise be forgotten.
 
 ## Task 11 — the no-flag default, the schemes, and the unreachable keys — verified 2026-09-15
 

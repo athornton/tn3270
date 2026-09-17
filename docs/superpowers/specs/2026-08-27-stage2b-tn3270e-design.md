@@ -9,7 +9,16 @@ those two, and every transcript was captured off the wire from real s3270 during
 design session. Where this document states a byte, it was measured or quoted, not
 recalled — see `verify-wire-constants-against-sources`.
 
-## The fact that shapes everything: this stage cannot be verified against a live host
+## ~~The fact that shapes everything: this stage cannot be verified against a live host~~ — PARTLY SUPERSEDED 2026-09-17
+
+> **SUPERSEDED IN PART, 2026-09-17. Read *Live host, 2026-09-17* at the end of this
+> document before quoting anything in this section.** Everything below about the two
+> Hercules systems is still true and still measured. What is no longer true is the
+> heading's absolute claim and the sentence "**2b cannot be**": a real host — z/VM 4.4 at
+> `evievm.pubvm.org:23` — **does** offer option 40 and **does** send `SEND DEVICE-TYPE`.
+> The negotiation still does not complete there, so 2b is not verified against a host; but
+> "no available host offers option 40" and "there is no live host" are now statements about
+> the two Hercules systems only, not about the world.
 
 **Neither available Hercules system offers TN3270E.** Measured 2026-08-27 by completing
 full telnet negotiation against both and logging every option:
@@ -33,10 +42,15 @@ A correction that belongs here, since it is cited elsewhere as a measured fact:
 comment describes is unaffected (OpenSSL reads the leading `0xff` as a record content type
 either way), but the option name is wrong and should be fixed.
 
-Stages 1, 2a, TLS and IND$FILE were all proven against a real host. **2b cannot be**, so
-its verification story is deliberately different, and is set out under *Testing* below.
+Stages 1, 2a, TLS and IND$FILE were all proven against a real host. ~~**2b cannot be**~~
+— **as written on 2026-08-27 that read as a permanent impossibility, and it is not one; see
+*Live host, 2026-09-17*. It is still unproven, for a different reason: the one host that
+offers the option refuses it mid-negotiation.** So its verification story is deliberately
+different, and is set out under *Testing* below.
 The user is arranging access to a real z/VM or z/OS system; this design is written so that
-live verification becomes a drop-in step rather than a rewrite.
+live verification becomes a drop-in step rather than a rewrite. **That access arrived
+2026-09-17 and the drop-in step did work as intended** — the committed probe ran unchanged
+except for one ordering defect in it, recorded below.
 
 ## Reference transcript, captured from real s3270
 
@@ -291,7 +305,9 @@ following the precedent set by `L:` alongside `-insecure`.
 
 ## Testing
 
-Three layers, because there is no live host. The layering is the point: each one is
+Three layers, because ~~there is no live host~~ **no live host completes the negotiation**
+(corrected 2026-09-17: one now offers the option and then withdraws it — *Live host,
+2026-09-17*). The layering is the point: each one is
 checked by something that does not depend on our client being right.
 
 **1. Unit tests over the pure state machine.** The captured s3270 transcript above is the
@@ -318,15 +334,19 @@ The harness is also a prerequisite for the printer session (item 7), so it is no
 scaffolding built only for this stage.
 
 **3. A recorded probe for the future real host.** Committed as a script plus a checklist in
-`docs/live-testing.md`, listing the things only a real z/VM or z/OS can answer:
+`docs/live-testing.md`, listing the things only a real z/VM or z/OS can answer. **Run
+2026-09-17 against z/VM 4.4; one of the four is answered, three are not** — status on each
+is under *Live host, 2026-09-17* below:
 
 - Does it send `FUNCTIONS REQUEST` itself rather than waiting for ours? Transition 5 is
   implemented from x3270's source and has never been exercised by a real server.
+  **Still unanswered.**
 - Does it ever send `ALWAYS-RESPONSE`? Until one does, the entire positive-response path is
   unit-tested only — the same honest position that retransmit ended up in.
+  **Still unanswered.**
 - Does it send a BIND we are declining to ask for, and does it assign an LU we did not
-  request?
-- Does `-tn3270e off` still reach a usable session there?
+  request? **Still unanswered.**
+- Does `-tn3270e off` still reach a usable session there? **ANSWERED YES, 2026-09-17.**
 
 Record the answers against this spec rather than in a session note, and treat a stated
 scope here as open: see the roadmap discipline in `docs/HANDOFF.md`.
@@ -342,7 +362,7 @@ this repo are Python already.
 | Full negotiation, reaching 3270 submode and round-tripping an Erase/Write and an Enter | **met** — `drive-e.py` case 1; inbound `00000000007d40c31140c1c8c9` |
 | `DEVICE-TYPE REQUEST` byte-identical to s3270's capture | **met** — `020749424d2d333237382d322d45`, both |
 | `FUNCTIONS REQUEST` identical except the omitted BIND-IMAGE | **met** — ours `0307020405`, s3270's `030700020405`; pinned as a subtraction |
-| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first |
+| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBOURING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), not `refuseTn3270e()`. See *Live host, 2026-09-17* |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
 | `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **MET, 2026-08-28, both hosts.** VM/370: `-tn3270e off`, `N:` and an LU list each byte-identical in both directions (140 sent, 1806 received). MVS 3.8j TK5: all four runs identical in what we SENT (33 bytes); received differs by one byte, decoded and shown to be a digit of the clock on TK5's logon panel |
@@ -379,3 +399,91 @@ Recorded here rather than in a session note, per the discipline this spec alread
 - **Prefixes we do not implement are refused, not ignored** — `A:`, `C:`, `P:`, `S:`,
   `T:`, `Y:` — since each changes what s3270 puts on the wire. `B:` is accepted and
   ignored because it is a no-op in s3270 itself.
+
+## Live host, 2026-09-17 — the probe's answers, recorded against the design
+
+The user obtained access to a real z/VM 4.4 system and the committed probe was run.
+Recorded here because this spec's own instruction is to record the answers against the
+design, not in a session note. Verbatim bytes and the full write-up are in
+`docs/live-testing.md`, *TN3270E against a real host*.
+
+Host `evievm.pubvm.org:23`, public z/VM 4.4, **plaintext only**, two connections, **no
+logon attempted**.
+
+### Three things this design assumed could not be observed, now observed
+
+1. **A real host offers option 40.** `< ff fd 28` = `IAC DO TN3270E`, unprompted, before
+   we said anything. Every earlier statement in this document that no available host offers
+   the option was true of the two Hercules systems and is not true in general.
+2. **A real host sends `SEND DEVICE-TYPE` itself** — `ff fa 28 08 02 ff f0`, exactly the
+   `08 02` operand order this design argued for from RFC 2355 and x3270 (*the noun first*;
+   `02 08` was the mistake actually made when building the harness). `e-server.py` sends it
+   because it was written to; a host now has been seen sending it. **The operand order is
+   confirmed by a third, independent source.**
+3. **The backoff path has a live witness.** After the refusal we sent `IAC WONT TN3270E`
+   then `IAC WILL TERMINAL-TYPE`, fell back to base TN3270, and reached z/VM's logon
+   screen. It is what makes TN3270E-on-by-default safe, and it is no longer harness-only.
+
+   **Be precise about WHICH backoff, because it is not the one the success criteria
+   tabulate.** `drive-e.py`'s refusal cases are a DEVICE-TYPE **REJECT** subnegotiation
+   (`--reject`, driving `refuseTn3270e()` after the LU list is exhausted) and *us*
+   declining (`--expect-refuse`, i.e. `-tn3270e off` and `N:`). **No harness case, and no
+   host before this one, ever sent `IAC DONT TN3270E` after our `WILL`** — our client never
+   volunteers `WILL 40`, so the Hercules hosts' known willingness to answer a bare
+   `ff fb 28` with `ff fe 28` was measured by a passive probe and never by us. z/VM 4.4
+   took the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`: delete from `myOpts`,
+   reply `WONT`), which has no dedicated unit test for option 40: the only test of a
+   *received* `DONT` is "drops out of 3270 mode when the host DONTs BINARY"
+   (`packages/core/test/telnet.test.ts:165-171`). **So the live run is
+   currently the ONLY evidence for that arm on option 40, which makes it worth a unit test
+   rather than worth relying on.** Note also that `St.Dont` does not clear
+   `tn3270eNegotiated`, where `refuseTn3270e()` does; harmless here because the flag was
+   still false when the `DONT` arrived, and nothing was observed going wrong — flagged as an
+   asymmetry to check, not as a diagnosed bug.
+
+### The negotiation does NOT complete, and the reason is UNRESOLVED
+
+After a well-formed `DEVICE-TYPE REQUEST` the host answers `ff fe 28` (`IAC DONT
+TN3270E`) and immediately `ff fd 18` (`IAC DO TERMINAL-TYPE`). A second run with
+`-model 3278-2` — device type `IBM-3278-2`, no `-E` — was **byte-identical in outcome**,
+so **the `-E` suffix is not the trigger**.
+
+**This spec's own verification argument is what blocks the conclusion.** Under *Testing*
+it says a harness never shown to satisfy a known-good client proves nothing about ours,
+because when our client fails we cannot tell which side is wrong. That applies here
+exactly: **there is no s3270 binary on this box and no compiler to build one**, so nobody
+has shown this host satisfying a known-good client. Two candidate explanations, both
+untested:
+
+- **(a) the host may require a `CONNECT` clause naming an LU.** RFC 2355 makes it optional
+  and a conforming host should assign a device, but a public z/VM with defined resources
+  may not. `Connect("LUNAME@evievm.pubvm.org:23")` would be decisive given a valid name.
+- **(b) the option may be advertised but not functional**, as some front ends do.
+
+**So TN3270E is still not verified against a host, and no scope in this document should be
+closed on the strength of this run.** What is verified live is: a host offers it, a host
+asks for a device type, and our fallback is correct.
+
+### Consequences for the untested branches
+
+**Transition 5 — the host sending `FUNCTIONS REQUEST` first — is still the largest
+untested branch in `tn3270e.ts`**, unchanged by this run, because the negotiation never
+reached FUNCTIONS. Same for `ALWAYS-RESPONSE` and for an unrequested BIND. The unit tests
+over the s3270 golden transcript remain the only evidence for all three.
+
+### One defect in the probe, fixed 2026-09-17
+
+The committed probe ran `Trace(on)` **after** `Connect()`, and
+`Trace.setEnabled` (`packages/core/src/trace.ts:47`) only flips a boolean — it retains
+nothing from before the call — while `parseArgs` (`packages/cli/src/main.ts:52-78`)
+exposes no `-trace` flag to compensate. **As documented the probe captured none of the
+negotiation, which was the entire point of all four questions.** `Trace(on)` now comes
+first. `-insecure` is also required against a plaintext host; without it the leading
+`0xff` of `IAC DO TERMINAL-TYPE` is read as a TLS record content type and the probe
+**hangs** rather than failing.
+
+### TLS is untouched by this
+
+z/VM 4.4 at `evievm.pubvm.org:23` **does not do TLS**, so our TLS verification remains via
+the in-repo proxy against Hercules. **There is still no native-TLS-mainframe witness.**
+Keep that qualifier wherever the TLS result is quoted.
