@@ -432,14 +432,17 @@ describe('TN3270E telnet option (40)', () => {
     const sent: number[][] = [];
     const records: Uint8Array[] = [];
     const bodies: Uint8Array[] = [];
+    /** One entry per onTn3270eDisabled call, so "how many times" is answerable. */
+    const disabled: true[] = [];
     const layer = new TelnetLayer({
       write: (b) => sent.push(Array.from(b)),
       onRecord: (r) => records.push(r),
       terminalType: 'IBM-3278-2-E',
       tn3270eEnabled,
       onTn3270eSubneg: (body) => bodies.push(body),
+      onTn3270eDisabled: () => { disabled.push(true); },
     });
-    return { layer, sent, records, bodies };
+    return { layer, sent, records, bodies, disabled };
   }
 
   it('answers DO TN3270E with WILL when enabled', () => {
@@ -550,6 +553,111 @@ describe('TN3270E telnet option (40)', () => {
     const { layer, sent } = eHarness(true);
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
     layer.refuseTn3270e();
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('CLEARS A COMPLETED NEGOTIATION when the host sends DONT for option 40', () => {
+    // THE ASYMMETRY THIS CLOSES. refuseTn3270e() cleared `tn3270eNegotiated` and the
+    // St.Dont arm did not, so a host withdrawing option 40 AFTER the negotiation
+    // completed left that flag true with the option off — and the flag short-circuits
+    // is3270Mode(), so we would have gone on prepending a 5-byte data header to a host
+    // with no parser for it and stripping one from records that never carried it.
+    //
+    // Not a hypothetical arm: measured 2026-09-17, a real z/VM 4.4 answers our
+    // `IAC WILL TN3270E` with `IAC DONT TN3270E` (docs/live-testing.md). There it
+    // arrived before the negotiation completed, which is the only reason nothing broke.
+    //
+    // Driven with real bytes through receive() rather than by poking the field: the bug
+    // WAS that the byte path skipped the teardown, so a test that called the teardown
+    // itself could not have seen it.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    expect(layer.is3270Mode()).toBe(true);
+    sent.length = 0;
+
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.TN3270E));
+
+    // THE CONSEQUENCE, not merely the flag: nothing in this test negotiated BINARY or
+    // EOR (RFC 2355 §4 makes them implied by TN3270E), so with the short-circuit gone
+    // the classic test underneath it must answer false.
+    expect(layer.is3270Mode()).toBe(false);
+    // ...and the wire reply, exactly once.
+    expect(sent).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+
+  it('can negotiate TN3270E again after the host withdrew it', () => {
+    // `myOpts` comes off in the same teardown, so the option is renegotiable rather
+    // than latched — the same property the refusal path has, for the same reason.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.TN3270E));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
+  });
+
+  it('leaves the TN3270E negotiation ALONE on a DONT for another option', () => {
+    // The transposition-shaped mistake a careless fix makes: clearing the flag for
+    // every option that gets withdrawn, not just 40.
+    const { layer, sent, disabled } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.SUPPRESS_GO_AHEAD));
+    layer.setTn3270eNegotiated(true);
+    sent.length = 0;
+
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.SUPPRESS_GO_AHEAD));
+
+    expect(sent).toEqual([[T.IAC, T.WONT, O.SUPPRESS_GO_AHEAD]]);
+    expect(layer.is3270Mode()).toBe(true);
+    expect(disabled).toEqual([]);
+    // Option 40 is still ours, so a fresh DO is a REPEAT and RFC 854 says it goes
+    // unanswered. That is what proves `myOpts` was not touched either.
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    expect(sent).toEqual([]);
+  });
+
+  it('answers a DONT for an option 40 we never agreed with silence', () => {
+    // The teardown is unconditional; the ACKNOWLEDGEMENT is not. RFC 854 requires that
+    // a request to enter a mode we are already in go unacknowledged, "essential to
+    // prevent endless loops in the negotiation", and x3270 guards the whole TNS_DONT
+    // block with `if (myopts[c])` (Common/telnet.c:2039-2048).
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.TN3270E));
+    expect(sent).toEqual([]);
+    expect(layer.is3270Mode()).toBe(false);
+  });
+
+  it('tells its owner ONCE per teardown, by either route', () => {
+    // `onTn3270eDisabled` is what carries the teardown up to Session.e, which is where
+    // the header framing is actually decided. Both routes fire it because both run the
+    // same private teardown — that is the property, and it is asserted rather than
+    // assumed.
+    const { layer, disabled } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DONT, O.TN3270E));
+    expect(disabled).toEqual([true]);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.refuseTn3270e();
+    expect(disabled).toEqual([true, true]);
+  });
+
+  it('setTn3270eNegotiated(false) runs the WHOLE teardown, not just the flag', () => {
+    // There is no way through this class to clear the flag alone: `false` routes
+    // through refuseTn3270e(), so the option and the host's picture of it come off
+    // with it. A bare flag write would leave the host believing we still do option 40.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    sent.length = 0;
+    layer.setTn3270eNegotiated(false);
+    expect(sent).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+    expect(layer.is3270Mode()).toBe(false);
     sent.length = 0;
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
     expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);

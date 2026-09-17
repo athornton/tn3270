@@ -309,6 +309,79 @@ describe('TN3270E state across connections', () => {
   });
 });
 
+describe('TN3270E withdrawn mid-session', () => {
+  /**
+   * `IAC DONT TN3270E` AFTER THE NEGOTIATION COMPLETED — THE SAME BUG ONE LAYER UP.
+   *
+   * RFC 854 lets either party withdraw an option whenever it likes, and this one does not
+   * close the connection: `handleClose`, the one place `Session.e` was reliably cleared,
+   * never runs. So without the telnet layer telling us, `inTn3270e()` stayed true on a
+   * host that had stopped speaking TN3270E, and both directions corrupt exactly as they
+   * did across connections — five bytes eaten off each inbound record, five prepended to
+   * each outbound one.
+   *
+   * Not contrived: a real z/VM 4.4 answers our `IAC WILL TN3270E` with `IAC DONT
+   * TN3270E` and then carries on as a plain TN3270 host, measured 2026-09-17
+   * (docs/live-testing.md). Only the timing differed — its DONT arrived before the
+   * negotiation completed.
+   */
+  const withdrawMidSession = async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    // Guard the premise: with no completed negotiation there is no stale state to leak
+    // and the test below proves nothing.
+    expect(session.is3270Mode()).toBe(true);
+    conn.host(T.IAC, T.DONT, O.TN3270E);
+    // ...and the host carries on as a plain TN3270 host, which is what z/VM did next.
+    conn.negotiateClassic();
+    expect(session.is3270Mode()).toBe(true);
+    return { session, conn };
+  };
+
+  it('answers the withdrawal with WONT and drops out of 3270 mode', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    expect(session.is3270Mode()).toBe(true);
+    conn.clear();
+    conn.host(T.IAC, T.DONT, O.TN3270E);
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+    // Nothing here negotiated BINARY or EOR — RFC 2355 §4 implied them — so the session
+    // must fall all the way out of 3270 mode rather than keep the short-circuit.
+    expect(session.is3270Mode()).toBe(false);
+  });
+
+  it('strips no header from a host that has stopped speaking TN3270E', async () => {
+    const { session, conn } = await withdrawMidSession();
+    conn.host(0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
+    expect(session.oia.toText()).not.toContain('PROG');
+  });
+
+  it('sends no header to it either', async () => {
+    // The worse half, again: five bytes the plain host parses as 3270 data.
+    const { session, conn } = await withdrawMidSession();
+    conn.host(...WRITE_FIELD, T.IAC, T.EOR);
+    conn.clear();
+    session.sendAID(AID.ENTER);
+    expect(conn.writes.at(-1)![0]).toBe(0x7d);            // the AID, not a header
+  });
+
+  it('keeps the negotiation when the host withdraws some OTHER option', async () => {
+    // The transposition guard at session level: TERMINAL-TYPE goes away and TN3270E
+    // framing must not.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    conn.host(T.IAC, T.DONT, O.TERMINAL_TYPE);
+    expect(session.is3270Mode()).toBe(true);
+    conn.host(...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR);
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // header still stripped
+  });
+});
+
 describe('per-connection TN3270E settings', () => {
   /**
    * s3270's `N:` and `LU@` are properties of a HOST, not of a process — they sit in

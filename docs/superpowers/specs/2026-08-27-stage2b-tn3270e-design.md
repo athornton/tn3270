@@ -362,7 +362,7 @@ this repo are Python already.
 | Full negotiation, reaching 3270 submode and round-tripping an Erase/Write and an Enter | **met** — `drive-e.py` case 1; inbound `00000000007d40c31140c1c8c9` |
 | `DEVICE-TYPE REQUEST` byte-identical to s3270's capture | **met** — `020749424d2d333237382d322d45`, both |
 | `FUNCTIONS REQUEST` identical except the omitted BIND-IMAGE | **met** — ours `0307020405`, s3270's `030700020405`; pinned as a subtraction |
-| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBOURING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`), not `refuseTn3270e()`. See *Live host, 2026-09-17* |
+| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBOURING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm of `TelnetLayer.step` (`packages/core/src/telnet.ts`), not `refuseTn3270e()` — and that arm turned out to carry a real teardown bug, since fixed. See *Live host, 2026-09-17* |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
 | `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **MET, 2026-08-28, both hosts.** VM/370: `-tn3270e off`, `N:` and an LU list each byte-identical in both directions (140 sent, 1806 received). MVS 3.8j TK5: all four runs identical in what we SENT (33 bytes); received differs by one byte, decoded and shown to be a digit of the clock on TK5's logon panel |
@@ -431,15 +431,35 @@ logon attempted**.
    host before this one, ever sent `IAC DONT TN3270E` after our `WILL`** — our client never
    volunteers `WILL 40`, so the Hercules hosts' known willingness to answer a bare
    `ff fb 28` with `ff fe 28` was measured by a passive probe and never by us. z/VM 4.4
-   took the `St.Dont` arm (`packages/core/src/telnet.ts:212-215`: delete from `myOpts`,
-   reply `WONT`), which has no dedicated unit test for option 40: the only test of a
-   *received* `DONT` is "drops out of 3270 mode when the host DONTs BINARY"
-   (`packages/core/test/telnet.test.ts:165-171`). **So the live run is
-   currently the ONLY evidence for that arm on option 40, which makes it worth a unit test
-   rather than worth relying on.** Note also that `St.Dont` does not clear
-   `tn3270eNegotiated`, where `refuseTn3270e()` does; harmless here because the flag was
-   still false when the `DONT` arrived, and nothing was observed going wrong — flagged as an
-   asymmetry to check, not as a diagnosed bug.
+   took the `St.Dont` arm of `TelnetLayer.step` (`packages/core/src/telnet.ts`: delete from
+   `myOpts`, reply `WONT`), which had no dedicated unit test for option 40: the only test of
+   a *received* `DONT` was "drops out of 3270 mode when the host DONTs BINARY"
+   (`packages/core/test/telnet.test.ts`). **So the live run was for a day the ONLY evidence
+   for that arm on option 40** — that gap is now closed by unit tests, see the correction
+   below.
+
+   #### CORRECTION, 2026-09-17 — THE ASYMMETRY WAS A BUG, AND IT IS FIXED
+
+   This section first recorded that `St.Dont` did not clear `tn3270eNegotiated` where
+   `refuseTn3270e()` does, and filed it as "an asymmetry to check, not a diagnosed bug"
+   because the flag happened to still be false when z/VM's `DONT` arrived. **That wording
+   understated it and is withdrawn.** The flag SHORT-CIRCUITS `is3270Mode()` — which is the
+   whole point of the RFC 2355 §4 gate this spec argued for, so there is no second test
+   underneath it to catch the mistake — so a host withdrawing option 40 *after* the
+   negotiation completed left the client framing TN3270E against a host that had stopped
+   being TN3270E: a 5-byte data header prepended for a host with no parser for it, and five
+   bytes stripped from inbound records that never carried one. `Session.e` had the identical
+   hole and it is the worse half, since it is what actually decides the header on both
+   directions and a mid-session `DONT` closes no connection, so `handleClose()` never ran.
+   Both are the same shape as the defect this spec's own *state across connections* work
+   fixed: one teardown path cleared the state and another did not.
+
+   Fixed on branch `tn3270e-dont-teardown` by routing both paths through one
+   `TelnetLayer.disableTn3270e()` and both of the session's through
+   `Session.forgetTn3270e()`, reached by a new `TelnetLayerOptions.onTn3270eDisabled`
+   callback — ten tests, including the `is3270Mode()` consequence and a transposition guard
+   at each layer. Timing was the only thing separating "harmless" from "corrupt", and RFC
+   854 lets a host withdraw an option whenever it likes.
 
 ### The negotiation does NOT complete, and the reason is UNRESOLVED
 
