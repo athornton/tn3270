@@ -122,8 +122,11 @@ grant, and `--disable-gpu` because without GL a hidden window HANGS rather than 
 
 **TN3270E negotiates end to end** — device type, functions, the 5-byte header, SNA
 responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3270E
-server, **not against a live host**, because neither Hercules system offers the option.
-See *TN3270E* and *Verification*.
+server, **not against a live host**. Neither Hercules system offers the option at all,
+and the one real host that does — public z/VM 4.4, probed 2026-09-17 — **offers it and
+then withdraws it** after our device-type request, so what has a live witness is the
+*offer* and our *fallback*, not a completed negotiation. See *TN3270E* and
+*Verification*.
 
 Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
 the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
@@ -781,8 +784,17 @@ worse than one that says which quarter is missing.
   names all work (see *TN3270E*) — against real s3270 and an in-repo TN3270E server,
   because **neither Hercules system offers the option at all**. Measured on both,
   accepting and refusing: each opens `IAC DO TERMINAL-TYPE` and never mentions option
-  40. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
-  design) and **printer sessions**, whose harness now exists.
+  40. **A real host has now been tried, 2026-09-17 — public z/VM 4.4 at
+  `evievm.pubvm.org:23` — and it got further without getting there.** It sends
+  `IAC DO TN3270E` unprompted and asks for our device type, then answers our well-formed
+  request with `IAC DONT TN3270E`, identically with and without the `-E` suffix; we fell
+  back to base TN3270 and reached its logon screen. **So the offer and our backoff have a
+  live witness and the negotiation does not**, and whose fault the refusal is is
+  unresolved — there is no s3270 on that machine to compare against, which is the
+  comparison this project's own rules demand. Bytes and next steps:
+  `docs/live-testing.md`, *TN3270E against a real host*. What is still missing within it:
+  **BIND/UNBIND** (we decline BIND-IMAGE by design) and **printer sessions**, whose
+  harness now exists.
 - **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
   on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
   between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
@@ -888,6 +900,7 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
+| TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** The negotiation does **not** complete, so FUNCTIONS, responses and BIND are still untried against any host, and with no s3270 available for comparison we cannot say which side is wrong |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last
