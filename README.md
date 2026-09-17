@@ -104,7 +104,7 @@ host wrote: the Electron window grows to fit and a browser page scrolls. Clickin
 exactly the action its label names; a click anywhere else is ignored.
 
 The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 47 keys
-instead — arrows move, Enter fires, `Esc` closes — with each key's chord shown beside it, read
+instead — arrows move (`k`/`w` and `j`/`s` too), Enter fires, `Esc` closes — with each key's chord shown beside it, read
 from the same binding table the keymap is checked against so the on-screen help cannot drift.
 
 Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
@@ -154,7 +154,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1692 tests, 71 files
+npm test           # 1695 tests, 71 files
 npm run typecheck
 ```
 
@@ -300,6 +300,13 @@ follows the selection rather than showing only the first screenful, or everythin
 two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
 the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
 against, so 22 of the 47 correctly show a blank rather than a guess.
+
+**`k`/`w` also move up and `j`/`s` down**, in either case, while the list is open. Bare letters are
+bindable nowhere else in this emulator — everywhere else a letter is data you type into a field —
+and they are safe here only because the list already owns and swallows the whole keyboard, so they
+replace a no-op. `h`, `l`, `a` and `d` are deliberately left swallowed: the list is one column, so
+there is nothing for left and right to do. Case-folding diverges from vi, where `K` is not `k`,
+because caps lock must not make the list unnavigable.
 
 **Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
 `default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
@@ -823,7 +830,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1692 tests, 71 files |
+| `npm test` | **pass** — 1695 tests, 71 files |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
