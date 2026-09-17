@@ -15,9 +15,11 @@ typecheck clean, **1643 tests in 71 files**, `shot.mjs` **3/3 goldens matched**,
 **THREE THINGS ARE WAITING ON THE USER. Do not do any of them unasked.**
 
 1. **THE MERGE.** The plan's last step is `git merge --no-ff` to `main` and a push; **the user has
-   not authorised it.** The branch is **46 commits** ahead of `main` at `7ca0269`, and the tree is
-   clean. When told: re-run the whole gate **on the merge commit**, not only on the branch — that is
-   what the last three merges did.
+   not authorised it.** The branch sits on `main` at `7ca0269` and the tree is clean.
+   **No commit count is quoted here on purpose** — `git rev-list --count main..HEAD` is the answer,
+   and a number written down goes stale on the next commit, which is the same defect as a stale line
+   citation and it bit this very paragraph twice. When told: re-run the whole gate **on the merge
+   commit**, not only on the branch — that is what the last three merges did.
 2. **THE KEYPAD'S STYLING.** The user is choosing between the current x3270-atlas look and
    **inverse video on a spaced grid**, having already rejected a proportional font. That was
    measured, not argued: Helvetica's capital `I` is a bare stem, so `ErInp` renders as "Erlnp", and
@@ -171,8 +173,9 @@ renderer has stopped being shared.
 
 **`main` at `7ca0269`, pushed** — an earlier version of this line said `eb9c306`, which was
 `main`'s tip when the paragraph was written and is now one commit behind it. **The branch
-`keypad-and-special-keys` is 46 commits ahead of it and
-is NOT MERGED — see *START HERE*.** Working tree clean.
+`keypad-and-special-keys` is ahead of it and is NOT MERGED — see *START HERE*.** Working tree clean.
+(`git rev-list --count main..HEAD` for the number; it is not written down here, for the same reason
+`eb9c306` was worth marking.)
 
 **On the branch head: 1643 tests in 71 files**, `npm run typecheck` and `npm run build` clean,
 **all three** GUI goldens matching, `pty-smoke.py` 12/12, and all four by-hand harnesses passing

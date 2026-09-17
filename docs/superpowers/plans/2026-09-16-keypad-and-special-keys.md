@@ -2996,8 +2996,8 @@ not at all without deliberately demoting the goldens in writing.
 - [ ] **Step 6: Merge, after the user says so**
 
 > **AS BUILT: NOT DONE. THE USER HAS NOT AUTHORISED THE MERGE**, and Task 15 stopped after
-> verification and reporting. The branch is **46 commits** on top of `main` at `7ca0269`, the tree is
-> clean, and nothing was pushed, no
+> verification and reporting. The branch sits on `main` at `7ca0269`, the tree is clean, and nothing
+> was pushed, no
 > branch created or deleted, and no existing commit amended. When the go-ahead comes, **re-run the
 > whole gate on the merge commit itself** — that is what the last three merges did, and `git checkout`
 > reddens the build-staleness guard, so clear it with
