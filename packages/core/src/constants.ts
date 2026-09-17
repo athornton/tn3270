@@ -86,6 +86,35 @@ export const Tn3270eReason = {
 } as const;
 
 /**
+ * UNBIND reason codes (x3270's include/tn3270e.h:108-118).
+ *
+ * RFC 2355 does not enumerate these; x3270 decodes them in `unbind_reason`
+ * (Common/telnet.c:2592) and the wire is the authority. THE GAPS ARE REAL — there is
+ * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognised
+ * reason is reported as unknown rather than guessed at.
+ *
+ * BIND_FORTHCOMING IS THE OPERATIONALLY INTERESTING ONE: it means another BIND is
+ * coming, which is how a host hands a session between applications. A client that
+ * treated it as a teardown would drop a session the host intended to keep.
+ *
+ * NORMAL is 0x01, NOT 0x00, and that matters: a zero-length UNBIND body carries no
+ * reason at all, so 0x00 must stay available to mean "absent".
+ */
+export const Tn3270eUnbindReason = {
+  NORMAL: 0x01,
+  BIND_FORTHCOMING: 0x02,
+  VR_INOPERATIVE: 0x07,
+  RX_INOPERATIVE: 0x08,
+  HRESET: 0x09,
+  SSCP_GONE: 0x0a,
+  VR_DEACTIVATED: 0x0b,
+  LU_FAILURE_PERM: 0x0c,
+  LU_FAILURE_TEMP: 0x0e,
+  CLEANUP: 0x0f,
+  BAD_SENSE: 0xfe,
+} as const;
+
+/**
  * Negotiable functions.
  *
  * CONTENTION_RESOLUTION (0x05) is NOT in RFC 2355 — it is a later extension that
