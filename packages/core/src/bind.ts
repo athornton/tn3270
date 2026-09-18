@@ -211,3 +211,64 @@ export function parseUnbind(body: Uint8Array): UnbindInfo {
     forthcoming: reason === Tn3270eUnbindReason.BIND_FORTHCOMING,
   };
 }
+
+/** Whether a BIND's geometry may be applied, and if not, why not. */
+export interface BindDimsVerdict {
+  readonly ok: boolean;
+  /** Present when refused: a phrase for the trace and the OIA. */
+  readonly why?: string;
+}
+
+/**
+ * x3270's `bind_limit` range check (Common/telnet.c:2526-2557; verified against the
+ * source, not just the plan citing it -- the plan's line range was off by three at
+ * the top and one at the bottom, but the content matches).
+ *
+ * FOUR separate checks, not two: default over the model, default under model 2,
+ * alternate over the model, alternate under model 2 (telnet.c:2527, :2533, :2539,
+ * :2545). A valid default does not license an invalid alternate. Any failure keeps
+ * OUR geometry entirely -- x3270's `else` branch that assigns `defROWS`/`altROWS`
+ * etc. (telnet.c:2552-2555) is skipped entirely on any of the four `if`/`else if`
+ * branches above it, so on failure x3270 does not clamp, it just leaves the
+ * previous `defROWS`/`altROWS` alone; we do the same by returning a verdict rather
+ * than a geometry.
+ *
+ * THE CONSEQUENCE IS COUNTERINTUITIVE AND IS NOT A BUG: the upper bound is the
+ * configured model (`maxROWS`/`maxCOLS`) and the lower bound is model 2
+ * (`MODEL_2_ROWS`/`MODEL_2_COLS`, 3270ds.h:446-447), so ON A MODEL 2 THEY COINCIDE
+ * and BIND geometry is pinned to exactly 24x80. With the limit on, BIND can only
+ * ever narrow a large model toward 24x80; it can never grow one past `-model`.
+ * Growing past the model is oversize's job, and letting BIND do it here would
+ * silently make this feature into that one.
+ *
+ * `alternate: 'caller'` never reaches this function with real BIND traffic: the
+ * caller substitutes its own model first, and its own model is by definition in
+ * range. Accepting it here anyway is a defensive default for the case where a
+ * caller forgets, since the substitute would have been the model itself.
+ */
+export function acceptBindDims(
+  dims: BindDims,
+  model: { readonly rows: number; readonly cols: number },
+): BindDimsVerdict {
+  const alt = dims.alternate;
+  if (alt === 'caller') {
+    return { ok: true };
+  }
+  const d = `${dims.defaultRows}x${dims.defaultCols}`;
+  const a = `${alt.rows}x${alt.cols}`;
+  const max = `${model.rows}x${model.cols}`;
+  const min = `${MODEL_2.rows}x${MODEL_2.cols}`;
+  if (dims.defaultRows > model.rows || dims.defaultCols > model.cols) {
+    return { ok: false, why: `BIND default ${d} exceeds model ${max}` };
+  }
+  if (dims.defaultRows < MODEL_2.rows || dims.defaultCols < MODEL_2.cols) {
+    return { ok: false, why: `BIND default ${d} is below ${min}` };
+  }
+  if (alt.rows > model.rows || alt.cols > model.cols) {
+    return { ok: false, why: `BIND alternate ${a} exceeds model ${max}` };
+  }
+  if (alt.rows < MODEL_2.rows || alt.cols < MODEL_2.cols) {
+    return { ok: false, why: `BIND alternate ${a} is below ${min}` };
+  }
+  return { ok: true };
+}

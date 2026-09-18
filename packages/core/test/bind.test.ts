@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Tn3270eUnbindReason } from '../src/constants.js';
-import { maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX, parseBind, parseUnbind, type BindImage } from '../src/bind.js';
+import {
+  maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX, parseBind, parseUnbind, acceptBindDims,
+  type BindImage,
+} from '../src/bind.js';
 
 /**
  * Values are x3270's include/tn3270e.h:108-118, read from the source rather than
@@ -260,5 +263,98 @@ describe('parseUnbind', () => {
     // 0x03 is one of the real gaps in x3270's table. It is reported, not mapped.
     expect(parseUnbind(Uint8Array.of(0x03)))
       .toEqual({ reason: 0x03, forthcoming: false });
+  });
+});
+
+describe('acceptBindDims — x3270 s bind_limit range check', () => {
+  /** A model 4: 24x80 default, 43x80 alternate. */
+  const model4 = { rows: 43, cols: 80 };
+
+  it('accepts geometry inside the model', () => {
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 43, cols: 80 } },
+      model4,
+    )).toEqual({ ok: true });
+  });
+
+  it('refuses a default LARGER than the model', () => {
+    const r = acceptBindDims(
+      { defaultRows: 44, defaultCols: 80, alternate: { rows: 43, cols: 80 } },
+      model4,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.why).toContain('44x80');
+  });
+
+  it('refuses a default SMALLER than model 2', () => {
+    // 24x80 is the floor for BOTH pairs. A host asking for less is refused, not
+    // clamped: x3270 keeps its own geometry entirely on any failure.
+    const r = acceptBindDims(
+      { defaultRows: 23, defaultCols: 80, alternate: { rows: 43, cols: 80 } },
+      model4,
+    );
+    expect(r.ok).toBe(false);
+    // Distinguishes this branch's message from the "exceeds model" branch: both
+    // would otherwise satisfy `r.ok === false` and hide a swapped condition.
+    expect(r.why).toContain('23x80');
+    expect(r.why).toContain('below');
+  });
+
+  it('refuses an ALTERNATE out of range, separately from the default', () => {
+    // Four separate checks in x3270, not two: a valid default does not license an
+    // invalid alternate.
+    const over = acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 44, cols: 80 } },
+      model4,
+    );
+    expect(over.ok).toBe(false);
+    expect(over.why).toContain('44x80');
+    expect(over.why).toContain('exceeds');
+
+    const under = acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 23, cols: 80 } },
+      model4,
+    );
+    expect(under.ok).toBe(false);
+    expect(under.why).toContain('23x80');
+    expect(under.why).toContain('below');
+  });
+
+  it('accepts exactly 24x80 and exactly the model size, the two boundaries', () => {
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 24, cols: 80 } },
+      model4,
+    ).ok).toBe(true);
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: model4 },
+      model4,
+    ).ok).toBe(true);
+  });
+
+  it('pins a model 2 to EXACTLY 24x80, which is counterintuitive but correct', () => {
+    // The upper bound is the model and the lower is model 2, so on a model 2 they
+    // COINCIDE: every value except 24x80 is refused. With the limit on, BIND can only
+    // ever narrow a large model toward 24x80; it can never grow one past -model.
+    // That is a safety rail, not a capability -- growing past the model is oversize's
+    // job. Documented in the spec so this does not read as a bug.
+    const model2 = { rows: 24, cols: 80 };
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 24, cols: 80 } },
+      model2,
+    ).ok).toBe(true);
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: { rows: 43, cols: 80 } },
+      model2,
+    ).ok).toBe(false);
+  });
+
+  it('accepts an unresolved caller alternate, since the caller substitutes first', () => {
+    // 'caller' never reaches acceptBindDims from real BIND traffic -- the session
+    // layer substitutes its own model before calling this -- but the function must
+    // still have a defined, safe answer if that substitution is skipped.
+    expect(acceptBindDims(
+      { defaultRows: 24, defaultCols: 80, alternate: 'caller' },
+      model4,
+    )).toEqual({ ok: true });
   });
 });

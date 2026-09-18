@@ -121,10 +121,16 @@ export class Screen {
   size = 0;
   cursor = 0;
 
-  /** The Erase/Write size. The screen starts here, as x3270's does (ctlr.c:341). */
-  readonly defaultSize: { readonly rows: number; readonly cols: number };
+  /**
+   * The Erase/Write size. The screen starts here, as x3270's does (ctlr.c:341).
+   *
+   * NO LONGER `readonly`, and only `setSizes` may write it. A BIND is the second
+   * channel by which a host dictates geometry (Query Reply being the other), and it
+   * rewrites BOTH sizes -- so this cannot be fixed at construction any more.
+   */
+  defaultSize: { readonly rows: number; readonly cols: number };
   /** The Erase/Write Alternate size. Equal to `defaultSize` on a model 2. */
-  readonly alternateSize: { readonly rows: number; readonly cols: number };
+  alternateSize: { readonly rows: number; readonly cols: number };
 
   private chars = new Uint8Array(0);
   /** attrs[i] >= 0 means position i holds that field attribute value. */
@@ -211,6 +217,36 @@ export class Screen {
   /** Erase/Write Alternate: to the alternate size. */
   useAlternateSize(): boolean {
     return this.resize(this.alternateSize.rows, this.alternateSize.cols);
+  }
+
+  /**
+   * Replace what Erase/Write and Erase/Write Alternate MEAN.
+   *
+   * The only callers are BIND (which sets the host's geometry) and UNBIND (which
+   * reverts to the model's). Deliberately narrow: `resize` switches the CURRENT
+   * geometry between two fixed sizes, whereas this changes what those two sizes are,
+   * and no existing method could express that.
+   *
+   * It does NOT change the current geometry or erase anything. x3270 calls
+   * `ctlr_erase(false)` separately after `process_bind`, and keeping the two apart
+   * means a caller that only wants to reinterpret EW/EWA does not pay for a repaint.
+   *
+   * Deliberately does NOT call `acceptBindDims` (bind.ts): that is the decision, this
+   * is the mutation, and keeping them apart is what lets the decision be tested
+   * without a Screen. A caller that skips the check can install a geometry
+   * `acceptBindDims` would have refused -- that is intentional, not an oversight: the
+   * check is a POLICY (x3270's `bind_limit` toggle can be off, in which case x3270
+   * applies the BIND's geometry unchecked, ctlr.c's callers of `process_bind` do not
+   * gate on it either), while this method is the mechanism every policy needs.
+   */
+  setSizes(
+    def: { rows: number; cols: number },
+    alt: { rows: number; cols: number },
+  ): void {
+    checkGeometry(def.rows, def.cols);
+    checkGeometry(alt.rows, alt.cols);
+    this.defaultSize = { rows: def.rows, cols: def.cols };
+    this.alternateSize = { rows: alt.rows, cols: alt.cols };
   }
 
   /** Throws if `addr` is not an integer in [0, size). */
