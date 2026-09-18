@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Tn3270eUnbindReason } from '../src/constants.js';
-import { maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX, parseBind, type BindImage } from '../src/bind.js';
+import { maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX, parseBind, parseUnbind, type BindImage } from '../src/bind.js';
 
 /**
  * Values are x3270's include/tn3270e.h:108-118, read from the source rather than
@@ -231,5 +231,34 @@ describe('parseBind — the PLU name', () => {
     b[BIND_OFF.PLU_NAME_LEN] = declaredLen;
     b.set(bytes, BIND_OFF.PLU_NAME);
     expect(parseBind(b)!.pluName).toBe('ABCDE');
+  });
+});
+
+describe('parseUnbind', () => {
+  it('reads the reason byte', () => {
+    expect(parseUnbind(Uint8Array.of(Tn3270eUnbindReason.NORMAL)))
+      .toEqual({ reason: 0x01, forthcoming: false });
+  });
+
+  it('flags BIND_FORTHCOMING, because another BIND is coming', () => {
+    // THE OPERATIONALLY IMPORTANT CASE: the host is handing us between applications,
+    // not tearing the session down. A client that treated this as a teardown would
+    // drop a session the host meant to keep.
+    expect(parseUnbind(Uint8Array.of(Tn3270eUnbindReason.BIND_FORTHCOMING)))
+      .toEqual({ reason: 0x02, forthcoming: true });
+  });
+
+  it('reports an absent reason for a zero-length body', () => {
+    // x3270 only traces a reason when (ibptr - ibuf) > EH_SIZE, i.e. when there is a
+    // byte at all. Undefined rather than 0, so "no reason given" is distinguishable
+    // from any real code -- which is why NORMAL is 0x01 and not 0x00.
+    expect(parseUnbind(new Uint8Array(0)))
+      .toEqual({ reason: undefined, forthcoming: false });
+  });
+
+  it('passes an unrecognised reason through without inventing a meaning', () => {
+    // 0x03 is one of the real gaps in x3270's table. It is reported, not mapped.
+    expect(parseUnbind(Uint8Array.of(0x03)))
+      .toEqual({ reason: 0x03, forthcoming: false });
   });
 });

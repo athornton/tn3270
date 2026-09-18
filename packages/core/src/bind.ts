@@ -13,7 +13,7 @@
  * Plan:       docs/superpowers/plans/2026-09-17-bind-image-and-bind-unbind.md
  */
 
-import { MODEL_2 } from './constants.js';
+import { MODEL_2, Tn3270eUnbindReason } from './constants.js';
 import { cp037 } from './codepage.js';
 
 /** A BIND request unit begins with this. Anything else is not a BIND. */
@@ -185,4 +185,29 @@ function decodePluName(body: Uint8Array): string {
   if (body.length < BIND_OFF.PLU_NAME + namelen) return '';
   const slice = body.subarray(BIND_OFF.PLU_NAME, BIND_OFF.PLU_NAME + namelen);
   return cp037.decode(slice);
+}
+
+/** An UNBIND's reason, if it carried one. */
+export interface UnbindInfo {
+  /** Undefined when the body was empty: "no reason given", not reason zero. */
+  readonly reason: number | undefined;
+  /** The host is handing us to another application and a BIND is coming. */
+  readonly forthcoming: boolean;
+}
+
+/**
+ * Parse an UNBIND body (x3270's UNBIND handling, Common/telnet.c:2745-2765; the
+ * reason byte itself is read at :2749-2750, gated the same way this function gates
+ * it -- only when there is a byte to read).
+ *
+ * UNBIND is teardown WITH THE TCP CONNECTION STILL UP: bound state clears, the BIND's
+ * sizing reverts, the screen erases, and we wait for another BIND. It is not a
+ * disconnection and must not be treated as one.
+ */
+export function parseUnbind(body: Uint8Array): UnbindInfo {
+  const reason = body.length > 0 ? body[0]! : undefined;
+  return {
+    reason,
+    forthcoming: reason === Tn3270eUnbindReason.BIND_FORTHCOMING,
+  };
 }
