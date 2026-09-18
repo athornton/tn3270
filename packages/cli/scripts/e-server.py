@@ -67,6 +67,28 @@ DT_NAME = {
 }
 CMD_NAME = {WILL: 'WILL', WONT: 'WONT', DO: 'DO', DONT: 'DONT'}
 
+# A BIND with a size code, which the 5-byte one --send-bind sends below cannot carry:
+# byte 24 is the size code and bytes 20-23 the two rows/cols pairs (bind.ts's BIND_OFF,
+# taken from x3270's include/3270ds.h:433-441), and a 5-byte body does not reach any of
+# them. 0x7f means "both pairs present, and they may differ" (Common/telnet.c:2485-2521,
+# mirrored in parseBind's decodeDims) -- the interesting case, since 0x7e collapses to
+# one pair reused for both. Bytes 10-11 (MaxSec-RU 1024, MaxPri-RU 3840) are not load
+# bearing for the size-code path, but are copied from the real BIND in x3270's
+# s3270/Test/devname_success.trc (also reproduced in core/test/bind.test.ts's REAL_BIND)
+# rather than invented, so a trace of this run reads like a trace of a real host's.
+# Padded to 28 bytes so the PLU-name length byte at offset 27 is a real zero rather than
+# off the end of the array (decodePluName's own guard treats a buffer stopping exactly
+# at offset 27 as "no length byte at all", which would also work, but stopping past it
+# with an explicit zero is what a real host's fixed-length BIND actually looks like).
+SIZED_BIND = bytearray(28)
+SIZED_BIND[0] = 0x31        # BIND_RU
+SIZED_BIND[10] = 0x87       # MaxSec-RU 1024
+SIZED_BIND[11] = 0xf8       # MaxPri-RU 3840
+SIZED_BIND[20], SIZED_BIND[21] = 24, 80   # default rows, cols
+SIZED_BIND[22], SIZED_BIND[23] = 32, 80   # alternate rows, cols
+SIZED_BIND[24] = 0x7f       # size code: both pairs present
+SIZED_BIND = bytes(SIZED_BIND)
+
 
 def log(msg):
     print(msg, flush=True)
@@ -162,8 +184,20 @@ class EServer:
         # granted and no BIND sent, a client is entitled never to enter 3270 mode,
         # and real s3270 does exactly that (telnet.c:2339). That is the measurement
         # behind not requesting the function at all.
+        #
+        # TWO INDEPENDENT FLAGS, NOT ONE WITH A MODE ARGUMENT: --send-bind's 5-byte
+        # BIND (too short to reach byte 24, BIND_OFF.SSIZE) exercises parseBind's
+        # "no dimensions" path, and --bind-size's 28-byte BIND exercises the size-code
+        # path. Collapsing them into one flag would force every existing caller of
+        # --send-bind to learn a new argument just to keep today's behaviour, and
+        # would make it too easy to lose the short-BIND case by accident while adding
+        # the long one. Both may be set; --send-bind's runs first since it is checked
+        # first below, though driving both at once is not a case this harness uses.
         if self.args.send_bind and FUNC['bind-image'] in self.granted:
             self.send_record(0x03, bytes([0x31, 0x01, 0x03, 0xb1, 0x90]))
+            time.sleep(0.3)
+        if self.args.bind_size and FUNC['bind-image'] in self.granted:
+            self.send_record(0x03, SIZED_BIND)
             time.sleep(0.3)
         # Erase/Write, WCC reset+unlock, SBA(0,0), unprotected field, Insert Cursor.
         payload = bytes([0xf5, 0xc3, 0x11, 0x40, 0x40, 0x1d, 0x40, 0x13])
@@ -338,7 +372,12 @@ def main():
     p.add_argument('--grant', type=parse_funcs, default=[FUNC['responses'], FUNC['sysreq']],
                    help='comma-separated function names to grant, or "" for basic TN3270E')
     p.add_argument('--send-bind', action='store_true',
-                   help='send a BIND after negotiation (only meaningful with bind-image granted)')
+                   help='send a 5-byte BIND after negotiation, too short to carry a size '
+                        'code (only meaningful with bind-image granted)')
+    p.add_argument('--bind-size', action='store_true',
+                   help='send a 28-byte BIND with size code 0x7f after negotiation: '
+                        'default 24x80, alternate 32x80 (only meaningful with bind-image '
+                        'granted); independent of --send-bind, see SIZED_BIND')
     p.add_argument('--expect-refuse', action='store_true',
                    help='a WONT TN3270E from the client is the PASS condition, not a '
                         'failure: use for -tn3270e off and for N: hosts')
