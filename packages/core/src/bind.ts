@@ -220,6 +220,26 @@ export interface BindDimsVerdict {
 }
 
 /**
+ * How long to wait for a BIND after granting BIND-IMAGE, before giving up and
+ * executing what the host already sent.
+ *
+ * x3270 HAS NO SUCH TIMEOUT: with BIND-IMAGE granted and no BIND, it drops 3270 data
+ * indefinitely (Common/telnet.c:2681) and the session appears wedged. We decline to
+ * inherit that.
+ *
+ * FIVE SECONDS, AND THE REASON IS NOT MARGIN FOR ITS OWN SAKE. Every host in x3270's
+ * trace collection sends its BIND in the same turn as FUNCTIONS, so one round-trip
+ * would nearly always do -- but most of this client's users are on emulated hardware
+ * and some are on REAL 370-class iron (P/370s and similar), which is slow, and those
+ * are exactly the users with no other working client. A short timeout would punish
+ * them and nobody else.
+ *
+ * TUNABLE ON PURPOSE, and documented in the README: the person who needs it longer is
+ * running vintage hardware and is the least likely to be reading this source.
+ */
+export const NO_BIND_TIMEOUT_MS = 5000;
+
+/**
  * x3270's `bind_limit` range check (Common/telnet.c:2526-2557; verified against the
  * source, not just the plan citing it -- the plan's line range was off by three at
  * the top and one at the bottom, but the content matches).

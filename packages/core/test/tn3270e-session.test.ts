@@ -255,6 +255,92 @@ describe('TN3270E session data path', () => {
   });
 });
 
+describe('the BIND gate', () => {
+  /**
+   * Task 8's four behaviours. `negotiateE([Tn3270eFunc.BIND_IMAGE, ...])` is what
+   * puts a session behind the gate at all -- `bindImageGranted()` reads exactly this
+   * grant list, and every OTHER describe block in this file negotiates WITHOUT
+   * BIND_IMAGE (the default grant is `[RESPONSES, SYSREQ]`), which is why none of them
+   * hit the gate and none needed to change for this task -- confirmed by running the
+   * full suite unmodified before writing any of the tests below.
+   */
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+
+  /**
+   * Erase/Write, WCC, SBA(0,0), then EBCDIC 'A' as a DATA byte -- same shape as the
+   * "strips the header and executes the 3270 data behind it" test above. NOT
+   * WRITE_FIELD: that constant ends in an unprotected FIELD ATTRIBUTE at (0,0), which
+   * leaves `cellAt(0)` at 0x00 even once executed, so it cannot discriminate "ran" from
+   * "still gated" the way a painted character can.
+   */
+  const write3270 = (): number[] =>
+    [...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR];
+
+  /**
+   * A minimal BIND-IMAGE record: just enough for `decodeHeader` to see data type
+   * BIND-IMAGE and dispatch to `handleBind`. `BIND_RU` (0x31) is the one byte
+   * `parseBind` requires to recognize the RU at all; nothing past it is read by this
+   * task's minimal `handleBind`, which does not yet call `parseBind` -- that is
+   * Task 9's job. See the scope note in session.ts's `handleBind`.
+   */
+  const BIND_RU = 0x31;
+  const bind = (): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, BIND_RU, T.IAC, T.EOR];
+
+  it('retains, rather than drops, a 3270-DATA record that arrives before any BIND', async () => {
+    const { session, conn } = newSession();
+    session.trace.setEnabled(true);
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());
+    // Not executed: the screen the record would have painted must still be blank.
+    expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+    // RETAINED, NOT SILENTLY DROPPED -- the distinction the task exists to make.
+    // x3270's `return 0` at telnet.c:2681 leaves no trace at all; ours must say so,
+    // both because the operator deserves to know why the screen went quiet and
+    // because "observable" is how a later task can tell retention happened without
+    // reaching into a private field.
+    expect(session.trace.toText()).toContain('3270 data before BIND, retained');
+  });
+
+  it('executes the retained record once the BIND arrives', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0x00);   // premise: still gated
+    conn.host(...bind());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A', from write3270()
+  });
+
+  it('keeps only the MOST RECENT pre-BIND record, not a queue of every one', async () => {
+    // Two records painting different things before the BIND arrives: a host that
+    // painted twice has overwritten its own first screen, so the second one's content
+    // must be what the BIND releases -- not the first, and not both.
+    const writeOther = (): number[] => [
+      ...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc2, T.IAC, T.EOR,   // EBCDIC 'B' at (0,0)
+    ];
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());     // paints 'A' -- withheld
+    conn.host(...writeOther());    // paints 'B' -- withheld, and supersedes 'A'
+    conn.host(...bind());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc2);   // 'B', not 'A'
+  });
+
+  it('does NOT gate 3270 data when BIND-IMAGE was not granted', async () => {
+    // The default grant (RESPONSES, SYSREQ) is exactly what every other test in this
+    // file already negotiates, and this is the severity check: breaking this would
+    // silently withhold data from every ordinary TN3270E session in the suite.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();              // no BIND_IMAGE in the grant
+    conn.host(...write3270());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // executed immediately
+  });
+});
+
 describe('TN3270E state across connections', () => {
   /**
    * `this.e` is cleared only on the REJECT backoff path, so without a reset in
