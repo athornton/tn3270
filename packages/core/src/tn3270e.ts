@@ -92,21 +92,33 @@ export function carriesDatastream(dataType: number): boolean {
 /**
  * The functions we ask for.
  *
- * BIND-IMAGE IS DELIBERATELY ABSENT, and the reason is a measured hazard rather than
- * a cost. Granted BIND-IMAGE and sent no BIND, real s3270 never enters 3270 mode:
- * an Erase/Write is delivered and ignored, and Wait(3270Mode) times out. Granting it
- * WITH a BIND works, and denying it works. Since only advertise-then-stay-silent
- * hangs, not asking is what stops a server from putting us in that state at all.
- * x3270 accepts the risk (telnet.c:949-953); we need not. Three configurations
- * tabulated in docs/live-testing.md, *TN3270E harness validation*.
+ * BIND-IMAGE IS REQUESTED, and the hazard that once justified omitting it has been
+ * measured away. Granted BIND-IMAGE and sent no BIND, real s3270 never enters 3270
+ * mode (telnet.c:2339, and the gate at telnet.c:2681 that drops 3270_DATA until
+ * `tn3270e_bound`). THAT REMAINS TRUE. What changed is knowing how often it happens:
+ * 29 of 29 hosts in x3270's own trace collection that grant BIND-IMAGE send a BIND
+ * immediately after FUNCTIONS, counted BY BYTES across all 71 traces -- grepping for
+ * decoded `< BIND` annotation lines gives a FALSE answer, because older traces carry
+ * no annotations. The advertise-then-stay-silent case exists only in our own
+ * e-server.py, which we configured to do it.
+ *
+ * So we adopt the gate deliberately AND refuse to inherit the hang: a pre-BIND
+ * 3270-DATA record is retained and executed if NO_BIND_TIMEOUT_MS expires (bind.ts).
+ * Asking for it is what gives BIND, UNBIND and the whole geometry channel a
+ * verification path at all -- 46 recorded traces stop dead at FUNCTIONS without it.
  *
  * The two printer functions, SCS-CTL-CODES and DATA-STREAM-CTL, are printer-session
  * functions by RFC 2355 §7.2.2 and belong to the printer stage.
  *
  * CONTENTION-RESOLUTION is not in RFC 2355 at all; x3270 requests it and so do we,
  * but nothing here depends on a host granting it.
+ *
+ * ORDER MATTERS TO THE TESTS, NOT TO THE PROTOCOL: this is s3270's own order
+ * (00 02 04 05), so a byte-for-byte comparison against a recorded s3270 FUNCTIONS
+ * REQUEST matches without sorting either side.
  */
 export const REQUESTED_FUNCTIONS: readonly number[] = [
+  Tn3270eFunc.BIND_IMAGE,
   Tn3270eFunc.RESPONSES,
   Tn3270eFunc.SYSREQ,
   Tn3270eFunc.CONTENTION_RESOLUTION,
@@ -245,9 +257,10 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
     if (!addsNothing(offered)) {
       // x3270 calls this "Host illegally added function(s)" (telnet.c:2327) and
       // abandons TN3270E outright rather than trying to reconcile. So do we: a server
-      // that grants what we did not request is not one to keep bargaining with, and
-      // BIND-IMAGE forced on us is precisely the case that could then hang the
-      // session by never sending a BIND.
+      // that grants what we did not request is not one to keep bargaining with.
+      // BIND-IMAGE no longer exercises this branch -- it is in REQUESTED_FUNCTIONS as
+      // of this task -- so what lands here now is a printer function or anything else
+      // outside the four we ask for.
       return {
         next: { ...st, phase: 'backedOff' },
         effect: { kind: 'backoff', why: 'host illegally added function(s)' },

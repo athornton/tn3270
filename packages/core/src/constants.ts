@@ -126,12 +126,11 @@ export const Tn3270eUnbindReason = {
  * SCS_CTL_CODES and DATA_STREAM_CTL are printer-session functions by definition
  * (§7.2.2) and belong to the printer stage.
  *
- * BIND_IMAGE is defined but deliberately NOT requested. Granted BIND-IMAGE and sent
- * no BIND, real s3270 never enters 3270 mode at all — the write is delivered and
- * ignored (telnet.c:2339). Granting it with a BIND works, and denying it works;
- * only advertise-then-stay-silent hangs. Not asking is what makes that state
- * unreachable. Measured three ways; see docs/live-testing.md, *TN3270E harness
- * validation*.
+ * BIND_IMAGE IS requested as of this task (tn3270e.ts, REQUESTED_FUNCTIONS). Granted
+ * it and sent no BIND, real s3270 never enters 3270 mode at all — the write is
+ * delivered and ignored (telnet.c:2339). That hazard is real and unchanged; what
+ * changed is the measurement behind asking anyway — see tn3270e.ts's comment on
+ * REQUESTED_FUNCTIONS for the trace-collection count and the timeout that bounds it.
  */
 export const Tn3270eFunc = {
   BIND_IMAGE: 0x00,

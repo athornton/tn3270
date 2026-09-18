@@ -71,8 +71,8 @@ describe('TN3270E session negotiation', () => {
       [T.IAC, T.SB, O.TN3270E, Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST,
         ...ascii('IBM-3278-2-E'), T.IAC, T.SE],
       [T.IAC, T.SB, O.TN3270E, Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST,
-        Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
-        T.IAC, T.SE],
+        Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ,
+        Tn3270eFunc.CONTENTION_RESOLUTION, T.IAC, T.SE],
     ]);
   });
 
@@ -107,13 +107,16 @@ describe('TN3270E session negotiation', () => {
   });
 
   it('refuses TN3270E and stays usable when the host adds a function', async () => {
+    // BIND-IMAGE moved into REQUESTED_FUNCTIONS this task, so it can no longer stand
+    // in for "a function we never asked for" -- SCS-CTL-CODES (still unrequested,
+    // still a printer function per RFC 2355 §7.2.2) takes its place here.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
     conn.host(T.IAC, T.DO, O.TN3270E);
     conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
     conn.sb(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'));
     conn.clear();
-    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE);
+    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.SCS_CTL_CODES);
     expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
     // And the classic route still works on the same connection, which is the whole
     // point of backing off rather than failing.
@@ -219,8 +222,10 @@ describe('TN3270E session data path', () => {
   });
 
   it('traces and drops a data type it does not implement', async () => {
-    // BIND-IMAGE should never arrive, since we do not request the function -- but a
-    // non-conforming server could send one, and handing a bind image to the 3270
+    // We now REQUEST the BIND-IMAGE function (this task), but this session's
+    // negotiateE() only GRANTS RESPONSES and SYSREQ by default, so a BIND-IMAGE
+    // record here is still unearned -- either way, until Task 8 wires up bind.ts,
+    // the session does not implement this data type, and handing one to the 3270
     // executor would raise a program check the host never caused.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
