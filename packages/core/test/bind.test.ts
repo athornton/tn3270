@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Tn3270eUnbindReason } from '../src/constants.js';
-import { maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX } from '../src/bind.js';
+import { maxRu, BIND_RU, BIND_OFF, BIND_PLU_NAME_MAX, parseBind, type BindImage } from '../src/bind.js';
 
 /**
  * Values are x3270's include/tn3270e.h:108-118, read from the source rather than
@@ -79,5 +79,89 @@ describe('BIND offsets', () => {
     expect(BIND_OFF.PLU_NAME_LEN).toBe(27);
     expect(BIND_OFF.PLU_NAME).toBe(28);
     expect(BIND_PLU_NAME_MAX).toBe(8);
+  });
+});
+
+/** The real BIND from x3270's s3270/Test/devname_success.trc, bytes after the header. */
+const REAL_BIND = Uint8Array.from([
+  0x31, 0x01, 0x03, 0x03, 0xb1, 0x90, 0x30, 0x80, 0x00, 0x87,
+  0x87, 0xf8, 0x87, 0x00, 0x02, 0x80, 0x00, 0x00, 0x00, 0x00,
+  0x18, 0x50, 0x2b, 0x50, 0x7f, 0x00, 0x00, 0x08, 0xc9, 0xc2,
+  0xd4, 0xf0, 0xe2, 0xd4, 0xc1, 0xd1, 0x00, 0x05, 0x00, 0x7e,
+  0xec, 0x0b, 0x10, 0x08, 0xc9, 0xc2, 0xd4, 0xf0, 0xe3, 0xc5,
+  0xe2, 0xd8,
+]);
+
+describe('parseBind — the real host BIND', () => {
+  it('decodes devname_success.trc exactly as x3270 annotated it', () => {
+    // x3270's own decode of these bytes, from the trace at line 133:
+    //   < BIND PLU-name 'IBM0SMAJ' MaxSec-RU 1024 MaxPri-RU 3840
+    //     Rows-Cols Default 24x80 Alternate 43x80
+    //
+    // THIS IS THE POINT OF THE WHOLE TASK: a host-free witness from a real host,
+    // which BIND has never had. Not one byte of this is our invention.
+    const b = parseBind(REAL_BIND);
+    expect(b).not.toBeNull();
+    expect(b!.pluName).toBe('IBM0SMAJ');
+    expect(b!.maxRuSecondary).toBe(1024);
+    expect(b!.maxRuPrimary).toBe(3840);
+    expect(b!.sizeCode).toBe(0x7f);
+    expect(b!.dims).toEqual({
+      defaultRows: 24, defaultCols: 80,
+      alternate: { rows: 43, cols: 80 },
+    });
+  });
+});
+
+describe('parseBind — size codes', () => {
+  /** A BIND long enough to reach every offset, with the size code and dims settable. */
+  const bindWith = (ssize: number, rd = 0, cd = 0, ra = 0, ca = 0): Uint8Array => {
+    const b = new Uint8Array(28);
+    b[0] = BIND_RU;
+    b[BIND_OFF.RD] = rd; b[BIND_OFF.CD] = cd;
+    b[BIND_OFF.RA] = ra; b[BIND_OFF.CA] = ca;
+    b[BIND_OFF.SSIZE] = ssize;
+    return b;
+  };
+
+  it('0x00 and 0x02 both mean model 2 for both sizes', () => {
+    for (const code of [0x00, 0x02]) {
+      const b = parseBind(bindWith(code, 43, 80, 43, 80))!;
+      // The dims bytes are DELIBERATELY set to 43x80 and must be IGNORED: these two
+      // codes mean model 2 regardless of what bytes 20-23 happen to hold.
+      expect(b.dims).toEqual({
+        defaultRows: 24, defaultCols: 80, alternate: { rows: 24, cols: 80 },
+      });
+    }
+  });
+
+  it('0x03 means model-2 default and defers the alternate to the caller', () => {
+    const b = parseBind(bindWith(0x03, 43, 80, 43, 80))!;
+    expect(b.dims).toEqual({
+      defaultRows: 24, defaultCols: 80, alternate: 'caller',
+    });
+  });
+
+  it('0x7e uses ONE pair for both sizes', () => {
+    // The alternate bytes are set to something different and must be ignored:
+    // 0x7e duplicates the default pair, it does not read 22-23.
+    const b = parseBind(bindWith(0x7e, 32, 80, 43, 132))!;
+    expect(b.dims).toEqual({
+      defaultRows: 32, defaultCols: 80, alternate: { rows: 32, cols: 80 },
+    });
+  });
+
+  it('0x7f uses both pairs', () => {
+    const b = parseBind(bindWith(0x7f, 24, 80, 43, 80))!;
+    expect(b.dims).toEqual({
+      defaultRows: 24, defaultCols: 80, alternate: { rows: 43, cols: 80 },
+    });
+  });
+
+  it('reports no dimensions for an unrecognised size code', () => {
+    const b = parseBind(bindWith(0x55, 43, 80, 43, 80))!;
+    expect(b.dims).toBeUndefined();
+    // Still a valid BIND: the PLU name and RU sizes are unaffected.
+    expect(b.sizeCode).toBe(0x55);
   });
 });
