@@ -152,9 +152,13 @@ describe('parseBind — size codes', () => {
   });
 
   it('0x7f uses both pairs', () => {
-    const b = parseBind(bindWith(0x7f, 24, 80, 43, 80))!;
+    // Columns are DELIBERATELY distinct (80 vs 132), not tied like an earlier version
+    // of this test (80 vs 80): a coincidental tie can't catch defaultCols and
+    // alternate.cols being read from each other's offset. Rows already differed
+    // (24 vs 43), so only the columns half was under-verified.
+    const b = parseBind(bindWith(0x7f, 24, 80, 43, 132))!;
     expect(b.dims).toEqual({
-      defaultRows: 24, defaultCols: 80, alternate: { rows: 43, cols: 80 },
+      defaultRows: 24, defaultCols: 80, alternate: { rows: 43, cols: 132 },
     });
   });
 
