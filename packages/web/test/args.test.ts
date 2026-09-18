@@ -139,6 +139,30 @@ describe('parseWebArgs', () => {
     expect(a.port).toBe(3270);
   });
 
+  it('-bind-image off clears the option', () => {
+    expect(parseWebArgs(['-bind-image', 'off', 'vm:3270']).bindImage).toBe(false);
+  });
+
+  it('-bind-image defaults to on', () => {
+    expect(parseWebArgs(['vm:3270']).bindImage).not.toBe(false);
+  });
+
+  it('-bind-image rejects a value that is not on or off', () => {
+    expect(() => parseWebArgs(['-bind-image', 'yes', 'vm:3270'])).toThrow(UsageError);
+  });
+
+  it('-bind-image without a value is a usage error', () => {
+    expect(() => parseWebArgs(['-bind-image'])).toThrow(UsageError);
+  });
+
+  it('-bind-limit off lets an out-of-range BIND geometry through', () => {
+    expect(parseWebArgs(['-bind-limit', 'off', 'vm:3270']).bindLimit).toBe(false);
+  });
+
+  it('-bind-limit defaults to on', () => {
+    expect(parseWebArgs(['vm:3270']).bindLimit).not.toBe(false);
+  });
+
   describe('the parts of a host argument this gateway cannot honour', () => {
     /**
      * MEASURED BEFORE THE FIX: `LUA,LUB@127.0.0.1:3270` started the gateway and served happily,

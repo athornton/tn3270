@@ -23,6 +23,10 @@ export interface CliArgs {
   tls?: TlsOptions;
   /** Offer TN3270E. Absent means the default, which is on. */
   tn3270e?: boolean;
+  /** Request BIND-IMAGE. Absent means the default, which is on. */
+  bindImage?: boolean;
+  /** Range-check a BIND's geometry. Absent means the default, which is on. */
+  bindLimit?: boolean;
 }
 
 /**
@@ -74,6 +78,24 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         args.terminalType = value;
         i++;
         break;
+      case '-bind-image': {
+        if (value === undefined) throw new UsageError('-bind-image needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindImage = value === 'on';
+        i++;
+        break;
+      }
+      case '-bind-limit': {
+        if (value === undefined) throw new UsageError('-bind-limit needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-limit takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindLimit = value === 'on';
+        i++;
+        break;
+      }
       default:
         throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
     }
@@ -124,6 +146,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const session = defaultSession(
     resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
+    args.bindImage, args.bindLimit,
   );
   const runner = new Runner(session, {
     files: nodeTransferFiles,

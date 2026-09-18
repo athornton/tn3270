@@ -112,6 +112,42 @@ describe('-tn3270e', () => {
   });
 });
 
+describe('-bind-image', () => {
+  it('off clears the option', () => {
+    expect(parseArgs(['-bind-image', 'off', 'h:23']).bindImage).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseArgs(['h:23']).bindImage).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseArgs(['-bind-image', 'yes', 'h:23'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseArgs(['-bind-image'])).toThrow(UsageError);
+  });
+});
+
+describe('-bind-limit', () => {
+  it('off lets an out-of-range BIND geometry through', () => {
+    expect(parseArgs(['-bind-limit', 'off', 'h:23']).bindLimit).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseArgs(['h:23']).bindLimit).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseArgs(['-bind-limit', 'yes', 'h:23'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseArgs(['-bind-limit'])).toThrow(UsageError);
+  });
+});
+
 /**
  * The host argument's full shape, `[prefix:][LU,LU@]host[:port]`.
  *

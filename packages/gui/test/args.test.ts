@@ -79,3 +79,39 @@ describe('parseGuiArgs', () => {
     expect(() => parseGuiArgs([])).toThrow(/tn3270-gui/);
   });
 });
+
+describe('-bind-image', () => {
+  it('off clears the option', () => {
+    expect(parseGuiArgs(['-bind-image', 'off', 'vm']).bindImage).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseGuiArgs(['vm']).bindImage).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseGuiArgs(['-bind-image', 'yes', 'vm'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseGuiArgs(['-bind-image'])).toThrow(UsageError);
+  });
+});
+
+describe('-bind-limit', () => {
+  it('off lets an out-of-range BIND geometry through', () => {
+    expect(parseGuiArgs(['-bind-limit', 'off', 'vm']).bindLimit).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseGuiArgs(['vm']).bindLimit).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseGuiArgs(['-bind-limit', 'yes', 'vm'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseGuiArgs(['-bind-limit'])).toThrow(UsageError);
+  });
+});

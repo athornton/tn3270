@@ -108,6 +108,49 @@ describe('TN3270E session negotiation', () => {
     expect(conn.writes).toEqual([]);
   });
 
+  it('backs off when a host grants BIND-IMAGE we did not ask for', async () => {
+    // -bind-image off (SessionOptions.bindImage: false) excludes BIND-IMAGE from
+    // st.requested (tn3270e.ts, requestedFunctions()). A host that grants it anyway
+    // is "illegally adding a function" exactly as SCS-CTL-CODES is in the test right
+    // below -- addsNothing() is judged against the PER-SESSION list, not the fixed
+    // REQUESTED_FUNCTIONS constant, which is what makes -bind-image off a real
+    // refusal rather than a no-op. See tn3270e.ts's Tn3270eState.requested comment
+    // for what would go wrong if addsNothing read the constant instead: BIND-IMAGE
+    // would look like something we always request, the grant would be silently
+    // adopted into `agreed`, and the BIND gate (Session.bindImageGranted) would arm
+    // itself on a session whose operator specifically asked to skip it.
+    const { session, conn } = newSession({ bindImage: false });
+    await session.connect('127.0.0.1', 992);
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
+    conn.sb(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'));
+    conn.clear();
+    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES);
+    // The refusal: WONT TN3270E, and the session falls back to classic tn3270 --
+    // the same observable shape as any other illegally-added function.
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+    conn.negotiateClassic();
+    expect(session.is3270Mode()).toBe(true);
+  });
+
+  it('our FUNCTIONS REQUEST omits BIND-IMAGE with -bind-image off', async () => {
+    // Mutation check on the WIRE BYTES, not just on the flag: this fails if
+    // requestedFunctions() or its threading into initialState is ever dropped, even
+    // if `bindImage` still parses correctly at the argv layer.
+    const { session, conn } = newSession({ bindImage: false });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    // Exact match, not a `.not.toContain(BIND_IMAGE)` check: Tn3270eFunc.BIND_IMAGE is
+    // 0x00, which would make a containment check meaningless against a byte stream
+    // that legitimately carries zero bytes elsewhere (e.g. a REQUEST-FLAG byte). The
+    // full-array equality below is what actually proves BIND-IMAGE is absent.
+    expect(conn.writes[2]).toEqual([
+      T.IAC, T.SB, O.TN3270E, Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST,
+      Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
+      T.IAC, T.SE,
+    ]);
+  });
+
   it('refuses TN3270E and stays usable when the host adds a function', async () => {
     // BIND-IMAGE moved into REQUESTED_FUNCTIONS this task, so it can no longer stand
     // in for "a function we never asked for" -- SCS-CTL-CODES (still unrequested,

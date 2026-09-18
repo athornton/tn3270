@@ -60,6 +60,13 @@ export interface SessionOptions {
    * directly; this task defaults it and wires the check.
    */
   bindLimit?: boolean;
+  /**
+   * Request the BIND-IMAGE function. Defaults to true; `-bind-image off` clears it.
+   *
+   * Off means the gate never closes, because the gate is conditional on the host
+   * having AGREED the function.
+   */
+  bindImage?: boolean;
 }
 
 /**
@@ -672,6 +679,7 @@ export class Session {
     this.e ??= initialState({
       terminalType: this.opts.terminalType ?? TERMINAL_TYPE,
       lus: this.per.lus ?? this.opts.lus ?? [],
+      bindImage: this.opts.bindImage ?? true,
     });
     const r = negotiate(this.e, body);
     this.e = r.next;

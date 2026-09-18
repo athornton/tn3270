@@ -22,6 +22,17 @@ export function defaultSession(
    * and safe because the negotiation backs off to traditional tn3270 on a reject.
    */
   tn3270e?: boolean,
+  /**
+   * Request the BIND-IMAGE function. Absent means the product default, ON.
+   * `-bind-image off` (Task 11) passes `false`.
+   */
+  bindImage?: boolean,
+  /**
+   * Range-check a BIND's geometry against the model. Absent means the product
+   * default, ON, matching x3270's `bind_limit`. `-bind-limit off` (Task 11) passes
+   * `false`.
+   */
+  bindLimit?: boolean,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
@@ -30,5 +41,7 @@ export function defaultSession(
     ...(alternate !== undefined
       ? { alternateRows: alternate.rows, alternateCols: alternate.cols }
       : {}),
+    ...(bindImage === undefined ? {} : { bindImage }),
+    ...(bindLimit === undefined ? {} : { bindLimit }),
   });
 }
