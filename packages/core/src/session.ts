@@ -17,7 +17,7 @@ import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, type QueryRequest } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
-import { NO_BIND_TIMEOUT_MS } from './bind.js';
+import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
 
 /**
  * A single TN3270 session: socket, telnet layer, screen, keyboard.
@@ -53,6 +53,13 @@ export interface SessionOptions {
   tn3270e?: boolean;
   /** LU names to request via CONNECT, tried in order as REJECTs come back. */
   lus?: readonly string[];
+  /**
+   * Range-check a BIND's geometry against the model before applying it. Defaults to
+   * true, matching x3270's `bind_limit` resource (Common/glue.c:458) and its polarity:
+   * the flag that turns it OFF, not on. `-bind-limit off` (Task 11) will drive this
+   * directly; this task defaults it and wires the check.
+   */
+  bindLimit?: boolean;
 }
 
 /**
@@ -139,6 +146,27 @@ export class Session {
    * re-armed per record and why it is not `.unref()`'d.
    */
   private noBindTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Whether a BIND's geometry is range-checked against the model before being applied.
+   * x3270's `bind_limit` (Common/glue.c:458, default true) -- see `SessionOptions.bindLimit`.
+   */
+  private readonly bindLimit: boolean;
+  /**
+   * THE MODEL'S ALTERNATE GEOMETRY, CAPTURED AT CONSTRUCTION -- NOT READ FROM
+   * `this.screen.alternateSize`.
+   *
+   * `screen.alternateSize` is mutable now that a BIND can rewrite it (`Screen.setSizes`),
+   * so by the time an UNBIND arrives it may hold whatever the MOST RECENT BIND asked for,
+   * not the model the session was built with. x3270 keeps the same distinction: `altROWS`/
+   * `altCOLS` are the LIVE, mutable values `process_bind` overwrites (telnet.c:2554-2555),
+   * while UNBIND's revert (telnet.c:2760-2761) assigns them back from `maxROWS`/`maxCOLS` --
+   * the model's fixed maximum, set once at `-model` parse time and never touched by BIND.
+   * This field is that same fixed point on our side. Deriving it from the screen instead
+   * would revert an UNBIND to the PREVIOUS BIND's geometry rather than the model's -- wrong,
+   * and it looks completely correct while doing so. See the mutation test in
+   * tn3270e-session.test.ts pinning exactly this.
+   */
+  private readonly modelAlternate: { readonly rows: number; readonly cols: number };
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
   private per: ConnectOptions = {};
   /**
@@ -181,6 +209,18 @@ export class Session {
       ...(opts.codePage ? { codePage: opts.codePage } : {}),
     });
     this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
+    this.bindLimit = opts.bindLimit ?? true;
+    // Captured from OPTIONS, not from `this.screen.alternateSize` -- see the field's own
+    // comment for why reading it back off the screen would be the trap.
+    this.modelAlternate = {
+      rows: opts.alternateRows ?? opts.rows ?? MODEL_2.rows,
+      cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
+    };
+  }
+
+  /** The model's alternate geometry -- see `modelAlternate`'s field comment. */
+  private modelSize(): { readonly rows: number; readonly cols: number } {
+    return this.modelAlternate;
   }
 
   on(event: SessionEvent, fn: () => void): void {
@@ -691,6 +731,21 @@ export class Session {
     this.eSeq = 0;
     this.bound = false;
     this.pendingBindRecord = undefined;
+    this.clearNoBindTimer();
+  }
+
+  /**
+   * Cancel the no-BIND deadline, if one is running. A no-op otherwise -- every caller
+   * (here, `handleBind`, `handleUnbind`) reaches this on paths where a timer may or may
+   * not be pending, and forcing each of them to check first would just move the guard
+   * out of the one place that needs to get it right.
+   *
+   * PULLED OUT rather than left inline in each of the three call sites deliberately:
+   * this project has twice shipped a bug where one teardown path cleared a piece of
+   * state and another did not (see `forgetTn3270e`'s own history with `e`). One method
+   * is what makes that drift impossible here.
+   */
+  private clearNoBindTimer(): void {
     if (this.noBindTimer !== undefined) {
       clearTimeout(this.noBindTimer);
       this.noBindTimer = undefined;
@@ -734,39 +789,103 @@ export class Session {
   }
 
   /**
-   * A BIND-IMAGE record arrived. MINIMAL FOR THIS TASK: Task 9 owns the geometry
-   * (`Screen.setSizes`, `acceptBindDims`) and the OIA/trace reporting of what the BIND
-   * asked for; this task's job is only the gate, so this stops at the two facts the
-   * gate itself depends on -- `bound` flips true, and whatever the gate withheld now
-   * runs through the SAME `executeRecord` a live record would have. `parseBind` and
-   * its geometry are deliberately not consulted here yet.
+   * A BIND: the host naming an application and, often, dictating geometry.
    *
-   * Cancels the Task-9 timer, since there is no more "no BIND" to time out on --
-   * left inert today because `armNoBindTimer` is itself a stub, but wired here so
-   * Task 9 does not also have to touch this call site.
+   * THE ORDER HERE MATTERS AND MATCHES x3270: parse, apply geometry, erase, THEN
+   * release the gate. Verified against `process_bind`/`process_eor`
+   * (Common/telnet.c:2449-2590, :2708-2744): `process_bind` runs to completion --
+   * including `ctlr_erase(false)` at :2559 -- and only once it returns does the
+   * `TN3270E_DT_BIND_IMAGE` case in `process_eor` set `tn3270e_bound = 1` (:2742).
+   * Releasing the gate FIRST would let the retained record drain through
+   * `executeRecord` at the OLD geometry, which is the bug the gate exists to
+   * prevent -- a record painted at 24x80 and then silently viewed through a 43x80
+   * buffer, or vice versa.
    */
-  private handleBind(_body: Uint8Array): void {
-    this.bound = true;
-    if (this.noBindTimer !== undefined) {
-      clearTimeout(this.noBindTimer);
-      this.noBindTimer = undefined;
+  private handleBind(body: Uint8Array): void {
+    const bind = parseBind(body);
+    if (bind === null) {
+      this.trace.note('BIND-IMAGE record that is not a BIND, dropped');
+      return;
     }
-    const pending = this.pendingBindRecord;
-    if (pending !== undefined) {
-      this.pendingBindRecord = undefined;
-      this.executeRecord(pending.body, pending.wants);
+    if (bind.dims !== undefined) {
+      const model = this.modelSize();
+      const alt = bind.dims.alternate === 'caller' ? model : bind.dims.alternate;
+      const dims = { ...bind.dims, alternate: alt };
+      const verdict = this.bindLimit
+        ? acceptBindDims(dims, model)
+        : { ok: true as const };
+      if (verdict.ok) {
+        this.screen.setSizes(
+          { rows: dims.defaultRows, cols: dims.defaultCols }, alt);
+        // `useDefaultSize()` ALONE IS NOT x3270's `ctlr_erase(false)`, and this is a real
+        // divergence caught by reading ctlr.c rather than trusting the plan's sketch.
+        // `ctlr_erase` calls `ctlr_clear(true)` -- the actual data-clearing memset --
+        // UNCONDITIONALLY, at ctlr.c:552, BEFORE the `if (alt == screen_alt && ROWS ==
+        // newROWS && COLS == newCOLS) return;` early-return at :565-567. That early
+        // return only skips the RESIZE bookkeeping and the `screen_disp`/`ctlr_blanks`
+        // repaint -- it does not un-clear a buffer already cleared three lines earlier.
+        // `Screen.resize()` (which `useDefaultSize()` calls) conflates the two: it
+        // returns false and skips its own allocate-and-blank whenever the new default
+        // equals the CURRENT geometry, which would leave a BIND that keeps the default
+        // size (changing only the alternate, the common case for a same-application
+        // reconnect) painted over the operator's last screen instead of erased. `clear()`
+        // is therefore called explicitly and unconditionally, matching `ctlr_clear`'s
+        // placement ahead of the size check rather than behind it.
+        this.screen.useDefaultSize();
+        this.screen.clear();
+      } else {
+        this.trace.note(`${verdict.why}; keeping our geometry`);
+      }
+    }
+    this.bound = true;
+    this.clearNoBindTimer();
+    const held = this.pendingBindRecord;
+    this.pendingBindRecord = undefined;
+    if (held !== undefined) {
+      this.executeRecord(held.body, held.wants);
+    } else {
+      // Only emitted when NOTHING was drained: `executeRecord` (line ~625) already
+      // emits 'screen' once it finishes painting the retained record, and that repaint
+      // reflects the geometry change made above -- a second emit here would fire twice
+      // for one logical frame. But a BIND that resized/erased with no pre-BIND record
+      // waiting has made a screen change nothing else will announce, so this path must
+      // emit or a resize-only BIND is invisible to both renderers.
+      this.emit('screen');
     }
   }
 
   /**
-   * An UNBIND record arrived. MINIMAL FOR THIS TASK: x3270 also reverts geometry and
-   * re-erases the screen on UNBIND (Common/telnet.c:2745-2765), which is Task 9/10
-   * territory. This task only owns `bound`'s lifecycle, so it stops at clearing it --
-   * a BIND-forthcoming UNBIND re-arms the gate for whatever 3270 data follows, exactly
-   * as granting BIND-IMAGE armed it the first time.
+   * An UNBIND: teardown with the TCP connection still up.
+   *
+   * Reverts the BIND's sizing, erases, and closes the gate again to await another
+   * BIND. BIND_FORTHCOMING says one IS coming -- the host handing us between
+   * applications -- and treating that as a disconnection would drop a session the
+   * host meant to keep. x3270 does exactly this at Common/telnet.c:2752-2764:
+   * `tn3270e_bound = 0`, `defROWS`/`defCOLS` back to `MODEL_2_ROWS`/`MODEL_2_COLS`,
+   * `altROWS`/`altCOLS` back to `maxROWS`/`maxCOLS` (the MODEL's fixed maximum, not
+   * whatever a BIND last set it to), then `ctlr_erase(false)`.
+   *
+   * Reverts to `modelSize()` -- captured at construction -- and NOT to
+   * `this.screen.alternateSize`: see that field's own comment for why deriving it
+   * from the screen would revert to the wrong geometry after two BINDs in a row.
    */
-  private handleUnbind(_body: Uint8Array): void {
+  private handleUnbind(body: Uint8Array): void {
+    const info = parseUnbind(body);
+    this.trace.note(
+      `UNBIND reason ${info.reason ?? 'absent'}`
+      + `${info.forthcoming ? ' (BIND forthcoming)' : ''}`);
+    const model = this.modelSize();
+    this.screen.setSizes({ rows: MODEL_2.rows, cols: MODEL_2.cols }, model);
+    // Explicit, unconditional `clear()` for the same reason as `handleBind`: `ctlr_erase`
+    // clears before it checks whether the size changed (ctlr.c:552 precedes the
+    // early-return at :565-567), so an UNBIND reverting to a default size that happens to
+    // match the current one must still erase.
+    this.screen.useDefaultSize();
+    this.screen.clear();
     this.bound = false;
+    this.pendingBindRecord = undefined;
+    this.clearNoBindTimer();
+    this.emit('screen');
   }
 
   /**

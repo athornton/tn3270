@@ -4,7 +4,8 @@ import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, AID,
   Tn3270eOp, Tn3270eFunc, Tn3270eDataType, Tn3270eResponseFlag, Tn3270eSense,
 } from '../src/constants.js';
-import { NO_BIND_TIMEOUT_MS } from '../src/bind.js';
+import { NO_BIND_TIMEOUT_MS, BIND_OFF, BIND_RU as BIND_RU_BYTE } from '../src/bind.js';
+import { MODEL_4 } from '../src/constants.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -446,6 +447,148 @@ describe('the BIND gate', () => {
       expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
     });
   });
+});
+
+describe('BIND and UNBIND: geometry', () => {
+  /**
+   * Task 10's six behaviours: applying an in-range BIND, refusing an out-of-range one,
+   * substituting our own alternate for size code 0x03, reverting on UNBIND, honouring
+   * `-bind-limit off`, and confirming UNBIND re-arms the gate rather than disconnecting.
+   */
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+
+  /**
+   * A 28-byte BIND RU body with the given size code and dims, no PLU name -- same shape
+   * as bind.test.ts's own `bindWith`, reused here rather than re-derived because that
+   * file already pins the byte offsets this one only needs to drive.
+   */
+  const bindBody = (ssize: number, rd = 0, cd = 0, ra = 0, ca = 0): number[] => {
+    const b = new Uint8Array(28);
+    b[0] = BIND_RU_BYTE;
+    b[BIND_OFF.RD] = rd; b[BIND_OFF.CD] = cd;
+    b[BIND_OFF.RA] = ra; b[BIND_OFF.CA] = ca;
+    b[BIND_OFF.SSIZE] = ssize;
+    return [...b];
+  };
+
+  /** A BIND-IMAGE TN3270E record carrying `body`, framed with a header and IAC EOR. */
+  const bindRecord = (body: number[]): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, ...body, T.IAC, T.EOR];
+
+  /** An UNBIND TN3270E record. Omitting `reason` means an empty body (no reason given). */
+  const unbindRecord = (reason?: number): number[] =>
+    [Tn3270eDataType.UNBIND, 0x00, 0x00, 0x00, 0x00,
+      ...(reason === undefined ? [] : [reason]), T.IAC, T.EOR];
+
+  /**
+   * Erase/Write, WCC, SBA(0,0), then an EBCDIC byte as DATA -- same shape as `write3270`
+   * above, and for the same reason (`WRITE_FIELD` ends in a field attribute, which
+   * cannot discriminate "ran" from "still gated"). Parameterized on the byte so test 6
+   * can distinguish "the record from before UNBIND" from "the record from after".
+   */
+  const write3270 = (ebcdic = 0xc1): number[] =>
+    [...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, ebcdic, T.IAC, T.EOR];
+
+  it('applies an in-range BIND geometry', async () => {
+    // Model 4: default 24x80, alternate 43x80 -- the model this session was
+    // constructed with, per `SessionOptions.alternateRows/Cols`.
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    // Size code 0x7f, default 24x80, alternate 32x80 -- IN RANGE for a model 4 (the
+    // upper bound), and above the model-2 floor, so `acceptBindDims` must accept it.
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 32, 80)));
+    expect(session.screen.defaultSize).toEqual({ rows: 24, cols: 80 });
+    expect(session.screen.alternateSize).toEqual({ rows: 32, cols: 80 });
+  });
+
+  it('refuses an out-of-range BIND and keeps our geometry, with a specific trace', async () => {
+    // Model 2 (the default): its alternate size IS its default size, 24x80, so a BIND
+    // asking for a 43-row alternate is refused by the upper-bound check.
+    const { session, conn } = newSession();
+    session.trace.setEnabled(true);
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 43, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+    // THE EXACT REFUSAL PHRASE, not a loose `toContain('BIND')` -- Task 9 found that a
+    // vague assertion passes on an unrelated trace line (there the arm-time "3270 data
+    // before BIND, retained" note; here there is no such decoy, but the discipline is
+    // the same). `acceptBindDims`'s own `why` string, verified against bind.ts, is
+    // exactly "BIND alternate 43x80 exceeds model 24x80" for this input.
+    expect(session.trace.toText())
+      .toContain('BIND alternate 43x80 exceeds model 24x80; keeping our geometry');
+  });
+
+  it("size code 0x03 substitutes OUR alternate, not the caller's request", async () => {
+    // Model 4: default 24x80, alternate 43x80. `parseBind` reports `alternate:
+    // 'caller'` for 0x03, and the session must fill in ITS OWN model, not a model-2
+    // default -- the whole reason `BindDims.alternate` has a `'caller'` variant rather
+    // than resolving to a concrete size inside the pure parser.
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x03)));
+    expect(session.screen.defaultSize).toEqual({ rows: 24, cols: 80 });
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('UNBIND reverts to the MODEL geometry, not the BIND that just ran', async () => {
+    // Model 4: default 24x80, alternate 43x80. BIND to alternate 32x80 first, so the
+    // screen briefly shows something OTHER than the model -- then UNBIND, which must
+    // revert to 43x80 (the model), not to 32x80 (what the screen happened to hold).
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 32, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 32, cols: 80 }); // premise
+    conn.host(...unbindRecord());
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('honours an out-of-range BIND when bindLimit is off', async () => {
+    // The flag itself is Task 11's `-bind-limit off`; this task defaults it to true
+    // and lets a caller drive it directly, which is exactly what this test does.
+    // Model 2 (the default), so a 43-row alternate is out of range with the limit ON
+    // (test above) -- and must be ACCEPTED with it off.
+    const { session, conn } = newSession({ bindLimit: false });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 43, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('does not disconnect on UNBIND, and the gate closes again for the next BIND',
+    async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      // A first BIND, opening the gate -- so there is a "before" state distinct from
+      // "never bound at all" for the UNBIND below to revert.
+      conn.host(...bindRecord(bindBody(0x00)));
+      expect(session.isConnected()).toBe(true);
+
+      conn.host(...unbindRecord());
+      // NOT A DISCONNECT: the TCP connection stays up, which is the entire point of
+      // UNBIND over a real teardown.
+      expect(session.isConnected()).toBe(true);
+
+      // THE GATE IS CLOSED AGAIN: a 3270-DATA record arriving now must be RETAINED,
+      // not executed -- exactly the Task 8 distinction, reusing the same discriminating
+      // technique (a painted character, not WRITE_FIELD's field attribute).
+      conn.host(...write3270(0xc2));
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);   // not yet painted
+      expect(session.trace.toText()).toContain('3270 data before BIND, retained');
+
+      // The host may send another BIND, per BIND_FORTHCOMING's whole premise -- and
+      // when it does, the retained record must drain, exactly as it did the first time.
+      conn.host(...bindRecord(bindBody(0x00)));
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc2);   // now executed
+    });
 });
 
 describe('TN3270E state across connections', () => {
