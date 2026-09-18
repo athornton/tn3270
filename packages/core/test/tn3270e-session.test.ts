@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, AID,
   Tn3270eOp, Tn3270eFunc, Tn3270eDataType, Tn3270eResponseFlag, Tn3270eSense,
 } from '../src/constants.js';
+import { NO_BIND_TIMEOUT_MS } from '../src/bind.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -338,6 +339,112 @@ describe('the BIND gate', () => {
     conn.negotiateE();              // no BIND_IMAGE in the grant
     conn.host(...write3270());
     expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // executed immediately
+  });
+
+  /**
+   * Task 9's no-BIND deadline. Fake timers are installed AFTER `connect()` and
+   * `negotiateE()`, not before: `FakeConnection`'s `connect` is a synchronous
+   * `() => conn`, so `await session.connect(...)` resolves on a plain microtask with
+   * no real timer involved either way, but installing fake timers first would still
+   * leave nothing to distinguish -- doing it after keeps the arrangement identical to
+   * the BIND-gate tests above and confines the fakery to exactly the lines that need
+   * it, so a reader does not have to ask whether the negotiation itself depended on
+   * wall-clock time.
+   */
+  describe('the no-BIND timeout', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('executes the retained record -- the whole screen, not just the session -- '
+      + 'when no BIND arrives', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      // Still blank: gated, exactly as the ungated-timeout tests above pin.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS);
+      // The FRAME the host painted is now on screen -- recovered, not merely a
+      // session that stopped being gated. This is the entire reason the record is
+      // retained instead of dropped: x3270 drops it, so a timeout there would clear
+      // the gate onto a blank screen.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
+    });
+
+    it('does not fire once a BIND has arrived: the record executes exactly once', async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      conn.host(...bind());
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // executed by the BIND
+      const before = session.recordCount();
+      // CHECKED IMMEDIATELY, BEFORE ADVANCING: `setTimeout` only ever fires once, so
+      // a check made only AFTER advancing far past the deadline cannot tell "the
+      // timer was cancelled" from "the timer fired once and is now spent" -- both
+      // leave `getTimerCount()` at 0 by then. The discriminating moment is right
+      // after `handleBind` runs: a real cancellation means no timer is pending here
+      // at all, whereas relying solely on the drained `pendingBindRecord` field would
+      // leave this still at 1.
+      expect(vi.getTimerCount()).toBe(0);
+      // Now advance well past the original deadline. If cancellation were missing,
+      // the still-armed timer would fire here, find `pendingBindRecord` already
+      // drained, trace anyway, and touch nothing on screen -- so the screen and
+      // recordCount alone cannot see that failure. The trace assertion is what
+      // catches it: a fired-but-inert timer still writes its "no BIND within" line.
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS * 10);
+      expect(session.recordCount()).toBe(before);          // not re-executed
+      expect(session.trace.toText()).not.toContain('no BIND within');
+    });
+
+    it('traces the timeout with a message specific enough to discriminate a fired '
+      + 'timer from an inert one', async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      expect(session.trace.toText()).not.toContain('no BIND within');
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS);
+      // Not merely toContain('BIND'), which the arm-time "3270 data before BIND,
+      // retained" line (still present, earlier in the trace) would also satisfy --
+      // this asserts the exact fired-timeout sentence, including the constant's
+      // own value, so a test reading only "some BIND-shaped line exists" cannot
+      // pass on the arm-time trace alone.
+      expect(session.trace.toText())
+        .toContain(`no BIND within ${NO_BIND_TIMEOUT_MS}ms; executing the retained `
+          + 'record at our own geometry');
+    });
+
+    it('is cleared when the connection closes, so it cannot hold the event loop', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      expect(vi.getTimerCount()).toBe(1);
+      session.disconnect();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('is NOT re-armed per record: several pre-BIND records spread over time still '
+      + 'time out ~5s after the FIRST one', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());                       // T+0: arms the timer
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS - 1000); // T+4000: one ms shy of 4s
+      conn.host(...write3270());                        // a second pre-BIND record
+      vi.advanceTimersByTime(900);                       // T+4900: still short of 5000
+      // Not yet: a re-arming implementation would need another ~5s from THIS record.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+      vi.advanceTimersByTime(200);                        // T+5100: past 5000 from T+0
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
+    });
   });
 });
 

@@ -17,6 +17,7 @@ import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, type QueryRequest } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
+import { NO_BIND_TIMEOUT_MS } from './bind.js';
 
 /**
  * A single TN3270 session: socket, telnet layer, screen, keyboard.
@@ -132,10 +133,10 @@ export class Session {
    */
   private pendingBindRecord: { wants: Tn3270eHeader; body: Uint8Array } | undefined;
   /**
-   * The Task 9 timer that gives up waiting for a BIND and executes
-   * `pendingBindRecord` anyway. Armed by `armNoBindTimer()` when the gate first
-   * withholds a record; a stub here because arming and firing the timer are that
-   * task's, not this one's -- see NO_BIND_TIMEOUT_MS in bind.ts.
+   * The no-BIND deadline: gives up waiting for a BIND after NO_BIND_TIMEOUT_MS
+   * (bind.ts) and executes `pendingBindRecord` anyway. Armed by `armNoBindTimer()`
+   * when the gate first withholds a record; see that method for why it is not
+   * re-armed per record and why it is not `.unref()`'d.
    */
   private noBindTimer: ReturnType<typeof setTimeout> | undefined;
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
@@ -769,15 +770,46 @@ export class Session {
   }
 
   /**
-   * Arm the Task-9 "give up waiting for a BIND" timer. STUB FOR THIS TASK: the plan
-   * reserves the timeout logic itself for Task 9 (NO_BIND_TIMEOUT_MS, bind.ts), and
-   * this task's tests never let a timer fire -- each one either supplies a BIND or
-   * asserts the retained-not-executed state before one would. Left as a documented
-   * no-op rather than removed so `handleRecord`'s call site and this task's tests do
-   * not have to change again when Task 9 fills it in.
+   * Start the no-BIND deadline, unless one is already running.
+   *
+   * NOT restarted per record: the deadline is "how long since the host should have
+   * bound", and re-arming on every pre-BIND write would let a chatty host defer it
+   * forever -- which is the hang, arrived at by a different route.
+   *
+   * NOT `.unref()`'d -- checked against every other timer in this repo
+   * (`grep -rn 'setTimeout\|\.unref('`) and none of them call `.unref()` either: the
+   * TUI's ESC timer (`app.ts:534,544`) and the web gateway's grace timer
+   * (`web/src/sessions.ts:109`) both stay ref'd and instead rely on an explicit
+   * `clearTimeout` reaching every teardown path, exactly the discipline
+   * `forgetTn3270e` already applies here. That is precedent, not just a tie-breaker:
+   * `app.ts:303`'s comment on the ESC timer names the same failure mode this task's
+   * plan cites -- a ref'd timer holds the event loop open for its own duration after
+   * `restore()` -- and that codebase's answer was `clearTimeout` on every exit path,
+   * not `.unref()`.
+   *
+   * Ref'd is also the behaviourally correct choice on its own terms, not merely the
+   * consistent one: this timer's whole job is to recover a frame the operator cannot
+   * otherwise see once the host goes quiet. A CLI script whose only outstanding work
+   * is this timeout is precisely the case where staying alive to paint that frame is
+   * wanted, not a leak to suppress -- `.unref()` would let such a process exit right
+   * out from under its own recovery. Nothing here holds the loop open longer than
+   * `NO_BIND_TIMEOUT_MS`, and `forgetTn3270e()` clears it on every path that ends a
+   * negotiation (a clean `disconnect()`, our own backoff, or the host withdrawing
+   * option 40), so an interactive front end that tears down normally never waits out
+   * the 5s regardless.
    */
   private armNoBindTimer(): void {
-    // Intentionally empty. See NO_BIND_TIMEOUT_MS in bind.ts.
+    if (this.noBindTimer !== undefined) return;
+    this.noBindTimer = setTimeout(() => {
+      this.noBindTimer = undefined;
+      const held = this.pendingBindRecord;
+      this.pendingBindRecord = undefined;
+      // TRACED BEFORE EXECUTING, so the trace shows the cause ahead of its effect
+      // even if executing throws.
+      this.trace.note(
+        `no BIND within ${NO_BIND_TIMEOUT_MS}ms; executing the retained record at our own geometry`);
+      if (held !== undefined) this.executeRecord(held.body, held.wants);
+    }, NO_BIND_TIMEOUT_MS);
   }
 
   /**
