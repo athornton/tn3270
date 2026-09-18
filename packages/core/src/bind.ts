@@ -14,6 +14,7 @@
  */
 
 import { MODEL_2 } from './constants.js';
+import { cp037 } from './codepage.js';
 
 /** A BIND request unit begins with this. Anything else is not a BIND. */
 export const BIND_RU = 0x31;
@@ -149,7 +150,39 @@ function decodeDims(body: Uint8Array, sizeCode: number): BindDims | undefined {
   }
 }
 
-/** Stub -- Task 4 decodes the EBCDIC PLU name at BIND_OFF.PLU_NAME_LEN/PLU_NAME. */
-function decodePluName(_body: Uint8Array): string {
-  return '';
+/**
+ * The primary LU name: WHICH APPLICATION the host has just connected us to.
+ *
+ * Four guards, each matching x3270 (Common/telnet.c:2562-2582) and each with a
+ * distinct failure it prevents:
+ *  - the buffer must REACH the length byte (`buflen > BIND_OFF_PLU_NAME_LEN`, :2562);
+ *  - a declared length over 8 is CLAMPED, as x3270 clamps it, not refused (:2564-2565);
+ *  - a declared length of 0 means no name, not an empty one followed by stray bytes
+ *    (the `namelen > 0` half of :2567's `&&`);
+ *  - a declared length that does not leave enough buffer for the name yields nothing
+ *    at all (the other half of :2567's `&&`) -- see the note below for the exact bound
+ *    used here, which is NOT x3270's literal one.
+ *
+ * DELIBERATE DEPARTURE FROM x3270's LITERAL BOUND: x3270's C guard is
+ * `buflen > BIND_OFF_PLU_NAME + namelen` -- STRICT greater-than. Copying `namelen`
+ * bytes starting at offset 28 only touches indices up to `28 + namelen - 1`, so
+ * `buflen >= 28 + namelen` (one byte less than x3270 demands) is everything the copy
+ * itself needs; x3270's `>` refuses a buffer that ends exactly on the name's last
+ * byte even though every byte the copy would read is present and valid. That reads as
+ * an off-by-one bug in x3270 itself, and here it is NOT reproduced: this file's own
+ * "decodes EBCDIC" test (bind.test.ts, `withName` with its default `declaredLen`)
+ * builds a buffer sized to exactly `PLU_NAME + bytes.length` -- i.e. it sits exactly on
+ * this boundary -- and is required to succeed. Matching x3270's `>` verbatim would make
+ * that mandatory test fail, so the bound used below is `>=`
+ * (`body.length < BIND_OFF.PLU_NAME + namelen` to reject), the logically-correct one,
+ * not x3270's. See bind.test.ts's dedicated boundary test for the case this documents.
+ */
+function decodePluName(body: Uint8Array): string {
+  if (body.length <= BIND_OFF.PLU_NAME_LEN) return '';
+  let namelen = body[BIND_OFF.PLU_NAME_LEN]!;
+  if (namelen > BIND_PLU_NAME_MAX) namelen = BIND_PLU_NAME_MAX;
+  if (namelen === 0) return '';
+  if (body.length < BIND_OFF.PLU_NAME + namelen) return '';
+  const slice = body.subarray(BIND_OFF.PLU_NAME, BIND_OFF.PLU_NAME + namelen);
+  return cp037.decode(slice);
 }

@@ -165,3 +165,67 @@ describe('parseBind — size codes', () => {
     expect(b.sizeCode).toBe(0x55);
   });
 });
+
+describe('parseBind — the PLU name', () => {
+  /** Build a BIND carrying `name` as its PLU name, EBCDIC-encoded. */
+  const withName = (bytes: number[], declaredLen = bytes.length): Uint8Array => {
+    const b = new Uint8Array(BIND_OFF.PLU_NAME + bytes.length);
+    b[0] = BIND_RU;
+    b[BIND_OFF.SSIZE] = 0x00;
+    b[BIND_OFF.PLU_NAME_LEN] = declaredLen;
+    b.set(bytes, BIND_OFF.PLU_NAME);
+    return b;
+  };
+
+  it('decodes EBCDIC', () => {
+    // 'IBM' in cp037: I=0xc9 B=0xc2 M=0xd4
+    expect(parseBind(withName([0xc9, 0xc2, 0xd4]))!.pluName).toBe('IBM');
+  });
+
+  it('is empty when the declared length is zero', () => {
+    // x3270 requires namelen > 0 before copying, so a zero length is "no name" and
+    // not "a name of length zero followed by whatever bytes are there".
+    expect(parseBind(withName([0xc9, 0xc2, 0xd4], 0))!.pluName).toBe('');
+  });
+
+  it('caps at 8 bytes even when the host declares more', () => {
+    // x3270 clamps namelen to BIND_PLU_NAME_MAX rather than refusing the BIND.
+    const nine = [0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9];
+    const name = parseBind(withName(nine, 9))!.pluName;
+    expect(name).toHaveLength(8);
+    expect(name).toBe('ABCDEFGH');
+  });
+
+  it('is empty when the declared length overruns the buffer', () => {
+    // A HOSTILE OR TRUNCATED BIND: it says 8 bytes and supplies 2. x3270 requires
+    // buflen > PLU_NAME + namelen before copying, so it takes nothing. Taking the two
+    // available bytes would be inventing a name the host did not send.
+    expect(parseBind(withName([0xc9, 0xc2], 8))!.pluName).toBe('');
+  });
+
+  it('is empty when the buffer does not reach the length byte at all', () => {
+    const short = new Uint8Array(20);
+    short[0] = BIND_RU;
+    expect(parseBind(short)!.pluName).toBe('');
+  });
+
+  it('decodes a name whose last byte is the buffer-s last byte (buflen == PLU_NAME + namelen)', () => {
+    // x3270's C guard is `buflen > BIND_OFF_PLU_NAME + namelen` (Common/telnet.c:2567)
+    // -- STRICT greater-than. Copying `namelen` bytes from offset 28 only touches
+    // indices up to 28 + namelen - 1, so buflen == 28 + namelen supplies every byte the
+    // copy needs; x3270's `>` refuses this buffer anyway, which reads as an off-by-one
+    // bug in x3270 itself. This decoder deliberately does NOT reproduce that bug (see
+    // the comment on decodePluName in bind.ts) because this file's own "decodes EBCDIC"
+    // test above builds exactly this boundary via `withName`'s default declaredLen and
+    // is required to succeed. This is the fixture that discriminates the two readings:
+    // the real BIND (52 bytes, declares 8 at offset 28, 28+8=36 < 52) has 16 bytes of
+    // slack and passes under EITHER reading, so it proves nothing about this choice.
+    const declaredLen = 5;
+    const bytes = [0xc1, 0xc2, 0xc3, 0xc4, 0xc5]; // 'ABCDE', fully present
+    const b = new Uint8Array(BIND_OFF.PLU_NAME + declaredLen); // buflen == 28 + 5 == 33
+    b[0] = BIND_RU;
+    b[BIND_OFF.PLU_NAME_LEN] = declaredLen;
+    b.set(bytes, BIND_OFF.PLU_NAME);
+    expect(parseBind(b)!.pluName).toBe('ABCDE');
+  });
+});
