@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { TelnetLayer, MAX_RECORD_BYTES, MAX_SUBNEG_BYTES } from '../src/telnet.js';
-import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
+import {
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, EnvironGroup, EnvironQual,
+} from '../src/constants.js';
 import { Trace } from '../src/trace.js';
+import { DeviceName } from '../src/devname.js';
+
+/** ASCII to bytes, matching the same helper in newenviron.test.ts. */
+const a = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0));
 
 /** Collects what the layer wants to transmit and the records it produces. */
 function harness() {
@@ -22,6 +28,53 @@ function harness2(terminalType: string) {
     write: (b) => sent.push(Array.from(b)),
     onRecord: (r) => records.push(r),
     terminalType,
+  });
+  return { layer, sent, records };
+}
+
+/**
+ * As `harness`, with NEW-ENVIRON (option 39) configured.
+ *
+ * `devname` is a `DeviceName` TEMPLATE (e.g. `'foo==='`), not a fixed value: this
+ * harness owns one `DeviceName` instance internally and calls `.next()` from inside
+ * the `uservars` callback, so a fresh DEVNAME is minted per reply exactly as a real
+ * `Session` will need to (Task 7's wiring). Passing a template rather than a resolved
+ * name is what lets the ITERATES test below exercise the mechanism the feature exists
+ * for, through real bytes, rather than by calling `DeviceName` directly.
+ *
+ * `{}` (no `devname`, no `vars`, no `uservars`) leaves `environ` undefined, which is
+ * what makes option 39 refused -- there is nothing configured to answer a SEND with,
+ * and `TelnetLayerOptions.environ` is documented as absent-means-refuse for exactly
+ * this reason.
+ */
+function envHarness(opts: {
+  devname?: string;
+  vars?: ReadonlyMap<string, string>;
+  uservars?: ReadonlyMap<string, string>;
+}) {
+  const sent: number[][] = [];
+  const records: Uint8Array[] = [];
+  const { devname, vars, uservars } = opts;
+  const dn = devname !== undefined ? new DeviceName(devname) : undefined;
+  const configured = dn !== undefined || vars !== undefined || uservars !== undefined;
+  const layer = new TelnetLayer({
+    write: (b) => sent.push(Array.from(b)),
+    onRecord: (r) => records.push(r),
+    ...(configured
+      ? {
+        environ: {
+          vars: vars ?? new Map<string, string>(),
+          // Called per reply, which is the whole point: a fresh Map is built each
+          // time so DEVNAME can advance. The static `uservars`, if any, are copied
+          // in first so a caller who wants both DEVNAME and other USERVARs gets both.
+          uservars: () => {
+            const m = new Map(uservars ?? new Map<string, string>());
+            if (dn !== undefined) m.set('DEVNAME', dn.next());
+            return m;
+          },
+        },
+      }
+      : {}),
   });
   return { layer, sent, records };
 }
@@ -795,5 +848,95 @@ describe('TN3270E telnet option (40)', () => {
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
     expect(() => layer.receive(
       Uint8Array.of(T.IAC, T.SB, O.TN3270E, 0x08, 0x02, T.IAC, T.SE))).not.toThrow();
+  });
+});
+
+describe('NEW-ENVIRON telnet option (39)', () => {
+  it('agrees to option 39 when variables are configured', () => {
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    expect(sent).toEqual([[T.IAC, T.WILL, O.NEW_ENVIRON]]);
+  });
+
+  it('REFUSES option 39 when nothing is configured', () => {
+    // Dark by default, which is what keeps this feature's blast radius on the existing
+    // negotiation tests at zero. A host offering it to a client with no device name and
+    // no user has nothing to learn.
+    const { layer, sent } = envHarness({});
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    expect(sent).toEqual([[T.IAC, T.WONT, O.NEW_ENVIRON]]);
+  });
+
+  it('does not re-acknowledge a repeated DO', () => {
+    // RFC 854's loop rule, the same guard the other options carry.
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    expect(sent).toEqual([]);
+  });
+
+  it('answers a host WILL for option 39 with DONT', () => {
+    // NEW-ENVIRON is something WE do. A host offering to do it is refused. Asserted
+    // rather than assumed, because the WONT TN3270E bug (e789b4f) was exactly a missing
+    // case for an option in the wrong direction, and it was the third of that shape
+    // here.
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.WILL, O.NEW_ENVIRON));
+    expect(sent).toEqual([[T.IAC, T.DONT, O.NEW_ENVIRON]]);
+  });
+
+  it('answers a SEND for DEVNAME with a full IS reply, framed', () => {
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    sent.length = 0;
+    layer.receive(Uint8Array.from([
+      T.IAC, T.SB, O.NEW_ENVIRON, EnvironQual.SEND,
+      EnvironGroup.USERVAR, ...a('DEVNAME'), T.IAC, T.SE,
+    ]));
+    expect(sent).toEqual([[
+      T.IAC, T.SB, O.NEW_ENVIRON, EnvironQual.IS,
+      EnvironGroup.USERVAR, ...a('DEVNAME'), EnvironGroup.VALUE, ...a('foo001'),
+      T.IAC, T.SE,
+    ]]);
+  });
+
+  it('ITERATES the device name across successive requests', () => {
+    // The behaviour the whole template mechanism exists for, driven through real bytes
+    // rather than by calling DeviceName directly -- the delivery is what could break.
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    const ask = Uint8Array.from([
+      T.IAC, T.SB, O.NEW_ENVIRON, EnvironQual.SEND,
+      EnvironGroup.USERVAR, ...a('DEVNAME'), T.IAC, T.SE,
+    ]);
+    sent.length = 0;
+    layer.receive(ask);
+    layer.receive(ask);
+    layer.receive(ask);
+    // Each reply is a complete, self-contained frame -- `IAC SB NEW-ENVIRON IS USERVAR
+    // "DEVNAME" VALUE <name> IAC SE` -- of exactly the length the fixed prefix and
+    // suffix predict for a 6-byte name, so slicing by fixed offsets from each end is
+    // safe here (unlike the plan's `indexOf(VALUE)`, which would misfire on a name or
+    // value that legitimately contains the VALUE byte, and `length - 2`, which assumes
+    // the frame ends `IAC SE` with nothing after -- true today because nothing here
+    // ever emits a trailing annotation, but not a property of the frame shape itself).
+    // The prefix is `IAC SB NEW-ENVIRON IS USERVAR "DEVNAME" VALUE` = 3 + 1 + 1 +
+    // 7 + 1 = 13 bytes; the suffix is `IAC SE` = 2 bytes.
+    const prefixLen = 3 + 1 + 1 + a('DEVNAME').length + 1;
+    const names = sent.map((frame) => String.fromCharCode(
+      ...frame.slice(prefixLen, frame.length - 2)));
+    expect(names).toEqual(['foo001', 'foo002', 'foo003']);
+  });
+
+  it('drops a malformed SEND rather than replying', () => {
+    const { layer, sent } = envHarness({ devname: 'foo===' });
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
+    sent.length = 0;
+    // A name byte with no group byte ahead of it: parseEnvironSend returns null.
+    layer.receive(Uint8Array.from([
+      T.IAC, T.SB, O.NEW_ENVIRON, EnvironQual.SEND, ...a('DEVNAME'), T.IAC, T.SE,
+    ]));
+    expect(sent).toEqual([]);
   });
 });
