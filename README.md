@@ -142,7 +142,7 @@ These terminal harnesses come with it, because "it looked right" is not a result
   TN3270 server: 12 checks, including that your terminal still echoes afterwards.
 - `packages/cli/scripts/drive-playback.py` replays **recorded real hosts** through
   x3270's own `playback -b`, which asserts our replies byte for byte with no host and
-  no network. It needs a built suite3270 alongside this repo; 5 of 5 traces pass.
+  no network. It needs a built suite3270 alongside this repo; 6 of 6 traces pass.
 
 ## Build and test
 
@@ -164,7 +164,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1813 tests, 72 files
+npm test           # 1819 tests, 72 files
 npm run typecheck
 ```
 
@@ -830,6 +830,14 @@ worse than one that says which quarter is missing.
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
   unimplemented.
+- **No NEW-ENVIRON (telnet option 39), so no `-devname`.** We answer `IAC WONT
+  NEW-ENVIRON` to any host that offers it. x3270 uses option 39 to send a device name as
+  a `DEVNAME` USERVAR, which is a second route to the thing TN3270E's `CONNECT` does with
+  LU names — and ours only does the latter. **This is a measured gap, not a guess:** it is
+  what made x3270's `devname_success.trc` undrivable as a playback fixture (we send `ff fc
+  27` where the trace expects `ff fb 27`, mismatching after one block), which is why the
+  recorded-host BIND witness is `sscp-lu-data.trc` instead. Nothing here needs it today;
+  it would matter for a host that identifies sessions by device name rather than by LU.
 - **TN3270E is implemented but NOT verified against a live host.** The option, the
   DEVICE-TYPE/FUNCTIONS subnegotiation, the 5-byte header, SNA responses, SYSREQ and LU
   names all work (see *TN3270E*) — against real s3270 and an in-repo TN3270E server,
@@ -855,6 +863,15 @@ worse than one that says which quarter is missing.
   `docs/live-testing.md`, *TN3270E against a real host*. What is still missing: a **printer
   session**, whose harness now exists, and a live UNBIND with `BIND_FORTHCOMING`, which no
   trace or reachable host has produced.
+
+  **A HOST WITHDRAWING TN3270E IS HANDLED BOTH WAYS ROUND, and that took two fixes.** The
+  correct byte is `IAC DONT TN3270E`, which a real z/VM 4.4 sends and which tears the
+  negotiation down at both layers. Some real hosts send `IAC WONT TN3270E` instead — x3270
+  carries a special case for them named, verbatim, *"Ugly hack for hosts that send WONT
+  TN3270E instead of DONT TN3270E"* (`Common/telnet.c:1879-1889`) — and until `e789b4f` we
+  answered that form with **nothing at all**, because option 40 is something *we* do and the
+  handler only reacted to options the *host* does. Both now route through one teardown, and
+  the second has a recorded-host witness in `wont-tn3270e.trc`.
 - **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
   on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
   between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
@@ -940,7 +957,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1813 tests, 72 files (measured 2026-09-19 on `bind-image`) |
+| `npm test` | **pass** — 1819 tests, 72 files (measured 2026-09-19 on `main` at `ed735fd`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -960,7 +977,7 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
-| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 6 of 6 traces**, host-free, by `drive-playback.py`. Replays six different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Five of the six still stop at FUNCTIONS** (a host `WONT`, a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace). **The sixth, `sscp-lu-data.trc`, gets past FUNCTIONS to a real BIND** — 4 matched blocks (3, 19, 11, 8 bytes) where the others stop at 3, PLU name `IBM0SMAA`, giving BIND parsing its first real-host witness. The plan's original candidate for that role, `devname_success.trc`, turned out to need NEW-ENVIRON (telnet option 39), which this client does not implement at all, and was replaced |
+| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 6 of 6 traces**, host-free, by `drive-playback.py`. Replays six different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` colour-digit divergence that is not our defect. The plan's original candidate for that role, `devname_success.trc`, turned out to need NEW-ENVIRON (telnet option 39), which this client does not implement at all, and was replaced |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both

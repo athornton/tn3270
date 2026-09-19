@@ -6,52 +6,65 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, 2026-09-19
 
-**GIT FACTS, CHECKED THIS DAY, NOT CARRIED FORWARD FROM AN EARLIER NOTE.** `main` is at `d030b64`
-*Merge playback-oracle*. Everything the section below used to call "not yet merged" — the keypad,
-Sys Req on the classic path, reconnect-on-enter, the z/VM probe and verdict, the TN3270E-DONT
-teardown fix, the playback oracle — **is merged into `main`** (`189f4c3`, `4e0b091`, `b395bf0`,
-`b198e6e`, `d1ec19d`, `d030b64`). None of that is the next action any more; it is history, and the
-sections below it in this file (*What the keypad branch delivered*, *Sys Req on both paths*, the
-playback-oracle bullets) stand as the record of it and need no further correction for that purpose.
+**GIT FACTS, CHECKED THIS DAY, NOT CARRIED FORWARD FROM AN EARLIER NOTE.** **`main` is at
+`ed735fd`, pushed, and it is the ONLY branch — local and remote.** Everything earlier drafts of this
+section called "not yet merged" is merged: the keypad, Sys Req on the classic path,
+reconnect-on-enter, the z/VM probe and verdict, the TN3270E-DONT teardown fix, the playback oracle,
+and now **BIND-IMAGE/BIND/UNBIND** (`06232cc`, `--no-ff`, branch deleted). The sections below stand
+as the record of that work; none of them is the next action.
 
-**THE CURRENT BRANCH IS `bind-image`, AT `63cbece`, 17 commits ahead of `main` (`d030b64`), AND IT
-IS NOT MERGED.** It adds what `main` lacked: the client now **requests** TN3270E BIND-IMAGE (`main`
-declined it by design; see the *playback -b* bullets below, now corrected to match), parses BIND
-and UNBIND, honours BIND's screen geometry within limits, and gates inbound 3270 data on a BIND
-arriving — with a 5-second timeout that executes the withheld frame rather than hanging forever, as
-x3270 does. Two new flags, both default on: `-bind-image on|off`, `-bind-limit on|off`. Design:
+**WHAT THE BIND-IMAGE WORK DELIVERED.** The client **requests** TN3270E BIND-IMAGE (it previously
+declined it by design), parses BIND and UNBIND, honours BIND's screen geometry within limits, and
+gates inbound 3270 data on a BIND arriving — with a 5-second timeout that **executes the withheld
+frame** rather than hanging forever as x3270 does. Two new flags, both default on: `-bind-image
+on|off`, `-bind-limit on|off`. Design:
 `docs/superpowers/specs/2026-09-17-bind-image-and-bind-unbind-design.md`; plan:
 `docs/superpowers/plans/2026-09-17-bind-image-and-bind-unbind.md`, annotated with `**AS BUILT:**`
-notes on every task that diverged from it — read those before re-deriving anything the plan
-claims. Full detail: `README.md`'s TN3270E section and `docs/live-testing.md`.
+notes on every task that diverged from it — **read those before re-deriving anything the plan
+claims; fourteen defects were found executing it and nearly all were in the plan.** Full detail:
+`README.md`'s TN3270E section and `docs/live-testing.md`.
 
-**The whole gate passes on the branch head, measured 2026-09-19:** build and typecheck clean,
-**1813 tests in 72 files**, `python3 packages/cli/scripts/drive-e.py` **10/10 configurations**
-(including the BIND gate and its timeout), `python3 packages/cli/scripts/drive-playback.py`
-**6 of 6 traces** — the sixth, `packages/fixtures/x3270/sscp-lu-data.trc`, is the first-ever
-recorded-host witness for BIND, matching 4 blocks. **No live (non-recorded) host has ever completed
-TN3270E negotiation**, so BIND/UNBIND's witness is that recording, not a network host; see
-*`playback -b` as an oracle* in `docs/live-testing.md`.
+**THE `WONT TN3270E` GAP IS FIXED, 2026-09-19 (`e789b4f`).** Earlier drafts of this section recorded
+it as a follow-up; it is done. A host withdrawing TN3270E with `IAC WONT TN3270E` — the
+wrong-way-round form of the already-fixed `IAC DONT TN3270E` case — used to get **no reply and no
+teardown**, because `St.Wont` only reacted to options in `hisOpts` and TN3270E lives in `myOpts`.
+That left `tn3270eNegotiated` true, which short-circuits `is3270Mode()`, so we would have gone on
+framing TN3270E against a host that had stopped. **Third instance of one shape on this project: a
+teardown path that cleared nothing.** Routed through the same `disableTn3270e()` as the other two.
+x3270 carries the same special case and names it verbatim — "Ugly hack for hosts that send WONT
+TN3270E instead of DONT TN3270E" (`Common/telnet.c:1879-1889`). **The reply is `WONT`, not `DONT`**,
+because the option is ours. **Two of the four mutations survived the first draft of its tests**, and
+fixing that is most of the commit's value: a guard test used an option the host *had* agreed, so the
+`else if` was never reached and dropping the option-40 guard left it green; and the `else if`
+ordering turned out **unfalsifiable** (only BINARY and EOR ever enter `hisOpts`, `telnet.ts:446-455`,
+so the branches are mutually exclusive by construction) — the test claiming to pin it was replaced
+by one pinning that reason.
 
-**A REAL GAP THIS WORK SURFACED, NOT FIXED HERE, AND NOT IN SCOPE FOR TASK 14 (docs):** a host that
-withdraws TN3270E by sending `IAC WONT TN3270E` (the wrong-way-round form of the already-fixed
-`IAC DONT TN3270E` case) gets no reply from `TelnetLayer`'s `St.Wont` handler
-(`packages/core/src/telnet.ts`), because that handler only reacts to an option in `hisOpts`, and
-TN3270E is in `myOpts`. `packages/fixtures/x3270/wont-tn3270e.trc` is a real trace of exactly this,
-and `drive-playback.py`'s case for it does not assert past the 3rd block, so the gap is real and
-does not manufacture a false pass. x3270 has a named special case for it
-(`Common/telnet.c:1879-1889`, "Ugly hack for hosts that send WONT TN3270E instead of DONT
-TN3270E"). Recorded here as a follow-up for whoever next touches `telnet.ts`.
+**The whole gate passes on `main` at `ed735fd`, measured 2026-09-19 on the merge commit and again
+after the WONT fix:** build and typecheck clean, **1819 tests in 72 files**, `drive-e.py` **10/10**
+(including the BIND gate and its timeout), `drive-playback.py` **6 of 6**, `pty-smoke.py` **12/12**,
+`shot.mjs` **3/3**, `keys.mjs` 18 chords/16 actions, `clicks.mjs` 9 buttons/10 actions,
+`browser-keys.mjs` 13 chords/11 actions, `browser-shot.mjs` **2/2**.
 
-**ONE THING IS WAITING ON THE USER. Do not do it unasked.**
+**TWO RECORDED-HOST WITNESSES NOW, AND BOTH ARE NEW.** `sscp-lu-data.trc` matches 4 blocks and is
+the first-ever recorded-host witness for **BIND**. `wont-tn3270e.trc` matches **5 blocks, up from
+3**, and is the witness for the WONT fix — it stops on a genuine `wrongTerminalName` divergence
+(we send `IBM-3278-4-E`, that recording sent the colour digit `IBM-3279-4-E`), which is why its case
+carries `mismatch_ok=True`. **That flag tolerates the stopping point and does not excuse the blocks
+before it**: reverting the fix fails with "matched 3 blocks, expected at least 5", verified.
+**No live (non-recorded) host has ever completed a TN3270E negotiation**, so BIND/UNBIND's witness
+is a recording and not a network host.
 
-1. **THE MERGE.** Task 15 of the bind-image plan is the final gate re-run and `git merge --no-ff`
-   to `main`, then a push; **the user has not authorised it, and it is out of scope for the docs
-   task (Task 14) that produced this note.** **No commit count is quoted here on purpose** —
-   `git rev-list --count main..HEAD` is the answer, and a number written down goes stale on the
-   next commit, which is the same defect as a stale line citation and it has bitten this file
-   before. When told: re-run the whole gate **on the merge commit**, not only on the branch — that
-   is what every merge on this project so far has done.
+**BUILD-STALENESS TRAP, hit again on this merge:** a `git checkout` or merge rewrites mtimes without
+changing content, so the GUI **and web** staleness guards redden. Force-rebuild **both**:
+`npx tsc --build --force packages/gui packages/web`. Forcing only `packages/gui` is what failed
+`browser-keys.mjs` on the first gate attempt after the merge.
+
+**NOTHING IS WAITING ON THE USER.** The next roadmap items are **(4) oversize + `IBM-DYNAMIC`**
+(which is really oversize — the advertisement is a by-product; see the out-of-scope section of the
+bind-image spec for the measurements), then **local model-switching** (user 2026-09-17, "probably
+right after `IBM-DYNAMIC`"; steal x3270's `Common/model.c`), then PS+VMGIF, packaging and the
+printer session.
 
 **EVERYTHING BELOW THIS POINT, DOWN TO *THE STATE OF THE TREE*, PREDATES THE BIND-IMAGE BRANCH AND
 DESCRIBES ALREADY-MERGED WORK.** It is left as-is except where a specific number or claim about
@@ -155,7 +168,7 @@ what it could NOT, as of 2026-09-17, are different claims, so quote them apart:
   among them): our `IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` including the model the flag
   asked for, and — on `wont-tn3270e.trc`, whose host answers `WONT 40` before FUNCTIONS — our
   whole backoff to classic TN3270. **Mutation-verified twice**: corrupting the device-type string
-  and reversing the DEVICE-TYPE operand order each turn all five cases red. **The operand-order
+  and reversing the DEVICE-TYPE operand order each turn all six cases red (five when that was written). **The operand-order
   bug is the one real s3270 accepts SILENTLY** (`DEVICE-TYPE ??8`, then a stall), so this is new
   coverage, not a second opinion on what unit tests already catch.
 - **NOT PROVED THEN, AND THIS IS NOW STALE — CORRECTED ON THE `bind-image` BRANCH, 2026-09-19:**
@@ -439,8 +452,8 @@ renderer has stopped being shared.
 
 **THIS SECTION IS A HISTORICAL SNAPSHOT FROM THE KEYPAD BRANCH, 2026-09-17, AND THE KEYPAD IS
 NOW MERGED.** For where the tree stands today, see *START HERE* at the top of this file: `main` is
-at `d030b64`, the current branch is `bind-image` (17 commits ahead, unmerged), and the current
-count is **1813 tests in 72 files**. Nothing below this note was re-derived for that; it is kept as
+at `ed735fd` and is the only branch (bind-image is merged and deleted), and the current
+count is **1819 tests in 72 files**. Nothing below this note was re-derived for that; it is kept as
 the record of the keypad branch's own numbers on its own day.
 
 **`main` at `7ca0269`, pushed** — an earlier version of this line said `eb9c306`, which was
@@ -879,7 +892,7 @@ support **beyond keypad buttons, which the keypad branch added — no click-to-p
 drag-to-select, no light pen**; the Electron GUI (stage 3, since DONE); and the web front end
 (**also since DONE**). **TN3270E (stage 2b) is
 now done** — see *Where things stand*. Within it, BIND/UNBIND, once undone because we declined
-BIND-IMAGE by design, **is now built on the `bind-image` branch (not yet merged) — see *START
+BIND-IMAGE by design, **is now built and MERGED to `main` (`06232cc`) — see *START
 HERE*** — and the **printer session now has its harness but nothing has
 driven it**.
 

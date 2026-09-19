@@ -2566,16 +2566,33 @@ order, each turn all six cases red. **The operand-order bug is the one real s327
 SILENTLY** — it logs `DEVICE-TYPE ??8` and stalls — so this is genuinely new coverage rather than
 a second opinion on what the unit tests already catch.
 
-**A real gap this work surfaced, not yet fixed:** `wont-tn3270e.trc`'s host answers our FUNCTIONS
-REQUEST with `IAC WONT TN3270E` — a host withdrawing an option **we** enabled, spelled the wrong
-way round from the `IAC DONT TN3270E` case already fixed on this branch's parent. `telnet.ts`'s
-`St.Wont` handler only reacts to an option in `hisOpts` (options the host does); TN3270E lives in
-`myOpts` (options we do), so this case is a silent no-op — no reply, and `playback` then reports
-`Socket EOF` waiting for one. x3270 has a named special case for exactly this ("Ugly hack for hosts
-that send WONT TN3270E instead of DONT TN3270E", `Common/telnet.c:1879-1889`). It is recorded in
-`docs/HANDOFF.md` as a follow-up, not fixed here — this document and Task 14 are docs, not
-`telnet.ts` — and `drive-playback.py`'s `wont-tn3270e.trc` case does not assert on the 4th block, so
-the gap is real but does not manufacture a false pass in the 3 blocks that case does check.
+**A real gap this work surfaced, AND IT IS NOW FIXED — `e789b4f`, 2026-09-19.**
+`wont-tn3270e.trc`'s host answers our FUNCTIONS REQUEST with `IAC WONT TN3270E` — a host withdrawing
+an option **we** enabled, spelled the wrong way round from the `IAC DONT TN3270E` case fixed two days
+earlier. `telnet.ts`'s `St.Wont` handler only reacted to options in `hisOpts` (options the host does);
+TN3270E lives in `myOpts` (options we do), so it was a **silent no-op** — no reply, no teardown, and
+`playback` then reported `Socket EOF` waiting for one. Worse than the silence: `tn3270eNegotiated`
+stayed true, and that flag short-circuits `is3270Mode()`, so we would have gone on framing TN3270E
+against a host that had stopped. **Third instance on this project of one shape — a teardown path that
+cleared nothing** — so it routes through the same `disableTn3270e()` as the other two rather than
+repeating the rule. x3270 carries the same special case and names it verbatim ("Ugly hack for hosts
+that send WONT TN3270E instead of DONT TN3270E", `Common/telnet.c:1879-1889`). **The reply is `WONT`,
+not `DONT`**, because the option is ours: we are saying we stop doing it, not answering about what
+the host does.
+
+**THIS TRACE IS NOW THE WITNESS FOR THE FIX, at 5 matched blocks instead of 3** — `WILL TN3270E`,
+`DEVICE-TYPE REQUEST`, `FUNCTIONS REQUEST`, **`WONT TN3270E`**, then `WILL TERMINAL-TYPE` on the
+classic path. All five are asserted, so a regression to silence cannot pass quietly: reverting the
+fix fails with *"matched 3 blocks, expected at least 5"*, verified by mutation.
+
+**It stops on a divergence that is NOT our bug**, which is why its case now carries
+`mismatch_ok=True`. At the 6th block we send TERMINAL-TYPE `IBM-3278-4-E`; the recording sent the
+**colour digit** `IBM-3279-4-E` (its line 105) while still sending `IBM-3278-4-E` for its own TN3270E
+DEVICE-TYPE (line 78). That is `wrongTerminalName`: `telnet.c:2104` uses the colour digit when
+`model_num < 4` **or** the resource is set, and this recording is a model 4 with it set (`Model
+3279-4-E` in its header) — the same mechanism that excludes `sruvm.trc` and `rpqnames.trc` below.
+Before the fix the run ended in `Socket EOF`, which emits no mismatch line at all, so the flag was
+unnecessary then and is load-bearing now.
 
 ### THE EXCLUDED TRACES, EACH WITH ITS MEASURED REASON
 
