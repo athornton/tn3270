@@ -41,11 +41,17 @@ export interface GuiArgs {
   bindImage?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   bindLimit?: boolean;
+  /**
+   * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means we refuse
+   * telnet option 39 entirely -- see `SessionOptions.devname`.
+   */
+  devname?: string;
 }
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+  + `[-bind-image on|off] [-bind-limit on|off] [-devname NAME] `
+  + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
   const args: GuiArgs = {};
@@ -113,6 +119,11 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         i++;
         break;
       }
+      case '-devname':
+        if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
+        args.devname = value;
+        i++;
+        break;
       default:
         if (flag.startsWith('-')) {
           throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);

@@ -6,7 +6,8 @@ import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Oia, KeyboardState } from './oia.js';
 import { Trace, parseTrace } from './trace.js';
-import { TelnetLayer } from './telnet.js';
+import { TelnetLayer, type TelnetLayerOptions } from './telnet.js';
+import { DeviceName } from './devname.js';
 import {
   initialState, negotiate, encodeHeader, decodeHeader, carriesDatastream,
   TN3270E_HEADER_BYTES, type Tn3270eState, type Tn3270eHeader,
@@ -67,6 +68,23 @@ export interface SessionOptions {
    * having AGREED the function.
    */
   bindImage?: boolean;
+  /**
+   * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means we refuse
+   * telnet option 39 entirely.
+   *
+   * Trailing `=` characters become a counter: `foo===` yields foo001, foo002, ... See
+   * devname.ts for why a host wants a fresh name per request.
+   */
+  devname?: string;
+  /**
+   * Value for NEW-ENVIRON's USER var. Defaults to $USER, then $USERNAME, then UNKNOWN,
+   * matching x3270 (telnet_new_environ.c:221-228).
+   *
+   * THIS PUTS THE LOCAL ACCOUNT NAME ON THE WIRE to any host that asks for it. x3270
+   * does the same unconditionally. Documented in the README rather than left for someone
+   * to discover in a trace.
+   */
+  user?: string;
 }
 
 /**
@@ -281,6 +299,83 @@ export class Session {
     return this.error;
   }
 
+  /**
+   * Build the `environ` option for a fresh `TelnetLayer`, or `undefined` to refuse
+   * option 39 -- ONE place, called from both `connect()` and `replay()`, so the two
+   * can never disagree about what a host learns. `forgetTn3270e()` is the precedent
+   * for consolidating related state into one method rather than trusting two call
+   * sites to stay in step; this is the same discipline applied to a different piece
+   * of per-connection state.
+   *
+   * `undefined` UNLESS `devname` OR `user` WAS CONFIGURED, matching `TelnetLayerOptions.environ`'s
+   * own contract: agreeing to the option with nothing to tell a host is not a real
+   * acceptance. Note that `user` ALONE already crosses that line, because `user`
+   * defaults from `$USER`/`$USERNAME`/`UNKNOWN` and is therefore ALMOST ALWAYS resolvable
+   * even when nobody passed `-devname` -- see the field comments on `devname`/`user` and
+   * the Task 7 report for why this is the deliberately-chosen "blast radius".
+   *
+   * A FRESH `DeviceName` PER CALL, not one held for the session's lifetime: verified
+   * against x3270's own C source, `net_connect()` calls `environ_init()` on EVERY
+   * connect (`Common/telnet.c:688`, called from `host_connect()` at :645), and
+   * `host_reconnect()` re-enters `host_connect()` (`Common/host.c:786`) rather than
+   * reusing state -- so x3270 itself resets its devname counter on every connect
+   * INCLUDING every reconnect. A counter that survived across `reconnect()` here would
+   * offer a host `foo004` on a fresh connection where x3270 would offer `foo001`,
+   * which is a real, observable divergence on the wire, not a cosmetic one.
+   */
+  private buildEnviron(): TelnetLayerOptions['environ'] {
+    const { devname, user } = this.opts;
+    if (devname === undefined && user === undefined) return undefined;
+    const vars = new Map<string, string>();
+    // USER first, matching x3270's environ_init order (telnet_new_environ.c:220-245).
+    const resolvedUser = user ?? process.env['USER'] ?? process.env['USERNAME'] ?? 'UNKNOWN';
+    vars.set('USER', resolvedUser);
+
+    const dn = devname !== undefined ? new DeviceName(devname) : undefined;
+    return {
+      vars,
+      uservars: () => {
+        const m = new Map<string, string>();
+        // DEVNAME, then IBMELF, then IBMAPPLID -- x3270's own insertion order, which a
+        // whole-group SEND dump reproduces on the wire (see newenviron.ts's doc comment
+        // on Map iteration order).
+        if (dn !== undefined) m.set('DEVNAME', dn.next());
+        // IBMELF: x3270 sends this unconditionally with NO documented meaning anywhere
+        // in its source -- `telnet_new_environ.c:237-238`'s only comment is
+        // "/* Set IBMELF. */". Sent here to match x3270's wire behaviour for a host that
+        // keys off its presence, but ITS MEANING IS UNVERIFIED: do not invent one.
+        m.set('IBMELF', 'YES');
+        // IBMAPPLID: x3270 reads this from its OWN environment (`getenv("IBMAPPLID")`,
+        // telnet_new_environ.c:241-244) and falls back to the literal string "None" when
+        // unset. We have no equivalent environment variable to read -- nothing in this
+        // codebase sets one -- so the fallback is all we ever send.
+        m.set('IBMAPPLID', 'None');
+        // CODEPAGE: x3270 derives this from `cgcsgid & 0xffff`, formatted `%03d` when
+        // under 100 else `%d` (telnet_new_environ.c:255-260). We have no cgcsgid field
+        // anywhere in this codebase (`codepage.ts`'s `CodePage` carries only a `name`
+        // like 'cp037'), so the value is derived from that name instead: stripping the
+        // 'cp' prefix from our default and only code page, 'cp037', yields exactly the
+        // "037" x3270 computes for ITS default codepage (`Common/codepage.c:250`,
+        // `set_codepage_number` falling back to "037"). Not hardcoded as a bare string:
+        // if `codePage` ever changes, this changes with it rather than silently lying
+        // about which page is live.
+        //
+        // CHARSET is deliberately NOT sent: x3270 derives it from `(cgcsgid >> 16) &
+        // 0xffff`, the GCSGID half of the SAME field we do not model, and there is no
+        // honest value to compute here without inventing one.
+        // KBDTYPE is deliberately NOT sent: x3270 only sends it when `kybdtype` is
+        // configured, which nothing in this codebase sets.
+        // Confirmed WORTH sending despite the original design spec's "no trace asks for
+        // this" belief: four traces (dbcs-wrap.trc among them) send an empty-body SEND,
+        // which parseEnvironSend expands to "every variable", and x3270 answers with all
+        // six -- so a real host asking for everything gets this one from x3270 today.
+        const codePageName = this.opts.codePage?.name ?? cp037.name;
+        m.set('CODEPAGE', codePageName.replace(/^cp/i, ''));
+        return m;
+      },
+    };
+  }
+
   async connect(host: string, port: number, per: ConnectOptions = {}): Promise<void> {
     // Tear down any live connection first. Without this the old Connection is
     // dropped without close(), and its onClose/onError closures still capture
@@ -315,6 +410,11 @@ export class Session {
     this.oia.waitingForHost = true;
     this.oia.inhibit(KeyboardState.AwaitingFirstWrite);
 
+    // Built ONCE, not inline, so the conditional spread below and the value it spreads
+    // cannot evaluate `buildEnviron()` twice and hand the TelnetLayer a DIFFERENT
+    // `DeviceName` (and thus a different starting counter) than the one the presence
+    // check just examined.
+    const environ = this.buildEnviron();
     this.telnet = new TelnetLayer({
       write: (b) => conn.write(b),
       onRecord: (r) => this.handleRecord(r),
@@ -327,6 +427,11 @@ export class Session {
       tn3270eEnabled: this.per.tn3270e ?? this.opts.tn3270e ?? true,
       onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, this.telnet); },
       onTn3270eDisabled: () => { this.tn3270eDisabled(); },
+      // `environ` is `undefined` unless `devname` or `user` was configured -- see
+      // `buildEnviron()`'s own comment. Spread conditionally for the same
+      // exactOptionalPropertyTypes reason as `terminalType` above: an explicit
+      // `environ: undefined` is a type error here.
+      ...(environ !== undefined ? { environ } : {}),
     });
 
     // Each callback checks identity against the `conn` it closes over, not just
@@ -1198,9 +1303,23 @@ export class Session {
       throw new Error('replay() requires a disconnected session; disconnect first');
     }
     const events = parseTrace(traceText);
+    // Same helper `connect()` uses, and for the same reason: a replayed trace that
+    // refused option 39 a live connection would have accepted (or vice versa) would
+    // silently exercise different negotiation code than a live session ever does --
+    // exactly the hole Task 8's playback oracle depends on being closed here.
+    const environ = this.buildEnviron();
     const telnet: TelnetLayer = new TelnetLayer({
       write: () => { /* discard: replay is one-directional */ },
       onRecord: (r) => this.handleRecord(r),
+      // Wired so a replayed negotiation is OBSERVABLE the same way a live one is: without
+      // this, `this.trace` never learns what replay()'s own TelnetLayer decided to send in
+      // reply to a DO/SEND, and the only two consumers that could ever prove `environ` was
+      // (or was not) wired into replay() -- a human reading a trace, and this file's own
+      // "replay() answers option 39 the same way connect() would" test -- would both be
+      // looking at an always-empty trace regardless of what replay() actually did. `write`
+      // stays a discard sink -- this does not put anything back on a socket, since replay()
+      // opens none -- but the trace is exactly the introspection connect() already gets.
+      trace: this.trace,
       tn3270eEnabled: this.opts.tn3270e ?? true,
       // Wired even though writes are discarded: replaying a TN3270E trace still has
       // to advance the state machine, or handleRecord never learns to strip the
@@ -1211,6 +1330,7 @@ export class Session {
       // recorded trace can contain the host's `IAC DONT TN3270E`, and a replay that kept
       // `e` past it would strip a header from every later record that has none.
       onTn3270eDisabled: () => { this.tn3270eDisabled(); },
+      ...(environ !== undefined ? { environ } : {}),
     });
     for (const ev of events) {
       if (ev.dir === 'recv') telnet.receive(ev.bytes);

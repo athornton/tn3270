@@ -98,6 +98,20 @@ describe('-bind-image', () => {
   });
 });
 
+describe('-devname', () => {
+  it('sets the device name template', () => {
+    expect(parseGuiArgs(['-devname', 'foo===', 'vm']).devname).toBe('foo===');
+  });
+
+  it('has no device name by default', () => {
+    expect(parseGuiArgs(['vm']).devname).toBeUndefined();
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseGuiArgs(['-devname'])).toThrow(UsageError);
+  });
+});
+
 describe('-bind-limit', () => {
   it('off lets an out-of-range BIND geometry through', () => {
     expect(parseGuiArgs(['-bind-limit', 'off', 'vm']).bindLimit).toBe(false);
