@@ -74,6 +74,10 @@ export interface WebArgs {
   readonly hostTls: TlsFlags;
   readonly model?: string;
   readonly scheme?: string;
+  /** Request BIND-IMAGE. Absent means the default, which is on. */
+  readonly bindImage?: boolean;
+  /** Range-check a BIND's geometry. Absent means the default, which is on. */
+  readonly bindLimit?: boolean;
 }
 
 /** One flag that takes a value, or throw naming the flag rather than the index. */
@@ -121,6 +125,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let replay: string | undefined;
   let model: string | undefined;
   let scheme: string | undefined;
+  let bindImage: boolean | undefined;
+  let bindLimit: boolean | undefined;
 
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
@@ -151,6 +157,22 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
       case '--log-actions': logActions = true; continue;
       case '-model': model = value(args, i, a); i += 1; continue;
       case '-scheme': scheme = value(args, i, a); i += 1; continue;
+      case '-bind-image': {
+        const v = value(args, i, a); i += 1;
+        if (v !== 'on' && v !== 'off') {
+          throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(v)}`);
+        }
+        bindImage = v === 'on';
+        continue;
+      }
+      case '-bind-limit': {
+        const v = value(args, i, a); i += 1;
+        if (v !== 'on' && v !== 'off') {
+          throw new UsageError(`-bind-limit takes on or off, not ${JSON.stringify(v)}`);
+        }
+        bindLimit = v === 'on';
+        continue;
+      }
       default:
         if (a.startsWith('-')) throw new UsageError(`unknown flag ${a}`);
         rest.push(a);
@@ -223,5 +245,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     hostTls,
     ...(model !== undefined ? { model } : {}),
     ...(scheme !== undefined ? { scheme } : {}),
+    ...(bindImage === undefined ? {} : { bindImage }),
+    ...(bindLimit === undefined ? {} : { bindLimit }),
   };
 }

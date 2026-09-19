@@ -217,14 +217,16 @@ describe('TN3270E header codec', () => {
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
 describe('TN3270E negotiation — DEVICE-TYPE', () => {
-  it('requests exactly RESPONSES, SYSREQ and CONTENTION-RESOLUTION', () => {
-    // BIND-IMAGE is deliberately absent. Granted BIND-IMAGE and sent no BIND, real
-    // s3270 never enters 3270 mode -- measured three ways, docs/live-testing.md
-    // *TN3270E harness validation*. Not asking is what makes that unreachable.
+  it('requests BIND-IMAGE, RESPONSES, SYSREQ and CONTENTION-RESOLUTION', () => {
+    // BIND-IMAGE IS PRESENT, and its presence is the whole of this branch. It was
+    // omitted while the grant-then-no-BIND hang was thought to be a live risk; 29 of
+    // 29 hosts in x3270's traces that grant it send a BIND immediately, and the gate
+    // now has a timeout, so the omission cost us BIND, UNBIND and 46 traces' worth of
+    // verification for nothing.
     expect([...REQUESTED_FUNCTIONS]).toEqual([
-      Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
+      Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES,
+      Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
     ]);
-    expect([...REQUESTED_FUNCTIONS]).not.toContain(Tn3270eFunc.BIND_IMAGE);
   });
 
   it('omits both printer functions, which belong to the printer stage', () => {
@@ -404,11 +406,12 @@ describe('TN3270E negotiation — FUNCTIONS', () => {
 
   it('backs off when FUNCTIONS IS ADDS a function we never asked for', () => {
     // x3270: "Host illegally added function(s)" (telnet.c:2327), which abandons
-    // TN3270E outright rather than trying to reconcile. BIND-IMAGE is the case that
-    // matters: a server forcing it on us is exactly the one that could then hang the
-    // session by never sending a BIND.
+    // TN3270E outright rather than trying to reconcile. BIND-IMAGE no longer
+    // exercises this path -- it moved into REQUESTED_FUNCTIONS this task -- so the
+    // illegal addition here is SCS-CTL-CODES, a printer function we still do not ask
+    // for and have no reason to accept unasked.
     const r = negotiate(atFunctions(), Uint8Array.of(
-      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, Tn3270eFunc.BIND_IMAGE,
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.RESPONSES, Tn3270eFunc.SCS_CTL_CODES,
     ));
     expect(r.next.phase).toBe('backedOff');
     expect(r.reply).toBeUndefined();
@@ -602,12 +605,14 @@ describe('TN3270E negotiation — REJECT, LU fallback and backoff', () => {
     // The two backoff routes -- an illegal added function and a device-type reject --
     // must land in the same terminal phase, because the session's handling of it is
     // one code path (send WONT, forget the option, stay reachable as classic tn3270).
+    // BIND-IMAGE moved into REQUESTED_FUNCTIONS this task, so SCS-CTL-CODES (still
+    // unrequested) is what stands in for "added" here now.
     let st = atDeviceType([]);
     st = negotiate(st, Uint8Array.from([
       Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'),
     ])).next;
     const r = negotiate(st, Uint8Array.of(
-      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE,
+      Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.SCS_CTL_CODES,
     ));
     expect(r.next.phase).toBe('backedOff');
   });
@@ -635,17 +640,22 @@ describe('conformance with the recorded s3270 negotiation', () => {
     expect([...r.reply!]).toEqual(s3270Bytes);
   });
 
-  it('our FUNCTIONS REQUEST differs from s3270 s ONLY by BIND-IMAGE', () => {
-    // s3270 sent 03 07 00 02 04 05; we send 03 07 02 04 05 -- the same list with
-    // BIND-IMAGE (0x00) removed. Expressed as a SUBTRACTION from s3270's list rather
-    // than as our own three bytes, because that is what would catch an accidental
-    // divergence in the other three. Not asking for BIND-IMAGE is deliberate: granted
-    // it with no BIND following, s3270 never enters 3270 mode at all (measurement C in
-    // docs/live-testing.md, x3270's telnet.c:2339), and not asking is what makes that
-    // state unreachable.
+  it('our FUNCTIONS REQUEST is now byte-identical to s3270 s', () => {
+    // s3270 sent 03 07 00 02 04 05 (captured; see docs/live-testing.md, *TN3270E
+    // harness validation*). We now send the same four function bytes in the same
+    // order.
+    //
+    // THIS TEST PREVIOUSLY ASSERTED A SUBTRACTION -- s3270's list MINUS BIND-IMAGE --
+    // expressed as `s3270Funcs.filter((f) => f !== Tn3270eFunc.BIND_IMAGE)`, which
+    // yields a 3-element array. Adding BIND-IMAGE to REQUESTED_FUNCTIONS did NOT make
+    // that pass vacuously: it failed LOUDLY, comparing our new 4-element list against
+    // the filtered 3-element one and reporting the extra `0` -- because the filter
+    // still ran and still removed the element, leaving a length mismatch for `toEqual`
+    // to catch. A flipped default's blast radius includes tests that still run and
+    // still compare something, but no longer compare the RIGHT thing; this one is
+    // rewritten as a plain equality so what it asserts matches what changed.
     const s3270Funcs = [0x00, 0x02, 0x04, 0x05];
-    expect([...REQUESTED_FUNCTIONS]).toEqual(
-      s3270Funcs.filter((f) => f !== Tn3270eFunc.BIND_IMAGE));
+    expect([...REQUESTED_FUNCTIONS]).toEqual(s3270Funcs);
   });
 
   it('asks for CONTENTION-RESOLUTION even though RFC 2355 does not list it', () => {

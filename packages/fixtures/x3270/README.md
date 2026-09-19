@@ -1,6 +1,6 @@
 # x3270 reference captures
 
-**Status: two files, one of each kind.**
+**Status: three files, one of them a different kind from the other two.**
 
 - `vm370-conformance-model2.trace` — a real s3270 capture against VM/370.
   `conformance.test.ts` picks up `*.trace` files here automatically and runs
@@ -13,16 +13,46 @@
   not as a description of a gap. The `.txt` extension is deliberate: it keeps this
   file out of the `*.trace` glob, because it is an excerpt of two records rather than
   a whole session and would be meaningless as a replay fixture.
+- `sscp-lu-data.trc` — **not** a `conformance.test.ts` fixture either, and not
+  captured against our own Hercules host: it is x3270's OWN shipped test trace
+  (`s3270/Test/sscp-lu-data.trc` in the suite3270-4.5 source tree), copied here
+  verbatim so `packages/cli/scripts/drive-playback.py` can replay it without
+  requiring a hand-built suite3270 checkout for the trace itself (the `playback`
+  binary that plays it back still has to come from such a checkout — see that
+  script's `FIXTURES` comment). Recorded by x3270 v4.3pre1
+  (`Command: x3270 -trace -geometry +64+19`) against x3270's own public local test
+  target, `Common/Test/target/target.py`, listening on `localhost:8021` — confirmed
+  by the "x3270 test target" banner text inside the trace itself. This is x3270's
+  open-source test infrastructure, not a private or sensitive live host, and the
+  file carries no typed credentials (grepped for `password`/`passwd`; the session
+  never logs on to anything, it only reaches the test target's own service menu).
+  Kept because it is the one trace among drive-playback.py's traces whose host
+  grants BIND-IMAGE and sends a real BIND, giving BIND/UNBIND parsing a real-host
+  witness that no other available trace provides (both Hercules test hosts refuse
+  TN3270E option 40 outright, and public z/VM 4.4 withdraws it before negotiation
+  completes). `devname_success.trc` was tried first and rejected as non-viable
+  (NEW-ENVIRON, which we do not implement) — see drive-playback.py's `EXCLUDED`
+  dict and the comment on this trace's `Case` for the measured reason.
 
 ## What belongs here
 
-Each file is a trace of a real x3270/s3270 session, driving the **same
+Each `*.trace` file is a trace of a real x3270/s3270 session, driving the **same
 Hercules host** that our own fixtures in `packages/fixtures/traces/` were
 recorded against, produced with the **same scripted command list** (a
 `packages/cli/scripts/*.txt`-style file, or the s3270 equivalent) that
 produced our fixture. The comparison in `conformance.test.ts` is only
 meaningful if both clients did the same thing — a hand-driven x3270 session
 typed differently from our own recording proves nothing.
+
+`sscp-lu-data.trc` above is exempt from this rule the same way
+`tso-query-reply.txt` is: it is not compared against one of our own recordings by
+`conformance.test.ts`, it is replayed at our live client by
+`drive-playback.py`/`playback -b`, so "same host, same script as our fixture"
+does not apply — there is no "our fixture" on the other side of this one. Its
+`.trc` extension (matching the extension x3270's own suite uses for these files)
+keeps it out of the `*.trace` glob for the same reason `tso-query-reply.txt` uses
+`.txt`, just via a different extension because this file is itself a foreign
+trace format, not an excerpt of one of ours.
 
 Every `.trace` file added here must ship together with:
 

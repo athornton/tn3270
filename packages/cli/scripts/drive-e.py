@@ -53,7 +53,7 @@ class Case:
     """One configuration: how the server is set up, and what our client should do."""
 
     def __init__(self, name, server_args, client_args, script, expect,
-                 wire=(), absent=()):
+                 wire=(), absent=(), client_wire=()):
         self.name = name
         self.server_args = server_args
         self.client_args = client_args
@@ -65,6 +65,14 @@ class Case:
         #: Substrings that must NOT appear. An assertion about what we did not send is
         #: the only way to pin a deliberate omission such as BIND-IMAGE.
         self.absent = absent
+        #: Substrings that MUST appear in OUR CLIENT's own stdout, as distinct from
+        #: `wire`, which checks the SERVER's log. Needed for the no-BIND timeout: the
+        #: trace line that proves it fired ("no BIND within 5000ms; executing the
+        #: retained record at our own geometry", session.ts) is written into our
+        #: client's own Trace buffer and never crosses the wire at all, so the server
+        #: cannot see it and `wire` could never assert on it. The script must enable
+        #: Trace(on) and read it back with TraceText for this to have anything to see.
+        self.client_wire = client_wire
 
 
 #: `-model 3278-2-E` throughout: the terminal type is what carries the `-E` extended
@@ -93,11 +101,22 @@ CASES = [
             # The inbound record carries a header and the AID behind it, not the AID
             # first -- the whole point of the outbound header work.
             'first byte (AID) 0x7d',
+            # THE DEFAULT FLIP THIS TASK'S PLAN WARNED ABOUT: this case's own `absent`
+            # used to pin BIND-IMAGE's byte (0x00) as something we never sent -- true
+            # before Task 9-11, false now that REQUESTED_FUNCTIONS (tn3270e.ts) starts
+            # with BIND_IMAGE. Our FUNCTIONS REQUEST is now byte-for-byte what s3270
+            # itself sends (the comment this replaced said so), so that is now a
+            # POSITIVE assertion instead of an absence.
+            '[030700020405]',
         ],
-        # BIND-IMAGE is 0x00 and would appear as the first function byte. s3270 sends
-        # 030700020405; we deliberately send 0307020405. Pinned as an ABSENCE, because
-        # asserting our own bytes would not catch us starting to ask for it.
-        absent=['[030700020405]'],
+        # The lost subject, replaced rather than deleted (see Task 7's precedent for
+        # exactly this move, cited in this task's plan): with BIND-IMAGE now requested
+        # by default, "a function we never ask for" has to be a DIFFERENT function.
+        # data-stream-ctl (0x01) is in FUNC (e-server.py) and in x3270's own function
+        # table but not in REQUESTED_FUNCTIONS, so asserting its absence from the
+        # server's parsed function list is the same test this case always ran, aimed
+        # at a function that is still actually omitted.
+        absent=["'data-stream-ctl'"],
     ),
     Case(
         'basic TN3270E, no functions granted',
@@ -152,6 +171,105 @@ CASES = [
         # in harness config F: 02 00 00 00 00 00.
         wire=['NEGOTIATION COMPLETE', 'DATA-TYPE=RESPONSE'],
     ),
+    Case(
+        'bind-image granted, BIND follows',
+        # --bind-size is e-server.py's NEW flag (Task 12): a 28-byte BIND with size
+        # code 0x7f, default 24x80, alternate 32x80 -- long enough to reach byte 24
+        # (BIND_OFF.SSIZE, bind.ts), which the existing --send-bind's 5-byte BIND
+        # cannot. -model 3278-2-E below makes 32x80 exceed the model's own alternate
+        # (24x80), so acceptBindDims (bind.ts, bindLimit default on) refuses the BIND's
+        # geometry and traces why -- itself worth asserting on, since a silent
+        # acceptance here would mean the range check never ran.
+        ['--grant', 'bind-image,responses,sysreq,contention-resolution', '--bind-size'],
+        MODEL,
+        # Trace(on) BEFORE Connect, so the whole negotiation and the BIND are
+        # captured; TraceText reads it back over the s3270 protocol (see Case's
+        # client_wire comment -- the BIND is our own client's data, not the server's).
+        'Trace(on)\nConnect(127.0.0.1:{port})\nWait(3270Mode,8)\nWait(InputField,4)\n'
+        'TraceText\nQuit\n',
+        expect=0,
+        wire=[
+            'NEGOTIATION COMPLETE',
+            # The server's own log of the bytes it sent: TN3270E BIND-IMAGE, not
+            # 3270-DATA -- confirms --bind-size actually queued a BIND-IMAGE record
+            # ahead of the Erase/Write, not merely that negotiation finished.
+            'TN3270E BIND-IMAGE',
+        ],
+        client_wire=[
+            # The BIND arriving over our own wire: RU 0x31 (BIND_RU) followed by the
+            # MaxSec-RU/MaxPri-RU bytes 0x87 0xf8 this task's server sends -- proof the
+            # BIND reached parseBind, not just that SOME record arrived.
+            '31 00 00 00 00 00 00 00 00 00 87',
+            # 3278-2-E's alternate is 24x80 (MODEL_2), and the BIND asked for 32x80 --
+            # over the model, so acceptBindDims refuses it (bind.ts's four-check range
+            # test) and this exact phrase is what it traces.
+            'BIND alternate 32x80 exceeds model 24x80; keeping our geometry',
+        ],
+    ),
+    Case(
+        # DELIBERATELY TAKES ABOUT FIVE SECONDS. Do not "optimise" this case by
+        # shortening NO_BIND_TIMEOUT_MS's wait or by swapping in a BIND: this is the
+        # ONLY case in this file, and the only end-to-end exercise anywhere outside
+        # bind.test.ts/session.test.ts, of the 5-second no-BIND deadline actually
+        # firing against a real socket rather than a fake clock. If this case starts
+        # finishing fast, that is a regression in the gate, not a speedup.
+        'bind-image granted, NO BIND -- the timeout recovers',
+        # No --send-bind, no --bind-size: bind-image is granted and the server sends
+        # only its ordinary Erase/Write. Because the function is granted, the gate
+        # (session.ts's `bindImageGranted() && !this.bound`) withholds that record
+        # rather than executing it, matching x3270's own gate at telnet.c:2681 -- but
+        # unlike x3270 (which hangs forever there) our client retains the record and
+        # runs it after NO_BIND_TIMEOUT_MS (bind.ts), which is what this case waits
+        # out.
+        ['--grant', 'bind-image,responses,sysreq,contention-resolution'],
+        MODEL,
+        # Wait(InputField,10): the per-case client-side wait MUST exceed 5s by a
+        # comfortable margin, or this looks like a client bug rather than a timing
+        # one. 10s gives the 5s deadline room to fire even under CI/CPU jitter.
+        'Trace(on)\nConnect(127.0.0.1:{port})\nWait(3270Mode,8)\nWait(InputField,10)\n'
+        'TraceText\nQuit\n',
+        expect=0,
+        wire=['NEGOTIATION COMPLETE'],
+        # The server's log shows only a 3270-DATA record -- no BIND-IMAGE -- which is
+        # the point: this pins that the ordinary write was NOT accompanied by a BIND,
+        # so anything that unblocked the screen came from OUR side, not the host's.
+        absent=['TN3270E BIND-IMAGE'],
+        client_wire=[
+            # "NOTHING VISIBLE HAPPENED" CANNOT DISTINGUISH THE TIMEOUT FIRING FROM
+            # THE GATE NEVER HAVING ENGAGED AT ALL -- the exact trap the plan calls
+            # out by name (Sys Req). The screen arriving proves data was applied
+            # eventually; it does NOT prove the 5s deadline was what released it
+            # rather than, say, the gate silently failing to engage. This exact trace
+            # line (session.ts's armNoBindTimer) is the one place that distinguishes
+            # them: it can only be written by the timeout callback actually running.
+            'no BIND within 5000ms; executing the retained record at our own geometry',
+            # And the gate DID hold the record first -- ruling out the OTHER false
+            # positive, a BIND gate that never armed and let the record through
+            # immediately by accident (which would print neither line, but Wait
+            # might still return via some unrelated path).
+            '3270 data before BIND, retained',
+        ],
+    ),
+    Case(
+        '-bind-image off refuses the function',
+        ['--grant', 'responses,sysreq'],
+        MODEL + ['-bind-image', 'off'],
+        'Connect(127.0.0.1:{port})\nWait(3270Mode,8)\nQuit\n',
+        expect=0,
+        wire=[
+            'NEGOTIATION COMPLETE',
+            # requestedFunctions(false) (tn3270e.ts) filters BIND_IMAGE out of
+            # REQUESTED_FUNCTIONS, so the FUNCTIONS REQUEST our client sends is missing
+            # its first byte relative to every other granted case: 03 07 02 04 05, not
+            # 03 07 00 02 04 05.
+            '[0307020405]',
+        ],
+        # BIND-IMAGE is function byte 0x00, and would be the FIRST byte of the
+        # FUNCTIONS REQUEST body did we ask for it. Pinned as an absence for the same
+        # reason 'full grant' pins one: asserting only our own bytes would not catch
+        # us starting to ask for it again if -bind-image off's filter ever broke.
+        absent=['[030700020405]'],
+    ),
 ]
 
 
@@ -198,6 +316,9 @@ def run_case(case, port, node, verbose):
     for unwanted in case.absent:
         if unwanted in log:
             problems.append(f'present but should NOT be: {unwanted!r}')
+    for want in case.client_wire:
+        if want not in client.stdout:
+            problems.append(f'missing from our client\'s own stdout: {want!r}')
 
     if verbose:
         sys.stdout.write(log)

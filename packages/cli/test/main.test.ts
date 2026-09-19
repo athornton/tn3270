@@ -59,3 +59,39 @@ describe('-tn3270e', () => {
     expect(() => parseArgs(['-tn3270e'])).toThrow(/needs a value/i);
   });
 });
+
+describe('-bind-image', () => {
+  it('off clears the option', () => {
+    expect(parseArgs(['-bind-image', 'off']).bindImage).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseArgs([]).bindImage).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseArgs(['-bind-image', 'yes'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseArgs(['-bind-image'])).toThrow(UsageError);
+  });
+});
+
+describe('-bind-limit', () => {
+  it('off lets an out-of-range BIND geometry through', () => {
+    expect(parseArgs(['-bind-limit', 'off']).bindLimit).toBe(false);
+  });
+
+  it('defaults to on', () => {
+    expect(parseArgs([]).bindLimit).not.toBe(false);
+  });
+
+  it('rejects a value that is not on or off', () => {
+    expect(() => parseArgs(['-bind-limit', 'yes'])).toThrow(UsageError);
+  });
+
+  it('without a value is a usage error', () => {
+    expect(() => parseArgs(['-bind-limit'])).toThrow(UsageError);
+  });
+});

@@ -39,6 +39,10 @@ export interface TuiArgs {
   tls?: TlsOptions;
   /** Offer TN3270E. Absent means the default, which is on. */
   tn3270e?: boolean;
+  /** Request BIND-IMAGE. Absent means the default, which is on. */
+  bindImage?: boolean;
+  /** Range-check a BIND's geometry. Absent means the default, which is on. */
+  bindLimit?: boolean;
 }
 
 /**
@@ -129,6 +133,24 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         i++;
         break;
       }
+      case '-bind-image': {
+        if (value === undefined) throw new UsageError('-bind-image needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindImage = value === 'on';
+        i++;
+        break;
+      }
+      case '-bind-limit': {
+        if (value === undefined) throw new UsageError('-bind-limit needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-limit takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindLimit = value === 'on';
+        i++;
+        break;
+      }
       default:
         if (flag.startsWith('-')) {
           throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
@@ -197,7 +219,8 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   if (args.host === undefined) {
     throw new UsageError(
       `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
-      + `[-tn3270e on|off] ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
+      + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] ${TLS_USAGE} `
+      + `[prefix:][LU,LU@]host[:port]`,
     );
   }
 
@@ -209,7 +232,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   };
   const session = defaultSession(
     resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
-    args.tn3270e,
+    args.tn3270e, args.bindImage, args.bindLimit,
   );
 
   // The LU list travels with the CONNECTION, not the session: it came from the host

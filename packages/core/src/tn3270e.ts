@@ -92,25 +92,64 @@ export function carriesDatastream(dataType: number): boolean {
 /**
  * The functions we ask for.
  *
- * BIND-IMAGE IS DELIBERATELY ABSENT, and the reason is a measured hazard rather than
- * a cost. Granted BIND-IMAGE and sent no BIND, real s3270 never enters 3270 mode:
- * an Erase/Write is delivered and ignored, and Wait(3270Mode) times out. Granting it
- * WITH a BIND works, and denying it works. Since only advertise-then-stay-silent
- * hangs, not asking is what stops a server from putting us in that state at all.
- * x3270 accepts the risk (telnet.c:949-953); we need not. Three configurations
- * tabulated in docs/live-testing.md, *TN3270E harness validation*.
+ * BIND-IMAGE IS REQUESTED, and the hazard that once justified omitting it has been
+ * measured away. Granted BIND-IMAGE and sent no BIND, real s3270 never enters 3270
+ * mode (telnet.c:2339, and the gate at telnet.c:2681 that drops 3270_DATA until
+ * `tn3270e_bound`). THAT REMAINS TRUE. What changed is knowing how often it happens:
+ * 29 of 29 hosts in x3270's own trace collection that grant BIND-IMAGE send a BIND
+ * immediately after FUNCTIONS, counted BY BYTES across all 71 traces -- grepping for
+ * decoded `< BIND` annotation lines gives a FALSE answer, because older traces carry
+ * no annotations. The advertise-then-stay-silent case exists only in our own
+ * e-server.py, which we configured to do it.
+ *
+ * So we adopt the gate deliberately AND refuse to inherit the hang: a pre-BIND
+ * 3270-DATA record is retained and executed if NO_BIND_TIMEOUT_MS expires (bind.ts).
+ * Asking for it is what gives BIND, UNBIND and the whole geometry channel a
+ * verification path at all -- 46 recorded traces stop dead at FUNCTIONS without it.
  *
  * The two printer functions, SCS-CTL-CODES and DATA-STREAM-CTL, are printer-session
  * functions by RFC 2355 §7.2.2 and belong to the printer stage.
  *
  * CONTENTION-RESOLUTION is not in RFC 2355 at all; x3270 requests it and so do we,
  * but nothing here depends on a host granting it.
+ *
+ * ORDER MATTERS TO THE TESTS, NOT TO THE PROTOCOL: this is s3270's own order
+ * (00 02 04 05), so a byte-for-byte comparison against a recorded s3270 FUNCTIONS
+ * REQUEST matches without sorting either side.
  */
 export const REQUESTED_FUNCTIONS: readonly number[] = [
+  Tn3270eFunc.BIND_IMAGE,
   Tn3270eFunc.RESPONSES,
   Tn3270eFunc.SYSREQ,
   Tn3270eFunc.CONTENTION_RESOLUTION,
 ];
+
+/**
+ * The functions THIS session asks for. Defaults to REQUESTED_FUNCTIONS; with
+ * `bindImage` false (`SessionOptions.bindImage`, Task 11's `-bind-image off`),
+ * BIND-IMAGE is left out of the request.
+ *
+ * A FUNCTION, DELIBERATELY NOT A MUTATION OF THE CONSTANT: `REQUESTED_FUNCTIONS`
+ * stays the fixed default-on list so the conformance tests above (a byte-for-byte
+ * comparison against a recorded s3270 FUNCTIONS REQUEST) keep comparing against
+ * exactly what they always have, and so every existing caller that reads the
+ * constant directly keeps working unchanged.
+ *
+ * THE RESULT OF THIS CALL IS WHAT `addsNothing` MUST BE JUDGED AGAINST, not
+ * `REQUESTED_FUNCTIONS` itself. If `addsNothing` used the constant instead, a host
+ * that grants BIND-IMAGE on a session that asked it OFF would look like it "added
+ * nothing" -- because BIND-IMAGE is still in the constant -- and would be silently
+ * adopted into `agreed`. `bindImageGranted()` (session.ts) reads `agreed` alone, so
+ * the BIND gate would then arm itself on a session whose operator specifically
+ * asked to skip the whole BIND/UNBIND channel: exactly the outcome `-bind-image off`
+ * exists to prevent, reached anyway because the refusal check consulted the wrong
+ * list.
+ */
+export function requestedFunctions(bindImage: boolean): readonly number[] {
+  return bindImage
+    ? REQUESTED_FUNCTIONS
+    : REQUESTED_FUNCTIONS.filter((f) => f !== Tn3270eFunc.BIND_IMAGE);
+}
 
 export type Tn3270ePhase =
   | 'idle'
@@ -130,6 +169,20 @@ export interface Tn3270eState {
   readonly deviceType?: string;
   /** The LU the SERVER reported, which need not be the one we asked for. */
   readonly lu?: string;
+  /**
+   * THE FUNCTIONS THIS SESSION ASKS FOR, fixed at `initialState()` time by
+   * `requestedFunctions(bindImage)`. Per-session in exactly the way `terminalType`
+   * and `lus` already are: `-bind-image off` (Task 11) must change what one
+   * session requests without touching any other session's negotiation, including
+   * one already in flight on a different connection.
+   *
+   * Carried on the STATE, not threaded as a parameter to `negotiate()`, because
+   * `negotiate()` is pure and already receives the state on every call -- adding a
+   * parameter to a pure function that is called from three places inside itself
+   * (the FUNCTIONS REQUEST reply, the counter-offer, and `addsNothing`) would mean
+   * getting it right at three call sites instead of one field read from `st`.
+   */
+  readonly requested: readonly number[];
 }
 
 export type Tn3270eEffect =
@@ -144,7 +197,7 @@ export interface NegotiateResult {
 }
 
 export function initialState(
-  o: { terminalType: string; lus: readonly string[] },
+  o: { terminalType: string; lus: readonly string[]; bindImage?: boolean },
 ): Tn3270eState {
   return {
     phase: 'idle',
@@ -152,6 +205,9 @@ export function initialState(
     terminalType: o.terminalType,
     lus: o.lus,
     luIndex: 0,
+    // Defaults to on, matching `SessionOptions.bindImage`'s own default -- see that
+    // field's comment in session.ts.
+    requested: requestedFunctions(o.bindImage ?? true),
   };
 }
 
@@ -179,9 +235,16 @@ function decodeFuncs(list: Uint8Array): number[] {
   return [...list].filter((f) => KNOWN_FUNCS.includes(f));
 }
 
-/** True when `offered` contains nothing outside REQUESTED_FUNCTIONS. */
-function addsNothing(offered: readonly number[]): boolean {
-  return offered.every((f) => REQUESTED_FUNCTIONS.includes(f));
+/**
+ * True when `offered` contains nothing outside THIS SESSION's requested list
+ * (`st.requested`), NOT the module constant `REQUESTED_FUNCTIONS`.
+ *
+ * See `Tn3270eState.requested`'s comment for what goes wrong if this read the
+ * constant instead: with `-bind-image off`, BIND-IMAGE would look like something
+ * we always ask for and a host granting it unasked would be silently accepted.
+ */
+function addsNothing(st: Tn3270eState, offered: readonly number[]): boolean {
+  return offered.every((f) => st.requested.includes(f));
 }
 
 /** Build DEVICE-TYPE REQUEST <ttype> [CONNECT <lu>] for the state's current LU. */
@@ -235,19 +298,24 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
         ...(lu === '' ? {} : { lu }),
       },
       reply: Uint8Array.from([
-        Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...REQUESTED_FUNCTIONS,
+        Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...st.requested,
       ]),
     };
   }
 
   if (body[0] === Tn3270eOp.FUNCTIONS && body[1] === Tn3270eOp.IS) {
     const offered = decodeFuncs(body.subarray(2));
-    if (!addsNothing(offered)) {
+    if (!addsNothing(st, offered)) {
       // x3270 calls this "Host illegally added function(s)" (telnet.c:2327) and
       // abandons TN3270E outright rather than trying to reconcile. So do we: a server
-      // that grants what we did not request is not one to keep bargaining with, and
-      // BIND-IMAGE forced on us is precisely the case that could then hang the
-      // session by never sending a BIND.
+      // that grants what we did not request is not one to keep bargaining with.
+      // BIND-IMAGE does not exercise this branch on a session that requested it (the
+      // default) -- what lands here then is a printer function or anything else
+      // outside the four we ask for. On a session built with `-bind-image off`
+      // (Task 11), BIND-IMAGE is EXCLUDED from `st.requested` and so DOES land here
+      // if the host grants it anyway: that is the whole protection `-bind-image off`
+      // relies on, since `addsNothing` above is judged against `st.requested`, not
+      // the fixed module constant.
       return {
         next: { ...st, phase: 'backedOff' },
         effect: { kind: 'backoff', why: 'host illegally added function(s)' },
@@ -266,7 +334,7 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
 
   if (body[0] === Tn3270eOp.FUNCTIONS && body[1] === Tn3270eOp.REQUEST) {
     const offered = decodeFuncs(body.subarray(2));
-    if (addsNothing(offered)) {
+    if (addsNothing(st, offered)) {
       // They want what we want, or less: adopt it, confirm with IS, and finish
       // (telnet.c:2293-2301).
       return {
@@ -278,7 +346,7 @@ export function negotiate(st: Tn3270eState, body: Uint8Array): NegotiateResult {
     // They want something we cannot do: counter with the common subset and STAY in
     // negotiation (telnet.c:2306-2311). No 'complete' effect here -- emitting one
     // would put the session in 3270 mode before the host has agreed to anything.
-    const common = offered.filter((f) => REQUESTED_FUNCTIONS.includes(f));
+    const common = offered.filter((f) => st.requested.includes(f));
     return {
       next: { ...st, phase: 'awaitingFunctions' },
       reply: Uint8Array.from([Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST, ...common]),

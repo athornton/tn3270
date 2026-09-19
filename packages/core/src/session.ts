@@ -9,7 +9,7 @@ import { Trace, parseTrace } from './trace.js';
 import { TelnetLayer } from './telnet.js';
 import {
   initialState, negotiate, encodeHeader, decodeHeader, carriesDatastream,
-  TN3270E_HEADER_BYTES, type Tn3270eState,
+  TN3270E_HEADER_BYTES, type Tn3270eState, type Tn3270eHeader,
 } from './tn3270e.js';
 import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
@@ -17,6 +17,7 @@ import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, type QueryRequest } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
+import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
 
 /**
  * A single TN3270 session: socket, telnet layer, screen, keyboard.
@@ -52,6 +53,20 @@ export interface SessionOptions {
   tn3270e?: boolean;
   /** LU names to request via CONNECT, tried in order as REJECTs come back. */
   lus?: readonly string[];
+  /**
+   * Range-check a BIND's geometry against the model before applying it. Defaults to
+   * true, matching x3270's `bind_limit` resource (Common/glue.c:458) and its polarity:
+   * the flag that turns it OFF, not on. `-bind-limit off` (Task 11) will drive this
+   * directly; this task defaults it and wires the check.
+   */
+  bindLimit?: boolean;
+  /**
+   * Request the BIND-IMAGE function. Defaults to true; `-bind-image off` clears it.
+   *
+   * Off means the gate never closes, because the gate is conditional on the host
+   * having AGREED the function.
+   */
+  bindImage?: boolean;
 }
 
 /**
@@ -103,6 +118,62 @@ export class Session {
   private e: Tn3270eState | undefined;
   /** Outbound SEQ-NUMBER. Only advances when RESPONSES was agreed (§8.1.4). */
   private eSeq = 0;
+  /**
+   * True once a BIND has been received on a session that granted BIND-IMAGE.
+   *
+   * Mirrors x3270's `tn3270e_bound` (Common/telnet.c:182), which the gate below reads
+   * at telnet.c:2681-2682 and BIND/UNBIND set and clear at :2742 and :2752. Meaningless
+   * -- and never consulted -- on a session that never granted the function: see
+   * `bindImageGranted()`.
+   *
+   * Cleared in `forgetTn3270e()`, alongside `pendingBindRecord`: see that method's
+   * comment for why a negotiation ending is the one place both belong, and for the
+   * enumeration of every path that reaches it.
+   */
+  private bound = false;
+  /**
+   * The most recent 3270-DATA record withheld by the BIND gate (`handleRecord`).
+   *
+   * ONLY THE MOST RECENT, DELIBERATELY NOT A QUEUE: a host that painted twice before
+   * binding has overwritten its own first screen, so keeping the first would show the
+   * operator a screen the host itself has abandoned, and an unbounded queue is a
+   * memory hole a remote party controls -- it decides how many records precede its
+   * own BIND. `wants` is the decoded header, kept alongside the header-stripped body
+   * because they are exactly `executeRecord`'s two parameters: the timeout path
+   * (Task 9) calls `executeRecord(pendingBindRecord.body, pendingBindRecord.wants)`,
+   * so a host that asked for ALWAYS-RESPONSE on the withheld record still gets one.
+   *
+   * Cleared in `forgetTn3270e()`; see `bound`'s comment.
+   */
+  private pendingBindRecord: { wants: Tn3270eHeader; body: Uint8Array } | undefined;
+  /**
+   * The no-BIND deadline: gives up waiting for a BIND after NO_BIND_TIMEOUT_MS
+   * (bind.ts) and executes `pendingBindRecord` anyway. Armed by `armNoBindTimer()`
+   * when the gate first withholds a record; see that method for why it is not
+   * re-armed per record and why it is not `.unref()`'d.
+   */
+  private noBindTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Whether a BIND's geometry is range-checked against the model before being applied.
+   * x3270's `bind_limit` (Common/glue.c:458, default true) -- see `SessionOptions.bindLimit`.
+   */
+  private readonly bindLimit: boolean;
+  /**
+   * THE MODEL'S ALTERNATE GEOMETRY, CAPTURED AT CONSTRUCTION -- NOT READ FROM
+   * `this.screen.alternateSize`.
+   *
+   * `screen.alternateSize` is mutable now that a BIND can rewrite it (`Screen.setSizes`),
+   * so by the time an UNBIND arrives it may hold whatever the MOST RECENT BIND asked for,
+   * not the model the session was built with. x3270 keeps the same distinction: `altROWS`/
+   * `altCOLS` are the LIVE, mutable values `process_bind` overwrites (telnet.c:2554-2555),
+   * while UNBIND's revert (telnet.c:2760-2761) assigns them back from `maxROWS`/`maxCOLS` --
+   * the model's fixed maximum, set once at `-model` parse time and never touched by BIND.
+   * This field is that same fixed point on our side. Deriving it from the screen instead
+   * would revert an UNBIND to the PREVIOUS BIND's geometry rather than the model's -- wrong,
+   * and it looks completely correct while doing so. See the mutation test in
+   * tn3270e-session.test.ts pinning exactly this.
+   */
+  private readonly modelAlternate: { readonly rows: number; readonly cols: number };
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
   private per: ConnectOptions = {};
   /**
@@ -145,6 +216,18 @@ export class Session {
       ...(opts.codePage ? { codePage: opts.codePage } : {}),
     });
     this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
+    this.bindLimit = opts.bindLimit ?? true;
+    // Captured from OPTIONS, not from `this.screen.alternateSize` -- see the field's own
+    // comment for why reading it back off the screen would be the trap.
+    this.modelAlternate = {
+      rows: opts.alternateRows ?? opts.rows ?? MODEL_2.rows,
+      cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
+    };
+  }
+
+  /** The model's alternate geometry -- see `modelAlternate`'s field comment. */
+  private modelSize(): { readonly rows: number; readonly cols: number } {
+    return this.modelAlternate;
   }
 
   on(event: SessionEvent, fn: () => void): void {
@@ -406,18 +489,72 @@ export class Session {
           `TN3270E record shorter than a header, ${record.length} bytes, dropped`);
         return;
       }
+      // BIND and UNBIND are dispatched BEFORE the carriesDatastream/gate checks below,
+      // because neither carries a 3270 datastream and the gate condition below tests
+      // `!this.bound` -- reaching it before `handleBind` has had a chance to flip that
+      // flag would make a session's OWN BIND look like more pre-BIND data.
+      //
+      // BOTH ARE GATED ON `bindImageGranted()`, NOT DISPATCHED UNCONDITIONALLY ON THE
+      // DATA TYPE. This departs from the plan's sketch, which dispatched on data type
+      // alone -- but x3270 does not: `case TN3270E_DT_BIND_IMAGE` and `case
+      // TN3270E_DT_UNBIND` each open with `if (!b8_bit_is_set(&e_funcs,
+      // TN3270E_FUNC_BIND_IMAGE)) return 0;` (Common/telnet.c:2709 and :2746) before
+      // doing anything else. A record carrying data type BIND-IMAGE on a session that
+      // never negotiated the FUNCTION is not a BIND we are owed; it falls through to
+      // the same "not implemented, dropped" trace as any other type we do not handle,
+      // exactly as it did before this task and exactly as x3270's silent `return 0`
+      // does. Confirmed against session.test.ts's own regression: `negotiateE()`
+      // grants RESPONSES and SYSREQ only, so its BIND-IMAGE-data-type test is (and
+      // must stay) a "not implemented" trace, not a bind.
+      if (this.bindImageGranted() && h.dataType === Tn3270eDataType.BIND_IMAGE) {
+        this.handleBind(record.subarray(TN3270E_HEADER_BYTES));
+        return;
+      }
+      if (this.bindImageGranted() && h.dataType === Tn3270eDataType.UNBIND) {
+        this.handleUnbind(record.subarray(TN3270E_HEADER_BYTES));
+        return;
+      }
       if (!carriesDatastream(h.dataType)) {
-        // RESPONSE, UNBIND, BIND-IMAGE, NVT-DATA, SSCP-LU-DATA, PRINT-EOJ. None
-        // carries a 3270 datastream, and feeding one to the executor would raise a
-        // spurious program check. Traced rather than silently ignored: the trace is
-        // how we would find out a real host sends these.
+        // RESPONSE, NVT-DATA, SSCP-LU-DATA, PRINT-EOJ. None of these carries a 3270
+        // datastream, and feeding one to the executor would raise a spurious program
+        // check. Traced rather than silently ignored: the trace is how we would find
+        // out a real host sends these.
         this.trace.note(
           `TN3270E data type 0x${h.dataType.toString(16)} not implemented, dropped`);
+        return;
+      }
+      if (this.bindImageGranted() && !this.bound) {
+        // THE GATE (x3270's telnet.c:2681-2682), with the hang removed. x3270 returns
+        // here and the record is gone; we keep the most recent one so the Task 9
+        // timeout can run it through this same `executeRecord`. Only the most recent:
+        // a host that painted twice before binding has overwritten its own first
+        // screen, and a queue would be a memory hole a remote party controls. See
+        // `pendingBindRecord`'s own comment.
+        this.pendingBindRecord = { wants: h, body: record.subarray(TN3270E_HEADER_BYTES) };
+        this.armNoBindTimer();
+        this.trace.note('3270 data before BIND, retained');
         return;
       }
       body = record.subarray(TN3270E_HEADER_BYTES);
       wants = h;
     }
+    this.executeRecord(body, wants);
+  }
+
+  /**
+   * Parse and apply one 3270 datastream, once `handleRecord` has decided it is safe
+   * to run: past the BIND gate, with any TN3270E header already stripped.
+   *
+   * PULLED OUT OF `handleRecord` SO THE RETAINED PATH AND THE LIVE PATH CANNOT DRIFT.
+   * `handleBind` (Task 9's timeout does the same) calls this directly on a record
+   * `pendingBindRecord` held back, with the exact `wants` that record arrived with --
+   * so a host that asked for ALWAYS-RESPONSE on the withheld record still gets one,
+   * and every side effect below (OIA, alarm, Query reply, program check) runs exactly
+   * as it would have if the BIND had arrived first. Two copies of this logic, one for
+   * "arrived before BIND" and one for "arrived after", is exactly the kind of drift
+   * this project has already paid for once with `e` (see `forgetTn3270e`).
+   */
+  private executeRecord(body: Uint8Array, wants: Tn3270eHeader | null): void {
     this.records++;
     if (this.trace.isEnabled()) {
       this.trace.note(describeRecord(body));
@@ -542,6 +679,7 @@ export class Session {
     this.e ??= initialState({
       terminalType: this.opts.terminalType ?? TERMINAL_TYPE,
       lus: this.per.lus ?? this.opts.lus ?? [],
+      bindImage: this.opts.bindImage ?? true,
     });
     const r = negotiate(this.e, body);
     this.e = r.next;
@@ -584,10 +722,42 @@ export class Session {
    * abandoned one's total. Nothing observes that today, because a session with no
    * negotiation writes no SEQ-NUMBER — which is the argument for putting it here rather
    * than at each caller, where "nothing observes it" would have to be re-derived.
+   *
+   * `bound`, `pendingBindRecord` and `noBindTimer` go with it for the SAME reason, not
+   * a new one: the BIND gate is meaningless without a live TN3270E negotiation to have
+   * granted the function, so every path that ends one must also end the gate, or a
+   * second negotiation on this connection (or the next connection entirely) could
+   * inherit `bound = true` from the first and skip the gate for data the new host has
+   * not yet earned -- or, worse, inherit a `pendingBindRecord` addressed to a screen
+   * geometry that no longer applies and execute it against the wrong buffer size. This
+   * project has shipped exactly that shape of bug twice already for `e` itself (see
+   * above and `tn3270eDisabled`), which is why the gate's state is retired in the same
+   * place rather than trusted to a fourth call site remembering to do it by hand.
    */
   private forgetTn3270e(): void {
     this.e = undefined;
     this.eSeq = 0;
+    this.bound = false;
+    this.pendingBindRecord = undefined;
+    this.clearNoBindTimer();
+  }
+
+  /**
+   * Cancel the no-BIND deadline, if one is running. A no-op otherwise -- every caller
+   * (here, `handleBind`, `handleUnbind`) reaches this on paths where a timer may or may
+   * not be pending, and forcing each of them to check first would just move the guard
+   * out of the one place that needs to get it right.
+   *
+   * PULLED OUT rather than left inline in each of the three call sites deliberately:
+   * this project has twice shipped a bug where one teardown path cleared a piece of
+   * state and another did not (see `forgetTn3270e`'s own history with `e`). One method
+   * is what makes that drift impossible here.
+   */
+  private clearNoBindTimer(): void {
+    if (this.noBindTimer !== undefined) {
+      clearTimeout(this.noBindTimer);
+      this.noBindTimer = undefined;
+    }
   }
 
   /**
@@ -613,6 +783,160 @@ export class Session {
   /** True once TN3270E negotiation completed, i.e. records carry a header. */
   private inTn3270e(): boolean {
     return this.e?.phase === 'negotiated';
+  }
+
+  /**
+   * True when the host agreed the BIND-IMAGE FUNCTION (0x00), NOT when a record of
+   * BIND-IMAGE DATA TYPE (0x03) has arrived — those are two different meanings of the
+   * same name, one negotiated once, the other carried on every BIND record. This
+   * method answers only the first question, which is the one the gate in
+   * `handleRecord` needs: whether a BIND is owed at all.
+   */
+  private bindImageGranted(): boolean {
+    return this.e?.agreed.includes(Tn3270eFunc.BIND_IMAGE) ?? false;
+  }
+
+  /**
+   * A BIND: the host naming an application and, often, dictating geometry.
+   *
+   * THE ORDER HERE MATTERS AND MATCHES x3270: parse, apply geometry, erase, THEN
+   * release the gate. Verified against `process_bind`/`process_eor`
+   * (Common/telnet.c:2449-2590, :2708-2744): `process_bind` runs to completion --
+   * including `ctlr_erase(false)` at :2559 -- and only once it returns does the
+   * `TN3270E_DT_BIND_IMAGE` case in `process_eor` set `tn3270e_bound = 1` (:2742).
+   * Releasing the gate FIRST would let the retained record drain through
+   * `executeRecord` at the OLD geometry, which is the bug the gate exists to
+   * prevent -- a record painted at 24x80 and then silently viewed through a 43x80
+   * buffer, or vice versa.
+   */
+  private handleBind(body: Uint8Array): void {
+    const bind = parseBind(body);
+    if (bind === null) {
+      this.trace.note('BIND-IMAGE record that is not a BIND, dropped');
+      return;
+    }
+    if (bind.dims !== undefined) {
+      const model = this.modelSize();
+      const alt = bind.dims.alternate === 'caller' ? model : bind.dims.alternate;
+      const dims = { ...bind.dims, alternate: alt };
+      const verdict = this.bindLimit
+        ? acceptBindDims(dims, model)
+        : { ok: true as const };
+      if (verdict.ok) {
+        this.screen.setSizes(
+          { rows: dims.defaultRows, cols: dims.defaultCols }, alt);
+        // `useDefaultSize()` ALONE IS NOT x3270's `ctlr_erase(false)`, and this is a real
+        // divergence caught by reading ctlr.c rather than trusting the plan's sketch.
+        // `ctlr_erase` calls `ctlr_clear(true)` -- the actual data-clearing memset --
+        // UNCONDITIONALLY, at ctlr.c:552, BEFORE the `if (alt == screen_alt && ROWS ==
+        // newROWS && COLS == newCOLS) return;` early-return at :565-567. That early
+        // return only skips the RESIZE bookkeeping and the `screen_disp`/`ctlr_blanks`
+        // repaint -- it does not un-clear a buffer already cleared three lines earlier.
+        // `Screen.resize()` (which `useDefaultSize()` calls) conflates the two: it
+        // returns false and skips its own allocate-and-blank whenever the new default
+        // equals the CURRENT geometry, which would leave a BIND that keeps the default
+        // size (changing only the alternate, the common case for a same-application
+        // reconnect) painted over the operator's last screen instead of erased. `clear()`
+        // is therefore called explicitly and unconditionally, matching `ctlr_clear`'s
+        // placement ahead of the size check rather than behind it.
+        this.screen.useDefaultSize();
+        this.screen.clear();
+      } else {
+        this.trace.note(`${verdict.why}; keeping our geometry`);
+      }
+    }
+    this.bound = true;
+    this.clearNoBindTimer();
+    const held = this.pendingBindRecord;
+    this.pendingBindRecord = undefined;
+    if (held !== undefined) {
+      this.executeRecord(held.body, held.wants);
+    } else {
+      // Only emitted when NOTHING was drained: `executeRecord` (line ~625) already
+      // emits 'screen' once it finishes painting the retained record, and that repaint
+      // reflects the geometry change made above -- a second emit here would fire twice
+      // for one logical frame. But a BIND that resized/erased with no pre-BIND record
+      // waiting has made a screen change nothing else will announce, so this path must
+      // emit or a resize-only BIND is invisible to both renderers.
+      this.emit('screen');
+    }
+  }
+
+  /**
+   * An UNBIND: teardown with the TCP connection still up.
+   *
+   * Reverts the BIND's sizing, erases, and closes the gate again to await another
+   * BIND. BIND_FORTHCOMING says one IS coming -- the host handing us between
+   * applications -- and treating that as a disconnection would drop a session the
+   * host meant to keep. x3270 does exactly this at Common/telnet.c:2752-2764:
+   * `tn3270e_bound = 0`, `defROWS`/`defCOLS` back to `MODEL_2_ROWS`/`MODEL_2_COLS`,
+   * `altROWS`/`altCOLS` back to `maxROWS`/`maxCOLS` (the MODEL's fixed maximum, not
+   * whatever a BIND last set it to), then `ctlr_erase(false)`.
+   *
+   * Reverts to `modelSize()` -- captured at construction -- and NOT to
+   * `this.screen.alternateSize`: see that field's own comment for why deriving it
+   * from the screen would revert to the wrong geometry after two BINDs in a row.
+   */
+  private handleUnbind(body: Uint8Array): void {
+    const info = parseUnbind(body);
+    this.trace.note(
+      `UNBIND reason ${info.reason ?? 'absent'}`
+      + `${info.forthcoming ? ' (BIND forthcoming)' : ''}`);
+    const model = this.modelSize();
+    this.screen.setSizes({ rows: MODEL_2.rows, cols: MODEL_2.cols }, model);
+    // Explicit, unconditional `clear()` for the same reason as `handleBind`: `ctlr_erase`
+    // clears before it checks whether the size changed (ctlr.c:552 precedes the
+    // early-return at :565-567), so an UNBIND reverting to a default size that happens to
+    // match the current one must still erase.
+    this.screen.useDefaultSize();
+    this.screen.clear();
+    this.bound = false;
+    this.pendingBindRecord = undefined;
+    this.clearNoBindTimer();
+    this.emit('screen');
+  }
+
+  /**
+   * Start the no-BIND deadline, unless one is already running.
+   *
+   * NOT restarted per record: the deadline is "how long since the host should have
+   * bound", and re-arming on every pre-BIND write would let a chatty host defer it
+   * forever -- which is the hang, arrived at by a different route.
+   *
+   * NOT `.unref()`'d -- checked against every other timer in this repo
+   * (`grep -rn 'setTimeout\|\.unref('`) and none of them call `.unref()` either: the
+   * TUI's ESC timer (`app.ts:534,544`) and the web gateway's grace timer
+   * (`web/src/sessions.ts:109`) both stay ref'd and instead rely on an explicit
+   * `clearTimeout` reaching every teardown path, exactly the discipline
+   * `forgetTn3270e` already applies here. That is precedent, not just a tie-breaker:
+   * `app.ts:303`'s comment on the ESC timer names the same failure mode this task's
+   * plan cites -- a ref'd timer holds the event loop open for its own duration after
+   * `restore()` -- and that codebase's answer was `clearTimeout` on every exit path,
+   * not `.unref()`.
+   *
+   * Ref'd is also the behaviourally correct choice on its own terms, not merely the
+   * consistent one: this timer's whole job is to recover a frame the operator cannot
+   * otherwise see once the host goes quiet. A CLI script whose only outstanding work
+   * is this timeout is precisely the case where staying alive to paint that frame is
+   * wanted, not a leak to suppress -- `.unref()` would let such a process exit right
+   * out from under its own recovery. Nothing here holds the loop open longer than
+   * `NO_BIND_TIMEOUT_MS`, and `forgetTn3270e()` clears it on every path that ends a
+   * negotiation (a clean `disconnect()`, our own backoff, or the host withdrawing
+   * option 40), so an interactive front end that tears down normally never waits out
+   * the 5s regardless.
+   */
+  private armNoBindTimer(): void {
+    if (this.noBindTimer !== undefined) return;
+    this.noBindTimer = setTimeout(() => {
+      this.noBindTimer = undefined;
+      const held = this.pendingBindRecord;
+      this.pendingBindRecord = undefined;
+      // TRACED BEFORE EXECUTING, so the trace shows the cause ahead of its effect
+      // even if executing throws.
+      this.trace.note(
+        `no BIND within ${NO_BIND_TIMEOUT_MS}ms; executing the retained record at our own geometry`);
+      if (held !== undefined) this.executeRecord(held.body, held.wants);
+    }, NO_BIND_TIMEOUT_MS);
   }
 
   /**

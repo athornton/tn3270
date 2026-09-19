@@ -632,3 +632,39 @@ describe('extended attribute storage', () => {
     expect(() => s.setExtended(s.size, { fg: 0xf2 })).toThrow(RangeError);
   });
 });
+
+describe('Screen.setSizes — BIND and UNBIND rewrite both sizes', () => {
+  it('replaces the default and alternate sizes', () => {
+    const s = new Screen({ alternateRows: 43, alternateCols: 80 });
+    s.setSizes({ rows: 24, cols: 80 }, { rows: 32, cols: 80 });
+    expect(s.defaultSize).toEqual({ rows: 24, cols: 80 });
+    expect(s.alternateSize).toEqual({ rows: 32, cols: 80 });
+  });
+
+  it('makes useAlternateSize switch to the NEW alternate', () => {
+    // The point of the mutator: EW and EWA must keep meaning what they mean after a
+    // BIND. A resize() call could not express this -- it switches the CURRENT geometry
+    // between two fixed sizes, while BIND changes what those two sizes ARE.
+    const s = new Screen({ alternateRows: 43, alternateCols: 80 });
+    s.setSizes({ rows: 24, cols: 80 }, { rows: 32, cols: 80 });
+    s.useAlternateSize();
+    expect([s.rows, s.cols]).toEqual([32, 80]);
+  });
+
+  it('rejects a non-positive or non-integer size, like the constructor does', () => {
+    const s = new Screen();
+    expect(() => s.setSizes({ rows: 0, cols: 80 }, { rows: 24, cols: 80 }))
+      .toThrow(RangeError);
+    expect(() => s.setSizes({ rows: 24.5, cols: 80 }, { rows: 24, cols: 80 }))
+      .toThrow(RangeError);
+  });
+
+  it('does NOT change the current geometry by itself', () => {
+    // setSizes changes what EW/EWA mean; it does not perform one. The caller erases
+    // explicitly, matching x3270's separate ctlr_erase(false) after process_bind.
+    const s = new Screen();
+    expect([s.rows, s.cols]).toEqual([24, 80]);
+    s.setSizes({ rows: 24, cols: 80 }, { rows: 43, cols: 80 });
+    expect([s.rows, s.cols]).toEqual([24, 80]);
+  });
+});

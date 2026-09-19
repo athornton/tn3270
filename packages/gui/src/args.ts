@@ -37,11 +37,15 @@ export interface GuiArgs {
   tn3270e?: boolean;
   /** `-scheme`. Absent means the readable default. */
   scheme?: Scheme;
+  /** Request BIND-IMAGE. Absent means the default, which is on. */
+  bindImage?: boolean;
+  /** Range-check a BIND's geometry. Absent means the default, which is on. */
+  bindLimit?: boolean;
 }
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+  + `[-bind-image on|off] [-bind-limit on|off] ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
   const args: GuiArgs = {};
@@ -91,6 +95,24 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         args.terminalType = value;
         i++;
         break;
+      case '-bind-image': {
+        if (value === undefined) throw new UsageError('-bind-image needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindImage = value === 'on';
+        i++;
+        break;
+      }
+      case '-bind-limit': {
+        if (value === undefined) throw new UsageError('-bind-limit needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-bind-limit takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.bindLimit = value === 'on';
+        i++;
+        break;
+      }
       default:
         if (flag.startsWith('-')) {
           throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);

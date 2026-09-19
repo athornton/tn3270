@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, AID,
   Tn3270eOp, Tn3270eFunc, Tn3270eDataType, Tn3270eResponseFlag, Tn3270eSense,
 } from '../src/constants.js';
+import { NO_BIND_TIMEOUT_MS, BIND_OFF, BIND_RU as BIND_RU_BYTE } from '../src/bind.js';
+import { MODEL_4 } from '../src/constants.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -71,8 +73,8 @@ describe('TN3270E session negotiation', () => {
       [T.IAC, T.SB, O.TN3270E, Tn3270eOp.DEVICE_TYPE, Tn3270eOp.REQUEST,
         ...ascii('IBM-3278-2-E'), T.IAC, T.SE],
       [T.IAC, T.SB, O.TN3270E, Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST,
-        Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
-        T.IAC, T.SE],
+        Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ,
+        Tn3270eFunc.CONTENTION_RESOLUTION, T.IAC, T.SE],
     ]);
   });
 
@@ -106,14 +108,60 @@ describe('TN3270E session negotiation', () => {
     expect(conn.writes).toEqual([]);
   });
 
+  it('backs off when a host grants BIND-IMAGE we did not ask for', async () => {
+    // -bind-image off (SessionOptions.bindImage: false) excludes BIND-IMAGE from
+    // st.requested (tn3270e.ts, requestedFunctions()). A host that grants it anyway
+    // is "illegally adding a function" exactly as SCS-CTL-CODES is in the test right
+    // below -- addsNothing() is judged against the PER-SESSION list, not the fixed
+    // REQUESTED_FUNCTIONS constant, which is what makes -bind-image off a real
+    // refusal rather than a no-op. See tn3270e.ts's Tn3270eState.requested comment
+    // for what would go wrong if addsNothing read the constant instead: BIND-IMAGE
+    // would look like something we always request, the grant would be silently
+    // adopted into `agreed`, and the BIND gate (Session.bindImageGranted) would arm
+    // itself on a session whose operator specifically asked to skip it.
+    const { session, conn } = newSession({ bindImage: false });
+    await session.connect('127.0.0.1', 992);
+    conn.host(T.IAC, T.DO, O.TN3270E);
+    conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
+    conn.sb(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'));
+    conn.clear();
+    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES);
+    // The refusal: WONT TN3270E, and the session falls back to classic tn3270 --
+    // the same observable shape as any other illegally-added function.
+    expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+    conn.negotiateClassic();
+    expect(session.is3270Mode()).toBe(true);
+  });
+
+  it('our FUNCTIONS REQUEST omits BIND-IMAGE with -bind-image off', async () => {
+    // Mutation check on the WIRE BYTES, not just on the flag: this fails if
+    // requestedFunctions() or its threading into initialState is ever dropped, even
+    // if `bindImage` still parses correctly at the argv layer.
+    const { session, conn } = newSession({ bindImage: false });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    // Exact match, not a `.not.toContain(BIND_IMAGE)` check: Tn3270eFunc.BIND_IMAGE is
+    // 0x00, which would make a containment check meaningless against a byte stream
+    // that legitimately carries zero bytes elsewhere (e.g. a REQUEST-FLAG byte). The
+    // full-array equality below is what actually proves BIND-IMAGE is absent.
+    expect(conn.writes[2]).toEqual([
+      T.IAC, T.SB, O.TN3270E, Tn3270eOp.FUNCTIONS, Tn3270eOp.REQUEST,
+      Tn3270eFunc.RESPONSES, Tn3270eFunc.SYSREQ, Tn3270eFunc.CONTENTION_RESOLUTION,
+      T.IAC, T.SE,
+    ]);
+  });
+
   it('refuses TN3270E and stays usable when the host adds a function', async () => {
+    // BIND-IMAGE moved into REQUESTED_FUNCTIONS this task, so it can no longer stand
+    // in for "a function we never asked for" -- SCS-CTL-CODES (still unrequested,
+    // still a printer function per RFC 2355 §7.2.2) takes its place here.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
     conn.host(T.IAC, T.DO, O.TN3270E);
     conn.sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
     conn.sb(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ascii('IBM-3278-2-E'));
     conn.clear();
-    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE);
+    conn.sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.SCS_CTL_CODES);
     expect(conn.writes).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
     // And the classic route still works on the same connection, which is the whole
     // point of backing off rather than failing.
@@ -219,8 +267,10 @@ describe('TN3270E session data path', () => {
   });
 
   it('traces and drops a data type it does not implement', async () => {
-    // BIND-IMAGE should never arrive, since we do not request the function -- but a
-    // non-conforming server could send one, and handing a bind image to the 3270
+    // We now REQUEST the BIND-IMAGE function (this task), but this session's
+    // negotiateE() only GRANTS RESPONSES and SYSREQ by default, so a BIND-IMAGE
+    // record here is still unearned -- either way, until Task 8 wires up bind.ts,
+    // the session does not implement this data type, and handing one to the 3270
     // executor would raise a program check the host never caused.
     const { session, conn } = newSession();
     await session.connect('127.0.0.1', 992);
@@ -248,6 +298,340 @@ describe('TN3270E session data path', () => {
       T.IAC, T.IAC, T.IAC, T.EOR);
     expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
   });
+});
+
+describe('the BIND gate', () => {
+  /**
+   * Task 8's four behaviours. `negotiateE([Tn3270eFunc.BIND_IMAGE, ...])` is what
+   * puts a session behind the gate at all -- `bindImageGranted()` reads exactly this
+   * grant list, and every OTHER describe block in this file negotiates WITHOUT
+   * BIND_IMAGE (the default grant is `[RESPONSES, SYSREQ]`), which is why none of them
+   * hit the gate and none needed to change for this task -- confirmed by running the
+   * full suite unmodified before writing any of the tests below.
+   */
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+
+  /**
+   * Erase/Write, WCC, SBA(0,0), then EBCDIC 'A' as a DATA byte -- same shape as the
+   * "strips the header and executes the 3270 data behind it" test above. NOT
+   * WRITE_FIELD: that constant ends in an unprotected FIELD ATTRIBUTE at (0,0), which
+   * leaves `cellAt(0)` at 0x00 even once executed, so it cannot discriminate "ran" from
+   * "still gated" the way a painted character can.
+   */
+  const write3270 = (): number[] =>
+    [...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc1, T.IAC, T.EOR];
+
+  /**
+   * A minimal BIND-IMAGE record: just enough for `decodeHeader` to see data type
+   * BIND-IMAGE and dispatch to `handleBind`. `BIND_RU` (0x31) is the one byte
+   * `parseBind` requires to recognize the RU at all; nothing past it is read by this
+   * task's minimal `handleBind`, which does not yet call `parseBind` -- that is
+   * Task 9's job. See the scope note in session.ts's `handleBind`.
+   */
+  const BIND_RU = 0x31;
+  const bind = (): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, BIND_RU, T.IAC, T.EOR];
+
+  it('retains, rather than drops, a 3270-DATA record that arrives before any BIND', async () => {
+    const { session, conn } = newSession();
+    session.trace.setEnabled(true);
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());
+    // Not executed: the screen the record would have painted must still be blank.
+    expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+    // RETAINED, NOT SILENTLY DROPPED -- the distinction the task exists to make.
+    // x3270's `return 0` at telnet.c:2681 leaves no trace at all; ours must say so,
+    // both because the operator deserves to know why the screen went quiet and
+    // because "observable" is how a later task can tell retention happened without
+    // reaching into a private field.
+    expect(session.trace.toText()).toContain('3270 data before BIND, retained');
+  });
+
+  it('executes the retained record once the BIND arrives', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0x00);   // premise: still gated
+    conn.host(...bind());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A', from write3270()
+  });
+
+  it('keeps only the MOST RECENT pre-BIND record, not a queue of every one', async () => {
+    // Two records painting different things before the BIND arrives: a host that
+    // painted twice has overwritten its own first screen, so the second one's content
+    // must be what the BIND releases -- not the first, and not both.
+    const writeOther = (): number[] => [
+      ...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, 0xc2, T.IAC, T.EOR,   // EBCDIC 'B' at (0,0)
+    ];
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...write3270());     // paints 'A' -- withheld
+    conn.host(...writeOther());    // paints 'B' -- withheld, and supersedes 'A'
+    conn.host(...bind());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc2);   // 'B', not 'A'
+  });
+
+  it('does NOT gate 3270 data when BIND-IMAGE was not granted', async () => {
+    // The default grant (RESPONSES, SYSREQ) is exactly what every other test in this
+    // file already negotiates, and this is the severity check: breaking this would
+    // silently withhold data from every ordinary TN3270E session in the suite.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();              // no BIND_IMAGE in the grant
+    conn.host(...write3270());
+    expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // executed immediately
+  });
+
+  /**
+   * Task 9's no-BIND deadline. Fake timers are installed AFTER `connect()` and
+   * `negotiateE()`, not before: `FakeConnection`'s `connect` is a synchronous
+   * `() => conn`, so `await session.connect(...)` resolves on a plain microtask with
+   * no real timer involved either way, but installing fake timers first would still
+   * leave nothing to distinguish -- doing it after keeps the arrangement identical to
+   * the BIND-gate tests above and confines the fakery to exactly the lines that need
+   * it, so a reader does not have to ask whether the negotiation itself depended on
+   * wall-clock time.
+   */
+  describe('the no-BIND timeout', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('executes the retained record -- the whole screen, not just the session -- '
+      + 'when no BIND arrives', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      // Still blank: gated, exactly as the ungated-timeout tests above pin.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS);
+      // The FRAME the host painted is now on screen -- recovered, not merely a
+      // session that stopped being gated. This is the entire reason the record is
+      // retained instead of dropped: x3270 drops it, so a timeout there would clear
+      // the gate onto a blank screen.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // EBCDIC 'A'
+    });
+
+    it('does not fire once a BIND has arrived: the record executes exactly once', async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      conn.host(...bind());
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);   // executed by the BIND
+      const before = session.recordCount();
+      // CHECKED IMMEDIATELY, BEFORE ADVANCING: `setTimeout` only ever fires once, so
+      // a check made only AFTER advancing far past the deadline cannot tell "the
+      // timer was cancelled" from "the timer fired once and is now spent" -- both
+      // leave `getTimerCount()` at 0 by then. The discriminating moment is right
+      // after `handleBind` runs: a real cancellation means no timer is pending here
+      // at all, whereas relying solely on the drained `pendingBindRecord` field would
+      // leave this still at 1.
+      expect(vi.getTimerCount()).toBe(0);
+      // Now advance well past the original deadline. If cancellation were missing,
+      // the still-armed timer would fire here, find `pendingBindRecord` already
+      // drained, trace anyway, and touch nothing on screen -- so the screen and
+      // recordCount alone cannot see that failure. The trace assertion is what
+      // catches it: a fired-but-inert timer still writes its "no BIND within" line.
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS * 10);
+      expect(session.recordCount()).toBe(before);          // not re-executed
+      expect(session.trace.toText()).not.toContain('no BIND within');
+    });
+
+    it('traces the timeout with a message specific enough to discriminate a fired '
+      + 'timer from an inert one', async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      expect(session.trace.toText()).not.toContain('no BIND within');
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS);
+      // Not merely toContain('BIND'), which the arm-time "3270 data before BIND,
+      // retained" line (still present, earlier in the trace) would also satisfy --
+      // this asserts the exact fired-timeout sentence, including the constant's
+      // own value, so a test reading only "some BIND-shaped line exists" cannot
+      // pass on the arm-time trace alone.
+      expect(session.trace.toText())
+        .toContain(`no BIND within ${NO_BIND_TIMEOUT_MS}ms; executing the retained `
+          + 'record at our own geometry');
+    });
+
+    it('is cleared when the connection closes, so it cannot hold the event loop', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());
+      expect(vi.getTimerCount()).toBe(1);
+      session.disconnect();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('is NOT re-armed per record: several pre-BIND records spread over time still '
+      + 'time out ~5s after the FIRST one', async () => {
+      const { session, conn } = newSession();
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      vi.useFakeTimers();
+      conn.host(...write3270());                       // T+0: arms the timer
+      vi.advanceTimersByTime(NO_BIND_TIMEOUT_MS - 1000); // T+4000: one ms shy of 4s
+      conn.host(...write3270());                        // a second pre-BIND record
+      vi.advanceTimersByTime(900);                       // T+4900: still short of 5000
+      // Not yet: a re-arming implementation would need another ~5s from THIS record.
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);
+      vi.advanceTimersByTime(200);                        // T+5100: past 5000 from T+0
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc1);
+    });
+  });
+});
+
+describe('BIND and UNBIND: geometry', () => {
+  /**
+   * Task 10's six behaviours: applying an in-range BIND, refusing an out-of-range one,
+   * substituting our own alternate for size code 0x03, reverting on UNBIND, honouring
+   * `-bind-limit off`, and confirming UNBIND re-arms the gate rather than disconnecting.
+   */
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+
+  /**
+   * A 28-byte BIND RU body with the given size code and dims, no PLU name -- same shape
+   * as bind.test.ts's own `bindWith`, reused here rather than re-derived because that
+   * file already pins the byte offsets this one only needs to drive.
+   */
+  const bindBody = (ssize: number, rd = 0, cd = 0, ra = 0, ca = 0): number[] => {
+    const b = new Uint8Array(28);
+    b[0] = BIND_RU_BYTE;
+    b[BIND_OFF.RD] = rd; b[BIND_OFF.CD] = cd;
+    b[BIND_OFF.RA] = ra; b[BIND_OFF.CA] = ca;
+    b[BIND_OFF.SSIZE] = ssize;
+    return [...b];
+  };
+
+  /** A BIND-IMAGE TN3270E record carrying `body`, framed with a header and IAC EOR. */
+  const bindRecord = (body: number[]): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, ...body, T.IAC, T.EOR];
+
+  /** An UNBIND TN3270E record. Omitting `reason` means an empty body (no reason given). */
+  const unbindRecord = (reason?: number): number[] =>
+    [Tn3270eDataType.UNBIND, 0x00, 0x00, 0x00, 0x00,
+      ...(reason === undefined ? [] : [reason]), T.IAC, T.EOR];
+
+  /**
+   * Erase/Write, WCC, SBA(0,0), then an EBCDIC byte as DATA -- same shape as `write3270`
+   * above, and for the same reason (`WRITE_FIELD` ends in a field attribute, which
+   * cannot discriminate "ran" from "still gated"). Parameterized on the byte so test 6
+   * can distinguish "the record from before UNBIND" from "the record from after".
+   */
+  const write3270 = (ebcdic = 0xc1): number[] =>
+    [...hdr(), 0xf5, 0xc3, 0x11, 0x40, 0x40, ebcdic, T.IAC, T.EOR];
+
+  it('applies an in-range BIND geometry', async () => {
+    // Model 4: default 24x80, alternate 43x80 -- the model this session was
+    // constructed with, per `SessionOptions.alternateRows/Cols`.
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    // Size code 0x7f, default 24x80, alternate 32x80 -- IN RANGE for a model 4 (the
+    // upper bound), and above the model-2 floor, so `acceptBindDims` must accept it.
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 32, 80)));
+    expect(session.screen.defaultSize).toEqual({ rows: 24, cols: 80 });
+    expect(session.screen.alternateSize).toEqual({ rows: 32, cols: 80 });
+  });
+
+  it('refuses an out-of-range BIND and keeps our geometry, with a specific trace', async () => {
+    // Model 2 (the default): its alternate size IS its default size, 24x80, so a BIND
+    // asking for a 43-row alternate is refused by the upper-bound check.
+    const { session, conn } = newSession();
+    session.trace.setEnabled(true);
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 43, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+    // THE EXACT REFUSAL PHRASE, not a loose `toContain('BIND')` -- Task 9 found that a
+    // vague assertion passes on an unrelated trace line (there the arm-time "3270 data
+    // before BIND, retained" note; here there is no such decoy, but the discipline is
+    // the same). `acceptBindDims`'s own `why` string, verified against bind.ts, is
+    // exactly "BIND alternate 43x80 exceeds model 24x80" for this input.
+    expect(session.trace.toText())
+      .toContain('BIND alternate 43x80 exceeds model 24x80; keeping our geometry');
+  });
+
+  it("size code 0x03 substitutes OUR alternate, not the caller's request", async () => {
+    // Model 4: default 24x80, alternate 43x80. `parseBind` reports `alternate:
+    // 'caller'` for 0x03, and the session must fill in ITS OWN model, not a model-2
+    // default -- the whole reason `BindDims.alternate` has a `'caller'` variant rather
+    // than resolving to a concrete size inside the pure parser.
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x03)));
+    expect(session.screen.defaultSize).toEqual({ rows: 24, cols: 80 });
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('UNBIND reverts to the MODEL geometry, not the BIND that just ran', async () => {
+    // Model 4: default 24x80, alternate 43x80. BIND to alternate 32x80 first, so the
+    // screen briefly shows something OTHER than the model -- then UNBIND, which must
+    // revert to 43x80 (the model), not to 32x80 (what the screen happened to hold).
+    const { session, conn } = newSession(
+      { alternateRows: MODEL_4.rows, alternateCols: MODEL_4.cols });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 32, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 32, cols: 80 }); // premise
+    conn.host(...unbindRecord());
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('honours an out-of-range BIND when bindLimit is off', async () => {
+    // The flag itself is Task 11's `-bind-limit off`; this task defaults it to true
+    // and lets a caller drive it directly, which is exactly what this test does.
+    // Model 2 (the default), so a 43-row alternate is out of range with the limit ON
+    // (test above) -- and must be ACCEPTED with it off.
+    const { session, conn } = newSession({ bindLimit: false });
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bindRecord(bindBody(0x7f, 24, 80, 43, 80)));
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('does not disconnect on UNBIND, and the gate closes again for the next BIND',
+    async () => {
+      const { session, conn } = newSession();
+      session.trace.setEnabled(true);
+      await session.connect('127.0.0.1', 992);
+      conn.negotiateE(GRANT_BIND_IMAGE);
+      // A first BIND, opening the gate -- so there is a "before" state distinct from
+      // "never bound at all" for the UNBIND below to revert.
+      conn.host(...bindRecord(bindBody(0x00)));
+      expect(session.isConnected()).toBe(true);
+
+      conn.host(...unbindRecord());
+      // NOT A DISCONNECT: the TCP connection stays up, which is the entire point of
+      // UNBIND over a real teardown.
+      expect(session.isConnected()).toBe(true);
+
+      // THE GATE IS CLOSED AGAIN: a 3270-DATA record arriving now must be RETAINED,
+      // not executed -- exactly the Task 8 distinction, reusing the same discriminating
+      // technique (a painted character, not WRITE_FIELD's field attribute).
+      conn.host(...write3270(0xc2));
+      expect(session.screen.cellAt(0).ebcdic).toBe(0x00);   // not yet painted
+      expect(session.trace.toText()).toContain('3270 data before BIND, retained');
+
+      // The host may send another BIND, per BIND_FORTHCOMING's whole premise -- and
+      // when it does, the retained record must drain, exactly as it did the first time.
+      conn.host(...bindRecord(bindBody(0x00)));
+      expect(session.screen.cellAt(0).ebcdic).toBe(0xc2);   // now executed
+    });
 });
 
 describe('TN3270E state across connections', () => {

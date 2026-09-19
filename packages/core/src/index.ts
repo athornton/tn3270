@@ -9,6 +9,7 @@ export * from './trace.js';
 export * from './x3270trace.js';
 export * from './telnet.js';
 export * from './screen.js';
+export * from './bind.js';
 export * from './stream/parse.js';
 export * from './stream/execute.js';
 export * from './stream/sf.js';
