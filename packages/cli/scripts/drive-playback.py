@@ -137,29 +137,46 @@ CASES = [
     # TN3270 (DO TERMINAL TYPE, etc: wont-tn3270e.trc lines 88-97). Recorded against a
     # real VTAM (SC0TCP01).
     #
-    # OUR CLIENT DOES NOT REPLY. `telnet.ts`'s `St.Wont` handler
-    # (`if (this.hisOpts.delete(c)) this.reply(T.DONT, c)`) only fires for an option in
-    # `hisOpts` -- options the HOST does. TN3270E is tracked in `myOpts` (options WE
-    # do), the same asymmetry x3270 itself calls out in `Common/telnet.c`'s TNS_WONT
-    # case as needing "an ugly hack for hosts that send WONT instead of DONT TN3270E"
-    # (telnet.c:1877-1889, `else if (c == TELOPT_TN3270E && myopts[c])`). We have no
-    # such special case, so a live run against this trace (Trace(on) + TraceText,
-    # 2026-09-18) shows `< ff fc 28` received with no `> ff fc 28` reply, and playback
-    # then sees `Socket EOF` waiting for one. THIS IS A REAL GAP, not a harness
-    # artifact or a stale-trace mismatch (rule 3 above does not apply: this is a
-    # protocol reply, not a version-specific byte). It is reported here rather than
-    # fixed, because fixing it is out of this task's scope -- Task 13 is the harness,
-    # not telnet.ts -- and because the CASE below does not assert on this 4th block,
-    # so the gap does not manufacture a false pass; it is simply undetected by the 3
-    # blocks this case does check.
-    Case('s3270/Test/wont-tn3270e.trc', '3278-4-E', 3,
+    # THE GAP THIS CASE ONCE DOCUMENTED IS FIXED, and this case is now the witness for
+    # the fix. It used to stop at 3 blocks: our `St.Wont` handler only fired for options
+    # in `hisOpts` (options the HOST does), while TN3270E lives in `myOpts` (options WE
+    # do), so a host withdrawing it with WONT instead of DONT got no reply at all and
+    # playback saw `Socket EOF` waiting for one. x3270 carries the same special case and
+    # names it, verbatim, "Ugly hack for hosts that send WONT TN3270E instead of DONT
+    # TN3270E" (Common/telnet.c:1879-1889).
+    #
+    # Now we answer `ff fc 28` and fall back to classic TN3270 exactly as real s3270
+    # does, so this case reaches FIVE blocks: WILL TN3270E, DEVICE-TYPE REQUEST,
+    # FUNCTIONS REQUEST, **WONT TN3270E**, and then WILL TERMINAL-TYPE on the classic
+    # path. The 4th and 5th are what the fix bought, and they are asserted below so a
+    # regression cannot quietly return to silence.
+    #
+    # IT STOPS ON A KNOWN DIVERGENCE THAT IS NOT OUR BUG -- rule 3 above, a trace
+    # records one client version. At the 6th block we send our TERMINAL-TYPE as
+    # `IBM-3278-4-E`; the recorded x3270 sent `IBM-3279-4-E` (line 105), the COLOUR
+    # digit, while still sending `IBM-3278-4-E` for its TN3270E DEVICE-TYPE (line 78).
+    # That is `wrongTerminalName`: `telnet.c:2104` uses the colour digit when
+    # `model_num < 4` OR the resource is set, and this recording is a model 4 with it
+    # set (`Model 3279-4-E` in the trace header). Whether to match it is an open
+    # question recorded in docs/live-testing.md, not a defect to fix here.
+    # `mismatch_ok=True` is NEW for this case and is the narrow thing to check if this
+    # ever regresses. Before the fix the run ended in `Socket EOF` -- playback waiting
+    # forever for a reply we never sent -- which produces no mismatch line at all, so the
+    # flag was not needed. Now we DO reply, get four blocks further, and stop on the
+    # terminal-type divergence below, which IS a mismatch and IS the correct outcome for
+    # our configuration. The five `expect_bytes` are what keeps this honest: the flag
+    # tolerates the stopping point, it does not excuse the blocks before it, and a
+    # regression to silence would fail on `fffc28` being absent rather than passing
+    # quietly.
+    Case('s3270/Test/wont-tn3270e.trc', '3278-4-E', 5,
          expect_bytes=('fffb28', 'fffa28020749424d2d333237382d342d45fff0',
-                       'fffa28030700020405fff0'),
+                       'fffa28030700020405fff0', 'fffc28', 'fffb18'),
+         mismatch_ok=True,
          stop_reason=(
-             'the host answers our FUNCTIONS REQUEST with WONT TN3270E; real s3270 '
-             'replies WONT TN3270E in turn and falls back to classic TN3270, but our '
-             'client has no handler for a host-initiated WONT on an option WE (not '
-             'it) enabled -- see the comment above this Case for the measured gap')),
+             'we answer WONT TN3270E and fall back to classic TN3270 correctly, then '
+             'send TERMINAL-TYPE `IBM-3278-4-E` where this recording sent the colour '
+             'digit `IBM-3279-4-E` -- x3270 s `wrongTerminalName` (telnet.c:2104), a '
+             'version/resource divergence and not a defect; see the comment above')),
 
     # A real host that GRANTS contention resolution and BIND-IMAGE, then drives a
     # keyboard Enter() to log on. Model 2, so it also pins that our DEVICE-TYPE
