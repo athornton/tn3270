@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TelnetOpt, EnvironGroup, EnvironQual } from '../src/constants.js';
-import { parseEnvironSend, buildEnvironIs } from '../src/newenviron.js';
+import { parseEnvironSend, buildEnvironIs, escapeEnvironBytes } from '../src/newenviron.js';
 
 /** ASCII to bytes, for building request bodies. */
 const a = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0));
@@ -212,5 +212,42 @@ describe('buildEnvironIs', () => {
     const got = Array.from(buildEnvironIs(
       [{ group: EnvironGroup.USERVAR, name: 'IBM' }], vars, uservars));
     expect(got).not.toContain(EnvironGroup.VALUE);
+  });
+});
+
+describe('escapeEnvironBytes', () => {
+  it('leaves ordinary text alone', () => {
+    expect(escapeEnvironBytes('DEVNAME')).toEqual(a('DEVNAME'));
+  });
+
+  it('prefixes each of the four group codes with ESC', () => {
+    // x3270's ESCAPED() macro covers VAR, USERVAR, ESC and VALUE
+    // (telnet_new_environ.c:58-59), and escaped_copy inserts ESC before each
+    // (:118-129).
+    //
+    // NO HOST HAS EVER SENT US SUCH A NAME and no trace in x3270's collection contains
+    // one -- every real device name is plain ASCII. This is therefore an UNWITNESSED
+    // wire rule, implemented because the alternative is silent corruption on the one
+    // host that does something unusual, and round-tripped below against our own parser,
+    // which is a real property even without a host.
+    expect(escapeEnvironBytes('\x00')).toEqual([EnvironGroup.ESC, 0]);
+    expect(escapeEnvironBytes('\x01')).toEqual([EnvironGroup.ESC, 1]);
+    expect(escapeEnvironBytes('\x02')).toEqual([EnvironGroup.ESC, 2]);
+    expect(escapeEnvironBytes('\x03')).toEqual([EnvironGroup.ESC, 3]);
+  });
+
+  it('round-trips through our own parser', () => {
+    // The property that holds without a host: whatever we escape, we un-escape.
+    const nasty = '\x00\x01A\x02\x03';
+    const body = Uint8Array.from([
+      EnvironGroup.USERVAR, ...escapeEnvironBytes(nasty),
+    ]);
+    expect(parseEnvironSend(body)![0]!.name).toBe(nasty);
+  });
+
+  it('truncates above a byte rather than emitting a multi-byte code unit', () => {
+    // charCodeAt yields a UTF-16 code unit. The same trap telnet.ts's TERMINAL-TYPE
+    // reply documents: mask to a byte or a value above 255 goes out mangled.
+    expect(escapeEnvironBytes('ǿ')).toEqual([0xff]);
   });
 });

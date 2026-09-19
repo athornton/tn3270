@@ -116,16 +116,45 @@ export function parseEnvironSend(body: Uint8Array): readonly EnvironRequest[] | 
 }
 
 /**
- * Escape a name or value for the wire (RFC 1572: ESC prefixes any byte that would
- * otherwise be read as a group delimiter).
+ * Escape a name or value for the wire (RFC 1572; x3270's `escaped_copy`,
+ * telnet_new_environ.c:118-129).
  *
- * STUBBED FOR THIS TASK -- Task 5 replaces this with real escaping. Every name and
- * value this task's own tests use is plain ASCII with no byte equal to VAR/VALUE/
- * ESC/USERVAR (0-3), so the stub is invisible to them; it exists only so
- * `buildEnvironIs` compiles and its tests can run before Task 5 lands.
+ * Any byte equal to one of the four group codes would otherwise be read as a
+ * delimiter, so it is prefixed with ESC. The receiver strips the ESC and takes the next
+ * byte literally, which is what `parseEnvironSend` does.
+ *
+ * UNWITNESSED BY ANY HOST: every real device name in x3270's trace collection is plain
+ * ASCII, so no recorded exchange exercises this. Implemented anyway, because the
+ * alternative is silent corruption on the first host that does something unusual, and
+ * because it round-trips against our own parser -- a real property even without a host.
+ *
+ * Masked to a byte BEFORE the comparison, not after: `charCodeAt` yields a UTF-16 code
+ * unit, and U+01FF is 511 rather than any group code but truncates to 0xFF. The same
+ * trap telnet.ts's TERMINAL-TYPE reply documents.
+ *
+ * ITERATES CODE POINTS (`for...of` on a string), NOT CODE UNITS, which matters only if
+ * a name ever contains a surrogate pair: `for...of` would yield the whole astral code
+ * point as one `ch`, and `ch.charCodeAt(0)` reads only its LEADING surrogate (0xD800-
+ * 0xDBFF), truncating to some byte in 0x00-0xDB with no ESC applied even if that byte
+ * happens to collide with a group code -- a silent corruption one level below the
+ * documented U+01FF truncation. Not worth handling: a device name is ASCII in every
+ * known case (see the module-level comment's grep of x3270's trace collection), so no
+ * real input reaches this path either way, and `parseEnvironSend`'s own byte-oriented
+ * un-escaping has no way to reconstruct a code point that was never sent as bytes in
+ * the first place -- the mangling would need fixing on the decode side too if it ever
+ * mattered, not just here.
  */
-function escapeEnvironBytes(s: string): number[] {
-  return Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+export function escapeEnvironBytes(s: string): number[] {
+  const out: number[] = [];
+  for (const ch of s) {
+    const b = ch.charCodeAt(0) & 0xff;
+    if (b === EnvironGroup.VAR || b === EnvironGroup.VALUE
+      || b === EnvironGroup.ESC || b === EnvironGroup.USERVAR) {
+      out.push(EnvironGroup.ESC);
+    }
+    out.push(b);
+  }
+  return out;
 }
 
 /**
