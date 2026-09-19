@@ -12,7 +12,7 @@
  *
  * Reference implementation: x3270's Common/telnet_new_environ.c.
  */
-import { EnvironGroup } from './constants.js';
+import { EnvironGroup, EnvironQual } from './constants.js';
 
 /** One requested entry. An empty `name` means "every variable in this group". */
 export interface EnvironRequest {
@@ -113,4 +113,75 @@ export function parseEnvironSend(body: Uint8Array): readonly EnvironRequest[] | 
     group: r.group,
     name: String.fromCharCode(...r.name),
   }));
+}
+
+/**
+ * Escape a name or value for the wire (RFC 1572: ESC prefixes any byte that would
+ * otherwise be read as a group delimiter).
+ *
+ * STUBBED FOR THIS TASK -- Task 5 replaces this with real escaping. Every name and
+ * value this task's own tests use is plain ASCII with no byte equal to VAR/VALUE/
+ * ESC/USERVAR (0-3), so the stub is invisible to them; it exists only so
+ * `buildEnvironIs` compiles and its tests can run before Task 5 lands.
+ */
+function escapeEnvironBytes(s: string): number[] {
+  return Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+}
+
+/**
+ * Build the IS reply body for `requests`.
+ *
+ * Returns the body from the qualifier onward: the caller adds `IAC SB NEW-ENVIRON`
+ * ahead of it and `IAC SE` after, and is responsible for IAC doubling -- see the
+ * TERMINAL-TYPE reply in telnet.ts for the same division and the RFC 855 reason.
+ *
+ * THE MISSING-VARIABLE RULE IS THE ONE TO GET RIGHT: a name we do not have is echoed
+ * with NO VALUE byte at all (x3270 appends VALUE only `if (value != NULL)`,
+ * telnet_new_environ.c:561). That is distinguishable on the wire from a known variable
+ * whose value is empty -- name + VALUE + nothing -- and emitting an empty VALUE for an
+ * unknown name would claim we have a variable we do not.
+ *
+ * A WHOLE-GROUP DUMP (`name === ''`) EMITS THE GROUP BYTE PER VARIABLE, not once for
+ * the group: x3270's own `name_len == 0` branch puts `vb_appendf(&reply, "%c",
+ * ereq->group)` INSIDE the `FOREACH_LLIST` over that group's variables
+ * (telnet_new_environ.c:532-537), building the same (group, name, VALUE, value) tuple
+ * per entry that the single-name branch below it builds for one name. There is no
+ * "dump the group header once" shape on the wire at all.
+ *
+ * A WHOLE-GROUP DUMP'S ORDER FOLLOWS THE MAP'S INSERTION ORDER, which callers should
+ * treat as significant even though nothing here enforces a particular order: x3270's
+ * own list is a `FOREACH_LLIST` over variables in the order `add_environ` inserted them
+ * (`environ_init`, telnet_new_environ.c:220-245: USER, then DEVNAME, then IBMELF, then
+ * IBMAPPLID, then CODEPAGE/CHARSET/KBDTYPE), and a host that has only ever seen that
+ * order from real x3270 has no reason to expect another. `Map` iteration order is
+ * insertion order per the ECMAScript spec, so a caller (Task 7) that populates the map
+ * in x3270's order gets x3270's wire order for free.
+ *
+ * WE REQUIRE AN EXACT NAME MATCH, WHICH DIVERGES FROM x3270 DELIBERATELY. Its
+ * `find_environ` compares `memcmp(name, e->name, namelen)` without checking that the
+ * lengths agree (:159-175: only `namelen` bytes of the stored name are compared), so a
+ * request for "IBM" matches its stored "IBMELF". That answers a question the host did
+ * not ask; we do not copy it -- a plain `Map.get` already requires equality.
+ */
+export function buildEnvironIs(
+  requests: readonly EnvironRequest[],
+  vars: ReadonlyMap<string, string>,
+  uservars: ReadonlyMap<string, string>,
+): Uint8Array {
+  const out: number[] = [EnvironQual.IS];
+  const emit = (group: number, name: string, value: string | undefined): void => {
+    out.push(group, ...escapeEnvironBytes(name));
+    if (value !== undefined) out.push(EnvironGroup.VALUE, ...escapeEnvironBytes(value));
+  };
+
+  for (const req of requests) {
+    const list = req.group === EnvironGroup.VAR ? vars : uservars;
+    if (req.name === '') {
+      // The whole group, in the map's insertion order -- see the doc comment above.
+      for (const [name, value] of list) emit(req.group, name, value);
+      continue;
+    }
+    emit(req.group, req.name, list.get(req.name));
+  }
+  return Uint8Array.from(out);
 }

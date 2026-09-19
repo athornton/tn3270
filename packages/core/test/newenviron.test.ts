@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TelnetOpt, EnvironGroup, EnvironQual } from '../src/constants.js';
-import { parseEnvironSend } from '../src/newenviron.js';
+import { parseEnvironSend, buildEnvironIs } from '../src/newenviron.js';
 
 /** ASCII to bytes, for building request bodies. */
 const a = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0));
@@ -104,5 +104,113 @@ describe('parseEnvironSend', () => {
     // truncated: there is nothing to salvage.
     expect(parseEnvironSend(Uint8Array.from(a('DEVNAME')))).toBeNull();
     expect(parseEnvironSend(Uint8Array.of(EnvironGroup.VALUE))).toBeNull();
+  });
+});
+
+describe('buildEnvironIs', () => {
+  const uservars = new Map([
+    ['IBMELF', 'YES'],
+    ['IBMAPPLID', 'None'],
+    ['DEVNAME', 'foo001'],
+  ]);
+  const vars = new Map([['USER', 'herc01']]);
+
+  it('reproduces the reply devname_success.trc records, byte for byte', () => {
+    // That trace's line 89-91:
+    //   fffa27 00 03 "IBMELF" 01 "YES" 03 "IBMAPPLID" 01 "None" 03 "DEVNAME" 01 "foo001" fff0
+    // We build the BODY: everything between `27` and `fff0`, starting at the qualifier.
+    const requests = [
+      { group: EnvironGroup.USERVAR, name: 'IBMELF' },
+      { group: EnvironGroup.USERVAR, name: 'IBMAPPLID' },
+      { group: EnvironGroup.USERVAR, name: 'DEVNAME' },
+    ];
+    expect(Array.from(buildEnvironIs(requests, vars, uservars))).toEqual([
+      EnvironQual.IS,
+      EnvironGroup.USERVAR, ...a('IBMELF'), EnvironGroup.VALUE, ...a('YES'),
+      EnvironGroup.USERVAR, ...a('IBMAPPLID'), EnvironGroup.VALUE, ...a('None'),
+      EnvironGroup.USERVAR, ...a('DEVNAME'), EnvironGroup.VALUE, ...a('foo001'),
+    ]);
+  });
+
+  it('OMITS THE VALUE BYTE ENTIRELY for a variable we do not have', () => {
+    // x3270 appends VALUE only `if (value != NULL)` (telnet_new_environ.c:561). So an
+    // unknown name is echoed bare. That is DIFFERENT on the wire from a known variable
+    // whose value is empty, which emits name + VALUE + nothing, and a host can tell
+    // them apart. Emitting an empty VALUE for an unknown name would claim we have a
+    // variable we do not.
+    const got = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.USERVAR, name: 'NOSUCH' }], vars, uservars));
+    expect(got).toEqual([
+      EnvironQual.IS, EnvironGroup.USERVAR, ...a('NOSUCH'),
+    ]);
+    expect(got).not.toContain(EnvironGroup.VALUE);
+  });
+
+  it('distinguishes an EMPTY known value from an absent one', () => {
+    const withEmpty = new Map([['EMPTY', '']]);
+    expect(Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.USERVAR, name: 'EMPTY' }], vars, withEmpty))).toEqual([
+      EnvironQual.IS, EnvironGroup.USERVAR, ...a('EMPTY'), EnvironGroup.VALUE,
+    ]);
+  });
+
+  it('dumps a whole group when the name is empty', () => {
+    const got = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.VAR, name: '' }], vars, uservars));
+    expect(got).toEqual([
+      EnvironQual.IS, EnvironGroup.VAR, ...a('USER'), EnvironGroup.VALUE, ...a('herc01'),
+    ]);
+  });
+
+  it('emits the group byte PER VARIABLE in a whole-group dump, and preserves insertion order', () => {
+    // x3270's own whole-group branch (telnet_new_environ.c:532-537) puts `vb_appendf(&reply,
+    // "%c", ereq->group)` INSIDE the `FOREACH_LLIST` over the group's variables, not once
+    // before the loop -- so a three-entry group is three (group, name, VALUE, value)
+    // tuples, not one group byte followed by three bare name/value pairs. A single-entry
+    // `vars` map (the test above) cannot distinguish the two shapes; this one can.
+    //
+    // ORDER: we use a `Map`, and `for...of` over a `Map` iterates in insertion order
+    // (guaranteed by the ECMAScript spec, unlike a plain object with numeric-looking
+    // keys). x3270's own list is also insertion-ordered -- `add_environ` appends via
+    // `llist_insert_before(&e->list, list)` and `environ_init` (:220-245) calls it
+    // USER, then DEVNAME, then IBMELF, then IBMAPPLID, then CODEPAGE/CHARSET/KBDTYPE in
+    // that fixed order -- so a real reply's whole-group dump has a specific, meaningful
+    // order that a host may rely on. This test pins that our output tracks the map's
+    // insertion order, which is the only thing guaranteeing ours matches x3270's: if
+    // Task 7 populates the map in x3270's order, the wire order matches automatically.
+    const manyUservars = new Map([
+      ['IBMELF', 'YES'],
+      ['IBMAPPLID', 'None'],
+      ['DEVNAME', 'foo001'],
+    ]);
+    const got = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.USERVAR, name: '' }], vars, manyUservars));
+    expect(got).toEqual([
+      EnvironQual.IS,
+      EnvironGroup.USERVAR, ...a('IBMELF'), EnvironGroup.VALUE, ...a('YES'),
+      EnvironGroup.USERVAR, ...a('IBMAPPLID'), EnvironGroup.VALUE, ...a('None'),
+      EnvironGroup.USERVAR, ...a('DEVNAME'), EnvironGroup.VALUE, ...a('foo001'),
+    ]);
+  });
+
+  it('does not let VAR and USERVAR lookups cross', () => {
+    // USER is a VAR; asking for it as a USERVAR must miss, and vice versa. x3270 picks
+    // the list by group (`(ereq->group == TELOBJ_VAR)? &vars : &uservars`).
+    const asUservar = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.USERVAR, name: 'USER' }], vars, uservars));
+    expect(asUservar).not.toContain(EnvironGroup.VALUE);
+    const asVar = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.VAR, name: 'DEVNAME' }], vars, uservars));
+    expect(asVar).not.toContain(EnvironGroup.VALUE);
+  });
+
+  it('does NOT prefix-match a name', () => {
+    // x3270's find_environ compares with `memcmp(name, e->name, namelen)` and never
+    // checks that the LENGTHS match, so a request for "IBM" matches the stored
+    // "IBMELF" there. That is a bug in the reference, not a rule to copy: it would
+    // answer a question the host did not ask. We require equality.
+    const got = Array.from(buildEnvironIs(
+      [{ group: EnvironGroup.USERVAR, name: 'IBM' }], vars, uservars));
+    expect(got).not.toContain(EnvironGroup.VALUE);
   });
 });
