@@ -40,10 +40,46 @@ export const TelnetOpt = {
   TIMING_MARK: 6,
   REGIME_3270: 29,
   TN3270E: 40,
+  NEW_ENVIRON: 39,
 } as const;
 
 /** TERMINAL-TYPE subnegotiation codes (RFC 1091). */
 export const TelnetSubopt = { IS: 0, SEND: 1 } as const;
+
+/**
+ * NEW-ENVIRON group codes (RFC 1572), from x3270's include/arpa_telnet.h:122-125.
+ *
+ * `ESC` is the escape prefix, not a group a host may request: any byte of a NAME or a
+ * VALUE that happens to equal one of these four codes is prefixed with `ESC` so the
+ * receiver does not read it as a delimiter.
+ */
+export const EnvironGroup = {
+  VAR: 0,
+  VALUE: 1,
+  ESC: 2,
+  USERVAR: 3,
+} as const;
+
+/**
+ * NEW-ENVIRON qualifiers (RFC 1572), from x3270's include/arpa_telnet.h:117-119.
+ *
+ * IS AND SEND SHARE THEIR VALUES WITH `TelnetSubopt`, WHICH IS TERMINAL-TYPE's, AND THE
+ * TWO ARE NOT THE SAME CONCEPT. Both encode "here it is" as 0 and "give it to me" as 1,
+ * by coincidence of two independent RFCs. Reusing one for the other would work today and
+ * would be wrong the first time either changed. The same trap, and the same resolution,
+ * as this file's note on XAH.DEFAULT versus XA.RESET.
+ *
+ * INFO (2) is a host-to-client unsolicited update. We never send it and no trace in
+ * x3270's collection sends one to us; it is defined so a received INFO can be traced by
+ * name rather than as an unknown byte. x3270 does define it (TELQUAL_INFO,
+ * arpa_telnet.h:119) and names it in the `telquals[]` trace table (Common/telnet.c:143,
+ * `{ "IS", "SEND", "INFO" }`), used by telnet_new_environ.c to log subnegotiations.
+ */
+export const EnvironQual = {
+  IS: 0,
+  SEND: 1,
+  INFO: 2,
+} as const;
 
 /**
  * TN3270E subnegotiation operations (RFC 2355 §3, rfc2355.txt:317-347), verified
