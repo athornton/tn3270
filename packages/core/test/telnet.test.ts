@@ -663,6 +663,131 @@ describe('TN3270E telnet option (40)', () => {
     expect(sent).toEqual([[T.IAC, T.WILL, O.TN3270E]]);
   });
 
+  it('TEARS TN3270E DOWN when the host sends WONT for option 40, not DONT', () => {
+    // THE SAME ASYMMETRY AS THE `DONT` ARM ABOVE, REACHED BY A DIFFERENT BYTE, and it
+    // was open until 2026-09-19. Option 40 is something WE do, so it lives in `myOpts`
+    // and the `St.Wont` arm's `hisOpts.delete(c)` never matched it: a host withdrawing
+    // it this way got no reply and no teardown at all, leaving `tn3270eNegotiated` true
+    // with the option conceptually off. Found while adding the playback oracle's
+    // `wont-tn3270e.trc` case, where our client receives `ff fc 28`, answers nothing,
+    // and the host then drops the connection.
+    //
+    // x3270 CARRIES THIS AS A NAMED SPECIAL CASE, verbatim: "Ugly hack for hosts that
+    // send WONT TN3270E instead of DONT TN3270E" (Common/telnet.c:1879-1889). So the
+    // behaviour is not our invention and the hosts that need it are real.
+    //
+    // THE REPLY IS `WONT`, NOT `DONT`, and that is the whole point of the special case:
+    // `DONT` would be answering about what the HOST does, and this option is ours. The
+    // reply says we stop doing it.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    expect(layer.is3270Mode()).toBe(true);
+    sent.length = 0;
+
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.TN3270E));
+
+    // The CONSEQUENCE, not merely the flag: nothing here negotiated BINARY or EOR, so
+    // with the short-circuit gone the classic test underneath must answer false.
+    expect(layer.is3270Mode()).toBe(false);
+    expect(sent).toEqual([[T.IAC, T.WONT, O.TN3270E]]);
+  });
+
+  it('tells its owner about a WONT teardown too, so the header framing comes off', () => {
+    // `onTn3270eDisabled` is what reaches `Session.e`, which is the layer that actually
+    // decides the 5-byte data header. A teardown this layer performs silently would
+    // leave the framing on — the worse half of the bug the DONT arm had.
+    const { layer, disabled } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.TN3270E));
+    expect(disabled).toEqual([true]);
+  });
+
+  it('answers a WONT for an option 40 we never claimed with silence', () => {
+    // Guarded on `myOpts` exactly as x3270 guards on `myopts[c]`, and for RFC 854's
+    // loop rule: an unsolicited withdrawal of something we never claimed is not an
+    // event to acknowledge.
+    //
+    // ONLY THE WIRE REPLY IS GUARDED. The teardown, and so `onTn3270eDisabled`, runs
+    // either way — an earlier draft of this test asserted `disabled` stayed empty and
+    // was WRONG about the design, not about the code. `disableTn3270e()` tears down
+    // unconditionally and returns only whether a REPLY is owed, because `myOpts` and
+    // `tn3270eNegotiated` are two records of one fact and guarding the teardown on the
+    // first would leave the second stuck on precisely when they disagree — which is the
+    // bug this whole arm exists to close. Verified against the `St.Dont` arm, which has
+    // behaved this way since it was fixed: a `DONT` for an unclaimed option 40 likewise
+    // sends nothing and still notifies once.
+    const { layer, sent, disabled } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.TN3270E));
+    expect(sent).toEqual([]);
+    expect(disabled).toEqual([true]);
+  });
+
+  it('still answers a WONT for an option the HOST had agreed with DONT', () => {
+    // THE ORDER OF THE TWO BRANCHES IS LOAD-BEARING. x3270 tests `hisopts[c]` FIRST and
+    // only falls to the option-40 hack in its `else if`, so an option the host really
+    // had agreed keeps the ordinary `DONT` acknowledgement. Getting this backwards would
+    // answer `WONT` to a normal withdrawal — a protocol error on every other option.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.WILL, O.EOR));
+    sent.length = 0;
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.EOR));
+    expect(sent).toEqual([[T.IAC, T.DONT, O.EOR]]);
+  });
+
+  it('leaves the TN3270E negotiation ALONE on a WONT for another option', () => {
+    // The transposition-shaped mistake: tearing TN3270E down for whichever option got
+    // withdrawn rather than only for 40. The mirror of the DONT arm's own guard test.
+    //
+    // THE OPTION MUST BE ONE THE HOST NEVER AGREED, and that is the whole difficulty of
+    // writing this test. A first draft used an EOR the host HAD agreed, so
+    // `hisOpts.delete` succeeded and the `else if` was never reached at all — dropping
+    // the `c === O.TN3270E` guard entirely left that draft GREEN. Mutation-checked, so
+    // this is measured rather than reasoned. An unagreed option is the only input that
+    // falls through to the second branch and can therefore observe its guard.
+    const { layer, disabled } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+
+    // SUPPRESS_GO_AHEAD was never agreed by the host, so `hisOpts.delete` misses and
+    // control reaches the option-40 branch with a non-40 option in hand.
+    layer.receive(Uint8Array.of(T.IAC, T.WONT, O.SUPPRESS_GO_AHEAD));
+
+    expect(layer.is3270Mode()).toBe(true);
+    expect(disabled).toEqual([]);
+  });
+
+  it('never puts option 40 in hisOpts, which is WHY the two WONT branches cannot collide', () => {
+    // THE `else if` IN THE `St.Wont` ARM IS UNFALSIFIABLE, and this test records the
+    // reason rather than pretending to pin the ordering. Measured: rewriting it as two
+    // independent `if`s leaves all tests green, and so does dropping the option-40 guard
+    // in the second branch when driven with an option the host HAD agreed. That is not a
+    // test gap — the two branches are mutually exclusive by construction, and this is
+    // the construction.
+    //
+    // `onWill` admits ONLY BINARY and EOR to `hisOpts` (telnet.ts:446-455) and answers
+    // every other option with an immediate DONT. Option 40 is something WE do, so it
+    // lives in `myOpts` and can never be in `hisOpts` — therefore `hisOpts.delete(40)`
+    // always misses and control always reaches the second branch for option 40, never
+    // for anything the first branch handled.
+    //
+    // Pinning THIS is what makes the arm's structure safe to reason about: if a future
+    // change ever admitted option 40 to `hisOpts`, the two branches WOULD collide, and
+    // this test reddens rather than the collision being discovered on a live host.
+    const { layer, sent } = eHarness(true);
+    layer.receive(Uint8Array.of(T.IAC, T.DO, O.TN3270E));
+    layer.setTn3270eNegotiated(true);
+    sent.length = 0;
+
+    // A host volunteering `WILL TN3270E` is odd but legal. We refuse it outright.
+    layer.receive(Uint8Array.of(T.IAC, T.WILL, O.TN3270E));
+
+    expect(sent).toEqual([[T.IAC, T.DONT, O.TN3270E]]);
+    // And refusing it left OUR side of option 40 untouched: still negotiated.
+    expect(layer.is3270Mode()).toBe(true);
+  });
+
   it('ignores a TN3270E subnegotiation when no consumer was wired', () => {
     // The replay path builds a layer without the callback; a subnegotiation arriving
     // there must be dropped rather than throwing on an undefined function.

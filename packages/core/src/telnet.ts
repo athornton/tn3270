@@ -288,7 +288,41 @@ export class TelnetLayer {
         return;
 
       case St.Wont:
-        if (this.hisOpts.delete(c)) this.reply(T.DONT, c);
+        // TWO BRANCHES, AND THE ORDER IS LOAD-BEARING. The first is the ordinary rule:
+        // the host withdraws something IT was doing, so it leaves `hisOpts` and we
+        // acknowledge with DONT.
+        //
+        // THE SECOND IS OPTION 40 ARRIVING BY THE WRONG VERB, and x3270 carries it as a
+        // named special case whose comment reads, verbatim, "Ugly hack for hosts that
+        // send WONT TN3270E instead of DONT TN3270E" (Common/telnet.c:1879-1889). The
+        // correct byte for withdrawing an option WE do is `DONT`, handled in the
+        // `St.Dont` arm above; some real hosts send `WONT` instead. Until 2026-09-19 we
+        // did nothing at all with it — `hisOpts.delete(40)` never matches, because
+        // option 40 is in `myOpts` — so the teardown never ran and
+        // `tn3270eNegotiated` stayed true, which SHORT-CIRCUITS `is3270Mode()`. Same
+        // consequence as the `DONT` hole fixed two days earlier: a 5-byte data header
+        // prepended for a host with no parser for it, and five bytes eaten off inbound
+        // records that never carried one. Found by the playback oracle's
+        // `wont-tn3270e.trc`, where we receive `ff fc 28`, answer nothing, and the host
+        // then drops the connection.
+        //
+        // `else if`, not a separate `if`: an option the host genuinely had agreed keeps
+        // the ordinary DONT acknowledgement, which is what x3270's own ordering gives.
+        // Answering WONT to a normal withdrawal would be a protocol error on every
+        // other option.
+        //
+        // THE REPLY IS `WONT`, NOT `DONT`, because the option is OURS: we are saying we
+        // stop doing it, not answering about what the host does.
+        //
+        // Routed through the SAME `disableTn3270e()` as the `St.Dont` arm and
+        // `refuseTn3270e()`. That method is where this rule lives precisely because two
+        // copies of one teardown is how these paths diverged twice already — once in
+        // `Session.e`, once in this class.
+        if (this.hisOpts.delete(c)) {
+          this.reply(T.DONT, c);
+        } else if (c === O.TN3270E && this.disableTn3270e()) {
+          this.reply(T.WONT, c);
+        }
         this.state = St.Data;
         return;
 
