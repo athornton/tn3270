@@ -1,6 +1,7 @@
 export const VERSION = '0.1.0';
 
 export * from './constants.js';
+export * from './devname.js';
 export * from './address.js';
 export * from './codepage.js';
 export * from './palette.js';
