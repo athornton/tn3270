@@ -1,36 +1,62 @@
-# Handoff — state as of 2026-09-17
+# Handoff — state as of 2026-09-19
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-17
+## START HERE — NEXT ACTION, 2026-09-19
 
-> **THIS SECTION IS TWO BRANCHES BEHIND — CORRECTED 2026-09-17, git facts only.** The keypad
-> **IS merged**: `189f4c3` *Merge keypad-and-special-keys* is on `main`, and `main` has since
-> taken `reconnect-on-enter` and `tn3270e-dont-teardown`, its head now `d1ec19d`. The count
-> below is stale too: **`npm test` is now 1728 tests in 71 files** (measured 2026-09-17 on
-> `zvm44-verdict`, exit 0), not 1692. Item 1's merge instruction is spent; read the rest of
-> this section as the keypad *record*, not as the next action. **Nothing else in this file was
-> re-verified against the tree for this correction** — only the merge state and the count.
+**GIT FACTS, CHECKED THIS DAY, NOT CARRIED FORWARD FROM AN EARLIER NOTE.** `main` is at `d030b64`
+*Merge playback-oracle*. Everything the section below used to call "not yet merged" — the keypad,
+Sys Req on the classic path, reconnect-on-enter, the z/VM probe and verdict, the TN3270E-DONT
+teardown fix, the playback oracle — **is merged into `main`** (`189f4c3`, `4e0b091`, `b395bf0`,
+`b198e6e`, `d1ec19d`, `d030b64`). None of that is the next action any more; it is history, and the
+sections below it in this file (*What the keypad branch delivered*, *Sys Req on both paths*, the
+playback-oracle bullets) stand as the record of it and need no further correction for that purpose.
 
-**THE KEYPAD IS BUILT AND VERIFIED, ON THE BRANCH `keypad-and-special-keys`, AND IT IS NOT
-MERGED.** All 15 tasks of the plan are done. The whole gate passes on the branch head: build and
-typecheck clean, **1692 tests in 71 files** ~~current~~ (**superseded: 1728 in 71, see the note
-above**), `shot.mjs` **3/3 goldens matched**, `keys.mjs`
-**18 chords / 16 actions**, `clicks.mjs` **9 buttons / 10 actions**, `browser-keys.mjs`
-**13 chords / 11 actions**, `browser-shot.mjs` **2/2 cases**, `pty-smoke.py` **12/12**.
+**THE CURRENT BRANCH IS `bind-image`, AT `63cbece`, 17 commits ahead of `main` (`d030b64`), AND IT
+IS NOT MERGED.** It adds what `main` lacked: the client now **requests** TN3270E BIND-IMAGE (`main`
+declined it by design; see the *playback -b* bullets below, now corrected to match), parses BIND
+and UNBIND, honours BIND's screen geometry within limits, and gates inbound 3270 data on a BIND
+arriving — with a 5-second timeout that executes the withheld frame rather than hanging forever, as
+x3270 does. Two new flags, both default on: `-bind-image on|off`, `-bind-limit on|off`. Design:
+`docs/superpowers/specs/2026-09-17-bind-image-and-bind-unbind-design.md`; plan:
+`docs/superpowers/plans/2026-09-17-bind-image-and-bind-unbind.md`, annotated with `**AS BUILT:**`
+notes on every task that diverged from it — read those before re-deriving anything the plan
+claims. Full detail: `README.md`'s TN3270E section and `docs/live-testing.md`.
 
-**ONE THING IS WAITING ON THE USER. Do not do it unasked.** (There were three; the user authorised
-the non-TN3270E Sys Req path on 2026-09-17, and chose the keypad's styling the same day. Both are
-done, and the second is below as a correction to what this file predicted about it.)
+**The whole gate passes on the branch head, measured 2026-09-19:** build and typecheck clean,
+**1813 tests in 72 files**, `python3 packages/cli/scripts/drive-e.py` **10/10 configurations**
+(including the BIND gate and its timeout), `python3 packages/cli/scripts/drive-playback.py`
+**6 of 6 traces** — the sixth, `packages/fixtures/x3270/sscp-lu-data.trc`, is the first-ever
+recorded-host witness for BIND, matching 4 blocks. **No live (non-recorded) host has ever completed
+TN3270E negotiation**, so BIND/UNBIND's witness is that recording, not a network host; see
+*`playback -b` as an oracle* in `docs/live-testing.md`.
 
-1. **THE MERGE.** The plan's last step is `git merge --no-ff` to `main` and a push; **the user has
-   not authorised it.** The branch sits on `main` at `7ca0269` and the tree is clean.
-   **No commit count is quoted here on purpose** — `git rev-list --count main..HEAD` is the answer,
-   and a number written down goes stale on the next commit, which is the same defect as a stale line
-   citation and it bit this very paragraph twice. When told: re-run the whole gate **on the merge
-   commit**, not only on the branch — that is what the last three merges did.
+**A REAL GAP THIS WORK SURFACED, NOT FIXED HERE, AND NOT IN SCOPE FOR TASK 14 (docs):** a host that
+withdraws TN3270E by sending `IAC WONT TN3270E` (the wrong-way-round form of the already-fixed
+`IAC DONT TN3270E` case) gets no reply from `TelnetLayer`'s `St.Wont` handler
+(`packages/core/src/telnet.ts`), because that handler only reacts to an option in `hisOpts`, and
+TN3270E is in `myOpts`. `packages/fixtures/x3270/wont-tn3270e.trc` is a real trace of exactly this,
+and `drive-playback.py`'s case for it does not assert past the 3rd block, so the gap is real and
+does not manufacture a false pass. x3270 has a named special case for it
+(`Common/telnet.c:1879-1889`, "Ugly hack for hosts that send WONT TN3270E instead of DONT
+TN3270E"). Recorded here as a follow-up for whoever next touches `telnet.ts`.
+
+**ONE THING IS WAITING ON THE USER. Do not do it unasked.**
+
+1. **THE MERGE.** Task 15 of the bind-image plan is the final gate re-run and `git merge --no-ff`
+   to `main`, then a push; **the user has not authorised it, and it is out of scope for the docs
+   task (Task 14) that produced this note.** **No commit count is quoted here on purpose** —
+   `git rev-list --count main..HEAD` is the answer, and a number written down goes stale on the
+   next commit, which is the same defect as a stale line citation and it has bitten this file
+   before. When told: re-run the whole gate **on the merge commit**, not only on the branch — that
+   is what every merge on this project so far has done.
+
+**EVERYTHING BELOW THIS POINT, DOWN TO *THE STATE OF THE TREE*, PREDATES THE BIND-IMAGE BRANCH AND
+DESCRIBES ALREADY-MERGED WORK.** It is left as-is except where a specific number or claim about
+BIND-IMAGE needed correcting in place (marked where it happens) — the keypad's styling, Sys Req's
+byte layout and the z/VM host findings are unaffected by this branch and do not need re-deriving.
 
 **DONE, NOT WAITING: THE KEYPAD'S STYLING.** The user chose **inverse video on a spaced grid** on
 2026-09-17, having rejected a proportional font — measured, not argued: Helvetica's capital `I` is a
@@ -58,8 +84,9 @@ first reading.
 
 **THEN: `IBM-DYNAMIC`, which the user scheduled IMMEDIATELY AFTER THE KEYPAD on 2026-09-16**, then
 (4) Programmable Symbol Sets + VMGIF. `IBM-DYNAMIC` is the one remaining TN3270E item with a live
-path today: TK5's TSO issues a Read Partition to any `-E` client. **BIND/UNBIND** and **printer
-sessions** stay unscheduled and have no *live* path ~~at all, both hosts refusing option 40~~ —
+path today: TK5's TSO issues a Read Partition to any `-E` client. **BIND/UNBIND is scheduled and
+now built, on the `bind-image` branch — see *START HERE* above.** It and **printer
+sessions** had no *live* path ~~at all, both hosts refusing option 40~~ —
 **no host that COMPLETES the negotiation is reachable; see the next paragraph, which changes
 what "no live path" means without yet removing the obstacle.** ~~And no path at all.~~
 **CORRECTED 2026-09-17: "no live path" no longer means "no path". `playback -b` replays a
@@ -119,10 +146,10 @@ workarounds** — `s3270 v4.5ga6`, OpenSSL 3.6.4, at
   ever been observed from any host. Probe questions 1-3 stay open.
 
 **DONE, 2026-09-17 — `playback -b` IS NOW A COMMITTED HARNESS: `packages/cli/scripts/drive-playback.py`,
-5 of 5 cases, and it found nothing wrong with our client.** Run it by hand like the other
+then 5 of 5 cases, and it found nothing wrong with our client.** Run it by hand like the other
 harnesses (it needs the out-of-tree suite3270 build, so it is NOT in `npm test`); its four
-invariants are pinned by `packages/tui/test/harness-flags.test.ts`, which is. What it proves and
-what it CANNOT are different claims, so quote them apart:
+invariants are pinned by `packages/tui/test/harness-flags.test.ts`, which is. What it proved and
+what it could NOT, as of 2026-09-17, are different claims, so quote them apart:
 
 - **PROVED, against five different real hosts' recorded bytes** (two commercial VTAM systems
   among them): our `IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` including the model the flag
@@ -131,15 +158,16 @@ what it CANNOT are different claims, so quote them apart:
   and reversing the DEVICE-TYPE operand order each turn all five cases red. **The operand-order
   bug is the one real s3270 accepts SILENTLY** (`DEVICE-TYPE ??8`, then a stall), so this is new
   coverage, not a second opinion on what unit tests already catch.
-- **NOT PROVED, AND THIS ORACLE CANNOT: everything from FUNCTIONS onward, which is still
-  questions 1-3.** **ALL 46 traces with an emulator side request BIND-IMAGE**, and we decline it
-  by design (granting it and getting no BIND hangs a real client — measured). So our 10-byte
-  `fffa280307020405fff0` meets an expected 11-byte `fffa28030700020405fff0` and the match stops
-  one block short in EVERY trace, `devname_success.trc` included. **Confirmed to be the only
-  difference** by temporarily adding `BIND_IMAGE` to `REQUESTED_FUNCTIONS`: the FUNCTIONS block
-  then matched byte-for-byte and play advanced. **That change was reverted and must not be
-  committed to make these pass** — it would trade a measured hang for a green harness.
-  So the BIND in `devname_success.trc` is still unreached, and BIND/UNBIND still has no witness.
+- **NOT PROVED THEN, AND THIS IS NOW STALE — CORRECTED ON THE `bind-image` BRANCH, 2026-09-19:**
+  this bullet used to say we decline BIND-IMAGE by design and so every trace mismatches one block
+  short of FUNCTIONS. **That decision was reversed**: the hazard (granting BIND-IMAGE and getting
+  no BIND hangs a real client) was real but no host in x3270's 71-trace collection ever triggers
+  it — so BIND-IMAGE is now requested, and the hang is refused with a 5-second timeout instead of
+  by never asking. `devname_success.trc` (`PLU-name 'IBM0SMAJ'`) turned out not to be the witness
+  this unlocked — it needs NEW-ENVIRON, which this client does not implement — but
+  `sscp-lu-data.trc` (`PLU-name 'IBM0SMAA'`, a different real host) is, reaching 4 matched blocks
+  including a real BIND. See `docs/live-testing.md`'s *`playback -b` as an oracle* for the current
+  6-of-6 measurement, and the bind-image plan's own AS BUILT notes for the decision record.
 
 **THREE PROPERTIES OF `playback` THAT CAN EACH MANUFACTURE A FALSE PASS, all measured here:**
 1. **IT EXITS 0 WHETHER OR NOT IT MATCHED ANYTHING.** `Common/playback.c:373` is literally
@@ -199,8 +227,9 @@ That is exactly how the fresh binary was validated before the live comparison wa
 failure mode that looks identical to success. It logged `Matched N bytes from emulator`
 throughout. **Pointing it at OUR client is the cheapest remaining path to functional TN3270E
 verification and should be tried before hunting for another host.** Two known divergences must
-be accounted for first or a mismatch will be misread: BIND-IMAGE, which we decline by design,
-and the bare DEVICE-TYPE below.
+be accounted for first or a mismatch will be misread: BIND-IMAGE, which we declined by design at
+the time this was written (**reversed on `bind-image`, 2026-09-19 — see *START HERE***), and the
+bare DEVICE-TYPE below.
 
 **A REAL DIVERGENCE FROM s3270 — NOW DECIDED BY THE USER, 2026-09-17: WE DO NOT APPEND `-E`
 UNCONDITIONALLY, AND THE DIVERGENCE STAYS.** No code changed, because our behaviour was already
@@ -408,6 +437,12 @@ renderer has stopped being shared.
 
 ## The state of the tree
 
+**THIS SECTION IS A HISTORICAL SNAPSHOT FROM THE KEYPAD BRANCH, 2026-09-17, AND THE KEYPAD IS
+NOW MERGED.** For where the tree stands today, see *START HERE* at the top of this file: `main` is
+at `d030b64`, the current branch is `bind-image` (17 commits ahead, unmerged), and the current
+count is **1813 tests in 72 files**. Nothing below this note was re-derived for that; it is kept as
+the record of the keypad branch's own numbers on its own day.
+
 **`main` at `7ca0269`, pushed** — an earlier version of this line said `eb9c306`, which was
 `main`'s tip when the paragraph was written and is now one commit behind it. **The branch
 `keypad-and-special-keys` is ahead of it and is NOT MERGED — see *START HERE*.** Working tree clean.
@@ -481,6 +516,9 @@ node packages/web/scripts/browser-shot.mjs   # 2/2 cases matched the GUI's own g
 python3 packages/tui/scripts/pty-smoke.py    # 12/12, and it needs no X at all
 python3 packages/cli/scripts/drive-playback.py  # 5/5 traces; needs the suite3270 build, no host
 ```
+
+**The `drive-playback.py` figure above is superseded on `bind-image`: 6/6 traces**, the sixth
+(`sscp-lu-data.trc`) added as the recorded-host BIND witness. See *START HERE*.
 
 **These two need something this sandbox does not always have**, which is why they are listed apart
 rather than folded into a single count:
@@ -680,12 +718,14 @@ REJECT`. **So the qualifier changes shape but does not lift: our client is EXONE
 exchange and still NOT functionally verified.** Never quote the first half without the second.
 **The oracle that can lift it is `playback -b`, not a host** — details in *Where things stand*
 above. Two known divergences from s3270 to account for before reading any mismatch as a bug:
-BIND-IMAGE, declined by design, and the bare DEVICE-TYPE under `-model`.
+BIND-IMAGE, declined by design at the time this was written (**reversed on `bind-image`,
+2026-09-19 — see *START HERE***), and the bare DEVICE-TYPE under `-model`.
 
-`packages/cli/scripts/drive-e.py` is the committed driver: seven configurations,
-asserting on the harness's exit code and the wire log. Our `DEVICE-TYPE REQUEST` is
-byte-identical to s3270's; `FUNCTIONS REQUEST` is its list minus BIND-IMAGE, pinned as
-an ABSENCE so that starting to ask for it would fail.
+`packages/cli/scripts/drive-e.py` is the committed driver: seven configurations at the time this
+was written, **now ten on `bind-image`**, asserting on the harness's exit code and the wire log.
+Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` used to be its list
+minus BIND-IMAGE, pinned as an ABSENCE — **on `bind-image`, BIND-IMAGE is pinned as PRESENT
+instead, and three of the ten configurations exercise the BIND gate and its timeout.**
 
 **STAGE 3 IS BUILT, 2026-09-14. Both parts.** `packages/frontend` exists (graph is
 `core ← frontend ← { cli, tui, gui }`, and `tui` no longer depends on `cli`), and
@@ -838,15 +878,18 @@ can dispatch on `kind` when PS lands); MF orders (parsed, counted as
 support **beyond keypad buttons, which the keypad branch added — no click-to-place-cursor, no
 drag-to-select, no light pen**; the Electron GUI (stage 3, since DONE); and the web front end
 (**also since DONE**). **TN3270E (stage 2b) is
-now done** — see *Where things stand*. Within it, BIND/UNBIND stays undone (we decline
-BIND-IMAGE by design) and the **printer session now has its harness but nothing has
+now done** — see *Where things stand*. Within it, BIND/UNBIND, once undone because we declined
+BIND-IMAGE by design, **is now built on the `bind-image` branch (not yet merged) — see *START
+HERE*** — and the **printer session now has its harness but nothing has
 driven it**.
 
 ## Roadmap, from the user 2026-08-25
 
 **STATUS AS OF 2026-09-17 — the list below is kept as WRITTEN, not rewritten.** This file's practice
 is to leave superseded items in place, because that is what let a correction land cleanly once
-before. Read the status here and the reasoning there.
+before. Read the status here and the reasoning there. **One cell is now stale in a way that would
+read as a live bug if left silent: item 1's "except BIND/UNBIND" is superseded by the `bind-image`
+branch — BIND/UNBIND is built, see *START HERE*.** The table itself is left as written below.
 
 | item | state |
 | --- | --- |
@@ -929,8 +972,10 @@ the 3279 screen directly.
      not the negotiation, and "the host's fault" is an exoneration rather than a
      verification.** The genuinely unbuilt parts that a real host would unlock:
      BIND-IMAGE with a real
-     BIND (deliberately not requested — granting it and sending no BIND stops s3270 entering
-     3270 mode at all), the printer session, and LU/device names actually being honoured —
+     BIND (at the time this was written, deliberately not requested — granting it and sending
+     no BIND stops s3270 entering 3270 mode at all; **now requested regardless, on the
+     `bind-image` branch, with a 5-second timeout instead of a hang — see *START HERE***),
+     the printer session, and LU/device names actually being honoured —
      ~~and an LU name is now also the **diagnostic** for why z/VM 4.4 refuses.~~ **THAT LAST
      CLAUSE IS DEAD: s3270 sent `IBM-3278-2-E CONNECT VTAM` to this host and was refused too,
      so an LU name diagnoses nothing here.** And BIND no longer needs a host at all —

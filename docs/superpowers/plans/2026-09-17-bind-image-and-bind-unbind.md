@@ -190,6 +190,10 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: matched the plan exactly.** `Tn3270eUnbindReason` in `packages/core/src/constants.ts:103-115`
+has all eleven values, the same gaps (0x03-0x06, 0x0d), and NORMAL at 0x01, not 0x00. No
+divergence to record.
+
 ---
 
 ## Task 2: `maxRu` and the BIND offsets
@@ -370,6 +374,22 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+**AS BUILT: three divergences from this task's draft, all corrections rather than new decisions.**
+`packages/core/src/bind.ts` as committed:
+1. **The mantissa spans bits 4-7, not bits 4-6 as this task's `maxRu` doc comment says.** The code
+   itself (`(c >> 4) & 0x0f`) was always right; only the prose above it was off by one bit. The
+   committed comment says "spanning bits 4-7" explicitly.
+2. **The `& 0x0f` mask IS unfalsifiable, exactly as Step 5 below predicted before writing any
+   code** — and the committed comment states this as "transcription fidelity... not a behavioural
+   guard" rather than leaving it as an implicit claim. No test asserts on it; the mutation-check in
+   Step 5 targets the validity flag instead, as instructed.
+3. **`BIND_PLU_NAME_MAX` is exported SEPARATELY from `BIND_OFF`, not as a member of it** —
+   diverging from this task's own `BIND_OFF.PLU_NAME_MAX` (see `:255`, `:304`). The committed
+   comment explains why: x3270's `include/3270ds.h:442` names it `BIND_PLU_NAME_MAX`, deliberately
+   dropping the `_OFF_` infix every true offset carries, because it is a length cap and not an
+   offset. Task 4's `decodePluName` uses the hoisted constant; **the plan's own Task 4 draft
+   (`namelen > BIND_OFF.PLU_NAME_MAX`) is stale against this** — see Task 4's AS BUILT note.
 
 ---
 
@@ -630,6 +650,9 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: `decodeDims`'s switch matches this task's draft exactly**, including the 0x7e case's
+comment about deliberately not reading bytes 22-23. No divergence in this task itself.
+
 ---
 
 ## Task 4: The PLU name
@@ -774,6 +797,28 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: the Step 4 IMPLEMENTER callout was investigated and resolved — the plan's own
+rearrangement was correct, but the guard is a deliberate, documented departure from x3270's
+literal source, not merely an algebraic restatement of it.** x3270's C guard is
+`buflen > BIND_OFF_PLU_NAME + namelen` (strict `>`). The plan's Step 3 draft rearranged that to
+`body.length <= BIND_OFF.PLU_NAME + namelen - 1` (reject), which accepts at
+`body.length >= PLU_NAME + namelen` — one byte more permissive than x3270's own `>`. The committed
+code (`bind.ts:185`, `if (body.length < BIND_OFF.PLU_NAME + namelen) return '';`) keeps that same,
+more permissive bound, and says so explicitly in a comment headed "DELIBERATE DEPARTURE FROM
+x3270's LITERAL BOUND": copying `namelen` bytes from offset 28 only touches indices up to
+`28 + namelen - 1`, so `buflen >= 28 + namelen` is everything the copy needs — x3270's `>` refuses
+a buffer that ends exactly on the name's last byte even though every byte the copy would read is
+present. Matching x3270 verbatim would fail this file's own "decodes EBCDIC" test, whose `withName`
+helper builds a buffer sized to exactly `PLU_NAME + bytes.length` — precisely the boundary x3270's
+stricter guard would refuse. **So the departure is intentional, tested, and load-bearing, not a
+bug carried over from a misreading of the source.** Separately: `decodePluName` uses the hoisted
+`BIND_PLU_NAME_MAX`, not `BIND_OFF.PLU_NAME_MAX` as this task's Step 3 draft has it — see Task 3's
+AS BUILT note. The fourth uncertainty this plan flagged before handoff (`cp037`'s decode method,
+Self-Review item 2) also checks out as written: `decodePluName` calls `cp037.decode(slice)`
+(`bind.ts:187`), and `cp037` is the `CodePage` instance exported from `codepage.ts:69`, exactly as
+this task's own Step 3 text already resolved it (`:761`) — no divergence, listed here only because
+Task 14's own Step 4 names this as one of the four uncertainties to account for.
+
 ---
 
 ## Task 5: `parseUnbind`
@@ -876,6 +921,8 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+**AS BUILT: matched the plan exactly.** No divergence in this task.
 
 ---
 
@@ -1173,6 +1220,15 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: this task's own doc-comment cites the wrong line range for x3270's `bind_limit`
+check.** The plan (and the first version of the committed comment) cited `Common/telnet.c:2523-2556`.
+The committed `acceptBindDims` in `packages/core/src/bind.ts:242-244` corrects this to
+`telnet.c:2526-2557` — off by three at the top and one at the bottom — and says explicitly that
+this was "verified against the source, not just the plan citing it." The four-way check itself
+(default-over, default-under, alternate-over, alternate-under) and the model-2-pins-to-24x80
+consequence match the plan exactly, including the "not a bug" framing. `Screen.setSizes` matches
+the plan's draft with no divergence.
+
 ---
 
 ## Task 7: Request BIND-IMAGE, and the blast radius
@@ -1320,6 +1376,19 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+**AS BUILT: the Step 4 IMPLEMENTER callout was investigated, and the plan's own guess about the
+outcome was wrong — corrected in the committed test's own comment, not silently.** The callout
+asked whether the old `:640` assertion (`s3270Funcs.filter(f => f !== BIND_IMAGE)`, a 3-element
+array) would have passed VACUOUSLY once BIND-IMAGE was added to `REQUESTED_FUNCTIONS`, or failed
+loudly. `packages/core/test/tn3270e.test.ts:648-656`'s own comment settles it: it failed LOUDLY —
+comparing the new 4-element list against the still-filtered 3-element one produced a length
+mismatch `toEqual` caught, "reporting the extra `0`." The plan's Step 4 draft asserted the vacuous
+outcome as a claim to be checked; the committed comment states the loud-failure outcome as the
+finding, matching what the IMPLEMENTER note asked for. **Also corrected in the same rewrite: three
+tests lost their subject, not one** — the committed comment frames this as "a flipped default's
+blast radius includes tests that still run and still compare something, but no longer compare the
+RIGHT thing," a broader statement than the plan's narrower "vacuous or not" framing.
 
 ---
 
@@ -1505,6 +1574,34 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: two divergences, one about WHERE the tests live and one about HOW dispatch works.**
+
+1. **This task's "Files" line and Step 2's sketch both say `packages/core/test/session.test.ts`.
+   The gate's tests actually landed in `packages/core/test/tn3270e-session.test.ts`**, a file that
+   already existed at the plan's own baseline commit `40e9a58` (confirmed via `git log`) and is
+   where every other TN3270E-negotiation-and-session test already lived. The plan named the wrong
+   file throughout Tasks 8-10; `session.test.ts` itself was not touched by any of them.
+2. **The dispatch is gated on the granted FUNCTION, not the data type alone — a real departure
+   from this task's own sketch, corrected against x3270's source rather than the plan.** Step 4's
+   sketch above dispatches `BIND_IMAGE`/`UNBIND` data types unconditionally. The committed
+   `handleRecord` (`packages/core/src/session.ts:492-516`) instead gates both on
+   `this.bindImageGranted()` first, with a comment explaining why: x3270's own `case
+   TN3270E_DT_BIND_IMAGE` and `case TN3270E_DT_UNBIND` each open with a check against the
+   negotiated function (`Common/telnet.c:2709`, `:2746`) before doing anything else, and a record
+   carrying that data type on a session that never negotiated the function is "not a BIND we are
+   owed" — it falls through to the same "not implemented, dropped" trace as any other unhandled
+   type. Confirmed against a regression in `tn3270e-session.test.ts` where `negotiateE()` grants
+   RESPONSES and SYSREQ only, so a BIND-IMAGE-data-type record there must stay a "not implemented"
+   trace rather than becoming a bind.
+
+**The session test harness's actual shape**, which the Step 2 IMPLEMENTER callout above flagged as
+unreproducible from a grep: the negotiating helper is `conn.negotiateE(grant)` on a
+`FakeConnection` (default grant `[RESPONSES, SYSREQ]`; pass `GRANT_BIND_IMAGE` for the gate tests),
+defined in `tn3270e-session.test.ts` itself — not a bare `negotiate` function as the plan's sketch
+implies. `screen.textAt` in the plan's sketch was a guess; it does not exist as such in the
+committed tests, which read the screen through whatever accessor that file's existing tests already
+used. Read `tn3270e-session.test.ts` directly rather than trusting either name from this plan.
+
 ---
 
 ## Task 9: The timeout, and it must be diagnosable
@@ -1646,6 +1743,22 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+**AS BUILT: the Step 3 IMPLEMENTER callout's own suggestion was followed exactly — clearing lives
+in `forgetTn3270e()`, the single existing place, not at three call sites — and its second half
+uncovered a real shape difference from the sketch.** `pendingBindRecord` is not a bare
+`Uint8Array` as Tasks 8-9's sketches have it; it is `{ wants: Tn3270eHeader; body: Uint8Array }`
+(`packages/core/src/session.ts:148`), because `executeRecord` takes **two** arguments, not one:
+`executeRecord(body, wants)`. The reason, stated in `executeRecord`'s own comment (`:544-556`): the
+retained and live paths must be indistinguishable all the way through, including which response
+flags the record's own TN3270E header asked for — "a host that asked for ALWAYS-RESPONSE on the
+withheld record still gets one." A withheld record that dropped its header's `wants` before
+retaining would silently downgrade that record's response behaviour relative to an identical one
+that arrived after BIND. `armNoBindTimer` (`:928`) calls
+`executeRecord(held.wants, held.body)`-shaped code accordingly. `forgetTn3270e` (`:737-742`)
+clears `noBindTimer` (via `clearNoBindTimer()`), `bound`, and `pendingBindRecord` together, exactly
+as the callout asked, and is reached from both `handleClose()` (`:454`) and the DONT-teardown path
+(`:703`) — the two paths memory already flagged as a recurring split-teardown risk.
 
 ---
 
@@ -1808,6 +1921,24 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: `modelAlternate`/`modelSize()` and `bindLimit` were added exactly as the Step 3
+IMPLEMENTER callout prescribed — but the same callout's caution about a hard-to-catch defect found
+a SECOND, more consequential one the plan never anticipated: `useDefaultSize()` alone is NOT
+x3270's `ctlr_erase(false)`.** `handleBind` and `handleUnbind`
+(`packages/core/src/session.ts:812-897`) both call `this.screen.useDefaultSize();
+this.screen.clear();` — an explicit, unconditional second call the plan's Step 3 sketch does not
+have. The reason, in `handleBind`'s own comment: `Screen.resize()` (which `useDefaultSize()` calls)
+returns early and skips its own allocate-and-blank whenever the new default equals the CURRENT
+geometry — but x3270's `ctlr_erase` calls the actual clearing `ctlr_clear(true)`
+UNCONDITIONALLY (`Common/ctlr.c:552`), *before* its own early-return for an unchanged size
+(`:565-567`). Without the explicit `clear()`, a BIND that keeps the default size and changes only
+the alternate — "the common case for a same-application reconnect" — would leave the operator's
+last screen painted instead of erased. This was found by reading `ctlr.c` directly rather than
+trusting this task's own sketch, and is a materially different and more consequential finding than
+the one the IMPLEMENTER callout asked the reader to watch for (which was about `modelAlternate`,
+and which also landed correctly: `packages/core/src/session.ts:176`, `readonly modelAlternate`,
+captured in the constructor and exposed via `modelSize()` at `:228-230`).
+
 ---
 
 ## Task 11: `-bind-image` and `-bind-limit` in all four front ends
@@ -1947,6 +2078,23 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: matched the plan closely; one location difference, consistent with Task 8's.** All
+four parsers (`packages/cli/src/main.ts:81-96`, `packages/gui/src/args.ts:98-113`,
+`packages/tui/src/main.ts:136-151`, `packages/web/src/args.ts:160-174`) added `-bind-image` and
+`-bind-limit` in each file's own idiom exactly as instructed — `web/src/args.ts` uses its `v`
+value-extraction helper rather than the `switch`-with-`i += 1` shape the other three use.
+`requestedFunctions(bindImage: boolean)` was added as a function, not a mutation of
+`REQUESTED_FUNCTIONS` (`packages/core/src/tn3270e.ts:148-152`), and `addsNothing` is judged against
+`st.requested`, not the constant (`tn3270e.ts:138-139, 246`), exactly per the plan's instruction.
+The Step 5 interaction test ("backs off when a host grants BIND-IMAGE we did not ask for") exists
+verbatim in spirit but landed in `packages/core/test/tn3270e-session.test.ts:111-134` rather than a
+bare unit test against `tn3270e.ts` directly — the same file-location pattern already noted in
+Task 8, and for the same reason: it needs a `Session`/`FakeConnection` harness (`newSession({
+bindImage: false })`) to observe the wire-level `WONT TN3270E` refusal, not just the state-machine
+`backedOff` phase the plan's Step 5 sketch checked. A second test at `:136-152` additionally pins
+the exact FUNCTIONS REQUEST byte sequence with BIND-IMAGE omitted, which the plan did not ask for
+but which its own comment justifies as "a mutation check on the wire bytes, not just on the flag."
+
 ---
 
 ## Task 12: `drive-e.py` — exercise the gate against a server
@@ -2029,6 +2177,28 @@ Generated with AI
 Co-Authored-By: SLAC AI"
 ```
 
+**AS BUILT: matched the plan's intent; one structural choice differs from its sketch, for a reason
+the plan's own Step 2 anticipated but did not decide.** Rather than extending `--send-bind` to take
+an optional geometry, `e-server.py` added a second, independent flag, `--bind-size`
+(`e-server.py:377-380`), backed by a module-level `SIZED_BIND` constant (`:70-90`) with the exact
+28-byte layout, size code `0x7f`, and `24x80`/`32x80` geometry the plan specified — `--send-bind`'s
+existing 5-byte BIND is untouched. The file's own comment (`:188-194`) gives the reason: "TWO
+INDEPENDENT FLAGS, NOT ONE WITH A MODE ARGUMENT" avoids teaching `--send-bind` a new argument just
+to preserve its current behaviour, and the two may be combined. All three specified cases landed
+in `drive-e.py` verbatim in effect (`:174-252`), plus a bonus case for `-bind-image off`
+(`:253-`); `drive-e.py` totals exactly 10 `Case(` entries, confirming the plan's predicted
+7-existing + 3-new count. The BIND-follows case additionally caught a real interaction the plan's
+sketch did not call out: `-model 3278-2-E`'s alternate (24x80) is smaller than the BIND's requested
+32x80, so `acceptBindDims` refuses it and traces `'BIND alternate 32x80 exceeds model 24x80;
+keeping our geometry'` — the case asserts on this refusal deliberately, "since a silent acceptance
+here would mean the range check never ran" (`:180-182`), turning what could have been a
+false-positive pass into a second live exercise of Task 6's range-check. The timeout case
+(`:209-252`) uses `Wait(InputField,10)`, a 10-second per-case allowance against the 5-second
+deadline, and asserts on two exact trace lines from both ends of the gate (armed, then released by
+timeout) rather than trusting "the screen eventually arrived" — the IMPLEMENTER callout's own
+"Sys Req trap" (indistinguishable symptoms for the timeout firing vs. the gate never engaging) is
+addressed head-on in the case's own comment, not just heeded silently.
+
 ---
 
 ## Task 13: `drive-playback.py` — the real-host witness
@@ -2102,6 +2272,32 @@ Generated with AI
 
 Co-Authored-By: SLAC AI"
 ```
+
+**AS BUILT: the plan's Step 2 candidate, `devname_success.trc`, is NOT the trace that shipped —
+`sscp-lu-data.trc` is, and the reason is structural, not a preference.** `devname_success.trc`'s
+host requires NEW-ENVIRON (telnet option 39) for its `-devname` feature: it sends `RCVD DO
+NEW-ENVIRON` and expects a `NEW-ENVIRON SEND USERVAR "DEVNAME"` reply before it will even offer
+DEVICE-TYPE, and this client implements no NEW-ENVIRON at all (no `TelnetOpt` entry in
+`constants.ts`, no handling in `telnet.ts`). A direct run (measured 2026-09-18, recorded in
+`drive-playback.py:213-221`) mismatches after 1 matched block: the client replies `fffc27` (WONT
+NEW-ENVIRON) where the trace expects `fffb27` (WILL). `sscp-lu-data.trc` was substituted because it
+reaches a real BIND WITHOUT NEW-ENVIRON — recorded by x3270 v4.3pre1 against its own local test
+target, no `-devname` — and the PLU name it carries is **`IBM0SMAA`, not the plan's assumed
+`IBM0SMAJ`** (`IBM0SMAJ` belongs to `devname_success.trc`, still exercised separately by
+`packages/core/test/bind.test.ts:99-108`, which is unaffected by this substitution since that test
+reads the trace bytes directly rather than through the playback harness). Geometry also differs
+from the plan's guess: default 24x80, alternate **43x80** (not 32x80). The substitute case
+additionally reaches something none of the plan's five original cases could: a host that
+NARROWS the function set (`FUNCTIONS REQUEST BIND-IMAGE` alone, not the four we asked for), which
+is documented as exercising `addsNothing`'s counter-offer-ACCEPTANCE branch — the previously-untested
+real-host complement to Task 11's counter-offer-REJECTION test. The result count matches the plan's
+prediction exactly: **6/6**, with `sscp-lu-data.trc` matching **4 blocks (3, 19, 11, 8 bytes)**
+against the other five's 3. `devname_success.trc` itself was moved into `EXCLUDED` with the full
+measured reason on record (`:280-286`), following this file's own stated policy that "we did not
+test it" and "it cannot be tested" are different claims. The three fake-pass caveats the plan's
+Step 3 asked to preserve are all present verbatim: the `exit(0)` regardless-of-match quirk
+(`:18-`), the `stdbuf -oL`/no-`fflush` handling (`:350-353`), and the one-trace-one-client-version
+framing.
 
 ---
 

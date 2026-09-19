@@ -29,6 +29,13 @@ and the Recording log says what happened when they were run.
   test-request path having landed. It is the first item on that list, and it needs a **trace**, not
   a screenshot: a host is free to ignore a test request, so "nothing visible happened" would not
   distinguish a working key from the inert one it used to be.
+- **BIND-IMAGE, BIND and UNBIND have NO live-host witness either, 2026-09-19, and for the same
+  reason as everything else past DEVICE-TYPE: no reachable host completes a TN3270E negotiation.**
+  We now request BIND-IMAGE, parse BIND and UNBIND, and honour BIND's geometry within `-model`'s
+  limits (`-bind-limit off` to disable the check), with a 5-second timeout that executes a withheld
+  frame rather than hanging the way x3270 does. The witness for all of it is a **recorded** host,
+  not a reachable one — `packages/fixtures/x3270/sscp-lu-data.trc` via `playback -b` — added to *The
+  four questions* below and to *Still to try*.
 - **VM/370 R6 (VM/CE 1.2) on `localhost:3270` — recorded 2026-08-17.** 43
   commands, 0 errors, 0 program checks. Fixture and golden committed. Five real
   bugs found and fixed; one spec claim falsified. Details in the Recording log.
@@ -1729,14 +1736,29 @@ SYSREQ CONTENTION-RESOLUTION`, `FUNCTIONS IS BIND-IMAGE`, a real BIND with
 
 ### `playback -b` as an oracle — better than what we have, and no host needed
 
-**This is the cheapest remaining route to functional TN3270E verification, and it should be
-tried before hunting for another host.** `playback -b` is strictly stronger than the in-repo
+**This was the cheapest remaining route to functional TN3270E verification, and it has now
+been tried.** `playback -b` is strictly stronger than the in-repo
 `packages/cli/scripts/e-server.py`: the harness was written by us from the RFC and x3270's
 source, so it can only check what we thought to encode, whereas `playback -b` replays a
 *recorded real host* and diffs the client's entire side of the conversation byte for byte,
-**with no network and no host**. And `s3270/Test/devname_success.trc` is a real TN3270E
-negotiation **including a BIND** — precisely the region questions 1-3 cover and z/VM 4.4
-will never reach. Recommended in `docs/HANDOFF.md` as the next step.
+**with no network and no host**.
+
+**`s3270/Test/devname_success.trc` was the original plan for this role and is NOT viable.**
+It requires NEW-ENVIRON (telnet option 39) for `-devname` — the host sends `DO NEW-ENVIRON`
+and expects `WILL` before it will even offer TN3270E's DEVICE-TYPE step — and this client
+implements no NEW-ENVIRON at all (no `TelnetOpt` entry, no handling in `telnet.ts`), so a
+direct run against it answers `WONT NEW-ENVIRON` where the trace expects `WILL` and
+mismatches after one matched block. **The real witness is
+`packages/fixtures/x3270/sscp-lu-data.trc`** (copied into the repo's own fixtures rather than
+referenced from a hand-built `~/src/suite3270-4.5` checkout, per this project's convention
+for reproducibility): a real host, recorded by x3270 v4.3pre1 against its own public test
+target, that grants BIND-IMAGE and sends a real BIND with no NEW-ENVIRON needed. It reaches
+**4 matched blocks (3, 19, 11, 8 bytes)** — the host narrowing the function set to
+BIND-IMAGE alone and our correctly adopting that narrower set, then the real BIND itself —
+where the five other committed traces stop at 3, one block short of it, each for a distinct,
+documented reason (a host `WONT`, a scripted keystroke the harness's short script never
+drives, or a BID reply this client does not implement). Driven by
+`packages/cli/scripts/drive-playback.py`, **6 of 6 cases**.
 
 ### A divergence from s3270 in our DEVICE-TYPE — recorded, not fixed
 
@@ -1807,10 +1829,18 @@ oracle* above for one that needs no host.**
    does, the positive-response path is exercised only by us asking the harness to send it
    — the same honest position retransmit is in. If a host does, check the SEQ it expects
    copied back.
-3. **Does it send a BIND we are declining to ask for, and does it assign an LU we did
-   not request?** **STILL UNANSWERED** — same reason. We deny BIND-IMAGE deliberately, so
-   a conforming host should send no BIND; one that does anyway is worth knowing about, and
-   the record is traced and dropped rather than handed to the 3270 executor.
+3. **Does it send a BIND, and does it assign an LU we did not request?** **STILL
+   UNANSWERED BY ANY REACHABLE HOST** — same reason as 1 and 2, and the question's
+   premise has changed since it was first written: **we now request BIND-IMAGE**
+   rather than declining it, so a granting host sending a BIND is the expected case,
+   not an anomaly. `sscp-lu-data.trc` (see *`playback -b` as an oracle*, below) answers
+   the shape of this question against a **recorded** host: it grants BIND-IMAGE and
+   sends a real BIND, PLU name `IBM0SMAA`, default 24x80, alternate 43x80, LU
+   unspecified in that trace. Added for a live host, still unanswered: **with what size
+   code does it BIND**, and **does it ever UNBIND with reason `BIND_FORTHCOMING`** —
+   the "another BIND is coming" case that must not be treated as a teardown? Neither
+   `sscp-lu-data.trc` nor any other trace here contains an UNBIND at all, so that half
+   of the question has no witness, recorded or live.
 4. **Does `-tn3270e off` still reach a usable session there?** **ANSWERED YES, 2026-09-17,
    and by a route the harness cannot produce** — we did not have to ask for `off`. The
    host's own `IAC DONT TN3270E` drove the backoff and the session reached z/VM's logon
@@ -1820,13 +1850,24 @@ oracle* above for one that needs no host.**
 
 ### Still to try, in order of what each would settle
 
-- **`playback -b` against `s3270/Test/devname_success.trc`, driving OUR client.** **This is
-  now the top item**, ahead of anything needing a host: it replays a recorded real host and
-  diffs the client's whole side byte for byte, the recording includes FUNCTIONS **and a
-  BIND**, and it needs no network. It is the only listed item that can touch questions 1-3.
-  See *`playback -b` as an oracle* above. Note the recording expects s3270's replies, so
-  our two known divergences — the bare DEVICE-TYPE under `-model`, and BIND-IMAGE, which we
-  decline by design — must be accounted for before a mismatch is read as a bug.
+- ~~**`playback -b` against `s3270/Test/devname_success.trc`, driving OUR client.**~~ **DONE,
+  2026-09-18/19, AND devname_success.trc TURNED OUT NOT VIABLE.** That trace needs
+  NEW-ENVIRON (telnet option 39) to reach TN3270E at all — it expects `WILL NEW-ENVIRON`
+  where we send `WONT`, since we implement no NEW-ENVIRON support whatsoever — so it
+  mismatches after one block regardless of BIND-IMAGE. The substitute,
+  `packages/fixtures/x3270/sscp-lu-data.trc` (also a real host, recorded by x3270 v4.3pre1
+  against its own public test target, no NEW-ENVIRON required), is what actually gets past
+  FUNCTIONS to a real BIND: 4 matched blocks where the other five committed cases stop at
+  3. See *`playback -b` as an oracle* below and *drive-playback.py*'s own comments for the
+  full measurement. This closes the BIND half of question 3; the UNBIND/`BIND_FORTHCOMING`
+  half still has no witness anywhere, recorded or live — no shipped trace contains an
+  UNBIND.
+- **A live host that completes a TN3270E negotiation at all, past DEVICE-TYPE.** Nothing
+  reachable from this sandbox has ever done so — both Hercules systems never offer option
+  40, and the one public host that does (z/VM 4.4) withdraws it before FUNCTIONS. Until one
+  turns up, BIND, UNBIND and LU assignment stay witnessed only by recorded traces, never by
+  a live exchange. Worth trying against the next real host: does it send a BIND, with what
+  size code, and does it ever UNBIND with `BIND_FORTHCOMING`?
 - ~~**An LU name against this host.** `Connect("LUNAME@evievm.pubvm.org:23")` is the one
   test that could distinguish explanation (a) from (b) above.~~ **NO LONGER DIAGNOSTIC,
   2026-09-17.** s3270 sent `IBM-3278-2-E CONNECT VTAM` to this host and was refused
@@ -2468,7 +2509,9 @@ host. It is a stronger oracle than our own `e-server.py` in one specific way: `e
 written by us from RFC 2355 and x3270's source, so a misreading we share with it passes; a trace is
 a recording of a real host and a known-good client, so it cannot agree with our mistakes.
 
-Committed driver: `packages/cli/scripts/drive-playback.py`, **5 of 5 cases**. Build the tools with:
+Committed driver: `packages/cli/scripts/drive-playback.py`, **6 of 6 cases** (measured
+2026-09-19; the sixth, `sscp-lu-data.trc`, is the BIND witness — see *`playback -b` as an
+oracle* below). Build the tools with:
 
 ```bash
 source /opt/lsst/software/stack/loadLSST.bash    # never paste the raw conda path; it is version-pinned
@@ -2488,30 +2531,51 @@ cd ~/src/suite3270-4.5 && make s3270 playback    # ~23 s, exit 0, no extra flags
 3. **A TRACE IS A RECORDING OF ONE CLIENT VERSION, NOT A SPECIFICATION.** See the excluded traces
    below; two of them fail against **today's s3270** just as they fail against us.
 
-### THE STRUCTURAL LIMIT: BIND-IMAGE, AND WHY WE DO NOT MAKE IT GO AWAY
+### THE FORMER STRUCTURAL LIMIT: BIND-IMAGE, RESOLVED 2026-09-19
 
-**All 46 traces with an emulator side ask for BIND-IMAGE** in FUNCTIONS (`07 00 ...`). We
-deliberately do not (`REQUESTED_FUNCTIONS`, `packages/core/src/tn3270e.ts`): granting BIND-IMAGE
-and then receiving no BIND makes a real client never enter 3270 mode, which is measured, not
-theorised. So in every trace that reaches FUNCTIONS, our 10-byte `fffa280307020405fff0` meets an
-expected 11-byte `fffa28030700020405fff0` and the comparison stops there, one block short.
+**This section used to explain why we declined BIND-IMAGE. That decision has been reversed, and
+the reasoning below is kept as the record of why, not as the current design.**
 
-**That was confirmed to be the ONLY difference**, by temporarily adding `BIND_IMAGE` to
-`REQUESTED_FUNCTIONS` and re-running: the FUNCTIONS block then matched byte-for-byte and play
-advanced to the next expectation. **The change was reverted. Do not commit it to make these traces
-go further** — it would trade a measured hang for a greener harness. The consequence to state
-honestly: **the real BIND in `devname_success.trc` (`PLU-name 'IBM0SMAJ'`) is still unreached, so
-BIND/UNBIND remains without any witness**, and probe questions 1-3 stay open.
+**All traces with an emulator side ask for BIND-IMAGE** in FUNCTIONS (`07 00 ...`). We used to
+decline it (`REQUESTED_FUNCTIONS`, `packages/core/src/tn3270e.ts`) because granting BIND-IMAGE and
+then receiving no BIND made a real client never enter 3270 mode — measured, not theorised, against
+x3270's own gate (`telnet.c:2681`). So in every trace that reached FUNCTIONS, our (then) 10-byte
+`fffa280307020405fff0` met an expected 11-byte `fffa28030700020405fff0` and the comparison stopped
+there, one block short.
 
-### WHAT THE FIVE CASES DO PROVE
+**What changed the decision: the hazard was real, but no host anywhere in x3270's 71-trace
+collection ever triggers it.** 29 of 29 hosts that grant BIND-IMAGE send a BIND in the same turn
+as FUNCTIONS, counted by bytes across all 71 traces (not by grepping decoded `< BIND` annotation
+lines — older traces carry none). The advertise-then-stay-silent case existed only in our own
+`e-server.py`, because we told it to. So BIND-IMAGE is now requested (`packages/core/src/bind.ts`,
+`session.ts`), and the hang it once justified avoiding is refused on its own terms instead of by
+never asking: a pre-BIND 3270-DATA record is retained rather than dropped, and a 5-second timeout
+executes it if no BIND arrives. **The real BIND witness this unlocked is not `devname_success.trc`**
+— that trace needs NEW-ENVIRON, which this client does not implement, and was found not viable —
+**but `packages/fixtures/x3270/sscp-lu-data.trc`**, which reaches 4 matched blocks including the
+real BIND. See *`playback -b` as an oracle*, above, for the measurement.
 
-Against five different real hosts' recorded bytes — two commercial VTAM systems among them — our
-`IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` carrying the model the flag asked for, and (on
-`wont-tn3270e.trc`, whose host sends `WONT 40` before FUNCTIONS is ever arbitrated) **the whole
-backoff to classic TN3270**. Mutation-verified twice: corrupting the device-type string, and
-reversing the DEVICE-TYPE operand order, each turn all five cases red. **The operand-order bug is
-the one real s3270 accepts SILENTLY** — it logs `DEVICE-TYPE ??8` and stalls — so this is genuinely
-new coverage rather than a second opinion on what the unit tests already catch.
+### WHAT THE SIX CASES DO PROVE
+
+Against six different real hosts' recorded bytes — two commercial VTAM systems among them — our
+`IAC WILL TN3270E`, our `DEVICE-TYPE REQUEST` carrying the model the flag asked for, our
+`FUNCTIONS REQUEST` now including BIND-IMAGE, and (on `wont-tn3270e.trc`, whose host sends
+`WONT 40` before FUNCTIONS is ever arbitrated) **the whole backoff to classic TN3270**.
+Mutation-verified twice: corrupting the device-type string, and reversing the DEVICE-TYPE operand
+order, each turn all six cases red. **The operand-order bug is the one real s3270 accepts
+SILENTLY** — it logs `DEVICE-TYPE ??8` and stalls — so this is genuinely new coverage rather than
+a second opinion on what the unit tests already catch.
+
+**A real gap this work surfaced, not yet fixed:** `wont-tn3270e.trc`'s host answers our FUNCTIONS
+REQUEST with `IAC WONT TN3270E` — a host withdrawing an option **we** enabled, spelled the wrong
+way round from the `IAC DONT TN3270E` case already fixed on this branch's parent. `telnet.ts`'s
+`St.Wont` handler only reacts to an option in `hisOpts` (options the host does); TN3270E lives in
+`myOpts` (options we do), so this case is a silent no-op — no reply, and `playback` then reports
+`Socket EOF` waiting for one. x3270 has a named special case for exactly this ("Ugly hack for hosts
+that send WONT TN3270E instead of DONT TN3270E", `Common/telnet.c:1879-1889`). It is recorded in
+`docs/HANDOFF.md` as a follow-up, not fixed here — this document and Task 14 are docs, not
+`telnet.ts` — and `drive-playback.py`'s `wont-tn3270e.trc` case does not assert on the 4th block, so
+the gap is real but does not manufacture a false pass in the 3 blocks that case does check.
 
 ### THE EXCLUDED TRACES, EACH WITH ITS MEASURED REASON
 

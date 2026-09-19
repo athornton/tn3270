@@ -164,7 +164,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1728 tests, 71 files
+npm test           # 1813 tests, 72 files
 npm run typecheck
 ```
 
@@ -448,6 +448,8 @@ assumed — see *Verification*.
 | `N:host` | no TN3270E **for that host**, s3270's spelling |
 | `LU@host` | request a specific LU by name |
 | `LUA,LUB@host` | request each in turn as rejections come back |
+| `-bind-image on\|off` | request the BIND-IMAGE function (default **on**); `off` means the gate below never closes, because it is conditional on the host having *agreed* the function |
+| `-bind-limit on\|off` | range-check a BIND's geometry against `-model` before honouring it (default **on**, matching x3270's `bind_limit` resource, `Common/glue.c:458`); `off` honours an out-of-range BIND anyway |
 
 The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
 must be **quoted** — `Connect("LUA,LUB@host")` — because the LU separator and the
@@ -459,12 +461,44 @@ rather than ignored, each pointing at the flag to use instead where there is one
 `N:` and an LU list belong to a *connection*, not to the process, so a CLI script may
 connect to a plain host and then to a TN3270E one and be right about both.
 
-**We ask for RESPONSES, SYSREQ and CONTENTION-RESOLUTION — and deliberately not
-BIND-IMAGE.** Grant BIND-IMAGE and send no BIND, and real s3270 never enters 3270 mode
-at all: the Erase/Write is delivered and silently ignored (x3270's `telnet.c:2339`).
-Granting it *with* a BIND works, and denying it works; only advertise-then-stay-silent
-hangs. Not asking is what makes that state unreachable. CONTENTION-RESOLUTION (`0x05`)
-is not in RFC 2355 at all — x3270 requests it anyway, and so do we.
+**We ask for BIND-IMAGE, RESPONSES, SYSREQ and CONTENTION-RESOLUTION.** Grant
+BIND-IMAGE and send no BIND, and real s3270 never enters 3270 mode at all: the
+Erase/Write is delivered and silently ignored (x3270's `telnet.c:2339`, and the gate
+at `:2681` that drops 3270 data until `tn3270e_bound`). That hazard is real and we do
+not deny it — but 29 of 29 hosts in x3270's own trace collection that grant
+BIND-IMAGE send a BIND in the same turn as FUNCTIONS (counted by bytes across all 71
+traces, not by grepping decoded `< BIND` lines, which older traces do not carry), and
+the advertise-then-stay-silent case exists only in our own `e-server.py`, which we
+configured to do it. So we ask for the function and refuse to inherit the hang
+instead: a 3270-DATA record that arrives before any BIND is **retained, not dropped**,
+and a **5-second timeout** (`-bind-image` cannot change the duration, only whether the
+gate exists at all) executes it at our own geometry if no BIND shows up. x3270 has no
+such timeout and would simply sit there.
+
+**Why 5 seconds and not one round-trip.** Every host in x3270's traces binds
+immediately, so a much shorter deadline would satisfy all of them — but some of this
+client's users are on real 370-class hardware (P/370s and similar), not an emulator,
+and that hardware is slow and has no other working client. A short timeout would
+punish exactly the users who can least afford it. The constant is `NO_BIND_TIMEOUT_MS`
+in `packages/core/src/bind.ts` and is deliberately easy to find for anyone who needs it
+longer.
+
+**A BIND may resize the screen mid-session, and we honour it — geometry included.**
+`-bind-limit on` (the default) range-checks a BIND's rows/cols against `-model` before
+applying them, matching x3270's `bind_limit` resource: the upper bound is the
+configured model, the lower bound is 24x80 (model 2). **On a model-2 session those two
+bounds are the same number**, so a BIND asking for anything other than exactly 24x80 is
+refused and our own geometry stands. **This is a safety rail, not a missing feature**:
+with the limit on, BIND can only ever *narrow* a larger model toward 24x80, never grow
+one past what `-model` configured — growing past the model is a separate, unbuilt
+feature (`-oversize`)'s job, and letting BIND do it here would silently turn this
+feature into that one. A user who sees a refused BIND while running `-model 3278-2`
+has not found a bug; `-bind-limit off` honours the BIND's geometry anyway. UNBIND
+reverts the screen to the model's own geometry, not to whatever the previous BIND left
+it at.
+
+CONTENTION-RESOLUTION (`0x05`) is not in RFC 2355 at all — x3270 requests it anyway,
+and so do we.
 
 Two things worth knowing:
 
@@ -687,13 +721,16 @@ Done:
    implemented*.
 
 6. **TN3270E proper** — the telnet option (40), DEVICE-TYPE/FUNCTIONS subnegotiation,
-   the data header, SNA responses, SYSREQ and device-name (LU) selection. Separated from
-   item 2 deliberately: measurement shows TSO needs neither the option nor any of this,
-   so bundling them would have delayed a working TSO session for no benefit. **Done
-   except BIND/UNBIND, and it is the first stage with no live-host verification path** —
-   neither Hercules system offers the option, and the one public host that does withdraws
-   it (its own fault: real s3270 is refused too), so it is checked against real s3270 and
-   an in-repo server instead. See *TN3270E*.
+   the data header, SNA responses, SYSREQ, device-name (LU) selection, and now
+   BIND-IMAGE with BIND/UNBIND. Separated from item 2 deliberately: measurement shows
+   TSO needs neither the option nor any of this, so bundling them would have delayed a
+   working TSO session for no benefit. **Done, including BIND/UNBIND**, and it remains
+   the stage with no *host* verification path for anything past DEVICE-TYPE — neither
+   Hercules system offers the option, and the one public host that does withdraws it
+   (its own fault: real s3270 is refused too) before FUNCTIONS. What stands in for a
+   host is a **recorded** one: x3270's `playback -b` replays a real host's TN3270E
+   negotiation including a real BIND, and our client is diffed against it byte for
+   byte. See *TN3270E* and *Verification*.
 
 7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
    an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
@@ -810,9 +847,14 @@ worse than one that says which quarter is missing.
   with no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`.**
   **That EXONERATES our client on that one exchange; it does NOT verify our TN3270E** — the
   host abandons before FUNCTIONS for s3270 too, so FUNCTIONS, BIND and LU assignment remain
-  unwitnessed by any host. Bytes and next steps: `docs/live-testing.md`, *TN3270E against a
-  real host*. What is still missing within it: **BIND/UNBIND** (we decline BIND-IMAGE by
-  design) and **printer sessions**, whose harness now exists.
+  unwitnessed by any *reachable* host. **No reachable host completes a TN3270E negotiation
+  at all**, so the witness for FUNCTIONS, BIND-IMAGE and BIND is a *recorded* host instead:
+  x3270's `playback -b` replaying `packages/fixtures/x3270/sscp-lu-data.trc`, a real host
+  that grants BIND-IMAGE and sends a real BIND (PLU name `IBM0SMAA`, MaxSec-RU 1024,
+  MaxPri-RU 3840, default 24x80, alternate 43x80). Bytes and next steps:
+  `docs/live-testing.md`, *TN3270E against a real host*. What is still missing: a **printer
+  session**, whose harness now exists, and a live UNBIND with `BIND_FORTHCOMING`, which no
+  trace or reachable host has produced.
 - **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
   on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
   between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
@@ -898,7 +940,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1732 tests, 71 files (measured 2026-09-17 on `playback-oracle`) |
+| `npm test` | **pass** — 1813 tests, 72 files (measured 2026-09-19 on `bind-image`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -917,8 +959,8 @@ visible there.
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
-| TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 7 configurations via `drive-e.py`; our `DEVICE-TYPE REQUEST` byte-identical to s3270's, `FUNCTIONS REQUEST` its list minus BIND-IMAGE by design |
-| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 5 of 5 traces**, host-free, by `drive-playback.py`. Replays five different real hosts (two commercial VTAM systems) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all five, and **that operand-order bug is one real s3270 accepts silently**. **The match stops at FUNCTIONS in every trace**: all 46 traces with an emulator side request BIND-IMAGE and we decline it by design, so nothing past that point — including the real BIND in `devname_success.trc` — is verified by this |
+| TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
+| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 6 of 6 traces**, host-free, by `drive-playback.py`. Replays six different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Five of the six still stop at FUNCTIONS** (a host `WONT`, a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace). **The sixth, `sscp-lu-data.trc`, gets past FUNCTIONS to a real BIND** — 4 matched blocks (3, 19, 11, 8 bytes) where the others stop at 3, PLU name `IBM0SMAA`, giving BIND parsing its first real-host witness. The plan's original candidate for that role, `devname_success.trc`, turned out to need NEW-ENVIRON (telnet option 39), which this client does not implement at all, and was replaced |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
