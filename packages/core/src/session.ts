@@ -340,15 +340,34 @@ export class Session {
         // whole-group SEND dump reproduces on the wire (see newenviron.ts's doc comment
         // on Map iteration order).
         if (dn !== undefined) m.set('DEVNAME', dn.next());
-        // IBMELF: x3270 sends this unconditionally with NO documented meaning anywhere
-        // in its source -- `telnet_new_environ.c:237-238`'s only comment is
-        // "/* Set IBMELF. */". Sent here to match x3270's wire behaviour for a host that
-        // keys off its presence, but ITS MEANING IS UNVERIFIED: do not invent one.
+        // IBMELF IS THE EXPRESS LOGON FEATURE, identified 2026-09-20 from IBM's Personal
+        // Communications 15.0 docs (*Express Logon Feature*) -- x3270's own source
+        // documents it nowhere, `telnet_new_environ.c:237-238`'s only comment being
+        // "/* Set IBMELF. */", so this is IBM's meaning rather than a derived one.
+        //
+        // ELF replaces an interactive logon with a CLIENT CERTIFICATE: the host's TN3270
+        // server validates the certificate, obtains a passticket and logs the user on
+        // without a userid or password crossing the network. IBM is explicit that "the
+        // host session must be configured for SSL with client authentication in order to
+        // play an ELF macro" -- so client authentication is a PREREQUISITE, not an option.
+        //
+        // WE SEND `YES` AND CANNOT HONOUR IT, WHICH IS DELIBERATE BUT WORTH KNOWING.
+        // This client has no client-certificate support at all (see the README's *What is
+        // not implemented*: -certfile/-keyfile/-clientcert are all absent), so TLS here
+        // authenticates the host to us and never us to the host. A host that acted on this
+        // `YES` would ask for a certificate we cannot produce. We send it anyway because
+        // x3270 does, unconditionally, and a host keying off its mere presence should see
+        // the same bytes from both clients -- but NO HOST HAS BEEN TRIED: the user has
+        // access to none that implements ELF, so what a real one does with our `YES` is
+        // unmeasured. If client certificates are ever implemented, THIS is the variable
+        // that makes ELF reachable, and the pairing with IBMAPPLID below is how.
         m.set('IBMELF', 'YES');
-        // IBMAPPLID: x3270 reads this from its OWN environment (`getenv("IBMAPPLID")`,
-        // telnet_new_environ.c:241-244) and falls back to the literal string "None" when
-        // unset. We have no equivalent environment variable to read -- nothing in this
-        // codebase sets one -- so the fallback is all we ever send.
+        // IBMAPPLID is ELF's other half: the application ID IBM's docs describe as stored
+        // in the ELF macro and replayed with the secured connection. x3270 reads it from
+        // its OWN environment (`getenv("IBMAPPLID")`, telnet_new_environ.c:241-244) and
+        // falls back to the literal string "None" when unset. We have no equivalent
+        // environment variable to read -- nothing in this codebase sets one -- so the
+        // fallback is all we ever send, which is consistent with not supporting ELF.
         m.set('IBMAPPLID', 'None');
         // CODEPAGE: x3270 derives this from `cgcsgid & 0xffff`, formatted `%03d` when
         // under 100 else `%d` (telnet_new_environ.c:255-260). We have no cgcsgid field

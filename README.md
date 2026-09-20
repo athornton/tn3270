@@ -529,10 +529,21 @@ variables it knows, this client answers `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID`
 `CODEPAGE`. **`USER` is your local account name**, resolved from `$USER`, then `$USERNAME`,
 then the literal `UNKNOWN`. x3270 sends it unconditionally and so do we, for
 compatibility — but it only ever leaves the machine if you asked for option 39 in the
-first place by passing `-devname`, and only to a host that asks for it. `IBMELF` is sent
-as `YES` because x3270 sends it; **what it claims is genuinely undocumented** in x3270's
-source, so we match the bytes without asserting a meaning. `CODEPAGE` is `037`, derived
-from the code page actually in use rather than hardcoded.
+first place by passing `-devname`, and only to a host that asks for it. `CODEPAGE` is
+`037`, derived from the code page actually in use rather than hardcoded.
+
+**`IBMELF: YES` advertises the Express Logon Feature, and we cannot currently honour
+it.** ELF replaces an interactive logon with a **client certificate**: the host's TN3270
+server validates it, obtains a passticket, and logs you on without a userid or password
+crossing the network. IBM is explicit that the session "must be configured for SSL with
+client authentication" for it to work — so a client certificate is a prerequisite, and
+**this client has no client-certificate support at all** (see *What is not implemented*).
+A host acting on our `YES` would ask for a certificate we cannot produce. We send it
+because x3270 sends it unconditionally and a host keying off its presence should see the
+same bytes from both — but **no host has been tried**, because none reachable from here
+implements ELF. `IBMAPPLID` is ELF's other half, the application ID; we send `None`,
+which is consistent with not supporting it. If client certificates are ever built, these
+two variables are what make ELF reachable.
 
 A variable a host asks for and we do not have is answered with **the name and no value
 byte at all**, which on the wire is distinguishable from a variable whose value is empty —
@@ -867,7 +878,12 @@ worse than one that says which quarter is missing.
 - **No client certificates.** TLS works (see *Connecting over TLS*), but only for
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
-  unimplemented.
+  unimplemented. **This is also what blocks IBM's Express Logon Feature**, which uses a
+  client certificate to obtain a passticket so no userid or password crosses the network:
+  we already advertise `IBMELF: YES` over NEW-ENVIRON because x3270 does, but we could not
+  complete the exchange if a host took us up on it. See *Naming a session with `-devname`*.
+  Nothing reachable from here implements ELF, so this is an untested gap rather than a
+  measured failure.
 - **NEW-ENVIRON carries a device name and nothing else.** Option 39 is implemented (see
   *Naming a session with `-devname`*), but only for the variables a host has actually been
   recorded asking for: `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID` and `CODEPAGE`.
