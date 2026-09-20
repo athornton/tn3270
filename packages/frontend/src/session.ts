@@ -33,6 +33,12 @@ export function defaultSession(
    * `false`.
    */
   bindLimit?: boolean,
+  /**
+   * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means the session
+   * refuses telnet option 39 entirely -- see `SessionOptions.devname`. `-devname`
+   * (Task 7) passes the template string.
+   */
+  devname?: string,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
@@ -43,5 +49,6 @@ export function defaultSession(
       : {}),
     ...(bindImage === undefined ? {} : { bindImage }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
+    ...(devname === undefined ? {} : { devname }),
   });
 }

@@ -40,9 +40,24 @@ ordering turned out **unfalsifiable** (only BINARY and EOR ever enter `hisOpts`,
 so the branches are mutually exclusive by construction) — the test claiming to pin it was replaced
 by one pinning that reason.
 
-**The whole gate passes on `main` at `ed735fd`, measured 2026-09-19 on the merge commit and again
-after the WONT fix:** build and typecheck clean, **1819 tests in 72 files**, `drive-e.py` **10/10**
-(including the BIND gate and its timeout), `drive-playback.py` **6 of 6**, `pty-smoke.py` **12/12**,
+**IN PROGRESS: BRANCH `new-environ` — NEW-ENVIRON (telnet option 39) and `-devname`, 8 of 10 tasks
+done, NOT MERGED.** Spec `docs/superpowers/specs/2026-09-19-new-environ-and-devname-design.md`, plan
+`docs/superpowers/plans/2026-09-19-new-environ-and-devname.md`. Chosen over oversize because it is
+structurally isolated (one telnet option, one subnegotiation, a string — no geometry, no renderer)
+and because it makes EXISTING evidence stronger: **`drive-playback.py` went from 6 of 6 to 10 of 10,
+and the four new devname traces each match NINE blocks** where the previous best was four.
+**Three findings from x3270's own source, each a bug in the reference we deliberately do not copy:**
+its NEW-ENVIRON parser treats `EE_NAME_ESC` as a TERMINAL state (one escape inside a name
+permanently disables the delimiter — unreachable in practice, since no trace anywhere contains an
+escape byte); its `find_environ` PREFIX-MATCHES (`memcmp` with no length check, so `IBM` matches
+`IBMELF`); and `-devname`'s counter SATURATES rather than wrapping, which `devname_failure.trc`
+proves on the wire by sending `foo9` twice.
+
+**The whole gate passed on `main` at `ed735fd`, measured 2026-09-19 on the merge commit and again
+after the WONT fix:** build and typecheck clean, **1819 tests in 72 files** (the `new-environ` branch
+is at **1869 in 74**), `drive-e.py` **10/10**
+(including the BIND gate and its timeout), `drive-playback.py` **6 of 6** (**10 of 10** on the
+branch), `pty-smoke.py` **12/12**,
 `shot.mjs` **3/3**, `keys.mjs` 18 chords/16 actions, `clicks.mjs` 9 buttons/10 actions,
 `browser-keys.mjs` 13 chords/11 actions, `browser-shot.mjs` **2/2**.
 
@@ -453,7 +468,7 @@ renderer has stopped being shared.
 **THIS SECTION IS A HISTORICAL SNAPSHOT FROM THE KEYPAD BRANCH, 2026-09-17, AND THE KEYPAD IS
 NOW MERGED.** For where the tree stands today, see *START HERE* at the top of this file: `main` is
 at `ed735fd` and is the only branch (bind-image is merged and deleted), and the current
-count is **1819 tests in 72 files**. Nothing below this note was re-derived for that; it is kept as
+count is **1869 tests in 74 files** (on `new-environ`). Nothing below this note was re-derived for that; it is kept as
 the record of the keypad branch's own numbers on its own day.
 
 **`main` at `7ca0269`, pushed** — an earlier version of this line said `eb9c306`, which was

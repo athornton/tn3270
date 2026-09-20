@@ -1,4 +1,5 @@
-import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, TERMINAL_TYPE } from './constants.js';
+import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, EnvironQual, TERMINAL_TYPE } from './constants.js';
+import { parseEnvironSend, buildEnvironIs } from './newenviron.js';
 import type { Trace } from './trace.js';
 
 /**
@@ -28,6 +29,27 @@ export interface TelnetLayerOptions {
    * about leaves the framing on. See `disableTn3270e`.
    */
   onTn3270eDisabled?: () => void;
+  /**
+   * NEW-ENVIRON (option 39) variables, or absent to refuse the option entirely.
+   *
+   * CONDITIONAL LIKE OPTION 40, and for the same reason `TelnetLayerOptions.tn3270eEnabled`
+   * exists as a knob rather than `DESIRED` growing a fourth entry: `DESIRED` is a constant
+   * set of options we always want, and this one we want only when there is something to
+   * say. Absent means "refuse" rather than "want with nothing configured" -- there is no
+   * separate `environEnabled` boolean, because a `-devname`-less, `-user`-less client has
+   * no reply to give a SEND, and agreeing to the option only to have nothing for the host
+   * to learn is not a real acceptance.
+   *
+   * `uservars` IS A FUNCTION, NOT A MAP, because the interesting variable -- DEVNAME --
+   * must be FRESH per request (see `DeviceName.next()` in devname.ts): a hosts asks
+   * repeatedly and expects a new candidate name each time it refuses the last one. A
+   * plain `ReadonlyMap<string,string>` frozen at construction could not do that; a
+   * callback invoked once per reply can.
+   */
+  environ?: {
+    readonly vars: ReadonlyMap<string, string>;
+    readonly uservars: () => ReadonlyMap<string, string>;
+  };
 }
 
 enum St { Data, Iac, Will, Wont, Do, Dont, Sb, SbIac }
@@ -84,6 +106,7 @@ export class TelnetLayer {
   private readonly tn3270eEnabled: boolean;
   private readonly onTn3270eSubneg: ((body: Uint8Array) => void) | undefined;
   private readonly onTn3270eDisabled: (() => void) | undefined;
+  private readonly environ: TelnetLayerOptions['environ'];
   /**
    * Set once DEVICE-TYPE and FUNCTIONS have both completed.
    *
@@ -112,6 +135,7 @@ export class TelnetLayer {
     this.tn3270eEnabled = opts.tn3270eEnabled ?? true;
     this.onTn3270eSubneg = opts.onTn3270eSubneg;
     this.onTn3270eDisabled = opts.onTn3270eDisabled;
+    this.environ = opts.environ;
   }
 
   /**
@@ -418,6 +442,21 @@ export class TelnetLayer {
       }
       return;
     }
+    if (opt === O.NEW_ENVIRON) {
+      // CONDITIONAL, like option 40 and for the same reason: `DESIRED` is a constant
+      // set, and we want 39 only when there is something to say. Refusing when nothing
+      // is configured keeps this feature dark by default, which is what holds its blast
+      // radius on the existing negotiation tests at zero.
+      if (this.environ === undefined) {
+        this.reply(T.WONT, opt);
+        return;
+      }
+      if (!this.myOpts.has(opt)) {
+        this.myOpts.add(opt);
+        this.reply(T.WILL, opt);
+      }
+      return;
+    }
     if (DESIRED.has(opt)) {
       if (!this.myOpts.has(opt)) {
         this.myOpts.add(opt);
@@ -492,7 +531,55 @@ export class TelnetLayer {
       this.sb = [];
       return;
     }
-    // Anything else is dropped; we advertised nothing that needs it.
+    if (this.sb[0] === O.NEW_ENVIRON && this.sb[1] === EnvironQual.SEND) {
+      // `this.sb` is consumed on EVERY path out of this arm, malformed or not --
+      // deliberately before the `requests === null` / `environ === undefined` check
+      // below, because the accumulator has to be cleared either way or the next
+      // subnegotiation inherits this one's tail. Compare the TN3270E and
+      // TERMINAL-TYPE arms above, which clear it before or right at their own
+      // dispatch for the same reason.
+      const requests = parseEnvironSend(Uint8Array.from(this.sb.slice(2)));
+      this.sb = [];
+      if (requests === null || this.environ === undefined) {
+        // TWO DIFFERENT REASONS TO DROP, ONE OUTCOME. `requests === null` is a
+        // malformed body (parseEnvironSend's contract: null rather than throwing,
+        // same reason as decodeHeader/parseBind -- a client cannot correct a host).
+        // `environ === undefined` is a host that sent SEND despite our refusing the
+        // option in onDo (WONT 39), or one that never even asked and sent it anyway;
+        // RFC compliance is not guaranteed and this layer does not require
+        // `myOpts.has(NEW_ENVIRON)` before answering, matching x3270's own dispatch
+        // (Common/telnet.c:2048-2049), which gates the whole SEND handler on
+        // `appres.new_environ` -- the configuration flag -- and never tests
+        // `myopts[TELOPT_NEW_ENVIRON]` at all. Since `environ === undefined` is
+        // exactly our equivalent of `!appres.new_environ`, this one check already
+        // covers "unconfigured" without a separate `myOpts` gate that x3270 itself
+        // does not have.
+        this.trace?.note('malformed or unconfigured NEW-ENVIRON SEND, dropped');
+        return;
+      }
+      const body = buildEnvironIs(requests, this.environ.vars, this.environ.uservars());
+      // `body` starts with the IS qualifier (0x00) and is a subnegotiation
+      // PARAMETER end to end -- RFC 855's last paragraph applies to the whole
+      // thing, not just the part after the qualifier. Doubling the qualifier byte
+      // too is harmless as well as correct: 0x00 can never equal IAC (0xff), so
+      // `doubleIac` is a no-op on it either way. Contrast the TERMINAL-TYPE arm
+      // above, which doubles only the ttype string -- there the IS qualifier
+      // (S.IS, also 0x00) is written OUTSIDE `doubleIac`'s argument, into the `out`
+      // array literal directly, so that arm's scope choice is invisible on the
+      // wire for the same reason: 0x00 doubles to itself.
+      const out = Uint8Array.from([
+        T.IAC, T.SB, O.NEW_ENVIRON, ...doubleIac(body), T.IAC, T.SE,
+      ]);
+      this.trace?.send(out);
+      this.write(out);
+      return;
+    }
+    // Anything else is dropped; we advertised nothing that needs it. This also
+    // catches a NEW-ENVIRON subnegotiation with a qualifier other than SEND --
+    // EnvironQual.INFO (a host telling US something, unsolicited) or IS (which
+    // makes no sense from a host to a client that never sent SEND) -- and traces
+    // it by option number rather than dropping it silently, the same as any other
+    // subnegotiation we did not advertise.
     const optLabel = this.sb.length > 0 ? String(this.sb[0]) : '(empty)';
     this.trace?.note(`ignored subnegotiation for option ${optLabel}`);
     this.sb = [];

@@ -52,9 +52,16 @@ excuse.
 WHAT NEW EVIDENCE THIS ADDS: `s3270/Test/sscp-lu-data.trc` (copied into
 `packages/fixtures/x3270/`, see the `Case` below for why) is a real host that grants
 BIND-IMAGE, so it is the one trace here that gets PAST FUNCTIONS to an actual
-recorded BIND -- 4 matched blocks where the other five stop at 3. `devname_success.trc`
-was investigated as the plan's original candidate and found NOT VIABLE: see the
-comment above its `Case` for the measured reason.
+recorded BIND -- 4 matched blocks where the other five stop at 3.
+
+TASK 8 (2026-09-20): NEW-ENVIRON (telnet option 39, Tasks 6/7) now exists, so all
+FOUR devname_*.trc traces that motivated it are drivable and each match 9 blocks --
+further than every case above INCLUDING sscp-lu-data.trc, because NEW-ENVIRON's
+per-request DEVNAME exchanges interleave with TN3270E's own steps. `devname_success.trc`
+was this feature's original motivating trace and is NO LONGER EXCLUDED; see the
+`Case` block comment above the four devname_*.trc entries for the measured account
+(template per trace, USER/CODEPAGE absence, the iteration-count check, and why none
+of them needs `mismatch_ok`).
 
     python3 packages/cli/scripts/drive-playback.py [--playback PATH] [--node PATH] [-v]
 
@@ -102,7 +109,7 @@ class Case:
     """One trace, and what our client must be seen to send while playing it."""
 
     def __init__(self, trace, model, blocks, expect_bytes=(), stop_reason='',
-                 mismatch_ok=False, root='suite'):
+                 mismatch_ok=False, root='suite', devname=None):
         #: Path relative to `root`.
         self.trace = trace
         self.model = model
@@ -120,6 +127,14 @@ class Case:
         #: why a trace, unlike the `playback` binary itself, does not need to live in
         #: the user's suite3270 checkout at all.
         self.root = root
+        #: `-devname` template to pass our client (e.g. 'foo==='), or None to leave
+        #: option 39 refused. Threaded into `client_argv` the same way `model` is --
+        #: see `run_case`. The four devname_*.trc traces each pin a DIFFERENT
+        #: template (read off their own recorded `Command:` line, not guessed): the
+        #: iteration WIDTH the host's own recording used has to match ours, or the
+        #: DEVNAME uservar values diverge for a reason that is a harness setup
+        #: mistake, not a client bug.
+        self.devname = devname
 
 
 # Every one of the five traces below now sends the SAME 11-byte FUNCTIONS REQUEST as
@@ -227,21 +242,20 @@ CASES = [
     # test hosts refuse TN3270E option 40, and public z/VM 4.4 withdraws it before
     # negotiation completes -- see docs cited elsewhere in this repo).
     #
-    # devname_success.trc WAS THE PLAN'S ORIGINAL CANDIDATE FOR THIS ROLE AND IS NOT
-    # VIABLE. It requires NEW-ENVIRON (telnet option 39) for `-devname`: `RCVD DO
-    # NEW-ENVIRON` then `SB NEW-ENVIRON SEND USERVAR "DEVNAME"` before the host will
-    # even offer TN3270E's DEVICE-TYPE step. Our client implements no NEW-ENVIRON at
-    # all -- no TelnetOpt entry in constants.ts, no handling in telnet.ts -- so a
-    # direct run against it (2026-09-18) mismatches after only 1 matched block: we
-    # reply `fffc27` (WONT NEW-ENVIRON) where the trace expects `fffb27` (WILL
-    # NEW-ENVIRON). Adding NEW-ENVIRON support is out of scope here; this trace is
-    # excluded and the reason is on record rather than silently dropped.
+    # devname_success.trc WAS EXCLUDED HERE UNTIL TASK 8 (see the old note, now
+    # replaced) BECAUSE NEW-ENVIRON DID NOT EXIST YET. Tasks 6/7 have since built it,
+    # so this trace and its three siblings below are now driven directly -- see each
+    # `devname_*` Case below, which supersedes this comment's old "not viable" claim.
     #
-    # `sscp-lu-data.trc` IS THE ALTERNATIVE, chosen because it reaches a real BIND
-    # WITHOUT NEW-ENVIRON: `s3270 -trace -geometry +64+19`, no `-devname`, connects to
+    # `sscp-lu-data.trc` REMAINS HERE TOO because it demonstrates something the four
+    # devname_*.trc traces do not: a host NARROWING the requested function set
+    # (`FUNCTIONS REQUEST BIND-IMAGE` alone) rather than granting everything asked,
+    # which is a distinct code path (`negotiate()`'s `addsNothing` branch) from the
+    # "host accepts our exact FUNCTIONS REQUEST" shape every devname_*.trc below
+    # exercises instead. `s3270 -trace -geometry +64+19`, no `-devname`, connects to
     # x3270's own local test target (`Common/Test/target/target.py`, localhost:8021 --
     # confirmed by the "x3270 test target" banner text inside the trace itself, the
-    # same public open-source infra devname_success.trc also used; neither is a
+    # same public open-source infra the devname_*.trc traces also used; neither is a
     # private or sensitive live host). Recorded by x3270 v4.3pre1.
     #
     # WHAT IT ADDS OVER THE FIVE CASES ABOVE, measured 2026-09-18 by direct playback
@@ -274,6 +288,162 @@ CASES = [
              'Wait(3270Mode,8)+Quit script never drives -- the 4 blocks asserted here '
              'are everything up through the real BIND'),
          root='fixtures'),
+
+    # THE FOUR DEVNAME TRACES -- Task 8's payoff, and the reason NEW-ENVIRON (Tasks
+    # 6/7) exists at all: "-devname foo===" answers a host's DEVNAME uservar with an
+    # ITERATING name, `foo001`, `foo002`, ... , because a real host refuses a name
+    # already in use. All four are DRIVABLE, not merely attempted, and all four match
+    # substantially FURTHER than sscp-lu-data.trc above (9 blocks, not 4) because
+    # option 39 negotiation interleaves with TN3270E's own steps and this harness's
+    # `expect_bytes` was measured directly rather than assumed from the plan.
+    #
+    # EACH TRACE'S -devname TEMPLATE WAS READ OFF ITS OWN `Command:` LINE, not
+    # guessed: `grep 'Command:' devname_*.trc` shows `-devname foo===` for _success,
+    # `-devname foo=` for _failure and _change1 (identical templates; the traces
+    # differ only in whether the host later refuses a name), and _change2 opens with
+    # no `-devname` at all -- ITS FIRST LINE is `s3stdin read 'set devname bar='`, an
+    # in-session `Set("devname", "bar=")` macro command BEFORE the `Connect()`, so its
+    # effective template is `bar=`, confirmed by the trace's own later
+    # `VALUE "bar1"`/`"bar2"`/... USERVAR replies. This harness has no scripted
+    # `Set()` step, but `-devname bar=` at process start reaches the identical
+    # DeviceName state the trace's `Set()`-before-`Connect()` does, because
+    # `buildEnviron()` (session.ts:326) is called fresh from `connect()`, after any
+    # `Set()` a real caller might have issued -- there is nothing "connect-time" about
+    # x3270's `Set()` that a start-time flag cannot reproduce for this harness's single
+    # scripted connect.
+    #
+    # USER AND CODEPAGE, THE TWO KNOWN RECORDED-VALUE TRAPS (see the module docstring's
+    # rule 3 and dbcs-wrap.trc's USER=pdm/CODEPAGE=1027): grepped all four traces for
+    # `USERVAR "USER"`/`VAR "USER"`/`"CODEPAGE"`/an empty-body SEND (which expands to
+    # "every variable" per newenviron.ts's parseEnvironSend) -- NONE of the four asks
+    # for anything but `IBMELF`, `IBMAPPLID`, `DEVNAME`, confirmed by
+    # `grep -oE 'USERVAR "[A-Z]+"' devname_*.trc | sort -u` returning exactly those
+    # three names across all four files. So `$USER` (`athor` on this box, never
+    # hardcoded) and our derived CODEPAGE=037 are never on the wire in these four
+    # cases and cannot cause a version-specific mismatch the way they would in a trace
+    # that asked for either.
+    #
+    # THE ITERATION-COUNT CONCERN (does a mid-trace reconnect reset x3270's counter
+    # where ours wouldn't, or vice versa): NONE of the four traces reconnects mid-trace
+    # -- each has exactly one `cstate [not-connected] -> [resolving]` and, where the
+    # trace ends with one, exactly one `RCVD disconnect` at the very end (grepped all
+    # four for `RCVD DO TN3270E`, `cstate [not-connected]` and `RCVD disconnect`). A
+    # single playback run is a single connect, so `DeviceName`'s per-connect reset
+    # (session.ts:317-324, matching x3270's own `environ_init` being called from every
+    # `host_connect()`) never fires mid-run and the counter stays in lockstep with the
+    # trace's own `foo00N`/`fooN`/`barN` sequence for as many DEVNAME requests as this
+    # harness's script survives to see.
+    #
+    # ALL FOUR REACH THE SAME STOPPING POINT for the same reason: the harness script is
+    # `Connect() ; Wait(3270Mode,8) ; Quit`, and 3270-mode arrives right after the BIND
+    # (block 9's `FUNCTIONS IS BIND-IMAGE` reply, followed immediately by the BIND
+    # itself and an EraseWrite that Wait(3270Mode) is satisfied by) -- so `Quit` fires
+    # before the host's NEXT scripted DEVNAME SEND, and playback logs `Socket EOF`
+    # waiting for our reply to a request our client never receives because it has
+    # already disconnected. That is the SAME "short script, not a client gap" shape as
+    # contention-resolution.trc, sscp-lu.trc and sscp-lu-data.trc above -- not a fifth
+    # kind of stop to invent an explanation for.
+    #
+    # `mismatch_ok` IS NOT NEEDED ON ANY OF THE FOUR: every one of the 9 asserted
+    # blocks matches byte-for-byte with zero `Emulator data mismatch` lines (measured
+    # directly, not inferred from the block count), because none of the three trap
+    # variables (USER, CODEPAGE, wrongTerminalName's colour digit -- these are Model
+    # 4/3278-4-E traces like wont-tn3270e.trc, but TERMINAL-TYPE is never reached
+    # before Quit fires) is ever exercised.
+    Case('devname_success.trc', '3278-4-E', 9,
+         expect_bytes=(
+             'fffb28', 'fffb27',
+             'fffa28020749424d2d333237382d342d45fff0',
+             # USERVAR "IBMELF" VALUE "YES" USERVAR "IBMAPPLID" VALUE "None" USERVAR
+             # "DEVNAME" VALUE "foo001" SE -- split across two playback reads (the
+             # trace's own `> 0x0`/`> 0x20` split), so two separate hex strings here.
+             'fffa27000349424d454c46015945530349424d4150504c4944014e6f6e650344',
+             '45564e414d4501666f6f303031fff0',
+             'fffa28030700020405fff0',
+             'fffa2700034445564e414d4501666f6f303032fff0',
+             'fffa28030400fff0',
+             'fffa2700034445564e414d4501666f6f303033fff0'),
+         stop_reason=(
+             'Wait(3270Mode,8) is satisfied right after the BIND that follows block 9 '
+             '(PLU IBM0SMAJ, MaxSec-RU 1024, MaxPri-RU 3840, default 24x80, alternate '
+             '43x80 -- the real BIND this trace was chosen for), so Quit fires before '
+             "the host's 4th DEVNAME SEND (which the trace itself would answer "
+             '"foo004"); playback logs Socket EOF waiting for that 10th reply, the same '
+             'short-script stop as sscp-lu-data.trc above'),
+         root='fixtures', devname='foo==='),
+
+    # SAME NEGOTIATION SHAPE AS devname_success.trc UP TO THE POINT THIS HARNESS'S
+    # SCRIPT QUITS -- the trace's DISTINGUISHING content (the host refusing a name
+    # already in use, `foo9` repeated at devname_failure.trc:255-257 rather than
+    # advancing to `foo10`) happens AFTER our client has already disconnected, so this
+    # case cannot exercise a refusal any more than sscp-lu.trc's cases above exercise
+    # their own post-Quit content. It is still real, independent evidence: template
+    # width `foo=` (single-digit forever, per `DeviceName`'s own doc comment on
+    # template parsing) produces different bytes than `foo===`'s zero-padded
+    # `foo001`, and this trace is the one witness for that width.
+    Case('devname_failure.trc', '3278-4-E', 9,
+         expect_bytes=(
+             'fffb28', 'fffb27',
+             'fffa28020749424d2d333237382d342d45fff0',
+             'fffa27000349424d454c46015945530349424d4150504c4944014e6f6e650344',
+             '45564e414d4501666f6f31fff0',
+             'fffa28030700020405fff0',
+             'fffa2700034445564e414d4501666f6f32fff0',
+             'fffa28030400fff0',
+             'fffa2700034445564e414d4501666f6f33fff0'),
+         stop_reason=(
+             "same short-script stop as devname_success.trc's Case above -- "
+             'Wait(3270Mode,8) is satisfied right after this trace\'s own BIND (PLU '
+             "IBM0SMAA) and Quit fires before the host's later DEVNAME requests, which "
+             'is where this trace records the refusal (`foo9` repeated rather than '
+             '`foo10`) that gives it its name; that refusal is real recorded content '
+             'this harness does not reach, not a defect in reaching it'),
+         root='fixtures', devname='foo='),
+
+    # IDENTICAL byte-for-byte to devname_failure.trc up to this harness's stopping
+    # point (`diff` of the two traces' RCVD/SENT lines shows the only difference in
+    # range is the CONNECT LU name IBM0TE00 vs IBM0TE01, which is not on our side of
+    # the wire) -- both use template `foo=` and both are s3270 recordings against the
+    # same test target. Kept as its own Case anyway because the plan named it
+    # separately and because "identical to a sibling trace" is itself a fact worth a
+    # passing case recording, not a reason to skip driving it.
+    Case('devname_change1.trc', '3278-4-E', 9,
+         expect_bytes=(
+             'fffb28', 'fffb27',
+             'fffa28020749424d2d333237382d342d45fff0',
+             'fffa27000349424d454c46015945530349424d4150504c4944014e6f6e650344',
+             '45564e414d4501666f6f31fff0',
+             'fffa28030700020405fff0',
+             'fffa2700034445564e414d4501666f6f32fff0',
+             'fffa28030400fff0',
+             'fffa2700034445564e414d4501666f6f33fff0'),
+         stop_reason=(
+             "same short-script stop as devname_failure.trc's Case above -- identical "
+             'reasoning, identical template'),
+         root='fixtures', devname='foo='),
+
+    # THE ONE TRACE WHOSE TEMPLATE IS NOT ON ITS OWN `Command:` LINE: this recording
+    # is a LIVE s3270 SESSION where `Set("devname", "bar=")` runs as a scripted step
+    # BEFORE `Connect("localhost:8021")` (trc lines 1-16, 18-27) rather than a
+    # `-devname` flag at s3270's own invocation -- s3270 was started with no
+    # `-devname` at all and the template was set interactively. See the Case block
+    # comment above (the one spanning all four devname_*.trc traces) for why a
+    # start-time `-devname bar=` flag reaches the same DeviceName state this
+    # harness needs, given it has no scripted `Set()` step of its own.
+    Case('devname_change2.trc', '3278-4-E', 9,
+         expect_bytes=(
+             'fffb28', 'fffb27',
+             'fffa28020749424d2d333237382d342d45fff0',
+             'fffa27000349424d454c46015945530349424d4150504c4944014e6f6e650344',
+             '45564e414d450162617231fff0',
+             'fffa28030700020405fff0',
+             'fffa2700034445564e414d450162617232fff0',
+             'fffa28030400fff0',
+             'fffa2700034445564e414d450162617233fff0'),
+         stop_reason=(
+             "same short-script stop as the other three devname_*.trc Cases above -- "
+             "this trace's own BIND is PLU IBM0SMAC"),
+         root='fixtures', devname='bar='),
 ]
 
 #: Traces deliberately NOT driven, each with the measured reason. Kept in the file
@@ -294,13 +464,12 @@ EXCLUDED = {
         'Common/telnet.c:2103-2106,2122); we always send 3278. See docs.',
     'b3270/Test/*.trc, s3270/Test/930.trc and 15 others':
         'host-only recordings with no emulator side at all, so `-b` asserts nothing.',
-    's3270/Test/devname_success.trc':
-        "the plan's original candidate for a real-BIND witness case, replaced below "
-        'by sscp-lu-data.trc. Requires NEW-ENVIRON (telnet option 39) for '
-        "-devname, which our client does not implement at all (no TelnetOpt entry, "
-        'no telnet.ts handling). Measured 2026-09-18: mismatches after 1 matched '
-        'block, sending WONT NEW-ENVIRON (fffc27) where the trace expects WILL '
-        '(fffb27). See sscp-lu-data.trc\'s Case comment for the full account.',
+    # NOTE: devname_success.trc, devname_failure.trc, devname_change1.trc and
+    # devname_change2.trc are NO LONGER LISTED HERE (Task 8, 2026-09-20). Until
+    # NEW-ENVIRON existed (Tasks 6/7) they mismatched at once -- see the git history of
+    # this dict for the exact old wording -- but all four are now drivable and have
+    # their own Case entries above. Leaving the stale entry beside a working case was
+    # exactly the mistake this dict's own module comment warns against.
 }
 
 
@@ -401,6 +570,8 @@ def run_case(case, playback, suite, node, verbose):
         '',
     ])
     client_argv = [node, CLI] + REQUIRED_FLAGS + ['-model', case.model]
+    if case.devname is not None:
+        client_argv += ['-devname', case.devname]
     try:
         subprocess.run(client_argv, input=script, capture_output=True,
                        text=True, timeout=40)

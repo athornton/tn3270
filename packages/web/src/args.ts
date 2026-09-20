@@ -78,6 +78,13 @@ export interface WebArgs {
   readonly bindImage?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   readonly bindLimit?: boolean;
+  /**
+   * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means we refuse
+   * telnet option 39 entirely -- see `SessionOptions.devname`. Single-dashed like
+   * `-model` and `-bind-image`: a flag inherited from the mainframe-client vocabulary,
+   * not one of the gateway's own (`--bind`, `--listen`, ...).
+   */
+  readonly devname?: string;
 }
 
 /** One flag that takes a value, or throw naming the flag rather than the index. */
@@ -127,6 +134,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let scheme: string | undefined;
   let bindImage: boolean | undefined;
   let bindLimit: boolean | undefined;
+  let devname: string | undefined;
 
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
@@ -173,6 +181,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
         bindLimit = v === 'on';
         continue;
       }
+      case '-devname': devname = value(args, i, a); i += 1; continue;
       default:
         if (a.startsWith('-')) throw new UsageError(`unknown flag ${a}`);
         rest.push(a);
@@ -247,5 +256,6 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(scheme !== undefined ? { scheme } : {}),
     ...(bindImage === undefined ? {} : { bindImage }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
+    ...(devname === undefined ? {} : { devname }),
   };
 }

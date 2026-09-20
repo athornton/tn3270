@@ -749,6 +749,102 @@ describe('trace and replay', () => {
   });
 });
 
+/**
+ * Option 39 (NEW-ENVIRON), Task 7's wiring: `Session` neither owns nor tests any of the
+ * parsing itself -- newenviron.ts and telnet.ts's own tests cover that -- what belongs here
+ * is that a `devname`-less session refuses the option and a `devname`-carrying one accepts
+ * it, driven with REAL WIRE BYTES through `FakeConnection`, not by poking a private field.
+ *
+ * CHOSEN OVER `tn3270e-session.test.ts` DELIBERATELY: option 39 and option 40 (TN3270E) are
+ * independent options negotiated by entirely separate branches of `telnet.ts`'s `onDo` --
+ * confirmed by reading that method, not assumed -- so a TN3270E-specific harness (which
+ * exists to drive BIND/UNBIND and the E-mode header) has nothing this test needs, and this
+ * file's plain `newSession()`/`FakeConnection` harness already has everything: a `Connection`
+ * that records raw bytes and a `.host(...)` helper to feed them in.
+ */
+describe('NEW-ENVIRON (option 39)', () => {
+  /** True if `conn.sent` contains `IAC <reply> NEW_ENVIRON` for the given reply command. */
+  function repliedWith(conn: FakeConnection, reply: number): boolean {
+    return conn.sent.some((b, i) =>
+      b === T.IAC && conn.sent[i + 1] === reply && conn.sent[i + 2] === O.NEW_ENVIRON);
+  }
+
+  it('refuses option 39 (WONT) when no devname or user is configured', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.host(T.IAC, T.DO, O.NEW_ENVIRON);
+    expect(repliedWith(conn, T.WONT)).toBe(true);
+    expect(repliedWith(conn, T.WILL)).toBe(false);
+  });
+
+  it('accepts option 39 (WILL) when a devname is configured', async () => {
+    const { session, conn } = newSession({ devname: 'foo===' });
+    await session.connect('localhost', 3270);
+    conn.host(T.IAC, T.DO, O.NEW_ENVIRON);
+    expect(repliedWith(conn, T.WILL)).toBe(true);
+    expect(repliedWith(conn, T.WONT)).toBe(false);
+  });
+
+  /**
+   * True if a trace's text contains `IAC <reply> NEW_ENVIRON` on a sent (`>`) line, i.e.
+   * the hex byte triple `ff <reply-hex> 27` appears after a ' > ' marker somewhere in the
+   * text. `repliedWith` above works off `FakeConnection.sent`, a live array of numbers;
+   * `replay()` has no such array to inspect -- its `write` is a discard sink -- so this
+   * reads the one thing replay()'s `TelnetLayer` DOES leave behind now that `trace: this.trace`
+   * is wired into its construction (session.ts's `replay()`): the rendered trace text.
+   */
+  function traceRepliedWith(traceText: string, reply: number): boolean {
+    const replyHex = reply.toString(16).padStart(2, '0');
+    return traceText
+      .split('\n')
+      .some((line) => line.includes(' > ') && line.includes(`ff ${replyHex} 27`));
+  }
+
+  /**
+   * THE HOLE THIS TASK CLOSES: `replay()` builds its OWN `TelnetLayer`, entirely separate
+   * from `connect()`'s, so wiring `environ` into one is no evidence about the other. A
+   * recorded trace containing `IAC DO NEW_ENVIRON` must be answered exactly as a live
+   * connection would be -- Task 8's playback oracle depends on replayed negotiation
+   * matching live negotiation byte for byte, and this is the test that would fail if
+   * `replay()`'s `TelnetLayer` construction ever dropped `environ` while `connect()`'s
+   * kept it (see the mutation check in the Task 7 report).
+   *
+   * OBSERVED VIA THE TRACE, NOT VIA `conn.sent`: replay() opens no connection at all, so
+   * there is no `FakeConnection` to record bytes on. `this.trace` is the only surface
+   * replay()'s internal `TelnetLayer` still exposes -- which is why `replay()` now passes
+   * `trace: this.trace` into that construction (see the comment there) -- and tracing must
+   * be switched on explicitly here, exactly as the live-session tests above do, or the
+   * trace stays empty regardless of what actually got negotiated and this assertion would
+   * again be vacuous.
+   */
+  it('replay() answers option 39 the same way connect() would', () => {
+    const withDevname = new Session({
+      connect: () => { throw new Error('must not connect'); },
+      devname: 'foo===',
+    });
+    withDevname.trace.setEnabled(true);
+    // A trace with nothing but the host's DO NEW_ENVIRON: enough to observe the reply
+    // without needing a full negotiation.
+    const traceText = '0.000 < ff fd 27';
+    withDevname.replay(traceText);
+    const out = withDevname.trace.toText();
+    expect(traceRepliedWith(out, T.WILL)).toBe(true);
+    expect(traceRepliedWith(out, T.WONT)).toBe(false);
+  });
+
+  it('replay() refuses option 39 the same way connect() would when devname/user are absent', () => {
+    const noDevname = new Session({
+      connect: () => { throw new Error('must not connect'); },
+    });
+    noDevname.trace.setEnabled(true);
+    const traceText = '0.000 < ff fd 27';
+    noDevname.replay(traceText);
+    const out = noDevname.trace.toText();
+    expect(traceRepliedWith(out, T.WONT)).toBe(true);
+    expect(traceRepliedWith(out, T.WILL)).toBe(false);
+  });
+});
+
 describe('query reply', () => {
   /**
    * WSF carrying Read Partition: L=5 SFID=01 PID=ff TYPE=02.

@@ -142,7 +142,7 @@ These terminal harnesses come with it, because "it looked right" is not a result
   TN3270 server: 12 checks, including that your terminal still echoes afterwards.
 - `packages/cli/scripts/drive-playback.py` replays **recorded real hosts** through
   x3270's own `playback -b`, which asserts our replies byte for byte with no host and
-  no network. It needs a built suite3270 alongside this repo; 6 of 6 traces pass.
+  no network. It needs a built suite3270 alongside this repo; 10 of 10 traces pass.
 
 ## Build and test
 
@@ -164,7 +164,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1819 tests, 72 files
+npm test           # 1869 tests, 74 files
 npm run typecheck
 ```
 
@@ -450,6 +450,7 @@ assumed — see *Verification*.
 | `LUA,LUB@host` | request each in turn as rejections come back |
 | `-bind-image on\|off` | request the BIND-IMAGE function (default **on**); `off` means the gate below never closes, because it is conditional on the host having *agreed* the function |
 | `-bind-limit on\|off` | range-check a BIND's geometry against `-model` before honouring it (default **on**, matching x3270's `bind_limit` resource, `Common/glue.c:458`); `off` honours an out-of-range BIND anyway |
+| `-devname NAME` | offer telnet option 39 (NEW-ENVIRON) and answer a host's `DEVNAME` request with `NAME`. **Trailing `=` characters become a counter**: `foo===` yields `foo001`, `foo002`, … a fresh name per request, because a host refuses a name already in use. Absent, option 39 is **refused outright** — the feature is dark unless asked for |
 
 The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
 must be **quoted** — `Connect("LUA,LUB@host")` — because the LU separator and the
@@ -499,6 +500,43 @@ it at.
 
 CONTENTION-RESOLUTION (`0x05`) is not in RFC 2355 at all — x3270 requests it anyway,
 and so do we.
+
+### Naming a session with `-devname`
+
+Some hosts identify a session by a **device name** rather than by an SNA LU, and ask for
+it over telnet option 39, NEW-ENVIRON (RFC 1572), as a `DEVNAME` uservar. That is a
+second, independent route to what TN3270E's `CONNECT` does with `LU@host` — different
+hosts use different ones, and this client now does both.
+
+```sh
+node packages/tui/dist/main.js -insecure -devname 'foo===' HOST:PORT
+```
+
+**Trailing `=` characters become a counter, and that is the point of the feature.** A
+host refuses a device name already in use, then asks again — so `foo===` offers `foo001`,
+then `foo002`, then `foo003`, a fresh candidate per request, three digits wide. `foo=`
+gives one digit and nine tries. A template with no `=` is a fixed name. The counter
+**saturates rather than wrapping** once the digits are exhausted: re-offering a name the
+host has already refused is the one thing this mechanism exists to avoid. All of that is
+measured off x3270's own recorded traces rather than reasoned about — `devname_failure.trc`
+shows `foo9` sent twice at the ceiling.
+
+**Option 39 is refused outright unless `-devname` is given.** Without it we answer
+`IAC WONT NEW-ENVIRON`, so nothing about an existing session's negotiation changes.
+
+**What goes on the wire, and one privacy consequence to know about.** Asked for the
+variables it knows, this client answers `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID` and
+`CODEPAGE`. **`USER` is your local account name**, resolved from `$USER`, then `$USERNAME`,
+then the literal `UNKNOWN`. x3270 sends it unconditionally and so do we, for
+compatibility — but it only ever leaves the machine if you asked for option 39 in the
+first place by passing `-devname`, and only to a host that asks for it. `IBMELF` is sent
+as `YES` because x3270 sends it; **what it claims is genuinely undocumented** in x3270's
+source, so we match the bytes without asserting a meaning. `CODEPAGE` is `037`, derived
+from the code page actually in use rather than hardcoded.
+
+A variable a host asks for and we do not have is answered with **the name and no value
+byte at all**, which on the wire is distinguishable from a variable whose value is empty —
+emitting an empty value would claim we have something we do not.
 
 Two things worth knowing:
 
@@ -830,14 +868,15 @@ worse than one that says which quarter is missing.
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
   unimplemented.
-- **No NEW-ENVIRON (telnet option 39), so no `-devname`.** We answer `IAC WONT
-  NEW-ENVIRON` to any host that offers it. x3270 uses option 39 to send a device name as
-  a `DEVNAME` USERVAR, which is a second route to the thing TN3270E's `CONNECT` does with
-  LU names — and ours only does the latter. **This is a measured gap, not a guess:** it is
-  what made x3270's `devname_success.trc` undrivable as a playback fixture (we send `ff fc
-  27` where the trace expects `ff fb 27`, mismatching after one block), which is why the
-  recorded-host BIND witness is `sscp-lu-data.trc` instead. Nothing here needs it today;
-  it would matter for a host that identifies sessions by device name rather than by LU.
+- **NEW-ENVIRON carries a device name and nothing else.** Option 39 is implemented (see
+  *Naming a session with `-devname`*), but only for the variables a host has actually been
+  recorded asking for: `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID` and `CODEPAGE`.
+  **`CHARSET` and `KBDTYPE` are deliberately absent** — x3270 derives both from a `cgcsgid`
+  this client does not model, and inventing values for them would put guesses on the wire.
+  A host that sends a bare "send everything" request gets the five we have; four traces in
+  x3270's collection do exactly that, so this is a real shape rather than a hypothetical.
+  **We also do not send an unsolicited `INFO`**, which RFC 1572 permits and no recorded host
+  uses.
 - **TN3270E is implemented but NOT verified against a live host.** The option, the
   DEVICE-TYPE/FUNCTIONS subnegotiation, the 5-byte header, SNA responses, SYSREQ and LU
   names all work (see *TN3270E*) — against real s3270 and an in-repo TN3270E server,
@@ -957,7 +996,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1819 tests, 72 files (measured 2026-09-19 on `main` at `ed735fd`) |
+| `npm test` | **pass** — 1869 tests, 74 files (measured 2026-09-20 on `new-environ`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
@@ -977,7 +1016,7 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
 | Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
-| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 6 of 6 traces**, host-free, by `drive-playback.py`. Replays six different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` colour-digit divergence that is not our defect. The plan's original candidate for that role, `devname_success.trc`, turned out to need NEW-ENVIRON (telnet option 39), which this client does not implement at all, and was replaced |
+| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` colour-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both

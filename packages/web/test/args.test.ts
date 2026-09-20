@@ -163,6 +163,18 @@ describe('parseWebArgs', () => {
     expect(parseWebArgs(['vm:3270']).bindLimit).not.toBe(false);
   });
 
+  it('-devname sets the device name template', () => {
+    expect(parseWebArgs(['-devname', 'foo===', 'vm:3270']).devname).toBe('foo===');
+  });
+
+  it('has no device name by default', () => {
+    expect(parseWebArgs(['vm:3270']).devname).toBeUndefined();
+  });
+
+  it('-devname without a value is a usage error', () => {
+    expect(() => parseWebArgs(['-devname'])).toThrow(UsageError);
+  });
+
   describe('the parts of a host argument this gateway cannot honour', () => {
     /**
      * MEASURED BEFORE THE FIX: `LUA,LUB@127.0.0.1:3270` started the gateway and served happily,

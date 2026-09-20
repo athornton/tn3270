@@ -27,6 +27,11 @@ export interface CliArgs {
   bindImage?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   bindLimit?: boolean;
+  /**
+   * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means we refuse
+   * telnet option 39 entirely -- see `SessionOptions.devname`.
+   */
+  devname?: string;
 }
 
 /**
@@ -96,6 +101,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       }
+      case '-devname':
+        if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
+        args.devname = value;
+        i++;
+        break;
       default:
         throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
     }
@@ -146,7 +156,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const session = defaultSession(
     resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-    args.bindImage, args.bindLimit,
+    args.bindImage, args.bindLimit, args.devname,
   );
   const runner = new Runner(session, {
     files: nodeTransferFiles,
