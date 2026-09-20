@@ -1,6 +1,7 @@
 # x3270 reference captures
 
-**Status: three files, one of them a different kind from the other two.**
+**Status: three ordinary reference captures, plus five files that are `playback -b`
+fixtures rather than `conformance.test.ts` ones (a different kind, see below).**
 
 - `vm370-conformance-model2.trace` — a real s3270 capture against VM/370.
   `conformance.test.ts` picks up `*.trace` files here automatically and runs
@@ -30,9 +31,29 @@
   grants BIND-IMAGE and sends a real BIND, giving BIND/UNBIND parsing a real-host
   witness that no other available trace provides (both Hercules test hosts refuse
   TN3270E option 40 outright, and public z/VM 4.4 withdraws it before negotiation
-  completes). `devname_success.trc` was tried first and rejected as non-viable
-  (NEW-ENVIRON, which we do not implement) — see drive-playback.py's `EXCLUDED`
-  dict and the comment on this trace's `Case` for the measured reason.
+  completes). It also exercises a code path none of the four devname traces below
+  do: a host NARROWING the requested FUNCTIONS set rather than granting all of it.
+- `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`,
+  `devname_change2.trc` — the SAME kind of copy as `sscp-lu-data.trc` above (x3270's
+  own shipped test traces, `s3270/Test/devname_*.trc`, copied verbatim so
+  `drive-playback.py` can replay them with no suite3270 checkout needed for the
+  trace itself), against the SAME public local test target
+  (`Common/Test/target/target.py`, `localhost:8021`, confirmed by the same "x3270
+  test target" banner text; no typed credentials — grepped for
+  `password`/`passwd`). Recorded by s3270 v4.4pre1 (`Command:` lines inside each
+  file). These are Task 8's payoff traces: the ones that motivated adding
+  NEW-ENVIRON (telnet option 39) in the first place, each exercising `-devname`'s
+  iterating DEVNAME uservar (`foo001`, `foo002`, ... for `devname_success.trc`'s
+  `foo===` template; single-digit `foo1`, `foo2`, ... saturating at `foo9` for
+  `devname_failure.trc`/`devname_change1.trc`'s `foo=`; `bar1`, `bar2`, ... for
+  `devname_change2.trc`, which sets its template via an in-session `Set("devname",
+  "bar=")` macro rather than a `-devname` flag — see the `Case` block comment in
+  drive-playback.py for why a start-time flag reproduces that state for a harness
+  with no scripted `Set()` step). Originally excluded (2026-09-18, before
+  NEW-ENVIRON existed) with the measured one-block WONT-NEW-ENVIRON mismatch; now
+  driven directly, matching 9 blocks each with no mismatch — see each trace's `Case`
+  in drive-playback.py for the exact bytes and why the harness's short scripted Quit
+  stops all four in the same place.
 
 ## What belongs here
 
@@ -44,15 +65,15 @@ produced our fixture. The comparison in `conformance.test.ts` is only
 meaningful if both clients did the same thing — a hand-driven x3270 session
 typed differently from our own recording proves nothing.
 
-`sscp-lu-data.trc` above is exempt from this rule the same way
-`tso-query-reply.txt` is: it is not compared against one of our own recordings by
-`conformance.test.ts`, it is replayed at our live client by
-`drive-playback.py`/`playback -b`, so "same host, same script as our fixture"
-does not apply — there is no "our fixture" on the other side of this one. Its
-`.trc` extension (matching the extension x3270's own suite uses for these files)
-keeps it out of the `*.trace` glob for the same reason `tso-query-reply.txt` uses
-`.txt`, just via a different extension because this file is itself a foreign
-trace format, not an excerpt of one of ours.
+`sscp-lu-data.trc` and the four `devname_*.trc` files above are exempt from this
+rule the same way `tso-query-reply.txt` is: none of the five is compared against
+one of our own recordings by `conformance.test.ts`, all five are replayed at our
+live client by `drive-playback.py`/`playback -b`, so "same host, same script as our
+fixture" does not apply — there is no "our fixture" on the other side of any of
+them. Their `.trc` extension (matching the extension x3270's own suite uses for
+these files) keeps them out of the `*.trace` glob for the same reason
+`tso-query-reply.txt` uses `.txt`, just via a different extension because these
+files are themselves a foreign trace format, not an excerpt of one of ours.
 
 Every `.trace` file added here must ship together with:
 
