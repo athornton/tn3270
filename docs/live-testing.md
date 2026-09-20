@@ -1758,7 +1758,7 @@ BIND-IMAGE alone and our correctly adopting that narrower set, then the real BIN
 where the five other committed traces stop at 3, one block short of it, each for a distinct,
 documented reason (a host `WONT`, a scripted keystroke the harness's short script never
 drives, or a BID reply this client does not implement). Driven by
-`packages/cli/scripts/drive-playback.py`, **6 of 6 cases**.
+`packages/cli/scripts/drive-playback.py`, **10 of 10 cases**.
 
 ### A divergence from s3270 in our DEVICE-TYPE — recorded, not fixed
 
@@ -2509,9 +2509,16 @@ host. It is a stronger oracle than our own `e-server.py` in one specific way: `e
 written by us from RFC 2355 and x3270's source, so a misreading we share with it passes; a trace is
 a recording of a real host and a known-good client, so it cannot agree with our mistakes.
 
-Committed driver: `packages/cli/scripts/drive-playback.py`, **6 of 6 cases** (measured
-2026-09-19; the sixth, `sscp-lu-data.trc`, is the BIND witness — see *`playback -b` as an
-oracle* below). Build the tools with:
+Committed driver: `packages/cli/scripts/drive-playback.py`, **10 of 10 cases** (measured
+2026-09-20). Two of them are witnesses for features that had none: `sscp-lu-data.trc` for BIND
+(4 blocks), and `wont-tn3270e.trc` for the `WONT TN3270E` teardown (5 blocks, up from 3 before
+that fix). **The four `devname_*.trc` cases each match NINE blocks** — further than any other case
+here, because NEW-ENVIRON's per-request `DEVNAME` exchanges interleave with TN3270E's own steps —
+and they cover the ITERATION mechanism rather than just the negotiation: disabling the device-name
+counter's increment reddens all four. **None of the four requests `USER` or `CODEPAGE`**, checked by
+grep across all of them, which is why our `$USER`-derived value never mismatches the recording's
+own (`dbcs-wrap.trc` records `USER=pdm`; ours would be whatever the local account is). See
+*`playback -b` as an oracle* below. Build the tools with:
 
 ```bash
 source /opt/lsst/software/stack/loadLSST.bash    # never paste the raw conda path; it is version-pinned

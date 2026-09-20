@@ -1430,3 +1430,85 @@ appear in no task, which is correct.
 `TelnetLayerOptions.environ` (`{ vars, uservars() }`), `SessionOptions.devname`/`user`. `buildEnvironIs`
 returns the body **from the qualifier onward** in both its definition and Task 6's caller, and Task 6
 is the only place framing and IAC doubling happen.
+
+---
+
+## AS BUILT — 2026-09-20
+
+Recorded so the next session inherits the findings rather than re-deriving them. **Nearly every
+substantive correction below came from an implementer reading the source instead of trusting this
+plan**, which is the point of telling them the source wins.
+
+**Task 1 — constants.** My citation `arpa_telnet.h:122-125` is right for the four *group* codes but
+I reused it for the *qualifiers*, which live one block earlier at **116-119**. Corrected in the
+shipped comment. `TELQUAL_INFO 2` does exist (I had flagged it as unverified) and x3270 names all
+three in a `telquals[]` trace array at `Common/telnet.c:143`, so including `INFO` is justified
+rather than speculative. `TELOPT_NEW_ENVIRON 39` is at `arpa_telnet.h:90`.
+
+**Task 2 — `DeviceName`.** Citation refined: `devname_init` at `devname.c:42`, `devname_next` at
+`:73`. **The saturation behaviour is PROVEN ON THE WIRE, not inferred from the C**:
+`devname_failure.trc` sends `foo9` at both line 249 and line 257, so the counter demonstrably
+repeats rather than wrapping. An **overflow cap at 15 digits** was added beyond the plan — `10 **
+digits` for a 20-`=` template exceeds `Number.MAX_SAFE_INTEGER`, and silently producing nonsense for
+a plausible typo is worse than treating the extra `=` as part of the stem.
+
+**Task 3 — the parser. THE MOST IMPORTANT FINDING ON THIS BRANCH.** My loop collapses x3270's
+`EE_VAR` and `EE_NAME` states, and I asked whether any input distinguishes them. **None does** — but
+answering the question surfaced a **latent bug in x3270 itself**: its `EE_NAME_ESC` case contains no
+state assignment at all (the whole function has exactly four, at relative lines 33, 58, 74, 77, none
+in that arm), so **one escape inside a name permanently disables the VAR/USERVAR delimiter** and
+silently absorbs the next request's group byte into the current name. We follow RFC 1572 instead and
+clear the escape after one byte. **The divergence is unreachable, not merely untested: no
+subnegotiation in any of the collection's traces contains byte 0x02 in a name or value**, so no host
+can have been built against x3270's behaviour.
+
+**Task 3 also corrected my evidence for "an empty body means send everything."** I cited only the C.
+**Four traces record a host actually doing it** — `dbcs-wrap.trc:103` sends the bare
+`fffa2701fff0`, and `lu.trc`, `target.trc`, `korean.trc` do the same — with x3270 answering with all
+six variables.
+
+**Task 4 — the reply builder.** Both my citations (`:559-570`, `:561`, and `find_environ` at
+`:159-175`) checked out exactly. **x3270's `find_environ` prefix-matches** — `memcmp(name, e->name,
+namelen)` with no length check — so a request for `IBM` matches its stored `IBMELF` there. Another
+reference bug we decline to copy; we require equality. My "dumps a whole group" test was **too weak
+to discriminate**: with a one-entry map it could not tell correct per-variable group-byte emission
+from a wrong single-group-byte shape. Replaced with a three-entry test, after verifying against the
+C that the group byte really is emitted inside the loop.
+
+**Task 5 — escaping.** `ESCAPED()` does cover all four codes (`:57-59`). My `'ǿ'` truncation test
+**passes against the stub too** and was reported as a vacuous pass rather than counted as coverage.
+The round-trip test earns its place: it proves our escaper and parser agree on the one case a naive
+design breaks — a group-code byte immediately following `ESC`.
+
+**Task 6 — the telnet layer.** The `doubleIac` scope question resolved in favour of my sketch, but
+**by reading x3270's `expand_iac` call site** (it operates on the whole reply buffer, qualifier
+included) rather than by accepting the sketch. **Do NOT gate a `SEND` on `myOpts.has(39)`**: x3270
+gates only on `appres.new_environ` at `telnet.c:2048-2049`, and the contrast with the
+`TELOPT_STARTTLS` branch two lines above — which *does* check `myopts` — shows that is deliberate.
+**And it found the hole Task 7 had to close.**
+
+**Task 7 — the wiring. THE `replay()` HOLE WAS REAL.** `session.ts` builds a `TelnetLayer` in two
+places, `connect()` and `replay()`, and the first draft wired only one — the identical shape to the
+`onTn3270eDisabled` bug this project shipped on an earlier branch. Worse, **the test written to catch
+it was vacuous**: it asserted the trace was empty, which passed either way, because `replay()`'s
+layer had **no trace wired at all**. Fixing that (adding `trace: this.trace`, its `write` still a
+discard sink) is what made the test discriminating. Decisions taken, each justified against the C:
+the `DeviceName` is built fresh per `connect()`/`replay()`, because **x3270 calls `environ_init()`
+from `net_connect()` at `telnet.c:688`**, so it resets per connect including reconnects; `IBMELF` is
+sent as `YES` with its meaning flagged **unverified**, since x3270's source documents it nowhere;
+`CODEPAGE` is sent, derived from the code page in use (`037`), while `CHARSET` and `KBDTYPE` are
+**not**, for want of a `cgcsgid` we do not model; and `USER` is unconditional like x3270's, gated
+only by the feature being dark unless `-devname` is passed. **Option 39 is genuinely dark by
+default** — `buildEnviron()` returns `undefined` unless `devname` or `user` is set, and `$USER` is
+resolved *inside* that guard rather than being able to trigger it.
+
+**Task 8 — the oracle. BETTER THAN THIS PLAN EXPECTED.** I told the implementer not to promise four
+drivable traces. **All four are drivable and each matches NINE blocks**, against a previous best of
+four, because option 39's per-request exchanges interleave with TN3270E's steps. `devname_change2.trc`
+needed template `bar=` (set via a scripted `Set()` in the recording rather than a command-line flag,
+so it had to be read out of the trace); `devname_change1.trc` is byte-identical to
+`devname_failure.trc` in the asserted range, which is stated in its comment rather than hidden.
+**`mismatch_ok` was needed nowhere**, and the predicted `USER`/`CODEPAGE` mismatch cannot occur:
+grep confirms none of the four requests either. The cases cover the **iteration mechanism**, not just
+negotiation — disabling the counter's increment reddens all four with values like `bar0` for `bar1`.
+A `devname` field had to be added to `Case`; the plan assumed one existed.
