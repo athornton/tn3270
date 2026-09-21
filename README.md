@@ -112,8 +112,11 @@ host's screen showing through the chord column.
 Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
 press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
 two get no chord — see *Using the TUI*. **Sys Req now puts bytes on the wire against a classic
-host**, as a four-byte test request read rather than the AID you would expect; it has no live
-witness yet. See *What is not implemented*.
+host**, as a test request read heading (`01 6c 61 02`) followed by any modified field data, rather
+than the AID you would expect. **Sys Req and Dup are live-verified on both Hercules hosts as of
+2026-09-21; Field Mark and Newline still have no live witness**, and no *keypad button* has been
+clicked at a host — the runs drove the CLI, which shares `applyAction` with the button but not the
+click plumbing. See *What is not implemented*.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
 which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
@@ -608,8 +611,8 @@ here. All three take no arguments — s3270's optional `FailOnError`/`NoFailOnEr
 `FieldMark` is refused by name rather than accepted and ignored, because failing on an operator
 error already *is* s3270's behaviour for a scripted call. **`SysReq()` answers `ok` whatever
 happens** — it reports no refusal, because the key exists on the keyboard whatever the host
-granted. What it sends depends on the session: a four-byte test request read against a classic
-host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
+granted. What it sends depends on the session: a test request read heading plus any modified field
+data against a classic host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
 command for the keypad toggle: a script-driven client has no renderer, which is why `-scheme` is
 absent here too.
 
@@ -813,7 +816,7 @@ Done:
    **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so drag-to-select would
    transmit on every copy attempt. x3270 keeps the two apart deliberately. **Sys Req was
    reachable but inert on this branch until the classic path landed**; it now sends a test
-   request read, still with no live witness — see *What is not implemented*.
+   request read, **live-verified on both hosts 2026-09-21** — see *What is not implemented*.
 
 Remaining, in the order the author wants it:
 
@@ -937,11 +940,16 @@ worse than one that says which quarter is missing.
   not be implemented with `lightpen_select()`, which sends an AID and sets MDT — drag-to-select
   would then transmit on every copy attempt. x3270 keeps them apart deliberately
   (`wc3270/screen.c:2357`).
-- **SYS REQ IS IMPLEMENTED ON BOTH PATHS AND HAS NO LIVE WITNESS.** Implemented is not verified,
-  and this entry is here for the second half. The keypad's `SysRq` button, the TUI overlay's entry
-  and the CLI's `SysReq()` now all put bytes on the wire against VM/370 and MVS 3.8j — but nobody
-  has yet driven the key at either host and watched what came back. On the next live run: see
-  `docs/live-testing.md`.
+- **SYS REQ'S CLASSIC PATH IS LIVE-VERIFIED (2026-09-21); ITS TN3270E PATH STILL HAS NO WITNESS.**
+  The keypad's `SysRq` button, the TUI overlay's entry and the CLI's `SysReq()` all put bytes on the
+  wire against VM/370 and MVS 3.8j, and the key has now been driven at both and the reply read.
+  **Both predicted forms appeared, one per host**: VM's unformatted screen sent the heading plus
+  modified buffer data (`01 6c 61 02 / 11 5b 60`), TK5's formatted panel the heading alone. No `f0`
+  in either record, so `case AID_SYSREQ` ran and not the ordinary-AID path.
+  **VM/370 ACTS on a test request** — `RUNNING` → `CP READ`, a second Read Partition and a repaint —
+  where MVS ignores it, so a host ignoring the key is legal but not universal. The `IAC AO` path
+  needs a host that grants the TN3270E SYSREQ function, which neither Hercules system will ever be.
+  Measurements in `docs/live-testing.md`, *Sys Req and Dup against VM/370 and TK5*.
   **It is not the AID you would expect.** Neither Hercules system offers TN3270E — both answer
   `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times — so both take the classic path,
   and x3270's classic branch does **not** send AID `0xf0`. `ctlr_read_modified` has a dedicated
@@ -955,12 +963,17 @@ worse than one that says which quarter is missing.
   function. There is no ETX; that is BSC framing, and a telnet record ends at `IAC EOR`.
   On an inhibited keyboard the key is **refused**, where x3270 would queue it — we have no action
   queue and did not invent one for a single key.
-- **Dup, Field Mark, Sys Req and Newline have NO live witness.** All four are implemented; none has
-  been pressed at a host. They are unit-tested against the
-  manual and x3270's source, and the keypad's *plumbing* is proven by harnesses — but no host has
-  ever been observed reacting to any of the four. The keypad as a whole needs no live verification,
-  because a button press produces the same wire bytes as the equivalent keystroke and those *are*
-  live-verified; that argument does not extend to four keys nothing ever pressed at a host.
+- **FIELD MARK AND NEWLINE HAVE NO LIVE WITNESS, and no keypad BUTTON has been clicked at a host.**
+  All four keys are implemented. **Sys Req and Dup were witnessed 2026-09-21** (above, and
+  `docs/live-testing.md`); the other two are unit-tested against the manual and x3270's source, and
+  no host has ever been observed reacting to them. **Two narrower gaps the 2026-09-21 runs did not
+  close, recorded so the witness is not read as wider than it is:** they drove the **CLI**, which
+  shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC, so the click path is
+  still offline-only (`clicks.mjs`); and **Dup's TAB is unwitnessed** even though its `0x1c` is not,
+  because TK5's logon panel has one unprotected field, where plain `Tab` does not move either. That
+  check needs a multi-field panel, which needs a logon. The keypad as a whole needs no live
+  verification, because a button press produces the same wire bytes as the equivalent keystroke and
+  those *are* live-verified.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
@@ -1030,7 +1043,10 @@ visible there.
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
 | GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
-| Dup, Field Mark, Sys Req, Newline vs a live host | **NOT DONE** — no host has been observed reacting to any of the four. Sys Req is no longer inert by construction (it sends a test request read against a classic host), so it is now worth trying: it is on `docs/live-testing.md`'s next-run list |
+| Sys Req vs both hosts, live | **pass, classic path — 2026-09-21** — both predicted forms appeared, one per host: VM's unformatted screen sent the heading plus modified buffer data (`01 6c 61 02 / 11 5b 60`), TK5's formatted panel the heading alone, **no `f0` in either** and no ETX. **VM/370 acts on it** (`RUNNING` → `CP READ`, a second Read Partition, a repaint) where MVS ignores it. The TN3270E `IAC AO` path is still unwitnessed and unobtainable here. **The control run matters: a first attempt ended at 0.003s against the real run's 0.457s and would have credited Sys Req with a transition it could not have caused** |
+| Dup vs MVS 3.8j TK5, live | **partial — 2026-09-21** — `0x1c` reached the host with the MDT set (an unmodified field is not transmitted at all) and TSO answered `INPUT NOT RECOGNIZED`, i.e. it read the field and rejected it. **The TAB half is NOT witnessed**: that panel has one unprotected field, where plain `Tab` does not move either — measured in the same session, not assumed |
+| Field Mark, Newline vs a live host | **NOT DONE** — neither has been pressed at a host. On `docs/live-testing.md`'s next-run list |
+| any keypad **button** vs a live host | **NOT DONE** — the 2026-09-21 runs drove the CLI, which shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC. The click path remains offline-only (`clicks.mjs`) |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
 | TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` colour-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
