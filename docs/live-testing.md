@@ -2406,7 +2406,13 @@ neither host showed the documented **0 fields** case here — both devices were 
 that remains a possibility rather than something seen on this run.
 
 
-## The virtual keypad and the four new keys — NO LIVE RUN, 2026-09-17
+## The virtual keypad and the four new keys — keypad NO LIVE RUN 2026-09-17; SYS REQ AND DUP LIVE-WITNESSED 2026-09-21
+
+**SUPERSEDED IN PART, 2026-09-21: Sys Req and Dup now HAVE live wire witnesses on both Hercules
+hosts — see *Sys Req and Dup against VM/370 and TK5* at the end of this section. Field Mark and
+Newline still have none, and no *keypad button* has been clicked at a host: the 2026-09-21 runs drove
+the CLI, which shares `applyAction` with the button but not the click plumbing.** The rest of this
+section stands as written.
 
 **Nothing was driven against a host for this feature, deliberately, and this section exists so that
 absence is on the record rather than inferred from silence.**
@@ -2421,24 +2427,27 @@ press highlight and a window resize — and every one of them is checked offline
 (`shot.mjs` 3/3, `browser-shot.mjs` 2/2) or through real Chromium input events (`clicks.mjs`,
 9 buttons / 10 actions).
 
-### WHERE THAT ARGUMENT STOPS: FOUR KEYS WITH NO LIVE WITNESS
+### WHERE THAT ARGUMENT STOPS: FOUR KEYS, TWO OF WHICH NOW HAVE A LIVE WITNESS
 
-**Sys Req, Dup, Field Mark and Newline have never been pressed at a host by anything, and the
-keypad's verification must not be read as covering them.** They are new in this branch precisely
-because no interactive front end could reach them, so there is no earlier run to inherit.
+**As written 2026-09-17, none of Sys Req, Dup, Field Mark and Newline had ever been pressed at a host
+by anything, and the keypad's verification must not be read as covering them.** They are new in this
+branch precisely because no interactive front end could reach them, so there is no earlier run to
+inherit. **Two of the four were witnessed on 2026-09-21; the table below is updated and the `none`
+entries are still live gaps.**
 
 | key | offline evidence | live witness |
 |---|---|---|
-| **Dup** | writes EBCDIC `0x1c`, sets MDT, then TABs; mutation-checked both halves | **none** |
+| **Dup** | writes EBCDIC `0x1c`, sets MDT, then TABs; mutation-checked both halves | **YES, MVS TK5 2026-09-21 — the `0x1c` is on the wire and the host PARSED it.** The TAB half is **not** witnessed: the panel it was driven on has one unprotected field, where plain `Tab` does not move either |
 | **Field Mark** | writes `0x1e` and advances as a typed character; the distinguishing last-cell case is pinned | **none** |
 | **Newline** | `Keyboard.newline()` has existed since stage 1 and the CLI could always call it | **none** — and nothing on this branch changed it, only its reachability |
-| **Sys Req** | the classic **test request read**, `01 6c 61 02` plus modified field data, byte-exact in `core/test/session.test.ts`; the TN3270E `IAC AO` separately in `core/test/tn3270e-session.test.ts` | **none — but now OBTAINABLE on both hosts**; see below |
+| **Sys Req** | the classic **test request read**, `01 6c 61 02` plus modified field data, byte-exact in `core/test/session.test.ts`; the TN3270E `IAC AO` separately in `core/test/tn3270e-session.test.ts` | **YES, BOTH HOSTS 2026-09-21 — and both PREDICTED FORMS appeared, one per host.** The TN3270E `IAC AO` half remains unobtainable here |
 
-### SYS REQ IS NOW REACHABLE *AND ACTIVE* ON BOTH HOSTS, AND STILL HAS NO LIVE WITNESS
+### SYS REQ IS NOW REACHABLE *AND ACTIVE* ON BOTH HOSTS — AND AS OF 2026-09-21 IT HAS A LIVE WITNESS
 
 **This section used to say a live witness was UNOBTAINABLE here. That stopped being true on
-2026-09-17**, when the non-TN3270E path landed. What has not changed is that nobody has driven the
-key at VM/370 or TK5 and watched the result. Implemented, not verified.
+2026-09-17**, when the non-TN3270E path landed, **and the witness was actually taken on 2026-09-21 —
+see *Sys Req and Dup against VM/370 and TK5* below. The classic half is now verified, not merely
+implemented.** The TN3270E `IAC AO` half is still unobtainable here, for the measured reason below.
 
 The TN3270E half is still unobtainable here, and for the measured reason it always was: send
 `IAC WILL TN3270E` (`ff fb 28`) and both Hercules systems answer `ff fe 28` = **DONT**, measured
@@ -2482,7 +2491,9 @@ z/OS:
 2. **Field Mark in the last data cell of a field**, which is where it differs from Dup: it must
    auto-skip like a typed character rather than park on the attribute byte.
 3. **SYS REQ AGAINST VM/370 AND TK5 — the newly available one, and the first thing to do on the
-   next live run.** Both take the classic path. Trace the session (`-trace`) and check the inbound
+   next live run.** Both take the classic path. Trace the session (`Trace(on)` as the FIRST script
+   line — **there is no `-trace` argv flag**, as *The probe* above records, and this step said there
+   was until 2026-09-21) and check the inbound
    record is exactly `01 6c 61 02` plus whatever is modified, terminated by `ff ef`, **with no
    `f0` anywhere in it** — a stray `f0` means the ordinary-AID path ran. Then watch the host:
    CP/CMS and MVS are each free to ignore a test request, so **"nothing visible happened" is a
@@ -2498,6 +2509,85 @@ z/OS:
 
 Do all five **through the keypad button**, not through the CLI: the CLI path is the one already
 covered offline, and the button is the path a user actually has.
+
+### Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried
+
+**Driven through the CLI, NOT the keypad button, so the advice immediately above is only half taken
+and this is an honest partial.** What the CLI shares with the button is `applyAction` and everything
+below it — the wire bytes, which is what had no witness. What it does not share is `mousedown` →
+`hitTestAt` → IPC, and that plumbing has only ever been exercised offline (`clicks.mjs`). **So the
+protocol half of items 1 and 3 is closed and the click half of every item is still open.**
+
+Both runs used the probe's shape — `Trace(on)` FIRST, no logon, so neither can hand the VM reconnect
+trap to the next run:
+
+```bash
+{ printf 'Trace(on)\nConnect(127.0.0.1:3270)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nSysReq()\n'
+  sleep 3
+  printf 'ScreenText\nTraceText\nQuit\n'; } \
+  | node packages/cli/dist/main.js -insecure -model 3278-2-E > /tmp/sysreq-vm.log 2>&1
+```
+
+**FEEDING THE SCRIPT WITH A `sleep` IN THE MIDDLE IS LOAD-BEARING, and it is what made the control
+valid.** `parseCommand` is driven by `readline` over stdin (`cli/src/main.ts:166`), so lines are
+consumed as they arrive and a `sleep` between two `printf`s holds the connection open for real. A
+single `printf` of the whole script runs every line in milliseconds and **quits before the host's
+reply can arrive** — see the invalidated control below.
+
+**SYS REQ: BOTH PREDICTED FORMS APPEARED, ONE PER HOST, AND THE PREDICTION WAS EXACTLY RIGHT.**
+The section above predicted the heading plus modified buffer contents on VM's unformatted screen and
+the heading alone on a formatted panel with nothing typed. Both were observed:
+
+| host | inbound record | matches |
+|---|---|---|
+| **VM/370** | `01 6c 61 02  11 5b 60  ff ef` | the heading, then an SBA to address 1760 (row 22, col 0) as the modified field data, then EOR |
+| **MVS TK5** | `01 6c 61 02  ff ef` | the heading **alone**, as predicted for a formatted panel with nothing modified |
+
+**NO `f0` ANYWHERE IN EITHER RECORD**, which was the specific check: a stray `f0` would have meant the
+ordinary-AID path ran instead of `ctlr_read_modified`'s `case AID_SYSREQ`. And **no ETX**, terminated
+by `ff ef` as predicted.
+
+**THE HOST REACTION ON VM IS NOT NOTHING, AND THAT IS THE SURPRISE.** The section above prepared for
+"nothing visible happened" as a valid result. VM/370 instead **acted on the test request**: the OIA
+status area went from `RUNNING   VM370CE` to **`CP READ   VM370CE`**, and the host followed with a
+**second Read Partition** (`f3 00 07 01 ff ff 03 80 00`) plus an EraseWrite repainting the logon
+panel. MVS TK5 did ignore it, as the section allowed — no reply at all, just the keyboard left locked.
+
+**THE KEYBOARD LOCKS AFTERWARDS ON BOTH HOSTS, as predicted** — the OIA's first field goes `U` → `L`
+(`cli/src/status.ts`). On VM it then unlocks again when the host writes; on MVS, which never writes,
+it stays locked for the rest of the session. **That difference is itself the tell that VM processed
+the request and MVS did not.**
+
+**THE FIRST CONTROL RUN WAS INVALID AND WOULD HAVE MANUFACTURED THE WHOLE RESULT.** Dropping
+`SysReq()` but keeping one `printf` gave a log ending at **0.003s** against the Sys Req run's
+**0.457s** — so it showed **zero** Read Partitions and no status line at all, and the `CP READ`
+transition would have looked like Sys Req's doing when it might merely have been elapsed time. The
+valid control holds the connection open for the same 3 seconds and does nothing: **one** Read
+Partition, and the status area stays `RUNNING   VM370CE` across both `ScreenText`s. *That* is what
+makes the second Read Partition and the `CP READ` attributable. See
+[[check-what-a-comparison-covers]] — a control that ends before the effect could appear is not a
+control.
+
+**DUP: THE `0x1c` IS ON THE WIRE AND MVS PARSED IT — but its TAB is UNOBSERVABLE on that panel.**
+`MoveCursor`-free run on TK5's logon panel, `Dup()` then `Enter`:
+
+```
+> 7d 5b 6b  11 5b 6b  1c 40 40 40 …  ff ef
+```
+
+AID `0x7d` (Enter), cursor at 1771 = row 22 col 11, SBA to the same, then **`1c`** followed by the
+field's trailing blanks. MVS answered with an EraseWrite reading **`INPUT NOT RECOGNIZED`** (EBCDIC
+`c9 d5 d7 e4 e3 …`), which is a host that *read the field and rejected its contents* — not a host that
+ignored the record. **The MDT half is therefore witnessed too**: an unmodified field is not
+transmitted at all, so the `1c` reaching the host proves the MDT was set.
+
+**WHAT THIS RUN CANNOT SHOW, and do not record it as showing it: the TAB.** The cursor stayed at row
+22 col 11 across the `Dup()`. That is **not** a falsification of `Dup_action`'s documented tab
+(`kybd.c:2790`) — **plain `Tab` does not move on that panel either**, measured in the same session
+across two consecutive `Tab`s, because TK5's logon panel has exactly one unprotected field and a tab
+from the only field wraps to itself. **Item 1's "cursor at the next unprotected field" check needs a
+panel with two or more input fields** — an ISPF panel after logon, which needs credentials this run
+deliberately did not use. Still open.
 
 ## `playback -b` as a reference oracle — the traces, and how to read them, 2026-09-17
 
