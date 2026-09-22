@@ -205,6 +205,13 @@ Four states: `idle`, `running`, `done`, `failed`.
   does this, and its comment gives the reason: better to say so here "than to have the first poll of
   the loop throw it after the host has been told to start". The refusal **names the current
   geometry**, as the model-4 program-check message names the model that would fit.
+  **AND IT MUST SAY WHAT TO DO ABOUT IT, because the remedy is a RESTART.** `-model` is parsed once at
+  launch (`tui/src/main.ts:106`) and **runtime model-switching does not exist** — it is roadmap item
+  (10), unbuilt. So a user at `-model 3278-4-E` cannot fix this from inside the running client, and a
+  message that only reports the geometry leaves them stuck. It must name the flag:
+  *"CUT file transfer needs a 24x80 screen; this session is 43x80. Restart with `-model 3278-2-E`,
+  or wait for DFT."* The user has accepted this constraint explicitly (2026-09-22) and **it is the
+  main reason stage 2 exists**: DFT is what makes transfer work at their actual working geometry.
 - **While `running`**, the form stays open showing progress from `CutTransfer`'s existing
   `TransferStep`, and the screen underneath keeps updating — in CUT mode a transfer *is* screen
   traffic.
@@ -221,12 +228,42 @@ Four states: `idle`, `running`, `done`, `failed`.
 module unit-testable.
 
 `nodeTransferFiles` is the one genuinely Node-coupled piece, so **it cannot go in `frontend`** if
-`frontend` is to stay browser-safe for stages 3 and 4. For stage 1: a small `packages/tui/src/files.ts`
-(four methods over `node:fs`), with the duplication against `cli`'s `nodeTransferFiles`
-(`cli/src/main.ts:132`) acknowledged rather than hidden. Stage 4
-will revisit it anyway, because the web gateway raises *whose filesystem* — a browser-initiated
-transfer moves bytes between the host and the **gateway's** disk, not the operator's machine, which is
-a security question and not a UI one.
+`frontend` is to stay browser-safe for stages 3 and 4.
+
+**A NEW PACKAGE, `packages/node-files`, decided by the user 2026-09-22 in preference to duplicating
+it.** It holds exactly one thing: the `TransferFiles` implementation over `node:fs`, moved from
+`cli/src/main.ts:132` (`nodeTransferFiles`). `cli` and `tui` both depend on it; neither duplicates the
+four methods, and there is one place where a filesystem bug can live.
+
+Its dependency is **`frontend`** (for the `TransferFiles` type), so the graph becomes:
+
+```
+core ← frontend ← { cli, tui, node-files }   with { cli, tui } → node-files
+core ← canvas ← { gui, web }
+```
+
+`gui` and `web` do **not** depend on it — which is the point of it being separate rather than folded
+into `frontend`: the browser bundle must not acquire a `node:fs` import, and stage 4 needs a
+*different* `TransferFiles` whose "filesystem" is an upload/download pair rather than a disk.
+
+**Four mechanical steps that are each easy to forget, and the last two fail silently:**
+1. `packages/node-files/package.json` — copy `frontend`'s shape: `@tn3270/node-files`, `type: module`,
+   `main`/`types`/`exports` pointing at `dist`, one dependency on `@tn3270/frontend`.
+2. `packages/node-files/tsconfig.json` — `extends ../../tsconfig.base.json`, `rootDir: src`,
+   `outDir: dist`, and `references: [{ "path": "../frontend" }]`.
+3. **Add `references` entries** for `../node-files` to `cli`'s and `tui`'s `tsconfig.json`. Without
+   this the import resolves at runtime but the build order is undefined.
+4. **Add `packages/node-files` to the ROOT `package.json`'s `typecheck` script**, which names every
+   package explicitly (`tsc --build packages/core packages/frontend ...`). **A package missing from
+   that list is silently exempt from typechecking** — the same class of gap as a harness that is not
+   in `npm test`. `workspaces: ["packages/*"]` picks the new package up automatically, so `npm run
+   build` needs no edit; only `typecheck` does.
+
+Stage 4 will still revisit *policy*, because the web gateway raises *whose filesystem* — a
+browser-initiated transfer moves bytes between the host and the **gateway's** disk, not the operator's
+machine, which is a security question and not a UI one. `node-files` is the right shape for that
+conversation: the gateway will supply its own implementation of the same interface rather than
+inheriting this one by accident.
 
 ## Testing
 
@@ -239,6 +276,11 @@ a security question and not a UI one.
 - **Mutation-check the applicability rules.** Each of the five must be independently falsifiable:
   breaking one should redden exactly one test. Memory's standing lesson is that a rule which passes
   vacuously is worse than a missing one.
+- **`node-files` needs a test that actually touches a filesystem**, since its whole reason to exist is
+  the `node:fs` coupling. A tmpdir round trip of all four methods, plus `append` against a missing file
+  and `exists` on a directory. **It must also be proven to be the SAME implementation `cli` used**: the
+  existing `cli` transfer tests are the regression guard for the move, exactly as the validator's tests
+  are for the `cli → frontend` move.
 - **A live run against VM at `-model 3278-2-E`**, which is the only geometry CUT accepts. The
   committed `transfer-vm.txt` round trip is the oracle: the form must produce the same transfer.
   **Prove state before trusting the run** (`QUERY DISK A` → `Ready;`, not `?CP:`) and reach `LOGOFF`,
