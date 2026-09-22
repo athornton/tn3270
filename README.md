@@ -15,7 +15,8 @@ browser gateway.**
 The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
 Reply, 3279 colour, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
 c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
-TN3270E is verified against two live hosts — VM/370 and MVS 3.8j.
+TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is **done but
+script-only**: no interactive front end can reach it. See *What is not implemented*.)
 
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
@@ -52,7 +53,8 @@ parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
 colour-capable 3279.
 
 **`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
-binary round-tripping byte-identically each way.
+binary round-tripping byte-identically each way — **but only from the scripting CLI. No
+interactive front end can transfer a file**; see *What is not implemented*.
 
 **There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
 blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
@@ -617,6 +619,8 @@ command for the keypad toggle: a script-driven client has no renderer, which is 
 absent here too.
 
 **`Transfer`** is `IND$FILE`, CUT mode, and it works on both hosts in both directions.
+**IT IS REACHABLE ONLY FROM HERE — there is no way to transfer a file from the TUI, the GUI or the
+browser.** See *What is not implemented*.
 Two things that will otherwise cost you an afternoon: quote CMS file names, because the
 argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
 `-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
@@ -974,6 +978,19 @@ worse than one that says which quarter is missing.
   check needs a multi-field panel, which needs a logon. The keypad as a whole needs no live
   verification, because a button press produces the same wire bytes as the equivalent keystroke and
   those *are* live-verified.
+- **`IND$FILE` IS SCRIPT-ONLY: NO INTERACTIVE FRONT END CAN TRANSFER A FILE.** The transfer itself
+  is finished and live-verified on both hosts in both directions — but only through the CLI's
+  `Transfer` command, i.e. only from a script or a piped stdin. **The `Action` union in
+  `frontend/src/keymap.ts` has no `transfer` member**, and only `packages/cli` imports
+  `CutTransfer`/`TransferDirection`, so the TUI, the GUI and the browser cannot reach it by any
+  route. This is the same shape as `Session.sysreq()` and `Keyboard.newline()` before the keypad
+  branch: a capability implemented in `core` with no interactive way to invoke it.
+  **It is not a missing keybinding.** Unlike every other action, a transfer needs arguments (local
+  path, direction, host file name), so it needs a *dialog* — and neither the GUI nor the browser has
+  any dialog infrastructure yet (see the next two entries). It is also long-running and can fail
+  midway, so it needs progress and cancellation that the OIA does not currently model. **And in the
+  web gateway it is a security question, not just a UI one:** a browser-initiated transfer moves
+  bytes between the host and the *gateway's* filesystem, not the operator's machine.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
