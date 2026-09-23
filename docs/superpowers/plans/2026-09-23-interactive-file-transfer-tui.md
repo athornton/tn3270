@@ -2631,6 +2631,50 @@ Generated with AI
 Co-Authored-By: SLAC AI')"
 ```
 
+### AS BUILT, Task 8 — two wrong fixtures, a truncated recovery message, and two silent guard pairs
+
+Gate after: build/typecheck clean, **1970 tests in 78 files** (from 1945), `pty-smoke.py` 12/12
+exit 0. Commit `09c2bea`. **16 engine tests + 9 app tests, not 8 + 1.**
+
+1. **`new Session({ alternateRows: 43 })` GIVES A 24x80 SCREEN.** A model sets only the ALTERNATE
+   size; EW/EWA switch to it. The geometry test would have passed **for entirely the wrong reason**
+   — the screen really being 1920 cells. Use `rows`/`cols`, and assert `screen.size === 3440`
+   **before** asserting the refusal. (Step 2's own warning was right to flag this; the answer is
+   `rows`, not `useAlternateSize()`.)
+2. **`is3270Mode()` IS FALSE ON ANY UNCONNECTED SESSION** (`session.ts:295` reads through
+   `this.telnet?`), so the 3270-mode refusal fires before every other check. **Every** test that
+   needs to get past it must mock it true — the plan mocks it only where it wants it false, so most
+   of its tests would have asserted the wrong refusal.
+3. **THE TIMEOUT MESSAGE HAD TO BE REORDERED.** The CLI's word order (reason, bytes, then
+   `(press Attn or Clear)`) is **113 characters** against the status line's 54, so the one
+   actionable phrase was truncated away — on the one failure where the host may still be
+   mid-transfer. **The recovery now LEADS the message.** Same shape as Task 6's help string, one
+   layer down, and caught the same way: by asserting on what is drawn.
+4. **`primeAndType` must be ported too** — the plan does not mention it, and without it there is no
+   keyboard-lock, no-input-field, field-too-small or unformatted-screen refusal. It returns a
+   message rather than throwing, because this caller reports onto a form.
+5. **`TransferResult` is a DISCRIMINATED UNION** (`ft/transfer.ts:98`), so `result.error` does not
+   typecheck on the `ok: true` arm — caught by `npm run typecheck` with all 14 tests green.
+6. **`CUT_SCREEN_SIZE` IS already re-exported** from core's index via `export * from './ft/frames.js'`
+   — the plan's "check it is, add it if not" needs no action.
+7. **TWO DEFENCE-IN-DEPTH PAIRS, found by mutation and now documented in the tests that cover
+   them**, because each guard alone keeps the suite green: (a) `ended` and `clearTimers()` in
+   `finish` — with both gone `onDone` fires THREE times and the last overwrites "cancelled" with
+   "timed out"; (b) `app.ts` clearing `transferRun` in `onDone` and `CutTransfer.cancel`'s own
+   idempotence — deleting the app's half keeps the whole TUI suite green and removing both reddens
+   **core's** three cancel tests, not a TUI one.
+8. **A `mut()` helper that ASSERTS ITS TARGET WAS FOUND is worth the three lines.** One mutation
+   here silently failed to match and reported a green suite — i.e. a false "this code is not
+   load-bearing". Two of the reported passes in my first sweep were that, not real.
+
+**No `outputCount` equivalent is needed**, which is the real simplification: the CLI polls so it
+must ask "has the host written since I last looked"; an event fires once per host write, so arriving
+in the listener IS the freshness signal.
+
+**Mutation matrix:** `session.off` → 2; `primeAndType` after `sendAID` → 2; `closeTransfer` not
+aborting → 1; running guard → 1; files check → 1; `ended`+`clearTimers` → 1 *only together*;
+`transferRun` clear + core's idempotence → core's 3 *only together*.
+
 ---
 
 ## Task 9: Documentation
