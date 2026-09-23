@@ -1064,3 +1064,94 @@ describe('after the transfer has ended', () => {
     expect(t.complete).toBe(true);
   });
 });
+
+describe('cancel, the operator-initiated abort', () => {
+  it('writes an abort response and returns PF2, so the host leaves transfer mode', () => {
+    // A user closing the form mid-transfer must ABORT rather than abandon, or the host
+    // program is left waiting for a CUT frame that will never come -- and the operator's
+    // next keystroke then goes into a host that is not listening for it.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    const screen = cutScreen();
+    const step = transfer.cancel(screen);
+    expect(step.ack).toBe(AckAid.ABORT);          // PF2: an abort WE initiate
+    expect(step.done?.ok).toBe(false);
+    // SC_ABORT_FILE, NOT the plan's SC_ABORT_XMIT. x3270 uses ABORT_FILE at BOTH of its
+    // user-cancel sites -- `cut_abort(get_message("ftUserCancel"), SC_ABORT_FILE)` at
+    // ft_cut.c:509 and :610 -- and reserves ABORT_XMIT for transmission faults, which is
+    // what every other abort in this file is. Telling the host a transmission error
+    // occurred when the operator simply changed their mind misreports the cause in the
+    // host's own log.
+    expect(step.done?.status).toBe(StatusCode.ABORT_FILE);
+  });
+
+  it("uses x3270's own ftUserCancel text, so the message is not invented", () => {
+    // `x3270.message.ftUserCancel: Transfer canceled by user` (Common/fb-common:35),
+    // matching how MSG already carries ftHostCancel and ftCutRetransmit verbatim.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    expect(transfer.cancel(cutScreen()).done?.error).toBe('Transfer canceled by user');
+  });
+
+  it('writes the response into the RESPONSE AREA, where the host reads it', () => {
+    // The status must actually reach the buffer, not merely be reported in the step: the
+    // host learns of the abort from these cells and from nothing else.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    const screen = cutScreen();
+    transfer.cancel(screen);
+    // Asserted as a RAW BYTE, not cp037.encode(...) as the plan wrote: ResponseFrameType
+    // values ARE EBCDIC control bytes already (CONTROL_CODE is 0xc3) and `writeResponse`
+    // calls `setChar` with them directly. Encoding 0xc3 as text is a different byte, and
+    // every other response-area assertion in this file (:824, :924, :979) compares raw.
+    expect(screen.cellAt(RO_FRAME_TYPE).ebcdic).toBe(ResponseFrameType.CONTROL_CODE);
+    // HIGH8/LOW8 of SC_ABORT_FILE = 0x8194 (ft_cut.c:670-671).
+    expect(screen.cellAt(RO_REASON_CODE).ebcdic).toBe(0x81);
+    expect(screen.cellAt(RO_REASON_CODE + 1).ebcdic).toBe(0x94);
+  });
+
+  it('is IDEMPOTENT: a second cancel sends no second AID', () => {
+    // A form closing as a transfer completes must not put a second PF2 on the wire: the
+    // host has already left transfer mode and would read it as input into whatever panel
+    // it painted next.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    const screen = cutScreen();
+    const first = transfer.cancel(screen);
+    const again = transfer.cancel(screen);
+    expect(again.ack).toBeUndefined();
+    // `{ done: this.outcome }`, NOT the plan's `{}`: that is what `step` already returns
+    // after the end (transfer.ts:318-321), and the run engine in Task 8 reads `done` to
+    // learn the outcome. Returning `{}` would make a post-completion cancel look like a
+    // transfer still in progress.
+    expect(again.done).toEqual(first.done);
+  });
+
+  it('writes NOTHING to the screen on a second cancel', () => {
+    // The idempotence that matters is on the BUFFER, not just the return value: a second
+    // response written into a screen the host has moved on from is a corrupted panel.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    transfer.cancel(cutScreen());
+    const fresh = cutScreen();
+    transfer.cancel(fresh);
+    expect(fresh.cellAt(RO_FRAME_TYPE).ebcdic).toBe(0x00);
+    expect(fresh.cellAt(RO_REASON_CODE).ebcdic).toBe(0x00);
+  });
+
+  it('cancelling after a NORMAL completion is also inert', () => {
+    // The same guard from the other side: the transfer ended on its own and the form is
+    // only now being closed.
+    const transfer = new CutTransfer({ direction: 'receive' });
+    // SC_XFER_COMPLETE is what ends a receive -- NOT the plan's `eofDataScreen(0)`, which
+    // only acks (:237 shows it returning `{ ack: AckAid.OK }` with no `done`), because
+    // the EOF sentinel reports the end of DATA and the host still sends a control code.
+    transfer.step(controlCodeScreen(StatusCode.XFER_COMPLETE));
+    expect(transfer.complete).toBe(true);
+    const after = transfer.cancel(cutScreen());
+    expect(after.ack).toBeUndefined();
+    expect(after.done?.ok).toBe(true);           // the real outcome, not the cancellation
+  });
+
+  it('reports the cancellation through `result` too', () => {
+    const transfer = new CutTransfer({ direction: 'receive' });
+    transfer.cancel(cutScreen());
+    expect(transfer.complete).toBe(true);
+    expect(transfer.result?.status).toBe(StatusCode.ABORT_FILE);
+  });
+});

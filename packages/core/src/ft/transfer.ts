@@ -180,6 +180,9 @@ const MSG = {
   UNKNOWN_CONTROL: 'Unknown FT control code from host',
   /** `ftCutRetransmit` (ft_cut.c:577). */
   RETRANSMIT: 'Transmission error',
+  /** `ftUserCancel` (fb-common:35), used by `cancel` — x3270's own wording for an
+   * operator cancellation, as at ft_cut.c:509 and :610. */
+  USER_CANCEL: 'Transfer canceled by user',
 } as const;
 
 /**
@@ -644,6 +647,53 @@ export class CutTransfer {
           `${MSG.UNKNOWN_CONTROL} (0x${status.toString(16).padStart(4, '0')})`,
         );
     }
+  }
+
+  /**
+   * Cancel at the operator's request: abort the transfer and tell the host.
+   *
+   * ## WHY THIS WRAPS `abort` RATHER THAN `abort` BEING MADE PUBLIC
+   *
+   * `abort` is the INTERNAL error path. Its callers each already hold a
+   * `CutFrameError`'s status and message, so its signature takes both — and an
+   * operator cancelling has neither. Exposing `abort` would put two arguments in
+   * the public API that no caller outside this file can sensibly supply, and the
+   * natural wrong guess (status 0, an empty message) is one the host would read
+   * as a protocol fault rather than a cancellation.
+   *
+   * ## THE STATUS IS `SC_ABORT_FILE`, NOT `SC_ABORT_XMIT`
+   *
+   * x3270 uses `SC_ABORT_FILE` at BOTH of its user-cancel sites —
+   * `cut_abort(get_message("ftUserCancel"), SC_ABORT_FILE)` at ft_cut.c:509 and
+   * :610 — and reserves `SC_ABORT_XMIT` for transmission faults, which is what
+   * every other abort in this file is. Reporting a transmission error when the
+   * operator simply changed their mind misstates the cause in the host's own log.
+   *
+   * `AckAid.ABORT` (PF2) is the AID: `run_action(AnPF, IA_FT, "2", NULL)`
+   * (ft_cut.c:674). Note the asymmetry recorded at the top of this file — a
+   * HOST-initiated abort is acknowledged with Enter, not PF2; PF2 is only for an
+   * abort WE initiate, which is exactly this.
+   *
+   * ## WE SEND IMMEDIATELY WHERE x3270 DEFERS
+   *
+   * x3270's `ft_do_cancel` (ft.c:1209-1225) sets `FT_ABORT_WAIT` and sends
+   * nothing until the host's NEXT frame arrives, which is what its two call sites
+   * above are. That suits a client whose transfer loop owns the screen; ours is
+   * called from a front end closing a form, which has no later frame to wait for
+   * and must not leave the host primed. So this writes the response and returns
+   * the AID in one step, and the front end sends it.
+   *
+   * IDEMPOTENT, on the buffer as well as the return value. A closed form racing a
+   * completing transfer must not put a second PF2 on the wire: the host has
+   * already left transfer mode and would read it as input into whatever panel it
+   * painted next. The post-completion return matches `step`'s own
+   * (`{ done: this.outcome }`), so a caller reading `done` sees the real outcome
+   * — which for a transfer that finished normally is a SUCCESS, not this
+   * cancellation.
+   */
+  cancel(screen: Screen): TransferStep {
+    if (this.outcome !== undefined) return { done: this.outcome };
+    return this.abort(screen, StatusCode.ABORT_FILE, MSG.USER_CANCEL);
   }
 
   /**
