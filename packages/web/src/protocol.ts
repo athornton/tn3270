@@ -110,6 +110,25 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
+    // `transferForm` IS REJECTED, taking the FIRST of the two branches above rather than the
+    // second, and the choice is not arbitrary: a browser must not have this action at all yet.
+    //
+    // `applyAction` throws on it (a dialog is the front end's business), so doing nothing here
+    // would end the gateway process from one frame -- the `toggleKeypad` hole exactly. An
+    // interception in `main.ts` would be the other legal answer, and is wrong TODAY for two
+    // reasons: there is no transfer dialog in the browser front end to intercept it into, and a
+    // browser-initiated transfer moves bytes between the host and the GATEWAY's filesystem rather
+    // than the operator's machine, which is a security question stage 4 of the transfer work has to
+    // settle before this kind can be accepted. Answering it with a silent no-op would also tell a
+    // clicked `Xfer` button nothing, where an error names the reason.
+    //
+    // REACHABLE FROM A CLICK, not just a hand-built frame: `KEYPAD_KEYS` carries an `Xfer` button,
+    // so the served bridge produces this kind in a browser today. When stage 4 gives the gateway a
+    // transfer path, this rejection becomes an interception in `main.ts` and the integration test's
+    // REFUSED list loses a member.
+    if (aKind === 'transferForm') {
+      throw new Error('transferForm is not accepted from a client: the gateway has no transfer UI');
+    }
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
     // already threw on it and nothing in `main.ts` intercepted it; now `main.ts` handles it and

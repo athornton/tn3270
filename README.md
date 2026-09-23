@@ -15,8 +15,9 @@ browser gateway.**
 The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
 Reply, 3279 colour, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
 c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
-TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is **done but
-script-only**: no interactive front end can reach it. See *What is not implemented*.)
+TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is reachable
+from the **TUI** as well as the CLI — `Ctrl-T` opens a transfer form; the GUI and the browser
+are stages 3 and 4. See *What is not implemented*.)
 
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
@@ -53,8 +54,12 @@ parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
 colour-capable 3279.
 
 **`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
-binary round-tripping byte-identically each way — **but only from the scripting CLI. No
-interactive front end can transfer a file**; see *What is not implemented*.
+binary round-tripping byte-identically each way. **`Ctrl-T` in the TUI opens a transfer
+form**; the GUI and the browser cannot reach it yet. Two honest limits: **CUT needs a 24x80
+screen**, so a session started at `-model 3278-4-E` refuses the transfer and names the
+restart, and **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** (measured on both
+hosts — TSO honours it as a maximum, CMS does not), so a `V 80` readback there is not
+confirmation the field took effect.
 
 **There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
 blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
@@ -345,6 +350,23 @@ replace a no-op. `h`, `l`, `a` and `d` are deliberately left swallowed: the list
 there is nothing for left and right to do. Case-folding diverges from vi, where `K` is not `k`,
 because caps lock must not make the list unnavigable.
 
+**`Ctrl-T` opens the file-transfer form**, which is the TUI's answer to the same problem the list
+solves for keys: `IND$FILE` needs arguments, so it needs somewhere to type them. Ten fields —
+direction, host dialect, the two file names, mode, exist, and the four record attributes — with
+`Tab` and `Shift-Tab` to move, left and right to change a cycle field, `Enter` to start and `Esc`
+to close. **It owns the keyboard exactly as the keypad list does, and that is what makes the text
+fields possible at all**: a printable byte is data typed at the host everywhere else, so a filename
+could not be entered without the interception. The two overlays are **mutually exclusive** — either
+key closes the other — because two things owning the keyboard is a state the operator cannot read.
+**Inapplicable fields are not drawn**: `Recfm` only on a send, `Lrecl` only once `Recfm` is set,
+`Blksize` not on VM, `Cr` only in ascii mode — and a value that becomes inapplicable is **cleared**
+rather than kept invisibly, since a hidden value that breaks a later submit names a keyword the
+operator never typed. **The form never validates.** It collects strings and hands them to the same
+`parseTransferKeywords` the CLI uses, so a refusal shows the validator's own message with the form
+still open and nothing retyped; a form and a script cannot drift on what is legal.
+**`Esc` mid-transfer ABORTS** — `CutTransfer.cancel` writes the response area and presses PF2, so
+the host leaves transfer mode rather than waiting for a frame that will never come.
+
 **Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
 `default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
 rest — and it is what every front end draws unless told otherwise. `3279` is
@@ -619,8 +641,9 @@ command for the keypad toggle: a script-driven client has no renderer, which is 
 absent here too.
 
 **`Transfer`** is `IND$FILE`, CUT mode, and it works on both hosts in both directions.
-**IT IS REACHABLE ONLY FROM HERE — there is no way to transfer a file from the TUI, the GUI or the
-browser.** See *What is not implemented*.
+**The TUI reaches it too, through `Ctrl-T`** — the same validator and the same command builder,
+so a form and a script cannot disagree about what is legal. The GUI and the browser cannot yet;
+see *What is not implemented*.
 Two things that will otherwise cost you an afternoon: quote CMS file names, because the
 argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
 `-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
@@ -824,6 +847,18 @@ Done:
 
 Remaining, in the order the author wants it:
 
+9a. **Interactive `IND$FILE` — stage 1 of four is done.** The transfer itself was finished and
+   live-verified long before any interactive front end could reach it, which is the same shape as
+   Sys Req and Newline before item 9. **Stage 1, the TUI's `Ctrl-T` form, is built** — see
+   *Using the TUI*. **Stage 2 is DFT**, which matters because it is **geometry-free**: `ft_dft.c`
+   contains zero screen-buffer references against 25 in `ft_cut.c`, so it moves data through
+   structured fields rather than the display, and it is what lifts the 24x80 restriction CUT
+   imposes. Neither Hercules host speaks DFT, so stage 2 will have no live witness. **Stage 3** is
+   the same form in the GUI, which is a renderer rather than a rewrite — the model is already
+   shared in `packages/frontend` and the `Xfer` keypad button already exists. **Stage 4** is the
+   web gateway, and it is a security decision before it is a UI one: the gateway currently
+   **refuses** the action, because a browser-initiated transfer would move bytes to the gateway's
+   filesystem and not the operator's.
 10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
@@ -978,19 +1013,18 @@ worse than one that says which quarter is missing.
   check needs a multi-field panel, which needs a logon. The keypad as a whole needs no live
   verification, because a button press produces the same wire bytes as the equivalent keystroke and
   those *are* live-verified.
-- **`IND$FILE` IS SCRIPT-ONLY: NO INTERACTIVE FRONT END CAN TRANSFER A FILE.** The transfer itself
-  is finished and live-verified on both hosts in both directions — but only through the CLI's
-  `Transfer` command, i.e. only from a script or a piped stdin. **The `Action` union in
-  `frontend/src/keymap.ts` has no `transfer` member**, and only `packages/cli` imports
-  `CutTransfer`/`TransferDirection`, so the TUI, the GUI and the browser cannot reach it by any
-  route. This is the same shape as `Session.sysreq()` and `Keyboard.newline()` before the keypad
-  branch: a capability implemented in `core` with no interactive way to invoke it.
-  **It is not a missing keybinding.** Unlike every other action, a transfer needs arguments (local
-  path, direction, host file name), so it needs a *dialog* — and neither the GUI nor the browser has
-  any dialog infrastructure yet (see the next two entries). It is also long-running and can fail
-  midway, so it needs progress and cancellation that the OIA does not currently model. **And in the
-  web gateway it is a security question, not just a UI one:** a browser-initiated transfer moves
-  bytes between the host and the *gateway's* filesystem, not the operator's machine.
+- **`IND$FILE` IS INTERACTIVE IN THE TUI ONLY — the GUI and the browser still cannot transfer a
+  file.** `Ctrl-T` opens a form in the TUI: ten fields, `Tab` and the arrows to move and change,
+  `Enter` to start, `Esc` to close, and closing mid-transfer **aborts** rather than abandoning, so
+  the host leaves transfer mode. **Three things it does not do yet.** (1) **CUT mode only, so it
+  needs a 24x80 screen** — a session at `-model 3278-4-E` gets a refusal naming the restart,
+  because `-model` is parsed once at launch and runtime model-switching does not exist. DFT is
+  stage 2 and is geometry-free. (2) **The GUI has the form's model and no renderer for it** —
+  `frontend/src/transferForm.ts` is shared and the `Xfer` keypad button exists, but stage 3 writes
+  the canvas view. (3) **The web gateway REFUSES the action outright, in `web/src/protocol.ts`**, and
+  that is deliberate: a browser-initiated transfer moves bytes between the host and the *gateway's*
+  filesystem, not the operator's machine, which is a security question stage 4 must settle before
+  the button can work. **Not verified against a live host yet** — see *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
@@ -1055,7 +1089,8 @@ visible there.
 | web gateway reattachment, live | **pass** — same session returned inside the grace window, a new one after it |
 | TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
-| `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically |
+| `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically. **From the CLI**; the TUI's form drives the same `CutTransfer` and the same command builder, and has its own live row below |
+| the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy.** **MVS/TSO through the form is NOT yet verified**, nor is cancelling a transfer mid-flight |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |

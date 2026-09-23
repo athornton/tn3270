@@ -181,11 +181,11 @@ describe('keypadRegion', () => {
   it('paints a FULL BLOCK of cells for every key, not just its label', () => {
     // Inverse video makes the CELL paint the button, so a short label must still fill the block or
     // the key is a white patch the width of its text -- and `^`, `v`, `<`, `>` would each be a lone
-    // 9x14 speck with no click target. 47 keys x 5 cells = 235.
+    // 9x14 speck with no click target. 48 keys x 5 cells = 240 (47 x 5 = 235 before `Xfer`).
     const r = region();
     expect(r.cells).toHaveLength(KEYPAD_KEYS.length * BLOCK);
-    expect(r.cells).toHaveLength(47 * 5);
-    // Strictly MORE than the labels themselves need -- 199 characters over 47 keys -- and the
+    expect(r.cells).toHaveLength(48 * 5);
+    // Strictly MORE than the labels themselves need -- 203 characters over 48 keys -- and the
     // difference is the padding, which is the point of the change.
     expect(r.cells.length)
       .toBeGreaterThan(KEYPAD_KEYS.reduce((n, k) => n + k.label.length, 0));
@@ -380,10 +380,11 @@ describe('hitTest', () => {
     // A hit test that rounded a click to the nearest key would return a button in a gutter. Table
     // rows 2 and 3 (drawn 4 and 6, since table row r is drawn at 2r) each have THREE 6-cell gutters
     // -- at cells 18, 42 and 54, since their keys sit at 0,6,12,24,30,36,48,60 -- and they stop at
-    // cell 66. Table row 4 (drawn 8) has one gutter, at 18, and stops at 48: its keys are
-    // 0,6,12,24,30,36 and NOW 42, which is `NewLn`. Cell 42 on that row was in the list below until
-    // Newline took it, and this test is what noticed -- the only assertion anywhere that a keypad
-    // column is EMPTY. Every gutter is probed at its first and last cell.
+    // cell 66. Table row 4 (drawn 8) has one gutter, at 18, and stops at 54: its keys are
+    // 0,6,12,24,30,36,42 and NOW 48, which is `Xfer`. This has happened TWICE now -- cell 42 was in
+    // the list below until Newline took it, and cell 48 until the transfer button did -- and this
+    // test is what noticed both times, being the only assertion anywhere that a keypad column is
+    // EMPTY. Every gutter is probed at its first and last cell.
     const r = keypadRegion(atlas, scheme, 350);
     const at = (cell: number, drawnRow: number) =>
       hitTest(r.buttons, cell * atlas.cellWidth, r.y + drawnRow * atlas.cellHeight);
@@ -392,12 +393,13 @@ describe('hitTest', () => {
         expect(at(cell, drawnRow), `cell ${cell} on drawn row ${drawnRow}`).toBeUndefined();
       }
     }
-    for (const cell of [18, 23, 48, 71]) {
+    for (const cell of [18, 23, 54, 71]) {
       expect(at(cell, 8), `cell ${cell} on drawn row 8`).toBeUndefined();
     }
-    // And the other side of the same change: the cell that STOPPED being a gutter must now be a
-    // button, or moving a key to 42 and forgetting to probe it would read as a pass above.
+    // And the other side of the same change: the cells that STOPPED being gutters must now be
+    // buttons, or moving a key into one and forgetting to re-probe would read as a pass above.
     expect(at(42, 8)?.label, 'cell 42 on drawn row 8').toBe('NewLn');
+    expect(at(48, 8)?.label, 'cell 48 on drawn row 8').toBe('Xfer');
   });
 });
 

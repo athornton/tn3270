@@ -84,6 +84,18 @@ export type Action =
   // NOT because a keypad BUTTON needs it: `KEYPAD_KEYS` must contain neither this nor
   // `quit`, since a drawn button for either would be a button whose only effect is to throw.
   | { kind: 'toggleKeypad' }
+  // Opens the front end's file-transfer dialog, and `applyAction` throws on it for the same
+  // reason it throws on `toggleKeypad`: what a dialog looks like is the front end's business.
+  //
+  // THE ONE ACTION THAT CANNOT BE COMPLETED BY THE KEY THAT STARTS IT. Every other member of
+  // this union is self-contained -- an AID, a cursor move, a character -- but a transfer needs
+  // a local path, a direction and a host file name, which is why it opens a form instead of
+  // doing something. That is also why it is the first member `KEYPAD_KEYS` carries despite
+  // `applyAction` throwing on it: unlike `toggleKeypad`, whose button would be a button that
+  // toggles the surface it is drawn on, a transfer button is a perfectly sensible thing to
+  // click -- the front end intercepts it exactly as it intercepts the chord. See the note on
+  // `KeypadKey.action`.
+  | { kind: 'transferForm' }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 
@@ -167,6 +179,11 @@ function buildTable(): Map<string, Action> {
   // ambiguity, accept both. Sys Req gets NO chord: c3270 defines none in either keymap, which
   // is why the TUI's overlay is its only keyboard route.
   t.set('\x0b', { kind: 'toggleKeypad' });
+  // The transfer form. NOT c3270's -- it binds no transfer key at all, in either half of
+  // fb-c3270, so there is no reference spelling to match and the choice is ours. `0x14` is free
+  // in both of its keymaps and was free here: the control bytes this table already takes are
+  // 01 03 04 06 0b 12 15 1d 7f.
+  t.set('\x14', { kind: 'transferForm' });
 
   // The PA keys have no terminal equivalent, so ESC-digit, as c3270 does.
   t.set('\x1b1', { kind: 'pa', n: 1 });

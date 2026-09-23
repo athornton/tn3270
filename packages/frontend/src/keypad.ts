@@ -135,4 +135,12 @@ export const KEYPAD_KEYS: readonly KeypadKey[] = Object.freeze([
   // takes 42 for a right edge of 48 -- inside 72, and NO NEW ROW, which is what keeps the Electron
   // window the same size and leaves the two non-keypad goldens byte-identical.
   { label: 'NewLn', action: { kind: 'newline' }, row: 4, col: 42, name: 'Newline' },
+  // The 48th key, and the FIRST whose action `applyAction` throws on -- see the note on
+  // `KeypadKey.action`, which this key made it necessary to rewrite. A transfer needs arguments,
+  // so the button opens a form; the front end intercepts it exactly as it intercepts Ctrl-T.
+  //
+  // `NewLn` ended at 48, so this takes 48 for a right edge of 54 -- still inside 72 and still NO
+  // NEW ROW, so the Electron window keeps its size and only the keypad golden moves. The gap at
+  // column 18 is NOT free space: it separates the Tab/BkTab clusters deliberately.
+  { label: 'Xfer', action: { kind: 'transferForm' }, row: 4, col: 48, name: 'File Transfer' },
 ]);

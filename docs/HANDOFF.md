@@ -1,10 +1,69 @@
-# Handoff — state as of 2026-09-19
+# Handoff — state as of 2026-09-23
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-19
+## START HERE — NEXT ACTION, 2026-09-23
+
+**BRANCH `interactive-transfer-tui`, NOT MERGED. Tasks 1-9 of 10 done; the remaining task is the
+full gate and THE FIRST LIVE RUN of the transfer form.** Spec
+`docs/superpowers/specs/2026-09-22-interactive-file-transfer-design.md`, plan
+`docs/superpowers/plans/2026-09-23-interactive-file-transfer-tui.md`.
+**EVERY TASK CARRIES AN `AS BUILT` SECTION — READ THOSE BEFORE RE-DERIVING ANYTHING THE PLAN
+CLAIMS.** They record roughly twenty defects, and the split is worth knowing: **the plan's prose was
+usually right about the design and wrong about the details**, and **three of the defects were in my
+own tests rather than in the code** — a test that passed against the very bug it named.
+
+**WHAT SHIPPED: `IND$FILE` IS REACHABLE FROM AN INTERACTIVE FRONT END FOR THE FIRST TIME.** `Ctrl-T`
+in the TUI opens a ten-field form; `Enter` starts the transfer, `Esc` closes it, and closing
+mid-transfer **aborts** rather than abandoning. New: `packages/node-files` (a package holding only
+`TransferFiles` over `node:fs`), `frontend/src/transferForm.ts` (the pure model, shared so stage 3's
+GUI is a renderer and not a rewrite), `frontend/src/transfer.ts` (the validator, MOVED out of `cli`),
+`tui/src/transferOverlay.ts` and `tui/src/transferRun.ts`, plus a public `CutTransfer.cancel` in
+core.
+
+**THE GATE, MEASURED ON THE BRANCH (not on a merge commit yet — that is Task 10):** build and
+typecheck clean, **1970 tests in 78 files** (from 1869 in 74), `pty-smoke.py` **12/12 exit 0**.
+**The other seven by-hand harnesses have NOT been re-run on this branch** — Task 10 does that.
+
+**NOT VERIFIED: NO FILE HAS CROSSED A REAL HOST THROUGH THE FORM.** The transfer engine underneath
+is live-verified on both hosts in both directions, and has been since 2026-08-18, but the form is
+not. Quote those two separately. The runbook for the live run is Task 10 step 3, and the oracle is
+the committed `packages/cli/scripts/transfer-vm.txt` round trip: **the form must produce the same
+transfer.** Use `-model 3278-2-E` — CUT accepts no other geometry — prove the session is at CMS with
+`QUERY DISK A` before trusting anything (`?CP: QUERY` means the VM reconnect trap and a void run),
+and **compare bytes, not the status line**: a transfer that reports success and writes a wrong file
+is the failure mode to look for.
+
+**FOUR FINDINGS FROM THIS BRANCH THAT GENERALISE, all measured:**
+1. **A test can pass against the bug it names.** Three times here. A truncation test asserted
+   `not.toContain('>\n')` over joined lines and the truncation marker was the document's final
+   character; an "Enter must not reach the host" test spied on `sendAID` while an unconnected
+   session takes the `reconnectInstead` path and never calls it; and a selection-repair test
+   asserted a field that is applicable in every state. **Assert on the line, not the document;
+   check the path the call actually takes on THIS object; and bisect a boundary rather than testing
+   one grossly-wrong value.**
+2. **A mutation helper MUST ASSERT ITS TARGET WAS FOUND.** Two "passes" in one sweep were silent
+   no-matches, i.e. a false "this code is not load-bearing" — the most misleading result a mutation
+   check can give.
+3. **DEFENCE-IN-DEPTH PAIRS ARE INVISIBLE TO SINGLE MUTATION.** Two here: `ended`/`clearTimers()` in
+   `transferRun`'s `finish` (with both gone `onDone` fires three times and the last overwrites
+   "cancelled" with "timed out"), and `app.ts` clearing `transferRun` vs `CutTransfer.cancel`'s own
+   idempotence (deleting the app's half keeps the whole TUI suite green; removing both reddens
+   CORE's tests). Both are now documented in the tests that cover them, so neither is deleted as
+   redundant on the evidence of a green suite.
+4. **A MESSAGE THAT DOES NOT FIT LOSES ITS MOST IMPORTANT WORDS, TWICE ON ONE BRANCH.** The TUI
+   status line is 54 columns. The keypad-style help string was 59 and lost the key that closes the
+   form; the CLI's timeout message is 113 and lost `(press Attn or Clear)` — the one actionable
+   phrase, on the one failure where the host may still be mid-transfer. **Put the recovery first,
+   and assert on what is drawn rather than what the code returns.**
+
+**SUPERSEDED — everything from here to *The state of the tree* describes MERGED work and was written
+for the 2026-09-19 state. The git facts in the next paragraph are stale: `main` has moved and this
+branch exists.**
+
+## The 2026-09-19 state, kept as the record of already-merged work
 
 **GIT FACTS, CHECKED THIS DAY, NOT CARRIED FORWARD FROM AN EARLIER NOTE.** **`main` is at
 `ed735fd`, pushed, and it is the ONLY branch — local and remote.** Everything earlier drafts of this

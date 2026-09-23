@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AID, resolve, Session, type Connection } from '@tn3270/core';
-import type { Action } from '@tn3270/frontend';
+import { AckAid, AID, resolve, Session, type Connection } from '@tn3270/core';
+import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { overlayLines } from '../src/keypadOverlay.js';
 
@@ -897,5 +897,456 @@ describe('the special-keys overlay', () => {
     expect(vi.getTimerCount()).toBe(1);
     h.app.restore();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('the transfer form', () => {
+  // Same reason the special-keys block uses them: the form holds a lone ESC for ESC_TIMEOUT_MS,
+  // so closing on Esc is a timed event.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Longer than ESC_TIMEOUT_MS, so a held lone ESC has resolved. */
+  const AFTER_ESC = 60;
+
+  /** Start an app and return a function that feeds it bytes, as a terminal would. */
+  function started(rows = 25, cols = 80) {
+    const h = harness(rows, cols);
+    h.app.start();
+    return { ...h, send: (...bytes: number[]) => h.stdin.listener!(Uint8Array.from(bytes)) };
+  }
+
+  /** An in-memory TransferFiles, so a submit can get past the filesystem check. */
+  function fakeFiles(initial: Record<string, Uint8Array> = {}): TransferFiles {
+    const files = new Map(Object.entries(initial));
+    return {
+      exists: (p) => files.has(p),
+      read: (p) => {
+        const got = files.get(p);
+        if (got === undefined) throw new Error(`ENOENT: ${p}`);
+        return got;
+      },
+      write: (p, bytes) => { files.set(p, bytes); },
+      append: (p, bytes) => { files.set(p, bytes); },
+    };
+  }
+
+  /** As `started`, but with a filesystem and a 3270-mode session: a submit can proceed. */
+  function startedWithFiles(files: TransferFiles = fakeFiles()) {
+    const session = makeSession();
+    vi.spyOn(session, 'is3270Mode').mockReturnValue(true);
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(25, 80);
+    const host = new FakeHost();
+    const app = new App({ session, stdin, stdout, host, depth: 0, files });
+    app.start();
+    return {
+      app, session, stdin, stdout, host,
+      send: (...bytes: number[]) => stdin.listener!(Uint8Array.from(bytes)),
+    };
+  }
+
+  /** Type a string into the currently selected text field. */
+  const type = (send: (...b: number[]) => void, text: string): void => {
+    send(...Array.from(text, (c) => c.charCodeAt(0)));
+  };
+
+  const CTRL_T = 0x14;
+  const CTRL_K = 0x0b;
+
+  it('opens on Ctrl-T', () => {
+    const h = started();
+    h.send(CTRL_T);
+    expect(h.app.transferOpen).toBe(true);
+  });
+
+  it('is actually DRAWN when it opens, not merely flagged open', () => {
+    // `transferOpen` is a field; a form that never reaches draw() is invisible and yet owns the
+    // keyboard. The overlay block pins its own opening the same way, with `marked(0)`.
+    const h = started();
+    h.send(CTRL_T);
+    expect(h.stdout.all).toContain('File Transfer');
+    expect(h.stdout.all).toContain('Direction');
+  });
+
+  it('is MUTUALLY EXCLUSIVE with the keypad list', () => {
+    // Two overlays both owning the keyboard is a state the user cannot read: the one they
+    // cannot see swallows everything they type.
+    const h = started();
+    h.send(CTRL_K);
+    expect(h.app.overlayOpen).toBe(true);
+    h.send(CTRL_T);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(h.app.transferOpen).toBe(true);
+    h.send(CTRL_K);
+    expect(h.app.transferOpen).toBe(false);
+    expect(h.app.overlayOpen).toBe(true);
+  });
+
+  it('OWNS the keyboard: a printable does NOT reach the screen', () => {
+    // The whole reason the form can have a text field at all. Without the interception,
+    // `a` is a character typed at the host -- and a fresh Session already accepts typing
+    // (this file's makeSession comment records that `typeString('A')` lands in cell 0),
+    // so this assertion is against the real keyboard rather than a mock.
+    const h = started();
+    const before = cellText(h.session, 0);
+    h.send(CTRL_T);
+    h.send(0x61, 0x62);                              // "ab"
+    expect(cellText(h.session, 0)).toBe(before);     // nothing reached the host
+  });
+
+  it('OWNS the keyboard for AIDs too: Enter submits the form, it does not reach the host', () => {
+    // The other half of the interception, and the one with a wire consequence: Enter is the
+    // Enter AID with the form down. Submitting an empty form is refused by the validator
+    // (Task 8), but either way the host must not see an AID the operator did not aim at it.
+    //
+    // SPIES ON `reconnect`, NOT ON `sendAID`, AND THAT IS THE WHOLE POINT. A first version watched
+    // `sendAID` and PASSED with the interception replaced by a real `applyAction(enter)` -- the
+    // harness session is unconnected, so `applyAction` takes `reconnectInstead` (actions.ts:196)
+    // and never reaches `sendAID` at all. Measured by mutation, not reasoned about. `reconnect` is
+    // what an Enter actually does to THIS session, so it is what must not happen. Enter also
+    // REDIALS a disconnected session by deliberate design, so leaking it here would silently open
+    // a connection from a keystroke aimed at a form.
+    const h = started();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    const redial = vi.spyOn(h.session, 'reconnect');
+    h.send(CTRL_T);
+    h.send(0x0d);
+    expect(redial).not.toHaveBeenCalled();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it('types into a text field once one is selected', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09);                                    // Tab: Direction -> Host
+    h.send(0x09);                                    // Tab: Host -> Local file
+    h.send(0x61, 0x2e, 0x62, 0x69, 0x6e);            // "a.bin"
+    expect(h.app.transferValues.localFile).toBe('a.bin');
+  });
+
+  it('refuses a printable in a CYCLE field rather than inventing a value', () => {
+    // The form collects strings but does not get to make them up: a typed value the
+    // validator has never seen would fail at submit naming a keyword the user did type.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x78);                                    // "x" with Direction selected
+    expect(h.app.transferValues.direction).toBe('receive');
+  });
+
+  it('Backspace deletes the last character', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);
+    h.send(0x61, 0x62);
+    h.send(0x7f);                                    // DEL
+    expect(h.app.transferValues.localFile).toBe('a');
+  });
+
+  it('accepts BOTH 0x08 and 0x7f as Backspace, because terminals disagree on which it sends', () => {
+    // The keymap already binds both (`keymap.ts` takes 0x7f, and 0x08 is Ctrl-H); a form that
+    // took only one would silently ignore the key on half the terminals out there.
+    for (const bs of [0x08, 0x7f]) {
+      const h = started();
+      h.send(CTRL_T);
+      h.send(0x09, 0x09);
+      h.send(0x61, 0x62);
+      h.send(bs);
+      expect(h.app.transferValues.localFile).toBe('a');
+    }
+  });
+
+  it('left and right cycle a cycle field', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b, 0x43);                        // CSI C = right
+    expect(h.app.transferValues.direction).toBe('send');
+    h.send(0x1b, 0x5b, 0x44);                        // CSI D = left
+    expect(h.app.transferValues.direction).toBe('receive');
+  });
+
+  it('accepts the SS3 form of the arrows too, since any layer can flip DECCKM', () => {
+    // `bindings.ts`'s reason, and the overlay path already honours both: accepting only
+    // `\x1b[C` would work in some terminals and not others.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x4f, 0x43);                        // SS3 C = right
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('A SPLIT ARROW MUST NOT CLOSE THE FORM', () => {
+    // `\x1b` and `[C` can arrive in SEPARATE reads -- the delivery this file's own escHeld
+    // tests record a regression for, so it is not hypothetical. Closing on the first byte
+    // would make the right arrow close the form on any terminal that splits, which the
+    // user can neither predict nor see.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
+    expect(h.app.transferOpen).toBe(true);
+    h.send(0x5b, 0x43);
+    expect(h.app.transferOpen).toBe(true);
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('a LONE Esc that outlives the window closes it', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
+    expect(h.app.transferOpen).toBe(true);
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.transferOpen).toBe(false);
+  });
+
+  it('a TRUNCATED escape prefix is discarded with the form left OPEN', () => {
+    // Mirrors the overlay's rule: an unfinished `\x1b[` is not a keypress, so it must not
+    // close the form -- only a LONE ESC that outlived the window did.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b);
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.transferOpen).toBe(true);
+  });
+
+  it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
+    // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
+    // comparison recognises -- the field would appear to stop changing while the key was
+    // held. Two rights from `receive` wrap back to `receive`, so assert three.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43);
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('BackTab moves the selection backwards', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);                              // to Local file
+    expect(h.app.transferSelected).toBe(2);
+    h.send(0x1b, 0x5b, 0x5a);                        // CSI Z
+    expect(h.app.transferSelected).toBe(1);
+  });
+
+  it('SKIPS an inapplicable field when moving, rather than selecting something unseen', () => {
+    // On a receive, Recfm/Lrecl/Blksize and (in binary) Cr are not drawn. Tab must not land
+    // on a row the operator cannot see; `moveField` skips them and this pins that it is wired.
+    const h = started();
+    h.send(CTRL_T);
+    for (let i = 0; i < 20; i++) {                   // more Tabs than there are fields
+      h.send(0x09);
+      const id = TRANSFER_FIELDS[h.app.transferSelected]!.id;
+      expect(applicable(id, h.app.transferValues)).toBe(true);
+    }
+  });
+
+  it('BYTES SHARING A READ WITH THE CLOSING KEYSTROKE ARE NOT LOST', () => {
+    // The silent lost keystroke `pump()` exists to prevent, and the reason closeOverlay does
+    // not empty its pending buffer. `Ctrl-T A` in one read closes the form and types the A at
+    // the host -- so the A must reach the screen, not vanish.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(CTRL_T, 0x41);                            // close, then "A" for the host
+    expect(h.app.transferOpen).toBe(false);
+    expect(cellText(h.session, 0)).toBe('A');
+  });
+
+  it('REOPENS EMPTY, so one operator\'s path is not handed to the next transfer', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09, 0x61, 0x62);                  // localFile = "ab"
+    expect(h.app.transferValues.localFile).toBe('ab');
+    h.send(CTRL_T);                                  // close
+    h.send(CTRL_T);                                  // reopen
+    expect(h.app.transferValues.localFile).toBe('');
+    expect(h.app.transferSelected).toBe(0);
+  });
+
+  it('does NOT open while SUSPENDED, where it would be invisible and own the keyboard', () => {
+    // toggleOverlay's rule, for the same reason: draw() paints nothing while suspended, so the
+    // form would swallow every keystroke from behind a "terminal too small" message. A 20x80
+    // terminal is suspended and still clears TRANSFER_MIN, so the fits check cannot cover this.
+    const h = started();
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    h.send(CTRL_T);
+    expect(h.app.transferOpen).toBe(false);
+  });
+
+  it('the ESC TIMER IS CLEARED ON RESTORE, so a held prefix cannot fire into a dead terminal', () => {
+    // The same leak this file's last overlay test pins: a pending timeout after restore() would
+    // reach closeTransfer and draw() -- which `quitting`/`restored` guard, but the timer itself
+    // must not outlive the app or the process cannot exit.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
+    expect(vi.getTimerCount()).toBe(1);
+    h.app.restore();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('the transfer form: submitting', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const CTRL_T = 0x14;
+  const ENTER = 0x0d;
+
+  /** An in-memory TransferFiles, so a submit can get past the filesystem check. */
+  function fakeFiles(initial: Record<string, Uint8Array> = {}): TransferFiles {
+    const files = new Map(Object.entries(initial));
+    return {
+      exists: (p) => files.has(p),
+      read: (p) => {
+        const got = files.get(p);
+        if (got === undefined) throw new Error(`ENOENT: ${p}`);
+        return got;
+      },
+      write: (p, bytes) => { files.set(p, bytes); },
+      append: (p, bytes) => { files.set(p, bytes); },
+    };
+  }
+
+  /** An app with a filesystem and a session that reports 3270 mode. */
+  function app(opts: { files?: TransferFiles; formatted?: boolean } = {}) {
+    const session = makeSession();
+    vi.spyOn(session, 'is3270Mode').mockReturnValue(true);
+    if (opts.formatted !== false) session.screen.setFieldAttribute(0, 0x00);
+    const aids: number[] = [];
+    vi.spyOn(session, 'sendAID').mockImplementation((aid: number) => { aids.push(aid); });
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(25, 80);
+    const host = new FakeHost();
+    const a = new App({
+      session, stdin, stdout, host, depth: 0,
+      ...(opts.files !== undefined ? { files: opts.files } : {}),
+    });
+    a.start();
+    const send = (...bytes: number[]): void => { stdin.listener!(Uint8Array.from(bytes)); };
+    const type = (text: string): void => { send(...Array.from(text, (c) => c.charCodeAt(0))); };
+    return { app: a, session, stdout, aids, send, type };
+  }
+
+  /** Fill in the two required fields of a fresh (receive) form and submit. */
+  function fillAndSubmit(h: ReturnType<typeof app>): void {
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);                    // Tab Tab: Local file
+    h.type('/tmp/a.bin');
+    h.send(0x09);                           // Tab: Host file
+    h.type('A.BIN');
+    h.send(ENTER);
+  }
+
+  it('keeps the form OPEN and shows the validator message on a bad submit', () => {
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(ENTER);                          // Enter with both file fields empty
+    expect(h.app.transferOpen).toBe(true);  // not closed
+    expect(h.app.transferError).toMatch(/LocalFile/);
+    expect(h.aids).toEqual([]);             // and nothing reached the host
+  });
+
+  it("shows the VALIDATOR'S OWN message, not a paraphrase", () => {
+    // The validator is the single authority on what is legal; paraphrasing here is how the
+    // TUI and the CLI would start to drift. MEASURED, not assumed: TransferOptionError's
+    // constructor prepends `Transfer(): ` (transfer.ts:99) as x3270 does, so the form shows
+    // the CLI's prefix too. Kept rather than stripped -- it is the validator's own text, and
+    // the point of this test is that we do not edit it.
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(ENTER);
+    expect(h.app.transferError).toBe("Transfer(): missing 'LocalFile' option");
+  });
+
+  it('refuses with a message when there is NO FILESYSTEM, rather than crashing', () => {
+    // `files` is optional on AppOptions so every existing test constructs an App unchanged,
+    // which means the absent case is reachable and must be handled on the form.
+    const h = app();                        // no files
+    fillAndSubmit(h);
+    expect(h.app.transferOpen).toBe(true);
+    expect(h.app.transferError).toMatch(/no file system/);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('RUNS a valid submit: the command is typed and Enter sent', () => {
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    expect(h.app.transferRunning).toBe(true);
+    expect(h.app.transferError).toBeUndefined();
+    expect(h.aids).toEqual([AID.ENTER]);
+    // The IND$FILE command really reached the screen, which is the only thing the host sees.
+    const text = resolve(h.session.screen.snapshot(), {}).map((c) => c.text).join('');
+    expect(text).toContain('IND$FILE GET A.BIN');
+  });
+
+  it('shows the ENGINE\'S refusal on the form when a local check fails', () => {
+    // A receive onto a file that exists with Exist=keep: refused by startTransfer, not by the
+    // validator, and the form must show it the same way.
+    const h = app({ files: fakeFiles({ '/tmp/a.bin': new Uint8Array([1]) }) });
+    fillAndSubmit(h);
+    expect(h.app.transferRunning).toBe(false);
+    expect(h.app.transferError).toMatch(/file exists/);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('IGNORES a second Enter while a transfer is running', () => {
+    // Starting a second transfer over the first would interleave two machines' frames on one
+    // screen, and the host is answering the first one.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    expect(h.aids).toEqual([AID.ENTER]);
+    h.send(ENTER);
+    expect(h.aids).toEqual([AID.ENTER]);    // no second prime, no second AID
+  });
+
+  it('CLOSING MID-TRANSFER ABORTS, so the host leaves transfer mode', () => {
+    // Walking away leaves the host program waiting for a CUT frame that never comes, and the
+    // operator's next keystroke goes into a host that is not listening for it.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    h.send(CTRL_T);                         // close the form
+    expect(h.app.transferOpen).toBe(false);
+    expect(h.aids).toEqual([AID.ENTER, AckAid.ABORT]);   // PF2
+  });
+
+  it('closing an IDLE form sends nothing', () => {
+    // The other side of the same guard: no run in flight means no abort, or every Esc out of
+    // an untouched form would put a PF2 on the wire.
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(CTRL_T);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('does NOT abort twice when the form is closed after the run already ended', () => {
+    // onDone clears transferRun, so a close afterwards must not call cancel on a finished
+    // run -- the host has left transfer mode and would read a second PF2 as input into
+    // whatever panel it painted next.
+    //
+    // THIS TEST CANNOT FAIL ALONE, and that is worth knowing rather than discovering later:
+    // measured by mutation, deleting `this.transferRun = undefined` from onDone keeps the
+    // whole TUI suite green, because `CutTransfer.cancel` is ITSELF idempotent and absorbs
+    // the second call. Removing BOTH reddens core's own three cancel tests, not this one.
+    // Defence in depth: this assertion pins the app's half of the contract so a reader does
+    // not delete it as redundant, but the guarantee lives in core.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    vi.advanceTimersByTime(700_000);        // past the overall deadline: the run ends
+    expect(h.app.transferRunning).toBe(false);
+    const after = [...h.aids];
+    h.send(CTRL_T);
+    expect(h.aids).toEqual(after);
+  });
+
+  it('a TIMED-OUT run leaves its message on the form, naming the recovery', () => {
+    // ASSERTED ON WHAT IS DRAWN, and that is what caught a real defect: the status line is
+    // 54 columns and truncates, so the engine's original word order (reason, bytes, then the
+    // recovery) put `(press Attn or Clear)` past the cut -- the operator saw only "transfer
+    // did not complete within 600s after 0 bytes; " with nothing about what to do. The
+    // recovery now leads the message. Same shape as the help string that did not fit, one
+    // layer down.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    vi.advanceTimersByTime(700_000);
+    expect(h.stdout.all).toMatch(/Attn or Clear/);
   });
 });

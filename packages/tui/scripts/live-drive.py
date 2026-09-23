@@ -255,8 +255,112 @@ def flow_vm(pw, user):
     ]
 
 
+# The transfer form's own keystrokes. Written as named constants because a bare
+# b"\x14" in a flow reads as noise, and because the ARROW form matters: the form
+# accepts CSI and SS3 alike, and this harness deliberately sends CSI (what a real
+# xterm sends with DECCKM off) so the live run exercises the same spelling a user
+# would produce rather than the one the unit tests favour.
+CTRL_T = b"\x14"            # opens/closes the transfer form
+TAB = b"\t"
+RIGHT = b"\x1b[C"           # CSI C: next value of a cycle field
+ESC = b"\x1b"
+
+
+def flow_vm_transfer(pw, user):
+    """
+    THE FIRST LIVE RUN OF THE TRANSFER FORM. The oracle is
+    `packages/cli/scripts/transfer-vm.txt`: the form must produce the same transfer
+    the CLI's `Transfer()` does, so this sends a binary up and reads it back, and the
+    CALLER compares bytes. A status line that says "complete" proves nothing -- a
+    transfer that reports success and writes a wrong file is the failure mode here.
+
+    Everything up to `Ready;` is `flow_vm`'s logon, unchanged and for its reasons --
+    see its comments on why two Enters come first and why "CMS" must never be matched
+    as a bare string.
+
+    ## THE KEYSTROKE COUNTS ARE DERIVED, NOT GUESSED
+
+    Field order is `direction host localFile hostFile mode exist cr recfm lrecl
+    blksize` (`TRANSFER_FIELDS`). On a fresh RECEIVE form, `recfm`/`lrecl`/`blksize`
+    are inapplicable (send-only) and `cr` is inapplicable (binary mode), so Tab visits
+    only `direction host localFile hostFile mode exist` -- which is why the send below
+    sets Direction FIRST and then counts Tabs against the longer list that reveals.
+    Getting this wrong is silent: a path typed into the wrong field is a valid string.
+
+    ## WHY `ERASE` FIRST
+
+    `Exist=keep` is the default and the engine refuses a receive onto a file that
+    exists -- correctly. The host file is erased before the send so a leftover from a
+    previous run cannot make the upload look successful, and the local download target
+    is removed by the caller for the same reason.
+    """
+    host_file = os.environ.get("TN3270_HOSTFILE", "FORM TEST A")
+    src = os.environ.get("TN3270_SRC", "/tmp/form-src.bin")
+    back = os.environ.get("TN3270_BACK", "/tmp/form-back.bin")
+    return [
+        ("connect banner", ["VM/370", "ONLINE", "370"], CR),
+        ("dismiss banner", ["VM/370", "ONLINE", "370"], CR),
+        ("at CP READ", ["CP READ", "VM/370"], f"LOGON {user}".encode() + CR),
+        ("password prompt", ["PASSWORD", "password", "ENTER"], pw.encode() + CR),
+        ("logged on", ["LOGON AT", "LOGMSG"], CR),
+        ("CMS logon complete (MORE...)", ["MORE...", "Ready;"], CTRL_C),
+        # PROOF OF STATE, exactly as the CLI oracle does it: `Ready;` means CMS and the
+        # run counts, `?CP: QUERY` means a reconnected machine and the run is VOID.
+        ("cleared, at a prompt", None, b"QUERY DISK A" + CR),
+        ("QUERY answered by CMS", ["LABEL", "Ready;", "?CP", "NOT LOGGED"], CTRL_C),
+        # Clear the host file so a leftover cannot fake a successful upload.
+        ("cleared for ERASE", None, f"ERASE {host_file}".encode() + CR),
+        # MEASURED, and the first run timed out on it: CMS answers a failed ERASE with
+        # `Ready(00028);` -- the RETURN CODE in parentheses -- and `File 'X' not found.` in
+        # MIXED case. `Ready;` and `NOT FOUND` both miss. Match the case-insensitive stems.
+        ("ERASE done", ["Ready", "not found"], CTRL_C),
+
+        # ---- THE SEND, through the form ----
+        ("at a prompt for the send", None, CTRL_T),
+        # Direction -> send. That reveals Recfm (and Lrecl once Recfm is set), which is
+        # why every later Tab count is computed on the send form and not the receive one.
+        ("form open for the send", ["File Transfer", "Direction"], RIGHT),
+        # Host stays `tso`?  No: VM needs the vm dialect, so Tab once and cycle.
+        ("direction is send", None, TAB + RIGHT),
+        # localFile, hostFile. CMS names contain spaces and the form takes them
+        # literally -- there is no argument splitter in this path, which is the one
+        # place the form is EASIER than the CLI (`HostFile="RT TEST A"` there).
+        ("host is vm", None, TAB + src.encode() + TAB + host_file.encode()),
+        ("both names typed", None, CR),
+        # A CUT transfer of 249 bytes is a handful of frames; the form shows progress
+        # and then a final line. Match either the success text or the failure, so a
+        # failure is REPORTED rather than timing out into an ambiguous log.
+        ("send finished", ["bytes transferred", "Attn or Clear", "Transfer():",
+                           "file exists", "cannot read"], ESC),
+
+        # ---- Prove the host really has it ----
+        ("form closed after send", None, CTRL_C),
+        ("cleared for LISTFILE", None, f"LISTFILE {host_file} (DATE".encode() + CR),
+        ("LISTFILE shows the file", ["FORM", "TEST", "NOT FOUND"], CTRL_C),
+
+        # ---- THE RECEIVE, through the form ----
+        ("at a prompt for the receive", None, CTRL_T),
+        # Direction stays `receive`, so Tab once to Host and cycle it to vm, then the
+        # two names. Exist stays `keep`; the caller deletes the local file first, which
+        # is what makes the engine's own refusal a real check rather than a nuisance.
+        ("form open for the receive", ["File Transfer", "Direction"], TAB + RIGHT),
+        ("host is vm again", None, TAB + back.encode() + TAB + host_file.encode()),
+        ("both names typed again", None, CR),
+        ("receive finished", ["bytes transferred", "Attn or Clear", "Transfer():",
+                              "file exists", "cannot read"], ESC),
+
+        # ---- Clean up and log off, so the next run is not handed the trap ----
+        ("form closed after receive", None, CTRL_C),
+        ("cleared for cleanup", None, f"ERASE {host_file}".encode() + CR),
+        ("cleanup done", ["Ready", "not found"], CTRL_C),
+        ("cleared for logoff", None, b"LOGOFF" + CR),
+        ("logged off", ["LOGOFF AT", "CONNECT=", "VM/370"], None),
+    ]
+
+
 FLOWS = {"tk5": ("127.0.0.1:3271", flow_tk5, "HERC01"),
-         "vm": ("127.0.0.1:3270", flow_vm, "CMSUSER")}
+         "vm": ("127.0.0.1:3270", flow_vm, "CMSUSER"),
+         "vmxfer": ("127.0.0.1:3270", flow_vm_transfer, "CMSUSER")}
 
 
 def main():
