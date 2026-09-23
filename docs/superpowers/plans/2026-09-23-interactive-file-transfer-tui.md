@@ -1350,6 +1350,41 @@ Generated with AI
 Co-Authored-By: SLAC AI')"
 ```
 
+### AS BUILT, Task 5 — the plan named the WRONG STATUS CODE
+
+Gate after: build/typecheck clean, **1910 tests in 76 files** (from 1903). Commit `5f3c8eb`.
+Six tests, not four.
+
+1. **`SC_ABORT_FILE`, NOT `SC_ABORT_XMIT`.** x3270 uses `ABORT_FILE` at **both** of its
+   user-cancel sites — `cut_abort(get_message("ftUserCancel"), SC_ABORT_FILE)` at
+   `ft_cut.c:509` and `:610` — and reserves `ABORT_XMIT` for transmission faults, which is what
+   every other abort in `transfer.ts` is. `StatusCode.ABORT_FILE` already existed, unused.
+   Reporting a transmission error for an operator's change of mind misstates the cause in the
+   host's own log.
+2. **The message is `MSG.USER_CANCEL = 'Transfer canceled by user'`** (`ftUserCancel`,
+   `fb-common:35`), added beside `ftHostCancel` and `ftCutRetransmit`. The American spelling is
+   x3270's.
+3. **There is no `finished` flag — it is `this.outcome`**, and the post-completion return must be
+   **`{ done: this.outcome }`, not the plan's `{}`**. That is what `step` already returns after the
+   end (`:318-321`), and **Task 8's engine reads `done`**; `{}` would make a post-completion cancel
+   look like a transfer still running. After a NORMAL completion the surviving `done` is the
+   SUCCESS, not the cancellation.
+4. **The response-area assertion compares a RAW BYTE**, not `cp037.encode(...)` as step 2 wrote:
+   `ResponseFrameType` values are EBCDIC control bytes already (`CONTROL_CODE` is `0xc3`) and
+   `writeResponse` `setChar`s them directly. Every other such assertion here (`:824`, `:924`,
+   `:979`) compares raw.
+5. **`eofDataScreen(0)` does NOT complete a receive** — it only acks (`:237`), because the EOF
+   sentinel ends the DATA and the host still sends a control code. Drive `SC_XFER_COMPLETE`.
+6. Two tests beyond the plan's four: the buffer is untouched on a second cancel (idempotence on the
+   SCREEN, not just the return value), and `result` reports the cancellation.
+
+**Recorded in the method comment: we send IMMEDIATELY where x3270 DEFERS.** `ft_do_cancel`
+(`ft.c:1209-1225`) sets `FT_ABORT_WAIT` and writes nothing until the host's next frame. A front end
+closing a form has no later frame to wait for and must not leave the host primed — which is also
+why **Task 8's `CANCELS by aborting` test can expect the AID synchronously**.
+
+**→ TASK 8 NEEDS AN EDIT:** any assertion there on the cancel status must say `ABORT_FILE`.
+
 ---
 
 ## Task 6: The TUI overlay renderer
