@@ -345,6 +345,21 @@ describe('the keypad-era actions', () => {
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/does not handle toggleKeypad/);
   });
+
+  it('REFUSES transferForm, because a dialog is the front end s own business', () => {
+    // The third of the same shape, and the first that opens a DIALOG rather than toggling a
+    // display: a transfer needs a local path, a direction and a host file name, so unlike
+    // every other member of the union it cannot be completed by the keystroke that starts
+    // it. A front end that bound the chord and forgot to own the dialog would otherwise get
+    // a no-op, because the switch treats an unrecognised kind as one.
+    //
+    // `/does not handle transferForm/` rather than `/transferForm/`, for the reason measured
+    // on the `toggleKeypad` twin above: the loose pattern also matches Node's own
+    // `TypeError: ...transferForm is not a function`, so it would pass against an
+    // accidental crash as well as the deliberate refusal.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'transferForm' })).toThrow(/does not handle transferForm/);
+  });
 });
 
 /**
@@ -519,6 +534,10 @@ const ROWS: readonly Row[] = [
   // a function`, which is how two assertions on this branch passed against an unrelated crash.
   { action: { kind: 'quit' }, throws: /does not handle quit/ },
   { action: { kind: 'toggleKeypad' }, throws: /does not handle toggleKeypad/ },
+  // THREE now. `transferForm` opens a dialog, which is the front end's business for the same
+  // reason its display is -- and a dialog is the one action that cannot be finished by the key
+  // that starts it, since a transfer needs arguments.
+  { action: { kind: 'transferForm' }, throws: /does not handle transferForm/ },
 ];
 
 /**
@@ -598,7 +617,8 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 25 members, 23 switch cases plus the 2 guards.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(25);
+    // a decision someone has to write down. 26 members, 23 switch cases plus the 3 guards --
+    // `transferForm` is the third guard, added with the TUI's transfer form.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(26);
   });
 });

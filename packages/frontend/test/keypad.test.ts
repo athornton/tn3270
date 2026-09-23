@@ -3,11 +3,15 @@ import { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH } from '../src/keypad.js';
 import { PF_AIDS, PA_AIDS } from '@tn3270/core';
 
 describe('KEYPAD_KEYS', () => {
-  it('has 47 keys, which is the layout in the spec', () => {
+  it('has 48 keys, which is the layout in the spec plus the transfer button', () => {
     // 47 = c3270's 44 (`Common/c3270/keypad.callbacks`) minus Cursor Select and Compose, plus the
     // four cursor arrows and Backspace. It was 46 until Newline -- which c3270's keypad has and
     // this table had dropped without noticing -- was added on the user's decision.
-    expect(KEYPAD_KEYS).toHaveLength(47);
+    //
+    // 48 SINCE `Xfer`, which c3270 has NO equivalent of at all: file transfer is a menu item
+    // there, not a keypad key. It is here so the GUI gets the button for free when stage 3 ports
+    // the form, and it is the first key whose action `applyAction` throws on.
+    expect(KEYPAD_KEYS).toHaveLength(48);
   });
 
   it('carries every PF and PA key exactly once', () => {
@@ -37,9 +41,19 @@ describe('KEYPAD_KEYS', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('never carries an action a front end must intercept', () => {
-    // `quit` and `toggleKeypad` both throw inside applyAction. A button for either would be a
-    // button that throws, and the swallow in applyAction would hide it.
+  it('never carries an action whose button would be SELF-DEFEATING', () => {
+    // `quit`, `toggleKeypad` and `transferForm` all throw inside applyAction, so "throws" is
+    // NOT the rule -- `transferForm` is a keypad key. The rule is whether a BUTTON makes sense:
+    //
+    //  - `quit` would tear down the window the button is drawn in.
+    //  - `toggleKeypad` would hide the surface the button is drawn on, so the only way to press
+    //    it twice is to find the chord anyway.
+    //  - `transferForm` opens a dialog, which is a perfectly sensible thing to click, and the
+    //    front end intercepts the button exactly as it intercepts Ctrl-T.
+    //
+    // THE TITLE USED TO SAY "an action a front end must intercept", and that became false the
+    // moment a third throwing action was a legitimate key. Named individually rather than
+    // derived from the throw, so adding a fourth is a decision someone writes down here.
     for (const k of KEYPAD_KEYS) {
       expect(k.action.kind).not.toBe('quit');
       expect(k.action.kind).not.toBe('toggleKeypad');
@@ -55,7 +69,7 @@ describe('KEYPAD_KEYS', () => {
     }
   });
 
-  it('gives each of the 20 special keys the action its label names', () => {
+  it('gives each of the 21 special keys the action its label names', () => {
     // THE DUPLICATION BELOW IS DELIBERATE. This restates the source's label-to-action mapping, and
     // that is the point: it is a second, independently written statement of a critical lookup
     // table, which is the only thing that can catch a label naming the wrong action. Swap `Del`'s
@@ -77,12 +91,14 @@ describe('KEYPAD_KEYS', () => {
       // Sent to the host, or handled locally.
       ['Enter', 'enter'], ['Clear', 'clear'], ['Attn', 'attn'],
       ['SysRq', 'sysreq'], ['Reset', 'reset'],
+      // Opens a form rather than doing anything, because a transfer needs arguments.
+      ['Xfer', 'transferForm'],
     ]);
     // RE-DERIVED, not bumped: the table is 12 + 12 PF keys and 3 PA keys, which is 27 the loop
-    // below excludes by `kind`, so the specials are 47 - 27 = 20. This line and the length check on
+    // below excludes by `kind`, so the specials are 48 - 27 = 21. This line and the length check on
     // `special` come at it from the two different sides -- what this map says, and what the source
     // table holds -- so adding a key here and not there (or there and not here) fails.
-    expect(expected.size).toBe(20);
+    expect(expected.size).toBe(21);
     expect(KEYPAD_KEYS).toHaveLength(27 + expected.size);
 
     const special = KEYPAD_KEYS.filter((k) => k.action.kind !== 'pf' && k.action.kind !== 'pa');

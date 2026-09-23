@@ -107,6 +107,13 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
       + 'canvas front ends accept both. NOT a 3270 key -- `applyAction` throws on it and each '
       + 'front end owns its own display',
   },
+  {
+    key: 'Ctrl-T', action: { kind: 'transferForm' }, terminal: '\x14',
+    note: 'opens the IND$FILE transfer form (TUI). NOT c3270\'s -- it binds NO transfer key at '
+      + 'all, in either half of Common/fb-c3270, so there is no reference spelling to match and '
+      + '0x14 is free in both. NOT a 3270 key -- `applyAction` throws on it, because a transfer '
+      + 'needs arguments and each front end owns its own dialog',
+  },
 
   // Sequence-less on purpose: two encodings each. See the header note on DECCKM.
   { key: 'Up', action: { kind: 'up' } },

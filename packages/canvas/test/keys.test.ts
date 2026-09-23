@@ -103,8 +103,20 @@ describe('actionForKey', () => {
     // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
     // written reason does not type-check. The hole this replaced was exactly an unexamined
     // one-line dismissal ("Alt-1, a terminal-only spelling" -- it is not), so "you must say
-    // why" is enforced by the shape rather than by a comment asking nicely. EMPTY on purpose.
-    const TERMINAL_ONLY: Readonly<Record<string, string>> = {};
+    // why" is enforced by the shape rather than by a comment asking nicely. NO LONGER EMPTY.
+    const TERMINAL_ONLY: Readonly<Record<string, string>> = {
+      // The chord exists and is bound in the TUI; the canvas front ends have nowhere to put the
+      // form yet. Porting it is stage 3 of the transfer work, and THIS ENTRY IS WHAT SHOULD BE
+      // DELETED when that lands -- the `checked` count below then goes back up by one, so the
+      // exemption cannot be forgotten silently.
+      //
+      // NOTE the keypad button is a different matter and already works: `KEYPAD_KEYS` carries
+      // `Xfer`, so a click produces `{ kind: 'transferForm' }` in both canvas front ends today.
+      // What is missing is the DIALOG, not the action -- which is why the web gateway swallows
+      // the kind (`web/src/main.ts`) rather than letting `applyAction` throw into a socket
+      // handler and take every session down with it.
+      'Ctrl-T': 'the GUI has no transfer dialog yet -- stage 3 of the transfer work',
+    };
     let checked = 0;
     for (const b of BINDING_INTENT) {
       const key = named[b.key];

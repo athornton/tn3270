@@ -49,6 +49,14 @@ export function applyAction(session: Session, action: Action): void {
   if (action.kind === 'toggleKeypad') {
     throw new Error('applyAction does not handle toggleKeypad: the front end owns its own display');
   }
+  // THE THIRD OF THE SAME SHAPE, and outside the `try` for the same reason as the two above.
+  // A transfer needs arguments, so this action opens a form rather than doing anything, and
+  // what a form looks like is the front end's business -- a terminal draws an overlay, a GUI
+  // will draw a window. A front end that bound the chord and forgot the dialog gets a loud
+  // failure instead of a key that appears to do nothing.
+  if (action.kind === 'transferForm') {
+    throw new Error('applyAction does not handle transferForm: the front end owns its own dialog');
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

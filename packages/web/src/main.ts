@@ -221,6 +221,10 @@ export function buildServer(args: WebArgs) {
        * required, since no `Session` event fires for a decision no `Session` knows about.
        */
       if (msg.action.kind === 'toggleKeypad') { showKeypad = !showKeypad; repaint?.(); return; }
+      // `transferForm` NEEDS NO INTERCEPTION HERE: it takes the other branch of `protocol.ts`'s
+      // two-branch rule and is rejected at decode, before it can reach this handler at all. See
+      // the note there for why a rejection rather than an interception -- in short, the gateway has
+      // no transfer dialog and stage 4 must settle whose filesystem a browser transfer writes to.
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a

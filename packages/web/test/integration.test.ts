@@ -82,12 +82,19 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * Kinds the GATEWAY must refuse outright, rather than answer.
  *
  * An expected-refusal list and NOT an exemption list: a kind named here must still produce an
- * `error` naming it, so a rejection that silently stopped happening still fails. `quit` is the only
- * member and the bar for a second one is high -- see `protocol.ts`'s two-branch rule. A front end
- * action that is the SENDER's own business, like `toggleKeypad`, belongs in `main.ts` as an
- * interception and must be answered here, not added to this list.
+ * `error` naming it, so a rejection that silently stopped happening still fails. The bar for a
+ * member is high -- see `protocol.ts`'s two-branch rule. A front end action that is the SENDER's own
+ * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
+ * not added to this list.
+ *
+ * TWO MEMBERS NOW. `quit` would stop the gateway. `transferForm` opens a dialog the browser front
+ * end does not have, and a browser-initiated transfer would move bytes between the host and the
+ * GATEWAY's filesystem rather than the operator's machine -- a security question stage 4 of the
+ * transfer work has to settle first. It is reachable from a CLICK, not just a hand-built frame,
+ * because `KEYPAD_KEYS` carries an `Xfer` button. When stage 4 lands, `transferForm` moves out of
+ * this list and into an interception in `main.ts`.
  */
-const REFUSED: readonly string[] = ['quit'];
+const REFUSED: readonly string[] = ['quit', 'transferForm'];
 
 /**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop
