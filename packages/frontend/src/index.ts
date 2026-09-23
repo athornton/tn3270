@@ -78,3 +78,13 @@ export type {
   TransferFiles, TransferRequest, Dialect,
   FtHostType, FtMode, FtCr, FtExist, FtRecfm,
 } from './transfer.js';
+
+// The transfer form's model. Pure data and pure functions, so the TUI and (stage 3) the
+// GUI render the same form without a second field table to drift.
+export {
+  TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText,
+  applicable, formKeywords, moveField,
+} from './transferForm.js';
+export type {
+  TransferFieldId, TransferFieldKind, TransferField, TransferValues, TransferFormState,
+} from './transferForm.js';
