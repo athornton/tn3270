@@ -64,3 +64,17 @@ export type { Binding } from './bindings.js';
 // architected meaning; this decides what gets drawn.
 export { SCHEMES, SCHEME_NAMES, DEFAULT_SCHEME, resolveScheme, schemeRgb } from './palette.js';
 export type { Scheme, Slot } from './palette.js';
+
+// IND$FILE transfer's host-independent half: keyword validation and command construction.
+// Here rather than in `cli` because the TUI must be able to validate a transfer request and
+// `tui` deliberately does not depend on `cli` -- severing that dependency was the point of
+// creating this package. The Node-coupled half (`TransferFiles` over `node:fs`) lives in
+// `@tn3270/node-files`, so this stays safe for the browser bundles in `gui` and `web`.
+export {
+  parseTransferKeywords, transferCommand, dialectFor,
+  TSO_DIALECT, VM_DIALECT, TransferOptionError, IND_FILE,
+} from './transfer.js';
+export type {
+  TransferFiles, TransferRequest, Dialect,
+  FtHostType, FtMode, FtCr, FtExist, FtRecfm,
+} from './transfer.js';

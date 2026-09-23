@@ -3,11 +3,11 @@ import {
   CutTransfer, isCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import {
-  tcpConnect, DEFAULT_TLS, resolveHostSpec, type TlsOptions,
+  tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand,
+  type TlsOptions, type TransferFiles, type TransferRequest,
 } from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
 import { formatStatus } from './status.js';
-import { transferCommand, type TransferFiles, type TransferRequest } from './transfer.js';
 
 /**
  * Executes s3270 commands against a session.

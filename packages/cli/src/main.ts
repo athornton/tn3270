@@ -4,10 +4,10 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
-  takeTlsFlag, resolveTls, defaultSession, type TlsFlags, type TlsOptions,
+  takeTlsFlag, resolveTls, defaultSession,
+  type TlsFlags, type TlsOptions, type TransferFiles,
 } from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
-import type { TransferFiles } from './transfer.js';
 
 export class UsageError extends Error {
   constructor(message: string) {
