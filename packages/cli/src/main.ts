@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
   takeTlsFlag, resolveTls, defaultSession,
-  type TlsFlags, type TlsOptions, type TransferFiles,
+  type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
+import { nodeTransferFiles } from '@tn3270/node-files';
 import { parseCommand } from './commands.js';
 
 export class UsageError extends Error {
@@ -113,28 +114,6 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
   return args;
 }
-
-/**
- * The real file system, for `Transfer()`.
- *
- * Lives here for exactly the reason `Replay(file)` does — runner.ts stays
- * I/O-free so every command's semantics are testable without a temp directory —
- * but injected rather than special-cased, because a transfer's file access is
- * interleaved with host round trips and cannot be lifted out of the runner the
- * way reading a replay file up front can.
- *
- * `Uint8Array`, never a string: these are file BYTES, and the whole point of the
- * binary default is that nothing in the path decodes them. `readFileSync` with no
- * encoding returns a Buffer, which IS a Uint8Array, but a fresh view is
- * constructed so nothing downstream can be surprised by Buffer's extra methods
- * or by its pooled backing store.
- */
-export const nodeTransferFiles: TransferFiles = {
-  exists: (path) => existsSync(path),
-  read: (path) => new Uint8Array(readFileSync(path)),
-  write: (path, bytes) => { writeFileSync(path, bytes); },
-  append: (path, bytes) => { appendFileSync(path, bytes); },
-};
 
 /**
  * s3270-compatible line protocol over stdin/stdout. Deliberately thin: all

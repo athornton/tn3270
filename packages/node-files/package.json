@@ -1,5 +1,5 @@
 {
-  "name": "@tn3270/cli",
+  "name": "@tn3270/node-files",
   "version": "0.1.0",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
@@ -9,13 +9,8 @@
   "exports": {
     ".": "./dist/index.js"
   },
-  "bin": {
-    "tn3270-cli": "./dist/main.js"
-  },
   "dependencies": {
-    "@tn3270/core": "0.1.0",
-    "@tn3270/frontend": "0.1.0",
-    "@tn3270/node-files": "0.1.0"
+    "@tn3270/frontend": "0.1.0"
   },
   "scripts": {
     "build": "tsc --build"
