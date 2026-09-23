@@ -1671,6 +1671,35 @@ Generated with AI
 Co-Authored-By: SLAC AI')"
 ```
 
+### AS BUILT, Task 6 — the plan's help string did not fit, and the test for it was vacuous
+
+Gate after: build/typecheck clean, **1924 tests in 77 files** (from 1910). Commit `272c3bf`.
+14 tests, not 11. **Measured geometry: `LABEL_WIDTH` 10, `VALUE_WIDTH` 40, `LINE_WIDTH` 54,
+`TRANSFER_MIN` 15x56, tallest form 13 lines** — the step-5 arithmetic note was right.
+
+1. **`'Tab/arrows move  left/right change  Enter start  Esc cancel'` IS 59 CHARACTERS against a
+   `LINE_WIDTH` of 54**, so it rendered as `... Enter start  Esc >` — cutting off the key that
+   closes the form, on the one line whose job is saying which keys work. Replaced with a named
+   `HELP` constant, `'Tab moves  <-/-> change  Enter start  Esc close'` (46). The module comment
+   records **why the help is the one status line that must FIT rather than truncate**: everything
+   else there arrives from outside (a validator message, a path, a host abort) where truncation is
+   the only option.
+2. **MY FIRST TEST FOR IT WAS VACUOUS and mutation caught it.** `not.toContain('>\n')` over the
+   joined lines **passed with the oversized string restored** — the status line is the LAST line,
+   so the marker it sought was the document's final character with no newline after it. Assert on
+   the last line itself. **The boundary was BISECTED: 53 and 54 pass, 55 fails.** And require
+   `Esc (close|cancel)`, not a bare `Esc` — the oversized string was cut off mid-word right after
+   `Esc`.
+3. Two tests beyond the plan's eleven: **opacity in every phase and with an error** (the status
+   line is the only variable-length line, so `idle` alone exercises one of its five branches), and
+   truncation of a long **error** as well as a long value.
+4. `shown` takes a `TransferFieldId`, not a `string`, so a caller cannot pass a non-field and
+   silently get the dash that means "unset".
+
+**Mutation matrix:** field-line `padEnd` → 2 red (both opacity tests); status-line `padEnd` → 2 red;
+value truncation → 1 red; the `applicable` filter → 1 red; the plan's help → 1 red *after* the test
+was fixed and **0 before**.
+
 ---
 
 ## Task 7: Key routing in `app.ts`
