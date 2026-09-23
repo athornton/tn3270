@@ -11,6 +11,7 @@ import {
   defaultSession, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, resolveTls,
   TLS_USAGE, type Scheme, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
+import { nodeTransferFiles } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout } from './render.js';
 import type { Depth } from './colours.js';
@@ -273,6 +274,9 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
     stdout: process.stdout,
     host,
     hint: BANNER,
+    // The real filesystem, injected exactly as the CLI's Runner takes it: `app.ts` imports no
+    // `node:fs`, so a test supplies an in-memory `TransferFiles` instead.
+    files: nodeTransferFiles,
     ...(args.colors !== undefined ? { depth: args.colors } : {}),
     ...(args.scheme !== undefined ? { scheme: args.scheme } : {}),
   });

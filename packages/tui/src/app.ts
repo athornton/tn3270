@@ -26,10 +26,13 @@ import { detectDepth, type Depth } from './colours.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
+import { startTransfer, type TransferRun } from './transferRun.js';
 import {
   applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, resolveScheme,
-  cycleField, moveField, newTransferForm, setFieldText, TRANSFER_FIELDS,
-  type Action, type Scheme, type TransferFormState, type TransferValues,
+  cycleField, formKeywords, moveField, newTransferForm, setFieldText, transferCommand,
+  TRANSFER_FIELDS,
+  type Action, type Scheme, type TransferFiles, type TransferFormState, type TransferRequest,
+  type TransferValues,
 } from '@tn3270/frontend';
 
 /** The byte a lone Escape keypress sends; also the first byte of every function key. */
@@ -178,6 +181,16 @@ export interface AppOptions {
    * row. Absent means draw none, which is what the tests want by default.
    */
   hint?: string;
+  /**
+   * The filesystem a transfer reads and writes, or absent for none.
+   *
+   * INJECTED, exactly as the Runner's `files` is and for the same reason: this file imports
+   * no `node:fs`, `main.ts` supplies `nodeTransferFiles` from `@tn3270/node-files`, and a
+   * test supplies an in-memory one. Absent rather than required so every existing test
+   * constructs an `App` unchanged -- and a submit with no filesystem is refused on the form
+   * rather than crashing.
+   */
+  files?: TransferFiles;
 }
 
 export class App {
@@ -268,6 +281,9 @@ export class App {
   private transferProgress: string | undefined;
   private transferPending: number[] = [];
   private transferTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The transfer in flight, so closing the form can ABORT it rather than abandon it. */
+  private transferRun: TransferRun | undefined;
+  private readonly files: TransferFiles | undefined;
 
   /** Public for tests, like `onInput`: a test should not have to infer this from bytes. */
   get overlayOpen(): boolean { return this.overlayShown; }
@@ -281,11 +297,18 @@ export class App {
   /** For tests: which entry of `TRANSFER_FIELDS` is selected. */
   get transferSelected(): number { return this.transferState.selected; }
 
+  /** For tests: the validator's message from a refused submit, if any. */
+  get transferError(): string | undefined { return this.transferState.error; }
+
+  /** For tests: whether a transfer is in flight. */
+  get transferRunning(): boolean { return this.transferPhase === 'running'; }
+
   constructor(opts: AppOptions) {
     this.session = opts.session;
     this.stdin = opts.stdin;
     this.stdout = opts.stdout;
     this.host = opts.host;
+    this.files = opts.files;
     this.mode3279 = opts.mode3279 ?? true;
     const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
     this.renderer = new TerminalRenderer({
@@ -864,16 +887,21 @@ export class App {
   /**
    * Close the form.
    *
-   * A RUNNING TRANSFER MUST BE ABORTED RATHER THAN ABANDONED, which Task 8 adds here: walking away
-   * leaves the host program waiting for a CUT frame that will never come, and the operator's next
-   * keystroke goes into a host that is not listening for it. `CutTransfer.cancel` exists for it.
+   * CLOSING MID-TRANSFER ABORTS RATHER THAN ABANDONING. Walking away leaves the host program
+   * waiting for a CUT frame that will never come, and the operator's next keystroke then goes into
+   * a host that is not listening for it. `CutTransfer.cancel` writes the response area and returns
+   * PF2 for exactly this.
    *
    * `transferPending` is deliberately NOT emptied, for the reason `closeOverlay` gives: the byte
    * that closed the form is still at the front of it, and its caller both consumes that byte and
    * forwards whatever shared the read to `pump()`.
    */
   private closeTransfer(): void {
+    this.transferRun?.cancel?.();
+    this.transferRun = undefined;
     this.transferShown = false;
+    this.transferPhase = 'idle';
+    this.transferProgress = undefined;
     this.clearTransferTimer();
     this.draw();
   }
@@ -1017,10 +1045,62 @@ export class App {
     this.draw();
   }
 
-  /** Task 8 runs the transfer. Validation first, so the form can show an error. */
+  /**
+   * Validate the form and start the transfer.
+   *
+   * A VALIDATION ERROR KEEPS THE FORM OPEN with the message shown, rather than closing and
+   * discarding what was typed -- the user's next move is to fix one field, and a form that
+   * vanished would make them retype all ten.
+   *
+   * Note what does NOT happen on any path here: Enter never reaches the session as an AID.
+   * The form owns the keyboard, so a submit is a submit even when it is refused.
+   */
   private submitTransfer(): void {
-    // Deliberately inert for now, and NOT a fall-through to the host: Enter must not reach the
-    // session as an AID while the form is up, which `app.test.ts` pins.
+    // A SECOND ENTER WHILE ONE IS RUNNING IS IGNORED. Starting a second transfer over the
+    // first would interleave two machines' frames on one screen, and the host is answering
+    // the first one.
+    if (this.transferPhase === 'running') return;
+    let command: string;
+    let request: TransferRequest;
+    try {
+      ({ request, command } = transferCommand(formKeywords(this.transferState)));
+    } catch (err) {
+      // THE VALIDATOR'S message, not one of ours: it is the single authority on what is
+      // legal, and paraphrasing it here is how the TUI and the CLI would start to drift.
+      this.transferState = {
+        ...this.transferState,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      this.draw();
+      return;
+    }
+    if (this.files === undefined) {
+      this.transferState = { ...this.transferState, error: 'no file system available' };
+      this.draw();
+      return;
+    }
+    const run = startTransfer({
+      session: this.session, files: this.files, request, command,
+      onProgress: (text) => { this.transferProgress = text; this.draw(); },
+      onDone: (result) => {
+        this.transferPhase = result.ok ? 'done' : 'failed';
+        this.transferProgress = result.ok
+          ? `${result.bytes ?? 0} bytes transferred` : result.error;
+        // CLEARED BEFORE THE DRAW: the run has ended, so `closeTransfer` must not then call
+        // `cancel` on it and put a second PF2 on the wire.
+        this.transferRun = undefined;
+        this.draw();
+      },
+    });
+    if (!run.ok) {
+      this.transferState = { ...this.transferState, error: run.error };
+      this.draw();
+      return;
+    }
+    this.transferRun = run;
+    this.transferPhase = 'running';
+    this.transferProgress = undefined;
+    this.draw();
   }
 
   /**

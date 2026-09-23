@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AID, resolve, Session, type Connection } from '@tn3270/core';
-import { applicable, TRANSFER_FIELDS, type Action } from '@tn3270/frontend';
+import { AckAid, AID, resolve, Session, type Connection } from '@tn3270/core';
+import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { overlayLines } from '../src/keypadOverlay.js';
 
@@ -916,6 +916,41 @@ describe('the transfer form', () => {
     return { ...h, send: (...bytes: number[]) => h.stdin.listener!(Uint8Array.from(bytes)) };
   }
 
+  /** An in-memory TransferFiles, so a submit can get past the filesystem check. */
+  function fakeFiles(initial: Record<string, Uint8Array> = {}): TransferFiles {
+    const files = new Map(Object.entries(initial));
+    return {
+      exists: (p) => files.has(p),
+      read: (p) => {
+        const got = files.get(p);
+        if (got === undefined) throw new Error(`ENOENT: ${p}`);
+        return got;
+      },
+      write: (p, bytes) => { files.set(p, bytes); },
+      append: (p, bytes) => { files.set(p, bytes); },
+    };
+  }
+
+  /** As `started`, but with a filesystem and a 3270-mode session: a submit can proceed. */
+  function startedWithFiles(files: TransferFiles = fakeFiles()) {
+    const session = makeSession();
+    vi.spyOn(session, 'is3270Mode').mockReturnValue(true);
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(25, 80);
+    const host = new FakeHost();
+    const app = new App({ session, stdin, stdout, host, depth: 0, files });
+    app.start();
+    return {
+      app, session, stdin, stdout, host,
+      send: (...bytes: number[]) => stdin.listener!(Uint8Array.from(bytes)),
+    };
+  }
+
+  /** Type a string into the currently selected text field. */
+  const type = (send: (...b: number[]) => void, text: string): void => {
+    send(...Array.from(text, (c) => c.charCodeAt(0)));
+  };
+
   const CTRL_T = 0x14;
   const CTRL_K = 0x0b;
 
@@ -1146,5 +1181,172 @@ describe('the transfer form', () => {
     expect(vi.getTimerCount()).toBe(1);
     h.app.restore();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('the transfer form: submitting', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const CTRL_T = 0x14;
+  const ENTER = 0x0d;
+
+  /** An in-memory TransferFiles, so a submit can get past the filesystem check. */
+  function fakeFiles(initial: Record<string, Uint8Array> = {}): TransferFiles {
+    const files = new Map(Object.entries(initial));
+    return {
+      exists: (p) => files.has(p),
+      read: (p) => {
+        const got = files.get(p);
+        if (got === undefined) throw new Error(`ENOENT: ${p}`);
+        return got;
+      },
+      write: (p, bytes) => { files.set(p, bytes); },
+      append: (p, bytes) => { files.set(p, bytes); },
+    };
+  }
+
+  /** An app with a filesystem and a session that reports 3270 mode. */
+  function app(opts: { files?: TransferFiles; formatted?: boolean } = {}) {
+    const session = makeSession();
+    vi.spyOn(session, 'is3270Mode').mockReturnValue(true);
+    if (opts.formatted !== false) session.screen.setFieldAttribute(0, 0x00);
+    const aids: number[] = [];
+    vi.spyOn(session, 'sendAID').mockImplementation((aid: number) => { aids.push(aid); });
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(25, 80);
+    const host = new FakeHost();
+    const a = new App({
+      session, stdin, stdout, host, depth: 0,
+      ...(opts.files !== undefined ? { files: opts.files } : {}),
+    });
+    a.start();
+    const send = (...bytes: number[]): void => { stdin.listener!(Uint8Array.from(bytes)); };
+    const type = (text: string): void => { send(...Array.from(text, (c) => c.charCodeAt(0))); };
+    return { app: a, session, stdout, aids, send, type };
+  }
+
+  /** Fill in the two required fields of a fresh (receive) form and submit. */
+  function fillAndSubmit(h: ReturnType<typeof app>): void {
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);                    // Tab Tab: Local file
+    h.type('/tmp/a.bin');
+    h.send(0x09);                           // Tab: Host file
+    h.type('A.BIN');
+    h.send(ENTER);
+  }
+
+  it('keeps the form OPEN and shows the validator message on a bad submit', () => {
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(ENTER);                          // Enter with both file fields empty
+    expect(h.app.transferOpen).toBe(true);  // not closed
+    expect(h.app.transferError).toMatch(/LocalFile/);
+    expect(h.aids).toEqual([]);             // and nothing reached the host
+  });
+
+  it("shows the VALIDATOR'S OWN message, not a paraphrase", () => {
+    // The validator is the single authority on what is legal; paraphrasing here is how the
+    // TUI and the CLI would start to drift. MEASURED, not assumed: TransferOptionError's
+    // constructor prepends `Transfer(): ` (transfer.ts:99) as x3270 does, so the form shows
+    // the CLI's prefix too. Kept rather than stripped -- it is the validator's own text, and
+    // the point of this test is that we do not edit it.
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(ENTER);
+    expect(h.app.transferError).toBe("Transfer(): missing 'LocalFile' option");
+  });
+
+  it('refuses with a message when there is NO FILESYSTEM, rather than crashing', () => {
+    // `files` is optional on AppOptions so every existing test constructs an App unchanged,
+    // which means the absent case is reachable and must be handled on the form.
+    const h = app();                        // no files
+    fillAndSubmit(h);
+    expect(h.app.transferOpen).toBe(true);
+    expect(h.app.transferError).toMatch(/no file system/);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('RUNS a valid submit: the command is typed and Enter sent', () => {
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    expect(h.app.transferRunning).toBe(true);
+    expect(h.app.transferError).toBeUndefined();
+    expect(h.aids).toEqual([AID.ENTER]);
+    // The IND$FILE command really reached the screen, which is the only thing the host sees.
+    const text = resolve(h.session.screen.snapshot(), {}).map((c) => c.text).join('');
+    expect(text).toContain('IND$FILE GET A.BIN');
+  });
+
+  it('shows the ENGINE\'S refusal on the form when a local check fails', () => {
+    // A receive onto a file that exists with Exist=keep: refused by startTransfer, not by the
+    // validator, and the form must show it the same way.
+    const h = app({ files: fakeFiles({ '/tmp/a.bin': new Uint8Array([1]) }) });
+    fillAndSubmit(h);
+    expect(h.app.transferRunning).toBe(false);
+    expect(h.app.transferError).toMatch(/file exists/);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('IGNORES a second Enter while a transfer is running', () => {
+    // Starting a second transfer over the first would interleave two machines' frames on one
+    // screen, and the host is answering the first one.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    expect(h.aids).toEqual([AID.ENTER]);
+    h.send(ENTER);
+    expect(h.aids).toEqual([AID.ENTER]);    // no second prime, no second AID
+  });
+
+  it('CLOSING MID-TRANSFER ABORTS, so the host leaves transfer mode', () => {
+    // Walking away leaves the host program waiting for a CUT frame that never comes, and the
+    // operator's next keystroke goes into a host that is not listening for it.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    h.send(CTRL_T);                         // close the form
+    expect(h.app.transferOpen).toBe(false);
+    expect(h.aids).toEqual([AID.ENTER, AckAid.ABORT]);   // PF2
+  });
+
+  it('closing an IDLE form sends nothing', () => {
+    // The other side of the same guard: no run in flight means no abort, or every Esc out of
+    // an untouched form would put a PF2 on the wire.
+    const h = app({ files: fakeFiles() });
+    h.send(CTRL_T);
+    h.send(CTRL_T);
+    expect(h.aids).toEqual([]);
+  });
+
+  it('does NOT abort twice when the form is closed after the run already ended', () => {
+    // onDone clears transferRun, so a close afterwards must not call cancel on a finished
+    // run -- the host has left transfer mode and would read a second PF2 as input into
+    // whatever panel it painted next.
+    //
+    // THIS TEST CANNOT FAIL ALONE, and that is worth knowing rather than discovering later:
+    // measured by mutation, deleting `this.transferRun = undefined` from onDone keeps the
+    // whole TUI suite green, because `CutTransfer.cancel` is ITSELF idempotent and absorbs
+    // the second call. Removing BOTH reddens core's own three cancel tests, not this one.
+    // Defence in depth: this assertion pins the app's half of the contract so a reader does
+    // not delete it as redundant, but the guarantee lives in core.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    vi.advanceTimersByTime(700_000);        // past the overall deadline: the run ends
+    expect(h.app.transferRunning).toBe(false);
+    const after = [...h.aids];
+    h.send(CTRL_T);
+    expect(h.aids).toEqual(after);
+  });
+
+  it('a TIMED-OUT run leaves its message on the form, naming the recovery', () => {
+    // ASSERTED ON WHAT IS DRAWN, and that is what caught a real defect: the status line is
+    // 54 columns and truncates, so the engine's original word order (reason, bytes, then the
+    // recovery) put `(press Attn or Clear)` past the cut -- the operator saw only "transfer
+    // did not complete within 600s after 0 bytes; " with nothing about what to do. The
+    // recovery now leads the message. Same shape as the help string that did not fit, one
+    // layer down.
+    const h = app({ files: fakeFiles() });
+    fillAndSubmit(h);
+    vi.advanceTimersByTime(700_000);
+    expect(h.stdout.all).toMatch(/Attn or Clear/);
   });
 });
