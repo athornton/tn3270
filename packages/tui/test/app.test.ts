@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AID, resolve, Session, type Connection } from '@tn3270/core';
-import type { Action } from '@tn3270/frontend';
+import { applicable, TRANSFER_FIELDS, type Action } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { overlayLines } from '../src/keypadOverlay.js';
 
@@ -894,6 +894,255 @@ describe('the special-keys overlay', () => {
     h.app.start();
     dispatchToggle(h.app);
     h.app.onInput(Uint8Array.from([0x1b]));
+    expect(vi.getTimerCount()).toBe(1);
+    h.app.restore();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('the transfer form', () => {
+  // Same reason the special-keys block uses them: the form holds a lone ESC for ESC_TIMEOUT_MS,
+  // so closing on Esc is a timed event.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Longer than ESC_TIMEOUT_MS, so a held lone ESC has resolved. */
+  const AFTER_ESC = 60;
+
+  /** Start an app and return a function that feeds it bytes, as a terminal would. */
+  function started(rows = 25, cols = 80) {
+    const h = harness(rows, cols);
+    h.app.start();
+    return { ...h, send: (...bytes: number[]) => h.stdin.listener!(Uint8Array.from(bytes)) };
+  }
+
+  const CTRL_T = 0x14;
+  const CTRL_K = 0x0b;
+
+  it('opens on Ctrl-T', () => {
+    const h = started();
+    h.send(CTRL_T);
+    expect(h.app.transferOpen).toBe(true);
+  });
+
+  it('is actually DRAWN when it opens, not merely flagged open', () => {
+    // `transferOpen` is a field; a form that never reaches draw() is invisible and yet owns the
+    // keyboard. The overlay block pins its own opening the same way, with `marked(0)`.
+    const h = started();
+    h.send(CTRL_T);
+    expect(h.stdout.all).toContain('File Transfer');
+    expect(h.stdout.all).toContain('Direction');
+  });
+
+  it('is MUTUALLY EXCLUSIVE with the keypad list', () => {
+    // Two overlays both owning the keyboard is a state the user cannot read: the one they
+    // cannot see swallows everything they type.
+    const h = started();
+    h.send(CTRL_K);
+    expect(h.app.overlayOpen).toBe(true);
+    h.send(CTRL_T);
+    expect(h.app.overlayOpen).toBe(false);
+    expect(h.app.transferOpen).toBe(true);
+    h.send(CTRL_K);
+    expect(h.app.transferOpen).toBe(false);
+    expect(h.app.overlayOpen).toBe(true);
+  });
+
+  it('OWNS the keyboard: a printable does NOT reach the screen', () => {
+    // The whole reason the form can have a text field at all. Without the interception,
+    // `a` is a character typed at the host -- and a fresh Session already accepts typing
+    // (this file's makeSession comment records that `typeString('A')` lands in cell 0),
+    // so this assertion is against the real keyboard rather than a mock.
+    const h = started();
+    const before = cellText(h.session, 0);
+    h.send(CTRL_T);
+    h.send(0x61, 0x62);                              // "ab"
+    expect(cellText(h.session, 0)).toBe(before);     // nothing reached the host
+  });
+
+  it('OWNS the keyboard for AIDs too: Enter submits the form, it does not reach the host', () => {
+    // The other half of the interception, and the one with a wire consequence: Enter is the
+    // Enter AID with the form down. Submitting an empty form is refused by the validator
+    // (Task 8), but either way the host must not see an AID the operator did not aim at it.
+    //
+    // SPIES ON `reconnect`, NOT ON `sendAID`, AND THAT IS THE WHOLE POINT. A first version watched
+    // `sendAID` and PASSED with the interception replaced by a real `applyAction(enter)` -- the
+    // harness session is unconnected, so `applyAction` takes `reconnectInstead` (actions.ts:196)
+    // and never reaches `sendAID` at all. Measured by mutation, not reasoned about. `reconnect` is
+    // what an Enter actually does to THIS session, so it is what must not happen. Enter also
+    // REDIALS a disconnected session by deliberate design, so leaking it here would silently open
+    // a connection from a keystroke aimed at a form.
+    const h = started();
+    const sent = vi.spyOn(h.session, 'sendAID');
+    const redial = vi.spyOn(h.session, 'reconnect');
+    h.send(CTRL_T);
+    h.send(0x0d);
+    expect(redial).not.toHaveBeenCalled();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it('types into a text field once one is selected', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09);                                    // Tab: Direction -> Host
+    h.send(0x09);                                    // Tab: Host -> Local file
+    h.send(0x61, 0x2e, 0x62, 0x69, 0x6e);            // "a.bin"
+    expect(h.app.transferValues.localFile).toBe('a.bin');
+  });
+
+  it('refuses a printable in a CYCLE field rather than inventing a value', () => {
+    // The form collects strings but does not get to make them up: a typed value the
+    // validator has never seen would fail at submit naming a keyword the user did type.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x78);                                    // "x" with Direction selected
+    expect(h.app.transferValues.direction).toBe('receive');
+  });
+
+  it('Backspace deletes the last character', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);
+    h.send(0x61, 0x62);
+    h.send(0x7f);                                    // DEL
+    expect(h.app.transferValues.localFile).toBe('a');
+  });
+
+  it('accepts BOTH 0x08 and 0x7f as Backspace, because terminals disagree on which it sends', () => {
+    // The keymap already binds both (`keymap.ts` takes 0x7f, and 0x08 is Ctrl-H); a form that
+    // took only one would silently ignore the key on half the terminals out there.
+    for (const bs of [0x08, 0x7f]) {
+      const h = started();
+      h.send(CTRL_T);
+      h.send(0x09, 0x09);
+      h.send(0x61, 0x62);
+      h.send(bs);
+      expect(h.app.transferValues.localFile).toBe('a');
+    }
+  });
+
+  it('left and right cycle a cycle field', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b, 0x43);                        // CSI C = right
+    expect(h.app.transferValues.direction).toBe('send');
+    h.send(0x1b, 0x5b, 0x44);                        // CSI D = left
+    expect(h.app.transferValues.direction).toBe('receive');
+  });
+
+  it('accepts the SS3 form of the arrows too, since any layer can flip DECCKM', () => {
+    // `bindings.ts`'s reason, and the overlay path already honours both: accepting only
+    // `\x1b[C` would work in some terminals and not others.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x4f, 0x43);                        // SS3 C = right
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('A SPLIT ARROW MUST NOT CLOSE THE FORM', () => {
+    // `\x1b` and `[C` can arrive in SEPARATE reads -- the delivery this file's own escHeld
+    // tests record a regression for, so it is not hypothetical. Closing on the first byte
+    // would make the right arrow close the form on any terminal that splits, which the
+    // user can neither predict nor see.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
+    expect(h.app.transferOpen).toBe(true);
+    h.send(0x5b, 0x43);
+    expect(h.app.transferOpen).toBe(true);
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('a LONE Esc that outlives the window closes it', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
+    expect(h.app.transferOpen).toBe(true);
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.transferOpen).toBe(false);
+  });
+
+  it('a TRUNCATED escape prefix is discarded with the form left OPEN', () => {
+    // Mirrors the overlay's rule: an unfinished `\x1b[` is not a keypress, so it must not
+    // close the form -- only a LONE ESC that outlived the window did.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b);
+    vi.advanceTimersByTime(AFTER_ESC);
+    expect(h.app.transferOpen).toBe(true);
+  });
+
+  it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
+    // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
+    // comparison recognises -- the field would appear to stop changing while the key was
+    // held. Two rights from `receive` wrap back to `receive`, so assert three.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43);
+    expect(h.app.transferValues.direction).toBe('send');
+  });
+
+  it('BackTab moves the selection backwards', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09);                              // to Local file
+    expect(h.app.transferSelected).toBe(2);
+    h.send(0x1b, 0x5b, 0x5a);                        // CSI Z
+    expect(h.app.transferSelected).toBe(1);
+  });
+
+  it('SKIPS an inapplicable field when moving, rather than selecting something unseen', () => {
+    // On a receive, Recfm/Lrecl/Blksize and (in binary) Cr are not drawn. Tab must not land
+    // on a row the operator cannot see; `moveField` skips them and this pins that it is wired.
+    const h = started();
+    h.send(CTRL_T);
+    for (let i = 0; i < 20; i++) {                   // more Tabs than there are fields
+      h.send(0x09);
+      const id = TRANSFER_FIELDS[h.app.transferSelected]!.id;
+      expect(applicable(id, h.app.transferValues)).toBe(true);
+    }
+  });
+
+  it('BYTES SHARING A READ WITH THE CLOSING KEYSTROKE ARE NOT LOST', () => {
+    // The silent lost keystroke `pump()` exists to prevent, and the reason closeOverlay does
+    // not empty its pending buffer. `Ctrl-T A` in one read closes the form and types the A at
+    // the host -- so the A must reach the screen, not vanish.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(CTRL_T, 0x41);                            // close, then "A" for the host
+    expect(h.app.transferOpen).toBe(false);
+    expect(cellText(h.session, 0)).toBe('A');
+  });
+
+  it('REOPENS EMPTY, so one operator\'s path is not handed to the next transfer', () => {
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x09, 0x09, 0x61, 0x62);                  // localFile = "ab"
+    expect(h.app.transferValues.localFile).toBe('ab');
+    h.send(CTRL_T);                                  // close
+    h.send(CTRL_T);                                  // reopen
+    expect(h.app.transferValues.localFile).toBe('');
+    expect(h.app.transferSelected).toBe(0);
+  });
+
+  it('does NOT open while SUSPENDED, where it would be invisible and own the keyboard', () => {
+    // toggleOverlay's rule, for the same reason: draw() paints nothing while suspended, so the
+    // form would swallow every keystroke from behind a "terminal too small" message. A 20x80
+    // terminal is suspended and still clears TRANSFER_MIN, so the fits check cannot cover this.
+    const h = started();
+    h.stdout.resize(20, 80);
+    h.host.fire('SIGWINCH');
+    h.send(CTRL_T);
+    expect(h.app.transferOpen).toBe(false);
+  });
+
+  it('the ESC TIMER IS CLEARED ON RESTORE, so a held prefix cannot fire into a dead terminal', () => {
+    // The same leak this file's last overlay test pins: a pending timeout after restore() would
+    // reach closeTransfer and draw() -- which `quitting`/`restored` guard, but the timer itself
+    // must not outlive the app or the process cannot exit.
+    const h = started();
+    h.send(CTRL_T);
+    h.send(0x1b);
     expect(vi.getTimerCount()).toBe(1);
     h.app.restore();
     expect(vi.getTimerCount()).toBe(0);

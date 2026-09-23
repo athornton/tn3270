@@ -25,9 +25,11 @@ import { resolve, type Session } from '@tn3270/core';
 import { detectDepth, type Depth } from './colours.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
+import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
 import {
   applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, resolveScheme,
-  type Action, type Scheme,
+  cycleField, moveField, newTransferForm, setFieldText, TRANSFER_FIELDS,
+  type Action, type Scheme, type TransferFormState, type TransferValues,
 } from '@tn3270/frontend';
 
 /** The byte a lone Escape keypress sends; also the first byte of every function key. */
@@ -47,6 +49,27 @@ const OVERLAY_CSI = 0x5b;         // the `[` of `\x1b[A`
 const OVERLAY_SS3 = 0x4f;         // the `O` of `\x1bOA`, which DECCKM makes equally likely
 const OVERLAY_UP = 0x41;
 const OVERLAY_DOWN = 0x42;
+
+/**
+ * The bytes the TRANSFER FORM reads while it is open, beside the `OVERLAY_*` ones it reuses.
+ *
+ * `OVERLAY_CR`/`LF`/`CSI`/`SS3`/`UP`/`DOWN`/`TOGGLE` and `ESC` are shared rather than redefined:
+ * two constants for one byte is exactly the drift this codebase keeps eliminating.
+ */
+const TRANSFER_TOGGLE = 0x14;     // Ctrl-T, which the terminal keymap maps to `transferForm`
+const TAB = 0x09;
+/**
+ * BOTH backspace bytes, because terminals disagree about which one the key sends.
+ *
+ * `0x7f` is DEL and what most Unix terminals send; `0x08` is Ctrl-H and what some others do. The
+ * keymap takes `0x7f` for its own `backspace`, so accepting only that here would leave the key
+ * dead for anyone whose terminal sends the other.
+ */
+const BACKSPACE = 0x08;
+const DEL = 0x7f;
+const TRANSFER_RIGHT = 0x43;      // the `C` of `\x1b[C`
+const TRANSFER_LEFT = 0x44;       // the `D` of `\x1b[D`
+const TRANSFER_BACKTAB = 0x5a;    // the `Z` of `\x1b[Z`
 
 /**
  * `k`/`w` for up and `j`/`s` for down, as alternatives to the arrows -- ONLY while the list is open.
@@ -226,8 +249,37 @@ export class App {
   private overlayPending: number[] = [];
   private overlayTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * The transfer form's state, MUTUALLY EXCLUSIVE with the overlay's above.
+   *
+   * A separate set of fields rather than a shared "which overlay" enum, following how the two
+   * renderers are separate: the keypad list carries a selection and a scroll window over 47 fixed
+   * rows, and the form carries values whose applicability changes what rows exist at all. The one
+   * invariant between them is that `transferShown` and `overlayShown` are never both true, which
+   * `toggleTransfer`/`toggleOverlay` maintain and `app.test.ts` pins.
+   *
+   * `transferPending`/`transferTimer` are separate from BOTH `buffer`/`escHeld` and the overlay's
+   * pair, for the reason `overlayPending` gives: the ESC state machine in `pump()` is the most
+   * delicate thing in this file and nothing an overlay does may perturb it.
+   */
+  private transferShown = false;
+  private transferState: TransferFormState = newTransferForm();
+  private transferPhase: TransferPhase = 'idle';
+  private transferProgress: string | undefined;
+  private transferPending: number[] = [];
+  private transferTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** Public for tests, like `onInput`: a test should not have to infer this from bytes. */
   get overlayOpen(): boolean { return this.overlayShown; }
+
+  /** Public for tests, like `overlayOpen`. */
+  get transferOpen(): boolean { return this.transferShown; }
+
+  /** For tests: the form's current values. */
+  get transferValues(): TransferValues { return this.transferState.values; }
+
+  /** For tests: which entry of `TRANSFER_FIELDS` is selected. */
+  get transferSelected(): number { return this.transferState.selected; }
 
   constructor(opts: AppOptions) {
     this.session = opts.session;
@@ -312,9 +364,13 @@ export class App {
     // state on an App that should be fully torn down.
     this.escHeld = false;
     // The overlay's own held prefix is a THIRD timer, and it keeps the event loop alive after the
-    // terminal is restored exactly as the two above do.
+    // terminal is restored exactly as the two above do. The transfer form's is a FOURTH -- every
+    // `setTimeout` call site in this file has to be represented here, which is why they are listed
+    // rather than folded into one helper: a new one is then a visibly missing line.
     this.clearOverlayTimer();
     this.overlayPending = [];
+    this.clearTransferTimer();
+    this.transferPending = [];
     this.stdout.write(CURSOR_OFF);
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);
@@ -387,7 +443,12 @@ export class App {
     const cells = resolve(this.session.screen.snapshot(), { mode3279: this.mode3279 });
     const out = this.renderer.paint(
       cells, this.session.screen.cursor, this.session.oia.toText(),
-      this.overlayShown ? this.overlayWindow() : undefined,
+      // At most one contributes: the two are mutually exclusive, so the order of this chain is
+      // a tie-break that can never be needed rather than a precedence rule.
+      this.overlayShown ? this.overlayWindow()
+        : this.transferShown
+          ? transferLines(this.transferState, this.transferPhase, this.transferProgress)
+          : undefined,
     );
     if (out !== '') this.stdout.write(out);
   }
@@ -401,6 +462,12 @@ export class App {
     // BEFORE the buffer and before `pump`, deliberately: the ESC state machine below is untouched
     // by anything the overlay does, and the overlay does not have to reason about `escHeld`.
     if (this.overlayShown) { this.consumeOverlayKey(bytes); return; }
+    // THE FORM OWNS THE KEYBOARD FOR THE SAME REASONS AND ONE MORE: it has TEXT FIELDS, and a
+    // filename needs every printable character. A bare letter is bindable nowhere else in this
+    // emulator precisely because `pump()` hands printable runs to `typeString`; this interception
+    // is what makes typing a path possible at all. It also stops Enter reaching the host as an
+    // AID when the operator meant to submit the form.
+    if (this.transferShown) { this.consumeTransferKey(bytes); return; }
     for (const b of bytes) this.buffer.push(b);
     this.pump();
   }
@@ -575,6 +642,11 @@ export class App {
     // `applyAction` THROWS on the action rather than ignoring it, so a front end that forgot to
     // intercept it dies on the keystroke instead of presenting a chord that does nothing.
     if (action.kind === 'toggleKeypad') { this.toggleOverlay(); return; }
+    // Intercepted here for the same reason and with the same consequence: `applyAction` THROWS on
+    // `transferForm`, so a front end that forgot this arm dies on the keystroke rather than
+    // offering a chord that does nothing. (The web gateway REJECTS the kind instead -- see
+    // `web/src/protocol.ts` -- because a browser transfer's filesystem is a stage-4 question.)
+    if (action.kind === 'transferForm') { this.toggleTransfer(); return; }
     if (action.kind === 'quit') {
       this.quitting = true;
       this.restore();
@@ -674,6 +746,11 @@ export class App {
       const letter = overlayLetterDelta(pending[0]);
       if (pending[0] === OVERLAY_CR || pending[0] === OVERLAY_LF) this.fireOverlay();
       else if (pending[0] === OVERLAY_TOGGLE) this.closeOverlay();
+      // Ctrl-T SWAPS to the transfer form. Without this arm the exclusion is one-way: Ctrl-T from
+      // the list would be swallowed like any other unrecognised byte, so the form would be
+      // reachable from the screen but not from the list -- an inconsistency the user meets as
+      // "the key works sometimes". `transferKey` has the mirror of this arm for Ctrl-K.
+      else if (pending[0] === TRANSFER_TOGGLE) { this.closeOverlay(); this.toggleTransfer(); }
       else if (letter !== 0) this.moveOverlay(letter);
       return 1;
     }
@@ -747,6 +824,203 @@ export class App {
     }
     this.overlayTop = Math.min(this.overlayTop, Math.max(0, lines.length - rows));
     return lines.slice(this.overlayTop, this.overlayTop + rows);
+  }
+
+  /**
+   * Open the transfer form, or close an open one.
+   *
+   * NO SCROLL WINDOW, unlike `overlayWindow`: the form is at most 13 lines against `TRANSFER_MIN`'s
+   * 15, so every line always fits and the whole list is handed to the renderer.
+   */
+  private toggleTransfer(): void {
+    if (this.transferShown) { this.closeTransfer(); return; }
+    // NOT WHILE SUSPENDED, exactly as `toggleOverlay` refuses: `draw()` paints nothing then, so
+    // opening would leave the form INVISIBLE and yet owning the keyboard -- every keystroke
+    // swallowed by something the user cannot see. A 20x80 terminal is suspended and still clears
+    // TRANSFER_MIN, so the fits check below does not cover this.
+    if (this.suspended) return;
+    // MUTUALLY EXCLUSIVE with the keypad list. Two overlays both owning the keyboard is a state
+    // the user cannot read: the one they cannot see swallows what they type. Closed AFTER the
+    // suspended guard, so a refused open does not silently dismiss the list.
+    if (this.overlayShown) this.closeOverlay();
+    if (!transferFits(this.terminal())) {
+      // NOT REACHABLE FROM A LIVE SESSION, for the reason `overlayFits`'s own branch gives:
+      // `tooSmall` demands 24x80 before a session runs and TRANSFER_MIN is 15x56, so every
+      // terminal that reaches here clears it. What it guards is the gap between a shrink and its
+      // SIGWINCH. TRANSFER_MIN was NOT inflated to make this reachable -- see transferOverlay.ts.
+      this.showMessage('terminal too small for the transfer form');
+      return;
+    }
+    this.transferShown = true;
+    // REOPENS EMPTY. A form that remembered its values would hand one operator's path -- and on a
+    // send, the file they were reading -- to the next transfer, where a stale HostFile is a write
+    // to a dataset nobody named in this session.
+    this.transferState = newTransferForm();
+    this.transferPhase = 'idle';
+    this.transferProgress = undefined;
+    this.draw();
+  }
+
+  /**
+   * Close the form.
+   *
+   * A RUNNING TRANSFER MUST BE ABORTED RATHER THAN ABANDONED, which Task 8 adds here: walking away
+   * leaves the host program waiting for a CUT frame that will never come, and the operator's next
+   * keystroke goes into a host that is not listening for it. `CutTransfer.cancel` exists for it.
+   *
+   * `transferPending` is deliberately NOT emptied, for the reason `closeOverlay` gives: the byte
+   * that closed the form is still at the front of it, and its caller both consumes that byte and
+   * forwards whatever shared the read to `pump()`.
+   */
+  private closeTransfer(): void {
+    this.transferShown = false;
+    this.clearTransferTimer();
+    this.draw();
+  }
+
+  /**
+   * Read the bytes as the form's, one key at a time.
+   *
+   * ## A SPLIT ARROW MUST NOT READ AS ESCAPE
+   *
+   * The same hazard `consumeOverlayKey` documents, and not hypothetical: `\x1b` and `[C` can
+   * arrive in separate reads. Closing on the first would make the right arrow close the form on
+   * any terminal that splits -- discarding everything typed into it. So an incomplete prefix is
+   * HELD with the same 50ms window `pump()` uses, and only a lone ESC that outlives it closes. A
+   * truncated `\x1b[` is discarded with the form left open, mirroring `pump()`'s discard.
+   *
+   * ## ONE READ, SEVERAL KEYS
+   *
+   * A loop rather than a match on the chunk: autorepeat coalesced by a slow link delivers
+   * `\x1b[C\x1b[C` as one read, and a whole-chunk comparison would see the field stop changing
+   * while the key was held. Typing into a text field makes this more likely here than in the
+   * overlay, not less -- a fast typist's keystrokes share reads routinely.
+   */
+  private consumeTransferKey(bytes: Uint8Array): void {
+    for (const b of bytes) this.transferPending.push(b);
+    this.clearTransferTimer();
+
+    while (this.transferShown && this.transferPending.length > 0) {
+      const taken = this.transferKey(this.transferPending);
+      if (taken === 0) { this.holdTransferPrefix(); return; }
+      this.transferPending.splice(0, taken);
+    }
+
+    if (this.transferPending.length > 0) {
+      // Bytes that shared a read with the keystroke that CLOSED the form belong to the screen
+      // again. Dropping them is the silent lost keystroke `pump()` exists to prevent, and it is
+      // safe now that `transferShown` is false, so `onInput` will not intercept them again.
+      for (const b of this.transferPending) this.buffer.push(b);
+      this.transferPending = [];
+      this.pump();
+    }
+  }
+
+  /** Act on the ONE key at the front, returning bytes consumed, or 0 for an unresolved prefix. */
+  private transferKey(pending: readonly number[]): number {
+    const b = pending[0];
+    if (b !== ESC) {
+      if (b === OVERLAY_CR || b === OVERLAY_LF) this.submitTransfer();
+      else if (b === TRANSFER_TOGGLE) this.closeTransfer();
+      // Ctrl-K swaps to the keypad list rather than being swallowed, so the two overlays are
+      // reachable from each other without a trip through the screen.
+      else if (b === OVERLAY_TOGGLE) { this.closeTransfer(); this.toggleOverlay(); }
+      else if (b === TAB) this.moveTransfer(1);
+      else if (b === BACKSPACE || b === DEL) this.backspaceTransfer();
+      // Printable ASCII only. A control byte this form does not name is SWALLOWED rather than
+      // falling through to the screen, as the overlay swallows what it does not recognise.
+      else if (b !== undefined && b >= 0x20 && b < 0x7f) this.typeTransfer(b);
+      return 1;
+    }
+    if (pending.length === 1) return 0;                         // Escape, or an arrow's first byte
+    if (pending[1] === OVERLAY_CSI || pending[1] === OVERLAY_SS3) {
+      if (pending.length === 2) return 0;                       // no final byte yet
+      // BOTH FORMS, for the reason `bindings.ts` gives: any layer can flip DECCKM, so accepting
+      // one of `\x1b[C`/`\x1bOC` would work in some terminals and not others. BackTab arrives as
+      // CSI Z, which is three bytes like the arrows.
+      if (pending[2] === OVERLAY_UP) this.moveTransfer(-1);
+      else if (pending[2] === OVERLAY_DOWN) this.moveTransfer(1);
+      else if (pending[2] === TRANSFER_RIGHT) this.cycleTransfer(1);
+      else if (pending[2] === TRANSFER_LEFT) this.cycleTransfer(-1);
+      else if (pending[2] === TRANSFER_BACKTAB) this.moveTransfer(-1);
+      return 3;                            // any other function key: swallowed, whole
+    }
+    // ESC followed by something that cannot continue an arrow: it really was Escape.
+    this.closeTransfer();
+    return 1;
+  }
+
+  /** Wait out `ESC_TIMEOUT_MS` on a prefix the form cannot yet resolve. */
+  private holdTransferPrefix(): void {
+    this.transferTimer = setTimeout(() => {
+      this.transferTimer = undefined;
+      const lone = this.transferPending.length === 1 && this.transferPending[0] === ESC;
+      this.transferPending = [];
+      // A LONE ESC that outlived the window really was Escape, so it closes. A truncated `\x1b[`
+      // is discarded with the form left open: an unfinished sequence is not a keypress, and here
+      // closing would also discard everything typed.
+      if (lone && this.transferShown) this.closeTransfer();
+    }, ESC_TIMEOUT_MS);
+  }
+
+  private clearTransferTimer(): void {
+    if (this.transferTimer === undefined) return;
+    clearTimeout(this.transferTimer);
+    this.transferTimer = undefined;
+  }
+
+  private moveTransfer(delta: number): void {
+    this.transferState = moveField(this.transferState, delta);
+    this.draw();
+  }
+
+  /**
+   * Cycle the selected field, if it is a cycle field.
+   *
+   * ## A CYCLE CANNOT HIDE THE FIELD THAT IS SELECTED, AND THAT WAS MEASURED
+   *
+   * The plan added a repair here -- `moveField(1)` when the selection became inapplicable -- on
+   * the theory that flipping Mode to binary hides Cr while Cr is selected. IT IS UNREACHABLE: a
+   * field's applicability depends only on OTHER fields (`recfm` on direction, `lrecl` on direction
+   * and recfm, `blksize` on those and host, `cr` on mode), so cycling a field can hide others but
+   * never itself. Verified exhaustively over all 360 reachable value-states x every selectable
+   * cycle field x both deltas -- 4128 operations, zero cases where the selection ended
+   * inapplicable. The repair was dropped rather than kept as dead code with a test that could only
+   * pass vacuously; if a future field's applicability depends on itself, `transferForm.test.ts`'s
+   * own rules are where that shows up first.
+   *
+   * What IS reachable is a cycle hiding a DIFFERENT field, which `clearInapplicable` handles in
+   * the model by clearing its value, and `moveField` handles for the selection by skipping it.
+   */
+  private cycleTransfer(delta: number): void {
+    const field = TRANSFER_FIELDS[this.transferState.selected];
+    if (field === undefined) return;
+    this.transferState = cycleField(this.transferState, field.id, delta);
+    this.draw();
+  }
+
+  private typeTransfer(byte: number): void {
+    const field = TRANSFER_FIELDS[this.transferState.selected];
+    if (field === undefined || field.kind === 'cycle') return;
+    const current = this.transferState.values[field.id];
+    this.transferState = setFieldText(
+      this.transferState, field.id, current + String.fromCharCode(byte),
+    );
+    this.draw();
+  }
+
+  private backspaceTransfer(): void {
+    const field = TRANSFER_FIELDS[this.transferState.selected];
+    if (field === undefined || field.kind === 'cycle') return;
+    const current = this.transferState.values[field.id];
+    this.transferState = setFieldText(this.transferState, field.id, current.slice(0, -1));
+    this.draw();
+  }
+
+  /** Task 8 runs the transfer. Validation first, so the form can show an error. */
+  private submitTransfer(): void {
+    // Deliberately inert for now, and NOT a fall-through to the host: Enter must not reach the
+    // session as an AID while the form is up, which `app.test.ts` pins.
   }
 
   /**
