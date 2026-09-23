@@ -2776,6 +2776,37 @@ Co-Authored-By: SLAC AI"
 
 Then merge with `--no-ff`, as the last five features did, and **re-run the whole gate on the merge commit itself** — not only on the branch. A merge rewrites mtimes, so force-rebuild `packages/gui packages/web` first or the staleness guards redden on mtimes alone.
 
+### AS BUILT, Task 10 — the gate passed, and THE LIVE RUN FOUND A DEFECT NO TEST COULD
+
+**Measured on the branch: build and typecheck clean, 1971 tests in 78 files** (from 1869 in 74).
+**All eight by-hand harnesses pass:** `shot.mjs` 3/3, `keys.mjs` 18 chords/16 actions, `clicks.mjs`
+9 buttons/10 actions, `browser-keys.mjs` 13 chords/11 actions, `browser-shot.mjs` 2/2,
+`pty-smoke.py` 12/12 exit 0, `drive-e.py` 10/10, `drive-playback.py` 10/10.
+
+1. **THE KEYPAD GOLDEN DID NEED REGENERATING, as step 2 predicted, and it was confirmed by eye
+   FIRST.** The diff is a single 45x14px region at column 48 of the bottom row, reading `Xfer` in
+   inverse video, with the image dimensions unchanged (720x476 both). `browser-shot.mjs` then
+   independently reproduces the new hash `530d5400a866`, which is a second witness rather than the
+   same measurement twice. `--update` rewrote the other two goldens **identically**, so it did not
+   silently absorb unrelated drift — worth checking, since that is exactly what makes a blanket
+   `--update` dangerous.
+2. **THE LIVE RUN SUCCEEDED: 29 of 29 steps, both directions, byte-identical round trip**, with
+   CMS's own `LISTFILE` as the independent check. Full record in `docs/live-testing.md`.
+3. **AND IT FOUND A REAL DEFECT THE WHOLE TEST SUITE MISSED.** The 24x80 refusal was **109
+   characters against a 54-column status line**, so a real `-model 3278-4-E` session showed
+   `CUT file transfer needs a 24x80 screen; this session >` — **losing every word of the remedy**,
+   which is the only reason the message is worded at all. All sixteen engine tests passed because
+   every one reads `r.error` rather than what is drawn. **Third instance of this shape on one
+   branch.** The new test renders through `transferLines`; mutation-verified by restoring the old
+   wording.
+4. **A live harness flow is cheap to add and worth it.** `live-drive.py` gained a `vmxfer` flow
+   (29 steps) rather than a new script, so the ANSI screen reconstruction and the logoff discipline
+   were reused. Two of its own fixes were measured: **CMS answers a failed `ERASE` with
+   `Ready(00028);`** — the return code in parentheses — and `not found.` in mixed case, so
+   `["Ready;", "NOT FOUND"]` times out on a screen that plainly says both; and **the keystroke
+   counts must be derived from `TRANSFER_FIELDS` and applicability**, since a path typed into the
+   wrong field is still a valid string and fails silently.
+
 ---
 
 ## Self-review against the spec
@@ -2804,4 +2835,11 @@ Checked each spec section against a task:
 
 **One spec correction, recorded in Task 5:** the spec's "expose it" for `CutTransfer.abort` is insufficient — `abort` is the internal error path with a two-argument signature no external caller can supply. The plan adds a `cancel(screen)` wrapper instead and explains why.
 
-**Two places the plan deliberately tells the implementer to resolve something rather than guessing:** the `KeypadKey` doc-comment rule that `transferForm` contradicts (Task 3 step 6), and whether `cycleTransfer` can leave the selection on a now-inapplicable field (Task 7 step 4(g) — it can).
+**Two places the plan deliberately tells the implementer to resolve something rather than guessing:** the `KeypadKey` doc-comment rule that `transferForm` contradicts (Task 3 step 6), and whether `cycleTransfer` can leave the selection on a now-inapplicable field (Task 7 step 4(g)).
+
+**CORRECTED 2026-09-23 — THIS LINE USED TO END "it can", AND IT CANNOT.** Measured exhaustively:
+360 reachable value-states × every selectable cycle field × both deltas = 4128 operations, **zero**
+cases where the selection ended inapplicable, because a field's applicability depends only on OTHER
+fields. The repair was dropped and the reasoning kept as a comment. Left corrected in place rather
+than deleted, because "the plan told the implementer to check and the plan's own answer was wrong"
+is the most useful thing this line can now say. See *AS BUILT, Task 7*.
