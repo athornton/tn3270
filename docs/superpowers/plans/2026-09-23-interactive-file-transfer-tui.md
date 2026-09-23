@@ -1147,6 +1147,45 @@ Generated with AI
 Co-Authored-By: SLAC AI')"
 ```
 
+### AS BUILT, Task 4 — four defects in this plan's own code, each falsified before fixing
+
+Gate after: build/typecheck clean, **1903 tests in 76 files** (from 1877/75). Commit `ea8ee15`.
+
+1. **`clearInapplicable` NEEDED A FIXED-POINT LOOP.** The rules CHAIN and the single pass above
+   is wrong. Measured: single-pass reddens the new "CASCADES the VM repair too" test, because
+   the `Recfm=U` repair ran *after* the loop and so could never cascade to the `Lrecl` it had
+   licensed — the form would have submitted `Lrecl=80` with no `Recfm` and met the validator's
+   *"Lrecl and Blksize need Recfm as well"*. The sibling receive cascade passes single-pass only
+   **by luck of table order** (`recfm` at index 7 is cleared before `lrecl` at 8 is tested);
+   reorder `TRANSFER_FIELDS` and it breaks. Both cascade tests are new; nothing else covers
+   rule chaining.
+2. **`error?: string` DOES NOT TYPECHECK** against this plan's own `error: undefined` writes under
+   `exactOptionalPropertyTypes` — 2 errors, at the plan's own lines. It must be
+   `error?: string | undefined`. **Task 7 needs this too**, at `app.ts`'s
+   `{ ...this.transferState, error: run.error }`, where `run.error` is `string | undefined`.
+3. **The keyword map must be a TOTAL `Record`, not `Partial<Record<>>`.** Measured: with `Partial`,
+   dropping `direction` from the map **compiles cleanly** and emits the keyword `undefined=receive`
+   at runtime; with `Record` it is TS2741 at build. The validator cannot save us here — it never
+   sees a field name it recognises.
+4. **The plan's `import type { FtHostType }` is unused** and was dropped. The module refers to no
+   type from `transfer.ts`.
+
+**And a counting correction for step 7: `applicable` has FOUR cases, not five.** The fifth rule is
+the separate `Recfm=U`-on-VM repair inside `clearInapplicable`, which is what the fifth mutation
+check must target (delete it outright; 2 tests redden).
+
+**Measured mutation matrix** — each `return true`, build, run, revert:
+
+| rule | tests reddened |
+|---|---|
+| `recfm` | 2 — "hides Recfm on a receive", the receive cascade |
+| `lrecl` | 4 — "disables Lrecl while Recfm is unset", "CLEARS Lrecl when Recfm returns to unset", both cascades |
+| `blksize` | 3 — "hides Blksize on VM", "CLEARS Blksize when Host flips to vm", the receive cascade |
+| `cr` | 2 — "hides Cr unless the mode is ascii", "CLEARS Cr when the mode returns to binary" |
+| VM repair (deleted) | 2 — "REPAIRS Recfm=U when Host flips to vm", the VM cascade |
+
+No rule passed vacuously.
+
 ---
 
 ## Task 5: `CutTransfer.cancel` — a public method, not a visibility change
