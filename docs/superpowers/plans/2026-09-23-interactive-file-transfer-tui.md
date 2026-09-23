@@ -2155,6 +2155,46 @@ Generated with AI
 Co-Authored-By: SLAC AI')"
 ```
 
+### AS BUILT, Task 7 — the exclusion was ONE-WAY and the selection repair is UNREACHABLE
+
+Gate after: build/typecheck clean, **1945 tests in 77 files** (from 1924), `pty-smoke.py` 12/12
+exit 0. Commit `7527481`. **18 tests, not 11.**
+
+1. **THE EXCLUSION WAS ONE-WAY.** Step (f) adds a Ctrl-K arm to `transferKey` but **no Ctrl-T arm to
+   `overlayKey`**, so Ctrl-T from inside the keypad list was swallowed like any other unrecognised
+   byte — the form reachable from the screen but not from the list. Both arms now exist and each is
+   falsifiable alone. A test caught it, not review.
+2. **THE SELECTION REPAIR IN `cycleTransfer` IS UNREACHABLE AND WAS DROPPED.** A field's
+   applicability depends only on **other** fields (`recfm`←direction, `lrecl`←direction+recfm,
+   `blksize`←those+host, `cr`←mode), so cycling a field can hide others but never itself. **Checked
+   exhaustively: 360 reachable value-states × every selectable cycle field × both deltas = 4128
+   operations, ZERO cases** where the selection ended inapplicable. **And the plan's own test for it
+   passes vacuously** — replaying its keystroke script lands the selection on `Mode`, which is
+   always applicable, so it asserts `applicable('mode', …) === true`. Kept as a comment saying why
+   there is no code.
+3. **`transferSelected` is still needed** (for the Tab-skipping test), so add the accessor.
+4. **The plan's Enter test shape is a trap I hit: spying on `sendAID` proves nothing here.** The
+   harness `Session` is unconnected, so `applyAction` takes `reconnectInstead` (`actions.ts:196`)
+   and never reaches `sendAID` — a version of `submitTransfer` that really sent Enter passed. **Spy
+   on `reconnect`**, which is what an Enter does to this session.
+5. **`restore()` needs `clearTransferTimer()` + `transferPending = []`** — a FOURTH `setTimeout`
+   call site in `app.ts`. Step 4 does not mention it; without it the process hangs `ESC_TIMEOUT_MS`
+   on exit after a held prefix.
+6. **Both `0x08` and `0x7f` must be accepted as Backspace** (terminals disagree; taking one leaves
+   the key dead on half of them) — the plan defines both constants but says nothing about why.
+7. **Drop the `TRANSFER_MIN` and `applicable` imports** from `app.ts` once the repair is gone: they
+   end up referenced only in comments, which `tsc` does not flag.
+8. Six further tests beyond the plan's, each reaching a state nothing else did: the form is DRAWN
+   and not merely flagged; the SS3 arrow form; a truncated `\x1b[` leaving it OPEN; BackTab; Tab
+   SKIPPING inapplicable fields; and REOPENS EMPTY (a stale `HostFile` is a write to a dataset
+   nobody named this session).
+
+**Mutation matrix:** `onInput` interception → **12 red**; Ctrl-T arm → 1; Ctrl-K arm → 1; submit
+falling through → 1 *after* the test was fixed and **0 before**; `suspended` guard → 1;
+`clearTransferTimer` → 1; forward-remainder → 1; `newTransferForm` reset → 1.
+
+**`submitTransfer` is deliberately inert** and must NOT fall through to the host — Task 8 fills it.
+
 ---
 
 ## Task 8: Run the transfer
