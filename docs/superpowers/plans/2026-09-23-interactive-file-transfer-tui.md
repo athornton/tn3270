@@ -544,6 +544,37 @@ Co-Authored-By: SLAC AI')"
 
 ---
 
+### AS BUILT, Task 3 — four consequences outside `frontend` that this plan MISSED
+
+All four were found by running the full suite rather than the per-package ones. **Per-package runs
+are not a gate on this repo**: `vitest run packages/frontend` and `packages/tui` were both green
+while four tests in `canvas` and `web` were red.
+
+1. **A REMOTELY-TRIGGERABLE GATEWAY KILL.** `web/src/main.ts` calls `applyAction` outside any try
+   inside a socket `data` handler, where a throw ends the process and every operator's session. The
+   keypad button makes it reachable from a click. Closed by a **rejection in `protocol.ts`**, the
+   first of its documented two branches, because a browser must not have the action at all yet —
+   stage 4 must settle whose filesystem a browser transfer writes to. Mutation-verified.
+   `integration.test.ts`'s `REFUSED` list gained a member and its comment records how to remove it.
+2. **`bindings.test.ts` caught the intent declared without the byte bound** — `BINDING_INTENT` had
+   `Ctrl-T` while `keymap.ts`'s table did not. Add both.
+3. **`canvas/test/keys.test.ts` has a `TERMINAL_ONLY` record requiring a written reason** for any
+   `BINDING_INTENT` key the canvas mapper cannot express. `Ctrl-T` is a genuine exemption until
+   stage 3; the entry must name the condition for its own deletion.
+4. **Keypad geometry: 48 keys is 240 cells, and cell 48 stopped being a gutter.** Two tests in
+   `canvas/test/keypad.test.ts`. The blank-column assertion is the only one anywhere that a keypad
+   column is EMPTY and has now caught this twice.
+
+**And one rule needed rewriting rather than working around:** `keypad.test.ts`'s "never carries an
+action a front end must intercept" became false, since `transferForm` throws *and* is a legitimate
+key. The real rule is whether a *button* makes sense.
+
+**`actions.test.ts` also requires three edits, not one:** the refusal test, a dispatch-table row, and
+the exact `ROWS.length` count (25 → 26). Its exhaustiveness test compares the table against a
+runtime scan of the union's declaration, so a member without a row fails by design.
+
+---
+
 ## Task 4: The form model — fields, defaults, cycle order
 
 **Files:**
