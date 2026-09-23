@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   AckAid, AID, resolve, Session, type Connection,
 } from '@tn3270/core';
-import type { TransferFiles, TransferRequest } from '@tn3270/frontend';
+import { newTransferForm, type TransferFiles, type TransferRequest } from '@tn3270/frontend';
 import { startTransfer } from '../src/transferRun.js';
+import { transferLines } from '../src/transferOverlay.js';
 
 /**
  * Transfer-engine tests over a REAL `Session` with a fake socket.
@@ -124,6 +125,28 @@ describe('startTransfer', () => {
     expect(r.error).toMatch(/43x80/);            // the CURRENT geometry
     expect(r.error).toMatch(/-model 3278-2-E/);  // the remedy
     expect(r.error).toMatch(/DFT/);              // and that it is coming
+  });
+
+  it('THE REFUSAL SURVIVES THE 54-COLUMN STATUS LINE with its remedy intact', () => {
+    // FOUND BY A LIVE RUN, NOT BY A TEST, and that is the point of this one existing. The
+    // first version of the message was 109 characters against transferOverlay's LINE_WIDTH
+    // of 54, so a real `-model 3278-4-E` session against VM/370 showed
+    //     CUT file transfer needs a 24x80 screen; this session >
+    // and cut off EVERY WORD OF THE REMEDY -- the only reason the message is worded at all,
+    // since -model is parsed once at launch and the user cannot fix it from inside the
+    // client. Every other test here reads `r.error` directly, which is exactly why none of
+    // them saw it.
+    //
+    // So this asserts on the RENDERED line, through the same renderer the form uses. Third
+    // instance of this shape on one branch (the keypad help string, the timeout message,
+    // this), hence the rule now written in transferOverlay.ts: on a 54-column line, put the
+    // action first.
+    const { session } = withSpy(in3270(makeSession(43, 80)));
+    const r = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
+    const lines = transferLines({ ...newTransferForm(), error: r.error }, 'idle', undefined);
+    const status = lines[lines.length - 1] ?? '';
+    expect(status.trimEnd().endsWith('>')).toBe(true);     // it IS truncated; that is fine
+    expect(status).toMatch(/-model 3278-2-E/);             // but the REMEDY is still there
   });
 
   it('refuses when not in 3270 mode', () => {

@@ -81,11 +81,19 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     // model-switching does not exist -- it is an unbuilt roadmap item -- so a user at
     // `-model 3278-4-E` cannot fix this from inside the running client. A message that only
     // reported the geometry would leave them stuck.
+    //
+    // THE REMEDY LEADS, AND A LIVE RUN IS WHAT PROVED IT HAD TO. The first version read
+    // "CUT file transfer needs a 24x80 screen; this session is 43x80. Restart with -model
+    // 3278-2-E, or wait for DFT." -- 109 characters against the form's 54-column status
+    // line, so a real model-4 session showed "CUT file transfer needs a 24x80 screen; this
+    // session >" and CUT OFF EVERY WORD OF THE REMEDY. The one thing the message exists to
+    // carry was the one thing truncated, and no unit test saw it because they all read
+    // `r.error` rather than what was drawn. Third instance on this branch, after the keypad
+    // help string and the timeout message: on a 54-column line, put the action first.
     return {
       ok: false,
-      error: `CUT file transfer needs a 24x80 screen; this session is `
-        + `${session.screen.rows}x${session.screen.cols}. `
-        + `Restart with -model 3278-2-E, or wait for DFT.`,
+      error: `restart with -model 3278-2-E: CUT needs 24x80, not `
+        + `${session.screen.rows}x${session.screen.cols} (DFT will lift this)`,
     };
   }
   if (!session.is3270Mode()) {

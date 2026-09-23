@@ -9,6 +9,14 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE TUI'S `Ctrl-T` TRANSFER FORM IS LIVE-VERIFIED ON VM/CMS, 2026-09-23 — the first live run
+  of interactive file transfer.** 29 of 29 steps, both directions, a 249-byte binary
+  **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file it wrote. The
+  *engine* has been verified since 2026-08-18; the *form* had no witness until now, and those stay
+  separate claims because the code underneath is the same. **A real defect was found that no unit
+  test could see: the 24x80 refusal was 109 characters against a 54-column status line and lost
+  every word of its remedy.** MVS/TSO through the form is still unverified. See *The TUI's `Ctrl-T`
+  transfer form against live VM/CMS* at the end.
 - **A REAL TN3270E-CAPABLE HOST HAS NOW BEEN PROBED, 2026-09-17, AND THE REFUSAL IS THE HOST'S
   FAULT.** z/VM 4.4 at `evievm.pubvm.org:23` sends `IAC DO TN3270E` unprompted and asks
   `SEND DEVICE-TYPE`, both firsts here, then **withdraws the option** after our request and we
@@ -2732,3 +2740,116 @@ Its four assertions were each mutation-falsified separately — but **the first 
 was a silent no-op whose anchor never matched the source**, so it reported "8 passed" while proving
 nothing about the assertion under test. Asserting the anchor exists *before* mutating is what
 exposed it. **A mutation check that cannot fail is worse than none, because it certifies.**
+
+## The TUI's `Ctrl-T` transfer form against live VM/CMS — verified 2026-09-23
+
+**THE FIRST LIVE RUN OF INTERACTIVE FILE TRANSFER.** The transfer *engine* has been
+live-verified on both hosts since 2026-08-18; the *form* had no witness until now, and those
+two claims must stay separate because the code underneath is the same. It is now closed for
+VM/CMS in both directions.
+
+**Result: 29 of 29 steps matched, and the 249-byte binary round-tripped BYTE-IDENTICALLY.**
+
+```
+/tmp/form-src.bin   3c0f28c0000d3d6098eec6982b44977bb14e4e9841e995741d7d6b902df6a5de
+/tmp/form-back.bin  3c0f28c0000d3d6098eec6982b44977bb14e4e9841e995741d7d6b902df6a5de
+cmp: identical
+```
+
+Reproduce it with the new flow in the existing pty harness:
+
+```bash
+head -c 249 /dev/urandom > /tmp/form-src.bin && rm -f /tmp/form-back.bin
+TN3270_PASSWORD=CMSUSER python3 packages/tui/scripts/live-drive.py vmxfer
+cmp /tmp/form-src.bin /tmp/form-back.bin
+```
+
+**COMPARE BYTES, NOT THE STATUS LINE.** A transfer that reports success and writes a wrong
+file is the failure mode here, and the form says `done: 249 bytes transferred` either way.
+The harness asserts on screens; the `cmp` is what makes the run mean anything.
+
+### What the form actually looked like, on a real host
+
+Straight out of `/tmp/live-vmxfer-panels.txt`, the send:
+
+```
+  File Transfer (IND$FILE)
+  Direction   send
+  Host        vm
+  Local file  /tmp/form-src.bin
+> Host file   FORM TEST A
+  Mode        binary
+  Exist       keep
+  Recfm       -
+
+done: 249 bytes transferred
+```
+
+Three things this confirms that no unit test could: the form renders **opaquely** over a live
+host screen (no host text bleeding into any line); `Recfm` appears on the send and **is absent
+from the receive form**, which is the applicability rule working against real data rather than
+a fixture; and **CMS file names with spaces need no quoting here**, unlike the CLI, where
+`HostFile="RT TEST A"` is required because `splitArgs` breaks on spaces. The form has no
+argument splitter in the path, so `FORM TEST A` is typed literally.
+
+**The host's own view, which is the independent check:**
+
+```
+LISTFILE FORM TEST A (DATE
+Filename Filetype Fm  Format    Recs Blocks     Date    Time
+FORM     TEST     A1  V    80      4      1  09/23/26   23:36
+Ready; T=0.01/0.01 23:36:25
+```
+
+CMS holds the file, `V 80`, 4 records — written by the form, then read back identically.
+
+### A REAL DEFECT THE LIVE RUN FOUND, AND NO TEST COULD: THE 24x80 REFUSAL LOST ITS REMEDY
+
+Driving the TUI at `-model 3278-4-E` against VM and submitting the form produced, on screen:
+
+```
+CUT file transfer needs a 24x80 screen; this session >
+```
+
+The message was **109 characters** against the form's status line of **54**, so every word of
+the remedy — `Restart with -model 3278-2-E, or wait for DFT` — was truncated away. That is the
+only reason the message is worded at all: `-model` is parsed once at launch and runtime
+model-switching does not exist, so a user cannot fix this from inside the running client.
+
+**Every unit test read `r.error` rather than what was drawn, so all sixteen passed.** The fix
+puts the action first —
+
+```
+restart with -model 3278-2-E: CUT needs 24x80, not 43>
+```
+
+— and the new test renders the refusal through `transferLines` and asserts the remedy survives
+truncation. Mutation-verified by restoring the old wording: it reddens.
+
+**THIRD INSTANCE OF ONE SHAPE ON A SINGLE BRANCH.** The keypad-style help string was 59
+characters and lost the key that closes the form; the timeout message was 113 and lost
+`(press Attn or Clear)`; this was 109 and lost the restart. **On a 54-column line, put the
+action first — and assert on what is DRAWN, not on what the function returns.**
+
+### Two harness fixes, both measured rather than guessed
+
+1. **CMS answers a failed `ERASE` with `Ready(00028);`** — the return code in parentheses — and
+   `File 'FORM TEST A' not found.` in **mixed case**. A step matching `["Ready;", "NOT FOUND"]`
+   times out on a screen that plainly says both. Match the stems `Ready` and `not found`.
+2. **The keystroke counts are derived from `TRANSFER_FIELDS` and applicability, not guessed.**
+   On a fresh *receive* form Tab visits only `direction host localFile hostFile mode exist` —
+   `recfm`/`lrecl`/`blksize` are send-only and `cr` needs ascii mode — so the send flow sets
+   Direction *first* and counts against the longer list that reveals. **Getting this wrong is
+   silent**: a path typed into the wrong field is still a valid string.
+
+### What is still unverified
+
+- **MVS/TSO through the form.** The CLI's `Transfer()` is verified there; the form is not. The
+  flow is `vmxfer`-shaped but TSO needs quoting decisions (`'HERC01.X.Y'` vs userid-relative)
+  that the form passes through verbatim, so it deserves its own run rather than an assumption.
+- **A cancelled transfer mid-flight.** `Esc` during a running transfer aborts with PF2 and the
+  unit tests pin the AID, but no live run has interrupted a real transfer. A 249-byte CUT
+  transfer completes too fast to interrupt by script; a larger file would be needed.
+- **The `Lrecl`-with-`Recfm=V` asymmetry through the form.** Measured through
+  `transferCommand` directly on both hosts (2026-09-22) and unchanged by this branch, but the
+  form has not been the thing that sent it.
