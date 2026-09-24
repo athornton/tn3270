@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { DftRequest, DftReply, DftHeader, DftError, OPEN_MSG } from '../src/ft/dftFrames.js';
+import {
+  DftRequest,
+  DftReply,
+  DftHeader,
+  DftError,
+  OPEN_MSG,
+  parseDftFrame,
+  DftFrameError,
+} from '../src/ft/dftFrames.js';
 
 describe('DFT wire constants, from include/ft_dft_ds.h', () => {
   it('has the six host request types', () => {
@@ -35,5 +43,29 @@ describe('DFT wire constants, from include/ft_dft_ds.h', () => {
     // the comparison is against a name whose trailing spaces have been trimmed.
     expect(OPEN_MSG).toBe('FT:MSG');
     expect(OPEN_MSG).toHaveLength(6);
+  });
+});
+
+describe('parseDftFrame', () => {
+  it('reads the request type from offset 0 of the PARAMS, not offset 3', () => {
+    // A minimal Open: request type only. x3270 would read this at cp+3; we get
+    // params, so it is at 0. Getting this wrong is the bug this test exists for.
+    const frame = parseDftFrame(Uint8Array.of(0x00, 0x12));
+    expect(frame.requestType).toBe(0x0012);
+  });
+
+  it('reads a CLOSE', () => {
+    expect(parseDftFrame(Uint8Array.of(0x41, 0x12)).requestType).toBe(0x4112);
+  });
+
+  it('keeps the whole payload, so handlers can read their own offsets', () => {
+    const frame = parseDftFrame(Uint8Array.of(0x46, 0x11, 0xaa, 0xbb));
+    expect(frame.requestType).toBe(0x4611);
+    expect([...frame.payload]).toEqual([0x46, 0x11, 0xaa, 0xbb]);
+  });
+
+  it('refuses a payload too short to hold a request type', () => {
+    expect(() => parseDftFrame(Uint8Array.of(0x00))).toThrow(DftFrameError);
+    expect(() => parseDftFrame(new Uint8Array(0))).toThrow(/2 bytes/);
   });
 });

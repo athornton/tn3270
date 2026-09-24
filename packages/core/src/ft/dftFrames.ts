@@ -80,3 +80,39 @@ export const DftError = {
  * does NOT call `ft_running`, so it must not start a transfer.
  */
 export const OPEN_MSG = 'FT:MSG';
+
+/** A malformed DFT frame. A transfer fault, never a session fault. */
+export class DftFrameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DftFrameError';
+  }
+}
+
+/** A parsed DFT frame: the request type, and the payload it came from. */
+export interface DftFrame {
+  /** 16-bit request type from payload offset 0. One of `DftRequest`'s values. */
+  requestType: number;
+  /**
+   * The whole payload, INCLUDING the request type. Handlers read their own
+   * fields at their own offsets, so they need the original bytes rather than a
+   * subarray whose offsets differ again.
+   */
+  payload: Uint8Array;
+}
+
+/**
+ * Split a `SF_TRANSFER_DATA` payload into its request type and its bytes.
+ *
+ * `payload` is what `parseStructuredFields` yields: the parameters, with the
+ * length bytes and the SFID already removed. So the request type x3270 reads at
+ * `cp+3` is at **0** here. See the offset trap in this module's header comment.
+ */
+export function parseDftFrame(payload: Uint8Array): DftFrame {
+  if (payload.length < 2) {
+    throw new DftFrameError(
+      `DFT frame needs at least 2 bytes for a request type, got ${payload.length}`,
+    );
+  }
+  return { requestType: (payload[0]! << 8) | payload[1]!, payload };
+}
