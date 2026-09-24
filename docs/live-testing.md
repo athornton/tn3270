@@ -2230,7 +2230,9 @@ measurement caught it.** Unbinding `PA_CODES` reddens `npm test` too:
 Tests  3 failed | 1349 passed
 ```
 
-All three failures are in `packages/gui/test/keys.test.ts` — *satisfies the shared
+All three failures are in `packages/canvas/test/keys.test.ts` (**written as
+`packages/gui/test/...` until 2026-09-24 — the file MOVED in the `packages/canvas` extraction,
+along with `keys.ts` and `renderer.ts`, and the three test names below are unchanged there**) — *satisfies the shared
 BINDING_INTENT table for every key it names*, *maps Alt+digit to PA1-3*, and *matches on
 e.code, because macOS Option-1 reports key "¡"*. The reason, obvious only in hindsight: the
 mutation is INSIDE `actionForKey`, which is exactly what those synthetic-`KeyLike` tests call.
