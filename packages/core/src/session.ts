@@ -15,7 +15,7 @@ import {
 import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
-import { buildReply, DEFAULT_CAPABILITIES, type QueryRequest } from './queryreply.js';
+import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './queryreply.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
@@ -68,6 +68,24 @@ export interface SessionOptions {
    * having AGREED the function.
    */
   bindImage?: boolean;
+  /**
+   * Advertise Query Reply (DDM), QCODE 0x95, which is what lets a host choose DFT
+   * file transfer instead of CUT. Defaults to FALSE; `-ddm on` sets it.
+   *
+   * Default-off deliberately, and it is the one capability here that is not
+   * simply "do we honour it": the client does not select a transfer protocol, it
+   * declares a capability and the HOST picks. So turning this on changes which
+   * protocol live hosts speak, and all of this project's transfer evidence was
+   * gathered over CUT. The user's call, 2026-09-24: ship it off, measure which
+   * hosts offer DFT, then flip the default. See
+   * docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
+   */
+  ddm?: boolean;
+  /**
+   * Inbound/outbound DDM byte limit advertised in the DDM Query Reply, clamped to
+   * 256..32767. Only read when `ddm` is on. Defaults to 16384.
+   */
+  dftBufferSize?: number;
   /**
    * Device-name template for NEW-ENVIRON's DEVNAME uservar. Absent means we refuse
    * telnet option 39 entirely.
@@ -1199,7 +1217,17 @@ export class Session {
     // the reserved value is screened out in stream/sf.ts queryListRequest before
     // it ever becomes an sfReply. The throw is an unreachable assertion, and
     // there are tests at both levels pinning that.
-    this.sendInbound(buildReply(request, DEFAULT_CAPABILITIES, geometry));
+    // DDM is appended rather than living in DEFAULT_CAPABILITIES because it is
+    // opt-in: see SessionOptions.ddm. Appending keeps the list in ascending QCODE
+    // order for every subset (0x95 < 0xa6 only by luck of where it lands, so
+    // insert before Implicit Partition rather than at the end) -- wire order is
+    // list order, and matching x3270's ascending order is what makes captures
+    // comparable. buildReply then applies the REQTYP rules to whichever list it
+    // is given, so no other code changes.
+    const capabilities = this.opts.ddm
+      ? withDdm(DEFAULT_CAPABILITIES, this.opts.dftBufferSize)
+      : DEFAULT_CAPABILITIES;
+    this.sendInbound(buildReply(request, capabilities, geometry));
     // enterInhibit, not inhibit(EnterInhibit): it yields to a stronger inhibit
     // already in force. Before the host's first write that is
     // AwaitingFirstWrite — the case TSO produces, since it queries before

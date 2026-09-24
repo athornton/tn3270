@@ -1,0 +1,62 @@
+# RESULT 2026-09-24: MVS/TSO OFFERS DFT. With `-ddm on` TK5 answered with
+# `WriteStructuredField unknownSF(0x40,3B) unknownSF(0xd0,38B)` and again at 32B --
+# SFID 0xd0 is SF_TRANSFER_DATA, and both frames are TR_OPEN_REQ (0x0012) whose
+# lengths 0x29 and 0x23 are EXACTLY the two `dft_open_request` accepts
+# (ft_dft.c:146-157). The name field is ASCII "FT:DATA", not "FT:MSG", so these are
+# real file opens. With `-ddm off` the same script saw ZERO 0xd0 frames and
+# round-tripped 249 bytes over CUT. One byte of advertisement is the only variable.
+#
+# Our client has no DFT parser yet, so `-ddm on` FAILS here ("no CUT frame from the
+# host within 30s after 0 bytes"). THAT FAILURE IS THE POSITIVE RESULT -- judge this
+# probe by the trace, never by whether the transfer succeeded.
+# MVS/TSO IND$FILE round trip for the DDM/DFT probe. Mirrors the VM probe so the
+# only variable between hosts is the host. Facts from live-drive.py flow_tso_transfer
+# and the transfer design doc: IND$FILE is a plain TSO command from READY (Rayborn's
+# FFTP 2.0.5), Recfm=variable never fixed (fixed pads and fails cmp), and TSO quoting
+# is semantic -- unquoted gets the userid prepended, quoted is absolute.
+# Reaching LOGOFF is not optional: TSO holds the userid otherwise and the next run
+# draws IKJ56425I LOGON REJECTED, USERID IN USE.
+Trace(on)
+Connect(127.0.0.1:3271)
+Wait(3270Mode,20)
+Wait(Settle,15)
+String("HERC01")
+Enter
+Wait(Settle,25)
+String("CUL8TR")
+Enter
+Wait(Settle,30)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+ScreenText
+String("X")
+Enter
+Wait(Settle,25)
+ScreenText
+String("DELETE 'HERC01.DDMP.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=send,Host=tso,HostFile=DDMP.BIN,LocalFile=/tmp/rt-src.bin,Recfm=variable,Lrecl=1024)
+ScreenText
+String("LISTDS 'HERC01.DDMP.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=receive,Host=tso,HostFile='HERC01.DDMP.BIN',LocalFile=/tmp/tso-back.bin,Exist=replace)
+ScreenText
+String("DELETE 'HERC01.DDMP.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+TraceText
+Trace(off)
+Quit

@@ -76,6 +76,11 @@ export interface WebArgs {
   readonly scheme?: string;
   /** Request BIND-IMAGE. Absent means the default, which is on. */
   readonly bindImage?: boolean;
+  /**
+   * Advertise Query Reply (DDM), enabling DFT file transfer. Absent means the
+   * default, which is OFF -- see SessionOptions.ddm for why this one is opt-in.
+   */
+  readonly ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   readonly bindLimit?: boolean;
   /**
@@ -133,6 +138,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let model: string | undefined;
   let scheme: string | undefined;
   let bindImage: boolean | undefined;
+  let ddm: boolean | undefined;
   let bindLimit: boolean | undefined;
   let devname: string | undefined;
 
@@ -171,6 +177,14 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
           throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(v)}`);
         }
         bindImage = v === 'on';
+        continue;
+      }
+      case '-ddm': {
+        const v = value(args, i, a); i += 1;
+        if (v !== 'on' && v !== 'off') {
+          throw new UsageError(`-ddm takes on or off, not ${JSON.stringify(v)}`);
+        }
+        ddm = v === 'on';
         continue;
       }
       case '-bind-limit': {
@@ -255,6 +269,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(model !== undefined ? { model } : {}),
     ...(scheme !== undefined ? { scheme } : {}),
     ...(bindImage === undefined ? {} : { bindImage }),
+    ...(ddm === undefined ? {} : { ddm }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
   };

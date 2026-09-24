@@ -42,6 +42,12 @@ export interface TuiArgs {
   tn3270e?: boolean;
   /** Request BIND-IMAGE. Absent means the default, which is on. */
   bindImage?: boolean;
+  /**
+   * Advertise Query Reply (DDM), which lets a host choose DFT file transfer
+   * instead of CUT. Absent means the default, which is OFF -- unlike the other
+   * capability flags here. See `SessionOptions.ddm`.
+   */
+  ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   bindLimit?: boolean;
   /**
@@ -148,6 +154,15 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         i++;
         break;
       }
+      case '-ddm': {
+        if (value === undefined) throw new UsageError('-ddm needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-ddm takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.ddm = value === 'on';
+        i++;
+        break;
+      }
       case '-bind-limit': {
         if (value === undefined) throw new UsageError('-bind-limit needs a value, on or off');
         if (value !== 'on' && value !== 'off') {
@@ -230,7 +245,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   if (args.host === undefined) {
     throw new UsageError(
       `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
-      + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-devname NAME] `
+      + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
       + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
     );
   }
@@ -243,7 +258,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   };
   const session = defaultSession(
     resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
-    args.tn3270e, args.bindImage, args.bindLimit, args.devname,
+    args.tn3270e, args.bindImage, args.bindLimit, args.devname, args.ddm,
   );
 
   // The LU list travels with the CONNECTION, not the session: it came from the host
