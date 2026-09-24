@@ -1,7 +1,9 @@
 # DFT file transfer (transfer stage 2) — design
 
 **Date:** 2026-09-24
-**Status:** design, approved in brainstorming; no code written
+**Status:** design, approved in brainstorming. **Task 1 (the DDM advertisement and the live probe) is
+BUILT AND RUN — `9f92816`.** The state machine, the inbound plumbing and the Read Modified hook are
+not started.
 **Scope of THIS spec:** DFT as a second transfer protocol in `core`, advertised behind a new `-ddm`
 flag defaulting **off**, reachable from the transfer form and the `Transfer` command that already
 exist. **Not in scope:** flipping the default to DFT (a later, cheap commit once measured), the GUI
@@ -43,15 +45,35 @@ reply to a Read Partition structured field specifying Query or Query List".
 implicitPartition]` (`queryreply.ts:449`), and `0x95` appears nowhere in `packages/core` outside two
 unrelated CUT codec tables.
 
-### The consequence, which is a testable prediction and not a conclusion
+### THE PREDICTION WAS RUN AND CONFIRMED, 2026-09-24: MVS/TSO OFFERS DFT
 
-**The recorded claim that "both Hercules hosts speak CUT" may be a property of OUR ADVERTISEMENT,
-not of the hosts.** `IND$FILE` on each host may have chosen CUT because we never told it we could do
-DDM. If that is so, DFT gains a live witness on the very hosts the roadmap assumed could not provide
-one — which inverts the main stated cost of this stage.
+The probe below was executed the same day this spec was written, commit `9f92816`. **The recorded
+claim that "both Hercules hosts speak CUT" was a property of OUR ADVERTISEMENT, not of the hosts.**
 
-This is why **Task 1 is a measurement, not code** (see *Verification* below). Do not record either
-outcome as known until the probe has run.
+Same script, same client build, same session shape; one byte of advertisement the only variable:
+
+| Host | `-ddm off` | `-ddm on` |
+|---|---|---|
+| **MVS 3.8j TK5** | 0 × `0xd0`, 249 bytes round-tripped over CUT | **4 × `0xd0`**, both transfers time out at 0 bytes |
+| **VM/370 MECAFF** | 249 bytes round-tripped over CUT | 249 bytes round-tripped over CUT, **0 × `0xd0`** |
+
+TK5 answered `WriteStructuredField unknownSF(0x40,3B) unknownSF(0xd0,38B)` and again at 32B. Both
+frames decode as **`TR_OPEN_REQ` (`0x0012`)**, and their lengths **`0x29` and `0x23` are exactly the
+two `dft_open_request` accepts** (`ft_dft.c:146-157`) — predicted from the source before any host was
+touched, then sent by a real host in a single session. The name field is ASCII **`FT:DATA`**, not
+`FT:MSG`, so `message_flag` is false and these are real file opens: the branch distinction below is
+live, not theoretical.
+
+**VM's null result is equally a measurement, not an absence of testing.** Our unit
+`00 0c 81 95 00 00 40 00 40 00 01 01` was on the wire 16 times and Summary listed `0x95`, against
+four Read Partitions from VM. MECAFF saw DDM and declined it.
+
+**So stage 2 HAS a live witness, on TSO — and CUT keeps its witnesses on both hosts, because the flag
+defaults off.** The roadmap's "DFT has no live path here" is retired.
+
+**The failing `-ddm on` transfer on TK5 IS the positive result**, because no DFT parser exists yet.
+Judging the probe by whether the transfer succeeded would have inverted the finding. This is the same
+rule the Sys Req live run needed: judge by trace.
 
 ### The risk this creates, and why the flag defaults off
 
@@ -171,22 +193,28 @@ Two divergences from CUT worth stating so they are not "simplified" into consist
 
 ## Verification
 
-### Task 1 is the probe, and it comes before the state machine is designed in detail
+### Task 1, THE PROBE, IS DONE — `9f92816`, 2026-09-24
 
-Add **only** the DDM capability behind `-ddm`, then run the existing, committed harnesses —
-`packages/tui/scripts/live-drive.py vmxfer` and `tsoxfer` — **twice per host, once `-ddm off` and
-once `-ddm on`.** One byte of advertisement is the only difference between the runs.
+**Result above: TSO offers DFT, VM does not.** The probe scripts are committed as
+`packages/cli/scripts/ddm-probe-vm.txt` and `ddm-probe-tso.txt`, each carrying its result in its
+header. Re-run either as `node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm on|off <
+SCRIPT`. Both reach `LOGOFF`, so neither strands a userid.
 
-- **If a host offers DFT:** stage 2 gains a live witness the roadmap assumed it could not have, and
-  the implementation plan gains live-run tasks. Record it against this spec.
-- **If neither does:** DFT stays synthetic-only, and that is now **measured** rather than inferred —
-  which also retires the standing claim that both hosts "speak CUT" as a property of the hosts.
+**Consequences for the rest of the plan, which the original ordering existed to discover:**
 
-The CUT evidence is preserved either way, because the flag defaults off.
+- **The implementation plan GAINS live-run tasks on TSO**, and they are the real gate on this
+  feature. A DFT engine verified only against synthetic payloads would be the weakest evidence in
+  this project's transfer work; now it need not be.
+- **TK5 is the reference host**, and it is the one that must be driven at **43x80** — the geometry
+  that motivated the whole stage and that CUT refuses.
+- **VM is the control.** It exercises the "advertised, declined" path, which is what proves the flag
+  does not break a CUT host.
 
-**Judge the probe by TRACE, not by whether the transfer succeeded.** A DFT transfer against a host
-with no DFT support and a CUT transfer both end in a transferred file; only the trace distinguishes
-`SF_TRANSFER_DATA` frames from CUT screens. This is the same rule the Sys Req live run needed.
+**Judge any re-run by TRACE, not by whether the transfer succeeded** — and note the direction of that
+trap has now been measured in both directions. Before a DFT parser exists, success means the host
+chose CUT and failure means it chose DFT; once one exists, both end in a transferred file and only
+the trace distinguishes `SF_TRANSFER_DATA` frames from CUT screens. Same rule the Sys Req live run
+needed.
 
 ### Host-free verification
 
