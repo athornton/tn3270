@@ -563,6 +563,17 @@ above; read those.
   keys and NO CURSOR ARROWS**; the arrow-looking glyphs in `keypad.full:8-11` are Tab, BackTab and
   Newline. `keypad.labels`/`keypad.full` are its rendering and `keypad.outline` is literal ASCII art
   of one, worth reading.
+  **RUNNING c3270 AND LOOKING AT IT, 2026-09-24 — the first direct observation, and it confirms the
+  design rather than correcting it.** `~/bin/c3270` v4.5ga6 exists (built here 2026-08-17; the
+  toolchain is behind `source /opt/lsst/software/stack/loadLSST.bash`, and **`hash -r` is required
+  after sourcing or `command -v make` still reports MISSING with the directory on `PATH`**). Driven
+  under a pty against TK5 with `-secure` (its equivalent of our `-insecure`) and toggled with
+  **`Ctrl-A k`** — the two-key non-Windows binding at `fb-c3270:136`, *not* `Alt-K`, which is in the
+  `_WIN32` half and does nothing here. **The keypad is 16 rows x 78 columns** (`wc -l` / max line
+  length of `keypad.outline` and `keypad.labels`, and it renders into rows 1-15 of a 24-row
+  terminal). **So "a faithful c3270-style keypad would hide the display" is now MEASURED, not
+  inferred** — 16 of 24 rows — which is why the TUI got a navigable list instead. The rendered keys
+  are exactly the shipped set including **Sys Req, Dup and Field Mark**.
 - ~~**The layout is 46 buttons**, not 43.~~ **47 as shipped**: c3270's 44, minus Cursor Select and
   Compose, plus the four cursor arrows and Backspace. The spec's first draft said 43, Task 3 made it
   46 by also dropping Newline, and Newline was then added on the user's decision — so the count
@@ -1273,6 +1284,14 @@ TSO does not work without it. See *Next steps* item 4, which is where to start.
 - **5 of 6 inbound records byte-identical with real x3270**, reproduced three
   consecutive times. s3270 4.5ga6 is built at `~/src/suite3270-4.5` (the user
   built it), so this needs no second machine. Procedure in `docs/live-testing.md`.
+  **THE BINARIES ARE UNDER `obj/`, NOT BESIDE THEIR SOURCE — checked 2026-09-24.**
+  `obj/x86_64-conda-linux-gnu/s3270/s3270` and `.../playback/playback`, both built
+  2026-09-17 with gcc 14.4.0. **`ls s3270/s3270` finds nothing and is NOT evidence
+  the tool is unbuilt**; that mistake was made this session. `make s3270 playback`
+  answers "Nothing to be done". **`c3270` is at `~/bin/c3270`, v4.5ga6.** All of it
+  needs `source /opt/lsst/software/stack/loadLSST.bash` **followed by `hash -r`** —
+  without the rehash, `command -v make` reports MISSING even with its directory on
+  `PATH`, which is a sharper version of lesson 12 below.
   The sixth record is the AID sent on the all-protected connect-time banner, where
   the two clients differ by design (s3270 blocks on a hardcoded `Wait(InputField)`
   at `stdinscript.c:437`); both forms are correct per `ctlr.c:796-830`. The
@@ -1460,6 +1479,17 @@ a symptom.
     software stack, look for the stack's activation script before concluding X is absent;
     and when a conclusion rests on "we cannot do Y here", grep the handoff for Y before
     accepting it.
+    **IT HAPPENED AGAIN ON 2026-09-24, TO THE SAME PERSON READING THIS SAME FILE, so the
+    lesson is restated with the two mechanisms that actually cause it.** I reported that
+    building `c3270` was "a toolchain expedition, not a small job" on the evidence of
+    `which make gcc cc` — and `~/bin/c3270` had existed since 2026-08-17. **(a) `hash -r`
+    IS REQUIRED after sourcing the stack**, or `command -v make` still answers MISSING
+    with its directory on `PATH`: the restored shell snapshot carries stale command
+    hashes, so even the correct activation looks like it failed. **(b) A built binary may
+    not sit beside its source** — `s3270` and `playback` live under
+    `obj/x86_64-conda-linux-gnu/`, so `ls s3270/s3270` "proving" they are unbuilt was the
+    second false negative in the same five minutes. **Three wrong readings, one cause:
+    every one was a search that could only have found the thing in the place I guessed.**
 
 ## Bug tally, for calibration
 
