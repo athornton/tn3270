@@ -354,6 +354,12 @@ export const EBCDIC_STX = 0x02;
 export const Sfid = {
   READ_PARTITION: 0x01,
   QUERY_REPLY: 0x81,
+  /**
+   * `SF_TRANSFER_DATA` — DFT file transfer, dispatched by x3270 at `sf.c:175`.
+   * Both a host request type and the SFID we send our replies under. A host only
+   * sends this if we advertised Query Reply (DDM) 0x95, which `-ddm on` does.
+   */
+  TRANSFER_DATA: 0xd0,
 } as const;
 
 /** PID value meaning "this is a query, not a read of partition 0x00-0x7E". */
