@@ -6,8 +6,12 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, 2026-09-23
 
-**BRANCH `interactive-transfer-tui`, NOT MERGED. Tasks 1-9 of 10 done; the remaining task is the
-full gate and THE FIRST LIVE RUN of the transfer form.** Spec
+**MERGED AND PUSHED: `main` is at `35273d7`, the only branch, tree clean.** All 10 tasks done, and
+the FULL GATE was re-run on the merge commit itself -- build/typecheck clean, **1971 tests in 78
+files**, and **all eight by-hand harnesses** (`shot.mjs` 3/3, `keys.mjs`, `clicks.mjs`,
+`browser-keys.mjs`, `browser-shot.mjs` 2/2, `pty-smoke.py` 12/12, `drive-e.py` 10/10,
+`drive-playback.py` 10/10). The `synthetic-ispf-keypad` golden was regenerated for the 48th `Xfer`
+button, confirmed by eye first. Spec
 `docs/superpowers/specs/2026-09-22-interactive-file-transfer-design.md`, plan
 `docs/superpowers/plans/2026-09-23-interactive-file-transfer-tui.md`.
 **EVERY TASK CARRIES AN `AS BUILT` SECTION — READ THOSE BEFORE RE-DERIVING ANYTHING THE PLAN
@@ -25,16 +29,19 @@ core.
 
 **THE GATE, MEASURED ON THE BRANCH (not on a merge commit yet — that is Task 10):** build and
 typecheck clean, **1970 tests in 78 files** (from 1869 in 74), `pty-smoke.py` **12/12 exit 0**.
-**The other seven by-hand harnesses have NOT been re-run on this branch** — Task 10 does that.
-
-**NOT VERIFIED: NO FILE HAS CROSSED A REAL HOST THROUGH THE FORM.** The transfer engine underneath
-is live-verified on both hosts in both directions, and has been since 2026-08-18, but the form is
-not. Quote those two separately. The runbook for the live run is Task 10 step 3, and the oracle is
-the committed `packages/cli/scripts/transfer-vm.txt` round trip: **the form must produce the same
-transfer.** Use `-model 3278-2-E` — CUT accepts no other geometry — prove the session is at CMS with
-`QUERY DISK A` before trusting anything (`?CP: QUERY` means the VM reconnect trap and a void run),
-and **compare bytes, not the status line**: a transfer that reports success and writes a wrong file
-is the failure mode to look for.
+**LIVE-VERIFIED ON BOTH HOSTS IN BOTH DIRECTIONS — VM/CMS 2026-09-23 (29/29 steps), MVS/TSO
+2026-09-24 (26/26).** The same 249-byte binary round-tripped **byte-identically** on each, with the
+hosts' own `LISTFILE`/`LISTDS` as independent checks (`V 80` on CMS, `VB 1024 BLKSIZE 1028 PS` on
+TSO). Reproduce with `live-drive.py vmxfer` / `tsoxfer`, both committed, then `cmp`. **An earlier
+draft of this section said NO FILE HAD CROSSED A REAL HOST; that is now false.**
+**Still unverified: cancelling a transfer mid-flight** — 249 bytes over CUT completes far too fast
+to interrupt by script, so a much larger file would be needed.
+**Three things to carry into any future live transfer run.** Use `-model 3278-2-E`; CUT accepts no
+other geometry. **Prove the session's state before trusting a result** — `QUERY DISK A` must answer
+`Ready;` on VM (`?CP: QUERY` means the reconnect trap and a void run), and TSO must be at `READY`,
+where `IND$FILE` runs as a plain command with no ISPF panel involved. And **compare bytes, not the
+status line**: the form says `done: N bytes transferred` either way, so a transfer that reports
+success and writes a wrong file is the failure mode to look for.
 
 **FOUR FINDINGS FROM THIS BRANCH THAT GENERALISE, all measured:**
 1. **A test can pass against the bug it names.** Three times here. A truncation test asserted

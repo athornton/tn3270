@@ -1024,7 +1024,7 @@ worse than one that says which quarter is missing.
   the canvas view. (3) **The web gateway REFUSES the action outright, in `web/src/protocol.ts`**, and
   that is deliberate: a browser-initiated transfer moves bytes between the host and the *gateway's*
   filesystem, not the operator's machine, which is a security question stage 4 must settle before
-  the button can work. **Not verified against a live host yet** — see *Verification*.
+  the button can work. **Live-verified on BOTH hosts in both directions** — see *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
@@ -1090,7 +1090,8 @@ visible there.
 | TUI vs MVS 3.8j TK5, live | **pass** — ISPF menu, tutorial paged, clean `LOGOFF` |
 | TUI vs VM/370, live | **pass** — CMS answers `QUERY DISK A`, CP reports `LOGOFF AT` |
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically. **From the CLI**; the TUI's form drives the same `CutTransfer` and the same command builder, and has its own live row below |
-| the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy.** **MVS/TSO through the form is NOT yet verified**, nor is cancelling a transfer mid-flight |
+| the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy** |
+| the same form vs MVS/TSO, live | **pass — 2026-09-24** — 26 of 26 steps, both directions, the same binary **round-tripping byte-identically**, and TSO's own `LISTDS` reporting `VB 1024 BLKSIZE 1028 PS`. Exercises the other dialect (`RECFM(V) LRECL(1024)` parenthesised) and **both TSO quoting conventions in one session** — unquoted on the send, so TSO prepends the userid, quoted on the receive. `Blksize` is drawn here and was absent on VM, which is the applicability rule checked against two real hosts rather than a fixture. **Still unverified: cancelling a transfer mid-flight** — 249 bytes over CUT completes too fast to interrupt by script |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |

@@ -358,9 +358,106 @@ def flow_vm_transfer(pw, user):
     ]
 
 
+def flow_tso_transfer(pw, user):
+    """
+    THE TRANSFER FORM AGAINST MVS/TSO. The oracle is the CLI round trip recorded in the
+    IND$FILE design doc: a 249-byte binary sent with `Recfm=variable` and read back
+    byte-identically. The form must produce the same transfer, and the CALLER compares
+    bytes -- the status line says "done" either way.
+
+    ## IND$FILE IS A PLAIN TSO COMMAND, RUN FROM `READY`
+
+    TK5's IND$FILE is Mike Rayborn's Free File Transfer Program 2.0.5, installed from the
+    CBT disks. Its usage text is `IND$FILE {GET|PUT} 'dataset.name' options`, i.e. an
+    ordinary TSO command -- so this flow leaves ISPF with `X` and transfers from `READY`,
+    exactly where `packages/cli/scripts` drove it. No ISPF panel is involved.
+
+    ## THREE TSO FACTS THAT ARE NOT GUESSES
+
+    1. **`Recfm=variable`, never `fixed`.** Fixed PADS to the record boundary: the same
+       249-byte payload came back as 320 bytes -- 249 plus 71 nulls -- because a
+       fixed-record dataset cannot record that its last record was short. Correct
+       behaviour, and it fails a byte comparison.
+    2. **TSO quoting is SEMANTIC.** Unquoted `FORMV.BIN` gets the userid prepended, so it
+       becomes `HERC01.FORMV.BIN`; quoted `'HERC01.FORMV.BIN'` is absolute. The form passes
+       the name through verbatim (as x3270 does), so both are legal and only the operator
+       knows which is meant. This flow sends UNQUOTED and receives QUOTED, matching the
+       CLI run it is checked against -- which also exercises both forms in one session.
+    3. **Reach a real LOGOFF.** TSO holds a userid otherwise and the next attempt draws
+       `IKJ56425I LOGON REJECTED, USERID IN USE`, which looks exactly like a failure of the
+       thing being tested. The teardown below always tries.
+
+    ## DELETE FIRST, AND WHY IT IS NOT OPTIONAL
+
+    `Exist=keep` is the default and the engine refuses a receive onto an existing local
+    file -- correctly. The HOST dataset is deleted before the send so a leftover from an
+    earlier run cannot make a failed upload look successful. TSO's DELETE wants the quoted
+    form to be unambiguous about the userid.
+    """
+    src = os.environ.get("TN3270_SRC", "/tmp/form-src.bin")
+    back = os.environ.get("TN3270_BACK", "/tmp/form-back-tso.bin")
+    # Unquoted for the send (TSO prepends the userid), quoted for the receive and the
+    # DELETE, which is the same pair the CLI round trip used.
+    ds_plain = os.environ.get("TN3270_DSN", "FORMV.BIN")
+    ds_full = f"'{user}.{ds_plain}'"
+    return [
+        ("Hercules banner or VTAM panel", ["TK5", "Logon", "Terminal"], CTRL_R + CTRL_C),
+        ("VTAM USS logon panel", ["Logon"], user.encode() + CR),
+        ("password prompt", ["PASSWORD", "password"], pw.encode() + CR),
+        ("logon banner", ["LOGON IN PROGRESS", "Welcome", "***"], CR),
+        # TSO shows TWO more-output prompts before ISPF -- the welcome banner and a FORTUNE
+        # COOKIE -- and the count is not fixed, so drain rather than counting Enters.
+        ("dismiss more-output prompts", "DRAIN***", None),
+        # Leave ISPF for READY, which is where IND$FILE runs.
+        ("ISPF primary option menu", ["USERID", "BROWSE", "Primary Option"], b"X" + CR),
+        ("at TSO READY", ["READY", "CLST"], f"DELETE {ds_full}".encode() + CR),
+        # Either outcome is fine: deleted, or not there to begin with.
+        ("DELETE answered", ["READY", "NOT IN CATALOG", "IDC", "ENTRY"], None),
+
+        # ---- THE SEND, through the form ----
+        ("at READY for the send", None, CTRL_T),
+        # Direction -> send. Host STAYS `tso`, which is the default -- the opposite of the
+        # VM flow, and the reason this is a separate flow rather than a parameter.
+        ("form open for the send", ["File Transfer", "Direction"], RIGHT),
+        # Tab past Host (leaving it tso) to localFile, then hostFile.
+        ("direction is send", None, TAB + TAB + src.encode() + TAB + ds_plain.encode()),
+        # Recfm=variable, and Lrecl after it. From the send form the order is
+        # ... mode exist [cr] recfm lrecl blksize; cr is skipped in binary mode, so from
+        # hostFile it is Tab x3 to recfm (mode, exist, recfm), then RIGHT twice for
+        # variable (unset -> fixed -> variable), then Tab to lrecl.
+        ("both names typed", None, TAB + TAB + TAB + RIGHT + RIGHT),
+        ("recfm set", None, TAB + b"1024"),
+        ("lrecl typed", None, CR),
+        ("send finished", ["bytes transferred", "Attn or Clear", "Transfer():",
+                           "file exists", "cannot read", "restart with"], ESC),
+
+        # ---- Prove the host really has it ----
+        ("form closed after send", None, CTRL_C),
+        ("at READY for LISTDS", None, f"LISTDS {ds_full}".encode() + CR),
+        ("LISTDS shows the dataset", ["RECFM", "VB", "NOT IN CATALOG", "READY"], None),
+
+        # ---- THE RECEIVE, through the form ----
+        ("at READY for the receive", None, CTRL_T),
+        # Direction stays `receive`; Host stays `tso`. Tab twice to localFile, then the
+        # QUOTED dataset name -- absolute, so TSO does not prepend the userid again.
+        ("form open for the receive", ["File Transfer", "Direction"],
+         TAB + TAB + back.encode() + TAB + ds_full.encode()),
+        ("both names typed again", None, CR),
+        ("receive finished", ["bytes transferred", "Attn or Clear", "Transfer():",
+                              "file exists", "cannot read", "restart with"], ESC),
+
+        # ---- Clean up and log off ----
+        ("form closed after receive", None, CTRL_C),
+        ("at READY for cleanup", None, f"DELETE {ds_full}".encode() + CR),
+        ("cleanup done", ["READY", "NOT IN CATALOG", "IDC", "ENTRY"], b"LOGOFF" + CR),
+        ("logged off", ["LOGGED OFF", "Logon", "RUNNING"], None),
+    ]
+
+
 FLOWS = {"tk5": ("127.0.0.1:3271", flow_tk5, "HERC01"),
          "vm": ("127.0.0.1:3270", flow_vm, "CMSUSER"),
-         "vmxfer": ("127.0.0.1:3270", flow_vm_transfer, "CMSUSER")}
+         "vmxfer": ("127.0.0.1:3270", flow_vm_transfer, "CMSUSER"),
+         "tsoxfer": ("127.0.0.1:3271", flow_tso_transfer, "HERC01")}
 
 
 def main():

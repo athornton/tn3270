@@ -9,6 +9,13 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **AND ON MVS/TSO, 2026-09-24 — BOTH HOSTS ARE NOW CLOSED FOR THE FORM.** 26 of 26 steps, both
+  directions, the same 249-byte binary **round-tripping byte-identically**, with TSO's own `LISTDS`
+  confirming `VB 1024` on `TSO003`. It exercises the OTHER dialect (`RECFM(V) LRECL(1024)`
+  parenthesised, against CMS's bare form) and **both TSO quoting conventions in one session** —
+  unquoted on the send, quoted on the receive. `IND$FILE` on TK5 is **Mike Rayborn's FFTP 2.0.5
+  from the CBT disks, a plain TSO command run from `READY`**; no ISPF panel is involved. The userid
+  was confirmed free afterwards rather than assumed. See *The transfer form against live MVS/TSO*.
 - **THE TUI'S `Ctrl-T` TRANSFER FORM IS LIVE-VERIFIED ON VM/CMS, 2026-09-23 — the first live run
   of interactive file transfer.** 29 of 29 steps, both directions, a 249-byte binary
   **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file it wrote. The
@@ -2853,3 +2860,115 @@ action first — and assert on what is DRAWN, not on what the function returns.*
 - **The `Lrecl`-with-`Recfm=V` asymmetry through the form.** Measured through
   `transferCommand` directly on both hosts (2026-09-22) and unchanged by this branch, but the
   form has not been the thing that sent it.
+
+## The transfer form against live MVS/TSO — verified 2026-09-24
+
+**BOTH HOSTS ARE NOW CLOSED FOR THE FORM.** The VM/CMS run above was the first; this is the
+second, and it exercises the *other* dialect — TSO's parenthesised `RECFM(V) LRECL(1024)`
+against CMS's bare `RECFM V`, which is the dialect seam the design anticipated.
+
+**Result: 26 of 26 steps, both directions, the same 249-byte binary ROUND-TRIPPING
+BYTE-IDENTICALLY**, with TSO's own `LISTDS` as the independent check.
+
+```
+/tmp/form-src.bin        3c0f28c0000d3d6098eec6982b44977bb14e4e9841e995741d7d6b902df6a5de
+/tmp/form-back-tso.bin   3c0f28c0000d3d6098eec6982b44977bb14e4e9841e995741d7d6b902df6a5de
+cmp: identical
+```
+
+```bash
+head -c 249 /dev/urandom > /tmp/form-src.bin && rm -f /tmp/form-back-tso.bin
+TN3270_PASSWORD=CUL8TR TN3270_USER=HERC01 python3 packages/tui/scripts/live-drive.py tsoxfer
+cmp /tmp/form-src.bin /tmp/form-back-tso.bin
+```
+
+### `IND$FILE` ON TK5 IS A PLAIN TSO COMMAND, RUN FROM `READY`
+
+Confirmed by the user and borne out by the run: TK5's `IND$FILE` is **Mike Rayborn's Free
+File Transfer Program 2.0.5**, installed from the CBT disks, and its usage text
+(`IND$FILE {GET|PUT} 'dataset.name' options`) is an ordinary TSO command. **No ISPF panel is
+involved** — the flow leaves ISPF with `X` and transfers from `READY`, which is also where
+`packages/cli/scripts` drove it. The form itself needs no ISPF anything, since it owns the
+keyboard and types into whatever input field the screen offers.
+
+### The form on a real TSO session, and what it shows that VM's run could not
+
+```
+  File Transfer (IND$FILE)
+  Direction   send
+  Host        tso
+  Local file  /tmp/form-src.bin
+  Host file   FORMV.BIN
+  Mode        binary
+  Exist       keep
+  Recfm       variable
+> Lrecl       1024
+  Blksize     -
+
+done: 249 bytes transferred
+```
+
+**`Blksize` is DRAWN here and was ABSENT on VM.** That is the applicability rule
+(`blksize` requires `host !== 'vm'`, because CMS files have no block size) doing its job
+against two real hosts rather than against a fixture — the strongest form of that check
+available, and it needed both runs to be worth anything.
+
+**The host's own view, which is the independent check:**
+
+```
+LISTDS 'HERC01.FORMV.BIN'
+ HERC01.FORMV.BIN
+ --RECFM-LRECL-BLKSIZE-DSORG
+   VB    1024  1028    PS
+ --VOLUMES--
+   TSO003
+ READY
+```
+
+Note **`VB`, not `V`** — TSO reports the blocked form, so a readback cannot string-compare
+against what was sent. Already recorded on 2026-09-22 from `transferCommand` directly;
+now seen end to end through the form. `BLKSIZE 1028` is the host's own choice (`LRECL+4`
+for a variable-length record's RDW), not ours: the form sent no `Blksize`.
+
+### BOTH TSO QUOTING FORMS WERE EXERCISED IN ONE SESSION, DELIBERATELY
+
+TSO quoting is **semantic, not syntactic**, and the form passes the name through verbatim as
+x3270 does. So:
+
+- **The send used `FORMV.BIN` UNQUOTED** and TSO prepended the userid, creating
+  `HERC01.FORMV.BIN` — which `LISTDS` above confirms.
+- **The receive used `'HERC01.FORMV.BIN'` QUOTED**, i.e. absolute.
+
+Both are legitimate requests and only the operator knows which is meant. Running one of each
+in a single session is what proves the form is not quietly normalising them.
+
+### `Recfm=variable`, never `fixed`, and this is a byte-comparison matter
+
+`fixed` PADS to the record boundary: the same 249-byte payload came back as **320 bytes —
+249 followed by 71 nulls** — because a fixed-record dataset cannot record that its last
+record was short (`ceil(249/80) = 4` records x 80 = 320). Correct behaviour, and it fails a
+`cmp`. Measured 2026-08-18 through the CLI and unchanged; the form offers `variable` as the
+second of three cycle states for exactly this reason.
+
+### THE USERID WAS NOT LEFT HELD, AND THAT WAS CHECKED RATHER THAN ASSUMED
+
+`IKJ56425I LOGON REJECTED, USERID IN USE` is the trap here, and it looks exactly like a
+failure of the thing being tested. The flow reached its own `LOGOFF` (final panel: the fresh
+TK5 VTAM banner), and **a follow-up logon confirmed `HERC01` free** — no `IN USE`, reached
+`READY`, logged off again cleanly.
+
+**One caution learned in that follow-up: the `tk5` flow expects the ISPF TUTORIAL and sends
+`X` (exit to READY) unless `TN3270_TUTORIAL` is set**, so running it bare times out waiting
+for a tutorial panel while sitting at `READY`. That is a flow-selection mistake, not a host
+or client fault — but it ends without reaching `LOGOFF`, so it is exactly the way to strand a
+userid by accident. Use `tsoxfer`, or set `TN3270_TUTORIAL=1`.
+
+### What is still unverified, after both hosts
+
+- **Cancelling a transfer mid-flight.** `Esc` during a running transfer aborts with PF2 and
+  the unit tests pin the AID, but 249 bytes over CUT completes far too fast to interrupt by
+  script. A much larger file would be needed.
+- **`Lrecl` with `Recfm=V` as a *disagreement* between the hosts.** The asymmetry was measured
+  through `transferCommand` on 2026-09-22 (TSO honours it as a maximum, CMS ignores it); this
+  run sent `LRECL(1024)` to TSO and `LISTDS` reports `1024`, so TSO's half now has a witness
+  through the form. **CMS's half does not** — the VM run sent no `Lrecl` at all.
