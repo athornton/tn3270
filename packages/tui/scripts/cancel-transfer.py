@@ -23,7 +23,12 @@ where three runs failed identically because the user was logged on as CMSUSER at
 each script\'s closing LOGOFF logged *them* off. Ask, do not clean up.
 
 Usage:
-  TN3270_PASSWORD=CMSUSER python3 packages/tui/scripts/cancel-transfer.py
+  TN3270_PASSWORD=CMSUSER python3 packages/tui/scripts/cancel-transfer.py vm
+  TN3270_PASSWORD=CUL8TR  python3 packages/tui/scripts/cancel-transfer.py tso
+
+Both hosts are worth running: they are DIFFERENT IND$FILE implementations (MECAFF on
+VM/CMS, Mike Rayborn\'s FFTP 2.0.5 on MVS/TSO), so what we send is our code but what the
+host does with the abort is theirs.
 """
 import os, pty, select, struct, termios, fcntl, time, re, sys
 
@@ -41,12 +46,25 @@ if not os.path.exists(SRC):
     with open(SRC, "wb") as f:
         f.write(bytes(random.getrandbits(8) for _ in range(200 * 1024)))
 SIZE = os.path.getsize(SRC)
-HOSTFILE = "CANC TEST A"
+
+# WHICH HOST. The two run DIFFERENT IND$FILE implementations -- MECAFF on VM/CMS, Mike
+# Rayborn's FFTP 2.0.5 on MVS/TSO -- so an abort is worth testing against both: what we send
+# is our code, but what the host does with it is theirs, and only they can say whether it
+# leaves transfer mode.
+WHICH = sys.argv[1] if len(sys.argv) > 1 else "vm"
+if WHICH not in ("vm", "tso"):
+    print("usage: cancel-transfer.py [vm|tso]")
+    sys.exit(2)
+TARGET = "127.0.0.1:3270" if WHICH == "vm" else "127.0.0.1:3271"
+DEFAULT_USER = "CMSUSER" if WHICH == "vm" else "HERC01"
+DEFAULT_PW = "CMSUSER" if WHICH == "vm" else "CUL8TR"
+# CMS takes a three-part name; TSO takes a dataset, and unquoted means userid-prepended.
+HOSTFILE = "CANC TEST A" if WHICH == "vm" else "CANC.BIN"
 
 main_fd, child_fd = pty.openpty()
 fcntl.ioctl(child_fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
 argv = ["node", os.path.join(REPO, "packages/tui/dist/main.js"),
-        "-insecure", "-model", "3278-2-E", "127.0.0.1:3270"]
+        "-insecure", "-model", "3278-2-E", TARGET]
 pid = os.fork()
 if pid == 0:
     os.setsid()
@@ -85,35 +103,61 @@ def wait_for(needle, timeout, label):
 CR, CTRL_C, CTRL_T, TAB, ESC, CTRL_BRACKET = b"\r", b"\x03", b"\x14", b"\t", b"\x1b", b"\x1d"
 RIGHT = b"\x1b[C"
 
-print(f"cancelling a {SIZE}-byte transfer mid-flight")
+USER = os.environ.get("TN3270_USER", DEFAULT_USER)
+PW = os.environ.get("TN3270_PASSWORD", DEFAULT_PW)
+print(f"cancelling a {SIZE}-byte transfer mid-flight on {WHICH} as {USER}")
 drain(5)
-os.write(main_fd, CR); drain(2)
-os.write(main_fd, CR); drain(2)
-USER = os.environ.get("TN3270_USER", "CMSUSER")
-PW = os.environ.get("TN3270_PASSWORD", "CMSUSER")
-os.write(main_fd, f"LOGON {USER}".encode() + CR); drain(3)
-os.write(main_fd, PW.encode() + CR); drain(5)
-os.write(main_fd, CR); drain(3)
-os.write(main_fd, CTRL_C); drain(3)
-# STATE PROOF, the same one every VM script here needs.
-os.write(main_fd, b"QUERY DISK A" + CR); drain(3)
-txt = plain()
-if "?CP" in txt:
-    print("  VOID: ?CP -- reconnected to a running machine, not a fresh CMS session")
-    os.write(main_fd, CTRL_BRACKET); drain(1); sys.exit(2)
-print("  ok   at CMS (QUERY DISK A answered)")
-os.write(main_fd, CTRL_C); drain(2)
-os.write(main_fd, f"ERASE {HOSTFILE}".encode() + CR); drain(3)
-os.write(main_fd, CTRL_C); drain(2)
+
+if WHICH == "vm":
+    os.write(main_fd, CR); drain(2)          # dismiss the banner (its text is discarded)
+    os.write(main_fd, CR); drain(2)
+    os.write(main_fd, f"LOGON {USER}".encode() + CR); drain(3)
+    os.write(main_fd, PW.encode() + CR); drain(5)
+    os.write(main_fd, CR); drain(3)
+    os.write(main_fd, CTRL_C); drain(3)      # clear the MORE... that EATS input
+    # STATE PROOF. `?CP:` means this is a RECONNECT and the run is void -- see the docstring.
+    os.write(main_fd, b"QUERY DISK A" + CR); drain(3)
+    if "?CP" in plain():
+        print("  VOID: ?CP -- reconnected to a running machine, not a fresh CMS session")
+        os.write(main_fd, CTRL_BRACKET); drain(1); sys.exit(2)
+    print("  ok   at CMS (QUERY DISK A answered)")
+    os.write(main_fd, CTRL_C); drain(2)
+    os.write(main_fd, f"ERASE {HOSTFILE}".encode() + CR); drain(3)
+    os.write(main_fd, CTRL_C); drain(2)
+else:
+    os.write(main_fd, b"\x12" + CTRL_C); drain(3)      # Ctrl-R reset, then clear
+    os.write(main_fd, USER.encode() + CR); drain(4)
+    if "IN USE" in plain() or "IKJ56425I" in plain():
+        print(f"  VOID: {USER} is already logged on -- rotate userids or clear it")
+        os.write(main_fd, CTRL_BRACKET); drain(1); sys.exit(2)
+    os.write(main_fd, PW.encode() + CR); drain(6)
+    # TSO shows SEVERAL more-output prompts (welcome banner, then a fortune cookie) and the
+    # count is not fixed, so drain rather than counting Enters.
+    for _ in range(5):
+        if "***" not in plain()[-4000:]:
+            break
+        os.write(main_fd, CR); drain(2.5)
+    # IND$FILE IS A PLAIN TSO COMMAND, so leave ISPF for READY. X is the menu's exit.
+    os.write(main_fd, b"X" + CR); drain(4)
+    if "READY" not in plain():
+        print("  WARN did not clearly reach READY; continuing anyway")
+    else:
+        print("  ok   at TSO READY")
+    os.write(main_fd, f"DELETE '{USER}.{HOSTFILE}'".encode() + CR); drain(4)
 
 # Open the form and set up a SEND of the big file.
 os.write(main_fd, CTRL_T); drain(1.5)
 if not wait_for("File Transfer", 5, "form open"): sys.exit(1)
 os.write(main_fd, RIGHT); drain(0.8)            # direction -> send
-os.write(main_fd, TAB + RIGHT); drain(0.8)      # host -> vm
+if WHICH == "vm":
+    os.write(main_fd, TAB + RIGHT); drain(0.8)  # host -> vm (TSO is already the default)
+else:
+    os.write(main_fd, TAB); drain(0.8)
 os.write(main_fd, TAB + SRC.encode()); drain(0.8)
 os.write(main_fd, TAB + HOSTFILE.encode()); drain(0.8)
-os.write(main_fd, TAB + TAB + TAB + RIGHT + RIGHT); drain(0.8)   # recfm -> variable
+# Recfm -> variable. NEVER fixed: it pads to the record boundary, and a truncated-then-padded
+# file tells you nothing about where the cancel landed.
+os.write(main_fd, TAB + TAB + TAB + RIGHT + RIGHT); drain(0.8)
 print("  ok   form filled")
 mark = len(buf)
 os.write(main_fd, CR)                            # START
@@ -146,11 +190,17 @@ for frag in ["canceled by user", "transferring", "bytes transferred"]:
 
 # Clean up and log off -- a failed run must not hand the reconnect trap to the next one.
 os.write(main_fd, CTRL_C); drain(2)
-os.write(main_fd, f"ERASE {HOSTFILE}".encode() + CR); drain(3)
-os.write(main_fd, CTRL_C); drain(2)
-os.write(main_fd, b"LOGOFF" + CR); drain(6)
+if WHICH == "vm":
+    os.write(main_fd, f"ERASE {HOSTFILE}".encode() + CR); drain(3)
+    os.write(main_fd, CTRL_C); drain(2)
+else:
+    os.write(main_fd, f"DELETE '{USER}.{HOSTFILE}'".encode() + CR); drain(4)
+os.write(main_fd, b"LOGOFF" + CR); drain(7)
 tail = plain()
-print(f"  LOGOFF confirmed: {'LOGOFF AT' in tail}")
+# VM prints CP's own accounting; TSO says LOGGED OFF and returns to the VTAM banner.
+ok = ("LOGOFF AT" in tail) if WHICH == "vm" else ("LOGGED OFF" in tail or "Logon" in tail[-3000:])
+print(f"  LOGOFF confirmed: {ok}")
 os.write(main_fd, CTRL_BRACKET); drain(1.5)
-open("/tmp/cancel-raw.txt", "w").write(plain())
-print("  full capture: /tmp/cancel-raw.txt")
+cap = f"/tmp/cancel-raw-{WHICH}.txt"
+open(cap, "w").write(plain())
+print(f"  full capture: {cap}")

@@ -16,7 +16,11 @@ and the Recording log says what happened when they were run.
   on. The final count was 24261, not 204800, which is what proves it was mid-flight. **An aborted
   upload leaves a PARTIAL file on the host** (measured by comparing the two `ERASE`s). Also
   measured: CUT runs at ~15 ms/frame locally and the codec expands random data 1.727x, so 200 KB is
-  the smallest file that gives a usable interruption window. See *Mid-flight cancellation*.
+  the smallest file that gives a usable interruption window. **ALSO VERIFIED ON MVS/TSO** (cancelled
+  at 15430 of 204800), where the observable is DIFFERENT: MECAFF announces `TRANS99 - Protocol
+  error` and Rayborn's FFTP says nothing at all and simply returns to `READY`. **So "the host
+  printed an error" is not the test — "the next command is obeyed" is.** Both leave a partial file.
+  See *Mid-flight cancellation*.
 - **AND ON MVS/TSO, 2026-09-24 — BOTH HOSTS ARE NOW CLOSED FOR THE FORM.** 26 of 26 steps, both
   directions, the same 249-byte binary **round-tripping byte-identically**, with TSO's own `LISTDS`
   confirming `VB 1024` on `TSO003`. It exercises the OTHER dialect (`RECFM(V) LRECL(1024)`
@@ -3061,3 +3065,35 @@ safe to "clean up" by logging the machine off**, because the session may not be 
 The distinguishing evidence when it is genuinely clear: `QUERY DISK A` answers with the disk
 table (`CMS191 191 A R/W ... 65422` blocks free) and `Ready;`, and the closing `CONNECT=`
 spans only the current run.
+
+### AND ON MVS/TSO — verified 2026-09-24, with a DIFFERENT observable
+
+The same harness (`cancel-transfer.py tso`) against the other `IND$FILE` implementation.
+**Worth running both**: what we send is our code, but what the host does with an abort is
+theirs, and only the host can say whether it left transfer mode.
+
+**Result: cancelled at 15430 of 204800 bytes, final count 23162 — and TSO also returned to
+its prompt.** Same conclusion as VM, reached through different evidence:
+
+| | VM/CMS (MECAFF) | MVS/TSO (Rayborn FFTP 2.0.5) |
+|---|---|---|
+| host's own message | **`>> TRANS99 - Protocol error`** then `Ready;` | **nothing at all** — straight back to `READY` |
+| next command works | `ERASE` → `Ready;` | `DELETE` → `READY` |
+| clean logoff after | `LOGOFF AT 00:25:44` | `HERC02 LOGGED OFF TSO AT 01:26:52` |
+| partial file left | **yes** | **yes** |
+
+**THE DIFFERENCE IS THE HOST'S VERBOSITY, NOT ITS BEHAVIOUR, and that matters for how a
+future run is judged.** MECAFF announces the aborted conversation as a protocol error; FFTP
+says nothing and simply ends. **So "the host printed an error" is NOT the test** — a silent
+return to the prompt is an equally correct outcome, and on TSO it is the only one available.
+The test is that the NEXT COMMAND IS OBEYED, which is what both `DELETE`/`ERASE` lines show.
+
+**A partial dataset is left on TSO too**, measured the same way as on CMS by comparing the
+two `DELETE`s in one run: the **pre-run** one answered `ENTRY HERC02.CANC.BIN NOT FOUND+ /
+**ENTRY ... NOT DELETED / LASTCC=8`, and the **post-cancel** one answered a bare `READY`. So
+the rule generalises across both dialects: **an aborted upload leaves a truncated host file,
+not the absence of one.**
+
+**The VM result was re-run after the harness was generalised** and reproduced byte-for-byte
+(17641 of 204800, same final counts) — a refactor of a live harness is exactly the kind of
+change that can silently invalidate the result it was written to capture.

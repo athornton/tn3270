@@ -40,8 +40,11 @@ cancelling a 200KB upload at 17641 of 204800 bytes made MECAFF's `IND$FILE` answ
 the entire purpose of aborting rather than abandoning. 249 bytes is far too fast to interrupt; the
 size was chosen from measurement (~15 ms/frame locally, 1.727x codec expansion on random data, so
 200 KB is ~185 frames and ~2.8 s per direction). Harness:
-`packages/tui/scripts/cancel-transfer.py`. **An aborted upload leaves a PARTIAL file on the host**,
-which is correct and worth expecting.
+`packages/tui/scripts/cancel-transfer.py vm|tso` -- **verified on BOTH hosts**, and the observable
+DIFFERS: MECAFF announces `>> TRANS99 - Protocol error` where Rayborn's FFTP on TSO says nothing at
+all and simply returns to `READY`. **So "the host printed an error" is NOT the test; "the next
+command is obeyed" is.** **An aborted upload leaves a PARTIAL file on BOTH hosts**, which is correct
+and worth expecting rather than discovering.
 **Three things to carry into any future live transfer run.** Use `-model 3278-2-E`; CUT accepts no
 other geometry. **Prove the session's state before trusting a result** — `QUERY DISK A` must answer
 `Ready;` on VM (`?CP: QUERY` means the reconnect trap and a void run), and TSO must be at `READY`,
