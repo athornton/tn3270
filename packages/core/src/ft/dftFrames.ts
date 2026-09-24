@@ -15,6 +15,13 @@
  * parser reported 38- and 32-byte payloads (41-3, 35-3).
  */
 
+/**
+ * x3270 overlays its offsets on the RAW structured field; ours start 3 bytes
+ * later, because parseStructuredFields has already stripped the two length
+ * bytes and the SFID. See "THE OFFSET TRAP" above.
+ */
+export const X3270_HEADER_LEN = 3;
+
 /** Host request types: `TR_*_REQ` and `TR_DATA_INSERT`. */
 export const DftRequest = {
   /** `TR_OPEN_REQ` — open a file or announce a message. */
@@ -126,14 +133,14 @@ export function parseDftFrame(payload: Uint8Array): DftFrame {
  * (`ft_dft.c:146-148`). TK5 sent both in one session, arriving here as 32 and 38
  * bytes, which is what confirmed the subtraction against a real host.
  */
-const OPEN_SHORT = 0x23 - 3;   // 32
-const OPEN_LONG = 0x29 - 3;    // 38
+const OPEN_SHORT = 0x23 - X3270_HEADER_LEN;   // 32
+const OPEN_LONG = 0x29 - X3270_HEADER_LEN;    // 38
 
-/** Name offsets, x3270's +25 / +31 less 3 (`ft_dft.c:147,153`). */
-const NAME_AT_SHORT = 25 - 3;  // 22
-const NAME_AT_LONG = 31 - 3;   // 28
-/** Record size offset, x3270's +27 less 3 (`ft_dft.c:151`). */
-const RECSZ_AT = 27 - 3;       // 24
+/** Name offsets, x3270's +25 / +31 less the header (`ft_dft.c:147,153`). */
+const NAME_AT_SHORT = 25 - X3270_HEADER_LEN;  // 22
+const NAME_AT_LONG = 31 - X3270_HEADER_LEN;   // 28
+/** Record size offset, x3270's +27 less the header (`ft_dft.c:151`). */
+const RECSZ_AT = 27 - X3270_HEADER_LEN;       // 24
 
 /** How many bytes the name field occupies. `memcpy(namebuf, name, 7)` (`ft_dft.c:159`). */
 const NAME_LENGTH = 7;
@@ -181,8 +188,12 @@ export function parseDftOpen(payload: Uint8Array): DftOpen {
     );
   }
 
+  // `nameAt + i` maxes at 28 (short, < 32) or 34 (long, < 38), both within the
+  // length just checked above, so this is provably in bounds -- the same idiom
+  // parseDftFrame uses two functions up, not a real bounds concern needing a
+  // fallback.
   let name = '';
-  for (let i = 0; i < NAME_LENGTH; i++) name += String.fromCharCode(payload[nameAt + i] ?? 0);
+  for (let i = 0; i < NAME_LENGTH; i++) name += String.fromCharCode(payload[nameAt + i]!);
   // Trailing spaces only, matching x3270's backwards walk from namebuf[6]
   // (ft_dft.c:161-164). trimEnd() would also eat tabs and newlines, which are
   // legal name bytes; a host sending one would silently get a different name.
@@ -190,7 +201,6 @@ export function parseDftOpen(payload: Uint8Array): DftOpen {
 
   // `recordSize: undefined` would not typecheck under exactOptionalPropertyTypes
   // against an optional property, so the key is added only when it has a value.
-  return recordSize === undefined
-    ? { name, isMessage: name === OPEN_MSG }
-    : { name, isMessage: name === OPEN_MSG, recordSize };
+  // Same spread-when-defined idiom as bind.ts:116.
+  return { name, isMessage: name === OPEN_MSG, ...(recordSize === undefined ? {} : { recordSize }) };
 }

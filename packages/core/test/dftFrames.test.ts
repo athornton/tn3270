@@ -121,18 +121,20 @@ describe('parseDftOpen', () => {
   });
 
   it('refuses any other length, as dft_open_request does', () => {
-    // Anything but 0x23 or 0x29 is ftDftUnknownOpen (ft_dft.c:153-155).
+    // Anything but 0x23 or 0x29 is ftDftUnknownOpen (ft_dft.c:154-156).
     expect(() => parseDftOpen(new Uint8Array(0x24 - 3))).toThrow(/unknown Open length/);
     expect(() => parseDftOpen(new Uint8Array(0x28 - 3))).toThrow(/unknown Open length/);
   });
 
-  it('BISECTS the boundary: 0x20 and 0x26 payloads pass, 0x21 and 0x25 do not', () => {
-    // The payload lengths for the two legal FIELD lengths. Testing one grossly
-    // wrong value would not catch an off-by-one in the subtraction, which is the
-    // error this whole plan warns about.
-    expect(() => parseDftOpen(new Uint8Array(0x20))).not.toThrow();
-    expect(() => parseDftOpen(new Uint8Array(0x26))).not.toThrow();
-    expect(() => parseDftOpen(new Uint8Array(0x21))).toThrow();
-    expect(() => parseDftOpen(new Uint8Array(0x25))).toThrow();
+  it('BISECTS the boundary from both sides: 31/39 are new, 33/37 pin the adjacency', () => {
+    // 31 and 39 sit one step BEYOND the accepted 32 and 38 -- new coverage that
+    // would catch the boundary drifting outward, which the accept-tests above
+    // (already at 32/38) and the refuse-test above (already at 33/37) do not
+    // exercise. 33 and 37 duplicate the refuse-test's values on purpose: they
+    // pin the inward adjacency so this test still reads as a full bisection.
+    expect(() => parseDftOpen(new Uint8Array(31))).toThrow();
+    expect(() => parseDftOpen(new Uint8Array(39))).toThrow();
+    expect(() => parseDftOpen(new Uint8Array(33))).toThrow();
+    expect(() => parseDftOpen(new Uint8Array(37))).toThrow();
   });
 });
