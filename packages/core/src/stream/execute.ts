@@ -341,9 +341,9 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
   const wcc = record.wcc ?? 0;
   // WCC reset-MDT is UNCONDITIONAL: manual Table 3-2 bit 7 says "all MDT bits in
   // the device's existing character buffer are reset", and x3270's handler
-  // (ctlr.c:1545-1550) calls mdt_clear on every field attribute with no
+  // (ctlr.c:1439-1451) calls mdt_clear on every field attribute with no
   // protection check. This matters because ctlr_read_modified filters on
-  // FA_IS_MODIFIED alone (ctlr.c:921) — a protected field carrying MODIFY would
+  // FA_IS_MODIFIED alone (ctlr.c:822) — a protected field carrying MODIFY would
   // otherwise leak its data to the host. Erase Input is the unprotected-only
   // one; see Screen.clearUnprotectedMDT.
   if (wcc & WCC.RESET_MDT) screen.clearAllMDT();

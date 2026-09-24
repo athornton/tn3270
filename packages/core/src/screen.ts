@@ -434,9 +434,10 @@ export class Screen {
   /**
    * Reset MDT in EVERY field, protected or not. This is WCC reset-MDT: manual
    * Table 3-2 bit 7 says "all MDT bits in the device's existing character
-   * buffer are reset," and x3270's handler (`ctlr.c:1545-1550`) has no
-   * protection check. This matters because Read Modified filters on MDT alone
-   * (`ctlr.c:921`) — a protected field left carrying MDT would otherwise leak
+   * buffer are reset," and x3270's handler (`ctlr.c:1439-1451`, which tests
+   * `ea_buf[baddr].fa` only) has no protection check. This matters because Read
+   * Modified filters on MDT alone (`ctlr.c:822`, inside `ctlr_read_modified()`)
+   * — a protected field left carrying MDT would otherwise leak
    * its data to the host on the next read. Erase Input is the
    * unprotected-only operation; see `clearUnprotectedMDT`.
    */
