@@ -9,6 +9,14 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **ALL FOUR SPECIAL KEYS NOW HAVE A LIVE WITNESS, 2026-09-24.** Field Mark and Newline were the
+  last two without one; both are now witnessed on **both** hosts against matched controls. Field
+  Mark puts `0x1e` on the wire and both hosts parse the field (on VM it is the entire payload), and
+  **its advance is witnessed**, which is the recorded contrast with Dup's TAB. Newline's record is
+  byte-identical to its control **except the cursor address** — what "purely local" must look like
+  on the wire. **Two gaps survive: every run drove the CLI, so the keypad CLICK path is still
+  offline-only, and Dup's TAB is still unwitnessed** (it needs a multi-field panel, hence a logon).
+  See *Field Mark and Newline against VM/370 and TK5*.
 - **CMS IGNORES `LRECL` WITH `RECFM V` — confirmed on the wire 2026-09-24, closing the last open
   question on the transfer work.** Three cases in one session: `RECFM V LRECL 80` and `RECFM V`
   alone both store `V 80` (indistinguishable), while `RECFM F LRECL 80` stores `F 80` — **and that
@@ -55,13 +63,16 @@ and the Recording log says what happened when they were run.
   corrected probe: *TN3270E against a real host*.
 - **THE VIRTUAL KEYPAD — NOTHING WAS RUN AGAINST A HOST, 2026-09-17, and that is a decision rather
   than a gap.** A button press produces the same wire bytes as the equivalent keystroke, and those
-  are already verified below. **But Sys Req, Dup, Field Mark and Newline have NO live witness at
-  all** — see *The virtual keypad and the four new keys* at the end of this document, which also
-  lists what to run on the first real host that appears. ~~And Sys Req cannot get one here.~~
+  are already verified below. ~~**But Sys Req, Dup, Field Mark and Newline have NO live witness at
+  all**~~ — **SUPERSEDED: all four were witnessed on both hosts, Sys Req and Dup 2026-09-21 and
+  Field Mark and Newline 2026-09-24.** See *The virtual keypad and the four new keys* at the end of
+  this document. ~~And Sys Req cannot get one here.~~
   **Corrected 2026-09-17: Sys Req CAN now get a witness on both existing hosts**, the non-TN3270E
-  test-request path having landed. It is the first item on that list, and it needs a **trace**, not
-  a screenshot: a host is free to ignore a test request, so "nothing visible happened" would not
-  distinguish a working key from the inert one it used to be.
+  test-request path having landed. **What survives of this bullet is the CLICK path**: every one of
+  those runs drove the CLI, so `mousedown` → `hitTestAt` → IPC has still never been exercised at a
+  host. All of them needed a **trace**, not a screenshot — a host is free to ignore a test request,
+  and on TK5 the Field Mark control produced the *same screen message* as the run, so
+  "nothing visible happened" and "the screen changed" are both uninformative.
 - **BIND-IMAGE, BIND and UNBIND have NO live-host witness either, 2026-09-19, and for the same
   reason as everything else past DEVICE-TYPE: no reachable host completes a TN3270E negotiation.**
   We now request BIND-IMAGE, parse BIND and UNBIND, and honour BIND's geometry within `-model`'s
@@ -2460,19 +2471,21 @@ press highlight and a window resize — and every one of them is checked offline
 (`shot.mjs` 3/3, `browser-shot.mjs` 2/2) or through real Chromium input events (`clicks.mjs`,
 9 buttons / 10 actions).
 
-### WHERE THAT ARGUMENT STOPS: FOUR KEYS, TWO OF WHICH NOW HAVE A LIVE WITNESS
+### WHERE THAT ARGUMENT STOPPED: FOUR KEYS, AND ALL FOUR NOW HAVE A LIVE WITNESS
 
 **As written 2026-09-17, none of Sys Req, Dup, Field Mark and Newline had ever been pressed at a host
 by anything, and the keypad's verification must not be read as covering them.** They are new in this
 branch precisely because no interactive front end could reach them, so there is no earlier run to
-inherit. **Two of the four were witnessed on 2026-09-21; the table below is updated and the `none`
-entries are still live gaps.**
+inherit. **Sys Req and Dup were witnessed 2026-09-21, Field Mark and Newline 2026-09-24 — the table
+below has no `none` entries left.** Two narrower gaps survive all four runs and are named under the
+table: **every run drove the CLI, so the click path is still offline-only**, and **Dup's TAB is
+unwitnessed** even though its `0x1c` is not.
 
 | key | offline evidence | live witness |
 |---|---|---|
 | **Dup** | writes EBCDIC `0x1c`, sets MDT, then TABs; mutation-checked both halves | **YES, MVS TK5 2026-09-21 — the `0x1c` is on the wire and the host PARSED it.** The TAB half is **not** witnessed: the panel it was driven on has one unprotected field, where plain `Tab` does not move either |
-| **Field Mark** | writes `0x1e` and advances as a typed character; the distinguishing last-cell case is pinned | **none** |
-| **Newline** | `Keyboard.newline()` has existed since stage 1 and the CLI could always call it | **none** — and nothing on this branch changed it, only its reachability |
+| **Field Mark** | writes `0x1e` and advances as a typed character; the distinguishing last-cell case is pinned | **YES, BOTH HOSTS 2026-09-24** — the `0x1e` is on the wire and both parsed the field; on VM it is the entire payload. **The advance is witnessed too**, which is the documented contrast with Dup |
+| **Newline** | `Keyboard.newline()` has existed since stage 1 and the CLI could always call it | **YES, BOTH HOSTS 2026-09-24** — the record is byte-identical to its control **except the cursor address**, which is what "purely local" looks like on the wire |
 | **Sys Req** | the classic **test request read**, `01 6c 61 02` plus modified field data, byte-exact in `core/test/session.test.ts`; the TN3270E `IAC AO` separately in `core/test/tn3270e-session.test.ts` | **YES, BOTH HOSTS 2026-09-21 — and both PREDICTED FORMS appeared, one per host.** The TN3270E `IAC AO` half remains unobtainable here |
 
 ### SYS REQ IS NOW REACHABLE *AND ACTIVE* ON BOTH HOSTS — AND AS OF 2026-09-21 IT HAS A LIVE WITNESS
@@ -2521,8 +2534,11 @@ z/OS:
    `Dup`. Expect `0x1c` in the buffer and the cursor at the **next unprotected field** — the tab is
    the counterintuitive half. Then repeat in a **numeric** field, which the manual says must accept
    it (p. 4-13) where Field Mark must be refused.
-2. **Field Mark in the last data cell of a field**, which is where it differs from Dup: it must
-   auto-skip like a typed character rather than park on the attribute byte.
+2. ~~**Field Mark in the last data cell of a field**, which is where it differs from Dup: it must
+   auto-skip like a typed character rather than park on the attribute byte.~~ **DONE 2026-09-24 on
+   TK5 — it auto-skips, and a typed character in the same cell is the control that gives that
+   meaning.** See *Field Mark and Newline against VM/370 and TK5*. Still open from item 1: **Dup in a
+   NUMERIC field**, which needs a panel that has one.
 3. **SYS REQ AGAINST VM/370 AND TK5 — the newly available one, and the first thing to do on the
    next live run.** Both take the classic path. Trace the session (`Trace(on)` as the FIRST script
    line — **there is no `-trace` argv flag**, as *The probe* above records, and this step said there
@@ -2537,11 +2553,18 @@ z/OS:
    Note the keyboard **locks** afterwards, as it does after Enter, until the host writes.
 4. **Sys Req against a host that grants the TN3270E SYSREQ function**, which neither Hercules
    system will ever be. Watch for `IAC AO` on the wire, and watch what the host does with it.
-5. **Newline**, which needs no host at all to be interesting — but confirm the host does not treat
-   the resulting cursor position as an AID, which it should not, Newline being purely local.
+5. ~~**Newline**, which needs no host at all to be interesting — but confirm the host does not treat
+   the resulting cursor position as an AID, which it should not, Newline being purely local.~~
+   **DONE 2026-09-24 on BOTH hosts, and the prediction held exactly**: the inbound record is
+   byte-identical to its control apart from the cursor address. See *Field Mark and Newline against
+   VM/370 and TK5*.
 
 Do all five **through the keypad button**, not through the CLI: the CLI path is the one already
-covered offline, and the button is the path a user actually has.
+covered offline, and the button is the path a user actually has. **Items 2, 3 and 5 are done and
+item 1 is half done — but every one of them was driven through the CLI, so this instruction is still
+outstanding for all of them.** What remains host-side is **Dup's TAB and a numeric field** (both need
+a multi-field panel, hence a logon) and **Sys Req's TN3270E half** (needs a host that grants the
+function, which neither Hercules system will).
 
 ### Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried
 
@@ -2621,6 +2644,82 @@ across two consecutive `Tab`s, because TK5's logon panel has exactly one unprote
 from the only field wraps to itself. **Item 1's "cursor at the next unprotected field" check needs a
 panel with two or more input fields** — an ISPF panel after logon, which needs credentials this run
 deliberately did not use. Still open.
+
+### Field Mark and Newline against VM/370 and TK5 — DONE 2026-09-24, so all four keys are witnessed
+
+**The last two keys with no live witness now have one, on BOTH hosts, each against a matched
+control.** Same shape as the Sys Req/Dup runs above — `Trace(on)` and `TraceText` first, no logon, a
+`sleep` mid-script so the connection stays open for a real reply, and **driven through the CLI, so
+the click path remains offline-only**. The controls differ from the runs by exactly one line, the
+`FieldMark()` or `Newline()` call.
+
+**FIELD MARK: the `1e` is on the wire and BOTH hosts parsed the field.**
+
+| host | inbound record | reading |
+|---|---|---|
+| **VM/370** | `7d 5b 61  11 5b 60  1e  ff ef` | AID Enter, cursor **1761**, SBA to 1760, then `1e` as **the entire field data** — VM's screen is unformatted here, so there are no trailing blanks for it to hide among |
+| **MVS TK5** | `7d 5b 6c  11 5b 6b  1e 40 40 40 …  ff ef` | AID Enter, cursor **1772**, SBA to 1771, `1e`, then the field's trailing blanks |
+
+**VM's is the stronger of the two** because the `1e` is the whole payload. Both show the **advance**:
+Field Mark is a typed character, so the cursor ends one column past where it began (1760→1761,
+1771→1772). **Contrast the Dup witness above, whose cursor did not move at all** — that is the
+recorded asymmetry (Dup TABs, Field Mark advances) showing up on the wire, and one run could not have
+shown it.
+**The MDT half comes free, as it did for Dup:** an unmodified field is never transmitted, so the
+`1e` arriving at all proves the MDT was set.
+**Host reactions, and they differ:** VM answered with a **Read Partition**
+(`f3 00 07 01 ff ff 03 80 00`), which our 105-byte Query Reply satisfied — a host processing the
+record. TK5 answered `INPUT NOT RECOGNIZED`, a host reading the field and rejecting its contents.
+
+**THE TK5 CONTROL SHOWS WHY THE SCREEN IS NOT THE TEST HERE: it also says `INPUT NOT RECOGNIZED`.**
+A bare `Enter()` on that panel gets the same message, so the rendered screen cannot distinguish Field
+Mark from nothing. What distinguishes them is the record: the control is `7d 5b 6b ff ef` — **AID and
+cursor only, no SBA and no data at all** — against the run's SBA-plus-`1e`. Judge by trace, as with
+Sys Req.
+
+**NEWLINE: purely local, confirmed by a record that is byte-identical to its control except for the
+cursor address.** This was the specific prediction in the list above — that the host must not treat
+the new cursor position as an AID — and it holds.
+
+| host | control (`Enter` alone) | with `Newline()` first |
+|---|---|---|
+| **VM/370** | `7d 5b 60  11 5b 60  ff ef` | `7d 5c f0  11 5b 60  ff ef` |
+| **MVS TK5** | `7d 5b 6b  ff ef` | `7d 5c f0  ff ef` |
+
+On VM the two records differ in **three bytes and nothing else**: the cursor address goes `5b 60`
+(1760) → `5c f0` (1840), exactly one row of 80, while **the SBA and the field data are unchanged**.
+Nothing was modified and nothing extra was sent — which is what "purely local" has to look like on
+the wire. On TK5 the cursor goes 1771 → 1840 with no SBA in either record. Both hosts then simply
+repainted.
+
+**ITEM 2 IS ALSO CLOSED: FIELD MARK AUTO-SKIPS FROM THE LAST DATA CELL, AND IT IS INDISTINGUISHABLE
+FROM A TYPED CHARACTER THERE.** This is the case the list above singles out as where Field Mark
+differs from Dup, so it was worth positioning the cursor for. TK5's input field runs **1771 to 1898**
+(128 bytes, measured by walking `MoveCursor` along it), and its attribute byte is at 1899.
+
+| action at row 23 col 58 (addr 1898, the last data cell) | cursor afterwards |
+|---|---|
+| `FieldMark()` | **22/11** — the start of the next unprotected field |
+| `String(z)`, an ordinary typed character | **22/11**, identical |
+| `Dup()` | **22/11**, also identical *on this panel* |
+
+**It did NOT park on the attribute byte at 1899, which is the thing being checked.** The typed
+character is the control that gives that meaning: Field Mark must behave like one, and it does.
+**Dup agreeing here is NOT evidence that Dup and Field Mark are the same** — this panel has exactly
+one unprotected field, so the auto-skip destination and the TAB destination coincide. That is the
+same one-field limitation that leaves Dup's TAB unwitnessed, and it is why the table above is read as
+"three actions agree on this panel" rather than "Dup auto-skips".
+**Mid-field is a different case and was run too:** Field Mark at row 22 col 79 put `1e` at index 74
+of a 128-byte field and advanced the cursor to 23/0 — a plain advance, no skip, since the field
+continues.
+
+**A TRAP FOR ANY VM RE-RUN: VM/370 SETTLES ON EITHER OF TWO SCREENS, AND THE FIRST ATTEMPT AT THIS
+COMPARISON WAS INVALID BECAUSE OF IT.** Consecutive identical invocations landed once at cursor 0/0
+(reaching `Wait(Settle)` after 2.0s, AID record `7d c1 50 ff ef`, cursor 80 = row 2) and once at
+22/0 (0.44s, the record tabled above). **A run and a control that started on different screens
+cannot be compared** — the differing cursor would have been the screen's doing, not Newline's. The
+pair above is the matched one: same starting cursor, same timing. Re-run until the control and the
+run agree on their starting position, and check the `Wait(Settle)` elapsed time as the tell.
 
 ## `playback -b` as a reference oracle — the traces, and how to read them, 2026-09-17
 

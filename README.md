@@ -126,9 +126,9 @@ Four 3270 keys became reachable in the process, having been implemented in `core
 press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
 two get no chord — see *Using the TUI*. **Sys Req now puts bytes on the wire against a classic
 host**, as a test request read heading (`01 6c 61 02`) followed by any modified field data, rather
-than the AID you would expect. **Sys Req and Dup are live-verified on both Hercules hosts as of
-2026-09-21; Field Mark and Newline still have no live witness**, and no *keypad button* has been
-clicked at a host — the runs drove the CLI, which shares `applyAction` with the button but not the
+than the AID you would expect. **All four are live-verified on both Hercules hosts** — Sys Req and
+Dup as of 2026-09-21, Field Mark and Newline 2026-09-24 — but no *keypad button* has been
+clicked at a host: the runs drove the CLI, which shares `applyAction` with the button but not the
 click plumbing. See *What is not implemented*.
 
 **On a headless Linux box** you also need an X server and two Chromium flags, neither of
@@ -1042,10 +1042,11 @@ worse than one that says which quarter is missing.
   function. There is no ETX; that is BSC framing, and a telnet record ends at `IAC EOR`.
   On an inhibited keyboard the key is **refused**, where x3270 would queue it — we have no action
   queue and did not invent one for a single key.
-- **FIELD MARK AND NEWLINE HAVE NO LIVE WITNESS, and no keypad BUTTON has been clicked at a host.**
-  All four keys are implemented. **Sys Req and Dup were witnessed 2026-09-21** (above, and
-  `docs/live-testing.md`); the other two are unit-tested against the manual and x3270's source, and
-  no host has ever been observed reacting to them. **Two narrower gaps the 2026-09-21 runs did not
+- **NO KEYPAD BUTTON HAS BEEN CLICKED AT A HOST, and Dup's TAB is still unwitnessed.** (This bullet
+  used to lead with "Field Mark and Newline have no live witness"; both got one on 2026-09-24.)
+  All four keys are implemented, and **all four are now witnessed on both hosts** — Sys Req and Dup
+  2026-09-21, **Field Mark and Newline 2026-09-24**, each against a matched control (above, and
+  `docs/live-testing.md`). **Two narrower gaps the runs did not
   close, recorded so the witness is not read as wider than it is:** they drove the **CLI**, which
   shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC, so the click path is
   still offline-only (`clicks.mjs`); and **Dup's TAB is unwitnessed** even though its `0x1c` is not,
