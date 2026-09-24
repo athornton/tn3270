@@ -117,3 +117,80 @@ export function parseDftFrame(payload: Uint8Array): DftFrame {
   }
   return { requestType: (payload[0]! << 8) | payload[1]!, payload };
 }
+
+/**
+ * The two legal `Open` payload lengths, which are x3270's two legal FIELD
+ * lengths minus the 3-byte header we never see.
+ *
+ * `dft_open_request` tests `len == 0x23` and `len == 0x29` on the field length
+ * (`ft_dft.c:146-148`). TK5 sent both in one session, arriving here as 32 and 38
+ * bytes, which is what confirmed the subtraction against a real host.
+ */
+const OPEN_SHORT = 0x23 - 3;   // 32
+const OPEN_LONG = 0x29 - 3;    // 38
+
+/** Name offsets, x3270's +25 / +31 less 3 (`ft_dft.c:147,153`). */
+const NAME_AT_SHORT = 25 - 3;  // 22
+const NAME_AT_LONG = 31 - 3;   // 28
+/** Record size offset, x3270's +27 less 3 (`ft_dft.c:151`). */
+const RECSZ_AT = 27 - 3;       // 24
+
+/** How many bytes the name field occupies. `memcpy(namebuf, name, 7)` (`ft_dft.c:159`). */
+const NAME_LENGTH = 7;
+
+/** A parsed `Open`. */
+export interface DftOpen {
+  /** The 7-byte name with trailing spaces trimmed. */
+  name: string;
+  /**
+   * `true` when the name is `FT:MSG`: the host is sending a MESSAGE, not opening
+   * a file. x3270 sets `message_flag` and does not call `ft_running`
+   * (`ft_dft.c:171-176`), so this must not start a transfer.
+   */
+  isMessage: boolean;
+  /**
+   * Record size, present only in the long form. Absent rather than 0 when the
+   * host did not send one, because 0 is what x3270 uses as "no value" and an
+   * optional property says so in the type.
+   */
+  recordSize?: number;
+}
+
+/**
+ * Parse an `Open` request.
+ *
+ * The name is compared as ASCII. That looks wrong for a 3270 data stream and is
+ * not: x3270 does `strcmp(namebuf, OPEN_MSG)` on the raw bytes with no EBCDIC
+ * translation (`ft_dft.c:171`), and TK5's own frames carry ASCII `FT:DATA` —
+ * observed in the 2026-09-24 probe trace. The name is metadata the host writes in
+ * the PC's alphabet, not screen data.
+ */
+export function parseDftOpen(payload: Uint8Array): DftOpen {
+  let nameAt: number;
+  let recordSize: number | undefined;
+
+  if (payload.length === OPEN_SHORT) {
+    nameAt = NAME_AT_SHORT;
+  } else if (payload.length === OPEN_LONG) {
+    nameAt = NAME_AT_LONG;
+    recordSize = (payload[RECSZ_AT]! << 8) | payload[RECSZ_AT + 1]!;
+  } else {
+    throw new DftFrameError(
+      `unknown Open length: ${payload.length} payload bytes `
+      + `(expected ${OPEN_SHORT} or ${OPEN_LONG}, i.e. field length 0x23 or 0x29)`,
+    );
+  }
+
+  let name = '';
+  for (let i = 0; i < NAME_LENGTH; i++) name += String.fromCharCode(payload[nameAt + i] ?? 0);
+  // Trailing spaces only, matching x3270's backwards walk from namebuf[6]
+  // (ft_dft.c:161-164). trimEnd() would also eat tabs and newlines, which are
+  // legal name bytes; a host sending one would silently get a different name.
+  name = name.replace(/ +$/, '');
+
+  // `recordSize: undefined` would not typecheck under exactOptionalPropertyTypes
+  // against an optional property, so the key is added only when it has a value.
+  return recordSize === undefined
+    ? { name, isMessage: name === OPEN_MSG }
+    : { name, isMessage: name === OPEN_MSG, recordSize };
+}
