@@ -34,8 +34,14 @@ typecheck clean, **1970 tests in 78 files** (from 1869 in 74), `pty-smoke.py` **
 hosts' own `LISTFILE`/`LISTDS` as independent checks (`V 80` on CMS, `VB 1024 BLKSIZE 1028 PS` on
 TSO). Reproduce with `live-drive.py vmxfer` / `tsoxfer`, both committed, then `cmp`. **An earlier
 draft of this section said NO FILE HAD CROSSED A REAL HOST; that is now false.**
-**Still unverified: cancelling a transfer mid-flight** — 249 bytes over CUT completes far too fast
-to interrupt by script, so a much larger file would be needed.
+**MID-FLIGHT CANCELLATION IS ALSO VERIFIED, 2026-09-24**, which was the last unwitnessed piece:
+cancelling a 200KB upload at 17641 of 204800 bytes made MECAFF's `IND$FILE` answer
+`>> TRANS99 - Protocol error` and **return CMS to `Ready;`** -- the host left transfer mode, which is
+the entire purpose of aborting rather than abandoning. 249 bytes is far too fast to interrupt; the
+size was chosen from measurement (~15 ms/frame locally, 1.727x codec expansion on random data, so
+200 KB is ~185 frames and ~2.8 s per direction). Harness:
+`packages/tui/scripts/cancel-transfer.py`. **An aborted upload leaves a PARTIAL file on the host**,
+which is correct and worth expecting.
 **Three things to carry into any future live transfer run.** Use `-model 3278-2-E`; CUT accepts no
 other geometry. **Prove the session's state before trusting a result** — `QUERY DISK A` must answer
 `Ready;` on VM (`?CP: QUERY` means the reconnect trap and a void run), and TSO must be at `READY`,

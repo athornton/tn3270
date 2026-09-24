@@ -9,6 +9,14 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **MID-FLIGHT CANCELLATION IS LIVE-VERIFIED ON VM/CMS, 2026-09-24 — the last unwitnessed piece of
+  the form, and the one whose whole purpose is what the host does next.** Cancelling a 200KB upload
+  at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and
+  **return CMS to `Ready;`** — the host left transfer mode, which is the property the feature rests
+  on. The final count was 24261, not 204800, which is what proves it was mid-flight. **An aborted
+  upload leaves a PARTIAL file on the host** (measured by comparing the two `ERASE`s). Also
+  measured: CUT runs at ~15 ms/frame locally and the codec expands random data 1.727x, so 200 KB is
+  the smallest file that gives a usable interruption window. See *Mid-flight cancellation*.
 - **AND ON MVS/TSO, 2026-09-24 — BOTH HOSTS ARE NOW CLOSED FOR THE FORM.** 26 of 26 steps, both
   directions, the same 249-byte binary **round-tripping byte-identically**, with TSO's own `LISTDS`
   confirming `VB 1024` on `TSO003`. It exercises the OTHER dialect (`RECFM(V) LRECL(1024)`
@@ -2972,3 +2980,84 @@ userid by accident. Use `tsoxfer`, or set `TN3270_TUTORIAL=1`.
   through `transferCommand` on 2026-09-22 (TSO honours it as a maximum, CMS ignores it); this
   run sent `LRECL(1024)` to TSO and `LISTDS` reports `1024`, so TSO's half now has a witness
   through the form. **CMS's half does not** — the VM run sent no `Lrecl` at all.
+
+## MID-FLIGHT CANCELLATION, live against VM/CMS — verified 2026-09-24
+
+**THE LAST UNWITNESSED PIECE OF THE TRANSFER FORM, AND THE ONE THAT MATTERS MOST**, because
+it is the only part whose *purpose* is what the host does afterwards. `CutTransfer.cancel`,
+the abort response bytes and PF2 had unit tests and no live witness at all until now.
+
+**Result: the host LEFT TRANSFER MODE and returned CMS to its own prompt.**
+
+```
+Transfer canceled by user          <- our form
+>> TRANS99 - Protocol error        <- MECAFF's IND$FILE, terminating
+Ready; T=0.13/0.14 00:19:20        <- CMS, back at its prompt
+```
+
+Everything afterwards behaved normally: `ERASE CANC TEST A` answered `Ready;`, and `LOGOFF`
+completed with `CONNECT= 00:00:37` — one fresh session, so the result is not contaminated by
+a reconnect.
+
+### PROVING IT WAS ACTUALLY MID-FLIGHT IS THE HARD PART, NOT THE CANCEL
+
+A cancel sent before the first frame or after the last exercises **nothing**:
+`CutTransfer.cancel` is idempotent and a completed transfer swallows it. So the harness
+(`/tmp/cancel-test.py`, reproduced below in outline) waits for the status line to read
+`transferring...`, records the byte count **at that moment**, sends `Esc`, and requires the
+final count to be far short of the file size.
+
+```
+cancelling a 204800-byte transfer mid-flight
+  progress when cancelling: 17641 of 204800 bytes     <- 8.6% in
+  byte counts seen after the cancel: 22069 23162 23162 24261
+  'canceled by user'   present: True
+  'bytes transferred'  present: False                 <- it did NOT complete
+```
+
+**24261 of 204800 is the proof.** A cancelled transfer reporting 204800 was not cancelled.
+
+### THE ABORTED UPLOAD LEAVES A PARTIAL FILE ON THE HOST, and that is correct
+
+Measured by comparing the two `ERASE`s in one run: the **pre-run** `ERASE CANC TEST A`
+answered `File 'CANC TEST A' not found.`, and the **post-cancel** one answered a bare
+`Ready;` — so a file existed by then. The host wrote what it had received before the abort,
+which is the only thing it can do. **An operator cancelling an upload must therefore expect a
+truncated host file, not the absence of one**, and clean up if that matters.
+
+### HOW BIG A FILE, MEASURED RATHER THAN GUESSED
+
+CUT against local Hercules is **much faster than it looks** — roughly 15 ms per frame, not
+the 50 ms first estimated:
+
+| size | frames | per direction |
+|---|---|---|
+| 249 B | 1 | instant — **far too fast to interrupt** |
+| 20 KB | ~19 | ~1 s |
+| 200 KB | ~185 | **~2.8 s — the size used here** |
+
+**Encoding expansion is 1.727x on random data**, measured through `CutCodec.localToHost`
+rather than estimated: bytes outside the codec's current quadrant cost two encoded bytes, so
+~1107 source bytes fit in the 1912-byte frame payload. Random data is the worst case and
+therefore the right choice for a timing probe. **200 KB round-trips byte-identically in both
+directions** (verified separately before the cancellation test, so a failed cancel could not
+be confused with a size the transfer could not handle).
+
+### THE VM RECONNECT TRAP BIT AGAIN, AND THE LESSON IS SHARPER THAN THE OLD NOTE
+
+Three consecutive runs timed out at `0 bytes` with `Transfer(): transfer no CUT frame from
+the host within 30s`, including one using the **committed, known-good**
+`packages/cli/scripts/transfer-vm.txt` with only a filename changed. Every one showed
+`DMKCFC001E ?CP: QUERY` at the state proof. **The cause was not a stranded machine from an
+earlier script — it was the OPERATOR being logged on as `CMSUSER` at the time.** The
+`LOGON` reconnected to their live session, and each script's closing `LOGOFF` then logged
+*them* off.
+
+**So the old note "a failed transfer hands the trap to the next run" understates it: ANY other
+CMSUSER session, human or scripted, produces an identical signature.** `QUERY DISK A`
+answering `?CP:` means the run is void and says nothing about the client — and **it is not
+safe to "clean up" by logging the machine off**, because the session may not be yours. Ask.
+
+The distinguishing evidence when it is genuinely clear: `QUERY DISK A` answers with the disk
+table (`CMS191 191 A R/W ... 65422` blocks free) and `Ready;`, and the closing `CONNECT=`
+spans only the current run.
