@@ -453,6 +453,12 @@ Expected: FAIL — `parseDftOpen` is not exported.
 
 Append to `packages/core/src/ft/dftFrames.ts`:
 
+**AS BUILT (`b17e319`, `5345d34`): the five offset constants below use a literal `3` in this
+listing; the shipped code subtracts `X3270_HEADER_LEN` instead.** A quality review pointed out that
+a `3` repeated five times, tied to correctness only by prose, was about to be repeated again in
+`dft.ts` — so it became an exported constant. Tasks 5 and 6 now import it. Read the shipped
+`dftFrames.ts`, not this block.
+
 ```typescript
 /**
  * The two legal `Open` payload lengths, which are x3270's two legal FIELD
@@ -629,13 +635,22 @@ Append to `packages/core/src/ft/dftFrames.ts`:
 ```typescript
 import { AID, Sfid } from '../constants.js';
 
-/** Big-endian 16-bit. */
-function u16(n: number): [number, number] {
+/**
+ * Big-endian 16-bit. **Exported because `ft/dft.ts` needs it in Task 6** — the
+ * alternative is a second copy in that file, and two hand-rolled big-endian
+ * writers that could disagree is exactly the kind of drift this project has been
+ * bitten by. Matches x3270's `SET16` macro (`include/3270ds.h:341-344`).
+ */
+export function u16(n: number): [number, number] {
   return [(n >> 8) & 0xff, n & 0xff];
 }
 
-/** Big-endian 32-bit, for the record number. */
-function u32(n: number): [number, number, number, number] {
+/**
+ * Big-endian 32-bit, for the record number. Exported for the same reason as
+ * `u16`. `>>>` not `>>`: a record number above 0x7fffffff would sign-extend and
+ * produce a negative high byte with `>>`.
+ */
+export function u32(n: number): [number, number, number, number] {
   return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
 }
 
@@ -943,6 +958,7 @@ Create `packages/core/src/ft/dft.ts`:
  */
 import {
   DftRequest,
+  X3270_HEADER_LEN,
   buildCloseAck,
   buildDataAck,
   buildDftError,
@@ -964,9 +980,14 @@ const MSG = {
 /** `END_TRANSFER` (`ft_dft.c:53`): the host's own "transfer complete" message. */
 const END_TRANSFER = 'TRANS03';
 
-/** Offsets into a `Data Insert` payload, all x3270's less 3. */
-const DATA_LENGTH_AT = 8 - 3;   // 5: struct data_buffer.data_length
-const DATA_AT = 10 - 3;         // 7: struct data_buffer.data
+/**
+ * Offsets into a `Data Insert` payload, x3270's less the header it counts and we
+ * do not. **Use the imported `X3270_HEADER_LEN`, not a literal 3** — Task 3
+ * introduced it precisely so this second file could not drift from the first.
+ * Offsets are into `struct data_buffer` (`ft_dft.c:59-67`).
+ */
+const DATA_LENGTH_AT = 8 - X3270_HEADER_LEN;   // 5: data_buffer.data_length
+const DATA_AT = 10 - X3270_HEADER_LEN;         // 7: data_buffer.data
 /** The declared data length counts 5 bytes of header. `ft_dft.c:236`. */
 const LENGTH_OVERHEAD = 5;
 
@@ -1455,7 +1476,28 @@ And the handler:
   }
 ```
 
-`dft.ts` now needs `AID`, `Sfid` and its own `u16`/`u32`. Rather than duplicate them, export the helpers from `dftFrames.ts` — add `export` to `u16` and `u32` there, and import them here along with `AID` and `Sfid` from `../constants.js`.
+Extend the two import statements at the top of `dft.ts`. Add `DftError`, `DftHeader`, `DftReply`, `u16` and `u32` to the existing `./dftFrames.js` import, and add a new one for the AID and SFID:
+
+```typescript
+import {
+  DftError,
+  DftHeader,
+  DftReply,
+  DftRequest,
+  X3270_HEADER_LEN,
+  buildCloseAck,
+  buildDataAck,
+  buildDftError,
+  buildOpenAck,
+  parseDftFrame,
+  parseDftOpen,
+  u16,
+  u32,
+} from './dftFrames.js';
+import { AID, Sfid } from '../constants.js';
+```
+
+**`u16`/`u32` are exported by Task 4**, so import them rather than writing a second copy — two hand-rolled big-endian writers that could disagree is exactly the drift `X3270_HEADER_LEN` exists to prevent. (An earlier draft declared them private and told you to reach back into Task 4's file to add `export`; that edit-back is gone. If you find them private, the Task 4 implementer missed it — export them there, not here.)
 
 - [ ] **Step 4: Run the test**
 
@@ -1677,7 +1719,7 @@ Then the handler:
   }
 ```
 
-Import `DftTransfer` at the top, and add `transferEnd` to the event map if the emitter is typed.
+Import `DftTransfer` at the top, and **add `transferEnd` to `SessionEvent`** (`session.ts:126`), which is a typed union — `'screen' | 'connect' | 'disconnect' | 'alarm'` — so `emit('transferEnd')` will NOT compile until you do. Checked 2026-09-24: `SessionEvent` has **no consumers outside `session.ts`** (it types `on`, `off`, `listenerCount` and `emit` and nothing else references it), so widening it has no blast radius and needs no exhaustive-switch updates.
 
 - [ ] **Step 7: Export the public surface**
 
