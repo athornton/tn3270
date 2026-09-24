@@ -1,12 +1,53 @@
-# Handoff — state as of 2026-09-23
+# Handoff — state as of 2026-09-24
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-23
+## START HERE — NEXT ACTION, 2026-09-24
 
-**MERGED AND PUSHED: `main` is at `35273d7`, the only branch, tree clean.** All 10 tasks done, and
+**`main` is at `d1e3919`, pushed, the only branch, tree clean, no stashes.** The `ddm-probe` branch
+was merged `--no-ff` and deleted local and remote; the docs commits after it went straight to
+`main`, which is the precedent for docs-only work here.
+
+**THE DFT SPEC IS WRITTEN AND ITS TASK 1 — THE PROBE — IS BUILT, RUN AND MERGED.** Spec
+`docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`. Gate on the merge commit:
+typecheck clean, **1971 tests in 78 files, unchanged** — a default-off capability has zero blast
+radius, and confirming that *is* the test.
+
+**NEXT ACTION, IN ORDER.** (1) **The user still owes the spec a review.** (2) Then write the
+implementation plan with `writing-plans`. The state machine (`core/src/ft/dft.ts`), the wire
+constants, the inbound plumbing and the Read Modified hook are **not started**.
+
+**THE FINDING, MEASURED NOT PREDICTED, AND IT CORRECTED TWO SPECS AND THE README: MVS/TSO OFFERS
+DFT.** "Both Hercules hosts speak CUT" was a property of *our advertisement*, not of the hosts. The
+client does not choose CUT or DFT — the host does, on seeing a Query Reply (DDM) unit, QCODE
+`0x95`, which **we had never sent**. The probe held everything constant but that one byte of
+advertisement: TK5 with `-ddm off` round-tripped 249 bytes over CUT with zero `0xd0` frames, and
+with `-ddm on` sent **four**, decoding as `TR_OPEN_REQ` at exactly the two lengths
+`dft_open_request` accepts, and both transfers timed out at 0 bytes. VM/370's MECAFF declines and
+stays on CUT, so it is the control. **So stage 2 has a live witness on TSO after all** — TK5 is the
+reference host, VM the control.
+
+**TWO TRAPS THIS PROVED, both worth carrying.** (1) **The FAILING transfer is the POSITIVE result
+today, and the direction INVERTS once a parser exists** — afterwards both paths end in a
+transferred file and only the trace tells them apart. Judge by trace. (2) **`Trace(on)` alone puts
+nothing in the log; `TraceText` is required** — without it the VM run's "no `0x95`" reading was
+about our own logging, not about VM. **Verify your own advertisement reached the wire before
+concluding anything about a host.**
+
+**WHAT `-ddm` IS AND IS NOT.** Single-dashed, **default off**, all four front ends, following
+`-bind-image` exactly. Default off is what preserves CUT's live witnesses on both hosts. It is a
+**measurement instrument, not a feature**: turning it on makes a host offer a protocol we cannot
+parse. It flips to default-on once DFT works. **It has NO unit test** — zero of the 78 test files
+mention DDM — so its only evidence is the two committed probe scripts
+(`packages/cli/scripts/ddm-probe-{vm,tso}.txt`) and the unchanged test count. Pinning the unit's
+bytes is a stage-2 task. **`SessionOptions.dftBufferSize` exists and nothing sets it**; wiring it
+to `Transfer`'s already-parsed-and-ignored `BufferSize` keyword is also stage 2.
+
+## The 2026-09-23 state, for the work below
+
+**MERGED AND PUSHED: `main` was at `35273d7`, the only branch, tree clean.** All 10 tasks done, and
 the FULL GATE was re-run on the merge commit itself -- build/typecheck clean, **1971 tests in 78
 files**, and **all eight by-hand harnesses** (`shot.mjs` 3/3, `keys.mjs`, `clicks.mjs`,
 `browser-keys.mjs`, `browser-shot.mjs` 2/2, `pty-smoke.py` 12/12, `drive-e.py` 10/10,
