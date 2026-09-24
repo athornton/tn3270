@@ -26,6 +26,12 @@ export interface CliArgs {
   tn3270e?: boolean;
   /** Request BIND-IMAGE. Absent means the default, which is on. */
   bindImage?: boolean;
+  /**
+   * Advertise Query Reply (DDM), which lets a host choose DFT file transfer
+   * instead of CUT. Absent means the default, which is OFF -- unlike the other
+   * capability flags here. See `SessionOptions.ddm`.
+   */
+  ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   bindLimit?: boolean;
   /**
@@ -93,6 +99,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       }
+      case '-ddm': {
+        if (value === undefined) throw new UsageError('-ddm needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-ddm takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.ddm = value === 'on';
+        i++;
+        break;
+      }
       case '-bind-limit': {
         if (value === undefined) throw new UsageError('-bind-limit needs a value, on or off');
         if (value !== 'on' && value !== 'off') {
@@ -135,7 +150,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const session = defaultSession(
     resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-    args.bindImage, args.bindLimit, args.devname,
+    args.bindImage, args.bindLimit, args.devname, args.ddm,
   );
   const runner = new Runner(session, {
     files: nodeTransferFiles,

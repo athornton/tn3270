@@ -46,7 +46,7 @@ export function buildServer(args: WebArgs) {
     factory: () => {
       const session = defaultSession(
         resolveTerminalType(typeOpts), hostTls, resolveAlternateSize(typeOpts), undefined,
-        args.bindImage, args.bindLimit, args.devname,
+        args.bindImage, args.bindLimit, args.devname, args.ddm,
       );
       if (args.replay !== undefined) {
         // The hostless test seam: paint a recorded trace and open no socket at all, so no test

@@ -39,6 +39,12 @@ export interface GuiArgs {
   scheme?: Scheme;
   /** Request BIND-IMAGE. Absent means the default, which is on. */
   bindImage?: boolean;
+  /**
+   * Advertise Query Reply (DDM), which lets a host choose DFT file transfer
+   * instead of CUT. Absent means the default, which is OFF -- unlike the other
+   * capability flags here. See `SessionOptions.ddm`.
+   */
+  ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
   bindLimit?: boolean;
   /**
@@ -50,7 +56,7 @@ export interface GuiArgs {
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] [-devname NAME] `
+  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
   + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -107,6 +113,15 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
           throw new UsageError(`-bind-image takes on or off, not ${JSON.stringify(value)}`);
         }
         args.bindImage = value === 'on';
+        i++;
+        break;
+      }
+      case '-ddm': {
+        if (value === undefined) throw new UsageError('-ddm needs a value, on or off');
+        if (value !== 'on' && value !== 'off') {
+          throw new UsageError(`-ddm takes on or off, not ${JSON.stringify(value)}`);
+        }
+        args.ddm = value === 'on';
         i++;
         break;
       }

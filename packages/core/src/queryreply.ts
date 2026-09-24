@@ -435,6 +435,90 @@ const highlighting: Capability = {
 };
 
 /**
+ * DFT's buffer size: the default, and the bounds a caller-supplied value is
+ * clamped to.
+ *
+ * `DFT_BUF 16384` (globals.h:417, inside an `#if !defined` so it is overridable
+ * at build time), `DFT_MIN_BUF 256` and `DFT_MAX_BUF 32767` (globals.h:419-420).
+ * x3270 applies the bounds in `set_dft_buffersize` (ft_dft.c:728-748), which is
+ * also where the default is chosen, and `do_qr_ddm` calls it with 0 when no
+ * transfer is running (sf.c:897).
+ */
+export const DFT_BUF_DEFAULT = 16384;
+export const DFT_BUF_MIN = 256;
+export const DFT_BUF_MAX = 32767;
+
+/** Clamp a DFT buffer size, mirroring set_dft_buffersize (ft_dft.c:740-747). */
+export function boundDftBufferSize(size: number): number {
+  if (size > DFT_BUF_MAX) return DFT_BUF_MAX;
+  if (size < DFT_BUF_MIN) return DFT_BUF_MIN;
+  return size;
+}
+
+/**
+ * Distributed Data Management (QCODE 0x95) — the DFT advertisement.
+ *
+ * NOT in DEFAULT_CAPABILITIES: it is added only when `-ddm on` is passed, which
+ * is the whole point of the flag. A host chooses DFT over CUT on seeing this
+ * unit, so advertising it unconditionally would silently move every live host
+ * off the CUT path that this project's transfer evidence was gathered on. See
+ * docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
+ *
+ * Body after `L L SFID QCODE`, from do_qr_ddm (sf.c:899-906) and the manual's
+ * byte table (pages.txt:9812-9822):
+ *
+ *   4-5   FLAGS   reserved, X'0000'
+ *   6-7   LIMIN   max DDM bytes/transmission inbound
+ *   8-9   LIMOUT  max DDM bytes/transmission outbound
+ *   10    NSS     number of subsets supported = 1
+ *   11    DDMSS   subset identifier = X'01', "DDM Copy Subset 1"
+ *
+ * The manual names bytes 6-7 UMIN and 8-9 LIMOUT in its table and then calls
+ * them UMIN/UMOUT in the prose (pages.txt:9818-9819 against :9827-9838) — OCR
+ * of LIMIN/LIMOUT, which is what x3270 calls them. X'0000' in either would mean
+ * "no implementation limit" (pages.txt:9830, :9838); we send a real bound
+ * because we will have one.
+ *
+ * NSS and DDMSS are a single SET16 of 0x0101 in x3270 (sf.c:906) with the
+ * comment `/* NSS=01, DDMSS=01 *\/`. Written as two bytes here because they are
+ * two fields, and X'01' is the only defined DDMSS value (pages.txt:9844-9848).
+ */
+export function ddmCapability(bufferSize = DFT_BUF_DEFAULT): Capability {
+  const size = boundDftBufferSize(bufferSize);
+  return {
+    qcode: Qcode.DDM,
+    // Table 6-1: "Distributed Data Management Yes X'95' Yes Yes"
+    // (pages.txt:8595) — Query column "Yes".
+    returnedForQuery: true,
+    params: () => [
+      0x00, 0x00,                          // FLAGS: reserved
+      (size >> 8) & 0xff, size & 0xff,     // LIMIN
+      (size >> 8) & 0xff, size & 0xff,     // LIMOUT
+      0x01,                                // NSS
+      0x01,                                // DDMSS: DDM Copy Subset 1
+    ],
+  };
+}
+
+/**
+ * `base` with the DDM unit inserted in ascending-QCODE position.
+ *
+ * Inserted before Implicit Partition (0xA6) rather than appended, because wire
+ * order is list order and ascending QCODE is what makes our captures comparable
+ * with x3270's (see DEFAULT_CAPABILITIES). The manual imposes no ordering
+ * requirement (pages.txt:8534-8539).
+ */
+export function withDdm(
+  base: readonly Capability[],
+  bufferSize?: number,
+): readonly Capability[] {
+  const ddm = ddmCapability(bufferSize);
+  const at = base.findIndex((c) => c.qcode > ddm.qcode);
+  if (at < 0) return [...base, ddm];
+  return [...base.slice(0, at), ddm, ...base.slice(at)];
+}
+
+/**
  * What we advertise. Adding a unit is one entry here.
  *
  * ORDER IS WIRE ORDER: buildQueryReply emits units in list order, so inserting

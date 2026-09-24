@@ -39,6 +39,12 @@ export function defaultSession(
    * (Task 7) passes the template string.
    */
   devname?: string,
+  /**
+   * Advertise Query Reply (DDM), which lets a host choose DFT file transfer.
+   * Absent means the product default, which is OFF -- unlike every other flag
+   * here. `-ddm on` passes `true`. See `SessionOptions.ddm`.
+   */
+  ddm?: boolean,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
@@ -50,5 +56,6 @@ export function defaultSession(
     ...(bindImage === undefined ? {} : { bindImage }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
+    ...(ddm === undefined ? {} : { ddm }),
   });
 }

@@ -38,8 +38,15 @@ cell of a 24x80 buffer and nothing else". The user's working setting is `-model 
 so **on their usual setup a CUT transfer is refused.** DFT removes that: `ft_dft.c` has **zero**
 screen-buffer references (`grep -c "ea_buf\|ctlr_add\|ROWS\|COLS"` = 0, against 25 in `ft_cut.c`) and
 no mention of 1920, 24x80 or geometry anywhere — it moves data through structured fields
-(`SF_TRANSFER_DATA = 0xd0`, dispatched at `sf.c:175`), not through the display buffer. **Neither
-Hercules host speaks DFT** (both measured as CUT), so stage 2 will have no live witness.
+(`SF_TRANSFER_DATA = 0xd0`, dispatched at `sf.c:175`), not through the display buffer.
+
+**CORRECTED 2026-09-24 — this paragraph used to end "Neither Hercules host speaks DFT (both measured
+as CUT), so stage 2 will have no live witness." THAT WAS WRONG, and it was wrong because it described
+our own advertisement as a property of the hosts.** Both hosts were measured while we had never sent
+Query Reply (DDM), QCODE `0x95`, which is the only thing that lets a host choose DFT. With it
+advertised, **MVS 3.8j TK5 sends `SF_TRANSFER_DATA` (two `TR_OPEN_REQ` frames) and VM/370 MECAFF still
+chooses CUT** — measured both ways on both hosts, commit `9f92816`. **So stage 2 DOES have a live
+witness, on TSO.** See `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`.
 
 ## Architecture
 

@@ -438,6 +438,26 @@ export const Qcode = {
    * Highlighting" (pages.txt:10342) and 3270ds.h:143 QR_HIGHLIGHTING 0x87.
    */
   HIGHLIGHTING: 0x87,
+  /**
+   * Distributed Data Management, the advertisement that lets a host choose DFT
+   * file transfer instead of CUT.
+   *
+   * Table 6-1: "Distributed Data Management Yes X'95' Yes Yes"
+   * (pages.txt:8595), and the unit's own section confirms both the code and the
+   * causality: "The Query Reply (Distributed Data Management) indicates the
+   * Distributed Data Management (DDM) subsets supported. When this function is
+   * supported, this Query Reply is transmitted inbound in reply to a Read
+   * Partition structured field specifying Query or Query List"
+   * (pages.txt:9806-9810). x3270's 3270ds.h:155 QR_DDM 0x95.
+   *
+   * THIS IS THE ONLY SWITCH BETWEEN CUT AND DFT, and it is ours to throw rather
+   * than the host's to offer: the client does not choose a transfer protocol,
+   * it declares a capability and the host picks. `ft_cut.c:440` and
+   * `ft_dft.c:175` call `ft_running(true)`/`ft_running(false)`, which REPORTS
+   * which protocol arrived (read once, `ft.c:556`, to print "CUT" or "DFT").
+   * See docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
+   */
+  DDM: 0x95,
   IMPLICIT_PARTITION: 0xa6,
   /**
    * Null (QCODE 0xFF) — "we support none of what you asked for".

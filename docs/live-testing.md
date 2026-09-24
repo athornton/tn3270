@@ -3136,3 +3136,64 @@ unexpressible in order to satisfy a VM quirk. x3270 agrees — both its branches
 
 Clean run: state proof `Ready;`, three transfers complete, `CONNECT= 00:00:09` (one session),
 `LOGOFF AT 00:33:08`.
+
+## MVS/TSO OFFERS DFT AND VM/370 DOES NOT — measured both ways on both hosts, 2026-09-24
+
+**This retires the standing claim that "neither Hercules host speaks DFT, so stage 2 has no live
+witness". That claim described OUR ADVERTISEMENT as a property of the hosts.** Both earlier
+measurements were taken while we had never sent Query Reply (Distributed Data Management), QCODE
+`0x95` — which is the only thing that lets a host choose DFT over CUT. See
+`docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md` for why that switch is ours and not
+the host's (`ft_cut.c:440`/`ft_dft.c:175` *report* the protocol that arrived; they do not select one).
+
+Scripts, both committed with their results in their headers:
+
+    node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm off < packages/cli/scripts/ddm-probe-vm.txt
+    node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm on  < packages/cli/scripts/ddm-probe-vm.txt
+    node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm off < packages/cli/scripts/ddm-probe-tso.txt
+    node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm on  < packages/cli/scripts/ddm-probe-tso.txt
+
+| Host | `-ddm off` | `-ddm on` |
+|---|---|---|
+| MVS 3.8j TK5 | 0 × `0xd0`, 249 bytes round-tripped over CUT | **4 × `0xd0`**, both transfers time out at 0 bytes |
+| VM/370 MECAFF | 249 bytes round-tripped over CUT | 249 bytes round-tripped over CUT, **0 × `0xd0`** |
+
+**One byte of advertisement is the only variable** — same script, same client build, same session
+shape. That is what the flag is for, and it is why the probe is attributable.
+
+### What TK5 actually sent
+
+    < f3 00 06 40 00 f1 c2 00 29 d0 00 12 01 06 01 01 ...  03 09 46 54 3a 44 41 54 41
+    = # WriteStructuredField unknownSF(0x40,3B) unknownSF(0xd0,38B)
+
+and again at 32B. SFID `0xd0` is `SF_TRANSFER_DATA`. **Both frames decode as `TR_OPEN_REQ`
+(`0x0012`), and their lengths `0x29` and `0x23` are exactly the two `dft_open_request` accepts**
+(`ft_dft.c:146-157`) — predicted from the source before any host was touched, then sent by a real host
+in one session. The trailing `46 54 3a 44 41 54 41` is ASCII **`FT:DATA`**, *not* `FT:MSG`, so
+`message_flag` is false and these are real file opens rather than the message channel.
+
+### THE FAILING TRANSFER IS THE POSITIVE RESULT, and the trap reverses later
+
+We have no DFT parser, so `-ddm on` on TK5 fails with `no CUT frame from the host within 30s after 0
+bytes`. **Judging this probe by whether the transfer succeeded would have inverted the finding.**
+Note the direction changes once a parser exists: *today* success means the host chose CUT and failure
+means it chose DFT; *afterwards* both end in a transferred file and only the trace distinguishes
+`SF_TRANSFER_DATA` frames from CUT screens. Same rule as the Sys Req run — judge by trace.
+
+### VM's result is a measurement, not an absence of one
+
+Our unit `00 0c 81 95 00 00 40 00 40 00 01 01` was on the wire 16 times and Summary listed `0x95`,
+against four Read Partitions from VM (`type=0x03, reqtyp=0x80, qcodes=[0x00]`). **MECAFF saw DDM and
+declined it.** Without that check the run would have been indistinguishable from a client that never
+sent the unit — which is the whole reason `TraceText` was added to the VM probe.
+
+### Consequences
+
+- **Stage 2 has a live witness on TSO, and TK5 is the reference host** — to be driven at **43x80**,
+  the geometry that motivated the stage and that CUT refuses.
+- **VM is the control**, exercising the advertised-and-declined path that proves the flag does not
+  break a CUT host.
+- CUT keeps its witnesses on both hosts, because `-ddm` defaults off.
+
+Clean runs: no `?CP:` on VM and `LOGOFF AT` present in both VM runs; no `IN USE` on TK5 and both TSO
+runs ended at a fresh VTAM logon panel. No userid was stranded.

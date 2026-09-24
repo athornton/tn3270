@@ -239,7 +239,7 @@ app.whenReady().then(async () => {
   try {
     session = defaultSession(
       resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname,
+      args.bindImage, args.bindLimit, args.devname, args.ddm,
     );
   } catch (err) {
     fail(explain(err));
