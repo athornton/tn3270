@@ -57,9 +57,13 @@ colour-capable 3279.
 binary round-tripping byte-identically each way. **`Ctrl-T` in the TUI opens a transfer
 form**; the GUI and the browser cannot reach it yet. Two honest limits: **CUT needs a 24x80
 screen**, so a session started at `-model 3278-4-E` refuses the transfer and names the
-restart, and **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** (measured on both
-hosts — TSO honours it as a maximum, CMS does not), so a `V 80` readback there is not
-confirmation the field took effect.
+restart, and **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on the wire
+2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
+indistinguishable while `RECFM F LRECL 80` differs, so the keyword demonstrably reaches
+the host and CMS simply disregards it. TSO honours it as a *maximum* (`VB 1024` measured
+through the form). So a `V 80` readback on CMS is not confirmation the field took effect,
+and the field stays enabled because disabling it would make a real TSO attribute
+unexpressible.
 
 **There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
 blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
@@ -1092,6 +1096,7 @@ visible there.
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically. **From the CLI**; the TUI's form drives the same `CutTransfer` and the same command builder, and has its own live row below |
 | the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy** |
 | the same form vs MVS/TSO, live | **pass — 2026-09-24** — 26 of 26 steps, both directions, the same binary **round-tripping byte-identically**, and TSO's own `LISTDS` reporting `VB 1024 BLKSIZE 1028 PS`. Exercises the other dialect (`RECFM(V) LRECL(1024)` parenthesised) and **both TSO quoting conventions in one session** — unquoted on the send, so TSO prepends the userid, quoted on the receive. `Blksize` is drawn here and was absent on VM, which is the applicability rule checked against two real hosts rather than a fixture. Both TSO quoting conventions in one session |
+| `Lrecl` with `Recfm=V` on CMS | **pass — 2026-09-24** — three cases in one session: `RECFM V LRECL 80` and `RECFM V` alone both store `V 80`, while `RECFM F LRECL 80` stores `F 80`. **The third case is what makes the first two evidence**, since without it "the two V cases match" cannot distinguish a host ignoring the keyword from a client never sending it. The 1000-byte payload was deliberately not a multiple of 80 |
 | mid-flight cancellation vs VM/CMS, live | **pass — 2026-09-24** — cancelling a 200KB upload at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and return CMS to `Ready;`: **the host left transfer mode**, which is the whole purpose of aborting rather than abandoning. The final count was 24261, not 204800, which is what proves it was mid-flight rather than before the first frame or after the last. **An aborted upload leaves a PARTIAL file on the host** — correct, since the host wrote what it received |
 | the same, vs MVS/TSO, live | **pass — 2026-09-24** — cancelled at **15430 of 204800**, final count 23162, and TSO returned to `READY`. **The observable differs and the difference is instructive**: MECAFF announces `>> TRANS99 - Protocol error`, while Rayborn's FFTP says **nothing at all** and simply ends. So *"the host printed an error"* is not the test — *"the next command is obeyed"* is, which both `ERASE`/`DELETE` show. A partial file is left on both |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |

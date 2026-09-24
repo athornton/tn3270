@@ -9,6 +9,12 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **CMS IGNORES `LRECL` WITH `RECFM V` — confirmed on the wire 2026-09-24, closing the last open
+  question on the transfer work.** Three cases in one session: `RECFM V LRECL 80` and `RECFM V`
+  alone both store `V 80` (indistinguishable), while `RECFM F LRECL 80` stores `F 80` — **and that
+  third case is what makes the first two mean anything**, since without it "the two V cases match"
+  cannot tell a host that ignores the keyword from a client that never sent it. The field therefore
+  **stays enabled** for `V`: TSO honours it as a maximum. See *CMS ignores `LRECL` with `RECFM V`*.
 - **MID-FLIGHT CANCELLATION IS LIVE-VERIFIED ON VM/CMS, 2026-09-24 — the last unwitnessed piece of
   the form, and the one whose whole purpose is what the host does next.** Cancelling a 200KB upload
   at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and
@@ -2866,12 +2872,11 @@ action first — and assert on what is DRAWN, not on what the function returns.*
 - **MVS/TSO through the form.** The CLI's `Transfer()` is verified there; the form is not. The
   flow is `vmxfer`-shaped but TSO needs quoting decisions (`'HERC01.X.Y'` vs userid-relative)
   that the form passes through verbatim, so it deserves its own run rather than an assumption.
-- **A cancelled transfer mid-flight.** `Esc` during a running transfer aborts with PF2 and the
-  unit tests pin the AID, but no live run has interrupted a real transfer. A 249-byte CUT
-  transfer completes too fast to interrupt by script; a larger file would be needed.
-- **The `Lrecl`-with-`Recfm=V` asymmetry through the form.** Measured through
-  `transferCommand` directly on both hosts (2026-09-22) and unchanged by this branch, but the
-  form has not been the thing that sent it.
+- ~~**A cancelled transfer mid-flight.**~~ **CLOSED 2026-09-24 ON BOTH HOSTS** — see
+  *Mid-flight cancellation*. A 249-byte transfer is indeed too fast; 200 KB was the measured
+  answer.
+- ~~**The `Lrecl`-with-`Recfm=V` asymmetry through the form.**~~ **CLOSED 2026-09-24** — see
+  *CMS ignores `LRECL` with `RECFM V`*.
 
 ## The transfer form against live MVS/TSO — verified 2026-09-24
 
@@ -2977,13 +2982,15 @@ userid by accident. Use `tsoxfer`, or set `TN3270_TUTORIAL=1`.
 
 ### What is still unverified, after both hosts
 
-- **Cancelling a transfer mid-flight.** `Esc` during a running transfer aborts with PF2 and
-  the unit tests pin the AID, but 249 bytes over CUT completes far too fast to interrupt by
-  script. A much larger file would be needed.
-- **`Lrecl` with `Recfm=V` as a *disagreement* between the hosts.** The asymmetry was measured
-  through `transferCommand` on 2026-09-22 (TSO honours it as a maximum, CMS ignores it); this
-  run sent `LRECL(1024)` to TSO and `LISTDS` reports `1024`, so TSO's half now has a witness
-  through the form. **CMS's half does not** — the VM run sent no `Lrecl` at all.
+- ~~**Cancelling a transfer mid-flight.**~~ **CLOSED 2026-09-24, on BOTH hosts** — see
+  *Mid-flight cancellation*.
+- ~~**`Lrecl` with `Recfm=V` as a disagreement between the hosts.**~~ **CLOSED 2026-09-24.** TSO's
+  half was witnessed by this run (`LISTDS` reporting `1024`); **CMS's half was closed the same day
+  by a three-case comparison** — see *CMS ignores `LRECL` with `RECFM V`*.
+
+**NOTHING ON THE TRANSFER FORM IS NOW UNVERIFIED AGAINST A LIVE HOST.** Both directions, both
+hosts, both dialects, both quoting conventions, mid-flight cancellation, the geometry refusal and
+the `LRECL` asymmetry all have witnesses.
 
 ## MID-FLIGHT CANCELLATION, live against VM/CMS — verified 2026-09-24
 
@@ -3097,3 +3104,35 @@ not the absence of one.**
 **The VM result was re-run after the harness was generalised** and reproduced byte-for-byte
 (17641 of 204800, same final counts) — a refactor of a live harness is exactly the kind of
 change that can silently invalidate the result it was written to capture.
+
+## CMS IGNORES `LRECL` WITH `RECFM V` — confirmed on the wire, 2026-09-24
+
+The last open question on the transfer work, and it is now closed by a **three-case** run in
+one session (`/tmp/lrecl-vm.txt`, a variant of the committed oracle). The asymmetry was
+measured through `transferCommand` on 2026-09-22; this confirms it end to end against the
+live host.
+
+| case | command we sent | CMS `LISTFILE (FORMAT` reports |
+|---|---|---|
+| LR1 | `IND$FILE PUT LR1 TEST A (RECFM V LRECL 80` | **`V 80`** |
+| LR2 | `IND$FILE PUT LR2 TEST A (RECFM V` | **`V 80`** — identical |
+| LR3 | `IND$FILE PUT LR3 TEST A (RECFM F LRECL 80` | **`F 80`** |
+
+**LR1 and LR2 are indistinguishable, so CMS ignores `LRECL` when `RECFM` is `V`.** The 1000-byte
+payload was deliberately **not** a multiple of 80, so a differing record length would have shown
+as a different record count rather than coincidentally matching.
+
+**CASE 3 IS THE LOAD-BEARING ONE AND THE REASON THIS IS EVIDENCE AT ALL.** Without it, "the two
+V cases match" cannot distinguish *a host that ignores the keyword* from *a client that never
+sent it*. LR3 differs (`F 80`, not `V 80`) from a command whose only change is the RECFM letter,
+which proves the keyword really does reach the host and is really parsed. That is the same
+three-case discipline the 2026-09-22 measurement used, and it is the whole design of the check.
+
+**So the field STAYS ENABLED for `Recfm=V`**, and the README's wording stands: TSO honours
+`LRECL` as a *maximum* record length (`VB 1024` measured through the form on 2026-09-24, against
+`VB 255` without it), CMS ignores it, and disabling the field would make a real TSO attribute
+unexpressible in order to satisfy a VM quirk. x3270 agrees — both its branches gate `LRECL` on
+`recfm != DEFAULT_RECFM` only, with no `V` check (`ft.c:721-726`, `ft.c:763-766`).
+
+Clean run: state proof `Ready;`, three transfers complete, `CONNECT= 00:00:09` (one session),
+`LOGOFF AT 00:33:08`.

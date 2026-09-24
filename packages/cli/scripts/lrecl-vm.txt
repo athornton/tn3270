@@ -1,0 +1,81 @@
+# Does CMS honour LRECL with RECFM V? THREE cases, and the third is load-bearing:
+# without a RECFM F control, "the two V cases match" cannot distinguish a host that
+# IGNORES the keyword from a client that never SENT it.
+Connect(127.0.0.1:3270)
+Wait(3270Mode,20)
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+Enter
+Wait(Settle,15)
+String("LOGON CMSUSER")
+Enter
+Wait(Settle,20)
+String("CMSUSER")
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+Clear
+Wait(Settle,20)
+String("QUERY DISK A")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+# --- case 1: RECFM V, LRECL 80 ---
+String("ERASE LR1 TEST A")
+Enter
+Wait(Settle,20)
+Transfer(Direction=send,Host=vm,HostFile="LR1 TEST A",LocalFile=/tmp/lrecl-src.bin,Recfm=variable,Lrecl=80)
+Clear
+Wait(Settle,20)
+String("LISTFILE LR1 TEST A (FORMAT")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+# --- case 2: RECFM V, NO LRECL (the control for case 1) ---
+String("ERASE LR2 TEST A")
+Enter
+Wait(Settle,20)
+Transfer(Direction=send,Host=vm,HostFile="LR2 TEST A",LocalFile=/tmp/lrecl-src.bin,Recfm=variable)
+Clear
+Wait(Settle,20)
+String("LISTFILE LR2 TEST A (FORMAT")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+# --- case 3: RECFM F, LRECL 80 -- PROVES WE REALLY SEND THE KEYWORD ---
+String("ERASE LR3 TEST A")
+Enter
+Wait(Settle,20)
+Transfer(Direction=send,Host=vm,HostFile="LR3 TEST A",LocalFile=/tmp/lrecl-src.bin,Recfm=fixed,Lrecl=80)
+Clear
+Wait(Settle,20)
+String("LISTFILE LR3 TEST A (FORMAT")
+Enter
+Wait(Settle,20)
+ScreenText
+Clear
+Wait(Settle,20)
+String("ERASE LR1 TEST A")
+Enter
+Wait(Settle,15)
+String("ERASE LR2 TEST A")
+Enter
+Wait(Settle,15)
+String("ERASE LR3 TEST A")
+Enter
+Wait(Settle,15)
+Clear
+Wait(Settle,20)
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+Quit
