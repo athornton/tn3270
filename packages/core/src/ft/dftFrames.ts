@@ -54,7 +54,7 @@ export const DftReply = {
   CLOSE: 0x4109,
 } as const;
 
-/** Sub-headers inside a frame. */
+/** Sub-headers inside a frame: `TR_*_HDR`. */
 export const DftHeader = {
   /** `TR_RECNUM_HDR`, followed by a 32-bit record number. */
   RECNUM: 0x6306,
@@ -66,7 +66,7 @@ export const DftHeader = {
   BEGIN_DATA: 0x61,
 } as const;
 
-/** Error codes. */
+/** Error codes: `TR_ERR_*`. */
 export const DftError = {
   /** `TR_ERR_EOF` — a GET past end of file. Not a failure: it ends an upload. */
   EOF: 0x2200,
