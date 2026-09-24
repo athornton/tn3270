@@ -48,10 +48,13 @@ describe('DFT wire constants, from include/ft_dft_ds.h', () => {
 
 describe('parseDftFrame', () => {
   it('reads the request type from offset 0 of the PARAMS, not offset 3', () => {
-    // A minimal Open: request type only. x3270 would read this at cp+3; we get
-    // params, so it is at 0. Getting this wrong is the bug this test exists for.
-    const frame = parseDftFrame(Uint8Array.of(0x00, 0x12));
+    // Distinct bytes at BOTH candidate offsets, so a wrong offset reads a REAL
+    // value rather than running off the end and coercing to 0. x3270 reads this
+    // field at cp+3 because its pointer includes the length bytes and the SFID;
+    // parseStructuredFields strips both, so for us it is at 0.
+    const frame = parseDftFrame(Uint8Array.of(0x00, 0x12, 0xff, 0x99, 0x88, 0x77));
     expect(frame.requestType).toBe(0x0012);
+    expect(frame.requestType).not.toBe(0x9988); // what an offset-3 read would give
   });
 
   it('reads a CLOSE', () => {

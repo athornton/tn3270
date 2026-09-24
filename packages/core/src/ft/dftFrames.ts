@@ -102,7 +102,8 @@ export interface DftFrame {
 }
 
 /**
- * Split a `SF_TRANSFER_DATA` payload into its request type and its bytes.
+ * Extract a `SF_TRANSFER_DATA` payload's request type, without disturbing the
+ * payload.
  *
  * `payload` is what `parseStructuredFields` yields: the parameters, with the
  * length bytes and the SFID already removed. So the request type x3270 reads at
