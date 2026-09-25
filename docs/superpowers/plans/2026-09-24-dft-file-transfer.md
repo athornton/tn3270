@@ -2041,7 +2041,7 @@ counter saying otherwise would misreport a working transfer in the trace.
 
 The spec's warning: **omitting this stalls uploads only; downloads pass.** That is the shape of defect that ships.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dftSession.test.ts`:
 
@@ -2104,12 +2104,12 @@ acting** — without that, a broken Task 6 would make all three pass against `un
 third test asserts the read was *answered*, not merely that it was not a replay: `not.toBe(0x88)`
 alone passes when nothing is sent at all, which is the stall this hook exists to prevent.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: FAIL — the screen read is sent instead of the retained frame.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/core/src/session.ts`, at the top of `answerRead`:
 
@@ -2139,18 +2139,18 @@ In `packages/core/src/session.ts`, at the top of `answerRead`:
   }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: all PASS.
 
-- [ ] **Step 5: Mutation-check, and check it the right way round**
+- [x] **Step 5: Mutation-check, and check it the right way round**
 
 Delete the whole short-circuit. Rebuild and run the **full** suite.
 Expected: the two replay tests fail and **every download test still passes** — which is the point. Record that asymmetry in the commit: it is the evidence that this hook needed its own test rather than being covered incidentally.
 Revert.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/session.ts packages/core/test/dftSession.test.ts
@@ -2168,6 +2168,30 @@ MEASURED, and it is why this is its own task: deleting the guard reddens the two
 replay tests and leaves EVERY download test green. Omitting it would have stalled
 uploads only."
 ```
+
+**AS BUILT (2026-09-25).** Inline. **21 tests in `dftSession.test.ts`; suite 2060 -> 2065 in 81
+files**, build/typecheck clean. The plan was right in every particular here, including its correction
+of the spec's citations — `ctlr.c:760` and `:986` verified exactly, the spec's `:761`/`:987` each one
+line late.
+
+**THE ASYMMETRY THE PLAN ASKED FOR IS MEASURED, and it is the whole justification for this task
+existing:** deleting the short-circuit fails **2 tests and leaves 2063 green**, every download test
+among them. An upload-only stall is invisible to the entire receive suite.
+
+**Two tests added beyond the plan's three:**
+1. **A replay must be IDEMPOTENT.** Two reads in a row produce identical bytes and leave
+   `transferred` unchanged. This pins the decision to replay retained BYTES rather than ask the engine
+   for a frame — re-deriving would consume more source and hand the host the NEXT chunk, corrupting
+   the file while both reads appeared to succeed. Nothing in the plan's set distinguished those.
+2. **An ordinary read with NO transfer at all**, which is the commonest case in the product and the
+   one a wrong guard (`this.dft !== undefined` instead of `retainedFrame !== undefined`) would break
+   for every user who never transfers a file. The plan's third test covers a download in flight but
+   not the no-transfer case.
+
+**The plan's own two cautions were both right and worth keeping:** `uploading()` asserts
+`retainedFrame` is defined **before** acting, so a broken Task 6 cannot make these pass against
+`undefined`; and the no-replay test asserts the read was *answered*, since `not.toBe(0x88)` alone
+passes when nothing is sent — which is the stall being guarded against.
 
 ---
 
