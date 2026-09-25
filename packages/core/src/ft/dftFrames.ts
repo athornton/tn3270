@@ -5,14 +5,21 @@
  * only place they are written down — the IBM manual documents the DDM Query
  * Reply that ENABLES this protocol but not these request codes.
  *
- * ## THE OFFSET TRAP
+ * ## THE OFFSET TRAP, AND ITS ONE EXCEPTION
  *
  * x3270 overlays `struct data_buffer` on the START of the structured field, so
  * its offsets count the two length bytes and the SFID. `parseStructuredFields`
- * hands us the parameters only. **Every offset here is x3270's minus 3**, and the
- * constants below are named for OUR frame so the subtraction happens once.
- * Confirmed against a live host: TK5 sent field lengths 0x29 and 0x23 and our
- * parser reported 38- and 32-byte payloads (41-3, 35-3).
+ * hands us the parameters only, so **offsets read through `data_bufr` are x3270's
+ * minus 3** — the request type, and everything in a `Data Insert`. Confirmed
+ * against a live host: TK5 sent field lengths 0x29 and 0x23 and our parser
+ * reported 38- and 32-byte payloads (41-3, 35-3).
+ *
+ * **THE `Open` IS THE EXCEPTION AND ITS OFFSETS ARE UNCHANGED.**
+ * `dft_open_request` is handed `cp`, not the struct base, and `cp` already points
+ * at struct offset 3 — the same byte our payload starts at. **This file got that
+ * wrong first time and its tests passed anyway**, because the test helper wrote
+ * the name at the same wrong offset the parser read. Full derivation and the
+ * measurement at `NAME_AT_SHORT` below; do not re-apply the -3 here.
  */
 
 import { AID, Sfid } from '../constants.js';
@@ -138,11 +145,47 @@ export function parseDftFrame(payload: Uint8Array): DftFrame {
 const OPEN_SHORT = 0x23 - X3270_HEADER_LEN;   // 32
 const OPEN_LONG = 0x29 - X3270_HEADER_LEN;    // 38
 
-/** Name offsets, x3270's +25 / +31 less the header (`ft_dft.c:147,153`). */
-const NAME_AT_SHORT = 25 - X3270_HEADER_LEN;  // 22
-const NAME_AT_LONG = 31 - X3270_HEADER_LEN;   // 28
-/** Record size offset, x3270's +27 less the header (`ft_dft.c:151`). */
-const RECSZ_AT = 27 - X3270_HEADER_LEN;       // 24
+/**
+ * ## THE OPEN OFFSETS ARE *NOT* x3270's MINUS 3 — THIS IS THE ONE EXCEPTION
+ *
+ * **CORRECTED 2026-09-25 after empirical measurement; the first version of this
+ * file was WRONG here and its tests passed anyway.** The `-3` rule holds for the
+ * payload *length* and for `Data Insert`'s offsets, because those are read through
+ * `data_bufr`, which overlays the field from byte 0. It does **not** hold for the
+ * `Open`, because `dft_open_request` is not given the struct base.
+ *
+ * `GET16` does **not** advance its pointer (`include/3270ds.h:341-344` — it reads
+ * `*(ptr)` and `*(ptr+1)` and assigns nothing back). So at `ft_dft.c:108` `cp` is
+ * set to `data_bufr->sf_request_type` and is *still* pointing there when
+ * `:114` calls `dft_open_request(data_length, cp)`. `sf_request_type` is at struct
+ * offset **3** (verified by `offsetof`), which is exactly where OUR payload
+ * starts.
+ *
+ * So `cp` and our `payload` point at THE SAME BYTE, and the Open's internal
+ * offsets carry over **unchanged**:
+ *
+ * | field | x3270 | ours |
+ * |---|---|---|
+ * | name, `len == 0x23` | `cp + 25` (`:147`) | **25** |
+ * | record size, `len == 0x29` | `cp + 27` (`:151`) | **27** |
+ * | name, `len == 0x29` | `cp + 31` (`:153`) | **31** |
+ *
+ * Measured, not reasoned: a synthetic `0x23` field with `memcpy(cp + 25, "FT:DATA", 7)`
+ * puts the name at field index 28 = payload index 25, and payload index 22 reads
+ * zeros. The live-probe evidence (field lengths `0x29`/`0x23` arriving as 38/32-byte
+ * payloads) confirms the LENGTH subtraction only, and was wrongly generalised to
+ * these offsets.
+ *
+ * **Why the original error was invisible:** the test helper wrote the name at the
+ * same wrong offset the parser read it from, so the pair agreed with each other and
+ * not with the wire — and the plan itself warns this failure is quiet, because a
+ * wrong name simply is not `FT:MSG`, so a MESSAGE frame silently starts a file
+ * transfer. `openPayload` now writes at the x3270 offsets and is checked against a
+ * byte-for-byte literal frame.
+ */
+const NAME_AT_SHORT = 25;
+const NAME_AT_LONG = 31;
+const RECSZ_AT = 27;
 
 /** How many bytes the name field occupies. `memcpy(namebuf, name, 7)` (`ft_dft.c:159`). */
 const NAME_LENGTH = 7;
@@ -190,10 +233,12 @@ export function parseDftOpen(payload: Uint8Array): DftOpen {
     );
   }
 
-  // `nameAt + i` maxes at 28 (short, < 32) or 34 (long, < 38), both within the
-  // length just checked above, so this is provably in bounds -- the same idiom
-  // parseDftFrame uses two functions up, not a real bounds concern needing a
-  // fallback.
+  // The name ENDS EXACTLY AT THE PAYLOAD'S LAST BYTE in both forms: 25+7 = 32 and
+  // 31+7 = 38, the two lengths checked just above. That exact fit is corroborating
+  // evidence for the corrected offsets rather than a coincidence -- x3270's
+  // `memcpy(namebuf, name, 7)` consumes the field to its end, which is why the
+  // short form's legal length is 0x23 and not more. So this is provably in bounds,
+  // and an off-by-one in either direction would run off the end.
   let name = '';
   for (let i = 0; i < NAME_LENGTH; i++) name += String.fromCharCode(payload[nameAt + i]!);
   // Trailing spaces only, matching x3270's backwards walk from namebuf[6]

@@ -82,38 +82,93 @@ describe('parseDftFrame', () => {
 
 /**
  * Build an Open payload as OUR parser sees it: field length minus 3.
- * `len` is the FIELD length the host declares (0x23 or 0x29), so the payload is
- * len-3 bytes. The name sits at the x3270 offset minus 3.
+ *
+ * **CORRECTED 2026-09-25.** This helper used to write the name at payload offset
+ * 22/28 — the same wrong offsets the parser read — so the two agreed with each
+ * other and not with the wire, and every test here passed over a real bug.
+ *
+ * The Open's internal offsets are x3270's UNCHANGED, not minus 3, because
+ * `dft_open_request` is handed a pointer to `sf_request_type` (struct offset 3)
+ * rather than the struct base: `GET16` does not advance its argument
+ * (`3270ds.h:341-344`), so the `cp` set at `ft_dft.c:108` is still there at `:114`.
+ * That is the same byte our payload starts at. See the long note in `dftFrames.ts`.
+ *
+ * To keep this helper from ever again being "right" only relative to the parser, it
+ * is written in terms of the FIELD and then sliced, exactly as the wire is laid
+ * out, and `pins the struct layout` below checks it against a hand-written literal.
  */
 function openPayload(len: 0x23 | 0x29, name: string, recsz = 0): Uint8Array {
-  const p = new Uint8Array(len - 3);
-  p[0] = 0x00;
-  p[1] = 0x12;                       // TR_OPEN_REQ
-  const nameAt = len === 0x23 ? 22 : 28;
+  // Build the WHOLE structured field, as `struct data_buffer` overlays it.
+  const field = new Uint8Array(len);
+  field[0] = 0x00;
+  field[1] = len;                    // declared field length
+  field[2] = 0xd0;                   // SFID
+  field[3] = 0x00;
+  field[4] = 0x12;                   // TR_OPEN_REQ, at struct offset 3
+  // `cp` is field + 3, so x3270's cp+N is field index N + 3.
+  const cp = 3;
   if (len === 0x29) {
-    p[24] = (recsz >> 8) & 0xff;     // recsz at x3270's +27
-    p[25] = recsz & 0xff;
+    field[cp + 27] = (recsz >> 8) & 0xff;
+    field[cp + 27 + 1] = recsz & 0xff;
   }
-  // Name is 7 bytes, space-padded, EBCDIC on the wire but ASCII in x3270's
-  // comparison because the host sends it as ASCII -- see the note in the impl.
+  const nameAt = cp + (len === 0x23 ? 25 : 31);
+  // Name is 7 bytes, space-padded. ASCII, not EBCDIC: x3270 strcmp's the raw
+  // bytes and TK5's own frames carry ASCII -- see the note in the impl.
   const padded = name.padEnd(7, ' ');
-  for (let i = 0; i < 7; i++) p[nameAt + i] = padded.charCodeAt(i);
-  return p;
+  for (let i = 0; i < 7; i++) field[nameAt + i] = padded.charCodeAt(i);
+  // What parseStructuredFields hands us: the params, less the 2 length bytes and
+  // the SFID.
+  return field.subarray(3);
 }
 
 describe('parseDftOpen', () => {
-  it('accepts the short form, name at payload offset 22', () => {
+  it('pins the struct layout against a HAND-WRITTEN frame, owing nothing to the helper', () => {
+    // THIS TEST EXISTS BECAUSE THE HELPER AND THE PARSER ONCE AGREED ON A WRONG
+    // OFFSET AND EVERY OTHER TEST HERE PASSED. It is written byte by byte from
+    // `struct data_buffer` (ft_dft.c:59-67) plus the pointer fact at :108/:114, so
+    // it is an INDEPENDENT oracle: if the parser and `openPayload` drift together
+    // again, this still fails.
+    //
+    // A real 0x23 Open for "FT:MSG ". Field: 00 23 d0 | 00 12 | 20 filler | name(7).
+    const field = [
+      0x00, 0x23, 0xd0,                    // 0-2   length, length, SFID
+      0x00, 0x12,                          // 3-4   TR_OPEN_REQ  (cp+0)
+      ...Array(23).fill(0x00),             // 5-27  filler       (cp+2 .. cp+24)
+      0x46, 0x54, 0x3a, 0x4d, 0x53, 0x47, 0x20, // 28-34 "FT:MSG " at cp+25
+    ];
+    expect(field).toHaveLength(0x23);      // the declared length, self-checked
+    // Our payload is the field less the 2 length bytes and the SFID.
+    const payload = Uint8Array.from(field.slice(3));
+    expect(payload).toHaveLength(0x23 - 3);
+    const open = parseDftOpen(payload);
+    expect(open.name).toBe('FT:MSG');
+    expect(open.isMessage).toBe(true);
+    // And the offset the original code used reads filler, not a name.
+    expect(payload[22]).toBe(0x00);
+    expect(payload[25]).toBe(0x46);        // 'F'
+  });
+
+  it('accepts the short form, name at payload offset 25', () => {
     const open = parseDftOpen(openPayload(0x23, 'FT:DATA'));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBeUndefined();
     expect(open.isMessage).toBe(false);
   });
 
-  it('accepts the long form, record size at 24 and name at 28', () => {
+  it('accepts the long form, record size at 27 and name at 31', () => {
     const open = parseDftOpen(openPayload(0x29, 'FT:DATA', 1024));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBe(1024);
     expect(open.isMessage).toBe(false);
+  });
+
+  it('the name ends exactly at the payload\'s last byte, in both forms', () => {
+    // 25+7 = 32 and 31+7 = 38, the two legal payload lengths. The exact fit is
+    // corroborating evidence for the offsets: x3270's 7-byte memcpy consumes the
+    // field to its end, which is why 0x23 is the short form's length and not more.
+    // An off-by-one either way would read off the end or leave a byte spare.
+    expect(25 + 7).toBe(0x23 - 3);
+    expect(31 + 7).toBe(0x29 - 3);
   });
 
   it('trims the name\'s trailing spaces, so a padded FT:MSG still matches', () => {
