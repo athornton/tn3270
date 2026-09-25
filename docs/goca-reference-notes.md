@@ -201,11 +201,44 @@ encoding, and conflating the two would be easy.
   matching Begin Area. A conformant implementation is expected to raise these, which is a source of
   negative test cases.
 
+## GA23-0059-07 in better form, and the two books we still need (2026-09-25)
+
+The user supplied two copies of the 3270 Programmer's Reference:
+
+- `$HOME/GA23-0059-07_3270_Data_Stream_Programmers_Reference_199206.pdf` — the released June 1992
+  document, 26 MB (scanned).
+- `$HOME/GA23-0059-07-text.pdf` — **a near-all-text draft, 471 pages, and the one to use.** It
+  extracts with proper table borders and renders hex as `X’0F10’` with real typographic quotes.
+
+**It is the SAME EDITION as `~/3270/ref/pages.txt`** (which is also GA23-0059-07), so it adds no new
+*content* — but it is materially better for citation, because `pages.txt` mangles `X'nn'` into
+`X }nn}` and loses table structure. **Prefer the draft PDF for any new structured-field work**; keep
+`pages.txt` line citations already in the code, since they are what existing comments reference.
+
+**It does NOT close the graphics gap, confirmed by search:**
+- The graphics `DATA` deferral appears in **seven** places, not one.
+- **Zero GOCA drawing orders appear anywhere in 471 pages** — searched for `GLINE`, `GSCP`, `GBIMG`,
+  `GCHST`, `GFARC`, `GSLT`, `GSCOL`, `GBAR`, `GEAR`, `GNOP1`. The 3270 manual and GOCA do not overlap
+  at all; the envelope and the contents live in genuinely separate books.
+
+**BUT IT NAMES THE TWO BOOKS WE ACTUALLY NEED (p. idx11, the related-publications list):**
+
+| order number | title |
+|---|---|
+| **GA18-2177** | *IBM 3179 Color Display Station Description* |
+| **GA18-2535** | *IBM 3192 Display Station Description* |
+
+**These are the acquisition targets now.** They are the terminal-specific descriptions, so they are
+where the 3270 GOCA subset, the device defaults, and the pel geometry should live — the three things
+GOCA-for-AFP cannot tell us. The only other mention of these terminals is at idx432, listing the
+3179 among devices that "interpret the data stream", which adds nothing.
+
 ## Still missing after this book
 
-1. **The 3179-G / 3192-G manuals.** Which subset the terminal accepts, its defaults, and its pel
-   geometry. The user has not found these yet. GOCA gives primitives; it does not say what a
-   G-terminal does with them.
+1. **The 3179-G / 3192-G manuals — NOW IDENTIFIED BY ORDER NUMBER: `GA18-2177` and `GA18-2535`**
+   (see the section above). Which subset the terminal accepts, its defaults, and its pel geometry.
+   GOCA gives primitives; it does not say what a G-terminal does with them, and GA23-0059-07 defers
+   to these seven times over.
 2. **The 3270 binding of GOCA** — the equivalent of Appendix A/B for the 3270 data stream. Unknown
    whether a separate publication exists.
 3. **Pel dimensions for the G-terminals.** Still unrecorded anywhere we have. prycroft6 says an
