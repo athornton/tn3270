@@ -16,6 +16,7 @@ import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './queryreply.js';
+import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
@@ -123,7 +124,15 @@ export interface ConnectOptions {
   lus?: readonly string[];
 }
 
-export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm';
+/**
+ * `transferEnd` fires when a DFT transfer finishes, however it finished — success,
+ * the host's own error message, a cancellation, or a malformed frame. A front end
+ * uses it to close a progress display without polling.
+ *
+ * Not exported from `index.ts` and referenced only by `on`/`off`/`listenerCount`/
+ * `emit`, so widening it has no blast radius (checked 2026-09-25).
+ */
+export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
@@ -140,6 +149,12 @@ export class Session {
   private telnet: TelnetLayer | undefined;
   private error: string | undefined;
   private readonly listeners = new Map<SessionEvent, Set<() => void>>();
+  /**
+   * The DFT transfer in flight, if any. `undefined` means a `SF_TRANSFER_DATA`
+   * frame is unexpected — which x3270 also treats as a no-op rather than an
+   * error, tracing "(no transfer in progress)" (`ft_dft.c:97-100`).
+   */
+  private dft: DftTransfer | undefined;
   /**
    * Host records applied since connect. Monotonic; never reset.
    *
@@ -304,6 +319,22 @@ export class Session {
   private emit(event: SessionEvent): void {
     for (const fn of this.listeners.get(event) ?? []) fn();
   }
+
+  /**
+   * Start a DFT transfer. The caller drives it by letting host records arrive —
+   * there is nothing to send first, because DFT is host-driven: the host opens,
+   * asks and closes, and we answer.
+   *
+   * Replaces any transfer already in flight. Not refused, because the previous one
+   * can only still be here if it never completed, and a caller that has decided to
+   * start a new transfer has more current information than this method does.
+   */
+  startDftTransfer(transfer: DftTransfer): void {
+    this.dft = transfer;
+  }
+
+  /** The DFT transfer in flight, for a front end to read progress or cancel. */
+  get dftTransfer(): DftTransfer | undefined { return this.dft; }
 
   isConnected(): boolean {
     return this.conn !== undefined;
@@ -758,6 +789,9 @@ export class Session {
       if (result.sfReply !== undefined) {
         this.answerQuery(result.sfReply);
       }
+      if (result.transferData !== undefined) {
+        for (const payload of result.transferData) this.handleTransferData(payload);
+      }
       // The only thing that OBSERVES the SA/MF counters. execute() bumps them
       // per record and nothing sums them, so without a line here a live run
       // could not tell "we saw no SA/MF" from "nobody looked" — the precise
@@ -1107,6 +1141,49 @@ export class Session {
     msg.set(header, 0);
     msg[header.length] = sense;
     this.telnet?.sendRecord(msg);
+  }
+
+  /**
+   * Answer one DFT frame.
+   *
+   * A frame arriving with no transfer in flight is IGNORED, matching x3270's
+   * `ft_state == FT_NONE` early return (`ft_dft.c:97-100`). It must not throw: a
+   * host can send one at any time, and `handleRecord` rethrows non-protocol
+   * errors as our own bug, which drops the connection. That would make an
+   * unexpected frame a remotely-triggerable disconnect — the same shape as the
+   * gateway kill the keypad branch's task ordering created.
+   */
+  private handleTransferData(payload: Uint8Array): void {
+    const transfer = this.dft;
+    if (transfer === undefined) {
+      this.trace.note('SF_TRANSFER_DATA with no transfer in progress, ignored');
+      return;
+    }
+    let step;
+    try {
+      step = transfer.handle(payload);
+    } catch (err) {
+      // A malformed frame ends the TRANSFER, never the session -- the rule CUT
+      // already follows. Without this catch a DftFrameError would escape into
+      // handleRecord and drop the connection.
+      this.trace.note(`DFT frame rejected: ${err instanceof Error ? err.message : String(err)}`);
+      this.dft = undefined;
+      this.emit('transferEnd');
+      return;
+    }
+    // Trace BEFORE the reply, so the log reads in the order things happened.
+    // Without this the `unsupported` field would be dead code and an
+    // unimplemented request type would be an unexplainable stall with an empty
+    // log -- x3270 logs `Unsupported(0x%04x)` for exactly this reason.
+    if (step.unsupported !== undefined) {
+      this.trace.note(
+        `DFT request type 0x${step.unsupported.toString(16).padStart(4, '0')} not implemented`);
+    }
+    if (step.reply !== undefined) this.sendInbound(step.reply);
+    if (step.done !== undefined) {
+      this.dft = undefined;
+      this.emit('transferEnd');
+    }
   }
 
   /**

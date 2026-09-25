@@ -24,3 +24,5 @@ export * from './session.js';
 export * from './ft/cut.js';
 export * from './ft/frames.js';
 export * from './ft/transfer.js';
+export * from './ft/dft.js';
+export * from './ft/dftFrames.js';

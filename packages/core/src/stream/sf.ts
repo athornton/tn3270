@@ -66,6 +66,16 @@ export type StructuredField =
    * PID=0xFF; see the stage 2a spec and the Query List work that followed it.
    */
   | { kind: 'readPartition'; pid: number; type: number; queryList?: QueryListParams }
+  /**
+   * `SF_TRANSFER_DATA` (SFID 0xd0): a DFT file-transfer frame.
+   *
+   * `payload` is the PARAMETERS — the length bytes and the SFID are already
+   * gone — so a `Data Insert`'s offsets in x3270's `ft_dft.c` are 3 more than the
+   * offset here. **The `Open` is the exception and its offsets are unchanged**,
+   * because `dft_open_request` receives a pointer already 3 bytes in;
+   * `ft/dftFrames.ts` owns both rules and explains why.
+   */
+  | { kind: 'transferData'; payload: Uint8Array }
   /** Any SFID we do not implement: counted and traced, never fatal. */
   | { kind: 'unknownSf'; sfid: number; data: Uint8Array };
 
@@ -206,6 +216,13 @@ export function parseStructuredFields(payload: Uint8Array): StructuredField[] {
         // existing toEqual assertions on this shape fail.
         fields.push({ kind: 'readPartition', pid, type });
       }
+    } else if (sfid === Sfid.TRANSFER_DATA) {
+      // No validation beyond this: a DFT frame's own shape is dft.ts's business,
+      // and a malformed one must fail the TRANSFER, not the record. Copied rather
+      // than subarray'd because the payload OUTLIVES this record -- dft.ts retains
+      // received chunks and Session holds a transfer across records, so a view into
+      // the inbound buffer would be rewritten by the next read.
+      fields.push({ kind: 'transferData', payload: Uint8Array.from(params) });
     } else {
       fields.push({ kind: 'unknownSf', sfid, data: Uint8Array.from(params) });
     }
