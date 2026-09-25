@@ -9,6 +9,25 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **CUT AT 43x80 IS MEASURED, 2026-09-25 — THE HOST REFUSES AND SELF-RECOVERS, so the protocol-
+  selection spec's one open question is closed.** Attempted a CUT upload against VM/370 CMS on a
+  43-row screen with the `dist` geometry gate disabled (source untouched; build restored and
+  re-verified at 2075 tests immediately afterwards). State proven first: `QUERY DISK A` → `Ready;`.
+  MECAFF answered **`Error: IND$FILE requires a MECAFF connected 3270 terminal`**, then
+  `... aborting`, and CMS returned to **`Ready(00032)` by itself**. **Zero CUT frames, zero `0xd0`
+  frames**, and `LOGOFF` completed with `CONNECT= 00:00:04` spanning only that run — no wedged
+  session and no manual recovery.
+  **THIS IS THE SAME REFUSAL `transfer-vm.txt` ALREADY DOCUMENTS FOR A PLAIN `IBM-3278-2`**, word for
+  word. So MECAFF is checking **whether it recognises the terminal, not the geometry**, and a model-4
+  session fails that check the same way a model-2-without-`-E` does. The question "does a CUT host
+  paint a frame at the wrong offsets" therefore **never arises on this host** — no transfer starts.
+  **Why it was worth one run:** it shrank an accepted regression in the selection design (removing the
+  up-front geometry gate does not leave this host mid-transfer), **deleted a planned code branch** (a
+  fast-fail on "screen arrived, not a CUT frame, not 24x80" is not worth building for a case that
+  resolves in ~1s), and **corrected a planned error message** — we were going to print "the host chose
+  CUT, which needs a 24x80 screen", but the host's own text is more accurate and must not be
+  overridden by our guess.
+
 - **THE VM CUT CONTROL FOR DFT IS NOW MEASURED, 2026-09-25 — the gap left open earlier that day.**
   The user recreated the VM/370 system from scratch and it is back on `localhost:3270`. Same
   version (**VM/370 Community Edition V1 R1.2**), logo paints, 22 fields, 24x80, zero program checks.
