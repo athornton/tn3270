@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { parseStructuredFields } from '../src/stream/sf.js';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import { DftTransfer } from '../src/ft/dft.js';
-import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S } from '../src/constants.js';
+import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, Qcode } from '../src/constants.js';
+import { ddmCapability } from '../src/queryreply.js';
 
 describe('parseStructuredFields, SF_TRANSFER_DATA', () => {
   it('yields a transferData variant, not an unknownSf', () => {
@@ -373,5 +374,127 @@ describe('the Read Modified hook', () => {
     conn.host(0xf6, 0xff, 0xef);
     expect(conn.sent[0]).not.toBe(0x88);
     expect(conn.sent.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Split a Query Reply record into its units: `{ qcode, body }` each.
+ *
+ * The same walk `queryreply.test.ts` uses, and the reason it is worth copying is the
+ * lesson from writing these tests: scanning the raw record for a QCODE byte with
+ * indexOf matches payload bytes that happen to equal it. Parse the structure.
+ */
+function replyUnits(sent: number[]): { qcode: number; body: number[] }[] {
+  // The record is the reply followed by IAC EOR, which sendInbound appends.
+  //
+  // AND EVERY 0xff IN THE PAYLOAD ARRIVES DOUBLED, because 0xff is the telnet escape
+  // and sendRecord's doubleIac() escapes it. Undoubling is not optional here: a
+  // Query Reply is full of 0xff (Usable Area's flags, Highlighting's pairs), and a
+  // walk over the raw bytes reads a doubled pair as part of a length. My first
+  // version did exactly that and reported a unit of length 65535, which looked like
+  // a product bug and was a test bug. Measured, not guessed: a direct probe showed
+  // the real reply is 4 units with Summary growing 9 -> 10 bytes when DDM is on.
+  const raw = sent.slice(0, -2);
+  const bytes: number[] = [];
+  for (let k = 0; k < raw.length; k++) {
+    bytes.push(raw[k]!);
+    if (raw[k] === 0xff && raw[k + 1] === 0xff) k++;
+  }
+  const out: { qcode: number; body: number[] }[] = [];
+  let i = 1;                                  // skip the AID
+  while (i < bytes.length) {
+    const len = (bytes[i]! << 8) | bytes[i + 1]!;
+    if (len < 4) throw new Error(`bogus unit length ${len} at offset ${i}`);
+    out.push({ qcode: bytes[i + 3]!, body: bytes.slice(i + 4, i + len) });
+    i += len;
+  }
+  return out;
+}
+
+describe('the DDM advertisement through a Session', () => {
+  /**
+   * Drive a real Read Partition (Query) from the host and return what we replied.
+   *
+   * THIS EXISTS BECAUSE THE CONSTANT-LEVEL TESTS CANNOT CATCH THE REAL DEFECT.
+   * Measured 2026-09-25: replacing `this.opts.ddm ? withDdm(...) : DEFAULT_CAPABILITIES`
+   * with an unconditional `withDdm(...)` left ALL 2071 tests green -- including the six
+   * new ones in queryreply.test.ts, which test the CONSTANT and the helper, not the
+   * session's choice between them.
+   *
+   * That mutation is not a cosmetic one. Advertising DDM changes which protocol a
+   * LIVE HOST speaks: TK5 offers DFT on seeing 0x95 and stays on CUT without it. So
+   * the unfalsified line was the one standing between `npm test` being green and
+   * every CUT live witness in this project being invalidated.
+   */
+  async function queryReplyBytes(opts: Partial<SessionOptions>): Promise<number[]> {
+    const { session, conn } = newSession(opts);
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+    // WriteStructuredField carrying Read Partition: L L SFID=0x01, PID=0xff,
+    // TYPE=0x02 (Query).
+    //
+    // THE PID IS SENT AS `IAC IAC`, NOT A LONE 0xff. 0xff is the telnet escape, so a
+    // bare one is consumed by the telnet layer and the record silently never arrives
+    // -- which is exactly what happened when this test was first written: all four
+    // cases failed with NOTHING on the wire, which reads like a broken product rather
+    // than a malformed test input. session.test.ts:859 spells it the same way.
+    conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+    return conn.sent;
+  }
+
+  it('puts NO 0x95 on the wire by default, which is what keeps live hosts on CUT', async () => {
+    const sent = await queryReplyBytes({});
+    expect(sent.length).toBeGreaterThan(0);          // it DID reply
+    expect(sent).not.toContain(0x95);
+  });
+
+  it('puts 0x95 on the wire with ddm on', async () => {
+    const sent = await queryReplyBytes({ ddm: true });
+    expect(sent).toContain(0x95);
+  });
+
+  it('adds DDM as its own unit AND to the summary, changing nothing else', async () => {
+    // MEASURED with a direct probe after two wrong guesses, and the numbers are worth
+    // recording: a plain Query reply is 5 units, and `-ddm on` makes it 6 --
+    // 0x80(10) 0x81(23) 0x86(38) 0x87(15) 0x95(12) 0xa6(17), against
+    // 0x80(9) 0x81(23) 0x86(38) 0x87(15) 0xa6(17) by default.
+    //
+    // So DDM does two things and both are pinned: it appends its own 12-byte unit
+    // BEFORE Implicit Partition (0x95 < 0xa6, so order is preserved), and it adds one
+    // byte to the Summary's qcode list. Everything else is byte-identical, which is
+    // what makes this an ADDITION rather than a protocol change dressed as one.
+    const off = replyUnits(await queryReplyBytes({}));
+    const on = replyUnits(await queryReplyBytes({ ddm: true }));
+    expect(off.map((u) => u.qcode)).toEqual([0x80, 0x81, 0x86, 0x87, 0xa6]);
+    expect(on.map((u) => u.qcode)).toEqual([0x80, 0x81, 0x86, 0x87, 0x95, 0xa6]);
+
+    // The summary lists the qcodes, so it grows by exactly one and stays sorted.
+    expect(off[0]!.body).not.toContain(0x95);
+    expect(on[0]!.body).toContain(0x95);
+    expect(on[0]!.body).toHaveLength(off[0]!.body.length + 1);
+    expect([...on[0]!.body]).toEqual([...on[0]!.body].sort((a, b) => a - b));
+
+    // Every other unit is untouched, matched by qcode so a reorder cannot hide.
+    for (const u of off.slice(1)) {
+      expect(on.find((v) => v.qcode === u.qcode)).toEqual(u);
+    }
+  });
+
+  it('honours dftBufferSize in the DDM unit it builds, clamped', async () => {
+    // SessionOptions.dftBufferSize was documented as existing and set by nothing;
+    // this is the first assertion that it reaches a built unit at all. Asserted on
+    // ddmCapability rather than on a Query reply, because the DDM unit is announced
+    // in the summary and sent when the host ASKS for 0x95 -- so the plain-Query reply
+    // above is the wrong place to look for its bytes.
+    const size = (n: number): number[] => ddmCapability(n).params();
+    // 512 = 0x0200 as LIMIN and LIMOUT, after 2 reserved FLAGS bytes.
+    expect(size(512)).toEqual([0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x01, 0x01]);
+    // 10 clamps up to DFT_MIN_BUF 256 = 0x0100; 99999 clamps down to 32767 = 0x7fff.
+    expect(size(10).slice(2, 6)).toEqual([0x01, 0x00, 0x01, 0x00]);
+    expect(size(99999).slice(2, 6)).toEqual([0x7f, 0xff, 0x7f, 0xff]);
+    // A byte-order error would make 512 read as 2, so the pair is asserted whole.
+    expect(size(512)[2]).toBe(0x02);
+    expect(size(512)[3]).toBe(0x00);
   });
 });
