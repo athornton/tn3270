@@ -1142,9 +1142,76 @@ as a presumption only:
    handling", so item 1 may leave this close to free.
 
 **All four of packaging, TLS, printer and PS were explicitly confirmed to remain**, so
-nothing from the older staging has been dropped. GDDM vector graphics remains the one
-thing deliberately NOT on the roadmap: IBM is sunsetting it, and the route is PS driving
-the 3279 screen directly.
+nothing from the older staging has been dropped.
+
+**CORRECTED BY THE USER 2026-09-25 — NATIVE VECTOR GRAPHICS IS NOW ON THE ROADMAP, SCHEDULED
+AFTER PS.** This supersedes the standing "GDDM vector graphics is deliberately NOT on the
+roadmap" decision, and the distinction that resolves it is the user's: **the 3179-G and 3192-G
+accept vector orders in Write Structured Field and RASTERIZE LOCALLY.** That is a TERMINAL
+capability, so implementing it is not a dependency on GDDM — GDDM is merely the host software
+that drives it, and its being sunset says nothing about a terminal-side data stream. The old
+reasoning conflated the two. What stays true: we do not depend on GDDM, and PS remains the
+prerequisite that gets pixels onto the screen.
+
+**THE ENVELOPE IS IN THE MANUAL WE ALREADY OWN; THE PRIMITIVES ARE NOT.** Verified 2026-09-25
+against `~/3270/ref/pages.txt`. Three outbound/inbound structured fields carry it, all three
+with `PID`, a 2-bit `SPANF` spanning flag and a 2-bit `MODE`, and a byte 6 `OBJTYP` of `X'00'`
+Graphics or `X'01'` Image:
+
+| SFID | Name | Manual |
+|---|---|---|
+| `X'0F11'` | **Object Control** | `pages.txt:7219` (index `:4445`) |
+| `X'0F0F'` | **Object Data** | `pages.txt:7277` (index `:4446`) |
+| `X'0F10'` | **Object Picture** | `pages.txt` *Object Picture* (index `:4447`) |
+
+**`Object Picture` has a fourth MODE the other two lack: `B'11'` STORE AND DRAW** — the others
+define only `B'00'` immediate and `B'10'` store, with `B'01'` reserved. So Object Picture is the
+one that actually renders, and that asymmetry is the first thing to pin in a spec.
+
+**ALL THREE DEFER THEIR CONTENTS: byte 7-n is "Data appropriate to the object type. For the
+format and contents of this parameter, refer to the appropriate graphics or image
+publications."** The same deferral appears in Query Reply (Segment) `X'B0'`. So the 3270
+Programmer's Reference gives us the framing and **none** of the drawing orders, and prycroft6
+says the same in as many words. **The architecture to chase is GOCA — *Graphics Object Content
+Architecture for Advanced Function Presentation Reference*** — which prycroft6 names explicitly
+and which we do NOT have locally. Acquiring it is the real prerequisite; no amount of reading
+`pages.txt` will yield a line-drawing opcode.
+
+**THE GDDM LINK THE USER SENT IS A FALSE LEAD, checked 2026-09-25.**
+`ibm.com/docs/en/gddm?topic=asvsec-descriptions` is the **GDDM-PGF Vector Symbol Editor** command
+reference — interactive `DRAW`/`LINE`/`CURVE`/`STRETCH` commands for authoring custom symbol sets
+in a tool, with no hex opcodes and no data-stream format. The user's hypothesis that GDDM
+instructions "might map pretty directly" to terminal orders is the right shape of question, but
+that page cannot answer it; GOCA can. The z/OS "buffer description structured fields" link is
+unrelated — DFSMSrmm API structured field introducers, nothing graphical.
+
+**FOUR QUERY REPLIES GATE IT, and they are all `No / No / Yes` in Table 6-1** — returned for
+Query List **All** only, never for a plain Query or an Equivalent list: **Graphic Color `X'B4'`
+(`pages.txt:8603`), Graphic Symbol Sets `X'B6'` (`:8604`), Segment `X'B0'`, Line Type `X'B2'`,**
+plus `Procedure X'B1'`, `Image X'82'`, `Transparency X'AB'` and `IOCA Auxiliary Device X'AA'`
+nearby. **This costs us no rework:** `queryreply.ts` already models exactly that distinction with
+`Capability.returnedForQuery`, and `selectCapabilities` already implements the Table 6-1 rules —
+so hosting these is adding entries, not changing the capability model. Segment `X'B0'`'s own DATA
+is deferred to "the appropriate graphics product publications" as well.
+
+**Terminals: 3179-G, 3192-G, and the 3472 InfoWindow** (prycroft6). It also records that these
+carried "the equivalent of the original PS-2 feature", i.e. **PS and vector graphics coexist on
+the same hardware** — which is consistent with PS being sequenced first. Three protocol
+generations exist and should not be conflated: PS (raster via loadable symbols), native vector
+graphics (these structured fields), and Advanced Vector Graphics/PCLK (a PC-client protocol).
+
+**Geometry is NOT hardcoded:** prycroft6 says an application reads **Usable Area** and **Implicit
+Partition** to discover the drawing space — both of which we already build and send. No pixel
+dimensions for the G-terminals are recorded anywhere we have yet; they are an open measurement.
+
+**Neither x3270 nor c3270 implements any of this** (prycroft6 mentions no emulator, and our own
+`sf.c` dispatch has no `0x0F10`/`0x0F0F`/`0x0F11` arm — so unlike every stage so far, **there is
+no reference implementation to diff against**, and no Hercules host here drives a G-terminal.
+That makes this the first feature with neither an x3270 oracle nor a live witness, which is worth
+knowing before it is scheduled: the evidence model that has carried nine stages does not apply.
+
+Sources: `~/3270/ref/pages.txt` (GA23-0059) and
+<https://www.prycroft6.com.au/misc/3270grfx.html>.
 
 8. **Real TN3270E, and `IBM-DYNAMIC` screen size.** Added by the user 2026-09-14, position
    not stated. ~~**Blocked on access to a real modern z/VM or z/OS, which the user had still
