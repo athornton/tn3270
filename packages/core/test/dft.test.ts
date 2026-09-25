@@ -374,3 +374,215 @@ describe('DftTransfer, construction', () => {
     expect(new DftTransfer({ direction: 'send', data: Uint8Array.of(1) }).direction).toBe('send');
   });
 });
+
+describe('DftTransfer, upload (send)', () => {
+  it('answers a Get with a data frame carrying the file bytes', () => {
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41, 0x42, 0x43) });
+    t.handle(open());
+    const step = t.handle(bare(DftRequest.GET));
+    const b = [...step.reply!];
+    // The whole frame, computed by hand from ft_dft.c:624-641. Pinned entire
+    // rather than field-by-field only, because the SF LENGTH is the byte most
+    // likely to be wrong: it is 16+data, EXCLUDING the AID (obptr - (obuf+1),
+    // ft_dft.c:654-655), while the data still lands at index 17.
+    expect(b).toEqual([
+      0x88, 0x00, 0x13, 0xd0, 0x46, 0x05, 0x63, 0x06, 0x00, 0x00, 0x00, 0x01,
+      0xc0, 0x80, 0x61, 0x00, 0x08, 0x41, 0x42, 0x43,
+    ]);
+    expect(b[0]).toBe(0x88);                       // AID_SF
+    expect(b.slice(1, 3)).toEqual([0x00, 0x13]);   // 3 data + 16, not + 17
+    expect(b[3]).toBe(0xd0);                       // SF_TRANSFER_DATA
+    expect(b.slice(4, 6)).toEqual([0x46, 0x05]);   // TR_GET_REPLY
+    expect(b.slice(6, 8)).toEqual([0x63, 0x06]);   // TR_RECNUM_HDR
+    expect(b.slice(8, 12)).toEqual([0x00, 0x00, 0x00, 0x01]);
+    expect(b.slice(12, 14)).toEqual([0xc0, 0x80]); // TR_NOT_COMPRESSED
+    expect(b[14]).toBe(0x61);                      // TR_BEGIN_DATA
+    expect(b.slice(15, 17)).toEqual([0x00, 0x08]); // 3 data bytes + 5
+    expect(b.slice(17)).toEqual([0x41, 0x42, 0x43]);
+  });
+
+  it('declares a length that EXCLUDES the AID but puts data at index 17', () => {
+    // The two numbers that look contradictory and are both right: the header is 17
+    // bytes counting the AID, so data starts at 17 (x3270's `bufptr = obuf + 17`,
+    // :584), while the declared length omits the AID and is therefore 16 + data.
+    // Checked across three sizes so the relationship is pinned, not one instance.
+    for (const n of [1, 3, 200]) {
+      const t = new DftTransfer({ direction: 'send', data: new Uint8Array(n).fill(0x7b) });
+      t.handle(open());
+      const b = [...t.handle(bare(DftRequest.GET)).reply!];
+      expect((b[1]! << 8) | b[2]!).toBe(n + 16);
+      expect(b).toHaveLength(n + 17);
+      expect(b.slice(17)).toHaveLength(n);
+      expect((b[15]! << 8) | b[16]!).toBe(n + 5);
+    }
+  });
+
+  it('sends an EOF frame when the source is exhausted, and that is not a failure', () => {
+    // ft_dft.c:644-651: HIGH8(TR_GET_REQ), TR_ERROR_REPLY, TR_ERROR_HDR,
+    // TR_ERR_EOF. 0x2200 is "get past end of file", which ENDS an upload cleanly.
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    t.handle(open());
+    t.handle(bare(DftRequest.GET));
+    const eof = t.handle(bare(DftRequest.GET));
+    expect([...eof.reply!]).toEqual([
+      0x88, 0x00, 0x09, 0xd0, 0x46, 0x08, 0x69, 0x04, 0x22, 0x00,
+    ]);
+    // EOF does not end the transfer, and neither will the Close that follows it:
+    // an upload completes the same way a download does, on the host's own FT:MSG
+    // TRANS03. Reporting success at EOF would claim the host had committed the
+    // file when we had only finished handing it over.
+    expect(eof.done).toBeUndefined();
+  });
+
+  it('distinguishes the EOF frame from an ABORT by one byte, the error code', () => {
+    // Both are 10 bytes with SF length 9 and differ only in the last two: EOF is
+    // 0x2200 (TR_ERR_EOF) and an abort is 0x0100 (TR_ERR_CMDFAIL). Pinned together
+    // because confusing them is how a clean end of upload becomes a reported
+    // failure -- or worse, an abort gets read by the host as a normal EOF.
+    const eofT = new DftTransfer({ direction: 'send', data: new Uint8Array(0) });
+    eofT.handle(open());
+    const eof = [...eofT.handle(bare(DftRequest.GET)).reply!];
+
+    const abortT = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    abortT.handle(open());
+    abortT.cancel();
+    const abort = [...abortT.handle(bare(DftRequest.GET)).reply!];
+
+    expect(eof.slice(0, 8)).toEqual(abort.slice(0, 8));   // identical up to the code
+    expect(eof.slice(8)).toEqual([0x22, 0x00]);
+    expect(abort.slice(8)).toEqual([0x01, 0x00]);
+  });
+
+  it('completes an upload on the host\'s message, not at EOF or Close', () => {
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    t.handle(open());
+    t.handle(bare(DftRequest.GET));
+    expect(t.handle(bare(DftRequest.GET)).done).toBeUndefined();   // EOF
+    expect(t.handle(bare(DftRequest.CLOSE)).done).toBeUndefined(); // CloseAck
+    t.handle(open('FT:MSG'));
+    const step = t.handle(dataInsert(ascii('TRANS03')));
+    expect(step.done).toEqual({ ok: true });     // no `data` on a send
+    expect(t.transferred).toBe(1);
+  });
+
+  it('splits a source larger than the buffer across several Gets', () => {
+    // CORRECTED FROM THE PLAN, which got this test wrong twice: it used a 100-byte
+    // source against a 273-byte frame, so nothing was SPLIT despite the name, and
+    // it looked for the EOF header at index 8-10 where it lives at 6-8 (the frame
+    // is 88 00 09 d0 46 08 | 69 04 | 22 00, so 8-10 is the error CODE).
+    // 600 bytes over 273-byte frames is 3 frames: 273 + 273 + 54.
+    const data = new Uint8Array(600).fill(0x5a);
+    const t = new DftTransfer({ direction: 'send', data, bufferSize: 300 });
+    t.handle(open());
+    expect([...t.handle(bare(DftRequest.GET)).reply!].slice(17)).toHaveLength(273);
+    expect([...t.handle(bare(DftRequest.GET)).reply!].slice(17)).toHaveLength(273);
+    expect([...t.handle(bare(DftRequest.GET)).reply!].slice(17)).toHaveLength(54);
+    const eof = t.handle(bare(DftRequest.GET));
+    expect([...eof.reply!].slice(6, 8)).toEqual([0x69, 0x04]);   // TR_ERROR_HDR
+    expect([...eof.reply!].slice(8, 10)).toEqual([0x22, 0x00]);  // TR_ERR_EOF
+  });
+
+  it('honours the buffer size, reserving 27 bytes as x3270 does', () => {
+    // ft_dft.c:583 `numbytes = ftc->dft_buffersize - 27`.
+    const data = new Uint8Array(500).fill(0x01);
+    const t = new DftTransfer({ direction: 'send', data, bufferSize: 300 });
+    t.handle(open());
+    expect([...t.handle(bare(DftRequest.GET)).reply!].slice(17)).toHaveLength(273);
+    expect(t.transferred).toBe(273);
+  });
+
+  it('numbers successive upload frames 1, 2, 3', () => {
+    const data = new Uint8Array(600).fill(0x02);
+    const t = new DftTransfer({ direction: 'send', data, bufferSize: 283 });  // 256 data
+    t.handle(open());
+    for (const expected of [1, 2, 3]) {
+      const b = [...t.handle(bare(DftRequest.GET)).reply!];
+      expect(b.slice(8, 12)).toEqual([0x00, 0x00, 0x00, expected]);
+    }
+    expect(t.transferred).toBe(600);
+  });
+
+  it('delivers the source byte for byte across several frames', () => {
+    // The property that matters to a user: what arrives is what was sent. Built
+    // from a pattern so a dropped, duplicated or reordered chunk shows up.
+    const data = Uint8Array.from({ length: 700 }, (_, i) => i & 0xff);
+    const t = new DftTransfer({ direction: 'send', data, bufferSize: 283 });
+    t.handle(open());
+    const sent: number[] = [];
+    for (;;) {
+      const b = [...t.handle(bare(DftRequest.GET)).reply!];
+      if (b[5] === 0x08) break;                  // TR_ERROR_REPLY: EOF
+      sent.push(...b.slice(17));
+    }
+    expect(sent).toEqual([...data]);
+  });
+
+  it('CLAMPS the buffer size to x3270\'s bounds, so a tiny one cannot starve a frame', () => {
+    // set_dft_buffersize bounds every assignment (ft_dft.c:740-747, DFT_MIN_BUF
+    // 256), and boundDftBufferSize already existed in queryreply.ts for the DDM
+    // advertisement. Reusing it is not tidiness: the size we ADVERTISE to the host
+    // and the size we CHUNK by must be the same number, or we promise one frame
+    // size and send another.
+    const data = new Uint8Array(400).fill(0x03);
+    const t = new DftTransfer({ direction: 'send', data, bufferSize: 10 });
+    t.handle(open());
+    // Clamped to 256, so 256-27 = 229 data bytes rather than a frame with no room.
+    expect([...t.handle(bare(DftRequest.GET)).reply!].slice(17)).toHaveLength(229);
+  });
+
+  it('clamps an over-large buffer size down to DFT_MAX_BUF', () => {
+    const t = new DftTransfer({ direction: 'send', data: new Uint8Array(1), bufferSize: 99999 });
+    expect(t.bufferSize).toBe(32767);
+  });
+
+  it('defaults the buffer size to x3270\'s DFT_BUF', () => {
+    const t = new DftTransfer({ direction: 'send', data: new Uint8Array(1) });
+    expect(t.bufferSize).toBe(16384);
+  });
+
+  it('retains the last upload frame for a Read Modified', () => {
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    t.handle(open());
+    const sent = t.handle(bare(DftRequest.GET)).reply!;
+    expect(t.retainedFrame).toEqual(sent);
+  });
+
+  it('retains the EOF frame too, since x3270 saves both branches', () => {
+    // The savebuf copy at ft_dft.c:657-663 is AFTER the if/else, so an EOF frame is
+    // retained exactly as a data frame is. A Read Modified arriving after EOF must
+    // re-send the EOF, not the last data frame -- which would re-send data the host
+    // already has.
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    t.handle(open());
+    const data = t.handle(bare(DftRequest.GET)).reply!;
+    const eof = t.handle(bare(DftRequest.GET)).reply!;
+    expect(t.retainedFrame).toEqual(eof);
+    expect(t.retainedFrame).not.toEqual(data);
+  });
+
+  it('has no retained frame before the first Get', () => {
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    expect(t.retainedFrame).toBeUndefined();
+  });
+
+  it('does not advance the offset when it replies EOF', () => {
+    // An EOF that advanced `offset` would make `transferred` overstate what the
+    // host received, which is what a progress display reads.
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41, 0x42) });
+    t.handle(open());
+    t.handle(bare(DftRequest.GET));
+    expect(t.transferred).toBe(2);
+    t.handle(bare(DftRequest.GET));
+    t.handle(bare(DftRequest.GET));
+    expect(t.transferred).toBe(2);
+  });
+
+  it('refuses a Get after cancellation, with the user-cancel message', () => {
+    const t = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    t.handle(open());
+    t.cancel();
+    const step = t.handle(bare(DftRequest.GET));
+    expect(step.done).toEqual({ ok: false, error: 'Transfer canceled by user' });
+    expect([...step.reply!].slice(4, 6)).toEqual([0x46, 0x08]);
+  });
+});

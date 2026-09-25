@@ -16,7 +16,12 @@
  * One instance per transfer, single-use like `CutTransfer` — once `handle` has
  * returned a `done`, the transfer is over and further calls are inert.
  */
+import { AID, Sfid } from '../constants.js';
+import { boundDftBufferSize, DFT_BUF_DEFAULT } from '../queryreply.js';
 import {
+  DftError,
+  DftHeader,
+  DftReply,
   DftRequest,
   buildCloseAck,
   buildDataAck,
@@ -24,6 +29,8 @@ import {
   buildOpenAck,
   parseDftFrame,
   parseDftOpen,
+  u16,
+  u32,
 } from './dftFrames.js';
 import { FT_MSG, type TransferDirection, type TransferResult } from './transfer.js';
 
@@ -47,10 +54,40 @@ const DATA_AT = 10 - 3;                        // 7
 /** The declared data length counts 5 bytes of header. `ft_dft.c:236`. */
 const LENGTH_OVERHEAD = 5;
 
+/**
+ * Bytes of one buffer that are NOT data. `ft_dft.c:583` reads
+ * `dft_buffersize - 27`, with the comment "always read 5 bytes less than we're
+ * allowed" — the 27 covers the 17-byte frame header, the 5-byte margin, and the
+ * remainder x3270 does not itemise.
+ */
+const UPLOAD_OVERHEAD = 27;
+
+/**
+ * Bytes before the data in an upload frame: `AID`, 2 length, `SFID`, reply type,
+ * recnum header, 4 recnum, compression, begin-data, 2 data length.
+ *
+ * **The declared SF length is this MINUS ONE.** x3270 writes
+ * `SET16(bufptr, obptr - (obuf + 1))` (`ft_dft.c:654-655`) — total bytes excluding
+ * the AID — while the data still lands at index 17 (`bufptr = obuf + 17`, `:584`).
+ * Both numbers are right and they differ by the AID; an earlier draft of the plan
+ * used 17 for both, which would have overstated every frame's length by one.
+ */
+const UPLOAD_HEADER_LEN = 17;
+
 export interface DftOptions {
   direction: TransferDirection;
   /** For `send`, the bytes to put on the host. Required for `send`. */
   data?: Uint8Array | readonly number[];
+  /**
+   * The DFT buffer size, which bounds one upload frame. Defaults to x3270's
+   * `DFT_BUF` 16384 and is CLAMPED to [256, 32767] by `boundDftBufferSize`, the
+   * same function the DDM Query Reply uses.
+   *
+   * Reusing that clamp is a correctness requirement, not tidiness: the size we
+   * ADVERTISE to the host in the DDM unit and the size we CHUNK by here must be
+   * the same number, or we promise one frame size and send another.
+   */
+  bufferSize?: number;
 }
 
 /** What one inbound frame produced. */
@@ -99,6 +136,24 @@ export class DftTransfer {
   /** Has the operator asked to cancel? Checked on the inbound edge. */
   private cancelRequested = false;
 
+  /** One upload frame's ceiling, clamped. Readable so a caller can advertise it. */
+  readonly bufferSize: number;
+
+  /**
+   * The last upload frame, verbatim, for `dft_read_modified` to re-send.
+   *
+   * x3270 keeps this in `dft_savebuf` (`ft_dft.c:657-663`) and replays it when a
+   * Read Modified arrives with `AID_SF`. Retaining the BYTES rather than the
+   * source range is the same decision `CutTransfer` documents for retransmits:
+   * re-deriving a frame can produce different bytes, and here it would also
+   * double-count `offset`.
+   *
+   * The copy in x3270 sits AFTER the data/EOF if-else, so an EOF frame is retained
+   * exactly as a data frame is — a Read Modified after EOF must re-send the EOF,
+   * not the last data frame, which the host already has.
+   */
+  private savedFrame: Uint8Array | undefined;
+
   private outcome: TransferResult | undefined;
 
   constructor(opts: DftOptions) {
@@ -114,11 +169,14 @@ export class DftTransfer {
       }
       this.source = new Uint8Array(0);
     }
+    this.bufferSize = boundDftBufferSize(opts.bufferSize ?? DFT_BUF_DEFAULT);
   }
 
   get result(): TransferResult | undefined { return this.outcome; }
   get complete(): boolean { return this.outcome !== undefined; }
   get isMessage(): boolean { return this.messageFlag; }
+  /** The last upload frame, for the Read Modified hook. */
+  get retainedFrame(): Uint8Array | undefined { return this.savedFrame; }
   /** Bytes transferred so far, for a progress display. */
   get transferred(): number {
     return this.direction === 'send' ? this.offset : this.receivedLength;
@@ -153,6 +211,7 @@ export class DftTransfer {
       case DftRequest.OPEN: return this.onOpen(frame.payload);
       case DftRequest.DATA_INSERT: return this.onDataInsert(frame.payload);
       case DftRequest.CLOSE: return this.onClose();
+      case DftRequest.GET: return this.onGet();
       // NEITHER SENDS ANYTHING. Both x3270 handlers trace and return -- they are
       // empty functions, `dft_insert_request` at ft_dft.c:193-198 and
       // `dft_set_cur_req` at :414-419, each carrying a "doesn't currently do
@@ -266,6 +325,49 @@ export class DftTransfer {
    */
   private onClose(): DftStep {
     return { reply: buildCloseAck() };
+  }
+
+  /**
+   * The host is asking us for data: this is the upload path.
+   *
+   * Either a data frame or, when the source is exhausted, an EOF frame. **EOF is
+   * not a failure** — `TR_ERR_EOF` is how an upload ends, and the host answers it
+   * with a Close and then its own `FT:MSG`. Reporting it as an error would fail
+   * every successful upload; completing on it would claim success before the host
+   * had committed the file.
+   */
+  private onGet(): DftStep {
+    const room = this.bufferSize - UPLOAD_OVERHEAD;
+    const chunk = this.source.subarray(this.offset, this.offset + room);
+
+    if (chunk.length === 0) {
+      // 10 bytes, SF length 9 -- the same SHAPE as dft_abort's frame
+      // (ft_dft.c:698-706), differing only in the final code: TR_ERR_EOF where an
+      // abort sends TR_ERR_CMDFAIL. The high byte is HIGH8(TR_GET_REQ) = 0x46,
+      // because this answers a GET (ft_dft.c:645-650).
+      const eof = Uint8Array.of(
+        AID.SF, ...u16(9), Sfid.TRANSFER_DATA,
+        (DftRequest.GET >> 8) & 0xff, DftReply.ERROR,
+        ...u16(DftHeader.ERROR), ...u16(DftError.EOF),
+      );
+      this.savedFrame = eof;
+      // `offset` is deliberately NOT advanced: `transferred` feeds a progress
+      // display, and an EOF that moved it would overstate what the host received.
+      return { reply: eof };
+    }
+
+    this.offset += chunk.length;
+    const frame = Uint8Array.of(
+      AID.SF, ...u16(chunk.length + UPLOAD_HEADER_LEN - 1), Sfid.TRANSFER_DATA,
+      ...u16(DftReply.GET),
+      ...u16(DftHeader.RECNUM), ...u32(this.recordNumber),
+      ...u16(DftHeader.NOT_COMPRESSED), DftHeader.BEGIN_DATA,
+      ...u16(chunk.length + LENGTH_OVERHEAD),
+      ...chunk,
+    );
+    this.recordNumber++;
+    this.savedFrame = frame;
+    return { reply: frame };
   }
 
   private fail(error: string, failedRequest: number): DftStep {
