@@ -2199,7 +2199,7 @@ passes when nothing is sent — which is the stall being guarded against.
 
 **Files:** none modified. This task produces evidence and a doc note.
 
-- [ ] **Step 1: Confirm `-ddm off` still puts no `0x95` on the wire**
+- [x] **Step 1: Confirm `-ddm off` still puts no `0x95` on the wire**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/queryreply.test.ts`
 
@@ -2219,12 +2219,12 @@ it('advertises DDM in ascending QCODE order when asked', () => {
 
 **Mutation-check both**: the spec warns the established failure mode here is a test that passes vacuously because every other test in the file already supplies the value under test. Remove the `ddm` filter in `answerQuery` and confirm the first test still passes (it tests the constant, not the session) — then add a session-level test if that gap is real.
 
-- [ ] **Step 2: Run the conformance and golden suites**
+- [x] **Step 2: Run the conformance and golden suites**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/cli/test/conformance.test.ts packages/cli/test/golden.test.ts`
 Expected: PASS, untouched. Record the numbers.
 
-- [ ] **Step 3: Run the playback oracle**
+- [x] **Step 3: Run the playback oracle**
 
 ```bash
 source /opt/lsst/software/stack/loadLSST.bash >/dev/null 2>&1; hash -r
@@ -2234,7 +2234,7 @@ cd ~/git/tn3270 && python3 packages/cli/scripts/drive-playback.py
 Expected: **10 of 10**. The reference binaries are at
 `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/{s3270,playback}/` — under `obj/`, **not** beside their source.
 
-- [ ] **Step 4: Run the full gate**
+- [x] **Step 4: Run the full gate**
 
 ```bash
 cd ~/git/tn3270 && npm run build && npm run typecheck && npm test
@@ -2251,7 +2251,7 @@ Expected: typecheck clean; `pty-smoke` 12/12; `drive-e` 10/10; `shot` 3/3; `keys
 
 If you ran `git checkout` at any point, run `npx tsc --build --force packages/gui` first or the GUI staleness guard reddens on mtimes alone.
 
-- [ ] **Step 5: Commit the evidence**
+- [x] **Step 5: Commit the evidence**
 
 ```bash
 git add -A
@@ -2262,6 +2262,48 @@ drive-playback 10/10, all eight by-hand harnesses at their recorded numbers.
 A default-off capability having zero blast radius is the claim, and confirming it
 is the test."
 ```
+
+**AS BUILT (2026-09-25).** Inline. **Suite 2065 -> 2075 in 81 files.** The plan's step-1 warning was
+exactly right and the gap it predicted was real and large.
+
+**THE `-ddm` DEFAULT-OFF GUARD WAS COMPLETELY UNFALSIFIED.** Replacing
+`this.opts.ddm ? withDdm(...) : DEFAULT_CAPABILITIES` with an unconditional `withDdm(...)` left **all
+2071 tests green**. That is not a coverage nicety: advertising `0x95` changes **which protocol a live
+host speaks** — TK5 offers DFT on seeing it and stays on CUT without it — so the unfalsified line was
+what stood between a green suite and every CUT live witness in this project being invalidated. Ten
+tests now cover it, **four at SESSION level**, and the mutation reddens two. Constant-level tests
+could not have done it: they exercise `DEFAULT_CAPABILITIES` and `withDdm`, not the session's choice
+between them. **Fourth vacuous-guard finding on this branch.**
+
+**THE REPLY'S REAL SHAPE, measured with a direct probe after two wrong guesses of mine:** a plain
+Query reply is **5 units** and `-ddm on` makes it **6** —
+`0x80(10) 0x81(23) 0x86(38) 0x87(15) 0x95(12) 0xa6(17)` against
+`0x80(9) 0x81(23) 0x86(38) 0x87(15) 0xa6(17)`. **DDM does TWO things**, both now pinned: its own
+12-byte unit inserted BEFORE Implicit Partition (`0x95 < 0xa6`, so ascending order holds) and **one
+extra byte in the Summary's qcode list**. All other units byte-identical.
+
+**TWO TEST-WRITING TRAPS, both of which first presented as product bugs — worth carrying to any future
+session-level wire test:**
+1. **A Read Partition's `0xff` PID must be written `IAC IAC`.** A lone `0xff` is consumed by the
+   telnet layer and the record never arrives. All four cases failed with **nothing on the wire**,
+   which reads like a broken product rather than a malformed test input.
+   `session.test.ts:859` already spells it correctly.
+2. **Query Reply payloads are full of `0xff`** (Usable Area flags, Highlighting pairs) **and arrive
+   DOUBLED.** A walk over the raw bytes reads a doubled pair as part of a length — mine reported a
+   unit of length **65535**, and the true 5-unit structure only appeared once `replyUnits` undoubled.
+   Relatedly: **parse the structure, do not grep it.** An earlier version of one assertion used
+   `indexOf(0x95)` and matched a coincidental byte inside another unit's payload.
+
+**BLAST RADIUS, MEASURED:** build/typecheck clean, **2075 tests in 81 files**, conformance + golden
+**12/12 untouched**, `drive-playback.py` **10/10** against real s3270, `pty-smoke.py` **12/12**,
+`drive-e.py` **10/10**, `shot.mjs` **3/3**, `keys.mjs` **18 chords/16 actions**, `clicks.mjs`
+**9 buttons/10 actions**, `browser-shot.mjs` **2/2**, `browser-keys.mjs` **13 chords/11 actions**.
+
+**Two plan corrections:** step 2's paths are wrong — `conformance.test.ts` and `golden.test.ts` are in
+**`packages/core/test`**, not `packages/cli/test`. And `packages/gui/scripts/xvfb.mjs` is a **library**
+exporting `ensureDisplay()`, not a runnable script; the harnesses call it themselves, so there is
+nothing to run first. Unsetting `HTTP_PROXY`/`no_proxy` before the Electron harnesses remains
+necessary.
 
 ---
 
