@@ -2309,6 +2309,47 @@ necessary.
 
 ### Task 10: Live run against MVS/TSO at 43x80
 
+> **BLOCKED, 2026-09-25 — AND THE BLOCKER IS A GAP IN THIS PLAN, NOT IN THE CODE.**
+> The run was attempted against TK5 at 43x80 with `-ddm on`. It reached the host and logged on
+> cleanly, then **`Transfer()` refused before sending anything**: *"CUT file transfer needs a 24x80
+> screen; this session is 43x80"* (`packages/cli/src/runner.ts:454`). **Zero `FileTransferData`
+> frames.**
+>
+> **NOTHING SELECTS DFT.** `Session.startDftTransfer` has no caller outside tests, and `runner.ts`
+> constructs a `CutTransfer` unconditionally. Tasks 1-9 build the engine, the wire plumbing and the
+> Read Modified hook — all of it verified — but **no task in this plan wires the `Transfer()` action
+> to choose DFT over CUT.** Tasks 11 and 12 both consume Task 10's trace, so the entire tail is
+> blocked behind work nothing specifies. This is the "plumbing built, switch never thrown" shape, and
+> it survived nine tasks because every test that exercises the engine calls `startDftTransfer`
+> itself — **the tests supply the very call the product is missing.** Compare
+> [[harness-passes-on-stale-artifacts]]: a suite can be green over a product that cannot run.
+>
+> **A NEW TASK IS NEEDED BEFORE THIS ONE, and it needs decisions this plan never poses:**
+> 1. **What chooses DFT?** Geometry alone is wrong — a 24x80 session on a DFT host should still work.
+>    x3270 does not choose at all: the HOST does, and `ft_running(true/false)` merely *reports* which
+>    protocol arrived (`ft_cut.c:440`, `ft_dft.c:175`, read once at `ft.c:556`). So the honest design
+>    is probably to start a transfer that can be EITHER, and let the first inbound frame decide —
+>    which means `runner.ts`'s poll loop cannot assume CUT frames.
+> 2. **What if the host never offers DFT and the screen is not 24x80?** Today that is the refusal
+>    above, and it is correct; it must stay reachable.
+> 3. **Does `Transfer()`'s `BufferSize` keyword now feed `DftOptions.bufferSize`?** It is parsed and
+>    ignored today, and `SessionOptions.dftBufferSize` is set by nothing. Wiring both is a
+>    one-liner each and they must agree, since the advertised and chunking sizes are one number.
+> 4. **All four front ends** reach transfers now (CLI action, TUI overlay, and the GUI/web forms via
+>    `frontend/src/transferForm.ts`), so the choice belongs wherever they already share code, not in
+>    `runner.ts` alone.
+>
+> **Also unmeasured: the VM control.** Port 3270 was closed (VM/370 down; only TK5 on 3271 was up),
+> so "DDM advertised does not break a CUT host" has no measurement from this session and Step 5
+> remains outstanding.
+>
+> **What the attempt did establish:** `-ddm on` reaches a live host without disturbing logon at
+> 43x80, and the geometry refusal fires BEFORE the host is told to start — so the failed run left no
+> half-open transfer on TSO and `LOGOFF` completed. `packages/cli/scripts/dft-tso.txt` is committed,
+> is correct as written, and carries its own judging criteria; it is the run to repeat once a front
+> end can start a DFT transfer.
+
+
 **Files:**
 - Create: `packages/cli/scripts/dft-tso.txt`
 - Modify: `docs/live-testing.md`
