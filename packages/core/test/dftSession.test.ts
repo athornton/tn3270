@@ -300,3 +300,78 @@ describe('Session DFT plumbing', () => {
     expect(session.dftTransfer).toBeDefined();               // still in flight
   });
 });
+
+describe('the Read Modified hook', () => {
+  /** A session with a retained upload frame: negotiated, opened, one Get answered. */
+  async function uploading() {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    const transfer = new DftTransfer({ direction: 'send', data: Uint8Array.of(0x41) });
+    session.startDftTransfer(transfer);
+    conn.host(...wsfBytes(openPayload()));  // Open
+    conn.host(...wsfBytes([0x46, 0x11]));   // Get -> retains a frame
+    expect(transfer.retainedFrame).toBeDefined();   // the premise, asserted
+    conn.sent = [];
+    return { session, conn, transfer };
+  }
+
+  it('replays the retained upload frame instead of reading the screen', async () => {
+    // x3270 short-circuits to dft_read_modified when the AID is AID_SF, at BOTH
+    // read sites: ctlr.c:760 in ctlr_read_modified and ctlr.c:986 in
+    // ctlr_read_buffer. Omitting this stalls UPLOADS ONLY -- downloads never take
+    // this path -- which is why it gets its own task and its own test.
+    const { conn, transfer } = await uploading();
+    conn.host(0xf6, 0xff, 0xef);            // Read Modified
+    // The retained frame, then IAC EOR that sendInbound appends.
+    expect(conn.sent.slice(0, transfer.retainedFrame!.length))
+      .toEqual([...transfer.retainedFrame!]);
+  });
+
+  it('replays on a Read Buffer too, the second of x3270\'s two sites', async () => {
+    const { conn, transfer } = await uploading();
+    conn.host(0xf2, 0xff, 0xef);            // Read Buffer
+    expect(conn.sent.slice(0, transfer.retainedFrame!.length))
+      .toEqual([...transfer.retainedFrame!]);
+  });
+
+  it('replays the SAME frame twice, without advancing the upload', async () => {
+    // A replay must not consume more source: the host is asking again for what it
+    // already asked for. If the hook read from the engine instead of the retained
+    // bytes, the second read would deliver the NEXT chunk and the file would be
+    // corrupt -- with both reads "succeeding".
+    const { conn, transfer } = await uploading();
+    const before = transfer.transferred;
+    conn.host(0xf6, 0xff, 0xef);
+    const first = [...conn.sent];
+    conn.sent = [];
+    conn.host(0xf6, 0xff, 0xef);
+    expect([...conn.sent]).toEqual(first);
+    expect(transfer.transferred).toBe(before);
+  });
+
+  it('reads the screen normally when there is no retained frame', async () => {
+    // A DOWNLOAD retains nothing, so the hook must not swallow an ordinary read.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.startDftTransfer(new DftTransfer({ direction: 'receive' }));
+    conn.sent = [];
+    conn.host(0xf6, 0xff, 0xef);
+    expect(conn.sent[0]).not.toBe(0x88);    // AID.SF -- i.e. not a replay
+    expect(conn.sent.length).toBeGreaterThan(0);   // it DID answer
+  });
+
+  it('reads the screen normally with NO transfer at all', async () => {
+    // The commonest case by far, and the one a wrong guard would break for every
+    // user who never transfers a file. `this.dft?.retainedFrame` must be undefined
+    // rather than throwing.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    conn.sent = [];
+    conn.host(0xf6, 0xff, 0xef);
+    expect(conn.sent[0]).not.toBe(0x88);
+    expect(conn.sent.length).toBeGreaterThan(0);
+  });
+});

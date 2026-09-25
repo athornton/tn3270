@@ -1229,6 +1229,29 @@ export class Session {
 
   /** A host-initiated read, which carries no operator AID. */
   private answerRead(kind: 'ReadBuffer' | 'ReadModified' | 'ReadModifiedAll'): void {
+    // DFT SHORT-CIRCUIT. x3270 does this at BOTH read sites -- ctlr.c:760 in
+    // ctlr_read_modified and ctlr.c:986 in ctlr_read_buffer -- returning
+    // immediately when the AID is AID_SF. (The design spec cites :761 and :987;
+    // the actual lines are one lower, verified.) Ours is one function, so one guard
+    // covers both, and the `all` variant comes free.
+    //
+    // Guarded on there being a RETAINED FRAME, not merely on a transfer being in
+    // flight: a DOWNLOAD retains nothing and must still answer an ordinary read.
+    //
+    // The retained BYTES are replayed rather than asking the engine for a frame.
+    // That is what makes a replay idempotent -- re-deriving would consume more
+    // source and hand the host the NEXT chunk, corrupting the file while both reads
+    // appeared to succeed.
+    //
+    // OMITTING THIS STALLS UPLOADS ONLY. A download never reaches here, so the
+    // whole receive path passes with this missing -- which is exactly why it is
+    // its own task, and why deleting it reddens only the two replay tests.
+    const retained = this.dft?.retainedFrame;
+    if (retained !== undefined) {
+      this.trace.note('Read Modified during a DFT upload: replaying the retained frame');
+      this.sendInbound(retained);
+      return;
+    }
     const payload = kind === 'ReadBuffer'
       ? buildReadBuffer(this.screen, AID.NONE)
       : buildReadModified(this.screen, AID.NONE, kind === 'ReadModifiedAll');
