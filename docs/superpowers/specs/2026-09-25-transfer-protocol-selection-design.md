@@ -191,11 +191,44 @@ names the real cause rather than a generic failure.
 **This trade was raised and accepted explicitly.** It is slower and it does prime the host, but the
 diagnosis improves and the existing Attn/Clear recovery hint still applies.
 
-**OPEN QUESTION, to be MEASURED rather than guessed (one run):** does a CUT host at 43x80 paint a
-recognisable frame at the wrong offsets, or nothing at all? If it paints something, the driver can
-fail fast — "a screen arrived, it is not a CUT frame, and we are not 24x80" — instead of waiting the
-full timeout. Measurable on VM/370, which is confirmed at 43 rows as of 2026-09-25. **The plan must
-measure this; the fast-fail is conditional on the answer.**
+**MEASURED 2026-09-25, AND THE ANSWER IS BETTER THAN EITHER BRANCH THIS QUESTION ANTICIPATED: THE
+HOST REFUSES, IN ABOUT A SECOND, AND NEVER ENTERS TRANSFER MODE.**
+
+Run against VM/370 CMS at 43x80 with the `dist` geometry gate disabled (source untouched, build
+restored and re-verified at 2075 tests afterwards). Logged on, state proven with
+`QUERY DISK A` → `Ready;`, then a CUT upload attempted on a 43-row screen. Result:
+
+```
+Error: IND$FILE requires a MECAFF connected 3270 terminal
+... aborting
+Ready(00032); T=0.01/0.01
+```
+
+**ZERO CUT frames and zero `0xd0` frames.** CMS returned to `Ready(00032)` **by itself**, and
+`LOGOFF` completed with `CONNECT= 00:00:04` spanning only that run — no wedged session, no manual
+recovery needed.
+
+**This is the same refusal `transfer-vm.txt` already documents for a plain `IBM-3278-2` terminal
+type**, which MECAFF rejects with identical wording. The geometry is not what MECAFF is checking; it
+is checking whether it recognises the terminal, and a model-4 session fails that check the same way.
+**So on this host the question "does a CUT frame appear at the wrong offsets" never arises — no
+transfer starts at all.**
+
+**THREE CONSEQUENCES FOR THIS DESIGN:**
+
+1. **The accepted regression is much smaller than believed.** The concern was that removing the
+   up-front geometry gate would prime the host and leave it mid-transfer. On VM it does not: the host
+   declines, recovers itself, and the whole exchange costs about a second. The *general* concern
+   stands for hosts that behave otherwise, and the Attn/Clear hint remains the fallback — but the one
+   CUT host available here is self-recovering.
+2. **A fast-fail on "screen arrived, not a CUT frame, not 24x80" is NOT worth building.** It would add
+   a branch for a case this host reaches in ~1s anyway, and its trigger condition cannot be
+   distinguished from ordinary host painting without guessing. **Dropped from the design.**
+3. **The timeout table's second row is now the WRONG diagnosis for this host.** It promises *"the host
+   chose CUT, which needs a 24x80 screen"*, but what actually happens is that the host refuses and its
+   own error text — `IND$FILE requires a MECAFF connected 3270 terminal` — reaches the screen. **The
+   host's text is better than ours and must not be replaced by it.** That row stays only as the
+   fallback for a host that goes quiet, and the driver should surface host text when it has it.
 
 ## Error handling
 
@@ -214,7 +247,7 @@ this project has removed unmeasured sleeps before. The message reports what was 
 | observed | message |
 |---|---|
 | nothing at all | *no transfer frame from the host within Ns* + existing Attn/Clear hint |
-| screens, none a CUT frame, screen not 24x80 | *the host chose CUT, which needs a 24x80 screen; this session is RxC — restart with `-model 3278-2-E`* |
+| screens, none a CUT frame, screen not 24x80 | *the host chose CUT, which needs a 24x80 screen; this session is RxC — restart with `-model 3278-2-E`*. **Fallback only** — see the measurement above: VM's `IND$FILE` refuses with its own text in ~1s, and host text beats ours whenever it exists |
 | screens, none a CUT frame, screen IS 24x80 | today's *no CUT frame …*, unchanged |
 | nothing, and DDM not advertised | append *DDM was not advertised; a host that speaks only DFT needs `-ddm on`* |
 
