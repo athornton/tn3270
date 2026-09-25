@@ -8,7 +8,8 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 **WAITING ON THE USER: they are reviewing
 `docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` and will respond
-2026-09-26.** Do not start implementing it before they do. **When they approve, the next step is
+MONDAY 2026-09-28** (said at the end of a Friday session, so expect a three-day gap and a cold
+start). Do not start implementing it before they do. **When they approve, the next step is
 `writing-plans` to turn that spec into an implementation plan** — brainstorming is complete and the
 spec is committed, self-reviewed, and has had its one open question measured and closed.
 
