@@ -2339,9 +2339,24 @@ necessary.
 >    `frontend/src/transferForm.ts`), so the choice belongs wherever they already share code, not in
 >    `runner.ts` alone.
 >
-> **Also unmeasured: the VM control.** Port 3270 was closed (VM/370 down; only TK5 on 3271 was up),
-> so "DDM advertised does not break a CUT host" has no measurement from this session and Step 5
-> remains outstanding.
+> **UPDATE: STEP 5, THE VM CONTROL, IS DONE — 2026-09-25.** The user rebuilt VM/370 and it is back on
+> `localhost:3270`. `ddm-probe-vm.txt` run twice with `-ddm on`/`-ddm off` as the only variable:
+> **VM chose CUT both ways, 249 bytes byte-identical each time, ZERO `0xd0` frames**, and our DDM unit
+> provably on the wire with `-ddm on` (**4** occurrences of `00 0c 81 95 00 00 40 00 40 00 01 01`,
+> against **0** with it off). **So `-ddm on` does not break a CUT host** — that question is closed.
+> State was proven first (`QUERY DISK A` → `Ready;`, not `?CP:`) and both runs reached `LOGOFF AT`.
+> Details, plus two traps, in `docs/live-testing.md` *Executed so far*.
+>
+> **It also produced a live confirmation of a Task 5 decision that no unit test could have given:**
+> MECAFF answers **`TRANS03 - File transfer complete`** — host text appended — which is exactly why
+> the engine matches `TRANS03` as a **prefix**. An equality test would have reported this successful
+> transfer as a failure whose error text was the success message.
+>
+> **But VM is now 24x80-ONLY: the rebuild does not define the 3278-4 pool**, so
+> `--terminal-type 'IBM-3278-4-E@MOD4'` yields 0 fields and never completes negotiation (we send the
+> suffix correctly; Hercules has no such group). Those `vm370ce.conf` statements were uncommented by
+> hand on the old system and are commented again. **Steps 1-4 of this task still need TK5**, which is
+> the reference host and is up on 3271 — and they still need the DFT selection work above.
 >
 > **What the attempt did establish:** `-ddm on` reaches a live host without disturbing logon at
 > 43x80, and the geometry refusal fires BEFORE the host is told to start — so the failed run left no
