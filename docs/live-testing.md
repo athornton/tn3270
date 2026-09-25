@@ -28,8 +28,13 @@ and the Recording log says what happened when they were run.
   "the FIRST stage with no live-verification path here" ever since. **That qualification can now be
   retired for the negotiation itself, once a proper run is recorded** — this probe is a capability
   survey, not that run.
-  **IT IS A THIRD PARTY'S SYSTEM. TREAT IT ACCORDINGLY, and this is a hard constraint rather than a
-  preference:**
+  **ATTRIBUTION IS PENDING, 2026-09-25: the user is asking the person who passed the host on how they
+  want to be cited.** Until they answer, this section names the service by its own banner
+  ("Blue Iron Terminal Server") and credits nobody — **do not invent an attribution, and do not add a
+  name to any commit message or doc until the user relays the answer.** When they do, the credit goes
+  here and in the README's acknowledgements if one is wanted.
+  **IT IS A THIRD PARTY'S SYSTEM — CONFIRMED BY THE USER 2026-09-25. TREAT IT ACCORDINGLY, and this is
+  a hard constraint rather than a preference:**
   - **No unattended or scripted logons**, and no credential guessing. Every other host section in this
     runbook assumes a system we own and may `LOGOFF` freely; that does not hold here.
   - **No file-transfer tests** — they create datasets on someone else's machine.
