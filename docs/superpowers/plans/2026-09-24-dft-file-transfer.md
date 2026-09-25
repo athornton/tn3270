@@ -577,7 +577,7 @@ the raw bytes with no EBCDIC step, and TK5's own frames carry ASCII FT:DATA."
 
 Four replies, all fixed-shape. Byte counts come from x3270's `space3270out` calls.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dftFrames.test.ts`:
 
@@ -623,12 +623,12 @@ describe('DFT reply builders', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftFrames.test.ts`
 Expected: FAIL — the builders are not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Append to `packages/core/src/ft/dftFrames.ts`:
 
@@ -702,19 +702,19 @@ export function buildDftError(failedRequest: number): Uint8Array {
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftFrames.test.ts`
 Expected: 21 tests PASS.
 
-- [ ] **Step 5: Mutation-check the length arithmetic**
+- [x] **Step 5: Mutation-check the length arithmetic**
 
 Change `body.length + 3` to `body.length`. Rebuild, rerun.
 Expected: **every** builder test fails on its length bytes. Confirm the edit landed, then revert.
 
 This matters because `+3` is the one place the AID-outside-the-count rule lives, and it is easy to "simplify".
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dftFrames.ts packages/core/test/dftFrames.test.ts
@@ -727,6 +727,42 @@ dropping the +3 reddens every builder.
 Error replies borrow the high byte of whatever request failed, which is why
 DftReply.ERROR is an 8-bit constant and looks like an odd one."
 ```
+
+**AS BUILT (2026-09-25).** Done inline, not subagent-driven, on remaining budget. All 25 tests in
+`dftFrames.test.ts` pass; suite 1986 -> **1996 in 79 files**, build/typecheck clean. Every byte was
+re-verified against `~/src/suite3270-4.5/Common/ft_dft.c` and `include/ft_dft_ds.h` before the code
+was written, and **all four reply byte-sequences the plan asserts are correct as written.** Six
+differences from the plan, none of which changed a wire byte:
+
+1. **The plan's mutation prediction OVERSTATES.** It says dropping `+3` fails "**every** builder
+   test". It fails **4 of 7**: the three that assert a `.slice()` past the length bytes still pass,
+   because the mutation only moves bytes 1-2. So the load-bearing guard is the four FULL-SEQUENCE
+   assertions and must be quoted that way. The edit was asserted to land (per fact 5) via a script
+   that aborts if the target string is absent.
+2. **`u32`'s `>>>` rationale was FALSE.** The plan says `>>` "would sign-extend and produce a
+   negative high byte". Measured across `0x80000000` and `0xffffffff`: `& 0xff` truncates either way
+   and the bytes are IDENTICAL. `>>>` is kept because the value is unsigned, but the comment now says
+   it is not load-bearing — an unfalsifiable claim in a comment is the same defect this repo already
+   recorded for `& 0xff` in `encodeHeader`.
+3. **Four citation ranges were off by one at the start.** `:180` is blank, so OpenAck is
+   **`:181-189`**; CloseAck is **`:680-687`** (`:679` is the `trace_ds(" Close")`), DataAck
+   **`:206-214`**, error **`:698-706`**. The plan's `:180-189`, `:681-687`, `:203-215`, `:697-708`
+   were each a line out. Verified line-by-line with `sed`, not by eye.
+4. **The import goes at the TOP.** The plan's step 3 says "append to `dftFrames.ts`" with the
+   `import` inside the appended block; the file had no imports at all, so a mid-file import would
+   have been legal TS but wrong style for this repo. Added after the module header comment.
+5. **`u16` was NOT shared with `queryreply.ts`**, which already has a module-private one. That one
+   range-checks and throws because a Query Reply's self-describing lengths corrupt the whole unit if
+   wrong; these are called with our own constants. Coupling two unrelated wire modules buys nothing.
+   Recorded in the doc comment so it is not "fixed" later.
+6. **Three tests added beyond the plan's six** (hence 25, not the predicted 21): the two writers are
+   pinned directly, and one test pins that `buildDataAck` holds **no state** — x3270 increments a
+   static `recnum` inside `dft_data_ack` (`:213`) and ours takes an argument, so the counter belongs
+   to Task 5. A builder owning it could not construct two acks for one record, which is what a
+   retransmit needs. That is a Task 5/6 design constraint, pinned here where it is cheap.
+
+`buildOpenAck` is sent for an `FT:MSG` open too — x3270 acknowledges at `:181` before testing
+`message_flag` at `:171-176`. Task 5 must not skip the ack on the message branch.
 
 ---
 
