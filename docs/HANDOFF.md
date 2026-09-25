@@ -1224,6 +1224,18 @@ graphics (these structured fields), and Advanced Vector Graphics/PCLK (a PC-clie
 Partition** to discover the drawing space — both of which we already build and send. No pixel
 dimensions for the G-terminals are recorded anywhere we have yet; they are an open measurement.
 
+**A SECOND IMPLEMENTATION EXISTS AND IT IS PUBLIC DOMAIN: `j3270`**
+(<https://git.hugfreevikings.wtf/rudi/j3270>, Unlicense), a Java 3270 emulator with a working GOCA
+decoder and tests. **43 opcodes agree exactly with our Table 16 extraction** — strong corroboration
+from an independent source. **Crucially it is based on IBM HOST ON-DEMAND, not on the AFP book**
+(`GocaDecoder.java` cites `HODDecoder`/`HODEllipse` with line numbers), so it reads the **3270
+binding** we lack: ten extra orders, several obviously display-oriented, plus `Object Control`
+procedure orders with no AFP analogue at all (attach/detach **graphic cursor**, erase plane). **One
+real conflict is unresolved — Partial Arc is `A3`/`E3` in our book and `86`/`C6` in j3270 — and it
+must not be "fixed" in either direction.** It claims **no live-host verification** of graphics (its
+"verified against" list is JDK builds), so it is a better paper reference, not the witness this
+feature lacks. Full analysis in `docs/goca-reference-notes.md`; treat `GocaDecoder.java` as a
+behavioural reference the way VMGIF is treated for PS.
 **Neither x3270 nor c3270 implements any of this** (prycroft6 mentions no emulator, and our own
 `sf.c` dispatch has no `0x0F10`/`0x0F0F`/`0x0F11` arm — so unlike every stage so far, **there is
 no reference implementation to diff against**, and no Hercules host here drives a G-terminal.
