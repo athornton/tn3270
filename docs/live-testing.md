@@ -9,6 +9,39 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **A PUBLIC HOST THAT SPEAKS TN3270E — the first one available to this project, 2026-09-25.** The
+  user supplied **`144.208.193.156:3270`**, which identifies itself as **"Blue Iron Terminal Server",
+  `bits` v0.18.0**. A read-only probe (connect, settle, trace, quit — no logon, no menu selection)
+  established:
+  - **TN3270E NEGOTIATED END TO END, with an LU name assigned: `IBM-3278-4-E`, LU `PYTN0001`,
+    session id echoed on screen.** Functions came back as **`(none: basic TN3270E)`** — the host
+    granted no optional function — so this exercises DEVICE-TYPE/FUNCTIONS and the 5-byte header
+    path, not RESPONSES or SYSREQ.
+  - **It issues a Query LIST, not a plain Query:** `ReadPartition(pid=0xff,type=0x03,reqtyp=0x80,
+    qcodes=[])` — `reqtyp=0x80` with an empty QCODE list, the "ALL" form.
+  - **It drives EraseWriteAlternate at model 4** — 43x80, many SF/SBA orders, rendered without
+    program checks.
+  - It **echoes our own client IP back onto the screen**, so assume the operator can see connections.
+  **WHY THIS MATTERS: it is the live-verification path stage 2b has never had.** Both Hercules hosts
+  REFUSE option 40 (`ff fe 28`, measured three times), which is why the TN3270E negotiation has been
+  verified only against `e-server.py` and real s3270 since 2026-08-27, and why this file has carried
+  "the FIRST stage with no live-verification path here" ever since. **That qualification can now be
+  retired for the negotiation itself, once a proper run is recorded** — this probe is a capability
+  survey, not that run.
+  **IT IS A THIRD PARTY'S SYSTEM. TREAT IT ACCORDINGLY, and this is a hard constraint rather than a
+  preference:**
+  - **No unattended or scripted logons**, and no credential guessing. Every other host section in this
+    runbook assumes a system we own and may `LOGOFF` freely; that does not hold here.
+  - **No file-transfer tests** — they create datasets on someone else's machine.
+  - **Nothing that resembles probing**: no port scanning, no repeated reconnects, no load.
+  - Read-only capability observation of the pre-logon screen is what the above was, and is the
+    ceiling for anything automated. **Anything beyond it is the user's call to make, per connection.**
+  - **Do not add it to any harness that `npm test` or a gate runs.** A committed script that hits a
+    third party on every CI run is the failure mode to avoid.
+  **What it does NOT give us:** no `0x0F0F`/`0x0F10`/`0x0F11` graphics (unprobed, and a terminal server
+  is unlikely to drive a G-terminal), and no DFT evidence — `-ddm` was off for this probe and TK5
+  remains the DFT reference host.
+
 - **CUT AT 43x80 IS MEASURED, 2026-09-25 — THE HOST REFUSES AND SELF-RECOVERS, so the protocol-
   selection spec's one open question is closed.** Attempted a CUT upload against VM/370 CMS on a
   43-row screen with the `dist` geometry gate disabled (source untouched; build restored and
