@@ -1178,8 +1178,15 @@ GOCA; everything else = long, `code length operand`). Mechanically verified acro
 and **none for the 3270 data stream**, mentions 3270 once in 216 pages, and never mentions a 3179 or
 3192. It also declares its own Extended format "not used in AFP GOCA", which is explicit evidence
 that bindings are subsets. **So the primitives are almost certainly right and the 3270 SUBSET,
-defaults and environment controls are NOT established.** The 3179-G/3192-G manuals remain missing
-(the user has not found them), and GOCA does not substitute for them.
+defaults and environment controls are NOT established.** **THE TWO TERMINAL BOOKS ARE NOW IDENTIFIED BY ORDER NUMBER — `GA18-2177` (*IBM 3179 Color Display
+Station Description*) and `GA18-2535` (*IBM 3192 Display Station Description*)**, named in
+GA23-0059-07's own related-publications list. Those are the acquisition targets; GOCA-for-AFP does
+not substitute for them. **Also new (2026-09-25): `$HOME/GA23-0059-07-text.pdf`, a 471-page near-all-
+text draft of the SAME edition as `~/3270/ref/pages.txt` — no new content, but it extracts with real
+table borders and renders hex as `X'0F10'` where `pages.txt` mangles it to `X }0F10}`. Prefer it for
+new structured-field work.** Searched and confirmed: **zero GOCA drawing orders appear anywhere in
+those 471 pages**, and the graphics `DATA` deferral appears **seven** times — the envelope and the
+contents are in genuinely separate books.
 
 **ALL THREE DEFER THEIR CONTENTS: byte 7-n is "Data appropriate to the object type. For the
 format and contents of this parameter, refer to the appropriate graphics or image
