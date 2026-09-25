@@ -2352,11 +2352,18 @@ necessary.
 > the engine matches `TRANS03` as a **prefix**. An equality test would have reported this successful
 > transfer as a failure whose error text was the success message.
 >
-> **But VM is now 24x80-ONLY: the rebuild does not define the 3278-4 pool**, so
-> `--terminal-type 'IBM-3278-4-E@MOD4'` yields 0 fields and never completes negotiation (we send the
-> suffix correctly; Hercules has no such group). Those `vm370ce.conf` statements were uncommented by
-> hand on the old system and are commented again. **Steps 1-4 of this task still need TK5**, which is
-> the reference host and is up on 3271 — and they still need the DFT selection work above.
+> **CORRECTED: VM IS A 43x80 HOST AGAIN.** An earlier version of this note said VM was 24x80-only;
+> that was a **sampling error of mine**, not a property of the host — the measurement read the last
+> status line from a run whose `Wait(Settle)` was too short and so captured the state before the
+> host's EWA resize. Plain **`-model 3278-4-E` reaches 43x80 with 41 fields** (EWA `7e` on the wire,
+> `24 80` → `43 80` at 0.505s), and the user independently ran a TUI mod-4 session at 43 lines.
+> `@MOD4` does still select nothing (`@MOD2` works; `@MOD4`/`@01C0`/`@02C0` do not negotiate), so the
+> rebuilt conf groups its 3278-4s differently — **but that blocks nothing, because no selector is
+> needed to get 43 rows.**
+>
+> **So BOTH hosts can now host a 43x80 DFT test, and the only thing still missing for Steps 1-4 is
+> the DFT selection work above.** TK5 remains the reference host (it is the one that offers DFT); VM
+> is the CUT control and Step 5 is done.
 >
 > **What the attempt did establish:** `-ddm on` reaches a live host without disturbing logon at
 > 43x80, and the geometry refusal fires BEFORE the host is told to start — so the failed run left no
