@@ -9,6 +9,29 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **DFT'S FIRST LIVE ATTEMPT FAILED, 2026-09-25, AND THE FAILURE IS THE FINDING: `Transfer()` HAS NO
+  DFT PATH.** The run reached TK5 at **43x80** and logged on cleanly, then `Transfer()` refused
+  before sending anything: *"CUT file transfer needs a 24x80 screen; this session is 43x80"*
+  (`packages/cli/src/runner.ts:454`, a `screen.size !== 1920` check). **Zero `FileTransferData`
+  frames, no readback file, exit 0.** So this is NOT a defect in the DFT engine, which is built,
+  plumbed and unit-tested — it is that **nothing selects it**: `Session.startDftTransfer` has no
+  caller outside tests, and `runner.ts` constructs a `CutTransfer` unconditionally.
+  **The implementation plan has a structural gap.** Tasks 1-9 build the engine, the wire plumbing and
+  the Read Modified hook; **no task wires the `Transfer()` action to choose DFT over CUT**, and Tasks
+  11 and 12 both depend on Task 10's trace, so the whole tail is blocked behind work no task
+  specifies. That wiring is its own task and needs decisions the plan never poses: what chooses DFT
+  (geometry? `-ddm`? a keyword?), what happens when a host offered DFT but the screen is 24x80, and
+  whether `Transfer()`'s already-parsed-and-ignored `BufferSize` keyword now feeds
+  `DftOptions.bufferSize`.
+  Script committed as `packages/cli/scripts/dft-tso.txt` with its judging criteria; it is correct as
+  written and will be the run once a front end can start a DFT transfer.
+  **The VM control could not run: port 3270 was closed, i.e. VM/370 was down. Only TK5 (3271) was
+  up.** So "DDM does not break a CUT host" is still unmeasured, and this run says nothing about it.
+  **What the run DID establish, and it is not nothing:** the `-ddm on` advertisement reaches a live
+  host without disturbing logon at 43x80, and the geometry refusal fires **before** the host is told
+  to start a transfer, which is the behaviour `runner.ts:450`'s comment claims and the reason a failed
+  run left no half-open transfer on TSO. `LOGOFF` completed, so no stranded userid.
+
 - **ALL FOUR SPECIAL KEYS NOW HAVE A LIVE WITNESS, 2026-09-24.** Field Mark and Newline were the
   last two without one; both are now witnessed on **both** hosts against matched controls. Field
   Mark puts `0x1e` on the wire and both hosts parse the field (on VM it is the entire payload), and
