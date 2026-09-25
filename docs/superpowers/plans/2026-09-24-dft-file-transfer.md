@@ -1377,7 +1377,7 @@ is churn on a branch mid-flight; noted so it is a decision rather than an oversi
 
 The `GET` path. It also produces the buffer the Read Modified hook re-sends, which is Task 8.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dft.test.ts`:
 
@@ -1497,12 +1497,12 @@ describe('DftTransfer, upload (send)', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dft.test.ts`
 Expected: FAIL — `bufferSize` is not on `DftOptions`, `retainedFrame` does not exist, `GET` is unhandled.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/core/src/ft/dft.ts`, add to the imports from `./dftFrames.js`: `DftError`, `DftHeader`, `DftReply`.
 
@@ -1638,12 +1638,12 @@ import { AID, Sfid } from '../constants.js';
 
 **`u16`/`u32` are exported by Task 4**, so import them rather than writing a second copy — two hand-rolled big-endian writers that could disagree is exactly the drift `X3270_HEADER_LEN` exists to prevent. (An earlier draft declared them private and told you to reach back into Task 4's file to add `export`; that edit-back is gone. If you find them private, the Task 4 implementer missed it — export them there, not here.)
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dft.test.ts`
 Expected: 21 tests PASS.
 
-- [ ] **Step 5: Mutation-check the three numbers that would corrupt a file**
+- [x] **Step 5: Mutation-check the three numbers that would corrupt a file**
 
 (a) Change `UPLOAD_OVERHEAD` from 27 to 0. Expected: the buffer-size test fails (300 data bytes, not 273). Revert.
 (b) Change `chunk.length + 16` to `chunk.length + 17` — **the off-by-one this plan itself made in an earlier draft.** Expected: the data-frame test fails on `b.slice(1,3)`, reporting `0x14` where `0x13` is right. Revert.
@@ -1651,7 +1651,7 @@ Expected: 21 tests PASS.
 
 Confirm each edit landed before trusting its result. (b) is the one to take seriously: the SF length excludes the AID while the data offset includes it, so 16 and 17 are both "right" for different things and one draft of this plan used 17 for both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dft.ts packages/core/test/dft.test.ts
@@ -1665,6 +1665,45 @@ The retained frame keeps the BYTES, not the source range -- the same decision
 CutTransfer documents for retransmits, and here re-deriving would also
 double-count the offset. Task 8 is the hook that replays it."
 ```
+
+**AS BUILT (2026-09-25).** Inline. **44 tests in `dft.test.ts`; suite 2025 -> 2042 in 80 files**,
+build/typecheck clean. The plan's frame arithmetic was **right** — SF length 16 + data with the data at
+index 17 — and I re-derived it from `ft_dft.c:654-655` and `:584` before trusting it, because the plan
+itself records an earlier draft that used 17 for both.
+
+**ONE PLAN TEST WAS WRONG IN TWO INDEPENDENT WAYS**, and it is the one named "splits a source larger
+than the buffer":
+1. **It did not split anything.** A 100-byte source against `bufferSize: 300` is one 273-byte frame, so
+   the test asserted a single frame and then an EOF — the multi-frame path it was named for went
+   unexercised. Now 600 bytes over three frames (273 + 273 + 54).
+2. **It looked for the EOF header at index 8-10, where the error CODE lives.** The EOF frame is
+   `88 00 09 d0 46 08 | 69 04 | 22 00`: `TR_ERROR_HDR` is at 6-8 and `TR_ERR_EOF` at 8-10. This was
+   the only failing test after implementing, so the plan's own expectation is what caught it — but it
+   would have been "fixed" by changing the implementation if I had trusted the test over the frame I
+   had just verified byte by byte against the C.
+
+**BUFFER SIZE IS CLAMPED THROUGH `queryreply.ts`'s EXISTING `boundDftBufferSize`, not the plan's new
+bare `DFT_BUF_DEFAULT` constant.** `DFT_BUF_DEFAULT`, `DFT_BUF_MIN`, `DFT_BUF_MAX` and the clamp were
+already there for the DDM advertisement (`9f92816`), and **reusing them is a correctness requirement,
+not tidiness: the size we ADVERTISE to the host and the size we CHUNK by must be the same number.**
+The plan's version also had `Math.max(1, ...)` papering over a small `bufferSize`, which would have
+produced 1-byte frames where x3270 clamps to 256. No import cycle — `queryreply.ts` imports only
+`constants` and `palette`.
+
+**Five behaviours added beyond the plan's tests, each because a mutation showed the plan's set did not
+pin it:** the 16-vs-17 relationship checked across three sizes rather than one instance; the EOF frame
+distinguished from an ABORT frame, which differ by **one byte** (`0x2200` vs `0x0100`) and are
+otherwise identical for 8 bytes; record numbers 1/2/3 across successive frames; the source delivered
+**byte for byte** across frames from a positional pattern, so a dropped or reordered chunk shows; and
+`offset` NOT advancing on EOF, since `transferred` feeds a progress display.
+
+**Five mutations verified, all reddening:** SF length 17-not-16 (2 tests), `UPLOAD_OVERHEAD` 22-not-27
+(3), dropping the `+5` on the inner data length (2), not retaining the EOF frame (1), never advancing
+`offset` (7).
+
+**For Task 8:** `retainedFrame` covers BOTH branches deliberately — x3270's savebuf copy at `:657-663`
+is after the if/else, so a Read Modified after EOF re-sends the EOF and not the last data frame, which
+the host already has.
 
 ---
 
