@@ -9,6 +9,42 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE VM CUT CONTROL FOR DFT IS NOW MEASURED, 2026-09-25 — the gap left open earlier that day.**
+  The user recreated the VM/370 system from scratch and it is back on `localhost:3270`. Same
+  version (**VM/370 Community Edition V1 R1.2**), logo paints, 22 fields, 24x80, zero program checks.
+  **`ddm-probe-vm.txt` run twice with `-ddm on` and `-ddm off` as the only variable, and VM chose CUT
+  BOTH WAYS:**
+  - Our DDM unit **demonstrably reached the wire** with `-ddm on` — `00 0c 81 95 00 00 40 00 40 00
+    01 01`, **4 occurrences**, against **0** with `-ddm off`. This matters because of the trap the
+    runbook already records: without proving our own advertisement was sent, "no DFT frames" would
+    be a statement about our logging rather than about the host.
+  - **ZERO `FileTransferData` / `0xd0` frames in either run.** MECAFF does not implement DFT.
+  - Both directions transferred both times, and **`cmp` byte-identical on 249 bytes** each run.
+  - **State PROVEN before trusting any of it:** `QUERY DISK A` answered `Ready;` (not `?CP:`), so
+    these were real CMS sessions and not reconnects to a stranded machine. Both runs reached
+    `LOGOFF AT`, with `CONNECT= 00:00:05` spanning only the current run — no trap handed forward.
+  **So `-ddm on` does NOT break a CUT host**, which was the open question, and VM remains the control
+  for DFT work while TK5 is the reference host.
+  **A LIVE CONFIRMATION OF A UNIT-TEST DECISION, worth recording because no test could have shown
+  it:** MECAFF's completion message arrives as **`TRANS03 - File transfer complete`** — `TRANS03`
+  with host text appended. That is exactly why the DFT engine matches `TRANS03` as a **PREFIX** and
+  not by equality (`memcmp` over `strlen`, `ft_dft.c:268`); an equality test would have reported this
+  successful transfer as a failure whose error text was the success message.
+  **ONE MEASURED DIFFERENCE IN THE RECREATED SYSTEM, and it is a config difference, not a
+  regression: THE 3278-4 POOL IS NOT DEFINED.** `--terminal-type 'IBM-3278-4-E@MOD4'` now yields
+  **0 fields and never reaches 3270 mode** (negotiation does not complete), where the old system gave
+  a 43-row session. We send the suffix correctly — traced as
+  `40 4d 4f 44 34 ff f0  # TERMINAL-TYPE IS IBM-3278-4-E@MOD4` — so this is Hercules having no such
+  device group, i.e. the `vm370ce.conf` 3278-4 statements that had been uncommented by hand are
+  commented again in the rebuild. **Consequence: VM is a 24x80-only host again until those are
+  uncommented, so it cannot host the 43x80 half of any future test.** Nothing to fix in the client.
+  **A GREP TRAP THAT PRODUCED A FALSE READING FIRST TIME, and it generalises to any wire log here:**
+  `grep -c "81 95"` reported **12 hits in the `-ddm off` run**, which looked like the flag leaking.
+  It is EBCDIC TEXT: `0x95` is the letter **`n`**, and `81 95 84` is **`and`** in VM's copyright
+  banner. Anchor on the unit header (`00 0c 81 95`) or decode; a bare hex grep for a byte that is
+  also a common letter will match prose. Same lesson as the Query Reply walk: parse the structure,
+  do not grep it.
+
 - **DFT'S FIRST LIVE ATTEMPT FAILED, 2026-09-25, AND THE FAILURE IS THE FINDING: `Transfer()` HAS NO
   DFT PATH.** The run reached TK5 at **43x80** and logged on cleanly, then `Transfer()` refused
   before sending anything: *"CUT file transfer needs a 24x80 screen; this session is 43x80"*
