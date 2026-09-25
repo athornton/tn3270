@@ -819,7 +819,7 @@ differences from the plan, none of which changed a wire byte:
 
 `DftTransfer` mirrors `CutTransfer`'s shape — single-use, an `outcome` once finished — but takes a payload and returns bytes rather than taking a `Screen` and returning an AID.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/test/dft.test.ts`:
 
@@ -1009,12 +1009,12 @@ describe('DftTransfer, download (receive)', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dft.test.ts`
 Expected: FAIL — cannot resolve `../src/ft/dft.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `packages/core/src/ft/dft.ts`:
 
@@ -1282,17 +1282,17 @@ export class DftTransfer {
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dft.test.ts`
 Expected: 12 tests PASS.
 
-- [ ] **Step 5: Mutation-check the length subtraction**
+- [x] **Step 5: Mutation-check the length subtraction**
 
 Remove `- LENGTH_OVERHEAD` (i.e. `const length = declared;`). Rebuild, rerun.
 Expected: the data tests fail with 5 extra bytes. Confirm the edit landed, then revert.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dft.ts packages/core/test/dft.test.ts
@@ -1308,6 +1308,64 @@ MESSAGE and must not start a file transfer, and a message frame ENDS the transfe
 '\$'). Cancellation is deferred to the next inbound frame, matching x3270, unlike
 CUT where we deliberately send immediately."
 ```
+
+**AS BUILT (2026-09-25).** Inline, not subagent-driven. **26 -> 27 tests in `dft.test.ts`; suite
+1998 -> 2025 in 80 files**, build/typecheck clean. The plan predicted 12 tests; 27 shipped. The design
+was right in every respect — `Close` does not complete, `FT:MSG` must not start a transfer, Set
+Cursor/Insert/unknown are silent, cancellation defers — and all of that is as written. What the plan
+lacked was found by reading `ft_dft.c` again rather than trusting the plan's prose.
+
+**THREE BEHAVIOURS MISSING FROM THE PLAN, in descending order of how badly each would have hurt:**
+
+1. **`TRANS03` IS A PREFIX MATCH, NOT EQUALITY.** `memcmp(msgp, END_TRANSFER, strlen(END_TRANSFER))`
+   at `:268` compares 7 bytes only. A real host sends `TRANS03` followed by its own wording, so
+   `text === END_TRANSFER` would report **every successful transfer as a failure whose error text is
+   the success message.** The plan's own listing used `startsWith`, so the code was right — but
+   nothing in the plan *said* why, and no test distinguished the two until one was added.
+   **This is the defect a synthetic-frame suite structurally cannot find**, because the frames the
+   tests build are the ones the plan imagined, and it would have surfaced only on TK5 in Task 10.
+2. **The completing frame carries BOTH a `reply` and a `done`.** `dft_data_ack()` is called at `:250`,
+   before the text is inspected at `:267`. Completing without replying leaves the host's final frame
+   unacknowledged.
+3. **An empty data frame is ACKNOWLEDGED, not an error.** x3270's `if (my_length > 0)` guard closes at
+   `:407`; `dft_data_ack()` is at `:410`, outside it.
+
+**TWO MUTATION CHECKS PASSED VACUOUSLY, WHICH IS THE PROCESS FINDING — fact 5 says a mutation must
+assert its target was found, and both of these DID; the target was found, the edit landed, and the
+tests still passed. Landing is necessary and not sufficient.**
+
+- **Step 5's own check, dropping `- LENGTH_OVERHEAD`, left 24 of 24 GREEN.** Every payload
+  `dataInsert` builds ends exactly where its data ends, and `subarray(7, 7+len)` **clamps at the
+  buffer end** — so reading 5 bytes too many returned the identical bytes. The plan asserts this
+  mutation makes "the data tests fail with 5 extra bytes"; it does not, with that helper.
+  `dataInsertPadded` now appends trailing junk so the over-read swallows something, and the mutation
+  reddens 2 tests **on content**. A host may pad a frame; the declared length is what says where data
+  stops, so this is a real-frame case and not a contrived one.
+- **Deleting `this.recordNumber = 1` left 26 of 26 green.** `recnum = 1` at `:178` runs on **every**
+  Open — it is the only assignment besides the two increments — so after the second Open the message
+  frame is acked as **record 1**, not as a continuation. The download sequence contains a second Open,
+  so this is observable; nothing asserted the number on that final ack. Now pinned.
+
+**The generalisable rule: a mutation that lands and changes nothing means the TEST is weak, not that
+the code is dead.** Both of these read as "this line is not load-bearing", which is the most
+misleading result available — and both lines were load-bearing.
+
+**Mutation-verified guards, four of them:** the `-5` subtraction (2 tests), the `TRANS03` prefix match
+(1), the `recnum` reset (1), and the `!messageFlag` exemption in the cancel guard that lets the host's
+final message still be read after a cancel (1).
+
+**One deviation from the plan's listing:** `MSG.USER_CANCEL` is **not** redeclared here. `transfer.ts`
+already has that exact string for CUT, so it is exported as `FT_MSG` and imported — one x3270 message,
+two engines reporting it, and two literals could drift into two different "canceled by user" texts.
+The rest of CUT's `MSG` stays private, being control-code names DFT has no use for.
+
+**Note for Task 7:** `payload` is a view into the inbound record's buffer, so `onDataInsert` copies
+with `Uint8Array.from` rather than retaining the subarray. If the plumbing hands us a buffer it then
+reuses, a retained view would alias it and corrupt every chunk but the last.
+
+**A test-layout inconsistency, left alone deliberately:** CUT's tests live in `test/ft/`, while Task 3
+put `dftFrames.test.ts` at `test/` top level and this plan specifies `test/dft.test.ts`. Moving them
+is churn on a branch mid-flight; noted so it is a decision rather than an oversight.
 
 ---
 
