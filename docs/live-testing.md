@@ -30,14 +30,21 @@ and the Recording log says what happened when they were run.
   with host text appended. That is exactly why the DFT engine matches `TRANS03` as a **PREFIX** and
   not by equality (`memcmp` over `strlen`, `ft_dft.c:268`); an equality test would have reported this
   successful transfer as a failure whose error text was the success message.
-  **ONE MEASURED DIFFERENCE IN THE RECREATED SYSTEM, and it is a config difference, not a
-  regression: THE 3278-4 POOL IS NOT DEFINED.** `--terminal-type 'IBM-3278-4-E@MOD4'` now yields
-  **0 fields and never reaches 3270 mode** (negotiation does not complete), where the old system gave
-  a 43-row session. We send the suffix correctly — traced as
-  `40 4d 4f 44 34 ff f0  # TERMINAL-TYPE IS IBM-3278-4-E@MOD4` — so this is Hercules having no such
-  device group, i.e. the `vm370ce.conf` 3278-4 statements that had been uncommented by hand are
-  commented again in the rebuild. **Consequence: VM is a 24x80-only host again until those are
-  uncommented, so it cannot host the 43x80 half of any future test.** Nothing to fix in the client.
+  **CORRECTED SAME DAY — MY "VM IS 24x80-ONLY" CLAIM WAS A TEST ARTIFACT, NOT A PROPERTY OF THE
+  HOST.** The user uncommented the 3278s and reported a TUI mod-4 session at 43 lines working fine;
+  re-measuring on the CLI agrees. **Plain `-model 3278-4-E` reaches 43x80 with 41 fields**, with EWA
+  (`7e`) on the wire twice and the status progression `24 80` → **`43 80` at 0.505s**.
+  **The error was mine and is worth recording as a method trap: my one-liner read the LAST
+  `^[LU] ` status line from a run whose `Wait(Settle)` was too short, so it captured the state BEFORE
+  the host's EWA resize arrived.** A 24x80 reading taken before EWA is indistinguishable from a
+  24x80-only host unless the whole status history is printed. **Print the progression, not the last
+  line** — the resize is the event being measured, so a single sample cannot show it.
+  **What IS true, and is a config difference rather than a client issue: `@MOD4` does not select
+  anything.** Measured across four suffixes: **`@MOD2` works** (22 fields, 24x80), while
+  **`@MOD4`, `@01C0` and `@02C0` all fail to complete negotiation**. We send the suffix correctly
+  (traced `40 4d 4f 44 34 ff f0`), so the rebuilt `vm370ce.conf` defines its 3278-4s under some other
+  group name or device numbering than the old one. **This blocks nothing: plain `-model 3278-4-E`
+  gets 43x80, so the `@group` selector is not needed for a model-4 session here.**
   **A GREP TRAP THAT PRODUCED A FALSE READING FIRST TIME, and it generalises to any wire log here:**
   `grep -c "81 95"` reported **12 hits in the `-ddm off` run**, which looked like the flag leaking.
   It is EBCDIC TEXT: `0x95` is the letter **`n`**, and `81 95 84` is **`and`** in VM's copyright
