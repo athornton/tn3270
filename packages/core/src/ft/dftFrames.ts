@@ -15,6 +15,8 @@
  * parser reported 38- and 32-byte payloads (41-3, 35-3).
  */
 
+import { AID, Sfid } from '../constants.js';
+
 /**
  * x3270 overlays its offsets on the RAW structured field; ours start 3 bytes
  * later, because parseStructuredFields has already stripped the two length
@@ -203,4 +205,100 @@ export function parseDftOpen(payload: Uint8Array): DftOpen {
   // against an optional property, so the key is added only when it has a value.
   // Same spread-when-defined idiom as bind.ts:116.
   return { name, isMessage: name === OPEN_MSG, ...(recordSize === undefined ? {} : { recordSize }) };
+}
+
+/**
+ * Big-endian 16-bit. **Exported because `ft/dft.ts` needs it in Task 6** — the
+ * alternative is a second copy in that file, and two hand-rolled big-endian
+ * writers that could disagree is exactly the kind of drift this project has been
+ * bitten by. Matches x3270's `SET16` macro (`include/3270ds.h:337-340`).
+ *
+ * Deliberately NOT shared with `queryreply.ts`'s module-private `u16`: that one
+ * range-checks and throws, because a Query Reply builds a self-describing
+ * structure where a bad length corrupts the whole unit. These writers are called
+ * with our own constants and a record counter we increment ourselves, so a shared
+ * helper would couple two unrelated wire modules to buy nothing.
+ */
+export function u16(n: number): [number, number] {
+  return [(n >> 8) & 0xff, n & 0xff];
+}
+
+/**
+ * Big-endian 32-bit, for the record number. Exported for the same reason as
+ * `u16`; matches `SET32` (`include/3270ds.h:345-350`).
+ *
+ * `>>>` is used for the high byte, but note it is NOT load-bearing: `& 0xff`
+ * truncates a sign-extended result to the same byte, measured across
+ * `0x80000000` and `0xffffffff`. It is written unsigned because that is what the
+ * value IS, not because `>>` would produce different bytes here.
+ */
+export function u32(n: number): [number, number, number, number] {
+  return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+}
+
+/**
+ * Every reply starts `AID_SF, L, L, SF_TRANSFER_DATA`, where L is the structured
+ * field length COUNTING ITSELF AND THE SFID BUT NOT THE AID — x3270 writes
+ * `SET16(obptr, 5)` before a 6-byte buffer (`ft_dft.c:184`, `space3270out(6)` at
+ * `:184`).
+ *
+ * So `length` here is `body.length + 3`: two length bytes, one SFID, and the
+ * caller's body. The AID is outside the count. This is the same +3 relationship
+ * as `X3270_HEADER_LEN` on the INBOUND side, and it is the same three bytes — but
+ * it is written as its own arithmetic here rather than reusing that constant,
+ * because one is "what the parser stripped from a field we received" and the other
+ * is "what we must count when declaring a field we send". Tying them together
+ * would make a future change to either silently change the other.
+ */
+function reply(...body: number[]): Uint8Array {
+  return Uint8Array.of(AID.SF, ...u16(body.length + 3), Sfid.TRANSFER_DATA, ...body);
+}
+
+/**
+ * Acknowledge an `Open`. `ft_dft.c:181-189`.
+ *
+ * Sent for BOTH an `FT:DATA` open and an `FT:MSG` open: x3270 acknowledges before
+ * it looks at `message_flag` (`:171-176` precedes `:181`), so the message branch
+ * gets the same 6 bytes.
+ */
+export function buildOpenAck(): Uint8Array {
+  // The literal 0x0009 is x3270's, and it is NOT one of the TR_ constants -- it
+  // has no name in ft_dft_ds.h. Left as a number with this note rather than
+  // given an invented name.
+  return reply(...u16(0x0009));
+}
+
+/** Acknowledge a `Close`. `ft_dft.c:680-687`. */
+export function buildCloseAck(): Uint8Array {
+  return reply(...u16(DftReply.CLOSE));
+}
+
+/**
+ * Acknowledge received data, carrying the record number. `ft_dft.c:206-214`.
+ *
+ * The counter is the CALLER's: x3270 keeps `recnum` static and increments it here,
+ * but a builder that owned it could not construct two acks for the same record,
+ * which is what a retransmit needs. Task 5's state machine holds it.
+ */
+export function buildDataAck(recordNumber: number): Uint8Array {
+  return reply(...u16(DftReply.NORMAL), ...u16(DftHeader.RECNUM), ...u32(recordNumber));
+}
+
+/**
+ * Report a failure. `ft_dft.c:698-706`.
+ *
+ * `failedRequest` supplies the high byte of the reply type, which is why
+ * `DftReply.ERROR` is 8 bits: x3270 writes `HIGH8(code)` then the error byte, so
+ * a failed GET (`0x4611`) yields reply type `0x4608`. The code sent is always
+ * `TR_ERR_CMDFAIL` — every one of `dft_abort`'s five call sites passes a different
+ * REQUEST but the same error code (`:155`, `:227`, `:401`, `:577`, `:619`).
+ * `TR_ERR_EOF` is used only by the upload's own EOF frame, not here.
+ */
+export function buildDftError(failedRequest: number): Uint8Array {
+  return reply(
+    (failedRequest >> 8) & 0xff,
+    DftReply.ERROR,
+    ...u16(DftHeader.ERROR),
+    ...u16(DftError.CMDFAIL),
+  );
 }

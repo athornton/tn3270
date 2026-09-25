@@ -8,6 +8,12 @@ import {
   parseDftFrame,
   parseDftOpen,
   DftFrameError,
+  buildOpenAck,
+  buildCloseAck,
+  buildDataAck,
+  buildDftError,
+  u16,
+  u32,
 } from '../src/ft/dftFrames.js';
 
 describe('DFT wire constants, from include/ft_dft_ds.h', () => {
@@ -136,5 +142,74 @@ describe('parseDftOpen', () => {
     expect(() => parseDftOpen(new Uint8Array(39))).toThrow();
     expect(() => parseDftOpen(new Uint8Array(33))).toThrow();
     expect(() => parseDftOpen(new Uint8Array(37))).toThrow();
+  });
+});
+
+describe('DFT reply builders', () => {
+  it('builds the Open acknowledgement, 6 bytes', () => {
+    // ft_dft.c:181-189: AID_SF, SET16(5), SF_TRANSFER_DATA, SET16(9).
+    expect([...buildOpenAck()]).toEqual([0x88, 0x00, 0x05, 0xd0, 0x00, 0x09]);
+  });
+
+  it('builds the Close acknowledgement, 6 bytes ending in TR_CLOSE_REPLY', () => {
+    // ft_dft.c:680-687.
+    expect([...buildCloseAck()]).toEqual([0x88, 0x00, 0x05, 0xd0, 0x41, 0x09]);
+  });
+
+  it('builds a data acknowledgement carrying a 32-bit record number', () => {
+    // ft_dft.c:206-214: AID_SF, SET16(11), SF, TR_NORMAL_REPLY, TR_RECNUM_HDR,
+    // SET32(recnum). 12 bytes.
+    expect([...buildDataAck(1)]).toEqual([
+      0x88, 0x00, 0x0b, 0xd0, 0x47, 0x05, 0x63, 0x06, 0x00, 0x00, 0x00, 0x01,
+    ]);
+  });
+
+  it('puts a large record number in big-endian order', () => {
+    expect([...buildDataAck(0x01020304)].slice(8)).toEqual([0x01, 0x02, 0x03, 0x04]);
+  });
+
+  it('builds an error reply borrowing the failed request\'s high byte', () => {
+    // ft_dft.c:698-706: AID_SF, SET16(9), SF, HIGH8(code), TR_ERROR_REPLY,
+    // TR_ERROR_HDR, TR_ERR_CMDFAIL. 10 bytes. The reply type's high byte comes
+    // from the REQUEST that failed -- 0x46 for a GET -- which is why ERROR is an
+    // 8-bit constant.
+    expect([...buildDftError(0x4611)]).toEqual([
+      0x88, 0x00, 0x09, 0xd0, 0x46, 0x08, 0x69, 0x04, 0x01, 0x00,
+    ]);
+  });
+
+  it('borrows 0x00 from an Open, since TR_OPEN_REQ is 0x0012', () => {
+    expect([...buildDftError(DftRequest.OPEN)].slice(4, 6)).toEqual([0x00, 0x08]);
+  });
+
+  it('numbers records from 1 upwards without the builder holding state', () => {
+    // x3270 keeps `recnum` as a static and increments it in dft_data_ack
+    // (ft_dft.c:213). Ours takes it as an argument, so the COUNTER belongs to the
+    // state machine in Task 5 -- pinned here because a builder that remembered
+    // anything would make two acks for record 1 impossible to construct, which
+    // is what a retransmit needs.
+    expect([...buildDataAck(1)]).toEqual([...buildDataAck(1)]);
+  });
+});
+
+describe('big-endian writers', () => {
+  it('splits a 16-bit value high byte first', () => {
+    expect(u16(0x1234)).toEqual([0x12, 0x34]);
+    expect(u16(0)).toEqual([0x00, 0x00]);
+    expect(u16(0xffff)).toEqual([0xff, 0xff]);
+  });
+
+  it('splits a 32-bit value high byte first', () => {
+    expect(u32(0x01020304)).toEqual([0x01, 0x02, 0x03, 0x04]);
+    expect(u32(0)).toEqual([0x00, 0x00, 0x00, 0x00]);
+  });
+
+  it('keeps the high byte unsigned past 0x7fffffff', () => {
+    // A record number this large cannot arise from a real transfer, but the
+    // writer is exported and Task 6 reuses it. `>>` would give the same bytes
+    // here because `& 0xff` truncates either way -- MEASURED, not assumed -- so
+    // this pins the OUTPUT and does not claim the shift operator is what saves it.
+    expect(u32(0xffffffff)).toEqual([0xff, 0xff, 0xff, 0xff]);
+    expect(u32(0x80000000)).toEqual([0x80, 0x00, 0x00, 0x00]);
   });
 });
