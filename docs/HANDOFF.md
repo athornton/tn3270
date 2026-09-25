@@ -4,7 +4,35 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-25
+## START HERE — NEXT ACTION, end of 2026-09-25
+
+**WAITING ON THE USER: they are reviewing
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` and will respond
+2026-09-26.** Do not start implementing it before they do. **When they approve, the next step is
+`writing-plans` to turn that spec into an implementation plan** — brainstorming is complete and the
+spec is committed, self-reviewed, and has had its one open question measured and closed.
+
+**State: branch `dft-file-transfer`, 37 commits, PUSHED and in sync, tree clean, no stashes. `main`
+is at `b37ffdf`, untouched. 2075 tests in 81 files, build and typecheck clean.** The full gate was
+re-run this session: conformance+golden 12/12, `drive-playback.py` 10/10, `pty-smoke.py` 12/12,
+`drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2,
+`browser-keys.mjs` 13/11.
+
+**Both Hercules hosts are UP and both do 43x80: VM/370 CE on 3270 (rebuilt by the user today) and
+MVS 3.8j TK5 on 3271.** VM is the CUT control and its control run PASSES; TK5 is the DFT reference
+host. Note `@MOD4` selects nothing on the rebuilt VM — irrelevant, since plain `-model 3278-4-E`
+gets 43 rows.
+
+**DFT Tasks 1-9 of 12 are done. Task 10 is blocked ONLY by the spec above** (nothing selects DFT:
+`startDftTransfer` has no caller outside tests, and `runner.ts` builds a `CutTransfer`
+unconditionally). Tasks 11-12 consume Task 10's trace.
+
+**Graphics is roadmapped after PS and now has three references** — GOCA S544-5498-01, GA23-0059-07 in
+text form, and the public-domain `j3270`, whose 43 agreeing opcodes corroborate our extraction. See
+`docs/goca-reference-notes.md`; still missing are GA18-2177 and GA18-2535, and there is still no live
+witness.
+
+## SUPERSEDED — earlier on 2026-09-25
 
 **ON BRANCH `dft-file-transfer`, PUSHED, 24 commits, tree clean. `main` is at `b37ffdf`, untouched.
 2075 tests in 81 files, build and typecheck clean.** Tasks 1-9 of
