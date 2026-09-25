@@ -1716,7 +1716,7 @@ the host already has.
 - Modify: `packages/core/src/index.ts`
 - Create: `packages/core/test/dftSession.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/test/dftSession.test.ts`:
 
@@ -1757,12 +1757,12 @@ describe('parseStructuredFields, SF_TRANSFER_DATA', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: FAIL — `kind` is `'unknownSf'`.
 
-- [ ] **Step 3: Add the variant**
+- [x] **Step 3: Add the variant**
 
 In `packages/core/src/stream/sf.ts`, add to the `StructuredField` union (before `unknownSf`):
 
@@ -1789,12 +1789,12 @@ And in the dispatch, before the `unknownSf` fallback:
     }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: 3 tests PASS.
 
-- [ ] **Step 5: Surface it from `execute`**
+- [x] **Step 5: Surface it from `execute`**
 
 In `packages/core/src/stream/execute.ts`, add to the result interface beside `sfReply` (line 160):
 
@@ -1818,7 +1818,7 @@ In the `WriteStructuredField` case, beside the `readPartition` arms:
         }
 ```
 
-- [ ] **Step 6: Route it in `Session`**
+- [x] **Step 6: Route it in `Session`**
 
 In `packages/core/src/session.ts`, add the field:
 
@@ -1899,11 +1899,11 @@ Then the handler:
 
 Import `DftTransfer` at the top, and **add `transferEnd` to `SessionEvent`** (`session.ts:126`), which is a typed union — `'screen' | 'connect' | 'disconnect' | 'alarm'` — so `emit('transferEnd')` will NOT compile until you do. Checked 2026-09-24: `SessionEvent` has **no consumers outside `session.ts`** (it types `on`, `off`, `listenerCount` and `emit` and nothing else references it), so widening it has no blast radius and needs no exhaustive-switch updates.
 
-- [ ] **Step 7: Export the public surface**
+- [x] **Step 7: Export the public surface**
 
 In `packages/core/src/index.ts`, export `DftTransfer`, `DftOptions`, `DftStep` from `./ft/dft.js` and the constants plus `DftFrameError` from `./ft/dftFrames.js`, following the pattern the CUT exports already use.
 
-- [ ] **Step 8: Write the plumbing test**
+- [x] **Step 8: Write the plumbing test**
 
 Append to `packages/core/test/dftSession.test.ts`:
 
@@ -1959,12 +1959,12 @@ describe('Session DFT plumbing', () => {
 against is a dropped connection, and `handleRecord` catches and closes rather than propagating
 in some paths — so "did not throw" alone would pass against the very bug.
 
-- [ ] **Step 9: Run everything**
+- [x] **Step 9: Run everything**
 
 Run: `cd ~/git/tn3270 && npm run build && npm run typecheck && npm test`
 Expected: build and typecheck clean; all tests pass, count up from 1971.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add packages/core/src packages/core/test/dftSession.test.ts
@@ -1984,6 +1984,52 @@ the gateway kill the keypad branch's task ordering created.
 transferData is an ARRAY: one WriteStructuredField can carry several fields and
 taking only the first would lose data silently."
 ```
+
+**AS BUILT (2026-09-25).** Inline. **16 tests in `dftSession.test.ts` + 2 in `parse.test.ts`; suite
+2042 -> 2060 in 81 files**, build/typecheck clean. The plan's five source edits were right as
+specified; two things it did not predict.
+
+**1. THE UNION VARIANT HAD BLAST RADIUS, AND THE PLAN CHECKED THE WRONG UNION.** Step 6 verifies that
+`SessionEvent` has no consumers outside `session.ts` — true, and it is not exported from `index.ts`
+either. But adding the variant to **`StructuredField`** broke `describeStructuredField` in
+`stream/parse.ts`, an exhaustive switch whose return type makes a missing kind a **compile error**.
+That is its documented purpose: its comment says a variant added by a later stage "would silently
+vanish from the trace". So the type system did the plan's job for it. **Adding a variant to a
+discriminated union in this repo means searching for exhaustive switches over it, not only for
+consumers of the adjacent type the plan happened to name.**
+
+**The upside is large and was not in the plan at all: DFT frames now carry their REQUEST TYPE in the
+trace** — `FileTransferData(0x0012,38B)` where the `-ddm` probe could only report
+`unknownSF(0xd0,38B)`, with the types decoded by hand afterwards. **This is what makes Task 10
+judgeable by trace**, which is fact 4's rule: after DFT works, a CUT transfer and a DFT transfer both
+end in a transferred file and only the trace distinguishes them. Pinned by two tests, one of which
+reproduces the probe's own `0x29` frame.
+
+**2. THE NO-TRANSFER GUARD WAS UNFALSIFIABLE AS THE PLAN SPECIFIED IT.** Replacing
+`if (transfer === undefined) { ... return; }` with `this.dft!` left **all 13 tests green** — the
+`catch` immediately below swallows the resulting `TypeError`, and the observable outcome is identical:
+no reply, still connected, transfer cleared. The two paths differ **only in the trace**, and the
+messages are not interchangeable to whoever reads the log ("no transfer in progress" is a host doing
+something unexpected; "DFT frame rejected" is a frame we could not parse). Collapsing them would send
+a future live-run diagnosis down the wrong path. The trace is now what is asserted, and both
+directions are mutation-verified. **This is the third vacuous mutation on this branch and they share a
+shape: the guard's effect was invisible because a LATER guard covered the same input.**
+
+**Also note the plan's own step-8 warning was right and insufficient.** It says to assert
+`isConnected()` and not merely that nothing threw — correct — but its two tests assert only that
+nothing broke. **Neither would have failed if no reply ever reached the host.** Added: an OpenAck
+asserted on the wire, a whole download driven through `FakeConnection` (Open, data, Close,
+Open(`FT:MSG`), `TRANS03`) proving one transfer survives its own Close **in situ**, an upload
+answering a `Get`, Set Cursor staying silent through the plumbing, `transferEnd` firing once, and
+several frames from ONE record both being delivered.
+
+**Four mutations verified:** the no-transfer guard (trace), the malformed-frame catch (2 tests),
+keeping only the first field of a record (1), and `payload: params` aliasing the inbound buffer
+instead of copying (1).
+
+**One deviation:** the `transferData` arm in `execute.ts` sits **before** the
+`structuredFieldsIgnored++` fallback, so a DFT frame is not counted as ignored — it is answered, and a
+counter saying otherwise would misreport a working transfer in the trace.
 
 ---
 
