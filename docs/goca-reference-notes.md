@@ -233,6 +233,90 @@ where the 3270 GOCA subset, the device defaults, and the pel geometry should liv
 GOCA-for-AFP cannot tell us. The only other mention of these terminals is at idx432, listing the
 3179 among devices that "interpret the data stream", which adds nothing.
 
+## A SECOND INDEPENDENT IMPLEMENTATION: j3270 (2026-09-25)
+
+<https://git.hugfreevikings.wtf/rudi/j3270> — an x3270-aligned 3270 emulator and protocol library in
+pure Java, **Unlicense (public domain)**, 511 Java files, 6.4 MB. Supplied by the user. It has a
+working GOCA implementation with its own test suite:
+`lib3270j/src/main/java/haus/nightmare/lib3270j/graphics/` — `GocaConstants.java`, `GocaDecoder.java`,
+`GraphicsPlane.java`, `HODGraphicsPlane.java`, `VectorSymbolData.java`, plus five Goca test classes.
+
+### It corroborates our extraction strongly
+
+**43 opcodes agree exactly** between its `GocaConstants.java` and our Table 16 extraction, on every
+code the two share. Two independent readings, from **different sources**, matching — that is real
+evidence our extraction is right. The only two nominal differences are naming (`NoOp`/`NOP1`,
+`SetMix`/`SetFgMix`). **Line types agree completely too**, including the trap: `LT_DEFAULT = 0` and
+`LT_SOLID = 7`.
+
+### BUT ITS SOURCE IS IBM HOST ON-DEMAND, NOT THIS BOOK — which is why it is interesting
+
+`GocaDecoder.java` cites **`HODDecoder`, `HODDrawOrder2Byte`, `HODEllipse`,
+`HODSegmentCharacteristics`**, with line references such as `HODDecoder:2229`, and states that orders
+"follow IBM GA23-0059 and Host On-Demand (HOD) architecture rules". So it tracks **IBM's own Java
+implementation** of the 3270 binding, using GA23-0059 only for the envelope — precisely the layer
+GOCA-for-AFP cannot give us. **That makes it a different KIND of evidence from a specification: it is
+a second implementation's reading of a binding we do not have.**
+
+### Orders it has that AFP GOCA lacks — the candidate 3270-binding set
+
+| code | j3270's name |
+|---|---|
+| `X'07'` | Set Marker Color |
+| `X'1B'` | Set Marker Size |
+| `X'23'` | Set Viewing Window Definition |
+| `X'27'` | Set Viewing Window |
+| `X'2A'` | Call Segment |
+| `X'3F'` | Pop Attribute |
+| `X'70'` | Begin Segment |
+| `X'7E'` | Erase Graphics Plane |
+
+Several are obviously terminal-oriented rather than printer-oriented — an **Erase Graphics Plane** and
+a **Viewing Window** make sense on a display and not on a page — which is consistent with these being
+genuinely part of the 3270 binding. Note `X'70'` Begin Segment is a *command* in AFP GOCA (Table 12),
+not a drawing order; j3270 puts it in the same dispatch, which may be a namespace difference or may be
+how the 3270 binding works. **Unresolved.**
+
+It also defines **procedure orders** for `Object Control X'0F11'` that have no AFP analogue at all:
+`P_ATTCUR X'08'` attach graphic cursor, `P_DETCUR X'09'`, `P_ERASE X'0A'`, `P_STOPDR X'0F'`,
+`P_BEGPROC X'30'`, `P_SETCUR X'31'`. A **graphics cursor** is a display concept; this is the clearest
+sign that the 3270 binding has a whole dimension AFP does not.
+
+### ONE REAL CONFLICT, UNRESOLVED — Partial Arc
+
+| | at CP | absolute |
+|---|---|---|
+| **AFP GOCA** (Table 16, verified) | `X'A3'` | `X'E3'` |
+| **j3270** | `X'86'` | `X'C6'` |
+
+**These cannot both be right for one device, and neither source can settle it from here.** Our values
+are transcribed from a table we have read; j3270's are transcribed from HoD, which we have not.
+**Do not "fix" either to match the other.** If arcs ever render wrong, this is the first thing to
+check. Note j3270's `X'86'`/`X'C6'` do fit the at-CP/absolute bit-1 pairing just as `X'A3'`/`X'E3'`
+do, so the pattern does not discriminate between them.
+
+Orders our book has that j3270 omits: `X'04'` Segment Characteristics (it treats `0x04` as a 2-byte
+NOP "per HoD"), `X'43'` Set Pick Id, `X'80'`/`X'C0'` **Box**, `X'B2'` Set Process Color. **Box being
+absent is worth noting** — it is a primitive one would expect a terminal to want.
+
+### How much to trust it
+
+- **License is not a constraint**: Unlicense, public domain, so reading or borrowing is unrestricted.
+- **It is a second reading, not a second specification.** Where it agrees with our book, confidence
+  rises sharply. Where it differs, we have two transcriptions and no arbiter.
+- **It claims no live-host verification of graphics.** The README's "tested and verified against" list
+  is JDK distributions (Temurin, Semeru), not hosts or terminals. So it is **not** the live witness
+  this feature lacks — it is another paper implementation, albeit a much more specific one.
+- **Its structured-field constants are organised differently** (`SF_OBJCNTL = 0x24`, `SF_OBJDATA =
+  0x85`, `SF_3270_G = 0x20`, alongside sub-IDs `0x0F`/`0x10`/`0x11` under SF `0x0F`). **Our
+  `0x0F0F`/`0x0F10`/`0x0F11` come straight from GA23-0059-07 and are not in doubt**; understanding
+  its numbering is a task for whoever implements, not a correction to ours.
+
+**Practical upshot: consult `GocaDecoder.java` while implementing, as a behavioural reference for the
+3270 binding, exactly as VMGIF is treated for PS.** It is the best available substitute for
+GA18-2177/GA18-2535 until those are found — but it is a substitute, and its Partial Arc conflict is a
+live reminder that it is not authoritative.
+
 ## Still missing after this book
 
 1. **The 3179-G / 3192-G manuals — NOW IDENTIFIED BY ORDER NUMBER: `GA18-2177` and `GA18-2535`**
