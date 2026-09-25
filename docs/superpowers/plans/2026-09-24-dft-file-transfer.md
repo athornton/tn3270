@@ -17,12 +17,41 @@
 **2. OUR PAYLOAD OFFSETS ARE x3270's MINUS 3, AND THIS IS THE SINGLE MOST LIKELY BUG IN THIS PLAN.**
 x3270 passes `ft_dft_data` a pointer to the **start of the whole structured field** — `cp[0..1]` are the length, `cp[2]` is SFID `0xd0`, and its `struct data_buffer` overlays the field from byte 0 (`ft_dft.c:59-67`, `sf.c:177`). Our `parseStructuredFields` hands out `params`, which **excludes the two length bytes and the SFID** (`stream/sf.ts:140`). So every offset in `ft_dft.c` and in the design spec must be reduced by 3 for our code:
 
-| field | x3270 offset into `cp` | our offset into `payload` |
+| field | x3270 offset | our offset into `payload` |
 |---|---|---|
-| request type (16-bit) | 3 | **0** |
-| name, `len == 0x23` | 25 | **22** |
-| record size (16-bit), `len == 0x29` | 27 | **24** |
-| name, `len == 0x29` | 31 | **28** |
+| request type (16-bit) | 3, into the struct | **0** |
+| name, `len == 0x23` | `cp + 25` | **25** |
+| record size (16-bit), `len == 0x29` | `cp + 27` | **27** |
+| name, `len == 0x29` | `cp + 31` | **31** |
+
+**CORRECTED 2026-09-25 — THE OPEN'S THREE OFFSETS ARE *NOT* REDUCED BY 3, AND THE TABLE ABOVE SAID
+THEY WERE. It was a real bug, it shipped in Task 3, and its tests passed over it.** The -3 rule
+applies only where a field is read through `data_bufr`, which overlays the field from byte 0 — that
+is the request type and everything in a `Data Insert`. The `Open` is read through `cp`, and **`cp` is
+already at struct offset 3**: `GET16` does not advance its pointer (`include/3270ds.h:341-344` reads
+`*(ptr)` and `*(ptr+1)` and assigns nothing back), so the `cp` set to `data_bufr->sf_request_type` at
+`ft_dft.c:108` is still pointing there when `:114` calls `dft_open_request(data_length, cp)`.
+`offsetof(struct data_buffer, sf_request_type)` is **3** — compiled and printed, not read off — which
+is exactly where our payload starts. So `cp` and our `payload` are the same byte and the Open's
+offsets carry over unchanged.
+
+**The live-probe evidence validates the LENGTH subtraction only.** Field lengths `0x29`/`0x23`
+arriving as 38/32-byte payloads says nothing about offsets *inside* the payload; fact 2 above
+generalised it to them without measuring, and the phrase "confirmed against a real host" gave a
+derived claim the standing of a measured one.
+
+**Corroboration that the corrected offsets are right:** the 7-byte name ends exactly at the payload's
+last byte in both forms — 25+7 = 32 and 31+7 = 38, the two legal payload lengths. x3270's
+`memcpy(namebuf, name, 7)` (`:159`) consumes the field to its end, which is why `0x23` is the short
+form's length and not more. Under the old offsets the name ended 3 bytes short with filler after it.
+
+**Why no test caught it, which is the transferable part:** the test helper wrote the name at the same
+wrong offset the parser read it from. Helper and parser agreed with each other and not with the wire,
+so five tests passed over a real bug — and this is the *quiet* failure fact 2 itself warns about: a
+wrong name is not `FT:MSG`, so a MESSAGE frame silently starts a file transfer and the host's status
+text is written into the user's file as if it were data. The guard now is a test that builds a `0x23`
+Open **byte by byte from the struct layout**, owing nothing to the helper or to the parser's
+constants; mutation-verified by restoring offset 22, which reddens it.
 
 **This is confirmed against a real host, not just derived.** The `-ddm on` probe recorded
 `unknownSF(0xd0,38B)` and a second at `32B`; the declared field lengths are `0x29` = 41 and `0x23` = 35, and 41 − 3 = 38, 35 − 3 = 32. The lengths the host sends are field lengths (x3270's convention); the payload we receive is 3 bytes shorter.
@@ -389,10 +418,10 @@ function openPayload(len: 0x23 | 0x29, name: string, recsz = 0): Uint8Array {
   const p = new Uint8Array(len - 3);
   p[0] = 0x00;
   p[1] = 0x12;                       // TR_OPEN_REQ
-  const nameAt = len === 0x23 ? 22 : 28;
+  const nameAt = len === 0x23 ? 25 : 31;   // CORRECTED: x3270's offsets, NOT minus 3
   if (len === 0x29) {
-    p[24] = (recsz >> 8) & 0xff;     // recsz at x3270's +27
-    p[25] = recsz & 0xff;
+    p[27] = (recsz >> 8) & 0xff;     // recsz at x3270's cp+27 == our 27
+    p[28] = recsz & 0xff;
   }
   // Name is 7 bytes, space-padded, EBCDIC on the wire but ASCII in x3270's
   // comparison because the host sends it as ASCII -- see the note in the impl.
@@ -402,14 +431,14 @@ function openPayload(len: 0x23 | 0x29, name: string, recsz = 0): Uint8Array {
 }
 
 describe('parseDftOpen', () => {
-  it('accepts the short form, name at payload offset 22', () => {
+  it('accepts the short form, name at payload offset 25', () => {
     const open = parseDftOpen(openPayload(0x23, 'FT:DATA'));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBeUndefined();
     expect(open.isMessage).toBe(false);
   });
 
-  it('accepts the long form, record size at 24 and name at 28', () => {
+  it('accepts the long form, record size at 27 and name at 31', () => {
     const open = parseDftOpen(openPayload(0x29, 'FT:DATA', 1024));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBe(1024);
@@ -566,6 +595,22 @@ transfer), so it gets the boundary bisection rather than one wrong value.
 The name is compared as ASCII, which is correct and looks wrong: x3270 strcmps
 the raw bytes with no EBCDIC step, and TK5's own frames carry ASCII FT:DATA."
 ```
+
+**AS BUILT CORRECTION (2026-09-25), APPLIED AFTER THIS TASK WAS ALREADY COMMITTED AND GREEN.** The
+three `Open` offsets above were WRONG — 22/24/28 where the wire has 25/27/31 — and Task 3 shipped
+them in `b17e319` with five passing tests. Fixed in `c0cdfad`, with the derivation in this plan's
+fact 2 and in `dftFrames.ts`. The listing in step 3 has been corrected in place; if you are reading
+this plan to implement, the numbers above are now right.
+
+**The process lesson, which is the reusable part:** the defect was NOT catchable by the reviews this
+task had, because the test helper and the parser shared the same wrong constant. A spec review reads
+the plan (which was wrong), and a quality review reads the diff for internal consistency (which was
+consistent). What found it was **re-deriving the offsets from the C source while implementing a LATER
+task** — Task 5 needed `Data Insert`'s offsets, checking those meant reading `ft_dft_data`'s
+pointer handling, and the pointer handling is where the Open's `cp` is set. So: when a later task
+touches the same source function, re-read it rather than trusting the earlier task's transcription.
+See [[implementers-should-verify-not-trust-plans]] — this is that lesson applied to my own committed
+code rather than to a plan.
 
 ---
 
