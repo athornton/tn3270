@@ -28,6 +28,16 @@ gets 43 rows.
 `startDftTransfer` has no caller outside tests, and `runner.ts` builds a `CutTransfer`
 unconditionally). Tasks 11-12 consume Task 10's trace.
 
+**AN IDEA PARKED FOR FUTURE BRAINSTORMING (user, 2026-09-25):
+`docs/ideas/composite-model-idea.md`** — an explicit terminal type for a 3270 **that never existed**:
+`IBM-DYNAMIC` sizing, the **full GOCA set including `Box`**, 3279-S3G-class PS, and the antialiased
+TrueType font as the default on that model only. Downstream of everything currently scheduled, since
+it *composes* those features. **Not designed and not scheduled** — but it is the only coherent target
+for capabilities that otherwise have no device to aim at, which matters because vector graphics has
+neither an oracle nor a live witness. The file lists the six questions a session must answer, the
+sharpest being whether it is a fifth row in `KNOWN_MODELS` or a **capability bundle**, since it changes
+four unrelated things.
+
 **Graphics is roadmapped after PS and now has three references** — GOCA S544-5498-01, GA23-0059-07 in
 text form, and the public-domain `j3270`, whose 43 agreeing opcodes corroborate our extraction. See
 `docs/goca-reference-notes.md`; still missing are GA18-2177 and GA18-2535, and there is still no live
