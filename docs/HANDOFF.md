@@ -1,10 +1,51 @@
-# Handoff — state as of 2026-09-24
+# Handoff — state as of 2026-09-25
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-24
+## START HERE — NEXT ACTION, 2026-09-25
+
+**ON BRANCH `dft-file-transfer`, PUSHED, 24 commits, tree clean. `main` is at `b37ffdf`, untouched.
+2075 tests in 81 files, build and typecheck clean.** Tasks 1-9 of
+`docs/superpowers/plans/2026-09-24-dft-file-transfer.md` are **done**; the full gate was re-run this
+session: conformance+golden 12/12, `drive-playback.py` 10/10, `pty-smoke.py` 12/12, `drive-e.py`
+10/10, `shot.mjs` 3/3, `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2,
+`browser-keys.mjs` 13/11.
+
+**NEXT ACTION: WRITE AND EXECUTE A NEW TASK THAT WIRES `Transfer()` TO DFT. NOTHING SELECTS IT
+TODAY.** The DFT engine, the structured-field plumbing and the Read Modified hook are all built and
+verified, but `Session.startDftTransfer` has **no caller outside tests** and `runner.ts` constructs a
+`CutTransfer` unconditionally, refusing non-24x80 at `runner.ts:454` before a byte goes out. The live
+run against TK5 at 43x80 therefore produced **zero DFT frames** — it never reached the wire. Tasks 10,
+11 and 12 all depend on that run, so the whole tail is blocked. **This is a gap in the plan, not a
+defect in the code**, and it survived nine tasks because every engine test calls `startDftTransfer`
+itself — the tests supply the call the product is missing.
+
+**The design decision that task turns on, and it is already answered by x3270: THE CLIENT DOES NOT
+CHOOSE THE PROTOCOL — THE HOST DOES.** `ft_running(true/false)` merely *reports* which arrived
+(`ft_cut.c:440`, `ft_dft.c:175`, read once at `ft.c:556`). So the honest shape is a transfer that can
+be either, with the first inbound frame deciding — which means `runner.ts`'s poll loop cannot assume
+CUT frames, and the existing 24x80 refusal must stay reachable for a CUT-only host. Also still set by
+nothing: `Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize`. All four front ends
+reach transfers now, so the choice belongs in shared code rather than in `runner.ts` alone. The full
+blocker note, with all four open decisions, is at the top of Task 10 in the plan.
+
+**Then Task 10 proper.** `packages/cli/scripts/dft-tso.txt` is committed, correct as written, and
+carries its own judging criteria. **Judge it by TRACE:** `FileTransferData(0x0012,38B)` is the line to
+grep for — DFT frames now name their request type, where the `-ddm` probe could only report
+`unknownSF(0xd0,38B)`. A successful transfer proves nothing on its own now that both protocols end in
+a transferred file. **VM/370 was DOWN this session (port 3270 closed; only TK5 on 3271 was up), so the
+VM control — "DDM advertised does not break a CUT host" — is still unmeasured.**
+
+**Read the AS BUILT section of every task 4-9 before re-deriving anything.** They record a real bug
+that shipped in Task 3 with green tests (the `Open` offsets are NOT x3270's minus 3 — `GET16` does not
+advance its pointer, so `dft_open_request` receives a pointer already at struct offset 3), four
+mutation checks that passed **vacuously** while their targets were load-bearing, and that `TRANS03` is
+a **prefix** match rather than equality — an equality test would have reported every successful live
+transfer as a failure.
+
+## SUPERSEDED — NEXT ACTION as of 2026-09-24
 
 **`main` is at `d1e3919`, pushed, the only branch, tree clean, no stashes.** The `ddm-probe` branch
 was merged `--no-ff` and deleted local and remote; the docs commits after it went straight to
