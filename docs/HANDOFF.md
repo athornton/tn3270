@@ -19,6 +19,16 @@ re-run this session: conformance+golden 12/12, `drive-playback.py` 10/10, `pty-s
 `drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2,
 `browser-keys.mjs` 13/11.
 
+**A THIRD HOST, PUBLIC, AND IT SPEAKS TN3270E (user, 2026-09-25): `144.208.193.156:3270` — "Blue
+Iron Terminal Server", `bits` v0.18.0.** A read-only probe negotiated TN3270E **end to end with an LU
+name assigned** (`IBM-3278-4-E`, LU `PYTN0001`, functions `(none: basic TN3270E)`), issued a **Query
+LIST** in the ALL form, and drove **EraseWriteAlternate at 43x80** cleanly. **This is the
+live-verification path stage 2b has never had** — both Hercules hosts REFUSE option 40 — so the
+standing "no live witness for the TN3270E negotiation" qualification can be retired for the
+negotiation once a real run is recorded. **IT IS SOMEONE ELSE'S MACHINE: no scripted or unattended
+logons, no transfer tests, nothing resembling probing, and NOT in any harness `npm test` or a gate
+runs.** Constraints and what it does not give us are in `docs/live-testing.md` *Executed so far*.
+
 **Both Hercules hosts are UP and both do 43x80: VM/370 CE on 3270 (rebuilt by the user today) and
 MVS 3.8j TK5 on 3271.** VM is the CUT control and its control run PASSES; TK5 is the DFT reference
 host. Note `@MOD4` selects nothing on the rebuilt VM — irrelevant, since plain `-model 3278-4-E`
