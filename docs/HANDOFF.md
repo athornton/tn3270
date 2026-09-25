@@ -1168,14 +1168,27 @@ Graphics or `X'01'` Image:
 define only `B'00'` immediate and `B'10'` store, with `B'01'` reserved. So Object Picture is the
 one that actually renders, and that asymmetry is the first thing to pin in a spec.
 
+**GOCA IS NOW IN HAND (user, 2026-09-25): `$HOME/S544-5498-01_GOCA_for_AFP_Reference_Oct2000.pdf`,
+216 pages.** Extracted notes — the complete order table, the format rule, and the caveats — are in
+**`docs/goca-reference-notes.md`**; do not re-derive them. Headline: **the order format is
+self-describing from the opcode**, so a decoder needs no per-order length table (`X'00'` = fixed
+1-byte; first hex digit < 8 AND second >= 8 = fixed 2-byte; `X'FE'` = extended and unused in AFP
+GOCA; everything else = long, `code length operand`). Mechanically verified across all 49 orders.
+**But it is the AFP edition, bound to MO:DCA and IPDS — printers.** It has appendices for those two
+and **none for the 3270 data stream**, mentions 3270 once in 216 pages, and never mentions a 3179 or
+3192. It also declares its own Extended format "not used in AFP GOCA", which is explicit evidence
+that bindings are subsets. **So the primitives are almost certainly right and the 3270 SUBSET,
+defaults and environment controls are NOT established.** The 3179-G/3192-G manuals remain missing
+(the user has not found them), and GOCA does not substitute for them.
+
 **ALL THREE DEFER THEIR CONTENTS: byte 7-n is "Data appropriate to the object type. For the
 format and contents of this parameter, refer to the appropriate graphics or image
 publications."** The same deferral appears in Query Reply (Segment) `X'B0'`. So the 3270
 Programmer's Reference gives us the framing and **none** of the drawing orders, and prycroft6
 says the same in as many words. **The architecture to chase is GOCA — *Graphics Object Content
-Architecture for Advanced Function Presentation Reference*** — which prycroft6 names explicitly
-and which we do NOT have locally. Acquiring it is the real prerequisite; no amount of reading
-`pages.txt` will yield a line-drawing opcode.
+Architecture for Advanced Function Presentation Reference*** — which prycroft6 names explicitly.
+**ACQUIRED 2026-09-25, see above and `docs/goca-reference-notes.md`.** No amount of reading
+`pages.txt` would have yielded a line-drawing opcode; GOCA supplies 49 of them.
 
 **THE GDDM LINK THE USER SENT IS A FALSE LEAD, checked 2026-09-25.**
 `ibm.com/docs/en/gddm?topic=asvsec-descriptions` is the **GDDM-PGF Vector Symbol Editor** command
