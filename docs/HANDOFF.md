@@ -31,11 +31,22 @@ and `stdin.on('data')` (`tui/src/app.ts:369`) are independent event-loop registr
 handled — and it is handled in `core`, so all four front ends get it. **Still absent, and moot until
 SSCP-LU data is implemented: x3270's `IN_SSCP && aid_byte != AID_ENTER` guard** (`ctlr.c:756-758`).
 
-**State: branch `dft-file-transfer`, 37 commits, PUSHED and in sync, tree clean, no stashes. `main`
-is at `b37ffdf`, untouched. 2075 tests in 81 files, build and typecheck clean.** The full gate was
-re-run this session: conformance+golden 12/12, `drive-playback.py` 10/10, `pty-smoke.py` 12/12,
-`drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2,
-`browser-keys.mjs` 13/11.
+**State, 2026-09-28: branch `dft-file-transfer`, 47 commits, tree clean, no stashes. 2085 tests in
+81 files, build and typecheck clean.** The full gate was re-run: conformance+golden 12/12,
+`drive-playback.py` 10/10, `pty-smoke.py` 12/12, `drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs`
+18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11.
+
+**`main` IS NO LONGER UNTOUCHED — IT CARRIES THE PENDING AID (`1702c93`, not pushed).** The code
+fix went to `main` on its own because nothing in it depends on DFT; the graphics docs stayed here,
+because `docs/goca-reference-notes.md` and `docs/ideas/composite-model-idea.md` do not exist on
+`main` at all. So the two branches hold different halves of one session's work, deliberately.
+On `main` the numbers are **1981 tests in 78 files (from 1971)**.
+
+**A PROCESS TRAP WORTH NOT REPEATING: `pending-aid` was branched off `dft-file-transfer`, not
+`main`, and merging it to `main` silently dragged 44 commits of INCOMPLETE DFT work (Tasks 1-9 of
+12) onto it.** Caught because the merge reported 46 commits for a two-commit branch; reversed with
+`git reset --hard` since nothing was pushed. **Check `git merge-base` before merging to `main` when
+more than one long-lived branch is in play.**
 
 **A THIRD HOST, PUBLIC, AND IT SPEAKS TN3270E (user, 2026-09-25): `144.208.193.156:3270` — "Blue
 Iron Terminal Server", `bits` v0.18.0.** A read-only probe negotiated TN3270E **end to end with an LU
