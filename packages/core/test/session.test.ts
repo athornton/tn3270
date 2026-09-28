@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Cmd, Order, AID, FA, Qcode, Sfid,
+  WCC,
 } from '../src/constants.js';
 import { KeyboardState, Oia } from '../src/oia.js';
 
@@ -1267,5 +1268,138 @@ describe('terminal type negotiation', () => {
     conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
     conn.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
     expect(negotiatedName(conn)).toBe('IBM-3278-2-E');
+  });
+});
+
+/**
+ * THE PENDING AID — what a host-initiated read carries when the operator pressed a key.
+ *
+ * x3270 keeps `aid` as a global (`include/kybd.h:51`, defined `Common/kybd.c:111` as
+ * `AID_NO`), sets it in `key_AID` (`kybd.c:922`) and passes it to BOTH reads
+ * (`ctlr.c:641,647`). So a Read Modified after a keypress reports the key, not 0x60.
+ *
+ * Four sites clear it, and all four are pinned below.
+ */
+describe('the pending AID', () => {
+  async function typed() {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    // One unprotected field at 0, "A" typed into it, cursor left at 2.
+    conn.host(SnaCmd.EW, 0xc3, Order.SF, 0x00, T.IAC, T.EOR);
+    session.keyboard.moveCursor(1);
+    session.keyboard.type('A');
+    return { session, conn };
+  }
+
+  it('reports the AID of the key the operator pressed, not 0x60', async () => {
+    const { session, conn } = await typed();
+    session.sendAID(AID.PF3);
+    conn.sent.length = 0;
+
+    conn.host(SnaCmd.RM, T.IAC, T.EOR);
+
+    expect(conn.sent[0]).toBe(AID.PF3);
+  });
+
+  it('answers 0x60 when no key has been pressed', async () => {
+    const { session, conn } = await typed();
+    conn.sent.length = 0;
+
+    conn.host(SnaCmd.RM, T.IAC, T.EOR);
+
+    expect(conn.sent[0]).toBe(AID.NONE);
+  });
+
+  it('carries the pending AID into Read Buffer too', async () => {
+    // ctlr.c:635 `ctlr_read_buffer(aid)` — the same global, not a separate one.
+    const { session, conn } = await typed();
+    session.sendAID(AID.PF3);
+    conn.sent.length = 0;
+
+    conn.host(SnaCmd.RB, T.IAC, T.EOR);
+
+    expect(conn.sent[0]).toBe(AID.PF3);
+  });
+
+  it('makes the short read reachable from a host read: Clear sends the AID alone', async () => {
+    // THE POINT OF THE WHOLE FEATURE. `isShortReadAID` has always existed in
+    // buildReadModified, but with the AID hardcoded to 0x60 no host-initiated read
+    // could ever reach it. Clear is a short read, so the answer is ONE byte plus
+    // IAC EOR -- no cursor address and no field data.
+    const { session, conn } = await typed();
+    session.sendAID(AID.CLEAR);
+    conn.sent.length = 0;
+
+    conn.host(SnaCmd.RM, T.IAC, T.EOR);
+
+    expect(conn.sent).toEqual([AID.CLEAR, T.IAC, T.EOR]);
+  });
+
+  it('Read Modified All still suppresses the short read', async () => {
+    const { session, conn } = await typed();
+    session.sendAID(AID.CLEAR);
+    conn.sent.length = 0;
+
+    conn.host(SnaCmd.RMA, T.IAC, T.EOR);
+
+    expect(conn.sent[0]).toBe(AID.CLEAR);
+    expect(conn.sent.length).toBeGreaterThan(3);
+  });
+
+  describe('is cleared by', () => {
+    /** Press PF3, apply `record`, then let the host read. */
+    async function afterClearing(...record: number[]) {
+      const { session, conn } = await typed();
+      session.sendAID(AID.PF3);
+      conn.host(...record, T.IAC, T.EOR);
+      conn.sent.length = 0;
+      conn.host(SnaCmd.RM, T.IAC, T.EOR);
+      return conn.sent[0];
+    }
+
+    it('a write whose WCC restores the keyboard (ctlr.c:2169)', async () => {
+      expect(await afterClearing(SnaCmd.W, WCC.KEYBOARD_RESTORE)).toBe(AID.NONE);
+    });
+
+    it('Erase All Unprotected (ctlr.c:1349)', async () => {
+      expect(await afterClearing(SnaCmd.EAU)).toBe(AID.NONE);
+    });
+
+    it('NOT a write whose WCC leaves the keyboard locked', async () => {
+      // The clear is gated on the WCC bit, not on a write happening: x3270's
+      // `if (wcc_keyboard_restore) { aid = AID_NO; ... }` (ctlr.c:2168-2170).
+      expect(await afterClearing(SnaCmd.W, 0x00)).toBe(AID.PF3);
+    });
+
+    it('NOT a Read Modified, which must be answerable repeatedly', async () => {
+      // A polling host reads over and over; each answer must name the same key
+      // until the host writes. Nothing in ctlr_read_modified touches `aid`.
+      const { session, conn } = await typed();
+      session.sendAID(AID.PF3);
+      conn.sent.length = 0;
+      conn.host(SnaCmd.RM, T.IAC, T.EOR);
+      conn.sent.length = 0;
+      conn.host(SnaCmd.RM, T.IAC, T.EOR);
+      expect(conn.sent[0]).toBe(AID.PF3);
+    });
+
+    it('a disconnection, so it cannot outlive its connection', async () => {
+      // THE SETUP WCC IS 0x00 ON PURPOSE, and getting this wrong made this test pass
+      // vacuously first time round. `typed()` uses WCC 0xc3, whose 0x02 bit restores the
+      // keyboard -- so a reconnect that painted with 0xc3 cleared the AID by the WCC rule
+      // above and proved nothing about handleClose. Found by deleting the handleClose
+      // clear and watching this stay green. A non-restoring write leaves that rule
+      // unreachable, so the only thing that can clear it here is the disconnection.
+      const { session, conn } = await typed();
+      session.sendAID(AID.PF3);
+      conn.close();
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      conn.host(SnaCmd.EW, 0x00, Order.SF, 0x00, T.IAC, T.EOR);
+      conn.sent.length = 0;
+      conn.host(SnaCmd.RM, T.IAC, T.EOR);
+      expect(conn.sent[0]).toBe(AID.NONE);
+    });
   });
 });
