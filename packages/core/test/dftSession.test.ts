@@ -498,3 +498,66 @@ describe('the DDM advertisement through a Session', () => {
     expect(size(512)[3]).toBe(0x00);
   });
 });
+
+/**
+ * Releasing a registered DFT transfer.
+ *
+ * Both of these serve protocol selection, where a transfer is registered BEFORE the host
+ * is told anything (a fast host's first 0xd0 arrives from inside record handling) and one
+ * of the two engines must then be discarded. But the `handleClose` half is a bug on its
+ * own terms, independent of that design.
+ */
+describe('a registered DFT transfer is releasable', () => {
+  it('cancelDftTransfer clears it', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.startDftTransfer(new DftTransfer({ direction: 'receive' }));
+    expect(session.dftTransfer).toBeDefined();
+
+    session.cancelDftTransfer();
+
+    expect(session.dftTransfer).toBeUndefined();
+  });
+
+  it('sends NOTHING, because the host never spoke to the loser', async () => {
+    // THE DIFFERENCE FROM DftTransfer.cancel(): that negotiates an end with a host
+    // mid-transfer; this discards an engine the host never addressed. Synthesising an
+    // abort here would put bytes on the wire that no captured session contains -- the
+    // same rule transferRun.ts gives for not inventing one from a timeout.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.startDftTransfer(new DftTransfer({ direction: 'receive' }));
+    conn.sent.length = 0;
+
+    session.cancelDftTransfer();
+
+    expect(conn.sent).toEqual([]);
+  });
+
+  it('is a no-op when nothing is registered', async () => {
+    // Idempotent, so a driver need not track whether it has already committed.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    expect(() => session.cancelDftTransfer()).not.toThrow();
+    expect(session.dftTransfer).toBeUndefined();
+  });
+
+  it('a dropped connection cannot strand one', async () => {
+    // THE LATENT BUG, independent of protocol selection: handleClose cleared conn,
+    // telnet, pendingAid, per and the TN3270E state but NOT dft -- so a transfer
+    // registered on one connection stayed registered on the next, and answerRead would
+    // replay its retained frame to a host that knows nothing about it.
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    conn.negotiate();
+    session.startDftTransfer(new DftTransfer({ direction: 'receive' }));
+    expect(session.dftTransfer).toBeDefined();
+
+    conn.close();
+
+    expect(session.dftTransfer).toBeUndefined();
+  });
+});

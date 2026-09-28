@@ -364,6 +364,28 @@ export class Session {
   /** The DFT transfer in flight, for a front end to read progress or cancel. */
   get dftTransfer(): DftTransfer | undefined { return this.dft; }
 
+  /**
+   * Release a registered DFT transfer without telling the host anything.
+   *
+   * FOR THE LOSER OF A PROTOCOL RACE, which is the only caller. `Transfer()` registers a
+   * DFT transfer *before* priming the host, because a fast host's first `0xd0` arrives
+   * from inside `handleRecord` before any driver code runs again — so `handleTransferData`
+   * must already have one. When the host answers with a CUT frame instead, that
+   * registration has to go, or `answerRead` would keep replaying its retained frame at a
+   * host now running a CUT transfer.
+   *
+   * SENDS NOTHING, and that is the whole difference from `DftTransfer.cancel()`: that
+   * negotiates an end with a host that is mid-transfer, while this discards an engine the
+   * host never addressed. Synthesising an abort here would put bytes on the wire that no
+   * captured session contains — the same rule `transferRun.ts` gives for refusing to
+   * invent one from a timeout.
+   *
+   * Idempotent, so a driver need not track whether it has already committed.
+   */
+  cancelDftTransfer(): void {
+    this.dft = undefined;
+  }
+
   isConnected(): boolean {
     return this.conn !== undefined;
   }
@@ -642,6 +664,14 @@ export class Session {
     // to one host must never be reported to the next one. See `pendingAid`, and note this
     // is the same one-teardown-path-clears-it shape already fixed here for `e` and `dft`.
     this.pendingAid = AID.NONE;
+    // A DFT TRANSFER BELONGS TO THE CONNECTION CARRYING IT. Without this, a transfer
+    // registered on one connection stays registered on the next, and `answerRead`'s
+    // retained-frame replay would answer a host that knows nothing about it.
+    //
+    // THIRD TIME THIS SHAPE HAS BEEN FIXED IN THIS FILE — `Session.e` once cleared only
+    // on the REJECT path, and `IAC DONT TN3270E` once cleared the option but not
+    // `tn3270eNegotiated`. One teardown path clears the state and another does not.
+    this.dft = undefined;
     // TN3270E state DIES WITH THE CONNECTION THAT NEGOTIATED IT. Until this line, `e`
     // was cleared only by the REJECT backoff below, so a second connection to a host
     // that never mentions option 40 inherited `phase: 'negotiated'` — and then
