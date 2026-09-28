@@ -558,6 +558,45 @@ EOF
 
 ---
 
+## PROGRESS — 2026-09-28
+
+**Tasks 1-4 are DONE and committed. Task 5 is next and nothing about it has started.**
+
+| Task | State | Commit |
+|---|---|---|
+| 1 baseline | done, no commit | — |
+| 2 `looksLikeCutFrame` | done, mutation-verified | `7af6ef5` |
+| 3 `cancelDftTransfer` + `handleClose` | done, both mutations verified | `bbeccb9` |
+| 4 the move to `frontend` | done, no logic change | `e79b50f` |
+| 5-9 | **not started** | — |
+
+**2093 tests in 82 files** (from 2085 in 81), build and typecheck clean.
+
+**FOUR PLAN DEFECTS FOUND SO FAR, all by reading the code the plan described** — the pattern this
+project keeps hitting, so expect more in Tasks 5-9:
+
+1. **Task 2's test path was wrong**: the CUT tests live in `packages/core/test/ft/`, not the flat
+   `test/`. Corrected before writing.
+2. **Task 4's consumer was wrong**: it is `tui/src/app.ts:29`, not `transferOverlay.ts`.
+3. **Task 4's export style was wrong**: `frontend/src/index.ts` uses explicit named exports
+   throughout, not `export *`. The index doubles as documentation of what is shared, so the
+   convention matters.
+4. **Task 4's test file could NOT move**, and the plan's step 7 anticipated exactly this. It asserts
+   on a rendered 54-column status line through `tui`'s own `transferLines`, so it stays in
+   `tui/test/` importing `startTransfer` from `@tn3270/frontend`. That direction is fine; only the
+   reverse inverts the graph.
+
+**Two things Task 5 should know before it starts:**
+
+- `startTransfer`'s options type is **`StartTransferOptions`** and it is now exported from
+  `@tn3270/frontend` (added to the index in Task 4). The Task 5 test snippet's `sendOptions` factory
+  can import it from `../src/transferRun.js`.
+- **`session.ddmAdvertised` still does not exist.** Task 6's timeout message needs it. Add a
+  one-line getter on `Session` returning `this.opts.ddm === true`, with a test, and commit it inside
+  Task 6.
+
+---
+
 ### Task 5: `frontend/transferRun.ts` — drop the geometry gate, build both engines
 
 **Files:**
