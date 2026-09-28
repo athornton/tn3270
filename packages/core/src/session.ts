@@ -1270,7 +1270,11 @@ export class Session {
     this.emit('screen');
   }
 
-  /** A host-initiated read, which carries no operator AID. */
+  /**
+   * A host-initiated read. It carries the PENDING AID — the key the operator last pressed,
+   * or 0x60 if none — which is how a host that polls with Read Modified learns about a
+   * keypress on its own schedule. See `pendingAid`.
+   */
   private answerRead(kind: 'ReadBuffer' | 'ReadModified' | 'ReadModifiedAll'): void {
     // DFT SHORT-CIRCUIT. x3270 does this at BOTH read sites -- ctlr.c:760 in
     // ctlr_read_modified and ctlr.c:986 in ctlr_read_buffer -- returning
