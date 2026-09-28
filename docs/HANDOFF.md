@@ -4,13 +4,35 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-28
+## START HERE — NEXT ACTION, end of 2026-09-28
 
-**THE TRANSFER-PROTOCOL-SELECTION SPEC IS APPROVED (user, 2026-09-28).**
-`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` — **the next step is
-`writing-plans` to turn it into an implementation plan, then DFT Tasks 10-12**, which it unblocks.
-Brainstorming is complete and the spec is committed, self-reviewed, and has had its one open question
-measured and closed.
+**PICK UP AT TASK 5 OF `docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md`.** Its
+PROGRESS section sits at the Task 5 boundary and is written for exactly this cold start: what is done,
+the four plan defects Tasks 2-4 found, and the two things Task 5/6 need that do not exist yet.
+
+**State: branch `dft-file-transfer` at `01889c0`, PUSHED and in sync, tree clean, no stashes. `main`
+at `43d1a85`, ALSO PUSHED. 2093 tests in 82 files, build and typecheck clean.** Tomorrow's cap is
+**$1900**, about **$160** available (2026-09-28 ran to $1734 of an $1800 cap).
+
+**THE SPEC IS APPROVED (user, 2026-09-28)** and the plan is written and committed; Tasks 1-4 of 9 are
+done. **Task 5 is where behaviour starts changing** — it deletes the up-front geometry gate, so a
+CUT-only host at 43x80 is PRIMED before we find out. That trade was raised and accepted, and measured:
+VM/370's MECAFF refuses with its own text in ~1s and CMS recovers itself.
+
+**TWO THINGS TASK 5/6 NEED:** `StartTransferOptions` is now exported from `@tn3270/frontend` (added in
+Task 4), and **`session.ddmAdvertised` DOES NOT EXIST** — Task 6's timeout message wants it as a
+one-line getter over `this.opts.ddm`, with a test, committed inside Task 6.
+
+**THE TWO BRANCHES HOLD DIFFERENT HALVES OF THIS SESSION'S WORK, DELIBERATELY.** `main` carries ONLY
+the pending-AID fix; the graphics docs and this plan are here, because
+`docs/goca-reference-notes.md` and `docs/ideas/composite-model-idea.md` do not exist on `main`.
+**Check `git merge-base` before merging anything to `main`** — branching off the wrong base once
+dragged 44 unfinished DFT commits onto it (caught by a two-commit branch reporting 46 merged;
+reversed, never pushed).
+
+**DONE THIS SESSION, in order:** the pending AID (jumped the queue on the user's call — a correctness
+gap in shipped code, not a feature), the HOD + 3192G ROM graphics fold, this plan, and Tasks 1-4.
+Each task's commit message carries its own AS BUILT detail; do not re-derive it.
 
 **DONE FIRST, ON THE USER'S CALL: the pending AID** (branch `pending-aid`). It jumped the queue
 because it is a correctness gap in shipped code rather than a feature. A host-initiated Read
