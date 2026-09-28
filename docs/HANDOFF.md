@@ -1,17 +1,35 @@
-# Handoff — state as of 2026-09-25
+# Handoff — state as of 2026-09-28
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, end of 2026-09-25
+## START HERE — NEXT ACTION, 2026-09-28
 
-**WAITING ON THE USER: they are reviewing
-`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` and will respond
-MONDAY 2026-09-28** (said at the end of a Friday session, so expect a three-day gap and a cold
-start). Do not start implementing it before they do. **When they approve, the next step is
-`writing-plans` to turn that spec into an implementation plan** — brainstorming is complete and the
-spec is committed, self-reviewed, and has had its one open question measured and closed.
+**THE TRANSFER-PROTOCOL-SELECTION SPEC IS APPROVED (user, 2026-09-28).**
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` — **the next step is
+`writing-plans` to turn it into an implementation plan, then DFT Tasks 10-12**, which it unblocks.
+Brainstorming is complete and the spec is committed, self-reviewed, and has had its one open question
+measured and closed.
+
+**DONE FIRST, ON THE USER'S CALL: the pending AID** (branch `pending-aid`). It jumped the queue
+because it is a correctness gap in shipped code rather than a feature. A host-initiated Read
+Modified / Read Modified All / Read Buffer answered with a hardcoded `0x60` regardless of what the
+operator had pressed; x3270 keeps the byte in its `aid` global and passes it to all three reads
+(`ctlr.c:635,641,647`). **The consequence that made it worth doing now: `buildReadModified`'s
+short-read branch was UNREACHABLE from the host path**, so pressing Clear and letting the host poll
+sent a full screen scrape under the wrong AID instead of the bare AID byte. **2085 tests in 81 files
+(from 2075), build clean, all four clear sites and the read site mutation-verified.**
+
+**WHY IT CAME UP: a video the user found** (<https://youtu.be/-NAT_K7ng6A>, from ~42:00) on using
+host-side Read Modified polling to build responsive 3270 applications, with a table of five terminal
+obligations cross-referenced to x3270's `ctlr.c`. **Four of the five we already met** — answering a
+read with no key pressed, the SBA+data field scan, and the short-read *logic* — and the fifth was
+this. **A worry that turned out NOT to apply: the TUI needs no listener thread.** The socket handler
+and `stdin.on('data')` (`tui/src/app.ts:369`) are independent event-loop registrations and nothing in
+`tui` or `frontend` blocks synchronously, so an unsolicited read arriving mid-typing was already
+handled — and it is handled in `core`, so all four front ends get it. **Still absent, and moot until
+SSCP-LU data is implemented: x3270's `IN_SSCP && aid_byte != AID_ENTER` guard** (`ctlr.c:756-758`).
 
 **State: branch `dft-file-transfer`, 37 commits, PUSHED and in sync, tree clean, no stashes. `main`
 is at `b37ffdf`, untouched. 2075 tests in 81 files, build and typecheck clean.** The full gate was
@@ -48,10 +66,26 @@ neither an oracle nor a live witness. The file lists the six questions a session
 sharpest being whether it is a fifth row in `KNOWN_MODELS` or a **capability bundle**, since it changes
 four unrelated things.
 
-**Graphics is roadmapped after PS and now has three references** — GOCA S544-5498-01, GA23-0059-07 in
-text form, and the public-domain `j3270`, whose 43 agreeing opcodes corroborate our extraction. See
-`docs/goca-reference-notes.md`; still missing are GA18-2177 and GA18-2535, and there is still no live
-witness.
+**Graphics is roadmapped after PS and now has FIVE references (was three; two arrived 2026-09-28)** —
+GOCA S544-5498-01, GA23-0059-07 in text form, the public-domain `j3270` (43 agreeing opcodes), **IBM's
+Host On-Demand order-support matrix, and a 3192G ROM disassembly** (`$HOME/blueglass — 3270 Graphics
+& SNA Research Findings.md`, @MK). See `docs/goca-reference-notes.md`, section *A THIRD AND FOURTH
+READING*. **The ROM is a different KIND of evidence from the rest — measured firmware, not a
+specification's intent** — and it closes the coordinate origin (centre pel 360,191, Y up; the 720x384 drawing area is a hardware fact, not a ROM one),
+confirms Arc and character angle/shear are honoured, and supplies firmware-exact image rules with
+error codes. **Two lessons generalise: a support matrix documents a CLIENT, not a device** (HOD leaves
+Arc blank for the 3192-G while the firmware has a handler), and **`Box` is now settled as absent from
+the 3270 binding by three independent sources**, which corrects `docs/ideas/composite-model-idea.md`.
+**Still missing: GA18-2177, GA18-2535, blueglass's own `GRAPHICS_DATA_STREAM.md` holding the ROM
+addresses (NOT on this box — ask the user), and there is still no live witness or x3270 oracle.**
+
+## SUPERSEDED — end of 2026-09-25 (the spec was awaiting review; it is now approved)
+
+**WAITING ON THE USER: they are reviewing
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` and will respond
+MONDAY 2026-09-28.** Kept because it records that the three-day gap and cold start were anticipated,
+and because the state it describes (37 commits on `dft-file-transfer`, 2075 tests) is the baseline the
+pending-AID work was measured against.
 
 ## SUPERSEDED — earlier on 2026-09-25
 
