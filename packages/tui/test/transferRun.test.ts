@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   AckAid, AID, resolve, Session, type Connection,
 } from '@tn3270/core';
-import { newTransferForm, type TransferFiles, type TransferRequest } from '@tn3270/frontend';
-import { startTransfer } from '../src/transferRun.js';
+import {
+  newTransferForm, startTransfer, type TransferFiles, type TransferRequest,
+} from '@tn3270/frontend';
 import { transferLines } from '../src/transferOverlay.js';
 
 /**

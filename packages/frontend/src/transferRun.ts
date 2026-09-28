@@ -1,5 +1,16 @@
 /**
- * Drive a CUT transfer from the TUI, event-driven rather than blocking.
+ * Drive a CUT transfer event-driven rather than blocking, for any front end that cannot
+ * block: the TUI today, and the GUI and web gateway when they grow a transfer UI.
+ *
+ * ## WHY IT LIVES IN `frontend` AND NOT IN `tui`
+ *
+ * It was written for the TUI and sat in `packages/tui` for that reason alone. But its
+ * justification below -- "a TUI cannot block" -- is equally true of a GUI and of a web
+ * gateway, and both already declare `@tn3270/frontend`. There are TWO genuine control
+ * flows here, not four: the CLI's blocking poll-until-done (the s3270 line protocol
+ * cannot report a completion arriving after its `ok`) and this one, which the other three
+ * front ends all want. Keeping it here is what stops the DFT arm being written four
+ * times.
  *
  * ## WHY NOT REUSE THE CLI'S LOOP
  *
@@ -35,7 +46,7 @@
 import {
   AID, CUT_SCREEN_SIZE, CutTransfer, isCutFrame, type Session, type TransferResult,
 } from '@tn3270/core';
-import type { TransferFiles, TransferRequest } from '@tn3270/frontend';
+import type { TransferFiles, TransferRequest } from './transfer.js';
 
 /** The CLI's own defaults (`runner.ts:43-44`), so the two front ends wedge alike. */
 const FRAME_TIMEOUT_MS = 30_000;
