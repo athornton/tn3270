@@ -24,8 +24,16 @@ not.
 
 It also inverts a real constraint. Today, deciding whether to implement an order means asking which
 historical device accepted it. On a model we define, **we** decide, and the answer can be "all of
-them" — which is why `Box` is called out: it is in AFP GOCA at `X'80'`/`X'C0'` and **j3270 omits it**,
-so on a faithful model its status is genuinely unresolved, while on this one it is simply supported.
+them" — which is why `Box` is called out: it is in AFP GOCA at `X'80'`/`X'C0'` and **j3270 omits it**.
+
+**RESTATED 2026-09-28, and the example gets STRONGER rather than weaker.** This used to say Box's
+status was "genuinely unresolved" on a faithful model. It is now resolved, and resolved *against*
+Box: **three sources agree it is not part of the 3270 binding** — j3270 omits it, the blueglass ROM
+research puts it among "AFP-era additions, absent from GDDM and HOD", and IBM's own HOD support
+matrix has no Box row at all. So the honest framing is not "nobody knows whether a G-terminal takes
+Box" but **"no G-terminal took Box, and this model adds it"** — which is a cleaner statement of what
+a composite model is *for*. The argument never depended on the uncertainty; it depended on there
+being a capability with no device to aim at, and that is exactly what Box now is.
 
 ## What already exists in our favour
 

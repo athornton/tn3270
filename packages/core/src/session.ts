@@ -256,6 +256,34 @@ export class Session {
    * presses of the reconnect key opening two sockets.
    */
   private reconnecting = false;
+  /**
+   * THE PENDING AID: which key the operator last pressed, for the host to learn about on
+   * its own schedule rather than ours.
+   *
+   * This is x3270's `aid` global (declared `include/kybd.h:51`, defined `Common/kybd.c:111`
+   * as `AID_NO`). It exists because **a Read Modified is not always a reply.** The operator
+   * path and the host path are separate: `key_AID` transmits immediately AND records the
+   * byte (`kybd.c:922-923`), and a *later* host-initiated read reports the same byte again
+   * (`ctlr.c:641` Read Modified, `:647` Read Modified All, `:635` Read Buffer — all three
+   * pass this one variable). A host polling with Read Modified is how an application gets
+   * responsiveness without waiting for the terminal to volunteer anything.
+   *
+   * 0x60 (`AID.NONE`, x3270's `AID_NO`) means "no key generated this read", which is a real
+   * value on the wire and not a sentinel for "unset".
+   *
+   * WHY IT IS NOT MERELY COSMETIC: `buildReadModified`'s short-read branch is reachable
+   * only through it. Press Clear, and a host that reads before writing must get the AID
+   * byte ALONE — no cursor address, no field data. With this hardcoded to 0x60 that branch
+   * was dead code on the host path, and we would have answered with a full screen scrape
+   * under the wrong AID.
+   *
+   * Cleared in four places, mirroring x3270 one for one. Three are host actions and live in
+   * `executeRecord`; the fourth is `handleClose`, which is this codebase's equivalent of the
+   * connection-scoped part of `restore_keyboard` (`ctlr.c:593`) — and it is there for the
+   * reason recorded twice already in this file: one teardown path clearing state while
+   * another does not is a bug shape this project has paid for with both `e` and `dft`.
+   */
+  private pendingAid: number = AID.NONE;
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -610,6 +638,10 @@ export class Session {
     this.oia.connected = false;
     this.oia.tn3270Mode = false;
     this.oia.waitingForHost = false;
+    // The pending AID is a property of the CONNECTION, not of the Session: a keypress sent
+    // to one host must never be reported to the next one. See `pendingAid`, and note this
+    // is the same one-teardown-path-clears-it shape already fixed here for `e` and `dft`.
+    this.pendingAid = AID.NONE;
     // TN3270E state DIES WITH THE CONNECTION THAT NEGOTIATED IT. Until this line, `e`
     // was cleared only by the REJECT backoff below, so a second connection to a host
     // that never mentions option 40 inherited `phase: 'negotiated'` — and then
@@ -762,6 +794,17 @@ export class Session {
       }
 
       if (result.keyboardRestore) {
+        // THE PENDING AID GOES WITH THE KEYBOARD LOCK, and the pairing is x3270's, not a
+        // convenience: `if (wcc_keyboard_restore) { aid = AID_NO; do_reset(false); }`
+        // (ctlr.c:2168-2170) and the same two lines again for EAU (ctlr.c:1349-1350). The
+        // host restoring the keyboard is exactly the moment the previous keypress stops
+        // being the pending answer, because the operator is now free to press another.
+        //
+        // Gated on `keyboardRestore`, which `execute` sets for a WCC restore bit AND
+        // unconditionally for EAU (execute.ts:275) -- so one line here covers two of
+        // x3270's four clear sites. A write that leaves the keyboard LOCKED must NOT clear
+        // it: the host has not given the screen back, so our answer is still the same key.
+        this.pendingAid = AID.NONE;
         this.oia.waitingForHost = false;
         this.oia.reset();
       } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite
@@ -1252,9 +1295,15 @@ export class Session {
       this.sendInbound(retained);
       return;
     }
+    // THE PENDING AID, not a hardcoded 0x60: x3270 passes its `aid` global to all three
+    // reads (ctlr.c:635, :641, :647). When no key has been pressed this IS 0x60, so the
+    // no-keypress case is unchanged — what changes is that a poll after a keypress now
+    // names the key, and that a short-read AID reaches buildReadModified's short-read
+    // branch. NOT consumed by the read: a polling host may read repeatedly and must get
+    // the same answer until it writes. See `pendingAid`.
     const payload = kind === 'ReadBuffer'
-      ? buildReadBuffer(this.screen, AID.NONE)
-      : buildReadModified(this.screen, AID.NONE, kind === 'ReadModifiedAll');
+      ? buildReadBuffer(this.screen, this.pendingAid)
+      : buildReadModified(this.screen, this.pendingAid, kind === 'ReadModifiedAll');
     this.sendInbound(payload);
   }
 
@@ -1353,6 +1402,12 @@ export class Session {
       throw new RangeError(`${aid} is not an AID byte; use AID, pfAID(n) or paAID(n)`);
     }
     if (this.telnet === undefined) throw new Error('not connected');
+
+    // RECORDED BEFORE IT IS SENT, and it OUTLIVES this record. x3270 does both in two
+    // adjacent lines -- `aid = aid_code; ctlr_read_modified(aid, false);` (kybd.c:922-923)
+    // -- so the byte is not merely an argument to this transmission: it is the answer to
+    // any host-initiated read that arrives before the host's next write. See `pendingAid`.
+    this.pendingAid = aid;
 
     const payload = buildReadModified(this.screen, aid, false);
     this.sendInbound(payload);

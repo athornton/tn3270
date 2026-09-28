@@ -8,9 +8,16 @@ records what those publications say, so the next session does not re-derive it.
 **Source.** `$HOME/S544-5498-01_GOCA_for_AFP_Reference_Oct2000.pdf` — *Graphics Object Content
 Architecture for Advanced Function Presentation Reference*, S544-5498-01, October 2000, 216 pages.
 Supplied by the user 2026-09-25. Text extracts cleanly with `pypdf` (see *Tooling* below).
+**THREE MORE SOURCES HAVE SINCE ARRIVED and this is no longer the only one** — j3270 (2026-09-25),
+and the HOD support matrix plus a 3192G ROM disassembly (2026-09-28). Sections below, in date order.
 
-**STATUS: this is a paper exercise. Nothing here has been checked against a terminal, an emulator,
-or a byte on a wire.** Read the caveat section before designing against it.
+**STATUS: nothing here has been checked against a terminal we have driven, or a byte on a wire we
+have sent.** Read the caveat section before designing against it. **But the claim is now narrower
+than "a paper exercise" (corrected 2026-09-28):** the sources include a **3192G ROM disassembly** and
+IBM's own emulator support matrix, so parts of this file describe measured firmware behaviour rather
+than a specification's intent. That is still not a live witness — it says what the device would do,
+not that we have made it do anything. **Per-claim provenance is what matters; see the 2026-09-28
+section, and blueglass's own markers.**
 
 ---
 
@@ -291,6 +298,10 @@ sign that the 3270 binding has a whole dimension AFP does not.
 
 **These cannot both be right for one device, and neither source can settle it from here.** Our values
 are transcribed from a table we have read; j3270's are transcribed from HoD, which we have not.
+**A THIRD SOURCE NARROWS IT WITHOUT CLOSING IT (2026-09-28):** blueglass lists three-point **Arc** at
+`C6`/`86` with a full operand layout and puts Partial Arc at `A3`/`E3`, raising the possibility that
+j3270 has named three-point Arc "Partial Arc". A naming collision, not an opcode conflict. **Still
+unconfirmed** — see the 2026-09-28 section.
 **Do not "fix" either to match the other.** If arcs ever render wrong, this is the first thing to
 check. Note j3270's `X'86'`/`X'C6'` do fit the at-CP/absolute bit-1 pairing just as `X'A3'`/`X'E3'`
 do, so the pattern does not discriminate between them.
@@ -298,6 +309,8 @@ do, so the pattern does not discriminate between them.
 Orders our book has that j3270 omits: `X'04'` Segment Characteristics (it treats `0x04` as a 2-byte
 NOP "per HoD"), `X'43'` Set Pick Id, `X'80'`/`X'C0'` **Box**, `X'B2'` Set Process Color. **Box being
 absent is worth noting** — it is a primitive one would expect a terminal to want.
+**SETTLED 2026-09-28: Box is NOT part of the 3270 binding.** Blueglass reaches the same conclusion
+independently and the HOD matrix has no Box row at all — three sources. See the 2026-09-28 section.
 
 ### How much to trust it
 
@@ -317,22 +330,139 @@ absent is worth noting** — it is a primitive one would expect a terminal to wa
 GA18-2177/GA18-2535 until those are found — but it is a substitute, and its Partial Arc conflict is a
 live reminder that it is not authoritative.
 
-## Still missing after this book
+## A THIRD AND FOURTH READING: THE HOD SUPPORT MATRIX AND A 3192G ROM DISASSEMBLY (2026-09-28)
+
+The user supplied two more sources. **One of them is a different KIND of evidence from everything
+above: a disassembly of the 3192G's own firmware.** Where this file has had specifications and one
+other implementation's reading of a specification, that is the device itself.
+
+| Source | What it is | Standing |
+|---|---|---|
+| <https://scc.its.state.nc.us/hod/en/help/nativegraph.html> | IBM Host On-Demand's own order-support matrix, 5 emulator columns x 50 rows. **Fetched and parsed in full, not summarised** | Documents what *emulators* accept, including a `HOD V4.0/3192-G` column |
+| `$HOME/blueglass — 3270 Graphics & SNA Research Findings.md` | @MK, 2026-09-25. GDDM Base + GA23-0059 + ZZ20-4167 + **a 3192G ROM disassembly**, every claim provenance-marked | The firmware claims are the strongest evidence this project has for graphics |
+
+**Read blueglass's own provenance markers before relying on a line of it.** It distinguishes
+`[2+ sources]`, `[single source]`, `[ROM]`, `[inferred]`, `[to verify]` and `[rejected]` — that
+discipline is why it can be trusted where it is confident, and it is explicit that `[ROM]` means
+"what the firmware does, not necessarily what IBM specified".
+
+### HOD's matrix and the ROM DISAGREE, and the disagreement is the useful part
+
+HOD leaves **Arc (C6/86) blank** for the 3192-G, and blueglass reports the firmware has **a real
+Arc handler** (ROM dispatch table). Both can be true: **HOD's matrix documents HOD's limits, not the
+terminal's.** The same pattern explains the matrix's asterisked rows — `Set Character Angle (34)` and
+`Set Character Shear (35)` are ticked for HOD with the footnote *"Host On-Demand Version 4.0 accepts
+these graphics orders, but ignores them"*, while the firmware **honours both** (34 scaling x by 3 and
+y by 4, which looks like aspect correction).
+
+**So a support matrix is a statement about a client. Do not read it as a device capability**, in
+either direction — and note this cuts against our own earlier note, which recorded Arc's blank cell
+as "possibly an HOD limitation `[to verify]`". It was.
+
+Two cells worth recording because a prose summary of this page got them wrong: **`Set Viewing
+Window (27)` is J3270PC-only** (blank for the 3192-G), and **`Segment Characteristics (04)` and
+`End of Symbol Definition (FF)` are 3192-G-only.**
+
+### What the ROM settles that this file listed as open
+
+| Question | Answer | Marker |
+|---|---|---|
+| Coordinate origin | Centre at pel (360,191), one unit per pel, Y **up**; screen is -360..359 x -192..191. Only the **graphics cursor** scales y by 3/4 | Price + firmware |
+| Arc (C6/86) supported? | **Yes**, real handler, HOD's blank cell notwithstanding | ROM |
+| Character Angle / Shear honoured? | **Yes**, both; HOD merely accepts and ignores them | ROM |
+| Procedural instruction layouts (08, 09, 0A, 0F, 31) | 08/09/0A/0F are fixed 2-byte with operand 00; 31 is long. **All go in `0F11` Object Control**, not `0F10` | ROM |
+| Query reply payloads B2, B4, B6 | B2 = line types 1-8 (**default 7**), B4 = colours 0-7 as red/blue/green plane flags, B6 = built-in F0 sets | ROM, 3192G only |
+| Segment FLAG1/FLAG2 reserved bits | Never read. Copying Price's `74`/`68` is safe. **Bit 0 of FLAG2 (nonchained) is REJECTED with error 43 — send chained segments only** | ROM |
+
+### Image encoding rules, which are firmware-exact and will bite an encoder
+
+Worth transcribing because these are error codes, not preferences:
+
+- **No scaling.** `Begin Image` must be exactly `D1 0A` or `91 06`; GDF's optional
+  IMAGEWIDTH/IMAGEDEPTH are **rejected with error 68**. FORMAT must be 0.
+- **Rows.** Each `Image Data` length must be exactly `ceil(WIDTH/8)` (**error 73**); more rows than
+  DEPTH is **error 75**; fewer is accepted. `End Image` is `93 02 0000`.
+- **CLIPPING IS PER ROW, and this is the trap:** a row off-screen vertically, or sticking out past
+  either side edge, is **skipped whole**. An image wider than the screen therefore **draws nothing**.
+  **Our encoder must clip host-side** — the terminal will not do it for us, and the failure mode is a
+  blank screen rather than a truncated picture.
+- **Colour is per plane.** Each image draws in the current colour and mix, so a full-colour picture
+  is one image per plane, composed with OR or XOR (colour indices are bit-coded: blue 1, red 2,
+  green 4). No native IOCA on this family.
+- Still untested on hardware: **bit order within a byte** (GDF says leftmost pel = high bit) and
+  **whether 0 bits are transparent** (`[inferred]` yes, since Set Background Mix is ignored).
+
+### It does NOT settle Partial Arc — but it reframes the conflict
+
+Blueglass puts **Partial Arc at `A3`/`E3`** in its "AFP-era additions, absent from GDDM and HOD"
+bucket, and *separately* lists **three-point Arc at `C6`/`86`** with a full operand layout. j3270
+calls `86`/`C6` **Partial Arc**.
+
+**A HYPOTHESIS THIS FILE DID NOT HAVE: j3270 may be labelling three-point Arc as Partial Arc.** That
+would make both transcriptions right about the bytes and wrong only about the name, which is a much
+cheaper problem than two devices disagreeing about an opcode. **Not confirmed — do not act on it**,
+and the standing instruction stands: do not "fix" either source to match the other. But if arcs
+render wrong, check the *name* before the *byte*.
+
+### Box: a second source now says it is not a 3270 order
+
+Blueglass puts **`Box` (80/C0)** in the same absent-from-GDDM-and-HOD bucket, independently of
+j3270's omission of it. **Two sources, arrived at separately, now agree Box is not part of this
+binding** — and the HOD matrix has no Box row at all, which is a third.
+
+This matters beyond the order itself: `docs/ideas/composite-model-idea.md` uses Box as its worked
+example of a capability whose status is "unresolved on a faithful model". **It is no longer
+unresolved.** The idea survives — a composite model can support an order no real terminal did, which
+is rather the point — but the premise should be restated as "Box is absent from the 3270 binding,
+and this model adds it" rather than "Box's status is unknown".
+
+### Non-graphics findings worth keeping
+
+- **Errors are coarse.** A rejected order returns a negative response with sense **1003** (function
+  not supported) or **1005** (parameter error). **The host learns the class of error, not which
+  order failed** — so a generator cannot be debugged by sense code alone.
+- **Throughput** `[single source: ZZ20-4167, channel-attached 3174-11]`: SNA RU 2048/N=2 = 73.4 KB/s;
+  the `(2N-1) x RU` product must fit the ~7.5 KB usable device buffer. A full-screen three-plane
+  bitmap is ~105 KB, so ~1.4 s to transmit: **fine for stills, not for animation.**
+- **DBUF is 8 KB and the 3179G runs the same code as the 3192G**, so ROM findings apply to both.
+
+### The gap this leaves
+
+**Blueglass cites a `GRAPHICS_DATA_STREAM.md` for the ROM addresses (`1A:571B`, `1A:0906-097C`,
+the `0F11` dispatcher at `1A:1297`) and THAT FILE IS NOT ON THIS BOX.** The findings are recorded
+here; the underlying disassembly evidence is not. **Ask the user for it before designing the order
+generator** — it is the difference between "the firmware honours Arc" and knowing what its handler
+actually accepts.
+
+Still no live witness and still no x3270 oracle. Blueglass does not change that; a ROM disassembly
+tells us what the device would do, not that we have made it do anything.
+
+## Still missing after all four sources
 
 1. **The 3179-G / 3192-G manuals — NOW IDENTIFIED BY ORDER NUMBER: `GA18-2177` and `GA18-2535`**
    (see the section above). Which subset the terminal accepts, its defaults, and its pel geometry.
    GOCA gives primitives; it does not say what a G-terminal does with them, and GA23-0059-07 defers
-   to these seven times over.
+   to these seven times over. **PARTLY ANSWERED 2026-09-28 by the 3192G ROM disassembly**, which
+   supplies the accepted subset, several defaults and the pel geometry for the 3192G (and so for the
+   3179G, same code). The manuals are still wanted for what IBM *specified* as against what this
+   firmware *does*, but they are no longer the only route to the device facts.
+   **A NEARER ASK: `GRAPHICS_DATA_STREAM.md`, blueglass's own companion file holding the ROM
+   addresses. It is not on this box.**
 2. **The 3270 binding of GOCA** — the equivalent of Appendix A/B for the 3270 data stream. Unknown
    whether a separate publication exists.
-3. **Pel dimensions for the G-terminals.** Still unrecorded anywhere we have. prycroft6 says an
-   application discovers the drawing space from **Usable Area** and **Implicit Partition** Query
-   Replies, both of which we already build and send — so this may be discoverable at runtime rather
-   than needing a constant.
+3. ~~**Pel dimensions for the G-terminals.**~~ **ANSWERED 2026-09-28: 720 x 384 pels** `[hardware]`,
+   cell 9x12 or 9x16 by page depth `[single source: GDDM]`, origin at centre pel (360,191) with Y up
+   `[Price + firmware]`. **The three parts have three different provenances — quote them separately;
+   only the origin is ROM-confirmed.** Runtime discovery via **Usable
+   Area** and **Implicit Partition** Query Replies (both of which we already build and send) remains
+   the right mechanism — prycroft6's point stands — but the constants are now known, which means a
+   generator can be written and tested before any device answers a query.
 4. **Any reference implementation.** Neither x3270 nor c3270 has a `0x0F0F`/`0x0F10`/`0x0F11` arm.
    No Hercules host here drives a G-terminal. **This remains the first feature with neither an
-   x3270 oracle nor a live witness**, and this book does not change that — it is a specification,
-   not an oracle.
+   x3270 oracle nor a live witness**, and none of the four sources changes that: j3270 is another
+   paper implementation, the HOD matrix documents clients, and a ROM disassembly says what the
+   device would do rather than what we have made it do. **Unchanged after everything —
+   this is still the hardest fact about this feature.**
 
 ## Tooling
 
