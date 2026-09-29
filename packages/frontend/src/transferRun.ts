@@ -23,15 +23,17 @@
  *
  * ## THE ORDER OF OPERATIONS IS THE ERROR-HANDLING RULE
  *
- * Everything checkable locally is checked BEFORE the host is told anything: the geometry,
- * 3270 mode, the keyboard lock, the source file, the destination. A local error after the
- * host has been primed leaves it sitting in transfer mode waiting for a client that has
- * already given up -- which the operator then has to break out of by hand.
+ * Everything checkable locally is checked BEFORE the host is told anything: 3270 mode, the
+ * keyboard lock, the source file, the destination. A local error after the host has been
+ * primed leaves it sitting in transfer mode waiting for a client that has already given up
+ * -- which the operator then has to break out of by hand.
  *
- * The checks are in the CLI's order and that order is load-bearing, not incidental:
- * geometry comes before 3270 mode because on a model-4 session BOTH are wrong, and which
- * message the operator sees decides what they do. "Restart with -model 3278-2-E" is
- * actionable; "not in 3270 mode" sends them looking at the connection.
+ * The checks are in the CLI's order. Geometry is NO LONGER AMONG THEM: under
+ * host-chooses-the-protocol we cannot know CUT was chosen until the host answers, so the
+ * 24x80 demand moved to the decision point (see `docs/superpowers/specs/
+ * 2026-09-25-transfer-protocol-selection-design.md`). The accepted cost is that a CUT-only
+ * host at 43x80 is now primed before we find out; measured on VM/370, MECAFF refuses with
+ * its own text in about a second and CMS recovers itself, so nothing wedges.
  *
  * ## WHAT IS DELIBERATELY NOT HERE
  *
@@ -44,7 +46,8 @@
  */
 
 import {
-  AID, CUT_SCREEN_SIZE, CutTransfer, isCutFrame, type Session, type TransferResult,
+  AID, CUT_SCREEN_SIZE, CutTransfer, DftTransfer, isCutFrame,
+  type Session, type TransferResult,
 } from '@tn3270/core';
 import type { TransferFiles, TransferRequest } from './transfer.js';
 
@@ -84,29 +87,6 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   const frameMs = opts.frameMs ?? FRAME_TIMEOUT_MS;
   const totalMs = opts.totalMs ?? TOTAL_TIMEOUT_MS;
 
-  // GEOMETRY, before anything else. `isCutFrame` throws on a screen that is not 24x80
-  // (`requireCutGeometry`), and it is better to say so here than to have the first frame
-  // throw it after the host has been told to start.
-  if (session.screen.size !== CUT_SCREEN_SIZE) {
-    // NAMES THE REMEDY, not just the problem. `-model` is parsed once at launch and runtime
-    // model-switching does not exist -- it is an unbuilt roadmap item -- so a user at
-    // `-model 3278-4-E` cannot fix this from inside the running client. A message that only
-    // reported the geometry would leave them stuck.
-    //
-    // THE REMEDY LEADS, AND A LIVE RUN IS WHAT PROVED IT HAD TO. The first version read
-    // "CUT file transfer needs a 24x80 screen; this session is 43x80. Restart with -model
-    // 3278-2-E, or wait for DFT." -- 109 characters against the form's 54-column status
-    // line, so a real model-4 session showed "CUT file transfer needs a 24x80 screen; this
-    // session >" and CUT OFF EVERY WORD OF THE REMEDY. The one thing the message exists to
-    // carry was the one thing truncated, and no unit test saw it because they all read
-    // `r.error` rather than what was drawn. Third instance on this branch, after the keypad
-    // help string and the timeout message: on a 54-column line, put the action first.
-    return {
-      ok: false,
-      error: `restart with -model 3278-2-E: CUT needs 24x80, not `
-        + `${session.screen.rows}x${session.screen.cols} (DFT will lift this)`,
-    };
-  }
   if (!session.is3270Mode()) {
     // x3270's `ftUnableNot3270`, "not in 3270 mode" (fb-common:47).
     return { ok: false, error: 'not in 3270 mode' };
@@ -137,10 +117,25 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   const primed = primeAndType(session, command);
   if (primed !== undefined) return { ok: false, error: primed };
 
-  const transfer = new CutTransfer({
+  // BOTH ENGINES, over the SAME source buffer. The host chooses the protocol, not us
+  // (x3270's `ft_running` merely REPORTS which arrived, ft.c:556), so we cannot know
+  // which we need until the first frame lands. Both need their source bytes up front
+  // anyway -- CUT to answer a retransmit, DFT to answer a GET -- so this is one extra
+  // object over one Uint8Array, not a second copy.
+  const cut = new CutTransfer({
     direction: request.direction,
     ...(source !== undefined ? { data: source } : {}),
   });
+  const dft = new DftTransfer({
+    direction: request.direction,
+    ...(source !== undefined ? { data: source } : {}),
+  });
+
+  // REGISTERED BEFORE THE HOST IS TOLD ANYTHING, and the order is load-bearing: a fast
+  // host's first 0xd0 arrives from inside `handleRecord`, before any driver code runs
+  // again, and `handleTransferData` needs a registered transfer at that moment. Doing
+  // this after sendAID(ENTER) would lose the first frame of a fast transfer to a race.
+  session.startDftTransfer(dft);
 
   let ended = false;
   let frameTimer: ReturnType<typeof setTimeout> | undefined;
@@ -175,7 +170,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     onDone({
       ok: result.ok,
       ...(result.ok ? {} : { error: result.error }),
-      bytes: transfer.bytesTransferred,
+      bytes: cut.bytesTransferred,
     });
   };
 
@@ -193,7 +188,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     finish({
       ok: false,
       error: `press Attn or Clear: host may still be transferring. `
-        + `${why}, ${transfer.bytesTransferred} bytes`,
+        + `${why}, ${cut.bytesTransferred} bytes`,
     });
   };
 
@@ -220,9 +215,9 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     armFrameTimer();
     // `step` may mutate the screen -- an abort response, or a whole upload frame -- and the
     // AID it returns is what sends those bytes, so the two must not be separated.
-    const step = transfer.step(session.screen);
+    const step = cut.step(session.screen);
     if (step.ack !== undefined) session.sendAID(step.ack);
-    onProgress(`${transfer.bytesTransferred} bytes`);
+    onProgress(`${cut.bytesTransferred} bytes`);
     if (step.done !== undefined) {
       if (step.done.ok && request.direction === 'receive') {
         // `result.data` is always present for a successful receive (`CutTransfer.success`),
@@ -261,11 +256,36 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     ok: true,
     cancel: (): void => {
       if (ended) return;
+      // RELEASE THE DFT REGISTRATION FIRST. This driver now registers a DFT engine before
+      // priming the host, and on a cancelled run the host never addressed it -- so it is
+      // DISCARDED rather than aborted, which is exactly `cancelDftTransfer`'s documented
+      // case ("the loser of a protocol race", `session.ts:367`). Without this a cancelled
+      // run leaves `session.dft` set, and `answerRead` would replay its retained frame at a
+      // host that has moved on. `handleClose` clears `dft` too, but a form closed on a live
+      // session never reaches it.
+      session.cancelDftTransfer();
+
+      // A CUT ABORT IS ONLY POSSIBLE AT 24x80, AND DELETING THE GEOMETRY GATE IS WHAT MADE
+      // THAT REACHABLE -- a defect this task introduced and the plan did not predict.
+      // `CutTransfer.cancel` writes the response area through `writeResponse`, which calls
+      // `requireCutGeometry` and THROWS `CutFrameError` on any other geometry
+      // (`frames.ts:314`). The gate used to guarantee this line was never reached at 43x80;
+      // now it is, and the throw escaped uncaught into the TUI's form-close path.
+      //
+      // Reported, not aborted, and that is the honest answer rather than the convenient
+      // one: there is no CUT frame layout to write into at this geometry, and the host has
+      // not told us it is running CUT. Inventing an abort would put bytes on the wire that
+      // no captured session contains -- the same rule this module already gives for
+      // refusing to synthesise one from a timeout.
+      if (session.screen.size !== CUT_SCREEN_SIZE) {
+        finish({ ok: false, error: 'transfer canceled by user' });
+        return;
+      }
       // ABORT, NOT ABANDON: `cancel` writes the response area and returns PF2, so the host
       // leaves transfer mode. Walking away would leave its program waiting for a frame that
       // never comes. `CutTransfer.cancel` is itself idempotent, and `ended` means we do not
       // rely on that -- a second call here does nothing at all.
-      const step = transfer.cancel(session.screen);
+      const step = cut.cancel(session.screen);
       if (step.ack !== undefined) session.sendAID(step.ack);
       finish(step.done ?? { ok: false, error: 'transfer canceled by user' });
     },

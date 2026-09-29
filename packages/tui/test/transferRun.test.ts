@@ -111,45 +111,6 @@ const base = {
 };
 
 describe('startTransfer', () => {
-  it('REFUSES a screen that is not 24x80, and names the remedy', () => {
-    // The refusal must say what to do about it, because the remedy is a RESTART: -model
-    // is parsed once at launch and runtime model-switching does not exist. A message that
-    // only reports the geometry leaves a user at -model 3278-4-E stuck with no way out
-    // from inside the running client.
-    const { session } = withSpy(in3270(makeSession(43, 80)));
-    // ASSERTED FIRST, because `alternateRows: 43` would have given a 1920-cell screen and
-    // this test would then pass for the wrong reason. See the module comment.
-    expect(session.screen.size).toBe(3440);
-    const r = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
-    expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/24x80/);
-    expect(r.error).toMatch(/43x80/);            // the CURRENT geometry
-    expect(r.error).toMatch(/-model 3278-2-E/);  // the remedy
-    expect(r.error).toMatch(/DFT/);              // and that it is coming
-  });
-
-  it('THE REFUSAL SURVIVES THE 54-COLUMN STATUS LINE with its remedy intact', () => {
-    // FOUND BY A LIVE RUN, NOT BY A TEST, and that is the point of this one existing. The
-    // first version of the message was 109 characters against transferOverlay's LINE_WIDTH
-    // of 54, so a real `-model 3278-4-E` session against VM/370 showed
-    //     CUT file transfer needs a 24x80 screen; this session >
-    // and cut off EVERY WORD OF THE REMEDY -- the only reason the message is worded at all,
-    // since -model is parsed once at launch and the user cannot fix it from inside the
-    // client. Every other test here reads `r.error` directly, which is exactly why none of
-    // them saw it.
-    //
-    // So this asserts on the RENDERED line, through the same renderer the form uses. Third
-    // instance of this shape on one branch (the keypad help string, the timeout message,
-    // this), hence the rule now written in transferOverlay.ts: on a 54-column line, put the
-    // action first.
-    const { session } = withSpy(in3270(makeSession(43, 80)));
-    const r = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
-    const lines = transferLines({ ...newTransferForm(), error: r.error }, 'idle', undefined);
-    const status = lines[lines.length - 1] ?? '';
-    expect(status.trimEnd().endsWith('>')).toBe(true);     // it IS truncated; that is fine
-    expect(status).toMatch(/-model 3278-2-E/);             // but the REMEDY is still there
-  });
-
   it('refuses when not in 3270 mode', () => {
     // No `in3270` here: an unconnected session already reports false, which is the state a
     // TUI is in before it connects.
@@ -158,17 +119,6 @@ describe('startTransfer', () => {
     const r = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/not in 3270 mode/);
-  });
-
-  it('CHECKS GEOMETRY BEFORE 3270 MODE, so a model-4 user is told the useful thing', () => {
-    // Both are wrong on a fresh 43-row session, and which message they see decides what
-    // they do: "restart with -model 3278-2-E" is actionable, "not in 3270 mode" sends them
-    // looking at the connection. The CLI checks geometry first (runner.ts:453) and this
-    // pins the same order.
-    const { session } = withSpy(makeSession(43, 80));
-    const r = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
-    expect(r.error).toMatch(/24x80/);
-    expect(r.error).not.toMatch(/not in 3270 mode/);
   });
 
   it('refuses a receive onto an existing file with Exist=keep, BEFORE telling the host', () => {
@@ -230,6 +180,37 @@ describe('startTransfer', () => {
       // The host may STILL be in transfer mode, and the message must say so -- otherwise
       // the user's next keystroke goes into a host waiting for a CUT frame.
       expect(done?.error).toMatch(/Attn or Clear/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('THE TIMEOUT SURVIVES THE 54-COLUMN STATUS LINE with its recovery intact', async () => {
+    // THIS IS WHY THIS TEST FILE LIVES IN `tui/test` AND NOT BESIDE ITS SUBJECT: it asserts
+    // on the RENDERED line, through `tui`'s own `transferLines`, and `frontend` cannot import
+    // `tui`. It replaces the geometry-refusal version of this test, which this task deleted
+    // along with the message it guarded -- the LESSON is not about geometry, it is that a
+    // 54-column line truncates, so the ACTION must come first. Task 6 adds clauses to this
+    // very message, which is exactly when the assertion is needed.
+    //
+    // Measured history, per transferOverlay.ts: the CLI's word order put "(press Attn or
+    // Clear)" at character 113 of a 54-column line, so the one actionable phrase -- on the
+    // one failure where the host may still be mid-transfer -- was the part cut off. Every
+    // other test here reads `done.error` directly, which is precisely why none of them saw it.
+    vi.useFakeTimers();
+    try {
+      const { session } = withSpy(withField(in3270(makeSession(24, 80))));
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(1200);
+
+      const lines = transferLines({ ...newTransferForm(), error: done?.error }, 'idle', undefined);
+      const status = lines[lines.length - 1] ?? '';
+      expect(status.trimEnd().endsWith('>')).toBe(true);   // it IS truncated; that is fine
+      expect(status).toMatch(/Attn or Clear/);             // but the RECOVERY is still there
     } finally {
       vi.useRealTimers();
     }
@@ -337,26 +318,148 @@ describe('startTransfer', () => {
       return { run, aids };
     };
 
-    // 1. wrong geometry
-    let got = mk(() => withSpy(in3270(makeSession(43, 80))), fakeFiles(), aReceive());
+    // GEOMETRY IS NO LONGER ON THIS LIST, and removing it was not a deletion of one line.
+    // The case that used to be here was `in3270(makeSession(43, 80))` with no `withField`,
+    // which STILL refuses and STILL sends nothing -- on the UNFORMATTED screen, one check
+    // further down. So it would have gone on passing while testing something else entirely,
+    // the vacuous pass this branch keeps finding. Deleted rather than left green.
+
+    // 1. not in 3270 mode
+    let got = mk(() => withSpy(makeSession(24, 80)), fakeFiles(), aReceive());
     expect(got.run.ok).toBe(false);
     expect(got.aids).toEqual([]);
-    // 2. not in 3270 mode
-    got = mk(() => withSpy(makeSession(24, 80)), fakeFiles(), aReceive());
-    expect(got.run.ok).toBe(false);
-    expect(got.aids).toEqual([]);
-    // 3. destination exists
+    // 2. destination exists
     got = mk(() => withSpy(withField(in3270(makeSession(24, 80)))),
       fakeFiles({ '/tmp/a.bin': new Uint8Array([1]) }), aReceive('/tmp/a.bin'));
     expect(got.run.ok).toBe(false);
     expect(got.aids).toEqual([]);
-    // 4. source unreadable
+    // 3. source unreadable
     got = mk(() => withSpy(withField(in3270(makeSession(24, 80)))), fakeFiles(), aSend('/tmp/x'));
     expect(got.run.ok).toBe(false);
     expect(got.aids).toEqual([]);
-    // 5. unformatted screen -- the one primeAndType itself raises
+    // 4. unformatted screen -- the one primeAndType itself raises
     got = mk(() => withSpy(in3270(makeSession(24, 80))), fakeFiles(), aReceive());
     expect(got.run.ok).toBe(false);
     expect(got.aids).toEqual([]);
+  });
+});
+
+/**
+ * THE ONE DELETION THIS DESIGN MAKES, and the tests that pin what replaced it.
+ *
+ * Under host-chooses-the-protocol the client cannot know CUT was chosen until the host has
+ * answered -- x3270's `ft_running` merely REPORTS which protocol arrived (`ft.c:556`) and
+ * has no selection logic at all -- so a 24x80 demand made before the host is asked is a
+ * demand made on no evidence. The accepted cost, raised and measured: a CUT-only host at
+ * 43x80 is now primed before we find out.
+ */
+describe('protocol selection: the geometry gate is gone', () => {
+  it('does not refuse a 43x80 session before the host is asked', () => {
+    const { session } = withSpy(withField(in3270(makeSession(43, 80))));
+    // ASSERTED FIRST, for the reason the module comment gives: `alternateRows: 43` would
+    // give a 1920-cell screen and this test would then pass without ever being at 43x80.
+    expect(session.screen.size).toBe(3440);
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+    expect(run.ok).toBe(true);
+    run.cancel!();      // do not leave a listener and two timers behind
+  });
+
+  it('still refuses when not in 3270 mode, AT 43x80 TOO', () => {
+    // The other local checks are unchanged and must stay reachable. The geometry gate used
+    // to shadow this one at 43x80 -- there was a test asserting exactly that order -- so
+    // this is the case whose ANSWER CHANGED, not merely one that still passes.
+    const { session, aids } = withSpy(withField(makeSession(43, 80)));
+    expect(session.is3270Mode()).toBe(false);
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'x',
+    });
+    expect(run.ok).toBe(false);
+    expect(run.error).toMatch(/not in 3270 mode/);
+    expect(run.error).not.toMatch(/24x80/);     // the old message must not still be first
+    expect(aids).toEqual([]);
+  });
+
+  it('registers the DFT transfer BEFORE the host is primed, not merely by the time we return', () => {
+    // A fast host's first 0xd0 arrives from inside `handleRecord`, before any driver code
+    // runs again, and `handleTransferData` needs a registered transfer AT THAT MOMENT.
+    //
+    // SO THE ASSERTION IS MADE FROM INSIDE `sendAID`, not after `startTransfer` returns.
+    // Checking afterwards cannot tell "registered before priming" from "registered after",
+    // which is the entire claim -- and the second one loses the first frame of a fast
+    // transfer to a race. Measured: with `startDftTransfer` moved below `sendAID(ENTER)`
+    // the after-the-fact check stays green and this one reddens.
+    const session = withField(in3270(makeSession(24, 80)));
+    let registeredWhenPrimed: boolean | undefined;
+    vi.spyOn(session, 'sendAID').mockImplementation(() => {
+      registeredWhenPrimed ??= session.dftTransfer !== undefined;
+    });
+
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+
+    expect(run.ok).toBe(true);
+    expect(registeredWhenPrimed).toBe(true);
+    run.cancel!();
+  });
+
+  it('CANCELLING AT 43x80 REPORTS rather than throwing CutFrameError at the operator', () => {
+    // A DEFECT THIS TASK INTRODUCED, found by running the deletion and not predicted by the
+    // plan: the geometry gate was load-bearing for `cancel` as well as for stepping. With it
+    // gone, `CutTransfer.cancel` is reachable at 43x80, and it writes the response area
+    // through `writeResponse` -> `requireCutGeometry`, which THROWS (`frames.ts:314`). The
+    // throw escaped uncaught into the TUI's form-close path -- `Esc` on the form -- which is
+    // the one place an operator cannot avoid.
+    //
+    // The observable is deliberately the ABSENCE of a throw plus a reported outcome, because
+    // "it did not crash" alone would pass on a cancel that silently did nothing.
+    const { session, aids } = withSpy(withField(in3270(makeSession(43, 80))));
+    const results: { ok: boolean; error?: string }[] = [];
+    const run = startTransfer({
+      session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+      onProgress: () => {}, onDone: (d) => { results.push(d); },
+    });
+    expect(run.ok).toBe(true);
+
+    expect(() => { run.cancel!(); }).not.toThrow();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.error).toMatch(/canceled by user/);
+    // NO PF2. There is no CUT frame layout to write into at this geometry and the host never
+    // said it was running CUT, so synthesising an abort would put bytes on the wire that no
+    // captured session contains -- the rule this module already states for timeouts.
+    expect(aids).toEqual([AID.ENTER]);
+  });
+
+  it('a cancelled run RELEASES the DFT registration, so no retained frame is replayed', () => {
+    // The registration happens before priming, so every exit path owns releasing it.
+    // `answerRead` replays a DFT engine's retained frame, which at a host that has moved on
+    // is unsolicited traffic. `handleClose` clears `dft` too, but a form closed on a LIVE
+    // session never reaches it -- so this path must do it itself.
+    const { session } = withSpy(withField(in3270(makeSession(24, 80))));
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+    expect(session.dftTransfer).toBeDefined();
+    run.cancel!();
+    expect(session.dftTransfer).toBeUndefined();
+  });
+
+  it('builds the DFT engine for the SAME direction, over the same source bytes', () => {
+    // Both engines are built over one source buffer, which is what makes this one object
+    // rather than a second copy. A send is the direction that can get this wrong: a
+    // `DftTransfer` built as `receive` would THROW on the data it was handed
+    // (`dft.ts:163-168`), and a `send` built with no data throws too.
+    const session = withField(in3270(makeSession(24, 80)));
+    vi.spyOn(session, 'sendAID').mockImplementation(() => {});
+    const files = fakeFiles({ '/tmp/a.bin': new Uint8Array([1, 2, 3]) });
+    const run = startTransfer({
+      ...base, session, files, request: aSend('/tmp/a.bin'), command: 'IND$FILE PUT A.BIN',
+    });
+    expect(run.ok).toBe(true);
+    expect(session.dftTransfer?.direction).toBe('send');
+    run.cancel!();
   });
 });
