@@ -271,6 +271,16 @@ describe('Session DFT plumbing', () => {
     expect(ended).toBe(1);
   });
 
+  it('ddmAdvertised reports the flag, so a front end can diagnose a timeout', () => {
+    // A FRONT END HAS NO OTHER ROUTE TO IT -- `opts` is private -- and it needs it because
+    // forgetting `-ddm on` will be the commonest failure once DFT works: a host that speaks
+    // only DFT cannot CHOOSE DFT unless the Query Reply carried QCODE 0x95. Defaults to false,
+    // like the flag, so the default is asserted rather than assumed.
+    expect(newSession().session.ddmAdvertised).toBe(false);
+    expect(newSession({ ddm: false }).session.ddmAdvertised).toBe(false);
+    expect(newSession({ ddm: true }).session.ddmAdvertised).toBe(true);
+  });
+
   it('answers a host Get with our data, the upload direction through the session', async () => {
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
@@ -452,6 +462,24 @@ describe('the DDM advertisement through a Session', () => {
   it('puts 0x95 on the wire with ddm on', async () => {
     const sent = await queryReplyBytes({ ddm: true });
     expect(sent).toContain(0x95);
+  });
+
+  it('ddmAdvertised AGREES WITH THE WIRE, so a front end can trust it to diagnose', async () => {
+    // THE GETTER'S MEANING, ASSERTED WHERE THE BYTES ARE. A front end reads
+    // `session.ddmAdvertised` to tell an operator their transfer timed out because `-ddm on`
+    // was never set -- advice that is actively misleading if the getter and the wire can
+    // disagree. Tested HERE, against `queryReplyBytes`, rather than beside the getter: over
+    // there it could be wired to any always-true expression and still pass, because nothing
+    // in a Session-options test observes the advertisement.
+    //
+    // 0x95 is `Qcode.DDM`, named rather than repeated as a literal so a constant change cannot
+    // leave this test quietly checking the wrong byte.
+    for (const ddm of [false, true]) {
+      const opts = ddm ? { ddm: true } : {};
+      const { session } = newSession(opts);
+      expect(session.ddmAdvertised).toBe(ddm);
+      expect((await queryReplyBytes(opts)).includes(Qcode.DDM)).toBe(ddm);
+    }
   });
 
   it('adds DDM as its own unit AND to the summary, changing nothing else', async () => {

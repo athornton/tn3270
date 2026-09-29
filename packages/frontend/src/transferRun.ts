@@ -46,7 +46,7 @@
  */
 
 import {
-  AID, CUT_SCREEN_SIZE, CutTransfer, DftTransfer, isCutFrame,
+  AID, CUT_SCREEN_SIZE, CutTransfer, DftTransfer, looksLikeCutFrame,
   type Session, type TransferResult,
 } from '@tn3270/core';
 import type { TransferFiles, TransferRequest } from './transfer.js';
@@ -141,6 +141,22 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   let frameTimer: ReturnType<typeof setTimeout> | undefined;
   let totalTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * Which protocol the host chose, once it has said. `undefined` means still waiting.
+   *
+   * Read by `cancel`, which has to abort a CUT transfer and merely discard a DFT one.
+   */
+  let committed: 'cut' | 'dft' | undefined;
+
+  /**
+   * Did the host paint ANY screen that was not a CUT frame?
+   *
+   * Only the timeout message reads it, and it earns its keep there: "nothing arrived at all"
+   * and "screens arrived, none of them a frame" want different diagnoses, and the operator
+   * cannot tell them apart from a bare deadline.
+   */
+  let sawNonFrameScreen = false;
+
   const clearTimers = (): void => {
     if (frameTimer !== undefined) { clearTimeout(frameTimer); frameTimer = undefined; }
     if (totalTimer !== undefined) { clearTimeout(totalTimer); totalTimer = undefined; }
@@ -161,6 +177,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     // `Session.listenerCount` exists at all. Removed here because this is the one place a
     // run ends -- the same discipline as `Session.handleClose` owning TN3270E teardown.
     session.off('screen', onScreen);
+    session.off('transferEnd', onTransferEnd);
     clearTimers();
     // NARROWED, not `result.error`: `TransferResult` is a DISCRIMINATED UNION
     // (`ft/transfer.ts:98`) and `error` exists only on the `ok: false` arm, so reading it
@@ -170,7 +187,12 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     onDone({
       ok: result.ok,
       ...(result.ok ? {} : { error: result.error }),
-      bytes: cut.bytesTransferred,
+      // FROM WHICHEVER ENGINE RAN. Reporting `cut.bytesTransferred` unconditionally would
+      // tell the operator a DFT transfer moved 0 bytes -- a success message contradicting
+      // itself, and the one number they would check against the host's own listing. The
+      // counters are per-engine and not interchangeable: `bytesTransferred` on CUT,
+      // `transferred` on DFT (`dft.ts:181`).
+      bytes: committed === 'dft' ? dft.transferred : cut.bytesTransferred,
     });
   };
 
@@ -185,11 +207,68 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     // complete within 600s after 0 bytes; " and nothing about what to do with a host still
     // in transfer mode. Measured: the message is 113 characters. Same shape as the help
     // string that did not fit in `transferOverlay.ts`, one layer down.
+    // WHAT WAS OBSERVED, not what we guess. Two clauses, mutually exclusive by construction,
+    // and the bare message when neither applies -- a 24x80 host painting non-frames has
+    // ignored the command (wrong panel, IND$FILE absent), where naming the geometry would be
+    // false and naming `-ddm` irrelevant.
+    let extra = '';
+    if (sawNonFrameScreen && session.screen.size !== CUT_SCREEN_SIZE) {
+      // FALLBACK ONLY. Measured on VM/370: MECAFF answers `IND$FILE requires a MECAFF
+      // connected 3270 terminal` and CMS recovers in about a second, so the HOST'S OWN TEXT
+      // usually arrives and is better than ours. This row is for a host that goes quiet --
+      // which is the case the deleted geometry gate used to pre-empt.
+      extra = ` (host may want 24x80; this session is ${session.screen.rows}x${session.screen.cols})`;
+    } else if (!sawNonFrameScreen && !session.ddmAdvertised) {
+      // EARNS ITS PLACE: forgetting `-ddm on` will be the commonest failure once DFT works,
+      // because a host that speaks only DFT cannot CHOOSE DFT unless we advertised QCODE
+      // 0x95. Guarded on `!sawNonFrameScreen` so it is not printed at a host that plainly
+      // answered -- there it would be noise, and noise in a message gets learned as ignorable.
+      extra = ' (DDM was not advertised; a host that speaks only DFT needs -ddm on)';
+    }
     finish({
       ok: false,
       error: `press Attn or Clear: host may still be transferring. `
-        + `${why}, ${cut.bytesTransferred} bytes`,
+        + `${why}, ${cut.bytesTransferred} bytes${extra}`,
     });
+  };
+
+  /**
+   * A DFT transfer ended, however it ended.
+   *
+   * `Session` has already cleared its own reference and fired `transferEnd`
+   * (`session.ts:1254-1257`), so the outcome is read from the engine reference kept above --
+   * `session.dftTransfer` is `undefined` by the time this runs and cannot be used.
+   *
+   * THE RECEIVED BYTES COME OFF `result.data`, NOT off the engine. `DftTransfer` has no `data`
+   * accessor at all; its surface is `result`/`complete`/`isMessage`/`retainedFrame`/
+   * `transferred` (`dft.ts:175-183`), and a download's payload is the `data` field of
+   * `TransferResult`'s success arm (`ft/transfer.ts:98-100`). Reading a non-existent accessor
+   * would have yielded `undefined`, coalesced to an empty array, and written a ZERO-BYTE FILE
+   * under a SUCCESS message -- the failure mode this project's live-transfer rule already
+   * names: compare bytes, not the status line.
+   */
+  const onTransferEnd = (): void => {
+    if (ended) return;
+    committed = 'dft';
+    const result = dft.result ?? { ok: false, error: 'DFT transfer ended without a result' };
+    if (result.ok && request.direction === 'receive') {
+      const bytes = result.data ?? new Uint8Array(0);
+      try {
+        if (request.exist === 'append') files.append(request.localFile, bytes);
+        else files.write(request.localFile, bytes);
+      } catch (err) {
+        // THE TRANSFER SUCCEEDED AND THE WRITE DID NOT, handled exactly as the CUT arm does:
+        // a "complete" that left no file on disk is the one outcome an operator must not be
+        // told, and the host is already out of transfer mode so there is nothing to abort.
+        finish({
+          ok: false,
+          error: `transfer complete but could not write ${request.localFile}: `
+            + `${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+    }
+    finish(result);
   };
 
   /** Re-armed on every frame: the per-frame deadline measures the GAP, not the total. */
@@ -211,7 +290,24 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
    */
   const onScreen = (): void => {
     if (ended) return;
-    if (!isCutFrame(session.screen)) return;
+    // DECIDE WITH THE NON-THROWING DETECTOR. `isCutFrame` was correct here while the geometry
+    // gate guaranteed 24x80; with the gate gone this handler runs at ANY geometry, and
+    // `isCutFrame` THROWS rather than answering (`frames.ts:314`). Measured: at 43x80 the
+    // first host write of any kind threw `CutFrameError` out of the screen listener. That is
+    // the whole reason `looksLikeCutFrame` was built in Task 2.
+    if (!looksLikeCutFrame(session.screen)) {
+      // The host painted something that is not a CUT frame. Keep waiting -- a DFT host may
+      // still be about to speak, and a CUT host often paints its prompt first -- but REMEMBER
+      // it, because the timeout message distinguishes this from silence.
+      sawNonFrameScreen = true;
+      return;
+    }
+    // CUT HAS WON. Release the DFT registration before stepping, so a stray inbound read
+    // cannot replay a retained frame at a host now running CUT.
+    if (committed === undefined) {
+      committed = 'cut';
+      session.cancelDftTransfer();
+    }
     armFrameTimer();
     // `step` may mutate the screen -- an abort response, or a whole upload frame -- and the
     // AID it returns is what sends those bytes, so the two must not be separated.
@@ -244,8 +340,35 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
 
   // NOW the host is involved. Everything from here can leave it in transfer mode, which is
   // why nothing above could.
+  //
+  // TWO WAKE SIGNALS, because the two protocols are observable in different places. A CUT
+  // transfer IS screen traffic, so `screen` sees every frame. A DFT transfer paints NOTHING --
+  // it is structured fields through `handleTransferData`, and although a WSF record does fire
+  // `screen` (`session.ts:897` is unconditional) the buffer is untouched, so every one of
+  // those events is a non-frame indistinguishable from a host painting a menu. A driver waking
+  // only on `screen` would therefore spin to its deadline on a perfectly healthy transfer.
+  //
+  // REGISTERED BEFORE `sendAID`, WHICH IS WHAT MAKES A SEPARATE STATE CHECK UNNECESSARY. A
+  // whole DFT transfer really can begin and finish inside `sendAID`'s record handling -- one
+  // of the tests drives exactly that -- but the listener is already in place when it does, so
+  // `onTransferEnd` fires from within that call stack and the run completes synchronously.
+  //
+  // THE PLAN ASKED FOR AN `if (dft.complete)` CHECK HERE AND IT WAS DELETED AS DEAD CODE.
+  // Nothing between `startDftTransfer` above and this line can reach the socket -- the
+  // intervening statements are closure definitions and `let`s -- so `dft.complete` is
+  // unfalsifiably false at this point. Its mutation check could not be made to fail, and the
+  // spec's own rule governs: "If nothing does, the call is decoration and should be deleted
+  // rather than kept." `transferRun.test.ts` pins the ORDER instead, which is the real
+  // invariant; reversing these two lines is what would break, and does.
   session.on('screen', onScreen);
+  session.on('transferEnd', onTransferEnd);
   session.sendAID(AID.ENTER);
+
+  // IF IT ALREADY FINISHED, `finish` has run and these are no-ops that must not be armed: a
+  // timer set after a completed run would fire into `ended` and clear itself, but it also
+  // keeps the event loop alive for `totalMs`, which in the TUI is ten minutes per transfer.
+  if (ended) return { ok: true };
+
   armFrameTimer();
   totalTimer = setTimeout(
     () => { timeout(`did not complete within ${totalMs / 1000}s`); },
@@ -256,13 +379,32 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     ok: true,
     cancel: (): void => {
       if (ended) return;
-      // RELEASE THE DFT REGISTRATION FIRST. This driver now registers a DFT engine before
-      // priming the host, and on a cancelled run the host never addressed it -- so it is
-      // DISCARDED rather than aborted, which is exactly `cancelDftTransfer`'s documented
-      // case ("the loser of a protocol race", `session.ts:367`). Without this a cancelled
-      // run leaves `session.dft` set, and `answerRead` would replay its retained frame at a
-      // host that has moved on. `handleClose` clears `dft` too, but a form closed on a live
-      // session never reaches it.
+
+      // A DFT TRANSFER ALREADY UNDER WAY IS ABORTED, NOT DISCARDED, and telling the two
+      // apart takes care. `committed` is NO USE here: it becomes `'dft'` only inside
+      // `onTransferEnd`, which calls `finish` immediately after, so `ended` above has already
+      // returned by the time it could be read. A mid-flight DFT transfer is therefore
+      // indistinguishable from a host that has said nothing -- except by the engine's own
+      // byte count, which is the signal used.
+      //
+      // The distinction is the difference between aborting and ABANDONING, which this module
+      // refuses to do elsewhere: discarding an engine whose host is mid-transfer leaves that
+      // host's program waiting for a frame that never comes. `DftTransfer.cancel` defers,
+      // checking its flag on the next inbound frame (`dft.ts:186-188`, matching x3270's
+      // `ft_dft.c:225-228`), so the registration MUST SURVIVE for that frame to arrive --
+      // which is why `cancelDftTransfer` is not called on this path.
+      if (dft.transferred > 0) {
+        dft.cancel();
+        finish({ ok: false, error: 'transfer canceled by user' });
+        return;
+      }
+
+      // NOTHING AROSE FROM THE DFT ENGINE, so it is the loser of a protocol race and is
+      // DISCARDED -- exactly `cancelDftTransfer`'s documented case ("the loser of a protocol
+      // race", `session.ts:367`), which sends nothing because the host never addressed it.
+      // Without this a cancelled run leaves `session.dft` set and `answerRead` would replay
+      // its retained frame at a host that has moved on. `handleClose` clears `dft` too, but a
+      // form closed on a LIVE session never reaches it.
       session.cancelDftTransfer();
 
       // A CUT ABORT IS ONLY POSSIBLE AT 24x80, AND DELETING THE GEOMETRY GATE IS WHAT MADE

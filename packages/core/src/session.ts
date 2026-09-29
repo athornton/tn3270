@@ -386,6 +386,22 @@ export class Session {
     this.dft = undefined;
   }
 
+  /**
+   * Did we advertise DDM, i.e. offer the host the chance to choose DFT?
+   *
+   * FOR A DIAGNOSTIC MESSAGE, which is the only caller and the reason this is not just
+   * `opts.ddm` read at the call site: `opts` is private, and a front end driving a transfer
+   * has no other route to the flag. A host that speaks only DFT cannot CHOOSE DFT unless the
+   * Query Reply carried QCODE 0x95 (`queryreply.ts`, appended at `:1410` only when this is
+   * on), so "the transfer timed out and DDM was never advertised" is a different failure from
+   * "the transfer timed out", and forgetting `-ddm on` will be the commonest one.
+   *
+   * REPORTS WHAT WE OFFERED, NOT WHAT THE HOST DID WITH IT. The host may ignore the unit
+   * entirely -- VM/370's MECAFF does, and stays on CUT -- so this must not be read as "DFT is
+   * available". Defaults to false, like the flag.
+   */
+  get ddmAdvertised(): boolean { return this.opts.ddm === true; }
+
   isConnected(): boolean {
     return this.conn !== undefined;
   }

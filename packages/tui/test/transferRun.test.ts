@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  AckAid, AID, resolve, Session, type Connection,
+  AckAid, AID, encodeAddress, O_SF, Order, resolve, Session, SnaCmd,
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S,
+  type Connection, type SessionOptions,
 } from '@tn3270/core';
 import {
   newTransferForm, startTransfer, type TransferFiles, type TransferRequest,
@@ -461,5 +463,460 @@ describe('protocol selection: the geometry gate is gone', () => {
     expect(run.ok).toBe(true);
     expect(session.dftTransfer?.direction).toBe('send');
     run.cancel!();
+  });
+});
+
+/**
+ * A REAL connection, because deciding is about what arrives from a host.
+ *
+ * Every test above runs on an UNCONNECTED session with `is3270Mode` mocked, which is enough
+ * to test refusals but cannot deliver a frame. These tests need the host to actually write:
+ * a DFT transfer arrives as `WriteStructuredField` records through `handleRecord`, and the
+ * whole claim under test is about WHEN that happens relative to the driver's own code.
+ *
+ * Lifted from `core/test/dftSession.test.ts` rather than reinvented, so the wire bytes agree
+ * with the tests that pinned the plumbing.
+ */
+class FakeConnection implements Connection {
+  sent: number[] = [];
+  onData: ((b: Uint8Array) => void) | undefined;
+  onClose: (() => void) | undefined;
+  onError: ((e: Error) => void) | undefined;
+
+  write(b: Uint8Array): void { this.sent.push(...b); }
+  close(): void { this.onClose?.(); }
+
+  /** Pretend the host sent these bytes. */
+  host(...bytes: number[]): void { this.onData?.(Uint8Array.from(bytes)); }
+
+  negotiate(): void {
+    this.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    this.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+    this.host(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+    this.host(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+    this.sent = [];
+  }
+}
+
+/**
+ * A connected, negotiated session sitting at a host-painted prompt, at any geometry.
+ *
+ * THE HOST HAS TO PAINT THE PROMPT ITSELF, and finding that out cost real time: a freshly
+ * connected session is in `X Wait` until the host writes, so `startTransfer` refuses with
+ * "keyboard locked" before reaching anything this file is testing. Every test above misses
+ * this because an UNCONNECTED session has never been locked -- so `withField`, which just
+ * pokes a field attribute in, is not enough here.
+ *
+ * The unlock is the WCC's keyboard-restore bit (0xc3), not the field: measured, `EraseWrite`
+ * with that WCC takes the OIA from "X Wait" to "4 A". Which is exactly the sequence a real
+ * host sends to put an operator at a command prompt, so the fixture is not a contrivance.
+ */
+async function connected(
+  rows = 24, cols = 80, extra: Partial<SessionOptions> = {},
+): Promise<{ session: Session; conn: FakeConnection }> {
+  const conn = new FakeConnection();
+  const session = new Session({ connect: () => conn, rows, cols, ...extra });
+  await session.connect('localhost', 3270);
+  conn.negotiate();
+  expect(session.is3270Mode()).toBe(true);     // REAL, not mocked: the host negotiated it
+
+  // EraseWrite, WCC 0xc3 (restore keyboard + reset MDT), then one unprotected field at 0 --
+  // a command prompt. `resize` is not called, so a 43-row session stays at its DEFAULT 24x80
+  // unless EWA switches it; `rows`/`cols` above are what size the buffer, per this file's
+  // module comment.
+  const [hi, lo] = encodeAddress(0, session.screen.size);
+  conn.host(SnaCmd.EW, 0xc3, Order.SBA, hi!, lo!, Order.SF, 0x00, T.IAC, T.EOR);
+  expect(session.oia.isInhibited()).toBe(false);   // the prompt really did unlock it
+  expect(session.screen.isFormatted()).toBe(true);
+  return { session, conn };
+}
+
+/** `WriteStructuredField` carrying one DFT frame: `L L SFID payload`, then IAC EOR. */
+function wsfBytes(payload: number[]): number[] {
+  const len = payload.length + 3;
+  return [0xf3, (len >> 8) & 0xff, len & 0xff, 0xd0, ...payload, 0xff, 0xef];
+}
+
+/** A DFT `Open` payload. The name sits at payload offset 25 (`dftFrames.ts`). */
+function openPayload(name = 'FT:DATA'): number[] {
+  const p = new Array<number>(0x23 - 3).fill(0x00);
+  p[0] = 0x00;
+  p[1] = 0x12;
+  const padded = name.padEnd(7, ' ');
+  for (let i = 0; i < 7; i++) p[25 + i] = padded.charCodeAt(i);
+  return p;
+}
+
+/** A DFT `Data Insert` carrying these bytes. */
+function dataInsert(bytes: number[]): number[] {
+  return [
+    0x47, 0x04, 0xc0, 0x80, 0x61,
+    ((bytes.length + 5) >> 8) & 0xff, (bytes.length + 5) & 0xff, ...bytes,
+  ];
+}
+
+/**
+ * Every record of a complete DFT download, in order: Open, data, Close, then the
+ * `FT:MSG` transfer carrying `TRANS03` that reports success.
+ *
+ * Returned as a list of records rather than run directly, so a caller can choose WHEN to
+ * deliver them -- which is the difference between two of the tests below.
+ */
+function wholeDftDownload(payload = [0x41, 0x42, 0x43]): number[][] {
+  return [
+    wsfBytes(openPayload()),
+    wsfBytes(dataInsert(payload)),
+    wsfBytes([0x41, 0x12]),                    // Close
+    wsfBytes(openPayload('FT:MSG')),
+    wsfBytes(dataInsert([...'TRANS03'].map((c) => c.charCodeAt(0)))),
+  ];
+}
+
+/**
+ * 0x7c is what a real TK5 host plants at `O_SF`: protected (0x20) and numeric (0x10), i.e.
+ * `FA_IS_SKIP`. Taken from `core/test/ft/detect.test.ts` rather than composed from
+ * `FA.PROTECT | FA.NUMERIC`, so this file agrees with the fixture and with the
+ * masks-never-equality reasoning in `isCutFrame`.
+ */
+const CUT_FRAME_ATTR = 0x7c;
+
+/**
+ * Make the HOST paint, over real wire bytes, because that is the only honest way to fire a
+ * `screen` event.
+ *
+ * `Session.emit` is private and there is no test seam, which is correct -- a test-only
+ * emitter would let these tests pass against a driver that never sees a real host write.
+ * A `Write` with an SBA is the smallest thing that reaches `emit('screen')`.
+ *
+ * `atSF` plants the auto-skip attribute at `O_SF` and so paints a CUT FRAME; without it the
+ * host has painted something that is not one, which is the other case the timeout
+ * distinguishes.
+ */
+function hostPaints(conn: FakeConnection, session: Session, atSF = false): void {
+  const addr = atSF ? O_SF : 0;
+  const [hi, lo] = encodeAddress(addr, session.screen.size);
+  const body = atSF
+    ? [Order.SBA, hi!, lo!, Order.SF, CUT_FRAME_ATTR]
+    : [Order.SBA, hi!, lo!, 0xc8];       // one character: a host painting anything at all
+  conn.host(SnaCmd.W, 0x00, ...body, T.IAC, T.EOR);
+}
+
+describe('protocol selection: deciding', () => {
+  it('a CUT frame commits to CUT and releases the DFT registration', async () => {
+    const { session, conn } = await connected();
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+    expect(run.ok).toBe(true);
+    expect(session.dftTransfer).toBeDefined();
+
+    // The host paints a CUT frame: an auto-skip attribute at O_SF, which is what
+    // `looksLikeCutFrame` tests for. Over real wire bytes, so the screen event is the real
+    // one rather than a test-only emitter.
+    hostPaints(conn, session, true);
+
+    // RELEASED, or `answerRead` would replay the DFT engine's retained frame at a host now
+    // running a CUT transfer.
+    expect(session.dftTransfer).toBeUndefined();
+    run.cancel!();
+  });
+
+  it('a DFT host completes THROUGH transferEnd, with no CUT frame ever painted', async () => {
+    // THE TEST THAT CATCHES THE SPIN-TO-TIMEOUT BUG, and the plan was WRONG about the
+    // mechanism in a way worth recording, because the wrong version would have failed here
+    // and looked like a product bug.
+    //
+    // The plan says "a DFT transfer produces ZERO screen events, so assert the count is
+    // zero". IT IS NOT ZERO: `emit('screen')` fires once per RECORD handled, and a DFT frame
+    // arrives as a WriteStructuredField record (`session.ts:897` -- unconditional, after the
+    // `transferData` dispatch at `:880`). Measured: five records, five screen events, and the
+    // screen BUFFER byte-identical throughout.
+    //
+    // Which makes the conclusion STRONGER, not weaker. Those events are indistinguishable to
+    // `onScreen` from a host painting a menu -- `looksLikeCutFrame` is false for all of them,
+    // since nothing was written at O_SF -- so a driver that treated `screen` as its DFT
+    // progress signal would see five non-frames and spin to its deadline on a healthy
+    // transfer. So what has to be asserted is that completion came through `transferEnd` and
+    // that CUT never committed, which is what the `dftTransfer`/`committed` observables below
+    // say. The screen COUNT is asserted as non-zero to pin the corrected mechanism.
+    const { session, conn } = await connected();
+    let screens = 0;
+    session.on('screen', () => { screens++; });
+    let settle!: (r: { ok: boolean; error?: string; bytes?: number }) => void;
+    const done = new Promise<{ ok: boolean; error?: string; bytes?: number }>((r) => {
+      settle = r;
+    });
+    const run = startTransfer({
+      session, files: fakeFiles(), request: aReceive('/tmp/got.bin'),
+      command: 'IND$FILE GET A.BIN', onProgress: () => {}, onDone: settle,
+    });
+    expect(run.ok).toBe(true);
+
+    // SNAPSHOT AFTER PRIMING, not before: `startTransfer` types the command and moves the
+    // cursor, which is a local change and not the host painting. Taking it earlier compared
+    // the typing against the transfer and reported a cursor move as host output.
+    const primed = JSON.stringify(session.screen.snapshot());
+    const screensAfterPriming = screens;
+
+    for (const record of wholeDftDownload()) conn.host(...record);
+
+    await expect(done).resolves.toMatchObject({ ok: true, bytes: 3 });
+    // THE SCREEN EVENTS HAPPENED and painted NOTHING: the corrected mechanism, both halves.
+    expect(screens).toBeGreaterThan(screensAfterPriming);
+    expect(JSON.stringify(session.screen.snapshot())).toBe(primed);
+  });
+
+  it('WRITES THE RECEIVED FILE, reading the bytes off the RESULT', async () => {
+    // `DftTransfer` HAS NO `data` ACCESSOR -- the plan's snippet reads `dft.data`, which does
+    // not exist (`dft.ts:175-183` is the whole surface). A received payload comes back on
+    // `result.data`, the success arm of the `TransferResult` union. Without this test the
+    // difference is invisible: `undefined` coalesces to an empty array and the transfer
+    // still reports ok, so the operator gets a SUCCESS and a ZERO-BYTE FILE.
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    let settle!: (r: { ok: boolean; error?: string; bytes?: number }) => void;
+    const done = new Promise<{ ok: boolean }>((r) => { settle = r as typeof settle; });
+
+    startTransfer({
+      session, files, request: aReceive('/tmp/got.bin'),
+      command: 'IND$FILE GET A.BIN', onProgress: () => {}, onDone: settle,
+    });
+    for (const record of wholeDftDownload([0x41, 0x42, 0x43])) conn.host(...record);
+
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
+  });
+
+  it('notices a DFT transfer that finished BEFORE the first wait', async () => {
+    // CHECK STATE FIRST, THEN WAIT. A whole DFT transfer can begin and finish inside record
+    // handling -- here, inside `sendAID`'s own call stack -- and a driver that only
+    // subscribes afterwards has already missed it. The symptom is a hang indistinguishable
+    // from the spin-to-timeout bug above.
+    //
+    // DRIVEN FROM INSIDE `sendAID`, which is what makes it that case and not a re-run of the
+    // test above: the entire transfer is delivered before `startTransfer` has returned, so
+    // no listener registered after the send could have seen any of it.
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    const results: { ok: boolean; error?: string }[] = [];
+
+    const realSendAID = session.sendAID.bind(session);
+    vi.spyOn(session, 'sendAID').mockImplementation((aid: number) => {
+      realSendAID(aid);
+      for (const record of wholeDftDownload()) conn.host(...record);
+    });
+
+    const run = startTransfer({
+      session, files, request: aReceive('/tmp/got.bin'), command: 'IND$FILE GET A.BIN',
+      onProgress: () => {}, onDone: (d) => { results.push(d); },
+    });
+
+    // SYNCHRONOUS, deliberately: no `await` between the send and this assertion, so a driver
+    // that needed a turn of the event loop to notice would fail here.
+    expect(results).toEqual([{ ok: true, bytes: 3 }]);
+    expect(run.ok).toBe(true);
+    expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
+  });
+
+  it('SUBSCRIBES TO transferEnd BEFORE priming, which is what the dead `dft.complete` replaced', () => {
+    // THE PLAN ASKED FOR `if (dft.complete) { onTransferEnd(); return }` AFTER `sendAID`, as a
+    // "check state before waiting" guard. It was DELETED as dead code, and this test is what
+    // stands in its place -- so read the two together.
+    //
+    // Why it was dead: nothing between `startDftTransfer` and the listener registration can
+    // reach the socket (the intervening lines are closure definitions and `let`s), so
+    // `dft.complete` is unfalsifiably false where the plan put it. Its own mutation check could
+    // not be made to fail -- removing the block left every test green -- and the spec's rule is
+    // explicit: "If nothing does, the call is decoration and should be deleted rather than
+    // kept."
+    //
+    // The REAL invariant is the ORDER, which this asserts directly: `transferEnd` must be
+    // subscribed before `sendAID` can deliver anything, because a whole DFT transfer can finish
+    // inside that call. The test above drives that case end to end; this one pins the mechanism
+    // that makes it work, so a future reshuffle cannot pass by reversing two lines.
+    const conn = new FakeConnection();
+    const session = new Session({ connect: () => conn, rows: 24, cols: 80 });
+    const order: string[] = [];
+    const realOn = session.on.bind(session);
+    vi.spyOn(session, 'on').mockImplementation((ev, fn) => {
+      order.push(`on:${ev}`);
+      realOn(ev, fn);
+    });
+    vi.spyOn(session, 'sendAID').mockImplementation(() => { order.push('sendAID'); });
+    vi.spyOn(session, 'is3270Mode').mockReturnValue(true);
+    session.screen.setFieldAttribute(0, 0x00);
+
+    startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+
+    expect(order.indexOf('on:transferEnd')).toBeGreaterThanOrEqual(0);   // it really subscribed
+    expect(order.indexOf('on:transferEnd')).toBeLessThan(order.indexOf('sendAID'));
+  });
+
+  it('REMOVES BOTH listeners when a DFT transfer ends', async () => {
+    // Two listeners now, not one. The `transferEnd` one is the new leak, and it is invisible
+    // except as wasted CPU -- which is why `Session.listenerCount` exists at all.
+    const { session, conn } = await connected();
+    const screensBefore = session.listenerCount('screen');
+    const endsBefore = session.listenerCount('transferEnd');
+
+    startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive('/tmp/got.bin'),
+      command: 'IND$FILE GET A.BIN',
+    });
+    expect(session.listenerCount('transferEnd')).toBe(endsBefore + 1);
+
+    for (const record of wholeDftDownload()) conn.host(...record);
+
+    expect(session.listenerCount('screen')).toBe(screensBefore);
+    expect(session.listenerCount('transferEnd')).toBe(endsBefore);
+  });
+
+  it('CANCELLING A DFT TRANSFER MID-FLIGHT ABORTS IT, keeping the registration alive', async () => {
+    // ABORT, NOT ABANDON -- the rule this module states for CUT, applied to DFT, and the two
+    // need OPPOSITE handling of the registration. `DftTransfer.cancel` DEFERS: it sets a flag
+    // checked on the next inbound frame (`dft.ts:205-208`, matching x3270's `ft_dft.c:225`,
+    // `:576`), so the engine must STILL BE REGISTERED for that frame to reach it. Calling
+    // `session.cancelDftTransfer()` here -- correct for a host that never spoke -- would
+    // discard the engine and leave the host's program waiting for a frame that never comes.
+    //
+    // MEASURED AS NECESSARY: with this branch removed the whole suite stayed green, which is
+    // why the test exists rather than the reasoning alone. The observable is the host's own
+    // next frame drawing a USER_CANCEL reply, i.e. the abort really reaching the wire.
+    const { session, conn } = await connected();
+    const results: { ok: boolean; error?: string }[] = [];
+    const run = startTransfer({
+      session, files: fakeFiles(), request: aReceive('/tmp/got.bin'),
+      command: 'IND$FILE GET A.BIN', onProgress: () => {}, onDone: (d) => { results.push(d); },
+    });
+    expect(run.ok).toBe(true);
+
+    // The transfer is genuinely under way: Open, then one data frame.
+    conn.host(...wsfBytes(openPayload()));
+    conn.host(...wsfBytes(dataInsert([0x41, 0x42])));
+    expect(session.dftTransfer?.transferred).toBe(2);
+
+    run.cancel!();
+
+    // STILL REGISTERED, which is the whole point -- the abort has been REQUESTED, not sent.
+    expect(session.dftTransfer).toBeDefined();
+    expect(results).toHaveLength(1);
+    expect(results[0]?.error).toMatch(/canceled by user/);
+
+    // And the next inbound frame is what carries it: the engine refuses the data and replies,
+    // which is the host being TOLD rather than left waiting.
+    conn.sent = [];
+    conn.host(...wsfBytes(dataInsert([0x43])));
+    expect(conn.sent.length).toBeGreaterThan(0);
+    expect(session.dftTransfer).toBeUndefined();     // and the transfer is over
+  });
+
+  it('a DFT transfer at 43x80 works, which is the whole point of the branch', async () => {
+    // THE PAYOFF. Before this design a 43x80 session could not transfer a file at all: the
+    // geometry gate refused before a byte reached the host. DFT has no 24x80 requirement --
+    // it is structured fields, not screen scraping -- so this is the case the deletion
+    // BOUGHT, and it would be silently lost if a future change reinstated the gate.
+    const { session, conn } = await connected(43, 80);
+    expect(session.screen.size).toBe(3440);
+    const files = fakeFiles();
+    let settle!: (r: { ok: boolean }) => void;
+    const done = new Promise<{ ok: boolean }>((r) => { settle = r; });
+
+    startTransfer({
+      session, files, request: aReceive('/tmp/got.bin'), command: 'IND$FILE GET A.BIN',
+      onProgress: () => {}, onDone: settle as never,
+    });
+    for (const record of wholeDftDownload()) conn.host(...record);
+
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
+  });
+});
+
+describe('the timeout message reports what was OBSERVED', () => {
+  it('names -ddm on when nothing arrived and DDM was never advertised', async () => {
+    // EARNS ITS PLACE: forgetting `-ddm on` will be the commonest failure once DFT works,
+    // because a host that speaks only DFT cannot CHOOSE DFT unless we advertised QCODE 0x95.
+    // Without this the operator sees a bare timeout and no reason to suspect a flag.
+    vi.useFakeTimers();
+    try {
+      const { session } = await connected();
+      expect(session.ddmAdvertised).toBe(false);
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).toMatch(/-ddm on/);
+      expect(done?.error).toMatch(/Attn or Clear/);   // the recovery still leads
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT name -ddm on when DDM WAS advertised', async () => {
+    // The other half, and the one that stops the clause becoming noise printed on every
+    // timeout. Without it the message would advise a flag the operator already set.
+    vi.useFakeTimers();
+    try {
+      const { session } = await connected(24, 80, { ddm: true });
+      expect(session.ddmAdvertised).toBe(true);
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).not.toMatch(/-ddm on/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('names the GEOMETRY when screens arrived and none was a CUT frame', async () => {
+    // THE FALLBACK ROW, and it is a fallback on purpose. Measured on VM/370: MECAFF answers
+    // `IND$FILE requires a MECAFF connected 3270 terminal` and CMS recovers in about a
+    // second, so the HOST'S OWN TEXT usually arrives and is better than ours. This row is
+    // for a CUT-only host at 43x80 that goes quiet instead.
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected(43, 80);
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      // The host paints SOMETHING -- a refusal, a menu -- but never a CUT frame.
+      hostPaints(conn, session);
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).toMatch(/43x80/);
+      expect(done?.error).not.toMatch(/-ddm on/);   // screens DID arrive, so not that row
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says neither thing when screens arrived at 24x80, because both would mislead', async () => {
+    // A 24x80 host painting non-frames is a host that ignored the command -- wrong panel,
+    // IND$FILE not installed. Blaming the geometry would be false and blaming -ddm would be
+    // irrelevant, so the message stays bare rather than guessing.
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected(24, 80);
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      hostPaints(conn, session);
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).not.toMatch(/-ddm on/);
+      expect(done?.error).not.toMatch(/24x80/);
+      expect(done?.error).toMatch(/Attn or Clear/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
