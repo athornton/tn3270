@@ -1,6 +1,6 @@
 import {
   Session, AID, PF_AIDS, PA_AIDS, pfAID, paAID, KeyboardState,
-  CutTransfer, isCutFrame, type TransferResult, resolve,
+  CutTransfer, DftTransfer, looksLikeCutFrame, type TransferResult, resolve,
 } from '@tn3270/core';
 import {
   tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand,
@@ -440,23 +440,24 @@ export class Runner {
    * existing without `Exist=replace` — fails BEFORE the host command is typed, so
    * the host is never left sitting in transfer mode waiting for a client that has
    * already given up." So everything that can be checked locally is checked
-   * first: the keywords, the geometry, the connection, the source file, the
-   * destination. Only then does anything reach the host.
+   * first: the keywords, the connection, the source file, the destination. Only
+   * then does anything reach the host.
+   *
+   * ## GEOMETRY IS NO LONGER ONE OF THEM
+   *
+   * Under host-chooses-the-protocol we cannot know CUT was chosen until the host
+   * answers — x3270's `ft_running` merely REPORTS which protocol arrived
+   * (`ft.c:556`) and has no selection logic at all — so a 24x80 demand made before
+   * the host is asked is a demand made on no evidence. Both engines are now built
+   * and the first frame decides; see
+   * `docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md`.
+   * The accepted cost is that a CUT-only host at 43x80 is primed before we find
+   * out, measured on VM/370 as MECAFF refusing with its own text in about a second.
    */
   private async transfer(args: string[], data: string[]): Promise<void> {
     const { request, command } = transferCommand(args);
     const files = this.requireFiles();
 
-    // GEOMETRY, before anything else. `isCutFrame` throws on a screen that is not
-    // 24x80 (frames.ts `requireCutGeometry`, and the design doc's "GEOMETRY
-    // COUPLING" section), and it is better to say so here than to have the first
-    // poll of the loop throw it after the host has been told to start.
-    if (this.session.screen.size !== 1920) {
-      throw new Error(
-        `Transfer(): CUT file transfer needs a 24x80 screen; this session is ` +
-          `${this.session.screen.rows}x${this.session.screen.cols}`,
-      );
-    }
     if (!this.session.is3270Mode()) {
       // x3270's `ftUnableNot3270`, "not in 3270 mode" (fb-common:47).
       throw new Error('Transfer(): not in 3270 mode');
@@ -484,17 +485,33 @@ export class Runner {
       throw new Error(`Transfer(): file exists: ${request.localFile} (use Exist=replace or append)`);
     }
 
+    // BOTH ENGINES, over the SAME source buffer. The host chooses the protocol,
+    // not us, so we cannot know which we need until the first frame lands. Both
+    // want their bytes up front anyway — CUT to answer a retransmit, DFT to answer
+    // a GET — so this costs one object over one Uint8Array, not a second copy.
     const transfer = new CutTransfer({
       direction: request.direction,
       ...(source !== undefined ? { data: source } : {}),
     });
+    const dft = new DftTransfer({
+      direction: request.direction,
+      ...(source !== undefined ? { data: source } : {}),
+    });
+
+    // REGISTERED BEFORE THE HOST IS TOLD ANYTHING, and the order is load-bearing: a
+    // fast host's first 0xd0 arrives from inside `handleRecord`, before any runner
+    // code runs again, and `handleTransferData` needs a registered transfer at that
+    // moment. Registering after `sendAID(ENTER)` would lose the first frame of a
+    // fast transfer to a race. Putting NOTHING on the wire is what makes this safe
+    // to do before the CUT path has been ruled out.
+    this.session.startDftTransfer(dft);
 
     // NOW the host is involved. Everything from here can leave it in transfer
     // mode, which is why nothing above could.
     this.primeAndType(command);
     this.session.sendAID(AID.ENTER);
 
-    const result = await this.runTransferFrames(transfer);
+    const result = await this.runTransferFrames(transfer, dft);
 
     for (const warning of transfer.warnings) data.push(`Transfer(): ${warning}`);
 
@@ -515,7 +532,16 @@ export class Runner {
     }
 
     // `ftComplete: Transfer complete, %i bytes transferred` (fb-common:31).
-    data.push(`Transfer complete, ${transfer.bytesTransferred} bytes transferred`);
+    //
+    // FROM WHICHEVER ENGINE RAN. The counters are per-engine and not
+    // interchangeable — `bytesTransferred` on CUT, `transferred` on DFT — so
+    // reporting CUT's unconditionally would tell a script that a successful DFT
+    // transfer moved 0 bytes. That is the one number a caller checks against the
+    // host's own listing, and a success line contradicting itself is worse than no
+    // line. `dft.complete` is the discriminator: it is set only by the engine that
+    // actually finished.
+    const moved = dft.complete ? dft.transferred : transfer.bytesTransferred;
+    data.push(`Transfer complete, ${moved} bytes transferred`);
   }
 
   private requireFiles(): TransferFiles {
@@ -625,29 +651,90 @@ export class Runner {
    * untested guess. The operator's recovery is Attn or Clear, as it would be from
    * a real terminal.
    */
-  private async runTransferFrames(transfer: CutTransfer): Promise<TransferResult> {
+  private async runTransferFrames(
+    transfer: CutTransfer, dft: DftTransfer,
+  ): Promise<TransferResult> {
     const overallDeadline = Date.now() + this.transferMs;
     // The screen the host wrote most recently that we have already processed.
     // A frame is "new" only once the host has written again, otherwise the first
     // poll after an ack would re-process the frame still sitting in the buffer.
     let processedOutput = this.outputCount;
+    // Did the host paint anything that was NOT a CUT frame? Only the timeout
+    // message reads it: "nothing at all" and "screens, none of them a frame" want
+    // different diagnoses and an operator cannot tell them apart from a deadline.
+    let sawNonFrameScreen = false;
 
     for (;;) {
+      // NO SEPARATE "CHECK STATE BEFORE WAITING" LINE HERE, and its absence is
+      // deliberate rather than an omission. A whole DFT transfer really can begin AND
+      // FINISH inside `sendAID(ENTER)`'s record handling — the frames arrive from
+      // `onRecord` and nothing yields to the runner in between — leaving no later
+      // host write to wake a poll, so the plan asked for an `if (dft.complete)` here.
+      // It was written and then DELETED as redundant: `!dft.complete` in the `while`
+      // below exits the poll on its first evaluation and the check after the loop
+      // returns the identical value. Measured — removing the extra line left the
+      // whole suite green, INCLUDING the test written for exactly that synchronous
+      // case ("a DFT transfer that finishes before the poll loop"), so it was
+      // decoration. The spec's rule: "If nothing does, the call is decoration and
+      // should be deleted rather than kept."
       const frameDeadline = Math.min(Date.now() + this.transferFrameMs, overallDeadline);
-      while (this.outputCount === processedOutput || !isCutFrame(this.session.screen)) {
+      // TWO WAKE CONDITIONS NOW, and the reason is not the obvious one. A DFT
+      // transfer DOES bump `outputCount` — `emit('screen')` fires once per record
+      // handled and a DFT frame arrives as a WriteStructuredField record — but it
+      // never paints a CUT frame, so `looksLikeCutFrame` stays false and this inner
+      // loop would never exit. A healthy DFT run would spin to `transferMs`.
+      //
+      // `looksLikeCutFrame`, NOT `isCutFrame`: with the geometry gate above gone
+      // this loop runs at any geometry, and `isCutFrame` THROWS rather than
+      // answering on anything but 24x80 (`frames.ts:314`).
+      while (!dft.complete
+        && (this.outputCount === processedOutput || !looksLikeCutFrame(this.session.screen))) {
+        if (this.outputCount !== processedOutput) {
+          // The host wrote, and it was not a CUT frame. Consume it so the next poll
+          // is about the NEXT host write, and remember that it happened.
+          sawNonFrameScreen = true;
+          processedOutput = this.outputCount;
+        }
         if (Date.now() >= frameDeadline) {
           const why = Date.now() >= overallDeadline
             ? `did not complete within ${this.transferMs / 1000}s`
             : `no CUT frame from the host within ${this.transferFrameMs / 1000}s`;
+          // WHAT WAS OBSERVED, not what we guess, and the same two rows the
+          // event-driven driver reports. Mutually exclusive by construction; when
+          // neither applies the message stays bare, because a 24x80 host painting
+          // non-frames has ignored the command and naming either would mislead.
+          let extra = '';
+          if (sawNonFrameScreen && this.session.screen.size !== 1920) {
+            // FALLBACK ONLY. Measured on VM/370: MECAFF answers with its own text
+            // and CMS recovers in about a second, so the host's wording beats ours
+            // whenever it arrives. This row is for a host that goes quiet instead.
+            extra = ` (host may want 24x80; this session is `
+              + `${this.session.screen.rows}x${this.session.screen.cols})`;
+          } else if (!sawNonFrameScreen && !this.session.ddmAdvertised) {
+            // Earns its place: forgetting `-ddm on` will be the commonest failure
+            // once DFT works, because a host that speaks only DFT cannot choose DFT
+            // unless we advertised QCODE 0x95.
+            extra = ' (DDM was not advertised; a host that speaks only DFT needs -ddm on)';
+          }
           return {
             ok: false,
             error: `transfer ${why} after ${transfer.bytesTransferred} bytes; ` +
-              `the host may still be in transfer mode (press Attn or Clear)`,
+              `the host may still be in transfer mode (press Attn or Clear)${extra}`,
           };
         }
         await new Promise((r) => setTimeout(r, 10));
       }
+      // The loop may have exited because DFT finished rather than because a frame
+      // arrived, so re-test before touching the screen: `transfer.step` would read
+      // CUT offsets out of a screen no CUT frame was ever painted into.
+      if (dft.complete) {
+        return dft.result ?? { ok: false, error: 'DFT transfer ended without a result' };
+      }
       processedOutput = this.outputCount;
+
+      // CUT HAS WON. Release the DFT registration before stepping, so a stray
+      // inbound read cannot replay a retained frame at a host now running CUT.
+      this.session.cancelDftTransfer();
 
       // `step` may mutate the screen — an abort response, or a whole upload frame
       // — and the AID it returns is what sends those bytes, so the two must not

@@ -1200,3 +1200,266 @@ describe('Transfer(): failure paths', () => {
     expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0xc1, 0xc2]);
   });
 });
+
+/**
+ * A transfer runner at an arbitrary geometry, and a DFT-capable one.
+ *
+ * `transferRunner` above hardcodes a default `Session`, which is always 24x80 -- every
+ * model's DEFAULT size is 24x80 and `-model` sets only the ALTERNATE, so a 43-row session
+ * needs `rows`/`cols` at construction. Written as a second factory rather than by widening
+ * the first, so none of the thirty CUT tests above changes.
+ */
+async function transferRunnerAt(
+  rows: number, cols: number, opts: { transferFrameSeconds?: number; ddm?: boolean } = {},
+) {
+  const conn = new FakeConnection();
+  const session = new Session({
+    connect: () => conn, rows, cols, ...(opts.ddm === true ? { ddm: true } : {}),
+  });
+  const files = new FakeFiles();
+  const runner = new Runner(session, {
+    clock: () => 0,
+    files,
+    transferFrameSeconds: opts.transferFrameSeconds ?? 5,
+  });
+  await runner.run(`Connect(localhost:3270)`);
+  conn.negotiate();
+  conn.host(SnaCmd.EW, 0x02, Order.SF, 0x00, Order.IC, T.IAC, T.EOR);
+  conn.sent = [];
+  return { runner, session, conn, files };
+}
+
+/** `WriteStructuredField` carrying one DFT frame: `L L SFID payload`, then IAC EOR. */
+function dftWsf(conn: FakeConnection, payload: number[]): void {
+  const len = payload.length + 3;
+  conn.host(0xf3, (len >> 8) & 0xff, len & 0xff, 0xd0, ...payload, T.IAC, T.EOR);
+}
+
+/** A DFT `Open` payload; the name sits at payload offset 25 (`dftFrames.ts`). */
+function dftOpen(name = 'FT:DATA'): number[] {
+  const p = new Array<number>(0x23 - 3).fill(0x00);
+  p[0] = 0x00;
+  p[1] = 0x12;
+  const padded = name.padEnd(7, ' ');
+  for (let i = 0; i < 7; i++) p[25 + i] = padded.charCodeAt(i);
+  return p;
+}
+
+/** A DFT `Data Insert` carrying these bytes. */
+function dftData(bytes: number[]): number[] {
+  return [
+    0x47, 0x04, 0xc0, 0x80, 0x61,
+    ((bytes.length + 5) >> 8) & 0xff, (bytes.length + 5) & 0xff, ...bytes,
+  ];
+}
+
+/** Every record of a complete DFT download: Open, data, Close, then FT:MSG/TRANS03. */
+function dftDownload(conn: FakeConnection, payload = [0x41, 0x42, 0x43]): void {
+  dftWsf(conn, dftOpen());
+  dftWsf(conn, dftData(payload));
+  dftWsf(conn, [0x41, 0x12]);                                     // Close
+  dftWsf(conn, dftOpen('FT:MSG'));
+  dftWsf(conn, dftData([...'TRANS03'].map((c) => c.charCodeAt(0))));
+}
+
+describe('Transfer() protocol selection', () => {
+  it('does not refuse 43x80 before the host is asked', async () => {
+    // THE DELETION, in the CLI's idiom: this used to THROW
+    // "CUT file transfer needs a 24x80 screen" before a byte reached the host. Under
+    // host-chooses-the-protocol we cannot know CUT was chosen until the host answers.
+    //
+    // NOTHING PINNED THAT GATE. Measured: no test in this file mentioned 24x80, 43x80 or
+    // `screen.size` at all, so its deletion could not redden anything -- which is exactly
+    // why this test is written as the deletion happens rather than after.
+    const { runner, session, conn } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.1 });
+    expect(session.screen.size).toBe(3440);
+    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    // It gets as far as a TIMEOUT, which means it reached the host -- the old behaviour
+    // failed with the geometry message and an empty wire.
+    expect(reply).not.toContain('needs a 24x80 screen');
+    expect(reply).toContain('press Attn or Clear');
+    expect(typedCommand(session)).toContain('IND$FILE GET FOO');
+    expect(conn.sent).toContain(AID.ENTER);
+  });
+
+  it('a DFT host completes, and the poll loop does not spin to its deadline', async () => {
+    // THE SECOND WAKE CONDITION. The loop waits on `outputCount` changing AND a CUT frame
+    // being present; a DFT transfer satisfies the first and never the second, so without
+    // `!dft.complete` a HEALTHY transfer runs to `transferFrameSeconds` and reports a
+    // timeout.
+    //
+    // THE PLAN IS WRONG ABOUT WHY, in the same way it was for the event-driven driver, and
+    // the correction matters for anyone reading the loop: it says "a DFT transfer never
+    // changes `outputCount`". It DOES -- `emit('screen')` fires once per record handled
+    // (`session.ts:897`, unconditional) and a DFT frame arrives as a WriteStructuredField
+    // record. What it never does is paint a CUT frame, so `looksLikeCutFrame` stays false
+    // and the inner `while` never exits. Same conclusion, different mechanism.
+    const { runner, conn, files } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    dftDownload(conn);
+    const reply = await pending;
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(reply).not.toContain('press Attn or Clear');
+    expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0x41, 0x42, 0x43]);
+  });
+
+  it('a DFT transfer works at 43x80, which is what the deletion bought', async () => {
+    // THE PAYOFF, and the CLI half of it. Before this design a 43x80 session could not
+    // transfer a file at all. DFT is structured fields, not screen scraping, so it has no
+    // 24x80 requirement.
+    const { runner, conn, files } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.5 });
+    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    dftDownload(conn, [0x44, 0x45]);
+    const reply = await pending;
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0x44, 0x45]);
+  });
+
+  it('registers the DFT engine BEFORE priming, so a fast host cannot lose its first frame', async () => {
+    // Same race as the event-driven driver: a fast host's first 0xd0 arrives from inside
+    // `handleRecord`, before any runner code runs again, and `handleTransferData` needs a
+    // registered transfer AT THAT MOMENT. Asserted from inside `sendAID` rather than after,
+    // because checking afterwards cannot tell the two orders apart.
+    const { runner, session } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    let registeredWhenPrimed: boolean | undefined;
+    const realSendAID = session.sendAID.bind(session);
+    vi.spyOn(session, 'sendAID').mockImplementation((aid: number) => {
+      registeredWhenPrimed ??= session.dftTransfer !== undefined;
+      realSendAID(aid);
+    });
+    await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    expect(registeredWhenPrimed).toBe(true);
+  });
+
+  it('a CUT frame RELEASES the DFT registration, so no retained frame is replayed', async () => {
+    // CUT HAS WON, so the DFT engine registered before priming must go: `answerRead` replays
+    // a registered engine's retained frame, which at a host now running a CUT transfer is
+    // unsolicited traffic mid-transfer. The registration is released before `step` is called,
+    // so a Read Modified arriving between the two cannot find it.
+    //
+    // MEASURED AS NECESSARY: without this test, removing the `cancelDftTransfer()` call left
+    // the whole suite green -- the spec's rule is that an unpinned call is decoration, so the
+    // choice was this test or deleting the line.
+    const { runner, session, conn } = await transferRunner();
+    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.dftTransfer).toBeDefined();          // registered before priming
+    controlCode(conn, StatusCode.HOST_ACK);             // the host answers with a CUT frame
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.dftTransfer).toBeUndefined();        // and the DFT engine is released
+    controlCode(conn, StatusCode.XFER_COMPLETE);
+    await pending;
+  });
+
+  it('A CUT HOST AT 24x80 IS BYTE-FOR-BYTE UNCHANGED, which is the real safety net', async () => {
+    // The spec's own words: "If the CUT path changes behaviour at 24x80, this design is
+    // wrong." Asserted on the WIRE rather than on success, because a transfer that succeeds
+    // while sending different bytes is exactly the regression this would hide.
+    //
+    // The comparison is against a run of the SAME sequence, so it cannot drift from a
+    // hardcoded expectation -- and the acks are what the CUT engine chose, frame by frame.
+    const encoded = Array.from(localToHost(Uint8Array.of(0xc1, 0xc2)));
+    const drive = async () => {
+      const { runner, conn, files } = await transferRunner();
+      const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+      await new Promise((r) => setTimeout(r, 20));
+      conn.sent = [];
+      controlCode(conn, StatusCode.HOST_ACK);
+      await new Promise((r) => setTimeout(r, 20));
+      dataFrame(conn, encoded, 1);
+      await new Promise((r) => setTimeout(r, 20));
+      controlCode(conn, StatusCode.XFER_COMPLETE);
+      const reply = await pending;
+      return { wire: [...conn.sent], reply, file: [...(files.store.get('/tmp/out.bin') ?? [])] };
+    };
+    const got = await drive();
+    expect(got.reply.split('\n').pop()).toBe('ok');
+    expect(got.file).toEqual([0xc1, 0xc2]);
+    // Every byte the client sent for a three-frame CUT download, and there is no DFT
+    // structured field among them -- registering a DFT engine must put NOTHING on the wire.
+    expect(got.wire).not.toContain(0xd0);
+    expect(got.wire.filter((b) => b === AID.ENTER).length).toBeGreaterThan(0);
+  });
+
+  it('names -ddm on in a timeout when DDM was never advertised', async () => {
+    // The CLI gets the same observed-state rows as the TUI. Forgetting `-ddm on` will be the
+    // commonest failure once DFT works, because a host that speaks only DFT cannot CHOOSE
+    // DFT unless the Query Reply carried QCODE 0x95.
+    const { runner, session } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    expect(session.ddmAdvertised).toBe(false);
+    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    expect(reply).toContain('-ddm on');
+    expect(reply).toContain('press Attn or Clear');
+  });
+
+  it('does NOT name -ddm on when it WAS advertised', async () => {
+    // The half that stops the clause becoming noise printed on every timeout.
+    const { runner, session } = await transferRunnerAt(24, 80, {
+      transferFrameSeconds: 0.1, ddm: true,
+    });
+    expect(session.ddmAdvertised).toBe(true);
+    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    expect(reply).not.toContain('-ddm on');
+  });
+
+  it('names the GEOMETRY when screens arrived at 43x80 and none was a CUT frame', async () => {
+    // THE FALLBACK ROW, and a fallback on purpose: measured on VM/370, MECAFF answers
+    // `IND$FILE requires a MECAFF connected 3270 terminal` and CMS recovers in about a
+    // second, so the host's own text usually arrives and beats ours. This is for a CUT-only
+    // host at 43x80 that goes quiet instead.
+    const { runner, conn } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.2 });
+    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    // The host paints SOMETHING -- a refusal, a menu -- but never a CUT frame.
+    conn.host(SnaCmd.W, 0x02, Order.SBA, ...encodeAddress(0, 3440), 0xc8, T.IAC, T.EOR);
+    const reply = await pending;
+    // ASSERTS THE WHOLE CLAUSE, NOT JUST "43x80", AND THAT IS THE POINT. The first version
+    // of this test read `toContain('43x80')` -- and PASSED under the mutation it exists to
+    // catch. Swapping `looksLikeCutFrame` back to `isCutFrame` makes the detector THROW
+    // `CutFrameError`, whose own message reads "...this screen is 43x80 = 3440 cells...", so
+    // the weak assertion matched the exception text instead of the timeout row. A test that
+    // passes against the bug it names, for the fifth time on this project's record.
+    //
+    // So: assert the RECOVERY leads, the row's own wording, and that no CutFrameError text
+    // is present. The third is what actually pins the non-throwing detector.
+    expect(reply).toContain('press Attn or Clear');
+    expect(reply).toContain('host may want 24x80; this session is 43x80');
+    expect(reply).not.toContain('offsets are meaningless');   // i.e. it did not throw
+    expect(reply).not.toContain('-ddm on');     // screens DID arrive, so not that row
+  });
+});
+
+describe('Transfer(): a DFT transfer that finishes before the poll loop', () => {
+  it('is NOT missed when it completes inside sendAID(ENTER) itself', async () => {
+    // THE CLI'S VERSION OF "CHECK STATE BEFORE WAITING". A whole DFT transfer can begin AND
+    // FINISH inside `sendAID`'s record handling -- the frames arrive from `onRecord` and
+    // nothing yields to the runner in between -- so by the time `runTransferFrames` is entered
+    // the transfer is already over and there is no further host write to wake a poll.
+    //
+    // WHAT MAKES IT WORK IS THE `while` CONDITION, NOT A SEPARATE PRE-CHECK. The plan asked
+    // for an `if (dft.complete)` before the loop; that was written, and its mutation check
+    // showed it REDUNDANT -- removing it left every test green, because `!dft.complete` in the
+    // `while` exits the poll immediately and the check after the loop returns the same result.
+    // It was deleted rather than kept, per the spec's rule: "If nothing does, the call is
+    // decoration and should be deleted rather than kept." This test is what pins the case, so
+    // the behaviour is covered even though the extra line is gone.
+    const { runner, session, conn, files } = await transferRunnerAt(24, 80, {
+      transferFrameSeconds: 0.1,
+    });
+    const realSendAID = session.sendAID.bind(session);
+    vi.spyOn(session, 'sendAID').mockImplementation((aid: number) => {
+      realSendAID(aid);
+      dftDownload(conn, [0x41, 0x42, 0x43]);
+    });
+
+    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+
+    // NOT a timeout: it noticed a transfer that was over before it looked.
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(reply).not.toContain('press Attn or Clear');
+    expect(reply).toContain('Transfer complete, 3 bytes transferred');
+    expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0x41, 0x42, 0x43]);
+  });
+});
