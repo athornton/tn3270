@@ -6,16 +6,33 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, end of 2026-09-29
 
-**THE TRANSFER-PROTOCOL-SELECTION BRANCH IS COMPLETE AND UNMERGED. THE NEXT ACTION IS THE MERGE
-DECISION, WHICH IS THE USER'S.** Tasks 1-8 of
-`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` are done and pushed; Task 9's docs
-are written and only its Step 4, the merge, remains. Read that plan's **PROGRESS/AS BUILT** section
-before anything else — it indexes nineteen plan defects and four of mine, and it is written for
-exactly this cold start.
+**MERGED AND DONE. ALL NINE TASKS OF
+`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` ARE COMPLETE, AND THE BRANCH IS
+MERGED AND DELETED.** Read that plan's **PROGRESS/AS BUILT** section before anything else — it
+indexes nineteen plan defects and four of mine, and it is written for exactly this cold start.
+**NOTHING IS WAITING ON THE USER.**
 
-**State: branch `dft-file-transfer` at `e202892`+, PUSHED and in sync, tree clean, no stashes. `main`
-at `43d1a85`, ALSO PUSHED. 2121 tests in 82 files, build and typecheck clean.** 2026-09-29 ran to
-about $1770 of a $1900 cap; the 30-day budget resets 2026-10-01.
+**State: `main` at `6873b8e`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+stashes. 2121 tests in 82 files (from 1981 on the pre-merge `main`), build and typecheck clean.**
+`dft-file-transfer` was merged `--no-ff` (60 commits) and deleted local and remote, which is the
+precedent the last five features set. 2026-09-29 ran to about $1780 of a $1900 cap; the 30-day
+budget resets 2026-10-01.
+
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch:** build and typecheck
+clean, 2121 tests in 82 files, conformance+golden 12/12, `pty-smoke.py` 12/12,
+`drive-playback.py` 10/10, `drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs` 18 chords/16 actions,
+`clicks.mjs` 9 buttons/10 actions, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13 chords/11 actions.
+
+**THE MERGE HAD TWO CONFLICTS, both in `packages/core/src/session.ts`, both additive, and one of them
+IS SEMANTIC — worth knowing if anything ever needs re-doing there.** `main`'s pending-AID work and the
+branch's DFT work touched the same two functions. In `handleClose` both teardown lines were kept. In
+**`answerRead` the ORDER MATTERS: the DFT retained-frame short-circuit must come FIRST**, because a
+Read Modified arriving mid-upload has to replay the retained bytes and must never fall through to a
+pending-AID screen scrape — that would hand the host a screen where it expects its frame.
+**Mutation-verified on the resolution itself:** moving the guard after the read reddens the two replay
+tests. **And the merge was verified beyond the suite total**, because 2121 matches the branch alone
+while `main` had added tests of its own: all five pending-AID tests were confirmed present by name and
+run green against the merged code.
 
 **DFT FILE TRANSFER IS LIVE — the thing this whole branch existed to produce.** Against MVS 3.8j TK5
 at **43x80**, a geometry CUT refuses outright: **11 `FileTransferData` frames, ZERO CUT frames, 249
@@ -32,13 +49,14 @@ the CUT path is unregressed; it does NOT prove VM declines DDM. That second clai
 for a Query at all varies between sessions — check that grep before reading any run as evidence
 about DDM.**
 
-**BEFORE MERGING: `main` carries ONLY the pending-AID fix and this branch carries the graphics docs;
-the two hold different halves of 2026-09-28's work deliberately. CHECK `git merge-base`** — branching
-off the wrong base once dragged 44 unfinished DFT commits onto `main` (caught by a two-commit branch
-reporting 46 merged; reversed, never pushed). **Re-run the full gate ON THE MERGE COMMIT**, this
-project's standing rule, and `--no-ff` is how the last five features merged.
+**THE TWO-BRANCH SPLIT IS RESOLVED — `main` now carries both halves of 2026-09-28's work** (the
+pending-AID fix and the graphics docs), so the standing "check `git merge-base` before merging to
+`main`" caution no longer has a second long-lived branch to guard against. **Keep the rule for next
+time:** branching off the wrong base once dragged 44 unfinished DFT commits onto `main`, caught only
+because a two-commit branch reported 46 merged. This merge was checked that way and reported exactly
+60, all of them the feature's own.
 
-**WHAT REMAINS AFTER THE MERGE, in the order the work suggests:**
+**WHAT REMAINS, in the order the work suggests:**
 1. **DFT plan Tasks 11-12**, which consume Task 10's trace and are now unblocked (`/tmp/dft-tso.log`,
    but re-run rather than trusting a temp file).
 2. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
