@@ -967,7 +967,16 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
 
 11. **Oversize + `IBM-DYNAMIC`.** Really oversize — the advertisement is a by-product. See the
    out-of-scope section of the bind-image spec for the measurements.
-12. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
+12. **Local model-switching**, immediately after it and before packaging. The two belong together:
+   both let the *user* do unpredictable things with their window, and in the code both drive the one
+   `Screen.resize()` path — which today has four callers, all in `core` and all HOST-driven (EW/EWA
+   and BIND/UNBIND). These two add the first CLIENT-driven resizing, so they meet the same questions
+   about renderer invalidation and mid-session geometry change; answering those once is the point of
+   scheduling them adjacently. x3270's `Common/model.c` is the reference to steal.
+   **Neither is well testable against any host reachable from this project** — `IBM-DYNAMIC` has one
+   live path (TK5's TSO issues a Read Partition to any `-E` client) and a client-initiated switch has
+   none, so expect unit tests, the playback oracle and by-hand GUI runs rather than a live witness.
+13. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
    addition rather than a stretch goal: nothing in this codebase is POSIX-specific. There are **zero
    native dependencies** (every package depends only on other workspace packages, with Electron the
    single external), and the `node:` builtins used are `crypto`, `fs`, `http`, `https`, `net`, `path`,
@@ -977,8 +986,9 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    Windows machine is available to test a packaged build on, which is all that testing an installer
    needs — so the target is unblocked, but treat "works on Windows" as unverified until an installer
    has actually been run there.
-13. **Local model-switching**, then **PS + VMGIF**, then **vector graphics** (GOCA).
-14. **Printer sessions**, last, and deliberately so: they are probably cheap in themselves, but
+14. **PS + VMGIF** — item 10 above holds its detail and dependency; this is only its position in
+   the reordered list — then **vector graphics** (GOCA).
+15. **Printer sessions**, last, and deliberately so: they are probably cheap in themselves, but
    likely entangled with the graphics work above. Needs a host that will drive one; see *What is not
    implemented*.
 

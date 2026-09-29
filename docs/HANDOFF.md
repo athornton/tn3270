@@ -103,9 +103,9 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    `/FORCE` is a last resort: `docs/live-testing.md`, *Freeing a held TSO userid on TK5*.
 5. **ROADMAP REORDERED BY THE USER, 2026-09-29, IN TWO PASSES — the second pass changed the first,
    so read the final order and not the reasoning in isolation.** The order is now:
-   **(a) oversize + `IBM-DYNAMIC`**, **(b) packaging — macOS, Linux and WINDOWS**,
-   **(c) local model-switching**, **(d) PS + VMGIF**, **(e) vector graphics (GOCA)**,
-   **(f) printer sessions LAST**.
+   **(a) oversize + `IBM-DYNAMIC`**, **(b) local model-switching**,
+   **(c) packaging — macOS, Linux and WINDOWS**, **(d) PS + VMGIF**,
+   **(e) vector graphics (GOCA)**, **(f) printer sessions LAST**.
    **Three pieces of the user's reasoning, all worth carrying because each is a judgement about what
    the tool is for rather than about effort:**
    - *"Without graphics it's still a pretty useful tool, but without packaging, it's very difficult
@@ -113,6 +113,23 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    - **Oversize then went AHEAD of packaging**, so that strange screen sizes exist in the first
      packaged build a user ever sees. A shipped app that cannot do the geometry an operator's host
      asks for is a worse first impression than a shipped app without vector graphics.
+   - **LOCAL MODEL-SWITCHING FOLLOWS `IBM-DYNAMIC` IMMEDIATELY AND SHIPS BEFORE PACKAGING TOO**, on
+     the user's reasoning that the two belong together because both *"imply the users doing
+     unpredictable things with their windows"*. **This restates their own call of 2026-09-17**
+     ("probably right after `IBM-DYNAMIC`"), which a later reorder had dropped — so it is a
+     consistent preference, not a new one.
+     **AND THE CODE AGREES, which makes it an architectural coupling rather than a UX resemblance:
+     `Screen.resize()` is the single mechanism both features drive**, and today it has exactly four
+     callers (`session.ts:1156`, `:1205`, `stream/execute.ts:340`, `:346`) — all in `core`, all
+     HOST-driven, i.e. EW/EWA and BIND/UNBIND. Oversize and model-switching both add the first
+     CLIENT-driven resizing to that same path, so they will hit the same questions about what
+     invalidates a renderer and what a mid-session geometry change does to a formatted screen. Doing
+     them apart means answering those twice.
+     **HONEST LIMIT, the user's own: neither is particularly testable on anything reachable here.**
+     TK5's TSO issues a Read Partition to any `-E` client, which is the one live path
+     `IBM-DYNAMIC` has; a CLIENT-initiated switch has no host that reacts to it. Expect the
+     verification to be unit tests, the playback oracle and by-hand GUI runs rather than a live
+     witness — and say so rather than implying a host confirmed it.
    - **Printer sessions moved to LAST despite being cheap**, because *"GDDM can involve printers and
      plotters as output devices"*, so printing is likely CONVOLVED with the graphics work.
      **`docs/goca-reference-notes.md` supports this from the other direction**: the primary GOCA
