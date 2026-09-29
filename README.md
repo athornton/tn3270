@@ -53,19 +53,29 @@ extended attributes and would have been silently discarded before. The SA orders
 parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
 colour-capable 3279.
 
-**`IND$FILE` file transfer works on both hosts, in both directions**, CUT mode, with a
+**`IND$FILE` file transfer works on both hosts, in both directions, in BOTH PROTOCOLS**, with a
 binary round-tripping byte-identically each way. **`Ctrl-T` in the TUI opens a transfer
-form**; the GUI and the browser cannot reach it yet. Two honest limits: **CUT needs a 24x80
-screen**, so a session started at `-model 3278-4-E` refuses the transfer and names the
-restart, and **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on the wire
-2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
+form**; the GUI and the browser cannot reach it yet.
+
+**DFT MODE WORKS, AND THE HOST CHOOSES IT — 2026-09-29.** Both engines are built for every
+transfer and the first inbound frame decides, because the client does not select the protocol:
+x3270's `ft_running` merely *reports* which one arrived (`ft.c:556`). **Live against MVS 3.8j
+TK5 at 43x80: 11 DFT frames, zero CUT frames, 249 bytes byte-identical both directions.** That
+geometry matters — **CUT needs a 24x80 screen and refuses anything else**, so a 43x80 transfer
+is only possible over DFT, and until this landed a `-model 3278-4-E` session could not transfer
+a file at all. The 24x80 requirement is still real but it is now raised **when CUT is chosen**
+rather than before the host is asked, which is the one behaviour change: a CUT-only host at
+43x80 is primed before we find out, and VM/370's MECAFF refuses with its own text in about a
+second. **`-ddm on` is what offers the host the choice** and is still default off; see
+*Using the CLI*.
+
+One honest limit remains: **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on
+the wire 2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
 indistinguishable while `RECFM F LRECL 80` differs, so the keyword demonstrably reaches
 the host and CMS simply disregards it. TSO honours it as a *maximum* (`VB 1024` measured
 through the form). So a `V 80` readback on CMS is not confirmation the field took effect,
 and the field stays enabled because disabling it would make a real TSO attribute
-unexpressible. **DFT mode is not implemented** — only its advertisement is, behind `-ddm`,
-default off, which is what measured that MVS/TSO offers DFT and VM/370 does not. Turning it on
-makes a host offer a protocol we cannot parse; see *Using the CLI*.
+unexpressible.
 
 **There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
 blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
@@ -655,34 +665,43 @@ argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
 `-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
 `packages/cli/scripts/transfer-vm.txt`.
 
-**Do not pass `-ddm on` while transferring a file.** The flag advertises the Query Reply
-(DDM) unit, QCODE `0x95`, and **the client does not choose CUT or DFT — the host does**, on
-seeing that unit. It is the switch that makes DFT reachable, and DFT is not implemented yet,
-so on a host that takes the offer the transfer stops working: MVS/TSO answers `-ddm on` with
-DFT `Open` requests we cannot parse, and both directions time out at 0 bytes. `-ddm off` is
-the default for exactly this reason.
+**`-ddm on` IS HOW YOU GET DFT, AND IT IS NOW SAFE TO PASS WHILE TRANSFERRING A FILE.** Earlier
+versions of this README said the opposite — "do not pass `-ddm on` while transferring a file",
+because a host that took the offer sent `Open` requests we could not parse and both directions
+timed out at 0 bytes. **That is fixed as of 2026-09-29**: DFT is implemented and the transfer
+drivers build both engines, so whichever protocol the host chooses is handled. The flag advertises
+the Query Reply (DDM) unit, QCODE `0x95`, and **the client does not choose CUT or DFT — the host
+does**, on seeing that unit.
 
 | Flag | Effect |
 |---|---|
 | *(none)*, or `-ddm off` | the default. No DDM unit is advertised, so every host falls back to CUT |
-| `-ddm on` | advertise DDM, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`). **A host may then answer in DFT, which is unimplemented** |
+| `-ddm on` | advertise DDM, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`). **A host may then answer in DFT, which now works** — and is the only way to transfer at a geometry other than 24x80 |
+
+It is **still default off**, which is deliberate: every CUT live witness in this project was
+measured without it, and flipping the default silently changes which protocol a host picks. Making
+it default-on is a separate, deliberate decision.
 
 The advertised LIMIN/LIMOUT are 16384, bounded 256..32767 (`SessionOptions.dftBufferSize`,
 clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`). **No flag or keyword reaches
 it yet** — `Transfer`'s `BufferSize` keyword is validated and then ignored, like `Remap`, and
-wiring the two together is a DFT task rather than something done.
+wiring the two together is still open work. **They must agree when it is done**, since the size we
+advertise to the host and the size we chunk by are one number.
 
 The unit is inserted in ascending-QCODE order rather than appended, so a capture stays
 comparable with x3270's. The flag exists because it is what *measured* which hosts offer DFT:
 MVS/TSO does and VM/370's MECAFF does not, which was invisible until we sent the unit at all.
-It will become the default once DFT works. Design and wire bytes:
-`docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`.
+Design and wire bytes: `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`; the
+protocol-selection design is
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md`.
 
-**Its evidence is a live probe and not the suite**: `-ddm` has **no unit test at all** — the
-whole of `9f92816` is covered only by the two committed probe scripts
-(`packages/cli/scripts/ddm-probe-{vm,tso}.txt`) and the unchanged test count that shows
-default-off costs nothing. So `npm test` would stay green if the advertisement broke. Pinning
-the unit's bytes is a DFT-stage task.
+**The advertisement's own evidence is still a live probe rather than a unit test.** `-ddm` has no
+test that pins its bytes directly; what covers it is `dftSession.test.ts`'s
+*the DDM advertisement through a Session* suite, which drives a real Read Partition and asserts
+`0x95` is on the wire with the flag on and absent with it off — added later than the flag itself.
+**And it is witnessed live**: the 2026-09-29 TK5 run shows `00 0c 81 95` in answer to the host's
+own `ReadPartition`. Note that **a host may issue no Query at all** — VM did not on that day's
+control run — so check `grep -c "81 95"` in a trace before reading it as evidence about DDM.
 
 **`Wait(condition[,seconds])`** takes `3270Mode`, `Output`, `Unlock`, `Settle`,
 or `InputField`. Which one you want is not obvious and gets hosts wrong in
@@ -882,18 +901,23 @@ Done:
 
 Remaining, in the order the author wants it:
 
-9a. **Interactive `IND$FILE` — stage 1 of four is done.** The transfer itself was finished and
+9a. **Interactive `IND$FILE` — stages 1 and 2 of four are DONE.** The transfer itself was finished and
    live-verified long before any interactive front end could reach it, which is the same shape as
    Sys Req and Newline before item 9. **Stage 1, the TUI's `Ctrl-T` form, is built** — see
-   *Using the TUI*. **Stage 2 is DFT**, which matters because it is **geometry-free**: `ft_dft.c`
-   contains zero screen-buffer references against 25 in `ft_cut.c`, so it moves data through
-   structured fields rather than the display, and it is what lifts the 24x80 restriction CUT
-   imposes. **MVS/TSO DOES offer DFT, measured 2026-09-24, so stage 2 has a live witness after
-   all** — an earlier version of this line said neither Hercules host spoke it. What was really
-   missing was on *our* side: a host offers DFT only to a client that advertised the Query Reply
-   (DDM) unit, and we had never sent one. See `-ddm` under *Using the CLI* and the probe's wire
-   bytes in `docs/live-testing.md`. VM/370's MECAFF declines it and stays on CUT, which makes it the
-   control. **Stage 3** is
+   *Using the TUI*. **STAGE 2, DFT, IS DONE AND LIVE — 2026-09-29.** It matters because it is
+   **geometry-free**: `ft_dft.c` contains zero screen-buffer references against 25 in `ft_cut.c`, so
+   it moves data through structured fields rather than the display, and it is what lifts the 24x80
+   restriction CUT imposes. **Measured on MVS 3.8j TK5 at 43x80: 11 DFT frames, zero CUT frames, 249
+   bytes byte-identical both directions.** The last piece was not the engine but the *selection* —
+   nothing chose DFT, so `startDftTransfer` had no caller outside tests; both drivers now build both
+   engines and the first inbound frame decides, because the host chooses and not the client.
+   **MVS/TSO DOES offer DFT, measured 2026-09-24** — an earlier version of this line said neither
+   Hercules host spoke it. What was really missing was on *our* side: a host offers DFT only to a
+   client that advertised the Query Reply (DDM) unit, and we had never sent one. See `-ddm` under
+   *Using the CLI* and the wire bytes in `docs/live-testing.md`. VM/370's MECAFF declines it and
+   stays on CUT, which makes it the control. **Still open in stage 2:** `Transfer()`'s `BufferSize`
+   keyword and `SessionOptions.dftBufferSize` are both set by nothing and must agree when wired.
+   **Stage 3** is
    the same form in the GUI, which is a renderer rather than a rewrite — the model is already
    shared in `packages/frontend` and the `Xfer` keypad button already exists. **Stage 4** is the
    web gateway, and it is a security decision before it is a UI one: the gateway currently
@@ -1057,12 +1081,12 @@ worse than one that says which quarter is missing.
 - **`IND$FILE` IS INTERACTIVE IN THE TUI ONLY — the GUI and the browser still cannot transfer a
   file.** `Ctrl-T` opens a form in the TUI: ten fields, `Tab` and the arrows to move and change,
   `Enter` to start, `Esc` to close, and closing mid-transfer **aborts** rather than abandoning, so
-  the host leaves transfer mode. **Three things it does not do yet.** (1) **CUT mode only, so it
-  needs a 24x80 screen** — a session at `-model 3278-4-E` gets a refusal naming the restart,
-  because `-model` is parsed once at launch and runtime model-switching does not exist. DFT is
-  stage 2 and is geometry-free. **`-ddm on` does not get you DFT** — it makes a host *offer* it,
-  and MVS/TSO then does, but nothing here parses a DFT frame, so the transfer times out at 0
-  bytes. The flag is a measurement instrument until stage 2 lands. (2) **The GUI has the form's
+  the host leaves transfer mode. **Two things it does not do yet.** ~~(1) CUT mode only, so it
+  needs a 24x80 screen.~~ **DONE 2026-09-29 — BOTH PROTOCOLS WORK AND THE HOST CHOOSES.** With
+  `-ddm on` a DFT host transfers at any geometry, live-verified at 43x80 on TK5; `-ddm on` really
+  does get you DFT now, where it used to be a measurement instrument that broke transfers. The
+  24x80 requirement survives only for CUT, and is raised when CUT is chosen rather than up front.
+  (2) **The GUI has the form's
   model and no renderer for it** —
   `frontend/src/transferForm.ts` is shared and the `Xfer` keypad button exists, but stage 3 writes
   the canvas view. (3) **The web gateway REFUSES the action outright, in `web/src/protocol.ts`**, and

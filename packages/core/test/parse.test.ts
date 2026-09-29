@@ -318,6 +318,33 @@ describe('describeRecord', () => {
     expect(sf).toBe('WriteStructuredField unknownSF(0x40,1B)');
   });
 
+  it('names a DFT frame and its REQUEST TYPE, not just its length', () => {
+    // THIS IS THE LINE THAT MAKES A LIVE RUN JUDGEABLE. The -ddm probe could only
+    // report `unknownSF(0xd0,38B)`, and the request types had to be decoded by hand
+    // afterwards to learn they were TR_OPEN_REQ. After DFT works, a CUT transfer and
+    // a DFT transfer both end in a transferred file and ONLY the trace tells them
+    // apart, so the type must be in it.
+    //
+    // A 0x29 field, the longer of the two lengths TK5 actually sent, carrying
+    // TR_OPEN_REQ -- so this reproduces the probe's own frame and shows what it
+    // would have printed.
+    const field = new Uint8Array(0x29);
+    field[0] = 0x00;
+    field[1] = 0x29;
+    field[2] = 0xd0;
+    field[3] = 0x00;
+    field[4] = 0x12;
+    expect(describeRecord(Uint8Array.of(SnaCmd.WSF, ...field)))
+      .toBe('WriteStructuredField FileTransferData(0x0012,38B)');
+  });
+
+  it('traces a DFT frame too short to hold a request type without throwing', () => {
+    // describeRecord promises never to throw; a 1-byte payload must not index past
+    // the end and produce NaN in the trace.
+    expect(describeRecord(Uint8Array.of(SnaCmd.WSF, 0x00, 0x04, 0xd0, 0x12)))
+      .toBe('WriteStructuredField FileTransferData(short,1B)');
+  });
+
   it('renders SFE pairs with both hex halves padded', () => {
     // Value 0x00 is the padding case: an SFE pair type 0xC0 value 0x00 is an
     // unprotected alphanumeric field, a real byte off the wire, and "0x0" would

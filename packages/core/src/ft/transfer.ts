@@ -186,6 +186,19 @@ const MSG = {
 } as const;
 
 /**
+ * The subset of `MSG` that DFT shares with CUT.
+ *
+ * Exported rather than copied into `dft.ts`: `ftUserCancel` is ONE x3270 message
+ * and both engines report it, so two string literals could drift and a front end
+ * comparing them would then see two different "canceled by user" texts. The rest of
+ * `MSG` stays private because every other entry is CUT-specific — a DFT abort
+ * carries the host's own text, not a control-code name.
+ */
+export const FT_MSG = {
+  USER_CANCEL: MSG.USER_CANCEL,
+} as const;
+
+/**
  * The CUT transfer state machine.
  *
  * One instance per transfer, and it is single-use: once `step` has returned a

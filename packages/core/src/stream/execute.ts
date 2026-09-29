@@ -158,6 +158,16 @@ export interface ExecuteResult {
    * carries the request; selectCapabilities interprets it.
    */
   sfReply?: QueryRequest;
+  /**
+   * DFT file-transfer payloads from this record, in arrival order. Surfaced as a
+   * REQUEST for the session to answer, exactly as `sfReply` is — `execute` stays
+   * pure and does no I/O.
+   *
+   * An ARRAY because one `WriteStructuredField` may carry several fields, and
+   * taking only the first would lose data silently: a truncated file with nothing
+   * in the log.
+   */
+  transferData?: Uint8Array[];
   /** WCC bit 6: unlock the keyboard. */
   keyboardRestore: boolean;
   /**
@@ -298,6 +308,11 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
           result.sfReply = { kind: 'query' };
         } else if (list !== undefined) {
           result.sfReply = { kind: 'queryList', reqtyp: list.reqtyp, qcodes: list.qcodes };
+        } else if (t.field.kind === 'transferData') {
+          // Before the fallback, so a DFT frame is NOT counted in
+          // structuredFieldsIgnored: it is answered, not ignored, and a counter
+          // that said otherwise would misreport a working transfer in the trace.
+          (result.transferData ??= []).push(t.field.payload);
         } else {
           // Everything else: a read against a real partition (non-0xFF PID on a
           // query, which x3270 rejects at sf.c:230-251), a TYPE we do not

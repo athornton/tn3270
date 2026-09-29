@@ -26,7 +26,7 @@ import { detectDepth, type Depth } from './colours.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
-import { startTransfer, type TransferRun } from './transferRun.js';
+import { startTransfer, type TransferRun } from '@tn3270/frontend';
 import {
   applyAction, lookup, MAX_SEQUENCE_LENGTH, PARTIAL, printableRun, resolveScheme,
   cycleField, formKeywords, moveField, newTransferForm, setFieldText, transferCommand,

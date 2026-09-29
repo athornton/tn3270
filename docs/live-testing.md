@@ -9,6 +9,205 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **DFT FILE TRANSFER IS LIVE AGAINST MVS 3.8j TK5, AT 43x80, 2026-09-29 — the run the whole
+  `dft-file-transfer` branch existed to produce.** Until today `Session.startDftTransfer` had no
+  caller outside tests and `runner.ts` built a `CutTransfer` unconditionally, so **no DFT frame had
+  ever reached a wire**. Commands, both offline-gated first:
+
+  ```bash
+  python3 -c "import random; random.seed(3270); open('/tmp/rt-src.bin','wb').write(bytes(random.randrange(256) for _ in range(249)))"
+  node packages/cli/dist/main.js -insecure -model 3278-4-E -ddm on \
+    < packages/cli/scripts/dft-tso.txt > /tmp/dft-tso.log 2>&1
+  ```
+
+  **JUDGED BY TRACE, NOT BY THE FILE**, because both protocols now end in a transferred file and
+  success alone no longer says which ran. The evidence, all four checks the script itself names:
+
+  | Check | Expected | Measured |
+  |---|---|---|
+  | `grep -c FileTransferData` | > 0 | **11** |
+  | `grep -c "O_SF\|CutFrame"` | 0 | **0** |
+  | geometry | 43x80 | **43 80** in the status line |
+  | `cmp /tmp/rt-src.bin /tmp/tso-dft-back.bin` | identical | **identical** |
+
+  **The request types read exactly as the protocol predicts**, which is a stronger result than the
+  count: `FileTransferData(0x0012,38B)` and `(0x0012,32B)` are Open, `(0x4611,6B)` Get,
+  `(0x4704,256B)`/`(0x4704,92B)` Data Insert, `(0x4511,12B)` Set Cursor, `(0x4112,2B)` Close. The
+  `-ddm` probe of 2026-09-24 could only report `unknownSF(0xd0,38B)`.
+  **And our DDM advertisement is witnessed on the wire**: `00 0c 81 95 ...` — the 12-byte Query
+  Reply unit, QCODE `0x95` — in answer to TK5's `ReadPartition`, 36 occurrences in the log. That
+  byte is what made the host choose DFT.
+  **249 bytes round-tripped byte-identically in BOTH directions at 43x80, a geometry CUT refuses
+  outright** (`frames.ts` throws on anything but 24x80), so this transfer was only possible over DFT.
+
+  **TWO THINGS THE RUN FOUND THAT ARE NOT IN ANY PLAN, and both are about what happens AFTER a
+  successful DFT transfer.** Worth expecting rather than rediscovering:
+  1. **TK5 leaves the screen at 24x80 with the keyboard LOCKED once a DFT transfer completes**, so
+     the very next `String()` is refused with `input inhibited` and the script's following step is
+     lost. Measured twice, once per direction, at identical points. Both transfers still succeeded
+     and reported `Transfer complete, 249 bytes transferred`; what broke was the script's
+     *sequencing* after them. A future script needs a `Wait(Unlock)` after each `Transfer()`.
+  2. **BECAUSE OF (1) THE SCRIPT NEVER REACHED ITS `LOGOFF`**, which is exactly the trap
+     `dft-tso.txt`'s own header warns about — it leaves `HERC01` held and `HERC01.DFTX.BIN` behind.
+     Here the userid was in fact released when the connection dropped (verified: the host was back
+     at a fresh `Logon ===>`), and the dataset was deleted by a follow-up run
+     (`ENTRY (A) HERC01.DFTX.BIN DELETED`). **Check both before trusting a rerun**, or the next
+     logon draws `IKJ56425I LOGON REJECTED, USERID IN USE`.
+
+- **THE VM/370 CUT CONTROL PASSES, AND ITS QUALIFICATION MATTERS MORE THAN ITS RESULT,
+  2026-09-29.** Run with `-ddm on` deliberately, to show that a client offering DFT does not break
+  a CUT host:
+
+  ```bash
+  node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm on \
+    < packages/cli/scripts/transfer-vm.txt > /tmp/cut-vm.log 2>&1
+  ```
+
+  **Zero `FileTransferData` frames, both transfers complete with MECAFF's own
+  `TRANS03 - File transfer complete`, 249 bytes byte-identical, `Ready;` proving CMS rather than the
+  reconnect trap, and `LOGOFF AT` reached** so the account is released.
+
+  **BUT VM ISSUED NO READ PARTITION ON THIS RUN, SO WE NEVER SENT IT THE DDM UNIT —
+  `grep -c "81 95"` is 0 on this log against 36 on TK5's, and `grep -c "+ 88"` (outbound structured
+  fields) is 0 against 5.** A host that asks no Query is never told our capabilities, so this run
+  cannot speak to what VM does with the advertisement. State the halves apart:
+  - **PROVED HERE:** the CUT path is unregressed by this branch. Both engines are now built and a
+    DFT engine is registered before the host is primed, and a real CUT host round-trips a file
+    exactly as before, with nothing extra on the wire.
+  - **NOT PROVED HERE:** that VM/370 *declines* DDM when offered.
+
+  **THAT SECOND CLAIM IS ALREADY SETTLED ELSEWHERE, AND BY BETTER EVIDENCE — do not re-derive it
+  from this run.** The `ddm-probe-vm.txt` runs of 2026-09-25 (same `-model 3278-2-E`, `-ddm on` vs
+  `-ddm off` as the only variable) DID get the unit onto the wire — **4 occurrences of
+  `00 0c 81 95 00 00 40 00 40 00 01 01` with it on, 0 with it off** — and VM chose CUT both ways
+  with 249 bytes byte-identical each time. **So VM's Read Partition is not something it does on
+  every session**, which is itself worth knowing: whether the advertisement is even exercised
+  depends on the host asking, and a control run that looks identical may or may not have tested it.
+  **Check `grep -c "81 95"` before reading any such run as evidence about DDM.**
+
+- **A PUBLIC HOST THAT SPEAKS TN3270E — the first one available to this project, 2026-09-25.** The
+  user supplied **`144.208.193.156:3270`**, which identifies itself as **"Blue Iron Terminal Server",
+  `bits` v0.18.0**. A read-only probe (connect, settle, trace, quit — no logon, no menu selection)
+  established:
+  - **TN3270E NEGOTIATED END TO END, with an LU name assigned: `IBM-3278-4-E`, LU `PYTN0001`,
+    session id echoed on screen.** Functions came back as **`(none: basic TN3270E)`** — the host
+    granted no optional function — so this exercises DEVICE-TYPE/FUNCTIONS and the 5-byte header
+    path, not RESPONSES or SYSREQ.
+  - **It issues a Query LIST, not a plain Query:** `ReadPartition(pid=0xff,type=0x03,reqtyp=0x80,
+    qcodes=[])` — `reqtyp=0x80` with an empty QCODE list, the "ALL" form.
+  - **It drives EraseWriteAlternate at model 4** — 43x80, many SF/SBA orders, rendered without
+    program checks.
+  - It **echoes our own client IP back onto the screen**, so assume the operator can see connections.
+  **WHY THIS MATTERS: it is the live-verification path stage 2b has never had.** Both Hercules hosts
+  REFUSE option 40 (`ff fe 28`, measured three times), which is why the TN3270E negotiation has been
+  verified only against `e-server.py` and real s3270 since 2026-08-27, and why this file has carried
+  "the FIRST stage with no live-verification path here" ever since. **That qualification can now be
+  retired for the negotiation itself, once a proper run is recorded** — this probe is a capability
+  survey, not that run.
+  **ATTRIBUTION IS PENDING, 2026-09-25: the user is asking the person who passed the host on how they
+  want to be cited.** Until they answer, this section names the service by its own banner
+  ("Blue Iron Terminal Server") and credits nobody — **do not invent an attribution, and do not add a
+  name to any commit message or doc until the user relays the answer.** When they do, the credit goes
+  here and in the README's acknowledgements if one is wanted.
+  **IT IS A THIRD PARTY'S SYSTEM — CONFIRMED BY THE USER 2026-09-25. TREAT IT ACCORDINGLY, and this is
+  a hard constraint rather than a preference:**
+  - **No unattended or scripted logons**, and no credential guessing. Every other host section in this
+    runbook assumes a system we own and may `LOGOFF` freely; that does not hold here.
+  - **No file-transfer tests** — they create datasets on someone else's machine.
+  - **Nothing that resembles probing**: no port scanning, no repeated reconnects, no load.
+  - Read-only capability observation of the pre-logon screen is what the above was, and is the
+    ceiling for anything automated. **Anything beyond it is the user's call to make, per connection.**
+  - **Do not add it to any harness that `npm test` or a gate runs.** A committed script that hits a
+    third party on every CI run is the failure mode to avoid.
+  **What it does NOT give us:** no `0x0F0F`/`0x0F10`/`0x0F11` graphics (unprobed, and a terminal server
+  is unlikely to drive a G-terminal), and no DFT evidence — `-ddm` was off for this probe and TK5
+  remains the DFT reference host.
+
+- **CUT AT 43x80 IS MEASURED, 2026-09-25 — THE HOST REFUSES AND SELF-RECOVERS, so the protocol-
+  selection spec's one open question is closed.** Attempted a CUT upload against VM/370 CMS on a
+  43-row screen with the `dist` geometry gate disabled (source untouched; build restored and
+  re-verified at 2075 tests immediately afterwards). State proven first: `QUERY DISK A` → `Ready;`.
+  MECAFF answered **`Error: IND$FILE requires a MECAFF connected 3270 terminal`**, then
+  `... aborting`, and CMS returned to **`Ready(00032)` by itself**. **Zero CUT frames, zero `0xd0`
+  frames**, and `LOGOFF` completed with `CONNECT= 00:00:04` spanning only that run — no wedged
+  session and no manual recovery.
+  **THIS IS THE SAME REFUSAL `transfer-vm.txt` ALREADY DOCUMENTS FOR A PLAIN `IBM-3278-2`**, word for
+  word. So MECAFF is checking **whether it recognises the terminal, not the geometry**, and a model-4
+  session fails that check the same way a model-2-without-`-E` does. The question "does a CUT host
+  paint a frame at the wrong offsets" therefore **never arises on this host** — no transfer starts.
+  **Why it was worth one run:** it shrank an accepted regression in the selection design (removing the
+  up-front geometry gate does not leave this host mid-transfer), **deleted a planned code branch** (a
+  fast-fail on "screen arrived, not a CUT frame, not 24x80" is not worth building for a case that
+  resolves in ~1s), and **corrected a planned error message** — we were going to print "the host chose
+  CUT, which needs a 24x80 screen", but the host's own text is more accurate and must not be
+  overridden by our guess.
+
+- **THE VM CUT CONTROL FOR DFT IS NOW MEASURED, 2026-09-25 — the gap left open earlier that day.**
+  The user recreated the VM/370 system from scratch and it is back on `localhost:3270`. Same
+  version (**VM/370 Community Edition V1 R1.2**), logo paints, 22 fields, 24x80, zero program checks.
+  **`ddm-probe-vm.txt` run twice with `-ddm on` and `-ddm off` as the only variable, and VM chose CUT
+  BOTH WAYS:**
+  - Our DDM unit **demonstrably reached the wire** with `-ddm on` — `00 0c 81 95 00 00 40 00 40 00
+    01 01`, **4 occurrences**, against **0** with `-ddm off`. This matters because of the trap the
+    runbook already records: without proving our own advertisement was sent, "no DFT frames" would
+    be a statement about our logging rather than about the host.
+  - **ZERO `FileTransferData` / `0xd0` frames in either run.** MECAFF does not implement DFT.
+  - Both directions transferred both times, and **`cmp` byte-identical on 249 bytes** each run.
+  - **State PROVEN before trusting any of it:** `QUERY DISK A` answered `Ready;` (not `?CP:`), so
+    these were real CMS sessions and not reconnects to a stranded machine. Both runs reached
+    `LOGOFF AT`, with `CONNECT= 00:00:05` spanning only the current run — no trap handed forward.
+  **So `-ddm on` does NOT break a CUT host**, which was the open question, and VM remains the control
+  for DFT work while TK5 is the reference host.
+  **A LIVE CONFIRMATION OF A UNIT-TEST DECISION, worth recording because no test could have shown
+  it:** MECAFF's completion message arrives as **`TRANS03 - File transfer complete`** — `TRANS03`
+  with host text appended. That is exactly why the DFT engine matches `TRANS03` as a **PREFIX** and
+  not by equality (`memcmp` over `strlen`, `ft_dft.c:268`); an equality test would have reported this
+  successful transfer as a failure whose error text was the success message.
+  **CORRECTED SAME DAY — MY "VM IS 24x80-ONLY" CLAIM WAS A TEST ARTIFACT, NOT A PROPERTY OF THE
+  HOST.** The user uncommented the 3278s and reported a TUI mod-4 session at 43 lines working fine;
+  re-measuring on the CLI agrees. **Plain `-model 3278-4-E` reaches 43x80 with 41 fields**, with EWA
+  (`7e`) on the wire twice and the status progression `24 80` → **`43 80` at 0.505s**.
+  **The error was mine and is worth recording as a method trap: my one-liner read the LAST
+  `^[LU] ` status line from a run whose `Wait(Settle)` was too short, so it captured the state BEFORE
+  the host's EWA resize arrived.** A 24x80 reading taken before EWA is indistinguishable from a
+  24x80-only host unless the whole status history is printed. **Print the progression, not the last
+  line** — the resize is the event being measured, so a single sample cannot show it.
+  **What IS true, and is a config difference rather than a client issue: `@MOD4` does not select
+  anything.** Measured across four suffixes: **`@MOD2` works** (22 fields, 24x80), while
+  **`@MOD4`, `@01C0` and `@02C0` all fail to complete negotiation**. We send the suffix correctly
+  (traced `40 4d 4f 44 34 ff f0`), so the rebuilt `vm370ce.conf` defines its 3278-4s under some other
+  group name or device numbering than the old one. **This blocks nothing: plain `-model 3278-4-E`
+  gets 43x80, so the `@group` selector is not needed for a model-4 session here.**
+  **A GREP TRAP THAT PRODUCED A FALSE READING FIRST TIME, and it generalises to any wire log here:**
+  `grep -c "81 95"` reported **12 hits in the `-ddm off` run**, which looked like the flag leaking.
+  It is EBCDIC TEXT: `0x95` is the letter **`n`**, and `81 95 84` is **`and`** in VM's copyright
+  banner. Anchor on the unit header (`00 0c 81 95`) or decode; a bare hex grep for a byte that is
+  also a common letter will match prose. Same lesson as the Query Reply walk: parse the structure,
+  do not grep it.
+
+- **DFT'S FIRST LIVE ATTEMPT FAILED, 2026-09-25, AND THE FAILURE IS THE FINDING: `Transfer()` HAS NO
+  DFT PATH.** The run reached TK5 at **43x80** and logged on cleanly, then `Transfer()` refused
+  before sending anything: *"CUT file transfer needs a 24x80 screen; this session is 43x80"*
+  (`packages/cli/src/runner.ts:454`, a `screen.size !== 1920` check). **Zero `FileTransferData`
+  frames, no readback file, exit 0.** So this is NOT a defect in the DFT engine, which is built,
+  plumbed and unit-tested — it is that **nothing selects it**: `Session.startDftTransfer` has no
+  caller outside tests, and `runner.ts` constructs a `CutTransfer` unconditionally.
+  **The implementation plan has a structural gap.** Tasks 1-9 build the engine, the wire plumbing and
+  the Read Modified hook; **no task wires the `Transfer()` action to choose DFT over CUT**, and Tasks
+  11 and 12 both depend on Task 10's trace, so the whole tail is blocked behind work no task
+  specifies. That wiring is its own task and needs decisions the plan never poses: what chooses DFT
+  (geometry? `-ddm`? a keyword?), what happens when a host offered DFT but the screen is 24x80, and
+  whether `Transfer()`'s already-parsed-and-ignored `BufferSize` keyword now feeds
+  `DftOptions.bufferSize`.
+  Script committed as `packages/cli/scripts/dft-tso.txt` with its judging criteria; it is correct as
+  written and will be the run once a front end can start a DFT transfer.
+  **The VM control could not run: port 3270 was closed, i.e. VM/370 was down. Only TK5 (3271) was
+  up.** So "DDM does not break a CUT host" is still unmeasured, and this run says nothing about it.
+  **What the run DID establish, and it is not nothing:** the `-ddm on` advertisement reaches a live
+  host without disturbing logon at 43x80, and the geometry refusal fires **before** the host is told
+  to start a transfer, which is the behaviour `runner.ts:450`'s comment claims and the reason a failed
+  run left no half-open transfer on TSO. `LOGOFF` completed, so no stranded userid.
+
 - **ALL FOUR SPECIAL KEYS NOW HAVE A LIVE WITNESS, 2026-09-24.** Field Mark and Newline were the
   last two without one; both are now witnessed on **both** hosts against matched controls. Field
   Mark puts `0x1e` on the wire and both hosts parse the field (on VM it is the entire payload), and

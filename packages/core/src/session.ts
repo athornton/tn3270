@@ -16,6 +16,7 @@ import { parseRecord, ParseError, describeRecord } from './stream/parse.js';
 import { execute, ExecuteError } from './stream/execute.js';
 import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './queryreply.js';
+import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
@@ -123,7 +124,15 @@ export interface ConnectOptions {
   lus?: readonly string[];
 }
 
-export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm';
+/**
+ * `transferEnd` fires when a DFT transfer finishes, however it finished — success,
+ * the host's own error message, a cancellation, or a malformed frame. A front end
+ * uses it to close a progress display without polling.
+ *
+ * Not exported from `index.ts` and referenced only by `on`/`off`/`listenerCount`/
+ * `emit`, so widening it has no blast radius (checked 2026-09-25).
+ */
+export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
@@ -140,6 +149,12 @@ export class Session {
   private telnet: TelnetLayer | undefined;
   private error: string | undefined;
   private readonly listeners = new Map<SessionEvent, Set<() => void>>();
+  /**
+   * The DFT transfer in flight, if any. `undefined` means a `SF_TRANSFER_DATA`
+   * frame is unexpected — which x3270 also treats as a no-op rather than an
+   * error, tracing "(no transfer in progress)" (`ft_dft.c:97-100`).
+   */
+  private dft: DftTransfer | undefined;
   /**
    * Host records applied since connect. Monotonic; never reset.
    *
@@ -332,6 +347,60 @@ export class Session {
   private emit(event: SessionEvent): void {
     for (const fn of this.listeners.get(event) ?? []) fn();
   }
+
+  /**
+   * Start a DFT transfer. The caller drives it by letting host records arrive —
+   * there is nothing to send first, because DFT is host-driven: the host opens,
+   * asks and closes, and we answer.
+   *
+   * Replaces any transfer already in flight. Not refused, because the previous one
+   * can only still be here if it never completed, and a caller that has decided to
+   * start a new transfer has more current information than this method does.
+   */
+  startDftTransfer(transfer: DftTransfer): void {
+    this.dft = transfer;
+  }
+
+  /** The DFT transfer in flight, for a front end to read progress or cancel. */
+  get dftTransfer(): DftTransfer | undefined { return this.dft; }
+
+  /**
+   * Release a registered DFT transfer without telling the host anything.
+   *
+   * FOR THE LOSER OF A PROTOCOL RACE, which is the only caller. `Transfer()` registers a
+   * DFT transfer *before* priming the host, because a fast host's first `0xd0` arrives
+   * from inside `handleRecord` before any driver code runs again — so `handleTransferData`
+   * must already have one. When the host answers with a CUT frame instead, that
+   * registration has to go, or `answerRead` would keep replaying its retained frame at a
+   * host now running a CUT transfer.
+   *
+   * SENDS NOTHING, and that is the whole difference from `DftTransfer.cancel()`: that
+   * negotiates an end with a host that is mid-transfer, while this discards an engine the
+   * host never addressed. Synthesising an abort here would put bytes on the wire that no
+   * captured session contains — the same rule `transferRun.ts` gives for refusing to
+   * invent one from a timeout.
+   *
+   * Idempotent, so a driver need not track whether it has already committed.
+   */
+  cancelDftTransfer(): void {
+    this.dft = undefined;
+  }
+
+  /**
+   * Did we advertise DDM, i.e. offer the host the chance to choose DFT?
+   *
+   * FOR A DIAGNOSTIC MESSAGE, which is the only caller and the reason this is not just
+   * `opts.ddm` read at the call site: `opts` is private, and a front end driving a transfer
+   * has no other route to the flag. A host that speaks only DFT cannot CHOOSE DFT unless the
+   * Query Reply carried QCODE 0x95 (`queryreply.ts`, appended at `:1410` only when this is
+   * on), so "the transfer timed out and DDM was never advertised" is a different failure from
+   * "the transfer timed out", and forgetting `-ddm on` will be the commonest one.
+   *
+   * REPORTS WHAT WE OFFERED, NOT WHAT THE HOST DID WITH IT. The host may ignore the unit
+   * entirely -- VM/370's MECAFF does, and stays on CUT -- so this must not be read as "DFT is
+   * available". Defaults to false, like the flag.
+   */
+  get ddmAdvertised(): boolean { return this.opts.ddm === true; }
 
   isConnected(): boolean {
     return this.conn !== undefined;
@@ -611,6 +680,15 @@ export class Session {
     // to one host must never be reported to the next one. See `pendingAid`, and note this
     // is the same one-teardown-path-clears-it shape already fixed here for `e` and `dft`.
     this.pendingAid = AID.NONE;
+    // A DFT TRANSFER BELONGS TO THE CONNECTION CARRYING IT. Without this, a transfer
+    // registered on one connection stays registered on the next, and `answerRead`'s
+    // retained-frame replay would answer a host that knows nothing about it.
+    //
+    // FOURTH TIME THIS SHAPE HAS BEEN FIXED IN THIS FILE — `Session.e` once cleared only
+    // on the REJECT path, `IAC DONT TN3270E` once cleared the option but not
+    // `tn3270eNegotiated`, and the pending AID above is the third. One teardown path clears
+    // the state and another does not.
+    this.dft = undefined;
     // TN3270E state DIES WITH THE CONNECTION THAT NEGOTIATED IT. Until this line, `e`
     // was cleared only by the REJECT backoff below, so a second connection to a host
     // that never mentions option 40 inherited `phase: 'negotiated'` — and then
@@ -800,6 +878,9 @@ export class Session {
       }
       if (result.sfReply !== undefined) {
         this.answerQuery(result.sfReply);
+      }
+      if (result.transferData !== undefined) {
+        for (const payload of result.transferData) this.handleTransferData(payload);
       }
       // The only thing that OBSERVES the SA/MF counters. execute() bumps them
       // per record and nothing sums them, so without a line here a live run
@@ -1153,6 +1234,49 @@ export class Session {
   }
 
   /**
+   * Answer one DFT frame.
+   *
+   * A frame arriving with no transfer in flight is IGNORED, matching x3270's
+   * `ft_state == FT_NONE` early return (`ft_dft.c:97-100`). It must not throw: a
+   * host can send one at any time, and `handleRecord` rethrows non-protocol
+   * errors as our own bug, which drops the connection. That would make an
+   * unexpected frame a remotely-triggerable disconnect — the same shape as the
+   * gateway kill the keypad branch's task ordering created.
+   */
+  private handleTransferData(payload: Uint8Array): void {
+    const transfer = this.dft;
+    if (transfer === undefined) {
+      this.trace.note('SF_TRANSFER_DATA with no transfer in progress, ignored');
+      return;
+    }
+    let step;
+    try {
+      step = transfer.handle(payload);
+    } catch (err) {
+      // A malformed frame ends the TRANSFER, never the session -- the rule CUT
+      // already follows. Without this catch a DftFrameError would escape into
+      // handleRecord and drop the connection.
+      this.trace.note(`DFT frame rejected: ${err instanceof Error ? err.message : String(err)}`);
+      this.dft = undefined;
+      this.emit('transferEnd');
+      return;
+    }
+    // Trace BEFORE the reply, so the log reads in the order things happened.
+    // Without this the `unsupported` field would be dead code and an
+    // unimplemented request type would be an unexplainable stall with an empty
+    // log -- x3270 logs `Unsupported(0x%04x)` for exactly this reason.
+    if (step.unsupported !== undefined) {
+      this.trace.note(
+        `DFT request type 0x${step.unsupported.toString(16).padStart(4, '0')} not implemented`);
+    }
+    if (step.reply !== undefined) this.sendInbound(step.reply);
+    if (step.done !== undefined) {
+      this.dft = undefined;
+      this.emit('transferEnd');
+    }
+  }
+
+  /**
    * Send one inbound record, adding the TN3270E header when the session has one.
    *
    * THE HEADER IS PREPENDED AND THE WHOLE THING HANDED TO sendRecord, so it flows
@@ -1199,6 +1323,29 @@ export class Session {
    * keypress on its own schedule. See `pendingAid`.
    */
   private answerRead(kind: 'ReadBuffer' | 'ReadModified' | 'ReadModifiedAll'): void {
+    // DFT SHORT-CIRCUIT. x3270 does this at BOTH read sites -- ctlr.c:760 in
+    // ctlr_read_modified and ctlr.c:986 in ctlr_read_buffer -- returning
+    // immediately when the AID is AID_SF. (The design spec cites :761 and :987;
+    // the actual lines are one lower, verified.) Ours is one function, so one guard
+    // covers both, and the `all` variant comes free.
+    //
+    // Guarded on there being a RETAINED FRAME, not merely on a transfer being in
+    // flight: a DOWNLOAD retains nothing and must still answer an ordinary read.
+    //
+    // The retained BYTES are replayed rather than asking the engine for a frame.
+    // That is what makes a replay idempotent -- re-deriving would consume more
+    // source and hand the host the NEXT chunk, corrupting the file while both reads
+    // appeared to succeed.
+    //
+    // OMITTING THIS STALLS UPLOADS ONLY. A download never reaches here, so the
+    // whole receive path passes with this missing -- which is exactly why it is
+    // its own task, and why deleting it reddens only the two replay tests.
+    const retained = this.dft?.retainedFrame;
+    if (retained !== undefined) {
+      this.trace.note('Read Modified during a DFT upload: replaying the retained frame');
+      this.sendInbound(retained);
+      return;
+    }
     // THE PENDING AID, not a hardcoded 0x60: x3270 passes its `aid` global to all three
     // reads (ctlr.c:635, :641, :647). When no key has been pressed this IS 0x60, so the
     // no-keypress case is unchanged — what changes is that a poll after a keypress now

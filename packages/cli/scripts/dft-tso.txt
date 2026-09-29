@@ -1,0 +1,76 @@
+# DFT FILE TRANSFER against MVS 3.8j TK5, AT 43x80 -- the geometry CUT REFUSES.
+#
+# Run it:
+#   cd ~/git/tn3270 && node packages/cli/dist/main.js \
+#     -insecure -model 3278-4-E -ddm on < packages/cli/scripts/dft-tso.txt \
+#     > /tmp/dft-tso.log 2>&1
+#
+# JUDGE THIS BY THE TRACE, NOT BY WHETHER THE TRANSFER SUCCEEDED. Before a DFT parser
+# existed, a FAILING transfer was the positive result (see ddm-probe-tso.txt). That has
+# now INVERTED: both CUT and DFT end in a transferred file, so success alone proves
+# nothing about which protocol ran. The four things that make this a result:
+#   grep -c "FileTransferData" /tmp/dft-tso.log   # DFT frames: must be > 0
+#   grep -c "O_SF\|CutFrame"   /tmp/dft-tso.log   # CUT frames: must be 0
+#   grep "43 80"               /tmp/dft-tso.log   # geometry: must be 43x80
+#   cmp /tmp/rt-src.bin /tmp/tso-dft-back.bin     # the bytes, both directions
+# `FileTransferData(0x0012,38B)` is the trace line to look for -- the request type is
+# named since 2026-09-25; the probe could only report `unknownSF(0xd0,38B)`.
+#
+# -model 3278-4-E IS THE POINT, not a preference. CUT's frames.ts throws on any
+# geometry but 24x80, so a 43x80 transfer is only possible over DFT. A run that
+# succeeded at 24x80 would have proved nothing.
+#
+# Facts from stage 1, each of which invalidates the run if ignored: IND$FILE on TK5 is
+# a plain TSO command from READY (Rayborn's FFTP 2.0.5, no ISPF panel -- leave ISPF
+# with X); Recfm=variable NEVER fixed, because fixed pads and 249 bytes came back as
+# 320; TSO quoting is semantic, so unquoted DFTX.BIN gets the userid prepended while
+# 'HERC01.DFTX.BIN' is absolute; and TSO reports VB, not V.
+# Reaching LOGOFF is not optional: TSO holds the userid otherwise and the next run
+# draws IKJ56425I LOGON REJECTED, USERID IN USE.
+#
+# TraceText is REQUIRED. Trace(on) alone puts nothing in the log, and without it a
+# "no 0xd0 frames" reading is about our own logging rather than about the host.
+Trace(on)
+Connect(127.0.0.1:3271)
+Wait(3270Mode,20)
+Wait(Settle,15)
+String("HERC01")
+Enter
+Wait(Settle,25)
+String("CUL8TR")
+Enter
+Wait(Settle,30)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+ScreenText
+String("X")
+Enter
+Wait(Settle,25)
+ScreenText
+String("DELETE 'HERC01.DFTX.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=send,Host=tso,HostFile=DFTX.BIN,LocalFile=/tmp/rt-src.bin,Recfm=variable,Lrecl=1024)
+ScreenText
+String("LISTDS 'HERC01.DFTX.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=receive,Host=tso,HostFile='HERC01.DFTX.BIN',LocalFile=/tmp/tso-dft-back.bin,Exist=replace)
+ScreenText
+String("DELETE 'HERC01.DFTX.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+TraceText
+Trace(off)
+Quit

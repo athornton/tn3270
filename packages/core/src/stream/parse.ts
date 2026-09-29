@@ -346,6 +346,23 @@ function describeStructuredField(f: StructuredField): string {
         // formatting accident.
         + `,qcodes=[${qcodes}])`;
     }
+    case 'transferData': {
+      // THE REQUEST TYPE IS TRACED, not just the length, and that is the whole
+      // value of this line: the -ddm probe could only report
+      // `unknownSF(0xd0,38B)` and the type had to be decoded by hand afterwards to
+      // learn the frames were TR_OPEN_REQ. Naming it here is what lets a live run
+      // be judged BY TRACE, which is the rule for this feature -- after DFT works,
+      // a CUT transfer and a DFT transfer both end in a transferred file and only
+      // the trace distinguishes them.
+      //
+      // The type is read here rather than imported from ft/dftFrames.ts: parse.ts
+      // is the outbound stream decoder and must not depend on the transfer engine.
+      // A payload too short to hold one is traced as such rather than throwing --
+      // describeRecord promises never to throw.
+      if (f.payload.length < 2) return `FileTransferData(short,${f.payload.length}B)`;
+      const type = ((f.payload[0]! << 8) | f.payload[1]!).toString(16).padStart(4, '0');
+      return `FileTransferData(0x${type},${f.payload.length}B)`;
+    }
     case 'unknownSf':
       return `unknownSF(0x${f.sfid.toString(16).padStart(2, '0')},${f.data.length}B)`;
   }

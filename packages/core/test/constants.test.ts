@@ -235,6 +235,8 @@ describe('structured field constants', () => {
     // Read Partition format, p. 5-51 (pages.txt:6342-6356).
     expect(Sfid.READ_PARTITION).toBe(0x01);
     expect(Sfid.QUERY_REPLY).toBe(0x81);
+    // SF_TRANSFER_DATA, not in the manual: x3270's include/3270ds.h:133.
+    expect(Sfid.TRANSFER_DATA).toBe(0xd0);
     expect(PID_QUERY).toBe(0xff);
     expect(ReadPartitionType.QUERY).toBe(0x02);
     expect(ReadPartitionType.QUERY_LIST).toBe(0x03);

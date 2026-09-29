@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  buildQueryReply, buildNullQueryReply, buildReply, DEFAULT_CAPABILITIES,
+  buildQueryReply, buildNullQueryReply, buildReply, DEFAULT_CAPABILITIES, withDdm,
+  DFT_BUF_DEFAULT, DFT_BUF_MIN, DFT_BUF_MAX, boundDftBufferSize,
   type Capability,
 } from '../src/queryreply.js';
 import { AID, Qcode, ReqTyp, Sfid, XAH } from '../src/constants.js';
@@ -854,3 +855,57 @@ describe('a capability a plain Query does not return', () => {
 // Summary is no longer forced into a QCODE-List reply at all, because p. 6-96's
 // "QCODE List=X'80'" is Summary's own QCODE and not a REQTYP. Nothing replaced it:
 // there is no longer a substitution to get wrong.
+
+describe('the DDM advertisement, QCODE 0x95', () => {
+  // THE WHOLE FEATURE HAD NO UNIT TEST until 2026-09-25: zero test files mentioned
+  // DDM, so 362 insertions across 12 files rested on two committed probe scripts and
+  // an unchanged test count. `npm test` would have stayed green if the advertisement
+  // broke. These pin the bytes.
+
+  it('does not advertise DDM unless asked, which is what keeps hosts on CUT', () => {
+    // Default-off is not a preference: the client does not choose CUT or DFT, the
+    // HOST does, on seeing this unit. Every CUT live witness this project has was
+    // gathered without it, so a flipped default silently changes which protocol
+    // real hosts speak.
+    expect(DEFAULT_CAPABILITIES.map((c) => c.qcode)).not.toContain(0x95);
+  });
+
+  it('advertises DDM in ascending QCODE order when asked', () => {
+    const codes = withDdm(DEFAULT_CAPABILITIES, DFT_BUF_DEFAULT).map((c) => c.qcode);
+    expect(codes).toContain(0x95);
+    expect([...codes]).toEqual([...codes].sort((a, b) => a - b));
+  });
+
+  it('inserts DDM BEFORE Implicit Partition, not at the end', () => {
+    // 0x95 < 0xa6, so appending would break ascending order. Wire order is list
+    // order and matching x3270's ascending order is what makes captures comparable.
+    const codes = withDdm(DEFAULT_CAPABILITIES, DFT_BUF_DEFAULT).map((c) => c.qcode);
+    expect(codes.indexOf(0x95)).toBeLessThan(codes.indexOf(Qcode.IMPLICIT_PARTITION));
+  });
+
+  it('carries the buffer size as INLIM and OUTLIM, both big-endian', () => {
+    // do_qr_ddm (sf.c:899-906). 16384 = 0x4000, so a byte-order error would show as
+    // 0x0040 = 64 -- a plausible-looking small number, which is why both bytes are
+    // asserted rather than the pair being trusted.
+    const ddm = withDdm(DEFAULT_CAPABILITIES, 16384).find((c) => c.qcode === 0x95)!;
+    const body = ddm.params();
+    expect(body).toContain(0x40);
+    const at = body.indexOf(0x40);
+    expect([body[at], body[at + 1]]).toEqual([0x40, 0x00]);
+  });
+
+  it('clamps the advertised size to x3270\'s own bounds', () => {
+    // set_dft_buffersize (ft_dft.c:740-747). DftTransfer chunks by the SAME clamp,
+    // so the size we promise and the size we send are one number.
+    expect(boundDftBufferSize(1)).toBe(DFT_BUF_MIN);
+    expect(boundDftBufferSize(99999)).toBe(DFT_BUF_MAX);
+    expect(boundDftBufferSize(DFT_BUF_DEFAULT)).toBe(DFT_BUF_DEFAULT);
+  });
+
+  it('defaults the size when withDdm is given no explicit one', () => {
+    const a = withDdm(DEFAULT_CAPABILITIES).find((c) => c.qcode === 0x95)!.params();
+    const b = withDdm(DEFAULT_CAPABILITIES, DFT_BUF_DEFAULT).find((c) => c.qcode === 0x95)!
+      .params();
+    expect(a).toEqual(b);
+  });
+});

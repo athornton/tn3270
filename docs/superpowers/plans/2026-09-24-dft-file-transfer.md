@@ -17,12 +17,41 @@
 **2. OUR PAYLOAD OFFSETS ARE x3270's MINUS 3, AND THIS IS THE SINGLE MOST LIKELY BUG IN THIS PLAN.**
 x3270 passes `ft_dft_data` a pointer to the **start of the whole structured field** — `cp[0..1]` are the length, `cp[2]` is SFID `0xd0`, and its `struct data_buffer` overlays the field from byte 0 (`ft_dft.c:59-67`, `sf.c:177`). Our `parseStructuredFields` hands out `params`, which **excludes the two length bytes and the SFID** (`stream/sf.ts:140`). So every offset in `ft_dft.c` and in the design spec must be reduced by 3 for our code:
 
-| field | x3270 offset into `cp` | our offset into `payload` |
+| field | x3270 offset | our offset into `payload` |
 |---|---|---|
-| request type (16-bit) | 3 | **0** |
-| name, `len == 0x23` | 25 | **22** |
-| record size (16-bit), `len == 0x29` | 27 | **24** |
-| name, `len == 0x29` | 31 | **28** |
+| request type (16-bit) | 3, into the struct | **0** |
+| name, `len == 0x23` | `cp + 25` | **25** |
+| record size (16-bit), `len == 0x29` | `cp + 27` | **27** |
+| name, `len == 0x29` | `cp + 31` | **31** |
+
+**CORRECTED 2026-09-25 — THE OPEN'S THREE OFFSETS ARE *NOT* REDUCED BY 3, AND THE TABLE ABOVE SAID
+THEY WERE. It was a real bug, it shipped in Task 3, and its tests passed over it.** The -3 rule
+applies only where a field is read through `data_bufr`, which overlays the field from byte 0 — that
+is the request type and everything in a `Data Insert`. The `Open` is read through `cp`, and **`cp` is
+already at struct offset 3**: `GET16` does not advance its pointer (`include/3270ds.h:341-344` reads
+`*(ptr)` and `*(ptr+1)` and assigns nothing back), so the `cp` set to `data_bufr->sf_request_type` at
+`ft_dft.c:108` is still pointing there when `:114` calls `dft_open_request(data_length, cp)`.
+`offsetof(struct data_buffer, sf_request_type)` is **3** — compiled and printed, not read off — which
+is exactly where our payload starts. So `cp` and our `payload` are the same byte and the Open's
+offsets carry over unchanged.
+
+**The live-probe evidence validates the LENGTH subtraction only.** Field lengths `0x29`/`0x23`
+arriving as 38/32-byte payloads says nothing about offsets *inside* the payload; fact 2 above
+generalised it to them without measuring, and the phrase "confirmed against a real host" gave a
+derived claim the standing of a measured one.
+
+**Corroboration that the corrected offsets are right:** the 7-byte name ends exactly at the payload's
+last byte in both forms — 25+7 = 32 and 31+7 = 38, the two legal payload lengths. x3270's
+`memcpy(namebuf, name, 7)` (`:159`) consumes the field to its end, which is why `0x23` is the short
+form's length and not more. Under the old offsets the name ended 3 bytes short with filler after it.
+
+**Why no test caught it, which is the transferable part:** the test helper wrote the name at the same
+wrong offset the parser read it from. Helper and parser agreed with each other and not with the wire,
+so five tests passed over a real bug — and this is the *quiet* failure fact 2 itself warns about: a
+wrong name is not `FT:MSG`, so a MESSAGE frame silently starts a file transfer and the host's status
+text is written into the user's file as if it were data. The guard now is a test that builds a `0x23`
+Open **byte by byte from the struct layout**, owing nothing to the helper or to the parser's
+constants; mutation-verified by restoring offset 22, which reddens it.
 
 **This is confirmed against a real host, not just derived.** The `-ddm on` probe recorded
 `unknownSF(0xd0,38B)` and a second at `32B`; the declared field lengths are `0x29` = 41 and `0x23` = 35, and 41 − 3 = 38, 35 − 3 = 32. The lengths the host sends are field lengths (x3270's convention); the payload we receive is 3 bytes shorter.
@@ -389,10 +418,10 @@ function openPayload(len: 0x23 | 0x29, name: string, recsz = 0): Uint8Array {
   const p = new Uint8Array(len - 3);
   p[0] = 0x00;
   p[1] = 0x12;                       // TR_OPEN_REQ
-  const nameAt = len === 0x23 ? 22 : 28;
+  const nameAt = len === 0x23 ? 25 : 31;   // CORRECTED: x3270's offsets, NOT minus 3
   if (len === 0x29) {
-    p[24] = (recsz >> 8) & 0xff;     // recsz at x3270's +27
-    p[25] = recsz & 0xff;
+    p[27] = (recsz >> 8) & 0xff;     // recsz at x3270's cp+27 == our 27
+    p[28] = recsz & 0xff;
   }
   // Name is 7 bytes, space-padded, EBCDIC on the wire but ASCII in x3270's
   // comparison because the host sends it as ASCII -- see the note in the impl.
@@ -402,14 +431,14 @@ function openPayload(len: 0x23 | 0x29, name: string, recsz = 0): Uint8Array {
 }
 
 describe('parseDftOpen', () => {
-  it('accepts the short form, name at payload offset 22', () => {
+  it('accepts the short form, name at payload offset 25', () => {
     const open = parseDftOpen(openPayload(0x23, 'FT:DATA'));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBeUndefined();
     expect(open.isMessage).toBe(false);
   });
 
-  it('accepts the long form, record size at 24 and name at 28', () => {
+  it('accepts the long form, record size at 27 and name at 31', () => {
     const open = parseDftOpen(openPayload(0x29, 'FT:DATA', 1024));
     expect(open.name).toBe('FT:DATA');
     expect(open.recordSize).toBe(1024);
@@ -452,6 +481,12 @@ Expected: FAIL — `parseDftOpen` is not exported.
 - [ ] **Step 3: Implement**
 
 Append to `packages/core/src/ft/dftFrames.ts`:
+
+**AS BUILT (`b17e319`, `5345d34`): the five offset constants below use a literal `3` in this
+listing; the shipped code subtracts `X3270_HEADER_LEN` instead.** A quality review pointed out that
+a `3` repeated five times, tied to correctness only by prose, was about to be repeated again in
+`dft.ts` — so it became an exported constant. Tasks 5 and 6 now import it. Read the shipped
+`dftFrames.ts`, not this block.
 
 ```typescript
 /**
@@ -561,6 +596,22 @@ The name is compared as ASCII, which is correct and looks wrong: x3270 strcmps
 the raw bytes with no EBCDIC step, and TK5's own frames carry ASCII FT:DATA."
 ```
 
+**AS BUILT CORRECTION (2026-09-25), APPLIED AFTER THIS TASK WAS ALREADY COMMITTED AND GREEN.** The
+three `Open` offsets above were WRONG — 22/24/28 where the wire has 25/27/31 — and Task 3 shipped
+them in `b17e319` with five passing tests. Fixed in `c0cdfad`, with the derivation in this plan's
+fact 2 and in `dftFrames.ts`. The listing in step 3 has been corrected in place; if you are reading
+this plan to implement, the numbers above are now right.
+
+**The process lesson, which is the reusable part:** the defect was NOT catchable by the reviews this
+task had, because the test helper and the parser shared the same wrong constant. A spec review reads
+the plan (which was wrong), and a quality review reads the diff for internal consistency (which was
+consistent). What found it was **re-deriving the offsets from the C source while implementing a LATER
+task** — Task 5 needed `Data Insert`'s offsets, checking those meant reading `ft_dft_data`'s
+pointer handling, and the pointer handling is where the Open's `cp` is set. So: when a later task
+touches the same source function, re-read it rather than trusting the earlier task's transcription.
+See [[implementers-should-verify-not-trust-plans]] — this is that lesson applied to my own committed
+code rather than to a plan.
+
 ---
 
 ### Task 4: Reply builders
@@ -571,7 +622,7 @@ the raw bytes with no EBCDIC step, and TK5's own frames carry ASCII FT:DATA."
 
 Four replies, all fixed-shape. Byte counts come from x3270's `space3270out` calls.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dftFrames.test.ts`:
 
@@ -617,25 +668,34 @@ describe('DFT reply builders', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftFrames.test.ts`
 Expected: FAIL — the builders are not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Append to `packages/core/src/ft/dftFrames.ts`:
 
 ```typescript
 import { AID, Sfid } from '../constants.js';
 
-/** Big-endian 16-bit. */
-function u16(n: number): [number, number] {
+/**
+ * Big-endian 16-bit. **Exported because `ft/dft.ts` needs it in Task 6** — the
+ * alternative is a second copy in that file, and two hand-rolled big-endian
+ * writers that could disagree is exactly the kind of drift this project has been
+ * bitten by. Matches x3270's `SET16` macro (`include/3270ds.h:341-344`).
+ */
+export function u16(n: number): [number, number] {
   return [(n >> 8) & 0xff, n & 0xff];
 }
 
-/** Big-endian 32-bit, for the record number. */
-function u32(n: number): [number, number, number, number] {
+/**
+ * Big-endian 32-bit, for the record number. Exported for the same reason as
+ * `u16`. `>>>` not `>>`: a record number above 0x7fffffff would sign-extend and
+ * produce a negative high byte with `>>`.
+ */
+export function u32(n: number): [number, number, number, number] {
   return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
 }
 
@@ -687,19 +747,19 @@ export function buildDftError(failedRequest: number): Uint8Array {
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftFrames.test.ts`
 Expected: 21 tests PASS.
 
-- [ ] **Step 5: Mutation-check the length arithmetic**
+- [x] **Step 5: Mutation-check the length arithmetic**
 
 Change `body.length + 3` to `body.length`. Rebuild, rerun.
 Expected: **every** builder test fails on its length bytes. Confirm the edit landed, then revert.
 
 This matters because `+3` is the one place the AID-outside-the-count rule lives, and it is easy to "simplify".
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dftFrames.ts packages/core/test/dftFrames.test.ts
@@ -713,6 +773,42 @@ Error replies borrow the high byte of whatever request failed, which is why
 DftReply.ERROR is an 8-bit constant and looks like an odd one."
 ```
 
+**AS BUILT (2026-09-25).** Done inline, not subagent-driven, on remaining budget. All 25 tests in
+`dftFrames.test.ts` pass; suite 1986 -> **1996 in 79 files**, build/typecheck clean. Every byte was
+re-verified against `~/src/suite3270-4.5/Common/ft_dft.c` and `include/ft_dft_ds.h` before the code
+was written, and **all four reply byte-sequences the plan asserts are correct as written.** Six
+differences from the plan, none of which changed a wire byte:
+
+1. **The plan's mutation prediction OVERSTATES.** It says dropping `+3` fails "**every** builder
+   test". It fails **4 of 7**: the three that assert a `.slice()` past the length bytes still pass,
+   because the mutation only moves bytes 1-2. So the load-bearing guard is the four FULL-SEQUENCE
+   assertions and must be quoted that way. The edit was asserted to land (per fact 5) via a script
+   that aborts if the target string is absent.
+2. **`u32`'s `>>>` rationale was FALSE.** The plan says `>>` "would sign-extend and produce a
+   negative high byte". Measured across `0x80000000` and `0xffffffff`: `& 0xff` truncates either way
+   and the bytes are IDENTICAL. `>>>` is kept because the value is unsigned, but the comment now says
+   it is not load-bearing — an unfalsifiable claim in a comment is the same defect this repo already
+   recorded for `& 0xff` in `encodeHeader`.
+3. **Four citation ranges were off by one at the start.** `:180` is blank, so OpenAck is
+   **`:181-189`**; CloseAck is **`:680-687`** (`:679` is the `trace_ds(" Close")`), DataAck
+   **`:206-214`**, error **`:698-706`**. The plan's `:180-189`, `:681-687`, `:203-215`, `:697-708`
+   were each a line out. Verified line-by-line with `sed`, not by eye.
+4. **The import goes at the TOP.** The plan's step 3 says "append to `dftFrames.ts`" with the
+   `import` inside the appended block; the file had no imports at all, so a mid-file import would
+   have been legal TS but wrong style for this repo. Added after the module header comment.
+5. **`u16` was NOT shared with `queryreply.ts`**, which already has a module-private one. That one
+   range-checks and throws because a Query Reply's self-describing lengths corrupt the whole unit if
+   wrong; these are called with our own constants. Coupling two unrelated wire modules buys nothing.
+   Recorded in the doc comment so it is not "fixed" later.
+6. **Three tests added beyond the plan's six** (hence 25, not the predicted 21): the two writers are
+   pinned directly, and one test pins that `buildDataAck` holds **no state** — x3270 increments a
+   static `recnum` inside `dft_data_ack` (`:213`) and ours takes an argument, so the counter belongs
+   to Task 5. A builder owning it could not construct two acks for one record, which is what a
+   retransmit needs. That is a Task 5/6 design constraint, pinned here where it is cheap.
+
+`buildOpenAck` is sent for an `FT:MSG` open too — x3270 acknowledges at `:181` before testing
+`message_flag` at `:171-176`. Task 5 must not skip the ack on the message branch.
+
 ---
 
 ### Task 5: The state machine — download
@@ -723,7 +819,7 @@ DftReply.ERROR is an 8-bit constant and looks like an odd one."
 
 `DftTransfer` mirrors `CutTransfer`'s shape — single-use, an `outcome` once finished — but takes a payload and returns bytes rather than taking a `Screen` and returning an AID.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/test/dft.test.ts`:
 
@@ -913,12 +1009,12 @@ describe('DftTransfer, download (receive)', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dft.test.ts`
 Expected: FAIL — cannot resolve `../src/ft/dft.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `packages/core/src/ft/dft.ts`:
 
@@ -943,6 +1039,7 @@ Create `packages/core/src/ft/dft.ts`:
  */
 import {
   DftRequest,
+  X3270_HEADER_LEN,
   buildCloseAck,
   buildDataAck,
   buildDftError,
@@ -964,9 +1061,14 @@ const MSG = {
 /** `END_TRANSFER` (`ft_dft.c:53`): the host's own "transfer complete" message. */
 const END_TRANSFER = 'TRANS03';
 
-/** Offsets into a `Data Insert` payload, all x3270's less 3. */
-const DATA_LENGTH_AT = 8 - 3;   // 5: struct data_buffer.data_length
-const DATA_AT = 10 - 3;         // 7: struct data_buffer.data
+/**
+ * Offsets into a `Data Insert` payload, x3270's less the header it counts and we
+ * do not. **Use the imported `X3270_HEADER_LEN`, not a literal 3** — Task 3
+ * introduced it precisely so this second file could not drift from the first.
+ * Offsets are into `struct data_buffer` (`ft_dft.c:59-67`).
+ */
+const DATA_LENGTH_AT = 8 - X3270_HEADER_LEN;   // 5: data_buffer.data_length
+const DATA_AT = 10 - X3270_HEADER_LEN;         // 7: data_buffer.data
 /** The declared data length counts 5 bytes of header. `ft_dft.c:236`. */
 const LENGTH_OVERHEAD = 5;
 
@@ -1180,17 +1282,17 @@ export class DftTransfer {
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dft.test.ts`
 Expected: 12 tests PASS.
 
-- [ ] **Step 5: Mutation-check the length subtraction**
+- [x] **Step 5: Mutation-check the length subtraction**
 
 Remove `- LENGTH_OVERHEAD` (i.e. `const length = declared;`). Rebuild, rerun.
 Expected: the data tests fail with 5 extra bytes. Confirm the edit landed, then revert.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dft.ts packages/core/test/dft.test.ts
@@ -1207,6 +1309,64 @@ MESSAGE and must not start a file transfer, and a message frame ENDS the transfe
 CUT where we deliberately send immediately."
 ```
 
+**AS BUILT (2026-09-25).** Inline, not subagent-driven. **26 -> 27 tests in `dft.test.ts`; suite
+1998 -> 2025 in 80 files**, build/typecheck clean. The plan predicted 12 tests; 27 shipped. The design
+was right in every respect — `Close` does not complete, `FT:MSG` must not start a transfer, Set
+Cursor/Insert/unknown are silent, cancellation defers — and all of that is as written. What the plan
+lacked was found by reading `ft_dft.c` again rather than trusting the plan's prose.
+
+**THREE BEHAVIOURS MISSING FROM THE PLAN, in descending order of how badly each would have hurt:**
+
+1. **`TRANS03` IS A PREFIX MATCH, NOT EQUALITY.** `memcmp(msgp, END_TRANSFER, strlen(END_TRANSFER))`
+   at `:268` compares 7 bytes only. A real host sends `TRANS03` followed by its own wording, so
+   `text === END_TRANSFER` would report **every successful transfer as a failure whose error text is
+   the success message.** The plan's own listing used `startsWith`, so the code was right — but
+   nothing in the plan *said* why, and no test distinguished the two until one was added.
+   **This is the defect a synthetic-frame suite structurally cannot find**, because the frames the
+   tests build are the ones the plan imagined, and it would have surfaced only on TK5 in Task 10.
+2. **The completing frame carries BOTH a `reply` and a `done`.** `dft_data_ack()` is called at `:250`,
+   before the text is inspected at `:267`. Completing without replying leaves the host's final frame
+   unacknowledged.
+3. **An empty data frame is ACKNOWLEDGED, not an error.** x3270's `if (my_length > 0)` guard closes at
+   `:407`; `dft_data_ack()` is at `:410`, outside it.
+
+**TWO MUTATION CHECKS PASSED VACUOUSLY, WHICH IS THE PROCESS FINDING — fact 5 says a mutation must
+assert its target was found, and both of these DID; the target was found, the edit landed, and the
+tests still passed. Landing is necessary and not sufficient.**
+
+- **Step 5's own check, dropping `- LENGTH_OVERHEAD`, left 24 of 24 GREEN.** Every payload
+  `dataInsert` builds ends exactly where its data ends, and `subarray(7, 7+len)` **clamps at the
+  buffer end** — so reading 5 bytes too many returned the identical bytes. The plan asserts this
+  mutation makes "the data tests fail with 5 extra bytes"; it does not, with that helper.
+  `dataInsertPadded` now appends trailing junk so the over-read swallows something, and the mutation
+  reddens 2 tests **on content**. A host may pad a frame; the declared length is what says where data
+  stops, so this is a real-frame case and not a contrived one.
+- **Deleting `this.recordNumber = 1` left 26 of 26 green.** `recnum = 1` at `:178` runs on **every**
+  Open — it is the only assignment besides the two increments — so after the second Open the message
+  frame is acked as **record 1**, not as a continuation. The download sequence contains a second Open,
+  so this is observable; nothing asserted the number on that final ack. Now pinned.
+
+**The generalisable rule: a mutation that lands and changes nothing means the TEST is weak, not that
+the code is dead.** Both of these read as "this line is not load-bearing", which is the most
+misleading result available — and both lines were load-bearing.
+
+**Mutation-verified guards, four of them:** the `-5` subtraction (2 tests), the `TRANS03` prefix match
+(1), the `recnum` reset (1), and the `!messageFlag` exemption in the cancel guard that lets the host's
+final message still be read after a cancel (1).
+
+**One deviation from the plan's listing:** `MSG.USER_CANCEL` is **not** redeclared here. `transfer.ts`
+already has that exact string for CUT, so it is exported as `FT_MSG` and imported — one x3270 message,
+two engines reporting it, and two literals could drift into two different "canceled by user" texts.
+The rest of CUT's `MSG` stays private, being control-code names DFT has no use for.
+
+**Note for Task 7:** `payload` is a view into the inbound record's buffer, so `onDataInsert` copies
+with `Uint8Array.from` rather than retaining the subarray. If the plumbing hands us a buffer it then
+reuses, a retained view would alias it and corrupt every chunk but the last.
+
+**A test-layout inconsistency, left alone deliberately:** CUT's tests live in `test/ft/`, while Task 3
+put `dftFrames.test.ts` at `test/` top level and this plan specifies `test/dft.test.ts`. Moving them
+is churn on a branch mid-flight; noted so it is a decision rather than an oversight.
+
 ---
 
 ### Task 6: The state machine — upload, and the retained buffer
@@ -1217,7 +1377,7 @@ CUT where we deliberately send immediately."
 
 The `GET` path. It also produces the buffer the Read Modified hook re-sends, which is Task 8.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dft.test.ts`:
 
@@ -1337,12 +1497,12 @@ describe('DftTransfer, upload (send)', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dft.test.ts`
 Expected: FAIL — `bufferSize` is not on `DftOptions`, `retainedFrame` does not exist, `GET` is unhandled.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/core/src/ft/dft.ts`, add to the imports from `./dftFrames.js`: `DftError`, `DftHeader`, `DftReply`.
 
@@ -1455,14 +1615,35 @@ And the handler:
   }
 ```
 
-`dft.ts` now needs `AID`, `Sfid` and its own `u16`/`u32`. Rather than duplicate them, export the helpers from `dftFrames.ts` — add `export` to `u16` and `u32` there, and import them here along with `AID` and `Sfid` from `../constants.js`.
+Extend the two import statements at the top of `dft.ts`. Add `DftError`, `DftHeader`, `DftReply`, `u16` and `u32` to the existing `./dftFrames.js` import, and add a new one for the AID and SFID:
 
-- [ ] **Step 4: Run the test**
+```typescript
+import {
+  DftError,
+  DftHeader,
+  DftReply,
+  DftRequest,
+  X3270_HEADER_LEN,
+  buildCloseAck,
+  buildDataAck,
+  buildDftError,
+  buildOpenAck,
+  parseDftFrame,
+  parseDftOpen,
+  u16,
+  u32,
+} from './dftFrames.js';
+import { AID, Sfid } from '../constants.js';
+```
+
+**`u16`/`u32` are exported by Task 4**, so import them rather than writing a second copy — two hand-rolled big-endian writers that could disagree is exactly the drift `X3270_HEADER_LEN` exists to prevent. (An earlier draft declared them private and told you to reach back into Task 4's file to add `export`; that edit-back is gone. If you find them private, the Task 4 implementer missed it — export them there, not here.)
+
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dft.test.ts`
 Expected: 21 tests PASS.
 
-- [ ] **Step 5: Mutation-check the three numbers that would corrupt a file**
+- [x] **Step 5: Mutation-check the three numbers that would corrupt a file**
 
 (a) Change `UPLOAD_OVERHEAD` from 27 to 0. Expected: the buffer-size test fails (300 data bytes, not 273). Revert.
 (b) Change `chunk.length + 16` to `chunk.length + 17` — **the off-by-one this plan itself made in an earlier draft.** Expected: the data-frame test fails on `b.slice(1,3)`, reporting `0x14` where `0x13` is right. Revert.
@@ -1470,7 +1651,7 @@ Expected: 21 tests PASS.
 
 Confirm each edit landed before trusting its result. (b) is the one to take seriously: the SF length excludes the AID while the data offset includes it, so 16 and 17 are both "right" for different things and one draft of this plan used 17 for both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/ft/dft.ts packages/core/test/dft.test.ts
@@ -1485,6 +1666,45 @@ CutTransfer documents for retransmits, and here re-deriving would also
 double-count the offset. Task 8 is the hook that replays it."
 ```
 
+**AS BUILT (2026-09-25).** Inline. **44 tests in `dft.test.ts`; suite 2025 -> 2042 in 80 files**,
+build/typecheck clean. The plan's frame arithmetic was **right** — SF length 16 + data with the data at
+index 17 — and I re-derived it from `ft_dft.c:654-655` and `:584` before trusting it, because the plan
+itself records an earlier draft that used 17 for both.
+
+**ONE PLAN TEST WAS WRONG IN TWO INDEPENDENT WAYS**, and it is the one named "splits a source larger
+than the buffer":
+1. **It did not split anything.** A 100-byte source against `bufferSize: 300` is one 273-byte frame, so
+   the test asserted a single frame and then an EOF — the multi-frame path it was named for went
+   unexercised. Now 600 bytes over three frames (273 + 273 + 54).
+2. **It looked for the EOF header at index 8-10, where the error CODE lives.** The EOF frame is
+   `88 00 09 d0 46 08 | 69 04 | 22 00`: `TR_ERROR_HDR` is at 6-8 and `TR_ERR_EOF` at 8-10. This was
+   the only failing test after implementing, so the plan's own expectation is what caught it — but it
+   would have been "fixed" by changing the implementation if I had trusted the test over the frame I
+   had just verified byte by byte against the C.
+
+**BUFFER SIZE IS CLAMPED THROUGH `queryreply.ts`'s EXISTING `boundDftBufferSize`, not the plan's new
+bare `DFT_BUF_DEFAULT` constant.** `DFT_BUF_DEFAULT`, `DFT_BUF_MIN`, `DFT_BUF_MAX` and the clamp were
+already there for the DDM advertisement (`9f92816`), and **reusing them is a correctness requirement,
+not tidiness: the size we ADVERTISE to the host and the size we CHUNK by must be the same number.**
+The plan's version also had `Math.max(1, ...)` papering over a small `bufferSize`, which would have
+produced 1-byte frames where x3270 clamps to 256. No import cycle — `queryreply.ts` imports only
+`constants` and `palette`.
+
+**Five behaviours added beyond the plan's tests, each because a mutation showed the plan's set did not
+pin it:** the 16-vs-17 relationship checked across three sizes rather than one instance; the EOF frame
+distinguished from an ABORT frame, which differ by **one byte** (`0x2200` vs `0x0100`) and are
+otherwise identical for 8 bytes; record numbers 1/2/3 across successive frames; the source delivered
+**byte for byte** across frames from a positional pattern, so a dropped or reordered chunk shows; and
+`offset` NOT advancing on EOF, since `transferred` feeds a progress display.
+
+**Five mutations verified, all reddening:** SF length 17-not-16 (2 tests), `UPLOAD_OVERHEAD` 22-not-27
+(3), dropping the `+5` on the inner data length (2), not retaining the EOF frame (1), never advancing
+`offset` (7).
+
+**For Task 8:** `retainedFrame` covers BOTH branches deliberately — x3270's savebuf copy at `:657-663`
+is after the if/else, so a Read Modified after EOF re-sends the EOF and not the last data frame, which
+the host already has.
+
 ---
 
 ### Task 7: Plumbing — the payload reaches the engine
@@ -1496,7 +1716,7 @@ double-count the offset. Task 8 is the hook that replays it."
 - Modify: `packages/core/src/index.ts`
 - Create: `packages/core/test/dftSession.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/test/dftSession.test.ts`:
 
@@ -1537,12 +1757,12 @@ describe('parseStructuredFields, SF_TRANSFER_DATA', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: FAIL — `kind` is `'unknownSf'`.
 
-- [ ] **Step 3: Add the variant**
+- [x] **Step 3: Add the variant**
 
 In `packages/core/src/stream/sf.ts`, add to the `StructuredField` union (before `unknownSf`):
 
@@ -1569,12 +1789,12 @@ And in the dispatch, before the `unknownSf` fallback:
     }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: 3 tests PASS.
 
-- [ ] **Step 5: Surface it from `execute`**
+- [x] **Step 5: Surface it from `execute`**
 
 In `packages/core/src/stream/execute.ts`, add to the result interface beside `sfReply` (line 160):
 
@@ -1598,7 +1818,7 @@ In the `WriteStructuredField` case, beside the `readPartition` arms:
         }
 ```
 
-- [ ] **Step 6: Route it in `Session`**
+- [x] **Step 6: Route it in `Session`**
 
 In `packages/core/src/session.ts`, add the field:
 
@@ -1677,13 +1897,13 @@ Then the handler:
   }
 ```
 
-Import `DftTransfer` at the top, and add `transferEnd` to the event map if the emitter is typed.
+Import `DftTransfer` at the top, and **add `transferEnd` to `SessionEvent`** (`session.ts:126`), which is a typed union — `'screen' | 'connect' | 'disconnect' | 'alarm'` — so `emit('transferEnd')` will NOT compile until you do. Checked 2026-09-24: `SessionEvent` has **no consumers outside `session.ts`** (it types `on`, `off`, `listenerCount` and `emit` and nothing else references it), so widening it has no blast radius and needs no exhaustive-switch updates.
 
-- [ ] **Step 7: Export the public surface**
+- [x] **Step 7: Export the public surface**
 
 In `packages/core/src/index.ts`, export `DftTransfer`, `DftOptions`, `DftStep` from `./ft/dft.js` and the constants plus `DftFrameError` from `./ft/dftFrames.js`, following the pattern the CUT exports already use.
 
-- [ ] **Step 8: Write the plumbing test**
+- [x] **Step 8: Write the plumbing test**
 
 Append to `packages/core/test/dftSession.test.ts`:
 
@@ -1739,12 +1959,12 @@ describe('Session DFT plumbing', () => {
 against is a dropped connection, and `handleRecord` catches and closes rather than propagating
 in some paths — so "did not throw" alone would pass against the very bug.
 
-- [ ] **Step 9: Run everything**
+- [x] **Step 9: Run everything**
 
 Run: `cd ~/git/tn3270 && npm run build && npm run typecheck && npm test`
 Expected: build and typecheck clean; all tests pass, count up from 1971.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add packages/core/src packages/core/test/dftSession.test.ts
@@ -1765,6 +1985,52 @@ transferData is an ARRAY: one WriteStructuredField can carry several fields and
 taking only the first would lose data silently."
 ```
 
+**AS BUILT (2026-09-25).** Inline. **16 tests in `dftSession.test.ts` + 2 in `parse.test.ts`; suite
+2042 -> 2060 in 81 files**, build/typecheck clean. The plan's five source edits were right as
+specified; two things it did not predict.
+
+**1. THE UNION VARIANT HAD BLAST RADIUS, AND THE PLAN CHECKED THE WRONG UNION.** Step 6 verifies that
+`SessionEvent` has no consumers outside `session.ts` — true, and it is not exported from `index.ts`
+either. But adding the variant to **`StructuredField`** broke `describeStructuredField` in
+`stream/parse.ts`, an exhaustive switch whose return type makes a missing kind a **compile error**.
+That is its documented purpose: its comment says a variant added by a later stage "would silently
+vanish from the trace". So the type system did the plan's job for it. **Adding a variant to a
+discriminated union in this repo means searching for exhaustive switches over it, not only for
+consumers of the adjacent type the plan happened to name.**
+
+**The upside is large and was not in the plan at all: DFT frames now carry their REQUEST TYPE in the
+trace** — `FileTransferData(0x0012,38B)` where the `-ddm` probe could only report
+`unknownSF(0xd0,38B)`, with the types decoded by hand afterwards. **This is what makes Task 10
+judgeable by trace**, which is fact 4's rule: after DFT works, a CUT transfer and a DFT transfer both
+end in a transferred file and only the trace distinguishes them. Pinned by two tests, one of which
+reproduces the probe's own `0x29` frame.
+
+**2. THE NO-TRANSFER GUARD WAS UNFALSIFIABLE AS THE PLAN SPECIFIED IT.** Replacing
+`if (transfer === undefined) { ... return; }` with `this.dft!` left **all 13 tests green** — the
+`catch` immediately below swallows the resulting `TypeError`, and the observable outcome is identical:
+no reply, still connected, transfer cleared. The two paths differ **only in the trace**, and the
+messages are not interchangeable to whoever reads the log ("no transfer in progress" is a host doing
+something unexpected; "DFT frame rejected" is a frame we could not parse). Collapsing them would send
+a future live-run diagnosis down the wrong path. The trace is now what is asserted, and both
+directions are mutation-verified. **This is the third vacuous mutation on this branch and they share a
+shape: the guard's effect was invisible because a LATER guard covered the same input.**
+
+**Also note the plan's own step-8 warning was right and insufficient.** It says to assert
+`isConnected()` and not merely that nothing threw — correct — but its two tests assert only that
+nothing broke. **Neither would have failed if no reply ever reached the host.** Added: an OpenAck
+asserted on the wire, a whole download driven through `FakeConnection` (Open, data, Close,
+Open(`FT:MSG`), `TRANS03`) proving one transfer survives its own Close **in situ**, an upload
+answering a `Get`, Set Cursor staying silent through the plumbing, `transferEnd` firing once, and
+several frames from ONE record both being delivered.
+
+**Four mutations verified:** the no-transfer guard (trace), the malformed-frame catch (2 tests),
+keeping only the first field of a record (1), and `payload: params` aliasing the inbound buffer
+instead of copying (1).
+
+**One deviation:** the `transferData` arm in `execute.ts` sits **before** the
+`structuredFieldsIgnored++` fallback, so a DFT frame is not counted as ignored — it is answered, and a
+counter saying otherwise would misreport a working transfer in the trace.
+
 ---
 
 ### Task 8: The Read Modified hook
@@ -1775,7 +2041,7 @@ taking only the first would lose data silently."
 
 The spec's warning: **omitting this stalls uploads only; downloads pass.** That is the shape of defect that ships.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/test/dftSession.test.ts`:
 
@@ -1838,12 +2104,12 @@ acting** — without that, a broken Task 6 would make all three pass against `un
 third test asserts the read was *answered*, not merely that it was not a replay: `not.toBe(0x88)`
 alone passes when nothing is sent at all, which is the stall this hook exists to prevent.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: FAIL — the screen read is sent instead of the retained frame.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/core/src/session.ts`, at the top of `answerRead`:
 
@@ -1873,18 +2139,18 @@ In `packages/core/src/session.ts`, at the top of `answerRead`:
   }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cd ~/git/tn3270 && npm run build && npx vitest run packages/core/test/dftSession.test.ts`
 Expected: all PASS.
 
-- [ ] **Step 5: Mutation-check, and check it the right way round**
+- [x] **Step 5: Mutation-check, and check it the right way round**
 
 Delete the whole short-circuit. Rebuild and run the **full** suite.
 Expected: the two replay tests fail and **every download test still passes** — which is the point. Record that asymmetry in the commit: it is the evidence that this hook needed its own test rather than being covered incidentally.
 Revert.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/session.ts packages/core/test/dftSession.test.ts
@@ -1903,13 +2169,37 @@ replay tests and leaves EVERY download test green. Omitting it would have stalle
 uploads only."
 ```
 
+**AS BUILT (2026-09-25).** Inline. **21 tests in `dftSession.test.ts`; suite 2060 -> 2065 in 81
+files**, build/typecheck clean. The plan was right in every particular here, including its correction
+of the spec's citations — `ctlr.c:760` and `:986` verified exactly, the spec's `:761`/`:987` each one
+line late.
+
+**THE ASYMMETRY THE PLAN ASKED FOR IS MEASURED, and it is the whole justification for this task
+existing:** deleting the short-circuit fails **2 tests and leaves 2063 green**, every download test
+among them. An upload-only stall is invisible to the entire receive suite.
+
+**Two tests added beyond the plan's three:**
+1. **A replay must be IDEMPOTENT.** Two reads in a row produce identical bytes and leave
+   `transferred` unchanged. This pins the decision to replay retained BYTES rather than ask the engine
+   for a frame — re-deriving would consume more source and hand the host the NEXT chunk, corrupting
+   the file while both reads appeared to succeed. Nothing in the plan's set distinguished those.
+2. **An ordinary read with NO transfer at all**, which is the commonest case in the product and the
+   one a wrong guard (`this.dft !== undefined` instead of `retainedFrame !== undefined`) would break
+   for every user who never transfers a file. The plan's third test covers a download in flight but
+   not the no-transfer case.
+
+**The plan's own two cautions were both right and worth keeping:** `uploading()` asserts
+`retainedFrame` is defined **before** acting, so a broken Task 6 cannot make these pass against
+`undefined`; and the no-replay test asserts the read was *answered*, since `not.toBe(0x88)` alone
+passes when nothing is sent — which is the stall being guarded against.
+
 ---
 
 ### Task 9: Blast radius — measure it, do not estimate it
 
 **Files:** none modified. This task produces evidence and a doc note.
 
-- [ ] **Step 1: Confirm `-ddm off` still puts no `0x95` on the wire**
+- [x] **Step 1: Confirm `-ddm off` still puts no `0x95` on the wire**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/core/test/queryreply.test.ts`
 
@@ -1929,12 +2219,12 @@ it('advertises DDM in ascending QCODE order when asked', () => {
 
 **Mutation-check both**: the spec warns the established failure mode here is a test that passes vacuously because every other test in the file already supplies the value under test. Remove the `ddm` filter in `answerQuery` and confirm the first test still passes (it tests the constant, not the session) — then add a session-level test if that gap is real.
 
-- [ ] **Step 2: Run the conformance and golden suites**
+- [x] **Step 2: Run the conformance and golden suites**
 
 Run: `cd ~/git/tn3270 && npx vitest run packages/cli/test/conformance.test.ts packages/cli/test/golden.test.ts`
 Expected: PASS, untouched. Record the numbers.
 
-- [ ] **Step 3: Run the playback oracle**
+- [x] **Step 3: Run the playback oracle**
 
 ```bash
 source /opt/lsst/software/stack/loadLSST.bash >/dev/null 2>&1; hash -r
@@ -1944,7 +2234,7 @@ cd ~/git/tn3270 && python3 packages/cli/scripts/drive-playback.py
 Expected: **10 of 10**. The reference binaries are at
 `~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/{s3270,playback}/` — under `obj/`, **not** beside their source.
 
-- [ ] **Step 4: Run the full gate**
+- [x] **Step 4: Run the full gate**
 
 ```bash
 cd ~/git/tn3270 && npm run build && npm run typecheck && npm test
@@ -1961,7 +2251,7 @@ Expected: typecheck clean; `pty-smoke` 12/12; `drive-e` 10/10; `shot` 3/3; `keys
 
 If you ran `git checkout` at any point, run `npx tsc --build --force packages/gui` first or the GUI staleness guard reddens on mtimes alone.
 
-- [ ] **Step 5: Commit the evidence**
+- [x] **Step 5: Commit the evidence**
 
 ```bash
 git add -A
@@ -1973,9 +2263,159 @@ A default-off capability having zero blast radius is the claim, and confirming i
 is the test."
 ```
 
+**AS BUILT (2026-09-25).** Inline. **Suite 2065 -> 2075 in 81 files.** The plan's step-1 warning was
+exactly right and the gap it predicted was real and large.
+
+**THE `-ddm` DEFAULT-OFF GUARD WAS COMPLETELY UNFALSIFIED.** Replacing
+`this.opts.ddm ? withDdm(...) : DEFAULT_CAPABILITIES` with an unconditional `withDdm(...)` left **all
+2071 tests green**. That is not a coverage nicety: advertising `0x95` changes **which protocol a live
+host speaks** — TK5 offers DFT on seeing it and stays on CUT without it — so the unfalsified line was
+what stood between a green suite and every CUT live witness in this project being invalidated. Ten
+tests now cover it, **four at SESSION level**, and the mutation reddens two. Constant-level tests
+could not have done it: they exercise `DEFAULT_CAPABILITIES` and `withDdm`, not the session's choice
+between them. **Fourth vacuous-guard finding on this branch.**
+
+**THE REPLY'S REAL SHAPE, measured with a direct probe after two wrong guesses of mine:** a plain
+Query reply is **5 units** and `-ddm on` makes it **6** —
+`0x80(10) 0x81(23) 0x86(38) 0x87(15) 0x95(12) 0xa6(17)` against
+`0x80(9) 0x81(23) 0x86(38) 0x87(15) 0xa6(17)`. **DDM does TWO things**, both now pinned: its own
+12-byte unit inserted BEFORE Implicit Partition (`0x95 < 0xa6`, so ascending order holds) and **one
+extra byte in the Summary's qcode list**. All other units byte-identical.
+
+**TWO TEST-WRITING TRAPS, both of which first presented as product bugs — worth carrying to any future
+session-level wire test:**
+1. **A Read Partition's `0xff` PID must be written `IAC IAC`.** A lone `0xff` is consumed by the
+   telnet layer and the record never arrives. All four cases failed with **nothing on the wire**,
+   which reads like a broken product rather than a malformed test input.
+   `session.test.ts:859` already spells it correctly.
+2. **Query Reply payloads are full of `0xff`** (Usable Area flags, Highlighting pairs) **and arrive
+   DOUBLED.** A walk over the raw bytes reads a doubled pair as part of a length — mine reported a
+   unit of length **65535**, and the true 5-unit structure only appeared once `replyUnits` undoubled.
+   Relatedly: **parse the structure, do not grep it.** An earlier version of one assertion used
+   `indexOf(0x95)` and matched a coincidental byte inside another unit's payload.
+
+**BLAST RADIUS, MEASURED:** build/typecheck clean, **2075 tests in 81 files**, conformance + golden
+**12/12 untouched**, `drive-playback.py` **10/10** against real s3270, `pty-smoke.py` **12/12**,
+`drive-e.py` **10/10**, `shot.mjs` **3/3**, `keys.mjs` **18 chords/16 actions**, `clicks.mjs`
+**9 buttons/10 actions**, `browser-shot.mjs` **2/2**, `browser-keys.mjs` **13 chords/11 actions**.
+
+**Two plan corrections:** step 2's paths are wrong — `conformance.test.ts` and `golden.test.ts` are in
+**`packages/core/test`**, not `packages/cli/test`. And `packages/gui/scripts/xvfb.mjs` is a **library**
+exporting `ensureDisplay()`, not a runnable script; the harnesses call it themselves, so there is
+nothing to run first. Unsetting `HTTP_PROXY`/`no_proxy` before the Electron harnesses remains
+necessary.
+
 ---
 
 ### Task 10: Live run against MVS/TSO at 43x80
+
+> **DONE, 2026-09-29. THE BLOCKER BELOW IS CLEARED and the run it describes has happened.**
+>
+> **AS BUILT.** The blocker was real and its diagnosis was right: nothing selected DFT. It was
+> answered by a spec and a nine-task plan of its own —
+> `docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` (user-approved
+> 2026-09-28) and `docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md`. Read those for
+> the design; this note records only that this task is no longer blocked and what the run measured.
+>
+> **WHAT SELECTED DFT: the host did, exactly as question 1 below guessed.** The up-front geometry
+> gate is gone from both drivers; both build a `CutTransfer` AND a `DftTransfer` over one source
+> buffer, register the DFT one *before* priming the host, and commit to whichever protocol declares
+> itself first. `looksLikeCutFrame` (new, in `core/src/ft/detect.ts`) is the non-throwing detector
+> that makes deciding possible at a geometry CUT cannot answer for.
+>
+> **THE TRACE EVIDENCE, judged by trace and not by the transferred file** — full detail and commands
+> in `docs/live-testing.md` *Executed so far*:
+> **11 `FileTransferData` frames, ZERO CUT frames, at 43x80, 249 bytes byte-identical in both
+> directions.** The request types decode as the protocol predicts (Open `0x0012`, Get `0x4611`, Data
+> Insert `0x4704`, Set Cursor `0x4511`, Close `0x4112`) where this plan's own probe could only say
+> `unknownSF(0xd0,38B)`. Our DDM advertisement is witnessed on the wire too: `00 0c 81 95` in answer
+> to TK5's `ReadPartition`.
+>
+> **TWO THINGS THE RUN FOUND THAT NO PLAN PREDICTED, both about what happens AFTER a successful DFT
+> transfer, and both matter to Tasks 11-12 which consume this trace:**
+> 1. **TK5 leaves the screen at 24x80 with the keyboard LOCKED once a DFT transfer completes**, so
+>    the next `String()` is refused with `input inhibited`. Measured twice, once per direction, at
+>    identical points. The transfers still succeeded; what broke was the script's sequencing after
+>    them. **`dft-tso.txt` needs a `Wait(Unlock)` after each `Transfer()`** before it can be trusted
+>    to run end to end.
+> 2. **Because of (1) the script never reached its `LOGOFF`** — the trap its own header warns about.
+>    The userid was released when the connection dropped and the leftover dataset was deleted by a
+>    follow-up run, both verified rather than assumed.
+>
+> **Questions 2 and 4 are answered; question 3 is NOT, and is still open work.** The 24x80 refusal
+> stays reachable, now raised at the decision point rather than up front (question 2), and the choice
+> lives in `frontend/src/transferRun.ts`, shared by three front ends, plus `cli/src/runner.ts` for the
+> blocking idiom (question 4). **`Transfer()`'s `BufferSize` keyword is still parsed and ignored and
+> `SessionOptions.dftBufferSize` is still set by nothing** (question 3) — one line each, and they must
+> agree, since the advertised and chunking sizes are one number.
+>
+> ---
+>
+> **THE ORIGINAL BLOCKER NOTE, 2026-09-25, kept because its reasoning is the record of how the gap
+> was found and because question 3 is still live:**
+>
+> **BLOCKED, 2026-09-25 — AND THE BLOCKER IS A GAP IN THIS PLAN, NOT IN THE CODE.**
+> The run was attempted against TK5 at 43x80 with `-ddm on`. It reached the host and logged on
+> cleanly, then **`Transfer()` refused before sending anything**: *"CUT file transfer needs a 24x80
+> screen; this session is 43x80"* (`packages/cli/src/runner.ts:454`). **Zero `FileTransferData`
+> frames.**
+>
+> **NOTHING SELECTS DFT.** `Session.startDftTransfer` has no caller outside tests, and `runner.ts`
+> constructs a `CutTransfer` unconditionally. Tasks 1-9 build the engine, the wire plumbing and the
+> Read Modified hook — all of it verified — but **no task in this plan wires the `Transfer()` action
+> to choose DFT over CUT.** Tasks 11 and 12 both consume Task 10's trace, so the entire tail is
+> blocked behind work nothing specifies. This is the "plumbing built, switch never thrown" shape, and
+> it survived nine tasks because every test that exercises the engine calls `startDftTransfer`
+> itself — **the tests supply the very call the product is missing.** Compare
+> [[harness-passes-on-stale-artifacts]]: a suite can be green over a product that cannot run.
+>
+> **A NEW TASK IS NEEDED BEFORE THIS ONE, and it needs decisions this plan never poses:**
+> 1. **What chooses DFT?** Geometry alone is wrong — a 24x80 session on a DFT host should still work.
+>    x3270 does not choose at all: the HOST does, and `ft_running(true/false)` merely *reports* which
+>    protocol arrived (`ft_cut.c:440`, `ft_dft.c:175`, read once at `ft.c:556`). So the honest design
+>    is probably to start a transfer that can be EITHER, and let the first inbound frame decide —
+>    which means `runner.ts`'s poll loop cannot assume CUT frames.
+> 2. **What if the host never offers DFT and the screen is not 24x80?** Today that is the refusal
+>    above, and it is correct; it must stay reachable.
+> 3. **Does `Transfer()`'s `BufferSize` keyword now feed `DftOptions.bufferSize`?** It is parsed and
+>    ignored today, and `SessionOptions.dftBufferSize` is set by nothing. Wiring both is a
+>    one-liner each and they must agree, since the advertised and chunking sizes are one number.
+> 4. **All four front ends** reach transfers now (CLI action, TUI overlay, and the GUI/web forms via
+>    `frontend/src/transferForm.ts`), so the choice belongs wherever they already share code, not in
+>    `runner.ts` alone.
+>
+> **UPDATE: STEP 5, THE VM CONTROL, IS DONE — 2026-09-25.** The user rebuilt VM/370 and it is back on
+> `localhost:3270`. `ddm-probe-vm.txt` run twice with `-ddm on`/`-ddm off` as the only variable:
+> **VM chose CUT both ways, 249 bytes byte-identical each time, ZERO `0xd0` frames**, and our DDM unit
+> provably on the wire with `-ddm on` (**4** occurrences of `00 0c 81 95 00 00 40 00 40 00 01 01`,
+> against **0** with it off). **So `-ddm on` does not break a CUT host** — that question is closed.
+> State was proven first (`QUERY DISK A` → `Ready;`, not `?CP:`) and both runs reached `LOGOFF AT`.
+> Details, plus two traps, in `docs/live-testing.md` *Executed so far*.
+>
+> **It also produced a live confirmation of a Task 5 decision that no unit test could have given:**
+> MECAFF answers **`TRANS03 - File transfer complete`** — host text appended — which is exactly why
+> the engine matches `TRANS03` as a **prefix**. An equality test would have reported this successful
+> transfer as a failure whose error text was the success message.
+>
+> **CORRECTED: VM IS A 43x80 HOST AGAIN.** An earlier version of this note said VM was 24x80-only;
+> that was a **sampling error of mine**, not a property of the host — the measurement read the last
+> status line from a run whose `Wait(Settle)` was too short and so captured the state before the
+> host's EWA resize. Plain **`-model 3278-4-E` reaches 43x80 with 41 fields** (EWA `7e` on the wire,
+> `24 80` → `43 80` at 0.505s), and the user independently ran a TUI mod-4 session at 43 lines.
+> `@MOD4` does still select nothing (`@MOD2` works; `@MOD4`/`@01C0`/`@02C0` do not negotiate), so the
+> rebuilt conf groups its 3278-4s differently — **but that blocks nothing, because no selector is
+> needed to get 43 rows.**
+>
+> **So BOTH hosts can now host a 43x80 DFT test, and the only thing still missing for Steps 1-4 is
+> the DFT selection work above.** TK5 remains the reference host (it is the one that offers DFT); VM
+> is the CUT control and Step 5 is done.
+>
+> **What the attempt did establish:** `-ddm on` reaches a live host without disturbing logon at
+> 43x80, and the geometry refusal fires BEFORE the host is told to start — so the failed run left no
+> half-open transfer on TSO and `LOGOFF` completed. `packages/cli/scripts/dft-tso.txt` is committed,
+> is correct as written, and carries its own judging criteria; it is the run to repeat once a front
+> end can start a DFT transfer.
+
 
 **Files:**
 - Create: `packages/cli/scripts/dft-tso.txt`

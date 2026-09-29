@@ -1,10 +1,202 @@
-# Handoff — state as of 2026-09-24
+# Handoff — state as of 2026-09-29
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-09-24
+## START HERE — NEXT ACTION, end of 2026-09-29
+
+**THE TRANSFER-PROTOCOL-SELECTION BRANCH IS COMPLETE AND UNMERGED. THE NEXT ACTION IS THE MERGE
+DECISION, WHICH IS THE USER'S.** Tasks 1-8 of
+`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` are done and pushed; Task 9's docs
+are written and only its Step 4, the merge, remains. Read that plan's **PROGRESS/AS BUILT** section
+before anything else — it indexes nineteen plan defects and four of mine, and it is written for
+exactly this cold start.
+
+**State: branch `dft-file-transfer` at `e202892`+, PUSHED and in sync, tree clean, no stashes. `main`
+at `43d1a85`, ALSO PUSHED. 2121 tests in 82 files, build and typecheck clean.** 2026-09-29 ran to
+about $1770 of a $1900 cap; the 30-day budget resets 2026-10-01.
+
+**DFT FILE TRANSFER IS LIVE — the thing this whole branch existed to produce.** Against MVS 3.8j TK5
+at **43x80**, a geometry CUT refuses outright: **11 `FileTransferData` frames, ZERO CUT frames, 249
+bytes byte-identical in both directions**, with the request types decoding as the protocol predicts
+and our DDM unit (`00 0c 81 95`) witnessed on the wire. Until this branch,
+`Session.startDftTransfer` had no caller outside tests and no DFT frame had ever reached a wire.
+**The VM/370 CUT control passes unregressed.** Both runs and their qualifications:
+`docs/live-testing.md` *Executed so far*.
+
+**READ ONE QUALIFICATION BEFORE QUOTING THE CONTROL: VM issued no Read Partition on that run, so we
+never sent it the DDM unit** (`grep -c "81 95"` is 0 there against 36 on TK5's). The control proves
+the CUT path is unregressed; it does NOT prove VM declines DDM. That second claim is settled by the
+2026-09-25 `ddm-probe-vm.txt` runs, which did get the unit onto the wire. **So whether a host asks
+for a Query at all varies between sessions — check that grep before reading any run as evidence
+about DDM.**
+
+**BEFORE MERGING: `main` carries ONLY the pending-AID fix and this branch carries the graphics docs;
+the two hold different halves of 2026-09-28's work deliberately. CHECK `git merge-base`** — branching
+off the wrong base once dragged 44 unfinished DFT commits onto `main` (caught by a two-commit branch
+reporting 46 merged; reversed, never pushed). **Re-run the full gate ON THE MERGE COMMIT**, this
+project's standing rule, and `--no-ff` is how the last five features merged.
+
+**WHAT REMAINS AFTER THE MERGE, in the order the work suggests:**
+1. **DFT plan Tasks 11-12**, which consume Task 10's trace and are now unblocked (`/tmp/dft-tso.log`,
+   but re-run rather than trusting a temp file).
+2. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
+   nothing** — one line each, and **they must agree**, since the advertised and chunking sizes are
+   one number. This is the one open question of DFT Task 10's four.
+3. **`dft-tso.txt` needs a `Wait(Unlock)` after each `Transfer()`.** Measured: TK5 leaves the screen
+   at 24x80 with the keyboard LOCKED after a successful DFT transfer, so the next `String()` is
+   refused with `input inhibited` and the script never reaches its `LOGOFF`. The transfers succeed;
+   the sequencing after them does not.
+4. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
+   are renderers rather than rewrites.
+
+## The 2026-09-28 state, kept for the work below
+
+**EVERYTHING FROM HERE TO THE NEXT `##` HEADING WAS WRITTEN ON 2026-09-28 AND ITS "NEXT ACTION" IS
+SUPERSEDED.** Tasks 5-8 are done; see *START HERE* above. The git facts below are also stale — the
+branch has moved from `01889c0` to `e202892`+ and the test count from 2093 to 2121. What is still
+current and worth reading is the pending-AID record, the branch-base trap, and the graphics notes.
+
+**THE TWO BRANCHES HOLD DIFFERENT HALVES OF 2026-09-28'S WORK, DELIBERATELY, AND THIS IS STILL
+TRUE.** `main` carries ONLY the pending-AID fix; the graphics docs and this plan are here, because
+`docs/goca-reference-notes.md` and `docs/ideas/composite-model-idea.md` do not exist on `main`.
+**Check `git merge-base` before merging anything to `main`** — branching off the wrong base once
+dragged 44 unfinished DFT commits onto it (caught by a two-commit branch reporting 46 merged;
+reversed, never pushed).
+
+**DONE ON 2026-09-28, in order:** the pending AID (jumped the queue on the user's call — a correctness
+gap in shipped code, not a feature), the HOD + 3192G ROM graphics fold, this plan, and Tasks 1-4.
+Each task's commit message carries its own AS BUILT detail; do not re-derive it.
+
+**DONE FIRST, ON THE USER'S CALL: the pending AID** (branch `pending-aid`). It jumped the queue
+because it is a correctness gap in shipped code rather than a feature. A host-initiated Read
+Modified / Read Modified All / Read Buffer answered with a hardcoded `0x60` regardless of what the
+operator had pressed; x3270 keeps the byte in its `aid` global and passes it to all three reads
+(`ctlr.c:635,641,647`). **The consequence that made it worth doing now: `buildReadModified`'s
+short-read branch was UNREACHABLE from the host path**, so pressing Clear and letting the host poll
+sent a full screen scrape under the wrong AID instead of the bare AID byte. **2085 tests in 81 files
+(from 2075), build clean, all four clear sites and the read site mutation-verified.**
+
+**WHY IT CAME UP: a video the user found** (<https://youtu.be/-NAT_K7ng6A>, from ~42:00) on using
+host-side Read Modified polling to build responsive 3270 applications, with a table of five terminal
+obligations cross-referenced to x3270's `ctlr.c`. **Four of the five we already met** — answering a
+read with no key pressed, the SBA+data field scan, and the short-read *logic* — and the fifth was
+this. **A worry that turned out NOT to apply: the TUI needs no listener thread.** The socket handler
+and `stdin.on('data')` (`tui/src/app.ts:369`) are independent event-loop registrations and nothing in
+`tui` or `frontend` blocks synchronously, so an unsolicited read arriving mid-typing was already
+handled — and it is handled in `core`, so all four front ends get it. **Still absent, and moot until
+SSCP-LU data is implemented: x3270's `IN_SSCP && aid_byte != AID_ENTER` guard** (`ctlr.c:756-758`).
+
+**State, 2026-09-28: branch `dft-file-transfer`, 47 commits, tree clean, no stashes. 2085 tests in
+81 files, build and typecheck clean.** The full gate was re-run: conformance+golden 12/12,
+`drive-playback.py` 10/10, `pty-smoke.py` 12/12, `drive-e.py` 10/10, `shot.mjs` 3/3, `keys.mjs`
+18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11.
+
+**`main` IS NO LONGER UNTOUCHED — IT CARRIES THE PENDING AID (`1702c93`, not pushed).** The code
+fix went to `main` on its own because nothing in it depends on DFT; the graphics docs stayed here,
+because `docs/goca-reference-notes.md` and `docs/ideas/composite-model-idea.md` do not exist on
+`main` at all. So the two branches hold different halves of one session's work, deliberately.
+On `main` the numbers are **1981 tests in 78 files (from 1971)**.
+
+**A PROCESS TRAP WORTH NOT REPEATING: `pending-aid` was branched off `dft-file-transfer`, not
+`main`, and merging it to `main` silently dragged 44 commits of INCOMPLETE DFT work (Tasks 1-9 of
+12) onto it.** Caught because the merge reported 46 commits for a two-commit branch; reversed with
+`git reset --hard` since nothing was pushed. **Check `git merge-base` before merging to `main` when
+more than one long-lived branch is in play.**
+
+**A THIRD HOST, PUBLIC, AND IT SPEAKS TN3270E (user, 2026-09-25): `144.208.193.156:3270` — "Blue
+Iron Terminal Server", `bits` v0.18.0.** A read-only probe negotiated TN3270E **end to end with an LU
+name assigned** (`IBM-3278-4-E`, LU `PYTN0001`, functions `(none: basic TN3270E)`), issued a **Query
+LIST** in the ALL form, and drove **EraseWriteAlternate at 43x80** cleanly. **This is the
+live-verification path stage 2b has never had** — both Hercules hosts REFUSE option 40 — so the
+standing "no live witness for the TN3270E negotiation" qualification can be retired for the
+negotiation once a real run is recorded. **IT IS SOMEONE ELSE'S MACHINE: no scripted or unattended
+logons, no transfer tests, nothing resembling probing, and NOT in any harness `npm test` or a gate
+runs.** Constraints and what it does not give us are in `docs/live-testing.md` *Executed so far*.
+
+**Both Hercules hosts are UP and both do 43x80: VM/370 CE on 3270 (rebuilt by the user today) and
+MVS 3.8j TK5 on 3271.** VM is the CUT control and its control run PASSES; TK5 is the DFT reference
+host. Note `@MOD4` selects nothing on the rebuilt VM — irrelevant, since plain `-model 3278-4-E`
+gets 43 rows.
+
+**DFT Tasks 1-9 of 12 are done. Task 10 is blocked ONLY by the spec above** (nothing selects DFT:
+`startDftTransfer` has no caller outside tests, and `runner.ts` builds a `CutTransfer`
+unconditionally). Tasks 11-12 consume Task 10's trace.
+
+**AN IDEA PARKED FOR FUTURE BRAINSTORMING (user, 2026-09-25):
+`docs/ideas/composite-model-idea.md`** — an explicit terminal type for a 3270 **that never existed**:
+`IBM-DYNAMIC` sizing, the **full GOCA set including `Box`**, 3279-S3G-class PS, and the antialiased
+TrueType font as the default on that model only. Downstream of everything currently scheduled, since
+it *composes* those features. **Not designed and not scheduled** — but it is the only coherent target
+for capabilities that otherwise have no device to aim at, which matters because vector graphics has
+neither an oracle nor a live witness. The file lists the six questions a session must answer, the
+sharpest being whether it is a fifth row in `KNOWN_MODELS` or a **capability bundle**, since it changes
+four unrelated things.
+
+**Graphics is roadmapped after PS and now has FIVE references (was three; two arrived 2026-09-28)** —
+GOCA S544-5498-01, GA23-0059-07 in text form, the public-domain `j3270` (43 agreeing opcodes), **IBM's
+Host On-Demand order-support matrix, and a 3192G ROM disassembly** (`$HOME/blueglass — 3270 Graphics
+& SNA Research Findings.md`, @MK). See `docs/goca-reference-notes.md`, section *A THIRD AND FOURTH
+READING*. **The ROM is a different KIND of evidence from the rest — measured firmware, not a
+specification's intent** — and it closes the coordinate origin (centre pel 360,191, Y up; the 720x384 drawing area is a hardware fact, not a ROM one),
+confirms Arc and character angle/shear are honoured, and supplies firmware-exact image rules with
+error codes. **Two lessons generalise: a support matrix documents a CLIENT, not a device** (HOD leaves
+Arc blank for the 3192-G while the firmware has a handler), and **`Box` is now settled as absent from
+the 3270 binding by three independent sources**, which corrects `docs/ideas/composite-model-idea.md`.
+**Still missing: GA18-2177, GA18-2535, blueglass's own `GRAPHICS_DATA_STREAM.md` holding the ROM
+addresses (NOT on this box — ask the user), and there is still no live witness or x3270 oracle.**
+
+## SUPERSEDED — end of 2026-09-25 (the spec was awaiting review; it is now approved)
+
+**WAITING ON THE USER: they are reviewing
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` and will respond
+MONDAY 2026-09-28.** Kept because it records that the three-day gap and cold start were anticipated,
+and because the state it describes (37 commits on `dft-file-transfer`, 2075 tests) is the baseline the
+pending-AID work was measured against.
+
+## SUPERSEDED — earlier on 2026-09-25
+
+**ON BRANCH `dft-file-transfer`, PUSHED, 24 commits, tree clean. `main` is at `b37ffdf`, untouched.
+2075 tests in 81 files, build and typecheck clean.** Tasks 1-9 of
+`docs/superpowers/plans/2026-09-24-dft-file-transfer.md` are **done**; the full gate was re-run this
+session: conformance+golden 12/12, `drive-playback.py` 10/10, `pty-smoke.py` 12/12, `drive-e.py`
+10/10, `shot.mjs` 3/3, `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2,
+`browser-keys.mjs` 13/11.
+
+**NEXT ACTION: WRITE AND EXECUTE A NEW TASK THAT WIRES `Transfer()` TO DFT. NOTHING SELECTS IT
+TODAY.** The DFT engine, the structured-field plumbing and the Read Modified hook are all built and
+verified, but `Session.startDftTransfer` has **no caller outside tests** and `runner.ts` constructs a
+`CutTransfer` unconditionally, refusing non-24x80 at `runner.ts:454` before a byte goes out. The live
+run against TK5 at 43x80 therefore produced **zero DFT frames** — it never reached the wire. Tasks 10,
+11 and 12 all depend on that run, so the whole tail is blocked. **This is a gap in the plan, not a
+defect in the code**, and it survived nine tasks because every engine test calls `startDftTransfer`
+itself — the tests supply the call the product is missing.
+
+**The design decision that task turns on, and it is already answered by x3270: THE CLIENT DOES NOT
+CHOOSE THE PROTOCOL — THE HOST DOES.** `ft_running(true/false)` merely *reports* which arrived
+(`ft_cut.c:440`, `ft_dft.c:175`, read once at `ft.c:556`). So the honest shape is a transfer that can
+be either, with the first inbound frame deciding — which means `runner.ts`'s poll loop cannot assume
+CUT frames, and the existing 24x80 refusal must stay reachable for a CUT-only host. Also still set by
+nothing: `Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize`. All four front ends
+reach transfers now, so the choice belongs in shared code rather than in `runner.ts` alone. The full
+blocker note, with all four open decisions, is at the top of Task 10 in the plan.
+
+**Then Task 10 proper.** `packages/cli/scripts/dft-tso.txt` is committed, correct as written, and
+carries its own judging criteria. **Judge it by TRACE:** `FileTransferData(0x0012,38B)` is the line to
+grep for — DFT frames now name their request type, where the `-ddm` probe could only report
+`unknownSF(0xd0,38B)`. A successful transfer proves nothing on its own now that both protocols end in
+a transferred file. **VM/370 was DOWN this session (port 3270 closed; only TK5 on 3271 was up), so the
+VM control — "DDM advertised does not break a CUT host" — is still unmeasured.**
+
+**Read the AS BUILT section of every task 4-9 before re-deriving anything.** They record a real bug
+that shipped in Task 3 with green tests (the `Open` offsets are NOT x3270's minus 3 — `GET16` does not
+advance its pointer, so `dft_open_request` receives a pointer already at struct offset 3), four
+mutation checks that passed **vacuously** while their targets were load-bearing, and that `TRANS03` is
+a **prefix** match rather than equality — an equality test would have reported every successful live
+transfer as a failure.
+
+## SUPERSEDED — NEXT ACTION as of 2026-09-24
 
 **`main` is at `d1e3919`, pushed, the only branch, tree clean, no stashes.** The `ddm-probe` branch
 was merged `--no-ff` and deleted local and remote; the docs commits after it went straight to
@@ -1101,9 +1293,108 @@ as a presumption only:
    handling", so item 1 may leave this close to free.
 
 **All four of packaging, TLS, printer and PS were explicitly confirmed to remain**, so
-nothing from the older staging has been dropped. GDDM vector graphics remains the one
-thing deliberately NOT on the roadmap: IBM is sunsetting it, and the route is PS driving
-the 3279 screen directly.
+nothing from the older staging has been dropped.
+
+**CORRECTED BY THE USER 2026-09-25 — NATIVE VECTOR GRAPHICS IS NOW ON THE ROADMAP, SCHEDULED
+AFTER PS.** This supersedes the standing "GDDM vector graphics is deliberately NOT on the
+roadmap" decision, and the distinction that resolves it is the user's: **the 3179-G and 3192-G
+accept vector orders in Write Structured Field and RASTERIZE LOCALLY.** That is a TERMINAL
+capability, so implementing it is not a dependency on GDDM — GDDM is merely the host software
+that drives it, and its being sunset says nothing about a terminal-side data stream. The old
+reasoning conflated the two. What stays true: we do not depend on GDDM, and PS remains the
+prerequisite that gets pixels onto the screen.
+
+**THE ENVELOPE IS IN THE MANUAL WE ALREADY OWN; THE PRIMITIVES ARE NOT.** Verified 2026-09-25
+against `~/3270/ref/pages.txt`. Three outbound/inbound structured fields carry it, all three
+with `PID`, a 2-bit `SPANF` spanning flag and a 2-bit `MODE`, and a byte 6 `OBJTYP` of `X'00'`
+Graphics or `X'01'` Image:
+
+| SFID | Name | Manual |
+|---|---|---|
+| `X'0F11'` | **Object Control** | `pages.txt:7219` (index `:4445`) |
+| `X'0F0F'` | **Object Data** | `pages.txt:7277` (index `:4446`) |
+| `X'0F10'` | **Object Picture** | `pages.txt` *Object Picture* (index `:4447`) |
+
+**`Object Picture` has a fourth MODE the other two lack: `B'11'` STORE AND DRAW** — the others
+define only `B'00'` immediate and `B'10'` store, with `B'01'` reserved. So Object Picture is the
+one that actually renders, and that asymmetry is the first thing to pin in a spec.
+
+**GOCA IS NOW IN HAND (user, 2026-09-25): `$HOME/S544-5498-01_GOCA_for_AFP_Reference_Oct2000.pdf`,
+216 pages.** Extracted notes — the complete order table, the format rule, and the caveats — are in
+**`docs/goca-reference-notes.md`**; do not re-derive them. Headline: **the order format is
+self-describing from the opcode**, so a decoder needs no per-order length table (`X'00'` = fixed
+1-byte; first hex digit < 8 AND second >= 8 = fixed 2-byte; `X'FE'` = extended and unused in AFP
+GOCA; everything else = long, `code length operand`). Mechanically verified across all 49 orders.
+**But it is the AFP edition, bound to MO:DCA and IPDS — printers.** It has appendices for those two
+and **none for the 3270 data stream**, mentions 3270 once in 216 pages, and never mentions a 3179 or
+3192. It also declares its own Extended format "not used in AFP GOCA", which is explicit evidence
+that bindings are subsets. **So the primitives are almost certainly right and the 3270 SUBSET,
+defaults and environment controls are NOT established.** **THE TWO TERMINAL BOOKS ARE NOW IDENTIFIED BY ORDER NUMBER — `GA18-2177` (*IBM 3179 Color Display
+Station Description*) and `GA18-2535` (*IBM 3192 Display Station Description*)**, named in
+GA23-0059-07's own related-publications list. Those are the acquisition targets; GOCA-for-AFP does
+not substitute for them. **Also new (2026-09-25): `$HOME/GA23-0059-07-text.pdf`, a 471-page near-all-
+text draft of the SAME edition as `~/3270/ref/pages.txt` — no new content, but it extracts with real
+table borders and renders hex as `X'0F10'` where `pages.txt` mangles it to `X }0F10}`. Prefer it for
+new structured-field work.** Searched and confirmed: **zero GOCA drawing orders appear anywhere in
+those 471 pages**, and the graphics `DATA` deferral appears **seven** times — the envelope and the
+contents are in genuinely separate books.
+
+**ALL THREE DEFER THEIR CONTENTS: byte 7-n is "Data appropriate to the object type. For the
+format and contents of this parameter, refer to the appropriate graphics or image
+publications."** The same deferral appears in Query Reply (Segment) `X'B0'`. So the 3270
+Programmer's Reference gives us the framing and **none** of the drawing orders, and prycroft6
+says the same in as many words. **The architecture to chase is GOCA — *Graphics Object Content
+Architecture for Advanced Function Presentation Reference*** — which prycroft6 names explicitly.
+**ACQUIRED 2026-09-25, see above and `docs/goca-reference-notes.md`.** No amount of reading
+`pages.txt` would have yielded a line-drawing opcode; GOCA supplies 49 of them.
+
+**THE GDDM LINK THE USER SENT IS A FALSE LEAD, checked 2026-09-25.**
+`ibm.com/docs/en/gddm?topic=asvsec-descriptions` is the **GDDM-PGF Vector Symbol Editor** command
+reference — interactive `DRAW`/`LINE`/`CURVE`/`STRETCH` commands for authoring custom symbol sets
+in a tool, with no hex opcodes and no data-stream format. The user's hypothesis that GDDM
+instructions "might map pretty directly" to terminal orders is the right shape of question, but
+that page cannot answer it; GOCA can. The z/OS "buffer description structured fields" link is
+unrelated — DFSMSrmm API structured field introducers, nothing graphical.
+
+**FOUR QUERY REPLIES GATE IT, and they are all `No / No / Yes` in Table 6-1** — returned for
+Query List **All** only, never for a plain Query or an Equivalent list: **Graphic Color `X'B4'`
+(`pages.txt:8603`), Graphic Symbol Sets `X'B6'` (`:8604`), Segment `X'B0'`, Line Type `X'B2'`,**
+plus `Procedure X'B1'`, `Image X'82'`, `Transparency X'AB'` and `IOCA Auxiliary Device X'AA'`
+nearby. **This costs us no rework:** `queryreply.ts` already models exactly that distinction with
+`Capability.returnedForQuery`, and `selectCapabilities` already implements the Table 6-1 rules —
+so hosting these is adding entries, not changing the capability model. Segment `X'B0'`'s own DATA
+is deferred to "the appropriate graphics product publications" as well.
+
+**Terminals: 3179-G, 3192-G, and the 3472 InfoWindow** (prycroft6). It also records that these
+carried "the equivalent of the original PS-2 feature", i.e. **PS and vector graphics coexist on
+the same hardware** — which is consistent with PS being sequenced first. Three protocol
+generations exist and should not be conflated: PS (raster via loadable symbols), native vector
+graphics (these structured fields), and Advanced Vector Graphics/PCLK (a PC-client protocol).
+
+**Geometry is NOT hardcoded:** prycroft6 says an application reads **Usable Area** and **Implicit
+Partition** to discover the drawing space — both of which we already build and send. No pixel
+dimensions for the G-terminals are recorded anywhere we have yet; they are an open measurement.
+
+**A SECOND IMPLEMENTATION EXISTS AND IT IS PUBLIC DOMAIN: `j3270`**
+(<https://git.hugfreevikings.wtf/rudi/j3270>, Unlicense), a Java 3270 emulator with a working GOCA
+decoder and tests. **43 opcodes agree exactly with our Table 16 extraction** — strong corroboration
+from an independent source. **Crucially it is based on IBM HOST ON-DEMAND, not on the AFP book**
+(`GocaDecoder.java` cites `HODDecoder`/`HODEllipse` with line numbers), so it reads the **3270
+binding** we lack: ten extra orders, several obviously display-oriented, plus `Object Control`
+procedure orders with no AFP analogue at all (attach/detach **graphic cursor**, erase plane). **One
+real conflict is unresolved — Partial Arc is `A3`/`E3` in our book and `86`/`C6` in j3270 — and it
+must not be "fixed" in either direction.** It claims **no live-host verification** of graphics (its
+"verified against" list is JDK builds), so it is a better paper reference, not the witness this
+feature lacks. Full analysis in `docs/goca-reference-notes.md`; treat `GocaDecoder.java` as a
+behavioural reference the way VMGIF is treated for PS.
+**Neither x3270 nor c3270 implements any of this** (prycroft6 mentions no emulator, and our own
+`sf.c` dispatch has no `0x0F10`/`0x0F0F`/`0x0F11` arm — so unlike every stage so far, **there is
+no reference implementation to diff against**, and no Hercules host here drives a G-terminal.
+That makes this the first feature with neither an x3270 oracle nor a live witness, which is worth
+knowing before it is scheduled: the evidence model that has carried nine stages does not apply.
+
+Sources: `~/3270/ref/pages.txt` (GA23-0059) and
+<https://www.prycroft6.com.au/misc/3270grfx.html>.
 
 8. **Real TN3270E, and `IBM-DYNAMIC` screen size.** Added by the user 2026-09-14, position
    not stated. ~~**Blocked on access to a real modern z/VM or z/OS, which the user had still
