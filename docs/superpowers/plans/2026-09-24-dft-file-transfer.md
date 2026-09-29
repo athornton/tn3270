@@ -2309,6 +2309,51 @@ necessary.
 
 ### Task 10: Live run against MVS/TSO at 43x80
 
+> **DONE, 2026-09-29. THE BLOCKER BELOW IS CLEARED and the run it describes has happened.**
+>
+> **AS BUILT.** The blocker was real and its diagnosis was right: nothing selected DFT. It was
+> answered by a spec and a nine-task plan of its own —
+> `docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md` (user-approved
+> 2026-09-28) and `docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md`. Read those for
+> the design; this note records only that this task is no longer blocked and what the run measured.
+>
+> **WHAT SELECTED DFT: the host did, exactly as question 1 below guessed.** The up-front geometry
+> gate is gone from both drivers; both build a `CutTransfer` AND a `DftTransfer` over one source
+> buffer, register the DFT one *before* priming the host, and commit to whichever protocol declares
+> itself first. `looksLikeCutFrame` (new, in `core/src/ft/detect.ts`) is the non-throwing detector
+> that makes deciding possible at a geometry CUT cannot answer for.
+>
+> **THE TRACE EVIDENCE, judged by trace and not by the transferred file** — full detail and commands
+> in `docs/live-testing.md` *Executed so far*:
+> **11 `FileTransferData` frames, ZERO CUT frames, at 43x80, 249 bytes byte-identical in both
+> directions.** The request types decode as the protocol predicts (Open `0x0012`, Get `0x4611`, Data
+> Insert `0x4704`, Set Cursor `0x4511`, Close `0x4112`) where this plan's own probe could only say
+> `unknownSF(0xd0,38B)`. Our DDM advertisement is witnessed on the wire too: `00 0c 81 95` in answer
+> to TK5's `ReadPartition`.
+>
+> **TWO THINGS THE RUN FOUND THAT NO PLAN PREDICTED, both about what happens AFTER a successful DFT
+> transfer, and both matter to Tasks 11-12 which consume this trace:**
+> 1. **TK5 leaves the screen at 24x80 with the keyboard LOCKED once a DFT transfer completes**, so
+>    the next `String()` is refused with `input inhibited`. Measured twice, once per direction, at
+>    identical points. The transfers still succeeded; what broke was the script's sequencing after
+>    them. **`dft-tso.txt` needs a `Wait(Unlock)` after each `Transfer()`** before it can be trusted
+>    to run end to end.
+> 2. **Because of (1) the script never reached its `LOGOFF`** — the trap its own header warns about.
+>    The userid was released when the connection dropped and the leftover dataset was deleted by a
+>    follow-up run, both verified rather than assumed.
+>
+> **Questions 2 and 4 are answered; question 3 is NOT, and is still open work.** The 24x80 refusal
+> stays reachable, now raised at the decision point rather than up front (question 2), and the choice
+> lives in `frontend/src/transferRun.ts`, shared by three front ends, plus `cli/src/runner.ts` for the
+> blocking idiom (question 4). **`Transfer()`'s `BufferSize` keyword is still parsed and ignored and
+> `SessionOptions.dftBufferSize` is still set by nothing** (question 3) — one line each, and they must
+> agree, since the advertised and chunking sizes are one number.
+>
+> ---
+>
+> **THE ORIGINAL BLOCKER NOTE, 2026-09-25, kept because its reasoning is the record of how the gap
+> was found and because question 3 is still live:**
+>
 > **BLOCKED, 2026-09-25 — AND THE BLOCKER IS A GAP IN THIS PLAN, NOT IN THE CODE.**
 > The run was attempted against TK5 at 43x80 with `-ddm on`. It reached the host and logged on
 > cleanly, then **`Transfer()` refused before sending anything**: *"CUT file transfer needs a 24x80

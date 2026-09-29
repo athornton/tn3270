@@ -1,36 +1,71 @@
-# Handoff — state as of 2026-09-28
+# Handoff — state as of 2026-09-29
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, end of 2026-09-28
+## START HERE — NEXT ACTION, end of 2026-09-29
 
-**PICK UP AT TASK 5 OF `docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md`.** Its
-PROGRESS section sits at the Task 5 boundary and is written for exactly this cold start: what is done,
-the four plan defects Tasks 2-4 found, and the two things Task 5/6 need that do not exist yet.
+**THE TRANSFER-PROTOCOL-SELECTION BRANCH IS COMPLETE AND UNMERGED. THE NEXT ACTION IS THE MERGE
+DECISION, WHICH IS THE USER'S.** Tasks 1-8 of
+`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` are done and pushed; Task 9's docs
+are written and only its Step 4, the merge, remains. Read that plan's **PROGRESS/AS BUILT** section
+before anything else — it indexes nineteen plan defects and four of mine, and it is written for
+exactly this cold start.
 
-**State: branch `dft-file-transfer` at `01889c0`, PUSHED and in sync, tree clean, no stashes. `main`
-at `43d1a85`, ALSO PUSHED. 2093 tests in 82 files, build and typecheck clean.** Tomorrow's cap is
-**$1900**, about **$160** available (2026-09-28 ran to $1734 of an $1800 cap).
+**State: branch `dft-file-transfer` at `e202892`+, PUSHED and in sync, tree clean, no stashes. `main`
+at `43d1a85`, ALSO PUSHED. 2121 tests in 82 files, build and typecheck clean.** 2026-09-29 ran to
+about $1770 of a $1900 cap; the 30-day budget resets 2026-10-01.
 
-**THE SPEC IS APPROVED (user, 2026-09-28)** and the plan is written and committed; Tasks 1-4 of 9 are
-done. **Task 5 is where behaviour starts changing** — it deletes the up-front geometry gate, so a
-CUT-only host at 43x80 is PRIMED before we find out. That trade was raised and accepted, and measured:
-VM/370's MECAFF refuses with its own text in ~1s and CMS recovers itself.
+**DFT FILE TRANSFER IS LIVE — the thing this whole branch existed to produce.** Against MVS 3.8j TK5
+at **43x80**, a geometry CUT refuses outright: **11 `FileTransferData` frames, ZERO CUT frames, 249
+bytes byte-identical in both directions**, with the request types decoding as the protocol predicts
+and our DDM unit (`00 0c 81 95`) witnessed on the wire. Until this branch,
+`Session.startDftTransfer` had no caller outside tests and no DFT frame had ever reached a wire.
+**The VM/370 CUT control passes unregressed.** Both runs and their qualifications:
+`docs/live-testing.md` *Executed so far*.
 
-**TWO THINGS TASK 5/6 NEED:** `StartTransferOptions` is now exported from `@tn3270/frontend` (added in
-Task 4), and **`session.ddmAdvertised` DOES NOT EXIST** — Task 6's timeout message wants it as a
-one-line getter over `this.opts.ddm`, with a test, committed inside Task 6.
+**READ ONE QUALIFICATION BEFORE QUOTING THE CONTROL: VM issued no Read Partition on that run, so we
+never sent it the DDM unit** (`grep -c "81 95"` is 0 there against 36 on TK5's). The control proves
+the CUT path is unregressed; it does NOT prove VM declines DDM. That second claim is settled by the
+2026-09-25 `ddm-probe-vm.txt` runs, which did get the unit onto the wire. **So whether a host asks
+for a Query at all varies between sessions — check that grep before reading any run as evidence
+about DDM.**
 
-**THE TWO BRANCHES HOLD DIFFERENT HALVES OF THIS SESSION'S WORK, DELIBERATELY.** `main` carries ONLY
-the pending-AID fix; the graphics docs and this plan are here, because
+**BEFORE MERGING: `main` carries ONLY the pending-AID fix and this branch carries the graphics docs;
+the two hold different halves of 2026-09-28's work deliberately. CHECK `git merge-base`** — branching
+off the wrong base once dragged 44 unfinished DFT commits onto `main` (caught by a two-commit branch
+reporting 46 merged; reversed, never pushed). **Re-run the full gate ON THE MERGE COMMIT**, this
+project's standing rule, and `--no-ff` is how the last five features merged.
+
+**WHAT REMAINS AFTER THE MERGE, in the order the work suggests:**
+1. **DFT plan Tasks 11-12**, which consume Task 10's trace and are now unblocked (`/tmp/dft-tso.log`,
+   but re-run rather than trusting a temp file).
+2. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
+   nothing** — one line each, and **they must agree**, since the advertised and chunking sizes are
+   one number. This is the one open question of DFT Task 10's four.
+3. **`dft-tso.txt` needs a `Wait(Unlock)` after each `Transfer()`.** Measured: TK5 leaves the screen
+   at 24x80 with the keyboard LOCKED after a successful DFT transfer, so the next `String()` is
+   refused with `input inhibited` and the script never reaches its `LOGOFF`. The transfers succeed;
+   the sequencing after them does not.
+4. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
+   are renderers rather than rewrites.
+
+## The 2026-09-28 state, kept for the work below
+
+**EVERYTHING FROM HERE TO THE NEXT `##` HEADING WAS WRITTEN ON 2026-09-28 AND ITS "NEXT ACTION" IS
+SUPERSEDED.** Tasks 5-8 are done; see *START HERE* above. The git facts below are also stale — the
+branch has moved from `01889c0` to `e202892`+ and the test count from 2093 to 2121. What is still
+current and worth reading is the pending-AID record, the branch-base trap, and the graphics notes.
+
+**THE TWO BRANCHES HOLD DIFFERENT HALVES OF 2026-09-28'S WORK, DELIBERATELY, AND THIS IS STILL
+TRUE.** `main` carries ONLY the pending-AID fix; the graphics docs and this plan are here, because
 `docs/goca-reference-notes.md` and `docs/ideas/composite-model-idea.md` do not exist on `main`.
 **Check `git merge-base` before merging anything to `main`** — branching off the wrong base once
 dragged 44 unfinished DFT commits onto it (caught by a two-commit branch reporting 46 merged;
 reversed, never pushed).
 
-**DONE THIS SESSION, in order:** the pending AID (jumped the queue on the user's call — a correctness
+**DONE ON 2026-09-28, in order:** the pending AID (jumped the queue on the user's call — a correctness
 gap in shipped code, not a feature), the HOD + 3192G ROM graphics fold, this plan, and Tasks 1-4.
 Each task's commit message carries its own AS BUILT detail; do not re-derive it.
 

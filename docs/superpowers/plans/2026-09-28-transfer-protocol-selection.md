@@ -558,9 +558,7 @@ EOF
 
 ---
 
-## PROGRESS — 2026-09-29
-
-**Tasks 1-5 are DONE and committed. Task 6 is next and nothing about it has started.**
+## PROGRESS — 2026-09-29: TASKS 1-8 DONE. ONLY TASK 9'S MERGE REMAINS.
 
 | Task | State | Commit |
 |---|---|---|
@@ -568,10 +566,89 @@ EOF
 | 2 `looksLikeCutFrame` | done, mutation-verified | `7af6ef5` |
 | 3 `cancelDftTransfer` + `handleClose` | done, both mutations verified | `bbeccb9` |
 | 4 the move to `frontend` | done, no logic change | `e79b50f` |
-| 5 both engines, gate deleted | done, four mutations verified | `6ed8e76` |
-| 6-9 | **not started** | — |
+| 5 both engines, gate deleted | done, 4 mutations verified | `6ed8e76` |
+| 6 the DFT arm + `ddmAdvertised` | done, 8 mutations verified | `e271636` |
+| 7 the same in `runner.ts` | done, 7 mutations verified | `ff77e65` |
+| 8 full gate + live runs | **done — DFT IS LIVE** | `e202892` |
+| 9 docs, then the merge | docs done; **merge is the only step left** | this commit |
 
-**2097 tests in 82 files** (from 2093), build and typecheck clean.
+**2121 tests in 82 files** (from 2093 at the Task 5 boundary, 2085 at the branch baseline), build and
+typecheck clean. **Whole offline gate re-run and matching baseline:** pty-smoke 12/12,
+drive-playback 10/10, drive-e 10/10, shot 3/3, keys 18/16, clicks 9/10, browser-shot 2/2,
+browser-keys 13/11.
+
+**THE RESULT: 11 DFT frames, zero CUT frames, at 43x80, 249 bytes byte-identical both directions
+against MVS 3.8j TK5** — the first DFT frame this project has ever put on a wire. The VM/370 CUT
+control passes unregressed. Both runs, with their qualifications, are in `docs/live-testing.md`.
+
+### AS BUILT — what executing Tasks 5-8 found. Nineteen plan defects and four of my own.
+
+Every commit message carries its own detail; this is the index. **The pattern held: nearly every
+defect was in the plan rather than the code, and the four that were mine were all in TESTS.**
+
+**THE THREE BIGGEST, each of which would have shipped a wrong thing:**
+
+1. **The plan's central claim about DFT is FALSE.** "A DFT transfer produces ZERO screen events, so
+   assert the count is zero" (Task 6) — it is not zero. `emit('screen')` fires once per RECORD
+   handled (`session.ts:897`, unconditional) and a DFT frame arrives as a WriteStructuredField
+   record, so five records give five events with the screen buffer byte-identical throughout. **The
+   conclusion strengthens**: those events are indistinguishable from a host painting a menu, so a
+   driver waking only on `screen` really would spin to its deadline — but a test asserting `0` would
+   have failed and looked like a product bug. Same error repeated in Task 7's premise about
+   `outputCount`.
+2. **The geometry gate was load-bearing for `cancel`, not only for stepping** (found in Task 5,
+   unpredicted). `CutTransfer.cancel` → `writeResponse` → `requireCutGeometry` **throws** at any
+   geometry but 24x80. Deleting the gate let that throw escape uncaught into the TUI's form-close
+   path — `Esc` on the form, which an operator cannot avoid. A fourth reachable throw of the same
+   shape then turned up in Task 6's `onScreen`.
+3. **`dft.data` does not exist** (Task 6's snippet). Received bytes come off `result.data`. Reading
+   the non-existent accessor yields `undefined`, coalesces to empty, and writes a **zero-byte file
+   under a success message** — so the test asserts the written FILE, not the `ok` flag.
+
+**THE `if (dft.complete)` PRE-CHECK WAS DEAD CODE IN BOTH DRIVERS AND WAS DELETED TWICE.** In
+`transferRun.ts` nothing between `startDftTransfer` and the listener registration can reach the
+socket, so it is unfalsifiably false. In `runner.ts` the case IS reachable — a transfer can finish
+inside `sendAID(ENTER)` — but `!dft.complete` in the `while` exits the poll on its first evaluation
+and the post-loop check returns the same value, so removing it left the suite green *including* the
+test written for exactly that case. The spec's rule governs both: "If nothing does, the call is
+decoration and should be deleted rather than kept." **What replaced it is a test pinning the
+registration ORDER**, which is the real invariant.
+
+**TWO BUGS NEITHER PLAN MENTIONED, both found by a mutation surviving:**
+
+- **The byte count is PER-ENGINE.** Both drivers reported CUT's counter unconditionally, so a
+  successful DFT transfer told the operator — and a script — that it moved **0 bytes**. That is the
+  one number checked against the host's own listing.
+- **Cancelling a DFT transfer mid-flight must ABORT, not discard,** and the two need opposite
+  handling of the registration. `DftTransfer.cancel` DEFERS to the next inbound frame, so the engine
+  must stay registered for it to arrive. `committed` cannot distinguish the cases (it is set inside
+  `onTransferEnd`, which calls `finish`, so `ended` has already returned); the engine's byte count
+  can.
+
+**MY OWN FOUR, all in tests, and the first is the one worth carrying:**
+
+1. **A test of mine PASSED AGAINST THE BUG IT NAMED** — fifth instance on this project's record. The
+   CLI's 43x80 timeout test asserted `toContain('43x80')` and stayed green under the `isCutFrame`
+   mutation, because **`CutFrameError`'s own message contains "43x80"**. It matched the exception
+   text instead of the timeout row. Now asserts the row's full wording *and the absence* of the
+   exception text.
+2. **Deleting a gate's tests is not a one-line change.** The 43x80 case in "EVERY local refusal
+   happens before the host is told" would have gone on **passing**, on the unformatted-screen refusal
+   one check further down — a vacuous pass testing something else. **When a gate is deleted, check
+   whether each of its tests now passes for a different reason.**
+3. **Two Task 7 tests passed vacuously when first written** ("does NOT name -ddm on" — nothing named
+   it yet; the geometry row — it matched the OLD gate's message). Both re-verified by mutation after
+   implementing rather than trusted.
+4. **A connected `Session` sits in `X Wait` until the host writes**, so the DFT fixtures needed the
+   host to paint a prompt (`EraseWrite` + WCC `0xc3`) — `withField` alone gives "keyboard locked".
+   Invisible to every pre-existing test, because an unconnected session has never been locked.
+
+**ALSO: the CLI's geometry gate had NO TEST AT ALL** (no test mentioned 24x80, 43x80 or
+`screen.size`), so its deletion could not redden anything — and **`CUT_SCREEN_SIZE` did not become
+unused** as the plan predicted; Task 5's cancel guard and Task 6's timeout table both need it.
+
+**Nineteen mutations were run across Tasks 5-7, every anchor asserting it matched exactly once
+first.** Three survived: two exposed dead code (deleted), one exposed a missing test (written).
 
 ### THREE THINGS TASK 6 MUST KNOW, all measured in Task 5
 

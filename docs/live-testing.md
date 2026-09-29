@@ -67,17 +67,23 @@ and the Recording log says what happened when they were run.
   `TRANS03 - File transfer complete`, 249 bytes byte-identical, `Ready;` proving CMS rather than the
   reconnect trap, and `LOGOFF AT` reached** so the account is released.
 
-  **BUT VM NEVER ISSUED A READ PARTITION, SO WE NEVER SENT IT THE DDM UNIT — `grep -c "81 95"` is
-  0 on this log against 36 on TK5's.** State the two halves apart and do not quote the first as the
-  second:
-  - **PROVED:** the CUT path is unregressed by this branch. Both engines are now built and a DFT
-    engine is registered before the host is primed, and a real CUT host round-trips a file exactly
-    as before, with nothing extra on the wire.
-  - **NOT PROVED:** that VM/370 *declines* DDM when offered. It was never offered, because a host
-    that asks no Query is never told our capabilities. The 2026-09-24 probe's finding that MECAFF
-    declines and stays on CUT rests on that probe, not on this run.
-  **So "DDM advertised does not break a CUT host" is now measured; "VM refuses DDM" remains a
-  separate claim resting on earlier evidence.**
+  **BUT VM ISSUED NO READ PARTITION ON THIS RUN, SO WE NEVER SENT IT THE DDM UNIT —
+  `grep -c "81 95"` is 0 on this log against 36 on TK5's, and `grep -c "+ 88"` (outbound structured
+  fields) is 0 against 5.** A host that asks no Query is never told our capabilities, so this run
+  cannot speak to what VM does with the advertisement. State the halves apart:
+  - **PROVED HERE:** the CUT path is unregressed by this branch. Both engines are now built and a
+    DFT engine is registered before the host is primed, and a real CUT host round-trips a file
+    exactly as before, with nothing extra on the wire.
+  - **NOT PROVED HERE:** that VM/370 *declines* DDM when offered.
+
+  **THAT SECOND CLAIM IS ALREADY SETTLED ELSEWHERE, AND BY BETTER EVIDENCE — do not re-derive it
+  from this run.** The `ddm-probe-vm.txt` runs of 2026-09-25 (same `-model 3278-2-E`, `-ddm on` vs
+  `-ddm off` as the only variable) DID get the unit onto the wire — **4 occurrences of
+  `00 0c 81 95 00 00 40 00 40 00 01 01` with it on, 0 with it off** — and VM chose CUT both ways
+  with 249 bytes byte-identical each time. **So VM's Read Partition is not something it does on
+  every session**, which is itself worth knowing: whether the advertisement is even exercised
+  depends on the host asking, and a control run that looks identical may or may not have tested it.
+  **Check `grep -c "81 95"` before reading any such run as evidence about DDM.**
 
 - **A PUBLIC HOST THAT SPEAKS TN3270E — the first one available to this project, 2026-09-25.** The
   user supplied **`144.208.193.156:3270`**, which identifies itself as **"Blue Iron Terminal Server",
