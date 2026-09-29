@@ -87,6 +87,12 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    gets less live exercise.** `-ddm off` is what keeps every pre-flip CUT measurement in
    `docs/live-testing.md` reproducible, and there is a test pinning that specifically, because if
    it broke that evidence would become unverifiable rather than merely old.
+   **LIVE-VERIFIED ON BOTH HOSTS, with NO `-ddm` flag on either command line — which is the whole
+   point, since before the flip those exact lines produced zero DFT frames.** TK5: 37 `81 95` on
+   the wire, 18 DFT frames, zero CUT frames, three transfers. VM/370: zero DFT frames, CUT
+   throughout, 249 bytes byte-identical, `LOGOFF AT` reached. **Read VM's result with its
+   qualification** — it issued no Read Partition, so it was never offered DDM; a session with its
+   exact flags *does* advertise when asked, so its choice of CUT is about VM not asking.
 4. **A HELD TSO USERID ON TK5 IS FREED WITH `/c u=<userid>` AT THE MVS OPERATOR CONSOLE** — the
    user's answer, 2026-09-29. A run that does not reach `LOGOFF` leaves the address space alive in
    `WAITING FOR RECONNECT`, and **a fresh logon cannot recover it**: TSO refuses rather than

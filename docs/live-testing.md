@@ -9,6 +9,38 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE `-ddm` DEFAULT FLIP IS LIVE-VERIFIED ON BOTH HOSTS, WITH NO FLAG ON EITHER COMMAND LINE —
+  2026-09-29.** The point of the run is the *absent* flag: before the flip these exact command lines
+  produced zero DFT frames.
+
+  ```bash
+  # TK5: no -ddm, so the new default is the only thing that can offer DDM
+  node packages/cli/dist/main.js -insecure -model 3278-4-E < /tmp/dft-default.txt
+  # VM/370: likewise, the CUT control
+  node packages/cli/dist/main.js -insecure -model 3278-2-E < packages/cli/scripts/transfer-vm.txt
+  ```
+
+  | | TK5 (MVS/TSO) | VM/370 (CMS) |
+  |---|---|---|
+  | `81 95` on the wire | **37** | 0 — *it never asked*, see below |
+  | DFT frames | **18** | **0** |
+  | CUT frames | **0** | CUT throughout |
+  | transfers | **3 complete** | **2 complete**, 249 bytes byte-identical |
+  | cleanup | 3 datasets deleted | `LOGOFF AT` reached |
+
+  **TK5 chose DFT purely from the default** — 18 frames, zero CUT frames, the request types reading
+  as the protocol predicts (Open/Get/Data Insert/Set Cursor/Close), and `VB 1024` / `VB 80` / `FB 80`
+  per `LISTDS` unchanged. **VM/370 stayed on CUT and is unregressed**, with `Ready;` proving CMS
+  rather than the reconnect trap.
+
+  **THE SAME QUALIFICATION AS THE PRE-FLIP CONTROL, AND IT IS NOT A WEAKNESS OF THE FLIP: VM ISSUED
+  NO READ PARTITION**, so it was never told about DDM — `grep -c ReadPartition` and
+  `grep -c "+ 88"` are both **0** on that log. **What was checked instead, because the run could not
+  check it:** a session built with exactly the VM run's flags *does* advertise DDM when asked
+  (`ddmAdvertised: true`, `0x95` present in the reply it would send). So VM's choice of CUT is about
+  VM not asking, not about our offer being absent. **Do not read this run as "VM declines DDM"** —
+  that claim rests on the 2026-09-25 `ddm-probe-vm.txt` runs, which did get the unit onto the wire.
+
 - **`BufferSize=512` MOVES THE HOST'S OWN RECORD SIZE TO 495, EXACTLY AS PREDICTED — TK5,
   2026-09-29.** The end-to-end proof that the DFT buffer size is one number and the host reads it.
   Same three-case script with `BufferSize=512` added to the FIRST transfer only:
