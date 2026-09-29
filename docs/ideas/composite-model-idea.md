@@ -77,6 +77,15 @@ These are the reasons this is a spec and not a patch:
    and a bad conformance baseline. The conformance comparison against real s3270 depends on our
    advertising what s3270 advertises — this model must not quietly become what `npm test` measures.
 
+## A COMPANION IDEA, 2026-09-29: render as SVG rather than rasterizing
+
+**`docs/ideas/svg-renderer-idea.md`** — the user's idea that the GUI need not present a matrix of
+pels at all: GOCA orders map largely onto SVG elements, the character grid becomes glyph placement,
+and nothing is rasterized by us. **The two ideas want each other**: a model that never existed is the
+natural home for a renderer not imitating any particular hardware, and font smoothing is on both
+lists. Read them together, and note the tension that file records — this project's renderer evidence
+is pixel-exact bitmap hashing, which SVG plus smoothing deliberately gives up.
+
 ## What it is NOT
 
 - Not a substitute for GA18-2177 / GA18-2535. Those describe real devices and are still wanted; this

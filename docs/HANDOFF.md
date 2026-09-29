@@ -278,6 +278,17 @@ gets 43 rows.
 `startDftTransfer` has no caller outside tests, and `runner.ts` builds a `CutTransfer`
 unconditionally). Tasks 11-12 consume Task 10's trace.
 
+**A SECOND PARKED IDEA (user, 2026-09-29): RENDER AS SVG RATHER THAN RASTERIZING —
+`docs/ideas/svg-renderer-idea.md`.** GOCA's orders map largely onto SVG elements, so the character
+grid becomes glyph placement and we rasterize nothing; browsers and Electron both render SVG happily.
+**It pairs with the composite-model idea below** and would delete a whole vector-rasterizing layer we
+would otherwise write with no oracle. **THE QUESTION IT MUST ANSWER FIRST, and the reason it is parked
+rather than adopted: this project's renderer evidence is PIXEL-EXACT BITMAP HASHING**, which is what
+lets `browser-shot.mjs` prove the renderer is shared rather than merely similar — and `shot.mjs`
+explicitly forbids pixel tolerances. SVG text is not bitwise reproducible and font smoothing abandons
+that property deliberately. **Settle it BEFORE the GOCA work, which is where it would pay off, rather
+than during.**
+
 **AN IDEA PARKED FOR FUTURE BRAINSTORMING (user, 2026-09-25):
 `docs/ideas/composite-model-idea.md`** — an explicit terminal type for a 3270 **that never existed**:
 `IBM-DYNAMIC` sizing, the **full GOCA set including `Box`**, 3279-S3G-class PS, and the antialiased
