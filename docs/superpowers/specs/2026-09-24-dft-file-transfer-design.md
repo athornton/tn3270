@@ -234,14 +234,64 @@ Mutation-check anything claiming to pin the advertisement: the established failu
 test that passes vacuously because every other test in the file already supplies the value under
 test.
 
-## One question deliberately left open
+## The question that was left open — ANSWERED FROM THE WIRE, 2026-09-29
 
-**Whether DFT should honour `Recfm`/`Lrecl`/`Blksize` identically to CUT.** These are `IND$FILE`
-command keywords rather than protocol, so they should ride through unchanged — but TSO's DFT `Open`
-carries **its own record size** at +27 (`len == 0x29`), which CUT has no equivalent of. Resolve this
-**from the wire during implementation**, not by guessing now. Stage 1 established the relevant
-asymmetries by live measurement on both hosts (TSO honours `LRECL` with `RECFM V` and reports `VB`;
-CMS ignores it and reports `V`), and the same discipline applies here.
+**It was: does DFT honour `Recfm`/`Lrecl`/`Blksize` identically to CUT, given that TSO's DFT `Open`
+carries its own record size at +27 (`len == 0x29`), which CUT has no equivalent of?**
+
+**THE ANSWER IS IN TWO PARTS, AND THEY ARE INDEPENDENT OF EACH OTHER.**
+
+**1. `Recfm` AND `Lrecl` RIDE THROUGH UNCHANGED, exactly as over CUT.** They are `IND$FILE` command
+keywords and the protocol does not touch them. Measured on MVS 3.8j TK5 over **DFT** (18
+`FileTransferData` frames, 43x80, three transfers), with TSO's own `LISTDS` as the independent check:
+
+| Requested | Command on the wire | TSO created |
+|---|---|---|
+| `Recfm=variable,Lrecl=1024` | `IND$FILE PUT LRA.BIN RECFM(V) LRECL(1024)` | **`VB 1024`** BLKSIZE 1028 |
+| `Recfm=variable,Lrecl=80` | `IND$FILE PUT LRB.BIN RECFM(V) LRECL(80)` | **`VB 80`** BLKSIZE 15040 |
+| `Recfm=fixed,Lrecl=80` | `IND$FILE PUT LRC.BIN RECFM(F) LRECL(80)` | **`FB 80`** BLKSIZE 15040 |
+
+**Three cases, not two, and that is the point of the design.** A vs B varies only `Lrecl` and B vs C
+only `Recfm`, so each keyword is isolated — and without the third you cannot distinguish "the host
+ignored the keyword" from "the client never sent it". Same discipline stage 1's `LRECL` work needed.
+**So no code change is required: `transferCommand` already builds the keywords and DFT is indifferent
+to them.**
+
+**2. THE `Open`'s RECORD SIZE HAS NOTHING TO DO WITH `Lrecl`. It is OUR OWN ADVERTISED BUFFER SIZE
+MINUS 17.** Measured across the same three transfers:
+
+```
+recordSize = 16367 = 0x3fef   in ALL THREE cases
+```
+
+**Identical while `Lrecl` went 1024 → 80 → 80 and `Recfm` went V → V → F.** 16367 is
+`16384 - 17` — our advertised `DFT_BUF` default (`SessionOptions.dftBufferSize`, LIMIN/LIMOUT in the
+DDM Query Reply) less DFT's 17-byte frame overhead, which is x3270's own `bufptr = obuf + 17`
+(`ft_dft.c:585`). So the host is echoing back the frame capacity **we told it about**, not describing
+the dataset.
+
+**AND x3270 DOES NOTHING WITH IT BUT TRACE — settled from the source, not inferred.** `recsz` is read
+at `ft_dft.c:151-152` and its only other appearance is the trace at `:165-166`
+(`trace_ds(" Open('%s',recsz=%u)\n", ...)`). It never reaches chunking, never reaches a `Lrecl`, never
+reaches anything. Our `parseDftOpen` matches: it exposes `recordSize` and no caller consumes it.
+
+**THE CONSEQUENCE FOR THE STILL-UNWIRED `BufferSize` PAIR, which is why this measurement matters
+beyond closing a question.** `Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize`
+are both set by nothing today. When they are wired they **must agree**, because the size advertised in
+the DDM unit and the size used to chunk an upload are one number — and the run above shows the host
+*reads that advertisement and quotes it back*. Advertising one value while chunking by another would
+have the host sizing its side from a number we do not honour.
+
+**Stage 1's host asymmetry is unaffected and still stands:** TSO honours `LRECL` with `RECFM V` and
+reports `VB`; CMS ignores it and reports `V`. That is a property of the hosts, not of the protocol,
+and DFT changes nothing about it.
+
+**Reproduce:** `/tmp/dft-lrecl.txt`-style three-case script against TK5 with `-ddm on -model
+3278-4-E`, then `LISTDS` after each transfer. **Two traps it cost to learn, both recorded in
+`docs/live-testing.md`:** `Wait(Unlock)` is required after every `Transfer()` (TK5 leaves the keyboard
+locked, and without it the next command is refused and the `LISTDS` is lost), and **TSO's `DELETE`
+takes one dataset name at a time** — three bare names is `INVALID KEYWORD`, which leaves TSO at a
+`REENTER` prompt that silently swallows every later command.
 
 ## What this spec does not do
 

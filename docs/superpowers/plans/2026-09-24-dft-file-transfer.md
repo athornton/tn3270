@@ -2494,6 +2494,44 @@ contradicted the plan. If the run failed, say so and what it showed.>"
 
 ### Task 11: Answer the spec's open question from the wire
 
+> **DONE, 2026-09-29. The answer is in the spec's *The question that was left open*, and it is in two
+> independent parts.**
+>
+> **AS BUILT.** (1) **`Recfm` and `Lrecl` ride through unchanged and TSO honours both** — three
+> transfers over DFT gave `VB 1024`, `VB 80`, `FB 80` per TSO's own `LISTDS`. **No code change was
+> needed**, which is the outcome Step 3's "code only if the answer demands it" allowed for. (2) **The
+> `Open`'s record size is NOT related to `Lrecl` at all**: it was **16367 = 0x3fef in all three
+> cases**, identical while `Lrecl` went 1024 → 80 → 80. That is `16384 - 17` — our own advertised
+> `DFT_BUF` less DFT's 17-byte frame overhead (x3270's `bufptr = obuf + 17`, `ft_dft.c:585`). The host
+> quotes back the capacity *we* advertised. **And x3270 does nothing with `recsz` but trace it**
+> (`ft_dft.c:151-152`, `:165-166`) — settled from the source, so our parser exposing it with no
+> consumer is correct rather than incomplete.
+>
+> **WHY THAT MATTERS BEYOND CLOSING THE QUESTION:** it is the argument for the still-unwired
+> `BufferSize`/`dftBufferSize` pair having to agree. The host reads our advertisement and echoes it,
+> so advertising one size while chunking by another would have it sizing its side from a number we do
+> not honour.
+>
+> **THE THREE-CASE SCRIPT IS COMMITTED as `packages/cli/scripts/dft-lrecl-tso.txt`**, with the
+> measured answer in its own header so a rerun is a check rather than a rediscovery — and
+> `packages/tui/test/harness-flags.test.ts` now pins both DFT scripts, because nothing in `npm test`
+> runs them and each of the traps below is silent.
+>
+> **THREE TRAPS THIS COST, all mine, all recorded in `docs/live-testing.md`:** `Wait(Unlock)` is
+> required after every `Transfer()` (TK5 leaves the keyboard locked; without it the `LISTDS` steps and
+> the `LOGOFF` are silently lost — **`dft-tso.txt` is fixed too**) but must NOT be added to the logon
+> dance (it advances past the password prompt); TSO's `DELETE` takes **one** dataset name at a time,
+> and three bare names leaves TSO at a `REENTER` prompt that swallows every later command; and **a
+> held userid cannot be freed from a fresh logon** — `HERC01` is still held by an earlier failed run
+> and needs operator action on the Hercules console, so this ran on `HERC02`.
+>
+> **Step 2 of this task asked for "two transfers differing only in `Lrecl`"; three were run**, per the
+> task's own following sentence, and the third is what makes it conclusive rather than suggestive.
+>
+> ---
+>
+> **The original task, for the reasoning:**
+
 **Files:** `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`, and code only if the answer demands it.
 
 The spec deliberately left one question open: **does DFT honour `Recfm`/`Lrecl`/`Blksize` the way CUT does?** They are `IND$FILE` command keywords rather than protocol, so they should ride through unchanged — but TSO's DFT `Open` carries **its own record size** at payload offset 24, which CUT has no equivalent of.
@@ -2522,6 +2560,37 @@ git commit -m "docs: answer DFT's open question from the wire
 ---
 
 ### Task 12: Merge
+
+> **DONE, 2026-09-29 — merged as `6873b8e`, `--no-ff`, 60 commits, branch deleted local and remote.**
+>
+> **AS BUILT.** The gate was re-run **on the merge commit itself** as Step 1 demands: build and
+> typecheck clean, **2121 tests in 82 files** (from 1981 on the pre-merge `main`), conformance+golden
+> 12/12, `pty-smoke.py` 12/12, `drive-playback.py` 10/10, `drive-e.py` 10/10, `shot.mjs` 3/3,
+> `keys.mjs` 18/16, `clicks.mjs` 9/10, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11.
+>
+> **THE MERGE HAD TWO CONFLICTS, both in `session.ts`, and ONE IS SEMANTIC.** `main`'s pending-AID
+> work and this branch's DFT work touched the same two functions. In `handleClose` both teardown lines
+> were kept. In **`answerRead` the DFT retained-frame short-circuit must come FIRST**, because a Read
+> Modified arriving mid-upload has to replay the retained bytes and must never fall through to a
+> pending-AID screen scrape. **Mutation-verified on the resolution itself** — moving the guard after
+> the read reddens the two replay tests.
+>
+> **Step 3's doc updates were done and the README was WRONG IN FOUR PLACES**, all in the direction
+> that misleads a user away from the feature: it said DFT was not implemented, said not to pass
+> `-ddm on` while transferring, said `-ddm on` makes a transfer time out at 0 bytes, and listed
+> CUT-only as a current limit. Found by auditing the docs against the code, which is exactly the
+> failure mode Step 3 warns about — and the fix had to reach the roadmap entry and the limits list,
+> not just the prose.
+>
+> **STEP 4 — THE `-ddm` DEFAULT FLIP — WAS NOT DONE AND IS STILL THE USER'S CALL.** It remains
+> default off deliberately: every CUT live witness in this project was measured without it, and
+> flipping moves both Hercules hosts onto whichever protocol they prefer, so those witnesses become
+> statements about a path real hosts here no longer take. **Ask before flipping**, and measure the
+> blast radius the way the `-model` flip was measured.
+>
+> ---
+>
+> **The original task:**
 
 - [ ] **Step 1: Re-run the full gate ON THE MERGE COMMIT**
 

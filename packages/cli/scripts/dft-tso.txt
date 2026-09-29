@@ -28,6 +28,19 @@
 # Reaching LOGOFF is not optional: TSO holds the userid otherwise and the next run
 # draws IKJ56425I LOGON REJECTED, USERID IN USE.
 #
+# WAIT(UNLOCK) AFTER EVERY Transfer() IS MANDATORY, MEASURED 2026-09-29 -- and its absence is
+# what cost the first live DFT run its LISTDS steps and its LOGOFF. TK5 leaves the screen at
+# 24x80 with the KEYBOARD LOCKED once a DFT transfer completes, so the next String() is refused
+# with `input inhibited` and the step is silently lost. Both transfers still SUCCEED; what
+# breaks is the sequencing after them. With these two lines, `input inhibited` goes from 2
+# occurrences to 0. Do NOT add Wait(Unlock) to the logon dance above: it advances past the
+# password prompt and the password is then read as a command (IKJ56410I ... NOT ACCEPTED
+# DURING LOGON). Plain Wait(Settle) is what works there.
+#
+# AND TSO's DELETE TAKES ONE DATASET NAME AT A TIME. `DELETE 'A' 'B' 'C'` is INVALID KEYWORD,
+# which leaves TSO at a REENTER prompt that swallows every later command -- transfers then
+# report `REENTER - IND$FILE PUT ...` with zero DFT frames, which looks like a client bug.
+#
 # TraceText is REQUIRED. Trace(on) alone puts nothing in the log, and without it a
 # "no 0xd0 frames" reading is about our own logging rather than about the host.
 Trace(on)
@@ -56,12 +69,16 @@ Enter
 Wait(Settle,25)
 ScreenText
 Transfer(Direction=send,Host=tso,HostFile=DFTX.BIN,LocalFile=/tmp/rt-src.bin,Recfm=variable,Lrecl=1024)
+Wait(Unlock,30)
+Wait(Settle,20)
 ScreenText
 String("LISTDS 'HERC01.DFTX.BIN'")
 Enter
 Wait(Settle,25)
 ScreenText
 Transfer(Direction=receive,Host=tso,HostFile='HERC01.DFTX.BIN',LocalFile=/tmp/tso-dft-back.bin,Exist=replace)
+Wait(Unlock,30)
+Wait(Settle,20)
 ScreenText
 String("DELETE 'HERC01.DFTX.BIN'")
 Enter

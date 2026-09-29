@@ -1,0 +1,111 @@
+# TASK 11 OF THE DFT PLAN: does DFT honour Recfm/Lrecl, and what IS the Open's record size?
+#
+# Run it:
+#   python3 -c "import random; random.seed(3270); open('/tmp/rt-src.bin','wb').write(bytes(random.randrange(256) for _ in range(249)))"
+#   cd ~/git/tn3270 && node packages/cli/dist/main.js \
+#     -insecure -model 3278-4-E -ddm on < packages/cli/scripts/dft-lrecl-tso.txt \
+#     > /tmp/dft-lrecl.log 2>&1
+#
+# THE ANSWER IT MEASURED, 2026-09-29 -- recorded here so a rerun is a CHECK and not a
+# rediscovery. Recfm and Lrecl ride through as IND$FILE keywords and TSO honours both:
+#   VB 1024 / VB 80 / FB 80, per LISTDS.
+# And the Open's recordSize is CONSTANT at 16367 = 0x3fef across all three cases --
+# 16384 - 17, i.e. OUR advertised DFT_BUF less DFT's 17-byte frame overhead (x3270's
+# `bufptr = obuf + 17`, ft_dft.c:585). It has nothing to do with the dataset. x3270 only
+# TRACES recsz (ft_dft.c:151-152, :165-166) and so do we.
+#   grep -c FileTransferData /tmp/dft-lrecl.log   # DFT frames: expect 18
+#   grep -c "Transfer complete" ...               # expect 3
+#   grep -c "input inhibited" ...                 # expect 0
+#   grep -A2 -- --RECFM ...                       # TSO's own three reports
+# Decode recordSize by feeding each 38-byte Open payload to parseDftOpen; the long-form
+# Opens are the `FileTransferData(0x0012,38B)` lines, one per transfer.
+#
+# THREE CASES, NOT TWO, AND THAT IS THE DESIGN. A vs B varies only Lrecl; B vs C varies only
+# Recfm. Without the third you cannot distinguish a host IGNORING the keyword from a client
+# never SENDING it -- the same discipline stage 1's LRECL work needed.
+#
+# WAIT(UNLOCK) AFTER EVERY Transfer() IS MANDATORY. TK5 leaves the screen at 24x80 with the
+# KEYBOARD LOCKED once a DFT transfer completes, so the next String() is refused with
+# `input inhibited` and its step is silently lost -- which is what cost the first live DFT run
+# its LISTDS steps and its LOGOFF. Do NOT add Wait(Unlock) to the logon dance: it advances past
+# the password prompt and the password is then read as a command (IKJ56410I ... NOT ACCEPTED
+# DURING LOGON). Plain Wait(Settle) is what works there.
+#
+# TSO's DELETE TAKES ONE DATASET NAME AT A TIME. `DELETE 'A' 'B' 'C'` is INVALID KEYWORD and
+# leaves TSO at a REENTER prompt that swallows every later command -- the transfers then report
+# `REENTER - IND$FILE PUT ...` with zero DFT frames, which reads exactly like a client bug.
+#
+# THIS SCRIPT USES HERC02, DELIBERATELY. HERC01 was left held by an earlier failed run
+# (IKJ56425I LOGON REJECTED, USERID HERC01 IN USE) and a held userid CANNOT be freed from a
+# fresh logon -- `LOGOFF` at the `Logon ===>` prompt is read as a userid. Freeing it needs
+# operator action on the Hercules console. Four userids exist, HERC01-HERC04.
+#
+# Reaching LOGOFF is not optional, for exactly that reason.
+Trace(on)
+Connect(127.0.0.1:3271)
+Wait(3270Mode,20)
+Wait(Settle,15)
+String("HERC02")
+Enter
+Wait(Settle,25)
+String("CUL8TR")
+Enter
+Wait(Settle,30)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+Enter
+Wait(Settle,25)
+ScreenText
+String("X")
+Enter
+Wait(Settle,25)
+ScreenText
+String("DELETE 'HERC02.LRA.BIN'")
+Enter
+Wait(Settle,25)
+String("DELETE 'HERC02.LRB.BIN'")
+Enter
+Wait(Settle,25)
+String("DELETE 'HERC02.LRC.BIN'")
+Enter
+Wait(Settle,25)
+Transfer(Direction=send,Host=tso,HostFile=LRA.BIN,LocalFile=/tmp/rt-src.bin,Recfm=variable,Lrecl=1024)
+Wait(Unlock,30)
+Wait(Settle,20)
+String("LISTDS 'HERC02.LRA.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=send,Host=tso,HostFile=LRB.BIN,LocalFile=/tmp/rt-src.bin,Recfm=variable,Lrecl=80)
+Wait(Unlock,30)
+Wait(Settle,20)
+String("LISTDS 'HERC02.LRB.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+Transfer(Direction=send,Host=tso,HostFile=LRC.BIN,LocalFile=/tmp/rt-src.bin,Recfm=fixed,Lrecl=80)
+Wait(Unlock,30)
+Wait(Settle,20)
+String("LISTDS 'HERC02.LRC.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+String("DELETE 'HERC02.LRA.BIN'")
+Enter
+Wait(Settle,25)
+String("DELETE 'HERC02.LRB.BIN'")
+Enter
+Wait(Settle,25)
+String("DELETE 'HERC02.LRC.BIN'")
+Enter
+Wait(Settle,25)
+ScreenText
+String("LOGOFF")
+Enter
+Wait(Settle,25)
+ScreenText
+TraceText
+Trace(off)
+Quit

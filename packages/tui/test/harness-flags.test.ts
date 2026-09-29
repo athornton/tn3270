@@ -121,3 +121,85 @@ describe('the playback oracle driver', () => {
     expect(source).not.toMatch(/pb\.returncode/);
   });
 });
+
+/**
+ * The DFT transfer scripts, whose two failure modes are both SILENT and both cost a live run.
+ *
+ * These are s3270 command scripts rather than python drivers, so there is no argv to anchor on
+ * -- the assertions are on the command sequence itself. Each pins a fact that was MEASURED on
+ * TK5 on 2026-09-29, after a run lost its `LISTDS` steps and its `LOGOFF` to the first and
+ * reported `REENTER - IND$FILE PUT ...` with zero DFT frames to the second.
+ *
+ * WHY A TEST AND NOT JUST THE COMMENT THE SCRIPTS ALREADY CARRY: nothing here runs these
+ * scripts (they need a live mainframe), so a well-meant tidy-up that collapsed the per-dataset
+ * DELETEs or dropped a `Wait(Unlock)` would leave `npm test` fully green and the next live run
+ * would fail in a way that reads as a client bug. That is the same structural gap this file was
+ * created for.
+ */
+describe('the DFT transfer scripts', () => {
+  const dftScripts = ['dft-tso.txt', 'dft-lrecl-tso.txt'];
+
+  for (const script of dftScripts) {
+    const source = readFileSync(join(cliScriptsDir, script), 'utf8');
+    const lines = source.split('\n').map((l) => l.trim());
+    const transferAt = lines
+      .map((l, i) => (l.startsWith('Transfer(') ? i : -1))
+      .filter((i) => i >= 0);
+
+    it(`${script} follows EVERY Transfer() with Wait(Unlock)`, () => {
+      // TK5 leaves the screen at 24x80 with the keyboard LOCKED once a DFT transfer
+      // completes, so the next String() is refused with `input inhibited` and its step is
+      // silently lost. The transfer itself still succeeds, which is what makes this so easy
+      // to miss: the log says "Transfer complete" and the step after it simply did not run.
+      expect(transferAt.length, `no Transfer() found in ${script}`).toBeGreaterThan(0);
+      for (const i of transferAt) {
+        expect(lines[i + 1], `Transfer() at line ${i + 1} of ${script} is not followed by Wait(Unlock)`)
+          .toMatch(/^Wait\(Unlock/);
+      }
+    });
+
+    it(`${script} does NOT put Wait(Unlock) in the logon dance`, () => {
+      // The opposite error, and it is not symmetrical: Wait(Unlock) before the password
+      // advances past TSO's prompt, and the password is then read as a command --
+      // `IKJ56410I CUL8TR COMMAND NOT ACCEPTED DURING LOGON`. Plain Wait(Settle) is what
+      // works there, so the FIRST Wait(Unlock) must come after the first Transfer().
+      const firstUnlock = lines.findIndex((l) => l.startsWith('Wait(Unlock'));
+      expect(firstUnlock, `no Wait(Unlock) at all in ${script}`).toBeGreaterThan(0);
+      expect(firstUnlock, `${script} waits for Unlock before its first Transfer()`)
+        .toBeGreaterThan(transferAt[0]!);
+    });
+
+    it(`${script} deletes ONE dataset per DELETE command`, () => {
+      // TSO's DELETE takes a single dsname: `DELETE 'A' 'B' 'C'` is INVALID KEYWORD, which
+      // leaves TSO at a REENTER prompt that swallows every later command. Counting quoted
+      // names is what catches a "tidier" one-line version.
+      for (const line of lines.filter((l) => l.startsWith('String("DELETE'))) {
+        const names = line.match(/'[^']*'/g) ?? [];
+        expect(names.length, `more than one dataset in: ${line}`).toBe(1);
+      }
+    });
+  }
+
+  it('dft-lrecl-tso.txt keeps all THREE Lrecl/Recfm cases, which is what makes it conclusive', () => {
+    // A vs B varies only Lrecl; B vs C varies only Recfm. Dropping the third case would leave
+    // a script that cannot distinguish a host IGNORING a keyword from a client never SENDING
+    // it -- the exact ambiguity the three-case design exists to remove, and it would still
+    // look like a passing experiment.
+    const source = readFileSync(join(cliScriptsDir, 'dft-lrecl-tso.txt'), 'utf8');
+    expect(source).toContain('Recfm=variable,Lrecl=1024');
+    expect(source).toContain('Recfm=variable,Lrecl=80');
+    expect(source).toContain('Recfm=fixed,Lrecl=80');
+    // And a LISTDS per transfer, since TSO's own report is the independent check.
+    expect(source.match(/String\("LISTDS /g)?.length).toBe(3);
+  });
+
+  it('dft-lrecl-tso.txt uses HERC02, because HERC01 is held', () => {
+    // An earlier failed run left HERC01 held (IKJ56425I ... USERID HERC01 IN USE) and a held
+    // userid cannot be freed from a fresh logon -- it needs operator action on the Hercules
+    // console. Pinned so a copy-paste back to HERC01 is caught here rather than by a live run
+    // whose downstream symptom (the password rejected as a command) looks like a client bug.
+    const source = readFileSync(join(cliScriptsDir, 'dft-lrecl-tso.txt'), 'utf8');
+    expect(source).toContain('String("HERC02")');
+    expect(source).not.toContain('String("HERC01")');
+  });
+});

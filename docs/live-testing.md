@@ -9,6 +9,44 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **DFT's OPEN RECORD SIZE IS OUR OWN BUFFER SIZE, NOT THE DATASET'S — three-case run on TK5,
+  2026-09-29.** This is DFT plan Task 11, and it closes the one question the DFT spec deliberately
+  left open. Run on **`HERC02`** (see the userid trap below), `-ddm on -model 3278-4-E`, three
+  transfers of the same 249-byte file differing only in the keywords, with `LISTDS` after each:
+
+  | Requested | TSO created (`LISTDS`) | `Open` recordSize |
+  |---|---|---|
+  | `Recfm=variable,Lrecl=1024` | **`VB 1024`** BLKSIZE 1028 | **16367** |
+  | `Recfm=variable,Lrecl=80` | **`VB 80`** BLKSIZE 15040 | **16367** |
+  | `Recfm=fixed,Lrecl=80` | **`FB 80`** BLKSIZE 15040 | **16367** |
+
+  **18 `FileTransferData` frames, three `Transfer complete`, zero `input inhibited`.** So:
+  **`Recfm` and `Lrecl` ride through as `IND$FILE` keywords and TSO honours both** (A vs B isolates
+  `Lrecl`, B vs C isolates `Recfm` — three cases, because two cannot tell "host ignored it" from
+  "client never sent it"), while **`recordSize` is CONSTANT at 16367 = `16384 - 17`** — our advertised
+  `DFT_BUF` less DFT's 17-byte frame overhead (x3270's `bufptr = obuf + 17`, `ft_dft.c:585`). The host
+  quotes back the capacity *we* advertised; it says nothing about the dataset. **x3270 only traces
+  `recsz`** (`ft_dft.c:151-152`, `:165-166`) and so do we. Full reasoning and the consequence for the
+  unwired `BufferSize`/`dftBufferSize` pair: the DFT spec's *The question that was left open*.
+
+  **THREE TRAPS THIS RUN COST, all mine and all worth not repeating:**
+  1. **`Wait(Unlock)` IS REQUIRED AFTER EVERY `Transfer()`** — this is the fix for the lock reported
+     below, and it works: `input inhibited` went from 2 occurrences to **0**, and the `LISTDS` steps
+     that were previously swallowed all ran. **Do NOT add `Wait(Unlock)` to the logon dance**,
+     though: it advances past TSO's password prompt and the password is then read as a command
+     (`IKJ56410I CUL8TR COMMAND NOT ACCEPTED DURING LOGON`). Plain `Wait(Settle)` there is what works.
+  2. **TSO's `DELETE` TAKES ONE DATASET NAME AT A TIME.** `DELETE 'A' 'B' 'C'` is `INVALID KEYWORD`,
+     which leaves TSO at a **`REENTER` prompt that silently swallows every later command** — three
+     transfers then reported `REENTER - IND$FILE PUT ...` and zero DFT frames, which reads exactly
+     like a client that cannot transfer.
+  3. **A HELD USERID CANNOT BE FREED FROM A FRESH LOGON.** The first failed attempt left `HERC01`
+     held, and every subsequent run got `IKJ56425I LOGON REJECTED, USERID HERC01 IN USE` — with the
+     *downstream* symptoms (password rejected as a command) looking like the real fault. `LOGOFF` at
+     the `Logon ===>` prompt does not help; it is read as a userid
+     (`IKJ56420I USERID LOGOFF NOT AUTHORIZED`). **Freeing it needs operator action on the Hercules
+     console.** `HERC01` IS STILL HELD as of this entry; the run was completed on `HERC02`, which was
+     logged off cleanly and verified free afterwards. Four userids exist (`HERC01`–`HERC04`).
+
 - **DFT FILE TRANSFER IS LIVE AGAINST MVS 3.8j TK5, AT 43x80, 2026-09-29 — the run the whole
   `dft-file-transfer` branch existed to produce.** Until today `Session.startDftTransfer` had no
   caller outside tests and `runner.ts` built a `CutTransfer` unconditionally, so **no DFT frame had
