@@ -6,14 +6,14 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, end of 2026-09-29
 
-**MERGED AND DONE. ALL NINE TASKS OF
-`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` ARE COMPLETE, AND THE BRANCH IS
-MERGED AND DELETED.** Read that plan's **PROGRESS/AS BUILT** section before anything else — it
+**MERGED AND DONE. BOTH PLANS ARE COMPLETE — all nine tasks of
+`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` AND all twelve of
+`docs/superpowers/plans/2026-09-24-dft-file-transfer.md` — AND THE BRANCH IS MERGED AND DELETED.** Read that plan's **PROGRESS/AS BUILT** section before anything else — it
 indexes nineteen plan defects and four of mine, and it is written for exactly this cold start.
 **NOTHING IS WAITING ON THE USER.**
 
-**State: `main` at `6873b8e`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
-stashes. 2121 tests in 82 files (from 1981 on the pre-merge `main`), build and typecheck clean.**
+**State: `main` at `3d45a1d`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+stashes. 2129 tests in 82 files (from 1981 on the pre-merge `main`), build and typecheck clean.**
 `dft-file-transfer` was merged `--no-ff` (60 commits) and deleted local and remote, which is the
 precedent the last five features set. 2026-09-29 ran to about $1780 of a $1900 cap; the 30-day
 budget resets 2026-10-01.
@@ -56,18 +56,34 @@ time:** branching off the wrong base once dragged 44 unfinished DFT commits onto
 because a two-commit branch reported 46 merged. This merge was checked that way and reported exactly
 60, all of them the feature's own.
 
+**THE DFT PLAN IS NOW COMPLETE TOO — ALL TWELVE TASKS.** Task 11 (the spec's deliberately-open
+question) and Task 12 (the merge) were both closed 2026-09-29; each carries an AS BUILT note in
+`docs/superpowers/plans/2026-09-24-dft-file-transfer.md`. **Task 11's answer, because it decides item
+1 below:** `Recfm`/`Lrecl` ride through unchanged and TSO honours both (`VB 1024` / `VB 80` / `FB 80`
+over DFT, three cases), while the `Open`'s record size is **16367 in all three** — `16384 - 17`, our
+own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Reproduce with
+`packages/cli/scripts/dft-lrecl-tso.txt`, which carries the answer in its header.
+
 **WHAT REMAINS, in the order the work suggests:**
-1. **DFT plan Tasks 11-12**, which consume Task 10's trace and are now unblocked (`/tmp/dft-tso.log`,
-   but re-run rather than trusting a temp file).
-2. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
-   nothing** — one line each, and **they must agree**, since the advertised and chunking sizes are
-   one number. This is the one open question of DFT Task 10's four.
-3. **`dft-tso.txt` needs a `Wait(Unlock)` after each `Transfer()`.** Measured: TK5 leaves the screen
-   at 24x80 with the keyboard LOCKED after a successful DFT transfer, so the next `String()` is
-   refused with `input inhibited` and the script never reaches its `LOGOFF`. The transfers succeed;
-   the sequencing after them does not.
-4. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
-   are renderers rather than rewrites.
+1. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
+   nothing** — one line each, and **they MUST agree**. Task 11 is what makes this concrete rather
+   than tidy: the host READS our advertised size and quotes it back in its `Open`, so advertising one
+   number while chunking by another would have it sizing its side from a value we do not honour.
+2. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
+   are renderers rather than rewrites. The gateway half is a **security decision first** —
+   `web/src/protocol.ts` refuses the `transferForm` action outright, because a browser-initiated
+   transfer moves bytes between the host and the *gateway's* filesystem, not the operator's.
+3. **THE `-ddm` DEFAULT FLIP IS STILL THE USER'S CALL, and is DFT plan Task 12 Step 4 — the one step
+   of that plan deliberately left undone.** The 2026-09-24 decision was to flip once DFT was tested,
+   and it now is. **But ask before flipping**, and measure the blast radius the way the `-model` flip
+   was measured: turning it on moves both Hercules hosts onto whichever protocol they prefer, so
+   every CUT live witness here becomes a statement about a path real hosts no longer take.
+4. **`HERC01` ON TK5 IS HELD and needs operator action on the Hercules console** — a failed run left
+   a TSO address space running, and a held userid cannot be freed from a fresh logon (`LOGOFF` at the
+   `Logon ===>` prompt is read as a userid). Live TSO work should use `HERC02`, which was logged off
+   cleanly and verified free. Four userids exist, `HERC01`–`HERC04`.
+5. **Roadmap beyond transfers, unchanged:** oversize + `IBM-DYNAMIC`, then local model-switching,
+   then PS+VMGIF and graphics, packaging, and the printer session.
 
 ## The 2026-09-28 state, kept for the work below
 
