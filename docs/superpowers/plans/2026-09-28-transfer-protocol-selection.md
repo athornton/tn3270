@@ -558,9 +558,9 @@ EOF
 
 ---
 
-## PROGRESS — 2026-09-28
+## PROGRESS — 2026-09-29
 
-**Tasks 1-4 are DONE and committed. Task 5 is next and nothing about it has started.**
+**Tasks 1-5 are DONE and committed. Task 6 is next and nothing about it has started.**
 
 | Task | State | Commit |
 |---|---|---|
@@ -568,12 +568,46 @@ EOF
 | 2 `looksLikeCutFrame` | done, mutation-verified | `7af6ef5` |
 | 3 `cancelDftTransfer` + `handleClose` | done, both mutations verified | `bbeccb9` |
 | 4 the move to `frontend` | done, no logic change | `e79b50f` |
-| 5-9 | **not started** | — |
+| 5 both engines, gate deleted | done, four mutations verified | `6ed8e76` |
+| 6-9 | **not started** | — |
 
-**2093 tests in 82 files** (from 2085 in 81), build and typecheck clean.
+**2097 tests in 82 files** (from 2093), build and typecheck clean.
 
-**FOUR PLAN DEFECTS FOUND SO FAR, all by reading the code the plan described** — the pattern this
-project keeps hitting, so expect more in Tasks 5-9:
+### THREE THINGS TASK 6 MUST KNOW, all measured in Task 5
+
+1. **`dft.data` DOES NOT EXIST and Task 6's snippet uses it.** `DftTransfer` exposes
+   `result`/`complete`/`isMessage`/`retainedFrame`/`transferred` and nothing else
+   (`dft.ts:175-183`). A received payload comes back on **`result.data`**, since `TransferResult`'s
+   success arm is `{ ok: true; data?: Uint8Array }` (`ft/transfer.ts:98-100`). So
+   `onTransferEnd` should read `result.data ?? new Uint8Array(0)` — and note it must capture
+   `result` BEFORE the narrowing, exactly as `finish` already documents for the union.
+2. **BOTH of Task 6's test snippets name `packages/frontend/test/transferRun.test.ts`, which does
+   not exist.** The tests are in **`packages/tui/test/transferRun.test.ts`** and must stay there:
+   they assert on a rendered 54-column status line through `tui`'s own `transferLines`, and
+   `frontend` cannot import `tui`. Reuse that file's existing harness (`makeSession`, `in3270`,
+   `withSpy`, `withField`, `fakeFiles`, `aReceive`, `aSend`, `base`) rather than writing the
+   plan's `connected24x80`/`sendOptions` factories, which do not exist either.
+3. **`session.ddmAdvertised` still does not exist** — unchanged from the note below. Add the
+   one-line getter over `this.opts.ddm`, with a test, inside Task 6's commit.
+
+**`CUT_SCREEN_SIZE` is still imported in `transferRun.ts`** — the plan expected it to become
+unused, but Task 5's `cancel` guard needs it and so does Task 6's timeout table.
+
+### THE DEFECT TASK 5 INTRODUCED, fixed in the same commit — read this before Task 7
+
+**The geometry gate was load-bearing for `cancel`, not only for stepping.**
+`CutTransfer.cancel` writes the response area through `writeResponse` → `requireCutGeometry`,
+which **throws `CutFrameError` on any geometry but 24x80** (`frames.ts:314`). The gate had made
+that line unreachable at 43x80; deleting it let the throw escape uncaught into the TUI's
+form-close path. `cancel` now reports at a non-CUT geometry instead of aborting, and sends no PF2
+— there is no frame layout to write into and the host never said it was running CUT.
+
+**TASK 7 HAS THE SAME HAZARD IN `runner.ts`**, which also builds a `CutTransfer` and can cancel
+it. Check every `CutTransfer` method the CLI can reach at a non-24x80 geometry, not just `step`.
+
+**SEVEN PLAN DEFECTS FOUND SO FAR, all by reading the code the plan described** — the pattern this
+project keeps hitting, so expect more in Tasks 6-9 (three of the seven are in Task 6's own text,
+listed above):
 
 1. **Task 2's test path was wrong**: the CUT tests live in `packages/core/test/ft/`, not the flat
    `test/`. Corrected before writing.
@@ -585,6 +619,18 @@ project keeps hitting, so expect more in Tasks 5-9:
    on a rendered 54-column status line through `tui`'s own `transferLines`, so it stays in
    `tui/test/` importing `startTransfer` from `@tn3270/frontend`. That direction is fine; only the
    reverse inverts the graph.
+5. **Task 5's and Task 6's `request` literal omits `host`, `mode` and `cr`**, which
+   `TransferRequest` requires (`transfer.ts:74-85`). It would not have compiled.
+6. **Task 5's and Task 6's test path is `frontend/test/`, which does not exist** — defect 4 above,
+   recurring in every task written before it was found.
+7. **Task 6's `dft.data` does not exist.** See the Task 6 notes above.
+
+**AND ONE FINDING THAT IS NOT A PLAN DEFECT BUT COST THE SAME TIME.** Deleting a test that asserts
+a refusal is not a one-line change: the 43x80 case in *"EVERY local refusal happens before the host
+is told"* would have gone on **passing**, on the unformatted-screen refusal one check further down,
+while no longer testing geometry at all. A vacuous pass, of exactly the kind this branch keeps
+finding. **When a gate is deleted, check whether each of its tests now passes for a different
+reason** rather than trusting that a green suite means the expectation was updated.
 
 **Two things Task 5 should know before it starts:**
 
