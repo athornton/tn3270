@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   AckAid, AID, encodeAddress, O_SF, Order, resolve, Session, SnaCmd,
-  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S,
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, Qcode,
   type Connection, type SessionOptions,
 } from '@tn3270/core';
 import {
@@ -831,6 +831,61 @@ describe('protocol selection: deciding', () => {
 
     await expect(done).resolves.toMatchObject({ ok: true });
     expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
+  });
+});
+
+describe('BufferSize reaches the engine AND the advertisement', () => {
+  /** The LIMIN/LIMOUT pair out of a real Query reply. */
+  function advertised(sent: readonly number[]): number | undefined {
+    const at = sent.findIndex((b, i) => sent[i - 1] === 0x81 && b === Qcode.DDM);
+    if (at < 0) return undefined;
+    return (sent[at + 3]! << 8) | sent[at + 4]!;
+  }
+
+  it('THE DRIVER CLOSES THE ADVERTISE/CHUNK DIVERGENCE, end to end', async () => {
+    // THE TEST FOR THE ORIGINAL BUG, at the level where it actually shipped. Measured before
+    // this change: a session built with `dftBufferSize: 4096` advertised 4096 while the
+    // engine the driver built chunked by the 16384 default -- because the driver passed no
+    // `bufferSize` at all. Both halves are asserted, because either alone would have passed
+    // over the bug: the ENGINE must take the keyword's size, and the ADVERTISEMENT must then
+    // quote that same number rather than the session default.
+    const { session, conn } = await connected(24, 80, { ddm: true, dftBufferSize: 4096 });
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(),
+      request: { ...aReceive(), bufferSize: 512 },
+      command: 'IND$FILE GET A.BIN',
+    });
+    expect(run.ok).toBe(true);
+
+    // 1. The engine chunks by the keyword's size.
+    expect(session.dftTransfer?.bufferSize).toBe(512);
+
+    // 2. And the host is told the SAME number, not the session's 4096.
+    conn.sent = [];
+    conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+    expect(advertised(conn.sent)).toBe(512);
+
+    run.cancel!();
+  });
+
+  it('falls back to the session default when the keyword is absent', async () => {
+    // The other arm, and it is what stops the wiring from forcing a size on every transfer:
+    // no `BufferSize=` means the engine takes its own default and the advertisement keeps
+    // using the session's. Asserting BOTH numbers, because they differ here (16384 vs 4096)
+    // and a single-value check could not tell which was being read.
+    const { session, conn } = await connected(24, 80, { ddm: true, dftBufferSize: 4096 });
+    const run = startTransfer({
+      ...base, session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+    });
+    expect(run.ok).toBe(true);
+    expect(session.dftTransfer?.bufferSize).toBe(16384);   // the engine's own default
+    conn.sent = [];
+    conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+    // THE ENGINE'S size wins once a transfer is registered, per x3270's do_qr_ddm -- so this
+    // is 16384, NOT the session's 4096. Pinned because it is the surprising half: registering
+    // a transfer changes what a subsequent Query answers.
+    expect(advertised(conn.sent)).toBe(16384);
+    run.cancel!();
   });
 });
 

@@ -215,9 +215,78 @@ describe('keyword rejection', () => {
     // behaviour we have not built or command syntax nobody has tested against a
     // host, and accepting them would produce a transfer whose options went
     // nowhere.
-    for (const k of ['Remap=yes', 'OtherOptions=TRACE', 'Allocation=tracks', 'BufferSize=4096']) {
-      expect(() => req(k)).toThrow(/unknown option/);
-    }
+    //
+    // `BufferSize` WAS ON THIS LIST AND IS NOT ANY MORE -- it is accepted as of the DFT
+    // buffer-size wiring, so leaving it here would have pinned a stale refusal. The three
+    // that remain are asserted individually rather than as a list, so removing one cannot
+    // be mistaken for the loop simply having fewer things to do.
+    expect(() => req('Remap=yes')).toThrow(/unknown option/);
+    expect(() => req('OtherOptions=TRACE')).toThrow(/unknown option/);
+    expect(() => req('Allocation=tracks')).toThrow(/unknown option/);
+  });
+
+  describe('BufferSize, the DFT frame size', () => {
+    // WHY IT IS ACCEPTED WHERE THE OTHER SEVEN ARE NOT: it governs behaviour that now
+    // EXISTS. DFT works, and the size is load-bearing rather than cosmetic -- Task 11
+    // measured the host reading our advertised size and quoting it back in its `Open`
+    // (recordSize = advertised - 17), so a wrong number is a wrong frame size on the wire.
+    it('is accepted and parsed as a number', () => {
+      expect(req('BufferSize=4096').bufferSize).toBe(4096);
+    });
+
+    it('CLAMPS to 256..32767, the same bounds the advertisement and the engine use', () => {
+      // `boundDftBufferSize` is reused rather than re-implemented, which is what makes the
+      // keyword, the DDM unit and DftTransfer agree BY CONSTRUCTION. Clamping rather than
+      // rejecting matches x3270's set_dft_buffersize (ft_dft.c:740-747).
+      expect(req('BufferSize=10').bufferSize).toBe(256);
+      expect(req('BufferSize=99999').bufferSize).toBe(32767);
+      expect(req('BufferSize=512').bufferSize).toBe(512);
+    });
+
+    it('still refuses a non-number, so a typo is not silently clamped to 256', () => {
+      // The clamp must not become a swallow-everything: `BufferSize=big` has to fail rather
+      // than quietly become the minimum.
+      expect(() => req('BufferSize=big')).toThrow(/positive integer/);
+      expect(() => req('BufferSize=0')).toThrow(/greater than zero/);
+    });
+
+    it('is ABSENT when not given, so the session default still applies', () => {
+      // Absence is meaningful here exactly as it is for `recfm`: no BufferSize means the
+      // engine takes its own default and the advertisement keeps using the session's.
+      expect(req().bufferSize).toBeUndefined();
+    });
+
+    it('does NOT reach the IND$FILE command, because it is not a host keyword', () => {
+      // It sizes OUR frames; the host learns it from the DDM Query Reply, not from the
+      // command line. x3270 does not put it in the command either (ft.c builds the command
+      // from the DCB keywords only). Asserted on both dialects, since they build differently.
+      for (const host of ['tso', 'vm'] as const) {
+        const { command } = transferCommand([
+          'Direction=send', 'LocalFile=/tmp/a', 'HostFile=A', `Host=${host}`,
+          'BufferSize=512',
+        ]);
+        expect(command).not.toMatch(/BUFFER/i);
+        expect(command).not.toContain('512');
+      }
+    });
+
+    it('is allowed on a RECEIVE, unlike the DCB keywords', () => {
+      // Recfm/Lrecl/Blksize are refused on a receive because the host dataset already
+      // exists. BufferSize is different in kind -- it is our own frame size and applies in
+      // both directions -- so it must NOT be swept into that refusal.
+      const r = parseTransferKeywords([
+        'Direction=receive', 'LocalFile=/tmp/a', 'HostFile=A', 'BufferSize=512',
+      ]);
+      expect(r.bufferSize).toBe(512);
+    });
+
+    it('is allowed on VM, unlike Blksize', () => {
+      // Same reasoning: it is not a host DCB attribute, so the VM restrictions do not apply.
+      const r = parseTransferKeywords([
+        'Direction=send', 'LocalFile=/tmp/a', 'HostFile=A', 'Host=vm', 'BufferSize=512',
+      ]);
+      expect(r.bufferSize).toBe(512);
+    });
   });
 
   it('rejects a missing LocalFile and a missing HostFile', () => {

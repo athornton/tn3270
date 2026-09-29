@@ -129,6 +129,13 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   const dft = new DftTransfer({
     direction: request.direction,
     ...(source !== undefined ? { data: source } : {}),
+    // `BufferSize=N` REACHES THE ENGINE, and this line is the one that closes a real bug
+    // rather than adding a feature: without it the engine always took its 16384 default
+    // while the DDM Query Reply advertised whatever the session was given, so the two
+    // could differ by 32x -- promising the host one frame size and sending another.
+    // `Session.startDftTransfer` now reads the size back OFF this engine for the
+    // advertisement, so there is one number and both sides read it.
+    ...(request.bufferSize === undefined ? {} : { bufferSize: request.bufferSize }),
   });
 
   // REGISTERED BEFORE THE HOST IS TOLD ANYTHING, and the order is load-bearing: a fast

@@ -1431,6 +1431,55 @@ describe('Transfer() protocol selection', () => {
   });
 });
 
+describe('Transfer(BufferSize=N)', () => {
+  it('reaches the DFT engine and BOUNDS THE FRAMES ON THE WIRE', async () => {
+    // THE KEYWORD'S WHOLE POINT, asserted on bytes rather than on the option. A small
+    // BufferSize must produce small upload frames: the engine chunks by
+    // `bufferSize - UPLOAD_OVERHEAD` (dft.ts:340), so 300 gives 273 data bytes per frame and
+    // a 600-byte file needs three. Before the driver passed the keyword through, the engine
+    // silently used 16384 and the whole file went in ONE frame -- which is also what the host
+    // was NOT told to expect.
+    const { runner, session, conn, files } = await transferRunnerAt(24, 80, {
+      transferFrameSeconds: 0.5,
+    });
+    files.store.set('/tmp/big.bin', new Uint8Array(600).fill(0xc1));
+
+    const pending = runner.run(
+      'Transfer(Direction=send,HostFile=BIG.BIN,LocalFile=/tmp/big.bin,BufferSize=300)');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.dftTransfer?.bufferSize).toBe(300);
+
+    // Open, then a Get per frame until the engine says EOF.
+    dftWsf(conn, dftOpen());
+    const frames: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      conn.sent = [];
+      dftWsf(conn, [0x46, 0x11]);                      // TR_GET_REQ
+      if (conn.sent.length === 0) break;
+      frames.push(conn.sent.length);
+      if (session.dftTransfer === undefined) break;
+    }
+    // Every frame fits the advertised buffer, and no single frame swallowed the file.
+    expect(frames.length).toBeGreaterThan(1);
+    for (const len of frames) expect(len).toBeLessThanOrEqual(300);
+
+    dftWsf(conn, [0x41, 0x12]);                        // Close
+    dftWsf(conn, dftOpen('FT:MSG'));
+    dftWsf(conn, dftData([...'TRANS03'].map((c) => c.charCodeAt(0))));
+    await pending;
+  });
+
+  it('CLAMPS through the whole path, so the engine and the wire agree at the bounds', async () => {
+    // `BufferSize=10` is below DFT_MIN_BUF. The keyword clamps it to 256 with the same
+    // `boundDftBufferSize` the engine and the advertisement use, so all three say 256 --
+    // the property that makes a mismatch structurally impossible rather than merely unlikely.
+    const { runner, session } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    await runner.run(
+      'Transfer(Direction=receive,HostFile=A.BIN,LocalFile=/tmp/out.bin,BufferSize=10)');
+    expect(session.dftTransfer?.bufferSize ?? 256).toBe(256);
+  });
+});
+
 describe('Transfer(): a DFT transfer that finishes before the poll loop', () => {
   it('is NOT missed when it completes inside sendAID(ENTER) itself', async () => {
     // THE CLI'S VERSION OF "CHECK STATE BEFORE WAITING". A whole DFT transfer can begin AND

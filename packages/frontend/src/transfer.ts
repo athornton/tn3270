@@ -31,7 +31,7 @@
  * even though x3270's own default is also TSO for unrelated reasons (ft.c:320).
  */
 
-import { AckAid, type TransferDirection } from '@tn3270/core';
+import { AckAid, boundDftBufferSize, type TransferDirection } from '@tn3270/core';
 
 /**
  * The file system, injected.
@@ -82,6 +82,13 @@ export interface TransferRequest {
   recfm?: FtRecfm;
   lrecl?: number;
   blksize?: number;
+  /**
+   * The DFT frame size, clamped to 256..32767. **Not a host keyword** -- it never
+   * appears in the `IND$FILE` command. It sizes OUR frames, and the host learns it
+   * from the DDM Query Reply instead, which is why it applies in BOTH directions and
+   * on BOTH hosts where the DCB keywords do not.
+   */
+  bufferSize?: number;
 }
 
 /**
@@ -313,17 +320,21 @@ export function dialectFor(host: FtHostType): Dialect {
  * with the full accepted set — the operator's next move is to retype it, and
  * "unknown option 'Recfmt'" without the list is a guessing game.
  *
- * x3270's table (ft.c:142-166) has eight more: `Remap`, `Allocation`,
- * `PrimarySpace`, `SecondarySpace`, `Avblock`, `BufferSize`, `WindowsCodePage`
- * and `OtherOptions`. Each is deliberately absent, and absent LOUDLY (see
- * `parseTransferKeywords`): `Remap` and `BufferSize` govern behaviour we have not
- * built (ascii remapping and DFT), the space keywords need `SPACE(n,n)` and
- * `TRACKS|CYLS` command syntax nobody has tested against the host yet, and
+ * x3270's table (ft.c:142-166) has eight more, of which SEVEN are deliberately
+ * absent and absent LOUDLY (see `parseTransferKeywords`): `Remap` governs ascii
+ * remapping we have not built, `Allocation`/`PrimarySpace`/`SecondarySpace`/
+ * `Avblock` need `SPACE(n,n)` and `TRACKS|CYLS` command syntax nobody has tested
+ * against the host yet, `WindowsCodePage` is not ours to honour, and
  * `OtherOptions` is a hole through which any of them could arrive unvalidated.
+ *
+ * **`BufferSize` IS THE EIGHTH AND IT IS NOW ACCEPTED**, because the behaviour it
+ * governs -- DFT -- exists. It is the one keyword here that never reaches the host
+ * command: it sizes our own frames and the host learns it from the DDM Query Reply,
+ * so it applies to a receive and to VM, where the DCB keywords do not.
  */
 const KEYWORDS = [
   'direction', 'localfile', 'hostfile', 'host', 'mode', 'cr', 'exist',
-  'recfm', 'lrecl', 'blksize',
+  'recfm', 'lrecl', 'blksize', 'buffersize',
 ] as const;
 
 const KEYWORD_SET = new Set<string>(KEYWORDS);
@@ -482,6 +493,20 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
   const lrecl = lreclText === undefined ? undefined : positiveInt('Lrecl', lreclText);
   const blksize = blksizeText === undefined ? undefined : positiveInt('Blksize', blksizeText);
 
+  // CLAMPED WITH THE FUNCTION CORE ALREADY USES, not with a second copy of the bounds.
+  // `boundDftBufferSize` is what `ddmCapability` applies to the advertisement
+  // (`queryreply.ts:487`) and what `DftTransfer`'s constructor applies to the chunking
+  // (`dft.ts:172`), so reusing it here is what makes all three agree BY CONSTRUCTION
+  // rather than by three matching literals. Clamping rather than rejecting is x3270's
+  // `set_dft_buffersize` (`ft_dft.c:740-747`).
+  //
+  // `positiveInt` FIRST, so the clamp does not become a swallow-everything: `BufferSize=big`
+  // must fail rather than quietly become the 256 minimum.
+  const bufferSizeText = get('buffersize');
+  const bufferSize = bufferSizeText === undefined
+    ? undefined
+    : boundDftBufferSize(positiveInt('BufferSize', bufferSizeText));
+
   // THREE COMBINATIONS x3270 ACCEPTS AND SILENTLY DROPS. Each one is rejected
   // here instead, because the visible symptom of the drop is a host dataset with
   // attributes nobody chose.
@@ -531,6 +556,7 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
     ...(recfm !== undefined ? { recfm } : {}),
     ...(lrecl !== undefined ? { lrecl } : {}),
     ...(blksize !== undefined ? { blksize } : {}),
+    ...(bufferSize !== undefined ? { bufferSize } : {}),
   };
 }
 

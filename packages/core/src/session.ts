@@ -156,6 +156,32 @@ export class Session {
    */
   private dft: DftTransfer | undefined;
   /**
+   * The in-flight transfer's DFT buffer size, for the DDM Query Reply to advertise.
+   *
+   * ## WHY THIS IS NOT JUST `opts.dftBufferSize`
+   *
+   * THE SIZE WE ADVERTISE AND THE SIZE WE CHUNK BY MUST BE ONE NUMBER, which
+   * `DftOptions.bufferSize` has always said and nothing enforced. Before this field
+   * existed the two could differ and did: with `dftBufferSize: 512` the Query Reply
+   * advertised 512 while the engine every driver builds chunked by the 16384 default
+   * — a 32x overrun of the frame size we had promised the host. Task 11 measured the
+   * host READING that advertisement and quoting it back in its `Open` (recordSize =
+   * advertised − 17), so the number is not decorative.
+   *
+   * x3270 has the same single source of truth and reads it the same way: `do_qr_ddm`
+   * takes `ftc->dft_buffersize` from the in-flight transfer and falls back to the
+   * resource default only when none is running (`sf.c:890-897`).
+   *
+   * ## A DELIBERATE DIVERGENCE: WE CLEAR IT, x3270 DOES NOT
+   *
+   * x3270 never clears `ftc` — the only assignment in `ft.c` is `:807` — so after any
+   * transfer its Query Reply keeps quoting that transfer's size forever. Cleared here
+   * at all four sites that clear `dft`, so a host querying between transfers gets the
+   * session default back. Fifth instance in this file of "one path sets state and
+   * another must clear it"; see `handleClose`.
+   */
+  private dftBuffer: number | undefined;
+  /**
    * Host records applied since connect. Monotonic; never reset.
    *
    * Exposed so a caller can wait for the stream to QUIESCE rather than for a
@@ -359,6 +385,11 @@ export class Session {
    */
   startDftTransfer(transfer: DftTransfer): void {
     this.dft = transfer;
+    // READ OFF THE ENGINE, already clamped by its own constructor (`dft.ts:172`, the same
+    // `boundDftBufferSize` the advertisement uses). Taking it from here rather than from a
+    // second parameter is what makes the advertised and chunked sizes structurally incapable
+    // of disagreeing: there is ONE value and both sides read it.
+    this.dftBuffer = transfer.bufferSize;
   }
 
   /** The DFT transfer in flight, for a front end to read progress or cancel. */
@@ -384,6 +415,7 @@ export class Session {
    */
   cancelDftTransfer(): void {
     this.dft = undefined;
+    this.dftBuffer = undefined;
   }
 
   /**
@@ -689,6 +721,7 @@ export class Session {
     // `tn3270eNegotiated`, and the pending AID above is the third. One teardown path clears
     // the state and another does not.
     this.dft = undefined;
+    this.dftBuffer = undefined;
     // TN3270E state DIES WITH THE CONNECTION THAT NEGOTIATED IT. Until this line, `e`
     // was cleared only by the REJECT backoff below, so a second connection to a host
     // that never mentions option 40 inherited `phase: 'negotiated'` — and then
@@ -1258,6 +1291,7 @@ export class Session {
       // handleRecord and drop the connection.
       this.trace.note(`DFT frame rejected: ${err instanceof Error ? err.message : String(err)}`);
       this.dft = undefined;
+      this.dftBuffer = undefined;
       this.emit('transferEnd');
       return;
     }
@@ -1272,6 +1306,7 @@ export class Session {
     if (step.reply !== undefined) this.sendInbound(step.reply);
     if (step.done !== undefined) {
       this.dft = undefined;
+      this.dftBuffer = undefined;
       this.emit('transferEnd');
     }
   }
@@ -1424,8 +1459,12 @@ export class Session {
     // list order, and matching x3270's ascending order is what makes captures
     // comparable. buildReply then applies the REQTYP rules to whichever list it
     // is given, so no other code changes.
+    // THE IN-FLIGHT TRANSFER'S SIZE WINS, falling back to the session default when no
+    // transfer is running -- x3270's own precedence, `do_qr_ddm` reading
+    // `ftc->dft_buffersize` or `set_dft_buffersize(0)` (`sf.c:890-897`). This is the read
+    // half of what makes the advertised and chunked sizes one number; see `dftBuffer`.
     const capabilities = this.opts.ddm
-      ? withDdm(DEFAULT_CAPABILITIES, this.opts.dftBufferSize)
+      ? withDdm(DEFAULT_CAPABILITIES, this.dftBuffer ?? this.opts.dftBufferSize)
       : DEFAULT_CAPABILITIES;
     this.sendInbound(buildReply(request, capabilities, geometry));
     // enterInhibit, not inhibit(EnterInhibit): it yields to a stronger inhibit

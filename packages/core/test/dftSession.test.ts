@@ -525,6 +525,143 @@ describe('the DDM advertisement through a Session', () => {
     expect(size(512)[2]).toBe(0x02);
     expect(size(512)[3]).toBe(0x00);
   });
+
+  /**
+   * ONE NUMBER, ADVERTISED AND CHUNKED, AND THE QUERY REPLY READS THE TRANSFER'S.
+   *
+   * x3270 keeps a single `ftc->dft_buffersize` and `do_qr_ddm` reads it from the IN-FLIGHT
+   * transfer, falling back to the resource default only when none is running
+   * (`sf.c:890-897`). We follow that, because the alternative -- a session default and an
+   * engine size that can differ -- was a REAL, REACHABLE BUG: measured before this change,
+   * `new Session({ ddm: true, dftBufferSize: 512 })` advertised 512 while the engine every
+   * driver built chunked by 16384. A 32x overrun of the frame size we promised the host.
+   *
+   * ASSERTED ON THE QUERY REPLY BYTES rather than on a getter, for the reason the
+   * advertisement suite above already documents: a constant-level test cannot catch the real
+   * defect, and Task 11 measured the host READING this number and quoting it back in its
+   * `Open` (recordSize = advertised - 17). So the bytes are what matter.
+   */
+  describe('the DFT buffer size is ONE number', () => {
+    /** The LIMIN/LIMOUT pair out of a real Query reply, or undefined if no DDM unit. */
+    function advertised(sent: readonly number[]): number | undefined {
+      const at = sent.findIndex((b, i) => sent[i - 1] === 0x81 && b === Qcode.DDM);
+      if (at < 0) return undefined;
+      // Body after `L L SFID QCODE`: 2 reserved FLAGS bytes, then LIMIN.
+      return (sent[at + 3]! << 8) | sent[at + 4]!;
+    }
+
+    it('advertises the SESSION default when no transfer is running', async () => {
+      const sent = await queryReplyBytes({ ddm: true, dftBufferSize: 4096 });
+      expect(advertised(sent)).toBe(4096);
+    });
+
+    it('advertises the RUNNING TRANSFER\'s size, not the session default', async () => {
+      // THE TEST FOR THE BUG. Without the wiring these disagree and the host is told 4096
+      // while we chunk by 512 -- or, as shipped, told 512 and chunked by 16384.
+      const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      session.startDftTransfer(new DftTransfer({ direction: 'receive', bufferSize: 512 }));
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(512);
+    });
+
+    it('REVERTS to the session default once the transfer ends -- a DELIBERATE x3270 divergence', async () => {
+      // x3270 NEVER CLEARS `ftc` -- the only assignment in ft.c is `:807` -- so after any
+      // transfer its Query Reply keeps quoting that transfer's size forever. We clear ours,
+      // so a host querying between transfers gets a stable, honest answer. Same shape as the
+      // four teardown bugs session.ts already documents fixing: one path sets state and
+      // another must clear it.
+      const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      const transfer = new DftTransfer({ direction: 'receive', bufferSize: 512 });
+      session.startDftTransfer(transfer);
+
+      // Run the whole download to completion, the way the engine really ends.
+      const di = (bytes: number[]): number[] => [
+        0x47, 0x04, 0xc0, 0x80, 0x61,
+        ((bytes.length + 5) >> 8) & 0xff, (bytes.length + 5) & 0xff, ...bytes,
+      ];
+      conn.host(...wsfBytes(openPayload()));
+      conn.host(...wsfBytes(di([0x41])));
+      conn.host(...wsfBytes([0x41, 0x12]));                        // Close
+      conn.host(...wsfBytes(openPayload('FT:MSG')));
+      conn.host(...wsfBytes(di([...'TRANS03'].map((c) => c.charCodeAt(0)))));
+      expect(transfer.complete).toBe(true);
+      expect(session.dftTransfer).toBeUndefined();
+
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(4096);
+    });
+
+    it('reverts when the transfer is CANCELLED too, not only when it completes', async () => {
+      // `cancelDftTransfer` is the protocol-race loser's path and clears `dft`; it must clear
+      // the size with it, or a cancelled transfer's size outlives it in the advertisement.
+      const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      session.startDftTransfer(new DftTransfer({ direction: 'receive', bufferSize: 512 }));
+      session.cancelDftTransfer();
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(4096);
+    });
+
+    it('reverts when the CONNECTION drops, so a new connection does not inherit it', async () => {
+      // `handleClose` clears `dft`, and must clear the size with it. FOUND BY MUTATION: with
+      // only the completion and cancel paths pinned, deleting this one left the suite green --
+      // an unfalsified teardown, which is the shape this file has now documented five times.
+      //
+      // It matters because a Session OUTLIVES its connection: the CLI reconnects with two
+      // `Connect()` actions in one script, and a second host would otherwise be told the frame
+      // size of a transfer that ran against the first.
+      const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      session.startDftTransfer(new DftTransfer({ direction: 'receive', bufferSize: 512 }));
+      conn.close();                                  // the socket goes away mid-transfer
+
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(4096);
+    });
+
+    it('reverts when a MALFORMED FRAME ends the transfer, not only a clean end', async () => {
+      // The third way a transfer ends: `handleTransferData` catches a DftFrameError, clears
+      // `dft` and fires `transferEnd`. ALSO FOUND BY MUTATION -- it was the other unfalsified
+      // clear. A rejected frame is an abnormal end, and the size must not survive it either.
+      const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      session.startDftTransfer(new DftTransfer({ direction: 'receive', bufferSize: 512 }));
+      conn.host(...wsfBytes([0x00]));                // one byte: too short to parse
+      expect(session.dftTransfer).toBeUndefined();
+
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(4096);
+    });
+
+    it('advertises the engine\'s CLAMPED size, so the two cannot disagree at the bounds', async () => {
+      // The engine clamps in its constructor (dft.ts:172) and the advertisement clamps in
+      // ddmCapability. Reading the engine's already-clamped `bufferSize` is what makes a
+      // double-clamp harmless and a MISSING clamp impossible: ask for 10, both say 256.
+      const { session, conn } = newSession({ ddm: true });
+      await session.connect('localhost', 3270);
+      conn.negotiate();
+      const transfer = new DftTransfer({ direction: 'receive', bufferSize: 10 });
+      expect(transfer.bufferSize).toBe(256);
+      session.startDftTransfer(transfer);
+      conn.sent = [];
+      conn.host(0xf3, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02, T.IAC, T.EOR);
+      expect(advertised(conn.sent)).toBe(256);
+    });
+  });
 });
 
 /**
