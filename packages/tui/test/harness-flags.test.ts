@@ -193,13 +193,18 @@ describe('the DFT transfer scripts', () => {
     expect(source.match(/String\("LISTDS /g)?.length).toBe(3);
   });
 
-  it('dft-lrecl-tso.txt uses HERC02, because HERC01 is held', () => {
-    // An earlier failed run left HERC01 held (IKJ56425I ... USERID HERC01 IN USE) and a held
-    // userid cannot be freed from a fresh logon -- it needs operator action on the Hercules
-    // console. Pinned so a copy-paste back to HERC01 is caught here rather than by a live run
-    // whose downstream symptom (the password rejected as a command) looks like a client bug.
-    const source = readFileSync(join(cliScriptsDir, 'dft-lrecl-tso.txt'), 'utf8');
-    expect(source).toContain('String("HERC02")');
-    expect(source).not.toContain('String("HERC01")');
+  it('the two DFT scripts use DIFFERENT userids, so they cannot collide on a held session', () => {
+    // ONE USERID PER SCRIPT. The original reason for this assertion was that HERC01 had been left
+    // HELD by a failed run -- but it has since been freed (`/c u=herc01` at the MVS operator
+    // console, user 2026-09-29), so "HERC01 is unusable" is no longer true and pinning that would
+    // now be pinning a stale fact. What survives is the durable reason: a script that does not
+    // reach LOGOFF leaves its userid held, and TSO refuses rather than reconnecting, so two
+    // scripts sharing a userid means one failed run blocks the other. Four exist, HERC01-HERC04.
+    const lrecl = readFileSync(join(cliScriptsDir, 'dft-lrecl-tso.txt'), 'utf8');
+    const tso = readFileSync(join(cliScriptsDir, 'dft-tso.txt'), 'utf8');
+    const userid = (src: string) => src.match(/String\("(HERC0\d)"\)/)?.[1];
+    expect(userid(lrecl), 'no userid found in dft-lrecl-tso.txt').toBeDefined();
+    expect(userid(tso), 'no userid found in dft-tso.txt').toBeDefined();
+    expect(userid(lrecl)).not.toBe(userid(tso));
   });
 });

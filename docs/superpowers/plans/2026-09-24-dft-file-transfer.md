@@ -2523,7 +2523,9 @@ contradicted the plan. If the run failed, say so and what it showed.>"
 > dance (it advances past the password prompt); TSO's `DELETE` takes **one** dataset name at a time,
 > and three bare names leaves TSO at a `REENTER` prompt that swallows every later command; and **a
 > held userid cannot be freed from a fresh logon** — `HERC01` is still held by an earlier failed run
-> and needs operator action on the Hercules console, so this ran on `HERC02`.
+> and was freed with **`/c u=herc01` at the MVS operator console** (user, 2026-09-29 — see
+> `docs/live-testing.md`, *Freeing a held TSO userid on TK5*, for why a fresh logon cannot do it).
+> This task ran on `HERC02`; **both are free now**.
 >
 > **Step 2 of this task asked for "two transfers differing only in `Lrecl`"; three were run**, per the
 > task's own following sentence, and the third is what makes it conclusive rather than suggestive.

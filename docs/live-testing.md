@@ -39,13 +39,13 @@ and the Recording log says what happened when they were run.
      which leaves TSO at a **`REENTER` prompt that silently swallows every later command** — three
      transfers then reported `REENTER - IND$FILE PUT ...` and zero DFT frames, which reads exactly
      like a client that cannot transfer.
-  3. **A HELD USERID CANNOT BE FREED FROM A FRESH LOGON.** The first failed attempt left `HERC01`
-     held, and every subsequent run got `IKJ56425I LOGON REJECTED, USERID HERC01 IN USE` — with the
-     *downstream* symptoms (password rejected as a command) looking like the real fault. `LOGOFF` at
-     the `Logon ===>` prompt does not help; it is read as a userid
-     (`IKJ56420I USERID LOGOFF NOT AUTHORIZED`). **Freeing it needs operator action on the Hercules
-     console.** `HERC01` IS STILL HELD as of this entry; the run was completed on `HERC02`, which was
-     logged off cleanly and verified free afterwards. Four userids exist (`HERC01`–`HERC04`).
+  3. **A HELD USERID CANNOT BE FREED FROM A FRESH LOGON — FREE IT WITH `/c u=<userid>` AT THE MVS
+     OPERATOR CONSOLE.** See *Freeing a held TSO userid on TK5* below for the whole recipe; the
+     symptom is `IKJ56425I LOGON REJECTED, USERID HERC01 IN USE` on screen, and the *downstream*
+     symptoms (the password rejected as a command) look like the real fault. The run was completed on
+     `HERC02` instead. **`HERC01` was afterwards freed with `/c u=herc01` and verified** — password
+     prompt reached, `$HASP250 HERC01 IS PURGED` on the console — so no userid is held now; all four
+     (`HERC01`–`HERC04`) are available.
 
 - **DFT FILE TRANSFER IS LIVE AGAINST MVS 3.8j TK5, AT 43x80, 2026-09-29 — the run the whole
   `dft-file-transfer` branch existed to produce.** Until today `Session.startDftTransfer` had no
@@ -1044,6 +1044,47 @@ attributing to it.
 
 The user's answer settled it in one line: the normal interactive flow shows no
 `restart` anywhere, which made it a symptom rather than background noise.
+
+### Freeing a held TSO userid on TK5
+
+**`/c u=<userid>` at the MVS operator console. Confirmed by the user, 2026-09-29.**
+
+A run that does not reach `LOGOFF` leaves the TSO address space alive, and the next logon draws
+`IKJ56425I LOGON REJECTED, USERID HERC01 IN USE` on screen / `IKJ606I TSOLOGON REJECTED. USERID,
+HERC01,IN USE` on the console. The console is the terminal running Hercules with `conf/tk5.cnf`;
+MVS commands are passed through it with a leading `/`:
+
+```
+/c u=herc01
+```
+
+**WHY A FRESH LOGON CANNOT FIX IT, so nobody spends another twenty minutes on this.** Logging on
+again is *refused*, not reconnected — unlike VM/370, where a held account reconnects and lands you at
+`CP READ` (the trap `transfer-vm.txt` documents). And **`LOGOFF` typed at the `Logon ===>` prompt is
+read as a USERID**, answering `IKJ56420I USERID LOGOFF NOT AUTHORIZED TO USE TSO`. So there is no
+in-band escape: it has to be the console.
+
+**WHAT THE CONSOLE LOG SHOWS, and it explains the hold rather than just reporting it.**
+`log/hardcopy.log` in the TK5 directory is the console hardcopy and is readable after the fact (the
+live console is Hercules' controlling terminal, which an agent cannot read — see the next section):
+
+```
+4000 19.46.15 TSU  19  IEF125I HERC01 - LOGGED ON - TIME=19.46.15
+4100 19.48.29 TSU  19  IKT108I HERC01 RECEIVE ERROR,...,WAITING FOR RECONNECT CUU0C0
+4080 19.48.36         IKJ606I TSOLOGON REJECTED. USERID, HERC01,IN USE
+```
+
+**`WAITING FOR RECONNECT` is the state to recognise:** TCAM is holding the address space open for a
+terminal that went away, which is exactly what a script that dies mid-session produces. JES2 sees it
+as a job (`TSU 19`), so `/$CJ19` reaches the same address space if the userid form is refused.
+
+**`/FORCE U=<userid>` EXISTS AND IS A LAST RESORT, not a stronger synonym.** It can leave enqueues
+held and datasets allocated, which is a worse state than a stuck userid. Try `/c u=...` first, then
+`/c u=...,dump`, and only then `FORCE`.
+
+**Reaching `LOGOFF` is cheaper than any of this**, which is why every committed TSO script ends with
+one and says so in its header — and why `Wait(Unlock)` after each `Transfer()` matters: without it the
+script loses its tail, including the `LOGOFF`.
 
 ### Reading the Hercules console log
 

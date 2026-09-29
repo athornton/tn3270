@@ -35,10 +35,12 @@
 # leaves TSO at a REENTER prompt that swallows every later command -- the transfers then report
 # `REENTER - IND$FILE PUT ...` with zero DFT frames, which reads exactly like a client bug.
 #
-# THIS SCRIPT USES HERC02, DELIBERATELY. HERC01 was left held by an earlier failed run
-# (IKJ56425I LOGON REJECTED, USERID HERC01 IN USE) and a held userid CANNOT be freed from a
-# fresh logon -- `LOGOFF` at the `Logon ===>` prompt is read as a userid. Freeing it needs
-# operator action on the Hercules console. Four userids exist, HERC01-HERC04.
+# THIS SCRIPT USES HERC02 AND dft-tso.txt USES HERC01, DELIBERATELY: one userid per script, so
+# two scripts can never collide on a held session. That matters because of what happened here --
+# the first attempt left HERC01 held (IKJ56425I LOGON REJECTED, USERID HERC01 IN USE) and a held
+# userid CANNOT be freed from a fresh logon: TSO refuses rather than reconnecting, and `LOGOFF`
+# at the `Logon ===>` prompt is read as a userid. It is freed with `/c u=herc01` at the MVS
+# operator console (user, 2026-09-29). Both are free as of that date. Four exist, HERC01-HERC04.
 #
 # Reaching LOGOFF is not optional, for exactly that reason.
 Trace(on)

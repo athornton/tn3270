@@ -78,10 +78,14 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    and it now is. **But ask before flipping**, and measure the blast radius the way the `-model` flip
    was measured: turning it on moves both Hercules hosts onto whichever protocol they prefer, so
    every CUT live witness here becomes a statement about a path real hosts no longer take.
-4. **`HERC01` ON TK5 IS HELD and needs operator action on the Hercules console** — a failed run left
-   a TSO address space running, and a held userid cannot be freed from a fresh logon (`LOGOFF` at the
-   `Logon ===>` prompt is read as a userid). Live TSO work should use `HERC02`, which was logged off
-   cleanly and verified free. Four userids exist, `HERC01`–`HERC04`.
+4. **A HELD TSO USERID ON TK5 IS FREED WITH `/c u=<userid>` AT THE MVS OPERATOR CONSOLE** — the
+   user's answer, 2026-09-29. A run that does not reach `LOGOFF` leaves the address space alive in
+   `WAITING FOR RECONNECT`, and **a fresh logon cannot recover it**: TSO refuses rather than
+   reconnecting (unlike VM/370), and `LOGOFF` typed at the `Logon ===>` prompt is read as a userid.
+   `HERC01` was left held this way and **has since been freed with that command and verified** — it
+   reaches the password prompt again, and the console log shows `IS PURGED`. **No userid is held
+   now**; all four (`HERC01`–`HERC04`) are available. Full recipe, the console-log evidence and why
+   `/FORCE` is a last resort: `docs/live-testing.md`, *Freeing a held TSO userid on TK5*.
 5. **Roadmap beyond transfers, unchanged:** oversize + `IBM-DYNAMIC`, then local model-switching,
    then PS+VMGIF and graphics, packaging, and the printer session.
 
