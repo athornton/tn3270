@@ -15,8 +15,15 @@ indexes nineteen plan defects and four of mine, and it is written for exactly th
 **State: `main` at `3d45a1d`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
 stashes. 2129 tests in 82 files (from 1981 on the pre-merge `main`), build and typecheck clean.**
 `dft-file-transfer` was merged `--no-ff` (60 commits) and deleted local and remote, which is the
-precedent the last five features set. 2026-09-29 ran to about $1780 of a $1900 cap; the 30-day
-budget resets 2026-10-01.
+precedent the last five features set.
+
+**BUDGET, FOR WHOEVER PICKS THIS UP ON WEDNESDAY 2026-09-30 — READ THIS BEFORE SIZING A PLAN.**
+2026-09-29 ran to about **$1877** of a $1900 cap. **The 30-day period ends at 2026-10-01 00:00 UTC,
+which is ~17:00 Mountain, i.e. the END of Wednesday's working day — so Wednesday is a full day spent
+under the REMAINING monthly allowance, not a fresh one.** The user's stated ceiling for Wednesday is
+therefore **the $2000 monthly total**, i.e. roughly **$120 of headroom**, and not a new daily figure.
+**Thursday 2026-10-01 starts a fresh 30-day budget.** Run `/spend` for the live number rather than
+extrapolating from this line.
 
 **THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch:** build and typecheck
 clean, 2121 tests in 82 files, conformance+golden 12/12, `pty-smoke.py` 12/12,
