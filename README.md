@@ -682,11 +682,22 @@ It is **still default off**, which is deliberate: every CUT live witness in this
 measured without it, and flipping the default silently changes which protocol a host picks. Making
 it default-on is a separate, deliberate decision.
 
-The advertised LIMIN/LIMOUT are 16384, bounded 256..32767 (`SessionOptions.dftBufferSize`,
-clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`). **No flag or keyword reaches
-it yet** — `Transfer`'s `BufferSize` keyword is validated and then ignored, like `Remap`, and
-wiring the two together is still open work. **They must agree when it is done**, since the size we
-advertise to the host and the size we chunk by are one number.
+The advertised LIMIN/LIMOUT default to 16384, bounded 256..32767, and **`Transfer(BufferSize=N)`
+sets them** — clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`.
+
+**IT IS ONE NUMBER: the size advertised to the host and the size we chunk by are the same value,
+read from the in-flight transfer.** That is x3270's design too — `do_qr_ddm` takes
+`ftc->dft_buffersize` from the running transfer and falls back to the default only when none is
+running (`sf.c:890-897`). It matters because **the host sizes its side from what we advertise**,
+measured live on TK5: `BufferSize=512` moved MVS's own `Open` record size to **495** (= 512 − 17,
+the DFT frame overhead) while un-keyworded transfers in the same session stayed at 16367. Before
+this was wired the two could differ by 32× — advertising 512 while chunking by 16384.
+
+`BufferSize` is the one transfer keyword that **never reaches the `IND$FILE` command**: it sizes our
+frames, not the host's dataset, so unlike `Recfm`/`Lrecl`/`Blksize` it is legal on a receive and on
+VM. It is CLI-only — the TUI form has no field for it, deliberately, because the form's width is
+derived from its field labels and a longer one would shift the status line's 54-column budget.
+`SessionOptions.dftBufferSize` remains the programmatic default and is still reachable from no flag.
 
 The unit is inserted in ascending-QCODE order rather than appended, so a capture stays
 comparable with x3270's. The flag exists because it is what *measured* which hosts offer DFT:
@@ -915,8 +926,9 @@ Remaining, in the order the author wants it:
    Hercules host spoke it. What was really missing was on *our* side: a host offers DFT only to a
    client that advertised the Query Reply (DDM) unit, and we had never sent one. See `-ddm` under
    *Using the CLI* and the wire bytes in `docs/live-testing.md`. VM/370's MECAFF declines it and
-   stays on CUT, which makes it the control. **Still open in stage 2:** `Transfer()`'s `BufferSize`
-   keyword and `SessionOptions.dftBufferSize` are both set by nothing and must agree when wired.
+   stays on CUT, which makes it the control. **Stage 2 is now COMPLETE**: `Transfer(BufferSize=N)`
+   sets the DFT frame size, and it is the SAME number advertised in the DDM Query Reply — verified
+   live, `BufferSize=512` moving the host's own `Open` record size to 495.
    **Stage 3** is
    the same form in the GUI, which is a renderer rather than a rewrite — the model is already
    shared in `packages/frontend` and the `Xfer` keypad button already exists. **Stage 4** is the

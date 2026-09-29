@@ -65,10 +65,15 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
 `packages/cli/scripts/dft-lrecl-tso.txt`, which carries the answer in its header.
 
 **WHAT REMAINS, in the order the work suggests:**
-1. **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize` are STILL set by
-   nothing** — one line each, and **they MUST agree**. Task 11 is what makes this concrete rather
-   than tidy: the host READS our advertised size and quotes it back in its `Open`, so advertising one
-   number while chunking by another would have it sizing its side from a value we do not honour.
+1. ~~`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize`.~~ **DONE 2026-09-29.**
+   `Transfer(BufferSize=N)` now sets the DFT frame size and it is the SAME number advertised in the
+   DDM Query Reply, read from the in-flight transfer (x3270's own design, `sf.c:890-897`).
+   **This fixed a live bug**: the drivers passed no `bufferSize`, so the engine always chunked by
+   16384 while the advertisement used whatever the session was given — reachable, and measured at
+   32× apart. **Verified live**: `BufferSize=512` moved MVS's own `Open` record size to **495**
+   (= 512 − 17) while un-keyworded transfers in the same session stayed at 16367.
+   **`SessionOptions.dftBufferSize` is still reachable from no flag** — deliberately; it is the
+   programmatic default, and a `-dft-buffer-size` flag would be additive if ever wanted.
 2. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
    are renderers rather than rewrites. The gateway half is a **security decision first** —
    `web/src/protocol.ts` refuses the `transferForm` action outright, because a browser-initiated

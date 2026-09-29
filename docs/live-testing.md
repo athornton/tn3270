@@ -9,6 +9,27 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **`BufferSize=512` MOVES THE HOST'S OWN RECORD SIZE TO 495, EXACTLY AS PREDICTED — TK5,
+  2026-09-29.** The end-to-end proof that the DFT buffer size is one number and the host reads it.
+  Same three-case script with `BufferSize=512` added to the FIRST transfer only:
+
+  | Transfer | Keyword | `Open` recordSize | Predicted |
+  |---|---|---|---|
+  | 1 | `BufferSize=512` | **495** | 512 − 17 ✓ |
+  | 2 | *(none)* | **16367** | 16384 − 17 ✓ |
+  | 3 | *(none)* | **16367** | 16384 − 17 ✓ |
+
+  **MVS sized its side from our advertisement**, and the un-keyworded transfers in the same session
+  stayed at the default — so this is not a session-wide setting being read once, it is per-transfer,
+  which is what x3270's `do_qr_ddm` reading `ftc->dft_buffersize` implies (`sf.c:890-897`).
+  **Nothing else changed:** 18 DFT frames, three `Transfer complete`, `VB 1024` / `VB 80` / `FB 80`
+  per `LISTDS` exactly as without the keyword, all three datasets deleted, `HERC02` logged off and
+  `IS PURGED`. **A smaller buffer does not change the dataset, only the frame size** — worth knowing,
+  since the two are easy to conflate given both end up as numbers in a trace.
+
+  **This is what the wiring bought, and before it the two could not have agreed:** the drivers passed
+  no `bufferSize`, so the engine always chunked by 16384 no matter what was advertised.
+
 - **DFT's OPEN RECORD SIZE IS OUR OWN BUFFER SIZE, NOT THE DATASET'S — three-case run on TK5,
   2026-09-29.** This is DFT plan Task 11, and it closes the one question the DFT spec deliberately
   left open. Run on **`HERC02`** (see the userid trap below), `-ddm on -model 3278-4-E`, three
