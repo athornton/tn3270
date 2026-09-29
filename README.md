@@ -961,6 +961,10 @@ two:
    single external), and the `node:` builtins used are `crypto`, `fs`, `http`, `https`, `net`, `path`,
    `readline`, `stream`, `tls`, `url`, `zlib` — all cross-platform. There is not one
    `process.platform` branch anywhere in `packages/*/src`.
+   **That is a claim about the CODE, not a test result: nothing here has ever run on Windows.** A
+   Windows machine is available to test a packaged build on, which is all that testing an installer
+   needs — so the target is unblocked, but treat "works on Windows" as unverified until an installer
+   has actually been run there.
 12. **Printer sessions.** Needs a host that will drive one; see *What is not implemented*.
 
 Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long

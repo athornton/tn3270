@@ -155,9 +155,25 @@ WSL — where the **existing** TUI runs unmodified, since WSL is Linux. So the p
 **IF IT IS EVER WANTED ANYWAY**, the cheap version is: keep `SIGWINCH` where it works and poll
 `stdout.columns`/`rows` on Windows behind the one platform branch this codebase currently does not
 have; accept that abnormal-exit restore is best-effort there; and require Windows Terminal rather
-than detecting console capabilities. **Do not start it without a Windows box to test on** — this
-project's standing rule is that an untested platform claim is a claim with a date on it, and there is
-no Windows host here.
+than detecting console capabilities.
+
+**THERE IS A WINDOWS BOX, AND KNOWING WHAT IT IS AND IS NOT MATTERS (user, 2026-09-29): a gaming
+machine, not a development environment.** So separate the two uses, because they need very different
+things from it:
+
+- **TESTING A PACKAGED BUILD needs almost nothing of it.** That is the point of shipping an installer:
+  download, run, connect. No toolchain, no Node, no repo. **So the Windows packaging target is
+  testable today** — build the installer here (or in CI), carry it over, and the box is a perfectly
+  good end-user test rig precisely BECAUSE it is not set up for development. That is the more
+  faithful test anyway: a dev machine has a toolchain that can mask a missing runtime dependency.
+- **DEVELOPING OR DEBUGGING ON WINDOWS needs it set up**, which is the cost a Windows TUI would carry
+  on top of the porting work above — and the TUI is the one thing whose problems (signals, raw mode,
+  console capabilities) can only be diagnosed *on* the platform, not from here. That remains the
+  argument against it.
+
+**So: the packaging target is unblocked and should include Windows. A Windows TUI stays out**, and
+this is now a decision about usefulness rather than about tooling — the WSL argument above is what
+settles it, not the absence of a machine.
 
 ## The 2026-09-28 state, kept for the work below
 
