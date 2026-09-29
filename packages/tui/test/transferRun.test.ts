@@ -896,7 +896,11 @@ describe('the timeout message reports what was OBSERVED', () => {
     // Without this the operator sees a bare timeout and no reason to suspect a flag.
     vi.useFakeTimers();
     try {
-      const { session } = await connected();
+      // `ddm: false` EXPLICITLY, since the 2026-09-29 flip made the default ON -- a bare
+      // `connected()` now advertises, so this row would never fire. The row itself is still
+      // worth keeping: `-ddm off` is how the CUT measurements reproduce, and an operator who
+      // set it and then wonders why DFT never happens is exactly who needs telling.
+      const { session } = await connected(24, 80, { ddm: false });
       expect(session.ddmAdvertised).toBe(false);
       let done: { ok: boolean; error?: string } | undefined;
       startTransfer({

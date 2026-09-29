@@ -276,9 +276,12 @@ describe('Session DFT plumbing', () => {
     // forgetting `-ddm on` will be the commonest failure once DFT works: a host that speaks
     // only DFT cannot CHOOSE DFT unless the Query Reply carried QCODE 0x95. Defaults to false,
     // like the flag, so the default is asserted rather than assumed.
-    expect(newSession().session.ddmAdvertised).toBe(false);
-    expect(newSession({ ddm: false }).session.ddmAdvertised).toBe(false);
+    // THE DEFAULT IS ON as of 2026-09-29, so absent means advertised. Both explicit forms
+    // are asserted as well as absence, because the flip is a polarity change and a
+    // `=== true`/`!== false` slip would show up in exactly one of the three.
+    expect(newSession().session.ddmAdvertised).toBe(true);
     expect(newSession({ ddm: true }).session.ddmAdvertised).toBe(true);
+    expect(newSession({ ddm: false }).session.ddmAdvertised).toBe(false);
   });
 
   it('answers a host Get with our data, the upload direction through the session', async () => {
@@ -453,9 +456,23 @@ describe('the DDM advertisement through a Session', () => {
     return conn.sent;
   }
 
-  it('puts NO 0x95 on the wire by default, which is what keeps live hosts on CUT', async () => {
+  it('PUTS 0x95 ON THE WIRE BY DEFAULT as of 2026-09-29, so a DFT host can choose DFT', async () => {
+    // THE FLIP. This test used to assert the OPPOSITE -- "puts NO 0x95 on the wire by
+    // default, which is what keeps live hosts on CUT" -- and that was correct while DFT was
+    // unimplemented, because advertising it made a host offer a protocol we could not parse.
+    // DFT now works and is live-verified, so the user flipped the default on 2026-09-29.
     const sent = await queryReplyBytes({});
     expect(sent.length).toBeGreaterThan(0);          // it DID reply
+    expect(sent).toContain(0x95);
+  });
+
+  it('puts NO 0x95 on the wire with `-ddm off`, which is how CUT measurements reproduce', async () => {
+    // THE ESCAPE HATCH, and it earns a test of its own rather than living as a clause in the
+    // one above: every CUT live witness in this project predates the flip, so `-ddm off` is
+    // what makes those runs reproducible. If this ever stops working, the old evidence
+    // becomes unverifiable rather than merely stale.
+    const sent = await queryReplyBytes({ ddm: false });
+    expect(sent.length).toBeGreaterThan(0);
     expect(sent).not.toContain(0x95);
   });
 
@@ -474,12 +491,16 @@ describe('the DDM advertisement through a Session', () => {
     //
     // 0x95 is `Qcode.DDM`, named rather than repeated as a literal so a constant change cannot
     // leave this test quietly checking the wrong byte.
+    // EXPLICIT on BOTH arms now, because absence no longer means off: `{}` would advertise.
     for (const ddm of [false, true]) {
-      const opts = ddm ? { ddm: true } : {};
+      const opts = { ddm };
       const { session } = newSession(opts);
       expect(session.ddmAdvertised).toBe(ddm);
       expect((await queryReplyBytes(opts)).includes(Qcode.DDM)).toBe(ddm);
     }
+    // And absence agrees with ON, which is the flip itself.
+    expect(newSession().session.ddmAdvertised).toBe(true);
+    expect((await queryReplyBytes({})).includes(Qcode.DDM)).toBe(true);
   });
 
   it('adds DDM as its own unit AND to the summary, changing nothing else', async () => {
@@ -492,7 +513,13 @@ describe('the DDM advertisement through a Session', () => {
     // BEFORE Implicit Partition (0x95 < 0xa6, so order is preserved), and it adds one
     // byte to the Summary's qcode list. Everything else is byte-identical, which is
     // what makes this an ADDITION rather than a protocol change dressed as one.
-    const off = replyUnits(await queryReplyBytes({}));
+    //
+    // `{ ddm: false }`, NOT `{}`, SINCE THE 2026-09-29 FLIP. With the default now ON, `{}`
+    // produces the SIX-unit reply and this test compared it against itself -- both sides
+    // identical, so the whole "DDM adds exactly one unit and one summary byte" claim would
+    // have evaporated while the assertions still read correctly. Exactly the shape this
+    // project keeps recording: a comparison whose inputs stopped differing.
+    const off = replyUnits(await queryReplyBytes({ ddm: false }));
     const on = replyUnits(await queryReplyBytes({ ddm: true }));
     expect(off.map((u) => u.qcode)).toEqual([0x80, 0x81, 0x86, 0x87, 0xa6]);
     expect(on.map((u) => u.qcode)).toEqual([0x80, 0x81, 0x86, 0x87, 0x95, 0xa6]);

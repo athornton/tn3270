@@ -243,6 +243,42 @@ describe('keyword rejection', () => {
       expect(req('BufferSize=512').bufferSize).toBe(512);
     });
 
+    it('WARNS when it clamps, naming both the asked-for and the used value', () => {
+      // A SILENT CLAMP IS THE PROBLEM. `BufferSize=100` becoming 256 changes the frames we
+      // put on the wire AND the number we advertise to the host, so an operator who tuned it
+      // deliberately is owed the news. x3270 clamps silently (`set_dft_buffersize` just
+      // returns the bound); we say so, the same way this file already refuses to drop a
+      // keyword silently.
+      //
+      // Both numbers are in the message because either alone is unactionable: "clamped to
+      // 256" does not say what was ignored, and "100 is out of range" does not say what ran.
+      const low = req('BufferSize=100');
+      expect(low.bufferSize).toBe(256);
+      expect(low.warnings).toHaveLength(1);
+      expect(low.warnings?.[0]).toContain('100');
+      expect(low.warnings?.[0]).toContain('256');
+
+      const high = req('BufferSize=40000');
+      expect(high.bufferSize).toBe(32767);
+      expect(high.warnings?.[0]).toContain('40000');
+      expect(high.warnings?.[0]).toContain('32767');
+    });
+
+    it('does NOT warn at the boundaries or in range, so the warning stays meaningful', () => {
+      // THE EXACT BOUNDS PASS UNCLAMPED, and 32767 is the upper one -- not 32766. Asserted
+      // because an off-by-one here would warn on a legal value, and a warning that fires on
+      // correct input is one an operator learns to ignore.
+      for (const n of [256, 257, 512, 16384, 32766, 32767]) {
+        expect(req(`BufferSize=${n}`).warnings).toBeUndefined();
+      }
+    });
+
+    it('carries no warnings key at all when BufferSize is absent', () => {
+      // Absence rather than an empty array, so `warnings` reads as "there is something to
+      // say" and a caller can loop over it without a length check.
+      expect(req().warnings).toBeUndefined();
+    });
+
     it('still refuses a non-number, so a typo is not silently clamped to 256', () => {
       // The clamp must not become a swallow-everything: `BufferSize=big` has to fail rather
       // than quietly become the minimum.

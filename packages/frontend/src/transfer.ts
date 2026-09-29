@@ -31,7 +31,9 @@
  * even though x3270's own default is also TSO for unrelated reasons (ft.c:320).
  */
 
-import { AckAid, boundDftBufferSize, type TransferDirection } from '@tn3270/core';
+import {
+  AckAid, boundDftBufferSize, DFT_BUF_MAX, DFT_BUF_MIN, type TransferDirection,
+} from '@tn3270/core';
 
 /**
  * The file system, injected.
@@ -89,6 +91,25 @@ export interface TransferRequest {
    * on BOTH hosts where the DCB keywords do not.
    */
   bufferSize?: number;
+  /**
+   * Things the operator should be told about their own request, having got a valid
+   * transfer anyway. Absent when there is nothing to say.
+   *
+   * ## WHY A WARNING AND NOT AN ERROR
+   *
+   * The one case today is a clamped `BufferSize`. Rejecting it would diverge from
+   * x3270, whose `set_dft_buffersize` silently returns the bound
+   * (`ft_dft.c:740-747`) -- but clamping SILENTLY is worse than either, because the
+   * number changes both the frames we put on the wire and the size we advertise to
+   * the host, and an operator who tuned it deliberately would never learn it was
+   * ignored. Same principle this module already applies to keywords: a request that
+   * quietly does something other than what was asked is the failure mode to avoid.
+   *
+   * SHAPED LIKE `CutTransfer.warnings` on purpose (`ft/transfer.ts:277`), which the
+   * CLI already drains into `data:` lines -- so surfacing these costs the caller one
+   * loop in the same idiom rather than a new mechanism.
+   */
+  warnings?: readonly string[];
 }
 
 /**
@@ -503,9 +524,25 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
   // `positiveInt` FIRST, so the clamp does not become a swallow-everything: `BufferSize=big`
   // must fail rather than quietly become the 256 minimum.
   const bufferSizeText = get('buffersize');
-  const bufferSize = bufferSizeText === undefined
+  const bufferSizeAsked = bufferSizeText === undefined
     ? undefined
-    : boundDftBufferSize(positiveInt('BufferSize', bufferSizeText));
+    : positiveInt('BufferSize', bufferSizeText);
+  const bufferSize = bufferSizeAsked === undefined
+    ? undefined
+    : boundDftBufferSize(bufferSizeAsked);
+
+  // WARN ONLY WHEN THE CLAMP ACTUALLY MOVED IT. Comparing the two values rather than
+  // re-testing the bounds is what keeps this honest if `boundDftBufferSize` ever changes:
+  // there is one definition of "out of range" and it is the function's own behaviour.
+  // Both numbers are in the message because either alone is unactionable -- "clamped to 256"
+  // does not say what was ignored, and naming only the input does not say what ran.
+  const warnings: string[] = [];
+  if (bufferSizeAsked !== undefined && bufferSize !== bufferSizeAsked) {
+    warnings.push(
+      `BufferSize ${bufferSizeAsked} is outside the DFT range `
+      + `${DFT_BUF_MIN}..${DFT_BUF_MAX}; using ${bufferSize}`,
+    );
+  }
 
   // THREE COMBINATIONS x3270 ACCEPTS AND SILENTLY DROPS. Each one is rejected
   // here instead, because the visible symptom of the drop is a host dataset with
@@ -557,6 +594,8 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
     ...(lrecl !== undefined ? { lrecl } : {}),
     ...(blksize !== undefined ? { blksize } : {}),
     ...(bufferSize !== undefined ? { bufferSize } : {}),
+    // Absent rather than empty, so `warnings` reads as "there is something to say".
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 

@@ -1214,7 +1214,9 @@ async function transferRunnerAt(
 ) {
   const conn = new FakeConnection();
   const session = new Session({
-    connect: () => conn, rows, cols, ...(opts.ddm === true ? { ddm: true } : {}),
+    // FORWARDED BOTH WAYS, not only when true: since the 2026-09-29 default flip, `ddm: false`
+    // is the meaningful one and dropping it would silently give an advertising session.
+    connect: () => conn, rows, cols, ...(opts.ddm === undefined ? {} : { ddm: opts.ddm }),
   });
   const files = new FakeFiles();
   const runner = new Runner(session, {
@@ -1387,7 +1389,10 @@ describe('Transfer() protocol selection', () => {
     // The CLI gets the same observed-state rows as the TUI. Forgetting `-ddm on` will be the
     // commonest failure once DFT works, because a host that speaks only DFT cannot CHOOSE
     // DFT unless the Query Reply carried QCODE 0x95.
-    const { runner, session } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    // `ddm: false` EXPLICITLY, since the 2026-09-29 flip made the default ON.
+    const { runner, session } = await transferRunnerAt(24, 80, {
+      transferFrameSeconds: 0.1, ddm: false,
+    });
     expect(session.ddmAdvertised).toBe(false);
     const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
     expect(reply).toContain('-ddm on');
@@ -1467,6 +1472,26 @@ describe('Transfer(BufferSize=N)', () => {
     dftWsf(conn, dftOpen('FT:MSG'));
     dftWsf(conn, dftData([...'TRANS03'].map((c) => c.charCodeAt(0))));
     await pending;
+  });
+
+  it('TELLS THE OPERATOR when it clamped, before the transfer runs', async () => {
+    // A WARNING NOBODY SEES IS NOT A WARNING. The validator produces it; this asserts it
+    // reaches the s3270 reply as a `data:` line, in the same idiom CutTransfer.warnings
+    // already uses -- and BEFORE anything else, since a clamp changes what goes on the wire
+    // and the operator may want to stop.
+    const { runner } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    const reply = await runner.run(
+      'Transfer(Direction=receive,HostFile=A.BIN,LocalFile=/tmp/out.bin,BufferSize=100)');
+    expect(reply).toContain('data: Transfer(): BufferSize 100 is outside the DFT range');
+    expect(reply).toContain('using 256');
+  });
+
+  it('says nothing extra when the size was in range', async () => {
+    // The other half, so the line cannot become noise printed on every transfer.
+    const { runner } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
+    const reply = await runner.run(
+      'Transfer(Direction=receive,HostFile=A.BIN,LocalFile=/tmp/out.bin,BufferSize=512)');
+    expect(reply).not.toContain('outside the DFT range');
   });
 
   it('CLAMPS through the whole path, so the engine and the wire agree at the bounds', async () => {

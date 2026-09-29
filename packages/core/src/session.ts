@@ -71,15 +71,30 @@ export interface SessionOptions {
   bindImage?: boolean;
   /**
    * Advertise Query Reply (DDM), QCODE 0x95, which is what lets a host choose DFT
-   * file transfer instead of CUT. Defaults to FALSE; `-ddm on` sets it.
+   * file transfer instead of CUT. **Defaults to TRUE as of 2026-09-29**; `-ddm off`
+   * clears it.
    *
-   * Default-off deliberately, and it is the one capability here that is not
-   * simply "do we honour it": the client does not select a transfer protocol, it
-   * declares a capability and the HOST picks. So turning this on changes which
-   * protocol live hosts speak, and all of this project's transfer evidence was
-   * gathered over CUT. The user's call, 2026-09-24: ship it off, measure which
-   * hosts offer DFT, then flip the default. See
-   * docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
+   * ## THE FLIP, AND WHY IT WAITED
+   *
+   * This is the one capability here that is not simply "do we honour it": the client
+   * does not select a transfer protocol, it declares a capability and the HOST picks.
+   * So the flag changes which protocol live hosts speak. It shipped DEFAULT OFF on
+   * 2026-09-24 precisely because DFT did not work yet — turning it on made a host
+   * offer a protocol we could not parse, and every transfer witness this project had
+   * was gathered over CUT.
+   *
+   * **The user's plan then was: ship it off, measure which hosts offer DFT, then flip.
+   * DFT now works and is live-verified** (11 DFT frames against MVS 3.8j TK5 at 43x80,
+   * 249 bytes byte-identical both directions, `docs/live-testing.md`), so the flip is
+   * their call of 2026-09-29.
+   *
+   * **WHAT TURNING IT ON MEANS, stated plainly because it is a real trade:** a host
+   * that speaks DFT will now choose DFT, so the CUT path gets less live exercise than
+   * it did. CUT is still fully implemented, still the only option at 24x80 against a
+   * CUT-only host, and `-ddm off` still restores exactly the old behaviour — which is
+   * how every pre-2026-09-29 CUT measurement can be reproduced.
+   *
+   * See docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
    */
   ddm?: boolean;
   /**
@@ -432,7 +447,7 @@ export class Session {
    * entirely -- VM/370's MECAFF does, and stays on CUT -- so this must not be read as "DFT is
    * available". Defaults to false, like the flag.
    */
-  get ddmAdvertised(): boolean { return this.opts.ddm === true; }
+  get ddmAdvertised(): boolean { return this.opts.ddm !== false; }
 
   isConnected(): boolean {
     return this.conn !== undefined;
@@ -1463,7 +1478,11 @@ export class Session {
     // transfer is running -- x3270's own precedence, `do_qr_ddm` reading
     // `ftc->dft_buffersize` or `set_dft_buffersize(0)` (`sf.c:890-897`). This is the read
     // half of what makes the advertised and chunked sizes one number; see `dftBuffer`.
-    const capabilities = this.opts.ddm
+    // `!== false`, NOT truthiness: the default is ON as of 2026-09-29 and absent must mean
+    // on, while `-ddm off` must mean off. Written the same way in `ddmAdvertised`, and the
+    // two MUST agree -- a front end tells the operator "DDM was not advertised" from that
+    // getter, so a polarity mismatch would produce advice that contradicts the wire.
+    const capabilities = this.opts.ddm !== false
       ? withDdm(DEFAULT_CAPABILITIES, this.dftBuffer ?? this.opts.dftBufferSize)
       : DEFAULT_CAPABILITIES;
     this.sendInbound(buildReply(request, capabilities, geometry));

@@ -66,8 +66,8 @@ is only possible over DFT, and until this landed a `-model 3278-4-E` session cou
 a file at all. The 24x80 requirement is still real but it is now raised **when CUT is chosen**
 rather than before the host is asked, which is the one behaviour change: a CUT-only host at
 43x80 is primed before we find out, and VM/370's MECAFF refuses with its own text in about a
-second. **`-ddm on` is what offers the host the choice** and is still default off; see
-*Using the CLI*.
+second. **DDM is advertised BY DEFAULT as of 2026-09-29**, so a DFT-capable host will choose
+DFT; `-ddm off` restores the CUT-only behaviour. See *Using the CLI*.
 
 One honest limit remains: **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on
 the wire 2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
@@ -675,12 +675,22 @@ does**, on seeing that unit.
 
 | Flag | Effect |
 |---|---|
-| *(none)*, or `-ddm off` | the default. No DDM unit is advertised, so every host falls back to CUT |
+| *(none)* | **the default as of 2026-09-29: DDM IS advertised**, so a DFT-capable host chooses DFT |
+| `-ddm off` | advertise nothing, so every host falls back to CUT — how pre-2026-09-29 CUT runs reproduce |
 | `-ddm on` | advertise DDM, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`). **A host may then answer in DFT, which now works** — and is the only way to transfer at a geometry other than 24x80 |
 
-It is **still default off**, which is deliberate: every CUT live witness in this project was
-measured without it, and flipping the default silently changes which protocol a host picks. Making
-it default-on is a separate, deliberate decision.
+**THE DEFAULT FLIPPED ON 2026-09-29, which was always the plan and is the user's call.** It shipped
+off on 2026-09-24 because DFT did not work yet — advertising it made a host offer a protocol we could
+not parse, so every transfer would have broken. DFT now works and is live-verified, so the flag has
+done its job as a measurement instrument and DFT is the better default: it is faster, and it is the
+only protocol that works at a geometry other than 24x80.
+
+**What that costs, stated plainly: the CUT path gets less live exercise than it did**, because a
+DFT-capable host will now pick DFT. CUT is still fully implemented and is still the only option
+against a CUT-only host such as VM/370's MECAFF. **`-ddm off` restores the old behaviour exactly**,
+which is what keeps every pre-flip CUT measurement in `docs/live-testing.md` reproducible — and there
+is a test pinning that, because if it ever broke, that evidence would become unverifiable rather than
+merely old.
 
 The advertised LIMIN/LIMOUT default to 16384, bounded 256..32767, and **`Transfer(BufferSize=N)`
 sets them** — clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`.

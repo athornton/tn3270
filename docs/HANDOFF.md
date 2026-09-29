@@ -78,11 +78,15 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    are renderers rather than rewrites. The gateway half is a **security decision first** —
    `web/src/protocol.ts` refuses the `transferForm` action outright, because a browser-initiated
    transfer moves bytes between the host and the *gateway's* filesystem, not the operator's.
-3. **THE `-ddm` DEFAULT FLIP IS STILL THE USER'S CALL, and is DFT plan Task 12 Step 4 — the one step
-   of that plan deliberately left undone.** The 2026-09-24 decision was to flip once DFT was tested,
-   and it now is. **But ask before flipping**, and measure the blast radius the way the `-model` flip
-   was measured: turning it on moves both Hercules hosts onto whichever protocol they prefer, so
-   every CUT live witness here becomes a statement about a path real hosts no longer take.
+3. ~~The `-ddm` default flip.~~ **DONE 2026-09-29, on the user's instruction — DFT plan Task 12
+   Step 4, the last step of that plan.** DDM is now advertised by default and `-ddm off` restores
+   the old behaviour. **BLAST RADIUS MEASURED BEFORE COMMITTING, as the plan required: exactly 6
+   tests in 3 files, every one a deliberate assertion about the default** and none incidental —
+   so the flip was bounded rather than hopeful. All six are expectation updates that now pin BOTH
+   polarities. **The real risk it carries: a DFT-capable host will now choose DFT, so the CUT path
+   gets less live exercise.** `-ddm off` is what keeps every pre-flip CUT measurement in
+   `docs/live-testing.md` reproducible, and there is a test pinning that specifically, because if
+   it broke that evidence would become unverifiable rather than merely old.
 4. **A HELD TSO USERID ON TK5 IS FREED WITH `/c u=<userid>` AT THE MVS OPERATOR CONSOLE** — the
    user's answer, 2026-09-29. A run that does not reach `LOGOFF` leaves the address space alive in
    `WAITING FOR RECONNECT`, and **a fresh logon cannot recover it**: TSO refuses rather than
@@ -274,7 +278,8 @@ concluding anything about a host.**
 **WHAT `-ddm` IS AND IS NOT.** Single-dashed, **default off**, all four front ends, following
 `-bind-image` exactly. Default off is what preserves CUT's live witnesses on both hosts. It is a
 **measurement instrument, not a feature**: turning it on makes a host offer a protocol we cannot
-parse. It flips to default-on once DFT works. **It has NO unit test** — zero of the 78 test files
+parse. It flips to default-on once DFT works. **AND IT DID, 2026-09-29 — see *START HERE*; this
+paragraph is the 2026-09-24 state and its last sentence is now history rather than a plan.** **It has NO unit test** — zero of the 78 test files
 mention DDM — so its only evidence is the two committed probe scripts
 (`packages/cli/scripts/ddm-probe-{vm,tso}.txt`) and the unchanged test count. Pinning the unit's
 bytes is a stage-2 task. **`SessionOptions.dftBufferSize` exists and nothing sets it**; wiring it

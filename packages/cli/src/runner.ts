@@ -456,6 +456,14 @@ export class Runner {
    */
   private async transfer(args: string[], data: string[]): Promise<void> {
     const { request, command } = transferCommand(args);
+
+    // THE OPERATOR'S OWN REQUEST, ANSWERED FIRST. Currently only a clamped `BufferSize`,
+    // and it is reported BEFORE anything else happens: the clamp changes both the frames
+    // we put on the wire and the size we advertise to the host, so an operator who tuned
+    // it deliberately may want to stop rather than discover it in a trace afterwards.
+    // Same drain as `transfer.warnings` below, so the two read alike in a reply.
+    for (const warning of request.warnings ?? []) data.push(`Transfer(): ${warning}`);
+
     const files = this.requireFiles();
 
     if (!this.session.is3270Mode()) {
