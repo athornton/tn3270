@@ -950,8 +950,18 @@ Remaining, in the order the author wants it:
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
    glyph is a host-supplied bitmap, which is exactly what it already draws, so PS should be
    an addition rather than a second renderer.
-11. Also on the roadmap, position not yet fixed: **packaging** for macOS and Linux, and
-   **printer sessions**.
+**PACKAGING AND PRINTER SESSIONS NOW COME BEFORE ALL OF THE GRAPHICS WORK — the user's call,
+2026-09-29, and the reasoning is worth keeping: without graphics this is still a useful tool, but
+without packaging it is a hard one to RUN.** So items 10 and the graphics roadmap move behind these
+two:
+
+11. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
+   addition rather than a stretch goal: nothing in this codebase is POSIX-specific. There are **zero
+   native dependencies** (every package depends only on other workspace packages, with Electron the
+   single external), and the `node:` builtins used are `crypto`, `fs`, `http`, `https`, `net`, `path`,
+   `readline`, `stream`, `tls`, `url`, `zlib` — all cross-platform. There is not one
+   `process.platform` branch anywhere in `packages/*/src`.
+12. **Printer sessions.** Needs a host that will drive one; see *What is not implemented*.
 
 Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
 ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped

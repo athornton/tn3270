@@ -101,8 +101,63 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    reaches the password prompt again, and the console log shows `IS PURGED`. **No userid is held
    now**; all four (`HERC01`–`HERC04`) are available. Full recipe, the console-log evidence and why
    `/FORCE` is a last resort: `docs/live-testing.md`, *Freeing a held TSO userid on TK5*.
-5. **Roadmap beyond transfers, unchanged:** oversize + `IBM-DYNAMIC`, then local model-switching,
-   then PS+VMGIF and graphics, packaging, and the printer session.
+5. **ROADMAP REORDERED BY THE USER, 2026-09-29: PACKAGING AND THE PRINTER SESSION NOW COME BEFORE
+   ALL GRAPHICS WORK.** Their reasoning, worth carrying: *"without graphics it's still a pretty
+   useful tool, but without packaging, it's very difficult to run."* So the order is now
+   **(a) packaging — macOS, Linux and WINDOWS**, **(b) printer sessions**, then the previous list:
+   oversize + `IBM-DYNAMIC`, local model-switching, PS+VMGIF and graphics.
+   **WINDOWS IS A NEW TARGET and it is cheap for the GUI: nothing here is POSIX-specific.** Zero
+   native dependencies anywhere (workspace-internal deps only, Electron the single external), the
+   `node:` builtins used are all cross-platform, and there is **not one `process.platform` branch in
+   `packages/*/src`**. **A Windows TUI is a different and much worse proposition — see *A Windows
+   TUI* below.**
+
+## A Windows TUI — asked 2026-09-29, and the honest answer is "don't"
+
+**THE ELECTRON GUI ON WINDOWS IS CHEAP AND WORTH DOING. A WINDOWS TUI IS NOT, AND THE USER'S OWN
+INSTINCT ("although I'm not sure that's really very useful") IS RIGHT.** Recorded here so the
+question is not re-opened from scratch.
+
+**WHY THE GUI IS CHEAP — measured, not assumed:**
+- **Zero native dependencies.** Every package depends only on other workspace packages; Electron is
+  the single external one. Nothing to rebuild per platform, which is what usually makes
+  cross-platform Electron packaging painful.
+- **No `process.platform` branch anywhere in `packages/*/src`.** Not one.
+- The `node:` builtins used across all packages are `crypto`, `fs`, `http`, `https`, `net`, `path`,
+  `readline`, `stream`, `tls`, `url`, `zlib` — every one cross-platform.
+- The renderer is a canvas blitting a baked glyph atlas, so it does not touch platform fonts at all.
+  That is already proven portable in a stronger sense than Windows requires: `browser-shot.mjs` shows
+  the served page and the Electron app producing **byte-identical** pixels.
+
+**So the GUI's Windows cost is almost entirely packaging-and-signing, not code** — the same work as
+the macOS/Linux targets, plus a code-signing certificate and whatever CI matrix runs it. It should
+share one packaging task rather than be a separate item.
+
+**WHY A WINDOWS TUI IS DIFFERENT, AND WHERE THE COST ACTUALLY IS.** The TUI is not
+platform-independent the way the rest is, and the problems are not in our code:
+1. **`SIGWINCH` DOES NOT EXIST ON WINDOWS.** `app.ts:362` is the only resize signal, and Node does
+   not emit it there. Terminal resize would need a different mechanism entirely, and resize is not a
+   nicety here — it drives `tooSmall`, the 24x80 floor, and every overlay's geometry.
+2. **`SIGHUP` does not exist either**, and `SIGINT`/`SIGTERM` are emulated with different semantics
+   (`app.ts:356`). Those three are what guarantee `restore()` runs; without them a crash leaves the
+   console in raw mode, and the recovery this file documents — `stty sane` typed blind — is not
+   available on Windows.
+3. **`setRawMode` and the escape-sequence renderer** (`render.ts:174`, `const ESC = '\x1b['`) work on
+   Windows Terminal and on ConHost with VT processing enabled, but **not** on older consoles, and
+   "which console is the user in" is not something we can detect reliably.
+
+**THE REAL ARGUMENT AGAINST IT, though, is not the porting cost — it is that the TUI's whole reason
+for existing is already met on Windows by other means.** It exists for operators on a remote shell
+with no display. A Windows user has the GUI, and a Windows user who wants a terminal client has
+WSL — where the **existing** TUI runs unmodified, since WSL is Linux. So the port would serve only
+"native Windows console, no WSL, no GUI", which is a narrow set.
+
+**IF IT IS EVER WANTED ANYWAY**, the cheap version is: keep `SIGWINCH` where it works and poll
+`stdout.columns`/`rows` on Windows behind the one platform branch this codebase currently does not
+have; accept that abnormal-exit restore is best-effort there; and require Windows Terminal rather
+than detecting console capabilities. **Do not start it without a Windows box to test on** — this
+project's standing rule is that an untested platform claim is a claim with a date on it, and there is
+no Windows host here.
 
 ## The 2026-09-28 state, kept for the work below
 
