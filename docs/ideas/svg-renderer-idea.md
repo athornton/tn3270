@@ -33,9 +33,30 @@ natural home for a renderer that is not imitating any particular hardware.
   resizes where a bitmap has to be re-blitted.
 - **Font smoothing becomes possible** rather than being fought, which is the composite model's point.
 
-## THE TENSION THAT DECIDES IT: this project's evidence is pixel-exact hashes
+## THE USER'S CONSTRAINT, STATED 2026-09-29 AND NOT NEGOTIABLE: THIS IS *IN ADDITION TO*, NEVER *INSTEAD OF*
 
-**This is the thing to resolve FIRST, not discover later.** The GUI and web renderers are verified by
+**Read this before the section below, because it reframes it.** An earlier draft of this file
+presented pixel-exactness as a tension "to resolve", which misread the intent. The user's position,
+in their words: they *"still, absolutely, want to do a traditional pixel-perfect terminal emulation
+(and that should very likely stay the default)"*. A prettier composite terminal, which would **not**
+have perfect pixel replicability, *"would remain a user-settable option ('Display Mode' or something
+like that) but would be in addition to the rectangular array of pixels, not instead of it."*
+
+**So the question is NOT "what replaces pixel-exact goldens".** Nothing replaces them. They keep
+verifying the default renderer exactly as they do today, including `browser-shot.mjs`'s proof that
+Electron and the browser produce identical bitmaps. The question is the narrower and much more
+tractable one: **what does a SECOND, opt-in display mode get verified by, given that it cannot be
+verified the same way?**
+
+That also settles question 2 below before it is asked: **yes, both paths exist, permanently and by
+design.** The PS work's "an addition rather than a second renderer" principle was about not
+*duplicating* the bitmap path to get PS glyphs; it was never an argument against an opt-in second
+display mode that exists for a different purpose. Authenticity is the default's job; prettiness is
+the option's.
+
+## WHAT THAT MEANS FOR VERIFICATION: the existing evidence is untouched
+
+**This is the thing to get right FIRST, not discover later.** The GUI and web renderers are verified by
 hashing the **raw bitmap** and requiring byte-identical output. `packages/gui/scripts/shot.mjs` says
 why in its own words: rendering is deterministic *"bitmap glyphs at integer scale with smoothing off,
 no hinting, no subpixel antialiasing"*, and it explicitly forbids the escape hatch —
@@ -50,33 +71,50 @@ That guarantee is load-bearing well beyond the goldens:
   distinguished from a renderer *regression*.
 
 **SVG text rendering is not bitwise reproducible across engines, versions, or platforms** — and font
-smoothing deliberately abandons the property that makes the current comparison work. So this idea and
-the current verification strategy are in direct conflict. **That is not a reason to reject it; it is
-the question it has to answer.**
+smoothing deliberately abandons the property that makes the current comparison work.
+
+**None of which threatens the above, because the default mode keeps rasterizing.** The goldens, the
+three GUI cases, the two browser cases and the shared-renderer proof all go on testing the bitmap
+path unchanged. **The real risk is subtler and worth naming: that adding a second mode quietly erodes
+the first** — a shared code path refactored for the SVG mode's benefit, a golden regenerated because
+"the renderer changed", a `--update` run without looking. **Guard the default explicitly**: whatever
+gates the mode should be pinned so the bitmap path cannot be reached through the SVG one, and the
+existing goldens should keep running in the default mode with no flag set.
 
 ## The questions a brainstorming session must answer
 
-1. **What replaces pixel-exact goldens?** Comparing serialized **SVG** rather than pixels is the
-   obvious candidate — it is deterministic, diffable, and reviewable in a way a bitmap is not. But it
-   verifies the *scene we built*, not the *image a user sees*, which is a genuinely weaker claim.
-   Would a structural comparison plus a small set of tolerance-based visual checks be acceptable, or
-   does that cross the line this project drew against pixel tolerances?
-2. **Does the existing bitmap path SURVIVE alongside it?** Two renderers is exactly the outcome the
-   PS work was shaped to avoid ("an addition rather than a second renderer"). If SVG is only for a
-   composite model, is the cost two rendering paths forever?
-3. **What about the TUI?** It has no canvas and no SVG. Today all four front ends share `frontend`,
-   and `core` hands out `Cell` variants a renderer dispatches on. An SVG scene graph is a
-   *different* interface. Does `core` grow a second output shape, or does SVG generation live in
-   `canvas` as one more consumer of the same cells?
+1. **What verifies the OPT-IN mode?** Not "what replaces the goldens" — those stay. Comparing
+   serialized **SVG** is the obvious candidate: deterministic, diffable, reviewable in a way a bitmap
+   is not. Its honest weakness is that it verifies the *scene we built* rather than the *image a user
+   sees*. Is that acceptable for a mode whose whole premise is that exact pixels are not the point,
+   or does it still want some tolerance-based visual check — and does that cross the line this
+   project drew against pixel tolerances, or sit outside it because the default never uses it?
+2. **HOW IS THE DEFAULT PROTECTED FROM THE OPTION?** (Replaces the old "do both paths survive" — they
+   do, by decision.) Two display modes means a mode flag, and a flag means a way to get the wrong
+   one. What pins that the goldens still exercise the bitmap path, and that no SVG-motivated
+   refactor silently changes it? This is the question with the most downside if got wrong, because
+   the failure is invisible: a still-green suite over a subtly different default renderer.
+3. **Where does the mode live, how is it set, and what do the non-canvas front ends do?**
+   `-display-mode` alongside `-scheme`, which is already GUI/TUI-only? Per-window in Electron,
+   per-connection in the gateway, following the keypad's precedent? **The TUI has neither canvas nor
+   SVG**, so it should presumably reject the flag rather than ignore it — this project's `applyAction`
+   convention is to fail loudly rather than show a dead control. And architecturally: `core` hands
+   out `Cell` variants a renderer dispatches on, so does SVG generation live in `canvas` as a second
+   consumer of the same cells, or does `core` grow a second output shape? **The first keeps one
+   source of truth; the second is how two renderers start to drift.**
 4. **Which GOCA orders do NOT map cleanly?** The user's own "maybe not all" is the right instinct.
    Candidates from the notes: `X'7E'` Erase Graphics Plane and the Viewing Window orders are
    *stateful display* operations rather than drawing, and pattern/marker sets may not have SVG
    equivalents. **Enumerate them before committing**, because they are where a clean mapping turns
    into a special case.
-5. **Does authenticity matter here?** A 3192G rasterized in firmware, and its output had firmware's
-   exact imperfections. An SVG renderer will look *better* than the hardware. For a composite model
-   that never existed, better is the point — but it means the GOCA work can no longer be verified by
-   "does it look like the real thing", and there is already no oracle or live witness for graphics.
+5. **Which mode does the GOCA work itself get verified in?** Authenticity is no longer the open
+   question — the user settled that: the default is pixel-perfect and the pretty mode is opt-in. But
+   it leaves a real one. A 3192G rasterized in firmware and its output carried firmware's exact
+   imperfections; an SVG renderer will look *better* than the hardware, which is the point of the
+   option and a problem for the DEFAULT. **If GOCA is implemented against SVG first because it is
+   easier, the authentic mode's rasterizer becomes the untested path** — and graphics already has no
+   oracle and no live witness. So: does the default's vector rasterizer get built first, or at least
+   verified independently of the SVG one?
 6. **Is the 3270 character grid genuinely just placement?** Mostly — but field attributes, the cursor,
    and inverse video interact with cell boundaries in ways the blitter currently gets for free.
 
