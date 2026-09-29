@@ -9,6 +9,76 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **DFT FILE TRANSFER IS LIVE AGAINST MVS 3.8j TK5, AT 43x80, 2026-09-29 — the run the whole
+  `dft-file-transfer` branch existed to produce.** Until today `Session.startDftTransfer` had no
+  caller outside tests and `runner.ts` built a `CutTransfer` unconditionally, so **no DFT frame had
+  ever reached a wire**. Commands, both offline-gated first:
+
+  ```bash
+  python3 -c "import random; random.seed(3270); open('/tmp/rt-src.bin','wb').write(bytes(random.randrange(256) for _ in range(249)))"
+  node packages/cli/dist/main.js -insecure -model 3278-4-E -ddm on \
+    < packages/cli/scripts/dft-tso.txt > /tmp/dft-tso.log 2>&1
+  ```
+
+  **JUDGED BY TRACE, NOT BY THE FILE**, because both protocols now end in a transferred file and
+  success alone no longer says which ran. The evidence, all four checks the script itself names:
+
+  | Check | Expected | Measured |
+  |---|---|---|
+  | `grep -c FileTransferData` | > 0 | **11** |
+  | `grep -c "O_SF\|CutFrame"` | 0 | **0** |
+  | geometry | 43x80 | **43 80** in the status line |
+  | `cmp /tmp/rt-src.bin /tmp/tso-dft-back.bin` | identical | **identical** |
+
+  **The request types read exactly as the protocol predicts**, which is a stronger result than the
+  count: `FileTransferData(0x0012,38B)` and `(0x0012,32B)` are Open, `(0x4611,6B)` Get,
+  `(0x4704,256B)`/`(0x4704,92B)` Data Insert, `(0x4511,12B)` Set Cursor, `(0x4112,2B)` Close. The
+  `-ddm` probe of 2026-09-24 could only report `unknownSF(0xd0,38B)`.
+  **And our DDM advertisement is witnessed on the wire**: `00 0c 81 95 ...` — the 12-byte Query
+  Reply unit, QCODE `0x95` — in answer to TK5's `ReadPartition`, 36 occurrences in the log. That
+  byte is what made the host choose DFT.
+  **249 bytes round-tripped byte-identically in BOTH directions at 43x80, a geometry CUT refuses
+  outright** (`frames.ts` throws on anything but 24x80), so this transfer was only possible over DFT.
+
+  **TWO THINGS THE RUN FOUND THAT ARE NOT IN ANY PLAN, and both are about what happens AFTER a
+  successful DFT transfer.** Worth expecting rather than rediscovering:
+  1. **TK5 leaves the screen at 24x80 with the keyboard LOCKED once a DFT transfer completes**, so
+     the very next `String()` is refused with `input inhibited` and the script's following step is
+     lost. Measured twice, once per direction, at identical points. Both transfers still succeeded
+     and reported `Transfer complete, 249 bytes transferred`; what broke was the script's
+     *sequencing* after them. A future script needs a `Wait(Unlock)` after each `Transfer()`.
+  2. **BECAUSE OF (1) THE SCRIPT NEVER REACHED ITS `LOGOFF`**, which is exactly the trap
+     `dft-tso.txt`'s own header warns about — it leaves `HERC01` held and `HERC01.DFTX.BIN` behind.
+     Here the userid was in fact released when the connection dropped (verified: the host was back
+     at a fresh `Logon ===>`), and the dataset was deleted by a follow-up run
+     (`ENTRY (A) HERC01.DFTX.BIN DELETED`). **Check both before trusting a rerun**, or the next
+     logon draws `IKJ56425I LOGON REJECTED, USERID IN USE`.
+
+- **THE VM/370 CUT CONTROL PASSES, AND ITS QUALIFICATION MATTERS MORE THAN ITS RESULT,
+  2026-09-29.** Run with `-ddm on` deliberately, to show that a client offering DFT does not break
+  a CUT host:
+
+  ```bash
+  node packages/cli/dist/main.js -insecure -model 3278-2-E -ddm on \
+    < packages/cli/scripts/transfer-vm.txt > /tmp/cut-vm.log 2>&1
+  ```
+
+  **Zero `FileTransferData` frames, both transfers complete with MECAFF's own
+  `TRANS03 - File transfer complete`, 249 bytes byte-identical, `Ready;` proving CMS rather than the
+  reconnect trap, and `LOGOFF AT` reached** so the account is released.
+
+  **BUT VM NEVER ISSUED A READ PARTITION, SO WE NEVER SENT IT THE DDM UNIT — `grep -c "81 95"` is
+  0 on this log against 36 on TK5's.** State the two halves apart and do not quote the first as the
+  second:
+  - **PROVED:** the CUT path is unregressed by this branch. Both engines are now built and a DFT
+    engine is registered before the host is primed, and a real CUT host round-trips a file exactly
+    as before, with nothing extra on the wire.
+  - **NOT PROVED:** that VM/370 *declines* DDM when offered. It was never offered, because a host
+    that asks no Query is never told our capabilities. The 2026-09-24 probe's finding that MECAFF
+    declines and stays on CUT rests on that probe, not on this run.
+  **So "DDM advertised does not break a CUT host" is now measured; "VM refuses DDM" remains a
+  separate claim resting on earlier evidence.**
+
 - **A PUBLIC HOST THAT SPEAKS TN3270E — the first one available to this project, 2026-09-25.** The
   user supplied **`144.208.193.156:3270`**, which identifies itself as **"Blue Iron Terminal Server",
   `bits` v0.18.0**. A read-only probe (connect, settle, trace, quit — no logon, no menu selection)
