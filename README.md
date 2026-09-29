@@ -950,12 +950,24 @@ Remaining, in the order the author wants it:
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
    glyph is a host-supplied bitmap, which is exactly what it already draws, so PS should be
    an addition rather than a second renderer.
-**PACKAGING AND PRINTER SESSIONS NOW COME BEFORE ALL OF THE GRAPHICS WORK — the user's call,
-2026-09-29, and the reasoning is worth keeping: without graphics this is still a useful tool, but
-without packaging it is a hard one to RUN.** So items 10 and the graphics roadmap move behind these
-two:
+**THE ORDER HERE IS THE USER'S, 2026-09-29, AND THE REASONING IS WORTH KEEPING.** Packaging came
+ahead of all graphics work because *without graphics this is still a useful tool, but without
+packaging it is a hard one to RUN*. Then oversize moved ahead of packaging in turn, so that **strange
+screen sizes are available in the first packaged build a user ever sees** — a shipped app that cannot
+do the geometry an operator's host asks for is a worse first impression than a shipped app with no
+vector graphics.
 
-11. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
+**And printer sessions moved BACK, behind graphics, for a reason the research already supports:
+GDDM drives printers and plotters as output devices, so the printing work is likely CONVOLVED with
+vector graphics rather than independent of it.** `docs/goca-reference-notes.md` says the same thing
+from the other side: the primary GOCA reference is the **AFP edition, bound to MO:DCA and IPDS —
+printers** — and the 3270 binding is what diverges from it. Doing printers first would mean building
+an SCS/3287 path and then revisiting it once GOCA lands; doing graphics first means the printer work
+can reuse whatever the drawing layer turns out to be. **Cheap is not the same as first.**
+
+11. **Oversize + `IBM-DYNAMIC`.** Really oversize — the advertisement is a by-product. See the
+   out-of-scope section of the bind-image spec for the measurements.
+12. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
    addition rather than a stretch goal: nothing in this codebase is POSIX-specific. There are **zero
    native dependencies** (every package depends only on other workspace packages, with Electron the
    single external), and the `node:` builtins used are `crypto`, `fs`, `http`, `https`, `net`, `path`,
@@ -965,7 +977,10 @@ two:
    Windows machine is available to test a packaged build on, which is all that testing an installer
    needs — so the target is unblocked, but treat "works on Windows" as unverified until an installer
    has actually been run there.
-12. **Printer sessions.** Needs a host that will drive one; see *What is not implemented*.
+13. **Local model-switching**, then **PS + VMGIF**, then **vector graphics** (GOCA).
+14. **Printer sessions**, last, and deliberately so: they are probably cheap in themselves, but
+   likely entangled with the graphics work above. Needs a host that will drive one; see *What is not
+   implemented*.
 
 Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
 ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped

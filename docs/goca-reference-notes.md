@@ -21,6 +21,22 @@ section, and blueglass's own markers.**
 
 ---
 
+## WHY THE PRINTER SESSION IS SCHEDULED AFTER THIS WORK, NOT BEFORE IT
+
+**The user's call, 2026-09-29: printer sessions go LAST, after vector graphics, despite probably
+being cheap in themselves.** Their reasoning is that *GDDM can involve printers and plotters as
+output devices*, so the printing work is likely convolved with the graphics work rather than
+independent of it.
+
+**The caveat immediately below is the same observation arrived at from the opposite direction, and
+that agreement is the argument.** This book — the project's primary GOCA reference — is bound to
+**MO:DCA and IPDS, i.e. printers**; the 3270 binding is what diverges from it. So the drawing model
+and the print model are not two unrelated features here, they are two bindings of one architecture.
+Building an SCS/3287 path first would mean revisiting it once GOCA lands; building graphics first
+means the printer work can reuse whatever the drawing layer turns out to be.
+
+**Cheap is not the same as first.**
+
 ## THE CAVEAT THAT MATTERS MOST: THIS IS THE *AFP* EDITION
 
 GOCA is one architecture with several environment bindings. **This book is bound to MO:DCA and

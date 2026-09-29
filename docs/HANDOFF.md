@@ -101,11 +101,24 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    reaches the password prompt again, and the console log shows `IS PURGED`. **No userid is held
    now**; all four (`HERC01`–`HERC04`) are available. Full recipe, the console-log evidence and why
    `/FORCE` is a last resort: `docs/live-testing.md`, *Freeing a held TSO userid on TK5*.
-5. **ROADMAP REORDERED BY THE USER, 2026-09-29: PACKAGING AND THE PRINTER SESSION NOW COME BEFORE
-   ALL GRAPHICS WORK.** Their reasoning, worth carrying: *"without graphics it's still a pretty
-   useful tool, but without packaging, it's very difficult to run."* So the order is now
-   **(a) packaging — macOS, Linux and WINDOWS**, **(b) printer sessions**, then the previous list:
-   oversize + `IBM-DYNAMIC`, local model-switching, PS+VMGIF and graphics.
+5. **ROADMAP REORDERED BY THE USER, 2026-09-29, IN TWO PASSES — the second pass changed the first,
+   so read the final order and not the reasoning in isolation.** The order is now:
+   **(a) oversize + `IBM-DYNAMIC`**, **(b) packaging — macOS, Linux and WINDOWS**,
+   **(c) local model-switching**, **(d) PS + VMGIF**, **(e) vector graphics (GOCA)**,
+   **(f) printer sessions LAST**.
+   **Three pieces of the user's reasoning, all worth carrying because each is a judgement about what
+   the tool is for rather than about effort:**
+   - *"Without graphics it's still a pretty useful tool, but without packaging, it's very difficult
+     to run"* — which is why packaging leads the graphics work.
+   - **Oversize then went AHEAD of packaging**, so that strange screen sizes exist in the first
+     packaged build a user ever sees. A shipped app that cannot do the geometry an operator's host
+     asks for is a worse first impression than a shipped app without vector graphics.
+   - **Printer sessions moved to LAST despite being cheap**, because *"GDDM can involve printers and
+     plotters as output devices"*, so printing is likely CONVOLVED with the graphics work.
+     **`docs/goca-reference-notes.md` supports this from the other direction**: the primary GOCA
+     reference is the **AFP edition, bound to MO:DCA and IPDS — printers** (its line 24-29), and the
+     3270 binding is precisely what diverges. Doing printers first would mean building an SCS/3287
+     path and revisiting it once GOCA lands. **Cheap is not the same as first.**
    **WINDOWS IS A NEW TARGET and it is cheap for the GUI: nothing here is POSIX-specific.** Zero
    native dependencies anywhere (workspace-internal deps only, Electron the single external), the
    `node:` builtins used are all cross-platform, and there is **not one `process.platform` branch in
