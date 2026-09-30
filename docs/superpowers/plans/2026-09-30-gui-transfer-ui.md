@@ -615,7 +615,10 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       }
       isRunning = true;
       deps.setRunning(true);
-      deps.setStatus('transferring...');
+      // NO ELLIPSIS: Fira Code and friends ligate `..` and `...`, the same hazard that took the
+      // TUI's arrows out of `transferOverlay.ts`'s help line. The present participle carries the
+      // sense without it, and `transferOverlay.test.ts` sweeps every phase for the pairs.
+      deps.setStatus('transferring');
     },
 
     requestCancel() {
