@@ -106,6 +106,31 @@ export interface Layout {
  * bottom and right, which is what `Math.floor` gives and what centring
  * conventionally means.
  *
+ * ## THE TWO AXES ARE GATED INDEPENDENTLY, SO A PARTIAL FRAME IS REACHABLE -- DELIBERATELY
+ *
+ * The horizontal RULES are gated on vertical slack and the SIDES on horizontal slack, and
+ * nothing couples them. Two consequences follow, both intended (user's call, 2026-09-30,
+ * after they were measured and shown):
+ *
+ *  - **0 spare columns: both rules, NEITHER side.** A 132-column screen in a 132-column
+ *    terminal gets a lid and a floor and no walls.
+ *  - **+1 spare column: both rules and the LEFT side only**, by the prefer-left rule above.
+ *
+ * KEPT, NOT FIXED, because a rule still does the job the frame is for: it shows where the
+ * screen begins and ends, which is the information a user needs when the 3270 screen does
+ * not fill the window. Coupling the gates would instead DROP the frame entirely at tight
+ * widths -- trading a partial delimiter for none -- and reserving two columns up front would
+ * spend cells on decoration that the screen itself may want. Neither buys anything at 0-1
+ * columns of slack, where by definition there is nowhere for a wall to go.
+ *
+ * **This is NOT the cause of a partial frame seen in a real terminal.** Measured 2026-09-30:
+ * at 179x40 with a 27x132 screen -- 47 columns of slack -- the frame renders complete and
+ * correct (corners at columns 23 and 156, 132 dashes, verticals on all 28 rows, nothing
+ * scrolled), verified by feeding real renderer output to pyte. A report of missing verticals
+ * at a roomy size was reproduced under iTerm2 and NOT under macOS Terminal with the same
+ * binary, host and geometry, so it is a terminal-emulator glyph-layout problem rather than
+ * ours. Do not "fix" this function in response to one: check the emulator first.
+ *
  * PURE, and the invariant worth having: nothing it returns may fall outside the
  * terminal. A border row below the last line, or an OIA past it, scrolls the window
  * and corrupts every cursor address computed afterwards -- `render.test.ts` sweeps

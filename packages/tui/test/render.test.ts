@@ -130,6 +130,35 @@ describe('layout: centring, and which border sides fit', () => {
     expect(l.colOffset).toBe(1);
   });
 
+  it('draws the RULES WITHOUT SIDES at zero spare columns, and that is deliberate', () => {
+    // The two axes are gated independently -- rules on vertical slack, sides on horizontal --
+    // so a tall-but-exactly-wide terminal gets a lid and a floor and no walls. KEPT on the
+    // user's call 2026-09-30: a rule still shows where the screen begins and ends, which is
+    // what the frame is for, and there is nowhere for a wall to go at zero slack. Coupling
+    // the gates would drop the frame entirely here, trading a partial delimiter for none.
+    //
+    // PINNED because a comment cannot stop a future tidy-up. This is the case a reader is
+    // most likely to mistake for a bug, so the intent is asserted rather than described --
+    // and it is REACHABLE ON A COMMON GEOMETRY: a model 5 is 132 columns wide and terminals
+    // are routinely exactly 132, rarely 134.
+    const l = layout({ rows: 32, cols: 80 }, S);
+    expect(l.border.top).toBe(true);
+    expect(l.border.bottom).toBe(true);
+    expect(l.border.left).toBe(false);
+    expect(l.border.right).toBe(false);
+    // And on the geometry that actually prompted the question: a 27x132 model 5.
+    const five = layout({ rows: 32, cols: 132 }, { rows: 27, cols: 132 });
+    expect(five.border).toEqual({ top: true, bottom: true, left: false, right: false });
+  });
+
+  it('draws the LEFT side only at one spare column, rules included', () => {
+    // The asymmetric middle case, and the same deliberate choice: prefer-left means the one
+    // spare column becomes a left wall, so the frame is a lid, a floor and one wall. Pinned
+    // for the same reason as the case above.
+    const l = layout({ rows: 32, cols: 81 }, S);
+    expect(l.border).toEqual({ top: true, bottom: true, left: true, right: false });
+  });
+
   it('centres the whole block in a roomy terminal', () => {
     // 40 rows: block is hint+top+24+status+bottom = 28, so 12 spare -> 6 above.
     // 100 cols: block is 1+80+1 = 82, so 18 spare -> 9 left of the border.
