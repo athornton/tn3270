@@ -838,12 +838,12 @@ spec's *Live host, 2026-09-17* and as testing layer 2b.
 
 ### WHAT THE KEYPAD BRANCH DELIVERED
 
-- **A clickable 47-button virtual keypad** in both canvas front ends, toggled by `Ctrl-K` (and
+- **A clickable 48-button virtual keypad** in both canvas front ends, toggled by `Ctrl-K` (and
   `Alt-K`), hidden by default. PF1–24, PA1–3 and the special keys, drawn through the same glyph
   atlas and the same blitter as the screen and the OIA — one drawing primitive, three regions — each
   key **inverse video on a spaced grid**, which is the user's choice of 2026-09-17 and needed no
   second font.
-- **A keyboard-navigable special-keys list in the TUI**, same 47 keys, same chord `Ctrl-K`, because
+- **A keyboard-navigable special-keys list in the TUI**, same 48 keys, same chord `Ctrl-K`, because
   a terminal has no mouse. Arrows move, Enter fires, Esc closes; while it is open **it owns the
   keyboard**, and the window follows the selection rather than showing the first N (first-N would
   leave everything from `Attention` down, Sys Req included, permanently unreachable).
@@ -857,9 +857,9 @@ spec's *Live host, 2026-09-17* and as testing layer 2b.
   between Electron and the served page.
 
 **THE ARCHITECTURE, in one paragraph, because it is not obvious and it was decided by one line.**
-The key **table** is data in `packages/frontend/src/keypad.ts` (47 keys) — there and not in `canvas`
+The key **table** is data in `packages/frontend/src/keypad.ts` (48 keys) — there and not in `canvas`
 because **both package graphs reach `frontend` and the TUI cannot import `canvas`**, and two copies
-of a 47-key list drift silently. The cell **layout** is `packages/canvas/src/keypad.ts`, in scale-1
+of a 48-key list drift silently. The cell **layout** is `packages/canvas/src/keypad.ts`, in scale-1
 pixels throughout. `hitTest`/`hitTestAt`/`KeypadButton` are in `packages/canvas/src/hittest.ts`,
 which is **import-free and in `BROWSER_MODULES`** — the renderer needs them and a runtime import of
 a workspace package there blanks the window with no error. Shared drawing types moved to the leaf

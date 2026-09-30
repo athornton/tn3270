@@ -117,7 +117,7 @@ That the renderer is genuinely shared rather than merely similar is checked in p
 own screenshot golden and requires them to be identical, with and without the keypad shown.
 
 **There is a virtual keypad, and four keys that had no way to be pressed.** `Ctrl-K` shows and
-hides a 47-button keypad in the Electron GUI and in a browser — PF1–PF24, PA1–PA3, and the
+hides a 48-button keypad in the Electron GUI and in a browser — PF1–PF24, PA1–PA3, and the
 special keys a PC keyboard has not got — drawn through the same glyph atlas as the screen, so it
 looks like a 3270 rather than like a native widget. Each key is **inverse video**, a black label on a
 white block, on a grid spaced by a blank row between key rows and a blank column at the end of every
@@ -126,10 +126,10 @@ appended *below* the screen and the status line, so showing it never moves or co
 host wrote: the Electron window grows to fit and a browser page scrolls. Clicking a button fires
 exactly the action its label names; a click anywhere else is ignored.
 
-The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 47 keys
+The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 48 keys
 instead — arrows move (`k`/`w` and `j`/`s` too), Enter fires, `Esc` closes — with each key's chord shown beside it, read
 from the same binding table the keymap is checked against so the on-screen help cannot drift. Every
-line is padded to one width, so the list is an opaque block rather than 47 ragged lines with the
+line is padded to one width, so the list is an opaque block rather than 48 ragged lines with the
 host's screen showing through the chord column.
 
 Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
@@ -190,7 +190,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 1869 tests, 74 files
+npm test           # 2157 tests, 82 files
 npm run typecheck
 ```
 
@@ -341,7 +341,7 @@ p. 7-12 — and Field Mark writes `0x1E` and advances like a typed character; a 
 Dup and refuses Field Mark (manual p. 4-13).
 
 **`Ctrl-K` opens the special-keys list.** A terminal has no mouse, so this is the TUI's answer to
-the canvas front ends' keypad: the same 47 keys as a scrolling list over the top-left of the
+the canvas front ends' keypad: the same 48 keys as a scrolling list over the top-left of the
 screen, arrows to move, `Enter` to fire the marked key, `Esc` or `Ctrl-K` again to close. `Ctrl-K`
 is c3270's own binding for its keypad (`Common/fb-c3270:191`), not a divergence. While the list is
 open **it owns the keyboard** — nothing falls through to the field behind it — and the window
@@ -349,7 +349,7 @@ follows the selection rather than showing only the first screenful, or everythin
 (**Sys Req** and **Newline** included) would be unreachable. That is the point of the list: those
 two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
 the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
-against, so 22 of the 47 correctly show a blank rather than a guess.
+against, so 22 of the 48 correctly show a blank rather than a guess.
 
 **The list is opaque, and that took fixing.** Every line is padded to one width — 27 columns: the
 selection mark, the name column, a two-space gap and the widest chord — so the 3270 screen behind
@@ -855,6 +855,18 @@ Start with `docs/HANDOFF.md`. The design spec is
 in `docs/superpowers/plans/`, and `docs/live-testing.md` is both the runbook for
 recording against a real host and the log of what was found doing so.
 
+**Spelling is US English** throughout — identifiers, comments and docs. **Three exceptions are
+deliberate, and each one looks like something a sweep missed:**
+
+- **`Color.GREY` and `COLOR_NAMES[0xfe] = 'grey'`.** `grey` is x3270's own canonical spelling:
+  `Common/glue.c:1041-1042` lists `{"Grey", HOST_COLOR_GREY}` and then `{"Gray", ...}` marked
+  `/* alias */` in x3270's own comment, and `see.c` and `fprint_screen.c` both emit `grey`. These
+  names are an interface to the implementation this client is conformance-tested against, so
+  matching it beats internal consistency. `packages/core/src/palette.ts` carries the full note.
+- **`licence` where it refers to IBM's licence for GA23-0059** — quoted external wording.
+- **`colour` inside `packages/fixtures/**/*.trace` header comments** — those files are recorded
+  evidence, carrying their own regeneration command, and editing prose inside a capture is churn.
+
 ## Staging
 
 Done:
@@ -908,7 +920,7 @@ Done:
    against the Electron app's own screenshot golden. See *Using the web gateway*.
 
 9. **A menu of special keys, and a show/hide virtual keypad** — done. Requested 2026-09-14 and
-   moved ahead of Programmable Symbol Sets on 2026-09-15. `Ctrl-K` shows a clickable 47-button
+   moved ahead of Programmable Symbol Sets on 2026-09-15. `Ctrl-K` shows a clickable 48-button
    keypad in the Electron GUI and in a browser, and opens a keyboard-navigable list of the same
    keys in the TUI, which has no mouse. It brought canvas hit-testing with it, and made **Dup,
    Field Mark, Sys Req and Newline** reachable — four keys `core` could do and no interactive
@@ -939,12 +951,20 @@ Remaining, in the order the author wants it:
    stays on CUT, which makes it the control. **Stage 2 is now COMPLETE**: `Transfer(BufferSize=N)`
    sets the DFT frame size, and it is the SAME number advertised in the DDM Query Reply — verified
    live, `BufferSize=512` moving the host's own `Open` record size to 495.
-   **Stage 3** is
-   the same form in the GUI, which is a renderer rather than a rewrite — the model is already
-   shared in `packages/frontend` and the `Xfer` keypad button already exists. **Stage 4** is the
-   web gateway, and it is a security decision before it is a UI one: the gateway currently
-   **refuses** the action, because a browser-initiated transfer would move bytes to the gateway's
-   filesystem and not the operator's.
+   **STAGE 3 IS DESIGNED AND PLANNED, NOT BUILT — 2026-09-30**:
+   `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md` and
+   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks). It is still a renderer rather
+   than a rewrite — the model and the driver are already shared in `packages/frontend`, and the `Xfer`
+   keypad button already exists — but **not a CANVAS renderer**, which earlier drafts of this line
+   assumed. The user's decision is a **separate `BrowserWindow` with real HTML controls** and a
+   native file dialog for the local file: the canvas preload has to stay at four functions for
+   `renderer.ts` to keep being shared with the browser, and teaching a canvas text editing, focus and
+   a file chooser buys nothing. x3270 puts its own transfer dialog in Xaw widgets for the same reason.
+   **Stage 4** is the web gateway, and it is a security decision before it is a UI one: the gateway
+   currently **refuses** the action, because a browser-initiated transfer would move bytes to the
+   gateway's filesystem and not the operator's. **The decided answer is real browser file I/O** —
+   bytes over the WebSocket, so "local file" means the operator's machine — which is a new protocol
+   message pair, chunking and a `TransferFiles` over the socket, and therefore its own spec.
 10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
    sends no PS structured fields until the capability is advertised), not TN3270E as
    earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
@@ -1149,11 +1169,18 @@ worse than one that says which quarter is missing.
   24x80 requirement survives only for CUT, and is raised when CUT is chosen rather than up front.
   (2) **The GUI has the form's
   model and no renderer for it** —
-  `frontend/src/transferForm.ts` is shared and the `Xfer` keypad button exists, but stage 3 writes
-  the canvas view. (3) **The web gateway REFUSES the action outright, in `web/src/protocol.ts`**, and
-  that is deliberate: a browser-initiated transfer moves bytes between the host and the *gateway's*
-  filesystem, not the operator's machine, which is a security question stage 4 must settle before
-  the button can work. **Live-verified on BOTH hosts in both directions** — see *Verification*.
+  `frontend/src/transferForm.ts` is shared and the `Xfer` keypad button exists. It is now **designed
+  and planned**: `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md` and
+  `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`. **NOT a canvas view, which is what this
+  said before the design existed** — the user's call (2026-09-30) is a separate `BrowserWindow` with
+  real HTML controls and a native file dialog for the local file, because the canvas preload must
+  stay at four functions for `renderer.ts` to keep being shared with the browser, and teaching a
+  canvas text editing and focus buys nothing. (3) **The web gateway REFUSES the action outright, in
+  `web/src/protocol.ts`**, and that is deliberate: a browser-initiated transfer moves bytes between
+  the host and the *gateway's* filesystem, not the operator's machine. **The answer decided on
+  2026-09-30 is real browser file I/O** — the bytes travelling over the WebSocket so that "local
+  file" means the operator's machine — which needs a new protocol message pair, chunking and a
+  `TransferFiles` over the socket, and is its own spec rather than part of the GUI's. **Live-verified on BOTH hosts in both directions** — see *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
@@ -1205,7 +1232,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 1869 tests, 74 files (measured 2026-09-20 on `new-environ`) |
+| `npm test` | **pass** — 2157 tests, 82 files (measured 2026-09-30 on `main`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
