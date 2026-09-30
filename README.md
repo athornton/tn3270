@@ -932,7 +932,19 @@ Done:
    reachable but inert on this branch until the classic path landed**; it now sends a test
    request read, **live-verified on both hosts 2026-09-21** — see *What is not implemented*.
 
-Remaining, in the order the author wants it:
+Remaining, in the order the author wants it.
+
+**REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
+after it.** Two features across the two canvas front ends — **the GUI transfer UI** (specced and
+planned), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web
+keypad window**. They are grouped deliberately rather than by coincidence: the shared halves already
+exist in `packages/frontend` (`transferForm.ts` and `transferRun.ts` for transfers, `keypad.ts` for
+the key table), so doing all four consecutively means the GUI's answer is still in hand when the
+browser's is written. Interleaving them with oversize would mean deciding twice what a native-window
+front end looks like. It also settles everything the **menu bar** touches — the keypad's toolbar icon
+needs one and so does the connect dialog — before packaging puts that chrome in front of a first-time
+user. Items 11 onward keep the order agreed on 2026-09-29.
+
 
 9a. **Interactive `IND$FILE` — stages 1 and 2 of four are DONE.** The transfer itself was finished and
    live-verified long before any interactive front end could reach it, which is the same shape as

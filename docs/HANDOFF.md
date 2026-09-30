@@ -184,11 +184,33 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    reaches the password prompt again, and the console log shows `IS PURGED`. **No userid is held
    now**; all four (`HERC01`–`HERC04`) are available. Full recipe, the console-log evidence and why
    `/FORCE` is a last resort: `docs/live-testing.md`, *Freeing a held TSO userid on TK5*.
-5. **ROADMAP REORDERED BY THE USER, 2026-09-29, IN TWO PASSES — the second pass changed the first,
-   so read the final order and not the reasoning in isolation.** The order is now:
+5. **ROADMAP REORDERED BY THE USER, 2026-09-29 AND AGAIN 2026-09-30 — read the FINAL order below and
+   not the reasoning in isolation, because two passes on the 29th already changed each other.**
+
+   **THE 2026-09-30 CHANGE: FOUR UI PIECES COME FIRST, ahead of everything that was previously next.**
+   The order is now:
+
+   **(0a) the GUI transfer UI** — specced and planned, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
+   **(0b) the GUI keypad WINDOW** — ready to spec, `docs/ideas/native-widget-dialogs-idea.md`;
+   **(0c) the WEB transfer UI** — needs its own spec: real browser file I/O over the WebSocket;
+   **(0d) the WEB keypad window** — follows the GUI's, per the user's answer that the gateway comes later;
+
+   then the previously-agreed list, unchanged in content and order:
    **(a) oversize + `IBM-DYNAMIC`**, **(b) local model-switching**,
    **(c) packaging — macOS, Linux and WINDOWS**, **(d) PS + VMGIF**,
    **(e) vector graphics (GOCA)**, **(f) printer sessions LAST**.
+
+   **WHY THE GROUPING IS THE POINT, and not just four items that happened to arrive together:** each
+   of the four is one of TWO features × TWO canvas front ends, and the shared halves already exist —
+   `frontend/src/transferForm.ts` + `transferRun.ts` for transfers, `frontend/src/keypad.ts` for the
+   key table. Doing all four consecutively means the GUI's answer is still in hand when the web one is
+   written, which is exactly the argument the user used on 2026-09-29 for pairing oversize with local
+   model-switching (*"both imply the users doing unpredictable things with their windows"*, and both
+   drive the one `Screen.resize()` path). **The reverse ordering is what would cost: interleaving these
+   with oversize would mean deciding twice what a native-window front end looks like.**
+   **It also front-loads everything the MENU BAR touches** — the keypad's toolbar icon needs one, and
+   so does the connect dialog — so the window chrome is settled before packaging puts it in front of a
+   first-time user.
    **Three pieces of the user's reasoning, all worth carrying because each is a judgement about what
    the tool is for rather than about effort:**
    - *"Without graphics it's still a pretty useful tool, but without packaging, it's very difficult
