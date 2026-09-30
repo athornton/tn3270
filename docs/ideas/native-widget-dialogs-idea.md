@@ -83,8 +83,15 @@ job: "if in doubt, do what x3270 does."**
    "the keypad is open" should survive an app restart, since a separate window makes that newly
    possible. x3270 DOES remember, through the `keypadOn` resource — `x3270/x3270.c:264`, "Turn on
    pop-up keypad at start-up" — but that needs a preferences store the GUI does not have. So: both
-   routes open it, closing closes it, every launch starts closed, and persistence arrives with
-   preferences (which the connect dialog will want anyway).
+   routes open it, closing closes it, every launch starts closed.
+   **CONFIRMED ON ITS MERITS, not merely as a holding position (user, 2026-09-30):** "making the user
+   reopen the keypad on each new application start, if they need it, is fine." That is a stronger
+   answer than "wait for preferences", and it matters because the weaker one invites someone to add
+   persistence the moment a preferences store exists. **It is not on the list of things preferences
+   should bring.** Reopening is one keystroke, and a keypad that reappears unbidden costs six rows of
+   window to a user who may not want it this session -- the same objection recorded against a
+   reattaching browser client inheriting someone else's keypad flag (README, *Using the web
+   gateway*).
 3. **`clicks.mjs` gets REWIRED to the native window's real buttons**, not retired. It stays the only
    cover for the click path and for 9 of the 48 label/action pairs. Note what changes: it clicks by
    LABEL today via `__tn3270ButtonCentre` and canvas coordinates, and a DOM button has no canvas
