@@ -1,7 +1,7 @@
-# TUI and Colour — Execution Progress
+# TUI and Color — Execution Progress
 
-Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on branch
-**`tui-and-colour`** (branched from `main` at `b054045`). Update after each task.
+Live status for `2026-08-19-tui-and-color.md`, executed subagent-driven on branch
+**`tui-and-color`** (branched from `main` at `b054045`). Update after each task.
 
 > **STOPPED AFTER TASK 8, 2026-08-20, on a spend limit — not a blocker.** Tasks 1-8 (the
 > whole core half) are done, reviewed and green: **822 tests**, typecheck clean, working tree
@@ -26,7 +26,7 @@ Live status for `2026-08-19-tui-and-colour.md`, executed subagent-driven on bran
 | 5. `render.ts` resolution | **DONE**, both reviews closed | `3a3531b`, `27e5310`, `52a19f7`, `4188b1e`, `6cefc9c` | 822 |
 | 6. TK5 fixture proof | **DONE**, reviewed — the run's goal, reached | `cdc200c`, `7045b10` | 808 |
 | 7. Query Reply Color + Highlighting | **DONE** | `c4708d1` | 816 |
-| 8. `ScreenJson` resolved colour | **DONE** | `a79f4fd` | 821 |
+| 8. `ScreenJson` resolved color | **DONE** | `a79f4fd` | 821 |
 | 9. `packages/tui` skeleton | | | |
 | 10. Depth detection + quantisation | | | |
 | 11. ANSI rendering + diffing | | | |
@@ -65,7 +65,7 @@ cited passage says what it is claimed to say — and checking takes a minute.
   x3270's real table is `rgbmap[16]` at `c3270/screen.c:213-229` and only 4 of 16
   matched. Ours are saturated primaries. **Kept ours deliberately**: with x3270's
   values, blue (`1e90ff`) and turquoise (`00ffff`) both quantise to ANSI 96, collapsing
-  two of the seven base colours. Comment now states the provenance honestly.
+  two of the seven base colors. Comment now states the provenance honestly.
 - Two RGB pairs collided (`neutral-black`/`black`, `neutral-white`/`white`), losing
   information a host sent. Fixed: `F0`→`1a1a1a`, `F7`→`e0e0e0`; `F8`/`FF` stay pure.
 - No test caught the three 16-entry structures drifting apart; one added.
@@ -81,7 +81,7 @@ cited passage says what it is claimed to say — and checking takes a minute.
   spec reviewer doing real mutation testing, and I reproduced it: adding
   `this.clearExtended(addr)` to `setChar` left **all 59 tests passing**. That is the
   rule Task 4 depends on most — the executor calls `setChar` then `setExtended`, so a
-  clear there would silently discard every SA colour and quietly send the TK5 fixture
+  clear there would silently discard every SA color and quietly send the TK5 fixture
   monochrome. Now pinned; re-running the same mutation gives 1 failure.
 
 **A question worth having settled (raised by quality review, checked against the
@@ -96,7 +96,7 @@ that sentinel argued from "SA type 0x00 clears back to unspecified" — i.e. it 
 a claim about `XAH.DEFAULT` (0x00 as a highlighting VALUE) by appealing to `XA.RESET`
 (0x00 as an attribute TYPE). **That is precisely the TYPE-vs-VALUE conflation
 `constants.ts` was written to warn against**, reproduced inside the change that added the
-warning's neighbour. The behaviour was correct throughout; only the argument was wrong.
+warning's neighbor. The behavior was correct throughout; only the argument was wrong.
 Fixed in `a6327bb`, which now cites the real reason and explicitly warns the next reader
 off the `XA.RESET` route. Worth remembering that a comment can be confidently wrong in a
 file whose whole purpose is preventing that error.
@@ -107,7 +107,7 @@ x3270 before acceptance, and each reproduced.
 
 1. **`applySa` was a merge with an early return. Silent corruption.** Because Task 3's
    `setExtended` merges (rightly — the composite rule needs it), a cell overwritten by a
-   later record with no SA in effect **kept the previous record's colour**. The manual:
+   later record with no SA in effect **kept the previous record's color**. The manual:
    "whenever a character is overwritten by a new character (or cleared or erased), the old
    character attribute is overwritten" (`pages.txt:3388-3391`). Must be clear-then-set, an
    assignment. x3270 stamps unconditionally (`ctlr.c:2141-2143`) via `ctlr_add_fg`, which
@@ -121,7 +121,7 @@ x3270 before acceptance, and each reproduced.
    requires a two-level lookup — a character whose own attribute is default "is displayed
    using the value of that property established for the field in the extended field
    attribute" (`pages.txt:3383-3387`). Demonstrated: SFE `fg=yellow` + 3 chars, then a
-   second record overwrites the middle one → colourless cell between two yellow neighbours,
+   second record overwrites the middle one → colorless cell between two yellow neighbors,
    inside a field still defined yellow, unrecoverable. Fix follows x3270: store on the
    **FA cell** (`ctlr.c:1886-1889`) and fall back per cell (`fprint_screen.c:754-758`).
    **This makes Task 5 four-level, not three** — cell → field → base map → mode3279.
@@ -129,7 +129,7 @@ x3270 before acceptance, and each reproduced.
    X'00' can appear only in the SA order" (`pages.txt:3456`); in SFE it is invalid and
    "rejected" (`:2897-2898`), i.e. ignored. x3270's SFE arm advances past
    (`ctlr.c:1869-1871`) where its SA arm zeroes everything (`:1915-1921`). As shipped it
-   would have discarded a colour the host set in the same order.
+   would have discarded a color the host set in the same order.
 
 5. **SFE seeding leaked across field boundaries — a real correctness bug, found by quality
    review and reproduced.** An `SBA` can move the write address into a *different,
@@ -175,7 +175,7 @@ unexercised by the only real host traffic we regression-test against. Task 6 can
 character level and cannot prove the field level; it now says so. Real coverage needs a
 trace from a host that sends SFE. [[check-what-a-comparison-covers]].
 
-**A genuinely useful find, now in the spec:** the OCR-damaged colour Table 4-7 is
+**A genuinely useful find, now in the spec:** the OCR-damaged color Table 4-7 is
 **reprinted UNDAMAGED at `pages.txt:9244-9260`** (manual p. 6-37, Chapter 6's Query
 Reply (Color) section) — `Neutral X'F7'`, `Black X'F8'`, `Purple X'FB'` all correct.
 Prefer it for the codes. Caveat: same OCR pipeline over the same table, so it
@@ -184,9 +184,9 @@ corroborates rather than independently confirms.
 ## Verified downstream, so later tasks can rely on it
 
 Task 10's quantisation numbers were **re-derived against the committed palette after
-the RGB change** and still hold: green cube index **46**, 16-colour SGR **92/94/91**
-for green/blue/red, 8-colour **32** for green, white cube **231**. All seven base
-colours remain distinct at 16 **and** 256. The four changed entries are not among the
+the RGB change** and still hold: green cube index **46**, 16-color SGR **92/94/91**
+for green/blue/red, 8-color **32** for green, white cube **231**. All seven base
+colors remain distinct at 16 **and** 256. The four changed entries are not among the
 seven, which is why the numbers survived — but re-derive rather than trust this if
 `PALETTE_3279` changes again.
 
@@ -195,27 +195,27 @@ implementer.** All corrected against the sources, which the implementer checked 
 taking my word for.
 
 1. **`0xF7` must NOT be remapped to white.** The plan's drafted `resolve()` had
-   `cell.fg === 0xf7 ? Colour.WHITE : cell.fg`, **and I repeated that instruction verbatim
+   `cell.fg === 0xf7 ? Color.WHITE : cell.fg`, **and I repeated that instruction verbatim
    when dispatching the task.** Both wrong. `0xF7` is Neutral — a distinct architected
    identification listed separately from White `0xFF` in Table 4-7, given its own RGB in
    `palette.ts` deliberately — and the manual routes it through Query Reply (Color)
    (`pages.txt:3544-3550`), whose F7 entry is an identity pair in our own reply, so F7
    resolves to F7. x3270 keeps `HOST_COLOR_NEUTRAL_WHITE` (7) and `HOST_COLOR_WHITE` (15) as
-   separate slots and special-cases F7 nowhere. Remapping collapses two colours a host chose
+   separate slots and special-cases F7 nowhere. Remapping collapses two colors a host chose
    between.
 2. **The field fallback covers background and highlighting too, not just foreground.** The
    manual says "any character property (color, highlighting, or character set)", and x3270
    mirrors its fg two-step for bg (`c3270/screen.c:1153-1158`) and gr (`:1166-1171`). A
    foreground-only fallback leaves an SFE's reverse-video field flat.
-3. **`mode3279 === false` gates colour but NOT highlighting.** The plan gated only fg,
+3. **`mode3279 === false` gates color but NOT highlighting.** The plan gated only fg,
    letting a background through on monochrome hardware; and highlighting must stay ungated
-   because a 3278 blinks and reverses — x3270 computes `gr` after its colour branch closes.
+   because a 3278 blinks and reverses — x3270 computes `gr` after its color branch closes.
 
 Also `pages.txt:3546-3548` → **`3544-3546`** for the `0x00` rule, and the drafted `Int16Array`
 for field addresses would have been a latent bug: an address can exceed 32767 on a large
 alternate size. The implementer used `Int32Array`.
 
-## THE GOAL OF THIS RUN IS REACHED — real host colour now reaches the screen
+## THE GOAL OF THIS RUN IS REACHED — real host color now reaches the screen
 
 **Task 6, verified independently.** Replaying the converted TK5 trace:
 
@@ -228,8 +228,8 @@ alternate size. The implementer used `Int32Array`.
 **But the fixture was not replayable as committed, and that is why the gap survived so long.**
 It was raw CLI output with every hex line prefixed `data: `, so `parseTrace`'s regex matched
 **zero** lines: replaying it gave 0 fields and 1920 uniformly green cells. Nothing in the
-repository exercised SA colour end to end — the three fixtures that *did* replay contain no
-character-level colour at all, all of theirs coming from the base map. Converting it is the
+repository exercised SA color end to end — the three fixtures that *did* replay contain no
+character-level color at all, all of theirs coming from the base map. Converting it is the
 substance of Task 6.
 
 **Two things Task 6 found that I had not flagged:**
@@ -243,7 +243,7 @@ substance of Task 6.
    considered, since MVS 3.8j echoes passwords unmasked.
 2. **`count-orders.mjs` could not read the canonical form** — its regex hard-required the
    `data: ` prefix, so on the converted file it reported `SA=0`, which is indistinguishable
-   from "the parser stopped recognising SA". The plan told the implementer to trust the script
+   from "the parser stopped recognizing SA". The plan told the implementer to trust the script
    over the plan, but that cross-check was impossible to perform. Prefix now optional; the
    **script** reports 113/101/12 on both forms.
 
@@ -289,11 +289,11 @@ later fails *there*, with a reason.
 
 Verified myself: five units now go out as `0x80(L=9) 0x81(L=23) 0x86(L=38) 0x87(L=15)
 0xa6(L=17)`, both Table 6-1 rows are OCR-clean and say `Yes ... Yes Yes`, and **the fixture
-still reports 113/101/12** — advertising colour did not change what TK5 sends, which is the
+still reports 113/101/12** — advertising color did not change what TK5 sends, which is the
 invariant that matters.
 
 One deliberate divergence, well handled: our Color unit is **not** byte-identical to the
-x3270 capture, differing in exactly its fifteen colour-identifier bytes, because that capture
+x3270 capture, differing in exactly its fifteen color-identifier bytes, because that capture
 was taken with x3270 in monochrome mode. Rather than skipping the unit in the comparison, the
 test exempts those bytes **by name and pins both sides**, so the other 23 stay pinned and the
 divergence cannot silently widen.
@@ -310,12 +310,12 @@ WHITE 793   BLUE 618   RED 329   NEUTRAL-WHITE 144   YELLOW 36
 ```
 
 So the whole path works: wire bytes → telnet → parse → execute (SA/SFE, eight rules) → per-cell
-storage → four-level resolution → the operator-facing CLI. Colour can now be inspected on a live
+storage → four-level resolution → the operator-facing CLI. Color can now be inspected on a live
 host **without simultaneously trusting a brand-new terminal renderer**, which is exactly why this
 task came before the TUI rather than after it.
 
 Both keys are emitted deliberately: a conformance comparison needs the raw bytes, a human
-debugging colour needs the resolution, and dropping either makes one of those impossible.
+debugging color needs the resolution, and dropping either makes one of those impossible.
 
 ## A RECURRING TRAP, now seen three times: the storage sentinel hides the rule
 
@@ -325,7 +325,7 @@ be represented in a `Screen`**, and therefore cannot reach any consumer through 
 path. Three consequences have now bitten:
 
 1. **Task 3**: the sentinel comment justified itself with `XA.RESET` (a TYPE) when the claim
-   was about `XAH.DEFAULT` (a VALUE). Right behaviour, wrong argument.
+   was about `XAH.DEFAULT` (a VALUE). Right behavior, wrong argument.
 2. **Task 5**: three tests named the `0x00`-means-device-default rule and **none of them
    reached it.** Both routes they used — `setExtended({fg: 0x00})` and a real SA order with
    value `0x00` — collapse to *absent* before resolution sees them. I reproduced the
@@ -373,10 +373,10 @@ regression; verify HEAD in a detached worktree before believing otherwise.
 ## Task 5's final round, and a third pass on one comment
 
 `4188b1e` unified the three attribute fall-throughs behind a `usableHighlight` mirroring
-`usableColour`, after review found `gr` gated level 1 on *non-zero* where fg/bg gate it on
+`usableColor`, after review found `gr` gated level 1 on *non-zero* where fg/bg gate it on
 *renderable*. I reproduced the consequence: a cell carrying a garbage `gr` of `0x99`
 **suppressed its field's highlighting entirely**, while a garbage `fg` fell through to the
-field's colour — same malformed host byte, two policies, one property apart. Also closed a
+field's color — same malformed host byte, two policies, one property apart. Also closed a
 gap where **swapping background's levels 1 and 2 left all 56 tests green** (verified).
 
 **A subtlety in that fix worth keeping:** `HIGHLIGHTS` holds **five** of the six architected
@@ -425,7 +425,7 @@ implementing, which was the right instruction. `tput` matched exactly
 (256/256/16777216/8/-1). **Node's column did not**: `getColorDepth` returns BITS
 — documented as 1/4/8/24, confirmed at both ends here (`TERM=dumb` → 1,
 `COLORTERM=truecolor` → 24) — so the real values are `8/4/4/4/4`, not the plan's
-`8/16/16/16/16`. Four of the five rows had been transcribed as colour COUNTS while
+`8/16/16/16/16`. Four of the five rows had been transcribed as color COUNTS while
 the first was left as raw bits, mixing units inside one column. The conclusion
 survives and gets stronger: `tput` is right five times out of five,
 `getColorDepth` once.
@@ -447,7 +447,7 @@ with **no `22~`**.
 
 ## A REGEX THAT COULD NOT MATCH, AND THE VACUOUS TEST NEXT TO IT
 
-Task 11's two colour tests shared one mistake with two faces. A cell emits
+Task 11's two color tests shared one mistake with two faces. A cell emits
 foreground and background in ONE sequence — `\x1b[38;5;46;48;5;59m` — so the
 foreground parameter is never followed by `m`, and the plan's `/\x1b\[38;5;\d+m/`
 matches nothing at all.
@@ -462,7 +462,7 @@ readmit that same mutant if the regex were ever loosened again.
 
 **This is the fifth instance of the project's recurring shape** (see the storage
 sentinel section above): a test that names a rule it never reaches. The tell is
-always the same — the assertion passes when the behaviour is deleted.
+always the same — the assertion passes when the behavior is deleted.
 
 ## THE STATUS ROW NUMBER WAS UNPINNED, AND THAT IS A VISIBLE BUG
 
@@ -510,8 +510,8 @@ so the two statements commute and **no input can distinguish the orderings**.
 Verified rather than argued: the prescribed test was written and it passes with
 the pristine code AND with the lines swapped, 38 for 38 both ways. Recording it as
 having closed the hole would have been the sixth instance of the trap. It is kept,
-relabelled for what it genuinely pins (the second write of an address wins,
-character and colour together — previously unpinned), with the equivalence
+relabeled for what it genuinely pins (the second write of an address wins,
+character and color together — previously unpinned), with the equivalence
 recorded in the test so nobody re-derives it. A second new test pins the
 falsifiable part: `applySa` clears before it sets, so making it additive fails 3
 tests where the ordering swap fails none.
@@ -546,7 +546,7 @@ same lesson as the trace probe that lacked `Trace(on)`.
 Two clauses in this work cannot be pinned by any test, and both are annotated in
 place saying so, so that nobody later writes a test claiming to cover them:
 
-- `colours.ts`: the `depth < 16777216` clause in the COLORTERM branch is redundant,
+- `colors.ts`: the `depth < 16777216` clause in the COLORTERM branch is redundant,
   because the only assignment is to the maximum. Deleting it leaves everything
   green. It stays as a guard for a future edit mapping some COLORTERM value to a
   LOWER depth. What IS testable, and now tested, is that a present-but-smaller
@@ -561,11 +561,11 @@ The user IPLed both systems and the TUI was driven against each over a pty:
 **VM/370 10/10 steps** (CMS answered `QUERY DISK A` with its disk table; CP closed
 with `LOGOFF AT` and its own accounting) and **TK5 8/8** (ISPF primary option menu
 fully rendered, then `X` to `READY` and a clean `LOGOFF`, with HERC04 confirmed free
-afterwards). Colour live: **five distinct foregrounds** on the ISPF menu where the
+afterwards). Color live: **five distinct foregrounds** on the ISPF menu where the
 default map yields four, two of them not in that map at all.
 
 Full results, and the six things that cost time, in `docs/live-testing.md` under
-*TUI and colour results*. The short version, because every one was MY error and not
+*TUI and color results*. The short version, because every one was MY error and not
 the client's: you cannot grep a diffing renderer's stream (reconstruct the screen);
 an escape sequence splits across reads; TSO has THREE more-output prompts, not two;
 `MORE...` eats input so Clear goes BEFORE the command; never match the bare string
@@ -584,7 +584,7 @@ typing into the already-post-logoff panel, breaking its own check and printing
 `logoff NOT confirmed` on runs whose accounts were independently free. A flag that
 cries wolf on success is worse than no flag.
 
-The `zti` comparison is **PARTIAL** and labelled as such: established that zti uses
+The `zti` comparison is **PARTIAL** and labeled as such: established that zti uses
 24-bit truecolor with its own palette, NOT established that every cell agrees with
 ours, because its tally spans its own chrome and comparing properly needs its curses
 screen reconstructed too.
@@ -660,7 +660,7 @@ contiguous run: `RED FIELD` had wrapped onto the end of the previous line, and o
 terminal rows began at the screen's left edge. The cause is that cells ARE contiguous
 across a row boundary, so the run-length logic emitted no position escape there and
 relied on the TERMINAL wrapping at the screen's right edge — true only while the screen
-exactly filled the terminal width. Centred in a 90-column window, an 80-column screen
+exactly filled the terminal width. Centerd in a 90-column window, an 80-column screen
 wrapped at 90 instead of 85 and every row after the first was misplaced.
 
 The tests missed it because they exercised offsets through SINGLE-CELL changes, where
@@ -675,7 +675,7 @@ trusting a dump:
 - The border WAS being drawn all along; the ASCII-only dump parser silently dropped
   multi-byte UTF-8 box characters. Confirmed by counting bytes on the wire — one each
   of `┌┐└┘`, 160 `─`, 50 `│` — before believing the picture.
-- `live-drive.py` reported 4 unrecognised escapes once the cursor sequences landed,
+- `live-drive.py` reported 4 unrecognized escapes once the cursor sequences landed,
   because its parser knew neither OSC nor DECSCUSR's `\x1b[2 q` (note the SPACE, which
   the CSI pattern cannot match). Taught it both; back to 0. A diagnostic counter that
   always shows noise is one nobody reads — the same failure as the logoff flag that
@@ -696,12 +696,12 @@ Reported as "the tutorial page renders with solid green cells where I expect a b
 cell, giving the pages a weird mottled effect". A real rendering bug, and the most
 serious one found in the TUI so far.
 
-**Root cause.** `\x1b[38;5;46m` sets a colour and leaves reverse, bold, blink and
+**Root cause.** `\x1b[38;5;46m` sets a color and leaves reverse, bold, blink and
 underline exactly as they were — only 0 (or 22/24/25/27) clears them. `paint()` emitted
 the desired attributes alone, so a reverse-video run leaked into every cell after it.
 ISPF's tutorial sends `SA highlighting=0xF2` for its title bar, so from the title
 onwards every cell stayed inverted, and each subsequent **space** became a solid block
-of the foreground colour. VM/370 never sends reverse, which is why only TK5 showed it.
+of the foreground color. VM/370 never sends reverse, which is why only TK5 showed it.
 
 **Measured on the real panels**, rendering the three captured tutorial `ScreenJson`
 dumps through `TerminalRenderer`: **3761 cells drawn in reverse, 2178 of them blanks**
@@ -724,7 +724,7 @@ could not report what I was asking it:**
 3. I drove s3270 with `Wait(Settle)`. **Settle is OUR extension** — s3270 rejects it,
    so every step errored and it never reached the panel.
 4. I then compared against s3270 as a **3278**, which is MONOCHROME, so the host sent
-   it no colour at all and its silence looked like a contradiction. Re-run as a 3279 it
+   it no color at all and its silence looked like a contradiction. Re-run as a 3279 it
    agreed with us byte for byte: 9 SA foreground orders, identical values and counts.
 
 That last one is worth keeping as a positive result: **our parsing and resolution are
@@ -734,19 +734,19 @@ tutorial body green. The green was never the bug; the leaked reverse video was.
 ## THE TUI HAS ITS OWN PALETTE, AND IT IS ZTI'S — 2026-08-25
 
 On the user's call, and scoped to the TUI only: core's `PALETTE_3279` is unchanged, as
-the shared model for a future GUI or web front end. `packages/tui/src/colours.ts` now
+the shared model for a future GUI or web front end. `packages/tui/src/colors.ts` now
 carries F0-F7 from **zti** (`tnz/zti.py:2813-2820`, converted from curses' 0-1000
 scale) and F8-FF from **x3270's** `rgbmap`, because zti advertises only F1-F7 in its
 Color Query Reply and so defines no more.
 
 Two things fell out of it:
 
-- **Nearest-RGB matching is gone, replaced by an explicit 16-colour table.** Nearest-RGB
-  made the PALETTE responsible for 16-colour distinctness, which is why core's values
+- **Nearest-RGB matching is gone, replaced by an explicit 16-color table.** Nearest-RGB
+  made the PALETTE responsible for 16-color distinctness, which is why core's values
   are saturated primaries: measured, x3270's `#1e90ff` blue and zti's `(120,144,240)`
   blue BOTH quantise to bright cyan, colliding with their turquoise. Deciding the slot
-  explicitly separates "what colour is it" from "which of sixteen slots", so a pleasant
-  palette no longer costs correctness on a 16-colour terminal.
+  explicitly separates "what color is it" from "which of sixteen slots", so a pleasant
+  palette no longer costs correctness on a 16-color terminal.
 - **Core's background divergence is REVERTED.** The default background is
   `NEUTRAL_BLACK` again, matching x3270 (`c3270/screen.c:1158`). It was changed to
   `BLACK` a day earlier to get a black-looking background; that was the wrong layer.
@@ -754,7 +754,7 @@ Two things fell out of it:
   with core left faithful. One fewer divergence to defend.
 
 Worth noting how well the references agree: x3270's `#32cd32` and zti's `(36,216,48)`
-green quantise to the SAME 256-colour cell, 77, where core's pure green gave 46. Two
+green quantise to the SAME 256-color cell, 77, where core's pure green gave 46. Two
 independent implementations landing on one number is why 77 is the right answer.
 
 ## Where to resume
@@ -767,10 +767,10 @@ the user does that by hand. `ss`/`netstat` show nothing in this sandbox, so prob
 `/dev/tcp/127.0.0.1/PORT`. Read the VM reconnect trap in `docs/HANDOFF.md` first: an
 account left logged on is reconnected, not refused, landing at `CP READ` where every
 command goes to CP. Use `packages/tui/scripts/live-drive.py` rather than starting from
-scratch, and **record what did not work too** — the *TUI and colour results* section of
+scratch, and **record what did not work too** — the *TUI and color results* section of
 `docs/live-testing.md` is where that goes, and its list of six self-inflicted failures
 is the most useful part of it.
 
 **When Hercules is down**, `packages/tui/scripts/pty-smoke.py` covers the same ground
-host-free: 12 checks including raw-mode teardown and the resize behaviour.
+host-free: 12 checks including raw-mode teardown and the resize behavior.
 

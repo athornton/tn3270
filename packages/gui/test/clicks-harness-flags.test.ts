@@ -157,7 +157,7 @@ describe('the click harness', () => {
 
   it('fails the run when the renderer throws', () => {
     // A renderer exception produces a window that receives clicks and does nothing with them. It is
-    // sharper here than in the chord harness: the button-centre probe is a `window` global installed
+    // sharper here than in the chord harness: the button-center probe is a `window` global installed
     // by the renderer's module body, so a renderer that threw before installing it has no probe.
     expect(clicks).toMatch(/renderer\[3\]/);
   });

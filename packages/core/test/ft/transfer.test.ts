@@ -586,7 +586,7 @@ describe('an upload spanning several frames', () => {
   it('writes a maximal frame over the response area but never over O_SF', () => {
     // CONSTRAINT 3. O_UP_DATA (7) + O_UP_MAX (1912) reaches 1918, so a maximal
     // frame covers the whole response area at 1914-1918. That is x3270's own
-    // behaviour (ft_cut.c:515-522) and harmless -- the host is asking for data,
+    // behavior (ft_cut.c:515-522) and harmless -- the host is asking for data,
     // not reading a response -- but it is exactly why this machine never writes
     // a response and an upload frame in the same step.
     const t = new CutTransfer({ direction: 'send', data: src });
@@ -626,7 +626,7 @@ describe('FT_RETRANSMIT re-sends the previous block byte-identically', () => {
    * x3270 does not do this at all: `cut_retransmit` aborts
    * (ft_cut.c:573-578) under a comment calling its own handling "(Improperly)
    * process a retransmit". `frames.ts` therefore surfaces `retransmit` as a
-   * frame kind, and the real behaviour lives here.
+   * frame kind, and the real behavior lives here.
    *
    * Why re-encoding would be WRONG rather than merely slower: the codec is
    * stateful. After frame 1 the quadrant sits wherever frame 1 left it, not
@@ -967,7 +967,7 @@ describe('an oversize declared length', () => {
 
   it('fails on an unknown frame type, too', () => {
     // `default: cut_abort(get_message("ftCutUnknownFrame"), SC_ABORT_XMIT)`
-    // (ft_cut.c:408-411). An unrecognised type means we have lost sync with the
+    // (ft_cut.c:408-411). An unrecognized type means we have lost sync with the
     // host, and guessing would write a wrong file.
     const s = cutScreen();
     s.setChar(O_FRAME_TYPE, 0x99);
@@ -1008,7 +1008,7 @@ describe('an oversize declared length', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Direction faults and terminal behaviour
+// Direction faults and terminal behavior
 // ---------------------------------------------------------------------------
 
 describe('a frame for the wrong direction', () => {
@@ -1134,7 +1134,7 @@ describe('cancel, the operator-initiated abort', () => {
     expect(fresh.cellAt(RO_REASON_CODE).ebcdic).toBe(0x00);
   });
 
-  it('cancelling after a NORMAL completion is also inert', () => {
+  it('canceling after a NORMAL completion is also inert', () => {
     // The same guard from the other side: the transfer ended on its own and the form is
     // only now being closed.
     const transfer = new CutTransfer({ direction: 'receive' });

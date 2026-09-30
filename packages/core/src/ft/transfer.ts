@@ -526,7 +526,7 @@ export class CutTransfer {
         // (`cut_abort(get_message("ftCutRetransmit"), SC_ABORT_XMIT)`,
         // ft_cut.c:577) under a comment that calls its own handling
         // "(Improperly) process a retransmit". The design doc requires the real
-        // behaviour: re-send the previous block, byte for byte.
+        // behavior: re-send the previous block, byte for byte.
         //
         // The AID is Enter, not PF1: `AckAid.RETRANSMIT` is what a client would
         // press to ask the HOST to re-send, whereas here the host has asked US,
@@ -669,7 +669,7 @@ export class CutTransfer {
    *
    * `abort` is the INTERNAL error path. Its callers each already hold a
    * `CutFrameError`'s status and message, so its signature takes both — and an
-   * operator cancelling has neither. Exposing `abort` would put two arguments in
+   * operator canceling has neither. Exposing `abort` would put two arguments in
    * the public API that no caller outside this file can sensibly supply, and the
    * natural wrong guess (status 0, an empty message) is one the host would read
    * as a protocol fault rather than a cancellation.

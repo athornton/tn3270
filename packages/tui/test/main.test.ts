@@ -43,7 +43,7 @@ describe('parseArgs', () => {
   it('leaves colors undefined for auto, which means detect', () => {
     // Distinct from `--colors 0`: absent means ask terminfo, 0 means monochrome
     // because the user said so. Conflating them would make the monochrome path
-    // impossible to select on a colour terminal, which is how it gets tested.
+    // impossible to select on a color terminal, which is how it gets tested.
     expect(parseArgs(['--colors', 'auto', 'h']).colors).toBeUndefined();
     expect(parseArgs(['h']).colors).toBeUndefined();
     expect(parseArgs(['--colors', '0', 'h']).colors).toBe(0);
@@ -60,11 +60,11 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--colors'])).toThrow(UsageError);
   });
 
-  it('rejects an unrecognised flag rather than ignoring it', () => {
+  it('rejects an unrecognized flag rather than ignoring it', () => {
     // Same reasoning as the CLI: a silently skipped flag produces a session that
     // negotiates something nobody asked for, which is very hard to see in a trace.
     expect(() => parseArgs(['--nonesuch', 'h'])).toThrow(UsageError);
-    expect(() => parseArgs(['-x'])).toThrow(/unrecognised/);
+    expect(() => parseArgs(['-x'])).toThrow(/unrecognized/);
   });
 
   it('rejects a second host instead of silently taking one of them', () => {
@@ -200,7 +200,7 @@ describe('the host argument', () => {
   });
 
   it('still refuses L: alongside -insecure', () => {
-    // Pre-existing behaviour, re-pinned because the check moved from a regex on the
+    // Pre-existing behavior, re-pinned because the check moved from a regex on the
     // raw argument to the resolved `tlsRequested` flag.
     expect(() => parseArgs(['-insecure', 'L:host'])).toThrow(/L:|TLS/);
     expect(() => parseArgs(['-insecure', 'l:host:992'])).toThrow(/L:|TLS/);

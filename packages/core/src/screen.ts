@@ -20,7 +20,7 @@ import { cp037, type CodePage } from './codepage.js';
  *
  * The three extended attributes are OPTIONAL and their absence is meaningful:
  * it means "this cell specifies nothing, fall through to the base field
- * attribute". That is not the same as any concrete colour, so do not default
+ * attribute". That is not the same as any concrete color, so do not default
  * them to 0x00 — `render.ts` needs the distinction. This mirrors x3270's
  * `struct ea` (include/globals.h:364-374), which likewise carries the character
  * and its attributes together.
@@ -28,9 +28,9 @@ import { cp037, type CodePage } from './codepage.js';
 export type Cell = {
   kind: 'char';
   ebcdic: number;
-  /** Foreground colour identification, 0xF0-0xFF. Absent means unspecified. */
+  /** Foreground color identification, 0xF0-0xFF. Absent means unspecified. */
   fg?: number;
-  /** Background colour identification, 0xF0-0xFF. Absent means unspecified. */
+  /** Background color identification, 0xF0-0xFF. Absent means unspecified. */
   bg?: number;
   /** Highlighting value (`XAH.*`). Absent means unspecified. */
   gr?: number;
@@ -138,7 +138,7 @@ export class Screen {
   /**
    * Extended attributes, one array each, parallel to `chars`.
    *
-   * 0 means "unspecified". Every architected colour is 0xF0-0xFF, so for `fgs`
+   * 0 means "unspecified". Every architected color is 0xF0-0xFF, so for `fgs`
    * and `bgs` the sentinel is unambiguous.
    *
    * For `grs` it genuinely collapses two states, and that is SAFE rather than
@@ -146,7 +146,7 @@ export class Screen {
    * a value this array cannot distinguish from "nothing set". The manual defines
    * that value as meaning "the default action of the device"
    * (pages.txt:10329-10331), so it renders identically to no highlighting at
-   * all — the same reasoning that lets `XAC_DEFAULT` (0x00 as a colour VALUE)
+   * all — the same reasoning that lets `XAC_DEFAULT` (0x00 as a color VALUE)
    * fall through to the base field attribute rather than being stored.
    *
    * DO NOT reach for `XA.RESET` to justify this. An earlier version of this
@@ -307,7 +307,7 @@ export class Screen {
    * MERGE, NOT REPLACE, because the manual's composite rule requires it: "The
    * set of type-value pairs applied during character processing is a composite,
    * by attribute type, of the last value specified in previously encountered SA
-   * orders" (p. 4-6, pages.txt:2995-2996). An SA setting colour must leave a
+   * orders" (p. 4-6, pages.txt:2995-2996). An SA setting color must leave a
    * previously set highlighting alone. Pass `clearExtended` to reset.
    */
   setExtended(addr: number, ext: ExtendedAttributes): void {
@@ -360,8 +360,8 @@ export class Screen {
     // "If the display receives an SF order, it sets the associated extended
     // field attribute to its default value" (p. 4-4, pages.txt:2869-2870). SFE
     // overrides this by calling setExtended AFTER this returns; a plain SF must
-    // leave the position clean, or a field following a coloured one inherits
-    // colour the host never gave it.
+    // leave the position clean, or a field following a colored one inherits
+    // color the host never gave it.
     this.clearExtended(addr);
   }
 
@@ -499,7 +499,7 @@ export class Screen {
         // Extended attributes go with the character data they decorate. EAU is
         // NOT one of the manual's four SA-state reset triggers, so this line is
         // an inference rather than a quotation — but leaving them would show
-        // stale colour on a cell whose data has just been nulled. Written
+        // stale color on a cell whose data has just been nulled. Written
         // directly rather than via clearExtended for the same reason as chars[]
         // above: one bounds check per cell is wasted work in a hot loop.
         this.fgs[a] = 0;

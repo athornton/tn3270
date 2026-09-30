@@ -19,7 +19,7 @@
  *
  * `Cr` and `Recfm` start at `''`, and that is not the same as any of their values: an
  * unset `Recfm` emits no `RECFM` keyword at all and lets the host choose, which is the
- * current CLI behaviour that works on both hosts. A two-state F/V toggle would make "I did
+ * current CLI behavior that works on both hosts. A two-state F/V toggle would make "I did
  * not ask for record attributes" unexpressible.
  */
 
@@ -152,7 +152,7 @@ export function setFieldText(
 /**
  * Is this field meaningful, given the rest of the form?
  *
- * All five rules are derived from the validator's own behaviour, cited where they come
+ * All five rules are derived from the validator's own behavior, cited where they come
  * from. An inapplicable field is not drawn and cannot be selected.
  */
 export function applicable(id: TransferFieldId, values: TransferValues): boolean {

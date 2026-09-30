@@ -26,7 +26,7 @@ describe('newTransferForm', () => {
     expect(s.values.mode).toBe('binary');
     expect(s.values.exist).toBe('keep');
     // UNSET is a distinct intention from any value: it emits no keyword at all and
-    // lets the host choose, which is the CLI behaviour that works on both hosts.
+    // lets the host choose, which is the CLI behavior that works on both hosts.
     expect(s.values.cr).toBe('');
     expect(s.values.recfm).toBe('');
     expect(s.values.localFile).toBe('');
@@ -127,7 +127,7 @@ describe('applicable', () => {
     expect(applicable('lrecl', v({ direction: 'send', recfm: 'fixed' }))).toBe(true);
   });
 
-  it('KEEPS Lrecl for Recfm=V, because TSO honours it as the MAXIMUM record length', () => {
+  it('KEEPS Lrecl for Recfm=V, because TSO honors it as the MAXIMUM record length', () => {
     // MEASURED LIVE ON BOTH HOSTS 2026-09-22, and they disagree. TSO: `RECFM V LRECL 80`
     // stored VB 80 against VB 255 without it. VM/CMS: both V cases stored V 80, so CMS
     // ignores it -- but disabling the field would make a real TSO attribute unexpressible

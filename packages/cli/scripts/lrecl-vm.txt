@@ -1,4 +1,4 @@
-# Does CMS honour LRECL with RECFM V? THREE cases, and the third is load-bearing:
+# Does CMS honor LRECL with RECFM V? THREE cases, and the third is load-bearing:
 # without a RECFM F control, "the two V cases match" cannot distinguish a host that
 # IGNORES the keyword from a client that never SENT it.
 Connect(127.0.0.1:3270)

@@ -35,7 +35,7 @@ describe('parseKeySpec', () => {
   });
 
   it('passes the key through VERBATIM, including punctuation', () => {
-    // ']' arrives as code BracketRight; nothing here normalises it.
+    // ']' arrives as code BracketRight; nothing here normalizes it.
     expect(parseKeySpec('Ctrl+]')).toEqual({ keyCode: ']', modifiers: ['control'] });
   });
 

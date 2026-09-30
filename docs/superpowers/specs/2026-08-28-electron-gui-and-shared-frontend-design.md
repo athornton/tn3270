@@ -30,7 +30,7 @@ unchanged** — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS set, and
 
 **Out, deliberately:** connect dialog, menus, preferences UI, mouse support, packaging,
 the webserver front end, and Programmable Symbol Sets. Each is a later stage; none is
-cancelled.
+canceled.
 
 **Why this slice and not the old "stage 2" list.** The old staging bundled the dialog and
 menus with the renderer and the keymap. The renderer and Chromium's keyboard handling are
@@ -76,9 +76,9 @@ and keeps everything specific to the s3270 line protocol.
 
 - `cli`: `commands.ts`, `runner.ts`, `transfer.ts`, `status.ts`. These are the s3270 line
   protocol and its reply format. A GUI has no `Wait(Settle)` and no `data:` lines.
-- `tui`: `render.ts` and `colours.ts`. Both are ANSI. `colours.ts` computes SGR
+- `tui`: `render.ts` and `colors.ts`. Both are ANSI. `colors.ts` computes SGR
   parameters and detects terminfo depth; the GUI wants RGB and gets it from core's
-  `colourRgb`/`PALETTE_3279`. **A third palette is not created.**
+  `colorRgb`/`PALETTE_3279`. **A third palette is not created.**
 - `tui`: `tooSmall` and `statusRowFor` look shareable and are not. They encode c3270's
   rule about apportioning scarce *terminal rows* (`c3270/screen.c:412-419`, `895`), a
   concept a resizable window does not have.
@@ -112,7 +112,7 @@ so the two are read together and a key added to one is visibly missing from the 
 
 ### Refactor safety
 
-**Moving a module must not change behaviour, and the existing 1202 tests are the
+**Moving a module must not change behavior, and the existing 1202 tests are the
 evidence.** Tests move with their subjects (`hostspec.test.ts`, `tls.test.ts`'s
 prefix/flag cases, `keymap.test.ts`); the suite must pass with assertions unchanged. No
 re-export shims are left behind in `cli` — a second path to the same symbol is the drift
@@ -147,13 +147,13 @@ letting the caller do the writing:
 1. **`drawList(snapshot, geometry) → DrawList`** — pure. Per cell:
    `{ glyph, fg: Rgb, bg: Rgb, reverse, cursor, underline }`, plus the OIA row and the
    letterbox offsets. No canvas, no DOM, no Electron. This is where reverse video, the
-   cursor, field colours and intensity are decided, and it is unit-testable in `npm test`.
+   cursor, field colors and intensity are decided, and it is unit-testable in `npm test`.
 2. **`blit(ctx, drawList, atlas, scale)`** — walks the list and draws.
    `imageSmoothingEnabled = false`, integer `scale` only.
 
 `glyph` is a *tagged* reference, not an index, so that a PS cell later carries a
 host-supplied bitmap through the same structure. That is the `dispatch on kind`
-constraint honoured at the one place it has to be.
+constraint honored at the one place it has to be.
 
 ### The font: x3270's own bitmaps
 
@@ -189,10 +189,10 @@ never push pixels, which forecloses PS permanently.
 
 ### Scaling
 
-**Integer multiples only, letterboxed and centred.** 1×, 2×, 3× by glyph cell; a window
-size between multiples keeps the nearest smaller multiple and centres the result. Every
+**Integer multiples only, letterboxed and centerd.** 1×, 2×, 3× by glyph cell; a window
+size between multiples keeps the nearest smaller multiple and centers the result. Every
 glyph pixel stays exact. Fractional scaling would smear a bitmap font, and the TUI
-already centres with a border, so the behaviour is familiar. The default multiple is **the largest
+already centers with a border, so the behavior is familiar. The default multiple is **the largest
 integer scale whose letterboxed screen fits within 80% of the display work area, minimum
 1×** — stated as a rule rather than "chosen from the display size", which could be read as
 either fit-to-fill or a fixed preference.
@@ -238,7 +238,7 @@ packaged app's resources sit in an asar only main can read.
 | Surface | How | Where |
 |---|---|---|
 | BDF parser | known glyph bitmaps taken from the BDF itself | `npm test` |
-| Draw list | reverse video, cursor, field colour, intensity, letterbox offsets | `npm test` |
+| Draw list | reverse video, cursor, field color, intensity, letterbox offsets | `npm test` |
 | Action mapping | `KeyboardEvent` → `Action`, beside the terminal table's tests | `npm test` |
 | Refactor safety | the existing 1202 tests, assertions unchanged | `npm test` |
 | Pixels reach the screen | a handful of `capturePage()` goldens under Xvfb | script, guarded |

@@ -9,7 +9,7 @@ import type { Action } from '@tn3270/frontend';
  * ## COMPRESSION IS NOT OPTIONAL AND ITS FORMAT IS NOT FREE
  *
  * MEASURED: a 24x80 draw list is 237220 bytes of JSON and 6760 deflated -- 35x, because per-cell
- * colour data is enormously repetitive. Raw frames would be unpleasant over a network since a
+ * color data is enormously repetitive. Raw frames would be unpleasant over a network since a
  * keystroke can produce several; compressed they are a non-issue, which is why dirty-cell diffing
  * is NOT in this design.
  *
@@ -50,7 +50,7 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  *
  * ## UNKNOWN KINDS ARE HARMLESS; KNOWN KINDS WITH OUT-OF-RANGE FIELDS ARE NOT
  *
- * This deliberately does not enumerate `Action` variants: an unrecognised `kind` falls through
+ * This deliberately does not enumerate `Action` variants: an unrecognized `kind` falls through
  * `applyAction`'s `switch` as a no-op, so a merely NEW action name needs no change here. But a
  * KNOWN kind carrying a bogus field is a different animal, and `pf`/`pa` are the case in point --
  * see below.

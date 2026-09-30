@@ -154,7 +154,7 @@ describe('TN3270E header codec', () => {
     // code, and this test would not catch their removal.
     //
     // It is kept anyway, because what matters to a host is that an over-large field
-    // cannot bleed into its neighbour -- and that would break the day encodeHeader
+    // cannot bleed into its neighbor -- and that would break the day encodeHeader
     // is rewritten to build a number[] or write into a DataView, neither of which
     // truncates for you.
     const h = encodeHeader({
@@ -199,7 +199,7 @@ describe('TN3270E header codec', () => {
     });
   });
 
-  it('recognises only 3270-DATA as carrying an executable datastream', () => {
+  it('recognizes only 3270-DATA as carrying an executable datastream', () => {
     // The gate that keeps a bind image or an unbind reason code out of the 3270
     // executor, where it would produce a spurious program check.
     expect(carriesDatastream(Tn3270eDataType.DATA_3270)).toBe(true);
@@ -342,7 +342,7 @@ describe('TN3270E negotiation — DEVICE-TYPE', () => {
     expect(r.next.lu).toBeUndefined();
   });
 
-  it('ignores a body it does not recognise, without changing state', () => {
+  it('ignores a body it does not recognize, without changing state', () => {
     const st = initialState({ terminalType: 'IBM-3278-2-E', lus: [] });
     const r = negotiate(st, Uint8Array.of(0x7e, 0x7f));
     expect(r.reply).toBeUndefined();

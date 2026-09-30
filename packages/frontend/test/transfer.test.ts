@@ -212,7 +212,7 @@ describe('keyword rejection', () => {
 
   it('rejects a keyword x3270 has but we deliberately do not', () => {
     // Remap, OtherOptions and the space keywords are absent LOUDLY: each governs
-    // behaviour we have not built or command syntax nobody has tested against a
+    // behavior we have not built or command syntax nobody has tested against a
     // host, and accepting them would produce a transfer whose options went
     // nowhere.
     //
@@ -226,7 +226,7 @@ describe('keyword rejection', () => {
   });
 
   describe('BufferSize, the DFT frame size', () => {
-    // WHY IT IS ACCEPTED WHERE THE OTHER SEVEN ARE NOT: it governs behaviour that now
+    // WHY IT IS ACCEPTED WHERE THE OTHER SEVEN ARE NOT: it governs behavior that now
     // EXISTS. DFT works, and the size is load-bearing rather than cosmetic -- Task 11
     // measured the host reading our advertised size and quoting it back in its `Open`
     // (recordSize = advertised - 17), so a wrong number is a wrong frame size on the wire.

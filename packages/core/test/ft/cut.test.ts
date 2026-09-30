@@ -58,7 +58,7 @@ describe('the 6-bit alphabet, ft_cut.c:105-106', () => {
     //     if (p == NULL) {
     //         return 0;
     //     }
-    // so an unrecognised byte is indistinguishable from a genuine index 0. We
+    // so an unrecognized byte is indistinguishable from a genuine index 0. We
     // keep that rather than diverging on frame handling we cannot yet test
     // against a live host.
     expect(from6(0x00)).toBe(0); // ebc2asc0[0x00] = 0x20, space, not in TABLE6
@@ -183,7 +183,7 @@ describe('checksum, ft_cut.c:550-554', () => {
     expect(checksum([0x2a])).toBe(0x2a);
   });
 
-  it('is 0 over an empty buffer, since the C initialises cs = 0', () => {
+  it('is 0 over an empty buffer, since the C initializes cs = 0', () => {
     expect(checksum([])).toBe(0);
     expect(checksum(new Uint8Array(0))).toBe(0);
   });
@@ -222,7 +222,7 @@ describe('the exhaustive round trip', () => {
     const decoded = new CutCodec().hostToLocal(encoded);
     expect(Array.from(decoded)).toEqual(all);
     // 256 data bytes plus one selector per quadrant change. Pinned so a change
-    // in switching behaviour is visible rather than merely still-lossless.
+    // in switching behavior is visible rather than merely still-lossless.
     expect(encoded.length).toBe(285);
   });
 

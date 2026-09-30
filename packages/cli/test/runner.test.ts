@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
   encodeAddress, cp037, checksum, from6, to6, hostToLocal, localToHost,
-  EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode, Colour,
+  EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode, Color,
   O_CC_FRAME_SEQ, O_CC_MESSAGE, O_CC_STATUS_CODE, O_DR_FRAME_SEQ, O_DR_SF,
   O_DT_CSUM, O_DT_DATA, O_DT_FRAME_SEQ, O_DT_LEN, O_FRAME_TYPE, O_SF,
   O_UP_DATA, O_UP_FRAME_SEQ, O_UP_LEN, RO_FRAME_TYPE, RO_REASON_CODE,
@@ -216,7 +216,7 @@ describe('Reconnect()', () => {
   it('does NOT reconnect on Enter(), which the interactive front ends do', async () => {
     // THE DIVERGENCE, ASSERTED. `applyAction` reconnects on `enter`/`clear` while disconnected, and
     // the CLI deliberately does not share that: a script that types Enter into a dead session gets
-    // s3270's own error, not a new socket to a mainframe. Without this test the two behaviours could
+    // s3270's own error, not a new socket to a mainframe. Without this test the two behaviors could
     // be unified by accident and nothing would notice.
     const { runner, calls } = spyingRunner();
     await runner.run('Connect(vm.example:3270)');
@@ -300,8 +300,8 @@ describe('screen reading', () => {
   });
 });
 
-describe('ScreenJson colour', () => {
-  it('reports resolved colour per cell', async () => {
+describe('ScreenJson color', () => {
+  it('reports resolved color per cell', async () => {
     const { runner, session } = newRunner();
     // A protected, unintensified field: the 3279 default map renders it BLUE.
     session.screen.setFieldAttribute(0, FA.PRINTABLE | FA.PROTECT);
@@ -314,12 +314,12 @@ describe('ScreenJson colour', () => {
 
     expect(json.resolved).toBeDefined();
     expect(json.resolved).toHaveLength(1920);
-    expect(json.resolved[1].fg).toBe(Colour.BLUE);
+    expect(json.resolved[1].fg).toBe(Color.BLUE);
     expect(json.resolved[1].text).toBe('A');
   });
 
   it('still reports the raw cells alongside the resolved ones', async () => {
-    // A conformance comparison needs the bytes; a human debugging colour needs
+    // A conformance comparison needs the bytes; a human debugging color needs
     // the resolution. Dropping either makes one of those impossible.
     const { runner, session } = newRunner();
     session.screen.setChar(0, 0xc1);
@@ -847,7 +847,7 @@ describe('Transfer(): option and pre-flight failures', () => {
   });
 
   it('fails when the Runner has no file system at all', async () => {
-    // Same division of labour as Replay(): runner.ts imports no node:fs.
+    // Same division of labor as Replay(): runner.ts imports no node:fs.
     const conn = new FakeConnection();
     const session = new Session({ connect: () => conn });
     const runner = new Runner(session, { clock: () => 0 });
@@ -1276,7 +1276,7 @@ describe('Transfer() protocol selection', () => {
     const { runner, session, conn } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.1 });
     expect(session.screen.size).toBe(3440);
     const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
-    // It gets as far as a TIMEOUT, which means it reached the host -- the old behaviour
+    // It gets as far as a TIMEOUT, which means it reached the host -- the old behavior
     // failed with the geometry message and an empty wire.
     expect(reply).not.toContain('needs a 24x80 screen');
     expect(reply).toContain('press Attn or Clear');
@@ -1356,7 +1356,7 @@ describe('Transfer() protocol selection', () => {
   });
 
   it('A CUT HOST AT 24x80 IS BYTE-FOR-BYTE UNCHANGED, which is the real safety net', async () => {
-    // The spec's own words: "If the CUT path changes behaviour at 24x80, this design is
+    // The spec's own words: "If the CUT path changes behavior at 24x80, this design is
     // wrong." Asserted on the WIRE rather than on success, because a transfer that succeeds
     // while sending different bytes is exactly the regression this would hide.
     //
@@ -1518,7 +1518,7 @@ describe('Transfer(): a DFT transfer that finishes before the poll loop', () => 
     // `while` exits the poll immediately and the check after the loop returns the same result.
     // It was deleted rather than kept, per the spec's rule: "If nothing does, the call is
     // decoration and should be deleted rather than kept." This test is what pins the case, so
-    // the behaviour is covered even though the extra line is gone.
+    // the behavior is covered even though the extra line is gone.
     const { runner, session, conn, files } = await transferRunnerAt(24, 80, {
       transferFrameSeconds: 0.1,
     });

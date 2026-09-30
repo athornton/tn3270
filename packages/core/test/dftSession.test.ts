@@ -536,7 +536,7 @@ describe('the DDM advertisement through a Session', () => {
     }
   });
 
-  it('honours dftBufferSize in the DDM unit it builds, clamped', async () => {
+  it('honors dftBufferSize in the DDM unit it builds, clamped', async () => {
     // SessionOptions.dftBufferSize was documented as existing and set by nothing;
     // this is the first assertion that it reaches a built unit at all. Asserted on
     // ddmCapability rather than on a Query reply, because the DDM unit is announced
@@ -624,9 +624,9 @@ describe('the DDM advertisement through a Session', () => {
       expect(advertised(conn.sent)).toBe(4096);
     });
 
-    it('reverts when the transfer is CANCELLED too, not only when it completes', async () => {
+    it('reverts when the transfer is CANCELED too, not only when it completes', async () => {
       // `cancelDftTransfer` is the protocol-race loser's path and clears `dft`; it must clear
-      // the size with it, or a cancelled transfer's size outlives it in the advertisement.
+      // the size with it, or a canceled transfer's size outlives it in the advertisement.
       const { session, conn } = newSession({ ddm: true, dftBufferSize: 4096 });
       await session.connect('localhost', 3270);
       conn.negotiate();

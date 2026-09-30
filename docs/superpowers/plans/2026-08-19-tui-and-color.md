@@ -1,14 +1,14 @@
-# TUI Front End and 3279 Colour Implementation Plan
+# TUI Front End and 3279 Color Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Store the extended attributes hosts already send us, resolve them into concrete 3279 colours, and ship `packages/tui` — a c3270-style terminal client usable on a box with no X.
+**Goal:** Store the extended attributes hosts already send us, resolve them into concrete 3279 colors, and ship `packages/tui` — a c3270-style terminal client usable on a box with no X.
 
-**Architecture:** Three layers, each independently testable. (1) `Screen` gains three parallel typed arrays for foreground, background and highlighting, written by new SA/SFE handling in `execute.ts` and surfaced on the existing `Cell` at the `snapshot()` boundary. (2) A new pure `render.ts` resolves protocol attributes into `ResolvedCell[]`, owning the manual's default-colour and `0xF7` rules so no front end reimplements them. (3) `packages/tui` consumes `ResolvedCell[]`, quantises to whatever colour depth `tput` reports, and translates terminal keys into the `Keyboard` actions the core already owns.
+**Architecture:** Three layers, each independently testable. (1) `Screen` gains three parallel typed arrays for foreground, background and highlighting, written by new SA/SFE handling in `execute.ts` and surfaced on the existing `Cell` at the `snapshot()` boundary. (2) A new pure `render.ts` resolves protocol attributes into `ResolvedCell[]`, owning the manual's default-color and `0xF7` rules so no front end reimplements them. (3) `packages/tui` consumes `ResolvedCell[]`, quantises to whatever color depth `tput` reports, and translates terminal keys into the `Keyboard` actions the core already owns.
 
-**Tech Stack:** TypeScript (ES modules, `.js` import specifiers), vitest, npm workspaces. **No new dependencies** — colour depth comes from shelling out to `tput`, not from a library.
+**Tech Stack:** TypeScript (ES modules, `.js` import specifiers), vitest, npm workspaces. **No new dependencies** — color depth comes from shelling out to `tput`, not from a library.
 
-**Spec:** `docs/superpowers/specs/2026-08-19-tui-and-colour-design.md` — read it first. It records why each decision was made, which two rules are protocol rather than preference, and what is deliberately out of scope.
+**Spec:** `docs/superpowers/specs/2026-08-19-tui-and-color-design.md` — read it first. It records why each decision was made, which two rules are protocol rather than preference, and what is deliberately out of scope.
 
 ---
 
@@ -22,7 +22,7 @@
 
 **Two specific traps this plan inherits, both already paid for:**
 
-1. **The colour table in the manual is OCR-damaged.** Table 4-7 (`pages.txt:3527-3541`) prints `X'FB'` **twice**, for both Black and Purple, and renders F7 as `X'F?'`. The correct values are Black `0xF8` and Purple `0xFB`, confirmed against `~/src/suite3270-4.5/include/3270ds.h:313-328`. Task 2 requires you to check all sixteen against that header.
+1. **The color table in the manual is OCR-damaged.** Table 4-7 (`pages.txt:3527-3541`) prints `X'FB'` **twice**, for both Black and Purple, and renders F7 as `X'F?'`. The correct values are Black `0xF8` and Purple `0xFB`, confirmed against `~/src/suite3270-4.5/include/3270ds.h:313-328`. Task 2 requires you to check all sixteen against that header.
 
 2. **Never count orders in a trace with a hex grep.** `grep -oE "28 42"` matches SBA/RA address bytes and payload data, and misses orders split across a `+` continuation line. It gave 97 where the parser gives 101, and it hid the twelve `0x00` resets entirely. Use `node packages/cli/scripts/count-orders.mjs`, which is committed for exactly this reason.
 
@@ -34,19 +34,19 @@
 
 | File | Responsibility |
 |---|---|
-| `packages/core/src/palette.ts` | The sixteen 3279 colour identifications and their RGB values. Pure data plus a lookup. Core-side because the GUI needs the same RGB for canvas. |
+| `packages/core/src/palette.ts` | The sixteen 3279 color identifications and their RGB values. Pure data plus a lookup. Core-side because the GUI needs the same RGB for canvas. |
 | `packages/core/src/render.ts` | Resolve a `ScreenSnapshot` into `ResolvedCell[]`: SA/SFE override, base-attribute fallback, the `0x00` and `0xF7` rules, `mode3279`. Pure. |
 | `packages/core/test/palette.test.ts` | All sixteen entries pinned against `3270ds.h`. |
 | `packages/core/test/render.test.ts` | One test per resolution rule, plus the TK5 fixture replay. |
 | `packages/core/test/sa.test.ts` | SA running state: composite, per-write reset, Clear reset, SF reset, EW/EWA reset. |
 | `packages/tui/package.json` | Workspace manifest for the TUI package. |
 | `packages/tui/tsconfig.json` | Project reference to core, matching the CLI's. |
-| `packages/tui/src/colours.ts` | Depth detection (`tput`, `COLORTERM`, override) and quantisation of a palette entry to an ANSI SGR string. |
+| `packages/tui/src/colors.ts` | Depth detection (`tput`, `COLORTERM`, override) and quantisation of a palette entry to an ANSI SGR string. |
 | `packages/tui/src/render.ts` | `ResolvedCell[]` → ANSI, with dirty-cell diffing. Owns the screen-too-small check. |
 | `packages/tui/src/keymap.ts` | Terminal byte sequences → named core actions. No 3270 semantics. |
 | `packages/tui/src/app.ts` | Wires `Session` events to the renderer; owns the run loop and raw-mode teardown. |
 | `packages/tui/src/main.ts` | argv, TCP transport, entry point. |
-| `packages/tui/test/colours.test.ts` | Quantisation at each of the four depths; detection precedence. |
+| `packages/tui/test/colors.test.ts` | Quantisation at each of the four depths; detection precedence. |
 | `packages/tui/test/keymap.test.ts` | Sequence → action mapping, including the ambiguous-Escape case. |
 | `packages/tui/test/render.test.ts` | ANSI emission and dirty-cell diffing. |
 
@@ -60,7 +60,7 @@
 | *(`packages/core/src/stream/parse.ts` — **no change needed**, see below)* | — |
 | `packages/core/src/queryreply.ts` | Add Color (`0x86`) and Highlighting (`0x87`) capability entries. |
 | `packages/core/src/index.ts` | Export `palette.ts` and `render.ts`. |
-| `packages/cli/src/runner.ts` | `ScreenJson` gains resolved colours, so the CLI can see them without a TUI. |
+| `packages/cli/src/runner.ts` | `ScreenJson` gains resolved colors, so the CLI can see them without a TUI. |
 | `package.json` | Add `packages/tui` to typecheck. |
 | `docs/HANDOFF.md` | Update state at the end. |
 
@@ -136,7 +136,7 @@ describe('extended attribute types and values', () => {
   it('XA.RESET is a TYPE meaning reset-all, distinct from XAC_DEFAULT as a VALUE', () => {
     // Both are 0x00 and conflating them is a real bug: as a type it means "return
     // every character attribute to default" (pages.txt:2991); as a value under
-    // XA.FOREGROUND it means "device default colour". The TK5 fixture contains
+    // XA.FOREGROUND it means "device default color". The TK5 fixture contains
     // twelve of the former.
     expect(XA.RESET).toBe(XAC_DEFAULT);
     expect(XA.RESET).not.toBe(XA.FOREGROUND);
@@ -163,7 +163,7 @@ Append to `packages/core/src/constants.ts`:
  * `RESET` is 0x00 AS A TYPE and means "return every character attribute type to
  * its default" — the manual: "The attribute type X'00' is always supported by
  * the SA order" (pages.txt:2991). Do not confuse it with `XAC_DEFAULT`, which is
- * 0x00 as a VALUE under FOREGROUND/BACKGROUND and means "device default colour".
+ * 0x00 as a VALUE under FOREGROUND/BACKGROUND and means "device default color".
  * Both appear in the committed TK5 fixture (101 FOREGROUND, 12 RESET), so a
  * conflation is not hypothetical.
  *
@@ -188,7 +188,7 @@ export const XAH = {
   INTENSIFY: 0xf8,
 } as const;
 
-/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
+/** Color value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
 export const XAC_DEFAULT = 0x00;
 ```
 
@@ -213,7 +213,7 @@ git commit -m "Name the extended attribute types and highlighting values"
 - Create: `packages/core/test/palette.test.ts`
 - Modify: `packages/core/src/index.ts`
 
-Sixteen colour identifications and their RGB values. This lives in core, not the TUI, because the GUI needs the same RGB values for canvas fills and the web front end will need them for CSS.
+Sixteen color identifications and their RGB values. This lives in core, not the TUI, because the GUI needs the same RGB values for canvas fills and the web front end will need them for CSS.
 
 - [ ] **Step 1: Verify all sixteen against x3270, because the manual's table is OCR-damaged**
 
@@ -231,7 +231,7 @@ Create `packages/core/test/palette.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { COLOUR_NAMES, PALETTE_3279, colourRgb, Colour } from '../src/palette.js';
+import { COLOR_NAMES, PALETTE_3279, colorRgb, Color } from '../src/palette.js';
 
 describe('3279 palette', () => {
   it('maps all sixteen identifications contiguously from 0xF0', () => {
@@ -245,27 +245,27 @@ describe('3279 palette', () => {
   it('names them per 3270ds.h:313-328, with Black 0xF8 and Purple 0xFB', () => {
     // The manual's Table 4-7 OCRs BOTH of these as X'FB'. This test is the
     // guard against transcribing that damage.
-    expect(COLOUR_NAMES[0xf8]).toBe('black');
-    expect(COLOUR_NAMES[0xfb]).toBe('purple');
-    expect(COLOUR_NAMES[0xf0]).toBe('neutral-black');
-    expect(COLOUR_NAMES[0xf7]).toBe('neutral-white');
+    expect(COLOR_NAMES[0xf8]).toBe('black');
+    expect(COLOR_NAMES[0xfb]).toBe('purple');
+    expect(COLOR_NAMES[0xf0]).toBe('neutral-black');
+    expect(COLOR_NAMES[0xf7]).toBe('neutral-white');
   });
 
-  it('names the seven base 3279 colours at their architected codes', () => {
-    expect(COLOUR_NAMES[Colour.BLUE]).toBe('blue');
-    expect(COLOUR_NAMES[Colour.RED]).toBe('red');
-    expect(COLOUR_NAMES[Colour.PINK]).toBe('pink');
-    expect(COLOUR_NAMES[Colour.GREEN]).toBe('green');
-    expect(COLOUR_NAMES[Colour.TURQUOISE]).toBe('turquoise');
-    expect(COLOUR_NAMES[Colour.YELLOW]).toBe('yellow');
-    expect(COLOUR_NAMES[Colour.WHITE]).toBe('white');
-    expect(Colour.BLUE).toBe(0xf1);
-    expect(Colour.GREEN).toBe(0xf4);
+  it('names the seven base 3279 colors at their architected codes', () => {
+    expect(COLOR_NAMES[Color.BLUE]).toBe('blue');
+    expect(COLOR_NAMES[Color.RED]).toBe('red');
+    expect(COLOR_NAMES[Color.PINK]).toBe('pink');
+    expect(COLOR_NAMES[Color.GREEN]).toBe('green');
+    expect(COLOR_NAMES[Color.TURQUOISE]).toBe('turquoise');
+    expect(COLOR_NAMES[Color.YELLOW]).toBe('yellow');
+    expect(COLOR_NAMES[Color.WHITE]).toBe('white');
+    expect(Color.BLUE).toBe(0xf1);
+    expect(Color.GREEN).toBe(0xf4);
   });
 
   it('gives every entry an RGB triple', () => {
     for (const code of Object.keys(PALETTE_3279).map(Number)) {
-      const rgb = colourRgb(code);
+      const rgb = colorRgb(code);
       expect(rgb).toHaveLength(3);
       for (const c of rgb) {
         expect(c).toBeGreaterThanOrEqual(0);
@@ -277,7 +277,7 @@ describe('3279 palette', () => {
   it('throws on a code outside 0xF0-0xFF rather than guessing', () => {
     // A malformed attribute must be caught by the resolver, which substitutes a
     // default; it must never reach here and silently produce black.
-    expect(() => colourRgb(0x99)).toThrow(/not a 3279 colour/);
+    expect(() => colorRgb(0x99)).toThrow(/not a 3279 color/);
   });
 });
 ```
@@ -293,7 +293,7 @@ Create `packages/core/src/palette.ts`:
 
 ```ts
 /**
- * The 3279 colour palette: sixteen architected colour identifications and the
+ * The 3279 color palette: sixteen architected color identifications and the
  * RGB each one renders as.
  *
  * IN CORE, NOT IN A FRONT END, deliberately. The TUI quantises these to whatever
@@ -309,13 +309,13 @@ Create `packages/core/src/palette.ts`:
  * order. palette.test.ts pins both of the damaged entries.
  *
  * RGB values follow x3270's default 3279 rendering. They are a presentation
- * choice, not architecture: the manual specifies which colour each code IS, not
+ * choice, not architecture: the manual specifies which color each code IS, not
  * its exact chromaticity, and a real 3279's phosphors matched none of these
  * precisely.
  */
 
-/** The seven base 3279 colours, by architected code. Table 4-7. */
-export const Colour = {
+/** The seven base 3279 colors, by architected code. Table 4-7. */
+export const Color = {
   NEUTRAL_BLACK: 0xf0,
   BLUE: 0xf1,
   RED: 0xf2,
@@ -334,10 +334,10 @@ export const Colour = {
   WHITE: 0xff,
 } as const;
 
-/** A 3279 colour identification, 0xF0-0xFF. */
-export type Colour3279 = number;
+/** A 3279 color identification, 0xF0-0xFF. */
+export type Color3279 = number;
 
-export const COLOUR_NAMES: Readonly<Record<number, string>> = Object.freeze({
+export const COLOR_NAMES: Readonly<Record<number, string>> = Object.freeze({
   0xf0: 'neutral-black',
   0xf1: 'blue',
   0xf2: 'red',
@@ -377,11 +377,11 @@ export const PALETTE_3279: Readonly<Record<number, Rgb>> = Object.freeze({
   0xff: [0xff, 0xff, 0xff],
 });
 
-/** RGB for a colour identification. Throws rather than guessing. */
-export function colourRgb(code: Colour3279): Rgb {
+/** RGB for a color identification. Throws rather than guessing. */
+export function colorRgb(code: Color3279): Rgb {
   const rgb = PALETTE_3279[code];
   if (rgb === undefined) {
-    throw new RangeError(`0x${code.toString(16)} is not a 3279 colour (expected 0xF0-0xFF)`);
+    throw new RangeError(`0x${code.toString(16)} is not a 3279 color (expected 0xF0-0xFF)`);
   }
   return rgb;
 }
@@ -445,7 +445,7 @@ describe('extended attribute storage', () => {
 
   it('setExtended merges rather than replacing, so one type does not clear another', () => {
     // The manual's composite rule (pages.txt:2995-2997): the applied set is a
-    // composite BY ATTRIBUTE TYPE. Setting colour must not wipe highlighting.
+    // composite BY ATTRIBUTE TYPE. Setting color must not wipe highlighting.
     const s = new Screen();
     s.setExtended(5, { gr: 0xf1 });
     s.setExtended(5, { fg: 0xf2 });
@@ -477,7 +477,7 @@ describe('extended attribute storage', () => {
   it('setFieldAttribute clears the attribute cell own extended attributes', () => {
     // "If the display receives an SF order, it sets the associated extended
     // field attribute to its default value" (pages.txt:2874-2875). A field
-    // following a coloured one must not inherit colour it was never given.
+    // following a colored one must not inherit color it was never given.
     const s = new Screen();
     s.setExtended(10, { fg: 0xf2, gr: 0xf1 });
     s.setFieldAttribute(10, 0xc0);
@@ -511,7 +511,7 @@ describe('extended attribute storage', () => {
 
   it('omits absent attributes from the snapshot rather than defaulting them', () => {
     // Absence is protocol-meaningful: it means "fall through to the base field
-    // attribute", which is NOT the same as any concrete colour. Storing 0x00
+    // attribute", which is NOT the same as any concrete color. Storing 0x00
     // here would erase the distinction, because 0x00 as a VALUE means
     // "device default" and would resolve identically -- but only by accident.
     const s = new Screen();
@@ -546,7 +546,7 @@ In `packages/core/src/screen.ts`, replace the `Cell` declaration (line 21) and i
  *
  * The three extended attributes are OPTIONAL and their absence is meaningful:
  * it means "this cell specifies nothing, fall through to the base field
- * attribute". That is not the same as any concrete colour, so do not default
+ * attribute". That is not the same as any concrete color, so do not default
  * them to 0x00 — `render.ts` needs the distinction. This mirrors x3270's
  * `struct ea` (include/globals.h:364-374), which likewise carries the character
  * and its attributes together.
@@ -554,9 +554,9 @@ In `packages/core/src/screen.ts`, replace the `Cell` declaration (line 21) and i
 export type Cell = {
   kind: 'char';
   ebcdic: number;
-  /** Foreground colour identification, 0xF0-0xFF. Absent means unspecified. */
+  /** Foreground color identification, 0xF0-0xFF. Absent means unspecified. */
   fg?: number;
-  /** Background colour identification, 0xF0-0xFF. Absent means unspecified. */
+  /** Background color identification, 0xF0-0xFF. Absent means unspecified. */
   bg?: number;
   /** Highlighting value (`XAH.*`). Absent means unspecified. */
   gr?: number;
@@ -579,7 +579,7 @@ In the `Screen` class, after the `attrs` declaration (line 80), add:
    * Extended attributes, one array each, parallel to `chars`.
    *
    * 0 means "unspecified" and is distinguishable from every real value because
-   * every architected colour is 0xF0-0xFF and every highlighting value is 0x00
+   * every architected color is 0xF0-0xFF and every highlighting value is 0x00
    * (default) or 0xF0-0xF8 — so 0 is never a value a host can set. Storing
    * `XAH.DEFAULT` (0x00) explicitly is therefore impossible here, which is
    * correct: "default" and "unspecified" resolve identically, and SA type 0x00
@@ -618,7 +618,7 @@ Replace `cellAt` (line 139-142) with:
    * MERGE, NOT REPLACE, because the manual's composite rule requires it: "The
    * set of type-value pairs applied during character processing is a composite,
    * by attribute type, of the last value specified in previously encountered SA
-   * orders" (p. 4-7, pages.txt:2995-2997). An SA setting colour must leave a
+   * orders" (p. 4-7, pages.txt:2995-2997). An SA setting color must leave a
    * previously set highlighting alone. Pass `clearExtended` to reset.
    */
   setExtended(addr: number, ext: ExtendedAttributes): void {
@@ -654,8 +654,8 @@ In `setFieldAttribute` (line 172), add after `this.chars[addr] = 0x00;`:
     // "If the display receives an SF order, it sets the associated extended
     // field attribute to its default value" (p. 4-4, pages.txt:2874-2875). SFE
     // overrides this by calling setExtended AFTER this returns; a plain SF must
-    // leave the position clean, or a field following a coloured one inherits
-    // colour the host never gave it.
+    // leave the position clean, or a field following a colored one inherits
+    // color the host never gave it.
     this.clearExtended(addr);
 ```
 
@@ -731,7 +731,7 @@ import { describe, expect, it } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute } from '../src/stream/execute.js';
-import { Command, Order, XA, XAH, Colour } from '../src/constants.js';
+import { Command, Order, XA, XAH, Color } from '../src/constants.js';
 
 /** Build and run a write record, returning the screen it produced. */
 function run(bytes: number[], screen = new Screen()): Screen {
@@ -750,67 +750,67 @@ describe('SA sets character attributes on subsequent characters', () => {
     const s = run([
       ...W, ...SBA0,
       0xc1,                                    // 'A' before any SA
-      0x28, XA.FOREGROUND, Colour.RED,         // SA fg=red
+      0x28, XA.FOREGROUND, Color.RED,         // SA fg=red
       0xc2,                                    // 'B' after
     ]);
     expect(s.cellAt(0).fg).toBeUndefined();
-    expect(s.cellAt(1).fg).toBe(Colour.RED);
+    expect(s.cellAt(1).fg).toBe(Color.RED);
   });
 
   it('persists across many characters until changed', () => {
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2, 0xc3,
-      0x28, XA.FOREGROUND, Colour.BLUE,
+      0x28, XA.FOREGROUND, Color.BLUE,
       0xc4,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
-    expect(s.cellAt(1).fg).toBe(Colour.RED);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
-    expect(s.cellAt(3).fg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
+    expect(s.cellAt(1).fg).toBe(Color.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
+    expect(s.cellAt(3).fg).toBe(Color.BLUE);
   });
 
-  it('is a COMPOSITE by type: setting colour leaves highlighting alone', () => {
-    // pages.txt:2995-2997. Modelling SA state as a single value instead of a
+  it('is a COMPOSITE by type: setting color leaves highlighting alone', () => {
+    // pages.txt:2995-2997. Modeling SA state as a single value instead of a
     // per-type map silently drops attributes, and this is the test that catches it.
     const s = run([
       ...W, ...SBA0,
       0x28, XA.HIGHLIGHTING, XAH.REVERSE,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,
     ]);
     expect(s.cellAt(0).gr).toBe(XAH.REVERSE);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
   });
 
   it('handles background as well as foreground', () => {
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.BACKGROUND, Colour.BLUE,
+      0x28, XA.BACKGROUND, Color.BLUE,
       0xc1,
     ]);
-    expect(s.cellAt(0).bg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).bg).toBe(Color.BLUE);
   });
 
   it('SA type 0x00 resets ALL character attributes to default', () => {
     // The twelve occurrences in the TK5 fixture are this case.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0x28, XA.HIGHLIGHTING, XAH.BLINK,
       0xc1,
       0x28, XA.RESET, 0x00,
       0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     expect(s.cellAt(0).gr).toBe(XAH.BLINK);
     expect(s.cellAt(1).fg).toBeUndefined();
     expect(s.cellAt(1).gr).toBeUndefined();
   });
 
-  it('a colour VALUE of 0x00 is stored, unlike a reset TYPE of 0x00', () => {
-    // XAC_DEFAULT means "device default colour" and is a legitimate value the
+  it('a color VALUE of 0x00 is stored, unlike a reset TYPE of 0x00', () => {
+    // XAC_DEFAULT means "device default color" and is a legitimate value the
     // host can set; SA type 0x00 means "reset everything". Both are 0x00 and
     // they are NOT the same operation.
     const s = run([
@@ -826,9 +826,9 @@ describe('SA sets character attributes on subsequent characters', () => {
     // "Another write type command is sent" (pages.txt:2977). x3270 zeroes
     // default_fg/bg/gr at the top of write processing, ctlr.c:1414-1416.
     const s = new Screen();
-    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc1], s);
+    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc1], s);
     run([...W, 0x11, 0x40, 0x41, 0xc2], s);   // second Write, SBA to 1
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     expect(s.cellAt(1).fg).toBeUndefined();
   });
 
@@ -837,11 +837,11 @@ describe('SA sets character attributes on subsequent characters', () => {
     // must carry the running attributes like any other.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.PINK,
+      0x28, XA.FOREGROUND, Color.PINK,
       0x3c, 0x40, 0x43, 0xc1,     // RA to address 3, fill 'A'
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.PINK);
-    expect(s.cellAt(2).fg).toBe(Colour.PINK);
+    expect(s.cellAt(0).fg).toBe(Color.PINK);
+    expect(s.cellAt(2).fg).toBe(Color.PINK);
   });
 
   it('still counts genuinely unimplemented SA types as ignored', () => {
@@ -855,46 +855,46 @@ describe('SA sets character attributes on subsequent characters', () => {
 
   it('does NOT count the SA types it now implements', () => {
     const r = execute(new Screen(), parseRecord(Uint8Array.from([
-      ...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc1,
+      ...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc1,
     ])));
     expect(r.setAttributeIgnored).toBe(0);
   });
 });
 
 describe('SFE seeds field-level extended attributes', () => {
-  it('applies a colour pair to the characters in the field', () => {
+  it('applies a color pair to the characters in the field', () => {
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,  // SFE: basic + fg
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,  // SFE: basic + fg
       0xc1, 0xc2,
     ]);
-    expect(s.cellAt(1).fg).toBe(Colour.YELLOW);
-    expect(s.cellAt(2).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(1).fg).toBe(Color.YELLOW);
+    expect(s.cellAt(2).fg).toBe(Color.YELLOW);
   });
 
-  it('a plain SF after a coloured SFE does not inherit its colour', () => {
+  it('a plain SF after a colored SFE does not inherit its color', () => {
     // pages.txt:2874-2875, and Task 3's setFieldAttribute change.
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
       0x1d, 0xc0,        // plain SF
       0xc2,
     ]);
-    expect(s.cellAt(1).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(1).fg).toBe(Color.YELLOW);
     expect(s.cellAt(3).fg).toBeUndefined();
   });
 
-  it('a character-level SA overrides the field-level SFE colour', () => {
+  it('a character-level SA overrides the field-level SFE color', () => {
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc2,
     ]);
-    expect(s.cellAt(1).fg).toBe(Colour.YELLOW);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
+    expect(s.cellAt(1).fg).toBe(Color.YELLOW);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
   });
 });
 ```
@@ -902,7 +902,7 @@ describe('SFE seeds field-level extended attributes', () => {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run packages/core/test/sa.test.ts`
-Expected: FAIL. Most assertions get `undefined` where a colour is expected.
+Expected: FAIL. Most assertions get `undefined` where a color is expected.
 
 - [ ] **Step 3: Add the SA state type**
 
@@ -916,7 +916,7 @@ In `packages/core/src/stream/execute.ts`, after the imports, add:
  * "The set of type-value pairs applied during character processing is a
  * composite, by attribute type, of the last value specified in previously
  * encountered SA orders" (p. 4-7, pages.txt:2995-2997). One value would make an
- * SA colour silently clear a preceding SA highlighting.
+ * SA color silently clear a preceding SA highlighting.
  *
  * Lives for one write command and is discarded: "Another write type command is
  * sent" returns the set to defaults (pages.txt:2977), which x3270 does by zeroing
@@ -961,7 +961,7 @@ In `applyToken`'s `'data'` case, replace the loop body:
 
 Do the same inside the `'ra'` case's fill loop and the `'ge'` case, wherever `setChar` is called on a position the host is filling with data.
 
-**`'eua'` and `'pt'` must CLEAR rather than stamp — also corrected after implementation.** An earlier version of this plan said "do not apply it in `'eua'`, which nulls rather than writes." Half right: EUA must not *stamp* the running state, but it must *clear* what is there, because Task 3 made `setChar` leave extended attributes alone and so nulling a cell would otherwise leave its colour behind. The manual says so directly: "Field attributes and extended field attributes are not affected by EUA. **Character attributes for every character changed to nulls are reset to their defaults**" (`pages.txt:3165-3166`). PT is the same case (`pages.txt:3090-3091`; x3270 `ctlr.c:1555-1560`), gated on `wroteSinceOrder` since a PT following an order leaves the buffer unmodified.
+**`'eua'` and `'pt'` must CLEAR rather than stamp — also corrected after implementation.** An earlier version of this plan said "do not apply it in `'eua'`, which nulls rather than writes." Half right: EUA must not *stamp* the running state, but it must *clear* what is there, because Task 3 made `setChar` leave extended attributes alone and so nulling a cell would otherwise leave its color behind. The manual says so directly: "Field attributes and extended field attributes are not affected by EUA. **Character attributes for every character changed to nulls are reset to their defaults**" (`pages.txt:3165-3166`). PT is the same case (`pages.txt:3090-3091`; x3270 `ctlr.c:1555-1560`), gated on `wroteSinceOrder` since a PT following an order leaves the buffer unmodified.
 
 Add the helper beside `applyToken`:
 
@@ -990,7 +990,7 @@ function applySa(screen: Screen, addr: number, sa: SaState): void {
 >
 > That is silently incorrect, because Task 3's `setExtended` **merges** (rightly — the
 > composite rule needs it). So a cell overwritten by a later record with no SA in effect
-> **keeps the previous record's colour**. Stale colour on rewritten cells, no error.
+> **keeps the previous record's color**. Stale color on rewritten cells, no error.
 >
 > The manual is explicit and was sitting there the whole time: "Character attributes are
 > associated with a character and not with the character's position in the buffer. Thus,
@@ -1091,7 +1091,7 @@ Add `XA` to the `constants.js` import at the top of the file.
 > x3270 draws exactly this distinction: its SFE arm for `XA_ALL` traces and advances past
 > without touching any `efa_*` (`ctlr.c:1869-1871`), while its SA arm zeroes all five
 > defaults (`ctlr.c:1915-1921`). As the plan originally had it, a trailing `X'00'` pair
-> would have **silently discarded a colour the host set in the same order**.
+> would have **silently discarded a color the host set in the same order**.
 
 **ALSO store the pairs on the field-attribute cell**, which is the storage half of the
 eighth rule (see the amendment at the top of Task 5). Order matters:
@@ -1123,7 +1123,7 @@ Expected: PASS on all 14, typecheck clean.
 - [ ] **Step 10: Run the whole suite**
 
 Run: `npm test`
-Expected: all passing. The executor's existing tests assert `setAttributeIgnored` counts; **if one now fails because it used a colour SA type, that test's expectation is what changed, not the behaviour** — update it and say so in the commit.
+Expected: all passing. The executor's existing tests assert `setAttributeIgnored` counts; **if one now fails because it used a color SA type, that test's expectation is what changed, not the behavior** — update it and say so in the commit.
 
 - [ ] **Step 11: Verify against the real fixture, which is the point of all this**
 
@@ -1145,19 +1145,19 @@ Write a scratch check with `import`, replay the fixture through a `Screen`, and 
 
 ```bash
 git add packages/core/src/stream/execute.ts packages/core/test/sa.test.ts
-git commit -m "Implement SA and SFE colour as running character-attribute state"
+git commit -m "Implement SA and SFE color as running character-attribute state"
 ```
 
 ---
 
-## Task 5: `render.ts` — resolve attributes into concrete colours
+## Task 5: `render.ts` — resolve attributes into concrete colors
 
 **Files:**
 - Create: `packages/core/src/render.ts`
 - Create: `packages/core/test/render.test.ts`
 - Modify: `packages/core/src/index.ts`
 
-Storage answers "what did the host say". This answers "what colour is this cell", and it must live in **one** place: two of its five rules are datastream semantics with citations, and reimplemented per front end they would diverge three ways.
+Storage answers "what did the host say". This answers "what color is this cell", and it must live in **one** place: two of its five rules are datastream semantics with citations, and reimplemented per front end they would diverge three ways.
 
 > **⚠️ AMENDED 2026-08-20: THIS TASK HAS A SIXTH RULE, AND THE DRAFT BELOW CANNOT
 > EXPRESS IT.** Review of Task 4 found that the manual requires a **two-level** lookup:
@@ -1168,7 +1168,7 @@ Storage answers "what did the host say". This answers "what colour is this cell"
 > > field in the extended field attribute.** Otherwise, the character attribute overrides
 > > the field attribute. (`pages.txt:3383-3387`)
 >
-> So an SFE's colour belongs to the FIELD, and a character with no attribute of its own
+> So an SFE's color belongs to the FIELD, and a character with no attribute of its own
 > falls back to it — *before* reaching the base-attribute map. Task 4 now stores field
 > extended attributes on the **field-attribute cell**, the way x3270 does
 > (`ctlr.c:1886-1889`), and x3270 resolves it per cell as
@@ -1179,15 +1179,15 @@ Storage answers "what did the host say". This answers "what colour is this cell"
 >
 > 1. the cell's own extended attribute (`cell.fg`), if usable
 > 2. **the field's extended attribute — read from the cell at `field.attrAddr`** ← NEW
-> 3. the base-attribute map (`defaultColour`)
+> 3. the base-attribute map (`defaultColor`)
 > 4. `mode3279 === false` → green, overriding everything
 >
 > The drafted `resolve()` below reads `cell.fg` and falls straight through to
-> `defaultColour(attr)`, with no term for level 2 — so **add it**, and add tests: a
-> character in an SFE-coloured field with no attribute of its own takes the field's
-> colour; and a character whose colour was cleared by an overwrite falls back to the
+> `defaultColor(attr)`, with no term for level 2 — so **add it**, and add tests: a
+> character in an SFE-colored field with no attribute of its own takes the field's
+> color; and a character whose color was cleared by an overwrite falls back to the
 > field's rather than to green. Everything else in this task is unchanged, and
-> `ResolvedCell`'s shape is unaffected — this changes how a colour is derived, not what a
+> `ResolvedCell`'s shape is unaffected — this changes how a color is derived, not what a
 > renderer consumes.
 >
 > Full write-up in the spec under *THE EIGHTH RULE*.
@@ -1199,9 +1199,9 @@ Storage answers "what did the host say". This answers "what colour is this cell"
 >    x3270 mirrors its fg two-step for bg (`c3270/screen.c:1153-1158`) and gr
 >    (`:1166-1171`). A foreground-only fallback leaves an SFE's reverse-video field flat.
 > 2. **`mode3279 === false` must gate BACKGROUND as well as foreground** — x3270 puts its
->    whole colour block behind `if (mode3279 || ...)` (`c3270/screen.c:1126`) — but must
+>    whole color block behind `if (mode3279 || ...)` (`c3270/screen.c:1126`) — but must
 >    **NOT** gate highlighting: a 3278 blinks and reverses perfectly well, and x3270
->    computes `gr` after its colour branch closes.
+>    computes `gr` after its color branch closes.
 > 3. **`0xF7` must NOT be remapped to white.** See the corrected rule 5 in the spec; the
 >    draft below has this fixed.
 
@@ -1219,7 +1219,7 @@ Create `packages/core/test/render.test.ts`:
 import { describe, expect, it } from 'vitest';
 import { Screen } from '../src/screen.js';
 import { resolve } from '../src/render.js';
-import { Colour } from '../src/palette.js';
+import { Color } from '../src/palette.js';
 import { XAH, FA } from '../src/constants.js';
 
 /** A screen with one field of the given attribute, and a character at addr 1. */
@@ -1233,46 +1233,46 @@ function fielded(attr: number): Screen {
 describe('resolve: base field attribute fallback (rule 2)', () => {
   it('unprotected normal is green', () => {
     const r = resolve(fielded(FA.PRINTABLE).snapshot());
-    expect(r[1]!.fg).toBe(Colour.GREEN);
+    expect(r[1]!.fg).toBe(Color.GREEN);
   });
 
   it('unprotected intensified is red', () => {
     const r = resolve(fielded(FA.PRINTABLE | FA.INT_HIGH_SEL).snapshot());
-    expect(r[1]!.fg).toBe(Colour.RED);
+    expect(r[1]!.fg).toBe(Color.RED);
   });
 
   it('protected normal is blue', () => {
     const r = resolve(fielded(FA.PRINTABLE | FA.PROTECT).snapshot());
-    expect(r[1]!.fg).toBe(Colour.BLUE);
+    expect(r[1]!.fg).toBe(Color.BLUE);
   });
 
   it('protected intensified is white', () => {
     const r = resolve(fielded(FA.PRINTABLE | FA.PROTECT | FA.INT_HIGH_SEL).snapshot());
-    expect(r[1]!.fg).toBe(Colour.WHITE);
+    expect(r[1]!.fg).toBe(Color.WHITE);
   });
 
   it('an unformatted screen is green', () => {
     const s = new Screen();
     s.setChar(0, 0xc1);
-    expect(resolve(s.snapshot())[0]!.fg).toBe(Colour.GREEN);
+    expect(resolve(s.snapshot())[0]!.fg).toBe(Color.GREEN);
   });
 });
 
-describe('resolve: explicit colour wins (rule 1)', () => {
+describe('resolve: explicit color wins (rule 1)', () => {
   it('an SA foreground overrides the base mapping', () => {
     const s = fielded(FA.PRINTABLE);          // would be green
-    s.setExtended(1, { fg: Colour.PINK });
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.PINK);
+    s.setExtended(1, { fg: Color.PINK });
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Color.PINK);
   });
 
   it('an explicit background is used', () => {
     const s = fielded(FA.PRINTABLE);
-    s.setExtended(1, { bg: Colour.BLUE });
-    expect(resolve(s.snapshot())[1]!.bg).toBe(Colour.BLUE);
+    s.setExtended(1, { bg: Color.BLUE });
+    expect(resolve(s.snapshot())[1]!.bg).toBe(Color.BLUE);
   });
 
   it('the default background is neutral black', () => {
-    expect(resolve(fielded(FA.PRINTABLE).snapshot())[1]!.bg).toBe(Colour.NEUTRAL_BLACK);
+    expect(resolve(fielded(FA.PRINTABLE).snapshot())[1]!.bg).toBe(Color.NEUTRAL_BLACK);
   });
 });
 
@@ -1281,54 +1281,54 @@ describe('resolve: mode3279 false makes everything green (rule 3)', () => {
     // x3270 fprint_screen.c:91-94 returns HOST_COLOR_GREEN unconditionally when
     // not in 3279 mode. A 3278 is monochrome hardware.
     const r = resolve(fielded(FA.PRINTABLE | FA.PROTECT).snapshot(), { mode3279: false });
-    expect(r[1]!.fg).toBe(Colour.GREEN);
+    expect(r[1]!.fg).toBe(Color.GREEN);
   });
 
-  it('ignores an explicit SA colour too', () => {
+  it('ignores an explicit SA color too', () => {
     const s = fielded(FA.PRINTABLE);
-    s.setExtended(1, { fg: Colour.PINK });
-    expect(resolve(s.snapshot(), { mode3279: false })[1]!.fg).toBe(Colour.GREEN);
+    s.setExtended(1, { fg: Color.PINK });
+    expect(resolve(s.snapshot(), { mode3279: false })[1]!.fg).toBe(Color.GREEN);
   });
 
-  it('still honours highlighting, which is not colour', () => {
+  it('still honors highlighting, which is not color', () => {
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { gr: XAH.REVERSE });
     const r = resolve(s.snapshot(), { mode3279: false });
     expect(r[1]!.reverse).toBe(true);
-    expect(r[1]!.fg).toBe(Colour.GREEN);
+    expect(r[1]!.fg).toBe(Color.GREEN);
   });
 });
 
 describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
-  it('a colour value of 0x00 means device default, NOT black', () => {
+  it('a color value of 0x00 means device default, NOT black', () => {
     // "The X'00' value selects the device default color indicated in the Query
     // Reply (Color) structured field" (pages.txt:3544-3546). So it falls through
     // to the base mapping -- here a protected field, so blue.
     const s = fielded(FA.PRINTABLE | FA.PROTECT);
     s.setExtended(1, { fg: 0x00 });
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.BLUE);
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Color.BLUE);
   });
 
-  it('0xF7 stays 0xF7 -- it is Neutral, a distinct colour, NOT white', () => {
+  it('0xF7 stays 0xF7 -- it is Neutral, a distinct color, NOT white', () => {
     // CORRECTED 2026-08-20. The manual routes X'F7' through Query Reply (Color)
     // (pages.txt:3544-3550), and OUR reply gives F7 an identity pair, so F7
     // resolves to F7. It is listed separately from White 0xFF in Table 4-7, has
     // its own RGB in palette.ts, and x3270 keeps HOST_COLOR_NEUTRAL_WHITE (7)
     // distinct from HOST_COLOR_WHITE (15), special-casing F7 nowhere. Remapping
-    // would collapse two colours a host deliberately chose between.
+    // would collapse two colors a host deliberately chose between.
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { fg: 0xf7 });
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.NEUTRAL_WHITE);
-    expect(resolve(s.snapshot())[1]!.fg).not.toBe(Colour.WHITE);
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Color.NEUTRAL_WHITE);
+    expect(resolve(s.snapshot())[1]!.fg).not.toBe(Color.WHITE);
   });
 
-  it('a malformed colour falls through to the default rather than throwing', () => {
-    // A bad byte from a host must not take the client down. colourRgb() throws
+  it('a malformed color falls through to the default rather than throwing', () => {
+    // A bad byte from a host must not take the client down. colorRgb() throws
     // on an unknown code, so resolve must never hand it one.
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { fg: 0x99 });
     expect(() => resolve(s.snapshot())).not.toThrow();
-    expect(resolve(s.snapshot())[1]!.fg).toBe(Colour.GREEN);
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Color.GREEN);
   });
 });
 
@@ -1393,17 +1393,17 @@ Create `packages/core/src/render.ts`:
 
 ```ts
 /**
- * Resolve protocol attributes into concrete colours for a renderer.
+ * Resolve protocol attributes into concrete colors for a renderer.
  *
  * ## WHY THIS IS IN CORE AND NOT IN EACH FRONT END
  *
- * Storage says what the host sent. This says what colour a cell IS, and two of
+ * Storage says what the host sent. This says what color a cell IS, and two of
  * its rules are datastream semantics rather than rendering taste:
  *
- *   - A colour VALUE of 0x00 means "the device default indicated in Query Reply
+ *   - A color VALUE of 0x00 means "the device default indicated in Query Reply
  *     (Color)" (GA23-0059 p. 4-19, pages.txt:3544-3546) -- NOT black.
- *   - 0xF7 means "the colour comes from a triple-plane character set", and with a
- *     single-plane or nonloadable set it takes the single colour Query Reply
+ *   - 0xF7 means "the color comes from a triple-plane character set", and with a
+ *     single-plane or nonloadable set it takes the single color Query Reply
  *     (Color) gives for F7, i.e. white on a display (pages.txt:3548-3554).
  *
  * Reimplemented in the TUI, the GUI and a web front end, those would diverge
@@ -1418,15 +1418,15 @@ import { FA, XAH } from './constants.js';
 // CodePage is a CLASS, not an interface, so it is a plain import. Its
 // byte-to-string method is `toUnicode(byte)` -- verified, see step 5.
 import { cp037, CodePage } from './codepage.js';
-import { Colour, PALETTE_3279, type Colour3279 } from './palette.js';
+import { Color, PALETTE_3279, type Color3279 } from './palette.js';
 import type { ScreenSnapshot } from './screen.js';
 
 export interface ResolvedCell {
   /** What to draw. A space for nulls and for field-attribute positions. */
   text: string;
-  /** Concrete 3279 colour identification. Never undefined, never invalid. */
-  fg: Colour3279;
-  bg: Colour3279;
+  /** Concrete 3279 color identification. Never undefined, never invalid. */
+  fg: Color3279;
+  bg: Color3279;
   blink: boolean;
   reverse: boolean;
   underscore: boolean;
@@ -1438,46 +1438,46 @@ export interface ResolvedCell {
 
 export interface ResolveOptions {
   /**
-   * Is this a colour device? Defaults to true.
+   * Is this a color device? Defaults to true.
    *
    * When false EVERY cell is green regardless of what the host sent, which is
-   * x3270's behaviour (`color_from_fa` returns HOST_COLOR_GREEN unconditionally,
+   * x3270's behavior (`color_from_fa` returns HOST_COLOR_GREEN unconditionally,
    * fprint_screen.c:91-94). A 3278 is monochrome hardware and must not be
-   * colourised just because a host sent an attribute it should not have.
+   * colorised just because a host sent an attribute it should not have.
    */
   mode3279?: boolean;
   codePage?: CodePage;
 }
 
 /**
- * The 3279 default colour map: which colour a cell takes from its base field
+ * The 3279 default color map: which color a cell takes from its base field
  * attribute when nothing more specific applies.
  *
  * x3270's `field_colors[4]` with its `DEFCOLOR_MAP` index
  * (fprint_screen.c:80-88): bit 1 is PROTECT, bit 0 is INT_HIGH_SEL.
  */
-const DEFAULT_COLOURS: readonly Colour3279[] = [
-  Colour.GREEN, // unprotected, normal
-  Colour.RED,   // unprotected, intensified
-  Colour.BLUE,  // protected, normal
-  Colour.WHITE, // protected, intensified
+const DEFAULT_COLORS: readonly Color3279[] = [
+  Color.GREEN, // unprotected, normal
+  Color.RED,   // unprotected, intensified
+  Color.BLUE,  // protected, normal
+  Color.WHITE, // protected, intensified
 ];
 
-function defaultColour(attr: number, mode3279: boolean): Colour3279 {
-  if (!mode3279) return Colour.GREEN;
+function defaultColor(attr: number, mode3279: boolean): Color3279 {
+  if (!mode3279) return Color.GREEN;
   const index = ((attr & FA.PROTECT) !== 0 ? 2 : 0) | ((attr & FA.INT_HIGH_SEL) !== 0 ? 1 : 0);
-  return DEFAULT_COLOURS[index]!;
+  return DEFAULT_COLORS[index]!;
 }
 
 /**
- * Is `code` a colour we can actually render?
+ * Is `code` a color we can actually render?
  *
  * 0x00 is excluded deliberately: it is legal on the wire and means "device
  * default", so it must fall through to the default map rather than being treated
- * as a value. An unrecognised byte falls through the same way -- a malformed
- * attribute from a host must never reach `colourRgb`, which throws.
+ * as a value. An unrecognized byte falls through the same way -- a malformed
+ * attribute from a host must never reach `colorRgb`, which throws.
  */
-function usableColour(code: number | undefined): boolean {
+function usableColor(code: number | undefined): boolean {
   if (code === undefined || code === 0x00) return false;
   return PALETTE_3279[code] !== undefined;
 }
@@ -1509,12 +1509,12 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     const gr = cell.gr ?? XAH.DEFAULT;
     out[i] = {
       text: isAttrPosition || cell.ebcdic === 0x00 ? ' ' : codePage.toUnicode(cell.ebcdic),
-      fg: mode3279 && usableColour(cell.fg)
+      fg: mode3279 && usableColor(cell.fg)
         ? cell.fg!   // NO 0xF7 remap -- see the correction note
-        : defaultColour(attr, mode3279),
-      bg: mode3279 && usableColour(cell.bg)
+        : defaultColor(attr, mode3279),
+      bg: mode3279 && usableColor(cell.bg)
         ? cell.bg!   // NO 0xF7 remap -- see the correction note
-        : Colour.NEUTRAL_BLACK,
+        : Color.NEUTRAL_BLACK,
       blink: gr === XAH.BLINK,
       reverse: gr === XAH.REVERSE,
       underscore: gr === XAH.UNDERSCORE,
@@ -1557,7 +1557,7 @@ Expected: PASS on all 22, typecheck clean.
 
 ```bash
 git add packages/core/src/render.ts packages/core/src/index.ts packages/core/test/render.test.ts
-git commit -m "Resolve extended attributes into concrete 3279 colours"
+git commit -m "Resolve extended attributes into concrete 3279 colors"
 ```
 
 ---
@@ -1579,11 +1579,11 @@ git commit -m "Resolve extended attributes into concrete 3279 colours"
 > - **`packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` does not.** It is raw CLI output: every
 >   line is prefixed `data: `, so **zero** lines match the regex. Replaying it yields an
 >   empty, unformatted screen — 0 fields, 0 attributes, 1920 green cells. A test asserting
->   "more than one colour" against it would have failed for the right reason; a test
+>   "more than one color" against it would have failed for the right reason; a test
 >   asserting anything weaker would have passed while proving nothing.
 > - **Stripping the six-character `data: ` prefix makes it work**, verified: 28 fields,
->   **532 cells carrying real character-level colour**, resolving to five distinct colours —
->   white 793, blue 618, red 329, neutral-white 144, yellow 36 — on a recognisable TK5
+>   **532 cells carrying real character-level color**, resolving to five distinct colors —
+>   white 793, blue 618, red 329, neutral-white 144, yellow 36 — on a recognizable TK5
 >   panel (`Terminal CUU0C0 … Date 18.08.26`). Two of those, **neutral-white and yellow, the
 >   base-attribute map cannot produce**, which is exactly the evidence this task exists to
 >   get.
@@ -1598,7 +1598,7 @@ git commit -m "Resolve extended attributes into concrete 3279 colours"
 > all.** That is precisely why that whole class of defect went unnoticed. Say so in the
 > commit message rather than letting a green Task 6 read as covering both levels. Real
 > coverage needs a capture from a host that sends SFE; none is committed.
-> [[check-what-a-comparison-covers]]: a passing comparison proves nothing about behaviour its
+> [[check-what-a-comparison-covers]]: a passing comparison proves nothing about behavior its
 > inputs never exercise.
 
 - [x] **Step 1: Convert the fixture to canonical form**
@@ -1627,13 +1627,13 @@ describe('the live TK5 ISPF fixture', () => {
     // zero lines matching parseTrace's regex), which produced an empty screen:
     // 0 fields, 1920 uniformly green cells. Assert the screen is FORMATTED first,
     // so a regression in the conversion fails here and loudly rather than
-    // surfacing as a subtly wrong colour count below.
+    // surfacing as a subtly wrong color count below.
     const s = replayFixture('mvs-tk5-tso-ispf.trace');
     expect(s.screen.isFormatted()).toBe(true);
     expect(s.screen.fields().length).toBeGreaterThan(20);
   });
 
-  it('carries real character-level colour, not just base-attribute colour', () => {
+  it('carries real character-level color, not just base-attribute color', () => {
     // 532 of 1920 cells have their own fg. This is the assertion that would have
     // caught the original gap: before this work every SA order was discarded and
     // this count was 0.
@@ -1645,22 +1645,22 @@ describe('the live TK5 ISPF fixture', () => {
     expect(withFg).toBeGreaterThan(400);
   });
 
-  it('uses colours the base-attribute map alone could not produce', () => {
+  it('uses colors the base-attribute map alone could not produce', () => {
     // The default map yields ONLY green, red, blue and white. TK5's panel also
     // shows neutral-white and yellow, which can only have come from SA orders --
-    // so this distinguishes "colour resolved" from "colour received", which a
-    // test asserting merely "more than one colour" would not.
+    // so this distinguishes "color resolved" from "color received", which a
+    // test asserting merely "more than one color" would not.
     const s = replayFixture('mvs-tk5-tso-ispf.trace');
-    const fromDefaults = new Set([Colour.GREEN, Colour.RED, Colour.BLUE, Colour.WHITE]);
+    const fromDefaults = new Set([Color.GREEN, Color.RED, Color.BLUE, Color.WHITE]);
     const seen = new Set(resolve(s.screen.snapshot()).map((c) => c.fg));
-    expect(seen.has(Colour.NEUTRAL_WHITE)).toBe(true);
-    expect(seen.has(Colour.YELLOW)).toBe(true);
-    const beyond = [...seen].filter((c) => !fromDefaults.has(c) && c !== Colour.NEUTRAL_BLACK);
+    expect(seen.has(Color.NEUTRAL_WHITE)).toBe(true);
+    expect(seen.has(Color.YELLOW)).toBe(true);
+    const beyond = [...seen].filter((c) => !fromDefaults.has(c) && c !== Color.NEUTRAL_BLACK);
     expect(beyond.length).toBeGreaterThan(0);
   });
 
   it('pins the SA order counts, so a parser regression fails loudly', () => {
-    // Without this, a change that stopped recognising SA would show up only as a
+    // Without this, a change that stopped recognizing SA would show up only as a
     // quietly monochrome screen -- exactly the failure mode this task exists to
     // end. Counts come from the parser, never a hex grep; see
     // packages/cli/scripts/count-orders.mjs and its header comment.
@@ -1696,7 +1696,7 @@ Expected: PASS. **If the counts come out other than 113/101/12, believe the scri
 
 ```bash
 git add packages/core/test/render.test.ts packages/core/test/helpers/trace.ts
-git commit -m "Pin TK5's colour against the fixture that was proving nothing before"
+git commit -m "Pin TK5's color against the fixture that was proving nothing before"
 ```
 
 ---
@@ -1710,7 +1710,7 @@ git commit -m "Pin TK5's colour against the fixture that was proving nothing bef
 
 A well-behaved host sends extended attributes only to a client that says it has them. Two new capability entries — the list exists so this is one entry each, not a refactor.
 
-**Note the asymmetry, and do not "fix" it:** TK5 already sends us SA colour *without* our advertising anything, which the fixture proves. So these units are for correctness with better-behaved hosts, not a prerequisite for the colour in Task 6. Nothing in this task should change the fixture's behaviour.
+**Note the asymmetry, and do not "fix" it:** TK5 already sends us SA color *without* our advertising anything, which the fixture proves. So these units are for correctness with better-behaved hosts, not a prerequisite for the color in Task 6. Nothing in this task should change the fixture's behavior.
 
 - [ ] **Step 1: Read x3270's two unit bodies, which are the reference**
 
@@ -1735,12 +1735,12 @@ Append to `packages/core/test/queryreply.test.ts`:
 
 ```ts
 describe('Color (QCODE 0x86)', () => {
-  it('reports 16 colours with green as the default, matching x3270 sf.c:735-755', () => {
+  it('reports 16 colors with green as the default, matching x3270 sf.c:735-755', () => {
     const bytes = buildReply({ kind: 'query' }, GEOMETRY_24X80, DEFAULT_CAPABILITIES);
     const unit = findUnit(bytes, Qcode.COLOR);
     // L L SFID QCODE then: options, count, then 16 pairs.
     expect(unit[0]).toBe(0x00);        // no options
-    expect(unit[1]).toBe(0x10);        // 16 colours
+    expect(unit[1]).toBe(0x10);        // 16 colors
     expect(unit[2]).toBe(0x00);        // the default entry...
     expect(unit[3]).toBe(0xf4);        // ...is GREEN
     // Then fifteen identity pairs, 0xf1..0xff.
@@ -1806,26 +1806,26 @@ In `packages/core/src/queryreply.ts`, before `DEFAULT_CAPABILITIES`:
 ```ts
 /**
  * Color (QCODE 0x86), GA23-0059 p. 6-38. Body: options, count, then `count`
- * (attribute-value, colour-identification) pairs.
+ * (attribute-value, color-identification) pairs.
  *
  * Ported from x3270's `do_qr_color` (Common/sf.c:735-755). Two details worth
  * stating because they are not guessable:
  *
  *  - The DEFAULT pair is `0x00 -> 0xF4`, i.e. green. That is the answer to "what
- *    does a colour value of 0x00 mean", and it is what makes render.ts's rule 4
+ *    does a color value of 0x00 mean", and it is what makes render.ts's rule 4
  *    consistent with what we advertise: we tell the host the default is green and
  *    our default map yields green for an ordinary unprotected field.
  *  - The remaining fifteen are IDENTITY pairs, 0xF1..0xFF. x3270 emits 0x00 as
- *    the value instead when not in 3279 mode; we always advertise colour because
+ *    the value instead when not in 3279 mode; we always advertise color because
  *    the terminal type we send decides whether a host uses it, and a TUI on a
- *    monochrome terminal still resolves colours internally (render.ts's
+ *    monochrome terminal still resolves colors internally (render.ts's
  *    mode3279 flag is a RENDERING choice, not a negotiation one).
  */
 const color: Capability = {
   qcode: Qcode.COLOR,
   returnedForQuery: true,
   params: () => {
-    const out = [0x00, 0x10, 0x00, Colour.GREEN];
+    const out = [0x00, 0x10, 0x00, Color.GREEN];
     for (let c = 0xf1; c <= 0xff; c++) out.push(c, c);
     return out;
   },
@@ -1863,7 +1863,7 @@ export const DEFAULT_CAPABILITIES: readonly Capability[] = [
 
 **Order matters for the goldens.** Units go out in list order, so inserting before `implicitPartition` changes the byte stream. That is intended — but it means the next step is not optional.
 
-Add `XAH` and `Colour` to the imports (`Colour` from `./palette.js`).
+Add `XAH` and `Color` to the imports (`Color` from `./palette.js`).
 
 - [ ] **Step 6: Run the tests, and expect conformance goldens to move**
 
@@ -1881,21 +1881,21 @@ git commit -m "Advertise Color and Highlighting in Query Reply"
 
 ---
 
-## Task 8: Surface resolved colour through the CLI
+## Task 8: Surface resolved color through the CLI
 
 **Files:**
 - Modify: `packages/cli/src/runner.ts` (the `ScreenJson` case, line 254)
 - Test: `packages/cli/test/runner.test.ts`
 
-Before any terminal code exists, make the colour visible from the existing CLI. This is what lets a live host be checked in Task 13 without trusting the TUI's rendering at the same time.
+Before any terminal code exists, make the color visible from the existing CLI. This is what lets a live host be checked in Task 13 without trusting the TUI's rendering at the same time.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `packages/cli/test/runner.test.ts`. The file's helper is **`newRunner()`** (line 27), returning `{ runner, session, conn }`, and commands are driven with **`await runner.run('...')`**, which returns the whole reply as a **string** — not an object with a `data` array. So the JSON line has to be picked out of that string:
 
 ```ts
-describe('ScreenJson colour', () => {
-  it('reports resolved colour per cell', async () => {
+describe('ScreenJson color', () => {
+  it('reports resolved color per cell', async () => {
     const { runner, session } = newRunner();
     // A protected, unintensified field: the 3279 default map renders it BLUE.
     session.screen.setFieldAttribute(0, FA.PRINTABLE | FA.PROTECT);
@@ -1908,12 +1908,12 @@ describe('ScreenJson colour', () => {
 
     expect(json.resolved).toBeDefined();
     expect(json.resolved).toHaveLength(1920);
-    expect(json.resolved[1].fg).toBe(Colour.BLUE);
+    expect(json.resolved[1].fg).toBe(Color.BLUE);
     expect(json.resolved[1].text).toBe('A');
   });
 
   it('still reports the raw cells alongside the resolved ones', async () => {
-    // A conformance comparison needs the bytes; a human debugging colour needs
+    // A conformance comparison needs the bytes; a human debugging color needs
     // the resolution. Dropping either makes one of those impossible.
     const { runner, session } = newRunner();
     session.screen.setChar(0, 0xc1);
@@ -1926,11 +1926,11 @@ describe('ScreenJson colour', () => {
 });
 ```
 
-Import `FA` and `Colour` from `@tn3270/core`. **Confirm the `data: ` prefix** against how the file's other `ScreenText`/`ScreenJson` tests read output — if they strip it differently, match them rather than this.
+Import `FA` and `Color` from `@tn3270/core`. **Confirm the `data: ` prefix** against how the file's other `ScreenText`/`ScreenJson` tests read output — if they strip it differently, match them rather than this.
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run packages/cli/test/runner.test.ts -t "ScreenJson colour"`
+Run: `npx vitest run packages/cli/test/runner.test.ts -t "ScreenJson color"`
 Expected: FAIL — `json.resolved` is undefined.
 
 - [ ] **Step 3: Implement**
@@ -1948,8 +1948,8 @@ In `packages/cli/src/runner.ts`, in the `ScreenJson` case, add `resolved` to the
           oia: s.oia.toText(),
           fields: snap.fields,
           cells: snap.cells,
-          // Resolved colours alongside the raw cells, not instead of them: a
-          // conformance comparison needs the bytes, a human debugging colour
+          // Resolved colors alongside the raw cells, not instead of them: a
+          // conformance comparison needs the bytes, a human debugging color
           // needs the resolution, and dropping either would make one of those
           // impossible.
           resolved: resolve(snap),
@@ -1969,7 +1969,7 @@ Expected: PASS. **`ScreenJson`'s output is asserted by other tests** — if one 
 
 ```bash
 git add packages/cli/src/runner.ts packages/cli/test/runner.test.ts
-git commit -m "Report resolved colour from ScreenJson"
+git commit -m "Report resolved color from ScreenJson"
 ```
 
 ---
@@ -2032,7 +2032,7 @@ In the root `package.json`:
  * c3270-style terminal front end.
  *
  * Argument parsing and process wiring only; the screen lives in app.ts. See
- * docs/superpowers/specs/2026-08-19-tui-and-colour-design.md.
+ * docs/superpowers/specs/2026-08-19-tui-and-color-design.md.
  */
 
 export function main(argv: readonly string[]): number {
@@ -2060,11 +2060,11 @@ git commit -m "Scaffold packages/tui"
 
 ---
 
-## Task 10: Colour depth detection and quantisation
+## Task 10: Color depth detection and quantisation
 
 **Files:**
-- Create: `packages/tui/src/colours.ts`
-- Create: `packages/tui/test/colours.test.ts`
+- Create: `packages/tui/src/colors.ts`
+- Create: `packages/tui/test/colors.test.ts`
 
 Four tiers, chosen from the terminal's actual capability. **Detection is `tput`, not Node's builtin** — the spec has the measurements showing why.
 
@@ -2080,16 +2080,16 @@ for (const x of ['xterm-256color','screen-256color','xterm-direct','xterm','vt10
   console.log(x.padEnd(18), 'node=' + f.call({}, {TERM:x}));"
 ```
 
-Expected: `tput` gives 256 / 256 / 16777216 / 8 / -1, while Node gives 8 / **16** / **16** / 16 / **16**. Node is wrong on three of the five, including both cases that matter (screen, direct colour). **If your run disagrees, report it before proceeding** — the whole design of this module rests on it.
+Expected: `tput` gives 256 / 256 / 16777216 / 8 / -1, while Node gives 8 / **16** / **16** / 16 / **16**. Node is wrong on three of the five, including both cases that matter (screen, direct color). **If your run disagrees, report it before proceeding** — the whole design of this module rests on it.
 
 - [ ] **Step 2: Write the failing tests**
 
-Create `packages/tui/test/colours.test.ts`:
+Create `packages/tui/test/colors.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { Colour } from '@tn3270/core';
-import { detectDepth, sgrFor, type Depth } from '../src/colours.js';
+import { Color } from '@tn3270/core';
+import { detectDepth, sgrFor, type Depth } from '../src/colors.js';
 
 describe('detectDepth', () => {
   it('prefers an explicit override over everything', () => {
@@ -2140,8 +2140,8 @@ describe('detectDepth', () => {
 describe('sgrFor: quantisation per depth', () => {
   it('24-bit emits exact RGB', () => {
     // Green is 0x00ff00.
-    expect(sgrFor(Colour.GREEN, 16777216, 'fg')).toBe('38;2;0;255;0');
-    expect(sgrFor(Colour.GREEN, 16777216, 'bg')).toBe('48;2;0;255;0');
+    expect(sgrFor(Color.GREEN, 16777216, 'fg')).toBe('38;2;0;255;0');
+    expect(sgrFor(Color.GREEN, 16777216, 'bg')).toBe('48;2;0;255;0');
   });
 
   // ⚠️ EVERY NUMBER IN THIS DESCRIBE BLOCK IS DERIVED FROM `PALETTE_3279`.
@@ -2150,7 +2150,7 @@ describe('sgrFor: quantisation per depth', () => {
   // `neutral-white`/`white` had each been given identical values, which loses
   // information a host deliberately sent, so all four were made distinct.
   //
-  // The seven base colours (blue, red, pink, green, turquoise, yellow, white)
+  // The seven base colors (blue, red, pink, green, turquoise, yellow, white)
   // were not among the four changed, so these numbers should still hold — but
   // WHITE (0xFF) is one of the seven AND was one of the four, so re-derive
   // rather than assume. Read the committed `PALETTE_3279` and recompute:
@@ -2161,7 +2161,7 @@ describe('sgrFor: quantisation per depth', () => {
   // your derivation wins. Say so rather than adjusting the implementation.
 
   it('256 emits a cube index', () => {
-    const sgr = sgrFor(Colour.GREEN, 256, 'fg');
+    const sgr = sgrFor(Color.GREEN, 256, 'fg');
     expect(sgr).toMatch(/^38;5;\d+$/);
     const index = Number(sgr.split(';')[2]);
     // The 6x6x6 cube starts at 16; pure green is 16 + 36*0 + 6*5 + 0 = 46.
@@ -2170,20 +2170,20 @@ describe('sgrFor: quantisation per depth', () => {
 
   it('16 emits a standard ANSI code', () => {
     // Bright green is 92; the 3279's green is full-intensity.
-    expect(sgrFor(Colour.GREEN, 16, 'fg')).toBe('92');
-    expect(sgrFor(Colour.BLUE, 16, 'fg')).toBe('94');
-    expect(sgrFor(Colour.RED, 16, 'fg')).toBe('91');
+    expect(sgrFor(Color.GREEN, 16, 'fg')).toBe('92');
+    expect(sgrFor(Color.BLUE, 16, 'fg')).toBe('94');
+    expect(sgrFor(Color.RED, 16, 'fg')).toBe('91');
   });
 
   it('8 emits only the non-bright range', () => {
-    expect(sgrFor(Colour.GREEN, 8, 'fg')).toBe('32');
-    expect(sgrFor(Colour.BLUE, 8, 'fg')).toBe('34');
-    expect(sgrFor(Colour.RED, 8, 'fg')).toBe('31');
+    expect(sgrFor(Color.GREEN, 8, 'fg')).toBe('32');
+    expect(sgrFor(Color.BLUE, 8, 'fg')).toBe('34');
+    expect(sgrFor(Color.RED, 8, 'fg')).toBe('31');
   });
 
   it('monochrome emits nothing at all', () => {
-    expect(sgrFor(Colour.RED, 0, 'fg')).toBe('');
-    expect(sgrFor(Colour.RED, 0, 'bg')).toBe('');
+    expect(sgrFor(Color.RED, 0, 'fg')).toBe('');
+    expect(sgrFor(Color.RED, 0, 'bg')).toBe('');
   });
 
   it('maps all sixteen palette entries at every depth without throwing', () => {
@@ -2195,12 +2195,12 @@ describe('sgrFor: quantisation per depth', () => {
     }
   });
 
-  it('distinguishes the seven base 3279 colours at 16 and above', () => {
-    // The test that would catch a quantisation table collapsing two colours to
+  it('distinguishes the seven base 3279 colors at 16 and above', () => {
+    // The test that would catch a quantisation table collapsing two colors to
     // the same ANSI code -- which is the failure a human would notice first and
     // a test asserting "does not throw" would miss entirely.
-    const base = [Colour.BLUE, Colour.RED, Colour.PINK, Colour.GREEN,
-                  Colour.TURQUOISE, Colour.YELLOW, Colour.WHITE];
+    const base = [Color.BLUE, Color.RED, Color.PINK, Color.GREEN,
+                  Color.TURQUOISE, Color.YELLOW, Color.WHITE];
     for (const depth of [16, 256, 16777216] as Depth[]) {
       const seen = new Set(base.map((c) => sgrFor(c, depth, 'fg')));
       expect(seen.size, `depth ${depth}`).toBe(base.length);
@@ -2211,16 +2211,16 @@ describe('sgrFor: quantisation per depth', () => {
 
 - [ ] **Step 3: Run to verify failure**
 
-Run: `npx vitest run packages/tui/test/colours.test.ts`
-Expected: FAIL — cannot resolve `../src/colours.js`.
+Run: `npx vitest run packages/tui/test/colors.test.ts`
+Expected: FAIL — cannot resolve `../src/colors.js`.
 
 - [ ] **Step 4: Implement**
 
-Create `packages/tui/src/colours.ts`:
+Create `packages/tui/src/colors.ts`:
 
 ```ts
 /**
- * Colour depth detection and quantisation of the 3279 palette to ANSI.
+ * Color depth detection and quantisation of the 3279 palette to ANSI.
  *
  * ## DETECTION USES `tput`, NOT NODE'S BUILTIN, AND THAT IS A MEASURED CHOICE
  *
@@ -2235,21 +2235,21 @@ Create `packages/tui/src/colours.ts`:
  *   xterm               8           16              8
  *   vt100               -1          16    <-- wrong none
  *
- * So anything under GNU screen would lose colour and a direct-colour terminal
+ * So anything under GNU screen would lose color and a direct-color terminal
  * would be capped at 16. The `terminfo` npm package does parse the real binary
  * database, but it is v0.1.1, last published 2016, one maintainer -- not a
  * dependency worth taking against a project policy of no deps beyond node:net
  * and node:tls. `tput` is POSIX and ships with the database it reads.
  *
  * Detection is a DEFAULT, not a verdict: terminfo entries are sometimes
- * conservative, and the monochrome path has to be testable on a colour terminal.
+ * conservative, and the monochrome path has to be testable on a color terminal.
  * Hence the override.
  */
 
 import { execFileSync } from 'node:child_process';
-import { colourRgb, type Colour3279 } from '@tn3270/core';
+import { colorRgb, type Color3279 } from '@tn3270/core';
 
-/** Colours the terminal can show. 0 means monochrome. */
+/** Colors the terminal can show. 0 means monochrome. */
 export type Depth = 0 | 8 | 16 | 256 | 16777216;
 
 export interface DetectOptions {
@@ -2311,8 +2311,8 @@ function cube256(r: number, g: number, b: number): number {
 }
 
 /**
- * The eight ANSI colours, as RGB, for nearest-match at 8 and 16 colours.
- * Index is the ANSI colour number: 0 black, 1 red, 2 green, 3 yellow, 4 blue,
+ * The eight ANSI colors, as RGB, for nearest-match at 8 and 16 colors.
+ * Index is the ANSI color number: 0 black, 1 red, 2 green, 3 yellow, 4 blue,
  * 5 magenta, 6 cyan, 7 white.
  */
 const ANSI_8: readonly (readonly [number, number, number])[] = [
@@ -2326,28 +2326,28 @@ function nearestAnsi(r: number, g: number, b: number): number {
   for (let i = 0; i < ANSI_8.length; i++) {
     const [ar, ag, ab] = ANSI_8[i]!;
     // Squared Euclidean distance in RGB. Crude, but the 3279's palette is
-    // saturated primaries and this separates all seven base colours -- which
-    // colours.test.ts asserts rather than assumes.
+    // saturated primaries and this separates all seven base colors -- which
+    // colors.test.ts asserts rather than assumes.
     const d = (r - ar) ** 2 + (g - ag) ** 2 + (b - ab) ** 2;
     if (d < bestDist) { bestDist = d; best = i; }
   }
   return best;
 }
 
-/** Is this colour bright enough to want the 90-97 range at 16 colours? */
+/** Is this color bright enough to want the 90-97 range at 16 colors? */
 function isBright(r: number, g: number, b: number): boolean {
   return Math.max(r, g, b) > 170;
 }
 
 /**
- * The SGR parameter string for one colour, e.g. `38;5;46`. Empty when monochrome.
+ * The SGR parameter string for one color, e.g. `38;5;46`. Empty when monochrome.
  * The caller wraps it in `\x1b[...m`.
  */
-export function sgrFor(code: Colour3279, depth: Depth, which: 'fg' | 'bg'): string {
+export function sgrFor(code: Color3279, depth: Depth, which: 'fg' | 'bg'): string {
   if (depth === 0) return '';
   let rgb: readonly [number, number, number];
   try {
-    rgb = colourRgb(code);
+    rgb = colorRgb(code);
   } catch {
     // render.ts should never hand us an invalid code, but a throw here would
     // take down the whole screen for one bad cell.
@@ -2371,19 +2371,19 @@ export function sgrFor(code: Colour3279, depth: Depth, which: 'fg' | 'bg'): stri
 
 - [ ] **Step 5: Run the tests**
 
-Run: `npx vitest run packages/tui/test/colours.test.ts && npm run typecheck`
+Run: `npx vitest run packages/tui/test/colors.test.ts && npm run typecheck`
 
 Expected: PASS.
 
-**Every numeric assertion in these tests was executed against the exact algorithm above before this plan was written**, so they should hold as given: cube index 46 for green, ANSI 92/94/91 for green/blue/red at 16 colours, 32 for green at 8, and all seven base 3279 colours distinct at 16 **and** 256. That means a failure here is a real discrepancy in your implementation rather than a stale number in the plan — read it rather than adjusting the expectation.
+**Every numeric assertion in these tests was executed against the exact algorithm above before this plan was written**, so they should hold as given: cube index 46 for green, ANSI 92/94/91 for green/blue/red at 16 colors, 32 for green at 8, and all seven base 3279 colors distinct at 16 **and** 256. That means a failure here is a real discrepancy in your implementation rather than a stale number in the plan — read it rather than adjusting the expectation.
 
-The two most valuable assertions are the cube index and the seven-distinct check. `16 + 36*step(r) + 6*step(g) + step(b)` with `step(0)=0, step(255)=5` gives `16 + 0 + 30 + 0 = 46`. If two base colours ever collapse to one ANSI code, the `ANSI_8` table or `isBright` needs adjusting; **do not weaken the test.**
+The two most valuable assertions are the cube index and the seven-distinct check. `16 + 36*step(r) + 6*step(g) + step(b)` with `step(0)=0, step(255)=5` gives `16 + 0 + 30 + 0 = 46`. If two base colors ever collapse to one ANSI code, the `ANSI_8` table or `isBright` needs adjusting; **do not weaken the test.**
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/tui/src/colours.ts packages/tui/test/colours.test.ts
-git commit -m "Detect colour depth with terminfo and quantise the 3279 palette"
+git add packages/tui/src/colors.ts packages/tui/test/colors.test.ts
+git commit -m "Detect color depth with terminfo and quantise the 3279 palette"
 ```
 
 ---
@@ -2402,13 +2402,13 @@ Create `packages/tui/test/render.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { Colour, type ResolvedCell } from '@tn3270/core';
+import { Color, type ResolvedCell } from '@tn3270/core';
 import { TerminalRenderer, tooSmall } from '../src/render.js';
 
 /** A 2x3 grid of plain green cells, with `text` from a string. */
 function grid(text: string, rows = 2, cols = 3): ResolvedCell[] {
   return [...text].map((ch) => ({
-    text: ch, fg: Colour.GREEN, bg: Colour.NEUTRAL_BLACK,
+    text: ch, fg: Color.GREEN, bg: Color.NEUTRAL_BLACK,
     blink: false, reverse: false, underscore: false, intensify: false, hidden: false,
   })).slice(0, rows * cols);
 }
@@ -2462,25 +2462,25 @@ describe('TerminalRenderer', () => {
     expect(r.paint(cells, 0, 'ok')).toContain('ok');
   });
 
-  it('emits no colour escapes at all when monochrome', () => {
+  it('emits no color escapes at all when monochrome', () => {
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
     const cells = grid('ABCDEF');
-    cells[0]!.fg = Colour.RED;
+    cells[0]!.fg = Color.RED;
     const out = r.paint(cells, 0, 'status');
     expect(out).not.toMatch(/\x1b\[3[0-9]/);
     expect(out).not.toMatch(/\x1b\[38;/);
   });
 
-  it('emits a colour escape when the colour changes mid-row', () => {
+  it('emits a color escape when the color changes mid-row', () => {
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
     const cells = grid('ABCDEF');
-    cells[1]!.fg = Colour.RED;
+    cells[1]!.fg = Color.RED;
     const out = r.paint(cells, 0, 'status');
     expect(out).toMatch(/\x1b\[38;5;\d+m/);
   });
 
   it('does not repeat an identical SGR for adjacent cells', () => {
-    // Six cells of one colour must not produce six escape sequences; that
+    // Six cells of one color must not produce six escape sequences; that
     // triples the bytes written on every redraw over a slow link.
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256 });
     const out = r.paint(grid('ABCDEF'), 0, 'status');
@@ -2521,7 +2521,7 @@ Expected: FAIL — cannot resolve `../src/render.js`.
 Create `packages/tui/src/render.ts`. The design points that matter:
 
 - **Diff against the previously painted cells**, keyed by index, and emit a cursor-position escape only when the run of changes breaks. This is the "redraw only dirty cells" rule the GUI section already committed to, applied to a terminal.
-- **Track the current SGR state** across cells so an unchanged colour emits nothing.
+- **Track the current SGR state** across cells so an unchanged color emits nothing.
 - **The status line is row `rows + 1`**, outside the 1920-cell buffer, exactly as the spec requires for the OIA.
 
 ```ts
@@ -2538,7 +2538,7 @@ Create `packages/tui/src/render.ts`. The design points that matter:
  * is drawn outside the screen buffer") and is owned here, not by Screen.
  */
 
-import { sgrFor, type Depth } from './colours.js';
+import { sgrFor, type Depth } from './colors.js';
 import type { ResolvedCell } from '@tn3270/core';
 
 export interface Geometry { rows: number; cols: number; }
@@ -2618,7 +2618,7 @@ export class TerminalRenderer {
     return parts.join('');
   }
 
-  /** The full SGR parameter list for one cell: colours plus highlighting. */
+  /** The full SGR parameter list for one cell: colors plus highlighting. */
   private cellSgr(cell: ResolvedCell): string {
     const params: string[] = [];
     if (cell.blink) params.push('5');
@@ -2641,7 +2641,7 @@ function sameCell(a: ResolvedCell, b: ResolvedCell): boolean {
 }
 ```
 
-**The method is named `cellSgr`, not `sgrFor`**, deliberately: `sgrFor` is the imported function from `colours.ts` and a method of the same name would shadow it confusingly at every call site.
+**The method is named `cellSgr`, not `sgrFor`**, deliberately: `sgrFor` is the imported function from `colors.ts` and a method of the same name would shadow it confusingly at every call site.
 
 - [ ] **Step 4: Run the tests**
 
@@ -2846,7 +2846,7 @@ Where the pieces meet. **The one non-negotiable requirement: raw mode must be re
  */
 
 import { resolve, type Session } from '@tn3270/core';
-import { detectDepth, type Depth } from './colours.js';
+import { detectDepth, type Depth } from './colors.js';
 import { TerminalRenderer, tooSmall } from './render.js';
 import { lookup, PARTIAL, type Action } from './keymap.js';
 
@@ -3028,7 +3028,7 @@ npm run build
 node packages/tui/dist/main.js -model 3278-2-E 127.0.0.1:3270
 ```
 
-Expected: the VM/370 logon screen, in colour if your terminal supports it. Press `Ctrl-]` to quit, then confirm the terminal still echoes — type `echo hello` and check you can see it.
+Expected: the VM/370 logon screen, in color if your terminal supports it. Press `Ctrl-]` to quit, then confirm the terminal still echoes — type `echo hello` and check you can see it.
 
 **If the terminal is broken after quitting, that is the highest-priority bug in this task.** Fix it before anything else, and add whichever exit path you missed to the list in `start()`.
 
@@ -3058,15 +3058,15 @@ for p in 3270 3271; do timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/$p" 2>/dev/n
 
 **`ss` and `netstat` report no listeners in this sandbox even when the ports are open** — use this probe. If either is closed, stop and ask the user to IPL it.
 
-- [ ] **Step 2: Capture TK5's ISPF panel through the CLI, where colour is now visible**
+- [ ] **Step 2: Capture TK5's ISPF panel through the CLI, where color is now visible**
 
-Run the committed `record-mvs.txt` with `-model 3278-2-E`, then extract the resolved colours from the `ScreenJson` line and count how many distinct foreground colours the ISPF primary option menu uses. Expect **more than the four** the base-attribute map can produce; that is the live counterpart of Task 6's fixture test.
+Run the committed `record-mvs.txt` with `-model 3278-2-E`, then extract the resolved colors from the `ScreenJson` line and count how many distinct foreground colors the ISPF primary option menu uses. Expect **more than the four** the base-attribute map can produce; that is the live counterpart of Task 6's fixture test.
 
 - [ ] **Step 3: Compare against `zti`, on a real tty**
 
-`zti` renders colour and is the reference for *which* colour a cell should be. **Capture it under `script`, not a pipe:** its gate is `self.colors >= 8 && sys.stdin.isatty()` (`~/git/tnz/tnz/tnz.py:251-253`), and `self.colors` defaults to 768 (`:94`), so `isatty()` is the only thing that can fail. A piped capture reports no colour and would "prove" we emit too much.
+`zti` renders color and is the reference for *which* color a cell should be. **Capture it under `script`, not a pipe:** its gate is `self.colors >= 8 && sys.stdin.isatty()` (`~/git/tnz/tnz/tnz.py:251-253`), and `self.colors` defaults to 768 (`:94`), so `isatty()` is the only thing that can fail. A piped capture reports no color and would "prove" we emit too much.
 
-**`zti` is NOT a reference for quantisation** — it has no depth tiering at all (`zti.py` reduces the question to a boolean `min(tns.colors, self.colors) >= 8` at `:1560`, `:3134`, `:3180`). So compare *which colour*, not which ANSI code.
+**`zti` is NOT a reference for quantisation** — it has no depth tiering at all (`zti.py` reduces the question to a boolean `min(tns.colors, self.colors) >= 8` at `:1560`, `:3134`, `:3180`). So compare *which color*, not which ANSI code.
 
 - [ ] **Step 4: Drive the TUI interactively against both hosts**
 
@@ -3076,13 +3076,13 @@ VM/370 (`127.0.0.1:3270`) and TK5 (`127.0.0.1:3271`). For each: log on, navigate
 
 - [ ] **Step 5: Record the results**
 
-Add a *TUI and colour results* section to `docs/live-testing.md`: which hosts, which terminal and depth, how many distinct colours appeared, and anything that differed from the fixture. **Record what did NOT work too** — an absent finding is the one that costs a future session real time.
+Add a *TUI and color results* section to `docs/live-testing.md`: which hosts, which terminal and depth, how many distinct colors appeared, and anything that differed from the fixture. **Record what did NOT work too** — an absent finding is the one that costs a future session real time.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add docs/live-testing.md
-git commit -m "Record live TUI and colour results against both hosts"
+git commit -m "Record live TUI and color results against both hosts"
 ```
 
 ---
@@ -3093,7 +3093,7 @@ git commit -m "Record live TUI and colour results against both hosts"
 - Modify: `packages/core/test/render.test.ts` (only if a mutant survives)
 - Modify: `packages/core/test/sa.test.ts` (likewise)
 
-The spec requires this and it is not optional: **review on the stage 2a work found two tests that passed with the behaviour they claimed to pin deleted.** The colour rules are exactly that shape — an assertion can look right and pin nothing, because so many paths produce green.
+The spec requires this and it is not optional: **review on the stage 2a work found two tests that passed with the behavior they claimed to pin deleted.** The color rules are exactly that shape — an assertion can look right and pin nothing, because so many paths produce green.
 
 This is a manual pass, not a tool. For each mutation: make the edit, run the named test file, confirm **at least one test fails**, then revert the edit.
 
@@ -3101,11 +3101,11 @@ This is a manual pass, not a tool. For each mutation: make the edit, run the nam
 
 | # | Mutation in `render.ts` | Must break |
 |---|---|---|
-| 1 | Delete the `mode3279` guard in `defaultColour`, so it always uses the table | the two `mode3279: false` tests |
-| 2 | Change `DEFAULT_COLOURS` index order, e.g. swap `BLUE` and `WHITE` | the protected/protected-intensified tests |
-| 3 | Make `usableColour` accept `0x00` | the "0x00 means device default" test |
-| 4 | Remap `0xf7` to `Colour.WHITE` (the plan's original error) | the `0xF7`-stays-Neutral test |
-| 5 | Make `usableColour` return `true` unconditionally | the malformed-colour test (should now throw) |
+| 1 | Delete the `mode3279` guard in `defaultColor`, so it always uses the table | the two `mode3279: false` tests |
+| 2 | Change `DEFAULT_COLORS` index order, e.g. swap `BLUE` and `WHITE` | the protected/protected-intensified tests |
+| 3 | Make `usableColor` accept `0x00` | the "0x00 means device default" test |
+| 4 | Remap `0xf7` to `Color.WHITE` (the plan's original error) | the `0xF7`-stays-Neutral test |
+| 5 | Make `usableColor` return `true` unconditionally | the malformed-color test (should now throw) |
 | 6 | Change `hidden` to compare against `FA.INT_HIGH_SEL` | the hidden-field test |
 | 7 | Map `blink` from `XAH.REVERSE` instead of `XAH.BLINK` | the highlighting table test |
 
@@ -3116,13 +3116,13 @@ This is a manual pass, not a tool. For each mutation: make the edit, run the nam
 | 8 | Make the SA state a single value instead of a per-type map | the composite test |
 | 9 | Hoist `const sa = {}` out of `execute` to module scope | the per-write-command reset test |
 | 10 | Make `XA.RESET` clear only `fg` | the reset test |
-| 11 | Call `applySa` **before** `setChar` | every colour test (setChar does not clear, so this may SURVIVE — see below) |
+| 11 | Call `applySa` **before** `setChar` | every color test (setChar does not clear, so this may SURVIVE — see below) |
 | 12 | Delete the `delete sa.*` lines from the `'sf'` case | the plain-SF test |
-| 13 | Delete the extended-pair loop from the `'sfe'` case | the SFE colour tests |
+| 13 | Delete the extended-pair loop from the `'sfe'` case | the SFE color tests |
 
 - [ ] **Step 3: If any mutant SURVIVES, the test suite has a hole — fix the test, not the mutant**
 
-Mutation 11 is the one most likely to survive, and if it does that is informative rather than fine: it means no test distinguishes attribute-then-character from character-then-attribute. Add one — write a cell twice in the same record with different SA state between the writes, and assert the second write's colour wins.
+Mutation 11 is the one most likely to survive, and if it does that is informative rather than fine: it means no test distinguishes attribute-then-character from character-then-attribute. Add one — write a cell twice in the same record with different SA state between the writes, and assert the second write's color wins.
 
 **Record every survivor and what you added**, in the commit message. A mutation that survived and was then covered is the most valuable finding this task can produce.
 
@@ -3134,7 +3134,7 @@ Run: `git diff --stat packages/core/src` — expected: **empty**. If it is not, 
 
 ```bash
 git add packages/core/test
-git commit -m "Close the holes mutation testing found in the colour rules"
+git commit -m "Close the holes mutation testing found in the color rules"
 ```
 
 ---
@@ -3143,7 +3143,7 @@ git commit -m "Close the holes mutation testing found in the colour rules"
 
 **Files:**
 - Modify: `docs/HANDOFF.md`
-- Modify: `docs/superpowers/specs/2026-08-19-tui-and-colour-design.md` (if measurement contradicted it)
+- Modify: `docs/superpowers/specs/2026-08-19-tui-and-color-design.md` (if measurement contradicted it)
 
 - [ ] **Step 1: Run the full suite and record the real numbers**
 
@@ -3152,7 +3152,7 @@ Expected: all green. Note the actual test count — do not guess it.
 
 - [ ] **Step 2: Rewrite the handoff's state paragraph**
 
-Cover: extended attributes stored and resolved; the TUI as a usable client; which hosts it was driven against; the test count; and **what is still not done** — PS (`0x43` still dropped), MF colour, the web front end, the Electron GUI, mouse support.
+Cover: extended attributes stored and resolved; the TUI as a usable client; which hosts it was driven against; the test count; and **what is still not done** — PS (`0x43` still dropped), MF color, the web front end, the Electron GUI, mouse support.
 
 - [ ] **Step 3: Correct the spec if any measurement contradicted it**
 
@@ -3162,7 +3162,7 @@ The spec is a design record, not scripture. If the ANSI mapping needed adjusting
 
 ```bash
 git add docs/
-git commit -m "Update the handoff: colour and the TUI are done"
+git commit -m "Update the handoff: color and the TUI are done"
 ```
 
 ---
@@ -3174,12 +3174,12 @@ git commit -m "Update the handoff: colour and the TUI are done"
 | Palette correctness | All 16 entries pinned against `3270ds.h`, both OCR-damaged codes explicitly | Task 2 |
 | Attribute storage | Round-trip per cell; absence stays absent; snapshot frozen | Task 3 |
 | The four reset rules | One test each: write command, Clear, plain SF, EW/EWA | Tasks 3, 4 |
-| The composite rule | An SA colour does not clear an SA highlighting | Task 4 |
+| The composite rule | An SA color does not clear an SA highlighting | Task 4 |
 | SA type 0x00 vs value 0x00 | Distinct tests; the fixture contains twelve of the former | Tasks 1, 4 |
-| Resolution rules 1-5 | One test per rule, plus `mode3279` false and a malformed colour | Task 5 |
-| **The gap that started this** | TK5 fixture produces colour beyond the four-colour default map | Task 6 |
+| Resolution rules 1-5 | One test per rule, plus `mode3279` false and a malformed color | Task 5 |
+| **The gap that started this** | TK5 fixture produces color beyond the four-color default map | Task 6 |
 | Query Reply bytes | Both units byte-compared with x3270's `sf.c` | Task 7 |
-| Quantisation | Four depths; all 16 codes; seven base colours stay distinct | Task 10 |
+| Quantisation | Four depths; all 16 codes; seven base colors stay distinct | Task 10 |
 | Depth detection | Override > COLORTERM > terminfo > monochrome; probe failure survivable | Task 10 |
 | Diffing | Unchanged repaint emits nothing; one changed cell emits one cell | Task 11 |
 | Hidden fields | Text never emitted, so a password is not in the scrollback | Task 11 |
@@ -3188,4 +3188,4 @@ git commit -m "Update the handoff: colour and the TUI are done"
 | Live hosts | Both systems, interactively, logged off cleanly | Task 14 |
 | **Do the tests actually pin anything** | 13 mutations, each must break a named test | Task 15 |
 
-**The single most important test in this plan is Task 6's**: it replays a fixture that has been on disk since 2026-08-18, carrying 101 foreground colour orders that were silently discarded the whole time. Everything else guards behaviour we are adding; that one guards the gap we did not know we had.
+**The single most important test in this plan is Task 6's**: it replays a fixture that has been on disk since 2026-08-18, carrying 101 foreground color orders that were silently discarded the whole time. Everything else guards behavior we are adding; that one guards the gap we did not know we had.

@@ -14,7 +14,7 @@ import type { Rgb } from '@tn3270/core';
  * `keypad.ts` did the same in the other direction. Both cycles typechecked and both erased at
  * build time, which is exactly why they survived two rounds of review.
  *
- * The hazard a cycle carries here is not a build failure but module initialisation ORDER: the day
+ * The hazard a cycle carries here is not a build failure but module initialization ORDER: the day
  * one of those type imports becomes a value import, the loser of the cycle sees `undefined` at
  * module load. In a browser with no bundler that is a BLACK CANVAS WITH NO ERROR, which this
  * project has already met four separate ways. `test/module-cycles.test.ts` is what keeps the

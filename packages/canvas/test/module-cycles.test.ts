@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
  * `cg.ts` took `AtlasGeometry` from `drawlist.ts` while `drawlist.ts` value-imported `column`.
  * `tsc --build` resolves both and `import type` erases, so the whole suite stayed green through
  * both. A cycle here is a latent hazard rather than a live failure: it decides module
- * initialisation ORDER, so the day one of these type imports becomes a value import -- a
+ * initialization ORDER, so the day one of these type imports becomes a value import -- a
  * constant, an enum, a helper -- the reward is a `TDZ`/`undefined` at module load, in a browser,
  * with no bundler and no error in any console. This project has met that exact silence four
  * separate ways.

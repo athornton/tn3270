@@ -76,7 +76,7 @@ export function buildReadModified(screen: Screen, aid: number, all: boolean): Ui
  * Shared by the ordinary AID path and the test request read because x3270 shares it too —
  * both arms of the `aid_byte` switch fall through to the same field scan
  * (`Common/ctlr.c:810-960`). Extracted verbatim from `buildReadModified`; the comments are
- * the original ones and the behaviour is unchanged for every existing caller.
+ * the original ones and the behavior is unchanged for every existing caller.
  */
 function modifiedData(screen: Screen, all: boolean): number[] {
   const out: number[] = [];

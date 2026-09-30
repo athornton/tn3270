@@ -32,7 +32,7 @@ The constraint is still right — a live re-record would negotiate something dif
 
 | File | Responsibility |
 |---|---|
-| `packages/core/src/stream/sf.ts` | Split a WSF payload into typed structured-field tokens; recognise Read Partition. Pure, no I/O. |
+| `packages/core/src/stream/sf.ts` | Split a WSF payload into typed structured-field tokens; recognize Read Partition. Pure, no I/O. |
 | `packages/core/src/queryreply.ts` | Encode Query Reply units from a capability list. Pure; takes geometry, returns bytes. |
 | `packages/core/src/termtype.ts` | Resolve `-model` / `--terminal-type` to a ttype string. Pure, no I/O. |
 | `packages/core/test/sf.test.ts` | Tests for the above parser, including the malformed-length cases. |
@@ -211,7 +211,7 @@ describe('structured field framing', () => {
     expect(fields[1]).toEqual({ kind: 'readPartition', pid: 0xff, type: 0x03 });
   });
 
-  it('keeps an unrecognised SFID as an opaque field rather than failing', () => {
+  it('keeps an unrecognized SFID as an opaque field rather than failing', () => {
     // A host may send anything; an unknown SF is a logged no-op, not an error.
     const fields = parseStructuredFields(Uint8Array.of(0x00, 0x05, 0x40, 0xaa, 0xbb));
     expect(fields).toEqual([
@@ -395,7 +395,7 @@ Expected: PASS, 10 tests.
 git add packages/core/src/stream/sf.ts packages/core/test/sf.test.ts
 git commit -m "Parse the WSF payload into typed structured fields
 
-Recognises Read Partition and keeps unknown SFIDs opaque. Rejects a
+Recognizes Read Partition and keeps unknown SFIDs opaque. Rejects a
 zero-length field, which a naive loop would read as advance-by-zero and
 hang on."
 ```
@@ -410,12 +410,12 @@ hang on."
 
 This replaces the opaque `structuredFields` token with the typed fields from task 2.
 
-**Two existing tests change, and one of them is a real behaviour change rather than a rename.** Read this before editing:
+**Two existing tests change, and one of them is a real behavior change rather than a rename.** Read this before editing:
 
 1. `parse.test.ts:35` ("keeps the payload unexamined") asserts the opaque token. It becomes an assertion about typed tokens.
 2. `parse.test.ts:46` ("accepts BOTH WSF encodings") feeds `WSF 0x00 0x05` — **a length claiming 5 bytes when only 2 are present.** That is malformed, and it only passed because the payload was never examined. Typed parsing correctly rejects it. The test's actual purpose is checking that *the command byte* decodes in both encodings, so give it a well-formed payload rather than deleting it.
 
-- [ ] **Step 1: Update the two existing tests to the new behaviour**
+- [ ] **Step 1: Update the two existing tests to the new behavior**
 
 In `packages/core/test/parse.test.ts`, replace the "keeps the payload unexamined" test with:
 
@@ -589,7 +589,7 @@ describe('query reply', () => {
     expect(AID.SF).toBe(0x88);
   });
 
-  it('sends exactly the three units we honour', () => {
+  it('sends exactly the three units we honor', () => {
     const parsed = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
     expect(parsed).toHaveLength(3);
     // Every unit is SFID 0x81 (Query Reply) with its QCODE in byte 3.
@@ -726,7 +726,7 @@ import { AID, Qcode, Sfid } from './constants.js';
  * Stage 2a advertises the minimal honest set: Summary, Usable Area, Implicit
  * Partition. x3270 sends ten, including Color and Highlighting — which would
  * invite the SA orders stage 2a deliberately does not implement. Every unit
- * here is one we honour. See the stage 2a design doc.
+ * here is one we honor. See the stage 2a design doc.
  */
 
 export interface Geometry {
@@ -764,7 +764,7 @@ const summary: Capability = {
  * The fixed values are x3270's, which this host accepted: 12/14-bit addressing,
  * cell units, and the 3278 cell metrics. They are dimensional constants of the
  * device, not capability claims, so copying them advertises nothing we do not
- * honour.
+ * honor.
  */
 const usableArea: Capability = {
   qcode: Qcode.USABLE_AREA,
@@ -773,7 +773,7 @@ const usableArea: Capability = {
     0x00,               // FLAGS: matrix character, cell units, no variable cells
     ...u16(geometry.cols), // W
     ...u16(geometry.rows), // H
-    0x01,               // UNITS: millimetres
+    0x01,               // UNITS: millimeters
     0x00, 0x0a, 0x02, 0xe5, // Xr: 10/741
     0x00, 0x02, 0x00, 0x6f, // Yr: 2/111
     0x09,               // AW: X units per default cell
@@ -863,7 +863,7 @@ reserved (p. 6-71); the SDP alone would have shifted every later byte."
 - Modify: `packages/core/src/stream/parse.ts` — the `Token` union, and the `Order.SFE`/`Order.MF` branch at lines 190-210
 - Modify: `packages/core/test/parse.test.ts`
 
-Today SA, SFE and MF all become `{kind:'deferred', order, data}`. SFE is about to gain real behaviour, so it gets its own token with its attribute pairs already decoded. SA and MF stay `deferred`.
+Today SA, SFE and MF all become `{kind:'deferred', order, data}`. SFE is about to gain real behavior, so it gets its own token with its attribute pairs already decoded. SA and MF stay `deferred`.
 
 **Preserve the existing length arithmetic.** `parse.ts` computes `operandLen = 1 + count * 2` — one count byte plus that many type/value pairs. That is correct (GA23-0059 p. 4-4); this task decodes the same bytes into pairs rather than re-deriving the length.
 
@@ -880,8 +880,8 @@ Add to `packages/core/test/parse.test.ts`:
     ]);
   });
 
-  it('decodes an SFE with several pairs, keeping ones we do not honour', () => {
-    // Type 0x42 is colour, which stage 2a drops at EXECUTE time — but the
+  it('decodes an SFE with several pairs, keeping ones we do not honor', () => {
+    // Type 0x42 is color, which stage 2a drops at EXECUTE time — but the
     // parser still reports it, so the trace shows what the host actually sent.
     const r = parseRecord(Uint8Array.of(
       SnaCmd.W, 0x00, Order.SFE, 0x02, 0xc0, 0x60, 0x42, 0xf4));
@@ -1047,7 +1047,7 @@ Add to `packages/core/test/execute.test.ts`. Match the existing helper style in 
   it('SFE with no 0xC0 pair STILL defines a field, with the default attribute', () => {
     // p. 4-5: unspecified attribute types take their defaults. Skipping the
     // field here would lose it entirely, which is the failure SFE exists to
-    // prevent. Type 0x42 is colour, which we do not honour.
+    // prevent. Type 0x42 is color, which we do not honor.
     const screen = new Screen();
     execute(screen, parseRecord(Uint8Array.of(
       SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x01, 0x42, 0xf4)));
@@ -1071,7 +1071,7 @@ Add to `packages/core/test/execute.test.ts`. Match the existing helper style in 
     expect(screen.cellAt(1).ebcdic).toBe(0xc1);
   });
 
-  it('SFE ignores pair types it does not honour but keeps the field attribute', () => {
+  it('SFE ignores pair types it does not honor but keeps the field attribute', () => {
     const screen = new Screen();
     execute(screen, parseRecord(Uint8Array.of(
       SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40,
@@ -1123,7 +1123,7 @@ In `packages/core/src/stream/execute.ts`, **keep** `structuredFieldsIgnored` and
   modifyFieldIgnored: number;
 ```
 
-And initialise both to 0 in the `result` literal at the top of `execute`.
+And initialize both to 0 in the `result` literal at the top of `execute`.
 
 - [ ] **Step 4: Count them in the token loop**
 
@@ -1145,7 +1145,7 @@ Replace the temporary `case 'sfe': return addr;` from task 5 with:
 ```typescript
     case 'sfe': {
       // SFE DEFINES A FIELD. The 0xC0 pair carries the basic field attribute;
-      // every other pair type (0x41 highlighting, 0x42 colour, 0x43 character
+      // every other pair type (0x41 highlighting, 0x42 color, 0x43 character
       // set, ...) is an extended attribute stage 2a does not render, so it is
       // dropped.
       //
@@ -1207,10 +1207,10 @@ a presence before any run trusts their absence."
 
 `execute` records the *intent* and `session` performs the I/O, matching how `readRequest` and `answerRead` already split (`session.ts:196-224`).
 
-**Three behaviours that are easy to get wrong:**
+**Three behaviors that are easy to get wrong:**
 
 1. **The screen is not touched.** No clear, no cursor move.
-2. **The keyboard is NOT restored, and this needs a REAL CODE CHANGE — not just an omission.** WSF carries no WCC, so there is no restore bit to honour. But look at `session.ts:180-191` before assuming that is enough:
+2. **The keyboard is NOT restored, and this needs a REAL CODE CHANGE — not just an omission.** WSF carries no WCC, so there is no restore bit to honor. But look at `session.ts:180-191` before assuming that is enough:
 
 ```typescript
       if (result.keyboardRestore) { ... }
@@ -1723,7 +1723,7 @@ describe('command line arguments', () => {
     expect(() => parseArgs(['--terminal-type'])).toThrow(UsageError);
   });
 
-  it('rejects an unrecognised flag rather than ignoring it', () => {
+  it('rejects an unrecognized flag rather than ignoring it', () => {
     // Silently ignoring a flag the user typed is how a session ends up
     // negotiating something nobody asked for.
     expect(() => parseArgs(['--wat'])).toThrow(UsageError);
@@ -1791,7 +1791,7 @@ export interface CliArgs {
  *
  * `-model` matches s3270's spelling so our invocations stay legible next to it
  * in conformance runs; `--terminal-type` is the escape hatch for a raw string.
- * An unrecognised flag is an error rather than something to skip: silently
+ * An unrecognized flag is an error rather than something to skip: silently
  * ignoring a flag the operator typed produces a session that negotiates
  * something nobody asked for, which is very hard to diagnose from a trace.
  */
@@ -1812,7 +1812,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       default:
-        throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
+        throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
     }
   }
   return args;
@@ -1847,7 +1847,7 @@ Expected: the first exits cleanly; the second prints a usage error mentioning `-
 git add packages/core/src/session.ts packages/cli/src/runner.ts packages/cli/src/main.ts packages/core/test/session.test.ts packages/cli/test/main.test.ts
 git commit -m "Add -model and --terminal-type command line flags
 
-main.ts had no argv parsing at all, so this is new surface. An unrecognised
+main.ts had no argv parsing at all, so this is new surface. An unrecognized
 flag is an error: silently ignoring one produces a session negotiating
 something nobody asked for."
 ```
@@ -1914,7 +1914,7 @@ printf 'Trace(on)\nConnect(C:localhost:3271)\nWait(3270Mode,25)\nWait(Settle,20)
   | ~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270 -model 3278-2-E -trace -tracefile /tmp/s3270-tso.trace
 ```
 
-Use the `C:` host prefix or it hangs on the all-protected banner. Compare its Query Reply with ours unit by unit; if TSO wants a unit we omit, adding it is one entry in `DEFAULT_CAPABILITIES` — **but only add units we actually honour**, and if that means claiming Color or Highlighting, that is the fold-into-2b signal rather than a quick fix.
+Use the `C:` host prefix or it hangs on the all-protected banner. Compare its Query Reply with ours unit by unit; if TSO wants a unit we omit, adding it is one entry in `DEFAULT_CAPABILITIES` — **but only add units we actually honor**, and if that means claiming Color or Highlighting, that is the fold-into-2b signal rather than a quick fix.
 
 - [ ] **Step 6: Commit a redacted fixture and golden, only once it passes**
 
@@ -1954,7 +1954,7 @@ Both are pass-2 text that the pass-3 diagnosis in the same file already contradi
 - **line 479** — "Query Reply is still worth implementing, but it is not what blocks TSO." It *is* what blocks TSO once the ttype is right. Replace with a note that this was pass 2's conclusion, superseded by pass 3 in this same document, and that stage 2a confirmed it on the wire.
 - **line 537** — "So a TK5/TSO fixture is blocked until TN3270E lands." Blocked on 2a, not TN3270E. Update to reflect what task 10 actually achieved.
 
-Keep the wrong-theory write-ups themselves — they are labelled as wrong and they stop the theories being re-derived. What must change is the two sentences that still read as current fact.
+Keep the wrong-theory write-ups themselves — they are labeled as wrong and they stop the theories being re-derived. What must change is the two sentences that still read as current fact.
 
 - [ ] **Step 2: Record what the run measured**
 
@@ -1994,7 +1994,7 @@ conclusions that the pass-3 diagnosis in the same file contradicted."
 | SA/MF absence is real | Counters proven able to report presence first (task 6), then measured live (task 10) | Nothing, once the presence test passes |
 | Query does not disturb state | Screen, cursor and keyboard asserted unchanged (task 7) | — |
 | Flags reach the wire | Negotiated ttype read off the fake host, plus a manual run (tasks 9) | — |
-| Existing behaviour intact | Full suite + VM/370 conformance every task | — |
+| Existing behavior intact | Full suite + VM/370 conformance every task | — |
 | **TSO reachable** | **The live run (task 10) — nothing offline proves this** | — |
 
 **If task 10 fails and the cause is a capability we do not implement, the agreed response is to fold 2a and 2b together** rather than growing 2a piecemeal. That is the spec's contingency, decided in advance.

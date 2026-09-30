@@ -1,9 +1,9 @@
 /**
- * The 3279 colour palette: sixteen architected colour identifications and the
+ * The 3279 color palette: sixteen architected color identifications and the
  * RGB each one renders as.
  *
  * IN CORE BECAUSE IT IS THE ARCHITECTED MEANING, not because it is what gets drawn.
- * This table answers "which colour IS code F1" and is pinned to GA23-0059 below. What a
+ * This table answers "which color IS code F1" and is pinned to GA23-0059 below. What a
  * front end actually paints comes from the scheme registry in `packages/frontend/palette.ts`,
  * where this table is the `3279` scheme's data — and where the READABLE default lives, since
  * the pure `#0000ff` blue below is close to illegible on black.
@@ -29,25 +29,25 @@
  * ## THE RGB VALUES ARE OUR OWN CHOICE, DELIBERATELY NOT X3270'S
  *
  * x3270's own default 3279 rendering (c3270/screen.c:213-229, `rgbmap[16]`)
- * uses muted, named-CSS-ish colours: e.g. blue is `0x1e90ff` (dodger blue),
+ * uses muted, named-CSS-ish colors: e.g. blue is `0x1e90ff` (dodger blue),
  * turquoise is `0x00ffff`, black is `0x2f4f4f` (dark slate grey — x3270's own
  * comment there reads "alas, this may be gray"). Measured against a standard
- * 16-colour ANSI palette, x3270's blue and turquoise both quantise to the
- * same slot, collapsing two of the seven base colours into one. Task 10
- * (terminal quantisation) depends on all seven base colours staying visually
- * distinct at both 16 and 256 colours, so this table instead uses saturated
+ * 16-color ANSI palette, x3270's blue and turquoise both quantise to the
+ * same slot, collapsing two of the seven base colors into one. Task 10
+ * (terminal quantisation) depends on all seven base colors staying visually
+ * distinct at both 16 and 256 colors, so this table instead uses saturated
  * primaries/secondaries (pure red, green, blue, cyan, magenta, yellow, plus
  * black and white) that survive quantisation at both depths. These are a
- * presentation choice, not architecture: the manual specifies which colour
+ * presentation choice, not architecture: the manual specifies which color
  * each code IS, not its exact chromaticity, and a real 3279's phosphors
  * matched none of these precisely — ours or x3270's.
  *
  * All sixteen RGB triples are pairwise distinct (palette.test.ts), so no two
- * architecturally-different colour identifications alias to the same pixel.
+ * architecturally-different color identifications alias to the same pixel.
  */
 
-/** The seven base 3279 colours, by architected code. Table 4-7. */
-export const Colour = {
+/** The seven base 3279 colors, by architected code. Table 4-7. */
+export const Color = {
   NEUTRAL_BLACK: 0xf0,
   BLUE: 0xf1,
   RED: 0xf2,
@@ -66,10 +66,28 @@ export const Colour = {
   WHITE: 0xff,
 } as const;
 
-/** A 3279 colour identification, 0xF0-0xFF. */
-export type Colour3279 = number;
+/** A 3279 color identification, 0xF0-0xFF. */
+export type Color3279 = number;
 
-export const COLOUR_NAMES: Readonly<Record<number, string>> = Object.freeze({
+/**
+ * `GREY` AND `'grey'` KEEP THE BRITISH SPELLING DELIBERATELY. DO NOT "FINISH" THE
+ * AMERICANISATION HERE.
+ *
+ * Everything else in this repo was moved to US spellings on 2026-09-30, which leaves these two
+ * looking like something the sweep missed. They are not: **`grey` is x3270's own canonical
+ * spelling**, measured in its source rather than assumed —
+ *
+ *  - `Common/glue.c:1041-1042`: `{ "Grey", HOST_COLOR_GREY }` and then
+ *    `{ "Gray", HOST_COLOR_GREY }, /* alias *\/` — x3270's own comment marks which is which.
+ *  - `Common/see.c:310` and `Common/fprint_screen.c:118` both emit `grey`.
+ *
+ * These names are an INTERFACE to the reference implementation, not prose: this project is
+ * conformance-tested against real s3270, and a name that appears in a trace or a comparison has
+ * to match what x3270 writes. Americanising it would be a gratuitous divergence in the one place
+ * where matching the reference is the whole point. The same reasoning is why the wire constants
+ * elsewhere are never "tidied" — see `docs/live-testing.md` on conformance.
+ */
+export const COLOR_NAMES: Readonly<Record<number, string>> = Object.freeze({
   0xf0: 'neutral-black',
   0xf1: 'blue',
   0xf2: 'red',
@@ -84,6 +102,7 @@ export const COLOUR_NAMES: Readonly<Record<number, string>> = Object.freeze({
   0xfb: 'purple',
   0xfc: 'pale-green',
   0xfd: 'pale-turquoise',
+  // x3270's spelling, not a missed rename. See the note above.
   0xfe: 'grey',
   0xff: 'white',
 });
@@ -112,11 +131,11 @@ export const PALETTE_3279: Readonly<Record<number, Rgb>> = Object.freeze({
   0xff: [0xff, 0xff, 0xff], // white: pure white
 });
 
-/** RGB for a colour identification. Throws rather than guessing. */
-export function colourRgb(code: Colour3279): Rgb {
+/** RGB for a color identification. Throws rather than guessing. */
+export function colorRgb(code: Color3279): Rgb {
   const rgb = PALETTE_3279[code];
   if (rgb === undefined) {
-    throw new RangeError(`0x${code.toString(16)} is not a 3279 colour (expected 0xF0-0xFF)`);
+    throw new RangeError(`0x${code.toString(16)} is not a 3279 color (expected 0xF0-0xFF)`);
   }
   return rgb;
 }

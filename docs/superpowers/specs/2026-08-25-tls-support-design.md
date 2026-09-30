@@ -18,7 +18,7 @@ x3270's TLS glue at `~/src/suite3270-4.5/Common/sio_openssl.c` and its option ta
 s3270 has this entire surface already, and we adopt its **spellings** while inverting its
 **default**. Verified from source, not memory:
 
-| s3270 | Where | Behaviour |
+| s3270 | Where | Behavior |
 |---|---|---|
 | `L:host:port` prefix | `Common/host.c:633` | this host is TLS |
 | `-verifycert` / `-noverifycert` | `include/resources.h:595,583` | chain verification on/off |
@@ -40,7 +40,7 @@ would pass while covering nothing.
 Measured 2026-08-25 with Node 26.7.0 against four stub servers. This is the reason
 default-on TLS is not a one-line change:
 
-| Plaintext server behaviour | TLS client result | Time |
+| Plaintext server behavior | TLS client result | Time |
 |---|---|---|
 | writes `IAC DO TN3270E`, then waits — **what Hercules does** | **hangs, no error** | ∞ |
 | writes nothing | **hangs, no error** | ∞ |
@@ -88,7 +88,7 @@ Both parsers get the same set: `packages/cli/src/main.ts:34` and
 | Flag | Meaning |
 |---|---|
 | *(default)* | TLS, chain verified against system trust store |
-| `-insecure` | no TLS at all — plaintext socket, today's behaviour |
+| `-insecure` | no TLS at all — plaintext socket, today's behavior |
 | `-noverifycert` | TLS, chain **not** verified. Alias `-no-verify` |
 | `-verifycert` | explicit default; exists for s3270 compatibility and so a future config file can be overridden on the command line |
 | `-cafile FILE` | verify against this PEM instead of the system store |

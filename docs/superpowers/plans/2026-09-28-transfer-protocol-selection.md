@@ -423,7 +423,7 @@ EOF
 
 ---
 
-### Task 4: MOVE `transferRun.ts` to `packages/frontend` — no behaviour change
+### Task 4: MOVE `transferRun.ts` to `packages/frontend` — no behavior change
 
 **Files:**
 - Create: `packages/frontend/src/transferRun.ts` (moved, byte-identical but for imports)
@@ -431,7 +431,7 @@ EOF
 - Modify: `packages/frontend/src/index.ts`, `packages/tui/src/transferOverlay.ts`
 - Move: `packages/tui/test/transferRun.test.ts` → `packages/frontend/test/transferRun.test.ts`
 
-**This task changes NO behaviour.** It is what keeps the DFT arm at two writings instead of four, and
+**This task changes NO behavior.** It is what keeps the DFT arm at two writings instead of four, and
 the spec says it is independently valuable regardless of the rest. Verified cheap: the file imports
 only `@tn3270/core` and `@tn3270/frontend`, and takes `TransferFiles` as a **type**, so the move
 carries no new dependency.
@@ -543,7 +543,7 @@ control flows, not four: the CLI's blocking poll-until-done (the s3270 line prot
 cannot report a completion arriving after its `ok`) and one event-driven driver that
 TUI, GUI and web all want.
 
-NO BEHAVIOUR CHANGE. Verified by diffing against the pre-move content: only the import
+NO BEHAVIOR CHANGE. Verified by diffing against the pre-move content: only the import
 lines differ. Test count unchanged at 2085, and frontend still imports neither cli nor
 tui, so the dependency graph is not inverted.
 
@@ -619,7 +619,7 @@ registration ORDER**, which is the real invariant.
 - **The byte count is PER-ENGINE.** Both drivers reported CUT's counter unconditionally, so a
   successful DFT transfer told the operator — and a script — that it moved **0 bytes**. That is the
   one number checked against the host's own listing.
-- **Cancelling a DFT transfer mid-flight must ABORT, not discard,** and the two need opposite
+- **Canceling a DFT transfer mid-flight must ABORT, not discard,** and the two need opposite
   handling of the registration. `DftTransfer.cancel` DEFERS to the next inbound frame, so the engine
   must stay registered for it to arrive. `committed` cannot distinguish the cases (it is set inside
   `onTransferEnd`, which calls `finish`, so `ended` has already returned); the engine's byte count
@@ -865,7 +865,7 @@ cd ~/git/tn3270 && npm run build && npx vitest run packages/frontend/test/transf
 
 Expected: the three new tests PASS. **Some existing tests in this file will now fail** — any that
 asserted the 43x80 refusal. Those are expectation updates, not regressions: change them to assert the
-new behaviour, and keep one that pins the *message text* for the timeout path in Task 6.
+new behavior, and keep one that pins the *message text* for the timeout path in Task 6.
 
 - [ ] **Step 5: Full suite**
 
@@ -874,7 +874,7 @@ cd ~/git/tn3270 && npm run build && npm test 2>&1 | grep -E "Test Files|Tests  |
 ```
 
 Expected: green. **`conformance.test.ts` and `golden.test.ts` (12) and the whole CUT suite must pass
-untouched** — the spec's own words: "If the CUT path changes behaviour at 24x80, this design is
+untouched** — the spec's own words: "If the CUT path changes behavior at 24x80, this design is
 wrong."
 
 - [ ] **Step 6: Commit**
@@ -1165,7 +1165,7 @@ EOF
   `grep -rln "Transfer(" packages/cli/test/`)
 
 The CLI keeps its blocking poll loop; the spec is explicit that collapsing the two drivers is a
-line-protocol behaviour change and out of scope.
+line-protocol behavior change and out of scope.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1259,7 +1259,7 @@ while condition.
 gone the old one would throw at 43x80 from inside the loop.
 
 The two drivers are deliberately NOT collapsed: that changes the s3270 line protocol's
-behaviour, which transferRun.ts's header documents as the reason they diverge.
+behavior, which transferRun.ts's header documents as the reason they diverge.
 
 Generated with AI
 
@@ -1415,8 +1415,8 @@ carries the graphics docs; the two hold different halves of 2026-09-28's work de
 | Live: DFT on TK5, CUT control on VM, judged by trace | 8 |
 
 **One gap found and closed here rather than left implicit:** the spec's *Cancellation* paragraph
-requires that cancelling while **uncommitted** abandons the wait, reports cancelled, and **synthesises
-no abort** — and its test list names "Cancel while uncommitted → reports cancelled and nothing goes on
+requires that canceling while **uncommitted** abandons the wait, reports canceled, and **synthesises
+no abort** — and its test list names "Cancel while uncommitted → reports canceled and nothing goes on
 the wire." Add this to **Task 6** as a fourth test and a branch in the returned `cancel`:
 
 ```typescript
@@ -1444,4 +1444,4 @@ the wire." Add this to **Task 6** as a fourth test and a branch in the returned 
 ```
 
 Its test must assert the wire is **empty** after the cancel, not merely that the run reported
-cancelled.
+canceled.

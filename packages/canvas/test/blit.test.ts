@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Screen, resolve, Colour } from '@tn3270/core';
+import { Screen, resolve, Color } from '@tn3270/core';
 import { SCHEMES, schemeRgb } from '@tn3270/frontend';
 import { drawList } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
 import {
-  blit, bestScale, centre, rgbCss, tintKey, blankColumns, type Ctx2D,
+  blit, bestScale, center, rgbCss, tintKey, blankColumns, type Ctx2D,
 } from '../src/blit.js';
 
 const distDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -60,14 +60,14 @@ describe('bestScale', () => {
   });
 });
 
-describe('centre', () => {
+describe('center', () => {
   it('letterboxes evenly', () => {
     const list = listFor();                       // 720x336
-    expect(centre(list, { width: 800, height: 400 }, 1)).toEqual({ x: 40, y: 32 });
+    expect(center(list, { width: 800, height: 400 }, 1)).toEqual({ x: 40, y: 32 });
   });
 
   it('clamps to zero rather than going negative when the window is too small', () => {
-    expect(centre(listFor(), { width: 100, height: 50 }, 1)).toEqual({ x: 0, y: 0 });
+    expect(center(listFor(), { width: 100, height: 50 }, 1)).toEqual({ x: 0, y: 0 });
   });
 });
 
@@ -152,15 +152,15 @@ describe('blankColumns', () => {
   });
 });
 
-describe('colour helpers', () => {
+describe('color helpers', () => {
   it('formats an Rgb as CSS', () => {
-    expect(rgbCss(schemeRgb(SCHEMES.default!, Colour.GREEN))).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
+    expect(rgbCss(schemeRgb(SCHEMES.default!, Color.GREEN))).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
   });
 
-  it('keys the tint cache by colour, so it is bounded by the palette', () => {
-    // A 3279 has sixteen colours, so tinting per COLOUR is at most sixteen composites
+  it('keys the tint cache by color, so it is bounded by the palette', () => {
+    // A 3279 has sixteen colors, so tinting per COLOR is at most sixteen composites
     // where tinting per cell would be 1920 a frame.
-    const keys = new Set(Object.values(Colour).map((c) => tintKey(schemeRgb(SCHEMES.default!, c))));
+    const keys = new Set(Object.values(Color).map((c) => tintKey(schemeRgb(SCHEMES.default!, c))));
     expect(keys.size).toBeLessThanOrEqual(16);
   });
 });

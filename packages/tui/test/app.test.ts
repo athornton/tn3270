@@ -83,7 +83,7 @@ describe('the minimum geometry, which now matches c3270', () => {
   it('RUNS in a terminal with no room for the OIA, rather than refusing', () => {
     // 80x24 is the commonest terminal size there is, and we used to refuse it. The
     // screen is mandatory, the OIA is not -- c3270/screen.c:895 drops the status
-    // line the same way. This is the behaviour change the relaxed tooSmall exists
+    // line the same way. This is the behavior change the relaxed tooSmall exists
     // for, asserted at the App level because that is where a user meets it.
     const h = harness(24, 80);
     expect(() => h.app.start()).not.toThrow();
@@ -115,7 +115,7 @@ describe('the minimum geometry, which now matches c3270', () => {
 });
 
 describe('centring, border and cursor', () => {
-  it('centres the screen in a roomy terminal instead of hugging the corner', () => {
+  it('centers the screen in a roomy terminal instead of hugging the corner', () => {
     // A JupyterLab terminal is essentially never 80x24, so this is the common case.
     const h = harness(40, 100);
     h.app.start();
@@ -154,17 +154,17 @@ describe('centring, border and cursor', () => {
   });
 
   it('makes the cursor visible, and restores it on exit', () => {
-    // A block cursor in a colour of its own; on the old dark-grey background the
+    // A block cursor in a color of its own; on the old dark-grey background the
     // cursor was effectively invisible. OSC 12 is best-effort -- a terminal that
     // does not implement it ignores the sequence -- so the shape is set too.
     const h = harness();
     h.app.start();
-    expect(h.stdout.all).toContain('\x1b]12;');   // set cursor colour
+    expect(h.stdout.all).toContain('\x1b]12;');   // set cursor color
     expect(h.stdout.all).toMatch(/\x1b\[\d q/);   // DECSCUSR shape
     const before = h.stdout.all;
     h.app.restore();
     const added = h.stdout.all.slice(before.length);
-    expect(added).toContain('\x1b]112');          // reset cursor colour
+    expect(added).toContain('\x1b]112');          // reset cursor color
     expect(added).toMatch(/\x1b\[0 q/);           // reset cursor shape
   });
 });
@@ -592,7 +592,7 @@ describe('the special-keys overlay', () => {
   });
 
   it('marks the selection in reverse video, inside the screen region and not the terminal corner', () => {
-    // 40x100: the screen's top-left is terminal row 9, column 11 -- the same address 'centres the
+    // 40x100: the screen's top-left is terminal row 9, column 11 -- the same address 'centers the
     // screen in a roomy terminal' pins. Drawing at 1;1 instead would put the list outside the
     // border, over whatever the terminal had there.
     const h = harness(40, 100);
@@ -780,7 +780,7 @@ describe('the special-keys overlay', () => {
 
   it('acts on two arrows delivered in ONE read', () => {
     // A slow link or a busy event loop coalesces autorepeat, and a chunk-at-a-time matcher would
-    // recognise neither -- the selection would silently stop moving while the key was held.
+    // recognize neither -- the selection would silently stop moving while the key was held.
     const h = harness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
@@ -1066,7 +1066,7 @@ describe('the transfer form', () => {
   });
 
   it('accepts the SS3 form of the arrows too, since any layer can flip DECCKM', () => {
-    // `bindings.ts`'s reason, and the overlay path already honours both: accepting only
+    // `bindings.ts`'s reason, and the overlay path already honors both: accepting only
     // `\x1b[C` would work in some terminals and not others.
     const h = started();
     h.send(CTRL_T);
@@ -1109,7 +1109,7 @@ describe('the transfer form', () => {
 
   it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
     // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
-    // comparison recognises -- the field would appear to stop changing while the key was
+    // comparison recognizes -- the field would appear to stop changing while the key was
     // held. Two rights from `receive` wrap back to `receive`, so assert three.
     const h = started();
     h.send(CTRL_T);
@@ -1326,7 +1326,7 @@ describe('the transfer form: submitting', () => {
     // measured by mutation, deleting `this.transferRun = undefined` from onDone keeps the
     // whole TUI suite green, because `CutTransfer.cancel` is ITSELF idempotent and absorbs
     // the second call. Removing BOTH reddens core's own three cancel tests, not this one.
-    // Defence in depth: this assertion pins the app's half of the contract so a reader does
+    // Defense in depth: this assertion pins the app's half of the contract so a reader does
     // not delete it as redundant, but the guarantee lives in core.
     const h = app({ files: fakeFiles() });
     fillAndSubmit(h);

@@ -220,7 +220,7 @@ describe('the REAL frame captured from MVS 3.8j TK5', () => {
     return screen;
   }
 
-  it('is recognised as a CUT frame', () => {
+  it('is recognized as a CUT frame', () => {
     // The host's own attribute at O_SF, arrived at through the real data
     // stream: `SBA(1919) ... SF(0x7c)`. 0x7c has PROTECT and NUMERIC, so
     // FA_IS_SKIP (3270ds.h:207) holds.
@@ -417,7 +417,7 @@ describe('parseFrame', () => {
     expect(frame.message).toBe('');
   });
 
-  it('reports an unrecognised status code rather than rejecting it', () => {
+  it('reports an unrecognized status code rather than rejecting it', () => {
     // x3270 aborts with ftCutUnknownControl (ft_cut.c:487-490), but aborting is
     // the state machine's decision and it needs the code to report. So the
     // frame parses and isKnownStatusCode says no.
@@ -557,7 +557,7 @@ describe('parseFrame', () => {
 
   it('rejects an unknown frame type with SC_ABORT_XMIT', () => {
     // `default: ... cut_abort(get_message("ftCutUnknownFrame"), SC_ABORT_XMIT)`
-    // (ft_cut.c:408-411). NOT a silent default: an unrecognised frame type
+    // (ft_cut.c:408-411). NOT a silent default: an unrecognized frame type
     // means we have lost sync, and guessing would write a wrong file.
     const screen = blankScreen();
     markCutFrame(screen);
@@ -735,7 +735,7 @@ describe('writeUploadData, ft_cut.c:513-556', () => {
     expect(r.consumed).toBeLessThan(src.length);
     expect(r.consumed * 2).toBe(O_UP_MAX);
     // A maximal frame reaches 1918 -- the last cell before O_SF. So it DOES
-    // overwrite the response area, which is x3270's behaviour and harmless
+    // overwrite the response area, which is x3270's behavior and harmless
     // (the host is asking for data, not reading a response), but it must never
     // touch O_SF or frame detection would die.
     expect(O_UP_DATA + O_UP_MAX - 1).toBe(O_SF - 1);

@@ -18,7 +18,7 @@ blind) is the most user-hostile one this package can ship.
 ## WHAT THE FAKE HOST IS
 
 A minimal TN3270 server: the standard negotiation (TERMINAL-TYPE, then EOR and
-BINARY both ways), then one Erase/Write carrying plain and coloured fields. It is
+BINARY both ways), then one Erase/Write carrying plain and colored fields. It is
 NOT a substitute for a live host -- it cannot tell us what MVS or VM actually
 send -- and Task 14 remains outstanding. It tells us the client draws, accepts
 keystrokes and cleans up.
@@ -265,7 +265,7 @@ def main():
         ("negotiated a terminal type", host.ttype is not None),
         ("drew the host's plain text", b"HELLO TN3270" in out),
         ("drew the host's second field", b"RED FIELD" in out),
-        ("emitted a 256-colour SGR", re.search(rb"\x1b\[[\d;]*38;5;\d+", out) is not None),
+        ("emitted a 256-color SGR", re.search(rb"\x1b\[[\d;]*38;5;\d+", out) is not None),
         ("echoed the typed characters back to the screen", b"XYZ" in out),
         ("drew a status line", b"\x1b[25;1H" in out),
         ("said 'too small' when shrunk below 24 rows", resize_msg),

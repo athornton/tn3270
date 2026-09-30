@@ -6,7 +6,7 @@
  *
  * ## PURE, AND THAT IS THE POINT
  *
- * This is where reverse video, the cursor, colour and the hidden-field rule are decided,
+ * This is where reverse video, the cursor, color and the hidden-field rule are decided,
  * and it is testable with no canvas, no Xvfb and no Electron. `render.ts` in the TUI is
  * built the same way -- it returns a string and lets the caller write it -- and that is
  * what made the TUI's output diffable and its tests fast. Putting these decisions inside a
@@ -15,7 +15,7 @@
  * ## WHY IT TAKES BOTH THE SNAPSHOT AND THE RESOLVED CELLS
  *
  * They are parallel arrays and each has half of what a glyph needs. `resolve()` gives
- * colour and the attribute flags but its `text` is a STRING, while the atlas is indexed by
+ * color and the attribute flags but its `text` is a STRING, while the atlas is indexed by
  * the font's Character Generator codes, reached from the EBCDIC byte that only the raw
  * snapshot carries. Zipping them by index costs nothing and avoids a Unicode round trip
  * that would lose APL. The design assumed `resolve()` alone would do; it does not.
@@ -33,7 +33,7 @@
  * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `keypad.ts`,
  * `assets.ts` and `blit.ts` all took them from here with `import type` -- while this module
  * value-imports `column` from `cg.ts` and `keypadRegion` from `keypad.ts`. That is an import
- * cycle in the type position: harmless while the imports erase, and a module-initialisation
+ * cycle in the type position: harmless while the imports erase, and a module-initialization
  * ordering bug the day one of them becomes a value. See `geometry.ts` and the guard in
  * `test/module-cycles.test.ts`.
  *
@@ -41,7 +41,7 @@
  */
 
 import {
-  cp037, Colour, type ResolvedCell, type ScreenSnapshot,
+  cp037, Color, type ResolvedCell, type ScreenSnapshot,
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
@@ -104,7 +104,7 @@ export function drawList(
     const col = i % snapshot.cols;
 
     // Reverse video swaps the pair rather than picking a fixed inverse: the cell's own
-    // colours are what a 3279 inverts.
+    // colors are what a 3279 inverts.
     const fg = schemeRgb(scheme, r.reverse ? r.bg : r.fg);
     const bg = schemeRgb(scheme, r.reverse ? r.fg : r.bg);
 
@@ -159,14 +159,14 @@ export function drawList(
  *
  * Neutral white on black, which is a presentation choice rather than a protocol fact: the
  * OIA is OUR chrome, not one of the host's 1920 cells, so nothing in the data stream says
- * what colour it should be. Truncated at the screen width rather than wrapped, because a
+ * what color it should be. Truncated at the screen width rather than wrapped, because a
  * status line that reflowed would move the screen.
  */
 function oiaCells(
   text: string, y: number, cols: number, atlas: AtlasGeometry, scheme: Scheme,
 ): readonly DrawCell[] {
-  const fg = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
-  const bg = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
+  const fg = schemeRgb(scheme, Color.NEUTRAL_WHITE);
+  const bg = schemeRgb(scheme, Color.NEUTRAL_BLACK);
   const out: DrawCell[] = [];
   const chars = [...text].slice(0, cols);
   for (let i = 0; i < chars.length; i++) {

@@ -83,7 +83,7 @@ Task 4.
 >
 > 1. **`dup()` TABS; it does not "advance one position and stop".** Step 4 below is wrong. `kybd.c:1435`
 >    does suppress `key_Character`'s auto-skip for a keyboard Dup, but `Dup_action` then moves the
->    cursor itself (`kybd.c:2790`), and the manual states the net behaviour outright (p. 7-12: "a Tab
+>    cursor itself (`kybd.c:2790`), and the manual states the net behavior outright (p. 7-12: "a Tab
 >    key operation to be performed"). What the suppression buys is that the tab happens ONCE — our
 >    `advanceAfterType` already tabs at end-of-field, so advancing first would skip a whole field.
 >    Implemented as `write; setMDT; tab()`, with both halves mutation-checked.
@@ -101,7 +101,7 @@ Task 4.
 > Also: the constants went beside `Order`, not `PF_AIDS` — they are format control orders, not AIDs.
 > The plan's four helper names were dropped for the file's existing `twoFields()`/`kb(s)` idiom plus a
 > local `threeFields()`. `writeControl`'s second parameter is `'tab' | 'autoSkip'`, not a boolean,
-> because a boolean could not express the correct behaviour. **10 tests, not 6. Suite at 1524.**
+> because a boolean could not express the correct behavior. **10 tests, not 6. Suite at 1524.**
 > (This line said "7 tests, suite at 1521" until the quality review caught it: `46d6b4b` added three
 > more and the commit that rewrote the lines directly above left this one alone. That is the exact
 > failure shape this repo keeps hitting — a later fix reaches the prose body and never the count that
@@ -344,7 +344,7 @@ Co-Authored-By: SLAC AI"
 >    either guard is now a compile error (`TS1360`), where before only prose stood between a
 >    maintainer and "the least diagnosable outcome available". **Zero runtime footprint** — the emitted
 >    JS is `default: action;`, so an unknown `kind` from untrusted JSON is still a silent no-op and
->    `protocol.ts`'s defence is preserved.
+>    `protocol.ts`'s defense is preserved.
 > 5. **The guard MUST sit outside the `try`.** `applyAction`'s `try` wraps the entire switch and its
 >    catch swallows errors, so a guard folded into the switch is swallowed and the dead-button no-op
 >    returns. Mutation-pinned.
@@ -550,7 +550,7 @@ describe('KEYPAD_KEYS', () => {
 
   it('labels fit the width the layout reserves', () => {
     // The canvas layout gives each key a fixed cell width; a longer label would overflow into
-    // its neighbour, silently, because the blitter clips nothing.
+    // its neighbor, silently, because the blitter clips nothing.
     for (const k of KEYPAD_KEYS) expect(k.label.length).toBeLessThanOrEqual(5);
   });
 
@@ -832,7 +832,7 @@ and, in the Alt branch, accept `k` as well as the PA digits:
 
 ```ts
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
-    // Alt-K is c3270's keypad toggle (fb-c3270:48), free to honour here because a real
+    // Alt-K is c3270's keypad toggle (fb-c3270:48), free to honor here because a real
     // KeyboardEvent carries no ESC ambiguity. Checked before PA_CODES so a future Alt binding
     // cannot shadow it silently.
     if (e.key.toLowerCase() === 'k') return { kind: 'toggleKeypad' };
@@ -906,11 +906,11 @@ Co-Authored-By: SLAC AI"
 >    `columnFor` computed `cg % atlas.cols`, **a different function**: `atlas.index` is a sparse packed
 >    map, **175 of its 431 entries differ from their CG code** (first divergence exactly CG 257 → 256,
 >    max CG 543), and `%` also drops the `CG_BOXSOLID` fallback, so an unknown character samples a
->    neighbouring glyph and reads as corruption. Latent only by luck — all 44 distinct label characters
+>    neighboring glyph and reads as corruption. Latent only by luck — all 44 distinct label characters
 >    land where the index is the identity — **and the spec's own ranked font fallback #1 is box-drawing
 >    borders, which is exactly where the non-identity entries live.** Now pinned by two tests against
 >    hand-built non-identity atlases.
-> 2. **`Colour` comes from `@tn3270/core`, not `@tn3270/frontend`.** The plan's import list would not
+> 2. **`Color` comes from `@tn3270/core`, not `@tn3270/frontend`.** The plan's import list would not
 >    have compiled.
 > 3. **`hitTest` AND `KeypadButton` LIVE IN `hittest.ts`, NOT HERE** — see Task 7 Step 4, whose
 >    "`./keypad.js` is relative and fine" was wrong. `dist/hittest.js` is arithmetic with **no import
@@ -1051,7 +1051,7 @@ Expected: FAIL, unresolved import.
 
 ```ts
 import { cp037 } from '@tn3270/core';
-import { KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, Colour, type Action, type Scheme }
+import { KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, Color, type Action, type Scheme }
   from '@tn3270/frontend';
 import { ebcdicToCg } from './cg.js';
 import type { AtlasGeometry, DrawCell } from './drawlist.js';
@@ -1097,8 +1097,8 @@ export const KEYPAD_ROWS_TALL = 6;
 const DRAWN_ROW: readonly number[] = Object.freeze([0, 1, 3, 4, 5]);
 
 export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): KeypadRegion {
-  const fg = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
-  const bg = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
+  const fg = schemeRgb(scheme, Color.NEUTRAL_WHITE);
+  const bg = schemeRgb(scheme, Color.NEUTRAL_BLACK);
   const cells: DrawCell[] = [];
   const buttons: KeypadButton[] = [];
 
@@ -1369,8 +1369,8 @@ Co-Authored-By: SLAC AI"
 >    and the measured precedent is that `if (e.altKey) return;` in its `keydown` listener leaves the
 >    suite fully green while every Alt chord is dead. `keypad.test.ts` now probes `hitTestAt` **at
 >    scale 3 with a non-zero centring offset**, the configuration that makes both plausible mistakes
->    fatal. Both were run: multiplying instead of dividing fails a CENTRE probe, and dropping the
->    offset **passes every centre probe** and fails only the last-device-pixel one — which is why both
+>    fatal. Both were run: multiplying instead of dividing fails a CENTER probe, and dropping the
+>    offset **passes every center probe** and fails only the last-device-pixel one — which is why both
 >    probes exist. That narrowed Task 13's job to the plumbing.
 > 2. **A CLICK ON AN ERROR SCREEN ERASED THE ERROR.** `onError` repaints as text but leaves `last`
 >    intact, so a `mousedown` at a button's former position passed the keypad guard, sent the action
@@ -1439,7 +1439,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (last?.keypad === undefined) return;
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(last, within);
-  const at = centre(last, within, scale);
+  const at = center(last, within, scale);
   const x = (e.offsetX - at.x) / scale;
   const y = (e.offsetY - at.y) / scale;
   const button = hitTest(last.keypad.buttons, x, y);
@@ -1487,7 +1487,7 @@ Expected: all green, `2/2 goldens matched`, `ok 15 chords, 13 actions in order`.
 **THIS PARAGRAPH WAS WRONG AND IS CORRECTED — 2026-09-16, Task 5's review.** It used to say
 "`./keypad.js` is relative and fine". **Relative-ness is not graph-cleanliness**, which is the very
 point `canvas/src/index.ts:12-16` already makes about `drawlist.js`. `keypad.ts` value-imports
-`column` from `drawlist.js` plus `cp037`/`Colour` from `@tn3270/core` and
+`column` from `drawlist.js` plus `cp037`/`Color` from `@tn3270/core` and
 `KEYPAD_KEYS`/`schemeRgb` from `@tn3270/frontend`, so importing it into the renderer:
 
 1. **fails `renderer-imports.test.ts`** — demonstrated, both assertions, by pulling `dist/drawlist.js`
@@ -1547,7 +1547,7 @@ Co-Authored-By: SLAC AI"
 
 **Files:**
 - Modify: `packages/gui/src/main.ts`
-- Test: `packages/gui/test/` — add to whichever file covers `main.ts`'s argv/seam behaviour; if
+- Test: `packages/gui/test/` — add to whichever file covers `main.ts`'s argv/seam behavior; if
   none does, this task's coverage is Tasks 13 and 14, and say so in your report.
 
 - [ ] **Step 1: Hold the flag and intercept the action**
@@ -1941,7 +1941,7 @@ Co-Authored-By: SLAC AI"
 >    reddens** — the third over-declaration on this branch after Tasks 5 and 6. Pinned from both
 >    directions now.
 > 3. **`chordFor` COMPARES ACTIONS STRUCTURALLY, NOT BY `JSON.stringify`.** Stringify compares
->    *serialisations*: reordering `{ kind, n }` in either table would stop matching and show a blank —
+>    *serializations*: reordering `{ kind, n }` in either table would stop matching and show a blank —
 >    and **a blank here reads as "no chord exists", a wrong answer indistinguishable from a right
 >    one.**
 > 4. **THE SWEEP OVER EVERY KEY IS A MIRROR TEST, and `dcb644f` backed it with ground truth.** It
@@ -2035,7 +2035,7 @@ import type { Geometry } from './render.js';
  * ## WHY A LIST AND NOT c3270'S KEYPAD
  *
  * c3270's keypad is about 16 rows tall (`Common/c3270/keypad.outline`). This TUI refuses to draw
- * below 24 rows and centres the screen above that, so a faithful keypad would have to hide most of
+ * below 24 rows and centers the screen above that, so a faithful keypad would have to hide most of
  * the 3270 display in order to show itself. A list overlays a corner and can refuse to open at all.
  *
  * ## THE CHORDS COME FROM `BINDING_INTENT`, NOT FROM A SECOND LIST
@@ -2364,7 +2364,7 @@ Co-Authored-By: SLAC AI"
 ### Task 13: `TN3270_GUI_CLICKS` — real mouse events at real buttons
 
 > **AS BUILT (`24c36ae`, with `a95dbd2` and `044f9e8` narrowing the task first). THREE PLACES THE PLAN
-> AND THE SOURCE DISAGREED, ALL RESOLVED IN THE SOURCE'S FAVOUR.**
+> AND THE SOURCE DISAGREED, ALL RESOLVED IN THE SOURCE'S FAVOR.**
 >
 > 1. **THE SEAM DOES NOT IMPLY THE KEYPAD, AND CANNOT.** Step 1's comment said it turns the keypad on;
 >    two on-switches would toggle it back **off**. `clicks.mjs` shows it with a real `Ctrl+K` instead —
@@ -2419,7 +2419,7 @@ In `SEAM`:
    *
    * Labels, not coordinates. A coordinate list would be a second copy of the layout, and it would
    * pass while the layout was wrong — which is the one thing this seam exists to catch. Main asks
-   * the renderer for the button's centre and delivers a real `mouseDown`/`mouseUp` pair through
+   * the renderer for the button's center and delivers a real `mouseDown`/`mouseUp` pair through
    * `sendInputEvent`, so the click enters at the top of Chromium's input pipeline exactly as
    * `TN3270_GUI_KEYS` does for keys.
    *
@@ -2437,7 +2437,7 @@ Add, alongside `maybeSendKeys`:
  * Click each named button, by asking the renderer where it is.
  *
  * THE RENDERER IS ASKED rather than told, because it is the only place that knows the scale and the
- * centring offset it last painted with. Computing them here would duplicate `bestScale`/`centre`
+ * centring offset it last painted with. Computing them here would duplicate `bestScale`/`center`
  * and would agree with the renderer right up until one of them changed.
  */
 async function maybeSendClicks(win: BrowserWindow): Promise<void> {
@@ -2445,7 +2445,7 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
   await new Promise((r) => setTimeout(r, SEAM.keysMs));
   for (const label of SEAM.clicks.split(',')) {
     const at = await win.webContents.executeJavaScript(
-      `window.__tn3270ButtonCentre(${JSON.stringify(label)})`,
+      `window.__tn3270ButtonCenter(${JSON.stringify(label)})`,
     ) as { x: number; y: number } | null;
     if (at === null) {
       process.stdout.write(`clicks: NO BUTTON ${label}\n`);
@@ -2466,7 +2466,7 @@ Call it from both the replay branch and the connected path, beside `maybeSendKey
 `quitIfKeysOnly` treat a clicks-only run the way it treats a keys-only one. **Read that function and
 extend its condition rather than adding a second quit path.**
 
-- [ ] **Step 3: Expose the button centre from the renderer**
+- [ ] **Step 3: Expose the button center from the renderer**
 
 In `renderer.ts`:
 
@@ -2474,18 +2474,18 @@ In `renderer.ts`:
 /**
  * TEST SEAM, and the only thing in this file that exists for a test.
  *
- * Returns the CENTRE of a named button in viewport pixels, so `clicks.mjs` can click it without
+ * Returns the CENTER of a named button in viewport pixels, so `clicks.mjs` can click it without
  * knowing the layout, the scale or the offset. Returning coordinates rather than firing the action
  * is what keeps the seam honest: the click still goes through Chromium.
  */
-(window as unknown as { __tn3270ButtonCentre: (label: string) => { x: number; y: number } | null })
-  .__tn3270ButtonCentre = (label) => {
+(window as unknown as { __tn3270ButtonCenter: (label: string) => { x: number; y: number } | null })
+  .__tn3270ButtonCenter = (label) => {
     if (last?.keypad === undefined) return null;
     const button = last.keypad.buttons.find((b) => b.label === label);
     if (button === undefined) return null;
     const within = { width: window.innerWidth, height: window.innerHeight };
     const scale = bestScale(last, within);
-    const at = centre(last, within, scale);
+    const at = center(last, within, scale);
     return {
       x: at.x + (button.x + button.w / 2) * scale,
       y: at.y + (button.y + button.h / 2) * scale,
@@ -2495,7 +2495,7 @@ In `renderer.ts`:
 
 - [ ] **Step 4: Write the harness**
 
-`packages/gui/scripts/clicks.mjs`, modelled on `keys.mjs` — **copy its structure, including the
+`packages/gui/scripts/clicks.mjs`, modeled on `keys.mjs` — **copy its structure, including the
 staleness guard over `gui` and `canvas`, the four ordered bails (`error`, then `signal`, then
 `status`, then the seam-ran check) and the `renderer[3]` filter.** Differences:
 
@@ -2526,7 +2526,7 @@ Expected output: `ok 8 buttons, 8 actions in order`.
 
 - [ ] **Step 5: Pin the invocation**
 
-`packages/gui/test/clicks-harness-flags.test.ts`, modelled on `keys-harness-flags.test.ts`: read
+`packages/gui/test/clicks-harness-flags.test.ts`, modeled on `keys-harness-flags.test.ts`: read
 `clicks.mjs` as text and pin `--no-sandbox`, `--disable-gpu`, `TN3270_GUI_REPLAY` (so it can reach
 no host), the `Ctrl+K` that shows the keypad, `Math.max(expected.length, actual.length)`, the
 zero-length bail, the `NO BUTTON` bail, the ordered `error`/`signal`/`status` checks, and the
@@ -2552,7 +2552,7 @@ measured facts, so nobody re-derives them:**
 1. **In native Electron mode the centring offset can NEVER be non-zero, at any scale.** `fit()`
    (`main.ts:312`; this said `:290`, one of the four places that number went stale)
    sets the content size to exactly `list.width * scale` × `list.height * scale`, so
-   `window.innerWidth === list.width * scale` and `centre` returns `(0,0)` for every model.
+   `window.innerWidth === list.width * scale` and `center` returns `(0,0)` for every model.
    `TN3270_GUI_SIZE` is meaningful **only alongside `url`** (`main.ts:101`), where `fit()` never runs — so
    an offset test must go through the URL seam, `browser-shot.mjs`-style.
 2. **720x350 is derived, not chosen.** `xvfb.mjs:26` starts `:99` at `1280x1024`; `fit()` takes 80% of the
@@ -2987,7 +2987,7 @@ keeps moving — one citation was already converted for exactly that reason.
 >   `key.col * atlas.cellWidth`). `render.ts`'s `overlayParts` uses 1-based terminal rows, which is
 >   that file's own convention throughout.
 >
-> **The two things worth a reviewer's eye, neither a defect:** `__tn3270ButtonCentre` is installed on
+> **The two things worth a reviewer's eye, neither a defect:** `__tn3270ButtonCenter` is installed on
 > `window` unconditionally rather than behind the seam env var, so it exists in a shipped renderer —
 > it returns coordinates only, reaches no `Session` and fires no action, and being a `window` global
 > rather than a fifth bridge function is what keeps the renderer shared. And `keypadRegion`'s
@@ -3079,7 +3079,7 @@ quietly capped, because a silent cap makes keys past line 12 unreachable.
 **Type consistency:** `KeypadKey` (Task 3) is `{label, action, row, col, name}`, used by Task 5's
 `keypadRegion` and Tasks 11's `overlayLines`. `KeypadButton` (Task 5) is `{x, y, w, h, action,
 label}`, produced by `keypadRegion`, consumed by `hitTest` (Task 5), `renderer.ts` (Task 7) and
-`__tn3270ButtonCentre` (Task 13). `KeypadRegion` is `{y, width, height, cells, buttons}`, produced
+`__tn3270ButtonCenter` (Task 13). `KeypadRegion` is `{y, width, height, cells, buttons}`, produced
 by Task 5 and carried by `DrawList.keypad` in Task 6. `drawList`'s sixth parameter is
 `showKeypad = false` in Task 6 and is passed by that name in Tasks 8 and 9.
 

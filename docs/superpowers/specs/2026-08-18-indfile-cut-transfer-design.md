@@ -15,7 +15,7 @@ Prerequisite reading: `docs/live-testing.md` (host runbook), and x3270's
 
 ## Governing principle
 
-**Where CUT behaviour is underspecified, do what x3270 does.** It is the client these
+**Where CUT behavior is underspecified, do what x3270 does.** It is the client these
 hosts have actually been driven with for decades, so its choices are the de facto
 protocol. `ft_cut_ds.h` is 82 lines and documents every offset, frame type, status code
 and AID; `ft_cut.c` is the algorithm. Both are on local disk. Diff against them rather
@@ -48,7 +48,7 @@ This matters because DFT is the more modern protocol and the natural assumption 
 
 - **VM/370 CE ships `IND$FILE`** as part of the MECAFF tools: `IND$FILE C` and
   `IND$FILE TEXT` on the `MECAFF` userid's E disk (`MCF294`), `IND$FILE C` and
-  `IND$FILE H` on F (`MCF394`). The C source is on disk, so host-side behaviour can be
+  `IND$FILE H` on F (`MCF394`). The C source is on disk, so host-side behavior can be
   read rather than guessed.
 - **The executables are `IND$FILD` and `IND$FILS`, NOT `IND$FILE`.** An earlier draft
   of this spec had this wrong. `IND$FILE` exists only as `C` (source) and `TEXT`
@@ -172,7 +172,7 @@ protocol offers no client-initiated retransmit to recover with in any case.
 
 **PREREQUISITE, and it gates this decision:** confirm MECAFF actually populates that
 byte. If it writes zero, every frame would log a spurious warning and the feature
-collapses to x3270's behaviour (ignore it). Measure before trusting a mismatch as
+collapses to x3270's behavior (ignore it). Measure before trusting a mismatch as
 meaningful — see the probe below.
 
 ## Architecture
@@ -422,7 +422,7 @@ sent 249, back 249, IDENTICAL: true
 
 Both transfers ran **in one session**, upload then download without reconnecting.
 
-**`Recfm=fixed` pads, and that is correct behaviour rather than a bug.** The same
+**`Recfm=fixed` pads, and that is correct behavior rather than a bug.** The same
 payload with `Recfm=fixed,Lrecl=80` came back as **320 bytes: the original 249
 followed by 71 nulls.** `ceil(249/80) = 4` records × 80 = 320, padding 71 — which
 matches the observed padding exactly. A fixed-record dataset has no way to record
@@ -495,7 +495,7 @@ like retransmit support and is the OPPOSITE direction — those are codes MECAFF
 a patched build XORed 0x15 into the checksum of upload frame 2 only, so the host saw a
 good frame and then a bad one. Results:
 
-| run | probe fired | host behaviour | outcome |
+| run | probe fired | host behavior | outcome |
 |---|---|---|---|
 | control | no | 5 data-request frames | `Transfer complete, 5000 bytes` |
 | corrupt frame 2 | yes | **5 data-request frames — identical** | `Transfer complete, 5000 bytes` |
@@ -551,7 +551,7 @@ reply no longer sends a unit the host never asked for.
 function already read `X'FF'` correctly as a QCODE in its Null branch, then read
 `X'80'` the other way thirty lines later. A file that contradicts itself about the same
 boilerplate is a stronger signal than either reading on its own. Six unit tests and one
-session test had been written to assert the wrong behaviour and were corrected; one
+session test had been written to assert the wrong behavior and were corrected; one
 describe block testing a now-nonexistent code path was deleted rather than adapted.
 
 **VM/CMS TRANSFER WORKS, BOTH DIRECTIONS — verified live 2026-08-19.** There was never
@@ -561,7 +561,7 @@ runs were driven:
 1. `HostFile=PROFILE EXEC A` — **rejected by our own argument parser.** `splitArgs`
    (`packages/cli/src/commands.ts:54`) splits on commas *or spaces*, so a CMS
    three-part filename becomes three keyword tokens and `EXEC` looks like an option
-   needing a value. **Quote it: `HostFile="PROFILE EXEC A"`.** The parser honours
+   needing a value. **Quote it: `HostFile="PROFILE EXEC A"`.** The parser honors
    double quotes. This is a usability trap specific to the CMS dialect — TSO dataset
    names have no spaces — and it should probably be documented in the runbook or
    handled at the call site.

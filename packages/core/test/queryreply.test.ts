@@ -8,7 +8,7 @@ import {
   type Capability,
 } from '../src/queryreply.js';
 import { AID, Qcode, ReqTyp, Sfid, XAH } from '../src/constants.js';
-import { Colour, colourRgb } from '../src/palette.js';
+import { Color, colorRgb } from '../src/palette.js';
 
 const GEOMETRY = { rows: 24, cols: 80 };
 
@@ -66,9 +66,9 @@ describe('query reply', () => {
     expect(AID.SF).toBe(0x88);
   });
 
-  it('sends exactly the five units we honour', () => {
+  it('sends exactly the five units we honor', () => {
     // WAS THREE. Color and Highlighting joined the list once SA execution and
-    // render.ts's colour resolution made them honest; the order is the wire order
+    // render.ts's color resolution made them honest; the order is the wire order
     // and is asserted, because units go out in capability-list order.
     const parsed = units(buildQueryReply(DEFAULT_CAPABILITIES, GEOMETRY));
     expect(parsed).toHaveLength(5);
@@ -152,9 +152,9 @@ describe('query reply', () => {
     // fails naming the byte rather than just "unit 0x81 differs from x3270".
     //
     // UNITS: if this assertion is what failed, you have probably "fixed" the
-    // millimetres-versus-inches inconsistency described at length in the KNOWN
+    // millimeters-versus-inches inconsistency described at length in the KNOWN
     // INCONSISTENCY comment in queryreply.ts. Read that comment before changing
-    // it. 0x01 (millimetres) disagrees with the inch-scaled Xr/Yr below, and it
+    // it. 0x01 (millimeters) disagrees with the inch-scaled Xr/Yr below, and it
     // is kept anyway because these exact bytes are what the live host accepted
     // from x3270. Changing UNITS alone makes the record differ from the only
     // known-good reference we have.
@@ -324,7 +324,7 @@ describe('query reply', () => {
  * (pages.txt:3558, :3988).
  */
 describe('Color query reply', () => {
-  it('reports 16 colours with green as the required default entry', () => {
+  it('reports 16 colors with green as the required default entry', () => {
     const body = unitBody(buildReply({ kind: 'query' }, DEFAULT_CAPABILITIES, GEOMETRY),
       Qcode.COLOR);
     // p. 6-36's table (pages.txt:9214-9225): byte 4 FLAGS, byte 5 NP, then NP
@@ -342,20 +342,20 @@ describe('Color query reply', () => {
     // that send Query Reply (Color) are required to have the values CAV1 =
     // X' 00', Cl 1 = value associated with the device default color, as the
     // first entry in the GAV/Cl pairs list." (pages.txt:9268-9270.) So CAV1 is
-    // 0x00 — the "device default" colour value, our XAC_DEFAULT — and CI1 must
-    // name a real colour.
+    // 0x00 — the "device default" color value, our XAC_DEFAULT — and CI1 must
+    // name a real color.
     expect(body[2]).toBe(0x00);
     // GREEN, not white and not black. x3270 writes `0xf0 + HOST_COLOR_GREEN`
     // with HOST_COLOR_GREEN = 4 (sf.c:746, 3270ds.h:317), i.e. 0xF4, and
-    // p. 6-36's colour table gives "Green X'F4'" (pages.txt:9251).
+    // p. 6-36's color table gives "Green X'F4'" (pages.txt:9251).
     //
     // This is the byte that has to agree with render.ts, and asserting the
     // constant rather than the literal is what keeps the two honest: level 4 of
-    // render's resolution yields Colour.GREEN for an ordinary unprotected
+    // render's resolution yields Color.GREEN for an ordinary unprotected
     // normal-intensity field, so what we advertise as the default is what we
     // actually paint.
-    expect(body[3]).toBe(Colour.GREEN);
-    expect(Colour.GREEN).toBe(0xf4);
+    expect(body[3]).toBe(Color.GREEN);
+    expect(Color.GREEN).toBe(0xf4);
     // The manual also forbids the reverse mapping: "The CAV(n) value of X'OO'
     // can have an associated Cl(n) value of any of the defined values except
     // X' 00'." (pages.txt:9266-9267.)
@@ -364,8 +364,8 @@ describe('Color query reply', () => {
     // Then fifteen IDENTITY pairs, 0xF1..0xFF — "The device must either display
     // the color whose color identifier is the same as the color attribute value
     // or display the device default color" (pages.txt:9236-9238), and identity
-    // is the first of those. Every one of these is a real claim we honour:
-    // PALETTE_3279 has an entry for each, so render.ts's usableColour accepts it
+    // is the first of those. Every one of these is a real claim we honor:
+    // PALETTE_3279 has an entry for each, so render.ts's usableColor accepts it
     // rather than falling through to a default.
     for (let i = 0; i < 15; i++) {
       const cav = 0xf1 + i;
@@ -374,7 +374,7 @@ describe('Color query reply', () => {
       // Not a restatement of the line above: this asserts the palette can render
       // what the pair promises. A CAV we advertise identity for but cannot paint
       // would be a lie the host acts on.
-      expect(() => colourRgb(cav)).not.toThrow();
+      expect(() => colorRgb(cav)).not.toThrow();
     }
     // 2 header bytes + 16 pairs. NOT 4 + 30, which the plan's expected length
     // said: the plan counted from the start of the UNIT (including L L SFID
@@ -396,11 +396,11 @@ describe('Color query reply', () => {
     // two travel together. Ours does not: TERMINAL_TYPE is IBM-3278-2-E regardless
     // of mode3279 (constants.ts), and render.ts's mode3279 is a per-render
     // presentation flag with no path to this module. Gating on it would mean the
-    // same session advertising different colour support depending on a rendering
+    // same session advertising different color support depending on a rendering
     // option, which is not something a Query Reply is allowed to depend on.
     //
     // The claim also stays true under mode3279: false, because 0x00 does not mean
-    // "no colour" — p. 6-36 says CI "identif[ies] the colors that are displayed"
+    // "no color" — p. 6-36 says CI "identif[ies] the colors that are displayed"
     // and lets a device answer with "the device default color"
     // (pages.txt:9236-9238). Advertising identity says we distinguish the
     // sixteen, which we do — Screen stores the CAV per cell whatever the renderer
@@ -415,7 +415,7 @@ describe('Color query reply', () => {
 
   it('omits the Default Background Color self-defining parameter x3270 can append', () => {
     // x3270 appends a 4-byte SDP `04 02 00 f0` when its screen has a background
-    // colour AND appres.qr_bg_color is set (sf.c:756-765). We do not, and this
+    // color AND appres.qr_bg_color is set (sf.c:756-765). We do not, and this
     // pins that: the unit is exactly the base list with nothing after it, so a
     // length of 2 + 32 leaves no room for an SDP. Ours is the same choice the
     // captured x3270 made — the fixture's Color unit is L=0x26 = 38 = 4 + 2 + 32,
@@ -453,7 +453,7 @@ describe('Highlighting query reply', () => {
       // NORMAL instead, which names the action outright. x3270 does the same
       // (sf.c:774-775).
       XAH.DEFAULT, XAH.NORMAL,
-      // Then four identities. Each is a claim render.ts honours: it sets exactly
+      // Then four identities. Each is a claim render.ts honors: it sets exactly
       // one of blink/reverse/underscore/intensify by equality against these.
       XAH.BLINK, XAH.BLINK,
       XAH.REVERSE, XAH.REVERSE,
@@ -661,7 +661,7 @@ describe('Query List selection', () => {
   it('sends Summary exactly once when the list names it', () => {
     // "the 3270 device or / workstation does not return duplicate Query Replies"
     // (pages.txt:8542-8544). Trivial now that Summary is never force-prepended,
-    // but kept: it is the regression test for reintroducing that behaviour.
+    // but kept: it is the regression test for reintroducing that behavior.
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.SUMMARY] },
       DEFAULT_CAPABILITIES, GEOMETRY);
@@ -851,7 +851,7 @@ describe('a capability a plain Query does not return', () => {
 });
 
 // REMOVED: a describe block asserting that a QCODE-List reply prepends the
-// CALLER'S Summary capability rather than this module's. That behaviour is gone —
+// CALLER'S Summary capability rather than this module's. That behavior is gone —
 // Summary is no longer forced into a QCODE-List reply at all, because p. 6-96's
 // "QCODE List=X'80'" is Summary's own QCODE and not a REQTYP. Nothing replaced it:
 // there is no longer a substitution to get wrong.

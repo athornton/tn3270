@@ -1,5 +1,5 @@
 import { AID, Qcode, ReqTyp, Sfid, XAH } from './constants.js';
-import { Colour } from './palette.js';
+import { Color } from './palette.js';
 
 /**
  * Query Reply, the answer to a host's Read Partition (Query).
@@ -8,14 +8,14 @@ import { Colour } from './palette.js';
  * advertising something later is one list entry and the Summary unit cannot
  * disagree with what is actually sent.
  *
- * Every unit here is one we honour, which is the rule that decides what goes in.
+ * Every unit here is one we honor, which is the rule that decides what goes in.
  * Stage 2a shipped the minimal honest set — Summary, Usable Area, Implicit
  * Partition — and deliberately withheld Color and Highlighting because they
  * invite the SA orders it did not implement. Now that SA and the four-level
- * colour resolution are in, the two are honest and are advertised.
+ * color resolution are in, the two are honest and are advertised.
  *
- * ADVERTISING THEM IS NOT WHAT MAKES HOST COLOUR ARRIVE. MVS 3.8j TK5 sends SA
- * colour whether or not we ask — the committed trace fixture has 113 SA orders
+ * ADVERTISING THEM IS NOT WHAT MAKES HOST COLOR ARRIVE. MVS 3.8j TK5 sends SA
+ * color whether or not we ask — the committed trace fixture has 113 SA orders
  * against a client that advertised neither unit — so these two are for
  * correctness with better-behaved hosts, not a prerequisite. x3270 sends ten
  * units; we still send five. See the stage 2a design doc.
@@ -170,7 +170,7 @@ const sdp = (id: number, params: number[]): number[] => [2 + params.length, id, 
  * (QCODE List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) Note that
  * covers QCODE List, so a list naming only 0x81 still gets Summary. buildReply
  * enforces this; see the note there, which is also where x3270's narrower
- * behaviour is recorded.
+ * behavior is recorded.
  */
 const summary: Capability = {
   qcode: Qcode.SUMMARY,
@@ -200,7 +200,7 @@ const summary: Capability = {
  * The fixed values are x3270's (Common/sf.c:711-732, do_qr_usable_area), which
  * this host accepted.
  * They are dimensional constants of the device, not capability claims, so
- * copying them advertises nothing we do not honour. Each is checked against the
+ * copying them advertises nothing we do not honor. Each is checked against the
  * manual's byte table below.
  */
 const usableArea: Capability = {
@@ -212,7 +212,7 @@ const usableArea: Capability = {
     // FLAGS byte 4. Bits 4-7 are ADDR; X'1' = "12/14-bit addressing allowed"
     // (pages.txt:11601). PP, HC and the reserved bits are all zero: we are a
     // display, not a page printer and not a hard copy device. This is a real
-    // claim and we honour it — address.ts decodeAddress handles both the 14-bit
+    // claim and we honor it — address.ts decodeAddress handles both the 14-bit
     // binary and 12-bit coded forms and rejects the reserved 10 flag.
     0x01,
     // FLAGS byte 5. VCP=0 (variable cells not supported — which is why no
@@ -228,15 +228,15 @@ const usableArea: Capability = {
     ...u16(alt(geometry).rows), // 8-9  H: height of usable area, in cells
     // 10 UNITS. The manual's values are "X'OO' Inches" / "X'01' Millimeters"
     // (pages.txt:11619-11620; the O in X'OO' is OCR of a zero). So 0x01 does
-    // mean millimetres, matching x3270's own comment "units (mm)" (sf.c:720).
+    // mean millimeters, matching x3270's own comment "units (mm)" (sf.c:720).
     //
     // KNOWN INCONSISTENCY, inherited deliberately from x3270 and NOT a typo
-    // here. This byte says millimetres, but the Xr/Yr fractions below are
+    // here. This byte says millimeters, but the Xr/Yr fractions below are
     // inch-scaled, so the pair does not describe a physical device. Worked out:
-    // Xr = 10/741 is 1/74.1, i.e. 74.1 pel centres per unit; at 9 pels per cell
+    // Xr = 10/741 is 1/74.1, i.e. 74.1 pel centers per unit; at 9 pels per cell
     // and 80 cells that is 9.7 units across. Read as INCHES the screen is
     // 9.7 x 5.2 in, an 11-inch diagonal, which is a real 3279-2. Read as
-    // MILLIMETRES it is 9.7 x 5.2 mm, which is absurd. The manual's own worked
+    // MILLIMETERS it is 9.7 x 5.2 mm, which is absurd. The manual's own worked
     // example settles the scale: "UNITS X'OO' / Xr X' 00020091 ' (2/145 inch)"
     // for a device with "72.5 pels/inch horizontally" (pages.txt:11762-11765),
     // and 2/145 is exactly 1/72.5 — the same inches-per-pel form as 10/741.
@@ -255,12 +255,12 @@ const usableArea: Capability = {
     // a single number is the mistake to avoid.
     0x00, 0x0a, 0x02, 0xe5,
     // 15-18 Yr: same numerator/denominator form in the Y direction.
-    // 0x0002 / 0x006f = 2/111, i.e. 55.5 pel centres per unit. x3270's
+    // 0x0002 / 0x006f = 2/111, i.e. 55.5 pel centers per unit. x3270's
     // Yr_3279_2 = 0x0002006f (sf.c:57).
     0x00, 0x02, 0x00, 0x6f,
     // 19 AW: "Number of X units in default cell" (pages.txt:11632). "X units"
     // are the pel pitches defined by Xr, so this is 9 pels of cell width — NOT
-    // a count of millimetres or inches. x3270's SW_3279_2 = 0x09 (sf.c:54).
+    // a count of millimeters or inches. x3270's SW_3279_2 = 0x09 (sf.c:54).
     0x09,
     // 20 AH: "Number of Y units in default cell" (pages.txt:11633), so 12 pels
     // of cell height. 9x12 is the standard 3279 cell. SH_3279_2 = 0x0c (sf.c:55).
@@ -297,7 +297,7 @@ const usableArea: Capability = {
  * NOTE we differ from x3270 in DERIVATION, not in bytes: x3270 hardcodes the
  * default as literal 80 and 24 (sf.c:919-920) and uses maxCOLS/maxROWS for the
  * alternate. Its two alternate comments are also swapped — sf.c:921 writes
- * maxCOLS labelled "alternate height", sf.c:922 writes maxROWS labelled
+ * maxCOLS labeled "alternate height", sf.c:922 writes maxROWS labeled
  * "alternate width" — so do not read those labels as authority for the field
  * order; the manual's WA-then-HA table is. We drive all four from the geometry,
  * which equals x3270's output at 24x80 and stays self-consistent off it.
@@ -332,15 +332,15 @@ const implicitPartition: Capability = {
  *    Query Reply (Color) are required to have the values CAV1 = X' 00', Cl 1 =
  *    value associated with the device default color, as the first entry"
  *    (pages.txt:9268-9270). CAV1 = X'00' is XAC_DEFAULT, the "device default"
- *    colour VALUE — the same 0x00 render.ts's usableColour rejects so that
- *    resolution falls through to the base map. CI1 must name a real colour, and
+ *    color VALUE — the same 0x00 render.ts's usableColor rejects so that
+ *    resolution falls through to the base map. CI1 must name a real color, and
  *    may be anything "except X' 00'" (pages.txt:9266-9267).
  *  - CI1 IS GREEN, not white and not black. x3270 writes `0xf0 +
- *    HOST_COLOR_GREEN` = 0xF4 (sf.c:746, 3270ds.h:317), and p. 6-36's colour
- *    table gives "Green X'F4'" (pages.txt:9251). Taken from Colour.GREEN rather
+ *    HOST_COLOR_GREEN` = 0xF4 (sf.c:746, 3270ds.h:317), and p. 6-36's color
+ *    table gives "Green X'F4'" (pages.txt:9251). Taken from Color.GREEN rather
  *    than written as a literal because it must agree with render.ts: level 4
  *    resolves an ordinary unprotected normal-intensity field to GREEN, so the
- *    advertised default is the colour we actually paint.
+ *    advertised default is the color we actually paint.
  *  - The remaining fifteen are IDENTITY pairs, 0xF1..0xFF. The manual allows
  *    either identity or the device default — "The device must either display the
  *    color whose color identifier is the same as the color attribute value or
@@ -356,7 +356,7 @@ const implicitPartition: Capability = {
  * telnet.c:2104), so for x3270 the negotiation and the rendering travel
  * together. Ours do not. TERMINAL_TYPE is IBM-3278-2-E regardless of mode3279,
  * which is a per-render presentation flag with no path into this module.
- * Gating on it would make the same session advertise different colour support
+ * Gating on it would make the same session advertise different color support
  * depending on a rendering option the host cannot see.
  *
  * It also stays TRUE under mode3279: false, which is why the divergence is safe
@@ -366,7 +366,7 @@ const implicitPartition: Capability = {
  * CAV per cell whatever a later renderer chooses to do with it.
  *
  * NO Default Background Color self-defining parameter. x3270 can append a 4-byte
- * `04 02 00 f0` when its screen has a background colour and appres.qr_bg_color is
+ * `04 02 00 f0` when its screen has a background color and appres.qr_bg_color is
  * set (sf.c:756-765); the captured x3270 did not, and neither do we — we have no
  * settable default background to report.
  */
@@ -379,7 +379,7 @@ const color: Capability = {
     // reason sdp() counts itself and buildQueryReply derives L: a hand-written
     // count is a magic number that a later edit to the pairs would leave stale,
     // and a host that trusts NP would then mis-parse the rest of the record.
-    const pairs = [[0x00, Colour.GREEN]];
+    const pairs = [[0x00, Color.GREEN]];
     for (let cav = 0xf1; cav <= 0xff; cav++) pairs.push([cav, cav]);
     return [0x00, pairs.length, ...pairs.flat()];
   },
@@ -405,7 +405,7 @@ const color: Capability = {
  *    (pages.txt:10329-10331) — true but circular. x3270 answers XAH_NORMAL
  *    (sf.c:774-775) and so do we.
  *
- * The other four are identities, and each is a claim render.ts honours: it sets
+ * The other four are identities, and each is a claim render.ts honors: it sets
  * exactly one of blink/reverse/underscore/intensify by equality against these
  * values. Exclusivity is the architecture's, not ours: "This structured field
  * indicates that the device supports highlighting on an exclusive basis. That
@@ -654,7 +654,7 @@ export function buildNullQueryReply(geometry: ScreenGeometry): Uint8Array {
  * unconditional: "The Summary Query Reply must always be sent inbound in reply
  * to a Read Partition / structured field specifying Query, or Query List (QCODE
  * List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) x3270 does NOT
- * honour that for a QCODE List — its filter is a plain membership test,
+ * honor that for a QCODE List — its filter is a plain membership test,
  * sf.c:268-272:
  *
  *     for (i = 0; i < NSR; i++) {

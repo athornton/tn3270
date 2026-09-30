@@ -126,7 +126,7 @@ export const Tn3270eReason = {
  *
  * RFC 2355 does not enumerate these; x3270 decodes them in `unbind_reason`
  * (Common/telnet.c:2592) and the wire is the authority. THE GAPS ARE REAL — there is
- * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognised
+ * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognized
  * reason is reported as unknown rather than guessed at.
  *
  * BIND_FORTHCOMING IS THE OPERATIONALLY INTERESTING ONE: it means another BIND is
@@ -397,7 +397,7 @@ export const ReadPartitionType = {
  *     #define   SF_RPQ_ALL	0x80	//   all
  *
  * B'11' (0xC0) is "Reserved" (pages.txt:6361) and there is no entry for it:
- * x3270 rejects an unrecognised request type outright (sf.c:301-303, `default:
+ * x3270 rejects an unrecognized request type outright (sf.c:301-303, `default:
  * ... return PDS_BAD_CMD`), and so do we.
  *
  * NOTE x3270 compares `buf[5]` against these WITHOUT masking off bits 2-7, so a
@@ -521,7 +521,7 @@ export const XA_3270 = 0xc0;
  *
  * Do not confuse `RESET` (0x00 as a TYPE, meaning reset-all) with
  * `XAC_DEFAULT` below (0x00 as a VALUE under FOREGROUND/BACKGROUND, meaning
- * "device default colour"). Both appear in the committed TK5 fixture (101
+ * "device default color"). Both appear in the committed TK5 fixture (101
  * FOREGROUND, 12 RESET), so a conflation is not hypothetical.
  *
  * CHARSET is named but deliberately NOT implemented — it selects Programmable
@@ -559,7 +559,7 @@ export const XAH = {
   INTENSIFY: 0xf8,
 } as const;
 
-/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
+/** Color value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
 export const XAC_DEFAULT = 0x00;
 
 /**

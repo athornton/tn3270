@@ -47,7 +47,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  * Listed explicitly rather than filtered by a `--` prefix rule, because our own
  * `--terminal-type` takes a VALUE: a prefix rule either eats that value or needs to know
  * about it, and both readings were wrong in the first draft of this file. Anything not
- * named here still reaches `parseGuiArgs`, so an unrecognised flag is still an error --
+ * named here still reaches `parseGuiArgs`, so an unrecognized flag is still an error --
  * silently swallowing one is what produces a session that negotiates something nobody
  * asked for.
  */
@@ -102,7 +102,7 @@ const SEAM = Object.freeze({
    *
    * On the normal path the window sizes itself from the first draw list, because main computes that
    * list. In URL mode main sees no frames at all -- the page does -- so the window would stay at its
-   * 800x600 default, `renderer.ts` would centre a 720x350 drawing inside it, and a capture would
+   * 800x600 default, `renderer.ts` would center a 720x350 drawing inside it, and a capture would
    * differ from the GUI golden by a black border alone. That is a difference in the HARNESS's
    * geometry rather than in anything drawn, which is the least interesting reason for a golden to
    * fail. `browser-shot.mjs` reads the size out of the golden PNG itself, so the golden defines the
@@ -114,14 +114,14 @@ const SEAM = Object.freeze({
    *
    * Labels, not coordinates. A coordinate list would be a second copy of the layout, and it would
    * pass while the layout was wrong -- which is the one thing this seam exists to catch. Main asks
-   * the renderer for the button's centre and delivers a real `mouseDown`/`mouseUp` pair through
+   * the renderer for the button's center and delivers a real `mouseDown`/`mouseUp` pair through
    * `sendInputEvent`, so the click enters at the top of Chromium's input pipeline exactly as
    * `TN3270_GUI_KEYS` does for keys.
    *
    * IT DOES NOT IMPLY THE KEYPAD, and the plan for it said it did -- so this is written down rather
    * than left as an omission. The keypad is a per-window display flag toggled by a `toggleKeypad`
    * action (see `showKeypad` below), and a run with the keypad hidden has no `list.keypad`, so
-   * `__tn3270ButtonCentre` returns `null` and every label reports `NO BUTTON`. Turning it on from
+   * `__tn3270ButtonCenter` returns `null` and every label reports `NO BUTTON`. Turning it on from
    * here would ALSO be wrong: `clicks.mjs` shows the keypad with `TN3270_GUI_KEYS=Ctrl+K`, which
    * proves the chord and the click path in one run, and a second on-switch here would toggle it
    * straight back off. So the caller shows the keypad; this seam only clicks.
@@ -421,7 +421,7 @@ app.whenReady().then(async () => {
  * Note that a spelling's CASE IS IGNORED by Chromium: both `A` and `a` deliver `key: 'a'`,
  * so this seam types lowercase unless `Shift+` is given.
  *
- * THE MAC BEHAVIOUR HERE IS REASONED, NOT MEASURED. Accelerator names are Chromium's own
+ * THE MAC BEHAVIOR HERE IS REASONED, NOT MEASURED. Accelerator names are Chromium's own
  * vocabulary and ought to be platform-independent, but this seam has only ever run on Linux
  * under Xvfb. Treat a Mac disagreement as likely rather than surprising: `Option-1` reports
  * `key === '¡'` there, which is the whole reason `keys.ts` matches the PA keys on `e.code`,
@@ -506,13 +506,13 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
  * non-zero offset (`canvas/test/keypad.test.ts:297`), so what this seam carries is the wiring, which
  * is provable at any scale -- and just as well, because in native Electron mode the centring offset
  * can never be non-zero at ANY scale: `fit` sets the content size to exactly `list.width * scale` by
- * `list.height * scale`, so `centre` returns (0,0) for every model on every display. The SCALE does
+ * `list.height * scale`, so `center` returns (0,0) for every model on every display. The SCALE does
  * vary with the display -- `fit` takes 80% of the work area -- and this seam does not care, because
  * it asks the renderer for a point rather than computing one.
  *
  * ASKS THE RENDERER WHERE THE BUTTON IS, rather than carrying coordinates. A coordinate list here
  * would be a second copy of the layout that agreed with itself while the layout was wrong -- the one
- * failure this seam exists to catch. `__tn3270ButtonCentre` returns a point; the CLICK still goes in
+ * failure this seam exists to catch. `__tn3270ButtonCenter` returns a point; the CLICK still goes in
  * through Chromium, so nothing about the path under test is bypassed.
  *
  * THE SETTLE IS NOT DECORATION. `clicks.mjs` shows the keypad with a real `Ctrl+K` first, and that
@@ -523,7 +523,7 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
  * one, and because a clicks-only run gets no settle from `maybeSendKeys` at all.
  *
  * NOT CALLED FROM THE URL BRANCH, unlike `maybeSendKeys`. In that mode the served page owns the
- * protocol and main sees no frames, so nothing here would be wrong -- `__tn3270ButtonCentre` reads
+ * protocol and main sees no frames, so nothing here would be wrong -- `__tn3270ButtonCenter` reads
  * the renderer's own `last` -- but no harness drives it that way and an untested call site is a
  * claim this file has not earned. `TN3270_GUI_CLICKS` is therefore IGNORED alongside
  * `TN3270_GUI_URL`, which fails loudly rather than quietly: no `clicks: sent` line is printed, and
@@ -544,7 +544,7 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
     let at;
     try {
       at = await win.webContents.executeJavaScript(
-        `window.__tn3270ButtonCentre(${JSON.stringify(label)})`,
+        `window.__tn3270ButtonCenter(${JSON.stringify(label)})`,
       ) as { x: number; y: number } | null;
     } catch (err) {
       /**
@@ -555,7 +555,7 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
        *
        * The reachable cause is a renderer that threw before installing the probe: it is a `window`
        * global set in `renderer.js`'s module body, and if the canvas or the 2D context is missing
-       * that module throws at load, leaving `window.__tn3270ButtonCentre` undefined and this call
+       * that module throws at load, leaving `window.__tn3270ButtonCenter` undefined and this call
        * rejecting with a TypeError. Exiting 2 keeps the diagnosis and loses the hang, exactly as the
        * bad-spelling path above does -- and `clicks.mjs`'s status bail then dumps the stdout, which
        * has the renderer's own `renderer[3]` line in it.

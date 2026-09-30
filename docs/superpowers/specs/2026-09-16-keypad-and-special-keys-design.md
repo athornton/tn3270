@@ -347,7 +347,7 @@ script-driven client has no renderer, which is the same reason `-scheme` is abse
 - A click outside every button is ignored; so is a click while the keypad is hidden, there being no
   rectangles to hit.
 - **`toggleKeypad` must be HANDLED by the gateway, not merely accepted.** `decodeClientMessage`
-  deliberately does not enumerate action kinds, and an unrecognised kind falls through
+  deliberately does not enumerate action kinds, and an unrecognized kind falls through
   `applyAction`'s switch as a no-op — so an unhandled `toggleKeypad` would be silently dropped and
   the button would appear dead. A hostile client sending it is harmless: it toggles a display.
 - Screen plus keypad taller than the work area needs no new code: `bestScale` drops to a smaller
@@ -413,7 +413,7 @@ same as having one.
    the note under *The four missing keys* and `docs/live-testing.md`.
 5. The TUI overlay lists every special key with its chord and fires one. **The "refuses to open in a
    terminal too small to hold it" half is UNREACHABLE IN A LIVE SESSION, measured in Task 11 — do not
-   claim it as verified behaviour.** `tooSmall` (`tui/src/render.ts:43`) already refuses any terminal
+   claim it as verified behavior.** `tooSmall` (`tui/src/render.ts:43`) already refuses any terminal
    below 24x80 before a session runs at all, and the smallest 3270 screen *is* 24x80, so every terminal
    that can reach the overlay is at least 24x80, which comfortably exceeds `OVERLAY_MIN` (12x29). The
    guard is therefore a floor for a caller passing a **sub-window**, not a refusal an operator can

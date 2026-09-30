@@ -31,7 +31,7 @@ found the panel during the initial full paint and lost it on every later diff.
 
 So this parses the ANSI stream into a 25x80 grid and searches THAT. Which is also
 the stronger test: it verifies what a user would actually see, and it lets the
-per-cell foreground colours be compared against the CLI's `ScreenJson`.
+per-cell foreground colors be compared against the CLI's `ScreenJson`.
 
 ## THE PASSWORD IS NOT IN THIS FILE
 
@@ -66,9 +66,9 @@ class AnsiScreen:
     Just enough of a terminal to reconstruct what the TUI drew.
 
     Handles what TerminalRenderer actually emits and nothing more: absolute cursor
-    positioning, SGR (recorded per cell, for the colour comparison), erase-to-EOL,
+    positioning, SGR (recorded per cell, for the color comparison), erase-to-EOL,
     erase-screen, and the alternate-buffer switches. Anything else is skipped
-    rather than guessed at -- an unrecognised sequence here would silently corrupt
+    rather than guessed at -- an unrecognized sequence here would silently corrupt
     the grid, so `unknown` is counted and reported.
     """
 
@@ -110,7 +110,7 @@ class AnsiScreen:
         while i < n:
             b = data[i]
             if b == 0x1B:
-                # OSC (\x1b]...BEL or ST) -- cursor colour, and its reset. Consumed
+                # OSC (\x1b]...BEL or ST) -- cursor color, and its reset. Consumed
                 # rather than counted: the client legitimately emits these, and an
                 # `unknown` counter that always shows noise is a counter nobody reads.
                 osc = re.match(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[i:])
@@ -180,7 +180,7 @@ class AnsiScreen:
     def text(self):
         return "\n".join("".join(r) for r in self.grid)
 
-    def colours(self):
+    def colors(self):
         seen = {}
         for r in range(ROWS - 1):            # exclude the status row
             for c in range(COLS):
@@ -259,7 +259,7 @@ def flow_vm(pw, user):
 # b"\x14" in a flow reads as noise, and because the ARROW form matters: the form
 # accepts CSI and SS3 alike, and this harness deliberately sends CSI (what a real
 # xterm sends with DECCKM off) so the live run exercises the same spelling a user
-# would produce rather than the one the unit tests favour.
+# would produce rather than the one the unit tests favor.
 CTRL_T = b"\x14"            # opens/closes the transfer form
 TAB = b"\t"
 RIGHT = b"\x1b[C"           # CSI C: next value of a cycle field
@@ -377,7 +377,7 @@ def flow_tso_transfer(pw, user):
     1. **`Recfm=variable`, never `fixed`.** Fixed PADS to the record boundary: the same
        249-byte payload came back as 320 bytes -- 249 plus 71 nulls -- because a
        fixed-record dataset cannot record that its last record was short. Correct
-       behaviour, and it fails a byte comparison.
+       behavior, and it fails a byte comparison.
     2. **TSO quoting is SEMANTIC.** Unquoted `FORMV.BIN` gets the userid prepended, so it
        becomes `HERC01.FORMV.BIN`; quoted `'HERC01.FORMV.BIN'` is absolute. The form passes
        the name through verbatim (as x3270 does), so both are legal and only the operator
@@ -528,7 +528,7 @@ def main():
                 os.write(main_fd, CR)
             transcript.append(
                 f"  step {step + 1}/{len(steps)}: {label} -- drained after {attempt + 1} Enter(s)")
-            panels.append((label, screen.text(), screen.colours()))
+            panels.append((label, screen.text(), screen.colors()))
             step += 1
             step_started = time.time()
             continue
@@ -537,7 +537,7 @@ def main():
         if wait_for is None:
             drain(3.5)
             transcript.append(f"  step {step + 1}/{len(steps)}: {label} -- settled")
-            panels.append((label, screen.text(), screen.colours()))
+            panels.append((label, screen.text(), screen.colors()))
             if send is not None:
                 os.write(main_fd, send)
             step += 1
@@ -560,7 +560,7 @@ def main():
         if any(w in txt for w in wait_for):
             hit = next(w for w in wait_for if w in txt)
             transcript.append(f"  step {step + 1}/{len(steps)}: {label} -- MATCHED on {hit!r}")
-            panels.append((label, txt, screen.colours()))
+            panels.append((label, txt, screen.colors()))
             if send is not None:
                 os.write(main_fd, send)
             step += 1
@@ -570,7 +570,7 @@ def main():
 
         if time.time() - step_started > STEP_TIMEOUT:
             transcript.append(f"  step {step + 1}/{len(steps)}: {label} -- TIMED OUT")
-            panels.append((label + " (TIMEOUT)", txt, screen.colours()))
+            panels.append((label + " (TIMEOUT)", txt, screen.colors()))
             break
 
     # BEST-EFFORT LOGOFF, even when the flow failed partway.
@@ -605,7 +605,7 @@ def main():
         txt = screen.text()
         logged_off = any(s in txt for s in ("LOGGED OFF", "LOGOFF AT", "Logon", "RUNNING", "VM/370"))
         transcript.append(f"  teardown: logoff {'CONFIRMED' if logged_off else 'NOT confirmed'}")
-        panels.append(("after teardown", txt, screen.colours()))
+        panels.append(("after teardown", txt, screen.colors()))
 
     os.write(main_fd, CTRL_BRACKET)
     time.sleep(1.0)
@@ -632,7 +632,7 @@ def main():
         f.write(bytes(everything))
     with open(f"/tmp/live-{which}-panels.txt", "w") as f:
         for label, txt, cols in panels:
-            f.write(f"===== {label} | colours={ {k: v for k, v in cols.items()} }\n{txt}\n\n")
+            f.write(f"===== {label} | colors={ {k: v for k, v in cols.items()} }\n{txt}\n\n")
 
     print(f"=== {which} as {user}: {step}/{len(steps)} steps matched")
     for line in transcript:
@@ -640,12 +640,12 @@ def main():
     last_cols = panels[-1][2] if panels else {}
     print(f"foreground codes on the last panel: { {k: v for k, v in sorted(last_cols.items(), key=lambda kv: -kv[1])} }")
     # A BLANK cell in reverse video renders as a solid block of the foreground
-    # colour -- exactly the mottling this run is checking for.
+    # color -- exactly the mottling this run is checking for.
     blocks = sum(1 for r in range(ROWS - 1) for c in range(COLS)
                  if screen.rev[r][c] and screen.grid[r][c] == " ")
     revtot = sum(1 for r in range(ROWS - 1) for c in range(COLS) if screen.rev[r][c])
     print(f"reverse-video cells: {revtot}, of which BLANK (solid blocks): {blocks}")
-    print(f"unrecognised escape sequences: {screen.unknown}")
+    print(f"unrecognized escape sequences: {screen.unknown}")
     print(f"left the alternate buffer: {b'\x1b[?1049l' in bytes(everything)}")
     print(f"ECHO restored after exit:  {bool(after[3] & termios.ECHO)}")
     print(f"logoff confirmed: {logged_off}")

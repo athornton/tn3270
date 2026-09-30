@@ -58,7 +58,7 @@ const SERVER_ARGV = ['--replay', trace, '--listen', '0', '--log-actions', '127.0
  * `--no-proxy-server` IS MANDATORY ON THIS BOX AND THE FAILURE IS SILENT. Measured: `HTTP_PROXY` is
  * set in this environment (an outbound SLAC squid), and Chromium sent the LOOPBACK page request to
  * it rather than to 127.0.0.1 -- despite `no_proxy` naming both `localhost` and `127.0.0.1`, which
- * Chromium does not honour the way curl does. The symptom is the worst kind: the window opens,
+ * Chromium does not honor the way curl does. The symptom is the worst kind: the window opens,
  * `did-fail-load` never fires, no renderer error appears, keys are delivered to a blank page, and
  * the gateway's log shows NOT ONE HTTP REQUEST. It cost a request-logging patch to the built server
  * to see that nothing had arrived at all.

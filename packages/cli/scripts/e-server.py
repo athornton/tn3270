@@ -189,7 +189,7 @@ class EServer:
         # BIND (too short to reach byte 24, BIND_OFF.SSIZE) exercises parseBind's
         # "no dimensions" path, and --bind-size's 28-byte BIND exercises the size-code
         # path. Collapsing them into one flag would force every existing caller of
-        # --send-bind to learn a new argument just to keep today's behaviour, and
+        # --send-bind to learn a new argument just to keep today's behavior, and
         # would make it too easy to lose the short-BIND case by accident while adding
         # the long one. Both may be set; --send-bind's runs first since it is checked
         # first below, though driving both at once is not a case this harness uses.
@@ -303,7 +303,7 @@ class EServer:
         # backoff path: the client is supposed to answer a DEVICE-TYPE REJECT with
         # WONT TN3270E and carry on as traditional tn3270, which real s3270 does.
         # An earlier version of this function reported exit 3 there, i.e. it called
-        # conforming behaviour a failure -- which would have inverted the meaning of
+        # conforming behavior a failure -- which would have inverted the meaning of
         # the one test that exercises backoff.
         if self.args.reject:
             if refused:
@@ -349,7 +349,7 @@ class EServer:
                 self.negotiated = True
                 self.after_negotiation()
         else:
-            log("     ** unrecognised TN3270E subnegotiation")
+            log("     ** unrecognized TN3270E subnegotiation")
 
 
 def parse_funcs(text):

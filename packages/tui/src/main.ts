@@ -3,7 +3,7 @@
  * c3270-style terminal front end.
  *
  * Argument parsing and process wiring only; the screen lives in app.ts. See
- * docs/superpowers/specs/2026-08-19-tui-and-colour-design.md.
+ * docs/superpowers/specs/2026-08-19-tui-and-color-design.md.
  */
 
 import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
@@ -14,7 +14,7 @@ import {
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout } from './render.js';
-import type { Depth } from './colours.js';
+import type { Depth } from './colors.js';
 
 export class UsageError extends Error {
   constructor(message: string) {
@@ -63,7 +63,7 @@ export interface TuiArgs {
  * `auto` is spelled out rather than being only the default, so a keymap or shell
  * alias can pass it explicitly and get detection back.
  */
-const COLOUR_WORDS: Readonly<Record<string, Depth>> = Object.freeze({
+const COLOR_WORDS: Readonly<Record<string, Depth>> = Object.freeze({
   '0': 0, 'none': 0, 'mono': 0,
   '8': 8,
   '16': 16,
@@ -75,7 +75,7 @@ const COLOUR_WORDS: Readonly<Record<string, Depth>> = Object.freeze({
  * Parse the argument vector.
  *
  * The flag spellings match the CLI's (`-model`, `--terminal-type`) so the two
- * front ends stay legible side by side, and an unrecognised flag is an error for
+ * front ends stay legible side by side, and an unrecognized flag is an error for
  * the same reason it is there: silently ignoring one produces a session that
  * negotiates something nobody asked for.
  *
@@ -124,7 +124,7 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         }
         i++;
         if (value.toLowerCase() === 'auto') break;   // leave it undefined: detect
-        const depth = COLOUR_WORDS[value.toLowerCase()];
+        const depth = COLOR_WORDS[value.toLowerCase()];
         if (depth === undefined) {
           throw new UsageError(`--colors does not understand ${JSON.stringify(value)}; use 0, 8, 16, 256, 16m or auto`);
         }
@@ -179,7 +179,7 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         break;
       default:
         if (flag.startsWith('-')) {
-          throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
+          throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
         }
         if (args.host !== undefined) {
           throw new UsageError(`more than one host given: ${JSON.stringify(args.host)} and ${JSON.stringify(flag)}`);

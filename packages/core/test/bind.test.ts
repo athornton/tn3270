@@ -165,7 +165,7 @@ describe('parseBind — size codes', () => {
     });
   });
 
-  it('reports no dimensions for an unrecognised size code', () => {
+  it('reports no dimensions for an unrecognized size code', () => {
     const b = parseBind(bindWith(0x55, 43, 80, 43, 80))!;
     expect(b.dims).toBeUndefined();
     // Still a valid BIND: the PLU name and RU sizes are unaffected.
@@ -259,7 +259,7 @@ describe('parseUnbind', () => {
       .toEqual({ reason: undefined, forthcoming: false });
   });
 
-  it('passes an unrecognised reason through without inventing a meaning', () => {
+  it('passes an unrecognized reason through without inventing a meaning', () => {
     // 0x03 is one of the real gaps in x3270's table. It is reported, not mapped.
     expect(parseUnbind(Uint8Array.of(0x03)))
       .toEqual({ reason: 0x03, forthcoming: false });

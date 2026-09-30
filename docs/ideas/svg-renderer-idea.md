@@ -23,7 +23,7 @@ natural home for a renderer that is not imitating any particular hardware.
 
 - **GOCA's primitives really are SVG's primitives.** Lines, arcs, fillets, character strings with
   angle and shear, area fill — `docs/goca-reference-notes.md`'s order table reads substantially like
-  a list of SVG path and text features. Arc and character angle/shear are confirmed honoured by the
+  a list of SVG path and text features. Arc and character angle/shear are confirmed honored by the
   3192G firmware, and both are one SVG attribute each.
 - **It deletes a whole layer we would otherwise write and verify.** Rasterizing vectors correctly —
   joins, caps, fill rules, arc parameterization — is real work with no oracle. SVG has all of that
@@ -118,7 +118,7 @@ existing goldens should keep running in the default mode with no flag set.
 6. **Is the 3270 character grid genuinely just placement?** Mostly — but field attributes, the cursor,
    and inverse video interact with cell boundaries in ways the blitter currently gets for free.
 
-## What already exists in our favour
+## What already exists in our favor
 
 - **`Cell` is a tagged variant precisely so a renderer dispatches on `kind`** rather than assuming
   bitmaps — noted in [[composite-model-idea]] and equally true here.

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { Colour, type ResolvedCell } from '@tn3270/core';
+import { Color, type ResolvedCell } from '@tn3270/core';
 import { resolveScheme } from '@tn3270/frontend';
 import { layout, statusRowFor, TerminalRenderer, tooSmall, type Layout } from '../src/render.js';
 
 /** A 2x3 grid of plain green cells, with `text` from a string. */
 function grid(text: string, rows = 2, cols = 3): ResolvedCell[] {
   return [...text].map((ch) => ({
-    text: ch, fg: Colour.GREEN, bg: Colour.NEUTRAL_BLACK,
+    text: ch, fg: Color.GREEN, bg: Color.NEUTRAL_BLACK,
     blink: false, reverse: false, underscore: false, intensify: false, hidden: false,
   })).slice(0, rows * cols);
 }
@@ -159,7 +159,7 @@ describe('layout: centring, and which border sides fit', () => {
     expect(l.border).toEqual({ top: true, bottom: true, left: true, right: false });
   });
 
-  it('centres the whole block in a roomy terminal', () => {
+  it('centers the whole block in a roomy terminal', () => {
     // 40 rows: block is hint+top+24+status+bottom = 28, so 12 spare -> 6 above.
     // 100 cols: block is 1+80+1 = 82, so 18 spare -> 9 left of the border.
     const l = layout({ rows: 40, cols: 100 }, S);
@@ -372,10 +372,10 @@ describe('TerminalRenderer', () => {
     expect(shrunk).toContain('ABC');
   });
 
-  it('emits no colour escapes at all when monochrome', () => {
+  it('emits no color escapes at all when monochrome', () => {
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
     const cells = grid('ABCDEF');
-    cells[0]!.fg = Colour.RED;
+    cells[0]!.fg = Color.RED;
     const out = r.paint(cells, 0, 'status');
     expect(out).not.toMatch(/\x1b\[3[0-9]/);
     expect(out).not.toMatch(/\x1b\[38;/);
@@ -392,10 +392,10 @@ describe('TerminalRenderer', () => {
   const FG_256 = /\x1b\[[\d;]*38;5;\d+[\d;]*m/;
   const FG_256_ALL = /\x1b\[[\d;]*38;5;\d+[\d;]*m/g;
 
-  it('emits a colour escape when the colour changes mid-row', () => {
+  it('emits a color escape when the color changes mid-row', () => {
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
-    cells[1]!.fg = Colour.RED;
+    cells[1]!.fg = Color.RED;
     const out = r.paint(cells, 0, 'status');
     expect(out).toMatch(FG_256);
     // Green, then red for the one changed cell, then green again: the run-length
@@ -404,7 +404,7 @@ describe('TerminalRenderer', () => {
   });
 
   it('does not repeat an identical SGR for adjacent cells', () => {
-    // Six cells of one colour must not produce six escape sequences; that
+    // Six cells of one color must not produce six escape sequences; that
     // triples the bytes written on every redraw over a slow link.
     const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
     const out = r.paint(grid('ABCDEF'), 0, 'status');
@@ -427,7 +427,7 @@ describe('TerminalRenderer', () => {
 
   it('TURNS REVERSE OFF AGAIN once the highlighted run ends', () => {
     // THE MOTTLING BUG. SGR parameters ACCUMULATE: emitting `\x1b[38;5;46;48;5;59m`
-    // sets colours but leaves SGR 7 in effect, because only 0 or 27 clears it. So a
+    // sets colors but leaves SGR 7 in effect, because only 0 or 27 clears it. So a
     // reverse-video run -- ISPF's tutorial title bar sends SA highlighting=0xF2 for
     // exactly one -- left every following cell inverted, turning each subsequent
     // SPACE into a solid green block and giving the page a mottled look. VM never
@@ -444,7 +444,7 @@ describe('TerminalRenderer', () => {
   it('clears highlighting between runs for every flag, at every depth', () => {
     // The general form, so the same class of bug cannot come back via a different
     // attribute. At depth 0 the `want || '0'` fallback already emitted a reset, which
-    // is why the monochrome case hid this for so long -- test the colour depths too.
+    // is why the monochrome case hid this for so long -- test the color depths too.
     for (const depth of [0, 16, 256] as const) {
       for (const flag of ['reverse', 'blink', 'underscore', 'intensify'] as const) {
         const r = new TerminalRenderer({ rows: 2, cols: 3, depth, scheme: resolveScheme() });
@@ -497,7 +497,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
     // THE BUG THIS EXISTS FOR: cells are contiguous across a row boundary, so the
     // run-length logic emitted no escape there and relied on the TERMINAL wrapping
     // at the screen's right edge. That is only true when the screen exactly fills
-    // the terminal width. Centred in a 90-column window, an 80-column screen wrapped
+    // the terminal width. Centerd in a 90-column window, an 80-column screen wrapped
     // at column 90 instead of 85, so every row after the first was misplaced --
     // caught by looking at a real 90x30 pty, where only rows 3 and 27 began at the
     // screen's left edge.

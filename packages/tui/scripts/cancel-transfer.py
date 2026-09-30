@@ -11,7 +11,7 @@ and a completed transfer swallows it. So this:
   3. sends Esc,
   4. and requires the final byte count to be LESS than the file size.
 
-A cancelled 200KB transfer that reports 204800 bytes was not cancelled.
+A canceled 200KB transfer that reports 204800 bytes was not canceled.
 
 ## IT REFUSES TO REPORT ANYTHING IF THE SESSION IS NOT FRESH
 
@@ -105,7 +105,7 @@ RIGHT = b"\x1b[C"
 
 USER = os.environ.get("TN3270_USER", DEFAULT_USER)
 PW = os.environ.get("TN3270_PASSWORD", DEFAULT_PW)
-print(f"cancelling a {SIZE}-byte transfer mid-flight on {WHICH} as {USER}")
+print(f"canceling a {SIZE}-byte transfer mid-flight on {WHICH} as {USER}")
 drain(5)
 
 if WHICH == "vm":
@@ -178,7 +178,7 @@ while time.time() < end:
             if 0 < progress_at_cancel < SIZE * 0.6:
                 break
 print(f"  {'ok  ' if seen_running else 'FAIL'} status line reached 'transferring...'")
-print(f"  progress when cancelling: {progress_at_cancel} of {SIZE} bytes")
+print(f"  progress when canceling: {progress_at_cancel} of {SIZE} bytes")
 
 os.write(main_fd, ESC)                           # CANCEL, mid-flight
 drain(4)

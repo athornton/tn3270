@@ -8,7 +8,7 @@
  * no hinting and no subpixel antialiasing to vary between machines, which is what lets
  * screenshot goldens be trusted.
  *
- * EVERY GLYPH IS NORMALISED TO THE FONT BOUNDING BOX, padded from its own BBX offsets.
+ * EVERY GLYPH IS NORMALIZED TO THE FONT BOUNDING BOX, padded from its own BBX offsets.
  * The atlas is then a plain grid and the blitter needs no per-glyph metrics. A BDF glyph
  * may be smaller than the box and offset within it; ignoring that shifts characters by a
  * pixel or two, which reads as a subtly wrong font rather than as a bug.
@@ -60,7 +60,7 @@ export function parseBdf(text: string): BdfFont {
 
     // A glyph with no ENCODING is not addressable, and -1 is BDF's "unencoded".
     if (encoding !== undefined && encoding >= 0 && bbx !== undefined) {
-      glyphs.set(encoding, normalise(hex, bbx, width, height, boxX, boxY));
+      glyphs.set(encoding, normalize(hex, bbx, width, height, boxX, boxY));
     }
   }
   if (glyphs.size === 0) throw new Error('BDF contained no encoded glyphs');
@@ -79,7 +79,7 @@ export function parseBdf(text: string): BdfFont {
  * the TOP of that padded width -- for a 9-pixel-wide glyph the row is 16 bits and pixel 0
  * is bit 15, not bit 8.
  */
-function normalise(
+function normalize(
   hex: readonly string[],
   [gw, gh, gx, gy]: [number, number, number, number],
   width: number, height: number, boxX: number, boxY: number,

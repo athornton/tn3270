@@ -27,7 +27,7 @@ Electron app draws — PF1–PF24, PA1–PA3 and the special keys a PC keyboard 
 interactive front end could press before the keypad. Sys Req and Newline get no chord in any front
 end, so this is their only route besides the CLI. `Ctrl-K` is c3270's own terminal binding for its
 keypad (`Common/fb-c3270:191`) and
-`Alt-K` is how its Windows keymap spells the same command, so both are honoured rather than one
+`Alt-K` is how its Windows keymap spells the same command, so both are honored rather than one
 being a divergence.
 
 **NOTHING ABOUT THE PROTOCOL CHANGED TO ADD IT, and that is the whole design.** A click is hit-
@@ -104,12 +104,12 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 | `-noverifycert` | — | make the TLS connection without verifying the host |
 | `-verifycert` | — | verify (the default; explicit for symmetry with s3270) |
 | `-model NAME` | `IBM-3278-2-E` | screen model, e.g. `3278-4-E` |
-| `-scheme NAME` | `default` | colour scheme: `default`, `3279`, `x3270`, `green` |
+| `-scheme NAME` | `default` | color scheme: `default`, `3279`, `x3270`, `green` |
 
 ## The host argument, and what this gateway will NOT take
 
 `HOST:PORT`, and of the full `[prefix:][LU,LU@]host[:port]` shape the other front ends accept, only
-`host:port` is honoured. The rest is **refused by name rather than ignored**, which is this project's
+`host:port` is honored. The rest is **refused by name rather than ignored**, which is this project's
 rule for anything that would change what goes on the wire without being implemented:
 
 | written | result |

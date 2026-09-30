@@ -38,7 +38,7 @@ action dispatch — into it, so the coming Electron GUI consumes one copy instea
 third.
 
 **Architecture:** A new composite-TypeScript workspace package between `core` and the
-front ends, giving `core ← frontend ← { cli, tui, gui }`. Nothing changes behaviour: this
+front ends, giving `core ← frontend ← { cli, tui, gui }`. Nothing changes behavior: this
 is a move, and the existing suite is the evidence.
 
 **Tech Stack:** TypeScript 7 project references, npm workspaces, vitest.
@@ -323,7 +323,7 @@ git commit -m "refactor: move hostspec into @tn3270/frontend"
 ## Task 3: Move `tls.ts`
 
 `tls.test.ts` covers two different things — the flag/prefix rules that are moving, and
-`Runner` behaviour that is not — so the file is **split**, not moved.
+`Runner` behavior that is not — so the file is **split**, not moved.
 
 **Files:**
 - Create: `packages/frontend/src/tls.ts` (moved)
@@ -662,7 +662,7 @@ describe('applyAction', () => {
 
   it('SWALLOWS a rejected action rather than throwing', () => {
     // A rejected action -- not connected, program check -- is normal operation, not a
-    // crash. This is the behaviour the TUI relied on, and moving the dispatch must not
+    // crash. This is the behavior the TUI relied on, and moving the dispatch must not
     // turn it into an exception that reaches the run loop.
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'enter' })).not.toThrow();
@@ -797,7 +797,7 @@ npm run typecheck && npm run build && npx vitest run 2>&1 | tail -3
 ```
 
 Expected: `Tests 1207 passed (1207)` — 1202 plus the five new ones. **`app.test.ts` must
-pass untouched**: it is the evidence that delegating did not change behaviour, and if it
+pass untouched**: it is the evidence that delegating did not change behavior, and if it
 needed editing, something moved that should not have.
 
 - [x] **Step 8: Prove the extraction against the real terminal**
@@ -1016,7 +1016,7 @@ The `packages/` listing gains a line and the existing ones narrow:
 
 ```
 packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
-                   colour resolution, Query Reply, IND$FILE, trace
+                   color resolution, Query Reply, IND$FILE, trace
 packages/frontend  rules every front end shares: host argument, TLS flags, session
                    factory, keymap, action dispatch
 packages/cli       s3270-style scripting CLI

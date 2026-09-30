@@ -107,7 +107,7 @@ export class Oia {
    *    before writing anything. Enter-inhibit is released by the next Erase/
    *    Write, EWA, EAU or Write; AwaitingFirstWrite is released by those AND by
    *    a WCC keyboard-restore, so it is released by a strictly larger set of
-   *    records and must not be dropped in favour of the narrower rule. It is
+   *    records and must not be dropped in favor of the narrower rule. It is
    *    also the truer description — there is no screen yet at all, rather than
    *    a screen that is merely frozen. x3270 orders its status line the same
    *    way, testing KL_AWAITING_FIRST before KL_ENTER_INHIBIT in all four

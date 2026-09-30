@@ -22,7 +22,7 @@
  */
 
 import { resolve, type Session } from '@tn3270/core';
-import { detectDepth, type Depth } from './colours.js';
+import { detectDepth, type Depth } from './colors.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
@@ -80,7 +80,7 @@ const TRANSFER_BACKTAB = 0x5a;    // the `Z` of `\x1b[Z`
  * A BARE LETTER IS BINDABLE NOWHERE ELSE IN THIS EMULATOR. Letters are data the operator types into
  * fields; `pump()` hands every printable run to `typeString`. It is safe here for exactly one
  * reason: the interception in `onInput` gives the overlay the whole keyboard and `overlayKey`
- * already swallows every byte it does not recognise, so these letters replace a no-op rather than
+ * already swallows every byte it does not recognize, so these letters replace a no-op rather than
  * displacing anything. Nothing about this generalises past `overlayShown`.
  *
  * NO `h`, `l`, `a` OR `d`, on purpose, and they are NOT an oversight: the overlay is a
@@ -131,17 +131,17 @@ const ESC_TIMEOUT_MS = 50;
  * Make the cursor findable, and put it back afterwards.
  *
  * Two sequences because they degrade differently. DECSCUSR (`\x1b[2 q`, steady
- * block) is very widely implemented; OSC 12 (cursor colour) is BEST-EFFORT -- a
+ * block) is very widely implemented; OSC 12 (cursor color) is BEST-EFFORT -- a
  * terminal that does not know it ignores it, which is why the shape is set too
- * rather than relying on colour alone.
+ * rather than relying on color alone.
  *
  * Green rather than white, matching the default-green foreground a 3279 shows and
  * the phosphor look people expect; it is one constant to change if white reads
  * better. The old default background was `neutral-black` at 0x1a1a1a -- a dark grey
  * -- against which an unstyled cursor was very hard to see. That default is now
- * pure black (core `resolve`), and the cursor is explicitly coloured.
+ * pure black (core `resolve`), and the cursor is explicitly colored.
  *
- * OSC 112 resets the colour to the terminal's own, and `\x1b[0 q` the shape, so a
+ * OSC 112 resets the color to the terminal's own, and `\x1b[0 q` the shape, so a
  * user's carefully configured cursor survives running this.
  */
 const CURSOR_ON = '\x1b]12;#00ff00\x07\x1b[2 q';
@@ -207,7 +207,7 @@ export class App {
    * until the next `pump()` call resolves it. Before the timer fires, more
    * bytes arriving clear it (at the top of `pump()`) and resolve through the
    * ordinary full-table scan instead -- exactly as they did before this
-   * ESC-holding behaviour existed -- so a split function key delivered
+   * ESC-holding behavior existed -- so a split function key delivered
    * promptly still completes normally. Only a PROMOTED ESC is narrowed to
    * PA-only completion.
    */
@@ -734,7 +734,7 @@ export class App {
    * ## ONE READ, SEVERAL KEYS
    *
    * A loop, not a match on the whole chunk, for the reason `pump()` gives: autorepeat coalesced by
-   * a slow link delivers `\x1b[B\x1b[B` as one read, which no whole-chunk comparison recognises --
+   * a slow link delivers `\x1b[B\x1b[B` as one read, which no whole-chunk comparison recognizes --
    * the selection would appear to stop moving while the key was held.
    */
   private consumeOverlayKey(bytes: Uint8Array): void {
@@ -770,7 +770,7 @@ export class App {
       if (pending[0] === OVERLAY_CR || pending[0] === OVERLAY_LF) this.fireOverlay();
       else if (pending[0] === OVERLAY_TOGGLE) this.closeOverlay();
       // Ctrl-T SWAPS to the transfer form. Without this arm the exclusion is one-way: Ctrl-T from
-      // the list would be swallowed like any other unrecognised byte, so the form would be
+      // the list would be swallowed like any other unrecognized byte, so the form would be
       // reachable from the screen but not from the list -- an inconsistency the user meets as
       // "the key works sometimes". `transferKey` has the mirror of this arm for Ctrl-K.
       else if (pending[0] === TRANSFER_TOGGLE) { this.closeOverlay(); this.toggleTransfer(); }
@@ -956,7 +956,7 @@ export class App {
       else if (b === TAB) this.moveTransfer(1);
       else if (b === BACKSPACE || b === DEL) this.backspaceTransfer();
       // Printable ASCII only. A control byte this form does not name is SWALLOWED rather than
-      // falling through to the screen, as the overlay swallows what it does not recognise.
+      // falling through to the screen, as the overlay swallows what it does not recognize.
       else if (b !== undefined && b >= 0x20 && b < 0x7f) this.typeTransfer(b);
       return 1;
     }

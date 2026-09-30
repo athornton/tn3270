@@ -367,13 +367,13 @@ describe('createTransferUi', () => {
     expect(ui.values().localFile).toBe('/tmp/chosen.txt');
   });
 
-  it('leaves the field alone when the dialog is cancelled', async () => {
+  it('leaves the field alone when the dialog is canceled', async () => {
     const deps = fakeDeps();
     deps.browse = vi.fn(async () => undefined);
     const ui = createTransferUi(deps);
     ui.type('localFile', '/typed/path');
     await ui.browseLocal();
-    expect(ui.values().localFile, 'a cancelled dialog must not erase a typed path')
+    expect(ui.values().localFile, 'a canceled dialog must not erase a typed path')
       .toBe('/typed/path');
   });
 
@@ -495,7 +495,7 @@ export interface UiDeps {
   setStatus(text: string): void;
   /** Enable or disable the inputs, per the running state. */
   setRunning(running: boolean): void;
-  /** Open a native file dialog. Resolves to a path, or undefined if cancelled. */
+  /** Open a native file dialog. Resolves to a path, or undefined if canceled. */
   browse(direction: string): Promise<string | undefined>;
   /** Hand the keywords to main. A local refusal comes back as `ok: false`. */
   submit(keywords: readonly string[]): Promise<{ ok: boolean; error?: string }>;
@@ -593,7 +593,7 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // main: a send must choose an existing file (Open) and a receive names a destination
       // (Save). The dialog deliberately does NOT set `Exist` -- see the spec.
       const chosen = await deps.browse(state.values.direction);
-      // A CANCELLED DIALOG MUST NOT ERASE A TYPED PATH. `undefined` is "the user changed their
+      // A CANCELED DIALOG MUST NOT ERASE A TYPED PATH. `undefined` is "the user changed their
       // mind", and overwriting the field with it would destroy work for a misclick.
       if (chosen === undefined) return;
       state = setFieldText(state, 'localFile', chosen);
@@ -654,12 +654,12 @@ Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Mutation-check the two assertions that matter most**
 
-The clearing test and the cancelled-dialog test both guard against a real cross-front-end bug, so
+The clearing test and the canceled-dialog test both guard against a real cross-front-end bug, so
 prove each can fail.
 
 ```bash
 cd ~/git/tn3270 && cp packages/gui/src/transferUi.ts /tmp/ui.bak
-# (a) make a cancelled dialog overwrite the field
+# (a) make a canceled dialog overwrite the field
 sed -i 's|      if (chosen === undefined) return;|      if (false) return;|' packages/gui/src/transferUi.ts
 npm run build >/dev/null 2>&1; npx vitest run packages/gui/test/transferUi.test.ts 2>&1 | grep -E "×|Tests "
 cp /tmp/ui.bak packages/gui/src/transferUi.ts
@@ -669,7 +669,7 @@ npm run build >/dev/null 2>&1; npx vitest run packages/gui/test/transferUi.test.
 cp /tmp/ui.bak packages/gui/src/transferUi.ts && npm run build >/dev/null 2>&1
 ```
 
-Expected: (a) reddens the cancelled-dialog test; (b) reddens the non-digit test. Then the restore
+Expected: (a) reddens the canceled-dialog test; (b) reddens the non-digit test. Then the restore
 leaves all 11 green — confirm:
 
 ```bash
@@ -696,7 +696,7 @@ The cycle options are collected by CYCLING the model rather than reading the fie
 table, because the one state-dependent rule -- VM does not offer Recfm=undefined --
 lives inside the model's private valuesFor and would otherwise be written twice.
 
-Mutation-verified twice: making a cancelled dialog overwrite the field reddens the
+Mutation-verified twice: making a canceled dialog overwrite the field reddens the
 typed-path test, and bypassing setFieldText on a numeric edit reddens the
 non-digit test.
 
@@ -947,7 +947,7 @@ import { contextBridge, ipcRenderer } from 'electron';
  * sits in front of a logged-on host session, so it is the last place to grant Node access.
  */
 contextBridge.exposeInMainWorld('tn3270transfer', {
-  /** Open a native file dialog. Resolves to a path, or undefined if the user cancelled. */
+  /** Open a native file dialog. Resolves to a path, or undefined if the user canceled. */
   browse: (direction: string): Promise<string | undefined> =>
     ipcRenderer.invoke('transfer:browse', direction) as Promise<string | undefined>,
   /**
@@ -1214,9 +1214,9 @@ export interface TransferDeps {
   closeWindow(): void;
   /** Focus the Cancel button, the only route out of a running transfer. */
   focusCancel(): void;
-  /** Native Open dialog: resolves to a path, or undefined if cancelled. */
+  /** Native Open dialog: resolves to a path, or undefined if canceled. */
   openDialog(): Promise<string | undefined>;
-  /** Native Save dialog: resolves to a path, or undefined if cancelled. */
+  /** Native Save dialog: resolves to a path, or undefined if canceled. */
   saveDialog(): Promise<string | undefined>;
   /**
    * `startTransfer` from `@tn3270/frontend`, ALREADY BOUND to this process's session and files.
@@ -1323,7 +1323,7 @@ export function createTransferController(deps: TransferDeps): TransferController
 
     shutdown() {
       // QUIT CANCELS, IT DOES NOT BLOCK. The window may refuse a close; it may not make the
-      // application unquittable. Cancelling first is what tells the host to leave transfer mode
+      // application unquittable. Canceling first is what tells the host to leave transfer mode
       // rather than leaving its program waiting for a frame -- the abort/abandon distinction
       // this module's docstring turns on.
       run?.cancel?.();
@@ -1512,7 +1512,7 @@ close over `session`:
    * A QUIT CANCELS A RUNNING TRANSFER RATHER THAN BEING BLOCKED BY IT.
    *
    * The window refuses a close while running; it must not make the application unquittable.
-   * Cancelling here is what tells the host to leave transfer mode -- walking away leaves its
+   * Canceling here is what tells the host to leave transfer mode -- walking away leaves its
    * program waiting for a frame that never comes.
    */
   app.on('before-quit', () => { transfer?.shutdown(); });
@@ -1876,7 +1876,7 @@ Append to `packages/gui/src/transferBoot.ts`:
  * TWO HOOKS FOR THE HARNESS, and nothing else on `window`.
  *
  * `executeJavaScript` is how main drives this window without a mouse, the same way
- * `__tn3270ButtonCentre` lets `clicks.mjs` click a keypad button by label. They go through the
+ * `__tn3270ButtonCenter` lets `clicks.mjs` click a keypad button by label. They go through the
  * SAME `ui` object a real click does, so a scenario cannot pass while the wiring is broken --
  * which is exactly what a hook that manipulated the DOM directly would allow.
  */
@@ -1977,7 +1977,7 @@ comment above it:
     // would move bytes between the host and the GATEWAY's filesystem, not the operator's.
     //
     // The user's decision (2026-09-30) is that the browser must get REAL browser file I/O --
-    // the bytes travelling over the WebSocket so that "local file" means the operator's machine.
+    // the bytes traveling over the WebSocket so that "local file" means the operator's machine.
     // That needs a new protocol message pair, chunking, and a `TransferFiles` implemented over
     // the socket, and it is its own spec. Until then this stays a rejection rather than an
     // interception, because `applyAction` throws on the kind and an unhandled throw here ends
@@ -2009,7 +2009,7 @@ The transfer window's Electron wiring is covered by `packages/gui/scripts/transf
 replay mode, stubbed dialog). **Three things that harness cannot reach, and they must be said so
 rather than implied:**
 
-1. **The native dialog's appearance and behaviour on macOS.** There is no macOS on the build box.
+1. **The native dialog's appearance and behavior on macOS.** There is no macOS on the build box.
    Check: `Browse…` on a send offers an Open panel that refuses a non-existent file; on a receive it
    offers a Save panel. **The panel must NOT set `Exist`** — pick `replace` in the form and confirm
    the transfer overwrites, then `keep` and confirm it refuses locally without telling the host.
@@ -2070,7 +2070,7 @@ operator's. The fix for that is real browser file I/O over the WebSocket, which 
 its own spec.
 
 The runbook gains the three things the Electron harness cannot reach and says so
-plainly: macOS dialog behaviour (no Mac here), a real transfer both directions
+plainly: macOS dialog behavior (no Mac here), a real transfer both directions
 compared BY BYTES against the host's listing, and the close guard against a
 transfer actually in flight.
 
@@ -2100,4 +2100,4 @@ implementation means the annotations were skipped, not that the plan was perfect
 - [ ] `python3 packages/tui/scripts/pty-smoke.py` — 12/12
 - [ ] `node packages/web/scripts/browser-shot.mjs` — 2/2 (the gateway is untouched but shares `frontend`)
 - [ ] A normal GUI run prints no `transfer window:` line
-- [ ] The three by-hand items in `docs/live-testing.md` remain OPEN and are labelled as such
+- [ ] The three by-hand items in `docs/live-testing.md` remain OPEN and are labeled as such

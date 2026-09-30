@@ -113,7 +113,7 @@ request (`telnet.c:2096,2122,4107`).
 >   bare `IBM-3278-2` as DEVICE-TYPE where s3270 sends `IBM-3278-2-E`.**
 >
 > **RFC 2355 permits both forms**, and there is a real argument that `-model 3278-2` meaning
-> "not extended" makes the bare form the more honest one, with s3270's behaviour leaking an
+> "not extended" makes the bare form the more honest one, with s3270's behavior leaking an
 > unrelated default. **This is for the user to decide; no code was changed when it was found.**
 > It also weakened a live-host test — see the correction under *Live host, 2026-09-17*.
 
@@ -229,7 +229,7 @@ Touch points, deliberately small:
 6. `SB DEVICE-TYPE REJECT REASON <code>` → on `UNSUPPORTED-REQ` back off; otherwise try
    the next LU, and back off once the list is exhausted (`telnet.c:2261-2277`).
 7. **Backoff** → send `WONT TN3270E`, discard all TN3270E state, restore the LU list, and
-   continue as traditional tn3270. Modelled on `backoff_tn3270e`. This is what makes
+   continue as traditional tn3270. Modeled on `backoff_tn3270e`. This is what makes
    on-by-default safe: a host that dislikes the option degrades instead of failing.
 
 On completion the session enters **3270 submode immediately**, because BIND-IMAGE was not
@@ -414,7 +414,7 @@ this repo are Python already.
 | Full negotiation, reaching 3270 submode and round-tripping an Erase/Write and an Enter | **met** — `drive-e.py` case 1; inbound `00000000007d40c31140c1c8c9` |
 | `DEVICE-TYPE REQUEST` byte-identical to s3270's capture | **met** — `020749424d2d333237382d322d45`, both. **But only for the DEFAULT terminal type, and that limit was found on 2026-09-17:** under `-model 3278-2` s3270 still sends `IBM-3278-2-E` and we send the bare `IBM-3278-2`, so this row would NOT hold if the comparison were re-run with a model flag. An open decision, not a fixed bug — see the divergence note under *Reference transcript* |
 | `FUNCTIONS REQUEST` identical except the omitted BIND-IMAGE | **met** — ours `0307020405`, s3270's `030700020405`; pinned as a subtraction |
-| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBOURING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm of `TelnetLayer.step` (`packages/core/src/telnet.ts`), not `refuseTn3270e()` — and that arm turned out to carry a real teardown bug, since fixed. See *Live host, 2026-09-17* |
+| A host that refuses option 40 still reaches a working session | **met** — `drive-e.py` case 4, and the LU list is exhausted first. **A NEIGHBORING path is now met LIVE, 2026-09-17, and it is not the same one** — z/VM 4.4 sent `IAC DONT TN3270E` *after* our `WILL`, which is the `St.Dont` arm of `TelnetLayer.step` (`packages/core/src/telnet.ts`), not `refuseTn3270e()` — and that arm turned out to carry a real teardown bug, since fixed. See *Live host, 2026-09-17* |
 | `npm test`, `npm run typecheck`, `npm run build` clean | **met** — 1202 tests in 41 files |
 | `pty-smoke.py` still 12/12 | **met** — re-run 2026-08-28 |
 | `-tn3270e off` byte-identical to today's session **against both Hercules hosts** | **MET, 2026-08-28, both hosts.** VM/370: `-tn3270e off`, `N:` and an LU list each byte-identical in both directions (140 sent, 1806 received). MVS 3.8j TK5: all four runs identical in what we SENT (33 bytes); received differs by one byte, decoded and shown to be a digit of the clock on TK5's logon panel |
@@ -441,8 +441,8 @@ Recorded here rather than in a session note, per the discipline this spec alread
 - **The CLI has no host argument**, so the whole `[prefix:][LU,LU@]host[:port]` shape is
   applied in `runner.ts` at `Connect()`. `resolveHostSpec` owns prefix meaning for both
   front ends; the older `splitTarget` was deleted rather than left beside it.
-- **`N:` is honoured where `L:` is refused**, and the asymmetry is principled: TLS is
-  fixed when the socket is made, so honouring `L:` on an `-insecure` session would be a
+- **`N:` is honored where `L:` is refused**, and the asymmetry is principled: TLS is
+  fixed when the socket is made, so honoring `L:` on an `-insecure` session would be a
   silent downgrade, while TN3270E is negotiated per connection, so the more specific
   per-host instruction can simply win.
 - **An LU list must be quoted in the CLI.** `Connect("LUA,LUB@host")`. Measured against

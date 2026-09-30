@@ -52,7 +52,7 @@ Every number here was taken on this box on 2026-09-15, not estimated.
 | `zlib.deflateSync` | 6760 |
 | `zlib.gzipSync` | 6772 |
 
-A 35× reduction, because per-cell colour data is enormously repetitive. **This is why compression
+A 35× reduction, because per-cell color data is enormously repetitive. **This is why compression
 is in the first slice and dirty-cell diffing is not**: raw frames would be unpleasant over a
 network (a keystroke can produce several), while 6.8 KB is a non-issue, and diffing would put
 patch semantics into the renderer that Electron does not need.
@@ -125,7 +125,7 @@ packages, `npm run build` MUST precede `vitest`**, because the package resolves 
 | --- | --- |
 | `src/main.ts` | entry: parse argv, build the server, own the session registry |
 | `src/args.ts` | the web-only flags; host, model, scheme and host-side TLS come from `frontend` |
-| `src/wsframe.ts` | RFC 6455 frame parse and serialise. Pure, no sockets, fully unit-testable |
+| `src/wsframe.ts` | RFC 6455 frame parse and serialize. Pure, no sockets, fully unit-testable |
 | `src/wsserver.ts` | the upgrade handshake and a `Connection` object. **The swap-to-`ws` seam** |
 | `src/httpstatic.ts` | serves the five static files and nothing else |
 | `src/protocol.ts` | message shapes, and `deflate` on the way out |
@@ -170,7 +170,7 @@ something or the key is a dead spot the renderer claims to bind.
 So the bridge intercepts `quit` before it reaches the socket, closes the connection, and shows
 "disconnected" through the same path as an error message. The effect is *disconnect this session*,
 which after the grace window ends the 3270 session — the closest honest analogue of quitting.
-The server ALSO refuses a `quit` that arrives anyway, as defence in depth, because the bridge is
+The server ALSO refuses a `quit` that arrives anyway, as defense in depth, because the bridge is
 served code and a client is not obliged to run it.
 
 ### THE QUEUEING RACE, which would present as an intermittently blank screen
@@ -252,7 +252,7 @@ reachable without a browser at all.
 
 **Inside `npm test`:**
 
-- `wsframe.test.ts` — parse and serialise across the payload-length boundaries (125/126/127 → 7,
+- `wsframe.test.ts` — parse and serialize across the payload-length boundaries (125/126/127 → 7,
   16 and 64-bit), masking (client frames MUST be masked; a server frame must NOT be), continuation
   frames, close/ping/pong, and malformed input rejected rather than mis-parsed.
 - `auth.test.ts` — token accepted, rejected, length-mismatched, absent; `--auth off`; and that the
@@ -313,7 +313,7 @@ server never opens a socket to a host, so no test can leak a credential.
    its pre-branch content by TWO LINES.** Live verification found that a model-4 screen (43 rows =
    616px with the OIA) had its entire OIA row clipped in a viewport shorter than that, silently. The
    Electron app fixes this by calling `setContentSize`; **a browser page cannot resize its own
-   window**, and `bestScale` floors at 1 while `centre` clamps at 0, so nothing else rescued it. The
+   window**, and `bestScale` floors at 1 while `center` clamps at 0, so nothing else rescued it. The
    canvas is now sized to `max(viewport, drawing)`, and the page's CSS scrolls. Measured both ways:
    `800x600 scrollable=false` before, `800x616 scrollable=true` after.
 

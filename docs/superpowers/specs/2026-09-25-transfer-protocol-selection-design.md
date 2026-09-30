@@ -119,8 +119,8 @@ flows, not four:
 this design proceeds.
 
 **Not collapsed to one driver.** Merging the CLI's blocking loop into the event-driven one changes
-the line protocol's behaviour, which `transferRun.ts`'s header documents as the reason they diverge.
-That is a behaviour change, not plumbing, and is out of scope here.
+the line protocol's behavior, which `transferRun.ts`'s header documents as the reason they diverge.
+That is a behavior change, not plumbing, and is out of scope here.
 
 ### 4 and 5. The DFT arm, in each driver
 
@@ -210,7 +210,7 @@ recovery needed.
 
 **This is the same refusal `transfer-vm.txt` already documents for a plain `IBM-3278-2` terminal
 type**, which MECAFF rejects with identical wording. The geometry is not what MECAFF is checking; it
-is checking whether it recognises the terminal, and a model-4 session fails that check the same way.
+is checking whether it recognizes the terminal, and a model-4 session fails that check the same way.
 **So on this host the question "does a CUT frame appear at the wrong offsets" never arises — no
 transfer starts at all.**
 
@@ -265,7 +265,7 @@ so a dropped connection cannot strand one.
 
 **Cancellation.** CUT sends its abort immediately; DFT defers to the next inbound frame, matching
 x3270 — a deliberate divergence documented in `dft.ts`. While **uncommitted**, a cancel has no
-engine to talk to: abandon the wait and report cancelled. **No synthesised abort**, for the reason
+engine to talk to: abandon the wait and report canceled. **No synthesised abort**, for the reason
 `transferRun.ts` already gives — an abort writes the response area and presses PF2 from a frame
 `CutTransfer` has parsed, so fabricating one puts bytes on the wire that no captured session
 contains.
@@ -274,7 +274,7 @@ contains.
 
 **The real safety net is what must keep passing untouched:** the whole CUT suite,
 `conformance.test.ts` and `golden.test.ts` (12 tests), `drive-playback.py` (10/10), and the DFT
-engine tests from Tasks 4–9. **If the CUT path changes behaviour at 24x80, this design is wrong.**
+engine tests from Tasks 4–9. **If the CUT path changes behavior at 24x80, this design is wrong.**
 
 **`detect.ts`:** `looksLikeCutFrame` returns `false` at 43x80 where `isCutFrame` throws; the two
 agree at 24x80 on both a real frame and a non-frame. Mutation: make it throw, and the 43x80 decision
@@ -289,13 +289,13 @@ test must fail without the fix** or it is testing nothing.
 
 **Integration, per driver, over `FakeConnection`:**
 
-- CUT host wins at 24x80 → DFT cancelled, CUT proceeds, bytes land.
+- CUT host wins at 24x80 → DFT canceled, CUT proceeds, bytes land.
 - DFT host wins → the `CutTransfer` is discarded and **the driver notices completion with ZERO
   `screen` events.** Assert the count is zero, not merely that it succeeded — this is the test that
   catches the spin-to-timeout bug.
 - CUT host at 43x80 → the timeout message names the geometry, and `isConnected()` is still true.
 - No frames, DDM off → the message mentions `-ddm on`.
-- Cancel while uncommitted → reports cancelled and **nothing goes on the wire.**
+- Cancel while uncommitted → reports canceled and **nothing goes on the wire.**
 
 **Two mutation checks are required**, because both defects would otherwise pass a green suite —
 **four mutations passed vacuously on the DFT branch**, each reading as "this line is dead" when it
@@ -313,7 +313,7 @@ trace line exists because adding the `transferData` variant broke an exhaustive 
 
 ## Out of scope
 
-- **Collapsing the two drivers into one.** A line-protocol behaviour change, not plumbing.
+- **Collapsing the two drivers into one.** A line-protocol behavior change, not plumbing.
 - **A transfer UI for the GUI or web.** They have no driver yet; the move makes one available, and
   giving them the UI is separate work.
 - **`Transfer()`'s `BufferSize` keyword and `SessionOptions.dftBufferSize`.** Both parsed and set by

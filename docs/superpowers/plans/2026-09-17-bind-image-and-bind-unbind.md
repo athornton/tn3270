@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Request the BIND-IMAGE function, parse BIND and UNBIND, honour BIND's geometry within x3270's limits, and gate 3270 data until bound — with a 5-second timeout that executes the retained frame rather than hanging.
+**Goal:** Request the BIND-IMAGE function, parse BIND and UNBIND, honor BIND's geometry within x3270's limits, and gate 3270 data until bound — with a 5-second timeout that executes the retained frame rather than hanging.
 
 **Architecture:** `parseBind` and `parseUnbind` are pure functions in `packages/core/src/bind.ts`, tested without a session. `Screen` gains one narrow mutator, `setSizes`, because `defaultSize`/`alternateSize` are `readonly` and BIND rewrites both. `Session` gains the gate: a retained pre-BIND record, a timer, and the geometry application. **No front end changes** — EWA already resizes mid-session and both renderers already follow it.
 
@@ -138,7 +138,7 @@ Append to `packages/core/src/constants.ts`, after the `Tn3270eReason` block (whi
  *
  * RFC 2355 does not enumerate these; x3270 decodes them in `unbind_reason`
  * (Common/telnet.c:2592) and the wire is the authority. THE GAPS ARE REAL — there is
- * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognised
+ * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognized
  * reason is reported as unknown rather than guessed at.
  *
  * BIND_FORTHCOMING IS THE OPERATIONALLY INTERESTING ONE: it means another BIND is
@@ -353,7 +353,7 @@ of the 256 possible inputs.** Masked and unmasked agree everywhere.
 
 **So do NOT write a test claiming to pin it, and do not mutate it expecting red.** Keep the mask,
 because it mirrors x3270 character for character and a reader comparing the two sources should
-find them identical — but keep it as **transcription fidelity, not as a checked behaviour**, and
+find them identical — but keep it as **transcription fidelity, not as a checked behavior**, and
 say so in a comment. This is the same shape as `encodeHeader`'s `& 0xff`, which this project
 already found to be intent-only because `Uint8Array.of` truncates mod 256 regardless.
 
@@ -381,7 +381,7 @@ Co-Authored-By: SLAC AI"
    itself (`(c >> 4) & 0x0f`) was always right; only the prose above it was off by one bit. The
    committed comment says "spanning bits 4-7" explicitly.
 2. **The `& 0x0f` mask IS unfalsifiable, exactly as Step 5 below predicted before writing any
-   code** — and the committed comment states this as "transcription fidelity... not a behavioural
+   code** — and the committed comment states this as "transcription fidelity... not a behavioral
    guard" rather than leaving it as an implicit claim. No test asserts on it; the mutation-check in
    Step 5 targets the validity flag instead, as instructed.
 3. **`BIND_PLU_NAME_MAX` is exported SEPARATELY from `BIND_OFF`, not as a member of it** —
@@ -496,7 +496,7 @@ describe('parseBind — size codes', () => {
     });
   });
 
-  it('reports no dimensions for an unrecognised size code', () => {
+  it('reports no dimensions for an unrecognized size code', () => {
     const b = parseBind(bindWith(0x55, 43, 80, 43, 80))!;
     expect(b.dims).toBeUndefined();
     // Still a valid BIND: the PLU name and RU sizes are unaffected.
@@ -852,7 +852,7 @@ describe('parseUnbind', () => {
       .toEqual({ reason: undefined, forthcoming: false });
   });
 
-  it('passes an unrecognised reason through without inventing a meaning', () => {
+  it('passes an unrecognized reason through without inventing a meaning', () => {
     // 0x03 is one of the real gaps in x3270's table. It is reported, not mapped.
     expect(parseUnbind(Uint8Array.of(0x03)))
       .toEqual({ reason: 0x03, forthcoming: false });
@@ -1399,7 +1399,7 @@ RIGHT thing," a broader statement than the plan's narrower "vacuous or not" fram
 - Modify: `packages/core/src/bind.ts` (add `NO_BIND_TIMEOUT_MS`)
 - Test: `packages/core/test/session.test.ts`
 
-**The behaviour, from the spec.** With the BIND-IMAGE function granted and no BIND yet, a
+**The behavior, from the spec.** With the BIND-IMAGE function granted and no BIND yet, a
 `3270_DATA` record is **retained, not executed and not dropped**. x3270 drops it
 (`telnet.c:2681`, a bare `return 0`); the user chose retention so the timeout in Task 9 recovers
 the frame and not merely the session.
@@ -1753,7 +1753,7 @@ uncovered a real shape difference from the sketch.** `pendingBindRecord` is not 
 retained and live paths must be indistinguishable all the way through, including which response
 flags the record's own TN3270E header asked for — "a host that asked for ALWAYS-RESPONSE on the
 withheld record still gets one." A withheld record that dropped its header's `wants` before
-retaining would silently downgrade that record's response behaviour relative to an identical one
+retaining would silently downgrade that record's response behavior relative to an identical one
 that arrived after BIND. `armNoBindTimer` (`:928`) calls
 `executeRecord(held.wants, held.body)`-shaped code accordingly. `forgetTn3270e` (`:737-742`)
 clears `noBindTimer` (via `clearNoBindTimer()`), `bound`, and `pendingBindRecord` together, exactly
@@ -1805,7 +1805,7 @@ describe('BIND geometry', () => {
     expect(s.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
   });
 
-  it('honours an out-of-range BIND when the limit is off', async () => {
+  it('honors an out-of-range BIND when the limit is off', async () => {
     const s = /* model 2 session, bindLimit: false, BIND-IMAGE granted */;
     /* deliver a BIND with alternate 43x80 */;
     expect(s.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
@@ -1905,7 +1905,7 @@ called out above — **if your test does not catch it, the test is wrong, not th
 
 ```bash
 cd ~/git/tn3270 && git add packages/core/src/session.ts packages/core/test/session.test.ts
-git commit -m "feat(core): honour BIND geometry, revert it on UNBIND
+git commit -m "feat(core): honor BIND geometry, revert it on UNBIND
 
 Order matters and matches x3270: parse, apply geometry, erase, then release the
 gate. Releasing first would execute the retained record at the old geometry,
@@ -2184,7 +2184,7 @@ an optional geometry, `e-server.py` added a second, independent flag, `--bind-si
 28-byte layout, size code `0x7f`, and `24x80`/`32x80` geometry the plan specified — `--send-bind`'s
 existing 5-byte BIND is untouched. The file's own comment (`:188-194`) gives the reason: "TWO
 INDEPENDENT FLAGS, NOT ONE WITH A MODE ARGUMENT" avoids teaching `--send-bind` a new argument just
-to preserve its current behaviour, and the two may be combined. All three specified cases landed
+to preserve its current behavior, and the two may be combined. All three specified cases landed
 in `drive-e.py` verbatim in effect (`:174-252`), plus a bonus case for `-bind-image off`
 (`:253-`); `drive-e.py` totals exactly 10 `Case(` entries, confirming the plan's predicted
 7-existing + 3-new count. The BIND-follows case additionally caught a real interaction the plan's

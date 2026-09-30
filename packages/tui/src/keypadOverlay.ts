@@ -12,7 +12,7 @@
  *
  * c3270's keypad is 16 rows tall and 78 columns wide (`Common/c3270/keypad.outline`, measured: 16
  * lines, longest 78). This TUI refuses to draw below 24 rows (`tooSmall` in `render.ts`) and
- * centres the screen above that, so a faithful keypad would have to hide two thirds of the 3270
+ * centers the screen above that, so a faithful keypad would have to hide two thirds of the 3270
  * display in order to show itself. A list overlays a corner instead, and can refuse to open at
  * all.
  *
@@ -72,7 +72,7 @@ const NAME_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => k.name.length));
 /**
  * Do these describe the same action?
  *
- * Structural, and NOT `JSON.stringify(a) === JSON.stringify(b)`: that compares SERIALISATIONS, so
+ * Structural, and NOT `JSON.stringify(a) === JSON.stringify(b)`: that compares SERIALIZATIONS, so
  * writing `{ n: 1, kind: 'pf' }` in either table would silently stop matching. The failure mode
  * would be a blank chord, which this overlay renders as "no chord exists" -- a wrong answer that
  * looks exactly like a right one. `pf`/`pa` carry `n` and `type` carries `text`; every other

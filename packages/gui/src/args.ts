@@ -141,7 +141,7 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         break;
       default:
         if (flag.startsWith('-')) {
-          throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
+          throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
         }
         if (args.host !== undefined) {
           throw new UsageError(

@@ -188,7 +188,7 @@ describe('the keypad toggle', () => {
   });
 
   it('is ALSO Alt-K, which is what c3270 uses on Windows', () => {
-    // Common/fb-c3270:48-49. A terminal could not honour that without going down the ESC
+    // Common/fb-c3270:48-49. A terminal could not honor that without going down the ESC
     // path; a real KeyboardEvent carries no such ambiguity, so both work here.
     expect(actionForKey({ key: 'k', code: 'KeyK', ctrlKey: false, altKey: true, metaKey: false, shiftKey: false }))
       .toEqual({ kind: 'toggleKeypad' });

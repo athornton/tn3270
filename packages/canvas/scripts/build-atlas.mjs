@@ -6,8 +6,8 @@
  * before -- `splitTarget` beside `hostspec.ts`. `npm run build` regenerates it, and
  * `dist/` is gitignored.
  *
- * ALPHA-ONLY OUTPUT: the atlas stores COVERAGE, and colour is applied per cell at blit
- * time from the resolved 3279 palette. Baking colour in would need one atlas per colour,
+ * ALPHA-ONLY OUTPUT: the atlas stores COVERAGE, and color is applied per cell at blit
+ * time from the resolved 3279 palette. Baking color in would need one atlas per color,
  * and a 3279 has sixteen.
  *
  * INDEXED BY CG CODE, NOT EBCDIC. The font is in Character Generator order -- see

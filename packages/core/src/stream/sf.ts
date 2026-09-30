@@ -85,7 +85,7 @@ export type StructuredField =
  * GA23-0059 p. 5-5 (pages.txt:4409-4412): "Except for the use of a Length
  * parameter value of zero, a structured field with a / one-byte type parameter
  * will be rejected if the Length field value is less than / three." Every SFID
- * we recognise is one byte — Read Partition's is X'01' at byte 2
+ * we recognize is one byte — Read Partition's is X'01' at byte 2
  * (pages.txt:6345) — so three is our minimum. The manual's four-byte minimum
  * applies to the two-byte type fields we do not implement, e.g. Begin/End of
  * File, whose table row reads "2-3 SFID X' OF85' Identifies this structured
@@ -284,7 +284,7 @@ export function queryListRequest(sf: StructuredField): QueryListParams | undefin
   // Present for every QUERY_LIST the parser emits — it throws when REQTYP is
   // missing — so this is a type narrowing, not a real branch.
   if (sf.queryList === undefined) return undefined;
-  // B'11' is "Reserved" (pages.txt:6361) and there is no defined behaviour for
+  // B'11' is "Reserved" (pages.txt:6361) and there is no defined behavior for
   // it, so it is not a request we can answer. Screened HERE, at the same place
   // as the bad-PID case, so the caller's "unanswerable" branch handles both
   // alike and no invalid REQTYP can reach the reply builder.

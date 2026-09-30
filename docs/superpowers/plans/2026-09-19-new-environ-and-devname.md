@@ -221,7 +221,7 @@ import { DeviceName } from '../src/devname.js';
 
 /**
  * x3270's devname_init (Common/devname.c:42) and devname_next (:73). The observable
- * behaviour comes from two real traces, not from reasoning:
+ * behavior comes from two real traces, not from reasoning:
  *   devname_success.trc: foo001, foo002, foo003, foo004   (template foo===)
  *   devname_failure.trc: foo1, foo2, foo3                 (template foo=)
  */
@@ -357,7 +357,7 @@ Expected: PASS, 5 tests.
 Read `Common/devname.c:42-83`. Confirm: the backward scan, `max *= 10` per `=`, `max - 1`, the
 pre-increment in `devname_next`, and the saturation guard. **Note anything that differs** — in
 particular, check whether x3270 returns the *unmodified template* on the first call when
-`sub_length` is 0, and whether our "fixed name" behaviour matches.
+`sub_length` is 0, and whether our "fixed name" behavior matches.
 
 - [ ] **Step 7: Commit**
 
@@ -388,7 +388,7 @@ Co-Authored-By: SLAC AI"
 
 **x3270 parses this with an explicit four-state machine** (`parse_new_environ`,
 `telnet_new_environ.c:356-470`): `EE_BASE`, `EE_VAR`, `EE_NAME`, `EE_NAME_ESC`. The shape matters
-because of two behaviours that are not obvious:
+because of two behaviors that are not obvious:
 
 - **A `VAR` or `USERVAR` byte terminates the previous request and starts a new one**, from either
   `EE_VAR` or `EE_NAME`. There is no explicit length or delimiter.
@@ -516,7 +516,7 @@ export interface EnvironRequest {
  * THE ORDER IS PRESERVED because the reply must list variables in the order asked; the
  * recorded trace does exactly that with its three uservars.
  *
- * TWO NON-OBVIOUS BEHAVIOURS, both from x3270's four-state machine
+ * TWO NON-OBVIOUS BEHAVIORS, both from x3270's four-state machine
  * (telnet_new_environ.c:356-470):
  *  - A VAR or USERVAR byte ENDS the previous request and begins a new one. There is no
  *    length prefix and no delimiter; the group bytes are the delimiters.
@@ -588,7 +588,7 @@ cd ~/git/tn3270 && git add packages/core/src/newenviron.ts packages/core/src/ind
 git commit -m "feat(core): parse a NEW-ENVIRON SEND request
 
 Group bytes are the delimiters -- there is no length prefix -- so a VAR or USERVAR
-byte ends the previous entry and starts the next. Two behaviours are easy to miss
+byte ends the previous entry and starts the next. Two behaviors are easy to miss
 and both are pinned: a group byte with no name means the whole group, and an EMPTY
 body means SEND EVERYTHING, expanding to one request per group. Returning an empty
 list for that case would answer the host with nothing in a reply that is still
@@ -969,7 +969,7 @@ describe('NEW-ENVIRON telnet option (39)', () => {
   });
 
   it('ITERATES the device name across successive requests', () => {
-    // The behaviour the whole template mechanism exists for, driven through real bytes
+    // The behavior the whole template mechanism exists for, driven through real bytes
     // rather than by calling DeviceName directly -- the delivery is what could break.
     const { layer, sent } = envHarness({ devname: 'foo===' });
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));
@@ -1203,7 +1203,7 @@ In `connect()` (and `replay()`, if it builds a layer — **check**), build the `
 >    twice shipped a bug where one teardown path cleared state and another did not. **Pick one,
 >    implement it in ONE place, and say which.**
 > 2. **Is `IBMELF: 'YES'` right for us?** x3270 sends it unconditionally (`:243`). It advertises
->    Enhanced LU Support. **Check what it means before copying it** — if we cannot honour what it
+>    Enhanced LU Support. **Check what it means before copying it** — if we cannot honor what it
 >    claims, sending it may be worse than omitting it. Report your reasoning; this is a judgement
 >    call, not a transcription.
 
@@ -1229,7 +1229,7 @@ gateway's own flags are double-dashed. Absent means we refuse option 39 entirely
 so the feature is dark unless asked for.
 
 USER goes on the wire to any host that asks, which is x3270's unconditional
-behaviour and is now documented rather than left to be discovered in a trace.
+behavior and is now documented rather than left to be discovered in a trace.
 
 Generated with AI
 
@@ -1255,7 +1255,7 @@ the traces were not read before estimating. Drive each one, report what actually
 tracks `devname_last_value` and `devname_count` — i.e. **it checks that the name changes.**
 
 That is a live, scriptable counterparty for this feature, not just a recording, and it is already on
-this box. **It is strictly better than a trace for the iteration behaviour**, because a trace can only
+this box. **It is strictly better than a trace for the iteration behavior**, because a trace can only
 replay one recorded conversation while the target can be asked repeatedly.
 
 **Consider using it, and report whether you did.** Two caveats before trusting it: it is a test
@@ -1302,7 +1302,7 @@ cd ~/git/tn3270 && npm run build && python3 packages/cli/scripts/drive-playback.
 ```
 
 **Report the exact block and byte counts per case.** If a trace stops on a divergence that is not our
-bug — `wrongTerminalName`'s colour digit is the known one — use `mismatch_ok=True` and say why, and
+bug — `wrongTerminalName`'s color digit is the known one — use `mismatch_ok=True` and say why, and
 **verify the flag does not mask a regression** by reverting something the case should catch. That
 check is what proved `wont-tn3270e.trc`'s flag honest.
 
@@ -1446,7 +1446,7 @@ three in a `telquals[]` trace array at `Common/telnet.c:143`, so including `INFO
 rather than speculative. `TELOPT_NEW_ENVIRON 39` is at `arpa_telnet.h:90`.
 
 **Task 2 — `DeviceName`.** Citation refined: `devname_init` at `devname.c:42`, `devname_next` at
-`:73`. **The saturation behaviour is PROVEN ON THE WIRE, not inferred from the C**:
+`:73`. **The saturation behavior is PROVEN ON THE WIRE, not inferred from the C**:
 `devname_failure.trc` sends `foo9` at both line 249 and line 257, so the counter demonstrably
 repeats rather than wrapping. An **overflow cap at 15 digits** was added beyond the plan — `10 **
 digits` for a 20-`=` template exceeds `Number.MAX_SAFE_INTEGER`, and silently producing nonsense for
@@ -1460,7 +1460,7 @@ in that arm), so **one escape inside a name permanently disables the VAR/USERVAR
 silently absorbs the next request's group byte into the current name. We follow RFC 1572 instead and
 clear the escape after one byte. **The divergence is unreachable, not merely untested: no
 subnegotiation in any of the collection's traces contains byte 0x02 in a name or value**, so no host
-can have been built against x3270's behaviour.
+can have been built against x3270's behavior.
 
 **Task 3 also corrected my evidence for "an empty body means send everything."** I cited only the C.
 **Four traces record a host actually doing it** — `dbcs-wrap.trc:103` sends the bare
@@ -1480,7 +1480,7 @@ C that the group byte really is emitted inside the loop.
 The round-trip test earns its place: it proves our escaper and parser agree on the one case a naive
 design breaks — a group-code byte immediately following `ESC`.
 
-**Task 6 — the telnet layer.** The `doubleIac` scope question resolved in favour of my sketch, but
+**Task 6 — the telnet layer.** The `doubleIac` scope question resolved in favor of my sketch, but
 **by reading x3270's `expand_iac` call site** (it operates on the whole reply buffer, qualifier
 included) rather than by accepting the sketch. **Do NOT gate a `SEND` on `myOpts.has(39)`**: x3270
 gates only on `appres.new_environ` at `telnet.c:2048-2049`, and the contrast with the

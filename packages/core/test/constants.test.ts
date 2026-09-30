@@ -312,7 +312,7 @@ describe('extended attribute types and values', () => {
   it('XA.RESET is a TYPE meaning reset-all, distinct from XAC_DEFAULT as a VALUE', () => {
     // Both are 0x00 and conflating them is a real bug: as a type it means "return
     // every character attribute to default" (pages.txt:3449-3456); as a value under
-    // XA.FOREGROUND it means "device default colour". The TK5 fixture contains
+    // XA.FOREGROUND it means "device default color". The TK5 fixture contains
     // twelve of the former.
     expect(XA.RESET).toBe(XAC_DEFAULT);
     expect(XA.RESET).not.toBe(XA.FOREGROUND);

@@ -118,7 +118,7 @@ export class SessionRegistry {
 
   /**
    * Shutdown: end every session, attached or not, and leave no timer behind to hold the event loop
-   * open. Deleting during `for...of` over a `Map` is defined behaviour -- the iterator visits each
+   * open. Deleting during `for...of` over a `Map` is defined behavior -- the iterator visits each
    * remaining entry in insertion order and simply does not revisit a deleted one.
    */
   closeAll(): void {

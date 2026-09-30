@@ -2,7 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry } from './geometry.js';
 import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
-import { blit, bestScale, centre, tintKey, type Ctx2D } from './blit.js';
+import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 import { hitTestAt, type KeypadButton } from './hittest.js';
 
 /**
@@ -24,8 +24,8 @@ import { hitTestAt, type KeypadButton } from './hittest.js';
  *
  * ## THE TINT CACHE
  *
- * The atlas is coverage, not colour. Each colour gets one pre-tinted copy, built on first
- * use and kept: a 3279 has sixteen colours, so the cache is bounded by the palette rather
+ * The atlas is coverage, not color. Each color gets one pre-tinted copy, built on first
+ * use and kept: a 3279 has sixteen colors, so the cache is bounded by the palette rather
  * than by the screen. Tinting per cell would be 1920 composites a frame.
  */
 
@@ -54,7 +54,7 @@ const real = canvas.getContext('2d');
 if (real === null) throw new Error('no 2D context: the window cannot draw');
 // `Ctx2D` narrows `fillStyle` to string so blit.ts needs no DOM types and stays testable
 // with a recorder. Sound because nothing here assigns a gradient or a pattern: a 3270 cell
-// is a flat colour.
+// is a flat color.
 const ctx = real as unknown as Ctx2D;
 
 let atlas: AtlasMessage | undefined;
@@ -82,10 +82,10 @@ let errored = false;
 const tints = new Map<string, ImageBitmap>();
 const building = new Set<string>();
 
-/** One tinted atlas per colour: coverage written into the alpha channel. */
-function tintOf(colour: Rgb): ImageBitmap | undefined {
+/** One tinted atlas per color: coverage written into the alpha channel. */
+function tintOf(color: Rgb): ImageBitmap | undefined {
   if (atlas === undefined) return undefined;
-  const key = tintKey(colour);
+  const key = tintKey(color);
   const got = tints.get(key);
   if (got !== undefined) return got;
   if (building.has(key)) return undefined;
@@ -95,15 +95,15 @@ function tintOf(colour: Rgb): ImageBitmap | undefined {
   const h = atlas.geometry.cellHeight;
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < atlas.coverage.length; i++) {
-    data[i * 4] = colour[0];
-    data[i * 4 + 1] = colour[1];
-    data[i * 4 + 2] = colour[2];
+    data[i * 4] = color[0];
+    data[i * 4 + 1] = color[1];
+    data[i * 4 + 2] = color[2];
     data[i * 4 + 3] = atlas.coverage[i]!;
   }
   void createImageBitmap(new ImageData(data, w, h)).then((bmp) => {
     tints.set(key, bmp);
     building.delete(key);
-    // A colour arriving late must not leave a hole: repaint once it is ready.
+    // A color arriving late must not leave a hole: repaint once it is ready.
     if (last !== undefined) paint(last);
   });
   return undefined;
@@ -115,7 +115,7 @@ function paint(list: DrawList): void {
 
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(list, within);
-  const at = centre(list, within, scale);
+  const at = center(list, within, scale);
 
   /**
    * THE CANVAS IS AT LEAST AS BIG AS THE DRAWING, NEVER JUST THE VIEWPORT.
@@ -127,7 +127,7 @@ function paint(list: DrawList): void {
    * it by resizing the window. A BROWSER PAGE CANNOT RESIZE ITS WINDOW, so the renderer has to stop
    * losing the data instead: sizing the canvas to the drawing lets the page scroll to reach it.
    *
-   * `bestScale` floors at 1 and `centre` clamps its offsets at 0, so neither of them saves this.
+   * `bestScale` floors at 1 and `center` clamps its offsets at 0, so neither of them saves this.
    *
    * NO EFFECT ON ELECTRON, which is why it is safe to change a file both front ends share: main sets
    * the content size to exactly `list.width * scale` by `list.height * scale`, so the `max` picks the
@@ -145,7 +145,7 @@ function paint(list: DrawList): void {
     offsetY: at.y,
     blank,
     // undefined skips the glyph this frame; tintOf repaints when the bitmap is ready.
-    tinted: (colour: Rgb): unknown | undefined => tintOf(colour),
+    tinted: (color: Rgb): unknown | undefined => tintOf(color),
   };
   blit(ctx, list, options);
 
@@ -199,7 +199,7 @@ function paint(list: DrawList): void {
   // UNPROVEN IN PIXELS, and there is no way to prove it here: nothing in the suite executes a line of
   // this file (`index.ts` deliberately does not export it), `shot.mjs` photographs no press, and
   // `clicks.mjs` drives a real `mousedown` through this listener but asserts actions, not pixels. The
-  // arithmetic and the guards are unchanged from the version that was measured; only the colour moved.
+  // arithmetic and the guards are unchanged from the version that was measured; only the color moved.
   if (pressed !== undefined && list.keypad !== undefined && list.keypad.buttons.includes(pressed)) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(
@@ -290,7 +290,7 @@ canvas.addEventListener('mousedown', (e) => {
   // The arithmetic is `hitTestAt`'s, not this file's, and DELIBERATELY: nothing can execute a line
   // of this module (`index.ts:8-10`), so the inverse lives where `keypad.test.ts` can mutate it.
   const button = hitTestAt(
-    list.keypad.buttons, e.offsetX, e.offsetY, centre(list, within, scale), scale,
+    list.keypad.buttons, e.offsetX, e.offsetY, center(list, within, scale), scale,
   );
   if (button === undefined) return;           // a gap, or the screen: not ours
   pressed = button;
@@ -322,7 +322,7 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
 /**
  * TEST SEAM, and the only thing in this file that exists for a test.
  *
- * Returns the CENTRE of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
+ * Returns the CENTER of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
  * without knowing the layout, the scale or the offset. Returning COORDINATES rather than firing the
  * action is what keeps the seam honest: the click still goes in through Chromium's input pipeline,
  * so `mousedown`, the primary-button guard, `hitTestAt`, `sendAction` and the IPC hop are all still
@@ -343,10 +343,10 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * as `NO BUTTON`, and both causes are a mistake in the CALLER -- clicking before showing the keypad,
  * or naming a key that is not in the table -- rather than a failure of the path under test. Note it
  * does NOT consult `errored`: this answers where the button IS, and whether a click on it is
- * refused while an error message is up is behaviour for the click path to decide.
+ * refused while an error message is up is behavior for the click path to decide.
  */
-(window as unknown as { __tn3270ButtonCentre: (label: string) => { x: number; y: number } | null })
-  .__tn3270ButtonCentre = (label) => {
+(window as unknown as { __tn3270ButtonCenter: (label: string) => { x: number; y: number } | null })
+  .__tn3270ButtonCenter = (label) => {
     // Read the module state ONCE, as the `mousedown` listener does: the scale, the offset and the
     // button must all come from the same frame.
     const list = last;
@@ -355,7 +355,7 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
     if (button === undefined) return null;
     const within = { width: window.innerWidth, height: window.innerHeight };
     const scale = bestScale(list, within);
-    const at = centre(list, within, scale);
+    const at = center(list, within, scale);
     return {
       x: at.x + (button.x + button.w / 2) * scale,
       y: at.y + (button.y + button.h / 2) * scale,

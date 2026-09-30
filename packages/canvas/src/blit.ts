@@ -5,11 +5,11 @@ import type { DrawList } from './drawlist.js';
 /**
  * Draw a `DrawList` onto a 2D canvas context.
  *
- * ## THE ATLAS IS COVERAGE, SO EVERY COLOUR NEEDS ITS OWN TINTED COPY
+ * ## THE ATLAS IS COVERAGE, SO EVERY COLOR NEEDS ITS OWN TINTED COPY
  *
  * `atlas.bin` is alpha only. Tinting per CELL would mean a composite operation 1920 times
- * a frame; tinting per COLOUR means at most sixteen, because that is how many a 3279 has.
- * So each colour gets one pre-tinted `ImageBitmap`-alike, built on demand and cached. The
+ * a frame; tinting per COLOR means at most sixteen, because that is how many a 3279 has.
+ * So each color gets one pre-tinted `ImageBitmap`-alike, built on demand and cached. The
  * cache is bounded by the palette, not by the screen, which is why it can be unbounded in
  * code without being unbounded in fact.
  *
@@ -47,14 +47,14 @@ export interface BlitOptions {
   readonly offsetX: number;
   readonly offsetY: number;
   /**
-   * A pre-tinted atlas for one colour, or `undefined` if it is not ready yet.
+   * A pre-tinted atlas for one color, or `undefined` if it is not ready yet.
    *
    * Returning undefined SKIPS the glyph for this frame rather than drawing a placeholder.
    * An earlier version returned an empty `ImageData`, which `drawImage` rejects outright --
    * "the provided value is not of type ... ImageBitmap" -- so every cell threw and the
    * window drew backgrounds only. The caller repaints when the tint finishes building.
    */
-  readonly tinted: (colour: Rgb) => unknown | undefined;
+  readonly tinted: (color: Rgb) => unknown | undefined;
   /**
    * Atlas columns with NO INK, whose `drawImage` can be skipped. From `blankColumns`.
    *
@@ -68,7 +68,7 @@ export interface BlitOptions {
 
 export const rgbCss = ([r, g, b]: Rgb): string => `rgb(${r},${g},${b})`;
 
-/** Cache key for a tinted atlas. Colours are triples, so a string key is the simplest. */
+/** Cache key for a tinted atlas. Colors are triples, so a string key is the simplest. */
 export const tintKey = ([r, g, b]: Rgb): string => `${r},${g},${b}`;
 
 /**
@@ -87,8 +87,8 @@ export function bestScale(list: Surface, within: Surface): number {
   return Math.max(1, Math.min(byWidth, byHeight));
 }
 
-/** Where to put the screen so it sits centred in `within` at `scale`. */
-export function centre(list: Surface, within: Surface, scale: number): { x: number; y: number } {
+/** Where to put the screen so it sits centerd in `within` at `scale`. */
+export function center(list: Surface, within: Surface, scale: number): { x: number; y: number } {
   return {
     x: Math.max(0, Math.floor((within.width - list.width * scale) / 2)),
     y: Math.max(0, Math.floor((within.height - list.height * scale) / 2)),

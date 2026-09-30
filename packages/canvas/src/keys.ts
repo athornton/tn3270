@@ -101,7 +101,7 @@ export function actionForKey(e: KeyLike): Action | null {
   // that bail as `null`, unchanged from before this patch.
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     // Alt-K is how c3270's _WIN32 keymap spells `Keypad()` (Common/fb-c3270:48-49, which binds
-    // both `k` and `K`), so it is honoured here alongside the Ctrl-K its terminal keymap uses
+    // both `k` and `K`), so it is honored here alongside the Ctrl-K its terminal keymap uses
     // (:191). A terminal cannot have both -- Alt-K arrives there as `ESC k` and this project
     // keeps new bindings off the ESC path -- but a real KeyboardEvent carries no such ambiguity.
     //

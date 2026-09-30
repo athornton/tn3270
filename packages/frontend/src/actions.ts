@@ -22,7 +22,7 @@ import type { Action } from './keymap.js';
  * `toggleKeypad` is the same shape. Showing or hiding a keypad is a display decision no
  * `Session` knows anything about: the Electron main process and the gateway's server each
  * hold the flag and rebuild the frame, and the TUI opens a list overlay instead. The
- * switch below treats an unrecognised kind as a NO-OP, so ignoring it would leave a front
+ * switch below treats an unrecognized kind as a NO-OP, so ignoring it would leave a front
  * end that forgot to intercept it presenting a button or a chord that does nothing at
  * all -- the least diagnosable outcome available. So it throws.
  *
@@ -125,7 +125,7 @@ export function applyAction(session: Session, action: Action): void {
       case 'toggleInsert': k.setInsertMode(!k.insertMode); break;
       // EXHAUSTIVENESS, WITH NO RUNTIME FOOTPRINT. `satisfies never` is a type-level assertion
       // that every member has been handled above: it emits `default: action;` and nothing else, so
-      // an unrecognised `kind` arriving from untrusted JSON is still the silent no-op that
+      // an unrecognized `kind` arriving from untrusted JSON is still the silent no-op that
       // `web/src/protocol.ts` relies on. What it buys is two compile errors instead of two silent
       // defects: a new `Action` member with no case, and -- the one that matters -- DELETING EITHER
       // GUARD ABOVE without adding a case, which would otherwise turn `quit` or `toggleKeypad` back
@@ -161,14 +161,14 @@ export function applyAction(session: Session, action: Action): void {
  *
  * x3270 has no such binding, and that was checked rather than assumed: `Enter_action` and
  * `Clear_action` (`Common/kybd.c`) branch only on the keyboard lock and on NVT mode, and the word
- * "reconnect" appears nowhere in that file. x3270 reaches this behaviour two other ways — the
+ * "reconnect" appears nowhere in that file. x3270 reaches this behavior two other ways — the
  * `Reconnect()` ACTION (`Common/host.c`, which we also expose, as the CLI's `Reconnect()`), and the
  * `reconnect` RESOURCE (`Common/glue.c`) that redials automatically. We follow x3270 where it has an
  * answer; here it has one for scripts and none for a keyboard, and this is the gap that fills.
  *
  * ## WHY HERE, AND NOT IN EACH FRONT END
  *
- * `applyAction` is the one translation the TUI, the GUI and the browser share, and the behaviour is
+ * `applyAction` is the one translation the TUI, the GUI and the browser share, and the behavior is
  * identical in all three; three copies would be three chances for one to drift. IT IS DELIBERATELY
  * NOT IN THE CLI, which does not use this function: a script's `Enter()` must not silently open a
  * socket, and s3270 spells the deliberate act `Reconnect()`.

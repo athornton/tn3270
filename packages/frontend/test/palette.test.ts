@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { Colour, COLOUR_NAMES } from '@tn3270/core';
+import { Color, COLOR_NAMES } from '@tn3270/core';
 import {
   SCHEMES, DEFAULT_SCHEME, resolveScheme, schemeRgb, SCHEME_NAMES, type Scheme,
 } from '../src/palette.js';
 
-/** Every architected colour identification, 0xF0-0xFF. */
-const ALL_CODES = Object.values(Colour);
+/** Every architected color identification, 0xF0-0xFF. */
+const ALL_CODES = Object.values(Color);
 
 describe('the scheme registry', () => {
   it('holds exactly the four named schemes, and default is one of them', () => {
@@ -18,14 +18,14 @@ describe('the scheme registry', () => {
     expect(new Set(Object.keys(SCHEMES))).toEqual(new Set(SCHEME_NAMES));
   });
 
-  // A scheme added later with a missing code would render `undefined` as a colour, which
-  // in the GUI is a thrown RangeError mid-frame and in the TUI a silently uncoloured cell.
+  // A scheme added later with a missing code would render `undefined` as a color, which
+  // in the GUI is a thrown RangeError mid-frame and in the TUI a silently uncolored cell.
   it('gives every scheme all sixteen codes in BOTH tables', () => {
     for (const name of SCHEME_NAMES) {
       const scheme = SCHEMES[name]!;
       for (const code of ALL_CODES) {
-        expect(scheme.rgb[code], `${name} rgb ${COLOUR_NAMES[code]}`).toBeDefined();
-        expect(scheme.ansi16[code], `${name} ansi16 ${COLOUR_NAMES[code]}`).toBeDefined();
+        expect(scheme.rgb[code], `${name} rgb ${COLOR_NAMES[code]}`).toBeDefined();
+        expect(scheme.ansi16[code], `${name} ansi16 ${COLOR_NAMES[code]}`).toBeDefined();
       }
     }
   });
@@ -34,8 +34,8 @@ describe('the scheme registry', () => {
     for (const name of SCHEME_NAMES) {
       for (const code of ALL_CODES) {
         for (const component of SCHEMES[name]!.rgb[code]!) {
-          expect(component, `${name} ${COLOUR_NAMES[code]}`).toBeGreaterThanOrEqual(0);
-          expect(component, `${name} ${COLOUR_NAMES[code]}`).toBeLessThanOrEqual(255);
+          expect(component, `${name} ${COLOR_NAMES[code]}`).toBeGreaterThanOrEqual(0);
+          expect(component, `${name} ${COLOR_NAMES[code]}`).toBeLessThanOrEqual(255);
         }
       }
     }
@@ -43,21 +43,21 @@ describe('the scheme registry', () => {
 
   it("pins default's blue to zti's value, which is the whole point of the change", () => {
     // Core's PALETTE_3279 has pure #0000ff here, which is what was unreadable on black.
-    expect(SCHEMES.default!.rgb[Colour.BLUE]).toEqual([120, 144, 240]);
-    expect(SCHEMES['3279']!.rgb[Colour.BLUE]).toEqual([0x00, 0x00, 0xff]);
+    expect(SCHEMES.default!.rgb[Color.BLUE]).toEqual([120, 144, 240]);
+    expect(SCHEMES['3279']!.rgb[Color.BLUE]).toEqual([0x00, 0x00, 0xff]);
   });
 
   it('pins x3270 blue and green to the verified rgbmap', () => {
     // c3270/screen.c:213-229. Dodger blue and limegreen, NOT saturated primaries.
-    expect(SCHEMES.x3270!.rgb[Colour.BLUE]).toEqual([0x1e, 0x90, 0xff]);
-    expect(SCHEMES.x3270!.rgb[Colour.GREEN]).toEqual([0x32, 0xcd, 0x32]);
+    expect(SCHEMES.x3270!.rgb[Color.BLUE]).toEqual([0x1e, 0x90, 0xff]);
+    expect(SCHEMES.x3270!.rgb[Color.GREEN]).toEqual([0x32, 0xcd, 0x32]);
   });
 });
 
 describe('per-scheme distinctness', () => {
-  // The three COLOUR schemes must keep all sixteen codes visually distinct, so no two
-  // architecturally-different colours alias to one pixel.
-  it('keeps all sixteen distinct in the three colour schemes', () => {
+  // The three COLOR schemes must keep all sixteen codes visually distinct, so no two
+  // architecturally-different colors alias to one pixel.
+  it('keeps all sixteen distinct in the three color schemes', () => {
     for (const name of ['default', '3279', 'x3270'] as const) {
       const seen = new Set(ALL_CODES.map((c) => SCHEMES[name]!.rgb[c]!.join(',')));
       expect(seen.size, name).toBe(16);
@@ -75,26 +75,26 @@ describe('per-scheme distinctness', () => {
     // its scheme format has a SEPARATE screen background (screen.c:4119-4180, token 17),
     // so it sets F0 to green and gets a dark screen from grey10. We resolve the
     // background FROM F0, so copying it literally gives a green background.
-    expect(green.rgb[Colour.NEUTRAL_BLACK]).toEqual([0, 0, 0]);
-    expect(green.rgb[Colour.BLACK]).toEqual([0, 0, 0]);
+    expect(green.rgb[Color.NEUTRAL_BLACK]).toEqual([0, 0, 0]);
+    expect(green.rgb[Color.BLACK]).toEqual([0, 0, 0]);
 
     // Everything visible is a shade of green: red and blue channels equal, green channel
     // above both. This is the property, not a value pin.
     for (const code of ALL_CODES) {
-      if (code === Colour.NEUTRAL_BLACK || code === Colour.BLACK) continue;
+      if (code === Color.NEUTRAL_BLACK || code === Color.BLACK) continue;
       const [r, g, b] = green.rgb[code]!;
-      expect(r, COLOUR_NAMES[code]).toBe(b);
-      expect(g, COLOUR_NAMES[code]).toBeGreaterThan(r);
+      expect(r, COLOR_NAMES[code]).toBe(b);
+      expect(g, COLOR_NAMES[code]).toBeGreaterThan(r);
     }
   });
 
-  // Without its own slot map, one session would render green at truecolour and
-  // blue/red/yellow at sixteen colours. This is why a Scheme carries ansi16 at all.
+  // Without its own slot map, one session would render green at truecolor and
+  // blue/red/yellow at sixteen colors. This is why a Scheme carries ansi16 at all.
   it('maps every green code onto the green or black ANSI slot', () => {
     for (const code of ALL_CODES) {
       const [slot] = SCHEMES.green!.ansi16[code]!;
-      const dark = code === Colour.NEUTRAL_BLACK || code === Colour.BLACK;
-      expect(slot, COLOUR_NAMES[code]).toBe(dark ? 0 : 2);
+      const dark = code === Color.NEUTRAL_BLACK || code === Color.BLACK;
+      expect(slot, COLOR_NAMES[code]).toBe(dark ? 0 : 2);
     }
   });
 });
@@ -122,10 +122,10 @@ describe('resolveScheme', () => {
 
 describe('schemeRgb', () => {
   it('returns the scheme\'s triple for a valid code', () => {
-    expect(schemeRgb(SCHEMES.default!, Colour.BLUE)).toEqual([120, 144, 240]);
+    expect(schemeRgb(SCHEMES.default!, Color.BLUE)).toEqual([120, 144, 240]);
   });
 
-  // Matches core's colourRgb contract, which drawlist.ts already relies on.
+  // Matches core's colorRgb contract, which drawlist.ts already relies on.
   it('throws rather than guessing on a code outside 0xF0-0xFF', () => {
     expect(() => schemeRgb(SCHEMES.default!, 0x00)).toThrow(RangeError);
     expect(() => schemeRgb(SCHEMES.default!, 0xef)).toThrow(RangeError);

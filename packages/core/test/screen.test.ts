@@ -533,7 +533,7 @@ describe('extended attribute storage', () => {
 
   it('setExtended merges rather than replacing, so one type does not clear another', () => {
     // The manual's composite rule (pages.txt:2995-2996): the applied set is a
-    // composite BY ATTRIBUTE TYPE. Setting colour must not wipe highlighting.
+    // composite BY ATTRIBUTE TYPE. Setting color must not wipe highlighting.
     const s = new Screen();
     s.setExtended(5, { gr: 0xf1 });
     s.setExtended(5, { fg: 0xf2 });
@@ -559,7 +559,7 @@ describe('extended attribute storage', () => {
     // attributes, the executor's setExtended call would still land, but only
     // by accident of ordering; the moment anything reorders those two calls,
     // or writes a character without immediately re-asserting SA state, every
-    // SA colour goes silently missing and the TK5 fixture renders monochrome.
+    // SA color goes silently missing and the TK5 fixture renders monochrome.
     const s = new Screen();
     s.setExtended(5, { fg: 0xf2, bg: 0xf1, gr: 0xf4 });
     s.setChar(5, 0xc1);
@@ -583,7 +583,7 @@ describe('extended attribute storage', () => {
   it('setFieldAttribute clears the attribute cell own extended attributes', () => {
     // "If the display receives an SF order, it sets the associated extended
     // field attribute to its default value" (pages.txt:2869-2870). A field
-    // following a coloured one must not inherit colour it was never given.
+    // following a colored one must not inherit color it was never given.
     const s = new Screen();
     s.setExtended(10, { fg: 0xf2, gr: 0xf1 });
     s.setFieldAttribute(10, 0xc0);
@@ -617,7 +617,7 @@ describe('extended attribute storage', () => {
 
   it('omits absent attributes from the snapshot rather than defaulting them', () => {
     // Absence is protocol-meaningful: it means "fall through to the base field
-    // attribute", which is NOT the same as any concrete colour. Storing 0x00
+    // attribute", which is NOT the same as any concrete color. Storing 0x00
     // here would erase the distinction, because 0x00 as a VALUE means
     // "device default" and would resolve identically -- but only by accident.
     const s = new Screen();

@@ -38,14 +38,14 @@ later reader will otherwise assume the x3270 default was copied.
 
 1. **A timeout, not a silent hang.** "I prefer a timeout to a silent hang." x3270 waits
    forever; we do not.
-2. **Parse-and-honour, not parse-and-log.** BIND may resize the screen mid-session, and that
+2. **Parse-and-honor, not parse-and-log.** BIND may resize the screen mid-session, and that
    blast radius is accepted.
 3. **Pre-BIND 3270 data is RETAINED and executed if the timeout fires** — not dropped as
    x3270 drops it. A timeout that discarded the frame would recover the session and still
    leave a blank screen, which is a quieter failure than the hang it replaces.
 4. **BIND-IMAGE is requested by DEFAULT, with `-bind-image off` to disable.** A flag nobody
    sets is a feature nobody tests, and the residual risk is covered by the timeout.
-5. **Range-check by default, `-bind-limit off` to honour anyway.** x3270's own spelling and
+5. **Range-check by default, `-bind-limit off` to honor anyway.** x3270's own spelling and
    polarity.
 6. **The timeout is 5 seconds**, and the reason is not margin-for-its-own-sake: most users
    will be on Hercules, but **P/370 and real 370-class hardware are still out there and are
@@ -53,7 +53,7 @@ later reader will otherwise assume the x3270 default was copied.
 
 ## Scope
 
-**In:** requesting the BIND-IMAGE function; parsing BIND and UNBIND; honouring BIND geometry
+**In:** requesting the BIND-IMAGE function; parsing BIND and UNBIND; honoring BIND geometry
 within limits; gating 3270 data until bound, with the recovering timeout.
 
 **Out, deliberately:** oversize and `IBM-DYNAMIC` (the next feature — and the range-check is
@@ -111,7 +111,7 @@ be smaller than the model in either dimension (`ovc < mxc`, `ovr < mxr`). **Over
 grows.**
 
 **Consequence for the next feature:** the substance is entirely in **oversize** — building a
-bigger buffer, honouring the product limit, and the front-end consequences (a 100x50 window; a
+bigger buffer, honoring the product limit, and the front-end consequences (a 100x50 window; a
 TUI that refuses at 50 rows). The advertisement is a by-product. So the next spec should be
 *"oversize, which advertises `IBM-DYNAMIC`"*, not *"`IBM-DYNAMIC`, which needs oversize"*.
 
@@ -183,7 +183,7 @@ boundary.
 ### 3. Geometry — a narrow new mutator on `Screen`
 
 `Screen.defaultSize` and `Screen.alternateSize` are **`readonly` today** (`screen.ts:125-128`)
-and BIND rewrites both. So parse-and-honour needs a new mutator; a `resize()` call cannot
+and BIND rewrites both. So parse-and-honor needs a new mutator; a `resize()` call cannot
 express it, because `resize` switches the *current* geometry between two fixed sizes while
 BIND changes what those two sizes *are*.
 
@@ -206,7 +206,7 @@ bug:** since the upper bound is the model's size and the lower is model 2, a **m
 client's BIND geometry is pinned to exactly 24x80** — every other value is refused. With
 `-bind-limit` on, BIND can only ever narrow a large model toward 24x80; it can never grow you
 past what `-model` already advertised. It is a safety rail, not a capability. `-bind-limit
-off` honours whatever arrives, bounded only by the 14-bit addressing limit
+off` honors whatever arrives, bounded only by the 14-bit addressing limit
 (`MAX_ROWS_COLS = 0x3fff`, which `address.ts` already handles).
 
 UNBIND (`telnet.c:2745`) reverts to the `-model` values, clears bound state, erases, and
@@ -291,7 +291,7 @@ while proving nothing, so a test that cannot be made to fail does not count:
 - the gate retains a record and executes it on BIND at the **new** geometry
 - the timeout fires, executes the retained record, and is observable
 - `-bind-image off` omits the function; a host forcing it anyway still backs off
-- `-bind-limit off` honours an out-of-range geometry
+- `-bind-limit off` honors an out-of-range geometry
 
 ## Risks, to be measured rather than assumed
 

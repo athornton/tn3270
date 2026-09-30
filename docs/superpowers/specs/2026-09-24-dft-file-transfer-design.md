@@ -236,7 +236,7 @@ test.
 
 ## The question that was left open — ANSWERED FROM THE WIRE, 2026-09-29
 
-**It was: does DFT honour `Recfm`/`Lrecl`/`Blksize` identically to CUT, given that TSO's DFT `Open`
+**It was: does DFT honor `Recfm`/`Lrecl`/`Blksize` identically to CUT, given that TSO's DFT `Open`
 carries its own record size at +27 (`len == 0x29`), which CUT has no equivalent of?**
 
 **THE ANSWER IS IN TWO PARTS, AND THEY ARE INDEPENDENT OF EACH OTHER.**
@@ -280,9 +280,9 @@ beyond closing a question.** `Transfer()`'s `BufferSize` keyword and `SessionOpt
 are both set by nothing today. When they are wired they **must agree**, because the size advertised in
 the DDM unit and the size used to chunk an upload are one number — and the run above shows the host
 *reads that advertisement and quotes it back*. Advertising one value while chunking by another would
-have the host sizing its side from a number we do not honour.
+have the host sizing its side from a number we do not honor.
 
-**Stage 1's host asymmetry is unaffected and still stands:** TSO honours `LRECL` with `RECFM V` and
+**Stage 1's host asymmetry is unaffected and still stands:** TSO honors `LRECL` with `RECFM V` and
 reports `VB`; CMS ignores it and reports `V`. That is a property of the hosts, not of the protocol,
 and DFT changes nothing about it.
 

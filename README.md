@@ -13,7 +13,7 @@ cannot tell it from the hardware.
 **Status: there is a working GUI, a working terminal client, a scripting CLI, and a
 browser gateway.**
 The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
-Reply, 3279 colour, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
+Reply, 3279 color, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
 c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
 TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is reachable
 from the **TUI** as well as the CLI — `Ctrl-T` opens a transfer form; the GUI and the browser
@@ -46,12 +46,12 @@ a modern host you would leave it off. See *TLS*.
   with its disk table, and logs off with CP's own `LOGOFF AT` accounting. That last
   part is the difference between being understood and being tolerated.
 
-**3279 colour is real and proven on the wire, not just in unit tests.** TK5's ISPF
-menu renders five distinct foreground colours where the base-attribute map can only
+**3279 color is real and proven on the wire, not just in unit tests.** TK5's ISPF
+menu renders five distinct foreground colors where the base-attribute map can only
 produce four — two of them (turquoise, neutral-white) come from the host's SA/SFE
 extended attributes and would have been silently discarded before. The SA orders we
 parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
-colour-capable 3279.
+color-capable 3279.
 
 **`IND$FILE` file transfer works on both hosts, in both directions, in BOTH PROTOCOLS**, with a
 binary round-tripping byte-identically each way. **`Ctrl-T` in the TUI opens a transfer
@@ -64,15 +64,15 @@ TK5 at 43x80: 11 DFT frames, zero CUT frames, 249 bytes byte-identical both dire
 geometry matters — **CUT needs a 24x80 screen and refuses anything else**, so a 43x80 transfer
 is only possible over DFT, and until this landed a `-model 3278-4-E` session could not transfer
 a file at all. The 24x80 requirement is still real but it is now raised **when CUT is chosen**
-rather than before the host is asked, which is the one behaviour change: a CUT-only host at
+rather than before the host is asked, which is the one behavior change: a CUT-only host at
 43x80 is primed before we find out, and VM/370's MECAFF refuses with its own text in about a
 second. **DDM is advertised BY DEFAULT as of 2026-09-29**, so a DFT-capable host will choose
-DFT; `-ddm off` restores the CUT-only behaviour. See *Using the CLI*.
+DFT; `-ddm off` restores the CUT-only behavior. See *Using the CLI*.
 
 One honest limit remains: **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on
 the wire 2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
 indistinguishable while `RECFM F LRECL 80` differs, so the keyword demonstrably reaches
-the host and CMS simply disregards it. TSO honours it as a *maximum* (`VB 1024` measured
+the host and CMS simply disregards it. TSO honors it as a *maximum* (`VB 1024` measured
 through the form). So a `V 80` readback on CMS is not confirmation the field took effect,
 and the field stays enabled because disabling it would make a real TSO attribute
 unexpressible.
@@ -229,7 +229,7 @@ manual's permitted set (p. 4-13).
 
 **`Ctrl-K` shows and hides the virtual keypad**, and `Alt-K` does the same — `Ctrl-K` is c3270's
 terminal binding (`Common/fb-c3270:191`) and `Alt-K` is how its Windows keymap spells the same
-command, so both are honoured here rather than one being a divergence. The window grows and
+command, so both are honored here rather than one being a divergence. The window grows and
 shrinks to fit; nothing above the keypad moves. **Clicking a button is the only thing the mouse
 does.** A press highlight is drawn locally and never reaches the host, so it cannot lag behind
 your finger over a WebSocket.
@@ -313,7 +313,7 @@ node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-sch
 defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*.
 `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
-monochrome path gets tested on a colour terminal.
+monochrome path gets tested on a color terminal.
 
 **`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
 constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
@@ -332,7 +332,7 @@ dropped. Arrow keys are bound in **both** encodings, CSI and SS3, because termin
 only the application-mode one and any layer can flip the mode.
 
 **Disconnected, `Enter` and `Ctrl-C` reconnect** to the same host, port and per-host options
-rather than sending their AID — see *Using the GUI* for the whole rule; the behaviour is shared
+rather than sending their AID — see *Using the GUI* for the whole rule; the behavior is shared
 code and identical in all three interactive front ends.
 
 **`Ctrl-D` is Dup and `Ctrl-F` is Field Mark**, both c3270's own bindings
@@ -383,17 +383,17 @@ still open and nothing retyped; a form and a script cannot drift on what is lega
 **`Esc` mid-transfer ABORTS** — `CutTransfer.cancel` writes the response area and presses PF2, so
 the host leaves transfer mode rather than waiting for a frame that will never come.
 
-**Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
+**Colors come from one shared table in `packages/frontend`, and `-scheme` picks which.**
 `default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
 rest — and it is what every front end draws unless told otherwise. `3279` is
 core's own saturated table: **our own choice of primaries, not a phosphor measurement** —
-the manual names each colour without fixing its chromaticity, and a real 3279 matched
+the manual names each color without fixing its chromaticity, and a real 3279 matched
 neither this table nor x3270's — kept because someone comparing against the architected
 meaning may want the unambiguous version. `x3270` is that emulator's own `rgbmap`, for
 comparing against it. `green` is a monochrome 3278, **the only one of the four with any
-claim to authenticity**, because a 3278 had no colour at all — colour was a 3279 feature —
+claim to authenticity**, because a 3278 had no color at all — color was a 3279 feature —
 and `greenscreen` is accepted as an alias for it, x3270's own spelling. Quantisation to 16
-colours is an explicit per-scheme table rather than nearest-RGB: with any pleasant palette,
+colors is an explicit per-scheme table rather than nearest-RGB: with any pleasant palette,
 blue and turquoise both land nearest ANSI cyan and would collide.
 
 ## Screen models
@@ -492,7 +492,7 @@ assumed — see *Verification*.
 | `LU@host` | request a specific LU by name |
 | `LUA,LUB@host` | request each in turn as rejections come back |
 | `-bind-image on\|off` | request the BIND-IMAGE function (default **on**); `off` means the gate below never closes, because it is conditional on the host having *agreed* the function |
-| `-bind-limit on\|off` | range-check a BIND's geometry against `-model` before honouring it (default **on**, matching x3270's `bind_limit` resource, `Common/glue.c:458`); `off` honours an out-of-range BIND anyway |
+| `-bind-limit on\|off` | range-check a BIND's geometry against `-model` before honoring it (default **on**, matching x3270's `bind_limit` resource, `Common/glue.c:458`); `off` honors an out-of-range BIND anyway |
 | `-devname NAME` | offer telnet option 39 (NEW-ENVIRON) and answer a host's `DEVNAME` request with `NAME`. **Trailing `=` characters become a counter**: `foo===` yields `foo001`, `foo002`, … a fresh name per request, because a host refuses a name already in use. Absent, option 39 is **refused outright** — the feature is dark unless asked for |
 
 The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
@@ -527,7 +527,7 @@ punish exactly the users who can least afford it. The constant is `NO_BIND_TIMEO
 in `packages/core/src/bind.ts` and is deliberately easy to find for anyone who needs it
 longer.
 
-**A BIND may resize the screen mid-session, and we honour it — geometry included.**
+**A BIND may resize the screen mid-session, and we honor it — geometry included.**
 `-bind-limit on` (the default) range-checks a BIND's rows/cols against `-model` before
 applying them, matching x3270's `bind_limit` resource: the upper bound is the
 configured model, the lower bound is 24x80 (model 2). **On a model-2 session those two
@@ -537,7 +537,7 @@ with the limit on, BIND can only ever *narrow* a larger model toward 24x80, neve
 one past what `-model` configured — growing past the model is a separate, unbuilt
 feature (`-oversize`)'s job, and letting BIND do it here would silently turn this
 feature into that one. A user who sees a refused BIND while running `-model 3278-2`
-has not found a bug; `-bind-limit off` honours the BIND's geometry anyway. UNBIND
+has not found a bug; `-bind-limit off` honors the BIND's geometry anyway. UNBIND
 reverts the screen to the model's own geometry, not to whatever the previous BIND left
 it at.
 
@@ -575,7 +575,7 @@ compatibility — but it only ever leaves the machine if you asked for option 39
 first place by passing `-devname`, and only to a host that asks for it. `CODEPAGE` is
 `037`, derived from the code page actually in use rather than hardcoded.
 
-**`IBMELF: YES` advertises the Express Logon Feature, and we cannot currently honour
+**`IBMELF: YES` advertises the Express Logon Feature, and we cannot currently honor
 it.** ELF replaces an interactive logon with a **client certificate**: the host's TN3270
 server validates it, obtains a passticket, and logs you on without a userid or password
 crossing the network. IBM is explicit that the session "must be configured for SSL with
@@ -649,7 +649,7 @@ connect to`.
 these names (`Common/kybd.c:223`, `:230`, `:254`), so a script written for it should not fail
 here. All three take no arguments — s3270's optional `FailOnError`/`NoFailOnError` on `Dup` and
 `FieldMark` is refused by name rather than accepted and ignored, because failing on an operator
-error already *is* s3270's behaviour for a scripted call. **`SysReq()` answers `ok` whatever
+error already *is* s3270's behavior for a scripted call. **`SysReq()` answers `ok` whatever
 happens** — it reports no refusal, because the key exists on the keyboard whatever the host
 granted. What it sends depends on the session: a test request read heading plus any modified field
 data against a classic host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
@@ -687,7 +687,7 @@ only protocol that works at a geometry other than 24x80.
 
 **What that costs, stated plainly: the CUT path gets less live exercise than it did**, because a
 DFT-capable host will now pick DFT. CUT is still fully implemented and is still the only option
-against a CUT-only host such as VM/370's MECAFF. **`-ddm off` restores the old behaviour exactly**,
+against a CUT-only host such as VM/370's MECAFF. **`-ddm off` restores the old behavior exactly**,
 which is what keeps every pre-flip CUT measurement in `docs/live-testing.md` reproducible — and there
 is a test pinning that, because if it ever broke, that evidence would become unverifiable rather than
 merely old.
@@ -783,7 +783,7 @@ front end.
 **It shares FEWER client flags than the other three, and refuses the rest by name rather than
 ignoring them.** `--terminal-type` and `-tn3270e` are not accepted at all, so a gateway
 session always offers TN3270E and takes its terminal type from `-model`. Of the host
-argument's full `[prefix:][LU,LU@]host[:port]` shape it honours only `host:port`: an **LU
+argument's full `[prefix:][LU,LU@]host[:port]` shape it honors only `host:port`: an **LU
 list** and the **`N:`** prefix are refused, because both are properties of one connection and
 this serves many sessions from a single command line. `L:` is accepted, since TLS to the host
 is already the default — but `L:` together with `-insecure` is refused as a silent
@@ -837,7 +837,7 @@ derived from a real session — procedure in `docs/live-testing.md`.
 
 ```
 packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
-                   colour resolution, Query Reply, IND$FILE, trace
+                   color resolution, Query Reply, IND$FILE, trace
 packages/frontend  rules every front end shares: host argument, TLS flags, session
                    factory, keymap, action dispatch, binding intent, the keypad key table
 packages/canvas    the canvas renderer, glyph atlas, keymap-to-action layer and the virtual
@@ -864,7 +864,7 @@ Done:
    Reply units, SFE. This is what MVS/TSO requires, and it was reprioritised ahead of
    the GUI because MVS 3.8j is expected to be the largest group of users.
 3. **`IND$FILE`** (CUT mode), both hosts, both directions.
-4. **3279 colour and the TUI** — per-cell extended attributes, four-level colour
+4. **3279 color and the TUI** — per-cell extended attributes, four-level color
    resolution, terminfo-driven depth detection, and a c3270-style front end.
 5. **TLS** — and it did jump the queue, for the reason earlier drafts of this section
    predicted: a 3270 client that cannot do TLS is unusable against anything modern.
@@ -1022,7 +1022,7 @@ CMS Gopher 2.4.2 are in `$HOME/cmsgopher`; the `.tar.gz` pair yields only
 `HELPCMS`, and `TONETABL` — its palette/dither table, which is the most directly useful
 piece. **There is no source.** Disassembling it is probably unnecessary: decoding GIF
 from the published spec is no harder than reverse-engineering a 1993 implementation once
-PS can push pixels, so VMGIF is best treated as a *behavioural* reference — evidence of
+PS can push pixels, so VMGIF is best treated as a *behavioral* reference — evidence of
 what a 3279 could be made to do, and a palette to compare against.
 
 **VMGIF used GDDM, and we will not.** IBM is sunsetting GDDM and would be
@@ -1162,7 +1162,7 @@ worse than one that says which quarter is missing.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
   **no connect dialog, no menus and no preferences**. It also does **not**
-  accept `--terminal-type` or `-tn3270e`, and of the host argument it honours only `host:port` —
+  accept `--terminal-type` or `-tn3270e`, and of the host argument it honors only `host:port` —
   an LU list and `N:` are refused by name rather than ignored. A screen taller than the browser
   viewport **scrolls**; it does not reflow, and it will not scale fractionally, because integer
   scaling is a design rule. There is no session list or admin view: sessions are addressed only
@@ -1186,13 +1186,13 @@ The TUI has three limits worth knowing before you run it:
 
 - **It needs at least 24 rows and 80 columns**, and refuses smaller rather than drawing
   a misleading partial screen. At exactly 24 rows it drops the status line and keeps the
-  screen, which is what c3270 does. Given more room it centres the screen and draws a
+  screen, which is what c3270 does. Given more room it centers the screen and draws a
   border.
-- **Its cursor colour is best-effort.** OSC 12 is not universally implemented, so the
+- **Its cursor color is best-effort.** OSC 12 is not universally implemented, so the
   shape is set via DECSCUSR as well; a terminal that ignores both still shows its own
   cursor.
 - **The special-keys list's "terminal too small" refusal cannot be provoked**, and is documented
-  that way rather than claimed as tested behaviour. The 24x80 floor above already refuses any
+  that way rather than claimed as tested behavior. The 24x80 floor above already refuses any
   smaller terminal before a session runs, and the smallest 3270 screen *is* 24x80 — so every
   terminal that can reach the list comfortably clears its 12x29 minimum. The check is a floor for
   a caller that hands the list a sub-window, not something an operator can hit.
@@ -1222,8 +1222,8 @@ visible there.
 | the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy** |
 | the same form vs MVS/TSO, live | **pass — 2026-09-24** — 26 of 26 steps, both directions, the same binary **round-tripping byte-identically**, and TSO's own `LISTDS` reporting `VB 1024 BLKSIZE 1028 PS`. Exercises the other dialect (`RECFM(V) LRECL(1024)` parenthesised) and **both TSO quoting conventions in one session** — unquoted on the send, so TSO prepends the userid, quoted on the receive. `Blksize` is drawn here and was absent on VM, which is the applicability rule checked against two real hosts rather than a fixture. Both TSO quoting conventions in one session |
 | `Lrecl` with `Recfm=V` on CMS | **pass — 2026-09-24** — three cases in one session: `RECFM V LRECL 80` and `RECFM V` alone both store `V 80`, while `RECFM F LRECL 80` stores `F 80`. **The third case is what makes the first two evidence**, since without it "the two V cases match" cannot distinguish a host ignoring the keyword from a client never sending it. The 1000-byte payload was deliberately not a multiple of 80 |
-| mid-flight cancellation vs VM/CMS, live | **pass — 2026-09-24** — cancelling a 200KB upload at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and return CMS to `Ready;`: **the host left transfer mode**, which is the whole purpose of aborting rather than abandoning. The final count was 24261, not 204800, which is what proves it was mid-flight rather than before the first frame or after the last. **An aborted upload leaves a PARTIAL file on the host** — correct, since the host wrote what it received |
-| the same, vs MVS/TSO, live | **pass — 2026-09-24** — cancelled at **15430 of 204800**, final count 23162, and TSO returned to `READY`. **The observable differs and the difference is instructive**: MECAFF announces `>> TRANS99 - Protocol error`, while Rayborn's FFTP says **nothing at all** and simply ends. So *"the host printed an error"* is not the test — *"the next command is obeyed"* is, which both `ERASE`/`DELETE` show. A partial file is left on both |
+| mid-flight cancellation vs VM/CMS, live | **pass — 2026-09-24** — canceling a 200KB upload at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and return CMS to `Ready;`: **the host left transfer mode**, which is the whole purpose of aborting rather than abandoning. The final count was 24261, not 204800, which is what proves it was mid-flight rather than before the first frame or after the last. **An aborted upload leaves a PARTIAL file on the host** — correct, since the host wrote what it received |
+| the same, vs MVS/TSO, live | **pass — 2026-09-24** — canceled at **15430 of 204800**, final count 23162, and TSO returned to `READY`. **The observable differs and the difference is instructive**: MECAFF announces `>> TRANS99 - Protocol error`, while Rayborn's FFTP says **nothing at all** and simply ends. So *"the host printed an error"* is not the test — *"the next command is obeyed"* is, which both `ERASE`/`DELETE` show. A partial file is left on both |
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
@@ -1233,7 +1233,7 @@ visible there.
 | Field Mark, Newline vs a live host | **NOT DONE** — neither has been pressed at a host. On `docs/live-testing.md`'s next-run list |
 | any keypad **button** vs a live host | **NOT DONE** — the 2026-09-21 runs drove the CLI, which shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC. The click path remains offline-only (`clicks.mjs`) |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
-| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` colour-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
+| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` color-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both

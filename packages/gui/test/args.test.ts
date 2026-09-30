@@ -4,7 +4,7 @@ import { parseGuiArgs, UsageError } from '../src/args.js';
 
 /**
  * The flags must be the TUI's, and the way that is guaranteed is by parsing with the same
- * shared helpers rather than by keeping two lists in step. These tests pin the BEHAVIOUR
+ * shared helpers rather than by keeping two lists in step. These tests pin the BEHAVIOR
  * a user sees; `packages/frontend/test` owns the rules themselves.
  */
 describe('parseGuiArgs', () => {
@@ -52,11 +52,11 @@ describe('parseGuiArgs', () => {
     expect(() => parseGuiArgs([])).toThrow(/usage/i);
   });
 
-  it('refuses an unrecognised flag rather than ignoring it', () => {
+  it('refuses an unrecognized flag rather than ignoring it', () => {
     // Same reasoning as both other front ends: a silently skipped flag produces a session
     // that negotiates something nobody asked for, which is very hard to see in a trace.
     expect(() => parseGuiArgs(['--nonesuch', 'vm'])).toThrow(UsageError);
-    expect(() => parseGuiArgs(['-x', 'vm'])).toThrow(/unrecognised/);
+    expect(() => parseGuiArgs(['-x', 'vm'])).toThrow(/unrecognized/);
   });
 
   it('rejects an unusable port instead of connecting to NaN', () => {

@@ -29,7 +29,7 @@ describe('ebcdicToCg', () => {
 
   it('sends every EBCDIC byte to a glyph the font actually has', () => {
     // The strongest check available without a host: 256 lookups, no gaps. A missing glyph
-    // would sample a neighbouring atlas cell at blit time, which looks like corruption
+    // would sample a neighboring atlas cell at blit time, which looks like corruption
     // rather than a missing character.
     for (let e = 0; e < 256; e++) {
       const cg = ebcdicToCg(e);

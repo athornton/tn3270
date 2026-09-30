@@ -74,7 +74,7 @@ and the Recording log says what happened when they were run.
   | `Recfm=fixed,Lrecl=80` | **`FB 80`** BLKSIZE 15040 | **16367** |
 
   **18 `FileTransferData` frames, three `Transfer complete`, zero `input inhibited`.** So:
-  **`Recfm` and `Lrecl` ride through as `IND$FILE` keywords and TSO honours both** (A vs B isolates
+  **`Recfm` and `Lrecl` ride through as `IND$FILE` keywords and TSO honors both** (A vs B isolates
   `Lrecl`, B vs C isolates `Recfm` — three cases, because two cannot tell "host ignored it" from
   "client never sent it"), while **`recordSize` is CONSTANT at 16367 = `16384 - 17`** — our advertised
   `DFT_BUF` less DFT's 17-byte frame overhead (x3270's `bufptr = obuf + 17`, `ft_dft.c:585`). The host
@@ -223,7 +223,7 @@ and the Recording log says what happened when they were run.
   frames**, and `LOGOFF` completed with `CONNECT= 00:00:04` spanning only that run — no wedged
   session and no manual recovery.
   **THIS IS THE SAME REFUSAL `transfer-vm.txt` ALREADY DOCUMENTS FOR A PLAIN `IBM-3278-2`**, word for
-  word. So MECAFF is checking **whether it recognises the terminal, not the geometry**, and a model-4
+  word. So MECAFF is checking **whether it recognizes the terminal, not the geometry**, and a model-4
   session fails that check the same way a model-2-without-`-E` does. The question "does a CUT host
   paint a frame at the wrong offsets" therefore **never arises on this host** — no transfer starts.
   **Why it was worth one run:** it shrank an accepted regression in the selection design (removing the
@@ -296,7 +296,7 @@ and the Recording log says what happened when they were run.
   up.** So "DDM does not break a CUT host" is still unmeasured, and this run says nothing about it.
   **What the run DID establish, and it is not nothing:** the `-ddm on` advertisement reaches a live
   host without disturbing logon at 43x80, and the geometry refusal fires **before** the host is told
-  to start a transfer, which is the behaviour `runner.ts:450`'s comment claims and the reason a failed
+  to start a transfer, which is the behavior `runner.ts:450`'s comment claims and the reason a failed
   run left no half-open transfer on TSO. `LOGOFF` completed, so no stranded userid.
 
 - **ALL FOUR SPECIAL KEYS NOW HAVE A LIVE WITNESS, 2026-09-24.** Field Mark and Newline were the
@@ -312,15 +312,15 @@ and the Recording log says what happened when they were run.
   alone both store `V 80` (indistinguishable), while `RECFM F LRECL 80` stores `F 80` — **and that
   third case is what makes the first two mean anything**, since without it "the two V cases match"
   cannot tell a host that ignores the keyword from a client that never sent it. The field therefore
-  **stays enabled** for `V`: TSO honours it as a maximum. See *CMS ignores `LRECL` with `RECFM V`*.
+  **stays enabled** for `V`: TSO honors it as a maximum. See *CMS ignores `LRECL` with `RECFM V`*.
 - **MID-FLIGHT CANCELLATION IS LIVE-VERIFIED ON VM/CMS, 2026-09-24 — the last unwitnessed piece of
-  the form, and the one whose whole purpose is what the host does next.** Cancelling a 200KB upload
+  the form, and the one whose whole purpose is what the host does next.** Canceling a 200KB upload
   at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and
   **return CMS to `Ready;`** — the host left transfer mode, which is the property the feature rests
   on. The final count was 24261, not 204800, which is what proves it was mid-flight. **An aborted
   upload leaves a PARTIAL file on the host** (measured by comparing the two `ERASE`s). Also
   measured: CUT runs at ~15 ms/frame locally and the codec expands random data 1.727x, so 200 KB is
-  the smallest file that gives a usable interruption window. **ALSO VERIFIED ON MVS/TSO** (cancelled
+  the smallest file that gives a usable interruption window. **ALSO VERIFIED ON MVS/TSO** (canceled
   at 15430 of 204800), where the observable is DIFFERENT: MECAFF announces `TRANS99 - Protocol
   error` and Rayborn's FFTP says nothing at all and simply returns to `READY`. **So "the host
   printed an error" is not the test — "the next command is obeyed" is.** Both leave a partial file.
@@ -365,7 +365,7 @@ and the Recording log says what happened when they were run.
   "nothing visible happened" and "the screen changed" are both uninformative.
 - **BIND-IMAGE, BIND and UNBIND have NO live-host witness either, 2026-09-19, and for the same
   reason as everything else past DEVICE-TYPE: no reachable host completes a TN3270E negotiation.**
-  We now request BIND-IMAGE, parse BIND and UNBIND, and honour BIND's geometry within `-model`'s
+  We now request BIND-IMAGE, parse BIND and UNBIND, and honor BIND's geometry within `-model`'s
   limits (`-bind-limit off` to disable the check), with a 5-second timeout that executes a withheld
   frame rather than hanging the way x3270 does. The witness for all of it is a **recorded** host,
   not a reachable one — `packages/fixtures/x3270/sscp-lu-data.trc` via `playback -b` — added to *The
@@ -409,7 +409,7 @@ So *any* disconnect before the `TERMINAL-TYPE IS` subnegotiation is an error, an
 the only choice is which error. Which one you get depends on whether Hercules'
 greeting was left **unread** in the client's receive queue, because abandoning
 unread data is what makes Linux send RST instead of FIN. **Measured against the
-real host** in a labelled four-phase run (consecutive client IDs 302-305, each
+real host** in a labeled four-phase run (consecutive client IDs 302-305, each
 phase isolated by 15 s of silence):
 
 | what the client does | close | message |
@@ -423,11 +423,11 @@ for the one-liner on the theory that its FIN outruns the greeting. Against the r
 host it is `HHC02909E`: the greeting does land first, so there *is* unread data to
 abandon. The mimic was not faithful enough — Hercules writes its greeting from
 inside libtelnet during the first `recv()`, and the timing that produces cannot be
-reproduced by a hand-rolled `accept()`/`send()`/`recv()` loop. Trust the labelled
+reproduced by a hand-rolled `accept()`/`send()`/`recv()` loop. Trust the labeled
 run against the real host over the mimic.
 
 Use the bash one-liner. It is the simplest thing that answers the question, and
-"which flavour of cosmetic error appears" is not worth extra machinery:
+"which flavor of cosmetic error appears" is not worth extra machinery:
 
 ```bash
 timeout 5 bash -c 'cat < /dev/null > /dev/tcp/HOST/PORT' && echo reachable || echo unreachable
@@ -727,7 +727,7 @@ addresses only fitting a 32×80 screen while we identified as `IBM-3278-2`.
 **Cause found 2026-08-17: another client taught the host that geometry.** The
 client the user actually runs is **`zti`** — the terminal interface shipped by the
 `tnz` package (console script `tnz.zti:main`), with the protocol implemented in
-`tnz/tnz.py`. Naming matters here only because the *behaviour* below lives in the
+`tnz/tnz.py`. Naming matters here only because the *behavior* below lives in the
 library while the *command you type* is `zti`; `~/git/tnz` is the source for both.
 
 It advertises terminal type **`IBM-DYNAMIC`** and answers Read Partition (Query)
@@ -1022,8 +1022,8 @@ its window size, exactly as the `tnz/tnz.py:265-282` reading predicted. Alternat
 support is therefore *not* a prerequisite for TSO and remains unimplemented.
 
 **The SA count is why the MF deferral was safe here, and it was measured rather than
-hoped.** 113 SA orders are parsed and dropped, costing only colour and highlighting;
-zero MF orders means nothing relied on the field-modifying behaviour stage 2a omits.
+hoped.** 113 SA orders are parsed and dropped, costing only color and highlighting;
+zero MF orders means nothing relied on the field-modifying behavior stage 2a omits.
 Had MF appeared, the pre-agreed response was to fold 2a and 2b together. The counters
 were shown able to report a *presence* (a unit test asserts non-zero on a synthetic
 SA/MF record) before this run's zero was trusted — stage 1 lesson 7 applied
@@ -1032,7 +1032,7 @@ deliberately.
 **One known divergence from x3270, found during implementation and not fixed.** We do
 not raise the enter-inhibit condition after answering a Query, which GA23-0059 p. 5-53
 (`pages.txt:6412`) makes step 1 of Read Partition processing and which x3270 implements
-in `query_reply_end()` (`Common/sf.c:929`). For TSO the behaviour coincides — it queries
+in `query_reply_end()` (`Common/sf.c:929`). For TSO the behavior coincides — it queries
 before any write, so we stay locked either way — but a *mid-session* Query would leave
 the keyboard unlocked over a screen the host considers frozen. See the stage 2a spec.
 
@@ -1194,7 +1194,7 @@ live console is Hercules' controlling terminal, which an agent cannot read — s
 4080 19.48.36         IKJ606I TSOLOGON REJECTED. USERID, HERC01,IN USE
 ```
 
-**`WAITING FOR RECONNECT` is the state to recognise:** TCAM is holding the address space open for a
+**`WAITING FOR RECONNECT` is the state to recognize:** TCAM is holding the address space open for a
 terminal that went away, which is exactly what a script that dies mid-session produces. JES2 sees it
 as a job (`TSU 19`), so `/$CJ19` reaches the same address space if the userid form is refused.
 
@@ -1230,7 +1230,7 @@ on the console, because those come from CP rather than from Hercules' message la
 Two things follow, and they make console correlation tractable:
 
 - **Match on client ID, not on position.** `HHC02915I client NNN` numbers increment
-  per connection, so a labelled run maps cleanly onto them (302, 303, 304, 305 for
+  per connection, so a labeled run maps cleanly onto them (302, 303, 304, 305 for
   four connections) with no timestamps needed at all.
 - **Bracket each action with something CP timestamps.** A `LOGON`/`LOGOFF` pair is a
   visible anchor, so ask ordering questions — "which client IDs fall between this
@@ -1238,7 +1238,7 @@ Two things follow, and they make console correlation tractable:
 
 Also note Hercules writes this log to its controlling terminal (its stdout is a
 pipe), so an agent cannot read it. It has to be pasted. Ask for a paste of a
-*bounded, labelled* run rather than asking the user to count events by eye.
+*bounded, labeled* run rather than asking the user to count events by eye.
 
 **The console log only ever confirms success, never diagnoses failure.** Per the
 user: there is no message for an incorrect password — you simply never get the
@@ -1267,9 +1267,9 @@ without the user pasting it.
 
 ---
 
-## TUI and colour results — 2026-08-25
+## TUI and color results — 2026-08-25
 
-Task 14 of `docs/superpowers/plans/2026-08-19-tui-and-colour.md`. **Both hosts, both
+Task 14 of `docs/superpowers/plans/2026-08-19-tui-and-color.md`. **Both hosts, both
 driven through the TUI itself, both logged off cleanly.** Terminal was a pty at
 25×80, `TERM=xterm-256color`, `--colors 256`.
 
@@ -1306,12 +1306,12 @@ rendered fully — `USERID : HERC04`, `TERMINAL : 3277`, `PANEL : ISP@PRIM`,
 returned the VTAM panel, and **HERC04 was confirmed free afterwards** by a separate
 logon that got the password prompt rather than `IN USE`.
 
-### Colour: five distinct foregrounds live, where the default map can produce four
+### Color: five distinct foregrounds live, where the default map can produce four
 
 Via the CLI, `record-mvs.txt` with `-model 3278-2-E`, counting `ScreenJson`'s
 `resolved` array at the ISPF menu — 1920 cells, 84 fields, 24×80:
 
-| colour | cells |
+| color | cells |
 |---|---|
 | green | 779 |
 | turquoise | 416 |
@@ -1320,45 +1320,45 @@ Via the CLI, `record-mvs.txt` with `-model 3278-2-E`, counting `ScreenJson`'s
 | blue | 64 |
 
 **Five, and two of them — turquoise and neutral-white — are not in
-`DEFAULT_COLOURS` at all**, so they can only have come from the host's SA/SFE
+`DEFAULT_COLORS` at all**, so they can only have come from the host's SA/SFE
 extended attributes. That is the live counterpart of the fixture test, and it is
 the gap this whole stage existed to close. Background was `neutral-black` for all
 1920 cells and no cell carried highlighting.
 
-The TUI drew the same panel with 4 of those 5 as 256-colour cube indices — 46
+The TUI drew the same panel with 4 of those 5 as 256-color cube indices — 46
 green, 51 turquoise, 188 neutral-white, 231 white — blue being absent from the
 panel state captured. Reconstructed from the ANSI stream, so this is what a user
 would actually see.
 
 **The fixture replay still reproduces its own numbers exactly** (28 fields; white
-793, blue 618, red 329, neutral-white 144, yellow 36), so colour resolution has not
+793, blue 618, red 329, neutral-white 144, yellow 36), so color resolution has not
 moved. Those differ from the live figures above only because the replay ends on a
 different screen — the Hercules banner, not the ISPF menu. Checked rather than
 assumed, after the live/fixture mismatch first looked like a regression.
 
 ### `zti` comparison — PARTIAL, and do not read more into it than it says
 
-Established: **`zti` emits 24-bit truecolor (`38;2;r;g;b`), never 256-colour
+Established: **`zti` emits 24-bit truecolor (`38;2;r;g;b`), never 256-color
 indices**, and its palette is its own — its green is `(35,215,47)` where ours is
 `(0,255,0)`, its turquoise `(87,239,239)` where ours is `(0,255,255)`. On a VTAM
 logon panel it used six foregrounds: green, white, turquoise, red, blue, yellow.
-Differing RGB is expected and not a defect; the manual fixes which colour each code
+Differing RGB is expected and not a defect; the manual fixes which color each code
 IS, not its chromaticity, and `palette.ts` already documents ours as a deliberate
 choice.
 
 **A cell-by-cell comparison was NOT completed.** Two reasons, both worth knowing
 before anyone repeats this:
 
-1. Those six colours are tallied over `zti`'s **whole byte stream**, which includes
+1. Those six colors are tallied over `zti`'s **whole byte stream**, which includes
    its OWN interface chrome, not just host cells. It is not a count of one panel.
 2. Comparing properly means reconstructing `zti`'s screen as well, and `zti` is a
    curses application using relative cursor motion, so the small absolute-only
    parser in `live-drive.py` is not sufficient for it.
 
-So: `zti` renders host colour and uses truecolor. Whether every cell agrees with
+So: `zti` renders host color and uses truecolor. Whether every cell agrees with
 ours is **still unverified**. Two traps if you take it up: `zti` does **not**
 autoconnect from `SESSION_HOST` — it waits at its own prompt for `goto <host>`, and
-a capture that misses this records a couple of hundred bytes and zero colour, which
+a capture that misses this records a couple of hundred bytes and zero color, which
 looks like a real negative result — and parsing SGR parameters naively will read the
 `35` of `38;2;35;215;47` as ANSI magenta. Both of those happened here.
 
@@ -1413,8 +1413,8 @@ ignore it, which is worse than not having it. The teardown is now skipped when t
 flow completed, since the flow's last step already confirms the logoff.
 
 Once it stopped disturbing that final screen, the post-logoff VTAM panel showed **five
-foreground colours** of its own — blue 332, white 124, red 113, neutral-white 93,
-yellow 32 — a second live screen exceeding the four-colour default map.
+foreground colors** of its own — blue 332, white 124, red 113, neutral-white 93,
+yellow 32 — a second live screen exceeding the four-color default map.
 
 ## TLS against both hosts — verified 2026-08-25
 
@@ -1448,7 +1448,7 @@ Five results, all with the client's own binaries, not `openssl s_client`:
 |---|---|
 | VM/370 CE via proxy, `-cafile` | connected, verified; screen went formatted, 22 fields, `RUNNING VM370CE` |
 | MVS 3.8j TK5 via proxy, `-cafile` | connected, verified; full turnkey banner rendered |
-| TK5 via proxy, `-cafile`, **TUI** in a pty | banner drawn in 256 colour, no TLS diagnostics |
+| TK5 via proxy, `-cafile`, **TUI** in a pty | banner drawn in 256 color, no TLS diagnostics |
 | `-insecure` straight at `:3270` | connected exactly as before TLS existed |
 | default TLS straight at `:3270` | **failed in 10.013 s** with the `-insecure` message |
 
@@ -1480,7 +1480,7 @@ U F U C(127.0.0.1) I 2 43 80 41 0 0x0 0.010         # 43x80, 41 fields
 
 Field 1 is the keyboard state and fields 7-8 are rows and cols, so those two status
 lines are the whole story. This is the reverse of the usual worry: the risk is not
-claiming a model the host will not honour, it is failing to claim the model the host
+claiming a model the host will not honor, it is failing to claim the model the host
 already assumes.
 
 **Getting a model-4 device in the first place is a Hercules config change.**
@@ -1510,7 +1510,7 @@ TUI results at 43x80, driven over a pty:
 | 30 rows | refuses with "terminal too small", draws no partial screen |
 
 43 rows needs a 46-row window for the full frame. The refusal is the designed
-behaviour, not a limitation: a clipped 3270 screen hides the host's data.
+behavior, not a limitation: a clipped 3270 screen hides the host's data.
 
 ### EWA is live-verified, and VM sends EW then EWA
 
@@ -1738,7 +1738,7 @@ process is painting one device, and the others sit idle with nothing on them. On
 `@00C1` is the same device *type* as the working `00C0` and still shows 0 fields, which fits
 the same reading.
 
-**So there is no client defect here.** What remains is a host-behaviour question, not ours:
+**So there is no client defect here.** What remains is a host-behavior question, not ours:
 whether VTAM/CP paints a logon panel on a device only when configured to. Selecting a device
 you can actually log on to means picking one the host is driving — on VM that is what makes
 `@MOD4` interesting only once DMKRIO drives `01C0`.
@@ -1851,7 +1851,7 @@ is one cursor bar at scale 1 on an otherwise empty row. `ScreenText` does not in
 cursor, so the two views are both right. Finding that the count matched the bar's geometry
 exactly is what turned an anomaly into a confirmation.
 
-Colour is live on both: VM draws its logo in blue, TK5's logon panel uses blue, white and
+Color is live on both: VM draws its logo in blue, TK5's logon panel uses blue, white and
 **red**. The OIA is drawn below the screen on both, through the same glyph atlas.
 
 ### THE FIRST LIVE RUN CLIPPED THE HOST'S DATA, and that is the bug worth remembering
@@ -1917,7 +1917,7 @@ binary in the workspace) drawing a green rect on a **canvas** — not a DOM page
 canvas is what the real renderer uses — then `capturePage()` and a pixel check.
 
 Result: `(0, 255, 0)` inside the rect, `(0, 0, 0)` outside. Channel order is **RGB**, and
-the PNG is **colour type 2** (RGB, no alpha).
+the PNG is **color type 2** (RGB, no alpha).
 
 **The three caveats, each measured:**
 
@@ -1927,7 +1927,7 @@ the PNG is **colour type 2** (RGB, no alpha).
 2. **`show: false` HANGS unless the GPU is disabled.** The first attempt sat until a
    120-second timeout with no output past `app ready`. With `--disable-gpu`, a hidden
    window captures fine and fast. So the failure of a headless capture is a **stall, not
-   an error** — the same shape as the TLS trap, and worth recognising as such.
+   an error** — the same shape as the TLS trap, and worth recognizing as such.
 3. **`capturePage()` returns the CONTENT area, not the window.** A `BrowserWindow` of
    `400x200` produced a **400x173** PNG, because width/height include the frame. Pass
    **`useContentSize: true`** and the capture is exactly `400x200`. Without it every
@@ -2055,7 +2055,7 @@ well-formed `DEVICE-TYPE REQUEST` either way.
   bullet or anything citing it; it is kept struck only so the reasoning is not repeated.
 - ~~Two candidate explanations, **both untested**: **(a)** the host may require a `CONNECT`
   clause naming an LU; **(b)** the option may be advertised but not functional.~~ **RESOLVED
-  IN FAVOUR OF (b), 2026-09-17.** Hypothesis (a) is **dead**: s3270 sent `IBM-3278-2-E
+  IN FAVOR OF (b), 2026-09-17.** Hypothesis (a) is **dead**: s3270 sent `IBM-3278-2-E
   CONNECT VTAM` and was refused identically. Details in *The verdict*.
 - **Questions 1, 2 and 3 remain unanswered**, because the negotiation never gets past
   DEVICE-TYPE — **and this host can never answer them.** It abandons first, so no
@@ -2063,7 +2063,7 @@ well-formed `DEVICE-TYPE REQUEST` either way.
   For a host-free way to close that gap, see *`playback -b` as an oracle* below.
 - **TLS still has no native-TLS-mainframe witness.** This host is plaintext, so our TLS
   verification remains via the in-repo proxy against Hercules. Honest — but keep it
-  labelled that way wherever it is quoted.
+  labeled that way wherever it is quoted.
 
 ### The verdict — the host's fault, 2026-09-17
 
@@ -2220,7 +2220,7 @@ while building the comparison above, and it is why run 2's reasoning had to be c
 
 **This is an open decision for the user, not a bug fixed here, and no code was changed.**
 RFC 2355 permits both forms, and there is a real argument that `-model 3278-2` meaning
-"not extended" makes the bare form the more honest one — s3270's behaviour arguably leaks
+"not extended" makes the bare form the more honest one — s3270's behavior arguably leaks
 an unrelated default. Decide it deliberately; do not "align with s3270" reflexively.
 
 Also worth recording for whoever next touches LU plumbing: **s3270 appends the LU to
@@ -2392,7 +2392,7 @@ Both cited by name: these line numbers were stale twice over and have been dropp
 | 0 | — | — | — | `AID.SF` (`0x88`) |
 | 1–9 | 9 | 0x81 | 0x80 | Summary — lists `80 81 86 87 a6` |
 | 10–32 | 23 | 0x81 | 0x81 | UsableArea |
-| 33–72 | 38 | 0x81 | 0x86 | Color (wire span is 40 bytes, not 38 — one colour pair is `ff,ff`, and each `0xff` doubles on the wire; the `LL` field itself counts logical, not wire, bytes) |
+| 33–72 | 38 | 0x81 | 0x86 | Color (wire span is 40 bytes, not 38 — one color pair is `ff,ff`, and each `0xff` doubles on the wire; the `LL` field itself counts logical, not wire, bytes) |
 | 73–87 | 15 | 0x81 | 0x87 | Highlighting |
 | 88–104 | 17 | 0x81 | 0xa6 | ImplicitPartitions |
 | 105–106 | — | — | — | `ff ef` (IAC EOR) |
@@ -2406,7 +2406,7 @@ byte-identical for its first 10 bytes (`88 00 09 81 80 80 81 86 87 a6`). Two dif
 Read Partition variants, same five-unit answer, which is architecturally correct: Null
 QueryList means "send everything you have," same as a plain Query.
 
-### The three colour schemes, live against VM at `-model 3278-4-E`
+### The three color schemes, live against VM at `-model 3278-4-E`
 
 `DISPLAY=:99` Electron, `--no-sandbox --disable-gpu`, `TN3270_GUI_SHOT`, genuinely
 connected (not replayed) to `127.0.0.1:3270`. Three captures, three distinct SHA-256
@@ -2420,7 +2420,7 @@ kind of off-by-one the 2026-09-14 section already explains); rows 40–41 are th
 at status-line row 41, matching the CLI's own `41 0` cursor report. **All three schemes
 paint the same content**; only the palette changes.
 
-Dominant colours (`PIL`, most frequent RGB triples, background excluded from the count
+Dominant colors (`PIL`, most frequent RGB triples, background excluded from the count
 below):
 
 | scheme | background | "blue" foreground | relative luminance of that blue |
@@ -2432,8 +2432,8 @@ below):
 This is a direct, measured corroboration of `palette.ts`'s own comment: architected pure
 blue (`0,0,255`) is close to illegible on pure black (≈7.2% luminance), which is exactly
 why the default scheme lightens it to `(120,144,240)` (≈57%). The `3279` scheme ships
-the pure architected colours as-is, legible only because its background is not pure
-black either. The `green` scheme reroutes every colour through green tones, which is
+the pure architected colors as-is, legible only because its background is not pure
+black either. The `green` scheme reroutes every color through green tones, which is
 visibly, measurably a different rendering, not a cosmetic tint of the same one.
 
 ### Attn against VM/370 — measured, and the answer is a null result
@@ -2532,10 +2532,10 @@ plumbing and NOT the mapping, which `keys.test.ts` was already guarding all alon
   link inside a packaged app on the user's own machine is not. Narrowed since, not closed:
   the chord harness below drives a real Chromium key event through the renderer, but it
   injects it with `sendInputEvent` under Xvfb, so a physical keyboard and a packaged `.app`
-  remain untested — and the Mac spelling behaviour is reasoned, not measured.
-- **A cell-by-cell colour comparison against `zti`'s truecolor output for the new
+  remain untested — and the Mac spelling behavior is reasoned, not measured.
+- **A cell-by-cell color comparison against `zti`'s truecolor output for the new
   schemes** — the 2026-08-25 section already marks the equivalent check PARTIAL for the
-  default scheme, for reasons (relative-cursor curses app, whole-stream colour tally)
+  default scheme, for reasons (relative-cursor curses app, whole-stream color tally)
   that apply here unchanged; not repeated for `3279`/`green`.
 
 ## The GUI's key chords, and which spellings Chromium accepts — verified 2026-09-15
@@ -2765,7 +2765,7 @@ author had already tried to close this exact gap once.
   info, warning, error, and the harness fails a run in which the renderer threw by filtering
   on that literal — a renderer exception otherwise presents as a window that receives keys and
   does nothing with them. Electron 44's own typings mark the numeric argument `@deprecated` in
-  favour of an event object, and a run prints that notice on stderr, so **the literal will
+  favor of an event object, and a run prints that notice on stderr, so **the literal will
   drift silently on an upgrade**: the filter would just stop matching. It cannot be loosened
   to `renderer[` either, because level 2 arrives on EVERY run here as Chromium's own CSP
   warning and would fail every run. `shot.mjs` filters on the same literal; if the level
@@ -2814,7 +2814,7 @@ OIA row fell **off the bottom of the image** — measured, `row OIA: OFF THE BOT
 This is the same failure the GUI hit on its first live run, and there `main.ts` fixes it by
 calling `setContentSize`. A page has no such power.
 
-`bestScale` floors at 1 and `centre` clamps its offsets at 0, so neither rescues it.
+`bestScale` floors at 1 and `center` clamps its offsets at 0, so neither rescues it.
 
 The fix is in `canvas/src/renderer.ts`: the canvas is sized to
 `max(viewport, drawing)` rather than to the viewport, and the web page's CSS is `overflow:auto`
@@ -3216,8 +3216,8 @@ fix fails with *"matched 3 blocks, expected at least 5"*, verified by mutation.
 
 **It stops on a divergence that is NOT our bug**, which is why its case now carries
 `mismatch_ok=True`. At the 6th block we send TERMINAL-TYPE `IBM-3278-4-E`; the recording sent the
-**colour digit** `IBM-3279-4-E` (its line 105) while still sending `IBM-3278-4-E` for its own TN3270E
-DEVICE-TYPE (line 78). That is `wrongTerminalName`: `telnet.c:2104` uses the colour digit when
+**color digit** `IBM-3279-4-E` (its line 105) while still sending `IBM-3278-4-E` for its own TN3270E
+DEVICE-TYPE (line 78). That is `wrongTerminalName`: `telnet.c:2104` uses the color digit when
 `model_num < 4` **or** the resource is set, and this recording is a model 4 with it set (`Model
 3279-4-E` in its header) — the same mechanism that excludes `sruvm.trc` and `rpqnames.trc` below.
 Before the fix the run ended in `Socket EOF`, which emits no mismatch line at all, so the flag was
@@ -3234,7 +3234,7 @@ An unexplained absence invites someone to add the trace back and misread the fai
   `-xrm '*wrongTerminalName: true'` s3270 satisfies TERMINAL-TYPE and gets all the way into Query
   Reply, then diverges on its own RPQ names, which we do not implement.
 - **`ft_cut.trc`, `ft_cut_ewa.trc`, `ft_dft.trc`** — classic TN3270 with no option 40 at all, which
-  would otherwise make them ideal. They were recorded in colour mode, and **x3270 builds `3279` for
+  would otherwise make them ideal. They were recorded in color mode, and **x3270 builds `3279` for
   TERMINAL-TYPE but `3278` for the TN3270E DEVICE-TYPE**: `create_model()`
   (`Common/model.c:135-138`) picks the digit from `mode3279`, and `create_3270_termtype`'s
   `force_3278` argument (`Common/telnet.c:2103-2106`) is true only at the TN3270E call site
@@ -3371,7 +3371,7 @@ action first — and assert on what is DRAWN, not on what the function returns.*
 - **MVS/TSO through the form.** The CLI's `Transfer()` is verified there; the form is not. The
   flow is `vmxfer`-shaped but TSO needs quoting decisions (`'HERC01.X.Y'` vs userid-relative)
   that the form passes through verbatim, so it deserves its own run rather than an assumption.
-- ~~**A cancelled transfer mid-flight.**~~ **CLOSED 2026-09-24 ON BOTH HOSTS** — see
+- ~~**A canceled transfer mid-flight.**~~ **CLOSED 2026-09-24 ON BOTH HOSTS** — see
   *Mid-flight cancellation*. A 249-byte transfer is indeed too fast; 200 KB was the measured
   answer.
 - ~~**The `Lrecl`-with-`Recfm=V` asymmetry through the form.**~~ **CLOSED 2026-09-24** — see
@@ -3456,13 +3456,13 @@ x3270 does. So:
 - **The receive used `'HERC01.FORMV.BIN'` QUOTED**, i.e. absolute.
 
 Both are legitimate requests and only the operator knows which is meant. Running one of each
-in a single session is what proves the form is not quietly normalising them.
+in a single session is what proves the form is not quietly normalizing them.
 
 ### `Recfm=variable`, never `fixed`, and this is a byte-comparison matter
 
 `fixed` PADS to the record boundary: the same 249-byte payload came back as **320 bytes —
 249 followed by 71 nulls** — because a fixed-record dataset cannot record that its last
-record was short (`ceil(249/80) = 4` records x 80 = 320). Correct behaviour, and it fails a
+record was short (`ceil(249/80) = 4` records x 80 = 320). Correct behavior, and it fails a
 `cmp`. Measured 2026-08-18 through the CLI and unchanged; the form offers `variable` as the
 second of three cycle states for exactly this reason.
 
@@ -3481,7 +3481,7 @@ userid by accident. Use `tsoxfer`, or set `TN3270_TUTORIAL=1`.
 
 ### What is still unverified, after both hosts
 
-- ~~**Cancelling a transfer mid-flight.**~~ **CLOSED 2026-09-24, on BOTH hosts** — see
+- ~~**Canceling a transfer mid-flight.**~~ **CLOSED 2026-09-24, on BOTH hosts** — see
   *Mid-flight cancellation*.
 - ~~**`Lrecl` with `Recfm=V` as a disagreement between the hosts.**~~ **CLOSED 2026-09-24.** TSO's
   half was witnessed by this run (`LISTDS` reporting `1024`); **CMS's half was closed the same day
@@ -3518,21 +3518,21 @@ A cancel sent before the first frame or after the last exercises **nothing**:
 final count to be far short of the file size.
 
 ```
-cancelling a 204800-byte transfer mid-flight
-  progress when cancelling: 17641 of 204800 bytes     <- 8.6% in
+canceling a 204800-byte transfer mid-flight
+  progress when canceling: 17641 of 204800 bytes     <- 8.6% in
   byte counts seen after the cancel: 22069 23162 23162 24261
   'canceled by user'   present: True
   'bytes transferred'  present: False                 <- it did NOT complete
 ```
 
-**24261 of 204800 is the proof.** A cancelled transfer reporting 204800 was not cancelled.
+**24261 of 204800 is the proof.** A canceled transfer reporting 204800 was not canceled.
 
 ### THE ABORTED UPLOAD LEAVES A PARTIAL FILE ON THE HOST, and that is correct
 
 Measured by comparing the two `ERASE`s in one run: the **pre-run** `ERASE CANC TEST A`
 answered `File 'CANC TEST A' not found.`, and the **post-cancel** one answered a bare
 `Ready;` — so a file existed by then. The host wrote what it had received before the abort,
-which is the only thing it can do. **An operator cancelling an upload must therefore expect a
+which is the only thing it can do. **An operator canceling an upload must therefore expect a
 truncated host file, not the absence of one**, and clean up if that matters.
 
 ### HOW BIG A FILE, MEASURED RATHER THAN GUESSED
@@ -3578,7 +3578,7 @@ The same harness (`cancel-transfer.py tso`) against the other `IND$FILE` impleme
 **Worth running both**: what we send is our code, but what the host does with an abort is
 theirs, and only the host can say whether it left transfer mode.
 
-**Result: cancelled at 15430 of 204800 bytes, final count 23162 — and TSO also returned to
+**Result: canceled at 15430 of 204800 bytes, final count 23162 — and TSO also returned to
 its prompt.** Same conclusion as VM, reached through different evidence:
 
 | | VM/CMS (MECAFF) | MVS/TSO (Rayborn FFTP 2.0.5) |
@@ -3588,7 +3588,7 @@ its prompt.** Same conclusion as VM, reached through different evidence:
 | clean logoff after | `LOGOFF AT 00:25:44` | `HERC02 LOGGED OFF TSO AT 01:26:52` |
 | partial file left | **yes** | **yes** |
 
-**THE DIFFERENCE IS THE HOST'S VERBOSITY, NOT ITS BEHAVIOUR, and that matters for how a
+**THE DIFFERENCE IS THE HOST'S VERBOSITY, NOT ITS BEHAVIOR, and that matters for how a
 future run is judged.** MECAFF announces the aborted conversation as a protocol error; FFTP
 says nothing and simply ends. **So "the host printed an error" is NOT the test** — a silent
 return to the prompt is an equally correct outcome, and on TSO it is the only one available.
@@ -3627,7 +3627,7 @@ sent it*. LR3 differs (`F 80`, not `V 80`) from a command whose only change is t
 which proves the keyword really does reach the host and is really parsed. That is the same
 three-case discipline the 2026-09-22 measurement used, and it is the whole design of the check.
 
-**So the field STAYS ENABLED for `Recfm=V`**, and the README's wording stands: TSO honours
+**So the field STAYS ENABLED for `Recfm=V`**, and the README's wording stands: TSO honors
 `LRECL` as a *maximum* record length (`VB 1024` measured through the form on 2026-09-24, against
 `VB 255` without it), CMS ignores it, and disabling the field would make a real TSO attribute
 unexpressible in order to satisfy a VM quirk. x3270 agrees — both its branches gate `LRECL` on
