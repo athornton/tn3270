@@ -68,3 +68,72 @@ in-canvas overlay must own it.
   window change. Worth considering as a separate, much smaller job.
 - Four keys have no other route in any interactive front end — **Sys Req, Dup, Field Mark, Newline** —
   so whatever replaces the keypad must still reach them, and none has a live witness yet.
+
+## The four open questions above are ANSWERED — user, 2026-09-30
+
+Recorded so the spec can be written without re-asking. **The user's guiding principle for the whole
+job: "if in doubt, do what x3270 does."**
+
+1. **The web gateway FOLLOWS LATER.** So `packages/canvas/src/keypad.ts` keeps its browser consumer
+   and nothing there is deleted — the GUI diverges first and the gateway catches up, rather than both
+   moving at once. `hitTest`/`hitTestAt` stay in `BROWSER_MODULES` regardless.
+2. **`Ctrl-K` OPENS THE PALETTE WINDOW, and stays a hotkey.** It is joined by a toolbar control (see
+   below), not replaced by one. **NO PERSISTENCE YET, which is the half of this question the user
+   flagged as unclear and which is therefore decided conservatively:** the sub-question was whether
+   "the keypad is open" should survive an app restart, since a separate window makes that newly
+   possible. x3270 DOES remember, through the `keypadOn` resource — `x3270/x3270.c:264`, "Turn on
+   pop-up keypad at start-up" — but that needs a preferences store the GUI does not have. So: both
+   routes open it, closing closes it, every launch starts closed, and persistence arrives with
+   preferences (which the connect dialog will want anyway).
+3. **`clicks.mjs` gets REWIRED to the native window's real buttons**, not retired. It stays the only
+   cover for the click path and for 9 of the 48 label/action pairs. Note what changes: it clicks by
+   LABEL today via `__tn3270ButtonCentre` and canvas coordinates, and a DOM button has no canvas
+   coordinates — so the seam becomes a DOM query by label. **Keep the by-label property**, since a
+   coordinate list would be a second copy of the layout and would pass while the layout was wrong.
+4. **The four otherwise-unreachable keys MUST keep a route** — Sys Req, Dup, Field Mark, Newline.
+   Nothing else in any interactive front end can press them, and none has a keypad-button witness
+   yet.
+
+## What the window should look and behave like
+
+**x3270's model, which the user named explicitly and which is confirmed in its source:**
+
+- **A keyboard ICON in the window's own toolbar opens it.** `x3270/keypad.bm` is exactly that, and
+  `menubar.c:604` places it via `keypad_button_init`; it ships at three sizes (`keypad.bm`,
+  `keypad15.bm`, `keypad20.bm`) beside a TLS padlock icon in the same menubar. **So this work implies
+  a MENU BAR**, which the user accepts as needed anyway — "we will need one for at least a connection
+  dialog."
+- **A separate keypad window**, opened by that control or by `Ctrl-K`.
+
+**MEASURED REFINEMENT THE USER'S SKETCH DID NOT INCLUDE: x3270 has FIVE placements, not two** —
+`left`, `right`, `bottom`, `integral`, `inside-right` (`x3270/keypad.c:318-332`, from the `keypad`
+resource). **`integral` is precisely what we ship today**, and the other four are variations on
+detached or docked. So "separate window" is x3270's majority behaviour and ours is its one in-window
+mode. **The spec need not offer all five** — offering a choice at all is a preferences question — but
+it should say which one it is implementing and that the others exist.
+
+**Appearance, the user's words: it should "look like a native app, not an X-windows app", with a
+pleasant font.** That is the same call they made for the transfer form the same day, and it points
+the same way: real HTML controls in a `BrowserWindow`, not glyphs blitted through the 3270 atlas.
+
+**ICONOGRAPHY IS AN OPEN PIECE OF WORK, and the user raised it themselves:** the arrows, Home, Tab
+forward/back and Newline may want **drawn or sourced icons** rather than the current `^ v < >` and
+abbreviated words. Note the constraint that makes this more than taste: the present labels are
+atlas glyphs in CG order, so they are limited to the 3270 character set — a native window is not,
+which is what makes icons possible at all. **Licensing matters if icons are sourced rather than
+drawn**, since this repo already vendors x3270's font with its licence and is careful about it.
+
+## What a spec still has to decide
+
+- **Whether the 48 keys keep one table.** `KEYPAD_KEYS` in `frontend` carries label, action, row and
+  col; rows/cols are canvas geometry a DOM layout would not use. Does the DOM view ignore them, or
+  does the table grow a presentation-neutral grouping?
+- **Where the menu bar lives**, since it is new: Electron's application menu (macOS convention, off
+  the window) versus an in-window toolbar (which x3270 uses, and which Linux users may expect).
+  These differ per platform and packaging targets all three.
+- **What happens to `KEYPAD_ROWS_TALL` and `keypadRegion`** once the GUI no longer draws a keypad
+  into its draw list: still needed by `web`, so they stay — but the GUI's `showKeypad` flag, its
+  `fit()` window-growing path and the keypad's presence in `DrawList` all become web-only.
+- **Whether the GUI goldens change.** `shot.mjs` has a `synthetic-ispf-keypad` case that renders the
+  in-window keypad. If the GUI stops drawing one, that golden is testing a path only the browser
+  still has — so it either moves to the web harness or is regenerated.
