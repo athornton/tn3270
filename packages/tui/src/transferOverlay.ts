@@ -55,8 +55,21 @@ const LINE_WIDTH = 2 + LABEL_WIDTH + 2 + VALUE_WIDTH;
  * A constant rather than an inline string so that its length is checkable, and phrased in
  * the shortest form that still names all four operations: move, change, submit, close.
  * See the module comment on why this one line truncating would be a defect.
+ *
+ * ## THE ARROWS ARE SPELLED AS WORDS BECAUSE `<-` AND `->` LIGATE
+ *
+ * This read `<-/-> change`, and both halves are among the most commonly ligated sequences
+ * in programming fonts -- Fira Code, JetBrains Mono, Cascadia and Iosevka all fuse them
+ * into single arrow glyphs. A terminal and a font that disagree about how many CELLS such a
+ * glyph occupies shift everything after it on the line, and this is the one line that must
+ * survive intact: it is the only place the form says how to submit and how to close.
+ *
+ * So the same hazard the module comment records for LENGTH applies to GLYPHS, and it lands
+ * on the same line for the same reason -- a truncated help and a ligated help both cost the
+ * user the two keys they most need. `Left/Right` is 52 characters against the 54 available,
+ * contains no ligature-prone pair, and names the keys as a person would say them.
  */
-const HELP = 'Tab moves  <-/-> change  Enter start  Esc close';
+const HELP = 'Tab moves  Left/Right change  Enter start  Esc close';
 
 /**
  * The smallest terminal this form will open in.

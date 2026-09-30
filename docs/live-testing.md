@@ -516,6 +516,73 @@ re-record.
 Repeat with `record-vm.txt` for the VM/370 side if that instance is also
 available.
 
+### Capturing what the TUI actually DREW, not what the client sent
+
+The above records the client's own log. To capture the **terminal output** — which
+is what you need when the question is about rendering rather than protocol — use
+`script`, and mind which one you have:
+
+```bash
+# BSD (macOS): the command is POSITIONAL, and there is NO -c flag.
+script -q /tmp/tn-cap.raw node packages/tui/dist/main.js -insecure -model 3278-5-E 127.0.0.1:3270
+
+# GNU (Linux): the command needs -c, and -c takes ONE string.
+script -q -c "node packages/tui/dist/main.js -insecure -model 3278-5-E 127.0.0.1:3270" /tmp/tn-cap.raw
+```
+
+**The BSD form is the better one and not merely the available one: it EXECS the
+command directly, so no shell runs.** GNU's `-c` hands the string to `$SHELL`, and
+an interactive shell with a themed prompt (oh-my-zsh, starship, powerlevel10k)
+writes its own escape sequences into the capture — indistinguishable from ours when
+the thing being diagnosed is a cursor address or a box-drawing run. Measured on
+macOS 2026-09-30: BSD `script` has no `-c` at all, and there is no other way to
+bypass the shell there.
+
+**Do NOT diagnose a rendering question from a copy-paste of the terminal.** Tried
+2026-09-30 and it wasted real time: a pasted 27x132 screen arrived with one line of
+245 characters, mismatched dash counts between the top and bottom borders, and the
+middle rows' left border missing — none of which any render this client can emit.
+Soft-wrap re-joining had mangled it. Replay the raw capture through a real VT
+emulator instead (see *Reading a raw capture* below).
+
+### Reading a raw capture
+
+`pyte` is a real VT emulator and is the right tool; a hand-rolled rasterizer is
+not. **Two reasons, both paid for here:** this repo has already hand-written a PNG
+filter decoder and a VT emulator and been misled by both, and the specific trap is
+DEFERRED WRAP — a real terminal writing the last column sets a pending-wrap flag
+that the next absolute cursor-position escape CLEARS, so it never scrolls. A
+rasterizer that wraps immediately reports scrolling that does not happen; mine
+claimed the 80x24 case scrolled, which would have contradicted a year of live
+testing.
+
+```bash
+python3 -m venv --system-site-packages /tmp/vtenv && /tmp/vtenv/bin/pip install -q pyte
+```
+
+Feed the capture to `pyte.HistoryScreen` and read `screen.display`. **Detect
+scrolling with `len(screen.history.top)`, not with a sentinel on the last row** —
+the drawing legitimately overwrites that row, so a sentinel there reports a scroll
+on every normal paint. And validate the emulator before trusting it: write N
+characters into an N-column terminal, then a CUP, and assert the history is still
+empty. A harness that has not satisfied a known-good case cannot say which side is
+wrong.
+
+### When the terminal EMULATOR is the variable
+
+If a rendering oddity cannot be reproduced from the byte stream, suspect the
+emulator before the code. Measured 2026-09-30: a partial border reproduced under
+iTerm2 and **not** under macOS Terminal with the same binary, host and geometry —
+so it was glyph layout in the emulator, not our output. Two self-contained repro
+cases that need no 3270 at all:
+
+- Print `┌` + 130 × `─` + `┐` and the same box in ASCII (`+`, `-`), both exactly 132
+  cells. If the box-drawing one looks wider or wraps, the font is mis-measuring
+  U+2500.
+- Print four lines of exactly 61 cells — a hyphen run, a U+2500 run, `<-/->`
+  repeated, and plain `X`. If the closing `|` does not land in the same column on
+  all four, the font is ligating, and which row misaligns names the culprit.
+
 ## Step 3 — Extract the trace into a fixture
 
 The session log interleaves the s3270-protocol replies with the trace lines
