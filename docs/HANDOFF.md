@@ -14,7 +14,7 @@ plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui
 **NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
 re-asking.
 
-**State: `main` at `6063e0f`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+**State: `main` at `45fec33`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
 stashes. 2157 tests in 82 files, build and typecheck clean.**
 
 **SPELLING CONVENTION, set 2026-09-30: THIS REPO USES US ENGLISH.** Identifiers, comments, test
