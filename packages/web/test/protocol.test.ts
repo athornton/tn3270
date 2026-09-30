@@ -82,7 +82,7 @@ describe('decodeClientMessage', () => {
   });
 
   it('REFUSES a quit action, which a browser must not be able to do to the gateway', () => {
-    // The bridge intercepts quit and closes its own socket. This is defence in depth, because the
+    // The bridge intercepts quit and closes its own socket. This is defense in depth, because the
     // bridge is served code and a client is not obliged to run it.
     expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"quit"}}'))
       .toThrow(/quit/i);

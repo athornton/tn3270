@@ -1,5 +1,5 @@
 /**
- * RFC 6455 frame parsing and serialising. Pure: no sockets, no state beyond the buffer given.
+ * RFC 6455 frame parsing and serializing. Pure: no sockets, no state beyond the buffer given.
  *
  * WHY HAND-ROLLED: every package in this project declares only workspace siblings, and keeping
  * that property in the one network-facing component was a deliberate call. Framing is
@@ -87,7 +87,7 @@ export function parseFrame(buf: Buffer, maxPayload = Number.MAX_SAFE_INTEGER): F
   return { fin, opcode, payload, consumed: off + len };
 }
 
-/** Serialise one unmasked server frame. Always final; we never fragment outbound. */
+/** Serialize one unmasked server frame. Always final; we never fragment outbound. */
 export function serializeFrame(opcode: number, payload: Buffer): Buffer {
   // A GUARD RATHER THAN A COMMENT, because the failure is silent and downstream. Byte 0 shares its
   // high nibble with FIN and the three RSV bits, so `0x10` would not be rejected by anything -- it

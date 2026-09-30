@@ -266,7 +266,7 @@ if (!stdout.includes('keys: sent ')) bail('the keys seam never reported sending 
  *
  * `3` IS 'error' ON A SCALE ELECTRON HAS DEPRECATED. Electron 44's own typings give the
  * numeric level as 0..3 for verbose, info, warning, error and mark the argument `@deprecated`
- * in favour of `Event<WebContentsConsoleMessageEventParams>` -- a run prints that deprecation
+ * in favor of `Event<WebContentsConsoleMessageEventParams>` -- a run prints that deprecation
  * notice on stderr. So this literal will drift on an upgrade, and it will drift SILENTLY: the
  * filter would simply stop matching and a renderer that threw would present as a mapping bug.
  * It cannot be loosened to `renderer[` either, because level 2 arrives on every run here

@@ -36,7 +36,7 @@ export interface Tn3270eHeader {
  * whose 3270 payload happens to contain a 0xff. Prepend this to the payload and
  * hand the single buffer to sendRecord(), and the requirement is met by
  * construction rather than by a second escaping implementation that could drift out
- * of step with the first. The end-to-end behaviour is pinned at the session level.
+ * of step with the first. The end-to-end behavior is pinned at the session level.
  *
  * The `& 0xff` on each field is INTENT, NOT PROTECTION: `Uint8Array.of` already
  * truncates mod 256, established by deleting a mask and watching the test still

@@ -302,7 +302,7 @@ describe('TN3270E session data path', () => {
 
 describe('the BIND gate', () => {
   /**
-   * Task 8's four behaviours. `negotiateE([Tn3270eFunc.BIND_IMAGE, ...])` is what
+   * Task 8's four behaviors. `negotiateE([Tn3270eFunc.BIND_IMAGE, ...])` is what
    * puts a session behind the gate at all -- `bindImageGranted()` reads exactly this
    * grant list, and every OTHER describe block in this file negotiates WITHOUT
    * BIND_IMAGE (the default grant is `[RESPONSES, SYSREQ]`), which is why none of them
@@ -427,7 +427,7 @@ describe('the BIND gate', () => {
       const before = session.recordCount();
       // CHECKED IMMEDIATELY, BEFORE ADVANCING: `setTimeout` only ever fires once, so
       // a check made only AFTER advancing far past the deadline cannot tell "the
-      // timer was cancelled" from "the timer fired once and is now spent" -- both
+      // timer was canceled" from "the timer fired once and is now spent" -- both
       // leave `getTimerCount()` at 0 by then. The discriminating moment is right
       // after `handleBind` runs: a real cancellation means no timer is pending here
       // at all, whereas relying solely on the drained `pendingBindRecord` field would
@@ -494,8 +494,8 @@ describe('the BIND gate', () => {
 
 describe('BIND and UNBIND: geometry', () => {
   /**
-   * Task 10's six behaviours: applying an in-range BIND, refusing an out-of-range one,
-   * substituting our own alternate for size code 0x03, reverting on UNBIND, honouring
+   * Task 10's six behaviors: applying an in-range BIND, refusing an out-of-range one,
+   * substituting our own alternate for size code 0x03, reverting on UNBIND, honoring
    * `-bind-limit off`, and confirming UNBIND re-arms the gate rather than disconnecting.
    */
   const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
@@ -592,7 +592,7 @@ describe('BIND and UNBIND: geometry', () => {
     expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
   });
 
-  it('honours an out-of-range BIND when bindLimit is off', async () => {
+  it('honors an out-of-range BIND when bindLimit is off', async () => {
     // The flag itself is Task 11's `-bind-limit off`; this task defaults it to true
     // and lets a caller drive it directly, which is exactly what this test does.
     // Model 2 (the default), so a 43-row alternate is out of range with the limit ON
@@ -771,7 +771,7 @@ describe('per-connection TN3270E settings', () => {
    * s3270's `N:` and `LU@` are properties of a HOST, not of a process — they sit in
    * the host argument, and `Connect()` can name a different host every time. The CLI
    * has no host argument at all, so without this the only way to reach an LU list was
-   * to construct a `Session` by hand, and `Connect(N:host)` could not be honoured.
+   * to construct a `Session` by hand, and `Connect(N:host)` could not be honored.
    */
   it('lets one connection decline TN3270E on a session that offers it', async () => {
     const { session, conn } = newSession();          // default: tn3270e on

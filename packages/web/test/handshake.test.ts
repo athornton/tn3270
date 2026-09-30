@@ -148,7 +148,7 @@ describe('checkUpgrade', () => {
       expect(refusal(r)).toMatch(/origin/i);
     });
 
-    it('does NOT honour a wildcard, glob or suffix rule', () => {
+    it('does NOT honor a wildcard, glob or suffix rule', () => {
       // A `*.example` rule is how this control gets quietly widened into uselessness. The entry is
       // compared as a literal string, so it can only ever match an Origin spelled `https://*.example`.
       for (const pattern of ['https://*.example', '*', 'https://*', '.example']) {

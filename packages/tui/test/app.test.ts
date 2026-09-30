@@ -83,7 +83,7 @@ describe('the minimum geometry, which now matches c3270', () => {
   it('RUNS in a terminal with no room for the OIA, rather than refusing', () => {
     // 80x24 is the commonest terminal size there is, and we used to refuse it. The
     // screen is mandatory, the OIA is not -- c3270/screen.c:895 drops the status
-    // line the same way. This is the behaviour change the relaxed tooSmall exists
+    // line the same way. This is the behavior change the relaxed tooSmall exists
     // for, asserted at the App level because that is where a user meets it.
     const h = harness(24, 80);
     expect(() => h.app.start()).not.toThrow();
@@ -780,7 +780,7 @@ describe('the special-keys overlay', () => {
 
   it('acts on two arrows delivered in ONE read', () => {
     // A slow link or a busy event loop coalesces autorepeat, and a chunk-at-a-time matcher would
-    // recognise neither -- the selection would silently stop moving while the key was held.
+    // recognize neither -- the selection would silently stop moving while the key was held.
     const h = harness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
@@ -1066,7 +1066,7 @@ describe('the transfer form', () => {
   });
 
   it('accepts the SS3 form of the arrows too, since any layer can flip DECCKM', () => {
-    // `bindings.ts`'s reason, and the overlay path already honours both: accepting only
+    // `bindings.ts`'s reason, and the overlay path already honors both: accepting only
     // `\x1b[C` would work in some terminals and not others.
     const h = started();
     h.send(CTRL_T);
@@ -1109,7 +1109,7 @@ describe('the transfer form', () => {
 
   it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
     // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
-    // comparison recognises -- the field would appear to stop changing while the key was
+    // comparison recognizes -- the field would appear to stop changing while the key was
     // held. Two rights from `receive` wrap back to `receive`, so assert three.
     const h = started();
     h.send(CTRL_T);
@@ -1326,7 +1326,7 @@ describe('the transfer form: submitting', () => {
     // measured by mutation, deleting `this.transferRun = undefined` from onDone keeps the
     // whole TUI suite green, because `CutTransfer.cancel` is ITSELF idempotent and absorbs
     // the second call. Removing BOTH reddens core's own three cancel tests, not this one.
-    // Defence in depth: this assertion pins the app's half of the contract so a reader does
+    // Defense in depth: this assertion pins the app's half of the contract so a reader does
     // not delete it as redundant, but the guarantee lives in core.
     const h = app({ files: fakeFiles() });
     fillAndSubmit(h);

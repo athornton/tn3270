@@ -72,7 +72,7 @@ const NAME_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => k.name.length));
 /**
  * Do these describe the same action?
  *
- * Structural, and NOT `JSON.stringify(a) === JSON.stringify(b)`: that compares SERIALISATIONS, so
+ * Structural, and NOT `JSON.stringify(a) === JSON.stringify(b)`: that compares SERIALIZATIONS, so
  * writing `{ n: 1, kind: 'pf' }` in either table would silently stop matching. The failure mode
  * would be a blank chord, which this overlay renders as "no chord exists" -- a wrong answer that
  * looks exactly like a right one. `pf`/`pa` carry `n` and `type` carries `text`; every other

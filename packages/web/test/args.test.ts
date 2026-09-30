@@ -101,7 +101,7 @@ describe('parseWebArgs', () => {
     expect(() => parseWebArgs(['vm:3270', '--allow-origin'])).toThrow(/--allow-origin/);
   });
 
-  it('stores the value verbatim -- no normalising, so no accidental wildcard support', () => {
+  it('stores the value verbatim -- no normalizing, so no accidental wildcard support', () => {
     // handshake.ts compares these as exact strings. Parsing must not helpfully strip a trailing
     // slash or lowercase a scheme, or the flag would start matching more than the operator wrote.
     expect(parseWebArgs(['--allow-origin', 'https://*.example', 'vm:3270']).allowOrigins)
@@ -175,7 +175,7 @@ describe('parseWebArgs', () => {
     expect(() => parseWebArgs(['-devname'])).toThrow(UsageError);
   });
 
-  describe('the parts of a host argument this gateway cannot honour', () => {
+  describe('the parts of a host argument this gateway cannot honor', () => {
     /**
      * MEASURED BEFORE THE FIX: `LUA,LUB@127.0.0.1:3270` started the gateway and served happily,
      * having SILENTLY DROPPED the LU selection. `resolveHostSpec` parses the whole
@@ -211,7 +211,7 @@ describe('parseWebArgs', () => {
     });
 
     it('still refuses an unimplemented prefix by name, through resolveHostSpec', () => {
-      // Unchanged behaviour, asserted so this file's new checks cannot be read as the only ones.
+      // Unchanged behavior, asserted so this file's new checks cannot be read as the only ones.
       expect(() => parseWebArgs(['C:vm:3270'])).toThrow(/C:/);
     });
   });

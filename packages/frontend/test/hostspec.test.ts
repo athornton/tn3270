@@ -156,7 +156,7 @@ describe('resolveHostSpec', () => {
 
   it('accepts B: and does nothing, because s3270 does nothing', () => {
     // "B:, now a no-op" (split_host.h). Refusing it would reject a host argument that
-    // works in s3270 and changes no behaviour there either.
+    // works in s3270 and changes no behavior there either.
     expect(resolveHostSpec('B:host', err)).toEqual({
       host: 'host', port: 23, lus: [], tn3270e: undefined, tlsRequested: false,
     });

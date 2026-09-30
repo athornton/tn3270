@@ -3,7 +3,7 @@ import { DeviceName } from '../src/devname.js';
 
 /**
  * x3270's devname_init (Common/devname.c:42) and devname_next (:73). The observable
- * behaviour comes from two real traces, not from reasoning:
+ * behavior comes from two real traces, not from reasoning:
  *   devname_success.trc: foo001, foo002, foo003, foo004   (template foo===)
  *   devname_failure.trc: foo1, foo2, foo3                 (template foo=)
  */

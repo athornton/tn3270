@@ -66,7 +66,7 @@ describe('query reply', () => {
     expect(AID.SF).toBe(0x88);
   });
 
-  it('sends exactly the five units we honour', () => {
+  it('sends exactly the five units we honor', () => {
     // WAS THREE. Color and Highlighting joined the list once SA execution and
     // render.ts's color resolution made them honest; the order is the wire order
     // and is asserted, because units go out in capability-list order.
@@ -152,9 +152,9 @@ describe('query reply', () => {
     // fails naming the byte rather than just "unit 0x81 differs from x3270".
     //
     // UNITS: if this assertion is what failed, you have probably "fixed" the
-    // millimetres-versus-inches inconsistency described at length in the KNOWN
+    // millimeters-versus-inches inconsistency described at length in the KNOWN
     // INCONSISTENCY comment in queryreply.ts. Read that comment before changing
-    // it. 0x01 (millimetres) disagrees with the inch-scaled Xr/Yr below, and it
+    // it. 0x01 (millimeters) disagrees with the inch-scaled Xr/Yr below, and it
     // is kept anyway because these exact bytes are what the live host accepted
     // from x3270. Changing UNITS alone makes the record differ from the only
     // known-good reference we have.
@@ -364,7 +364,7 @@ describe('Color query reply', () => {
     // Then fifteen IDENTITY pairs, 0xF1..0xFF — "The device must either display
     // the color whose color identifier is the same as the color attribute value
     // or display the device default color" (pages.txt:9236-9238), and identity
-    // is the first of those. Every one of these is a real claim we honour:
+    // is the first of those. Every one of these is a real claim we honor:
     // PALETTE_3279 has an entry for each, so render.ts's usableColor accepts it
     // rather than falling through to a default.
     for (let i = 0; i < 15; i++) {
@@ -453,7 +453,7 @@ describe('Highlighting query reply', () => {
       // NORMAL instead, which names the action outright. x3270 does the same
       // (sf.c:774-775).
       XAH.DEFAULT, XAH.NORMAL,
-      // Then four identities. Each is a claim render.ts honours: it sets exactly
+      // Then four identities. Each is a claim render.ts honors: it sets exactly
       // one of blink/reverse/underscore/intensify by equality against these.
       XAH.BLINK, XAH.BLINK,
       XAH.REVERSE, XAH.REVERSE,
@@ -661,7 +661,7 @@ describe('Query List selection', () => {
   it('sends Summary exactly once when the list names it', () => {
     // "the 3270 device or / workstation does not return duplicate Query Replies"
     // (pages.txt:8542-8544). Trivial now that Summary is never force-prepended,
-    // but kept: it is the regression test for reintroducing that behaviour.
+    // but kept: it is the regression test for reintroducing that behavior.
     const reply = buildReply(
       { kind: 'queryList', reqtyp: ReqTyp.QCODE_LIST, qcodes: [Qcode.SUMMARY] },
       DEFAULT_CAPABILITIES, GEOMETRY);
@@ -851,7 +851,7 @@ describe('a capability a plain Query does not return', () => {
 });
 
 // REMOVED: a describe block asserting that a QCODE-List reply prepends the
-// CALLER'S Summary capability rather than this module's. That behaviour is gone —
+// CALLER'S Summary capability rather than this module's. That behavior is gone —
 // Summary is no longer forced into a QCODE-List reply at all, because p. 6-96's
 // "QCODE List=X'80'" is Summary's own QCODE and not a REQTYP. Nothing replaced it:
 // there is no longer a substitution to get wrong.

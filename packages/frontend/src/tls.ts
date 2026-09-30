@@ -185,7 +185,7 @@ function adapt(sock: import('node:net').Socket): Connection {
 /**
  * Opens a connection to the host, encrypted or not.
  *
- * The plaintext path is byte-for-byte the behaviour that shipped before TLS
+ * The plaintext path is byte-for-byte the behavior that shipped before TLS
  * existed, so `-insecure` is a true escape hatch rather than a differently
  * configured TLS path.
  */

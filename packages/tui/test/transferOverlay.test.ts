@@ -157,7 +157,7 @@ describe('transferLines', () => {
     // `transferring... ${bytes} (Esc cancels)` sat in the running phase through the commit
     // that fixed the arrows, because that test read only the idle line. Fira Code ligates
     // `..` and `...` as well as arrows, so the running status had exactly the defect the
-    // neighbouring test was written to prevent -- one phase away and therefore invisible to it.
+    // neighboring test was written to prevent -- one phase away and therefore invisible to it.
     //
     // Swept over all four phases AND the error path, because each takes a different branch of
     // `statusLine` and the strings are unrelated. `--` is deliberately included: it is a

@@ -277,16 +277,16 @@ describe('startTransfer', () => {
     }
   });
 
-  it('CLEARS ITS TIMERS on cancel, so a cancelled run cannot report a timeout later', async () => {
-    // A timer surviving the cancel would call onDone a SECOND time, overwriting "cancelled"
+  it('CLEARS ITS TIMERS on cancel, so a canceled run cannot report a timeout later', async () => {
+    // A timer surviving the cancel would call onDone a SECOND time, overwriting "canceled"
     // with "timed out" on a form the operator has already closed.
     //
     // TWO GUARDS COVER THIS AND EITHER ALONE IS SUFFICIENT, measured by mutation: removing
     // `clearTimers()` leaves the `ended` flag refusing the late call, and removing `ended`
     // leaves the cleared timers never firing. So each mutation alone keeps this green and
     // only removing BOTH reddens it -- with both gone, onDone fires THREE times (cancel,
-    // frame deadline, total deadline) and the last one overwrites "cancelled" with "timed
-    // out". Defence in depth, like the pfAID/sendAID pair in frontend: recorded here so a
+    // frame deadline, total deadline) and the last one overwrites "canceled" with "timed
+    // out". Defense in depth, like the pfAID/sendAID pair in frontend: recorded here so a
     // future reader does not delete one as redundant on the evidence of a green suite.
     vi.useFakeTimers();
     try {
@@ -407,7 +407,7 @@ describe('protocol selection: the geometry gate is gone', () => {
     run.cancel!();
   });
 
-  it('CANCELLING AT 43x80 REPORTS rather than throwing CutFrameError at the operator', () => {
+  it('CANCELING AT 43x80 REPORTS rather than throwing CutFrameError at the operator', () => {
     // A DEFECT THIS TASK INTRODUCED, found by running the deletion and not predicted by the
     // plan: the geometry gate was load-bearing for `cancel` as well as for stepping. With it
     // gone, `CutTransfer.cancel` is reachable at 43x80, and it writes the response area
@@ -435,7 +435,7 @@ describe('protocol selection: the geometry gate is gone', () => {
     expect(aids).toEqual([AID.ENTER]);
   });
 
-  it('a cancelled run RELEASES the DFT registration, so no retained frame is replayed', () => {
+  it('a canceled run RELEASES the DFT registration, so no retained frame is replayed', () => {
     // The registration happens before priming, so every exit path owns releasing it.
     // `answerRead` replays a DFT engine's retained frame, which at a host that has moved on
     // is unsolicited traffic. `handleClose` clears `dft` too, but a form closed on a LIVE
@@ -773,7 +773,7 @@ describe('protocol selection: deciding', () => {
     expect(session.listenerCount('transferEnd')).toBe(endsBefore);
   });
 
-  it('CANCELLING A DFT TRANSFER MID-FLIGHT ABORTS IT, keeping the registration alive', async () => {
+  it('CANCELING A DFT TRANSFER MID-FLIGHT ABORTS IT, keeping the registration alive', async () => {
     // ABORT, NOT ABANDON -- the rule this module states for CUT, applied to DFT, and the two
     // need OPPOSITE handling of the registration. `DftTransfer.cancel` DEFERS: it sets a flag
     // checked on the next inbound frame (`dft.ts:205-208`, matching x3270's `ft_dft.c:225`,

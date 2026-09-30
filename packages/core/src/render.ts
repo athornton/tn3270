@@ -131,7 +131,7 @@ export interface ResolvedCell {
    * x3270's equivalent is wider -- `(gr & GR_INTENSIFY) || FA_IS_HIGH(fa)`
    * (c3270/screen.c:1183) -- because curses gives it A_BOLD as its only
    * brightness lever and it uses bold for both. We have real color, so folding
-   * the two would make an intensified field bold AND red, double-signalling one
+   * the two would make an intensified field bold AND red, double-signaling one
    * protocol fact. A renderer wanting x3270's look can OR in its own test.
    */
   intensify: boolean;
@@ -148,7 +148,7 @@ export interface ResolveOptions {
    * Is this a color device? Defaults to true.
    *
    * When false EVERY cell is green regardless of what the host sent, which is
-   * x3270's behaviour (`color_from_fa` returns HOST_COLOR_GREEN unconditionally,
+   * x3270's behavior (`color_from_fa` returns HOST_COLOR_GREEN unconditionally,
    * fprint_screen.c:90-94). A 3278 is monochrome hardware and must not be
    * colorised just because a host sent an attribute it should not have.
    *
@@ -206,7 +206,7 @@ function defaultColor(attr: number): Color3279 {
  *
  * 0x00 is excluded deliberately: it is legal on the wire and means "device
  * default", so it must fall through to the NEXT LEVEL rather than being treated
- * as a value. An unrecognised byte falls through the same way -- a malformed
+ * as a value. An unrecognized byte falls through the same way -- a malformed
  * attribute from a host must never reach `colorRgb`, which throws.
  *
  * THE 0x00 CHECK IS UNREACHABLE FROM ANY `Screen`-DERIVED SNAPSHOT, AND KEPT ON
@@ -308,7 +308,7 @@ const HIGHLIGHTS: ReadonlySet<number> = new Set([
  * 0x00: it means "the default action of the device" (pages.txt:10329-10331), a
  * fall-through rather than a value. And for the same reason as there, THAT CLAUSE
  * IS UNKILLABLE BY TEST TODAY -- `XAH.DEFAULT` is not a member of `HIGHLIGHTS`
- * either, so deleting it changes no behaviour, and mutation testing confirmed
+ * either, so deleting it changes no behavior, and mutation testing confirmed
  * every test still passes. It is kept on the same grounds: the two lines encode
  * different rules that merely coincide, one architectural ("X'00' means device
  * default") and one representational ("not a highlight we act on"). Were X'00'
@@ -365,7 +365,7 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
   // the default integer width and costs a few KB on a per-record redraw.
   // `attrOf` holds a byte, so Uint8Array suffices, and
   // 0x00 is a legitimate attribute value (x3270's `START_FIELD(0)` for an SFE
-  // with no 0xC0 pair, ctlr.c:1883-1885) -- which is why "no field" is signalled
+  // with no 0xC0 pair, ctlr.c:1883-1885) -- which is why "no field" is signaled
   // by `attrAddrOf[i] < 0` and never by `attrOf[i] === 0`.
   const attrAddrOf = new Int32Array(size).fill(-1);
   const attrOf = new Uint8Array(size);
@@ -411,7 +411,7 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     const attrAddr = attrAddrOf[i]!;
     // An unformatted buffer has no field: attribute 0x00 (unprotected, normal)
     // is what the base map should see, and `field` stays undefined so level 2 is
-    // skipped. x3270 reaches the same place with its `fa` initialised to 0.
+    // skipped. x3270 reaches the same place with its `fa` initialized to 0.
     const field = attrAddr >= 0 ? snap.cells[attrAddr]! : undefined;
     const attr = attrAddr >= 0 ? attrOf[i]! : 0x00;
 

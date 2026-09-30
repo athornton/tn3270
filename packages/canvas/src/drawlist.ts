@@ -33,7 +33,7 @@
  * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `keypad.ts`,
  * `assets.ts` and `blit.ts` all took them from here with `import type` -- while this module
  * value-imports `column` from `cg.ts` and `keypadRegion` from `keypad.ts`. That is an import
- * cycle in the type position: harmless while the imports erase, and a module-initialisation
+ * cycle in the type position: harmless while the imports erase, and a module-initialization
  * ordering bug the day one of them becomes a value. See `geometry.ts` and the guard in
  * `test/module-cycles.test.ts`.
  *

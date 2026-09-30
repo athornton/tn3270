@@ -109,14 +109,14 @@ export interface ResolvedHost {
  * dropping one silently hands the operator a session they did not ask for and cannot
  * see in the trace — the same reasoning that makes `L:` alongside `-insecure` an error
  * rather than a downgrade. `B:` is absent from this table because it is "now a no-op"
- * in s3270 itself (split_host.h), so accepting and ignoring it matches its behaviour
+ * in s3270 itself (split_host.h), so accepting and ignoring it matches its behavior
  * exactly.
  */
 const UNIMPLEMENTED_PREFIXES: Readonly<Record<string, string>> = Object.freeze({
   A: 'means an NVT/ANSI session rather than 3270 (ANSI_HOST). This client is 3270-only.',
   C: 'suppresses the login wait (NO_LOGIN_HOST). We never wait for a login, so the '
     + 'prefix would be a no-op here -- but it is refused rather than ignored, because '
-    + 'a script that relies on it is relying on s3270 behaviour we have not verified.',
+    + 'a script that relies on it is relying on s3270 behavior we have not verified.',
   P: 'connects through a telnet passthru proxy (PASSTHRU_HOST), which is not implemented.',
   S: 'asks for the standard data stream, not the extended one (STD_DS_HOST). Use a '
     + 'terminal type without the -E suffix instead, e.g. -model 3278-2.',

@@ -10,7 +10,7 @@
  * docs/superpowers/specs/2026-08-18-indfile-cut-transfer-design.md.
  *
  * Every constant below is cited to x3270 4.5 `include/ft_cut_ds.h`, which is 82
- * lines and documents the whole wire format, and every behaviour to
+ * lines and documents the whole wire format, and every behavior to
  * `Common/ft_cut.c`. Where CUT is underspecified the design doc's governing
  * principle applies: do what x3270 does, because it is the client these hosts
  * have actually been driven with for decades.
@@ -436,7 +436,7 @@ export type CutFrame =
  * status code it uses:
  *
  *   - an unknown frame type — `ftCutUnknownFrame` / `SC_ABORT_XMIT`,
- *     ft_cut.c:408-411. Not a silent default: a frame type we do not recognise
+ *     ft_cut.c:408-411. Not a silent default: a frame type we do not recognize
  *     means we have lost sync with the host, and guessing would write a wrong
  *     file.
  *   - a declared length past `MAX_DOWNLOAD_DATA` — `ftCutOversize` /

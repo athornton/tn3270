@@ -47,7 +47,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  * Listed explicitly rather than filtered by a `--` prefix rule, because our own
  * `--terminal-type` takes a VALUE: a prefix rule either eats that value or needs to know
  * about it, and both readings were wrong in the first draft of this file. Anything not
- * named here still reaches `parseGuiArgs`, so an unrecognised flag is still an error --
+ * named here still reaches `parseGuiArgs`, so an unrecognized flag is still an error --
  * silently swallowing one is what produces a session that negotiates something nobody
  * asked for.
  */
@@ -421,7 +421,7 @@ app.whenReady().then(async () => {
  * Note that a spelling's CASE IS IGNORED by Chromium: both `A` and `a` deliver `key: 'a'`,
  * so this seam types lowercase unless `Shift+` is given.
  *
- * THE MAC BEHAVIOUR HERE IS REASONED, NOT MEASURED. Accelerator names are Chromium's own
+ * THE MAC BEHAVIOR HERE IS REASONED, NOT MEASURED. Accelerator names are Chromium's own
  * vocabulary and ought to be platform-independent, but this seam has only ever run on Linux
  * under Xvfb. Treat a Mac disagreement as likely rather than surprising: `Option-1` reports
  * `key === '¡'` there, which is the whole reason `keys.ts` matches the PA keys on `e.code`,

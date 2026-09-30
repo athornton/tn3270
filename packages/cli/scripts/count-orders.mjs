@@ -30,7 +30,7 @@ const txt = readFileSync(file, 'utf8');
 // fixtures/mvs/ (CLI stdout, every line prefixed) and the canonical replayable form in
 // fixtures/traces/ (prefix stripped). Without that, running this on the canonical file
 // matched zero lines and reported SA=0 -- which looks exactly like "the parser stopped
-// recognising SA" and made the cross-check against
+// recognizing SA" and made the cross-check against
 // core/test/helpers/trace.ts:countDeferredOrders impossible to perform at all. That
 // helper is a port of this logic and the two MUST agree; keep them in step.
 let cur = null;

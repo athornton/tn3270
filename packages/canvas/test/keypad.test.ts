@@ -441,7 +441,7 @@ describe('hitTestAt', () => {
   it('finds it from the LAST DEVICE PIXEL of every button, which is what pins the offset', () => {
     // A center probe cannot catch a dropped offset: `at.x / scale` is 13.3 scale-1 pixels and a
     // button is 54 wide, so the center of one stays inside it. The last pixel does not -- it lands in
-    // the neighbouring button, or outside the keypad at the end of a row.
+    // the neighboring button, or outside the keypad at the end of a row.
     for (const b of r.buttons) {
       const p = onCanvas(b.x + b.w, b.y + b.h);
       expect(hitTestAt(r.buttons, p.x - 1, p.y - 1, at, scale), b.label).toEqual(b);
@@ -449,7 +449,7 @@ describe('hitTestAt', () => {
   });
 
   it('excludes the first device pixel PAST a button on both axes', () => {
-    // Half-open survives the scaling: `b.x + b.w` at scale belongs to the neighbour, not to `b`.
+    // Half-open survives the scaling: `b.x + b.w` at scale belongs to the neighbor, not to `b`.
     for (const b of r.buttons) {
       const p = onCanvas(b.x + b.w, b.y + b.h);
       expect(hitTestAt(r.buttons, p.x, p.y, at, scale), b.label).not.toEqual(b);

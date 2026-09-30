@@ -94,7 +94,7 @@ describe('drawList', () => {
     });
   });
 
-  it('falls back to boxsolid for a byte with no glyph, not to a neighbour', () => {
+  it('falls back to boxsolid for a byte with no glyph, not to a neighbor', () => {
     // An out-of-range column would sample whichever glyph sits next in the atlas, which
     // reads as corruption. EBCDIC 0x01 is one of the 55 unmapped bytes.
     const dl = listFor(screenWith([[0, 0x01]]));
@@ -210,7 +210,7 @@ describe('the keypad region', () => {
   });
 });
 
-describe('drawList honours the scheme it is given', () => {
+describe('drawList honors the scheme it is given', () => {
   it("draws the scheme's blue, not core's", () => {
     // The bug this change fixes: the GUI resolved through core's colorRgb, whose blue is
     // pure #0000ff and unreadable on black. A default 3279 field is green, so recolor one

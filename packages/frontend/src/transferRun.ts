@@ -173,8 +173,8 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
    * End the run exactly once: drop the listener, kill both timers, report.
    *
    * `ended` guards against every way two endings could race -- a frame completing as a
-   * deadline fires, or a cancel arriving as the last frame lands. Without it a cancelled run
-   * would later report a timeout, OVERWRITING "cancelled" on a form the operator has already
+   * deadline fires, or a cancel arriving as the last frame lands. Without it a canceled run
+   * would later report a timeout, OVERWRITING "canceled" on a form the operator has already
    * closed, and `onDone` would run twice for one transfer.
    */
   const finish = (result: TransferResult): void => {
@@ -409,7 +409,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
       // NOTHING AROSE FROM THE DFT ENGINE, so it is the loser of a protocol race and is
       // DISCARDED -- exactly `cancelDftTransfer`'s documented case ("the loser of a protocol
       // race", `session.ts:367`), which sends nothing because the host never addressed it.
-      // Without this a cancelled run leaves `session.dft` set and `answerRead` would replay
+      // Without this a canceled run leaves `session.dft` set and `answerRead` would replay
       // its retained frame at a host that has moved on. `handleClose` clears `dft` too, but a
       // form closed on a LIVE session never reaches it.
       session.cancelDftTransfer();

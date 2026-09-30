@@ -661,7 +661,7 @@ describe('sending AIDs', () => {
     it('does not disturb emit while it is running', () => {
       // A listener that removes itself is the shape that breaks a naive `for` over a mutating
       // collection. Iterating a Set that is modified during iteration is defined in JS, but the
-      // behaviour is worth pinning rather than assuming.
+      // behavior is worth pinning rather than assuming.
       const { session } = newSession();
       const seen: string[] = [];
       const once = (): void => { seen.push('once'); session.off('screen', once); };

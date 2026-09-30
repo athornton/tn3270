@@ -276,7 +276,7 @@ export class CutConversionError extends Error {
  *         return 0;
  *     }
  *
- * NOTE THE ERROR SEMANTICS, which we match deliberately: an unrecognised byte
+ * NOTE THE ERROR SEMANTICS, which we match deliberately: an unrecognized byte
  * yields 0, indistinguishable from a genuine 0. That is lossy, and we keep it
  * because from6 decodes sequence numbers and lengths whose framing x3270 has
  * validated for decades -- diverging here would change frame handling on a

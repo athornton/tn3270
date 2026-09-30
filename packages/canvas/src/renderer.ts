@@ -322,7 +322,7 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
 /**
  * TEST SEAM, and the only thing in this file that exists for a test.
  *
- * Returns the CENTRE of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
+ * Returns the CENTER of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
  * without knowing the layout, the scale or the offset. Returning COORDINATES rather than firing the
  * action is what keeps the seam honest: the click still goes in through Chromium's input pipeline,
  * so `mousedown`, the primary-button guard, `hitTestAt`, `sendAction` and the IPC hop are all still
@@ -343,7 +343,7 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * as `NO BUTTON`, and both causes are a mistake in the CALLER -- clicking before showing the keypad,
  * or naming a key that is not in the table -- rather than a failure of the path under test. Note it
  * does NOT consult `errored`: this answers where the button IS, and whether a click on it is
- * refused while an error message is up is behaviour for the click path to decide.
+ * refused while an error message is up is behavior for the click path to decide.
  */
 (window as unknown as { __tn3270ButtonCenter: (label: string) => { x: number; y: number } | null })
   .__tn3270ButtonCenter = (label) => {

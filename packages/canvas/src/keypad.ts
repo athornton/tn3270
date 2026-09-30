@@ -157,7 +157,7 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
     // renderer clears the canvas to black before blitting, so absence is already the separator, and
     // that is how the gutters between the clusters have always been drawn.
     //
-    // CENTRED, not left-aligned -- the one place this departs from the mockup the user approved, and
+    // CENTERED, not left-aligned -- the one place this departs from the mockup the user approved, and
     // it is a departure the mockup could not show: it left short labels flush left because there was
     // no block for them to be centerd IN until the padding above existed. Five is an ODD width, so
     // every odd-length label -- including all four arrows and `PA1`/`Ins`/`Dup`/`Tab`/`Del` -- is now
@@ -167,7 +167,7 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
     //
     // Labels are at most 5 characters (see `KeypadKey.label` in `frontend/src/keypad.ts` and the test
     // that pins it), which is exactly the block, so `left` is never negative and `padEnd` never
-    // truncates: a label cannot spill into its neighbour.
+    // truncates: a label cannot spill into its neighbor.
     const left = Math.floor((KEYPAD_BLOCK_WIDTH - key.label.length) / 2);
     const text = key.label.padStart(key.label.length + left).padEnd(KEYPAD_BLOCK_WIDTH);
     for (let i = 0; i < KEYPAD_BLOCK_WIDTH; i++) {

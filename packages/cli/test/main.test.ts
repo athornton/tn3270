@@ -32,7 +32,7 @@ describe('command line arguments', () => {
     expect(() => parseArgs(['--terminal-type'])).toThrow(UsageError);
   });
 
-  it('rejects an unrecognised flag rather than ignoring it', () => {
+  it('rejects an unrecognized flag rather than ignoring it', () => {
     // Silently ignoring a flag the user typed is how a session ends up
     // negotiating something nobody asked for.
     expect(() => parseArgs(['--wat'])).toThrow(UsageError);

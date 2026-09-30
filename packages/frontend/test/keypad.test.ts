@@ -115,7 +115,7 @@ describe('KEYPAD_KEYS', () => {
 
   it('labels fit the width the layout reserves', () => {
     // The canvas layout gives each key a fixed cell width; a longer label would overflow into
-    // its neighbour, silently, because the blitter clips nothing.
+    // its neighbor, silently, because the blitter clips nothing.
     for (const k of KEYPAD_KEYS) expect(k.label.length).toBeLessThanOrEqual(5);
   });
 
@@ -131,7 +131,7 @@ describe('KEYPAD_KEYS', () => {
 
   it('puts every key in a row KEYPAD_ROWS declares, on a whole-key column boundary', () => {
     // Task 5 turns `col` into pixels as `col * cellWidth`, so a `col` that is not a multiple of
-    // KEYPAD_KEY_WIDTH would draw a button straddling its neighbour's cells.
+    // KEYPAD_KEY_WIDTH would draw a button straddling its neighbor's cells.
     for (const k of KEYPAD_KEYS) {
       expect(KEYPAD_ROWS).toContain(k.row);
       expect(k.col % KEYPAD_KEY_WIDTH).toBe(0);

@@ -75,7 +75,7 @@ const COLOR_WORDS: Readonly<Record<string, Depth>> = Object.freeze({
  * Parse the argument vector.
  *
  * The flag spellings match the CLI's (`-model`, `--terminal-type`) so the two
- * front ends stay legible side by side, and an unrecognised flag is an error for
+ * front ends stay legible side by side, and an unrecognized flag is an error for
  * the same reason it is there: silently ignoring one produces a session that
  * negotiates something nobody asked for.
  *
@@ -179,7 +179,7 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         break;
       default:
         if (flag.startsWith('-')) {
-          throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
+          throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
         }
         if (args.host !== undefined) {
           throw new UsageError(`more than one host given: ${JSON.stringify(args.host)} and ${JSON.stringify(flag)}`);

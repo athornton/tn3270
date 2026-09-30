@@ -115,7 +115,7 @@ function saHandler(type: number): SaHandler | undefined {
  * Does the SA order apply this attribute type, or drop it?
  *
  * Derived from `SA_HANDLERS` so it cannot disagree with what is actually applied.
- * `XA.CHARSET` (Programmable Symbol Sets, out of scope) and anything unrecognised
+ * `XA.CHARSET` (Programmable Symbol Sets, out of scope) and anything unrecognized
  * are false, and stay counted by `setAttributeIgnored`.
  *
  * Presence of a handler, not `Object.hasOwn`, now that the lookup is centralised:
@@ -211,7 +211,7 @@ export interface ExecuteResult {
   structuredFieldsIgnored: number;
   /**
    * SA orders parsed and dropped — the ones whose attribute TYPE we do not
-   * implement, which is `XA.CHARSET` and anything unrecognised.
+   * implement, which is `XA.CHARSET` and anything unrecognized.
    *
    * NOT a count of SA orders seen. Color, background, highlighting and the
    * X'00' reset are applied now, and counting those would break what this field
@@ -325,7 +325,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
           // TN3270E that becomes a negative response (telnet.c:3432-3436). We
           // negotiate no TN3270E yet, so there is nowhere to send one, and
           // dropping the session over a field we can simply ignore would be
-          // worse behaviour than the trace line. Revisit with stage 2b.
+          // worse behavior than the trace line. Revisit with stage 2b.
           result.structuredFieldsIgnored++;
         }
       }
@@ -648,7 +648,7 @@ function applyToken(
       // survive at all. A later record that overwrites one character mid-field,
       // with no SFE and no SA, correctly clears that character's own attribute
       // (pages.txt:3388-3391) and must have something to fall back on — otherwise
-      // one colorless cell sits between colored neighbours, inside a field the
+      // one colorless cell sits between colored neighbors, inside a field the
       // host still defines as colored.
       //
       // The FA cell is exactly where x3270 puts them, immediately after its pair

@@ -50,7 +50,7 @@ export interface CliArgs {
  * compares with strcmp against OptModel, `"-model"` (glue.c:640,
  * resources.h:556).
  *
- * An unrecognised flag is an error rather than something to skip: silently
+ * An unrecognized flag is an error rather than something to skip: silently
  * ignoring a flag the operator typed produces a session that negotiates
  * something nobody asked for, which is very hard to diagnose from a trace.
  */
@@ -123,7 +123,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       default:
-        throw new UsageError(`unrecognised argument ${JSON.stringify(flag)}`);
+        throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
     }
   }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));

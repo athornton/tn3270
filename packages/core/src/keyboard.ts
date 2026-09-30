@@ -45,7 +45,7 @@ export class Keyboard {
     // refusal.
     //
     // OPERATOR ERRORS ARE EXCLUDED, and must be, or the exclusion breaks two
-    // shipped behaviours: "refuses a letter in a numeric field" types '5'
+    // shipped behaviors: "refuses a letter in a numeric field" types '5'
     // successfully straight after the refused 'A', and the auto-skip test types
     // on after a full field. x3270 draws the same line, clearing KL_OERR_MASK
     // and continuing where a host lock would have deferred — see

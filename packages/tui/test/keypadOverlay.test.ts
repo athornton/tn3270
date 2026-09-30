@@ -19,7 +19,7 @@ const CHORD_COL = 2 + Math.max(...KEYPAD_KEYS.map((k) => k.name.length)) + 2;
  * Does `a` describe the same action as `b`?
  *
  * Deliberately structural and NOT `JSON.stringify`, so that this test agrees with the module only
- * when the module is right rather than when it happens to serialise its literals in the same key
+ * when the module is right rather than when it happens to serialize its literals in the same key
  * order. `pf`/`pa` carry `n` and `type` carries `text`; every other member of the union is its
  * `kind` alone (`frontend/src/keymap.ts:43-88`).
  */

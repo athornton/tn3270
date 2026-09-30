@@ -126,7 +126,7 @@ export const Tn3270eReason = {
  *
  * RFC 2355 does not enumerate these; x3270 decodes them in `unbind_reason`
  * (Common/telnet.c:2592) and the wire is the authority. THE GAPS ARE REAL — there is
- * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognised
+ * no 0x03-0x06 and no 0x0d, and x3270 names none of them either. An unrecognized
  * reason is reported as unknown rather than guessed at.
  *
  * BIND_FORTHCOMING IS THE OPERATIONALLY INTERESTING ONE: it means another BIND is
@@ -397,7 +397,7 @@ export const ReadPartitionType = {
  *     #define   SF_RPQ_ALL	0x80	//   all
  *
  * B'11' (0xC0) is "Reserved" (pages.txt:6361) and there is no entry for it:
- * x3270 rejects an unrecognised request type outright (sf.c:301-303, `default:
+ * x3270 rejects an unrecognized request type outright (sf.c:301-303, `default:
  * ... return PDS_BAD_CMD`), and so do we.
  *
  * NOTE x3270 compares `buf[5]` against these WITHOUT masking off bits 2-7, so a

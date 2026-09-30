@@ -44,7 +44,7 @@ describe('SA sets character attributes on subsequent characters', () => {
   });
 
   it('is a COMPOSITE by type: setting color leaves highlighting alone', () => {
-    // pages.txt:2995-2996. Modelling SA state as a single value instead of a
+    // pages.txt:2995-2996. Modeling SA state as a single value instead of a
     // per-type map silently drops attributes, and this is the test that catches it.
     const s = run([
       ...W, ...SBA0,
@@ -134,7 +134,7 @@ describe('SA sets character attributes on subsequent characters', () => {
     // attribute is overwritten by the character attribute of the new character"
     // (p. 4-16, pages.txt:3388-3391). x3270 gets this because it stamps
     // default_fg unconditionally (ctlr.c:2141) and ctlr_add_fg assigns rather
-    // than merges, normalising any non-0xFx value to 0 (ctlr.c:2852-2861).
+    // than merges, normalizing any non-0xFx value to 0 (ctlr.c:2852-2861).
     //
     // Screen.setExtended MERGES, so the executor must clear before stamping. An
     // applySa that returns early when the SA state is empty leaves the red here.
@@ -233,7 +233,7 @@ describe('SA sets character attributes on subsequent characters', () => {
     expect(r.setAttributeIgnored).toBe(1);
   });
 
-  it('counts an SA type it does not recognise at all', () => {
+  it('counts an SA type it does not recognize at all', () => {
     // Table 4-6 has rows we deliberately do not name (VALIDATION 0xC1,
     // OUTLINING 0xC2, TRANSPARENCY 0x46). They must fall to the counted default
     // arm, not be silently swallowed.
@@ -261,7 +261,7 @@ describe('SA sets character attributes on subsequent characters', () => {
   });
 
   it('what it counts and what it applies agree, type by type', () => {
-    // THE COUNTER MUST NOT DISAGREE WITH THE BEHAVIOUR. Rather than restate the
+    // THE COUNTER MUST NOT DISAGREE WITH THE BEHAVIOR. Rather than restate the
     // list of implemented types -- which is the duplication this pins against --
     // this derives "did we apply it" from the screen and compares it to
     // setAttributeIgnored for every type in Table 4-6 plus a few reserved bytes.

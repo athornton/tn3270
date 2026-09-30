@@ -82,7 +82,7 @@ export type {
 // The event-driven transfer driver. Here rather than in `tui` because its own header's
 // reason for existing -- "a TUI cannot block" -- applies equally to the GUI and the web
 // gateway, and both already depend on this package. The CLI keeps its own blocking loop:
-// collapsing the two would change the s3270 line protocol's behaviour.
+// collapsing the two would change the s3270 line protocol's behavior.
 export { startTransfer } from './transferRun.js';
 export type { TransferRun, StartTransferOptions } from './transferRun.js';
 

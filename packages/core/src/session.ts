@@ -76,7 +76,7 @@ export interface SessionOptions {
    *
    * ## THE FLIP, AND WHY IT WAITED
    *
-   * This is the one capability here that is not simply "do we honour it": the client
+   * This is the one capability here that is not simply "do we honor it": the client
    * does not select a transfer protocol, it declares a capability and the HOST picks.
    * So the flag changes which protocol live hosts speak. It shipped DEFAULT OFF on
    * 2026-09-24 precisely because DFT did not work yet — turning it on made a host
@@ -91,7 +91,7 @@ export interface SessionOptions {
    * **WHAT TURNING IT ON MEANS, stated plainly because it is a real trade:** a host
    * that speaks DFT will now choose DFT, so the CUT path gets less live exercise than
    * it did. CUT is still fully implemented, still the only option at 24x80 against a
-   * CUT-only host, and `-ddm off` still restores exactly the old behaviour — which is
+   * CUT-only host, and `-ddm off` still restores exactly the old behavior — which is
    * how every pre-2026-09-29 CUT measurement can be reproduced.
    *
    * See docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md.
@@ -513,7 +513,7 @@ export class Session {
         // host session must be configured for SSL with client authentication in order to
         // play an ELF macro" -- so client authentication is a PREREQUISITE, not an option.
         //
-        // WE SEND `YES` AND CANNOT HONOUR IT, WHICH IS DELIBERATE BUT WORTH KNOWING.
+        // WE SEND `YES` AND CANNOT HONOR IT, WHICH IS DELIBERATE BUT WORTH KNOWING.
         // This client has no client-certificate support at all (see the README's *What is
         // not implemented*: -certfile/-keyfile/-clientcert are all absent), so TLS here
         // authenticates the host to us and never us to the host. A host that acted on this
@@ -1228,7 +1228,7 @@ export class Session {
    * `restore()` -- and that codebase's answer was `clearTimeout` on every exit path,
    * not `.unref()`.
    *
-   * Ref'd is also the behaviourally correct choice on its own terms, not merely the
+   * Ref'd is also the behaviorally correct choice on its own terms, not merely the
    * consistent one: this timer's whole job is to recover a frame the operator cannot
    * otherwise see once the host goes quiet. A CLI script whose only outstanding work
    * is this timeout is precisely the case where staying alive to paint that frame is

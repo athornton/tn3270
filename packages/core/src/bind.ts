@@ -50,7 +50,7 @@ export const BIND_PLU_NAME_MAX = 8;
  * decodes to 0 -- which is why this returns a number rather than throwing on it.
  *
  * The `& 0x0f` on the shifted mantissa is transcription fidelity with x3270, not a
- * behavioural guard: `c >> 4` on a byte (c <= 0xff) is already <= 15, so the mask
+ * behavioral guard: `c >> 4` on a byte (c <= 0xff) is already <= 15, so the mask
  * cannot change the result for any of the 256 possible inputs. Kept so a reader
  * comparing the two sources finds them identical character for character.
  */

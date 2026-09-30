@@ -208,7 +208,7 @@ describe('resolve: the field extended attribute is the second level', () => {
     // overwritten by the character attribute of the new character"
     // (pages.txt:3388-3391), so a second record that rewrites one cell mid-field
     // with no SA clears that cell's own color. Without level 2 the cell would
-    // come out green — one colorless hole between colored neighbours, inside a
+    // come out green — one colorless hole between colored neighbors, inside a
     // field the host still defines as yellow.
     const s = run([
       ...W, ...sba(0),
@@ -223,7 +223,7 @@ describe('resolve: the field extended attribute is the second level', () => {
 
     const r = resolve(s.snapshot());
     expect(r[2]!.fg).toBe(Color.YELLOW);   // the field's, not the base map's
-    expect(r[1]!.fg).toBe(Color.PINK);     // neighbours keep their own
+    expect(r[1]!.fg).toBe(Color.PINK);     // neighbors keep their own
     expect(r[3]!.fg).toBe(Color.PINK);
   });
 
@@ -345,7 +345,7 @@ describe('resolve: mode3279 false makes everything green (rule 3)', () => {
     expect(resolve(s.snapshot(), { mode3279: false })[1]!.bg).toBe(Color.NEUTRAL_BLACK);
   });
 
-  it('still honours highlighting, which is not color', () => {
+  it('still honors highlighting, which is not color', () => {
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { gr: XAH.REVERSE });
     const r = resolve(s.snapshot(), { mode3279: false });
@@ -420,7 +420,7 @@ describe('resolve: the 0x00 and 0xF7 rules (rules 4 and 5)', () => {
     // value "established for the field in the extended field attribute"
     // (pages.txt:3383-3387). So 0x00 must land on LEVEL 2, not skip past it to
     // the base map -- which is why the field here is protected (base map: blue)
-    // while its extended attribute is yellow. Only the correct behaviour yields
+    // while its extended attribute is yellow. Only the correct behavior yields
     // yellow: black fails, and skipping level 2 gives blue.
     const snap = handBuilt(FA.PRINTABLE | FA.PROTECT, { fg: Color.YELLOW }, { fg: 0x00 });
     expect(snap.cells[1]!.fg, 'the explicit zero must survive into the input').toBe(0x00);
@@ -632,14 +632,14 @@ describe('resolve: highlighting', () => {
     }
   });
 
-  it('an unrecognised highlighting value sets no flags', () => {
+  it('an unrecognized highlighting value sets no flags', () => {
     const s = fielded(FA.PRINTABLE);
     s.setExtended(1, { gr: 0x99 });
     const c = resolve(s.snapshot())[1]!;
     expect([c.blink, c.reverse, c.underscore, c.intensify]).toEqual([false, false, false, false]);
   });
 
-  it("an unrecognised highlighting value FALLS THROUGH to the field's, not over it", () => {
+  it("an unrecognized highlighting value FALLS THROUGH to the field's, not over it", () => {
     // THE BUG THIS PINS, which review found and I reproduced: highlighting used to
     // gate level 1 on NON-ZERO where fg and bg gate it on RENDERABLE. So the same
     // malformed byte behaved oppositely one property apart -- a cell carrying
@@ -681,7 +681,7 @@ describe('resolve: highlighting', () => {
       .toBe(true);
   });
 
-  it('an unrecognised FIELD highlighting value falls through to no highlighting', () => {
+  it('an unrecognized FIELD highlighting value falls through to no highlighting', () => {
     const snap = handBuilt(FA.PRINTABLE, { gr: 0x99 }, {});
     const c = resolve(snap)[1]!;
     expect([c.blink, c.reverse, c.underscore, c.intensify]).toEqual([false, false, false, false]);
@@ -772,7 +772,7 @@ describe('resolve: text and hidden fields', () => {
     // the attribute-position test from `text` breaks nothing, because
     // `Screen.setFieldAttribute` also nulls the cell, so `ebcdic === 0x00`
     // blanks it anyway. An earlier version of this test asserted the blank off a
-    // real Screen and therefore pinned storage's behaviour, not resolution's.
+    // real Screen and therefore pinned storage's behavior, not resolution's.
     //
     // `resolve` is a pure function of a ScreenSnapshot, so the honest way to pin
     // ITS rule is to hand it the state its contract must survive: a cell that is
@@ -797,7 +797,7 @@ describe('resolve: text and hidden fields', () => {
     expect(r[1]!.text).toBe('B');
   });
 
-  it('honours a non-default code page', () => {
+  it('honors a non-default code page', () => {
     // MUST USE A CODE PAGE THAT DISAGREES WITH THE DEFAULT. An earlier version
     // passed `{ codePage: cp037 }` -- which IS the default -- and asserted 'A',
     // so hardcoding cp037 and discarding `opts.codePage` left it green. It
@@ -924,7 +924,7 @@ describe('the live TK5 ISPF fixture', () => {
   });
 
   it('pins the SA order counts, so a parser regression fails loudly', () => {
-    // Without this, a change that stopped recognising SA would show up only as a
+    // Without this, a change that stopped recognizing SA would show up only as a
     // quietly monochrome screen -- exactly the failure mode this block exists to
     // end. Counts come from the PARSER, never a hex grep: see
     // packages/cli/scripts/count-orders.mjs and its header for why a grep over

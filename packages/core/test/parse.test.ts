@@ -169,7 +169,7 @@ describe('order parsing', () => {
     ]);
   });
 
-  it('decodes an SFE with several pairs, keeping ones we do not honour', () => {
+  it('decodes an SFE with several pairs, keeping ones we do not honor', () => {
     // Type 0x42 is color, which stage 2a drops at EXECUTE time — but the
     // parser still reports it, so the trace shows what the host actually sent.
     const r = parseRecord(Uint8Array.of(

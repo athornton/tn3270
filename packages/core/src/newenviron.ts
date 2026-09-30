@@ -31,7 +31,7 @@ export interface EnvironRequest {
  * THE ORDER IS PRESERVED because the reply must list variables in the order asked; the
  * recorded trace does exactly that with its three uservars.
  *
- * TWO NON-OBVIOUS BEHAVIOURS, both from x3270's four-state machine
+ * TWO NON-OBVIOUS BEHAVIORS, both from x3270's four-state machine
  * (telnet_new_environ.c:356-470):
  *  - A VAR or USERVAR byte ENDS the previous request and begins a new one. There is no
  *    length prefix and no delimiter; the group bytes are the delimiters.
@@ -59,7 +59,7 @@ export interface EnvironRequest {
  * reference parser, ONE escape inside a name permanently disables the VAR/USERVAR
  * delimiter for the rest of the buffer, silently absorbing what should have been the
  * next request's group byte into the current name. That looks like a latent bug in
- * telnet_new_environ.c, not a behaviour worth copying: RFC 1572 defines ESC as escaping
+ * telnet_new_environ.c, not a behavior worth copying: RFC 1572 defines ESC as escaping
  * exactly the following byte, which is what this function does (`escaped` is cleared
  * right after consuming one literal byte).
  *

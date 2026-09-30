@@ -345,10 +345,10 @@ export function dialectFor(host: FtHostType): Dialect {
  * absent and absent LOUDLY (see `parseTransferKeywords`): `Remap` governs ascii
  * remapping we have not built, `Allocation`/`PrimarySpace`/`SecondarySpace`/
  * `Avblock` need `SPACE(n,n)` and `TRACKS|CYLS` command syntax nobody has tested
- * against the host yet, `WindowsCodePage` is not ours to honour, and
+ * against the host yet, `WindowsCodePage` is not ours to honor, and
  * `OtherOptions` is a hole through which any of them could arrive unvalidated.
  *
- * **`BufferSize` IS THE EIGHTH AND IT IS NOW ACCEPTED**, because the behaviour it
+ * **`BufferSize` IS THE EIGHTH AND IT IS NOW ACCEPTED**, because the behavior it
  * governs -- DFT -- exists. It is the one keyword here that never reaches the host
  * command: it sizes our own frames and the host learns it from the DDM Query Reply,
  * so it applies to a receive and to VM, where the DCB keywords do not.
@@ -369,7 +369,7 @@ const KEYWORD_SET = new Set<string>(KEYWORDS);
  * first in its list and `add` never gets a chance. A one-letter abbreviation that
  * resolves to the wrong option is precisely the class of failure this action must
  * not have: `Mode=b` for binary and `Mode=a` for ascii differ by a silently
- * corrupted MODULE. Full spellings only, and an unrecognised one names the set.
+ * corrupted MODULE. Full spellings only, and an unrecognized one names the set.
  */
 function enumValue<T extends string>(
   keyword: string,
@@ -533,7 +533,7 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
 
   // WARN ONLY WHEN THE CLAMP ACTUALLY MOVED IT. Comparing the two values rather than
   // re-testing the bounds is what keeps this honest if `boundDftBufferSize` ever changes:
-  // there is one definition of "out of range" and it is the function's own behaviour.
+  // there is one definition of "out of range" and it is the function's own behavior.
   // Both numbers are in the message because either alone is unactionable -- "clamped to 256"
   // does not say what was ignored, and naming only the input does not say what ran.
   const warnings: string[] = [];

@@ -63,7 +63,7 @@ export function hitTest(
  * WITH NO CENTRING, which is exactly the configuration both screenshot harnesses run in
  * (`browser-shot.mjs` sizes the viewport from the golden, so `bestScale` returns 1 and `center`
  * returns 0,0). `keypad.test.ts`'s `hitTestAt` describe therefore probes at scale 3 with a non-zero
- * offset, and both mutations were run against it: multiplying fails a CENTRE probe, while dropping
+ * offset, and both mutations were run against it: multiplying fails a CENTER probe, while dropping
  * the offset passes every center probe and fails only the last-device-pixel one.
  */
 export function hitTestAt(

@@ -627,7 +627,7 @@ export class TelnetLayer {
   /**
    * Abandon TN3270E and fall back to traditional tn3270.
    *
-   * Modelled on x3270's backoff_tn3270e(): tell the host no, then forget we ever had
+   * Modeled on x3270's backoff_tn3270e(): tell the host no, then forget we ever had
    * the option, so both the classic BINARY/EOR route and a later renegotiation are
    * still reachable on this same layer. Latching it off would make a reconnect
    * silently decline. This is what makes on-by-default safe.

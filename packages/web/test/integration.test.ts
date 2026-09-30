@@ -160,7 +160,7 @@ function collect(ws: WebSocket, want: number): Promise<Array<Record<string, unkn
  *
  * Node's built-in client sends no `Origin` header and gives no way to add one, and it never writes
  * payload before the server's 101 -- so neither the `--allow-origin` wiring nor the `head` bytes of
- * an upgrade have any behavioural test without going down to a socket. Both were confirmed INERT to
+ * an upgrade have any behavioral test without going down to a socket. Both were confirmed INERT to
  * mutation before this existed.
  *
  * Everything is written in ONE `socket.write`, deliberately: that is what puts the first frame in
@@ -416,7 +416,7 @@ describe('the gateway end to end', () => {
   });
 
   it('compares the token ONLY through tokenMatches, on both routes', () => {
-    // A SOURCE SCAN, because the property is invisible to behaviour: a plain `!==` rejects exactly
+    // A SOURCE SCAN, because the property is invisible to behavior: a plain `!==` rejects exactly
     // the same tokens and every functional test passes either way (measured -- that mutation is
     // inert). What differs is timing, and `handshake.ts` exports `tokenMatches` precisely so the
     // asset route cannot leak by timing while the upgrade route is careful. The same instinct as

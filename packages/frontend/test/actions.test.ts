@@ -34,7 +34,7 @@ describe('applyAction', () => {
     //
     // MUST CONNECT FIRST. Written without the connect, this asserted `undefined` and
     // failed -- a disconnected session sends nothing and `applyAction` swallows the
-    // refusal, which is correct behaviour and makes any wire assertion vacuous.
+    // refusal, which is correct behavior and makes any wire assertion vacuous.
     const { session, conn } = newSession();
     await session.connect('h', 23);
     conn.sent = [];
@@ -52,7 +52,7 @@ describe('applyAction', () => {
     // web gateway is the first where a REMOTE party supplies it, and bounding it there closed the
     // live hole -- but at the boundary, not structurally.
     //
-    // THIS IS A DEFENCE-IN-DEPTH TEST, and the mutation matrix is worth stating because it is not
+    // THIS IS A DEFENSE-IN-DEPTH TEST, and the mutation matrix is worth stating because it is not
     // what it first looks like. TWO independent guards now stand behind it: `pfAID`/`paAID` refuse
     // the number, and `Session.sendAID` refuses the resulting byte. MEASURED, all four combinations:
     //
@@ -96,7 +96,7 @@ describe('applyAction', () => {
 
   it('SWALLOWS a rejected action rather than throwing', () => {
     // A rejected action -- not connected, program check -- is normal operation, not a
-    // crash. This is the behaviour the TUI relied on, and moving the dispatch must not
+    // crash. This is the behavior the TUI relied on, and moving the dispatch must not
     // turn it into an exception that reaches the run loop.
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'enter' })).not.toThrow();
@@ -310,7 +310,7 @@ describe('the keypad-era actions', () => {
     //
     // THE NEGATIVES ARE THE TEST. `case 'newline': k.newline()` sits between `tab` and
     // `backspace`, and its plausible defect is not a missing case -- `satisfies never` makes that
-    // a compile error -- but a case body pointing at a NEIGHBOUR. Every candidate moves the cursor
+    // a compile error -- but a case body pointing at a NEIGHBOR. Every candidate moves the cursor
     // and none of them throws, so an unasserted transposition is a silent wrong move: `tab()` goes
     // to the next FIELD rather than the next LINE, and `home()` to the first field on the screen.
     // On a screen with no fields those two even agree with `newline` about where to land, which is
@@ -335,7 +335,7 @@ describe('the keypad-era actions', () => {
   it('REFUSES toggleKeypad, which is the front end s own business', () => {
     // Same reasoning as `quit`, and the same failure mode: a front end that forgot to
     // intercept this would show a dead button rather than an error, because the switch
-    // below treats an unrecognised kind as a no-op. Throwing makes the omission loud.
+    // below treats an unrecognized kind as a no-op. Throwing makes the omission loud.
     // See applyAction's docstring.
     //
     // `/does not handle toggleKeypad/` rather than `/toggleKeypad/`: MEASURED, the loose
@@ -351,7 +351,7 @@ describe('the keypad-era actions', () => {
     // display: a transfer needs a local path, a direction and a host file name, so unlike
     // every other member of the union it cannot be completed by the keystroke that starts
     // it. A front end that bound the chord and forgot to own the dialog would otherwise get
-    // a no-op, because the switch treats an unrecognised kind as one.
+    // a no-op, because the switch treats an unrecognized kind as one.
     //
     // `/does not handle transferForm/` rather than `/transferForm/`, for the reason measured
     // on the `toggleKeypad` twin above: the loose pattern also matches Node's own
@@ -418,7 +418,7 @@ interface Row {
   readonly target?: string;
   /** Targets that must NOT be called -- this case's plausible transposition partners. */
   readonly notCalled?: readonly string[];
-  /** Asserted arguments, where the ARGUMENT is the behaviour: the AID byte, the text, the flag. */
+  /** Asserted arguments, where the ARGUMENT is the behavior: the AID byte, the text, the flag. */
   readonly args?: readonly unknown[];
   /** For the two kinds that throw instead of dispatching. A message pattern, never a bare throw. */
   readonly throws?: RegExp;
@@ -427,7 +427,7 @@ interface Row {
    *
    * Only `enter` and `clear` need it, and they need it absolutely: while disconnected they
    * reconnect instead of sending, so a row that ran disconnected would assert the wrong half of the
-   * behaviour. Everything else here is state-independent, and the note above the AID senders says
+   * behavior. Everything else here is state-independent, and the note above the AID senders says
    * why the rest of the table deliberately stays unconnected.
    */
   readonly connected?: true;
@@ -448,7 +448,7 @@ const ROWS: readonly Row[] = [
   // already recorded the call, so `pf` and `pa` need no `connect` here. The wire-level assertions
   // are above, where they belong.
   //
-  // `enter` AND `clear` DO NEED ONE, and the reason is the behaviour, not the harness: while
+  // `enter` AND `clear` DO NEED ONE, and the reason is the behavior, not the harness: while
   // disconnected those two RECONNECT and send nothing at all
   // (`actions.ts`'s `reconnectInstead`). `connected: true` is what keeps these two rows asserting
   // the AID rather than accidentally asserting the reconnect. Their partner list names
@@ -524,7 +524,7 @@ const ROWS: readonly Row[] = [
   // caught by the positive assertion instead: `typeString` is then never called at all.
   { action: { kind: 'type', text: 'HI' }, target: 'keyboard.typeString', args: ['HI'],
     notCalled: ['keyboard.dup'] },
-  // Read-then-set, so the ARGUMENT is the behaviour: a fresh keyboard has insert mode off, and
+  // Read-then-set, so the ARGUMENT is the behavior: a fresh keyboard has insert mode off, and
   // `setInsertMode(false)` here would be the toggle that never turns on.
   { action: { kind: 'toggleInsert' }, target: 'keyboard.setInsertMode', args: [true],
     notCalled: ['keyboard.reset'] },

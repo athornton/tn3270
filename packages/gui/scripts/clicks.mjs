@@ -109,7 +109,7 @@ const SHOW_KEYPAD = 'Ctrl+K';
  * one more instance of a path the first nine already exercised end to end. Their label-to-action
  * pairing is checked as DATA, for all 47, by `frontend/test/keypad.test.ts`; their rectangles by
  * `canvas/test/keypad.test.ts`; their pixels by the goldens. If a whole block ever falls out of that
- * list above, add a case for it here rather than trusting the neighbour.
+ * list above, add a case for it here rather than trusting the neighbor.
  */
 const CASES = [
   { label: 'PF1', action: { kind: 'pf', n: 1 } },

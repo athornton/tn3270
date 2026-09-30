@@ -61,7 +61,7 @@ export interface RunnerOptions {
   /**
    * Whether the injected session's socket is TLS. Defaults to true, matching
    * `defaultSession`. Its only job is to let `Connect(L:host)` be refused on a
-   * session built by `-insecure`: honouring that prefix is impossible after
+   * session built by `-insecure`: honoring that prefix is impossible after
    * construction, and connecting in the clear to a host the script explicitly
    * marked as TLS is a silent downgrade, which is the one outcome worth an error.
    */
@@ -155,8 +155,8 @@ export class Runner {
         // separator are both commas: `Connect(LUA,LUB@host)` arrives here as two
         // arguments, and without the check we would connect to the host `LUA` on port
         // 23 -- a silently wrong target. The quoted form `Connect("LUA,LUB@host")` is
-        // what carries an LU list, and splitArgs already honours the quotes. Both
-        // behaviours measured against real s3270 4.5ga6, not inferred.
+        // what carries an LU list, and splitArgs already honors the quotes. Both
+        // behaviors measured against real s3270 4.5ga6, not inferred.
         if (args.length !== 1) throw new Error('Connect() requires 1 argument');
         const target = args[0]!;
         // The full `[prefix:][LU,LU@]host[:port]` shape, by the same rules the TUI
@@ -169,7 +169,7 @@ export class Runner {
             + '-insecure. Connecting in the clear would be a silent downgrade.',
           );
         }
-        // `N:` is HONOURED here, where `L:` above is refused, and the difference is
+        // `N:` is HONORED here, where `L:` above is refused, and the difference is
         // whether it can be: TLS is decided when the socket is made, so a session built
         // by `-insecure` cannot become a TLS one and connecting anyway would be a silent
         // downgrade. TN3270E is negotiated per connection, so the more specific per-host
@@ -273,7 +273,7 @@ export class Runner {
       // and FieldMark take `0, 1` (:2769, :2807) where the one optional argument is the
       // keyword FailOnError or NoFailOnError; anything else is refused by `action_args_are`
       // (:2776, :2814), so `Dup(1)` errors there exactly as it does here. We reject the two
-      // keywords as well rather than accept and ignore them, because our behaviour already IS
+      // keywords as well rather than accept and ignore them, because our behavior already IS
       // the one they choose between: `oerr_fail = !IA_IS_KEY(ia)` (:2766) is TRUE for anything
       // that did not come from a key press, i.e. for every scripted call, so failing on an
       // operator error is s3270's own default for this client. Accepting NoFailOnError while
@@ -561,7 +561,7 @@ export class Runner {
 
   private requireFiles(): TransferFiles {
     if (this.files === undefined) {
-      // The same division of labour as Replay(): this file imports no `node:fs`,
+      // The same division of labor as Replay(): this file imports no `node:fs`,
       // so main.ts injects the real implementation and a test injects an
       // in-memory one.
       throw new Error('Transfer() requires the file system; construct the Runner with a `files` option');

@@ -145,7 +145,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i]!;
-    // The host-side TLS flags belong to frontend; it consumes what it recognises and
+    // The host-side TLS flags belong to frontend; it consumes what it recognizes and
     // reports, via `eaten`, how many EXTRA argv entries (beyond the flag itself) it ate --
     // 0 for a bare flag like `-insecure`, 1 for one that takes a value like `-cafile FILE`.
     // `undefined` means "not one of mine", so the switch below still gets a turn.
@@ -222,7 +222,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   const resolved = resolveHostSpec(rest[0]!, (m) => new UsageError(m));
 
   /**
-   * WHAT THIS GATEWAY CANNOT HONOUR IN A HOST ARGUMENT, REFUSED BY NAME.
+   * WHAT THIS GATEWAY CANNOT HONOR IN A HOST ARGUMENT, REFUSED BY NAME.
    *
    * `resolveHostSpec` parses the full `[prefix:][LU,LU@]host[:port]` shape, and this file used only
    * `host` and `port` from it — so an LU list and `N:` were accepted and SILENTLY IGNORED. Measured:
@@ -232,7 +232,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
    * changes what goes on the wire but is not implemented is refused by name rather than ignored.
    *
    * Both are per-CONNECTION properties, and this gateway opens one connection per session from a
-   * single command line, so honouring them would mean deciding what an LU list even means across
+   * single command line, so honoring them would mean deciding what an LU list even means across
    * sixteen concurrent sessions. Refusing is honest until that question has an answer.
    *
    * `L:` is NOT refused: it asks for TLS to the host, which is already this client's default. It is

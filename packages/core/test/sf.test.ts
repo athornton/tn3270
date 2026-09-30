@@ -35,7 +35,7 @@ describe('structured field framing', () => {
     });
   });
 
-  it('keeps an unrecognised SFID as an opaque field rather than failing', () => {
+  it('keeps an unrecognized SFID as an opaque field rather than failing', () => {
     // A host may send anything; an unknown SF is a logged no-op, not an error.
     const fields = parseStructuredFields(Uint8Array.of(0x00, 0x05, 0x40, 0xaa, 0xbb));
     expect(fields).toEqual([

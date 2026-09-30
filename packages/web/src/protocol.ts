@@ -50,7 +50,7 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  *
  * ## UNKNOWN KINDS ARE HARMLESS; KNOWN KINDS WITH OUT-OF-RANGE FIELDS ARE NOT
  *
- * This deliberately does not enumerate `Action` variants: an unrecognised `kind` falls through
+ * This deliberately does not enumerate `Action` variants: an unrecognized `kind` falls through
  * `applyAction`'s `switch` as a no-op, so a merely NEW action name needs no change here. But a
  * KNOWN kind carrying a bogus field is a different animal, and `pf`/`pa` are the case in point --
  * see below.

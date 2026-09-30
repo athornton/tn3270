@@ -381,7 +381,7 @@ describe('record framing', () => {
     // Sized exactly, like the plain-filler test above, so abandonment lands on
     // the chunk boundary with no pair left over: a leftover pair would be re-read
     // in St.Data as escaped data and prepended to the next record — correct
-    // behaviour, but it would mask what this asserts. MAX_SUBNEG_BYTES pairs, not
+    // behavior, but it would mask what this asserts. MAX_SUBNEG_BYTES pairs, not
     // one more, because the option byte 99 already occupies the first slot.
     const { layer, records } = in3270();
     layer.receive(Uint8Array.of(T.IAC, T.SB, 99));
@@ -727,7 +727,7 @@ describe('TN3270E telnet option (40)', () => {
     //
     // x3270 CARRIES THIS AS A NAMED SPECIAL CASE, verbatim: "Ugly hack for hosts that
     // send WONT TN3270E instead of DONT TN3270E" (Common/telnet.c:1879-1889). So the
-    // behaviour is not our invention and the hosts that need it are real.
+    // behavior is not our invention and the hosts that need it are real.
     //
     // THE REPLY IS `WONT`, NOT `DONT`, and that is the whole point of the special case:
     // `DONT` would be answering about what the HOST does, and this option is ours. The
@@ -902,7 +902,7 @@ describe('NEW-ENVIRON telnet option (39)', () => {
   });
 
   it('ITERATES the device name across successive requests', () => {
-    // The behaviour the whole template mechanism exists for, driven through real bytes
+    // The behavior the whole template mechanism exists for, driven through real bytes
     // rather than by calling DeviceName directly -- the delivery is what could break.
     const { layer, sent } = envHarness({ devname: 'foo===' });
     layer.receive(Uint8Array.of(T.IAC, T.DO, O.NEW_ENVIRON));

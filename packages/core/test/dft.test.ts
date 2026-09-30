@@ -130,7 +130,7 @@ describe('DftTransfer, download (receive)', () => {
     // the file's numbering.
     //
     // THIS TEST EXISTS BECAUSE DELETING THE RESET LEFT ALL 26 TESTS GREEN. The
-    // download sequence has a second Open, so the behaviour is observable; nothing
+    // download sequence has a second Open, so the behavior is observable; nothing
     // was asserting the number on that final ack. An unfalsified line is not a
     // pinned one.
     const t = new DftTransfer({ direction: 'receive' });
@@ -184,7 +184,7 @@ describe('DftTransfer, download (receive)', () => {
   });
 
   it('reads the declared length from offset 5, not from anywhere else', () => {
-    // Distinct non-zero bytes at the neighbouring candidate offsets, so a wrong
+    // Distinct non-zero bytes at the neighboring candidate offsets, so a wrong
     // offset reads a REAL value rather than running off the end and coercing to 0 --
     // the same strengthening Task 3's review asked for on parseDftFrame. The
     // compress indicator (0xc080) sits at 2-3 and begin-data (0x61) at 4, so an
@@ -482,7 +482,7 @@ describe('DftTransfer, upload (send)', () => {
     expect([...eof.reply!].slice(8, 10)).toEqual([0x22, 0x00]);  // TR_ERR_EOF
   });
 
-  it('honours the buffer size, reserving 27 bytes as x3270 does', () => {
+  it('honors the buffer size, reserving 27 bytes as x3270 does', () => {
     // ft_dft.c:583 `numbytes = ftc->dft_buffersize - 27`.
     const data = new Uint8Array(500).fill(0x01);
     const t = new DftTransfer({ direction: 'send', data, bufferSize: 300 });

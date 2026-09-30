@@ -8,7 +8,7 @@ import { Color } from './palette.js';
  * advertising something later is one list entry and the Summary unit cannot
  * disagree with what is actually sent.
  *
- * Every unit here is one we honour, which is the rule that decides what goes in.
+ * Every unit here is one we honor, which is the rule that decides what goes in.
  * Stage 2a shipped the minimal honest set — Summary, Usable Area, Implicit
  * Partition — and deliberately withheld Color and Highlighting because they
  * invite the SA orders it did not implement. Now that SA and the four-level
@@ -170,7 +170,7 @@ const sdp = (id: number, params: number[]): number[] => [2 + params.length, id, 
  * (QCODE List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) Note that
  * covers QCODE List, so a list naming only 0x81 still gets Summary. buildReply
  * enforces this; see the note there, which is also where x3270's narrower
- * behaviour is recorded.
+ * behavior is recorded.
  */
 const summary: Capability = {
   qcode: Qcode.SUMMARY,
@@ -200,7 +200,7 @@ const summary: Capability = {
  * The fixed values are x3270's (Common/sf.c:711-732, do_qr_usable_area), which
  * this host accepted.
  * They are dimensional constants of the device, not capability claims, so
- * copying them advertises nothing we do not honour. Each is checked against the
+ * copying them advertises nothing we do not honor. Each is checked against the
  * manual's byte table below.
  */
 const usableArea: Capability = {
@@ -212,7 +212,7 @@ const usableArea: Capability = {
     // FLAGS byte 4. Bits 4-7 are ADDR; X'1' = "12/14-bit addressing allowed"
     // (pages.txt:11601). PP, HC and the reserved bits are all zero: we are a
     // display, not a page printer and not a hard copy device. This is a real
-    // claim and we honour it — address.ts decodeAddress handles both the 14-bit
+    // claim and we honor it — address.ts decodeAddress handles both the 14-bit
     // binary and 12-bit coded forms and rejects the reserved 10 flag.
     0x01,
     // FLAGS byte 5. VCP=0 (variable cells not supported — which is why no
@@ -228,15 +228,15 @@ const usableArea: Capability = {
     ...u16(alt(geometry).rows), // 8-9  H: height of usable area, in cells
     // 10 UNITS. The manual's values are "X'OO' Inches" / "X'01' Millimeters"
     // (pages.txt:11619-11620; the O in X'OO' is OCR of a zero). So 0x01 does
-    // mean millimetres, matching x3270's own comment "units (mm)" (sf.c:720).
+    // mean millimeters, matching x3270's own comment "units (mm)" (sf.c:720).
     //
     // KNOWN INCONSISTENCY, inherited deliberately from x3270 and NOT a typo
-    // here. This byte says millimetres, but the Xr/Yr fractions below are
+    // here. This byte says millimeters, but the Xr/Yr fractions below are
     // inch-scaled, so the pair does not describe a physical device. Worked out:
     // Xr = 10/741 is 1/74.1, i.e. 74.1 pel centers per unit; at 9 pels per cell
     // and 80 cells that is 9.7 units across. Read as INCHES the screen is
     // 9.7 x 5.2 in, an 11-inch diagonal, which is a real 3279-2. Read as
-    // MILLIMETRES it is 9.7 x 5.2 mm, which is absurd. The manual's own worked
+    // MILLIMETERS it is 9.7 x 5.2 mm, which is absurd. The manual's own worked
     // example settles the scale: "UNITS X'OO' / Xr X' 00020091 ' (2/145 inch)"
     // for a device with "72.5 pels/inch horizontally" (pages.txt:11762-11765),
     // and 2/145 is exactly 1/72.5 — the same inches-per-pel form as 10/741.
@@ -260,7 +260,7 @@ const usableArea: Capability = {
     0x00, 0x02, 0x00, 0x6f,
     // 19 AW: "Number of X units in default cell" (pages.txt:11632). "X units"
     // are the pel pitches defined by Xr, so this is 9 pels of cell width — NOT
-    // a count of millimetres or inches. x3270's SW_3279_2 = 0x09 (sf.c:54).
+    // a count of millimeters or inches. x3270's SW_3279_2 = 0x09 (sf.c:54).
     0x09,
     // 20 AH: "Number of Y units in default cell" (pages.txt:11633), so 12 pels
     // of cell height. 9x12 is the standard 3279 cell. SH_3279_2 = 0x0c (sf.c:55).
@@ -297,7 +297,7 @@ const usableArea: Capability = {
  * NOTE we differ from x3270 in DERIVATION, not in bytes: x3270 hardcodes the
  * default as literal 80 and 24 (sf.c:919-920) and uses maxCOLS/maxROWS for the
  * alternate. Its two alternate comments are also swapped — sf.c:921 writes
- * maxCOLS labelled "alternate height", sf.c:922 writes maxROWS labelled
+ * maxCOLS labeled "alternate height", sf.c:922 writes maxROWS labeled
  * "alternate width" — so do not read those labels as authority for the field
  * order; the manual's WA-then-HA table is. We drive all four from the geometry,
  * which equals x3270's output at 24x80 and stays self-consistent off it.
@@ -405,7 +405,7 @@ const color: Capability = {
  *    (pages.txt:10329-10331) — true but circular. x3270 answers XAH_NORMAL
  *    (sf.c:774-775) and so do we.
  *
- * The other four are identities, and each is a claim render.ts honours: it sets
+ * The other four are identities, and each is a claim render.ts honors: it sets
  * exactly one of blink/reverse/underscore/intensify by equality against these
  * values. Exclusivity is the architecture's, not ours: "This structured field
  * indicates that the device supports highlighting on an exclusive basis. That
@@ -654,7 +654,7 @@ export function buildNullQueryReply(geometry: ScreenGeometry): Uint8Array {
  * unconditional: "The Summary Query Reply must always be sent inbound in reply
  * to a Read Partition / structured field specifying Query, or Query List (QCODE
  * List=X'80', / Equivalent, or All)." (pages.txt:11409-11411.) x3270 does NOT
- * honour that for a QCODE List — its filter is a plain membership test,
+ * honor that for a QCODE List — its filter is a plain membership test,
  * sf.c:268-272:
  *
  *     for (i = 0; i < NSR; i++) {
