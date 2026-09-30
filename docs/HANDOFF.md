@@ -14,9 +14,16 @@ plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui
 **NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
 re-asking.
 
-**State: `main` at `42d3733`. Everything from 2026-09-30 is on branch
-`gui-transfer-ui-and-tui-fixes`, PUSHED and in sync, tree clean, no stashes. 2156 tests in 82 files,
-build and typecheck clean.**
+**State: `main` at `cee46bb`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+stashes. 2156 tests in 82 files, build and typecheck clean.** `gui-transfer-ui-and-tui-fixes` was
+merged `--no-ff` (7 commits) and deleted local and remote, the precedent the last six features set.
+**The merge base was checked before merging and equalled `main` exactly**, so all 7 commits were this
+session's own — see [[branch-from-the-target-not-the-desk]] for why that is checked every time.
+
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch:** build and typecheck
+clean, 2156 tests in 82 files, `shot.mjs` 3/3, `keys.mjs` 18 chords/16 actions, `clicks.mjs` 9
+buttons/10 actions, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13 chords/11 actions,
+`drive-playback.py` 10/10, `pty-smoke.py` 12 PASS / 0 FAIL exit 0.
 
 **BUDGET — READ BEFORE SIZING ANYTHING.** 2026-09-30 ended at about **$1901 of the $2000 monthly
 total**, so the last day of the period was deliberately spent on a spec, a plan and two small fixes
