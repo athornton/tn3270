@@ -1977,7 +1977,7 @@ comment above it:
     // would move bytes between the host and the GATEWAY's filesystem, not the operator's.
     //
     // The user's decision (2026-09-30) is that the browser must get REAL browser file I/O --
-    // the bytes travelling over the WebSocket so that "local file" means the operator's machine.
+    // the bytes traveling over the WebSocket so that "local file" means the operator's machine.
     // That needs a new protocol message pair, chunking, and a `TransferFiles` implemented over
     // the socket, and it is its own spec. Until then this stays a rejection rather than an
     // interception, because `applyAction` throws on the kind and an unhandled throw here ends

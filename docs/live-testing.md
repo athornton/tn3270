@@ -2055,7 +2055,7 @@ well-formed `DEVICE-TYPE REQUEST` either way.
   bullet or anything citing it; it is kept struck only so the reasoning is not repeated.
 - ~~Two candidate explanations, **both untested**: **(a)** the host may require a `CONNECT`
   clause naming an LU; **(b)** the option may be advertised but not functional.~~ **RESOLVED
-  IN FAVOUR OF (b), 2026-09-17.** Hypothesis (a) is **dead**: s3270 sent `IBM-3278-2-E
+  IN FAVOR OF (b), 2026-09-17.** Hypothesis (a) is **dead**: s3270 sent `IBM-3278-2-E
   CONNECT VTAM` and was refused identically. Details in *The verdict*.
 - **Questions 1, 2 and 3 remain unanswered**, because the negotiation never gets past
   DEVICE-TYPE — **and this host can never answer them.** It abandons first, so no

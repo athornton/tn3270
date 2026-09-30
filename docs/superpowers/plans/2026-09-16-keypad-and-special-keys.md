@@ -2364,7 +2364,7 @@ Co-Authored-By: SLAC AI"
 ### Task 13: `TN3270_GUI_CLICKS` — real mouse events at real buttons
 
 > **AS BUILT (`24c36ae`, with `a95dbd2` and `044f9e8` narrowing the task first). THREE PLACES THE PLAN
-> AND THE SOURCE DISAGREED, ALL RESOLVED IN THE SOURCE'S FAVOUR.**
+> AND THE SOURCE DISAGREED, ALL RESOLVED IN THE SOURCE'S FAVOR.**
 >
 > 1. **THE SEAM DOES NOT IMPLY THE KEYPAD, AND CANNOT.** Step 1's comment said it turns the keypad on;
 >    two on-switches would toggle it back **off**. `clicks.mjs` shows it with a real `Ctrl+K` instead —

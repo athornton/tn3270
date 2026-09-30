@@ -2657,7 +2657,7 @@ exit 0. Commit `09c2bea`. **16 engine tests + 9 app tests, not 8 + 1.**
    typecheck on the `ok: true` arm — caught by `npm run typecheck` with all 14 tests green.
 6. **`CUT_SCREEN_SIZE` IS already re-exported** from core's index via `export * from './ft/frames.js'`
    — the plan's "check it is, add it if not" needs no action.
-7. **TWO DEFENCE-IN-DEPTH PAIRS, found by mutation and now documented in the tests that cover
+7. **TWO DEFENSE-IN-DEPTH PAIRS, found by mutation and now documented in the tests that cover
    them**, because each guard alone keeps the suite green: (a) `ended` and `clearTimers()` in
    `finish` — with both gone `onDone` fires THREE times and the last overwrites "canceled" with
    "timed out"; (b) `app.ts` clearing `transferRun` in `onDone` and `CutTransfer.cancel`'s own

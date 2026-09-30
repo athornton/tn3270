@@ -153,7 +153,7 @@ Two further rules from the same pages, both of which the naive implementation ge
 - **The composite rule** (`:2995-2997`): "The set of type-value pairs applied during
   character processing is a composite, by attribute type, of the last value specified in
   previously encountered SA orders." So SA state is a **per-type map**, not a single
-  value — an SA setting color does not clear a previously set highlighting. Modelling it
+  value — an SA setting color does not clear a previously set highlighting. Modeling it
   as one value would silently drop attributes.
 - **A plain SF resets extended attributes** (p. 4-4, `:2874-2875`): "If the display
   receives an SF order, it sets the associated extended field attribute to its default

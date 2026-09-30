@@ -336,7 +336,7 @@ independently and the HOD matrix has no Box row at all — three sources. See th
 - **It claims no live-host verification of graphics.** The README's "tested and verified against" list
   is JDK distributions (Temurin, Semeru), not hosts or terminals. So it is **not** the live witness
   this feature lacks — it is another paper implementation, albeit a much more specific one.
-- **Its structured-field constants are organised differently** (`SF_OBJCNTL = 0x24`, `SF_OBJDATA =
+- **Its structured-field constants are organized differently** (`SF_OBJCNTL = 0x24`, `SF_OBJDATA =
   0x85`, `SF_3270_G = 0x20`, alongside sub-IDs `0x0F`/`0x10`/`0x11` under SF `0x0F`). **Our
   `0x0F0F`/`0x0F10`/`0x0F11` come straight from GA23-0059-07 and are not in doubt**; understanding
   its numbering is a task for whoever implements, not a correction to ours.
@@ -414,7 +414,7 @@ Blueglass puts **Partial Arc at `A3`/`E3`** in its "AFP-era additions, absent fr
 bucket, and *separately* lists **three-point Arc at `C6`/`86`** with a full operand layout. j3270
 calls `86`/`C6` **Partial Arc**.
 
-**A HYPOTHESIS THIS FILE DID NOT HAVE: j3270 may be labelling three-point Arc as Partial Arc.** That
+**A HYPOTHESIS THIS FILE DID NOT HAVE: j3270 may be labeling three-point Arc as Partial Arc.** That
 would make both transcriptions right about the bytes and wrong only about the name, which is a much
 cheaper problem than two devices disagreeing about an opcode. **Not confirmed — do not act on it**,
 and the standing instruction stands: do not "fix" either source to match the other. But if arcs

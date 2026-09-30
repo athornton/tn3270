@@ -772,7 +772,7 @@ describe('SA sets character attributes on subsequent characters', () => {
   });
 
   it('is a COMPOSITE by type: setting color leaves highlighting alone', () => {
-    // pages.txt:2995-2997. Modelling SA state as a single value instead of a
+    // pages.txt:2995-2997. Modeling SA state as a single value instead of a
     // per-type map silently drops attributes, and this is the test that catches it.
     const s = run([
       ...W, ...SBA0,

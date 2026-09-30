@@ -522,7 +522,7 @@ success and writes a wrong file is the failure mode to look for.
 2. **A mutation helper MUST ASSERT ITS TARGET WAS FOUND.** Two "passes" in one sweep were silent
    no-matches, i.e. a false "this code is not load-bearing" — the most misleading result a mutation
    check can give.
-3. **DEFENCE-IN-DEPTH PAIRS ARE INVISIBLE TO SINGLE MUTATION.** Two here: `ended`/`clearTimers()` in
+3. **DEFENSE-IN-DEPTH PAIRS ARE INVISIBLE TO SINGLE MUTATION.** Two here: `ended`/`clearTimers()` in
    `transferRun`'s `finish` (with both gone `onDone` fires three times and the last overwrites
    "canceled" with "timed out"), and `app.ts` clearing `transferRun` vs `CutTransfer.cancel`'s own
    idempotence (deleting the app's half keeps the whole TUI suite green; removing both reddens

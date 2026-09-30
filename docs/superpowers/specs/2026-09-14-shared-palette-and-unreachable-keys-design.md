@@ -191,7 +191,7 @@ A flag value is a claim users quote back.
 
 x3270 solves this with **named schemes** rather than an authenticity switch: `default`,
 `old-default`, `reverse`, `bright`, `cpe`, `GreenScreen` (`x3270/fb-x3270:49-99`), with its
-menu labelling the standard one "Default 3279" (`schemeList:104`). It also keeps `old-default`,
+menu labeling the standard one "Default 3279" (`schemeList:104`). It also keeps `old-default`,
 which is precedent for our exact situation — change the look, keep the previous one named.
 
 **And the genuinely authentic option is not a color palette at all**: a 3278 is a monochrome

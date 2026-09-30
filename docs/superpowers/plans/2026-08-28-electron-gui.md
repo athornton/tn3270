@@ -492,7 +492,7 @@ Expected: FAIL, cannot resolve `../src/bdf.js`.
  * scale have no hinting and no subpixel antialiasing to vary between machines, which is
  * what lets screenshot goldens be trusted.
  *
- * EVERY GLYPH IS NORMALISED TO THE FONT BOUNDING BOX, padded from its own BBX offsets.
+ * EVERY GLYPH IS NORMALIZED TO THE FONT BOUNDING BOX, padded from its own BBX offsets.
  * The atlas is then a plain grid and the blitter needs no per-glyph metrics. A BDF glyph
  * may be smaller than the box and offset within it; ignoring that shifts characters by a
  * pixel or two, which reads as a subtly wrong font rather than as a bug.
