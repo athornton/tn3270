@@ -366,8 +366,8 @@ export class Runner {
           oia: s.oia.toText(),
           fields: snap.fields,
           cells: snap.cells,
-          // Resolved colours alongside the raw cells, not instead of them: a
-          // conformance comparison needs the bytes, a human debugging colour
+          // Resolved colors alongside the raw cells, not instead of them: a
+          // conformance comparison needs the bytes, a human debugging color
           // needs the resolution, and dropping either would make one of those
           // impossible.
           resolved: resolve(snap),

@@ -1,5 +1,5 @@
 /**
- * Colour depth detection and quantisation of the 3279 palette to ANSI.
+ * Color depth detection and quantisation of the 3279 palette to ANSI.
  *
  * ## DETECTION USES `tput`, NOT NODE'S BUILTIN, AND THAT IS A MEASURED CHOICE
  *
@@ -7,9 +7,9 @@
  * is wrong in exactly the cases this feature exists to detect. Measured on the
  * development box, Node v26.7.0.
  *
- * `getColorDepth` returns BITS of depth, not a colour count — documented as 1, 4,
+ * `getColorDepth` returns BITS of depth, not a color count — documented as 1, 4,
  * 8 or 24, and confirmed here at both ends (`TERM=dumb` gives 1, and
- * `COLORTERM=truecolor` gives 24). So its `4` below means sixteen colours. The
+ * `COLORTERM=truecolor` gives 24). So its `4` below means sixteen colors. The
  * raw return is shown first, with the count it implies in brackets:
  *
  *   terminal            tput        getColorDepth      truth
@@ -20,20 +20,20 @@
  *   vt100               -1          4  [16]   <-- wrong  none
  *
  * `tput` is right on all five; `getColorDepth` is right on one. So anything under
- * GNU screen would lose colour, a direct-colour terminal would be capped at 16,
- * and a vt100 would be sent colour it cannot show. The `terminfo` npm package does
+ * GNU screen would lose color, a direct-color terminal would be capped at 16,
+ * and a vt100 would be sent color it cannot show. The `terminfo` npm package does
  * parse the real binary database, but it is v0.1.1, last published 2016, one
  * maintainer -- not a dependency worth taking against a project policy of no deps
  * beyond node:net and node:tls. `tput` is POSIX and ships with the database it
  * reads.
  *
  * Detection is a DEFAULT, not a verdict: terminfo entries are sometimes
- * conservative, and the monochrome path has to be testable on a colour terminal.
+ * conservative, and the monochrome path has to be testable on a color terminal.
  * Hence the override.
  */
 
 import { execFileSync } from 'node:child_process';
-import { type Colour3279 } from '@tn3270/core';
+import { type Color3279 } from '@tn3270/core';
 import { type Scheme } from '@tn3270/frontend';
 
 /**
@@ -49,7 +49,7 @@ import { type Scheme } from '@tn3270/frontend';
  * terminfo depth detection, the 6x6x6 cube, and the SGR strings themselves.
  */
 
-/** Colours the terminal can show. 0 means monochrome. */
+/** Colors the terminal can show. 0 means monochrome. */
 export type Depth = 0 | 8 | 16 | 256 | 16777216;
 
 export interface DetectOptions {
@@ -121,11 +121,11 @@ function cube256(r: number, g: number, b: number): number {
 }
 
 /**
- * The SGR parameter string for one colour, e.g. `38;5;46`. Empty when monochrome.
+ * The SGR parameter string for one color, e.g. `38;5;46`. Empty when monochrome.
  * The caller wraps it in `\x1b[...m`.
  */
 export function sgrFor(
-  code: Colour3279, depth: Depth, which: 'fg' | 'bg', scheme: Scheme,
+  code: Color3279, depth: Depth, which: 'fg' | 'bg', scheme: Scheme,
 ): string {
   if (depth === 0) return '';
   const rgb = scheme.rgb[code];

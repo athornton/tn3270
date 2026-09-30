@@ -1,4 +1,4 @@
-import { cp037, Colour } from '@tn3270/core';
+import { cp037, Color } from '@tn3270/core';
 import { KEYPAD_KEYS, KEYPAD_KEY_WIDTH, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
 // FROM `geometry.js`, NOT `drawlist.js`, and that is the point: `drawlist.js` imports THIS module
@@ -111,7 +111,7 @@ const KEYPAD_BLOCK_WIDTH = KEYPAD_KEY_WIDTH - 1;
  * row the host wrote.
  */
 export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): KeypadRegion {
-  // Our chrome, not one of the host's cells, so no byte in the data stream says what colour it is
+  // Our chrome, not one of the host's cells, so no byte in the data stream says what color it is
   // -- the same argument and the same pair `oiaCells` uses in `drawlist.ts`.
   //
   // INVERSE VIDEO: that pair EXCHANGED, black ink on white paper, which is what makes a key read as
@@ -124,8 +124,8 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
   // before. There is no separate reverse flag to set. `intensify` is not read by the blitter at all;
   // `underline` and `cursor` are, and both paint `cell.fg`, which would now be a BLACK bar across
   // the bottom of a white key -- so all four stay false, as they already were, and the test says so.
-  const ink = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
-  const paper = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
+  const ink = schemeRgb(scheme, Color.NEUTRAL_BLACK);
+  const paper = schemeRgb(scheme, Color.NEUTRAL_WHITE);
   const cells: DrawCell[] = [];
   const buttons: KeypadButton[] = [];
 
@@ -159,9 +159,9 @@ export function keypadRegion(atlas: AtlasGeometry, scheme: Scheme, y: number): K
     //
     // CENTRED, not left-aligned -- the one place this departs from the mockup the user approved, and
     // it is a departure the mockup could not show: it left short labels flush left because there was
-    // no block for them to be centred IN until the padding above existed. Five is an ODD width, so
+    // no block for them to be centerd IN until the padding above existed. Five is an ODD width, so
     // every odd-length label -- including all four arrows and `PA1`/`Ins`/`Dup`/`Tab`/`Del` -- is now
-    // EXACTLY centred, which is the case that reads worst when it is not. Only the 4-character labels
+    // EXACTLY centerd, which is the case that reads worst when it is not. Only the 4-character labels
     // (`PF13`..`PF24`, `Home`, `Attn`, `BkSp`) lean half a cell left, and `Math.floor` is what decides
     // that.
     //

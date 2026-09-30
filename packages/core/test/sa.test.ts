@@ -3,7 +3,7 @@ import { Screen } from '../src/screen.js';
 import { parseRecord } from '../src/stream/parse.js';
 import { execute } from '../src/stream/execute.js';
 import { XA, XAH } from '../src/constants.js';
-import { Colour } from '../src/palette.js';
+import { Color } from '../src/palette.js';
 
 /** Build and run a write record, returning the screen it produced. */
 function run(bytes: number[], screen = new Screen()): Screen {
@@ -22,60 +22,60 @@ describe('SA sets character attributes on subsequent characters', () => {
     const s = run([
       ...W, ...SBA0,
       0xc1,                                    // 'A' before any SA
-      0x28, XA.FOREGROUND, Colour.RED,         // SA fg=red
+      0x28, XA.FOREGROUND, Color.RED,         // SA fg=red
       0xc2,                                    // 'B' after
     ]);
     expect(s.cellAt(0).fg).toBeUndefined();
-    expect(s.cellAt(1).fg).toBe(Colour.RED);
+    expect(s.cellAt(1).fg).toBe(Color.RED);
   });
 
   it('persists across many characters until changed', () => {
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2, 0xc3,
-      0x28, XA.FOREGROUND, Colour.BLUE,
+      0x28, XA.FOREGROUND, Color.BLUE,
       0xc4,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
-    expect(s.cellAt(1).fg).toBe(Colour.RED);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
-    expect(s.cellAt(3).fg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
+    expect(s.cellAt(1).fg).toBe(Color.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
+    expect(s.cellAt(3).fg).toBe(Color.BLUE);
   });
 
-  it('is a COMPOSITE by type: setting colour leaves highlighting alone', () => {
+  it('is a COMPOSITE by type: setting color leaves highlighting alone', () => {
     // pages.txt:2995-2996. Modelling SA state as a single value instead of a
     // per-type map silently drops attributes, and this is the test that catches it.
     const s = run([
       ...W, ...SBA0,
       0x28, XA.HIGHLIGHTING, XAH.REVERSE,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,
     ]);
     expect(s.cellAt(0).gr).toBe(XAH.REVERSE);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
   });
 
   it('handles background as well as foreground', () => {
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.BACKGROUND, Colour.BLUE,
+      0x28, XA.BACKGROUND, Color.BLUE,
       0xc1,
     ]);
-    expect(s.cellAt(0).bg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).bg).toBe(Color.BLUE);
   });
 
   it('SA type 0x00 resets ALL character attributes to default', () => {
     // The twelve occurrences in the TK5 fixture are this case.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0x28, XA.HIGHLIGHTING, XAH.BLINK,
       0xc1,
       0x28, XA.RESET, 0x00,
       0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     expect(s.cellAt(0).gr).toBe(XAH.BLINK);
     expect(s.cellAt(1).fg).toBeUndefined();
     expect(s.cellAt(1).gr).toBeUndefined();
@@ -87,15 +87,15 @@ describe('SA sets character attributes on subsequent characters', () => {
     // screen. x3270 zeroes fg, bg AND gr for XA_ALL (ctlr.c:1916-1920).
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.BACKGROUND, Colour.BLUE,
+      0x28, XA.BACKGROUND, Color.BLUE,
       0x28, XA.RESET, 0x00,
       0xc1,
     ]);
     expect(s.cellAt(0).bg).toBeUndefined();
   });
 
-  it('a colour VALUE of 0x00 does not reset the other types, unlike a TYPE of 0x00', () => {
-    // XAC_DEFAULT means "device default colour" and is a legitimate value the
+  it('a color VALUE of 0x00 does not reset the other types, unlike a TYPE of 0x00', () => {
+    // XAC_DEFAULT means "device default color" and is a legitimate value the
     // host can set; SA type 0x00 means "reset everything". Both are 0x00 and
     // they are NOT the same operation.
     //
@@ -103,7 +103,7 @@ describe('SA sets character attributes on subsequent characters', () => {
     // itself 0x00, which is Screen's "unspecified" sentinel, so cellAt(0).fg is
     // undefined here. That is deliberate, not a gap -- screen.ts:113-116 argues
     // XAC_DEFAULT should fall through to the base field attribute rather than be
-    // stored as a colour, which is exactly what an unspecified fg does. What this
+    // stored as a color, which is exactly what an unspecified fg does. What this
     // test pins is that setting it did not clear the BLINK beside it.
     const s = run([
       ...W, ...SBA0,
@@ -118,9 +118,9 @@ describe('SA sets character attributes on subsequent characters', () => {
     // "Another write type command is sent" (pages.txt:2978). x3270 zeroes
     // default_fg/bg/gr at the top of write processing, ctlr.c:1414-1416.
     const s = new Screen();
-    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc1], s);
+    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc1], s);
     run([...W, 0x11, 0x40, 0x41, 0xc2], s);   // second Write, SBA to 1
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     expect(s.cellAt(1).fg).toBeUndefined();
   });
 
@@ -139,20 +139,20 @@ describe('SA sets character attributes on subsequent characters', () => {
     // Screen.setExtended MERGES, so the executor must clear before stamping. An
     // applySa that returns early when the SA state is empty leaves the red here.
     const s = new Screen();
-    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc1], s);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc1], s);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     run([...W, ...SBA0, 0xc2], s);   // same address, no SA in effect
     expect(s.cellAt(0).fg).toBeUndefined();
   });
 
   it('an overwrite drops a stale attribute of a type the new SA does not mention', () => {
     // The per-type version of the rule above: highlighting set in one record
-    // must not survive a record that sets only colour at the same address.
+    // must not survive a record that sets only color at the same address.
     const s = new Screen();
     run([...W, ...SBA0, 0x28, XA.HIGHLIGHTING, XAH.BLINK, 0xc1], s);
     expect(s.cellAt(0).gr).toBe(XAH.BLINK);
-    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc2], s);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    run([...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc2], s);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
     expect(s.cellAt(0).gr).toBeUndefined();
   });
 
@@ -165,7 +165,7 @@ describe('SA sets character attributes on subsequent characters', () => {
     // is not among them, and SA applies to "subsequently interpreted characters in
     // the data stream" (:2969-2971) -- an SF does not stop them being subsequent.
     //
-    // x3270's ORDER_SF zeroes the FA cell's colour (ctlr.c:1486-1487) and never
+    // x3270's ORDER_SF zeroes the FA cell's color (ctlr.c:1486-1487) and never
     // touches default_fg/bg/gr, whose only assignments are write-command reset
     // (:1414-1416) and the SA order (:1905, :1917).
     //
@@ -175,14 +175,14 @@ describe('SA sets character attributes on subsequent characters', () => {
     // this test exists.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,               // char at 0, red
       0x1d, 0xc0,         // plain SF at 1
       0xc2,               // char at 2 -- still red, the SA is still in force
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
-    // But the SF's own cell takes no colour: that IS the field-level rule.
+    expect(s.cellAt(0).fg).toBe(Color.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
+    // But the SF's own cell takes no color: that IS the field-level rule.
     expect(s.cellAt(1).fg).toBeUndefined();
   });
 
@@ -191,13 +191,13 @@ describe('SA sets character attributes on subsequent characters', () => {
     // neither seed the running state nor clear it.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,
       0x29, 0x01, 0xc0, 0xc0,   // plain SFE at 1
       0xc2,                     // char at 2 -- still red
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
     expect(s.cellAt(1).fg).toBeUndefined();
   });
 
@@ -206,11 +206,11 @@ describe('SA sets character attributes on subsequent characters', () => {
     // must carry the running attributes like any other.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.PINK,
+      0x28, XA.FOREGROUND, Color.PINK,
       0x3c, 0x40, 0x43, 0xc1,     // RA to address 3, fill 'A'
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.PINK);
-    expect(s.cellAt(2).fg).toBe(Colour.PINK);
+    expect(s.cellAt(0).fg).toBe(Color.PINK);
+    expect(s.cellAt(2).fg).toBe(Color.PINK);
   });
 
   it('applies SA state to a graphic-escaped character', () => {
@@ -218,10 +218,10 @@ describe('SA sets character attributes on subsequent characters', () => {
     // text (ctlr.c:1739-1741).
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.TURQUOISE,
+      0x28, XA.FOREGROUND, Color.TURQUOISE,
       0x08, 0xc1,                 // GE 'A'
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.TURQUOISE);
+    expect(s.cellAt(0).fg).toBe(Color.TURQUOISE);
   });
 
   it('still counts genuinely unimplemented SA types as ignored', () => {
@@ -245,7 +245,7 @@ describe('SA sets character attributes on subsequent characters', () => {
 
   it('does NOT count the SA types it now implements', () => {
     const r = execute(new Screen(), parseRecord(Uint8Array.from([
-      ...W, ...SBA0, 0x28, XA.FOREGROUND, Colour.RED, 0xc1,
+      ...W, ...SBA0, 0x28, XA.FOREGROUND, Color.RED, 0xc1,
     ])));
     expect(r.setAttributeIgnored).toBe(0);
   });
@@ -273,20 +273,20 @@ describe('SA sets character attributes on subsequent characters', () => {
       0xc1, 0xc2, 0x46, 0x99, 0xff,   // VALIDATION, OUTLINING, TRANSPARENCY, junk
     ];
     for (const type of types) {
-      // A first SA sets a known colour; the SA under test then either changes the
+      // A first SA sets a known color; the SA under test then either changes the
       // running state (applied) or does not (ignored). A non-zero, non-default
       // value so that "applied" is observable for every implemented type.
       const s = new Screen();
       const r = execute(s, parseRecord(Uint8Array.from([
         ...W, ...SBA0,
-        0x28, XA.FOREGROUND, Colour.RED,
-        0x28, type, Colour.BLUE,
+        0x28, XA.FOREGROUND, Color.RED,
+        0x28, type, Color.BLUE,
         0xc1,
       ])));
       const cell = s.cellAt(0);
       // "Applied" means the second SA changed something about the cell: it either
-      // reset the red, or set a colour/highlighting of its own.
-      const applied = cell.fg !== Colour.RED || cell.bg !== undefined
+      // reset the red, or set a color/highlighting of its own.
+      const applied = cell.fg !== Color.RED || cell.bg !== undefined
         || cell.gr !== undefined;
       const counted = r.setAttributeIgnored > 0;
       expect(applied, `type 0x${type.toString(16)}: applied`).toBe(!counted);
@@ -307,39 +307,39 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
   // of this file asserted the characters, because SFE used to seed the running SA
   // state as well. That seeding was a real bug -- see the leak test at the bottom --
   // and removing it is what moved these assertions. RESOLVING a character to its
-  // field's colour is Task 5's job in render.ts, via this stored fallback; storing
+  // field's color is Task 5's job in render.ts, via this stored fallback; storing
   // it correctly is this task's, and is all these tests can honestly check.
 
-  it('puts a colour pair on the field-attribute cell, not on the characters', () => {
+  it('puts a color pair on the field-attribute cell, not on the characters', () => {
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,  // SFE: basic + fg
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,  // SFE: basic + fg
       0xc1, 0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
     // The characters carry no attribute of their own; they inherit at render time.
     expect(s.cellAt(1).fg).toBeUndefined();
     expect(s.cellAt(2).fg).toBeUndefined();
   });
 
-  it('a plain SF after a coloured SFE does not inherit its colour', () => {
+  it('a plain SF after a colored SFE does not inherit its color', () => {
     // "If the display receives an SF order, it sets the associated extended field
     // attribute to its default value" (pages.txt:2869-2870), and Task 3's
     // setFieldAttribute change. Each field's own FA cell is checked, so this pins
     // that the second field starts clean rather than copying the first.
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
       0x1d, 0xc0,        // plain SF at 2
       0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
     expect(s.cellAt(2).fg).toBeUndefined();
   });
 
   it('a plain SF also drops a highlighting the previous SFE established', () => {
-    // The SF reset is by TYPE-set, not just colour: "it sets the associated
+    // The SF reset is by TYPE-set, not just color: "it sets the associated
     // extended field attribute to its default value" (pages.txt:2869-2870), and
     // highlighting is one of those attributes.
     const s = run([
@@ -353,17 +353,17 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     expect(s.cellAt(2).gr).toBeUndefined();
   });
 
-  it('a later plain SFE does not inherit an earlier SFE colour', () => {
-    // Same rule as SF: an SFE that specifies no colour leaves its own FA cell at
+  it('a later plain SFE does not inherit an earlier SFE color', () => {
+    // Same rule as SF: an SFE that specifies no color leaves its own FA cell at
     // default rather than taking the previous field's.
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
       0x29, 0x01, 0xc0, 0xc0,   // SFE at 2 with only the basic attribute
       0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
     expect(s.cellAt(2).fg).toBeUndefined();
   });
 
@@ -377,17 +377,17 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     // own (so it will inherit yellow); the character written after has red. That
     // the RENDERED result is yellow then red is Task 5's to prove via the fallback
     // -- this test deliberately stops at the storage boundary rather than
-    // pretending to check a colour nothing here resolves.
+    // pretending to check a color nothing here resolves.
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc2,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);   // field level
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);   // field level
     expect(s.cellAt(1).fg).toBeUndefined();       // inherits the field
-    expect(s.cellAt(2).fg).toBe(Colour.RED);      // overrides the field
+    expect(s.cellAt(2).fg).toBe(Color.RED);      // overrides the field
   });
 
   it('a repeated pair type resolves to the last one', () => {
@@ -396,10 +396,10 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     // a repeated attribute type takes effect" (p. 4-5, pages.txt:2899-2901).
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW, XA.FOREGROUND, Colour.PINK,
+      0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW, XA.FOREGROUND, Color.PINK,
       0xc1,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.PINK);
+    expect(s.cellAt(0).fg).toBe(Color.PINK);
   });
 
   it('an X-00 pair type in an SFE is rejected, NOT treated as a reset', () => {
@@ -415,13 +415,13 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     // yellow must survive on the field.
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW, XA.RESET, 0x00,
+      0x29, 0x03, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW, XA.RESET, 0x00,
       0xc1,
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
   });
 
-  it('does NOT leak a field colour across a field boundary reached by SBA', () => {
+  it('does NOT leak a field color across a field boundary reached by SBA', () => {
     // THE BUG THAT REMOVED SFE'S RUNNING-STATE SEEDING, and the reason SFE's
     // attributes are field-scoped rather than carried in the SA state.
     //
@@ -429,7 +429,7 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     // field without passing an SF or SFE. A field-scoped attribute held in the
     // character-scoped running state has the wrong lifetime: nothing clears it at
     // the boundary, so it follows the address and lands on characters of a field
-    // the host defined with no colour at all.
+    // the host defined with no color at all.
     //
     // Note this is legitimate for a real SA order, which is character-scoped and
     // applies to "subsequently interpreted characters in the data stream"
@@ -438,19 +438,19 @@ describe('SFE stores extended attributes at the FIELD level, and only there', ()
     // scope.
     const s = run([
       ...W,
-      0x11, 0x40, 0x4a, 0x1d, 0xc0,   // SBA 10, plain SF -- field at 10, NO colour
+      0x11, 0x40, 0x4a, 0x1d, 0xc0,   // SBA 10, plain SF -- field at 10, NO color
       ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,   // SFE at 0, yellow
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,   // SFE at 0, yellow
       0xc1,                            // char at 1, inside the yellow field
       0x11, 0x40, 0x4b, 0xc2,          // SBA 11, char at 11 -- inside the PLAIN field
     ]);
-    // Cell 11 belongs to the plain field at 10 and must carry no colour.
+    // Cell 11 belongs to the plain field at 10 and must carry no color.
     expect(s.cellAt(11).fg).toBeUndefined();
-    // And its field genuinely is the uncoloured one, so the assertion is not vacuous.
+    // And its field genuinely is the uncolored one, so the assertion is not vacuous.
     expect(s.fieldAt(11)?.attrAddr).toBe(10);
     expect(s.cellAt(10).fg).toBeUndefined();
-    // The yellow field is untouched and still carries its own colour.
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    // The yellow field is untouched and still carries its own color.
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
   });
 });
 
@@ -463,10 +463,10 @@ describe('the extended FIELD attribute survives what the character level cannot'
     // before it increments past the attribute position (ctlr.c:1886-1891).
     const s = run([
       ...W, ...SBA0,
-      0x29, 0x03, 0xc0, 0xc0, XA.BACKGROUND, Colour.BLUE, XA.HIGHLIGHTING, XAH.REVERSE,
+      0x29, 0x03, 0xc0, 0xc0, XA.BACKGROUND, Color.BLUE, XA.HIGHLIGHTING, XAH.REVERSE,
       0xc1,
     ]);
-    expect(s.cellAt(0).bg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).bg).toBe(Color.BLUE);
     expect(s.cellAt(0).gr).toBe(XAH.REVERSE);
   });
 
@@ -475,7 +475,7 @@ describe('the extended FIELD attribute survives what the character level cannot'
     expect(s.cellAt(0).fg).toBeUndefined();
   });
 
-  it('KEEPS the field colour when a later record overwrites a character mid-field', () => {
+  it('KEEPS the field color when a later record overwrites a character mid-field', () => {
     // THE REASON THE FIELD LEVEL MUST BE STORED AT ALL, and the defect this test
     // exists to prevent.
     //
@@ -484,18 +484,18 @@ describe('the extended FIELD attribute survives what the character level cannot'
     // is overwritten by a new character ... the old character attribute is
     // overwritten by the character attribute of the new character"
     // (pages.txt:3388-3391) -- and must then have something to fall back on.
-    // Without the field level, the colour would be gone from the buffer entirely.
+    // Without the field level, the color would be gone from the buffer entirely.
     const s = new Screen();
     run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1, 0xc2, 0xc3,
     ], s);
     run([...W, 0x11, 0x40, 0x42, 0xc9], s);   // SBA to 2, overwrite the middle char
 
     expect(s.cellAt(2).fg).toBeUndefined();
-    // The FIELD still carries the colour, so it is recoverable at render time.
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    // The FIELD still carries the color, so it is recoverable at render time.
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
     // And the field is still the same field, governing the overwritten cell.
     expect(s.fieldAt(2)?.attrAddr).toBe(0);
   });
@@ -503,15 +503,15 @@ describe('the extended FIELD attribute survives what the character level cannot'
   it('survives a second write command, unlike the running SA state', () => {
     // The running state resets per write command (pages.txt:2978); the field level
     // is buffer content and must NOT. A record that writes elsewhere entirely
-    // leaves the field's colour in place.
+    // leaves the field's color in place.
     const s = new Screen();
     run([
       ...W, ...SBA0,
-      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Colour.YELLOW,
+      0x29, 0x02, 0xc0, 0xc0, XA.FOREGROUND, Color.YELLOW,
       0xc1,
     ], s);
     run([...W, 0x11, 0x40, 0x4b, 0xc2], s);   // second Write, SBA 11, far away
-    expect(s.cellAt(0).fg).toBe(Colour.YELLOW);
+    expect(s.cellAt(0).fg).toBe(Color.YELLOW);
   });
 });
 
@@ -523,10 +523,10 @@ describe('orders that null characters also reset those characters attributes', (
     //
     // This is NOT the same rule as stamping the SA state, which EUA must not do
     // -- EUA nulls rather than writes. Screen.setChar deliberately no longer
-    // touches extended attributes, so nulling alone leaves stale colour behind.
+    // touches extended attributes, so nulling alone leaves stale color behind.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2, 0xc3,
       0x11, 0x40, 0x40,           // SBA back to 0
       0x12, 0x40, 0x42,           // EUA, stop address 2
@@ -535,7 +535,7 @@ describe('orders that null characters also reset those characters attributes', (
     expect(s.cellAt(1).fg).toBeUndefined();
     // Address 2 is at/after the stop address, so it is untouched -- the positive
     // control that proves the assertions above are not vacuous.
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
   });
 
   it('EUA leaves a PROTECTED cell attributes alone, not just its character', () => {
@@ -556,15 +556,15 @@ describe('orders that null characters also reset those characters attributes', (
     run([
       ...W, ...SBA0,
       0x1d, 0xc0 | 0x20,            // SF protected at 0, so 1.. is protected
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2,                   // protected chars at 1 and 2, both red
       0x11, 0x40, 0x41,             // SBA to 1
       0x12, 0x40, 0x43,             // EUA, stop 3 -- covers the protected cells
     ], s);
     // Protected, so neither the character nor its attributes may change.
     expect(s.cellAt(1).ebcdic).toBe(0xc1);
-    expect(s.cellAt(1).fg).toBe(Colour.RED);
-    expect(s.cellAt(2).fg).toBe(Colour.RED);
+    expect(s.cellAt(1).fg).toBe(Color.RED);
+    expect(s.cellAt(2).fg).toBe(Color.RED);
   });
 
   it('EUA still clears an UNPROTECTED cell inside a formatted screen', () => {
@@ -574,7 +574,7 @@ describe('orders that null characters also reset those characters attributes', (
     run([
       ...W, ...SBA0,
       0x1d, 0xc0,                   // SF unprotected at 0
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2,
       0x11, 0x40, 0x41,
       0x12, 0x40, 0x43,
@@ -589,7 +589,7 @@ describe('orders that null characters also reset those characters attributes', (
     // and gr alongside the null (ctlr.c:1555-1560).
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1, 0xc2, 0xc3,
       0x05,                       // PT, and the data before it means it nulls
     ]);
@@ -604,13 +604,13 @@ describe('orders that null characters also reset those characters attributes', (
     // "the buffer is not modified" (pages.txt:3089), so the attributes stand.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,
       0x11, 0x40, 0x41,           // SBA to 1: an order, so wroteSinceOrder resets
       0x05,                       // PT
     ]);
     expect(s.cellAt(0).ebcdic).toBe(0xc1);
-    expect(s.cellAt(0).fg).toBe(Colour.RED);
+    expect(s.cellAt(0).fg).toBe(Color.RED);
   });
 });
 
@@ -634,28 +634,28 @@ describe('rewriting a cell in one record takes the LATER running state', () => {
    * this project keeps hitting, a test that names a rule it never reaches.
    *
    * What it DOES pin is real and previously unpinned: the second write of the
-   * same address wins, for the character and the colour together.
+   * same address wins, for the character and the color together.
    */
-  it('keeps the second write character AND colour, not a mix of the two', () => {
+  it('keeps the second write character AND color, not a mix of the two', () => {
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,                                    // 'A' in red at address 0
       ...SBA0,                                 // back to address 0
-      0x28, XA.FOREGROUND, Colour.BLUE,
+      0x28, XA.FOREGROUND, Color.BLUE,
       0xc2,                                    // 'B' in blue over the top
     ]);
-    expect(s.cellAt(0).fg).toBe(Colour.BLUE);
+    expect(s.cellAt(0).fg).toBe(Color.BLUE);
     expect(s.cellAt(0).ebcdic).toBe(0xc2);
   });
 
-  it('clears a colour the earlier write set when the later one specifies none', () => {
+  it('clears a color the earlier write set when the later one specifies none', () => {
     // applySa calls clearExtended first, so an overwrite with empty running state
-    // must leave no colour behind. This is the assertion that would fail if
+    // must leave no color behind. This is the assertion that would fail if
     // applySa ever became additive.
     const s = run([
       ...W, ...SBA0,
-      0x28, XA.FOREGROUND, Colour.RED,
+      0x28, XA.FOREGROUND, Color.RED,
       0xc1,
       ...SBA0,
       0x28, XA.RESET, 0x00,                    // reset the running state

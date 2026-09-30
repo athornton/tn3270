@@ -9,7 +9,7 @@ import type { Action } from '@tn3270/frontend';
  * ## COMPRESSION IS NOT OPTIONAL AND ITS FORMAT IS NOT FREE
  *
  * MEASURED: a 24x80 draw list is 237220 bytes of JSON and 6760 deflated -- 35x, because per-cell
- * colour data is enormously repetitive. Raw frames would be unpleasant over a network since a
+ * color data is enormously repetitive. Raw frames would be unpleasant over a network since a
  * keystroke can produce several; compressed they are a non-issue, which is why dirty-cell diffing
  * is NOT in this design.
  *

@@ -11,7 +11,7 @@ import type { QueryRequest } from '../queryreply.js';
  * "The set of type-value pairs applied during character processing is a
  * composite, by attribute type, of the last value specified in previously
  * encountered SA orders" (p. 4-7, pages.txt:2995-2996). One value would make an
- * SA colour silently clear a preceding SA highlighting.
+ * SA color silently clear a preceding SA highlighting.
  *
  * Lives for one write command and is discarded: "Another write type command is
  * sent" returns the set to defaults (p. 4-6, pages.txt:2978), which x3270 does by
@@ -213,7 +213,7 @@ export interface ExecuteResult {
    * SA orders parsed and dropped — the ones whose attribute TYPE we do not
    * implement, which is `XA.CHARSET` and anything unrecognised.
    *
-   * NOT a count of SA orders seen. Colour, background, highlighting and the
+   * NOT a count of SA orders seen. Color, background, highlighting and the
    * X'00' reset are applied now, and counting those would break what this field
    * is for: a zero must keep meaning "we never saw one we had to throw away"
    * rather than "we stopped looking". The session reports it as dropped work
@@ -427,7 +427,7 @@ export function execute(screen: Screen, record: ParsedRecord): ExecuteResult {
  * the old character attribute is overwritten by the character attribute of the
  * new character" (p. 4-16, pages.txt:3388-3391). `Screen.setExtended` MERGES, to
  * serve the composite rule, so merging the state alone would leave a previous
- * record's colour on a cell this record has just overwritten. x3270 has no such
+ * record's color on a cell this record has just overwritten. x3270 has no such
  * hazard because it stamps all three unconditionally (ctlr.c:2141-2143) through
  * `ctlr_add_fg`, whose `ea_buf[baddr].fg = color` assigns rather than merges
  * (ctlr.c:2852-2867) — so the clear here is what makes this an assignment,
@@ -478,7 +478,7 @@ function applyToken(
       // interpreted characters in the data stream" (:2969-2971), and an SF does not
       // stop them being subsequent.
       //
-      // x3270 agrees exactly: its ORDER_SF zeroes the FA CELL's colour
+      // x3270 agrees exactly: its ORDER_SF zeroes the FA CELL's color
       // (START_FIELD at ctlr.c:1394-1398, plus :1486-1487) and never touches
       // default_fg/default_bg/default_gr, whose only assignments are write-command
       // reset (:1414-1416) and the SA order itself (:1905, :1917).
@@ -553,7 +553,7 @@ function applyToken(
           // every character changed to nulls are reset to their defaults" (p.
           // 4-11, pages.txt:3165-3166). Needed as its own call because setChar
           // deliberately leaves extended attributes alone; without it a nulled
-          // cell keeps the colour of the character that used to be there.
+          // cell keeps the color of the character that used to be there.
           screen.clearExtended(a);
         }
         a = screen.inc(a);
@@ -589,7 +589,7 @@ function applyToken(
 
     case 'sfe': {
       // SFE DEFINES A FIELD. The 0xC0 pair carries the basic field attribute; the
-      // colour and highlighting pairs become the field's EXTENDED FIELD ATTRIBUTE,
+      // color and highlighting pairs become the field's EXTENDED FIELD ATTRIBUTE,
       // stored on the attribute cell, and also seed the running SA state — see the
       // two uses at the bottom of this case. 0x43 character set is still dropped —
       // Programmable Symbol Sets are out of scope — as is anything else.
@@ -627,7 +627,7 @@ function applyToken(
       // without touching efa_fg/bg/gr (ctlr.c:1869-1871), where its SA arm for the
       // same type zeroes all five defaults (ctlr.c:1915-1921). An earlier draft
       // treated it as a reset here, which would have let a trailing X'00' silently
-      // discard a colour the host did set.
+      // discard a color the host did set.
       const efa: SaState = {};
       for (const p of token.pairs) {
         if (p.type === XA.FOREGROUND) efa.fg = p.value;
@@ -644,12 +644,12 @@ function applyToken(
       // field in the extended field attribute. Otherwise, the character attribute
       // overrides the field attribute" (p. 4-16, pages.txt:3383-3387).
       //
-      // THE FIELD'S COLOUR LIVES HERE AND NOWHERE ELSE, so this is what makes it
+      // THE FIELD'S COLOR LIVES HERE AND NOWHERE ELSE, so this is what makes it
       // survive at all. A later record that overwrites one character mid-field,
       // with no SFE and no SA, correctly clears that character's own attribute
       // (pages.txt:3388-3391) and must have something to fall back on — otherwise
-      // one colourless cell sits between coloured neighbours, inside a field the
-      // host still defines as coloured.
+      // one colorless cell sits between colored neighbours, inside a field the
+      // host still defines as colored.
       //
       // The FA cell is exactly where x3270 puts them, immediately after its pair
       // loop: `ctlr_add_fg(buffer_addr, efa_fg)` and siblings at ctlr.c:1886-1889,
@@ -660,7 +660,7 @@ function applyToken(
       //
       // Safe to write unconditionally: setFieldAttribute above has just cleared
       // this cell (pages.txt:2869-2870), so an empty `efa` leaves it clean rather
-      // than inheriting the previous field's colour. CONSUMING this fallback is
+      // than inheriting the previous field's color. CONSUMING this fallback is
       // Task 5's job in render.ts; storing it is this task's.
       screen.setExtended(addr, efa);
 
@@ -679,9 +679,9 @@ function applyToken(
       // theoretical. Within a single record: a plain SF at 10 with no extended
       // attributes, then SBA 0, SFE(fg=yellow), a character at 1, then SBA to 11
       // and a character at 11. Cell 11 came out yellow — but it belongs to the
-      // plain field at 10, which the host gave no colour at all. An SBA (or PT) can
+      // plain field at 10, which the host gave no color at all. An SBA (or PT) can
       // move the write address into a DIFFERENT, ALREADY-EXISTING field without
-      // passing an SF or SFE, so nothing clears the seeding and a field's colour
+      // passing an SF or SFE, so nothing clears the seeding and a field's color
       // follows the address across the boundary. sa.test.ts pins this.
       //
       // The redundancy could not be waved through as harmless on the grounds that

@@ -1,14 +1,14 @@
-import { type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
+import { type Color3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
 
 /**
  * The display palettes every front end draws from, and the ANSI slots they quantise to.
  *
  * ## WHY THIS IS NOT CORE'S TABLE
  *
- * Core's `PALETTE_3279` answers "which colour IS code F1" — the architected meaning, pinned
+ * Core's `PALETTE_3279` answers "which color IS code F1" — the architected meaning, pinned
  * to GA23-0059 with notes on the OCR damage in its tables. It is not a presentation choice,
  * and its own comment says the RGB values are "OUR OWN CHOICE, DELIBERATELY NOT X3270'S":
- * saturated primaries, picked so that seven base colours survive quantisation to sixteen
+ * saturated primaries, picked so that seven base colors survive quantisation to sixteen
  * ANSI slots. On a black background its pure `#0000ff` blue is close to illegible, which is
  * what a user reported from the Electron GUI on 2026-09-14. The GUI had been drawing from
  * core while the TUI had quietly had its own gentler table since it shipped.
@@ -20,20 +20,20 @@ import { type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
  *
  * `green` is what forces this, and the RGB-only shape looks sufficient right up to the
  * moment it fails: with one shared slot map, a green session would render green at
- * truecolour and blue/red/yellow on a sixteen-colour terminal. The slot map is part of a
+ * truecolor and blue/red/yellow on a sixteen-color terminal. The slot map is part of a
  * scheme's identity, which is why it is scheme data here rather than the TUI's private
  * `ANSI_16` table.
  *
  * Quantisation ITSELF stays in the TUI — `detectDepth`, the 6x6x6 cube, the SGR strings.
- * That is genuinely terminal-specific. Which slot a colour belongs in is not.
+ * That is genuinely terminal-specific. Which slot a color belongs in is not.
  *
  * ## WHY THE SLOTS ARE A TABLE AND NOT NEAREST-RGB
  *
- * Nearest-RGB made the palette responsible for sixteen-colour distinctness, and with any
+ * Nearest-RGB made the palette responsible for sixteen-color distinctness, and with any
  * pleasant palette blue and turquoise both land nearest ANSI cyan and collapse into one
  * slot — measured for both references: x3270's `#1e90ff` and zti's `(120,144,240)` each
  * quantise to bright cyan, exactly like their turquoise. Deciding the slot explicitly
- * separates "what colour is this" from "which of sixteen slots does it occupy".
+ * separates "what color is this" from "which of sixteen slots does it occupy".
  */
 
 /** `[ansiIndex, bright]`. */
@@ -45,12 +45,12 @@ export interface Scheme {
 }
 
 /**
- * The slot map the three COLOUR schemes share.
+ * The slot map the three COLOR schemes share.
  *
- * Keyed by colour code rather than derived from RGB, so it is correct for all three
+ * Keyed by color code rather than derived from RGB, so it is correct for all three
  * regardless of how saturated their values are.
  */
-const COLOUR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
+const COLOR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
   0xf0: [0, false], 0xf1: [4, true],  0xf2: [1, true],  0xf3: [5, true],
   0xf4: [2, true],  0xf5: [6, true],  0xf6: [3, true],  0xf7: [7, true],
   0xf8: [0, false], 0xf9: [4, false], 0xfa: [3, true],  0xfb: [5, false],
@@ -58,7 +58,7 @@ const COLOUR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
 });
 
 /**
- * `default`: zti's colours for F0-F7, x3270's for F8-FF.
+ * `default`: zti's colors for F0-F7, x3270's for F8-FF.
  *
  * F0-F7 are **zti's own values**, read from `tnz/zti.py:2813-2820` where they are declared
  * in curses' 0-1000 scale and converted here to 0-255 (`green_rgb = (141, 847, 188)` ->
@@ -127,14 +127,14 @@ const DARK: Rgb = [0, 0, 0];
 /**
  * `green`: a monochrome 3278, which is the only "authentic" option here.
  *
- * A 3278 has a green phosphor and no colour at all — colour is a 3279 feature — and we
+ * A 3278 has a green phosphor and no color at all — color is a 3279 feature — and we
  * advertise `IBM-3278-2-E`. x3270 ships this as `GreenScreen` (`x3270/fb-x3270:98`).
  *
  * ## IT CANNOT BE TRANSCRIBED FROM X3270, AND THE REASON IS STRUCTURAL
  *
  * x3270's scheme format has a SEPARATE screen background. Verified in
- * `xfer_color_scheme` (`x3270/screen.c:4119-4180`): tokens 0-15 are the IBM colours, 16 is a
- * fallback, **17 is the screen background**, 18 select background, 19-22 attribute colours.
+ * `xfer_color_scheme` (`x3270/screen.c:4119-4180`): tokens 0-15 are the IBM colors, 16 is a
+ * fallback, **17 is the screen background**, 18 select background, 19-22 attribute colors.
  * So `GreenScreen` sets F0 neutral-black to `#21a021` — green — and gets its dark screen
  * from `grey10` at token 17.
  *
@@ -155,7 +155,7 @@ const GREEN_RGB: Readonly<Record<number, Rgb>> = Object.freeze({
 /**
  * Green's own slots: everything visible on ANSI green, the emphasis codes bright.
  *
- * Sharing `COLOUR_SLOTS` would make a sixteen-colour terminal render blue and red from a
+ * Sharing `COLOR_SLOTS` would make a sixteen-color terminal render blue and red from a
  * scheme whose whole point is that it does not have any.
  */
 const GREEN_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
@@ -166,10 +166,10 @@ const GREEN_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
 });
 
 export const SCHEMES: Readonly<Record<string, Scheme>> = Object.freeze({
-  default: Object.freeze({ rgb: DEFAULT_RGB, ansi16: COLOUR_SLOTS }),
+  default: Object.freeze({ rgb: DEFAULT_RGB, ansi16: COLOR_SLOTS }),
   // Core's architected table, which is what makes it a scheme rather than an orphan.
-  '3279': Object.freeze({ rgb: PALETTE_3279, ansi16: COLOUR_SLOTS }),
-  x3270: Object.freeze({ rgb: X3270_RGB, ansi16: COLOUR_SLOTS }),
+  '3279': Object.freeze({ rgb: PALETTE_3279, ansi16: COLOR_SLOTS }),
+  x3270: Object.freeze({ rgb: X3270_RGB, ansi16: COLOR_SLOTS }),
   green: Object.freeze({ rgb: GREEN_RGB, ansi16: GREEN_SLOTS }),
 });
 
@@ -203,20 +203,20 @@ export function resolveScheme(name?: string): Scheme {
   const resolved = SCHEMES[ALIASES[key] ?? key];
   if (resolved === undefined) {
     throw new RangeError(
-      `unknown colour scheme ${JSON.stringify(name)}; use one of ${SCHEME_NAMES.join(', ')}`,
+      `unknown color scheme ${JSON.stringify(name)}; use one of ${SCHEME_NAMES.join(', ')}`,
     );
   }
   return resolved;
 }
 
 /**
- * RGB for a colour identification within a scheme. Throws rather than guessing, matching
- * core's `colourRgb` contract, which `drawlist.ts` already depends on.
+ * RGB for a color identification within a scheme. Throws rather than guessing, matching
+ * core's `colorRgb` contract, which `drawlist.ts` already depends on.
  */
-export function schemeRgb(scheme: Scheme, code: Colour3279): Rgb {
+export function schemeRgb(scheme: Scheme, code: Color3279): Rgb {
   const rgb = scheme.rgb[code];
   if (rgb === undefined) {
-    throw new RangeError(`0x${code.toString(16)} is not a 3279 colour (expected 0xF0-0xFF)`);
+    throw new RangeError(`0x${code.toString(16)} is not a 3279 color (expected 0xF0-0xFF)`);
   }
   return rgb;
 }

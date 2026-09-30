@@ -25,7 +25,7 @@
  * (`canvas/test/keypad.test.ts`), because both fatal mutations -- multiplying instead of dividing,
  * and dropping the offset -- are invisible at scale 1 with no centring, and that is the ONLY
  * configuration this harness can run in: `main.ts`'s `fit` sets the content size to exactly
- * `list.width * scale` by `list.height * scale`, so `centre` returns (0,0) for every model in native
+ * `list.width * scale` by `list.height * scale`, so `center` returns (0,0) for every model in native
  * Electron mode, and an 80-column screen with the keypad is 720x476, which at scale 2 is 1440x952
  * and does not fit Xvfb's 1280x1024. So this run is the PLUMBING, which is scale-independent, and
  * the offset arithmetic lives where a unit test can mutate it.
@@ -160,7 +160,7 @@ if (CASES.length === 0) {
  * output file DELETED, since `--build` trusts its `.tsbuildinfo` rather than looking at the outputs.
  *
  * BOTH PACKAGES, SEPARATELY, and for this harness `canvas` is the more important of the two:
- * `renderer.ts` and its new `__tn3270ButtonCentre` probe live there, and so does `hittest.js`. One
+ * `renderer.ts` and its new `__tn3270ButtonCenter` probe live there, and so does `hittest.js`. One
  * `max` across both would let a fresh `gui` build MASK a stale `canvas` one, since gui's newer
  * output would win the max over canvas's newer source -- and a stale `canvas` is precisely a run
  * that clicks yesterday's layout and reports `ok`.

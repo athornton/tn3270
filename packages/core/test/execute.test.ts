@@ -234,7 +234,7 @@ describe('orders', () => {
   it('SFE with no 0xC0 pair STILL defines a field, with the default attribute', () => {
     // p. 4-5: unspecified attribute types take their defaults. Skipping the
     // field here would lose it entirely, which is the failure SFE exists to
-    // prevent. Type 0x42 is colour, which we do not honour.
+    // prevent. Type 0x42 is color, which we do not honour.
     const s = new Screen();
     run(s, SnaCmd.W, 0x00, Order.SBA, 0x40, 0x40, Order.SFE, 0x01, 0x42, 0xf4);
     expect(s.attributeAt(0)).toBe(0x00);
@@ -301,7 +301,7 @@ describe('orders', () => {
     // saturating at 1.
     //
     // BOTH SA ORDERS MUST USE A TYPE THAT IS STILL DROPPED, which is why they are
-    // XA.CHARSET and not the XA.FOREGROUND (0x42) they used to be. Colour,
+    // XA.CHARSET and not the XA.FOREGROUND (0x42) they used to be. Color,
     // background, highlighting and the X'00' reset are applied now, so an SA
     // carrying one of those is no longer ignored and must not be counted here —
     // see setAttributeIgnored's contract. This test's EXPECTATION changed with

@@ -1,5 +1,5 @@
 import { AID, Qcode, ReqTyp, Sfid, XAH } from './constants.js';
-import { Colour } from './palette.js';
+import { Color } from './palette.js';
 
 /**
  * Query Reply, the answer to a host's Read Partition (Query).
@@ -12,10 +12,10 @@ import { Colour } from './palette.js';
  * Stage 2a shipped the minimal honest set — Summary, Usable Area, Implicit
  * Partition — and deliberately withheld Color and Highlighting because they
  * invite the SA orders it did not implement. Now that SA and the four-level
- * colour resolution are in, the two are honest and are advertised.
+ * color resolution are in, the two are honest and are advertised.
  *
- * ADVERTISING THEM IS NOT WHAT MAKES HOST COLOUR ARRIVE. MVS 3.8j TK5 sends SA
- * colour whether or not we ask — the committed trace fixture has 113 SA orders
+ * ADVERTISING THEM IS NOT WHAT MAKES HOST COLOR ARRIVE. MVS 3.8j TK5 sends SA
+ * color whether or not we ask — the committed trace fixture has 113 SA orders
  * against a client that advertised neither unit — so these two are for
  * correctness with better-behaved hosts, not a prerequisite. x3270 sends ten
  * units; we still send five. See the stage 2a design doc.
@@ -233,7 +233,7 @@ const usableArea: Capability = {
     // KNOWN INCONSISTENCY, inherited deliberately from x3270 and NOT a typo
     // here. This byte says millimetres, but the Xr/Yr fractions below are
     // inch-scaled, so the pair does not describe a physical device. Worked out:
-    // Xr = 10/741 is 1/74.1, i.e. 74.1 pel centres per unit; at 9 pels per cell
+    // Xr = 10/741 is 1/74.1, i.e. 74.1 pel centers per unit; at 9 pels per cell
     // and 80 cells that is 9.7 units across. Read as INCHES the screen is
     // 9.7 x 5.2 in, an 11-inch diagonal, which is a real 3279-2. Read as
     // MILLIMETRES it is 9.7 x 5.2 mm, which is absurd. The manual's own worked
@@ -255,7 +255,7 @@ const usableArea: Capability = {
     // a single number is the mistake to avoid.
     0x00, 0x0a, 0x02, 0xe5,
     // 15-18 Yr: same numerator/denominator form in the Y direction.
-    // 0x0002 / 0x006f = 2/111, i.e. 55.5 pel centres per unit. x3270's
+    // 0x0002 / 0x006f = 2/111, i.e. 55.5 pel centers per unit. x3270's
     // Yr_3279_2 = 0x0002006f (sf.c:57).
     0x00, 0x02, 0x00, 0x6f,
     // 19 AW: "Number of X units in default cell" (pages.txt:11632). "X units"
@@ -332,15 +332,15 @@ const implicitPartition: Capability = {
  *    Query Reply (Color) are required to have the values CAV1 = X' 00', Cl 1 =
  *    value associated with the device default color, as the first entry"
  *    (pages.txt:9268-9270). CAV1 = X'00' is XAC_DEFAULT, the "device default"
- *    colour VALUE — the same 0x00 render.ts's usableColour rejects so that
- *    resolution falls through to the base map. CI1 must name a real colour, and
+ *    color VALUE — the same 0x00 render.ts's usableColor rejects so that
+ *    resolution falls through to the base map. CI1 must name a real color, and
  *    may be anything "except X' 00'" (pages.txt:9266-9267).
  *  - CI1 IS GREEN, not white and not black. x3270 writes `0xf0 +
- *    HOST_COLOR_GREEN` = 0xF4 (sf.c:746, 3270ds.h:317), and p. 6-36's colour
- *    table gives "Green X'F4'" (pages.txt:9251). Taken from Colour.GREEN rather
+ *    HOST_COLOR_GREEN` = 0xF4 (sf.c:746, 3270ds.h:317), and p. 6-36's color
+ *    table gives "Green X'F4'" (pages.txt:9251). Taken from Color.GREEN rather
  *    than written as a literal because it must agree with render.ts: level 4
  *    resolves an ordinary unprotected normal-intensity field to GREEN, so the
- *    advertised default is the colour we actually paint.
+ *    advertised default is the color we actually paint.
  *  - The remaining fifteen are IDENTITY pairs, 0xF1..0xFF. The manual allows
  *    either identity or the device default — "The device must either display the
  *    color whose color identifier is the same as the color attribute value or
@@ -356,7 +356,7 @@ const implicitPartition: Capability = {
  * telnet.c:2104), so for x3270 the negotiation and the rendering travel
  * together. Ours do not. TERMINAL_TYPE is IBM-3278-2-E regardless of mode3279,
  * which is a per-render presentation flag with no path into this module.
- * Gating on it would make the same session advertise different colour support
+ * Gating on it would make the same session advertise different color support
  * depending on a rendering option the host cannot see.
  *
  * It also stays TRUE under mode3279: false, which is why the divergence is safe
@@ -366,7 +366,7 @@ const implicitPartition: Capability = {
  * CAV per cell whatever a later renderer chooses to do with it.
  *
  * NO Default Background Color self-defining parameter. x3270 can append a 4-byte
- * `04 02 00 f0` when its screen has a background colour and appres.qr_bg_color is
+ * `04 02 00 f0` when its screen has a background color and appres.qr_bg_color is
  * set (sf.c:756-765); the captured x3270 did not, and neither do we — we have no
  * settable default background to report.
  */
@@ -379,7 +379,7 @@ const color: Capability = {
     // reason sdp() counts itself and buildQueryReply derives L: a hand-written
     // count is a magic number that a later edit to the pairs would leave stale,
     // and a host that trusts NP would then mis-parse the rest of the record.
-    const pairs = [[0x00, Colour.GREEN]];
+    const pairs = [[0x00, Color.GREEN]];
     for (let cav = 0xf1; cav <= 0xff; cav++) pairs.push([cav, cav]);
     return [0x00, pairs.length, ...pairs.flat()];
   },

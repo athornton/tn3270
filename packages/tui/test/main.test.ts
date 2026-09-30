@@ -43,7 +43,7 @@ describe('parseArgs', () => {
   it('leaves colors undefined for auto, which means detect', () => {
     // Distinct from `--colors 0`: absent means ask terminfo, 0 means monochrome
     // because the user said so. Conflating them would make the monochrome path
-    // impossible to select on a colour terminal, which is how it gets tested.
+    // impossible to select on a color terminal, which is how it gets tested.
     expect(parseArgs(['--colors', 'auto', 'h']).colors).toBeUndefined();
     expect(parseArgs(['h']).colors).toBeUndefined();
     expect(parseArgs(['--colors', '0', 'h']).colors).toBe(0);

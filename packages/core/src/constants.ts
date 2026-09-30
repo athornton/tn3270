@@ -521,7 +521,7 @@ export const XA_3270 = 0xc0;
  *
  * Do not confuse `RESET` (0x00 as a TYPE, meaning reset-all) with
  * `XAC_DEFAULT` below (0x00 as a VALUE under FOREGROUND/BACKGROUND, meaning
- * "device default colour"). Both appear in the committed TK5 fixture (101
+ * "device default color"). Both appear in the committed TK5 fixture (101
  * FOREGROUND, 12 RESET), so a conflation is not hypothetical.
  *
  * CHARSET is named but deliberately NOT implemented — it selects Programmable
@@ -559,7 +559,7 @@ export const XAH = {
   INTENSIFY: 0xf8,
 } as const;
 
-/** Colour value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
+/** Color value meaning "the device default", per Query Reply (Color). 3270ds.h:248. */
 export const XAC_DEFAULT = 0x00;
 
 /**

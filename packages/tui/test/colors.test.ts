@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Colour } from '@tn3270/core';
+import { Color } from '@tn3270/core';
 import { SCHEMES, resolveScheme, schemeRgb } from '@tn3270/frontend';
-import { detectDepth, sgrFor, type Depth } from '../src/colours.js';
+import { detectDepth, sgrFor, type Depth } from '../src/colors.js';
 
 const DEFAULT = SCHEMES.default!;
 
@@ -66,19 +66,19 @@ describe('detectDepth', () => {
 describe('sgrFor: quantisation per depth', () => {
   it('24-bit emits exact RGB, from the TUI palette', () => {
     // ZTI'S GREEN, (36,216,48), not core's saturated 0x00ff00. The TUI has its own
-    // palette (see colours.ts): core stays the shared model, and this front end
-    // renders the colours zti does, which is what the user compares against. Read
+    // palette (see colors.ts): core stays the shared model, and this front end
+    // renders the colors zti does, which is what the user compares against. Read
     // from tnz/zti.py:2815 and confirmed on the wire from a captured zti session.
-    expect(sgrFor(Colour.GREEN, 16777216, 'fg', DEFAULT)).toBe('38;2;36;216;48');
-    expect(sgrFor(Colour.GREEN, 16777216, 'bg', DEFAULT)).toBe('48;2;36;216;48');
+    expect(sgrFor(Color.GREEN, 16777216, 'fg', DEFAULT)).toBe('38;2;36;216;48');
+    expect(sgrFor(Color.GREEN, 16777216, 'bg', DEFAULT)).toBe('48;2;36;216;48');
   });
 
   it('renders neutral black as PURE black, as zti does', () => {
     // Why core needs no divergence for a black-looking background: the default
     // background resolves to F0, and F0 is pure black here even though core's
     // palette keeps 0x1a1a1a for it.
-    expect(sgrFor(Colour.NEUTRAL_BLACK, 16777216, 'bg', DEFAULT)).toBe('48;2;0;0;0');
-    expect(sgrFor(Colour.NEUTRAL_BLACK, 256, 'bg', DEFAULT)).toBe('48;5;16');
+    expect(sgrFor(Color.NEUTRAL_BLACK, 16777216, 'bg', DEFAULT)).toBe('48;2;0;0;0');
+    expect(sgrFor(Color.NEUTRAL_BLACK, 256, 'bg', DEFAULT)).toBe('48;5;16');
   });
 
   // Every number in this describe block was RE-DERIVED from the committed
@@ -89,7 +89,7 @@ describe('sgrFor: quantisation per depth', () => {
   //   16:     (bright ? 90 : 30) + nearest ANSI-8 index, bright = max>170
 
   it('256 emits a cube index', () => {
-    const sgr = sgrFor(Colour.GREEN, 256, 'fg', DEFAULT);
+    const sgr = sgrFor(Color.GREEN, 256, 'fg', DEFAULT);
     expect(sgr).toMatch(/^38;5;\d+$/);
     const index = Number(sgr.split(';')[2]);
     // 77, not 46: (36,216,48) gives 16 + 36*1 + 6*4 + 1. Worth knowing that BOTH
@@ -101,20 +101,20 @@ describe('sgrFor: quantisation per depth', () => {
 
   it('16 emits a standard ANSI code', () => {
     // Bright green is 92; the 3279's green is full-intensity.
-    expect(sgrFor(Colour.GREEN, 16, 'fg', DEFAULT)).toBe('92');
-    expect(sgrFor(Colour.BLUE, 16, 'fg', DEFAULT)).toBe('94');
-    expect(sgrFor(Colour.RED, 16, 'fg', DEFAULT)).toBe('91');
+    expect(sgrFor(Color.GREEN, 16, 'fg', DEFAULT)).toBe('92');
+    expect(sgrFor(Color.BLUE, 16, 'fg', DEFAULT)).toBe('94');
+    expect(sgrFor(Color.RED, 16, 'fg', DEFAULT)).toBe('91');
   });
 
   it('8 emits only the non-bright range', () => {
-    expect(sgrFor(Colour.GREEN, 8, 'fg', DEFAULT)).toBe('32');
-    expect(sgrFor(Colour.BLUE, 8, 'fg', DEFAULT)).toBe('34');
-    expect(sgrFor(Colour.RED, 8, 'fg', DEFAULT)).toBe('31');
+    expect(sgrFor(Color.GREEN, 8, 'fg', DEFAULT)).toBe('32');
+    expect(sgrFor(Color.BLUE, 8, 'fg', DEFAULT)).toBe('34');
+    expect(sgrFor(Color.RED, 8, 'fg', DEFAULT)).toBe('31');
   });
 
   it('monochrome emits nothing at all', () => {
-    expect(sgrFor(Colour.RED, 0, 'fg', DEFAULT)).toBe('');
-    expect(sgrFor(Colour.RED, 0, 'bg', DEFAULT)).toBe('');
+    expect(sgrFor(Color.RED, 0, 'fg', DEFAULT)).toBe('');
+    expect(sgrFor(Color.RED, 0, 'bg', DEFAULT)).toBe('');
   });
 
   it('maps all sixteen palette entries at every depth without throwing', () => {
@@ -126,12 +126,12 @@ describe('sgrFor: quantisation per depth', () => {
     }
   });
 
-  it('distinguishes the seven base 3279 colours at 16 and above', () => {
-    // The test that would catch a quantisation table collapsing two colours to
+  it('distinguishes the seven base 3279 colors at 16 and above', () => {
+    // The test that would catch a quantisation table collapsing two colors to
     // the same ANSI code -- which is the failure a human would notice first and
     // a test asserting "does not throw" would miss entirely.
-    const base = [Colour.BLUE, Colour.RED, Colour.PINK, Colour.GREEN,
-                  Colour.TURQUOISE, Colour.YELLOW, Colour.WHITE];
+    const base = [Color.BLUE, Color.RED, Color.PINK, Color.GREEN,
+                  Color.TURQUOISE, Color.YELLOW, Color.WHITE];
     for (const depth of [16, 256, 16777216] as Depth[]) {
       const seen = new Set(base.map((c) => sgrFor(c, depth, 'fg', DEFAULT)));
       expect(seen.size, `depth ${depth}`).toBe(base.length);
@@ -153,28 +153,28 @@ describe('sgrFor across schemes', () => {
     //
     // DERIVED from the registry on purpose. The literal value is pinned once, in
     // frontend's palette.test.ts; what THIS test asserts is that the TUI consults the
-    // registry at all -- so it fails if colours.ts ever regrows a private table, which is
+    // registry at all -- so it fails if colors.ts ever regrows a private table, which is
     // the drift that shipped two different blues in the first place.
-    const [r, g, b] = schemeRgb(SCHEMES.default!, Colour.BLUE);
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe(`38;2;${r};${g};${b}`);
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES['3279']!)).toBe('38;2;0;0;255');
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.x3270!)).toBe('38;2;30;144;255');
+    const [r, g, b] = schemeRgb(SCHEMES.default!, Color.BLUE);
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe(`38;2;${r};${g};${b}`);
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES['3279']!)).toBe('38;2;0;0;255');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.x3270!)).toBe('38;2;30;144;255');
   });
 
-  it('renders green as green at BOTH truecolour and sixteen colours', () => {
+  it('renders green as green at BOTH truecolor and sixteen colors', () => {
     // The reason a Scheme carries ansi16. With a shared slot map this second assertion
     // would come back as bright blue (94) from a monochrome-green scheme.
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.green!)).toBe('38;2;33;160;33');
-    expect(sgrFor(Colour.BLUE, 16, 'fg', SCHEMES.green!)).toBe('32');
-    expect(sgrFor(Colour.NEUTRAL_WHITE, 16, 'fg', SCHEMES.green!)).toBe('92');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.green!)).toBe('38;2;33;160;33');
+    expect(sgrFor(Color.BLUE, 16, 'fg', SCHEMES.green!)).toBe('32');
+    expect(sgrFor(Color.NEUTRAL_WHITE, 16, 'fg', SCHEMES.green!)).toBe('92');
   });
 
   it('keeps the background black in green, so the screen is not a green wash', () => {
-    expect(sgrFor(Colour.NEUTRAL_BLACK, 16777216, 'bg', SCHEMES.green!)).toBe('48;2;0;0;0');
+    expect(sgrFor(Color.NEUTRAL_BLACK, 16777216, 'bg', SCHEMES.green!)).toBe('48;2;0;0;0');
   });
 
   it('still returns nothing for monochrome or an invalid code', () => {
-    expect(sgrFor(Colour.RED, 0, 'fg', DEFAULT)).toBe('');
+    expect(sgrFor(Color.RED, 0, 'fg', DEFAULT)).toBe('');
     expect(sgrFor(0x00, 256, 'fg', DEFAULT)).toBe('');
     expect(sgrFor(0xef, 16777216, 'bg', DEFAULT)).toBe('');
   });

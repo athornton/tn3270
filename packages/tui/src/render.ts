@@ -15,7 +15,7 @@
  * Screen.
  */
 
-import { sgrFor, type Depth } from './colours.js';
+import { sgrFor, type Depth } from './colors.js';
 import { type Scheme } from '@tn3270/frontend';
 import type { ResolvedCell } from '@tn3270/core';
 
@@ -361,7 +361,7 @@ export class TerminalRenderer {
       // The row-start case is not an optimisation to skip: cells ARE contiguous
       // across a row boundary, but the terminal wraps at ITS right edge, not at the
       // screen's. That coincided only while the screen exactly filled the terminal
-      // width. Centred in a 90-column window an 80-column screen wrapped at column
+      // width. Centerd in a 90-column window an 80-column screen wrapped at column
       // 90 rather than 85, putting every row after the first in the wrong place --
       // found on a real pty, where only the first screen row and the OIA began at
       // the screen's left edge. Costs one escape per row on a full repaint.
@@ -374,12 +374,12 @@ export class TerminalRenderer {
       const want = this.cellSgr(cell);
       if (want !== sgr) {
         // RESET FIRST, ALWAYS. SGR parameters ACCUMULATE -- `\x1b[38;5;46m` sets a
-        // colour and leaves reverse, bold, blink and underline exactly as they were,
+        // color and leaves reverse, bold, blink and underline exactly as they were,
         // because only 0 (or 22/24/25/27) clears them. Emitting the desired
         // attributes alone therefore let a highlighted run leak into everything after
         // it: ISPF's tutorial sends SA highlighting=0xF2 for its title bar, and every
         // following cell stayed inverted, turning each subsequent SPACE into a solid
-        // block of the foreground colour and mottling the whole page. VM/370 never
+        // block of the foreground color and mottling the whole page. VM/370 never
         // sends reverse, which is why only TK5 showed it.
         //
         // The monochrome path accidentally did the right thing (`want` is empty there,
@@ -408,7 +408,7 @@ export class TerminalRenderer {
     if (this.place.statusRow !== undefined && status !== this.previousStatus) {
       // PADDED to the screen width, not `\x1b[K`. Erasing to end of line would wipe
       // the right-hand border on this row, and aligning to the screen rather than to
-      // column 1 keeps the OIA under the screen when the block is centred.
+      // column 1 keeps the OIA under the screen when the block is centerd.
       const text = status.length > this.cols
         ? status.slice(0, this.cols)
         : status.padEnd(this.cols, ' ');
@@ -438,7 +438,7 @@ export class TerminalRenderer {
   /**
    * The special-keys list, drawn one line per row over the top-left of the SCREEN region.
    *
-   * The screen's corner, not the terminal's: aligned like the OIA and the hint, so a centred block
+   * The screen's corner, not the terminal's: aligned like the OIA and the hint, so a centerd block
    * keeps the list inside its border instead of putting it over whatever the terminal had at 1;1.
    *
    * Reverse video for the selected line, which `keypadOverlay.ts` marks with a leading `>`. Each
@@ -459,7 +459,7 @@ export class TerminalRenderer {
       + (line.startsWith('>') ? `${ESC}0;7m${line}${ESC}0m` : `${ESC}0m${line}`));
   }
 
-  /** The full SGR parameter list for one cell: colours plus highlighting. */
+  /** The full SGR parameter list for one cell: colors plus highlighting. */
   private cellSgr(cell: ResolvedCell): string {
     const params: string[] = [];
     if (cell.blink) params.push('5');

@@ -12,7 +12,7 @@
  *
  * c3270's keypad is 16 rows tall and 78 columns wide (`Common/c3270/keypad.outline`, measured: 16
  * lines, longest 78). This TUI refuses to draw below 24 rows (`tooSmall` in `render.ts`) and
- * centres the screen above that, so a faithful keypad would have to hide two thirds of the 3270
+ * centers the screen above that, so a faithful keypad would have to hide two thirds of the 3270
  * display in order to show itself. A list overlays a corner instead, and can refuse to open at
  * all.
  *

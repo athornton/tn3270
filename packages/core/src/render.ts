@@ -1,18 +1,18 @@
 /**
- * Resolve protocol attributes into concrete colours for a renderer.
+ * Resolve protocol attributes into concrete colors for a renderer.
  *
  * ## WHY THIS IS IN CORE AND NOT IN EACH FRONT END
  *
- * Storage says what the host sent. This says what colour a cell IS, and its
+ * Storage says what the host sent. This says what color a cell IS, and its
  * rules are datastream semantics rather than rendering taste:
  *
  *   - A character with no attribute of its own falls back to its FIELD's
  *     extended attribute before reaching the base map (pages.txt:3383-3387).
- *   - A colour VALUE of 0x00 means "the device default indicated in Query Reply
+ *   - A color VALUE of 0x00 means "the device default indicated in Query Reply
  *     (Color)" (GA23-0059 p. 4-20, pages.txt:3544-3546) -- NOT black.
- *   - 0xF7 is the Neutral colour identification, and means "the colour comes
+ *   - 0xF7 is the Neutral color identification, and means "the color comes
  *     from a triple-plane character set"; with a single-plane or nonloadable set
- *     it takes the single colour Query Reply (Color) gives for F7
+ *     it takes the single color Query Reply (Color) gives for F7
  *     (pages.txt:3546-3549). Ours is the identity, so F7 stays F7 -- see the
  *     note on that below, which corrects an error in the plan.
  *
@@ -30,7 +30,7 @@
  *   1. the CHARACTER's own extended attribute (`cell.fg`), if usable
  *   2. the FIELD's extended attribute, read from the cell at the governing
  *      field's `attrAddr` -- where `execute.ts` stores an SFE's pairs
- *   3. the base-attribute map, `defaultColour` below
+ *   3. the base-attribute map, `defaultColor` below
  *   4. `mode3279 === false` overrides all three with green
  *
  * Level 2 is the manual's conflict-resolution rule: "If there are field
@@ -67,7 +67,7 @@ import { FA, XAH } from './constants.js';
 // CodePage is a CLASS, not an interface, so it is a plain import. Its
 // byte-to-string method is `toUnicode(byte)`.
 import { cp037, CodePage } from './codepage.js';
-import { Colour, PALETTE_3279, type Colour3279 } from './palette.js';
+import { Color, PALETTE_3279, type Color3279 } from './palette.js';
 import type { ScreenSnapshot } from './screen.js';
 
 /**
@@ -115,9 +115,9 @@ export interface ResolvedCell {
    * (pages.txt:3464-3467). Task 11's renderer has the corresponding test.
    */
   text: string;
-  /** Concrete 3279 colour identification. Never undefined, never invalid. */
-  fg: Colour3279;
-  bg: Colour3279;
+  /** Concrete 3279 color identification. Never undefined, never invalid. */
+  fg: Color3279;
+  bg: Color3279;
   blink: boolean;
   reverse: boolean;
   underscore: boolean;
@@ -126,11 +126,11 @@ export interface ResolvedCell {
    * bit: "A highlighting property specified by the extended field attribute does
    * not affect the intensify property specified by the field attribute"
    * (pages.txt:3474-3475), and an intensified FIELD is already carried here as
-   * colour, by `defaultColour` returning red or white.
+   * color, by `defaultColor` returning red or white.
    *
    * x3270's equivalent is wider -- `(gr & GR_INTENSIFY) || FA_IS_HIGH(fa)`
    * (c3270/screen.c:1183) -- because curses gives it A_BOLD as its only
-   * brightness lever and it uses bold for both. We have real colour, so folding
+   * brightness lever and it uses bold for both. We have real color, so folding
    * the two would make an intensified field bold AND red, double-signalling one
    * protocol fact. A renderer wanting x3270's look can OR in its own test.
    */
@@ -145,32 +145,32 @@ export interface ResolvedCell {
 
 export interface ResolveOptions {
   /**
-   * Is this a colour device? Defaults to true.
+   * Is this a color device? Defaults to true.
    *
    * When false EVERY cell is green regardless of what the host sent, which is
    * x3270's behaviour (`color_from_fa` returns HOST_COLOR_GREEN unconditionally,
    * fprint_screen.c:90-94). A 3278 is monochrome hardware and must not be
-   * colourised just because a host sent an attribute it should not have.
+   * colorised just because a host sent an attribute it should not have.
    *
    * Applies to BACKGROUND as well as foreground, and x3270 is the reason: its
-   * whole colour block is inside `if (mode3279 || ...)` (c3270/screen.c:1126),
-   * so a mono device reaches neither `ea_buf[baddr].fg` nor `.bg`. Colouring the
+   * whole color block is inside `if (mode3279 || ...)` (c3270/screen.c:1126),
+   * so a mono device reaches neither `ea_buf[baddr].fg` nor `.bg`. Coloring the
    * background of a green-only screen would be worse than useless -- green on
-   * blue is what a host meant for a colour terminal.
+   * blue is what a host meant for a color terminal.
    */
   mode3279?: boolean;
   codePage?: CodePage;
 }
 
 /**
- * The 3279 default colour map: which colour a cell takes from its base field
+ * The 3279 default color map: which color a cell takes from its base field
  * attribute when neither it nor its field specifies one.
  *
  * x3270's `field_colors[4]` with its `DEFCOLOR_MAP` index
  * (fprint_screen.c:81-88): bit 1 is PROTECT, bit 0 is INT_HIGH_SEL.
  *
  * NO `mode3279` PARAMETER, unlike x3270's `color_from_fa`, which takes the gate
- * inside itself (fprint_screen.c:90-94) because it is the only colour path its
+ * inside itself (fprint_screen.c:90-94) because it is the only color path its
  * print renderer has. Here the gate has to sit at the call site instead: it
  * overrides levels 1 and 2 as well, and those never reach this function. An
  * earlier version had the check in BOTH places, so deleting the one here changed
@@ -178,14 +178,14 @@ export interface ResolveOptions {
  * place, and `mode3279: false` is now the only thing that can produce green
  * without consulting this table.
  */
-const DEFAULT_COLOURS: readonly Colour3279[] = [
-  Colour.GREEN, // unprotected, normal
-  Colour.RED,   // unprotected, intensified
-  Colour.BLUE,  // protected, normal
-  Colour.WHITE, // protected, intensified
+const DEFAULT_COLORS: readonly Color3279[] = [
+  Color.GREEN, // unprotected, normal
+  Color.RED,   // unprotected, intensified
+  Color.BLUE,  // protected, normal
+  Color.WHITE, // protected, intensified
 ];
 
-function defaultColour(attr: number): Colour3279 {
+function defaultColor(attr: number): Color3279 {
   // A BIT TEST on FA.INT_HIGH_SEL, not a field comparison against FA.INTENSITY,
   // matching x3270's DEFCOLOR_MAP `(f) & FA_INT_HIGH_SEL) >> 3`
   // (fprint_screen.c:86-87). The two differ for exactly one attribute: intensity
@@ -193,21 +193,21 @@ function defaultColour(attr: number): Colour3279 {
   // intensified and returns red, where `Screen.intensified` (screen.ts:309) and
   // `hidden` below use `=== FA.INTENSITY` comparisons and call it hidden, not
   // intensified. Both are right for their own purpose and the divergence is
-  // deliberate: the colour a hidden field would have had is moot, because
+  // deliberate: the color a hidden field would have had is moot, because
   // `hidden` tells the renderer not to draw its text at all. x3270 has the same
   // pair of idioms side by side -- FA_IS_HIGH is a field comparison
   // (3270ds.h:211-212) while FA_IS_INTENSE is a bit test (3270ds.h:225-226).
   const index = ((attr & FA.PROTECT) !== 0 ? 2 : 0) | ((attr & FA.INT_HIGH_SEL) !== 0 ? 1 : 0);
-  return DEFAULT_COLOURS[index]!;
+  return DEFAULT_COLORS[index]!;
 }
 
 /**
- * Is `code` a colour we can actually render?
+ * Is `code` a color we can actually render?
  *
  * 0x00 is excluded deliberately: it is legal on the wire and means "device
  * default", so it must fall through to the NEXT LEVEL rather than being treated
  * as a value. An unrecognised byte falls through the same way -- a malformed
- * attribute from a host must never reach `colourRgb`, which throws.
+ * attribute from a host must never reach `colorRgb`, which throws.
  *
  * THE 0x00 CHECK IS UNREACHABLE FROM ANY `Screen`-DERIVED SNAPSHOT, AND KEPT ON
  * PURPOSE. `Screen` stores "unspecified" as the byte 0 and `cellAt` omits the
@@ -225,7 +225,7 @@ function defaultColour(attr: number): Colour3279 {
  * Reply (Color) structured field" (pages.txt:3544-3546), where the lookup means
  * only "not a byte we can render". Were `PALETTE_3279` ever to gain a 0x00 entry
  * -- a device-default swatch is an entirely plausible change -- the protocol rule
- * would silently invert into "0x00 paints that swatch", overriding a field colour
+ * would silently invert into "0x00 paints that swatch", overriding a field color
  * the host did set.
  *
  * `render.test.ts` pins all of this through hand-built snapshots, and separately
@@ -239,8 +239,8 @@ function defaultColour(attr: number): Colour3279 {
  * with `??` and cannot accidentally use an unusable code.
  *
  * 0xF7 IS USABLE AND IS RETURNED UNCHANGED. The plan drafted `cell.fg === 0xf7 ?
- * Colour.WHITE : cell.fg`, and that is wrong twice over. (1) 0xF7 is itself an
- * architected colour identification, Neutral, distinct from White 0xFF -- Table
+ * Color.WHITE : cell.fg`, and that is wrong twice over. (1) 0xF7 is itself an
+ * architected color identification, Neutral, distinct from White 0xFF -- Table
  * 4-7 lists both (pages.txt:3527-3541), palette.ts gives them distinct RGB on
  * purpose, and x3270 keeps them as separate slots HOST_COLOR_NEUTRAL_WHITE (7)
  * and HOST_COLOR_WHITE (15) (3270ds.h:313-328). (2) The rule the draft was
@@ -248,12 +248,12 @@ function defaultColour(attr: number): Colour3279 {
  * the color defaults to the single color specified for the X'F7' value by Query
  * Reply (Color)" (pages.txt:3547-3549) -- resolves through OUR Query Reply
  * (Color), whose F7 entry is the identity pair F7->F7, exactly as x3270 sends
- * (`sf.c` `do_qr_color`, and Task 7's unit). So the correct single colour for F7
+ * (`sf.c` `do_qr_color`, and Task 7's unit). So the correct single color for F7
  * is F7. The manual's "defined as White for a display" (pages.txt:3542-3543)
  * describes what that phosphor LOOKS like, and is not an instruction to
  * substitute the other code. x3270 special-cases F7 nowhere.
  */
-function usableColour(code: number | undefined): Colour3279 | undefined {
+function usableColor(code: number | undefined): Color3279 | undefined {
   if (code === undefined || code === 0x00) return undefined;
   return PALETTE_3279[code] !== undefined ? code : undefined;
 }
@@ -270,7 +270,7 @@ function usableColour(code: number | undefined): Colour3279 | undefined {
  * X'00' is the omitted one, and it is omitted because it is a FALL-THROUGH rather
  * than a highlight: "the default action of the device" (pages.txt:10329-10331).
  * It is valid on the wire and rejected here, which is exactly the split
- * `PALETTE_3279` makes for colours -- 0x00 is a legal colour value and not a
+ * `PALETTE_3279` makes for colors -- 0x00 is a legal color value and not a
  * palette key.
  *
  * NOTE X'F0' Normal IS a member, and that is not an oversight: "Normal (as
@@ -286,7 +286,7 @@ const HIGHLIGHTS: ReadonlySet<number> = new Set([
 
 /**
  * Is `code` a highlighting value we can act on? The exact analogue of
- * `usableColour`, and deliberately so: all three properties then read as ONE
+ * `usableColor`, and deliberately so: all three properties then read as ONE
  * rule and the `??` chain in `resolve` is uniform across them.
  *
  * IT DID NOT USE TO BE, and the divergence was reachable rather than academic.
@@ -302,9 +302,9 @@ const HIGHLIGHTS: ReadonlySet<number> = new Set([
  * and returned inbound by an implementation are rejected. All attribute types and
  * values are checked for validity" (p. 4-5, pages.txt:2897-2899). A rejected
  * value is one the device never established, so the field's highlighting still
- * stands -- exactly as a rejected colour leaves the field's colour standing.
+ * stands -- exactly as a rejected color leaves the field's color standing.
  *
- * `XAH.DEFAULT` (0x00) is excluded for the same reason `usableColour` excludes
+ * `XAH.DEFAULT` (0x00) is excluded for the same reason `usableColor` excludes
  * 0x00: it means "the default action of the device" (pages.txt:10329-10331), a
  * fall-through rather than a value. And for the same reason as there, THAT CLAUSE
  * IS UNKILLABLE BY TEST TODAY -- `XAH.DEFAULT` is not a member of `HIGHLIGHTS`
@@ -325,7 +325,7 @@ const HIGHLIGHTS: ReadonlySet<number> = new Set([
  * That mask silently turns 0x99 into 0x09, i.e. blink|intensify: two highlights
  * at once, which the architecture forbids on an "exclusive basis"
  * (pages.txt:10326-10328). We keep the architected value verbatim, so we must
- * check membership instead. Note x3270 DOES validate the analogous colour case
+ * check membership instead. Note x3270 DOES validate the analogous color case
  * at store time, `if ((color & 0xf0) != 0xf0) color = 0` in `ctlr_add_fg` -- so
  * rejecting a malformed value is its instinct too, just at a different layer.
  */
@@ -372,7 +372,7 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
   for (const f of snap.fields) {
     // From the attribute byte through the field's data: `length + 1` cells, so
     // the FA cell is governed by its own field. That is what makes the FA
-    // position resolve to its own extended colour, matching x3270's
+    // position resolve to its own extended color, matching x3270's
     // `calc_attrs(baddr, baddr, fa)` (c3270/screen.c:1451). It also makes the
     // wrap-around case fall out: the last field's run continues past the end of
     // the buffer to cell 0, so cells before the first attribute are owned by it.
@@ -415,18 +415,18 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
     const field = attrAddr >= 0 ? snap.cells[attrAddr]! : undefined;
     const attr = attrAddr >= 0 ? attrOf[i]! : 0x00;
 
-    // The four levels, per property. `usableColour` returning undefined for both
+    // The four levels, per property. `usableColor` returning undefined for both
     // 0x00 and a malformed byte is what makes `??` express the fall-through.
     const fg = mode3279
-      ? usableColour(cell.fg) ?? usableColour(field?.fg) ?? defaultColour(attr)
-      : Colour.GREEN;
+      ? usableColor(cell.fg) ?? usableColor(field?.fg) ?? defaultColor(attr)
+      : Color.GREEN;
     const bg = mode3279
-      ? usableColour(cell.bg) ?? usableColour(field?.bg) ?? Colour.NEUTRAL_BLACK
-      : Colour.NEUTRAL_BLACK;
+      ? usableColor(cell.bg) ?? usableColor(field?.bg) ?? Color.NEUTRAL_BLACK
+      : Color.NEUTRAL_BLACK;
 
     // Highlighting takes the same two levels through the same idiom, and is NOT
     // gated on mode3279 -- blink, reverse and underscore are things a monochrome
-    // 3278 does, and x3270 computes gr outside its colour block
+    // 3278 does, and x3270 computes gr outside its color block
     // (c3270/screen.c:1166, after the `if (!mode3279 || ...)` branch closes).
     const gr = usableHighlight(cell.gr) ?? usableHighlight(field?.gr) ?? XAH.DEFAULT;
 

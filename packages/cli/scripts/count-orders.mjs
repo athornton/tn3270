@@ -1,7 +1,7 @@
 // Count deferred orders (SA, MF) in a trace, AS THE PARSER SEES THEM.
 //
 // WHY THIS EXISTS RATHER THAN A GREP. The obvious `grep -oE "28 42"` over a trace is
-// wrong in both directions, and it produced a wrong number in a draft of the TUI/colour
+// wrong in both directions, and it produced a wrong number in a draft of the TUI/color
 // spec: it matches 0x28 0x42 occurring as SBA/RA address bytes or as ordinary payload
 // data, and it misses orders split across a `+` continuation line. It also silently
 // hides SA type 0x00 (reset-to-default) unless you happen to grep for it, which is the
@@ -13,7 +13,7 @@
 //
 // Defaults to the committed TK5 ISPF fixture, whose expected output is:
 //   SA total: 113  MF total: 0
-//     SA type 0x42 -> 101      (foreground colour)
+//     SA type 0x42 -> 101      (foreground color)
 //     SA type 0x00 -> 12       (reset character attributes)
 
 import { readFileSync } from 'node:fs';

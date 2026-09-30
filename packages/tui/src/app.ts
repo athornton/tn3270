@@ -22,7 +22,7 @@
  */
 
 import { resolve, type Session } from '@tn3270/core';
-import { detectDepth, type Depth } from './colours.js';
+import { detectDepth, type Depth } from './colors.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, TerminalRenderer, tooSmall } from './render.js';
 import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
@@ -131,17 +131,17 @@ const ESC_TIMEOUT_MS = 50;
  * Make the cursor findable, and put it back afterwards.
  *
  * Two sequences because they degrade differently. DECSCUSR (`\x1b[2 q`, steady
- * block) is very widely implemented; OSC 12 (cursor colour) is BEST-EFFORT -- a
+ * block) is very widely implemented; OSC 12 (cursor color) is BEST-EFFORT -- a
  * terminal that does not know it ignores it, which is why the shape is set too
- * rather than relying on colour alone.
+ * rather than relying on color alone.
  *
  * Green rather than white, matching the default-green foreground a 3279 shows and
  * the phosphor look people expect; it is one constant to change if white reads
  * better. The old default background was `neutral-black` at 0x1a1a1a -- a dark grey
  * -- against which an unstyled cursor was very hard to see. That default is now
- * pure black (core `resolve`), and the cursor is explicitly coloured.
+ * pure black (core `resolve`), and the cursor is explicitly colored.
  *
- * OSC 112 resets the colour to the terminal's own, and `\x1b[0 q` the shape, so a
+ * OSC 112 resets the color to the terminal's own, and `\x1b[0 q` the shape, so a
  * user's carefully configured cursor survives running this.
  */
 const CURSOR_ON = '\x1b]12;#00ff00\x07\x1b[2 q';

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Screen, resolve, Colour, type ResolvedCell } from '@tn3270/core';
+import { Screen, resolve, Color, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { drawList } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
@@ -44,16 +44,16 @@ describe('drawList', () => {
     expect(dl.cells[0]!.glyph).not.toBe(atlas.index[0xc1]);
   });
 
-  it('converts Colour3279 codes to RGB, since the atlas is colourless coverage', () => {
+  it('converts Color3279 codes to RGB, since the atlas is colorless coverage', () => {
     const dl = listFor(screenWith([[0, 0xc1]]));
     // Default unformatted foreground is green on a 3279.
-    expect(dl.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Colour.GREEN));
-    expect(dl.cells[0]!.fg).not.toBe(Colour.GREEN);      // a code, not an Rgb
+    expect(dl.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Color.GREEN));
+    expect(dl.cells[0]!.fg).not.toBe(Color.GREEN);      // a code, not an Rgb
   });
 
   it('SWAPS foreground and background for a reverse-video cell', () => {
     // Reverse video is the one attribute a blitter cannot infer, and getting it wrong is
-    // invisible on a mostly-empty screen. Asserted as a swap of the same two colours
+    // invisible on a mostly-empty screen. Asserted as a swap of the same two colors
     // rather than against literal RGB, so a palette change does not break it.
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
@@ -212,34 +212,34 @@ describe('the keypad region', () => {
 
 describe('drawList honours the scheme it is given', () => {
   it("draws the scheme's blue, not core's", () => {
-    // The bug this change fixes: the GUI resolved through core's colourRgb, whose blue is
-    // pure #0000ff and unreadable on black. A default 3279 field is green, so recolour one
+    // The bug this change fixes: the GUI resolved through core's colorRgb, whose blue is
+    // pure #0000ff and unreadable on black. A default 3279 field is green, so recolor one
     // cell by hand rather than relying on the default attribute.
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
-    const recoloured = resolve(snap).map((c, i) =>
-      i === 0 ? { ...c, fg: Colour.BLUE } : c);
+    const recolored = resolve(snap).map((c, i) =>
+      i === 0 ? { ...c, fg: Color.BLUE } : c);
 
-    const readable = drawList(snap, recoloured, atlas, SCHEMES.default!);
-    const saturated = drawList(snap, recoloured, atlas, SCHEMES['3279']!);
+    const readable = drawList(snap, recolored, atlas, SCHEMES.default!);
+    const saturated = drawList(snap, recolored, atlas, SCHEMES['3279']!);
 
     // DERIVED from the registry on purpose. The literal value is pinned once, in
     // frontend's palette.test.ts; what THIS test asserts is that drawList consults the
     // registry at all -- so it fails if drawlist.ts ever regrows a private table, which is
     // the drift that shipped two different blues in the first place.
-    expect(readable.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Colour.BLUE));
+    expect(readable.cells[0]!.fg).toEqual(schemeRgb(SCHEMES.default!, Color.BLUE));
     expect(saturated.cells[0]!.fg).toEqual([0, 0, 255]);
   });
 
-  it('draws the default green field colour from the scheme', () => {
+  it('draws the default green field color from the scheme', () => {
     expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.default!).cells[0]!.fg)
       .toEqual([36, 216, 48]);                       // zti green
     expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.x3270!).cells[0]!.fg)
       .toEqual([0x32, 0xcd, 0x32]);                  // x3270 limegreen
   });
 
-  it("draws the OIA in the scheme too, not in core's colours", () => {
-    // The OIA is our chrome, so no host byte says what colour it is -- but it must not be
+  it("draws the OIA in the scheme too, not in core's colors", () => {
+    // The OIA is our chrome, so no host byte says what color it is -- but it must not be
     // the one scheme-independent thing on screen.
     const list = listFor(screenWith([[0, 0xc1]]), SCHEMES.green!, 'X Wait');
     const oia = list.oia!.cells[list.oia!.cells.length - 1]!;

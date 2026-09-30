@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { cp037, Colour } from '@tn3270/core';
+import { cp037, Color } from '@tn3270/core';
 import { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH, SCHEMES, schemeRgb } from '@tn3270/frontend';
 import { keypadRegion, KEYPAD_ROWS_TALL, type KeypadRegion } from '../src/keypad.js';
 // From `hittest.js`, not `keypad.js`: the renderer hit-tests in the BROWSER, so this function lives
@@ -37,15 +37,15 @@ const labelCells = (r: KeypadRegion, b: KeypadButton): readonly DrawCell[] =>
 const BLOCK = KEYPAD_KEY_WIDTH - 1;
 
 /**
- * How many pad cells precede a centred label in its 5-cell block.
+ * How many pad cells precede a centerd label in its 5-cell block.
  *
  * This DOES restate the implementation's expression, and only the whole-layout loop below uses it,
  * where the alternative is 47 hand-written offsets. The independent statement of the same rule is
- * `centres the label, so a one-character arrow sits in the middle of its block`, which writes the
+ * `centers the label, so a one-character arrow sits in the middle of its block`, which writes the
  * offsets down for four label lengths and would fail if this helper and the source were wrong
  * together.
  */
-const centreOffset = (label: string): number => Math.floor((BLOCK - label.length) / 2);
+const centerOffset = (label: string): number => Math.floor((BLOCK - label.length) / 2);
 
 describe('keypadRegion', () => {
   it('produces one button per key in the table', () => {
@@ -161,11 +161,11 @@ describe('keypadRegion', () => {
   it('draws every cell INVERSE: black ink on white paper', () => {
     // THE STYLING ITSELF. `blit` fills `cell.bg` over the whole cell and then stamps the glyph
     // tinted `cell.fg`, so black-on-white IS a reverse-video cell -- no new field, no new glyph.
-    // These are the OIA's own two colours exchanged, and not two arbitrary ones.
+    // These are the OIA's own two colors exchanged, and not two arbitrary ones.
     const r = region();
-    const ink = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
-    const paper = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
-    // Otherwise the assertions below would hold for a keypad drawn in one colour on itself.
+    const ink = schemeRgb(scheme, Color.NEUTRAL_BLACK);
+    const paper = schemeRgb(scheme, Color.NEUTRAL_WHITE);
+    // Otherwise the assertions below would hold for a keypad drawn in one color on itself.
     expect(ink).not.toEqual(paper);
     expect(r.cells.length).toBeGreaterThan(0);
     for (const c of r.cells) {
@@ -221,21 +221,21 @@ describe('keypadRegion', () => {
       for (let i = 0; i < BLOCK; i++) {
         expect(mine[i]!.x, `${b.label}[${i}]`).toBe(b.x + i * atlas.cellWidth);
       }
-      // The label's characters sit at the centred offset, and every other cell is a SPACE rather
+      // The label's characters sit at the centerd offset, and every other cell is a SPACE rather
       // than a repeat of a label character or a leftover from the key before.
       const space = atlas.index[ebcdicToCg(cp037.fromUnicode(' '))];
       for (let i = 0; i < BLOCK; i++) {
-        const ch = b.label[i - centreOffset(b.label)];
+        const ch = b.label[i - centerOffset(b.label)];
         const want = ch === undefined ? space : atlas.index[ebcdicToCg(cp037.fromUnicode(ch))];
         expect(mine[i]!.glyph, `${b.label} cell ${i}`).toBe(want);
       }
     }
   });
 
-  it('centres the label, so a one-character arrow sits in the middle of its block', () => {
+  it('centers the label, so a one-character arrow sits in the middle of its block', () => {
     // HAND-DERIVED rather than a restatement of the implementation's expression. The block is FIVE
     // cells, which is odd, so a 1-character label starts at cell 2 with two blanks either side --
-    // exactly centred -- a 3-character at 1, and a 4- or 5-character at 0. Left-aligning instead
+    // exactly centerd -- a 3-character at 1, and a 4- or 5-character at 0. Left-aligning instead
     // would put every one of these at 0, which is the mutation this catches.
     const r = region();
     const space = atlas.index[ebcdicToCg(cp037.fromUnicode(' '))];
@@ -256,13 +256,13 @@ describe('keypadRegion', () => {
     // would draw a different glyph, which only a screenshot golden would catch. This must agree
     // with the screen and the OIA -- `column()` in `cg.ts` is the one copy, imported by all three.
     //
-    // `+ centreOffset` because the six cells now include the centring pad. `Enter` is 5 characters
+    // `+ centerOffset` because the six cells now include the centring pad. `Enter` is 5 characters
     // in a 6-cell key so its offset is 0 today, and the term is written anyway: without it this test
     // would silently start comparing pad cells if the alignment ever moved.
     const r = region();
     const enter = r.buttons.find((b) => b.label === 'Enter')!;
     const cells = labelCells(r, enter);
-    const at = centreOffset('Enter');
+    const at = centerOffset('Enter');
     for (let i = 0; i < 'Enter'.length; i++) {
       const ebcdic = cp037.fromUnicode('Enter'[i]!);
       expect(cells[at + i]!.glyph).toBe(atlas.index[ebcdicToCg(ebcdic)]);
@@ -290,7 +290,7 @@ describe('keypadRegion', () => {
     const r = keypadRegion(shifted, scheme, 0);
     const enter = r.buttons.find((b) => b.label === 'Enter')!;
     const cells = labelCells(r, enter);
-    const at = centreOffset('Enter');
+    const at = centerOffset('Enter');
     for (let i = 0; i < 'Enter'.length; i++) {
       const cg = ebcdicToCg(cp037.fromUnicode('Enter'[i]!));
       expect(cells[at + i]!.glyph).toBe(cg + shift);
@@ -414,14 +414,14 @@ describe('hitTest', () => {
  * only thing in the suite that can fail for either mistake.
  *
  * BOTH MUTATIONS WERE RUN against these assertions, verbatim:
- *   `* scale` for `/ scale`    -> two failures, the first being "finds the button under the centre of
+ *   `* scale` for `/ scale`    -> two failures, the first being "finds the button under the center of
  *                                every button": `PF13: expected undefined to deeply equal
  *                                { x: +0, y: 350, w: 54, h: 14, ... }`.
- *   dropping `- at.x`/`- at.y` -> the centre probes still PASS -- `at.x / scale` is 13.3 scale-1
+ *   dropping `- at.x`/`- at.y` -> the center probes still PASS -- `at.x / scale` is 13.3 scale-1
  *                                pixels of slop inside a 54-wide button -- and only the
  *                                last-device-pixel test fails: `PF13: expected { x: 54, y: 364, ... }
  *                                to deeply equal { x: +0, y: 350, ... }`, i.e. PF2. THAT is why the
- *                                edge probe is here and not just the centre one.
+ *                                edge probe is here and not just the center one.
  */
 describe('hitTestAt', () => {
   const scale = 3;
@@ -431,7 +431,7 @@ describe('hitTestAt', () => {
   /** Where a scale-1 point lands on the canvas -- i.e. exactly what `paint` would draw. */
   const onCanvas = (x: number, y: number) => ({ x: at.x + x * scale, y: at.y + y * scale });
 
-  it('finds the button under the centre of every button', () => {
+  it('finds the button under the center of every button', () => {
     for (const b of r.buttons) {
       const p = onCanvas(b.x + b.w / 2, b.y + b.h / 2);
       expect(hitTestAt(r.buttons, p.x, p.y, at, scale), b.label).toEqual(b);
@@ -439,8 +439,8 @@ describe('hitTestAt', () => {
   });
 
   it('finds it from the LAST DEVICE PIXEL of every button, which is what pins the offset', () => {
-    // A centre probe cannot catch a dropped offset: `at.x / scale` is 13.3 scale-1 pixels and a
-    // button is 54 wide, so the centre of one stays inside it. The last pixel does not -- it lands in
+    // A center probe cannot catch a dropped offset: `at.x / scale` is 13.3 scale-1 pixels and a
+    // button is 54 wide, so the center of one stays inside it. The last pixel does not -- it lands in
     // the neighbouring button, or outside the keypad at the end of a row.
     for (const b of r.buttons) {
       const p = onCanvas(b.x + b.w, b.y + b.h);
@@ -461,7 +461,7 @@ describe('hitTestAt', () => {
     expect(hitTestAt(r.buttons, 0, 0, at, scale)).toBeUndefined();
   });
 
-  it('is hitTest itself when the scale is 1 and nothing is centred', () => {
+  it('is hitTest itself when the scale is 1 and nothing is centerd', () => {
     // Written down because it is the DEGENERATE case, not the interesting one: this assertion is
     // green under both mutations above, which is precisely why the harnesses cannot be the check.
     for (const b of r.buttons) {

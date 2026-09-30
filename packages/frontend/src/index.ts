@@ -58,7 +58,7 @@ export { applyAction } from './actions.js';
 export { BINDING_INTENT } from './bindings.js';
 export type { Binding } from './bindings.js';
 
-// The display palettes. Shared because a front end's colours are a presentation choice that
+// The display palettes. Shared because a front end's colors are a presentation choice that
 // must not differ BETWEEN front ends -- the GUI drew core's saturated primaries while the
 // TUI had its own gentler table, and a user reported the blue as unreadable. Core keeps the
 // architected meaning; this decides what gets drawn.

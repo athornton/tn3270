@@ -115,7 +115,7 @@ describe('the minimum geometry, which now matches c3270', () => {
 });
 
 describe('centring, border and cursor', () => {
-  it('centres the screen in a roomy terminal instead of hugging the corner', () => {
+  it('centers the screen in a roomy terminal instead of hugging the corner', () => {
     // A JupyterLab terminal is essentially never 80x24, so this is the common case.
     const h = harness(40, 100);
     h.app.start();
@@ -154,17 +154,17 @@ describe('centring, border and cursor', () => {
   });
 
   it('makes the cursor visible, and restores it on exit', () => {
-    // A block cursor in a colour of its own; on the old dark-grey background the
+    // A block cursor in a color of its own; on the old dark-grey background the
     // cursor was effectively invisible. OSC 12 is best-effort -- a terminal that
     // does not implement it ignores the sequence -- so the shape is set too.
     const h = harness();
     h.app.start();
-    expect(h.stdout.all).toContain('\x1b]12;');   // set cursor colour
+    expect(h.stdout.all).toContain('\x1b]12;');   // set cursor color
     expect(h.stdout.all).toMatch(/\x1b\[\d q/);   // DECSCUSR shape
     const before = h.stdout.all;
     h.app.restore();
     const added = h.stdout.all.slice(before.length);
-    expect(added).toContain('\x1b]112');          // reset cursor colour
+    expect(added).toContain('\x1b]112');          // reset cursor color
     expect(added).toMatch(/\x1b\[0 q/);           // reset cursor shape
   });
 });
@@ -592,7 +592,7 @@ describe('the special-keys overlay', () => {
   });
 
   it('marks the selection in reverse video, inside the screen region and not the terminal corner', () => {
-    // 40x100: the screen's top-left is terminal row 9, column 11 -- the same address 'centres the
+    // 40x100: the screen's top-left is terminal row 9, column 11 -- the same address 'centers the
     // screen in a roomy terminal' pins. Drawing at 1;1 instead would put the list outside the
     // border, over whatever the terminal had there.
     const h = harness(40, 100);
