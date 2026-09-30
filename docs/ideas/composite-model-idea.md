@@ -35,7 +35,7 @@ Box" but **"no G-terminal took Box, and this model adds it"** — which is a cle
 a composite model is *for*. The argument never depended on the uncertainty; it depended on there
 being a capability with no device to aim at, and that is exactly what Box now is.
 
-## What already exists in our favour
+## What already exists in our favor
 
 - **Models live in ONE table with ONE shape.** `packages/core/src/termtype.ts` `KNOWN_MODELS` maps a
   name to `{ ttype, alternate }`, and `lookUpModel` rejects anything not in it *by name*. Adding a

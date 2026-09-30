@@ -168,9 +168,9 @@ CASES = [
     #
     # IT STOPS ON A KNOWN DIVERGENCE THAT IS NOT OUR BUG -- rule 3 above, a trace
     # records one client version. At the 6th block we send our TERMINAL-TYPE as
-    # `IBM-3278-4-E`; the recorded x3270 sent `IBM-3279-4-E` (line 105), the COLOUR
+    # `IBM-3278-4-E`; the recorded x3270 sent `IBM-3279-4-E` (line 105), the COLOR
     # digit, while still sending `IBM-3278-4-E` for its TN3270E DEVICE-TYPE (line 78).
-    # That is `wrongTerminalName`: `telnet.c:2104` uses the colour digit when
+    # That is `wrongTerminalName`: `telnet.c:2104` uses the color digit when
     # `model_num < 4` OR the resource is set, and this recording is a model 4 with it
     # set (`Model 3279-4-E` in the trace header). Whether to match it is an open
     # question recorded in docs/live-testing.md, not a defect to fix here.
@@ -189,7 +189,7 @@ CASES = [
          mismatch_ok=True,
          stop_reason=(
              'we answer WONT TN3270E and fall back to classic TN3270 correctly, then '
-             'send TERMINAL-TYPE `IBM-3278-4-E` where this recording sent the colour '
+             'send TERMINAL-TYPE `IBM-3278-4-E` where this recording sent the color '
              'digit `IBM-3279-4-E` -- x3270 s `wrongTerminalName` (telnet.c:2104), a '
              'version/resource divergence and not a defect; see the comment above')),
 
@@ -347,7 +347,7 @@ CASES = [
     # `mismatch_ok` IS NOT NEEDED ON ANY OF THE FOUR: every one of the 9 asserted
     # blocks matches byte-for-byte with zero `Emulator data mismatch` lines (measured
     # directly, not inferred from the block count), because none of the three trap
-    # variables (USER, CODEPAGE, wrongTerminalName's colour digit -- these are Model
+    # variables (USER, CODEPAGE, wrongTerminalName's color digit -- these are Model
     # 4/3278-4-E traces like wont-tn3270e.trc, but TERMINAL-TYPE is never reached
     # before Quit fires) is ever exercised.
     Case('devname_success.trc', '3278-4-E', 9,

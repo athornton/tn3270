@@ -14,7 +14,7 @@ and the HOD support matrix plus a 3192G ROM disassembly (2026-09-28). Sections b
 **STATUS: nothing here has been checked against a terminal we have driven, or a byte on a wire we
 have sent.** Read the caveat section before designing against it. **But the claim is now narrower
 than "a paper exercise" (corrected 2026-09-28):** the sources include a **3192G ROM disassembly** and
-IBM's own emulator support matrix, so parts of this file describe measured firmware behaviour rather
+IBM's own emulator support matrix, so parts of this file describe measured firmware behavior rather
 than a specification's intent. That is still not a live witness — it says what the device would do,
 not that we have made it do anything. **Per-claim provenance is what matters; see the 2026-09-28
 section, and blueglass's own markers.**
@@ -341,7 +341,7 @@ independently and the HOD matrix has no Box row at all — three sources. See th
   `0x0F0F`/`0x0F10`/`0x0F11` come straight from GA23-0059-07 and are not in doubt**; understanding
   its numbering is a task for whoever implements, not a correction to ours.
 
-**Practical upshot: consult `GocaDecoder.java` while implementing, as a behavioural reference for the
+**Practical upshot: consult `GocaDecoder.java` while implementing, as a behavioral reference for the
 3270 binding, exactly as VMGIF is treated for PS.** It is the best available substitute for
 GA18-2177/GA18-2535 until those are found — but it is a substitute, and its Partial Arc conflict is a
 live reminder that it is not authoritative.
@@ -368,7 +368,7 @@ HOD leaves **Arc (C6/86) blank** for the 3192-G, and blueglass reports the firmw
 Arc handler** (ROM dispatch table). Both can be true: **HOD's matrix documents HOD's limits, not the
 terminal's.** The same pattern explains the matrix's asterisked rows — `Set Character Angle (34)` and
 `Set Character Shear (35)` are ticked for HOD with the footnote *"Host On-Demand Version 4.0 accepts
-these graphics orders, but ignores them"*, while the firmware **honours both** (34 scaling x by 3 and
+these graphics orders, but ignores them"*, while the firmware **honors both** (34 scaling x by 3 and
 y by 4, which looks like aspect correction).
 
 **So a support matrix is a statement about a client. Do not read it as a device capability**, in
@@ -383,11 +383,11 @@ Window (27)` is J3270PC-only** (blank for the 3192-G), and **`Segment Characteri
 
 | Question | Answer | Marker |
 |---|---|---|
-| Coordinate origin | Centre at pel (360,191), one unit per pel, Y **up**; screen is -360..359 x -192..191. Only the **graphics cursor** scales y by 3/4 | Price + firmware |
+| Coordinate origin | Center at pel (360,191), one unit per pel, Y **up**; screen is -360..359 x -192..191. Only the **graphics cursor** scales y by 3/4 | Price + firmware |
 | Arc (C6/86) supported? | **Yes**, real handler, HOD's blank cell notwithstanding | ROM |
-| Character Angle / Shear honoured? | **Yes**, both; HOD merely accepts and ignores them | ROM |
+| Character Angle / Shear honored? | **Yes**, both; HOD merely accepts and ignores them | ROM |
 | Procedural instruction layouts (08, 09, 0A, 0F, 31) | 08/09/0A/0F are fixed 2-byte with operand 00; 31 is long. **All go in `0F11` Object Control**, not `0F10` | ROM |
-| Query reply payloads B2, B4, B6 | B2 = line types 1-8 (**default 7**), B4 = colours 0-7 as red/blue/green plane flags, B6 = built-in F0 sets | ROM, 3192G only |
+| Query reply payloads B2, B4, B6 | B2 = line types 1-8 (**default 7**), B4 = colors 0-7 as red/blue/green plane flags, B6 = built-in F0 sets | ROM, 3192G only |
 | Segment FLAG1/FLAG2 reserved bits | Never read. Copying Price's `74`/`68` is safe. **Bit 0 of FLAG2 (nonchained) is REJECTED with error 43 — send chained segments only** | ROM |
 
 ### Image encoding rules, which are firmware-exact and will bite an encoder
@@ -402,8 +402,8 @@ Worth transcribing because these are error codes, not preferences:
   either side edge, is **skipped whole**. An image wider than the screen therefore **draws nothing**.
   **Our encoder must clip host-side** — the terminal will not do it for us, and the failure mode is a
   blank screen rather than a truncated picture.
-- **Colour is per plane.** Each image draws in the current colour and mix, so a full-colour picture
-  is one image per plane, composed with OR or XOR (colour indices are bit-coded: blue 1, red 2,
+- **Color is per plane.** Each image draws in the current color and mix, so a full-color picture
+  is one image per plane, composed with OR or XOR (color indices are bit-coded: blue 1, red 2,
   green 4). No native IOCA on this family.
 - Still untested on hardware: **bit order within a byte** (GDF says leftmost pel = high bit) and
   **whether 0 bits are transparent** (`[inferred]` yes, since Set Background Mix is ignored).
@@ -447,7 +447,7 @@ and this model adds it" rather than "Box's status is unknown".
 **Blueglass cites a `GRAPHICS_DATA_STREAM.md` for the ROM addresses (`1A:571B`, `1A:0906-097C`,
 the `0F11` dispatcher at `1A:1297`) and THAT FILE IS NOT ON THIS BOX.** The findings are recorded
 here; the underlying disassembly evidence is not. **Ask the user for it before designing the order
-generator** — it is the difference between "the firmware honours Arc" and knowing what its handler
+generator** — it is the difference between "the firmware honors Arc" and knowing what its handler
 actually accepts.
 
 Still no live witness and still no x3270 oracle. Blueglass does not change that; a ROM disassembly
@@ -467,7 +467,7 @@ tells us what the device would do, not that we have made it do anything.
 2. **The 3270 binding of GOCA** — the equivalent of Appendix A/B for the 3270 data stream. Unknown
    whether a separate publication exists.
 3. ~~**Pel dimensions for the G-terminals.**~~ **ANSWERED 2026-09-28: 720 x 384 pels** `[hardware]`,
-   cell 9x12 or 9x16 by page depth `[single source: GDDM]`, origin at centre pel (360,191) with Y up
+   cell 9x12 or 9x16 by page depth `[single source: GDDM]`, origin at center pel (360,191) with Y up
    `[Price + firmware]`. **The three parts have three different provenances — quote them separately;
    only the origin is ROM-confirmed.** Runtime discovery via **Usable
    Area** and **Implicit Partition** Query Replies (both of which we already build and send) remains

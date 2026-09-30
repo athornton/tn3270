@@ -5980,7 +5980,7 @@ export function parseCommand(line: string): Command | null {
   return { name, args: splitArgs(rest) };
 }
 
-/** Split on commas or spaces, honouring double quotes and backslash escapes. */
+/** Split on commas or spaces, honoring double quotes and backslash escapes. */
 function splitArgs(rest: string): string[] {
   if (rest.trim() === '') return [];
   const args: string[] = [];

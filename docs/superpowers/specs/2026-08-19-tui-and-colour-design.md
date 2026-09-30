@@ -1,12 +1,12 @@
-# TUI Front End and 3279 Colour — Design
+# TUI Front End and 3279 Color — Design
 
 Design settled 2026-08-19. Two linked deliverables:
 
-1. **Extended attributes in the core, far enough to do colour** — SA and SFE colour and
+1. **Extended attributes in the core, far enough to do color** — SA and SFE color and
    highlighting stored per cell, plus a resolution layer that turns protocol attributes
-   into concrete colours.
+   into concrete colors.
 2. **`packages/tui`, a c3270 analog** — a curses-style terminal front end over the
-   existing core, with terminfo-detected colour depth.
+   existing core, with terminfo-detected color depth.
 
 Programmable Symbol Sets are **out of scope** (the user's call). The cell model is
 already a tagged variant so PS can be added later without touching consumers.
@@ -42,17 +42,17 @@ where the swap happens. One presentation contract, three transports.
 
 ## THE MEASUREMENT THAT SETS THIS SCOPE
 
-**ISPF is already sending us colour we throw away.** Counted through our own parser over
+**ISPF is already sending us color we throw away.** Counted through our own parser over
 the committed TK5 fixture (`packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`), all 113 SA
 orders break down as:
 
 | SA type | meaning | count |
 |---|---|---|
-| `0x42` | foreground colour | **101** |
+| `0x42` | foreground color | **101** |
 | `0x00` | reset all character attributes to default | 12 |
 | — | MF orders | 0 |
 
-So colour is not speculative future-proofing for a hypothetical host. It is information
+So color is not speculative future-proofing for a hypothetical host. It is information
 a host we test against every day is transmitting and we are discarding at
 `execute.ts:363-366`. That is the whole justification for putting extended attributes in
 this spec rather than deferring them again.
@@ -66,10 +66,10 @@ completely hid the `0x00` resets, which matter — they are precisely the "retur
 default" case rule 4 below has to handle, and a design that only saw `0x42` might have
 skipped it.
 
-**`0x00` as an SA type is not the same as `0x00` as a colour value.** As a type it means
+**`0x00` as an SA type is not the same as `0x00` as a color value.** As a type it means
 "reset all character attributes to their defaults" (the manual: "The attribute type
 `X'00'` is always supported by the SA order", `pages.txt:2991`); as a *value* under type
-`0x42` it means "device default colour". Both appear in this fixture and conflating them
+`0x42` it means "device default color". Both appear in this fixture and conflating them
 would be a real bug.
 
 **What is already in place:** the parser fully decodes both carriers. SA arrives as
@@ -88,9 +88,9 @@ re-parsing; the work is storage, resolution, and rendering.**
 export type Cell = {
   kind: 'char';
   ebcdic: number;
-  /** Foreground colour, a raw 3270 colour identification (0xF0-0xFF), or undefined. */
+  /** Foreground color, a raw 3270 color identification (0xF0-0xFF), or undefined. */
   fg?: number;
-  /** Background colour, likewise. */
+  /** Background color, likewise. */
   bg?: number;
   /** Highlighting bits: blink, reverse, underscore. */
   gr?: number;
@@ -153,12 +153,12 @@ Two further rules from the same pages, both of which the naive implementation ge
 - **The composite rule** (`:2995-2997`): "The set of type-value pairs applied during
   character processing is a composite, by attribute type, of the last value specified in
   previously encountered SA orders." So SA state is a **per-type map**, not a single
-  value — an SA setting colour does not clear a previously set highlighting. Modelling it
+  value — an SA setting color does not clear a previously set highlighting. Modelling it
   as one value would silently drop attributes.
 - **A plain SF resets extended attributes** (p. 4-4, `:2874-2875`): "If the display
   receives an SF order, it sets the associated extended field attribute to its default
   value." So `SF` is not attribute-neutral; it must clear the field's extended
-  attributes, or a field following a coloured one inherits colour it was never given.
+  attributes, or a field following a colored one inherits color it was never given.
   Likewise **EW/EWA reset both extended field attributes and character attributes** of
   the cells they null (`:2988-2991`).
 
@@ -168,7 +168,7 @@ resolution falls through to the base field attribute (rule 2 below).
 
 **THREE MORE RULES, added 2026-08-19 because implementation found the four above were not
 sufficient.** All three are stated outright in the manual and all three fail silently —
-wrong colour, never an error:
+wrong color, never an error:
 
 - **A rewritten character loses the attributes of the character it replaced.** "Character
   attributes are associated with a character and not with the character's position in the
@@ -177,7 +177,7 @@ wrong colour, never an error:
   new character" (`pages.txt:3388-3391`). So stamping the running state onto a written
   cell must be an **assignment, not a merge** — clear the cell's attributes, then apply.
   This is the one that actually bit: the plan had a merge with an early return when no SA
-  was in effect, which left a previous record's colour on cells the new record overwrote.
+  was in effect, which left a previous record's color on cells the new record overwrote.
   x3270 avoids it by stamping all three unconditionally (`ctlr.c:2141-2143`) through
   `ctlr_add_fg`, which assigns (`ctlr.c:2865`).
 - **EUA resets the attributes of the cells it nulls.** "Field attributes and extended
@@ -206,13 +206,13 @@ requires a two-level lookup, not one:
 > in the extended field attribute.** Otherwise, the character attribute overrides the
 > field attribute. (`pages.txt:3383-3387`)
 
-So an SFE's colour is a property **of the field**, and a character whose own attribute is
-default must fall back to it — not to the base-attribute map. Our model stored SFE colour
+So an SFE's color is a property **of the field**, and a character whose own attribute is
+default must fall back to it — not to the base-attribute map. Our model stored SFE color
 only by stamping it onto the cells as they were written, which loses it the moment a cell
 is rewritten. Demonstrated concretely: an SFE field with `fg=yellow` and three characters
 gives all three yellow; a second record overwriting the middle character with no SFE and
-no SA leaves that one cell colourless between two yellow neighbours, **inside a field
-still defined as yellow**. There is nothing to recover the colour from.
+no SA leaves that one cell colorless between two yellow neighbors, **inside a field
+still defined as yellow**. There is nothing to recover the color from.
 
 Note this is not a bug in the assignment-not-merge rule above — that rule is right, and
 `pages.txt:3388-3391` requires exactly that clearing. The bug is that clearing the
@@ -220,7 +220,7 @@ Note this is not a bug in the assignment-not-merge rule above — that rule is r
 
 **x3270's model, which is the one to copy:**
 
-- `START_FIELD` zeroes the FA cell's colour (`ctlr.c:1394-1398`).
+- `START_FIELD` zeroes the FA cell's color (`ctlr.c:1394-1398`).
 - SFE writes its extended attributes **onto the FA cell itself** (`ctlr_add_fg(buffer_addr,
   efa_fg)` and siblings, `ctlr.c:1886-1889`) — the FA cell is where field-level extended
   attributes live.
@@ -235,10 +235,10 @@ Note this is not a bug in the assignment-not-merge rule above — that rule is r
    change, not a redesign.
 2. **Resolution (Task 5)** — `resolve()` needs a **field-extended-attribute term** between
    "the cell's own attribute" and "the base-attribute map". The drafted version reads only
-   `cell.fg` then falls straight through to `defaultColour(attr)`, so as drafted it cannot
+   `cell.fg` then falls straight through to `defaultColor(attr)`, so as drafted it cannot
    express this rule even once the data is stored. The precedence is: cell's own attribute
    → the field's extended attribute → base-attribute map → `mode3279` green.
-3. **`ResolvedCell` is unaffected** — this changes how a colour is *derived*, not what a
+3. **`ResolvedCell` is unaffected** — this changes how a color is *derived*, not what a
    renderer consumes.
 
 ### A plain SF must NOT reset the running SA state either — the plan said it should
@@ -253,13 +253,13 @@ It must not:
 - **The SA reset list is closed.** Four triggers, then: "These **four** actions all return
   the established set of character attribute type-value pairs to their default value"
   (`pages.txt:2977-2982`). A plain SF is not one of them.
-- x3270's `ORDER_SF` zeroes the FA cell's colour (`ctlr.c:1486-1487`) and **never touches
+- x3270's `ORDER_SF` zeroes the FA cell's color (`ctlr.c:1486-1487`) and **never touches
   `default_*`** — verified by listing every assignment to `default_fg` in the file: connect
   (`:410`), write-command reset (`:1414`), the SA order (`:1905`, `:1917`), and a resize
   path (`:2711`). No SF, no SFE.
 
 So a plain SF was destroying **character-scoped** state on a **field-scoped** event.
-Demonstrated: `SA fg=red`, char, plain SF, char gave the second character no colour where
+Demonstrated: `SA fg=red`, char, plain SF, char gave the second character no color where
 x3270 gives it red.
 
 **Note the symmetry, because it is the lesson.** The SFE leak gave a field attribute a
@@ -282,7 +282,7 @@ the other pairs standing.
 x3270 draws exactly this distinction: its SFE arm for `XA_ALL` traces and advances past
 without touching any `efa_*` (`ctlr.c:1869-1871`), while its SA arm zeroes all five
 defaults (`ctlr.c:1915-1921`). As originally shipped, a trailing `X'00'` pair in an SFE
-would have **silently discarded a colour the host did set** in the same order.
+would have **silently discarded a color the host did set** in the same order.
 
 **A related deliberate divergence, worth knowing before Task 5:** x3270 seeds *no* running
 state from SFE at all — it relies entirely on the FA-cell fallback. We do both (seed the
@@ -297,12 +297,12 @@ orders are character-level and **no field-attribute cell in it carries extended
 attributes**. That is precisely why this whole class of defect went unnoticed: the trace we
 regression-test against never exercises the field level.
 
-Consequence for **Task 6**, which is the task whose entire purpose is proving the colour
+Consequence for **Task 6**, which is the task whose entire purpose is proving the color
 gap closed against real host traffic: it can prove the *character* level and cannot prove
 the *field* level. The field level is unit-tested only. Do not let a green Task 6 be read
 as covering both — and if real coverage is wanted, it needs a trace from a host that sends
 SFE. See [[check-what-a-comparison-covers]]: a passing comparison proves nothing about
-behaviour its inputs never exercise.
+behavior its inputs never exercise.
 
 Attribute types to support (from `include/3270ds.h:240-255`, cross-checked against the
 manual):
@@ -313,8 +313,8 @@ manual):
   `0xF4` underscore, **`0xF8` intensify** (`3270ds.h:241-246`; do not stop at underscore
   — intensify is a fifth value and omitting it would silently render intensified text as
   plain)
-- `0x42` **foreground colour**
-- `0x45` **background colour**
+- `0x42` **foreground color**
+- `0x45` **background color**
 - `0xC0` basic field attribute (already implemented)
 
 Everything else — `0x43` character set, `0x46` transparency, `0xFE` input control —
@@ -324,7 +324,7 @@ saw one" rather than "we stopped looking".
 
 ### Resolution: a separate module, because two rules are protocol not preference
 
-Storage answers "what did the host say". A renderer needs "what colour is this cell",
+Storage answers "what did the host say". A renderer needs "what color is this cell",
 and that resolution is genuinely separate logic that must live in **exactly one place**
 for the TUI, the GUI and the web front end. New module `packages/core/src/render.ts`:
 
@@ -333,8 +333,8 @@ export interface ResolvedCell {
   /** Unicode string for the cell, ' ' for null/unprintable. */
   text: string;
   /** Concrete 3279 palette entry, never undefined. */
-  fg: Colour3279;
-  bg: Colour3279;
+  fg: Color3279;
+  bg: Color3279;
   blink: boolean;
   reverse: boolean;
   underscore: boolean;
@@ -349,8 +349,8 @@ export function resolve(snap: ScreenSnapshot, opts?: { mode3279?: boolean }): Re
 
 The rules it implements, each with its source:
 
-1. **An explicit SA/SFE colour wins.**
-2. **Absent that, colour derives from the base field attribute** — the 3279 default map:
+1. **An explicit SA/SFE color wins.**
+2. **Absent that, color derives from the base field attribute** — the 3279 default map:
    unprotected-normal → **green**, unprotected-intensified → **red**, protected-normal →
    **blue**, protected-intensified → **white**. This is x3270's `color_from_fa`
    (`Common/fprint_screen.c:78-95`), whose `field_colors[4]` table and `DEFCOLOR_MAP`
@@ -359,10 +359,10 @@ The rules it implements, each with its source:
 3. **`mode3279 == false` → everything is green.** x3270's same function returns
    `HOST_COLOR_GREEN` unconditionally when not in 3279 mode
    (`fprint_screen.c:91-94`). A 3278 is a monochrome device and must not be
-   colourised just because the host sent an attribute.
+   colorised just because the host sent an attribute.
 4. **`0x00` means "device default", not black.** The manual: "The `X'00'` value selects
    the device default color indicated in the Query Reply (Color) structured field"
-   (`pages.txt:3544-3546`). So `0x00` resolves through rule 2, never to a literal colour.
+   (`pages.txt:3544-3546`). So `0x00` resolves through rule 2, never to a literal color.
 5. **`0xF7` is Neutral, and resolution must LEAVE IT ALONE.** ~~It resolves to white.~~
    **This spec had it wrong and implementation corrected it (2026-08-20).** The manual says
    `X'F7'` "indicates that the color is defined by a triple-plane character set", and with a
@@ -372,7 +372,7 @@ The rules it implements, each with its source:
    (Neutral, listed separately from White `0xFF` in Table 4-7) with its own RGB in
    `palette.ts` on purpose, and x3270 keeps `HOST_COLOR_NEUTRAL_WHITE` (7) and
    `HOST_COLOR_WHITE` (15) as separate slots and special-cases F7 nowhere in resolution.
-   Remapping it to `Colour.WHITE` would collapse two colours a host chose between.
+   Remapping it to `Color.WHITE` would collapse two colors a host chose between.
 
 **Rules 4 and 5 are why resolution cannot live in a front end.** They are datastream
 semantics with citations, not rendering taste; reimplemented per front end they would
@@ -393,7 +393,7 @@ corroboration rather than a fully independent document.
 
 **THE RGB VALUES ARE OURS, NOT x3270's — and an earlier draft of this spec said
 otherwise, wrongly.** x3270's actual default RGB table is `rgbmap[16]` at
-`c3270/screen.c:213-229`, and it is a set of muted, named-CSS-style colours
+`c3270/screen.c:213-229`, and it is a set of muted, named-CSS-style colors
 (`neutral black 0x1a1a1a`, `blue 0x1e90ff` dodger blue, `green 0x32cd32` lime green,
 `black 0x2f4f4f` dark slate grey — its own comment admits "alas, this may be gray").
 **We use saturated primaries instead**, which is a deliberate presentation choice for a
@@ -408,16 +408,16 @@ Two consequences measured before committing to it:
   so must we. A test asserting pairwise distinctness is worth more than the
   near-vacuous "every entry has three bytes in range" check, which TypeScript's tuple
   type already guarantees.
-- **Saturated primaries survive 16-colour quantisation; x3270's palette does not.**
+- **Saturated primaries survive 16-color quantisation; x3270's palette does not.**
   With x3270's `rgbmap`, blue (`1e90ff`) and turquoise (`00ffff`) both quantise to ANSI
-  96, collapsing two of the seven base colours. With saturated primaries all seven stay
+  96, collapsing two of the seven base colors. With saturated primaries all seven stay
   distinct at 16 **and** 256. That is the concrete reason to keep our own values, and
   it is why the quantisation tests can assert seven-distinct at all.
 
 **BEWARE THE OCR IN THAT TABLE — it is damaged in two places and must not be
 transcribed literally.** It renders F7 as `X'F?'`, and it prints **`X'FB'` twice**, for
 both Black and Purple. The correct values are Black `0xF8` and Purple `0xFB`; F8 is
-confirmed by the sequence being contiguous `F0`-`FF` and by x3270's own colour table.
+confirmed by the sequence being contiguous `F0`-`FF` and by x3270's own color table.
 Verify every one of these 16 against `include/3270ds.h` before committing the table —
 this is precisely the failure mode `verify-wire-constants-against-sources` exists for.
 
@@ -425,13 +425,13 @@ this is precisely the failure mode `verify-wire-constants-against-sources` exist
 
 A well-behaved host sends extended attributes only to a client that says it has them.
 x3270 answers Query Reply **Color (`0x86`)** and **Highlighting (`0x87`)**
-(`Common/sf.c:73`, `:86`; `do_qr_color` at `:735-763` reports 16 colours). Our
+(`Common/sf.c:73`, `:86`; `do_qr_color` at `:735-763` reports 16 colors). Our
 `queryreply.ts` is built from a capability list expressly so "advertising something later
 is one list entry", so this is two new units, not a refactor.
 
-**But note what the TK5 measurement above proves: TSO is already sending SA colour
+**But note what the TK5 measurement above proves: TSO is already sending SA color
 without our advertising anything.** So the two units are for correctness with
-better-behaved hosts, not a prerequisite for seeing colour on TK5 — and that asymmetry
+better-behaved hosts, not a prerequisite for seeing color on TK5 — and that asymmetry
 should be recorded as a live finding when it is confirmed on the wire, not assumed
 either way.
 
@@ -448,22 +448,22 @@ native dependency in a project whose stated policy is "no deps beyond `node:net`
 ```
 packages/tui/src/
   main.ts        argv, TERM detection, raw-mode setup and teardown
-  colours.ts     3279 palette -> ANSI, quantised per detected depth
+  colors.ts     3279 palette -> ANSI, quantised per detected depth
   render.ts      ResolvedCell[] -> ANSI, dirty-cell diffing
   keymap.ts      terminal key sequences -> core Keyboard actions
   app.ts         wires Session events to render; owns the run loop
 ```
 
-### Colour depth: detect, never assume
+### Color depth: detect, never assume
 
 Four tiers, chosen from the terminal's actual capability:
 
-| detected | behaviour |
+| detected | behavior |
 |---|---|
 | 24-bit | exact 3279 RGB via `38;2;r;g;b` |
 | 256 | nearest entry in the xterm 6×6×6 cube |
-| 8/16 | the standard ANSI mapping, where the 3279's seven core colours naturally live |
-| monochrome / none | ignore colour; render highlighting with reverse and intensity only |
+| 8/16 | the standard ANSI mapping, where the 3279's seven core colors naturally live |
+| monochrome / none | ignore color; render highlighting with reverse and intensity only |
 
 **Detection is `tput -T$TERM colors`, shelled out — not a library and not Node's
 builtin.** Measured on the dev box, all three approaches against the same terminals:
@@ -472,7 +472,7 @@ builtin.** Measured on the dev box, all three approaches against the same termin
 `getColorDepth` column below originally read 8/16/16/16/16. That mixed two units:
 the call returns **bits of depth**, documented as 1/4/8/24 and confirmed at both
 ends here (`TERM=dumb` → 1, `COLORTERM=truecolor` → 24), so four of the five rows
-had been written as colour COUNTS while the first was left as the raw return. The
+had been written as color COUNTS while the first was left as the raw return. The
 raw value is given first, with the count it implies in brackets. The conclusion is
 unchanged and in fact stronger: `tput` is right five times out of five,
 `getColorDepth` once.
@@ -488,7 +488,7 @@ unchanged and in fact stronger: `tput` is right five times out of five,
 
 Node's `tty.WriteStream.getColorDepth` is `TERM`-string heuristics, not terminfo, and it
 is wrong in exactly the cases this feature exists to detect — anything under GNU screen
-loses colour, and a direct-colour terminal is capped at 16. The `terminfo` npm package
+loses color, and a direct-color terminal is capped at 16. The `terminfo` npm package
 does parse the binary database, but it is v0.1.1, last published 2016, one maintainer:
 not a dependency worth taking. `tput` is POSIX, ships with the terminfo database it
 reads, and is at `/usr/bin/tput` here.
@@ -506,13 +506,13 @@ Three refinements, each of which is a real case:
    trusting, in the one case where nothing else is available, the very function the
    table above shows to be wrong four times in five — and its errors run in the
    dangerous direction. It reports 4 [16] for `vt100`, so the fallback would emit
-   colour escapes to a terminal that cannot show them, printing them as literal
+   color escapes to a terminal that cannot show them, printing them as literal
    text across the user's screen. Monochrome renders correctly everywhere, so it is
    the safe answer when detection genuinely fails. `--colors` remains the way to
-   get colour on a box with no `tput`.
+   get color on a box with no `tput`.
 3. **`--colors 0|8|16|256|16m` forces it.** Detection is a default, not a verdict:
    terminfo entries are sometimes conservative, and the monochrome path needs to be
-   testable on a colour terminal.
+   testable on a color terminal.
 
 ### Keyboard
 
@@ -578,7 +578,7 @@ be unrepresentable, and that limit should be documented rather than papered over
 - **Raw mode must be restored on every exit path** — normal quit, `Ctrl-]`, an uncaught
   exception, and SIGTERM. A TUI that dies leaving the terminal in raw mode with no echo
   is the single most user-hostile failure available here.
-- **Resolution must never throw on a malformed attribute.** An unknown colour value
+- **Resolution must never throw on a malformed attribute.** An unknown color value
   resolves through the default map with a trace note; a bad attribute from a host must
   not take the client down, matching how the codebase treats program checks as reportable
   rather than fatal.
@@ -588,56 +588,56 @@ be unrepresentable, and that limit should be documented rather than papered over
 The existing discipline applies: unit tests against synthetic screens, then a live host.
 
 1. **Resolution is pure and exhaustively testable** — `resolve()` over all four base
-   attribute combinations × explicit/absent/`0x00`/`0xF7` colour, in both `mode3279`
+   attribute combinations × explicit/absent/`0x00`/`0xF7` color, in both `mode3279`
    states. Rules 3, 4 and 5 each get a test that fails if the rule is dropped.
 2. **Quantisation is pure** — the 16 palette entries at each of the four depths, pinned
    as byte strings. This is where a wrong table shows up immediately.
 3. **SA running state**, one test per rule in the quoted passage, because this is where
    this design is most likely to ship a bug: that it applies to characters after it and
-   not before; that it is a **per-type composite** (an SA colour does not clear an SA
+   not before; that it is a **per-type composite** (an SA color does not clear an SA
    highlighting); that it **resets at each write command**; that **Clear resets it**;
    that **plain SF clears a field's extended attributes**; and that **EW/EWA clear both**
    for the cells they null. Each rule gets a test that fails if the rule is removed.
 4. **The TK5 fixture is the regression corpus, and it is already on disk.** Replaying
-   `mvs-tk5-tso-ispf.trace` must produce coloured output; 101 foreground SA orders and 12
-   resets mean the ISPF panel has known colour structure to assert against. **This is the
+   `mvs-tk5-tso-ispf.trace` must produce colored output; 101 foreground SA orders and 12
+   resets mean the ISPF panel has known color structure to assert against. **This is the
    test that would have caught the whole gap**, and it needs no host. Pin the counts
-   (113/101/12) as a test too, so a parser regression that stops recognising SA shows up
+   (113/101/12) as a test too, so a parser regression that stops recognizing SA shows up
    as a failure rather than as a quietly monochrome screen.
 5. **Live: drive a real ISPF session in the TUI and look at it.** Screenshot-equivalent
-   is a `ScreenJson` dump plus the resolved colours, diffable against a `zti` run for
-   the same panel. `zti` is on disk at `~/git/tnz`, renders colour normally inside any
-   colour-capable terminal, and is therefore the reference for colour the way s3270 was
+   is a `ScreenJson` dump plus the resolved colors, diffable against a `zti` run for
+   the same panel. `zti` is on disk at `~/git/tnz`, renders color normally inside any
+   color-capable terminal, and is therefore the reference for color the way s3270 was
    for the datastream.
 
-   **The hazard is in the capture method, not in `zti`.** Its colour gate is
+   **The hazard is in the capture method, not in `zti`.** Its color gate is
    `self.colors >= 8 and sys.stdin.isatty()` (`tnz/tnz.py:251-253`), and `self.colors`
    defaults to **768** (`:94`, overridable via `TNZ_COLORS`), so the `>= 8` half is
    satisfied out of the box and `isatty()` is the only thing that can fail. Piping a
-   `zti` run's stdout to a file makes it false, silently producing a colourless capture
-   that would "prove" we emit too much colour. Capture through a pty — `script`, as the
+   `zti` run's stdout to a file makes it false, silently producing a colorless capture
+   that would "prove" we emit too much color. Capture through a pty — `script`, as the
    2026-08-17 session did — or the comparison is worthless. Same class of mistake as the
    negative-control probe that reported an absence it could not have detected.
 
-   **`zti` is a reference for WHICH colour, not for quantisation.** It has no depth
+   **`zti` is a reference for WHICH color, not for quantisation.** It has no depth
    tiering: `tnz.py` consults no terminfo, and `zti.py` reduces everything to a boolean
    `min(tns.colors, self.colors) >= 8` (`zti.py:1560`, `:3134`, `:3180`). So our
    16/256/24-bit ladder has no reference implementation to diff against and its tests
    must be self-contained — which is what test 2 above is for.
 
 **Mutation-test the resolution rules.** Review on the stage 2a work found two tests that
-passed with the behaviour they claimed to pin deleted; the colour rules are exactly the
+passed with the behavior they claimed to pin deleted; the color rules are exactly the
 shape of thing where an assertion can look right and pin nothing.
 
 ## KNOWN GAP, deliberately deferred: `Keyboard` does not maintain extended attributes
 
 **Found 2026-08-20 by review of Task 4. Real, reproduced, and NOT fixed by this spec's
-tasks.** Recording it because the alternative is that Task 5 renders stale colour and
+tasks.** Recording it because the alternative is that Task 5 renders stale color and
 nobody knows why.
 
 Task 3 gave `setChar` a deliberate contract: it does not touch extended attributes,
 because the *executor* holds the running SA state and calls `setExtended` immediately
-after. The executor honours that. **`Keyboard` never did**, and this work did not revisit
+after. The executor honors that. **`Keyboard` never did**, and this work did not revisit
 it — so every *local* screen mutation leaves attributes desynchronised from the characters
 they belong to. Measured against x3270:
 
@@ -646,7 +646,7 @@ they belong to. Measured against x3270:
 | type `Z` over a red cell | `Z` keeps red | clears it — `ctlr_add_fg(baddr, 0); ctlr_add_gr(baddr, 0)` (`kybd.c:1378-1379`) |
 | Delete inside `A/red B/blue C/blue` | leaves `B/red` | moves the whole `struct ea`, so `B/blue` |
 | EraseEOF over red cells | nulls keep red | `ctlr_add(…, EBC_null, …)` clears |
-| Insert `Z` at a red cell | `Z` inherits red | colours shift with their characters |
+| Insert `Z` at a red cell | `Z` inherits red | colors shift with their characters |
 
 x3270's model is that **an attribute travels with its character byte** — which is the same
 rule `applySa` already quotes: "whenever a character is overwritten by a new character (or
@@ -658,7 +658,7 @@ which clears the three arrays directly.
 **Why it is deferred rather than folded in:** it is `keyboard.ts`, not the executor or the
 renderer, and it touches six call sites in a module with its own well-tested invariants.
 Doing it inside a task scoped to the executor would mean an unreviewed change to typing
-behaviour riding along with a colour change.
+behavior riding along with a color change.
 
 **Why it must not be forgotten:** the visible symptom is a user typing over a red field
 and seeing their own text come out red, which reads as a rendering bug in the TUI and will
@@ -667,11 +667,11 @@ model — clear on overwrite, and move attributes with characters on insert/dele
 
 ## Scope boundary
 
-**In:** per-cell fg/bg/highlighting storage; SA and SFE colour and highlighting; the
+**In:** per-cell fg/bg/highlighting storage; SA and SFE color and highlighting; the
 resolution module and the 3279 palette; Color and Highlighting Query Reply units;
-`packages/tui` with terminfo-detected colour, keymap, OIA and raw-mode safety.
+`packages/tui` with terminfo-detected color, keymap, OIA and raw-mode safety.
 
-**Out:** Programmable Symbol Sets (`0x43` character set stays dropped); MF colour
+**Out:** Programmable Symbol Sets (`0x43` character set stays dropped); MF color
 (`modifyFieldIgnored` keeps counting); the web front end and its server; the Electron
 GUI; mouse support; alternate geometry beyond what the core already negotiates; and
 **`Keyboard`'s maintenance of extended attributes on local edits** — see *KNOWN GAP*
@@ -679,5 +679,5 @@ above, which is real, measured, and must be fixed before the TUI is used in earn
 
 **Not assumed:** that any of this is conformant on a modern host. Everything here is
 verified against VM/370 and MVS 3.8j only — see the *Test hosts* section of the main
-design doc, and expect colour behaviour to be one of the things a future z/OS run
+design doc, and expect color behavior to be one of the things a future z/OS run
 checks first.

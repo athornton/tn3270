@@ -4,7 +4,7 @@
 
 **Goal:** Give every front end one palette registry with four selectable schemes, bind the 3270 keys that were implemented but unreachable, and make the default terminal type work on MVS.
 
-**Architecture:** A new `packages/frontend/src/palette.ts` holds four schemes, each carrying both a 16-colour RGB table and a 16-slot ANSI map; the TUI and GUI both resolve colour through it and both parse `-scheme`. The keys are table entries in three existing files plus two new `Action` kinds. The default terminal type is one constant and four test expectations.
+**Architecture:** A new `packages/frontend/src/palette.ts` holds four schemes, each carrying both a 16-color RGB table and a 16-slot ANSI map; the TUI and GUI both resolve color through it and both parse `-scheme`. The keys are table entries in three existing files plus two new `Action` kinds. The default terminal type is one constant and four test expectations.
 
 **Tech Stack:** TypeScript (ESM, NodeNext), vitest, npm workspaces (`core <- frontend <- {cli, tui, gui}`), Electron 44 for the GUI, Xvfb for headless capture.
 
@@ -40,7 +40,7 @@ Five facts that will otherwise cost you an hour each. All measured, not inferred
 
 **Created:**
 - `packages/frontend/src/palette.ts` — the scheme registry: the `Scheme` type, four schemes, `resolveScheme`, `schemeRgb`, `DEFAULT_SCHEME`. Sole owner of "what RGB and which ANSI slot".
-- `packages/frontend/test/palette.test.ts` — registry completeness, per-scheme distinctness, alias and error behaviour.
+- `packages/frontend/test/palette.test.ts` — registry completeness, per-scheme distinctness, alias and error behavior.
 - `packages/gui/test/renderer-imports.test.ts` — guards the renderer's runtime import graph.
 
 **Modified:**
@@ -51,7 +51,7 @@ Five facts that will otherwise cost you an hour each. All measured, not inferred
 - `packages/frontend/src/actions.ts` — two new cases.
 - `packages/frontend/src/bindings.ts` — PA3, Attn, Insert.
 - `packages/frontend/src/index.ts` — export the registry.
-- `packages/tui/src/colours.ts` — `TUI_PALETTE` and `ANSI_16` deleted; `sgrFor` takes a scheme.
+- `packages/tui/src/colors.ts` — `TUI_PALETTE` and `ANSI_16` deleted; `sgrFor` takes a scheme.
 - `packages/tui/src/render.ts` — `TerminalRenderer` takes a scheme.
 - `packages/tui/src/app.ts` — threads the scheme.
 - `packages/tui/src/main.ts` — parses `-scheme`, threads it, usage text.
@@ -80,13 +80,13 @@ Create `packages/frontend/test/palette.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { Colour, COLOUR_NAMES } from '@tn3270/core';
+import { Color, COLOR_NAMES } from '@tn3270/core';
 import {
   SCHEMES, DEFAULT_SCHEME, resolveScheme, schemeRgb, SCHEME_NAMES, type Scheme,
 } from '../src/palette.js';
 
-/** Every architected colour identification, 0xF0-0xFF. */
-const ALL_CODES = Object.values(Colour);
+/** Every architected color identification, 0xF0-0xFF. */
+const ALL_CODES = Object.values(Color);
 
 describe('the scheme registry', () => {
   it('holds exactly the four named schemes, and default is one of them', () => {
@@ -95,14 +95,14 @@ describe('the scheme registry', () => {
     expect(DEFAULT_SCHEME).toBe('default');
   });
 
-  // A scheme added later with a missing code would render `undefined` as a colour, which
-  // in the GUI is a thrown RangeError mid-frame and in the TUI a silently uncoloured cell.
+  // A scheme added later with a missing code would render `undefined` as a color, which
+  // in the GUI is a thrown RangeError mid-frame and in the TUI a silently uncolored cell.
   it('gives every scheme all sixteen codes in BOTH tables', () => {
     for (const name of SCHEME_NAMES) {
       const scheme = SCHEMES[name]!;
       for (const code of ALL_CODES) {
-        expect(scheme.rgb[code], `${name} rgb ${COLOUR_NAMES[code]}`).toBeDefined();
-        expect(scheme.ansi16[code], `${name} ansi16 ${COLOUR_NAMES[code]}`).toBeDefined();
+        expect(scheme.rgb[code], `${name} rgb ${COLOR_NAMES[code]}`).toBeDefined();
+        expect(scheme.ansi16[code], `${name} ansi16 ${COLOR_NAMES[code]}`).toBeDefined();
       }
     }
   });
@@ -111,8 +111,8 @@ describe('the scheme registry', () => {
     for (const name of SCHEME_NAMES) {
       for (const code of ALL_CODES) {
         for (const component of SCHEMES[name]!.rgb[code]!) {
-          expect(component, `${name} ${COLOUR_NAMES[code]}`).toBeGreaterThanOrEqual(0);
-          expect(component, `${name} ${COLOUR_NAMES[code]}`).toBeLessThanOrEqual(255);
+          expect(component, `${name} ${COLOR_NAMES[code]}`).toBeGreaterThanOrEqual(0);
+          expect(component, `${name} ${COLOR_NAMES[code]}`).toBeLessThanOrEqual(255);
         }
       }
     }
@@ -120,21 +120,21 @@ describe('the scheme registry', () => {
 
   it("pins default's blue to zti's value, which is the whole point of the change", () => {
     // Core's PALETTE_3279 has pure #0000ff here, which is what was unreadable on black.
-    expect(SCHEMES.default!.rgb[Colour.BLUE]).toEqual([120, 144, 240]);
-    expect(SCHEMES['3279']!.rgb[Colour.BLUE]).toEqual([0x00, 0x00, 0xff]);
+    expect(SCHEMES.default!.rgb[Color.BLUE]).toEqual([120, 144, 240]);
+    expect(SCHEMES['3279']!.rgb[Color.BLUE]).toEqual([0x00, 0x00, 0xff]);
   });
 
   it('pins x3270 blue and green to the verified rgbmap', () => {
     // c3270/screen.c:213-229. Dodger blue and limegreen, NOT saturated primaries.
-    expect(SCHEMES.x3270!.rgb[Colour.BLUE]).toEqual([0x1e, 0x90, 0xff]);
-    expect(SCHEMES.x3270!.rgb[Colour.GREEN]).toEqual([0x32, 0xcd, 0x32]);
+    expect(SCHEMES.x3270!.rgb[Color.BLUE]).toEqual([0x1e, 0x90, 0xff]);
+    expect(SCHEMES.x3270!.rgb[Color.GREEN]).toEqual([0x32, 0xcd, 0x32]);
   });
 });
 
 describe('per-scheme distinctness', () => {
-  // The three COLOUR schemes must keep all sixteen codes visually distinct, so no two
-  // architecturally-different colours alias to one pixel.
-  it('keeps all sixteen distinct in the three colour schemes', () => {
+  // The three COLOR schemes must keep all sixteen codes visually distinct, so no two
+  // architecturally-different colors alias to one pixel.
+  it('keeps all sixteen distinct in the three color schemes', () => {
     for (const name of ['default', '3279', 'x3270'] as const) {
       const seen = new Set(ALL_CODES.map((c) => SCHEMES[name]!.rgb[c]!.join(',')));
       expect(seen.size, name).toBe(16);
@@ -152,26 +152,26 @@ describe('per-scheme distinctness', () => {
     // its scheme format has a SEPARATE screen background (screen.c:4119-4180, token 17),
     // so it sets F0 to green and gets a dark screen from grey10. We resolve the
     // background FROM F0, so copying it literally gives a green background.
-    expect(green.rgb[Colour.NEUTRAL_BLACK]).toEqual([0, 0, 0]);
-    expect(green.rgb[Colour.BLACK]).toEqual([0, 0, 0]);
+    expect(green.rgb[Color.NEUTRAL_BLACK]).toEqual([0, 0, 0]);
+    expect(green.rgb[Color.BLACK]).toEqual([0, 0, 0]);
 
     // Everything visible is a shade of green: red and blue channels equal, green channel
     // above both. This is the property, not a value pin.
     for (const code of ALL_CODES) {
-      if (code === Colour.NEUTRAL_BLACK || code === Colour.BLACK) continue;
+      if (code === Color.NEUTRAL_BLACK || code === Color.BLACK) continue;
       const [r, g, b] = green.rgb[code]!;
-      expect(r, COLOUR_NAMES[code]).toBe(b);
-      expect(g, COLOUR_NAMES[code]).toBeGreaterThan(r);
+      expect(r, COLOR_NAMES[code]).toBe(b);
+      expect(g, COLOR_NAMES[code]).toBeGreaterThan(r);
     }
   });
 
-  // Without its own slot map, one session would render green at truecolour and
-  // blue/red/yellow at sixteen colours. This is why a Scheme carries ansi16 at all.
+  // Without its own slot map, one session would render green at truecolor and
+  // blue/red/yellow at sixteen colors. This is why a Scheme carries ansi16 at all.
   it('maps every green code onto the green or black ANSI slot', () => {
     for (const code of ALL_CODES) {
       const [slot] = SCHEMES.green!.ansi16[code]!;
-      const dark = code === Colour.NEUTRAL_BLACK || code === Colour.BLACK;
-      expect(slot, COLOUR_NAMES[code]).toBe(dark ? 0 : 2);
+      const dark = code === Color.NEUTRAL_BLACK || code === Color.BLACK;
+      expect(slot, COLOR_NAMES[code]).toBe(dark ? 0 : 2);
     }
   });
 });
@@ -199,10 +199,10 @@ describe('resolveScheme', () => {
 
 describe('schemeRgb', () => {
   it('returns the scheme\'s triple for a valid code', () => {
-    expect(schemeRgb(SCHEMES.default!, Colour.BLUE)).toEqual([120, 144, 240]);
+    expect(schemeRgb(SCHEMES.default!, Color.BLUE)).toEqual([120, 144, 240]);
   });
 
-  // Matches core's colourRgb contract, which drawlist.ts already relies on.
+  // Matches core's colorRgb contract, which drawlist.ts already relies on.
   it('throws rather than guessing on a code outside 0xF0-0xFF', () => {
     expect(() => schemeRgb(SCHEMES.default!, 0x00)).toThrow(RangeError);
     expect(() => schemeRgb(SCHEMES.default!, 0xef)).toThrow(RangeError);
@@ -223,17 +223,17 @@ Expected: FAIL — `Failed to resolve import "../src/palette.js"`.
 Create `packages/frontend/src/palette.ts`:
 
 ```ts
-import { Colour, type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
+import { Color, type Color3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
 
 /**
  * The display palettes every front end draws from, and the ANSI slots they quantise to.
  *
  * ## WHY THIS IS NOT CORE'S TABLE
  *
- * Core's `PALETTE_3279` answers "which colour IS code F1" — the architected meaning, pinned
+ * Core's `PALETTE_3279` answers "which color IS code F1" — the architected meaning, pinned
  * to GA23-0059 with notes on the OCR damage in its tables. It is not a presentation choice,
  * and its own comment says the RGB values are "OUR OWN CHOICE, DELIBERATELY NOT X3270'S":
- * saturated primaries, picked so that seven base colours survive quantisation to sixteen
+ * saturated primaries, picked so that seven base colors survive quantisation to sixteen
  * ANSI slots. On a black background its pure `#0000ff` blue is close to illegible, which is
  * what a user reported from the Electron GUI on 2026-09-14. The GUI had been drawing from
  * core while the TUI had quietly had its own gentler table since it shipped.
@@ -245,19 +245,19 @@ import { Colour, type Colour3279, type Rgb, PALETTE_3279 } from '@tn3270/core';
  *
  * `green` is what forces this, and the RGB-only shape looks sufficient right up to the
  * moment it fails: with one shared slot map, a green session would render green at
- * truecolour and blue/red/yellow on a sixteen-colour terminal. The slot map is part of a
+ * truecolor and blue/red/yellow on a sixteen-color terminal. The slot map is part of a
  * scheme's identity, which is why `ANSI_16` moved out of the TUI to sit here.
  *
  * Quantisation ITSELF stays in the TUI — `detectDepth`, the 6x6x6 cube, the SGR strings.
- * That is genuinely terminal-specific. Which slot a colour belongs in is not.
+ * That is genuinely terminal-specific. Which slot a color belongs in is not.
  *
  * ## WHY THE SLOTS ARE A TABLE AND NOT NEAREST-RGB
  *
- * Nearest-RGB made the palette responsible for sixteen-colour distinctness, and with any
+ * Nearest-RGB made the palette responsible for sixteen-color distinctness, and with any
  * pleasant palette blue and turquoise both land nearest ANSI cyan and collapse into one
  * slot — measured for both references: x3270's `#1e90ff` and zti's `(120,144,240)` each
  * quantise to bright cyan, exactly like their turquoise. Deciding the slot explicitly
- * separates "what colour is this" from "which of sixteen slots does it occupy".
+ * separates "what color is this" from "which of sixteen slots does it occupy".
  */
 
 /** `[ansiIndex, bright]`. */
@@ -269,12 +269,12 @@ export interface Scheme {
 }
 
 /**
- * The slot map the three COLOUR schemes share.
+ * The slot map the three COLOR schemes share.
  *
- * Keyed by colour code rather than derived from RGB, so it is correct for all three
+ * Keyed by color code rather than derived from RGB, so it is correct for all three
  * regardless of how saturated their values are.
  */
-const COLOUR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
+const COLOR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
   0xf0: [0, false], 0xf1: [4, true],  0xf2: [1, true],  0xf3: [5, true],
   0xf4: [2, true],  0xf5: [6, true],  0xf6: [3, true],  0xf7: [7, true],
   0xf8: [0, false], 0xf9: [4, false], 0xfa: [3, true],  0xfb: [5, false],
@@ -282,7 +282,7 @@ const COLOUR_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
 });
 
 /**
- * `default`: zti's colours for F0-F7, x3270's for F8-FF.
+ * `default`: zti's colors for F0-F7, x3270's for F8-FF.
  *
  * F0-F7 are **zti's own values**, read from `tnz/zti.py:2813-2820` where they are declared
  * in curses' 0-1000 scale and converted here to 0-255 (`green_rgb = (141, 847, 188)` ->
@@ -351,14 +351,14 @@ const DARK: Rgb = [0, 0, 0];
 /**
  * `green`: a monochrome 3278, which is the only "authentic" option here.
  *
- * A 3278 has a green phosphor and no colour at all — colour is a 3279 feature — and we
+ * A 3278 has a green phosphor and no color at all — color is a 3279 feature — and we
  * advertise `IBM-3278-2-E`. x3270 ships this as `GreenScreen` (`x3270/fb-x3270:98`).
  *
  * ## IT CANNOT BE TRANSCRIBED FROM X3270, AND THE REASON IS STRUCTURAL
  *
  * x3270's scheme format has a SEPARATE screen background. Verified in
- * `xfer_color_scheme` (`x3270/screen.c:4119-4180`): tokens 0-15 are the IBM colours, 16 is a
- * fallback, **17 is the screen background**, 18 select background, 19-22 attribute colours.
+ * `xfer_color_scheme` (`x3270/screen.c:4119-4180`): tokens 0-15 are the IBM colors, 16 is a
+ * fallback, **17 is the screen background**, 18 select background, 19-22 attribute colors.
  * So `GreenScreen` sets F0 neutral-black to `#21a021` — green — and gets its dark screen
  * from `grey10` at token 17.
  *
@@ -379,7 +379,7 @@ const GREEN_RGB: Readonly<Record<number, Rgb>> = Object.freeze({
 /**
  * Green's own slots: everything visible on ANSI green, the emphasis codes bright.
  *
- * Sharing `COLOUR_SLOTS` would make a sixteen-colour terminal render blue and red from a
+ * Sharing `COLOR_SLOTS` would make a sixteen-color terminal render blue and red from a
  * scheme whose whole point is that it does not have any.
  */
 const GREEN_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
@@ -390,10 +390,10 @@ const GREEN_SLOTS: Readonly<Record<number, Slot>> = Object.freeze({
 });
 
 export const SCHEMES: Readonly<Record<string, Scheme>> = Object.freeze({
-  default: Object.freeze({ rgb: DEFAULT_RGB, ansi16: COLOUR_SLOTS }),
+  default: Object.freeze({ rgb: DEFAULT_RGB, ansi16: COLOR_SLOTS }),
   // Core's architected table, which is what makes it a scheme rather than an orphan.
-  '3279': Object.freeze({ rgb: PALETTE_3279, ansi16: COLOUR_SLOTS }),
-  x3270: Object.freeze({ rgb: X3270_RGB, ansi16: COLOUR_SLOTS }),
+  '3279': Object.freeze({ rgb: PALETTE_3279, ansi16: COLOR_SLOTS }),
+  x3270: Object.freeze({ rgb: X3270_RGB, ansi16: COLOR_SLOTS }),
   green: Object.freeze({ rgb: GREEN_RGB, ansi16: GREEN_SLOTS }),
 });
 
@@ -420,26 +420,26 @@ export function resolveScheme(name?: string): Scheme {
   const resolved = SCHEMES[ALIASES[key] ?? key];
   if (resolved === undefined) {
     throw new RangeError(
-      `unknown colour scheme ${JSON.stringify(name)}; use one of ${SCHEME_NAMES.join(', ')}`,
+      `unknown color scheme ${JSON.stringify(name)}; use one of ${SCHEME_NAMES.join(', ')}`,
     );
   }
   return resolved;
 }
 
 /**
- * RGB for a colour identification within a scheme. Throws rather than guessing, matching
- * core's `colourRgb` contract, which `drawlist.ts` already depends on.
+ * RGB for a color identification within a scheme. Throws rather than guessing, matching
+ * core's `colorRgb` contract, which `drawlist.ts` already depends on.
  */
-export function schemeRgb(scheme: Scheme, code: Colour3279): Rgb {
+export function schemeRgb(scheme: Scheme, code: Color3279): Rgb {
   const rgb = scheme.rgb[code];
   if (rgb === undefined) {
-    throw new RangeError(`0x${code.toString(16)} is not a 3279 colour (expected 0xF0-0xFF)`);
+    throw new RangeError(`0x${code.toString(16)} is not a 3279 color (expected 0xF0-0xFF)`);
   }
   return rgb;
 }
 
 /** Re-exported so a consumer needs one import for "the palette". */
-export { Colour };
+export { Color };
 ```
 
 - [ ] **Step 4: Correct core's now-false comment**
@@ -451,7 +451,7 @@ intention nobody had checked. Replace those lines:
 
 ```ts
  * IN CORE BECAUSE IT IS THE ARCHITECTED MEANING, not because it is what gets drawn.
- * This table answers "which colour IS code F1" and is pinned to GA23-0059 below. What a
+ * This table answers "which color IS code F1" and is pinned to GA23-0059 below. What a
  * front end actually paints comes from the scheme registry in `packages/frontend/palette.ts`,
  * where this table is the `3279` scheme's data — and where the READABLE default lives, since
  * the pure `#0000ff` blue below is close to illegible on black.
@@ -466,7 +466,7 @@ intention nobody had checked. Replace those lines:
 In `packages/frontend/src/index.ts`, append after the `BINDING_INTENT` block:
 
 ```ts
-// The display palettes. Shared because a front end's colours are a presentation choice that
+// The display palettes. Shared because a front end's colors are a presentation choice that
 // must not differ BETWEEN front ends -- the GUI drew core's saturated primaries while the
 // TUI had its own gentler table, and a user reported the blue as unreadable. Core keeps the
 // architected meaning; this decides what gets drawn.
@@ -503,21 +503,21 @@ git commit -m "feat(frontend): four palette schemes, each carrying its own ANSI 
 ### Task 2: The TUI draws from the registry, and parses `-scheme`
 
 **Files:**
-- Modify: `packages/tui/src/colours.ts`
+- Modify: `packages/tui/src/colors.ts`
 - Modify: `packages/tui/src/render.ts:146,182,194,389-390`
 - Modify: `packages/tui/src/app.ts:74-86,130-143`
 - Modify: `packages/tui/src/main.ts:25-41,103-113,183,220-232`
-- Modify: `packages/tui/test/colours.test.ts`
+- Modify: `packages/tui/test/colors.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
-In `packages/tui/test/colours.test.ts`, change the import line to:
+In `packages/tui/test/colors.test.ts`, change the import line to:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { Colour } from '@tn3270/core';
+import { Color } from '@tn3270/core';
 import { SCHEMES, resolveScheme } from '@tn3270/frontend';
-import { detectDepth, sgrFor, type Depth } from '../src/colours.js';
+import { detectDepth, sgrFor, type Depth } from '../src/colors.js';
 
 const DEFAULT = SCHEMES.default!;
 ```
@@ -529,25 +529,25 @@ describe('sgrFor across schemes', () => {
   it('emits the scheme it is given, not a fixed table', () => {
     // The defect this whole change exists to fix: the GUI drew #0000ff while the TUI drew
     // zti's blue. Now both come from a named scheme and this pins the difference.
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe('38;2;120;144;240');
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES['3279']!)).toBe('38;2;0;0;255');
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.x3270!)).toBe('38;2;30;144;255');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.default!)).toBe('38;2;120;144;240');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES['3279']!)).toBe('38;2;0;0;255');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.x3270!)).toBe('38;2;30;144;255');
   });
 
-  it('renders green as green at BOTH truecolour and sixteen colours', () => {
+  it('renders green as green at BOTH truecolor and sixteen colors', () => {
     // The reason a Scheme carries ansi16. With a shared slot map this second assertion
     // would come back as bright blue (94) from a monochrome-green scheme.
-    expect(sgrFor(Colour.BLUE, 16777216, 'fg', SCHEMES.green!)).toBe('38;2;33;160;33');
-    expect(sgrFor(Colour.BLUE, 16, 'fg', SCHEMES.green!)).toBe('32');
-    expect(sgrFor(Colour.NEUTRAL_WHITE, 16, 'fg', SCHEMES.green!)).toBe('92');
+    expect(sgrFor(Color.BLUE, 16777216, 'fg', SCHEMES.green!)).toBe('38;2;33;160;33');
+    expect(sgrFor(Color.BLUE, 16, 'fg', SCHEMES.green!)).toBe('32');
+    expect(sgrFor(Color.NEUTRAL_WHITE, 16, 'fg', SCHEMES.green!)).toBe('92');
   });
 
   it('keeps the background black in green, so the screen is not a green wash', () => {
-    expect(sgrFor(Colour.NEUTRAL_BLACK, 16777216, 'bg', SCHEMES.green!)).toBe('48;2;0;0;0');
+    expect(sgrFor(Color.NEUTRAL_BLACK, 16777216, 'bg', SCHEMES.green!)).toBe('48;2;0;0;0');
   });
 
   it('still returns nothing for monochrome or an invalid code', () => {
-    expect(sgrFor(Colour.RED, 0, 'fg', DEFAULT)).toBe('');
+    expect(sgrFor(Color.RED, 0, 'fg', DEFAULT)).toBe('');
     expect(sgrFor(0x00, 256, 'fg', DEFAULT)).toBe('');
     expect(sgrFor(0xef, 16777216, 'bg', DEFAULT)).toBe('');
   });
@@ -556,22 +556,22 @@ describe('sgrFor across schemes', () => {
 
 Finally, every existing `sgrFor(...)` call in this file needs the new fourth argument. There
 are calls at roughly lines 69-70, 77-78, 89, 101-103, 107-109, 113-114, 121, 133, 141-142.
-Append `, DEFAULT` to each — e.g. `sgrFor(Colour.GREEN, 16777216, 'fg')` becomes
-`sgrFor(Colour.GREEN, 16777216, 'fg', DEFAULT)`. The loop at line 121 becomes
+Append `, DEFAULT` to each — e.g. `sgrFor(Color.GREEN, 16777216, 'fg')` becomes
+`sgrFor(Color.GREEN, 16777216, 'fg', DEFAULT)`. The loop at line 121 becomes
 `expect(() => sgrFor(code, d, 'fg', DEFAULT)).not.toThrow();` and the one at 133
 `new Set(base.map((c) => sgrFor(c, depth, 'fg', DEFAULT)))`.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
 ```bash
-cd ~/git/tn3270 && npx vitest run packages/tui/test/colours.test.ts
+cd ~/git/tn3270 && npx vitest run packages/tui/test/colors.test.ts
 ```
 
 Expected: FAIL — `Expected 3 arguments, but got 4` from the type checker, or wrong values.
 
-- [ ] **Step 3: Rewrite `colours.ts` to take a scheme**
+- [ ] **Step 3: Rewrite `colors.ts` to take a scheme**
 
-In `packages/tui/src/colours.ts`: delete the `TUI_PALETTE` constant **and its whole doc
+In `packages/tui/src/colors.ts`: delete the `TUI_PALETTE` constant **and its whole doc
 comment** (they move to `frontend/src/palette.ts`, already done in Task 1), delete the
 `ANSI_16` constant **and its doc comment**, change the import line, and replace `sgrFor`.
 
@@ -579,7 +579,7 @@ Replace the import at the top:
 
 ```ts
 import { execFileSync } from 'node:child_process';
-import { type Colour3279 } from '@tn3270/core';
+import { type Color3279 } from '@tn3270/core';
 import { type Scheme } from '@tn3270/frontend';
 ```
 
@@ -604,11 +604,11 @@ Replace `sgrFor` entirely:
 
 ```ts
 /**
- * The SGR parameter string for one colour, e.g. `38;5;46`. Empty when monochrome.
+ * The SGR parameter string for one color, e.g. `38;5;46`. Empty when monochrome.
  * The caller wraps it in `\x1b[...m`.
  */
 export function sgrFor(
-  code: Colour3279, depth: Depth, which: 'fg' | 'bg', scheme: Scheme,
+  code: Color3279, depth: Depth, which: 'fg' | 'bg', scheme: Scheme,
 ): string {
   if (depth === 0) return '';
   const rgb = scheme.rgb[code];
@@ -639,7 +639,7 @@ export function sgrFor(
 In `packages/tui/src/render.ts`, add to the import at line 18:
 
 ```ts
-import { sgrFor, type Depth } from './colours.js';
+import { sgrFor, type Depth } from './colors.js';
 import { type Scheme } from '@tn3270/frontend';
 ```
 
@@ -814,32 +814,32 @@ Any existing call that passed OIA text positionally — `listFor(s, 'X Wait')` �
 Add `import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';` and append:
 
 ```ts
-describe('drawList honours the scheme it is given', () => {
+describe('drawList honors the scheme it is given', () => {
   it("draws the scheme's blue, not core's", () => {
-    // The bug this change fixes: the GUI resolved through core's colourRgb, whose blue is
-    // pure #0000ff and unreadable on black. A default 3279 field is green, so recolour one
+    // The bug this change fixes: the GUI resolved through core's colorRgb, whose blue is
+    // pure #0000ff and unreadable on black. A default 3279 field is green, so recolor one
     // cell by hand rather than relying on the default attribute.
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
-    const recoloured = resolve(snap).map((c, i) =>
-      i === 0 ? { ...c, fg: Colour.BLUE } : c);
+    const recolored = resolve(snap).map((c, i) =>
+      i === 0 ? { ...c, fg: Color.BLUE } : c);
 
-    const readable = drawList(snap, recoloured, atlas, SCHEMES.default!);
-    const saturated = drawList(snap, recoloured, atlas, SCHEMES['3279']!);
+    const readable = drawList(snap, recolored, atlas, SCHEMES.default!);
+    const saturated = drawList(snap, recolored, atlas, SCHEMES['3279']!);
 
     expect(readable.cells[0]!.fg).toEqual([120, 144, 240]);
     expect(saturated.cells[0]!.fg).toEqual([0, 0, 255]);
   });
 
-  it('draws the default green field colour from the scheme', () => {
+  it('draws the default green field color from the scheme', () => {
     expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.default!).cells[0]!.fg)
       .toEqual([36, 216, 48]);                       // zti green
     expect(listFor(screenWith([[0, 0xc1]]), SCHEMES.x3270!).cells[0]!.fg)
       .toEqual([0x32, 0xcd, 0x32]);                  // x3270 limegreen
   });
 
-  it("draws the OIA in the scheme too, not in core's colours", () => {
-    // The OIA is our chrome, so no host byte says what colour it is -- but it must not be
+  it("draws the OIA in the scheme too, not in core's colors", () => {
+    // The OIA is our chrome, so no host byte says what color it is -- but it must not be
     // the one scheme-independent thing on screen.
     const list = listFor(screenWith([[0, 0xc1]]), SCHEMES.green!, 'X Wait');
     const oia = list.cells[list.cells.length - 1]!;
@@ -849,8 +849,8 @@ describe('drawList honours the scheme it is given', () => {
 });
 ```
 
-Note the existing test at line ~45 asserts `dl.cells[0]!.fg` equals `colourRgb(Colour.GREEN)`.
-That value changes, so update it to `schemeRgb(SCHEMES.default!, Colour.GREEN)`.
+Note the existing test at line ~45 asserts `dl.cells[0]!.fg` equals `colorRgb(Color.GREEN)`.
+That value changes, so update it to `schemeRgb(SCHEMES.default!, Color.GREEN)`.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
@@ -862,11 +862,11 @@ Expected: FAIL — `Expected 3-4 arguments, but got 4-5`.
 
 - [ ] **Step 3: Make `drawList` take a scheme**
 
-In `packages/gui/src/drawlist.ts`, change the imports (drop `colourRgb`, keep the rest):
+In `packages/gui/src/drawlist.ts`, change the imports (drop `colorRgb`, keep the rest):
 
 ```ts
 import {
-  cp037, Colour, type Rgb, type ResolvedCell, type ScreenSnapshot,
+  cp037, Color, type Rgb, type ResolvedCell, type ScreenSnapshot,
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, CG_BOXSOLID } from './cg.js';
@@ -901,8 +901,8 @@ Thread it into `oiaCells` — change its signature and body:
 function oiaCells(
   text: string, y: number, cols: number, atlas: AtlasGeometry, scheme: Scheme,
 ): readonly DrawCell[] {
-  const fg = schemeRgb(scheme, Colour.NEUTRAL_WHITE);
-  const bg = schemeRgb(scheme, Colour.NEUTRAL_BLACK);
+  const fg = schemeRgb(scheme, Color.NEUTRAL_WHITE);
+  const bg = schemeRgb(scheme, Color.NEUTRAL_BLACK);
 ```
 
 and update its call site inside `drawList` (find it with `grep -n "oiaCells(" packages/gui/src/drawlist.ts`) to pass `scheme` as the fifth argument.
@@ -943,7 +943,7 @@ And add a case beside `-model`:
 ```
 
 Also correct the file's header comment, which currently says the GUI deliberately has no
-colour flag — that is now only half true:
+color flag — that is now only half true:
 
 ```ts
  * Deliberately NOT the same as the TUI in one respect: there is no `--colors`. A canvas has
@@ -972,9 +972,9 @@ Then update the `drawList` call (line 182):
 
 - [ ] **Step 6: Fix the other GUI tests**
 
-`packages/gui/test/blit.test.ts` uses `colourRgb` at lines 155 and 161 and calls `drawList`.
-Change its import from `colourRgb` to `SCHEMES`/`schemeRgb` from `@tn3270/frontend`, replace
-`colourRgb(X)` with `schemeRgb(SCHEMES.default!, X)`, and add `SCHEMES.default!` as the fourth
+`packages/gui/test/blit.test.ts` uses `colorRgb` at lines 155 and 161 and calls `drawList`.
+Change its import from `colorRgb` to `SCHEMES`/`schemeRgb` from `@tn3270/frontend`, replace
+`colorRgb(X)` with `schemeRgb(SCHEMES.default!, X)`, and add `SCHEMES.default!` as the fourth
 argument to every `drawList(...)` call in both GUI test files.
 
 - [ ] **Step 7: Build and run the GUI tests**
@@ -1003,9 +1003,9 @@ describe('one source of truth for both front ends', () => {
       for (const code of ALL_CODES) {
         // What the GUI puts in a DrawCell.fg ...
         const rgb = schemeRgb(scheme, code);
-        // ... and the parameters the TUI's truecolour SGR is built from. Identical by
+        // ... and the parameters the TUI's truecolor SGR is built from. Identical by
         // construction, and this fails the moment either grows a private table again.
-        expect(rgb, `${name} ${COLOUR_NAMES[code]}`).toBe(scheme.rgb[code]);
+        expect(rgb, `${name} ${COLOR_NAMES[code]}`).toBe(scheme.rgb[code]);
         expect(rgb).toHaveLength(3);
       }
     }
@@ -1016,7 +1016,7 @@ describe('one source of truth for both front ends', () => {
 > **Why not compare `sgrFor` output directly to a `DrawList` here?** That would need
 > `packages/frontend` to import `tui` and `gui`, inverting the package graph this project
 > restructured to get right — `frontend`'s tests must not import either front end. The
-> TUI-side half is covered by `colours.test.ts`'s per-scheme `sgrFor` assertions (Task 2) and
+> TUI-side half is covered by `colors.test.ts`'s per-scheme `sgrFor` assertions (Task 2) and
 > the GUI-side half by `drawlist.test.ts`'s scheme assertions (this task, Step 1). Together
 > they close the loop without inverting the graph.
 
@@ -1191,7 +1191,7 @@ and where the case is spawned (line 85), thread that through:
 cd ~/git/tn3270 && DISPLAY=:99 node packages/gui/scripts/shot.mjs --update
 ```
 
-Then confirm what changed is only colour.
+Then confirm what changed is only color.
 
 > **CORRECTED 2026-09-14 — the "compare ink-pixel sets" script below is WRONG for this
 > re-baseline and will always report `MOVED`.** It defines ink as "any non-pure-black pixel",
@@ -1202,8 +1202,8 @@ Then confirm what changed is only colour.
 > `(0,0,0)` all along and becomes indistinguishable from the new background.
 >
 > **Do the ground-truth replay below instead.** The difference matters: "does *some*
-> consistent old→new colour mapping exist" is inferred from the images and can be satisfied by
-> a coincidental swap of two equal-population colours, whereas replaying the mapping the code
+> consistent old→new color mapping exist" is inferred from the images and can be satisfied by
+> a coincidental swap of two equal-population colors, whereas replaying the mapping the code
 > is *supposed* to implement checks the images against the source of truth. Both were run on
 > this re-baseline; the replay gave **0 mismatches across all 252,000 pixels**.
 
@@ -1277,7 +1277,7 @@ assert len(old) == len(new) and len(old[0]) == len(new[0]), 'DIMENSIONS CHANGED'
 bad = []
 for y, (orow, nrow) in enumerate(zip(old, new)):
     for x, (o, n) in enumerate(zip(orow, nrow)):
-        want = TABLE.get(o, o)          # unknown colours must stay put
+        want = TABLE.get(o, o)          # unknown colors must stay put
         if n != want: bad.append((x, y, o, want, n))
 print(f'pixels={len(old)*len(old[0])} mismatches={len(bad)}')
 for row in bad[:5]: print('  (x,y)=%s,%s old=%s expected=%s actual=%s' % row)
@@ -1286,8 +1286,8 @@ PY
 ```
 
 Expected: `mismatches=0` and `GROUND TRUTH CONFIRMED`. That proves both halves at once —
-every colour changed to exactly what the new palette specifies, **and** nothing moved, since a
-moved glyph would put an unexpected colour at some coordinate.
+every color changed to exactly what the new palette specifies, **and** nothing moved, since a
+moved glyph would put an unexpected color at some coordinate.
 
 **A mismatch means stop and diagnose, not re-baseline again.**
 
@@ -1296,7 +1296,7 @@ heuristic that buckets pixels by "blackness" cannot survive a change to what bla
 
 <details><summary>Superseded ink-set comparison — do not rely on it</summary>
 
-Compare ink-pixel **sets** — where ink is, not what colour it is:
+Compare ink-pixel **sets** — where ink is, not what color it is:
 
 ```bash
 cd ~/git/tn3270 && git show HEAD:packages/gui/test/golden/synthetic-ispf.png > /tmp/golden-before.png
@@ -1869,7 +1869,7 @@ cd ~/git/tn3270 && npx vitest run packages/tui/test/app.test.ts
 
 Expected: PASS, including the two pre-existing tests in that block —
 `'does nothing at all until the timer fires'` and `'completes the sequence when the rest
-arrives in time'` are both still correct under the new behaviour and must **not** be edited.
+arrives in time'` are both still correct under the new behavior and must **not** be edited.
 If either fails, the change went further than intended.
 
 - [ ] **Step 6: Check the exit path still works**
@@ -2067,14 +2067,14 @@ It currently says the shared palette is in `packages/core` and only the TUI rend
 values. Both halves are now false:
 
 ```markdown
-**Colours come from one shared table in `packages/frontend`, and `-scheme` picks which.**
-`default` is the readable one — zti's values for the seven base colours, x3270's for the rest
+**Colors come from one shared table in `packages/frontend`, and `-scheme` picks which.**
+`default` is the readable one — zti's values for the seven base colors, x3270's for the rest
 — and it is what every front end draws unless told otherwise. `3279` is the saturated
 alternative: **our own choice of primaries, not a phosphor measurement**, kept because the
-manual names each colour without fixing its chromaticity and someone may want the unambiguous
+manual names each color without fixing its chromaticity and someone may want the unambiguous
 version. `x3270` is that emulator's own `rgbmap`, for comparing against it. `green` is a
-monochrome 3278, which is the only one of the four with a claim to authenticity — colour was a
-3279 feature. Quantisation to 16 colours is an explicit per-scheme table rather than
+monochrome 3278, which is the only one of the four with a claim to authenticity — color was a
+3279 feature. Quantisation to 16 colors is an explicit per-scheme table rather than
 nearest-RGB: with any pleasant palette, blue and turquoise both land nearest ANSI cyan.
 ```
 
@@ -2161,7 +2161,7 @@ Connect to VM/370, press `Ctrl-A`, and record what happens. Attn is a Telnet BRE
 - [ ] **Step 6: Write up what was and was not verified**
 
 Add a section to `docs/live-testing.md` covering: the no-flag default on both hosts, the Query
-Reply trace offsets, the three schemes, and Attn's measured behaviour. **State plainly that
+Reply trace offsets, the three schemes, and Attn's measured behavior. **State plainly that
 PA1/PA2 end-to-end is the user's check on their Mac** — the keys can be shown to produce the
 right AID here, but only a host that acts on them proves the binding useful.
 

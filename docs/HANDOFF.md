@@ -114,7 +114,7 @@ because a two-commit branch reported 46 merged. This merge was checked that way 
 **THE DFT PLAN IS NOW COMPLETE TOO — ALL TWELVE TASKS.** Task 11 (the spec's deliberately-open
 question) and Task 12 (the merge) were both closed 2026-09-29; each carries an AS BUILT note in
 `docs/superpowers/plans/2026-09-24-dft-file-transfer.md`. **Task 11's answer, because it decides item
-1 below:** `Recfm`/`Lrecl` ride through unchanged and TSO honours both (`VB 1024` / `VB 80` / `FB 80`
+1 below:** `Recfm`/`Lrecl` ride through unchanged and TSO honors both (`VB 1024` / `VB 80` / `FB 80`
 over DFT, three cases), while the `Open`'s record size is **16367 in all three** — `16384 - 17`, our
 own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Reproduce with
 `packages/cli/scripts/dft-lrecl-tso.txt`, which carries the answer in its header.
@@ -140,7 +140,7 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    WebSocket, so that "local file" means the operator's machine. See the START HERE section.
 3. ~~The `-ddm` default flip.~~ **DONE 2026-09-29, on the user's instruction — DFT plan Task 12
    Step 4, the last step of that plan.** DDM is now advertised by default and `-ddm off` restores
-   the old behaviour. **BLAST RADIUS MEASURED BEFORE COMMITTING, as the plan required: exactly 6
+   the old behavior. **BLAST RADIUS MEASURED BEFORE COMMITTING, as the plan required: exactly 6
    tests in 3 files, every one a deliberate assertion about the default** and none incidental —
    so the flip was bounded rather than hopeful. All six are expectation updates that now pin BOTH
    polarities. **The real risk it carries: a DFT-capable host will now choose DFT, so the CUT path
@@ -364,8 +364,8 @@ GOCA S544-5498-01, GA23-0059-07 in text form, the public-domain `j3270` (43 agre
 Host On-Demand order-support matrix, and a 3192G ROM disassembly** (`$HOME/blueglass — 3270 Graphics
 & SNA Research Findings.md`, @MK). See `docs/goca-reference-notes.md`, section *A THIRD AND FOURTH
 READING*. **The ROM is a different KIND of evidence from the rest — measured firmware, not a
-specification's intent** — and it closes the coordinate origin (centre pel 360,191, Y up; the 720x384 drawing area is a hardware fact, not a ROM one),
-confirms Arc and character angle/shear are honoured, and supplies firmware-exact image rules with
+specification's intent** — and it closes the coordinate origin (center pel 360,191, Y up; the 720x384 drawing area is a hardware fact, not a ROM one),
+confirms Arc and character angle/shear are honored, and supplies firmware-exact image rules with
 error codes. **Two lessons generalise: a support matrix documents a CLIENT, not a device** (HOD leaves
 Arc blank for the 3192-G while the firmware has a handler), and **`Box` is now settled as absent from
 the 3270 binding by three independent sources**, which corrects `docs/ideas/composite-model-idea.md`.
@@ -494,7 +494,7 @@ hosts' own `LISTFILE`/`LISTDS` as independent checks (`V 80` on CMS, `VB 1024 BL
 TSO). Reproduce with `live-drive.py vmxfer` / `tsoxfer`, both committed, then `cmp`. **An earlier
 draft of this section said NO FILE HAD CROSSED A REAL HOST; that is now false.**
 **MID-FLIGHT CANCELLATION IS ALSO VERIFIED, 2026-09-24**, which was the last unwitnessed piece:
-cancelling a 200KB upload at 17641 of 204800 bytes made MECAFF's `IND$FILE` answer
+canceling a 200KB upload at 17641 of 204800 bytes made MECAFF's `IND$FILE` answer
 `>> TRANS99 - Protocol error` and **return CMS to `Ready;`** -- the host left transfer mode, which is
 the entire purpose of aborting rather than abandoning. 249 bytes is far too fast to interrupt; the
 size was chosen from measurement (~15 ms/frame locally, 1.727x codec expansion on random data, so
@@ -524,7 +524,7 @@ success and writes a wrong file is the failure mode to look for.
    check can give.
 3. **DEFENCE-IN-DEPTH PAIRS ARE INVISIBLE TO SINGLE MUTATION.** Two here: `ended`/`clearTimers()` in
    `transferRun`'s `finish` (with both gone `onDone` fires three times and the last overwrites
-   "cancelled" with "timed out"), and `app.ts` clearing `transferRun` vs `CutTransfer.cancel`'s own
+   "canceled" with "timed out"), and `app.ts` clearing `transferRun` vs `CutTransfer.cancel`'s own
    idempotence (deleting the app's half keeps the whole TUI suite green; removing both reddens
    CORE's tests). Both are now documented in the tests that cover them, so neither is deleted as
    redundant on the evidence of a green suite.
@@ -548,7 +548,7 @@ and now **BIND-IMAGE/BIND/UNBIND** (`06232cc`, `--no-ff`, branch deleted). The s
 as the record of that work; none of them is the next action.
 
 **WHAT THE BIND-IMAGE WORK DELIVERED.** The client **requests** TN3270E BIND-IMAGE (it previously
-declined it by design), parses BIND and UNBIND, honours BIND's screen geometry within limits, and
+declined it by design), parses BIND and UNBIND, honors BIND's screen geometry within limits, and
 gates inbound 3270 data on a BIND arriving — with a 5-second timeout that **executes the withheld
 frame** rather than hanging forever as x3270 does. Two new flags, both default on: `-bind-image
 on|off`, `-bind-limit on|off`. Design:
@@ -598,7 +598,7 @@ branch), `pty-smoke.py` **12/12**,
 **TWO RECORDED-HOST WITNESSES NOW, AND BOTH ARE NEW.** `sscp-lu-data.trc` matches 4 blocks and is
 the first-ever recorded-host witness for **BIND**. `wont-tn3270e.trc` matches **5 blocks, up from
 3**, and is the witness for the WONT fix — it stops on a genuine `wrongTerminalName` divergence
-(we send `IBM-3278-4-E`, that recording sent the colour digit `IBM-3279-4-E`), which is why its case
+(we send `IBM-3278-4-E`, that recording sent the color digit `IBM-3279-4-E`), which is why its case
 carries `mismatch_ok=True`. **That flag tolerates the stopping point and does not excuse the blocks
 before it**: reverting the fix fails with "matched 3 blocks, expected at least 5", verified.
 **No live (non-recorded) host has ever completed a TN3270E negotiation**, so BIND/UNBIND's witness
@@ -631,7 +631,7 @@ than 6, so a model 2 with it shown is **720x476**, and one golden moved (`synthe
 restyle "changes only `canvas/src/keypad.ts`". It also changed `canvas/src/renderer.ts`: the press
 highlight was `rgba(255,255,255,0.35)`, which over a now-white button is a **no-op**, so it is black
 at the same alpha. That is the one piece of local, zero-latency feedback in the design and nothing
-in the suite executes a line of `renderer.ts`, so the colour is **unproven in pixels** — the
+in the suite executes a line of `renderer.ts`, so the color is **unproven in pixels** — the
 appearance was checked by compositing 0.35 black over the regenerated capture, not by photographing
 a real press. The rest of the prediction held: the key table, the button rectangles and every hit
 test are indeed independent of how a button is drawn, and `clicks.mjs` still passes 9 for 9 with
@@ -698,7 +698,7 @@ workarounds** — `s3270 v4.5ga6`, OpenSSL 3.6.4, at
   and its `DONT` were identical to each. s3270 logged `Aborting TN3270E: negotiated off`.
 - **FOUR s3270 device-type variants, all refused**: `IBM-3278-2-E`, `IBM-3278-2-E CONNECT VTAM`,
   `IBM-DYNAMIC`, `IBM-3278-4-E`. **The CONNECT-clause hypothesis is DEAD** — the LU test above
-  is no longer diagnostic, so do not spend the favour asking for an LU name for that reason.
+  is no longer diagnostic, so do not spend the favor asking for an LU name for that reason.
 - **The decisive argument is conformance:** RFC 2355 §7.1.5 requires an unacceptable device type to
   draw a TN3270E `DEVICE-TYPE REJECT` with a reason code. **This host sends no TN3270E
   subnegotiation at all** — not `IS`, not `REJECT` — and withdraws at the *telnet* layer. That
@@ -747,7 +747,7 @@ what it could NOT, as of 2026-09-17, are different claims, so quote them apart:
    and then diverges on its own RPQ names). Excluded by name, with the reason, in the harness.
    **`ft_cut.trc` is excluded for a related reason worth knowing: x3270 builds `3279` for
    TERMINAL-TYPE and `3278` for DEVICE-TYPE** (`Common/model.c:135-138` `create_model`, called
-   from `Common/telnet.c:2103-2106` with `force_3278` true only at `:2122`), so a colour model's
+   from `Common/telnet.c:2103-2106` with `force_3278` true only at `:2122`), so a color model's
    two strings differ by one digit. We always send 3278.
 
 **TWO HARNESS DEFECTS FOUND BY THE HARNESS CLAIMING OUR CLIENT WAS BROKEN — the shape recurs, so
@@ -794,7 +794,7 @@ the time this was written (**reversed on `bind-image`, 2026-09-19 — see *START
 bare DEVICE-TYPE below.
 
 **A REAL DIVERGENCE FROM s3270 — NOW DECIDED BY THE USER, 2026-09-17: WE DO NOT APPEND `-E`
-UNCONDITIONALLY, AND THE DIVERGENCE STAYS.** No code changed, because our behaviour was already
+UNCONDITIONALLY, AND THE DIVERGENCE STAYS.** No code changed, because our behavior was already
 this; what changed is that it is now a decision rather than an open question, and it is pinned by
 a test. `packages/core/test/tn3270e.test.ts` *sends the terminal type VERBATIM, appending no -E of
 its own* asserts the bare `IBM-3278-2` for `-model 3278-2` and separately asserts the reply
@@ -944,7 +944,7 @@ contradicted a first reading. Do not re-derive them and do not "simplify" them b
    keypad button and the TUI list ARE Newline's route, exactly as they are Sys Req's.
 
 **ALSO WORTH KNOWING, because it is the honest limit of what the TUI list does:** its "refuses to
-open in a terminal too small" behaviour is **UNREACHABLE IN A LIVE SESSION.** `tooSmall`
+open in a terminal too small" behavior is **UNREACHABLE IN A LIVE SESSION.** `tooSmall`
 (`tui/src/render.ts:43`) already refuses anything below 24x80 before a session runs, and the
 smallest 3270 screen *is* 24x80 — so every terminal that can reach the list clears `OVERLAY_MIN`
 (12x29) comfortably. It is a floor for a caller passing a sub-window, not a refusal an operator can
@@ -1062,7 +1062,7 @@ node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
   canvas-sizing fix below. Verified by diffing against `main`: every other line of `renderer.ts`, and
   all five of `blit.ts`, `keys.ts`, `drawlist.ts`, `cg.ts` and `bdf.ts`, were byte-identical to the
   pre-branch version. **THE TWO-LINE CLAIM IS NOW HISTORICAL** — the keypad branch added the keypad
-  blit, the whole click path and the `__tn3270ButtonCentre` test seam to this file, so do not repeat
+  blit, the whole click path and the `__tn3270ButtonCenter` test seam to this file, so do not repeat
   it as current. What is still true, and is the claim worth making, is that the sharing is proven in
   PIXELS rather than asserted: `browser-shot.mjs` compares the served page against the Electron
   app's OWN goldens and they are identical, **in both of its cases** — with the keypad and without.
@@ -1131,7 +1131,7 @@ reflow or scale fractionally, because integer scaling is a design rule.
 **A browser cannot resize its own window, so the GUI's old clipping bug is worse in a page.** A
 model-4 screen is 43 rows = 616px with the OIA; in an 800x600 viewport the ENTIRE OIA row fell off
 the bottom, silently. Electron fixes this in `main.ts` with `setContentSize`; a page has no such
-power, and `bestScale` floors at 1 while `centre` clamps at 0, so neither rescues it.
+power, and `bestScale` floors at 1 while `center` clamps at 0, so neither rescues it.
 `canvas/src/renderer.ts` now sizes the canvas to `max(viewport, drawing)` and the web page's CSS is
 `overflow:auto`. **Measured both ways: `800x600 scrollable=false` before, `800x616 scrollable=true`
 after.** It costs Electron nothing, because main sizes its window to exactly the drawing, and both
@@ -1369,11 +1369,11 @@ new harness reports that the client is broken, suspect the harness first until i
 been shown to satisfy a known-good client.
 
 **THERE IS NOW A WORKING TERMINAL CLIENT.** `packages/tui` is a c3270-style front
-end: `node packages/tui/dist/main.js [-model M] [--colors N] host[:port]`. Colour
+end: `node packages/tui/dist/main.js [-model M] [--colors N] host[:port]`. Color
 is stored per cell, resolved through the four-level precedence, quantised to
 whatever the terminal supports, and drawn with dirty-cell diffing. The plan is
-`docs/superpowers/plans/2026-08-19-tui-and-colour.md`, and
-`...-tui-and-colour-PROGRESS.md` carries the findings — read that second file
+`docs/superpowers/plans/2026-08-19-tui-and-color.md`, and
+`...-tui-and-color-PROGRESS.md` carries the findings — read that second file
 before touching this work, because most of what cost time is in it rather than here.
 
 **ALL SIXTEEN TASKS ARE DONE, INCLUDING TASK 14's LIVE VERIFICATION.** The TUI was
@@ -1382,11 +1382,11 @@ both: **VM/370 10 of 10 steps** (CMS answered `QUERY DISK A` with its disk table
 CP closed with `LOGOFF AT` and its own accounting) and **MVS 3.8j TK5 8 of 8**
 (ISPF primary option menu fully rendered, `USERID : HERC04`, `TERMINAL : 3277`,
 then `X` to TSO `READY` and a clean `LOGOFF`). Full write-up, including the six
-things that cost time, in `docs/live-testing.md` under *TUI and colour results*.
+things that cost time, in `docs/live-testing.md` under *TUI and color results*.
 
-**Colour is proven live: five distinct foreground colours on TK5's ISPF menu**
+**Color is proven live: five distinct foreground colors on TK5's ISPF menu**
 (green 779, turquoise 416, white 339, neutral-white 322, blue 64), where
-`DEFAULT_COLOURS` can only produce four — and turquoise and neutral-white are not
+`DEFAULT_COLORS` can only produce four — and turquoise and neutral-white are not
 in that map at all, so they came from the host's SA/SFE attributes. The fixture
 replay still reproduces its own numbers exactly, so resolution has not moved.
 
@@ -1409,7 +1409,7 @@ userid verified free after every run.**
   a local minimal TN3270 server, ten checks including **ECHO restored on the tty
   after exit**. Use it when Hercules is down; exit 0 means all ten held.
 
-**The screen is CENTRED with a border, 2026-08-25.** A JupyterLab terminal is
+**The screen is CENTERD with a border, 2026-08-25.** A JupyterLab terminal is
 essentially never 80x24, so slack is spent in priority order rather than shared out:
 vertically screen → OIA → bottom border → top border, horizontally screen → left
 border → right border, and whatever remains is split evenly with any odd cell falling
@@ -1420,11 +1420,11 @@ it, and its test sweeps 22 heights by 5 widths asserting nothing lands outside t
 terminal.
 
 **THE TUI HAS ITS OWN PALETTE (2026-08-25), and core's is untouched.**
-`packages/tui/src/colours.ts` uses **zti's** colours for F0-F7 and **x3270's** for
+`packages/tui/src/colors.ts` uses **zti's** colors for F0-F7 and **x3270's** for
 F8-FF, because zti advertises only F1-F7 and defines no more. F0 renders as PURE BLACK
 there, as zti does, which is why core needs no divergence for a black background -- an
 earlier change to core's default bg has been REVERTED and it is `NEUTRAL_BLACK` again,
-faithful to `c3270/screen.c:1158`. Quantisation to 16 colours is now an EXPLICIT TABLE,
+faithful to `c3270/screen.c:1158`. Quantisation to 16 colors is now an EXPLICIT TABLE,
 not nearest-RGB: both references' blue collides with their turquoise under nearest-RGB,
 so the palette was previously carrying a burden that belongs to the quantiser.
 
@@ -1432,7 +1432,7 @@ so the palette was previously carrying a burden that belongs to the quantiser.
 SGR parameters ACCUMULATE.** Emitting the attributes a cell wants does NOT clear the
 ones it does not; only 0/22/24/25/27 do. A reverse-video run therefore leaked into
 everything after it, and ISPF's tutorial title bar turned 2178 blank cells across three
-pages into solid colour blocks. `paint()` now resets before setting. The monochrome path
+pages into solid color blocks. `paint()` now resets before setting. The monochrome path
 had accidentally been correct, which is why depth-0 tests never caught it. The cursor is a green steady block via OSC 12 plus
 DECSCUSR, restored on exit with OSC 112 and `\x1b[0 q`. **OSC 12 is best-effort**: a
 terminal that does not implement it ignores it, which is why the shape is set too.
@@ -1505,7 +1505,7 @@ as a presumption only:
    `$HOME/vmgif`** (April 1993: `VMGIF.MODULE.T1` 84600 bytes, wrapper execs, HELPCMS,
    and `TONETABL`, its palette/dither table). No source, and disassembly is probably
    unnecessary — decoding GIF from the published spec is no harder than reverse
-   engineering a 1993 implementation once PS can push pixels. Treat it as a behavioural
+   engineering a 1993 implementation once PS can push pixels. Treat it as a behavioral
    reference. GDDM is deliberately NOT a dependency (IBM is sunsetting it); the route is
    PS driving the 3279 screen directly.
 
@@ -1612,7 +1612,7 @@ real conflict is unresolved — Partial Arc is `A3`/`E3` in our book and `86`/`C
 must not be "fixed" in either direction.** It claims **no live-host verification** of graphics (its
 "verified against" list is JDK builds), so it is a better paper reference, not the witness this
 feature lacks. Full analysis in `docs/goca-reference-notes.md`; treat `GocaDecoder.java` as a
-behavioural reference the way VMGIF is treated for PS.
+behavioral reference the way VMGIF is treated for PS.
 **Neither x3270 nor c3270 implements any of this** (prycroft6 mentions no emulator, and our own
 `sf.c` dispatch has no `0x0F10`/`0x0F0F`/`0x0F11` arm — so unlike every stage so far, **there is
 no reference implementation to diff against**, and no Hercules host here drives a G-terminal.
@@ -1647,7 +1647,7 @@ Sources: `~/3270/ref/pages.txt` (GA23-0059) and
      BIND (at the time this was written, deliberately not requested — granting it and sending
      no BIND stops s3270 entering 3270 mode at all; **now requested regardless, on the
      `bind-image` branch, with a 5-second timeout instead of a hang — see *START HERE***),
-     the printer session, and LU/device names actually being honoured —
+     the printer session, and LU/device names actually being honored —
      ~~and an LU name is now also the **diagnostic** for why z/VM 4.4 refuses.~~ **THAT LAST
      CLAUSE IS DEAD: s3270 sent `IBM-3278-2-E CONNECT VTAM` to this host and was refused too,
      so an LU name diagnoses nothing here.** And BIND no longer needs a host at all —
@@ -1657,7 +1657,7 @@ Sources: `~/3270/ref/pages.txt` (GA23-0059) and
      2026-08-17 in `packages/fixtures/x3270/tso-query-reply.txt`, with ttype `IBM-3278-2-E`
      and **TN3270E not negotiated at all**, so the trigger is the `-E` claim and nothing to
      do with option 40. What a modern host would add is a host that *asks* for dynamic
-     geometry and honours the answer; the mechanism can be exercised on TK5 today.
+     geometry and honors the answer; the mechanism can be exercised on TK5 today.
      `IBM-DYNAMIC` is currently out of scope by decision (`termtype.ts:40-44`) — it is not a
      model but "ask me via Query Reply", and x3270 sends it only for oversize
      (`telnet.c:2101`).
@@ -1677,7 +1677,7 @@ design and every measurement. In brief:
 - Download: `SYS1.PARMLIB(IEASYS00)`, 1742 bytes, correct with CRLF.
 - Upload: a 249-byte binary chosen to stress the quadrant machinery round-tripped
   **byte-identically** with `Recfm=variable`. `Recfm=fixed` pads to the record
-  boundary, which is correct behaviour and what VMARC wants (`FBLOCK 80 00`).
+  boundary, which is correct behavior and what VMARC wants (`FBLOCK 80 00`).
 - The host program is Mike Rayborn's "Free File Transfer Program" 2.0.5 from the CBT
   tape, installed by the user. It needs `-model 3278-2-E`.
 - **Retransmit is unit-tested only, and now we know NEITHER HOST CAN TRIGGER IT**
@@ -1724,7 +1724,7 @@ than the stated bug:**
 - **IAC is now doubled inside telnet subnegotiation data**, required by RFC 855's
   final paragraph and done by x3270. The audit found three further defects on the
   *escaped*-byte path, all the same shape — it skipped gates the plain-byte path
-  honours: escaped IACs bypassed both accumulator ceilings entirely (200k `IAC IAC`
+  honors: escaped IACs bypassed both accumulator ceilings entirely (200k `IAC IAC`
   pairs grew a 1024-cap buffer to 200001), and an escaped IAC was stored regardless
   of 3270 mode, **leaking a banner byte into the head of the first real record** —
   the same class as the bug this module already calls "THE regression test".
@@ -1736,8 +1736,8 @@ REPLAYABLE** — `packages/fixtures/traces/mvs-tk5-tso-ispf.trace` is the CANONI
 form that `Replay()` accepts, and `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace` is
 raw CLI output with every line prefixed, which `Replay()` accepts with an `ok` and
 then produces an EMPTY SCREEN from. Citing the `mvs/` path here without that caveat
-cost a later session a wrong turn: it replayed to 0 fields and 1 colour and briefly
-looked like a colour-resolution regression. Use `traces/`. Fixture at
+cost a later session a wrong turn: it replayed to 0 fields and 1 color and briefly
+looked like a color-resolution regression. Use `traces/`. Fixture at
 `packages/fixtures/mvs/mvs-tk5-tso-ispf.trace`,
 full results in `docs/live-testing.md` under *Stage 2a results*. What shipped:
 
@@ -1749,11 +1749,11 @@ full results in `docs/live-testing.md` under *Stage 2a results*. What shipped:
 - **Query Reply** — five units (Summary 0x80, Usable Area 0x81, Color 0x86,
   Highlighting 0x87, Implicit Partition 0xA6), generated from a capability list so
   adding one is a single entry. The three-unit set was accepted by TK5; Color and
-  Highlighting were added once SA execution and colour resolution made them honest.
-  Byte-identical to x3270 except in Color's fifteen colour-identifier bytes, where
+  Highlighting were added once SA execution and color resolution made them honest.
+  Byte-identical to x3270 except in Color's fifteen color-identifier bytes, where
   our capture was taken with x3270 in monochrome mode and we advertise the identity
   pairs unconditionally — see the note on `color` in `queryreply.ts`.
-  **Advertising these did not change what TK5 sends us**: it emits SA colour either
+  **Advertising these did not change what TK5 sends us**: it emits SA color either
   way, which the trace fixture's 113 SA orders (captured before we advertised
   anything) show.
 - **SFE** implemented as a field-defining order, including the case that matters: an
@@ -1961,7 +1961,7 @@ a symptom.
    still **wrong**, because Hercules emits its greeting from inside libtelnet during
    the first `recv()` and the hand-rolled loop could not reproduce that timing.
    Reproducibility inside a mimic measures the mimic. What finally settled it was a
-   labelled run against the real host with 15 s of silence between phases, mapped by
+   labeled run against the real host with 15 s of silence between phases, mapped by
    client ID. When the real system is available, instrument *it*; keep the mimic for
    generating hypotheses, and say which one a claim rests on.
 9. **Before blocking on a question, check that its answer could change anything.**
@@ -2077,7 +2077,7 @@ times; that pushback was the single most valuable part of the process.
    the default ttype when they cannot; quoted a manual string that greps to zero hits;
    and omitted IAC-doubling from session-level test bytes, which made a negative test
    pass for the wrong reason. Mutation testing during review also found two tests that
-   passed with the behaviour they claimed to pin deleted. **Keep asking implementers to
+   passed with the behavior they claimed to pin deleted. **Keep asking implementers to
    verify against `pages.txt` and x3270 rather than accepting the task text.**
 
 5. **Stage 2b — TN3270E proper**, the telnet option (40): DEVICE-TYPE/FUNCTIONS

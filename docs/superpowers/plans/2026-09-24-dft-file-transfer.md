@@ -279,7 +279,7 @@ Expected: build clean, 5 tests PASS.
 git add packages/core/src/ft/dftFrames.ts packages/core/test/dftFrames.test.ts packages/core/src/constants.ts
 git commit -m "feat(core): DFT wire constants, transcribed from ft_dft_ds.h
 
-Constants only -- no behaviour yet. The header is the only written source for
+Constants only -- no behavior yet. The header is the only written source for
 these codes; the manual documents the DDM Query Reply that enables DFT but not
 the request types.
 
@@ -1302,7 +1302,7 @@ Takes a structured-field payload and returns reply bytes. Imports no Screen and
 no Session -- that is the feature and not an accident of layering, since it is
 what lets a transfer run at 43x80 where CUT refuses.
 
-Two behaviours that are easy to get backwards and are pinned: an FT:MSG open is a
+Two behaviors that are easy to get backwards and are pinned: an FT:MSG open is a
 MESSAGE and must not start a file transfer, and a message frame ENDS the transfer
 (TRANS03 means success, anything else is the host's own error text, truncated at a
 '\$'). Cancellation is deferred to the next inbound frame, matching x3270, unlike
@@ -1315,7 +1315,7 @@ was right in every respect — `Close` does not complete, `FT:MSG` must not star
 Cursor/Insert/unknown are silent, cancellation defers — and all of that is as written. What the plan
 lacked was found by reading `ft_dft.c` again rather than trusting the plan's prose.
 
-**THREE BEHAVIOURS MISSING FROM THE PLAN, in descending order of how badly each would have hurt:**
+**THREE BEHAVIORS MISSING FROM THE PLAN, in descending order of how badly each would have hurt:**
 
 1. **`TRANS03` IS A PREFIX MATCH, NOT EQUALITY.** `memcmp(msgp, END_TRANSFER, strlen(END_TRANSFER))`
    at `:268` compares 7 bytes only. A real host sends `TRANS03` followed by its own wording, so
@@ -1448,7 +1448,7 @@ describe('DftTransfer, upload (send)', () => {
     expect([...second.reply!].slice(8, 10)).toEqual([0x69, 0x04]);  // EOF header
   });
 
-  it('honours the buffer size, reserving 27 bytes as x3270 does', () => {
+  it('honors the buffer size, reserving 27 bytes as x3270 does', () => {
     // ft_dft.c:580 `numbytes = ftc->dft_buffersize - 27`.
     const data = new Uint8Array(500).fill(0x01);
     const t = new DftTransfer({ direction: 'send', data, bufferSize: 300 });
@@ -1690,7 +1690,7 @@ The plan's version also had `Math.max(1, ...)` papering over a small `bufferSize
 produced 1-byte frames where x3270 clamps to 256. No import cycle — `queryreply.ts` imports only
 `constants` and `palette`.
 
-**Five behaviours added beyond the plan's tests, each because a mutation showed the plan's set did not
+**Five behaviors added beyond the plan's tests, each because a mutation showed the plan's set did not
 pin it:** the 16-vs-17 relationship checked across three sizes rather than one instance; the EOF frame
 distinguished from an ABORT frame, which differ by **one byte** (`0x2200` vs `0x0100`) and are
 otherwise identical for 8 bytes; record numbers 1/2/3 across successive frames; the source delivered
@@ -2435,7 +2435,7 @@ Facts that decide whether the run is valid, all measured in stage 1:
 
 - [ ] **Step 2: Write the script**
 
-Create `packages/cli/scripts/dft-tso.txt`, modelled on `ddm-probe-tso.txt` — copy that file's header style, and read it first for the exact logon and navigation lines rather than inventing them. The script must:
+Create `packages/cli/scripts/dft-tso.txt`, modeled on `ddm-probe-tso.txt` — copy that file's header style, and read it first for the exact logon and navigation lines rather than inventing them. The script must:
 
 1. `Trace(on)` **and `TraceText`** as the first lines. `Trace(on)` alone logs nothing.
 2. Log on `HERC01`, leave ISPF with `X`, reach `READY`.
@@ -2497,7 +2497,7 @@ contradicted the plan. If the run failed, say so and what it showed.>"
 > **DONE, 2026-09-29. The answer is in the spec's *The question that was left open*, and it is in two
 > independent parts.**
 >
-> **AS BUILT.** (1) **`Recfm` and `Lrecl` ride through unchanged and TSO honours both** — three
+> **AS BUILT.** (1) **`Recfm` and `Lrecl` ride through unchanged and TSO honors both** — three
 > transfers over DFT gave `VB 1024`, `VB 80`, `FB 80` per TSO's own `LISTDS`. **No code change was
 > needed**, which is the outcome Step 3's "code only if the answer demands it" allowed for. (2) **The
 > `Open`'s record size is NOT related to `Lrecl` at all**: it was **16367 = 0x3fef in all three
@@ -2510,7 +2510,7 @@ contradicted the plan. If the run failed, say so and what it showed.>"
 > **WHY THAT MATTERS BEYOND CLOSING THE QUESTION:** it is the argument for the still-unwired
 > `BufferSize`/`dftBufferSize` pair having to agree. The host reads our advertisement and echoes it,
 > so advertising one size while chunking by another would have it sizing its side from a number we do
-> not honour.
+> not honor.
 >
 > **THE THREE-CASE SCRIPT IS COMMITTED as `packages/cli/scripts/dft-lrecl-tso.txt`**, with the
 > measured answer in its own header so a rerun is a check rather than a rediscovery — and
@@ -2536,7 +2536,7 @@ contradicted the plan. If the run failed, say so and what it showed.>"
 
 **Files:** `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`, and code only if the answer demands it.
 
-The spec deliberately left one question open: **does DFT honour `Recfm`/`Lrecl`/`Blksize` the way CUT does?** They are `IND$FILE` command keywords rather than protocol, so they should ride through unchanged — but TSO's DFT `Open` carries **its own record size** at payload offset 24, which CUT has no equivalent of.
+The spec deliberately left one question open: **does DFT honor `Recfm`/`Lrecl`/`Blksize` the way CUT does?** They are `IND$FILE` command keywords rather than protocol, so they should ride through unchanged — but TSO's DFT `Open` carries **its own record size** at payload offset 24, which CUT has no equivalent of.
 
 - [ ] **Step 1: Read the record size TSO actually sent**
 

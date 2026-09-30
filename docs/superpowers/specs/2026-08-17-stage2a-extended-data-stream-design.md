@@ -40,7 +40,7 @@ Explicitly **not** in scope, stated so it is not later mistaken for delivered:
   implements it: `query_reply_end()` calls `kybd_inhibit(true)` (`Common/sf.c:929`),
   cleared only by a later Erase/EAU/Write (`ctlr.c:550`, `:1309`, `:1406`).
 
-  As predicted, our behaviour already coincided with x3270's for the case this stage
+  As predicted, our behavior already coincided with x3270's for the case this stage
   exists to serve — TSO queries before any write, so we stayed locked either way —
   and diverged only for a **mid-session Query**, where we left the keyboard unlocked
   over a screen the host considers frozen. Now implemented as
@@ -92,7 +92,7 @@ including Color (0x86) and Highlighting (0x87), which are exactly the capabiliti
 that invite the SA orders we are deferring. Advertising them would have the host
 behave correctly while our screen went wrong.
 
-Every unit we send is one we honour. The fixture itself warns that x3270 "sends more
+Every unit we send is one we honor. The fixture itself warns that x3270 "sends more
 reply units than TSO necessarily requires, and the minimum acceptable subset is
 untested", and the project rule is to verify wire constants against the manual rather
 than copy them. If TK5 wants more, the failure is informative and the fix is one
@@ -129,8 +129,8 @@ tokens, `execute.ts` applies tokens to a screen, neither does I/O.
 - **`packages/core/src/stream/sf.ts`** — parses the inbound WSF payload into typed
   structured-field tokens. Today `parse.ts:92` lumps the whole payload into one
   opaque `structuredFields` token; this splits it on length-prefixed boundaries and
-  recognises Read Partition (SFID 0x01). Unknown SFIDs stay opaque and counted, so a
-  host sending something unrecognised is a logged no-op, not an error.
+  recognizes Read Partition (SFID 0x01). Unknown SFIDs stay opaque and counted, so a
+  host sending something unrecognized is a logged no-op, not an error.
 - **`packages/core/src/queryreply.ts`** — builds the reply from a **capability
   list**, per the standing directive in the stage 1 design doc ("Query Reply is
   generated from a capability list, not a hardcoded byte blob"). A `Capability[]` of
@@ -189,8 +189,8 @@ type is **0xC0**, confirmed twice: the manual's attribute-type table gives
 `X'C0' 3270 Field attribute`, and x3270's `include/3270ds.h:230` defines
 `XA_3270 0xc0`. (The manual's prose example OCRs as `X'C8'`; that is OCR damage, and
 the table plus x3270 agree on 0xC0. Worth recording as an instance of the standing
-rule paying off.) We honour the 0xC0 pair and parse-and-drop all others (0x41
-highlighting, 0x42 colour, 0x43 character set, …).
+rule paying off.) We honor the 0xC0 pair and parse-and-drop all others (0x41
+highlighting, 0x42 color, 0x43 character set, …).
 
 **The structural case, from the manual rather than inference** — p. 4-5
 (`pages.txt:2882`): "If SFE is
@@ -212,7 +212,7 @@ host: f3 00 05 01 ff 02                    (WSF, after telnet un-doubles ff ff)
 us:   88 <Summary> <UsableArea> <ImplicitPartitions>
 ```
 
-Three behaviours to get right, each with a tempting wrong alternative:
+Three behaviors to get right, each with a tempting wrong alternative:
 
 - **Query Reply does not touch the screen.** No clear, no cursor move, no keyboard
   change. In particular it must **not** set `keyboardRestore`: WSF carries no WCC,

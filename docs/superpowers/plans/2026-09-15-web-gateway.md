@@ -78,7 +78,7 @@ runtime dependencies), vitest, Electron 44.3.0 + Xvfb for the by-hand browser ha
 
 | file | responsibility |
 | --- | --- |
-| `src/wsframe.ts` | RFC 6455 frame parse/serialise. Pure, no sockets |
+| `src/wsframe.ts` | RFC 6455 frame parse/serialize. Pure, no sockets |
 | `src/handshake.ts` | the `Sec-WebSocket-Accept` computation and upgrade-request validation |
 | `src/wsserver.ts` | binds framing to a socket and yields a `Connection`. **The swap-to-`ws` seam** |
 | `src/protocol.ts` | message shapes, `encodeServerMessage` (deflate), `decodeClientMessage` |
@@ -221,7 +221,7 @@ export function readAtlas(): { geometry: AtlasGeometry; coverage: Uint8Array } {
  */
 export { drawList } from './drawlist.js';
 export type { AtlasGeometry, DrawCell, DrawList } from './drawlist.js';
-export { blit, blankColumns, bestScale, centre, rgbCss, tintKey } from './blit.js';
+export { blit, blankColumns, bestScale, center, rgbCss, tintKey } from './blit.js';
 export type { Surface, Ctx2D, BlitOptions } from './blit.js';
 export { actionForKey } from './keys.js';
 export type { KeyLike } from './keys.js';
@@ -595,7 +595,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i]!;
-    // The host-side TLS flags belong to frontend; it consumes what it recognises.
+    // The host-side TLS flags belong to frontend; it consumes what it recognizes.
     if (takeTlsFlag(args, i, hostTls)) { i = takeTlsFlag.lastIndex ?? i; continue; }
     switch (a) {
       case '--bind': bind = value(args, i, a); i += 1; continue;
@@ -853,7 +853,7 @@ Expected: FAIL, unresolved import.
 
 ```ts
 /**
- * RFC 6455 frame parsing and serialising. Pure: no sockets, no state beyond the buffer given.
+ * RFC 6455 frame parsing and serializing. Pure: no sockets, no state beyond the buffer given.
  *
  * WHY HAND-ROLLED: every package in this project declares only workspace siblings, and keeping
  * that property in the one network-facing component was a deliberate call. Framing is
@@ -916,7 +916,7 @@ export function parseFrame(buf: Buffer): Frame | undefined {
   return { fin, opcode, payload, consumed: off + len };
 }
 
-/** Serialise one unmasked server frame. Always final; we never fragment outbound. */
+/** Serialize one unmasked server frame. Always final; we never fragment outbound. */
 export function serializeFrame(opcode: number, payload: Buffer): Buffer {
   let head: Buffer;
   if (payload.length < 126) {
@@ -953,7 +953,7 @@ field, while byte 0 holds FIN/RSV/opcode. Applied as written, all 12 tests still
 this step literally would report a guard as proven while testing nothing. The real mutation sets bit
 7 of byte 1 in all three length branches.
 
-**And doing it properly exposed a genuine coverage gap:** the 16-bit and 64-bit serialise tests
+**And doing it properly exposed a genuine coverage gap:** the 16-bit and 64-bit serialize tests
 asserted only `out[1] & 0x7f`, so they SURVIVED the correct mutation — and per the measured frame
 sizes the 16-bit path is the one production traffic actually uses, so the unpinned branch was the
 load-bearing one. Both tests now also assert `out[1] & 0x80` is 0.
@@ -977,7 +977,7 @@ Two further as-built notes:
 ```bash
 cd ~/git/tn3270
 git add packages/web/src/wsframe.ts packages/web/test/wsframe.test.ts
-git commit -m "feat(web): RFC 6455 frame parse and serialise
+git commit -m "feat(web): RFC 6455 frame parse and serialize
 
 Pure and separately testable, because it is the highest-risk part of choosing a
 hand-rolled transport. Both length boundaries (126, 65536) and the client/server
@@ -1237,7 +1237,7 @@ is 20 tests and `args.test.ts` 17. Three things to carry forward:
   failed it — so that assertion is not merely decorative.
 
 Tests: a matching `--allow-origin` accepted; a non-matching one still refused; the flag not affecting
-the absent-Origin rule; and that no wildcard is honoured (`--allow-origin https://*.example` must NOT
+the absent-Origin rule; and that no wildcard is honored (`--allow-origin https://*.example` must NOT
 match `https://a.example`). Mutation-check by removing the allow-list branch and confirming the
 proxy case fails again.
 
@@ -1317,7 +1317,7 @@ describe('decodeClientMessage', () => {
   });
 
   it('REFUSES a quit action, which a browser must not be able to do to the gateway', () => {
-    // The bridge intercepts quit and closes its own socket. This is defence in depth, because the
+    // The bridge intercepts quit and closes its own socket. This is defense in depth, because the
     // bridge is served code and a client is not obliged to run it.
     expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"quit"}}'))
       .toThrow(/quit/i);
@@ -1353,7 +1353,7 @@ import type { Action } from '@tn3270/frontend';
  * ## COMPRESSION IS NOT OPTIONAL AND ITS FORMAT IS NOT FREE
  *
  * MEASURED: a 24x80 draw list is 237220 bytes of JSON and 6760 deflated -- 35x, because per-cell
- * colour data is enormously repetitive. Raw frames would be unpleasant over a network since a
+ * color data is enormously repetitive. Raw frames would be unpleasant over a network since a
  * keystroke can produce several; compressed they are a non-issue, which is why dirty-cell diffing
  * is NOT in this design.
  *
@@ -2752,8 +2752,8 @@ accumulate. **A `Session.off()` in core is the real fix and is a question for th
 **THREE MUTATIONS WERE INERT AGAINST THE PLAN'S FIVE TESTS, and closing them needed a RAW socket
 client.** Node's built-in WebSocket sends no `Origin` and offers no way to add one, and it never
 writes payload before the 101, so neither the `--allow-origin` wiring nor the `head` bytes had any
-behavioural test at all. A raw upgrade written in ONE `socket.write` covers both. The timing-safe
-comparison is invisible to behaviour by construction — a plain `!==` rejects exactly the same tokens
+behavioral test at all. A raw upgrade written in ONE `socket.write` covers both. The timing-safe
+comparison is invisible to behavior by construction — a plain `!==` rejects exactly the same tokens
 and every functional test passes either way — so it is pinned by a SOURCE SCAN, the same instinct as
 `renderer-imports.test.ts`. **A helper's completion condition matters: waiting for a fixed byte count
 HANGS on an accepted upgrade**, which answers only the ~130-byte 101 and then waits for a `hello`.
@@ -3249,7 +3249,7 @@ harness until it has satisfied a known-good path.
    over IPC, one over a WebSocket -- so the URL seam creates the window with NO preload. A real
    browser has no preload, so this asymmetry belongs to the test shell and not to the product.
 3. **`HTTP_PROXY` IS SET ON THIS BOX AND CHROMIUM SENT THE LOOPBACK REQUEST TO IT**, ignoring
-   `no_proxy` -- which names both `localhost` and `127.0.0.1` -- because Chromium does not honour that
+   `no_proxy` -- which names both `localhost` and `127.0.0.1` -- because Chromium does not honor that
    variable the way curl does. The symptom is the worst available: window opens, `did-fail-load` never
    fires, no renderer error, keys delivered to a blank page, and **not one HTTP request in the
    gateway's log**. Diagnosed only by patching the built server to log every request and seeing
@@ -3372,7 +3372,7 @@ Three findings:
 1. **THE WINDOW HAD TO BE TOLD ITS SIZE, because in URL mode main sees no draw lists.** On the normal
    path main computes the list and calls `setContentSize(list.width * scale, ...)`; in URL mode the
    PAGE owns the protocol, so the window would have stayed at its 800x600 default,
-   `renderer.ts` would have centred a 720x350 drawing inside it, and the capture would have differed
+   `renderer.ts` would have centerd a 720x350 drawing inside it, and the capture would have differed
    from the golden **by a black border alone** -- a difference in the harness's geometry rather than in
    anything drawn, which is the least interesting reason for a golden to fail. Hence a fifth seam,
    `TN3270_GUI_SIZE`, which REFUSES a malformed value by name rather than ignoring it.
@@ -3450,7 +3450,7 @@ Full measurements in `docs/live-testing.md`, *The web gateway against both hosts
 3. **THE CLIPPING BUG IS REAL IN A BROWSER AND WORSE THERE, which is what Step 2 asked about.** In an
    800x600 viewport the whole OIA row fell OFF THE BOTTOM -- measured as `row OIA: OFF THE BOTTOM OF
    THE IMAGE`. The GUI fixes this by calling `setContentSize`; **a page cannot resize its window**, and
-   `bestScale` floors at 1 while `centre` clamps at 0, so neither rescues it. Fixed in
+   `bestScale` floors at 1 while `center` clamps at 0, so neither rescues it. Fixed in
    `canvas/src/renderer.ts` by sizing the canvas to `max(viewport, drawing)`, with the web page's CSS
    at `overflow:auto`. **Measured both ways** by instrumenting the built renderer: `800x600
    scrollable=false` before, `800x616 scrollable=true` after. **It costs Electron nothing** -- main
@@ -3492,7 +3492,7 @@ this is a known failure mode and worth checking explicitly.
 - [x] **Step 3: Two tabs, two sessions**
 
 Open the URL twice and confirm two independent sessions with two Hercules devices. Per the
-measured device-selection behaviour, one may land on a device the host is not driving and show
+measured device-selection behavior, one may land on a device the host is not driving and show
 **0 fields** — that is the host's logon process painting one device, not a client defect. Record
 which happened rather than treating it as a bug.
 

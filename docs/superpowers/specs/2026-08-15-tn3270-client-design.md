@@ -133,7 +133,7 @@ disassembled if it came to that (S/370 object code, and the HELPCMS file plus
 once we know how to push pixels with Programmable Symbol Sets, **writing a GIF decoder
 from the spec is no harder than reverse-engineering a 1993 one** — GIF/LZW is a
 published, stable format and our decoder would run client-side in TypeScript, not on
-the host. So treat VMGIF as a **behavioural reference** (what a 3279 dithered image
+the host. So treat VMGIF as a **behavioral reference** (what a 3279 dithered image
 actually looked like, and `TONETABL` is literally its palette mapping) rather than as
 code to port. It remains the fidelity target named below.
 
@@ -214,15 +214,15 @@ Several stage 4+ items therefore have **no local test host at all**.
 **Plan: after the historic hosts are flawless, the user will poll contacts still
 working in the mainframe world for access to a modern z/OS and z/VM, and possibly
 z/VSE.** The user believes those contacts are in a position to grant it. That is the
-only realistic way to test TLS, TN3270E, and modern-VTAM behaviour against something
+only realistic way to test TLS, TN3270E, and modern-VTAM behavior against something
 authoritative rather than against our reading of the manual.
 
 Two consequences for sequencing, worth acting on now:
 
-- **Do not treat "works on TK5 and VM/CE" as "conformant".** Where behaviour is
+- **Do not treat "works on TK5 and VM/CE" as "conformant".** Where behavior is
   known to differ on modern systems, say so in the code comment and cite the
   manual, so a later z/OS run has something falsifiable to check against.
-- **Prefer designs that keep host-specific behaviour at a seam.** IND$FILE's
+- **Prefer designs that keep host-specific behavior at a seam.** IND$FILE's
   `Dialect` object is the model: TSO and VM differ in three named places and
   nothing else. TN3270E and TLS should land the same way, so adding a modern host
   is configuration and a new dialect rather than a rewrite.
@@ -640,7 +640,7 @@ The user re-confirmed this as the right choice on 2026-08-19.
 terminal front end draws in whatever font the terminal is already configured with and
 has no hook to change it, so for `packages/tui` 3270font is advice for the README
 ("install it and point your terminal at it") rather than a dependency. See the *Fonts*
-section of `docs/superpowers/specs/2026-08-19-tui-and-colour-design.md`.
+section of `docs/superpowers/specs/2026-08-19-tui-and-color-design.md`.
 
 ### Keyboard
 

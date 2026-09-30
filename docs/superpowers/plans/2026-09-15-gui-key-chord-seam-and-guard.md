@@ -118,7 +118,7 @@ describe('parseKeySpec', () => {
   });
 
   it('passes the key through VERBATIM, including punctuation', () => {
-    // ']' arrives as code BracketRight; nothing here normalises it.
+    // ']' arrives as code BracketRight; nothing here normalizes it.
     expect(parseKeySpec('Ctrl+]')).toEqual({ keyCode: ']', modifiers: ['control'] });
   });
 
@@ -555,7 +555,7 @@ keys: sent Alt+1,Ctrl+A,F1
 **If `Ctrl+A` is missing, do not paper over it:** suspect Electron's default application
 menu swallowing the accelerator, confirm by testing `Ctrl+A` alone, and record the finding
 in `docs/live-testing.md`. Drop the affected cases from Task 5's list with a comment saying
-why rather than changing the app's menu, which is product behaviour and out of scope here.
+why rather than changing the app's menu, which is product behavior and out of scope here.
 The process must also exit on its own; if it hangs, `quitIfKeysOnly` is not being reached.
 
 **AS BUILT — a defect in this task's own plan text, found by measurement.** `parseKeySpec`

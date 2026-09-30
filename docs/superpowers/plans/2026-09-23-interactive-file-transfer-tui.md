@@ -64,7 +64,7 @@
 
 ## Task 1: Move the host-independent half of `transfer.ts` into `frontend`
 
-Pure refactor. No behaviour changes. **This task's regression guard is the existing test suite** — the ten keyword rules must behave identically after the move.
+Pure refactor. No behavior changes. **This task's regression guard is the existing test suite** — the ten keyword rules must behave identically after the move.
 
 **Files:**
 - Create: `packages/frontend/src/transfer.ts`
@@ -170,7 +170,7 @@ git add -A
 git commit -m "refactor: move transfer validation from cli to frontend
 
 $(printf '%s' 'The TUI needs parseTransferKeywords and transferCommand, and tui does not
-depend on cli by design. Pure move: 1869 tests before and after, no behaviour
+depend on cli by design. Pure move: 1869 tests before and after, no behavior
 change. The Node-coupled nodeTransferFiles stays in cli until the next commit
 gives it a package of its own.
 
@@ -615,7 +615,7 @@ describe('newTransferForm', () => {
     expect(s.values.mode).toBe('binary');
     expect(s.values.exist).toBe('keep');
     // UNSET is a distinct intention from any value: it emits no keyword at all and
-    // lets the host choose, which is the CLI behaviour that works on both hosts.
+    // lets the host choose, which is the CLI behavior that works on both hosts.
     expect(s.values.cr).toBe('');
     expect(s.values.recfm).toBe('');
     expect(s.values.localFile).toBe('');
@@ -736,7 +736,7 @@ Expected: FAIL — cannot resolve `../src/transferForm.js`.
  *
  * `Cr` and `Recfm` start at `''`, and that is not the same as any of their values: an
  * unset `Recfm` emits no `RECFM` keyword at all and lets the host choose, which is the
- * current CLI behaviour that works on both hosts. A two-state F/V toggle would make "I did
+ * current CLI behavior that works on both hosts. A two-state F/V toggle would make "I did
  * not ask for record attributes" unexpressible.
  */
 
@@ -865,7 +865,7 @@ export function setFieldText(
 /**
  * Is this field meaningful, given the rest of the form?
  *
- * All five rules are derived from the validator's own behaviour, cited where they come
+ * All five rules are derived from the validator's own behavior, cited where they come
  * from. An inapplicable field is not drawn and cannot be selected.
  */
 export function applicable(id: TransferFieldId, values: TransferValues): boolean {
@@ -982,7 +982,7 @@ describe('applicable', () => {
     expect(applicable('lrecl', v({ direction: 'send', recfm: 'fixed' }))).toBe(true);
   });
 
-  it('KEEPS Lrecl for Recfm=V, because TSO honours it as the MAXIMUM record length', () => {
+  it('KEEPS Lrecl for Recfm=V, because TSO honors it as the MAXIMUM record length', () => {
     // MEASURED LIVE ON BOTH HOSTS 2026-09-22, and they disagree. TSO: `RECFM V LRECL 80`
     // stored VB 80 against VB 255 without it. VM/CMS: both V cases stored V 80, so CMS
     // ignores it -- but disabling the field would make a real TSO attribute unexpressible
@@ -1128,7 +1128,7 @@ emits, the validator accepts.
 Recfm is a THREE-state cycle because unset emits no keyword and lets the host
 choose -- a different wire command from RECFM V. Lrecl is 5 wide, not 3: TSO
 datasets reach 32760. Lrecl STAYS enabled for Recfm=V, which was measured on
-both hosts rather than reasoned about: TSO honours it as the maximum record
+both hosts rather than reasoned about: TSO honors it as the maximum record
 length (VB 80 against VB 255), VM ignores it, and disabling it would make a real
 TSO attribute unexpressible to satisfy a VM quirk.
 
@@ -1166,7 +1166,7 @@ Gate after: build/typecheck clean, **1903 tests in 76 files** (from 1877/75). Co
 3. **The keyword map must be a TOTAL `Record`, not `Partial<Record<>>`.** Measured: with `Partial`,
    dropping `direction` from the map **compiles cleanly** and emits the keyword `undefined=receive`
    at runtime; with `Record` it is TS2741 at build. The validator cannot save us here — it never
-   sees a field name it recognises.
+   sees a field name it recognizes.
 4. **The plan's `import type { FtHostType }` is unused** and was dropped. The module refers to no
    type from `transfer.ts`.
 
@@ -1247,7 +1247,7 @@ describe('cancel, the operator-initiated abort', () => {
     expect(again.done).toBeUndefined();
   });
 
-  it('cancelling after a NORMAL completion is also inert', () => {
+  it('canceling after a NORMAL completion is also inert', () => {
     // The same guard from the other side: the transfer ended on its own and the form is
     // only now being closed.
     const transfer = new CutTransfer({ direction: 'receive' });
@@ -1284,7 +1284,7 @@ In `packages/core/src/ft/transfer.ts`, beside `abort`, add a public method. `abo
    *
    * `abort` is the INTERNAL error path. Its ten callers each already hold a
    * `CutFrameError`'s status and message, so its signature takes both -- and an
-   * operator cancelling has neither. Exposing `abort` would put two arguments in the
+   * operator canceling has neither. Exposing `abort` would put two arguments in the
    * public API that no caller outside this file can sensibly supply, and the natural
    * wrong guess (status 0, an empty message) is one the host would read as a protocol
    * fault rather than a cancellation.
@@ -1300,14 +1300,14 @@ In `packages/core/src/ft/transfer.ts`, beside `abort`, add a public method. `abo
    */
   cancel(screen: Screen): TransferStep {
     if (this.finished) return {};
-    return this.abort(screen, StatusCode.ABORT_XMIT, MSG.CANCELLED);
+    return this.abort(screen, StatusCode.ABORT_XMIT, MSG.CANCELED);
   }
 ```
 
 **Three things to check against the real file rather than trusting the sketch:**
 
 1. **Is there a `finished` flag?** `finish()` exists (`abort` returns `this.finish(...)`), so some completion state is tracked. Find what it is called and test that. If there is none, add one — `private finished = false;` set in `finish()` — and say so in the commit.
-2. **`MSG.CANCELLED` may not exist.** Check the `MSG` table. x3270's own string is `ftUserCancel`/`ftCutUserCancel` — grep `fb-common` in `~/src/suite3270-4.5` for the exact text and add an entry matching the table's style. Do not invent a message where x3270 has one.
+2. **`MSG.CANCELED` may not exist.** Check the `MSG` table. x3270's own string is `ftUserCancel`/`ftCutUserCancel` — grep `fb-common` in `~/src/suite3270-4.5` for the exact text and add an entry matching the table's style. Do not invent a message where x3270 has one.
 3. **`StatusCode.ABORT_XMIT`** — confirm the spelling; the file uses `StatusCode.ABORT_XMIT` at its other call sites.
 
 - [ ] **Step 5: Run the tests**
@@ -1332,7 +1332,7 @@ git commit -m "feat(core): a public CutTransfer.cancel for operator cancellation
 
 $(printf '%s' 'The spec said abort "is private -- expose it", and that was not enough. abort is
 the INTERNAL error path: its ten callers each hold a CutFrameError status and
-message, and an operator cancelling has neither, so making it public would put
+message, and an operator canceling has neither, so making it public would put
 two arguments in the API that no outside caller can supply. The natural wrong
 guess -- status 0, empty message -- is one the host reads as a protocol fault
 rather than a cancellation.
@@ -1837,7 +1837,7 @@ describe('the transfer form', () => {
 
   it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
     // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
-    // comparison recognises -- the field would appear to stop changing while the key was
+    // comparison recognizes -- the field would appear to stop changing while the key was
     // held. Two rights from `receive` wrap back to `receive`, so assert three.
     const h = started();
     h.send(CTRL_T);
@@ -1907,7 +1907,7 @@ In `packages/tui/src/app.ts`:
         : undefined,
 ```
 
-(e) `toggleTransfer`, modelled on `toggleOverlay` — including the `suspended` guard, for the same reason: opening while suspended would leave the form invisible and yet owning the keyboard.
+(e) `toggleTransfer`, modeled on `toggleOverlay` — including the `suspended` guard, for the same reason: opening while suspended would leave the form invisible and yet owning the keyboard.
 
 ```typescript
   /** Open the transfer form, or close an open one. The keypad list closes if it is up. */
@@ -1939,7 +1939,7 @@ In `packages/tui/src/app.ts`:
   }
 ```
 
-(f) `consumeTransferKey` and `transferKey`, modelled on `consumeOverlayKey`/`overlayKey`. The ESC handling must be the **same shape**: hold an incomplete prefix for `ESC_TIMEOUT_MS`, and only a lone ESC that outlives the window closes.
+(f) `consumeTransferKey` and `transferKey`, modeled on `consumeOverlayKey`/`overlayKey`. The ESC handling must be the **same shape**: hold an incomplete prefix for `ESC_TIMEOUT_MS`, and only a lone ESC that outlives the window closes.
 
 ```typescript
   /**
@@ -2161,7 +2161,7 @@ Gate after: build/typecheck clean, **1945 tests in 77 files** (from 1924), `pty-
 exit 0. Commit `7527481`. **18 tests, not 11.**
 
 1. **THE EXCLUSION WAS ONE-WAY.** Step (f) adds a Ctrl-K arm to `transferKey` but **no Ctrl-T arm to
-   `overlayKey`**, so Ctrl-T from inside the keypad list was swallowed like any other unrecognised
+   `overlayKey`**, so Ctrl-T from inside the keypad list was swallowed like any other unrecognized
    byte — the form reachable from the screen but not from the list. Both arms now exist and each is
    falsifiable alone. A test caught it, not review.
 2. **THE SELECTION REPAIR IN `cycleTransfer` IS UNREACHABLE AND WAS DROPPED.** A field's
@@ -2659,7 +2659,7 @@ exit 0. Commit `09c2bea`. **16 engine tests + 9 app tests, not 8 + 1.**
    — the plan's "check it is, add it if not" needs no action.
 7. **TWO DEFENCE-IN-DEPTH PAIRS, found by mutation and now documented in the tests that cover
    them**, because each guard alone keeps the suite green: (a) `ended` and `clearTimers()` in
-   `finish` — with both gone `onDone` fires THREE times and the last overwrites "cancelled" with
+   `finish` — with both gone `onDone` fires THREE times and the last overwrites "canceled" with
    "timed out"; (b) `app.ts` clearing `transferRun` in `onDone` and `CutTransfer.cancel`'s own
    idempotence — deleting the app's half keeps the whole TUI suite green and removing both reddens
    **core's** three cancel tests, not a TUI one.

@@ -70,7 +70,7 @@ All already exported (verified in `packages/frontend/src/index.ts`):
 `StartTransferOptions`, `TransferRun`.
 
 **`transferForm.ts` is NOT modified.** Its docstring states the central rule — the form never
-validates, it collects strings and `parseTransferKeywords` is the authority — and the GUI honours
+validates, it collects strings and `parseTransferKeywords` is the authority — and the GUI honors
 that by calling `transferCommand` and displaying its error, exactly as the TUI does. If the two ever
 disagree, the validator wins.
 
@@ -124,7 +124,7 @@ off — a window that handles file paths and host credentials is the last place 
 
 | dir | function | shape |
 |---|---|---|
-| ↑ | `browse(direction)` | `invoke`; resolves to a path, or `undefined` if the dialog was cancelled |
+| ↑ | `browse(direction)` | `invoke`; resolves to a path, or `undefined` if the dialog was canceled |
 | ↑ | `submit(keywords)` | `invoke`; resolves to `{ ok: false, error }` for a local refusal, else `{ ok: true }` |
 | ↑ | `cancel()` | `send` |
 | ↓ | `onProgress(fn)` | `on`; text plus phase |

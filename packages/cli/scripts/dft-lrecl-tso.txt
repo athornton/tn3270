@@ -1,4 +1,4 @@
-# TASK 11 OF THE DFT PLAN: does DFT honour Recfm/Lrecl, and what IS the Open's record size?
+# TASK 11 OF THE DFT PLAN: does DFT honor Recfm/Lrecl, and what IS the Open's record size?
 #
 # Run it:
 #   python3 -c "import random; random.seed(3270); open('/tmp/rt-src.bin','wb').write(bytes(random.randrange(256) for _ in range(249)))"
@@ -7,7 +7,7 @@
 #     > /tmp/dft-lrecl.log 2>&1
 #
 # THE ANSWER IT MEASURED, 2026-09-29 -- recorded here so a rerun is a CHECK and not a
-# rediscovery. Recfm and Lrecl ride through as IND$FILE keywords and TSO honours both:
+# rediscovery. Recfm and Lrecl ride through as IND$FILE keywords and TSO honors both:
 #   VB 1024 / VB 80 / FB 80, per LISTDS.
 # And the Open's recordSize is CONSTANT at 16367 = 0x3fef across all three cases --
 # 16384 - 17, i.e. OUR advertised DFT_BUF less DFT's 17-byte frame overhead (x3270's

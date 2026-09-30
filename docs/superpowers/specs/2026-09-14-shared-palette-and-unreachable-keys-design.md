@@ -27,18 +27,18 @@ independent of everything else here and could ship alone.
 
 ## Problem 1: the GUI never got the TUI's palette
 
-`packages/gui/src/drawlist.ts` resolves colour through core's `colourRgb`, where blue F1 is
+`packages/gui/src/drawlist.ts` resolves color through core's `colorRgb`, where blue F1 is
 **pure `#0000ff`** (`packages/core/src/palette.ts:92`). On black that is close to
 illegible, which is what the user saw.
 
 The TUI does not use that table. It has its own, `TUI_PALETTE`
-(`packages/tui/src/colours.ts:61`), where blue is **`(120,144,240)`** — zti's own value,
+(`packages/tui/src/colors.ts:61`), where blue is **`(120,144,240)`** — zti's own value,
 read from `tnz/zti.py:2813-2820` and independently confirmed on the wire, with F8-FF taken
 from x3270's `rgbmap` (`c3270/screen.c:213-229`). Core's saturated primaries exist for one
-reason, stated in its own comment: so that seven base colours stay distinct when quantised
+reason, stated in its own comment: so that seven base colors stay distinct when quantised
 to sixteen ANSI slots. **That reason no longer applies** — the TUI stopped relying on
-nearest-RGB when it gained the explicit `ANSI_16` slot table (`colours.ts:95`), and the GUI
-is truecolour and never quantises at all. So nothing is served by the GUI using them.
+nearest-RGB when it gained the explicit `ANSI_16` slot table (`colors.ts:95`), and the GUI
+is truecolor and never quantises at all. So nothing is served by the GUI using them.
 
 The comment in `core/src/palette.ts:5-7` claims "The TUI quantises these, the GUI will fill
 canvas cells with them ... One table, three consumers." The first clause has been false
@@ -106,19 +106,19 @@ then arrives as a fresh printable run and is typed as text.
 that is, via Option/Alt configured as Meta. `README.md:169-170` documents "`Esc` `1`/`2`/`3`
 are PA1/PA2/PA3", which describes bytes rather than a keystroke a human can perform. The
 keymap's own comment is accurate about the mechanism ("only a timeout can tell them apart")
-but the resulting behaviour was never exercised by a human, and no test could catch it: the
+but the resulting behavior was never exercised by a human, and no test could catch it: the
 unit tests hand `lookup()` a complete `\x1b1` buffer, which is exactly the case that works.
 
 **Fix (user's call): when the buffer is exactly a lone `\x1b`, do not discard it on the timer
 — hold it as a Meta prefix for one further keystroke.** Truncated escape sequences (`\x1b[`,
 `\x1bO`) keep the 50 ms discard, so that protection is unchanged. Then literal `Esc` `1` works
 in any terminal on any keyboard with no Option mapping, which also matches Emacs' Meta
-behaviour — the user's habitual editor, and the reason they like this spelling.
+behavior — the user's habitual editor, and the reason they like this spelling.
 
 The cost, stated plainly: a bare Escape pressed with no follow-up leaves one byte buffered
 until the next keystroke, and that next keystroke is then consumed by the failed `\x1b`+key
 lookup. **On a 3270 that costs nothing real** — Escape has no 3270 meaning and was already
-being discarded — but it is a behaviour change and needs its own test.
+being discarded — but it is a behavior change and needs its own test.
 
 ## Problem 4: the default terminal type fails on MVS
 
@@ -174,19 +174,19 @@ two days. Audited, every script under `packages/*/scripts`:
 ("the same IBM-3278-2"). All four are load-bearing explanations, not decoration, so each is
 rewritten rather than deleted.
 
-## Problem 5: no way to ask for the primary-colour palette
+## Problem 5: no way to ask for the primary-color palette
 
 Requested by the user once the default was settled: someone may want the unpleasant-but-
-saturated colours deliberately, so the readable table should be the default rather than the
+saturated colors deliberately, so the readable table should be the default rather than the
 only option — a flag in the TUI, a menu item in the GUI and webserver later.
 
 **There is no "literal original 3270 palette" to serve, and the flag must not claim there is.**
 Core's `PALETTE_3279` is not it: its own comment says *"THE RGB VALUES ARE OUR OWN CHOICE,
-DELIBERATELY NOT X3270'S"*, chosen as saturated primaries so sixteen-colour ANSI quantisation
-keeps the seven base colours distinct — a TUI constraint, not fidelity. The same comment adds
+DELIBERATELY NOT X3270'S"*, chosen as saturated primaries so sixteen-color ANSI quantisation
+keeps the seven base colors distinct — a TUI constraint, not fidelity. The same comment adds
 that *"a real 3279's phosphors matched none of these precisely — ours or x3270's."* The manual
-specifies which colour each code **is**, never its chromaticity. So the value is named
-**`3279`** — the architected colours at full saturation — and not `original` or `authentic`.
+specifies which color each code **is**, never its chromaticity. So the value is named
+**`3279`** — the architected colors at full saturation — and not `original` or `authentic`.
 A flag value is a claim users quote back.
 
 x3270 solves this with **named schemes** rather than an authenticity switch: `default`,
@@ -194,14 +194,14 @@ x3270 solves this with **named schemes** rather than an authenticity switch: `de
 menu labelling the standard one "Default 3279" (`schemeList:104`). It also keeps `old-default`,
 which is precedent for our exact situation — change the look, keep the previous one named.
 
-**And the genuinely authentic option is not a colour palette at all**: a 3278 is a monochrome
-green display and colour is a 3279 feature, while we advertise `IBM-3278-2-E`. Hence `green`.
+**And the genuinely authentic option is not a color palette at all**: a 3278 is a monochrome
+green display and color is a 3279 feature, while we advertise `IBM-3278-2-E`. Hence `green`.
 
 ### x3270's scheme format has a separate screen background, and ours does not
 
 Verified from `xfer_color_scheme` (`x3270/screen.c:4119-4180`), the 23 tokens are: **0-15** the
-IBM colours, **16** a fallback, **17 the screen background**, **18** select background,
-**19-22** attribute colours.
+IBM colors, **16** a fallback, **17 the screen background**, **18** select background,
+**19-22** attribute colors.
 
 So `GreenScreen` sets **F0 neutral-black to `#21a021` — green** — and gets its dark screen from
 `grey10` at token 17. **We resolve the background from F0** (the TUI's own note: "the default
@@ -221,8 +221,8 @@ interface Scheme { rgb: Record<number, Rgb>; ansi16: Record<number, [number, boo
 ```
 
 **Green is what forces that**, and it is worth stating because the RGB-only shape looks
-sufficient: with a shared slot map, one session would render green at truecolour and
-blue/red/yellow at sixteen colours. The slot map is part of a scheme's identity.
+sufficient: with a shared slot map, one session would render green at truecolor and
+blue/red/yellow at sixteen colors. The slot map is part of a scheme's identity.
 
 | Scheme | RGB source | Slot map |
 |---|---|---|
@@ -237,11 +237,11 @@ Also exported: **`DEFAULT_SCHEME = 'default'`**, **`resolveScheme(name?)`** (cas
 `greenscreen` aliased to `green`, and on an unknown name it throws listing the valid ones
 rather than falling back — a silent fallback would render the wrong palette and blame the
 user's memory), and **`schemeRgb(scheme, code)`**, which throws on a non-3279 code exactly as
-core's `colourRgb` does.
+core's `colorRgb` does.
 
 The throwing helper exists alongside the raw table because the consumers need opposite failure
-behaviour: `sgrFor` deliberately returns `''` for a bad code rather than throwing, since "a
-throw here would take down the whole screen for one bad cell" (`colours.ts:184`).
+behavior: `sgrFor` deliberately returns `''` for a bad code rather than throwing, since "a
+throw here would take down the whole screen for one bad cell" (`colors.ts:184`).
 
 `packages/frontend` may hold this: the graph is `core <- frontend <- { cli, tui, gui }`, and
 `frontend` already imports core types. No graph change.
@@ -250,9 +250,9 @@ throw here would take down the whole screen for one bad cell" (`colours.ts:184`)
 
 | File | Change |
 |---|---|
-| `packages/tui/src/colours.ts` | delete `TUI_PALETTE` **and `ANSI_16`**; `sgrFor` gains a `scheme` argument and reads both tables from it. What stays is the genuinely terminal-specific part: `detectDepth`, `cube256`, and the depth quantisation itself. |
+| `packages/tui/src/colors.ts` | delete `TUI_PALETTE` **and `ANSI_16`**; `sgrFor` gains a `scheme` argument and reads both tables from it. What stays is the genuinely terminal-specific part: `detectDepth`, `cube256`, and the depth quantisation itself. |
 | `packages/tui/src/main.ts` | parse `-scheme`; thread the resolved scheme to `Renderer`. |
-| `packages/gui/src/drawlist.ts:94,95,139,140` | `colourRgb` (core) → `schemeRgb(scheme, …)`; `drawList` takes the scheme. It runs in MAIN, which has the parsed args, so nothing new crosses IPC. |
+| `packages/gui/src/drawlist.ts:94,95,139,140` | `colorRgb` (core) → `schemeRgb(scheme, …)`; `drawList` takes the scheme. It runs in MAIN, which has the parsed args, so nothing new crosses IPC. |
 | `packages/gui/src/args.ts` | parse `-scheme`. |
 | `packages/gui/test/blit.test.ts`, `drawlist.test.ts` | assert against the scheme the GUI actually draws. |
 | `packages/core/src/palette.ts:5-7` | correct the false "TUI quantises these / GUI fills cells with them" comment; point at the registry. |
@@ -263,7 +263,7 @@ is no longer true — the slot map is scheme data, and leaving it behind would m
 impossible to express. Recorded rather than silently rewritten, because the original reasoning
 was sound for a registry that held RGB only.
 
-**`PALETTE_3279` and `colourRgb` stay in core, untouched**, and core's table now has a job: it
+**`PALETTE_3279` and `colorRgb` stay in core, untouched**, and core's table now has a job: it
 is the `3279` scheme's data. That resolves the "two palettes with no signpost" risk better
 than a cross-reference comment did — core states the architected meaning, and the registry
 decides what a front end draws.
@@ -290,7 +290,7 @@ no value import. A new test pins this rather than trusting the reasoning.
 `#0000cd`. Every cell shifts slightly; **blue F1 is the only one that changes character.**
 
 **Caveat, stated because it is not settled:** F9 deep-blue stays dark even in this table
-(x3270's `#0000cd`). Basic 3270 field colour reaches only F1-F7, so the user almost certainly
+(x3270's `#0000cd`). Basic 3270 field color reaches only F1-F7, so the user almost certainly
 saw F1 and this fixes it — but a panel sending *deep-blue* through extended attributes will
 still be dark. If it survives, F9 is a separate question and must not be pre-emptively
 "fixed" here on a guess.
@@ -345,7 +345,7 @@ affected. Missing any of them leaves the README contradicting itself.
 - **`README.md:168-170`, the TUI's key list**: gains `Ctrl-A` and Insert. Its `Esc` `1`/`2`/`3`
   claim becomes true only once the Problem 3 fix lands — **it is a promise the code does not
   currently keep**, so the fix and the sentence must ship together.
-- **`README.md:173-175` becomes false and must be rewritten.** It currently says "Colours are
+- **`README.md:173-175` becomes false and must be rewritten.** It currently says "Colors are
   zti's, not core's: **the shared palette in `packages/core`** keeps saturated primaries, and
   **the TUI** renders the gentler values". After this change the gentler values are the shared
   ones, they live in `packages/frontend`, and every front end uses them — core's table is no
@@ -360,7 +360,7 @@ affected. Missing any of them leaves the README contradicting itself.
 ## Testing
 
 - **The cross-front-end property, asserted directly**: for **every scheme** and all sixteen
-  codes, the RGB the GUI resolves equals the RGB the TUI emits at truecolour depth. This is the
+  codes, the RGB the GUI resolves equals the RGB the TUI emits at truecolor depth. This is the
   actual requirement, and it fails if either front end drifts again. `default`'s blue is pinned
   at `(120,144,240)` with its zti provenance.
 - **Every scheme must be complete**: all sixteen codes present in both `rgb` and `ansi16`,
@@ -376,12 +376,12 @@ affected. Missing any of them leaves the README contradicting itself.
   vacuous. The value pins plus per-scheme distinctness carry more.
 - **The GUI golden must be re-baselined** — `test/golden/synthetic-ispf.png` and its sha256.
   The `TN3270_GUI_REPLAY` seam makes that host-free and clock-free (no password, no TK5
-  clock). **The diff must be inspected, not accepted**: colours should change and ink
+  clock). **The diff must be inspected, not accepted**: colors should change and ink
   positions should not. A moved glyph means something else broke.
 - **A second golden on `green`**, since replay is deterministic and that scheme is the one most
-  likely to break the blit path: `blit.ts` caches tinted glyph copies keyed by colour
+  likely to break the blit path: `blit.ts` caches tinted glyph copies keyed by color
   (`tintKey`), and a scheme where fourteen codes share one RGB is the first thing that has ever
-  exercised a cache hit across *different* colour codes.
+  exercised a cache hit across *different* color codes.
 - **New renderer-import guard**: assert that the renderer's runtime graph (`dist/renderer.js`
   plus its transitive *local* imports) contains no `@tn3270/*` value import. This is trap #5,
   whose symptom is a blank window with no error, and this change edits both a renderer-side
@@ -402,7 +402,7 @@ affected. Missing any of them leaves the README contradicting itself.
 
 ### Live verification, and its honest limits
 
-- **Colour**: run the GUI against VM/370 here and confirm blue is legible. Doable in this
+- **Color**: run the GUI against VM/370 here and confirm blue is legible. Doable in this
   sandbox.
 - **PA1/PA2**: need a host that acts on them, which realistically means ISPF on MVS. **This
   is the user's check on the Mac and must not be reported as verified here.** What PA1 and PA2
@@ -466,7 +466,7 @@ witnesses and the third corrects a note we already had.
   for exactly this reason — plain click is selection, the light pen is a separate action gated
   behind Alt (`wc3270/screen.c:2357`).
   Selection is hit-testing, a text extent and a clipboard write: **no protocol work, no core
-  changes.** It is also the mouse behaviour a Mac user misses first, so it is the strongest
+  changes.** It is also the mouse behavior a Mac user misses first, so it is the strongest
   candidate to ship before either the keypad or the light pen.
 
 ### Light pen / Cursor Select — measured groundwork for that spec

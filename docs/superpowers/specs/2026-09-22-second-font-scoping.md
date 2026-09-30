@@ -61,7 +61,7 @@ the gate would stay green. This is the same shape as the recurring lesson that a
    a value above `0xff`**, so the vendored BDF's 175 page-1/2 glyphs (`apl_del`, `apl_iota`,
    `apl_epsilon`, …) are baked into the atlas and **unreachable**. Nothing above CG 255 can be drawn, so
    a second font cannot regress APL.
-   *If APL is ever wired up*, the new path needs `column()`'s miss behaviour too: it falls back to
+   *If APL is ever wired up*, the new path needs `column()`'s miss behavior too: it falls back to
    `CG_BOXSOLID` (`cg.ts:107`), x3270's visible "unprintable" marker, and `cg.ts:104` warns that
    returning the wrong column "is a font bug only a golden could catch" — which under this design the
    goldens deliberately will not.

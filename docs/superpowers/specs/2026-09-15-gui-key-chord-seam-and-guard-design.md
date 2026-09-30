@@ -79,7 +79,7 @@ this parses one spec.
   `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`/`Super`. They map to Electron's
   lowercase `'control'`, `'alt'`, `'shift'`, `'meta'`.
 - The final segment is the key and passes through **verbatim**, case preserved. Nothing
-  about it is normalised: `]` and `1` and `F1` are all just strings to `sendInputEvent`.
+  about it is normalized: `]` and `1` and `F1` are all just strings to `sendInputEvent`.
 - **It THROWS on a DOM-code spelling** — `/^(Digit|Key|Numpad|Arrow)/` — naming the valid
   form in the message (`Digit1` → use `1`; `ArrowUp` → use `Up`). This is the one piece of
   cleverness in the design and it exists because the alternative is a silent pass. It is a

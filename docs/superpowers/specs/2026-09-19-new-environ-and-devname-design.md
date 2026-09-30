@@ -92,9 +92,9 @@ candidate. That is what `devname_failure.trc` records.
 - RFC 1572 escaping on names and values.
 
 **Out, deliberately:**
-- **`CODEPAGE`, `CHARSET`, `KBDTYPE`.** **A first draft of this spec said x3270 "initialises all
+- **`CODEPAGE`, `CHARSET`, `KBDTYPE`.** **A first draft of this spec said x3270 "initializes all
   three to `NULL`" — that was WRONG, and the correction is the useful part.** The `NULL`s at
-  `telnet_new_environ.c:210-212` are only the struct initialiser; `:247-275` fills all three in
+  `telnet_new_environ.c:210-212` are only the struct initializer; `:247-275` fills all three in
   immediately after, from the host codepage (`CODEPAGE` from `cgcsgid & 0xffff` zero-padded below
   100, `CHARSET` from `cgcsgid >> 16`, `KBDTYPE` from `kybdtype`), with environment overrides and a
   `NO_CODEPAGE` escape hatch. So x3270 really does offer them.
@@ -177,7 +177,7 @@ own parser, which is a real property even without a host.
 
 ### 4. The telnet layer
 
-`onDo` gains a conditional-option branch for 39, **modelled on the existing TN3270E one at
+`onDo` gains a conditional-option branch for 39, **modeled on the existing TN3270E one at
 `telnet.ts:410-420`** — that branch exists precisely because option 40 is conditional where `DESIRED`
 is a constant set, and 39 has the same shape: we only want it if a device name or user was
 configured. Without one, answer `WONT` and the whole feature stays dark.

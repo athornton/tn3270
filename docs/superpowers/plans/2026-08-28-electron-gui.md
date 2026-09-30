@@ -57,13 +57,13 @@ wrong in three ways. Corrected in place below; recorded here because the reasoni
 2. **The draw list cannot get EBCDIC from `resolve()`.** `ResolvedCell.text` is a *string*;
    the atlas is EBCDIC-indexed, which was one of the three reasons it beat a TTF. `resolve()`
    returns an array PARALLEL to `snap.cells`, so `drawList` takes both and zips by index —
-   glyph from `snapshot.cells[i].ebcdic`, colour and flags from `resolved[i]`. No core change
+   glyph from `snapshot.cells[i].ebcdic`, color and flags from `resolved[i]`. No core change
    and the no-translation property survives.
-3. **`fg`/`bg` are `Colour3279` CODES, not `Rgb`.** The draw list converts with `colourRgb()`.
+3. **`fg`/`bg` are `Color3279` CODES, not `Rgb`.** The draw list converts with `colorRgb()`.
 
 Also threaded through: `blink` and `intensify` (both exist on `ResolvedCell` and the original
 `DrawCell` dropped them), and `mode3279`, because a 3278 is monochrome hardware and must not
-be colourised — `app.ts:275` is the precedent.
+be colorised — `app.ts:275` is the precedent.
 
 ## PREREQUISITE
 
@@ -236,7 +236,7 @@ print('outside rect (300,150):', px(300,150))
 ```
 
 Measured 2026-08-28: dims `400 200` **with `useContentSize: true`** — `400 173` without it,
-because window width/height include the frame — colour type `2`, inside `(0, 255, 0)`,
+because window width/height include the frame — color type `2`, inside `(0, 255, 0)`,
 outside `(0, 0, 0)`. Channel order is **RGB**, which is what Task 10's comparison needs.
 
 This is also the argument for Task 10 comparing whole PNGs byte-for-byte instead of
@@ -542,7 +542,7 @@ export function parseBdf(text: string): BdfFont {
 
     // A glyph with no ENCODING is not addressable, and -1 is BDF's "unencoded".
     if (encoding !== undefined && encoding >= 0 && bbx !== undefined) {
-      glyphs.set(encoding, normalise(hex, bbx, width, height, boxX, boxY));
+      glyphs.set(encoding, normalize(hex, bbx, width, height, boxX, boxY));
     }
   }
   if (glyphs.size === 0) throw new Error('BDF contained no encoded glyphs');
@@ -556,7 +556,7 @@ export function parseBdf(text: string): BdfFont {
  * top, so the vertical placement is a subtraction, not an addition. Getting that
  * backwards flips glyphs about the baseline and looks like a font bug.
  */
-function normalise(
+function normalize(
   hex: readonly string[],
   [gw, gh, gx, gy]: [number, number, number, number],
   width: number, height: number, boxX: number, boxY: number,
@@ -613,8 +613,8 @@ EOF
 )"
 ```
 
-Expected: a recognisable capital **A**. If it is upside down, the `top` subtraction in
-`normalise` is wrong; if it is mirrored, the bit shift is.
+Expected: a recognizable capital **A**. If it is upside down, the `top` subtraction in
+`normalize` is wrong; if it is mirrored, the bit shift is.
 
 - [x] **Step 8: Commit**
 
@@ -645,8 +645,8 @@ mean an encoder for no benefit.
  * things to keep in step, and this project has already been bitten by a second copy of a
  * rule -- see the frontend extraction. `npm run build` regenerates it.
  *
- * Alpha-only output: the atlas stores COVERAGE, and colour is applied per cell at blit
- * time from the resolved 3279 palette. Baking colour in would need one atlas per colour.
+ * Alpha-only output: the atlas stores COVERAGE, and color is applied per cell at blit
+ * time from the resolved 3279 palette. Baking color in would need one atlas per color.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -769,7 +769,7 @@ describe('drawList', () => {
   it('SWAPS foreground and background for a reverse-video cell', () => {
     // Reverse video is the one attribute a blitter cannot infer, and getting it wrong is
     // invisible in a screenshot of mostly-empty screen. Asserted as a swap of the same
-    // two colours, not against literal RGB, so a palette change does not break it.
+    // two colors, not against literal RGB, so a palette change does not break it.
     const s = screenWith([[0, 0xc1]]);
     const snap = resolve(s.snapshot());
     const plain = drawList(snap, geometry).cells[0]!;
@@ -788,7 +788,7 @@ describe('drawList', () => {
   it('falls back to the space glyph for a code the atlas lacks', () => {
     // A host may send any byte. A missing glyph must draw a space, not crash and not
     // draw garbage from the next atlas cell -- an out-of-range index would sample the
-    // neighbouring glyph, which looks like corruption rather than a missing character.
+    // neighboring glyph, which looks like corruption rather than a missing character.
     const s = screenWith([[0, 0x07]]);             // not in this test's index
     const dl = drawList(resolve(s.snapshot()), geometry);
     expect(dl.cells[0]!.glyph).toBe(geometry.index[0x40]);
@@ -821,7 +821,7 @@ import type { Rgb } from '@tn3270/core';
 /**
  * Turn a resolved screen snapshot into per-cell draw instructions.
  *
- * PURE, and that is the point: this is where reverse video, the cursor and colour are
+ * PURE, and that is the point: this is where reverse video, the cursor and color are
  * decided, and it is testable with no canvas, no Xvfb and no Electron. `render.ts` in the
  * TUI is built the same way -- it returns a string and lets the caller write it -- and
  * that is what made the TUI's output diffable and its tests fast. Putting these decisions
@@ -830,7 +830,7 @@ import type { Rgb } from '@tn3270/core';
  * `glyph` is an ATLAS INDEX here, but the field is deliberately the only thing a cell
  * says about its appearance, so a Programmable Symbol Set cell can later carry a
  * host-supplied bitmap through the same structure -- the `dispatch on Cell.kind`
- * constraint from HANDOFF, honoured at the one place it has to be.
+ * constraint from HANDOFF, honored at the one place it has to be.
  */
 export interface AtlasGeometry {
   readonly cellWidth: number;
@@ -872,7 +872,7 @@ export function drawList(
     const col = i % snapshot.cols;
     const glyph = atlas.index[c.ebcdic] ?? atlas.index[EBCDIC_SPACE] ?? 0;
     // Reverse video swaps the pair rather than picking a fixed inverse: the cell's own
-    // colours are what a 3279 inverts.
+    // colors are what a 3279 inverts.
     const reverse = c.reverse === true;
     cells.push({
       x: col * atlas.cellWidth,
@@ -1112,7 +1112,7 @@ describe('parseGuiArgs', () => {
     expect(() => parseGuiArgs([])).toThrow(/usage/i);
   });
 
-  it('refuses an unrecognised flag rather than ignoring it', () => {
+  it('refuses an unrecognized flag rather than ignoring it', () => {
     expect(() => parseGuiArgs(['--nonesuch', 'vm'])).toThrow(UsageError);
   });
 });
@@ -1201,8 +1201,8 @@ stamp the glyph from the atlas tinted with `fg`, then invert or block the cursor
 `ctx.imageSmoothingEnabled = false` and an integer `scale`.
 
 The atlas is alpha-only coverage, so tinting means either building one tinted copy per
-colour in use and caching it, or compositing with `globalCompositeOperation`. **Cache
-per colour**: a 3279 has 16 colours at most, so the cache is bounded and small, and
+color in use and caching it, or compositing with `globalCompositeOperation`. **Cache
+per color**: a 3279 has 16 colors at most, so the cache is bounded and small, and
 recompositing per cell would be 1920 composites per frame.
 
 - [x] **Step 3: The renderer**
@@ -1214,7 +1214,7 @@ caches, size the canvas to `drawList` dimensions times the scale, subscribe to
 `preventDefault()` and sends the action.
 
 **Choose the scale as the design states**: the largest integer scale whose letterboxed
-screen fits within 80% of the display work area, minimum 1×. Centre the result.
+screen fits within 80% of the display work area, minimum 1×. Center the result.
 
 - [x] **Step 4: Run it against a host and look at it**
 
@@ -1446,10 +1446,10 @@ a different version, underpinning every remaining task, is worth one hour to re-
 without complete code. They depend on the atlas geometry that Task 4 emits and on the
 tinting approach measured in Task 3, and inventing exact code here would be guessing at
 numbers the earlier tasks produce. The decisions are stated (cache tinted glyphs per
-colour, integer scale, centre, smoothing off); the arithmetic is the implementer's, against
+color, integer scale, center, smoothing off); the arithmetic is the implementer's, against
 tests that already exist by then.
 
 **Known risks, in order.** Task 1 could fail outright and block everything. Task 3's
-`normalise` has two easy-to-invert axes and Step 7 exists to catch both by eye. Task 10's
+`normalize` has two easy-to-invert axes and Step 7 exists to catch both by eye. Task 10's
 byte-exact goldens may prove less deterministic than argued, and the task says what to do
 instead rather than allowing a tolerance to be quietly added.

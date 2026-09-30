@@ -94,7 +94,7 @@ writes a renderer and reuses the model.
 | Blksize | numeric, 5 wide | empty |
 
 **`Recfm` is a THREE-state cycle, not an F/V toggle.** "Unset" and "V" produce different wire
-commands — unset emits no `RECFM` at all and lets the host choose, which is the current CLI behaviour
+commands — unset emits no `RECFM` at all and lets the host choose, which is the current CLI behavior
 that works on both hosts. Starting at `—` preserves "I did not ask for record attributes" as a
 distinct intention from "I want F 80". `Lrecl` is **5 wide, not 3**: `positiveInt` has no upper bound
 and TSO datasets legitimately reach `32760`, so a narrow field would silently prevent valid transfers.
@@ -153,7 +153,7 @@ designs. Commands were verified by calling `transferCommand` directly, not infer
 | `LV00` | `IND$FILE PUT LV00 TEST A (RECFM V` | `V 80` |
 | `LF80` | `IND$FILE PUT LF80 TEST A (RECFM F LRECL 80` | `F 80` |
 
-The two `V` cases are **identical**, so CMS did not honour the `LRECL`; `LF80` proves the keyword
+The two `V` cases are **identical**, so CMS did not honor the `LRECL`; `LF80` proves the keyword
 reached the host. **On VM, `Lrecl` with `Recfm=V` is INERT — accepted, transferred, silently ignored.**
 
 **MVS/TSO (TK5), `LISTDS`:**
@@ -164,7 +164,7 @@ reached the host. **On VM, `Lrecl` with `Recfm=V` is INERT — accepted, transfe
 | `LV00` | `RECFM V` (no LRECL) | `VB  255  14790` |
 | `LF80` | `RECFM F LRECL 80` | `FB  80  15040` |
 
-The two `V` cases **differ, 80 against 255**, so **TSO HONOURS it** — it is the maximum record length,
+The two `V` cases **differ, 80 against 255**, so **TSO HONORS it** — it is the maximum record length,
 and `IND$FILE`'s own default is 255.
 
 **Decision: `Lrecl` stays enabled for `V`.** Disabling it would make a real TSO attribute
