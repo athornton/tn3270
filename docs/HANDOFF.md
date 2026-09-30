@@ -78,6 +78,16 @@ it rules out "make it smaller". Likely answer is the same native-window treatmen
 is getting. `docs/ideas/native-widget-dialogs-idea.md` records why it is a SEPARATE spec: the keypad
 is shipped and shared with the web gateway, so changing the GUI **splits** a converged feature, and
 `clicks.mjs` clicks by label through canvas coordinates a native window would not have.
+**ITS FOUR OPEN QUESTIONS WERE ANSWERED THE SAME DAY, SO IT IS READY TO SPEC** — no brainstorming
+needed, go straight to `writing-plans`' predecessor and then a spec. The answers: **the web gateway
+FOLLOWS LATER** (so nothing in `canvas/src/keypad.ts` is deleted); **`Ctrl-K` stays a hotkey**, joined
+by an x3270-style **toolbar keyboard icon**, which implies **the MENU BAR the connect dialog needs
+anyway**; **`clicks.mjs` gets rewired to real DOM buttons**, keeping its by-LABEL property; the **four
+otherwise-unreachable keys keep a route**; and **no persistence yet** (x3270 remembers via its
+`keypadOn` resource, but that needs preferences the GUI lacks). The user's principle for the whole
+job: ***if in doubt, do what x3270 does*** — and x3270 has **FIVE** keypad placements, of which
+`integral` is the one we currently ship. Appearance should be **native, not X-ish**, and the arrows /
+Home / Tab / Newline may want **real icons**, which the 3270 atlas cannot supply.
 
 **THE WEB GATEWAY'S TRANSFER REFUSAL IS NOW THE OUTSTANDING HALF**, and the user's decision is that
 it needs **real browser file I/O** — bytes over the WebSocket so "local file" means the operator's
