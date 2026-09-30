@@ -152,6 +152,38 @@ describe('transferLines', () => {
     }
   });
 
+  it('keeps ligature-prone pairs out of EVERY phase, not just the idle help', () => {
+    // THE IDLE-ONLY VERSION OF THIS TEST MISSED A REAL ONE, which is why the sweep exists:
+    // `transferring... ${bytes} (Esc cancels)` sat in the running phase through the commit
+    // that fixed the arrows, because that test read only the idle line. Fira Code ligates
+    // `..` and `...` as well as arrows, so the running status had exactly the defect the
+    // neighbouring test was written to prevent -- one phase away and therefore invisible to it.
+    //
+    // Swept over all four phases AND the error path, because each takes a different branch of
+    // `statusLine` and the strings are unrelated. `--` is deliberately included: it is a
+    // ligature in several fonts and it is also how this project writes an em dash in prose, so
+    // it is the pair most likely to arrive by habit.
+    const phases = ['idle', 'running', 'done', 'failed'] as const;
+    for (const phase of phases) {
+      const lines = transferLines(newTransferForm(), phase, '512 bytes');
+      const status = lines[lines.length - 1] ?? '';
+      for (const pair of ['->', '<-', '=>', '<=', '--', '==', '>=', '<>', '...', '..']) {
+        expect(status, `the ${phase} status must not contain the ligature-prone pair ${pair}`)
+          .not.toContain(pair);
+      }
+    }
+    // The `progress` argument is host- or engine-supplied and may legitimately be absent, so
+    // the undefined case takes a different path through the template literals.
+    for (const phase of phases) {
+      const lines = transferLines(newTransferForm(), phase, undefined);
+      const status = lines[lines.length - 1] ?? '';
+      for (const pair of ['...', '..', '->', '<-']) {
+        expect(status, `the ${phase} status with no progress must not contain ${pair}`)
+          .not.toContain(pair);
+      }
+    }
+  });
+
   it('TRUNCATES a long value rather than widening the box', () => {
     // A 300-character path must not make the overlay wider than the terminal; the
     // alternative is a line that wraps and corrupts every row below it.

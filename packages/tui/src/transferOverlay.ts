@@ -146,7 +146,11 @@ function statusLine(
   state: TransferFormState, phase: TransferPhase, progress: string | undefined,
 ): string {
   if (state.error !== undefined) return truncate(state.error);
-  if (phase === 'running') return truncate(`transferring... ${progress ?? ''} (Esc cancels)`);
+  // `transferring`, NOT `transferring...`: Fira Code ligates `..` and `...`, and the same
+  // argument as `HELP`'s arrows applies one line down -- a fused glyph shifts what follows, and
+  // what follows here is the byte count and `(Esc cancels)`. The present participle already
+  // carries the sense the ellipsis was adding, so nothing is lost by dropping it.
+  if (phase === 'running') return truncate(`transferring ${progress ?? ''} (Esc cancels)`);
   if (phase === 'done') return truncate(`done: ${progress ?? ''}`);
   if (phase === 'failed') return truncate(progress ?? 'failed');
   return truncate(HELP);
