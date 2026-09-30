@@ -14,8 +14,21 @@ plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui
 **NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
 re-asking.
 
-**State: `main` at `5c7d04e`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+**State: `main` at `6063e0f`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
 stashes. 2157 tests in 82 files, build and typecheck clean.**
+
+**SPELLING CONVENTION, set 2026-09-30: THIS REPO USES US ENGLISH.** Identifiers, comments, test
+names, scripts and docs were swept (~1,500 occurrences, 146 files, merged at `6063e0f`). **THREE
+EXCEPTIONS ARE DELIBERATE and each looks like a missed rename, so check before "finishing" any of
+them:**
+1. **`Color.GREY` / `COLOR_NAMES[0xfe] = 'grey'`** — `grey` is x3270's CANONICAL spelling
+   (`Common/glue.c:1041-1042` marks `Gray` as the alias, in x3270's own comment), and these names
+   interface with the implementation we are conformance-tested against. Long note in
+   `packages/core/src/palette.ts`.
+2. **`licence` at `README.md:1249`** — IBM's own wording for the GA23-0059 licence.
+3. **`colour` in `packages/fixtures/**/*.trace` headers** — recorded evidence; those files carry
+   their own regeneration command and `render.test.ts:840` warns that a differing number means the
+   conversion differs.
 
 **TWO branches were merged `--no-ff` and deleted**: `gui-transfer-ui-and-tui-fixes` (7 commits, at
 `cee46bb`) and then `ellipsis-ligature-fix` (1 commit, at `5c7d04e`). **The merge base was checked
