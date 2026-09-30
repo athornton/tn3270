@@ -14,19 +14,25 @@ plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui
 **NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
 re-asking.
 
-**State: `main` at `cee46bb`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
-stashes. 2156 tests in 82 files, build and typecheck clean.** `gui-transfer-ui-and-tui-fixes` was
-merged `--no-ff` (7 commits) and deleted local and remote, the precedent the last six features set.
-**The merge base was checked before merging and equalled `main` exactly**, so all 7 commits were this
-session's own — see [[branch-from-the-target-not-the-desk]] for why that is checked every time.
+**State: `main` at `5c7d04e`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+stashes. 2157 tests in 82 files, build and typecheck clean.**
 
-**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch:** build and typecheck
-clean, 2156 tests in 82 files, `shot.mjs` 3/3, `keys.mjs` 18 chords/16 actions, `clicks.mjs` 9
-buttons/10 actions, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13 chords/11 actions,
-`drive-playback.py` 10/10, `pty-smoke.py` 12 PASS / 0 FAIL exit 0.
+**TWO branches were merged `--no-ff` and deleted**: `gui-transfer-ui-and-tui-fixes` (7 commits, at
+`cee46bb`) and then `ellipsis-ligature-fix` (1 commit, at `5c7d04e`). **The merge base was checked
+before each and equalled `main` exactly**, so no branch dragged in work of another's — see
+[[branch-from-the-target-not-the-desk]] for why that is checked every time.
 
-**BUDGET — READ BEFORE SIZING ANYTHING.** 2026-09-30 ended at about **$1901 of the $2000 monthly
-total**, so the last day of the period was deliberately spent on a spec, a plan and two small fixes
+**THE FULL GATE WAS RE-RUN ON THE FIRST MERGE COMMIT ITSELF, not only on the branch:** build and
+typecheck clean, 2156 tests in 82 files, `shot.mjs` 3/3, `keys.mjs` 18 chords/16 actions,
+`clicks.mjs` 9 buttons/10 actions, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13 chords/11 actions,
+`drive-playback.py` 10/10, `pty-smoke.py` 12 PASS / 0 FAIL exit 0. **The second merge (`5c7d04e`,
+2157 tests) re-ran build, typecheck, the suite and `pty-smoke.py` only** — it touches one string in
+`transferOverlay.ts`, which no golden or browser harness renders, so the canvas harnesses were not
+re-run. Said plainly rather than implied, because "the gate was green" should never cover a subset
+without naming it.
+
+**BUDGET — READ BEFORE SIZING ANYTHING.** 2026-09-30 ended at about **$1910 of the $2000 monthly
+total**, so the last day of the period was deliberately spent on a spec, a plan and three small fixes
 rather than on starting a ten-task implementation that would have stranded mid-flight.
 **2026-10-01 00:00 UTC starts a FRESH 30-day budget**, so whoever picks this up has a full
 allowance and should run `/spend` for the live number rather than extrapolating from this line.
