@@ -1,29 +1,64 @@
-# Handoff — state as of 2026-09-29
+# Handoff — state as of 2026-09-30
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, end of 2026-09-29
+## START HERE — NEXT ACTION, end of 2026-09-30
 
-**MERGED AND DONE. BOTH PLANS ARE COMPLETE — all nine tasks of
-`docs/superpowers/plans/2026-09-28-transfer-protocol-selection.md` AND all twelve of
-`docs/superpowers/plans/2026-09-24-dft-file-transfer.md` — AND THE BRANCH IS MERGED AND DELETED.** Read that plan's **PROGRESS/AS BUILT** section before anything else — it
-indexes nineteen plan defects and four of mine, and it is written for exactly this cold start.
-**NOTHING IS WAITING ON THE USER.**
+**THE GUI TRANSFER UI IS SPECCED AND PLANNED, NOT STARTED. GO STRAIGHT TO
+`docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`, TASK 1** — ten tasks, each with complete
+code, exact commands and its own mutation check. Its *Read this before Task 1* section carries six
+measured facts written for exactly this cold start; do not re-derive them, and **do not trust the
+plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md`.
+**NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
+re-asking.
 
-**State: `main` at `3d45a1d`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
-stashes. 2129 tests in 82 files (from 1981 on the pre-merge `main`), build and typecheck clean.**
-`dft-file-transfer` was merged `--no-ff` (60 commits) and deleted local and remote, which is the
-precedent the last five features set.
+**State: `main` at `42d3733`. Everything from 2026-09-30 is on branch
+`gui-transfer-ui-and-tui-fixes`, PUSHED and in sync, tree clean, no stashes. 2156 tests in 82 files,
+build and typecheck clean.**
 
-**BUDGET, FOR WHOEVER PICKS THIS UP ON WEDNESDAY 2026-09-30 — READ THIS BEFORE SIZING A PLAN.**
-2026-09-29 ran to about **$1877** of a $1900 cap. **The 30-day period ends at 2026-10-01 00:00 UTC,
-which is ~17:00 Mountain, i.e. the END of Wednesday's working day — so Wednesday is a full day spent
-under the REMAINING monthly allowance, not a fresh one.** The user's stated ceiling for Wednesday is
-therefore **the $2000 monthly total**, i.e. roughly **$120 of headroom**, and not a new daily figure.
-**Thursday 2026-10-01 starts a fresh 30-day budget.** Run `/spend` for the live number rather than
-extrapolating from this line.
+**BUDGET — READ BEFORE SIZING ANYTHING.** 2026-09-30 ended at about **$1901 of the $2000 monthly
+total**, so the last day of the period was deliberately spent on a spec, a plan and two small fixes
+rather than on starting a ten-task implementation that would have stranded mid-flight.
+**2026-10-01 00:00 UTC starts a FRESH 30-day budget**, so whoever picks this up has a full
+allowance and should run `/spend` for the live number rather than extrapolating from this line.
+
+**THREE THINGS FOUND ON 2026-09-30 THAT ARE NOT IN THE PLAN, in descending order of how much time
+they would waste if rediscovered:**
+
+1. **A PARTIAL TUI BORDER IS NOT A BUG IN `layout()` — CHECK THE TERMINAL EMULATOR FIRST.** A report
+   of missing left verticals at 179x40 with a 27x132 screen was chased for a while and is
+   **iTerm2**: it reproduced there and NOT under macOS Terminal with the same binary, host and
+   geometry. At that size the render is provably correct (corners at columns 23 and 156, 132 dashes,
+   verticals on all 28 rows, nothing scrolled into history — verified by feeding real renderer output
+   to pyte). `docs/live-testing.md` now has a *When the terminal EMULATOR is the variable* section
+   with two self-contained repro cases. The user is filing upstream.
+2. **`layout()` DOES have a real, separate wart, and it is DELIBERATE — do not "fix" it.** The two
+   axes are gated independently, so 0 spare columns gives both horizontal rules and NEITHER side, and
+   +1 gives a left side only. Kept on the user's explicit call (option C of three offered) because a
+   rule still shows where the screen begins and ends, and at 0-1 columns there is nowhere for a wall
+   to go. **Pinned by two tests** in `packages/tui/test/render.test.ts`, mutation-verified — raising
+   the left gate to `slackH >= 2` reddens them.
+3. **DO NOT DIAGNOSE RENDERING FROM A COPY-PASTE.** A pasted screen arrived with a 245-character
+   line, mismatched dash counts between its own borders, and missing verticals the code cannot emit.
+   Use `script` and replay through pyte; **BSD `script` takes the command POSITIONALLY and has no
+   `-c`**, which is the better form anyway because it execs directly instead of running an
+   oh-my-zsh prompt into your capture. Full recipe in the runbook, Step 2.
+
+**ALSO PARKED 2026-09-30: the user does not like the shipped keypad** — *ugly* and *modal* strongly,
+awkward-to-aim somewhat, and **footprint explicitly NOT a concern**, which is the useful part because
+it rules out "make it smaller". Likely answer is the same native-window treatment the transfer form
+is getting. `docs/ideas/native-widget-dialogs-idea.md` records why it is a SEPARATE spec: the keypad
+is shipped and shared with the web gateway, so changing the GUI **splits** a converged feature, and
+`clicks.mjs` clicks by label through canvas coordinates a native window would not have.
+
+**THE WEB GATEWAY'S TRANSFER REFUSAL IS NOW THE OUTSTANDING HALF**, and the user's decision is that
+it needs **real browser file I/O** — bytes over the WebSocket so "local file" means the operator's
+machine, not the gateway's. That is a new protocol message pair, chunking, and a `TransferFiles` over
+the socket. **Its own spec, not a rider on the GUI plan.** Plan Task 10 corrects
+`packages/web/src/protocol.ts`'s message, which currently gives a reason ("the gateway has no
+transfer UI") that stops being true the moment the GUI has one.
 
 **THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch:** build and typecheck
 clean, 2121 tests in 82 files, conformance+golden 12/12, `pty-smoke.py` 12/12,
@@ -85,6 +120,11 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    are renderers rather than rewrites. The gateway half is a **security decision first** —
    `web/src/protocol.ts` refuses the `transferForm` action outright, because a browser-initiated
    transfer moves bytes between the host and the *gateway's* filesystem, not the operator's.
+   **SPLIT IN TWO ON 2026-09-30, on the user's decision, and the GUI half is SPECCED AND PLANNED but
+   NOT STARTED:** spec `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md`, plan
+   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks). **The WEB half is now the
+   outstanding piece and needs its own spec** — the user's call is real browser file I/O over the
+   WebSocket, so that "local file" means the operator's machine. See the START HERE section.
 3. ~~The `-ddm` default flip.~~ **DONE 2026-09-29, on the user's instruction — DFT plan Task 12
    Step 4, the last step of that plan.** DDM is now advertised by default and `-ddm off` restores
    the old behaviour. **BLAST RADIUS MEASURED BEFORE COMMITTING, as the plan required: exactly 6
