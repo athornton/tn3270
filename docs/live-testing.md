@@ -427,7 +427,7 @@ reproduced by a hand-rolled `accept()`/`send()`/`recv()` loop. Trust the labeled
 run against the real host over the mimic.
 
 Use the bash one-liner. It is the simplest thing that answers the question, and
-"which flavour of cosmetic error appears" is not worth extra machinery:
+"which flavor of cosmetic error appears" is not worth extra machinery:
 
 ```bash
 timeout 5 bash -c 'cat < /dev/null > /dev/tcp/HOST/PORT' && echo reachable || echo unreachable
