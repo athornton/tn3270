@@ -123,6 +123,33 @@ describe('transferLines', () => {
     // `Esc` alone is not enough: the oversized string was cut off mid-word AFTER `Esc`,
     // so the word that says what Esc does is what must be present.
     expect(status).toMatch(/Esc (close|cancel)/);
+    // AND IT MUST NAME THE KEYS THAT CYCLE A FIELD. The help has to say all four
+    // operations; `Tab`, `Enter` and `Esc` are checked above, and this is the fourth.
+    expect(status).toMatch(/Left\/Right|arrows/);
+  });
+
+  it('spells the arrow keys as WORDS, because `<-` and `->` ligate', () => {
+    // NOT COSMETIC, and the same class of defect as the truncation above -- it costs the
+    // user the same information for a different reason. This line read `<-/-> change`, and
+    // `<-`/`->` are among the most commonly ligated sequences in programming fonts (Fira
+    // Code, JetBrains Mono, Cascadia, Iosevka all fuse them). When a font renders two
+    // characters as one arrow glyph and the terminal still counts two cells -- or vice
+    // versa -- everything after it on the line shifts, and what shifts out of view here is
+    // how to submit and how to close the form.
+    //
+    // PINNED AS A PROPERTY, NOT AS A STRING. Asserting the exact help text would pass for
+    // any rewording, including one that reintroduced an arrow; this forbids the character
+    // pairs themselves, so the next person to shorten this line cannot reach for `->`
+    // without a red test. The pairs listed are the ones that actually ligate in the fonts
+    // above; a bare `-` or `<` is harmless and is not forbidden.
+    const status = (() => {
+      const lines = transferLines(newTransferForm(), 'idle', undefined);
+      return lines[lines.length - 1] ?? '';
+    })();
+    for (const pair of ['->', '<-', '=>', '<=', '--', '==', '>=', '<>']) {
+      expect(status, `help must not contain the ligature-prone pair ${pair}`)
+        .not.toContain(pair);
+    }
   });
 
   it('TRUNCATES a long value rather than widening the box', () => {
