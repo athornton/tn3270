@@ -61,6 +61,67 @@ export interface UiField {
   readonly options: readonly string[];
 }
 
+/**
+ * Where the caret belongs after a rebuild, as a PURE FUNCTION OF THREE VALUES.
+ *
+ * ## WHY THIS LIVES HERE AND NOT IN `transferBoot.ts`
+ *
+ * It was in `transferBoot.ts`, inline, and it was WRONG -- measured in real Electron: `Lrecl`
+ * holding `800`, caret at 1, type a non-digit `x`, and the caret ended at 2 when it should have
+ * been 1. Unreachable by any test, because `transferBoot.ts` cannot be imported without a
+ * `document`. It is arithmetic on three values and needs no element at all, so it belongs on this
+ * side of the injected-DOM boundary, where the rest of the decidable logic already is and where a
+ * unit test can reach it. `transferBoot.ts` keeps only the `setSelectionRange` call.
+ *
+ * This module rather than a new sibling file: a sibling would add an edge to the browser's import
+ * graph, and every blank-window failure this repo has met came from that graph. Here there is no
+ * new edge -- `transferBoot.ts` already imports this file. The file's stated job is "browser-side
+ * logic with the DOM injected", and a caret calculation with its element removed is exactly that.
+ *
+ * ## THE CONTRACT IS DEFINED BY LENGTH DIFFERENCE, NOT BY "ACCEPTED" OR "REFUSED"
+ *
+ * This function cannot know WHY the two strings differ, so it does not try. The caller supplies:
+ *
+ * - `remembered`: the caret as the browser reported it, which is AFTER the browser applied the
+ *   keystroke and BEFORE the model saw it. That off-by-one-keystroke capture is the whole bug.
+ * - `typed`: what the input was DISPLAYING at that moment, i.e. including that keystroke.
+ * - `shown`: what the rebuilt element will display, i.e. what the model now holds.
+ *
+ * The caret moves left by however much the model dropped: `typed.length - shown.length`. An
+ * accepted edit drops nothing and the caret stays where the browser put it. A refused edit drops
+ * exactly the characters the browser had inserted, so the caret lands where it was before them.
+ *
+ * DEFINING IT AS "REFUSED MEANS BACK EXACTLY ONE" WOULD BE WRONG, and not only for the obvious
+ * reason that a paste inserts many. It is also not implementable: `rememberFocus` reads the input
+ * AFTER the keystroke, so it never observes the pre-keystroke string that such a rule would have
+ * to compare against. The length difference is both correct for a paste and derivable from what
+ * can actually be observed.
+ *
+ * ## WHAT IT DOES NOT HANDLE
+ *
+ * A model that CHANGED a value rather than accepting or refusing it -- same length, different
+ * characters, or a rewrite that inserts as much as it removes. `setFieldText` and `cycleField`
+ * only ever accept wholesale or return the state untouched, so no such edit exists today. If one
+ * is ever added, this returns a caret that is numerically in range and semantically meaningless,
+ * which is a real limit and not a safe one. Stated rather than papered over.
+ */
+export function caretAfterEdit(
+  remembered: { readonly start: number | null; readonly end: number | null },
+  typed: string,
+  shown: string,
+): { start: number; end: number } {
+  const clamp = (n: number): number => Math.max(0, Math.min(n, shown.length));
+  // A `<select>` has a null selection, and so does an input the browser declined to report one
+  // for. The end of the text is the least surprising place for a caret nobody specified.
+  if (remembered.start === null) return { start: shown.length, end: shown.length };
+  const dropped = typed.length - shown.length;
+  const start = clamp(remembered.start - dropped);
+  const end = clamp((remembered.end ?? remembered.start) - dropped);
+  // A collapsed caret is the common case and an inverted range is not expressible, so a selection
+  // whose ends crossed under clamping collapses to its start rather than throwing in the DOM.
+  return { start, end: Math.max(start, end) };
+}
+
 /** Everything this module needs from the outside world. */
 export interface UiDeps {
   /** Draw these fields, in this order. Called on every change. */
@@ -176,6 +237,20 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // main: a send must choose an existing file (Open) and a receive names a destination
       // (Save). The dialog deliberately does NOT set `Exist` -- see the spec.
       const chosen = await deps.browse(state.values.direction);
+      // THE `isRunning` CHECK IS DELIBERATELY DUPLICATED, because the `await` above is a
+      // SUSPENSION POINT and the state can change across it. The check before it is not enough:
+      // if the native dialog is not modal to this window the operator can press Start while it is
+      // open, and a late resolution then lands in the middle of a running transfer. Measured in
+      // real Electron with a deferred `browse`: the redraw's `show()` overwrote a live progress
+      // line ("128 bytes") with the idle help text, and `setFieldText` mutated the form model
+      // while the host was mid-transfer.
+      //
+      // THIS IS THE PRIMARY GUARD. `transferBoot.ts`'s `render` also reads a running flag when it
+      // sets each control's `disabled`, which is now DEFENSE IN DEPTH rather than the primary
+      // protection -- it covers the enablement third of the same hazard. Do not delete either half
+      // on the evidence of a green suite: this repo has twice recorded that a defense-in-depth pair
+      // is invisible to single mutation, because each half alone keeps the other's tests passing.
+      if (isRunning) return;
       // A CANCELED DIALOG MUST NOT ERASE A TYPED PATH. `undefined` is "the user changed their
       // mind", and overwriting the field with it would destroy work for a misclick.
       if (chosen === undefined) return;

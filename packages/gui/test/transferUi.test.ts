@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createTransferUi, type UiDeps, type UiField } from '../src/transferUi.js';
+import { caretAfterEdit, createTransferUi, type UiDeps, type UiField } from '../src/transferUi.js';
 
 /**
  * A fake DOM, because vitest runs `environment: 'node'` and there is no `document`.
@@ -226,5 +226,98 @@ describe('createTransferUi', () => {
     const last = deps.rendered[deps.rendered.length - 1]!;
     expect(last.find((f) => f.id === 'recfm')!.options)
       .toEqual(['', 'fixed', 'variable']);
+  });
+
+  /**
+   * The interleaving a reviewer measured in real Electron: Start pressed while the native file
+   * dialog is open, then the dialog resolves LATE, into a running transfer.
+   *
+   * The `await` in `browseLocal` is a suspension point, so the check before it proves nothing about
+   * the state after it. Without the second check the late resolution did two visible wrongs: the
+   * redraw's `show()` painted the idle help text over a live progress line, and `setFieldText`
+   * mutated the form model while the host was mid-transfer.
+   */
+  it('IGNORES a dialog that resolves after a transfer has started', async () => {
+    const deps = fakeDeps();
+    // A browse that does not resolve until the test says so, which is what makes the window
+    // between the two checks observable at all.
+    let release: (path: string) => void = () => {};
+    deps.browse = vi.fn(() => new Promise<string | undefined>((res) => { release = res; }));
+    const ui = createTransferUi(deps);
+
+    const browsing = ui.browseLocal();
+    await ui.start();
+    ui.progress('128 bytes');
+    expect(ui.running()).toBe(true);
+
+    release('/tmp/picked.txt');
+    await browsing;
+
+    // The live progress line must still be the last thing the status shows.
+    const statuses = vi.mocked(deps.setStatus).mock.calls.map((c) => c[0]);
+    expect(statuses[statuses.length - 1]).toBe('128 bytes');
+    // And the model must be untouched: a path arriving mid-transfer is a path for the NEXT one.
+    expect(ui.values().localFile).toBe('');
+  });
+});
+
+/**
+ * The caret arithmetic, which was inline in `transferBoot.ts` and wrong there.
+ *
+ * Every case below is a pure computation, which is the point: the version this replaced could not
+ * be reached by any test, because `transferBoot.ts` needs a `document` to import.
+ */
+describe('caretAfterEdit', () => {
+  it('leaves the caret where the browser put it when the model ACCEPTED the edit', () => {
+    // `80` with the caret after the `0`, type `0`: the model takes it, nothing was dropped.
+    expect(caretAfterEdit({ start: 3, end: 3 }, '800', '800')).toEqual({ start: 3, end: 3 });
+  });
+
+  it('puts the caret BACK ONE when the model refused a keystroke MID-STRING', () => {
+    // THE MEASURED BUG, in real Electron: `lrecl` holding `800`, caret at 1, type a non-digit.
+    // The browser has already made the input read `8x00` with the caret at 2; the model refuses,
+    // so the element will show `800` again and the caret belongs at 1, where the user left it.
+    // The old code clamped to `value.length` only, so 2 was within range and survived untouched.
+    expect(caretAfterEdit({ start: 2, end: 2 }, '8x00', '800')).toEqual({ start: 1, end: 1 });
+  });
+
+  it('puts the caret back one when the model refused a keystroke at the END', () => {
+    // This case passed by LUCK under the old clamp: the caret was past `value.length`, so clamping
+    // happened to land it in the right place. That is why the mid-string case above is the one
+    // that proves the fix.
+    expect(caretAfterEdit({ start: 4, end: 4 }, '800x', '800')).toEqual({ start: 3, end: 3 });
+  });
+
+  it('handles a refused PASTE, which drops more than one character', () => {
+    // Why the contract is a length difference and not "back exactly one".
+    expect(caretAfterEdit({ start: 6, end: 6 }, '80abc0', '800')).toEqual({ start: 3, end: 3 });
+  });
+
+  it('sends a null caret to the end of the text', () => {
+    // A `<select>` or a `<button>`: no caret to preserve, and the end is the least surprising
+    // place to leave one.
+    expect(caretAfterEdit({ start: null, end: null }, '', 'variable'))
+      .toEqual({ start: 8, end: 8 });
+  });
+
+  it('keeps a selection RANGE, shifted by what was dropped', () => {
+    expect(caretAfterEdit({ start: 2, end: 5 }, '8x0000', '80000'))
+      .toEqual({ start: 1, end: 4 });
+  });
+
+  it('clamps into range rather than returning a position the DOM would reject', () => {
+    // Defensive: no caller produces this today, but a caret past the new text must not escape --
+    // `setSelectionRange` would silently clamp, and a position below zero is simply meaningless.
+    expect(caretAfterEdit({ start: 9, end: 9 }, '800', '800')).toEqual({ start: 3, end: 3 });
+    expect(caretAfterEdit({ start: 0, end: 0 }, '800', '800')).toEqual({ start: 0, end: 0 });
+  });
+
+  it('never returns a NEGATIVE position when the model dropped more than the caret', () => {
+    // `clearInapplicable` can empty a field outright, so `shown` may be shorter than the caret's
+    // own offset -- here the model dropped two characters from under a caret at 1, which is -1
+    // before clamping. `setSelectionRange(-1, ...)` is not an error the DOM reports; it silently
+    // treats it as 0, so without the lower bound this would be a wrong caret nothing complains
+    // about. Added because the lower bound survived mutation with only the test above.
+    expect(caretAfterEdit({ start: 1, end: 1 }, '80', '')).toEqual({ start: 0, end: 0 });
   });
 });
