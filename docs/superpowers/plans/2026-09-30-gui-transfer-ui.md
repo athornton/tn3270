@@ -2158,6 +2158,82 @@ intervening edit** — submit while the keyboard is locked, the host clears the 
 nothing called `setFieldText`, so nothing cleared the error. The fix belongs beside those lines rather
 than in `statusLine`, so both front ends clear it at the same moment.
 
+### Tasks 4-5, 2026-10-01
+
+**THE PLAN'S `transferBoot.ts` SHIPS A BLANK WINDOW, AND IT IS THE PLAN'S OWN MOST-WARNED-ABOUT
+FAILURE HIDDEN INSIDE ITS OWN CODE. `ui?.running()` THROWS.** It appears three times in `render`,
+and `render` is called **synchronously** by `createTransferUi` (`transferUi.ts:152` calls `redraw()`
+before returning), so `ui` is in its temporal dead zone. **Optional chaining does NOT guard a TDZ
+read** — `?.` guards `null`/`undefined`, while reading a dead-zone binding *is* the
+`ReferenceError`. The module throws partway through evaluation, no listener is ever attached, and the
+console is empty.
+
+**PROVEN IN THE PRODUCT, NOT ARGUED: the plan's verbatim file was built and LOADED IN REAL ELECTRON
+UNDER Xvfb**, which printed `Uncaught ReferenceError: Cannot access 'ui' before initialization` at
+`transferBoot.js:31`, with `rows painted: 0` and `status text: ""`. **No unit test in this repo could
+have caught it** — there is no `document` under vitest, so this file is unreachable by any test, which
+is exactly why the plan declares it untestable. The lesson generalizes past this plan:
+**when the untestable file is the one that cannot be tested, LOAD IT.** Fixed with a module-level
+`let running` that `setRunning` maintains, and a comment saying why the obvious form is wrong.
+
+**A SECOND DEFECT OF THE SAME KIND, AND THE FORM WAS SIMPLY UNUSABLE FOR ITS MAIN JOB: `render` does
+`replaceChildren()` on every model change, and a text input routes every keystroke through
+`ui.type`.** So typing one character into `Local file` removes the focused input from the document,
+focus falls to `<body>`, and **the second character goes nowhere.** Measured in Electron:
+`{"afterOne":{"active":"BODY","stillInDoc":false},"secondCharGoesTo":"BODY","lost":true}`. Fixed with
+`data-field`/`data-role` attributes and `rememberFocus`/`restoreFocus`. **This is the one class of
+`if` that legitimately belongs in this file** — it is about real elements, which `transferUi.ts` is
+built never to touch — but see the next note for the part that did *not* belong here.
+
+**THE CARET ARITHMETIC WAS WRONG AND IN THE WRONG FILE.** It is a pure function of three values
+needing no DOM, it sat in the untestable file, and it was off by one: with `lrecl` at `800` and the
+caret at 1, typing a non-digit left the value correctly unchanged but **the caret at 2**, because
+`rememberFocus` reads `selectionStart` *after* the browser has applied the rejected keystroke.
+Clamping to `value.length` rescued only the append case — **confirmed to have passed by luck**, since
+the old arithmetic keeps the append and paste tests green and only the mid-string case distinguishes
+it. Now `caretAfterEdit` in `transferUi.ts`, exported and unit-tested.
+**ITS CONTRACT IS A LENGTH DIFFERENCE, NOT "refused means back one"**, because a back-one rule is not
+merely wrong for pastes but *unimplementable here*: nothing ever observes the pre-keystroke string it
+would compare against. **Placed in `transferUi.ts` rather than a sibling deliberately — a sibling
+would add an edge to the BROWSER's import graph, and every blank-window failure here came from that
+graph.** The built graph confirms it: `transferBoot.js` still carries exactly one specifier.
+
+**A MUTANT SURVIVED AND CLOSED A GAP IN THE FIX ITSELF, which is the sweep working as intended.**
+Dropping the `Math.max(0, …)` lower bound survived, because no test covered it: `clearInapplicable`
+can empty a field outright, so the shown string can be shorter than the caret's offset and the
+position goes negative — **and `setSelectionRange(-1, …)` is not an error the DOM reports**, it
+silently treats it as 0. A wrong caret with nothing complaining. Test added, mutant now killed.
+
+**ONE PLAN EXPECTATION WAS SIMPLY WRONG AND ITS OWN FALLBACK ANTICIPATED IT:** Step 4 expects
+`transferBoot.js` to emit *two* specifiers; it emits **one**, because `import type` erases. The
+plan's trailing `export type { TransferFieldId };` was dropped too — nothing imports this entry
+point, so both lines were dead, and keeping the re-export would have put a second
+`@tn3270/frontend` specifier into the graph for no purpose.
+
+**THE IMPORT MAP'S RESOLUTION BASE IS THE DOCUMENT'S URL, NOT THE IMPORTING MODULE'S, and this was
+settled empirically because getting it backwards yields a plausible wrong path and a blank window.**
+`packages/gui/dist/../frontend/dist/transferForm.js` **does not exist**, yet loading
+`packages/gui/transfer.html` painted six rows with the correct field ids — which only happens if the
+address resolved against `packages/gui/`. MDN agrees: relative addresses resolve to the import map
+base URL.
+
+**`#status.error` WAS DEAD CSS and was omitted.** `setStatus(text: string)` takes one parameter, so
+nothing could ever add that class. **The consequence is a real and currently untracked gap: an error
+renders in `GrayText`, visually identical to the help line.** Styling it needs a signature change in
+`transferUi.ts` and its tests, not a markup edit — so it is named here rather than quietly left.
+
+**A SPEC DIVERGENCE, NOT A PLAN ONE, AND NOT FIXED: the spec's IPC table says `onProgress` carries
+"text plus phase"; the preload passes text only**, and Task 7 makes the same choice. So the
+implementation is self-consistent and the SPEC is what diverges.
+
+**STILL CONTINGENT, FOR TASK 7: pass the transfer window as `showOpenDialog`'s PARENT.** `browseLocal`
+checks `isRunning` *before* its `await` and acts *after* it, so a dialog resolving late can mutate the
+form mid-transfer — driven and measured, it clobbered a live progress line with the help text and set
+`localFile` during a running transfer. **Fixed properly with a second `if (isRunning) return;` after
+the await**, where it is testable; the `render`-side flag read is kept as **defense in depth and
+documented as such at both ends**, because this repo has twice recorded that such pairs are invisible
+to single mutation. A parent window makes the dialog modal and closes it at the source.
+
 ## Verification checklist for the whole plan
 
 - [ ] `npm run build` clean
