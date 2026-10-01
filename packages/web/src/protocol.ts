@@ -110,24 +110,36 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
-    // `transferForm` IS REJECTED, taking the FIRST of the two branches above rather than the
-    // second, and the choice is not arbitrary: a browser must not have this action at all yet.
+    // `transferForm` IS REJECTED, and as of 2026-10-01 the REASON is not that no front end has a
+    // transfer UI -- the Electron GUI does (`gui/src/transferWindow.ts`, a real `BrowserWindow` with
+    // HTML controls and a native file dialog). The reason is the one this comment always gave
+    // second and must now give first: a browser-initiated transfer would move bytes between the
+    // host and the GATEWAY's filesystem, not the operator's.
     //
-    // `applyAction` throws on it (a dialog is the front end's business), so doing nothing here
-    // would end the gateway process from one frame -- the `toggleKeypad` hole exactly. An
-    // interception in `main.ts` would be the other legal answer, and is wrong TODAY for two
-    // reasons: there is no transfer dialog in the browser front end to intercept it into, and a
-    // browser-initiated transfer moves bytes between the host and the GATEWAY's filesystem rather
-    // than the operator's machine, which is a security question stage 4 of the transfer work has to
-    // settle before this kind can be accepted. Answering it with a silent no-op would also tell a
-    // clicked `Xfer` button nothing, where an error names the reason.
+    // The user's decision (2026-09-30) is that the browser must get REAL browser file I/O -- the
+    // bytes traveling over the WebSocket so that "local file" means the operator's machine. That
+    // needs a new protocol message pair, chunking, and a `TransferFiles` implemented over the
+    // socket, and it is its own spec.
     //
-    // REACHABLE FROM A CLICK, not just a hand-built frame: `KEYPAD_KEYS` carries an `Xfer` button,
-    // so the served bridge produces this kind in a browser today. When stage 4 gives the gateway a
-    // transfer path, this rejection becomes an interception in `main.ts` and the integration test's
-    // REFUSED list loses a member.
+    // WHY A REJECTION RATHER THAN AN INTERCEPTION, stated as MEASURED rather than as the hazard
+    // this comment used to claim. The old text said an unhandled throw here would "end the gateway
+    // process"; that is FALSE at this boundary and was never true of it. `main.ts:151-154` wraps
+    // `decodeClientMessage` in a try and answers EVERY decode failure with a per-socket `error`
+    // frame plus a `return`, so a throw from this function is already contained to one client. The
+    // process-ending hazard is real one line LOWER: `applyAction` at `main.ts:228` is OUTSIDE any
+    // try, inside a socket 'data' handler, which is why `toggleKeypad` needed an interception
+    // above it. Throwing HERE is therefore the safe half of the two, not the dangerous one -- it is
+    // the reason this can stay a rejection at all, and an `error` naming the kind tells a clicked
+    // `Xfer` button something where a silent no-op would not.
+    //
+    // REACHABLE FROM A CLICK, not just a hand-built frame: `KEYPAD_KEYS` carries an `Xfer` button
+    // and `canvas/src/keys.ts` maps Ctrl-T, and the browser runs both. When the gateway gets a
+    // transfer path over the socket, this rejection becomes an interception in `main.ts` and the
+    // integration test's REFUSED list loses a member.
     if (aKind === 'transferForm') {
-      throw new Error('transferForm is not accepted from a client: the gateway has no transfer UI');
+      throw new Error(
+        'transferForm is not accepted from a client: a browser transfer would write to the '
+        + "gateway's filesystem, not yours");
     }
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`

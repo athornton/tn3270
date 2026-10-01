@@ -1,15 +1,18 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
 import {
-  applyAction, defaultSession, describeTlsError, resolveScheme, type Action,
+  applyAction, defaultSession, describeTlsError, resolveScheme, startTransfer, transferCommand,
+  type Action,
 } from '@tn3270/frontend';
+import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
 import { parseKeySpec } from './keyspec.js';
+import { createTransferController } from './transferWindow.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -127,6 +130,37 @@ const SEAM = Object.freeze({
    * straight back off. So the caller shows the keypad; this seam only clicks.
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
+  /**
+   * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
+   * window without a mouse.
+   *
+   * Comma-separated steps, applied in order, so one variable expresses a whole scenario and the
+   * harness needs no IPC of its own. Like `TN3270_GUI_CLICKS` it names WHAT to do rather than where
+   * to click: a coordinate list would be a second copy of the layout and would pass while the
+   * layout was wrong.
+   *
+   * ITS PRESENCE IS WHAT OPENS THE WINDOW, and the plan for this seam had an `open` STEP instead --
+   * which nothing would have consumed. Its loop skipped `open` with "already open" while nothing in
+   * this file had opened anything, so the whole scenario would have printed nothing at all. One
+   * fact, one place.
+   *
+   * A STEP THIS FILE DOES NOT RECOGNISE IS REPORTED, not ignored, the same way `clicks: NO BUTTON`
+   * reports a label that is not in the layout: a typo would otherwise present as a field that never
+   * got set, which reads as a broken form.
+   */
+  transfer: process.env['TN3270_GUI_TRANSFER'] ?? '',
+  /**
+   * What the native file dialog should return, INSTEAD OF SHOWING.
+   *
+   * Separate from `transfer` above because it substitutes a MODAL, and a modal nobody can click
+   * does not fail -- it HANGS, which is the failure shape this project has met in four other
+   * places. Empty means show the real dialog.
+   *
+   * ONE VALUE FOR BOTH DIRECTIONS, which is honest about what it is: a stub for a chooser, not a
+   * model of one. A scenario that needed an Open and a Save to answer differently would need two
+   * variables, and no scenario does.
+   */
+  transferPath: process.env['TN3270_GUI_TRANSFER_PATH'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -280,6 +314,223 @@ app.whenReady().then(async () => {
   let showKeypad = false;
 
   /**
+   * The transfer window, created on first request and reused after that.
+   *
+   * LAZY because most sessions never transfer a file, and an Electron window costs a renderer
+   * process. Reused rather than recreated so that reopening mid-transfer shows the RUNNING
+   * state instead of a fresh form -- two submits would interleave two machines' frames on one
+   * screen.
+   *
+   * ## ONE PER PROCESS, WHICH IS WHY THE HANDLERS BELOW ARE SAFE
+   *
+   * Everything in this block runs inside `app.whenReady().then(...)`, and that callback is
+   * registered exactly ONCE at module scope (line 151). There is no `second-instance` or
+   * `activate` handler in this file, so nothing re-enters it -- which matters because
+   * `ipcMain.handle` THROWS on a second registration for the same channel ("Attempted to
+   * register a second handler for 'transfer:browse'") and `app.on('before-quit')` would
+   * accumulate a listener per entry. Both are therefore correct HERE and would be bugs if this
+   * callback ever became re-entrant; a second window per process needs the three handlers and
+   * the quit hook hoisted to module scope, keyed on which window asked.
+   */
+  let transferWin: BrowserWindow | undefined;
+  let transfer: ReturnType<typeof createTransferController> | undefined;
+
+  const openTransferWindow = async (): Promise<void> => {
+    if (transferWin !== undefined && !transferWin.isDestroyed()) {
+      transferWin.show();
+      transferWin.focus();
+      return;
+    }
+    const tw = new BrowserWindow({
+      width: 460,
+      height: 420,
+      useContentSize: true,
+      title: 'File Transfer',
+      // A CHILD of the terminal window so it travels with it, but NOT modal: the operator may
+      // want to look at the screen behind it, and a 3270 transfer is typed at a command prompt
+      // they may need to see.
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        // `.cjs`, compiled from transferPreload.cts: an ESM preload cannot load.
+        preload: join(here, 'transferPreload.cjs'),
+      },
+    });
+    transferWin = tw;
+    // Same forwarding as the main window: a renderer that throws otherwise produces a window
+    // that does nothing with no explanation anywhere.
+    //
+    // THE DEPRECATED FIVE-ARGUMENT FORM, MATCHING THE MAIN WINDOW'S HANDLER ABOVE RATHER THAN
+    // electron.d.ts's preferred shape. Electron 44 still declares both -- `(details, level,
+    // message, line, sourceId)` with the last four marked `@deprecated` -- and `level` is a
+    // NUMBER there, where the `details.level` of the new form is a STRING ('info' | 'warning' |
+    // 'error' | 'debug'). That difference is not cosmetic for the harnesses: `shot.mjs`,
+    // `keys.mjs` and `clicks.mjs` all filter stdout on the literal `renderer[3]`, and each
+    // records that the numeric level is deprecated and will drift silently on an upgrade. Using
+    // the new shape here would print `transfer[error]` while the main window printed
+    // `renderer[3]` -- two spellings of one thing in one stream, for a window whose log nothing
+    // greps yet. One spelling, one upgrade to do when the level finally moves.
+    tw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      process.stdout.write(`transfer[${level}] ${sourceId}:${line} ${message}\n`);
+    });
+    tw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      process.stdout.write(`transfer window failed to load ${url}: ${code} ${desc}\n`);
+    });
+
+    transfer = createTransferController({
+      send: (channel, payload) => {
+        if (!tw.isDestroyed()) tw.webContents.send(channel, payload);
+      },
+      // THE WINDOW, NOT THE BUTTON, and the dep is named `focusWindow` for that reason -- see its
+      // docstring. `webContents.focus()` moves focus to no particular control; the form's only
+      // enabled control while a transfer runs IS Cancel, because `setRunning(true)` disables
+      // everything else, so bringing the window forward is the whole of the remedy. `show()`
+      // first, because a close attempt can come from a window that is behind the terminal.
+      focusWindow: () => { tw.show(); tw.focus(); },
+      openDialog: async () => {
+        // THE STUB SUBSTITUTES THE WHOLE DIALOG, never merely its default. A real modal under Xvfb
+        // has nobody to click it and would HANG the harness -- a stall, not an error.
+        if (SEAM.transferPath !== '') return SEAM.transferPath;
+        // `tw` AS THE FIRST ARGUMENT IS WHAT MAKES THIS WINDOW-MODAL (the `showOpenDialog(window,
+        // options)` overload, electron.d.ts:7850), which is what closes the interleaving recorded
+        // in the AS BUILT notes: a parentless dialog leaves Start clickable while it is open, and
+        // a late resolution then lands mid-transfer. `transferUi.ts`'s post-await `isRunning`
+        // check is the primary guard for that and stays -- this is the half that stops the race
+        // being reachable at all.
+        const r = await dialog.showOpenDialog(tw, {
+          title: 'Send which file?',
+          properties: ['openFile'],
+        });
+        return r.canceled ? undefined : r.filePaths[0];
+      },
+      saveDialog: async () => {
+        // Same stub, same reason as `openDialog` above.
+        if (SEAM.transferPath !== '') return SEAM.transferPath;
+        const r = await dialog.showSaveDialog(tw, { title: 'Receive into which file?' });
+        // `filePath`, SINGULAR, and a STRING rather than an optional one: `SaveDialogReturnValue`
+        // (electron.d.ts:23629-23637) gives '' when the dialog was canceled, where
+        // `OpenDialogReturnValue` gives a `filePaths` array. So the `canceled` check is what
+        // distinguishes them, and returning '' would put an empty path in the form's Local file
+        // field -- erasing whatever the operator had typed, which `browseLocal` treats `undefined`
+        // as specifically meaning it must not do.
+        return r.canceled ? undefined : r.filePath;
+      },
+      startTransfer: (opts) => startTransfer({ ...opts, session, files: nodeTransferFiles }),
+      buildCommand: (keywords) => transferCommand(keywords),
+    });
+
+    // THE CLOSE GUARD. `preventDefault` on `close` is what makes an accidental Cmd-W or red
+    // button unable to abandon a running transfer; Cancel is the only route out.
+    tw.on('close', (e) => {
+      if (transfer?.shouldPreventClose() === true) {
+        e.preventDefault();
+        transfer.onCloseAttempt();
+      }
+    });
+    tw.on('closed', () => {
+      // GUARDED ON IDENTITY, because `closed` can arrive after a replacement window has already
+      // been built: `openTransferWindow` only reuses a window that is not destroyed, so a
+      // destroyed-but-not-yet-notified window would otherwise clear the NEW window's controller
+      // and leave `transfer` undefined while a form sat on screen -- every submit answered 'the
+      // transfer window is not open'. Nothing reaches `transfer = undefined` in that case now.
+      if (transferWin !== tw) return;
+      /**
+       * CANCEL BEFORE CLEARING -- THE FOURTH INSTANCE OF THE TEARDOWN BUG, AND IT IS REACHABLE.
+       *
+       * `closed` can mean "the window was destroyed out from under a LIVE transfer", not only
+       * "nothing was running". MEASURED in real Electron: closing a child window's PARENT destroys
+       * the child and fires the child's `closed` WITHOUT EVER FIRING ITS `close`. So an operator
+       * who closes the terminal window mid-transfer never reaches the close guard above at all.
+       *
+       * WHY `before-quit` IS NOT SUFFICIENT ON ITS OWN, which is the non-obvious part: the order
+       * is `closed` -> this handler -> `window-all-closed` -> `app.quit()` -> `before-quit`. So by
+       * the time the quit hook runs, `transfer` is ALREADY `undefined` and it has nothing left to
+       * cancel. Observed: `cancel() was called 0 time(s)`, with `session.dft` still set and the
+       * host waiting for a frame that never comes -- the spec's "session.dft set with the window
+       * gone", reached by a different door than the identity guard above is watching.
+       *
+       * NOT A DOUBLE CANCEL on the ordinary paths. A `closed` that follows a REFUSED close can
+       * only happen after the transfer ended -- `onDone` cleared `run` -- so `shutdown` finds
+       * nothing and does nothing. Cmd-Q genuinely does reach `before-quit` first (verified order:
+       * `before-quit` -> child `close` -> PREVENTED -> `closed`), and `shutdown` is idempotent, so
+       * the two hooks overlapping costs nothing. `TransferRun.cancel` is itself idempotent too
+       * (`transferRun.ts:388`).
+       */
+      // `'windowGone'` AND NOT `'sessionLost'`: the form this reason decides about has already been
+      // destroyed, so there is nothing on screen to tell. `shutdown`'s own docstring has the split.
+      transfer?.shutdown('windowGone');
+      transferWin = undefined;
+      transfer = undefined;
+    });
+
+    await tw.loadFile(join(here, '..', 'transfer.html'));
+    await driveTransferWindow(tw);
+  };
+
+  /**
+   * THE SIXTH SEAM'S ENTRY POINT: open the transfer window because `TN3270_GUI_TRANSFER` is set.
+   *
+   * A WRAPPER RATHER THAN A CALL AT EACH SITE, so the "is the seam active?" question is asked in one
+   * place. `main.ts`'s own `SEAM` docstring records why that matters: three places once asked "is
+   * the keys seam active?" with their own inline emptiness checks, agreed only by coincidence, and
+   * one of them was the gate keeping a typed password off stdout.
+   *
+   * CALLED FROM THE REPLAY AND LIVE PATHS, after the input seams and before `maybeCapture`. Not from
+   * the URL branch: there is no `Session` there, no `openTransferWindow` in scope, and
+   * `TN3270_GUI_CLICKS` is ignored in that mode for the same reason -- an untested call site is a
+   * claim this file has not earned.
+   *
+   * AFTER the keys, which matters for composition rather than for this seam alone: `keys.mjs` sends
+   * a real Ctrl+T, and that opens the window through the `action` handler. Reaching here afterwards
+   * finds the window already open, `openTransferWindow` shows and focuses it, and `driveTransferWindow`
+   * is NOT re-entered -- it runs from the `loadFile` path only. A chord run therefore cannot be
+   * driven by this seam, which is correct: `keys.mjs` sets no `TN3270_GUI_TRANSFER`.
+   */
+  const maybeOpenTransferWindow = async (): Promise<void> => {
+    if (SEAM.transfer === '') return;
+    await openTransferWindow();
+  };
+
+  /**
+   * ONE REGISTRATION PER PROCESS, for the reason given at `transferWin` above.
+   *
+   * Registered OUT HERE rather than inside `openTransferWindow`, which is the difference between
+   * working and crashing: `ipcMain.handle` throws on a second handler for the same channel, so
+   * registering them per window would die the second time the operator closed the form and
+   * pressed Ctrl-T again -- and that throw would come out of `openTransferWindow`'s promise,
+   * i.e. as an unhandled rejection with no window, which is this file's worst failure shape.
+   *
+   * They tolerate a MISSING controller rather than assuming one, because these channels outlive
+   * any particular window: the preload is only loaded by the transfer window, so in practice
+   * nothing can call them while it is closed, but a handler that threw on the way to finding out
+   * would reject the renderer's `invoke` with a stack trace instead of an answer.
+   */
+  ipcMain.handle('transfer:browse', async (_e, direction: string) =>
+    transfer === undefined ? undefined : transfer.browse(direction));
+  ipcMain.handle('transfer:submit', async (_e, keywords: readonly string[]) =>
+    transfer === undefined
+      ? { ok: false, error: 'the transfer window is not open' }
+      : transfer.submit(keywords));
+  ipcMain.on('transfer:cancel', () => { transfer?.requestCancel(); });
+
+  /**
+   * A QUIT CANCELS A RUNNING TRANSFER RATHER THAN BEING BLOCKED BY IT.
+   *
+   * The window refuses a close while running; it must not make the application unquittable.
+   * Canceling here is what tells the host to leave transfer mode -- walking away leaves its
+   * program waiting for a frame that never comes.
+   *
+   * ONE LISTENER, for the same scope reason as the handlers above: `app.on` accumulates, and a
+   * per-window registration would cancel the same transfer once per window ever opened.
+   * `shutdown` is safe to reach with nothing running, and swallows a `cancel` that throws --
+   * which it can, on a dropped session -- because a throw here would be the unquittable app this
+   * hook exists to prevent.
+   */
+  app.on('before-quit', () => { transfer?.shutdown('quit'); });
+
+  /**
    * Compute the DRAW LIST here and send that, rather than sending the snapshot.
    *
    * `drawList` needs core's palette and code page, and a browser cannot resolve a bare
@@ -325,6 +576,37 @@ app.whenReady().then(async () => {
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+  /**
+   * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
+   * docstring names and the one nothing handled.
+   *
+   * A repaint alone is not enough, and the gap is not a leak in core: `Session.handleClose` clears
+   * its own `dft`, so nothing is left registered down there. It is the CONTROLLER that keeps
+   * `run !== undefined` forever, which makes `shouldPreventClose()` permanently true -- so the
+   * transfer window refuses EVERY close on a session that is already dead. The only control left is
+   * Cancel, and that throws `not connected` (`core/src/session.ts:1513`), which `cancelRun`
+   * swallows and reports: an escape by error message rather than by a working control.
+   *
+   * A SEPARATE LISTENER rather than a line inside `send`, because `send` is the paint path and runs
+   * on every frame -- putting teardown in it would mean re-deciding this on each of them. The TUI
+   * does the equivalent from its own close path (`tui/src/app.ts:899-900`, `closeTransfer`), so
+   * this makes the two front ends agree rather than inventing a rule for this one.
+   *
+   * `shutdown` and not `requestCancel`: this is the same "cancel rather than block" case as a quit,
+   * and it must not throw out of an event listener -- `shutdown` swallows a failed cancel, which on
+   * a dropped socket is the expected outcome rather than a surprise.
+   *
+   * ## `'sessionLost'` IS THE ONE REASON THAT STILL HAS SOMEBODY TO TELL
+   *
+   * AND THE ONE THING CANCELING DOES NOT ACHIEVE BY ITSELF, which cost this branch a defect: at
+   * 24x80 the cancel THROWS on its way to the driver's `finish` (`transferRun.ts:438` ->
+   * `session.sendAID` -> `not connected`), so `onDone` never fires and the form was left showing
+   * 'transferring' with a dead Cancel and a dead Start -- then 30 seconds later the driver's own
+   * frame timer said `press Attn or Clear: host may still be transferring`, at a host that was gone.
+   * Geometry-dependent, and 24x80 is the broken one. Naming the reason is what lets `shutdown` send
+   * an honest ending instead, and bump the generation so that stale timeout cannot contradict it.
+   */
+  session.on('disconnect', () => { transfer?.shutdown('sessionLost'); });
 
   /**
    * Every action the renderer sends, logged for the chord harness -- and ONLY while BOTH
@@ -363,6 +645,16 @@ app.whenReady().then(async () => {
     // display decision, and this is the front end that owns this display. Recomputing the frame is
     // what makes the window resize, since `fit` sizes from the draw list.
     if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
+    // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
+    // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own
+    // business. A front end that forgot this arm would die on the keystroke rather than being
+    // silently inert -- which is the property that throw exists to give.
+    //
+    // `void`, NOT AWAITED, and the handler is deliberately not `async`: this is a fire-and-forget
+    // UI action, and making the listener async would swallow a `loadFile` failure into an
+    // unhandled rejection. The window reports its own load failures through the `did-fail-load`
+    // forwarding above, which is where a diagnosis belongs.
+    if (action.kind === 'transferForm') { void openTransferWindow(); return; }
     applyAction(session, action);
     send();
   });
@@ -385,6 +677,7 @@ app.whenReady().then(async () => {
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win);
+    await maybeOpenTransferWindow();
     await maybeCapture(win);
     await quitIfKeysOnly();
     return;
@@ -402,6 +695,7 @@ app.whenReady().then(async () => {
 
   await maybeSendKeys(win);
   await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
+  await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
 });
@@ -582,6 +876,133 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
     await new Promise((r) => setTimeout(r, 120));
   }
   process.stdout.write(`clicks: sent ${SEAM.clicks}\n`);
+}
+
+/**
+ * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
+ * window, and reports what it did.
+ *
+ * ## WHAT IT COVERS THAT NOTHING ELSE CAN
+ *
+ * A second `BrowserWindow`, its own preload bridge, `transfer.html`'s IMPORT MAP, every line of
+ * `transferBoot.ts`, and the `transfer:submit` hop into the controller. None of that is reachable
+ * from vitest: `transferBoot.ts` needs a `document` and there is none under `environment: 'node'`,
+ * this file cannot be imported at all, and no fake DOM can fail to resolve a module specifier.
+ * `transferUi.ts`'s docstring names this seam's harness as the only thing that can see a
+ * blank-window-with-no-error -- which this branch shipped once already, as a TDZ read in
+ * `transferBoot.ts`.
+ *
+ * ## STEPS, NOT COORDINATES, AND THE ECHO IS THE MODEL'S OWN VALUE
+ *
+ * Each step names a FIELD BY ID and goes through `window.__tn3270SetField`, which calls the same
+ * `ui.type` a keystroke does. The line printed back carries `ui.values()[id]` rather than the
+ * string this function handed over, so a value the MODEL REFUSED cannot be reported as set -- a
+ * non-digit into `Lrecl`, a cycle field, an id that is not in the table. A seam that echoed its own
+ * input would pass while the form ignored it.
+ *
+ * ## EVERY LINE HERE IS GATED, AND THAT IS A PRIVACY RULE RATHER THAN TIDINESS
+ *
+ * A `localFile=` line carries a PATH, in a window opened in front of a live logged-on session. The
+ * same argument gates the action log (see `logActions`) and keeps goldens away from live logons.
+ *
+ * THE GATE IS THE EARLY RETURN BELOW AND NOTHING ELSE -- one `if` ahead of every write, rather than
+ * a condition on each. That is deliberate: a per-line gate is a thing each new line has to
+ * remember, and the one that forgets is the one that prints a path. A whole FUNCTION that is not
+ * entered is structural. `transferSeam.test.ts` pins it by reading this file as text, since nothing
+ * can import it.
+ *
+ * NOT GATED ON REPLAY MODE, unlike `logActions`, and the asymmetry is reasoned. That gate exists
+ * because `TN3270_GUI_KEYS` is used against live hosts and `keys.ts` builds a `type` action
+ * carrying typed text for every printable keypress -- so the seam variable alone says nothing about
+ * what is on screen. This seam has no such life: it is set by a harness, the paths it prints are
+ * the harness's own, and requiring replay would make it unable to ever drive a real transfer by
+ * hand -- which is the thing a human would most want it for.
+ */
+async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
+  if (SEAM.transfer === '') return;
+  process.stdout.write('transfer window: opened\n');
+  /**
+   * THE FIELD COUNT FIRST, BEFORE ANY STEP RUNS.
+   *
+   * This is the blank-window check, and it describes the form AS FIRST DRAWN, which is what "did it
+   * render" means. The plan for this seam printed it LAST, after the submit, where the number
+   * describes whatever the submit left behind and a reader has to know which -- and where a
+   * scenario that crashed mid-way would print no count at all, losing the one line that says the
+   * window is not blank.
+   */
+  const rows = await tw.webContents.executeJavaScript(
+    'document.querySelectorAll("#fields .row").length',
+  ) as number;
+  process.stdout.write(`transfer window: fields=${rows}\n`);
+
+  for (const step of SEAM.transfer.split(',')) {
+    /**
+     * SPLIT ON THE FIRST `=` ONLY, KEEPING THE REMAINDER -- and `split('=', 2)` DOES NOT DO THAT.
+     *
+     * The plan for this seam used it. JavaScript's second argument is a LIMIT ON THE OUTPUT, not
+     * Python's maxsplit: `'path=/tmp/a=b'.split('=', 2)` is `['path', '/tmp/a']`, silently
+     * discarding `=b`. Verified under node. So a Windows path, or any value containing `=`, would
+     * have been TRUNCATED and the field set to a prefix -- and the echoed line would have agreed
+     * with the truncation, because it reports what the model holds. `indexOf` plus `slice` keeps
+     * the remainder whole.
+     */
+    const at = step.indexOf('=');
+    const name = at < 0 ? step : step.slice(0, at);
+    const value = at < 0 ? undefined : step.slice(at + 1);
+
+    if (name === 'submit') {
+      const r = await tw.webContents.executeJavaScript('window.__tn3270Submit()') as
+        { ok: boolean; status: string };
+      // THE FORM'S OWN STATUS LINE, which is what a user would see and what distinguishes a
+      // validator complaint from `not in 3270 mode` from 'the transfer window is not open'. `ok`
+      // alone is satisfied by all three, i.e. by the form never having been filled in.
+      process.stdout.write(`transfer window: submit -> ok=${r.ok} status=${r.status}\n`);
+      continue;
+    }
+    if (value === undefined) {
+      // REPORTED, not ignored, for the reason `SEAM.transfer`'s docstring gives.
+      process.stdout.write(`transfer window: UNKNOWN STEP ${step}\n`);
+      continue;
+    }
+    /**
+     * THE FIELD ID IS NOT VALIDATED HERE, and that is the renderer's job rather than an omission.
+     * `__tn3270SetField` returns what the model holds afterwards, so an id outside
+     * `TransferFieldId` comes back as the empty string and the echo below says so -- a line reading
+     * `localFil=` is a visible failure, where a list of legal ids in this file would be a second
+     * copy of `TRANSFER_FIELDS` that could agree with itself while the form disagreed.
+     */
+    const held = await tw.webContents.executeJavaScript(
+      `window.__tn3270SetField(${JSON.stringify(name)}, ${JSON.stringify(value)})`,
+    ) as string;
+    process.stdout.write(`transfer window: ${name}=${held}\n`);
+  }
+
+  /**
+   * THE RUN HAS TO END ITSELF, and `quitIfKeysOnly` will not do it: it returns early unless the
+   * keys or clicks seam is set, so a transfer-only run reaches the end of `app.whenReady()`'s
+   * callback with two windows open and SITS THERE until something kills it. Measured before this
+   * line existed: the harness burned its full 120-second timeout, which is the stall-rather-than-
+   * fail shape this file keeps writing comments about.
+   *
+   * NOT FOLDED INTO `quitIfKeysOnly`, deliberately. That function is reached from three places on
+   * the main window's paths, all AFTER `maybeCapture`; this seam runs inside `openTransferWindow`,
+   * which is called from the `action` handler and from Ctrl-T -- i.e. at a time nothing in those
+   * paths is waiting. Widening its condition would make it quit from whichever path happened to
+   * reach it first, which for a `transferForm` action is a race with the scenario still running.
+   *
+   * THE DRAIN IS NOT OPTIONAL, and `quitIfKeysOnly` has the measurement: writing to a PIPE is
+   * asynchronous, and with no drain output stops at one 64000-byte buffer with the last line GONE,
+   * three runs out of three. Everything this function prints is what the harness scores, and the
+   * `submit ->` line is the LAST of them.
+   *
+   * A SHOT RUN IS LEFT ALONE, so the two seams compose rather than racing: `maybeCapture` quits
+   * when it has its picture, and quitting here first would leave a zero-byte PNG. That is also what
+   * makes the privacy check in the AS BUILT notes runnable -- a `TN3270_GUI_SHOT` run with this
+   * variable unset prints nothing and exits on its own.
+   */
+  if (SEAM.shot !== '') return;
+  await new Promise<void>((r) => { process.stdout.write('', () => { r(); }); });
+  app.quit();
 }
 
 /**

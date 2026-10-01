@@ -85,6 +85,24 @@ const CASES = [
   { spec: 'Ctrl+F', action: { kind: 'fieldMark' } },
   { spec: 'Ctrl+K', action: { kind: 'toggleKeypad' } },
   { spec: 'Ctrl+R', action: { kind: 'reset' } },
+  /**
+   * Ctrl+T, which THIS LIST EXISTS TO HAVE CAUGHT and did not.
+   *
+   * The chord was DEAD in the GUI for a commit: `canvas/src/keys.ts`'s CTRL table had no `t`, so a
+   * real run printed `keys: sent Ctrl+T` and no `action:` line, while the `Xfer` keypad button
+   * opened the window perfectly -- the click route goes through `KEYPAD_KEYS` and never through
+   * that table. `canvas/test/keys.test.ts` had the key EXEMPTED as "the GUI has no transfer dialog
+   * yet", so the fast gate was green by permission.
+   *
+   * Like Ctrl+K, its handling is in `main.ts` rather than in `applyAction` -- which throws on the
+   * kind -- so this position also proves the log-then-intercept ORDER there a second time.
+   *
+   * It OPENS A SECOND WINDOW, and that is harmless here: `quitIfKeysOnly` calls `app.quit()`, which
+   * closes every window, and the transfer window's close guard only refuses while a transfer is
+   * RUNNING -- nothing is submitted in this run. Were that not so, this harness would hang on exit,
+   * which is the measured failure shape `maybeSendKeys` already documents for a different cause.
+   */
+  { spec: 'Ctrl+T', action: { kind: 'transferForm' } },
   { spec: 'Ctrl+U', action: { kind: 'eraseInput' } },
   { spec: 'Ctrl+Z', action: null },
   { spec: 'Shift+Tab', action: { kind: 'backTab' } },

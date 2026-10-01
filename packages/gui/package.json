@@ -8,7 +8,8 @@
   "dependencies": {
     "@tn3270/canvas": "0.1.0",
     "@tn3270/core": "0.1.0",
-    "@tn3270/frontend": "0.1.0"
+    "@tn3270/frontend": "0.1.0",
+    "@tn3270/node-files": "0.1.0"
   },
   "devDependencies": {
     "electron": "^44.0.0"

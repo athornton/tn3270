@@ -2088,16 +2088,432 @@ checks showed, and any defect found in this plan rather than in the code. Previo
 recorded forty-odd such defects each, nearly all in the plan — so an empty section at the end of
 implementation means the annotations were skipped, not that the plan was perfect.)*
 
+### Tasks 1-3, 2026-10-01
+
+**THE BASELINE IN THIS PLAN IS OFF BY ONE: it says 2156 tests in 82 files; `main` at `9d5fb42` has
+2157.** The ellipsis-ligature fix landed after the plan was written. So every count in the checklist
+below is one low, and the plan's target of 2183 is really **2184**.
+
+**AND THE SAME FIX MOVED `transferForm.js` FROM 9141 BYTES TO 9139**, which the plan quotes in four
+places as a measured fact. The number is now re-measured in `transferModule.test.ts`'s comment, and
+**the test asserts the IMPORTS and not the size** — which is the whole reason it survived the drift.
+A guard that had pinned 9141 would have failed on an unrelated commit and taught everyone to loosen
+it. [[summary-lines-outlive-their-corrections]] is the shape: the fix reached the prose body and not
+the four numbers summarising it.
+
+**Task 1** pins an existing property, so it was green on arrival. **Mutation-verified**: prepending
+`import { AID } from '@tn3270/core';` to the built file reddens it *naming `@tn3270/core`*, so it is
+not vacuous.
+
+**Task 2** is config only and the full suite was run to prove it: 83 files / 2159 tests, i.e. exactly
+baseline + Task 1's two. A `lib` and a dependency addition have zero blast radius, and confirming
+that *is* the test.
+
+**TASK 3 HAD A REAL DEFECT THE PLAN'S OWN TESTS COULD NOT SEE, and it is the one worth carrying:
+`offered()` AS WRITTEN RETURNS THE OPTIONS LIST ROTATED.** It collects by cycling from the field's
+*current* value, so once `Recfm` is `variable` it returns `['variable','undefined','','fixed']`
+instead of table order — **a `<select>` that reorders its own menu every time the operator picks an
+item.** Measured against the built model, not argued. **None of the plan's eleven tests reads
+`.options`, so this would have shipped GREEN** — the [[check-what-a-comparison-covers]] shape, in a
+plan that was otherwise careful. Fixed by filtering `TRANSFER_FIELDS` by what the walk saw, so
+cycling still discovers *which* values are legal and the VM `Recfm=undefined` rule keeps its one home
+in the model's private `valuesFor`. Proved equivalent to `valuesFor` across **520 reachable states
+and 2727 applicable cycle-field checks, zero mismatches**. Two tests added, both mutation-verified.
+
+**A SECOND DEFECT, in `start()`: the plan sets `state.error` on a refusal and never clears it on a
+later success**, while `show()` gives `error` precedence over everything. One line added beside
+`isRunning = true`, and a regression test, because **deleting that line left all thirteen tests
+green** — an unpinned behavioral fix is the thing this repo keeps finding.
+**ITS SYMPTOM WAS FIRST DESCRIBED WRONG, and the correction is the useful part:** the stale error
+*cannot* print over `transferring`, because `start()` calls `setStatus('transferring')` directly and
+`cycle`/`type`/`browseLocal` all open with `if (isRunning) return`. It resurfaces on the first
+post-`finished()` edit **the model REJECTS** — a non-digit into a numeric field — because a rejected
+edit returns the state unchanged (`transferForm.ts:143,147,148`) while an **accepted** edit writes
+`error: undefined` and clears it by accident. That accident is what would have made it intermittent.
+
+**A DEFECT CLAIMED AND THEN WITHDRAWN, recorded because the reasoning error is a trap:** the
+implementer reported that importing the `@tn3270/frontend` BARREL would blank the window, since
+`frontend/dist/index.js` re-exports `./tls.js`, which imports `node:net`/`node:tls`/`node:fs`. **Every
+one of those sub-facts is true and the conclusion is false.** Task 4's `<script type="importmap">`
+remaps that one bare specifier **in the browser, before any fetch**, so the barrel is never requested.
+The plan's phrase *"rewritten to a relative path at build time"* is loose about *when* (runtime, by the
+map) and is what invited the error. **The verified mechanism:** the emitted `transferUi.js` keeps the
+bare specifier as its only runtime import, and all six imported names are exported directly by
+`dist/transferForm.js`, so one map entry satisfies the whole list. **The real hazard is therefore a
+SECOND workspace import in that file**, which would resolve to nothing — and that is what the comment
+now warns about.
+
+**STILL UNTESTABLE HERE, AND TASK 8 IS WHAT MUST CATCH IT: the import map is load-bearing and no unit
+test in `packages/gui` executes it.** The window must be LOADED and seen to paint.
+
+**A DIVERGENCE THIS WORK CREATED IN THE TUI, found by the review and confirmed by measurement —
+~~NOT fixed, and out of scope for this plan~~. FIXED 2026-10-01 on the user's instruction, before the
+merge; see the note at the end of this section for how.** `app.ts` set `transferPhase = 'running'` without
+touching `transferState.error`, so the TUI now carries the bug the GUI just fixed. **Its blast radius
+is WORSE, not narrower:** `statusLine` recomputes from the phase on every draw and `state.error`
+outranks the phase (`transferOverlay.ts:148`), so a stale error shadows the `transferring` line **for
+the entire duration of a running transfer**, and then the `done:` line after it. **Reproduced
+directly:** with `error: 'keyboard locked'` and `phase: 'running'`, `statusLine` returns
+`"keyboard locked"` where `"transferring 100 bytes (Esc cancels)"` is correct. **Reachable with no
+intervening edit** — submit while the keyboard is locked, the host clears the lock, press Enter again;
+nothing called `setFieldText`, so nothing cleared the error. The fix belongs beside those lines rather
+than in `statusLine`, so both front ends clear it at the same moment.
+
+**AS FIXED, 2026-10-01 (the user asked for it before the merge):** the clear went beside the
+`transferPhase = 'running'` assignment, exactly where the note above predicted. **The test is the
+interesting part, because the obvious one does not work:** `app.test.ts`'s existing
+*RUNS a valid submit* already asserts `transferError` is `undefined`, and it passed throughout — it
+submits on a **fresh** form where the error was never set, so it cannot distinguish "cleared" from
+"never set". [[check-what-a-comparison-covers]]. The new test instead spies `is3270Mode` to `false`,
+submits (getting a genuine `not in 3270 mode` refusal and asserting it arrived), flips the spy back,
+and presses Enter again **with nothing typed between** — which is the whole point, since
+`setFieldText`/`cycleField` write `error: undefined` and any accepted edit would have cleared it by
+accident. **A TRANSIENT refusal is what makes this reachable**, and it is why the fix cannot be left
+to the next keystroke. Mutation-verified with the sed's landing confirmed by `diff` first: removing
+the clear reddens exactly that one test, 1 failed / 96 passed.
+
+### Tasks 4-5, 2026-10-01
+
+**THE PLAN'S `transferBoot.ts` SHIPS A BLANK WINDOW, AND IT IS THE PLAN'S OWN MOST-WARNED-ABOUT
+FAILURE HIDDEN INSIDE ITS OWN CODE. `ui?.running()` THROWS.** It appears three times in `render`,
+and `render` is called **synchronously** by `createTransferUi` (`transferUi.ts:152` calls `redraw()`
+before returning), so `ui` is in its temporal dead zone. **Optional chaining does NOT guard a TDZ
+read** — `?.` guards `null`/`undefined`, while reading a dead-zone binding *is* the
+`ReferenceError`. The module throws partway through evaluation, no listener is ever attached, and the
+console is empty.
+
+**PROVEN IN THE PRODUCT, NOT ARGUED: the plan's verbatim file was built and LOADED IN REAL ELECTRON
+UNDER Xvfb**, which printed `Uncaught ReferenceError: Cannot access 'ui' before initialization` at
+`transferBoot.js:31`, with `rows painted: 0` and `status text: ""`. **No unit test in this repo could
+have caught it** — there is no `document` under vitest, so this file is unreachable by any test, which
+is exactly why the plan declares it untestable. The lesson generalizes past this plan:
+**when the untestable file is the one that cannot be tested, LOAD IT.** Fixed with a module-level
+`let running` that `setRunning` maintains, and a comment saying why the obvious form is wrong.
+
+**A SECOND DEFECT OF THE SAME KIND, AND THE FORM WAS SIMPLY UNUSABLE FOR ITS MAIN JOB: `render` does
+`replaceChildren()` on every model change, and a text input routes every keystroke through
+`ui.type`.** So typing one character into `Local file` removes the focused input from the document,
+focus falls to `<body>`, and **the second character goes nowhere.** Measured in Electron:
+`{"afterOne":{"active":"BODY","stillInDoc":false},"secondCharGoesTo":"BODY","lost":true}`. Fixed with
+`data-field`/`data-role` attributes and `rememberFocus`/`restoreFocus`. **This is the one class of
+`if` that legitimately belongs in this file** — it is about real elements, which `transferUi.ts` is
+built never to touch — but see the next note for the part that did *not* belong here.
+
+**THE CARET ARITHMETIC WAS WRONG AND IN THE WRONG FILE.** It is a pure function of three values
+needing no DOM, it sat in the untestable file, and it was off by one: with `lrecl` at `800` and the
+caret at 1, typing a non-digit left the value correctly unchanged but **the caret at 2**, because
+`rememberFocus` reads `selectionStart` *after* the browser has applied the rejected keystroke.
+Clamping to `value.length` rescued only the append case — **confirmed to have passed by luck**, since
+the old arithmetic keeps the append and paste tests green and only the mid-string case distinguishes
+it. Now `caretAfterEdit` in `transferUi.ts`, exported and unit-tested.
+**ITS CONTRACT IS A LENGTH DIFFERENCE, NOT "refused means back one"**, because a back-one rule is not
+merely wrong for pastes but *unimplementable here*: nothing ever observes the pre-keystroke string it
+would compare against. **Placed in `transferUi.ts` rather than a sibling deliberately — a sibling
+would add an edge to the BROWSER's import graph, and every blank-window failure here came from that
+graph.** The built graph confirms it: `transferBoot.js` still carries exactly one specifier.
+
+**A MUTANT SURVIVED AND CLOSED A GAP IN THE FIX ITSELF, which is the sweep working as intended.**
+Dropping the `Math.max(0, …)` lower bound survived, because no test covered it: `clearInapplicable`
+can empty a field outright, so the shown string can be shorter than the caret's offset and the
+position goes negative — **and `setSelectionRange(-1, …)` is not an error the DOM reports**, it
+silently treats it as 0. A wrong caret with nothing complaining. Test added, mutant now killed.
+
+**ONE PLAN EXPECTATION WAS SIMPLY WRONG AND ITS OWN FALLBACK ANTICIPATED IT:** Step 4 expects
+`transferBoot.js` to emit *two* specifiers; it emits **one**, because `import type` erases. The
+plan's trailing `export type { TransferFieldId };` was dropped too — nothing imports this entry
+point, so both lines were dead, and keeping the re-export would have put a second
+`@tn3270/frontend` specifier into the graph for no purpose.
+
+**THE IMPORT MAP'S RESOLUTION BASE IS THE DOCUMENT'S URL, NOT THE IMPORTING MODULE'S, and this was
+settled empirically because getting it backwards yields a plausible wrong path and a blank window.**
+`packages/gui/dist/../frontend/dist/transferForm.js` **does not exist**, yet loading
+`packages/gui/transfer.html` painted six rows with the correct field ids — which only happens if the
+address resolved against `packages/gui/`. MDN agrees: relative addresses resolve to the import map
+base URL.
+
+**`#status.error` WAS DEAD CSS and was omitted.** `setStatus(text: string)` takes one parameter, so
+nothing could ever add that class. **The consequence is a real and currently untracked gap: an error
+renders in `GrayText`, visually identical to the help line.** Styling it needs a signature change in
+`transferUi.ts` and its tests, not a markup edit — so it is named here rather than quietly left.
+
+**A SPEC DIVERGENCE, NOT A PLAN ONE, AND NOT FIXED: the spec's IPC table says `onProgress` carries
+"text plus phase"; the preload passes text only**, and Task 7 makes the same choice. So the
+implementation is self-consistent and the SPEC is what diverges.
+
+**STILL CONTINGENT, FOR TASK 7: pass the transfer window as `showOpenDialog`'s PARENT.** `browseLocal`
+checks `isRunning` *before* its `await` and acts *after* it, so a dialog resolving late can mutate the
+form mid-transfer — driven and measured, it clobbered a live progress line with the help text and set
+`localFile` during a running transfer. **Fixed properly with a second `if (isRunning) return;` after
+the await**, where it is testable; the `render`-side flag read is kept as **defense in depth and
+documented as such at both ends**, because this repo has twice recorded that such pairs are invisible
+to single mutation. A parent window makes the dialog modal and closes it at the source.
+
+### Tasks 6-7, 2026-10-01
+
+**THE PLAN'S `submit` MAKES THE WINDOW UNCLOSABLE AND THE APP UNQUITTABLE, because `onDone` CAN
+FIRE SYNCHRONOUSLY.** It sets `run`/`isRunning` *after* calling `startTransfer`, with `onDone`
+passed into that call — and `transferRun.ts:358-361` says in as many words that "a whole DFT
+transfer really can begin and finish inside `sendAID`'s record handling… the run completes
+synchronously", with the listeners registered before `sendAID` at `:370-372` and
+`if (ended) return { ok: true };` at `:377` returning a run **with no `cancel`**.
+`tui/test/transferRun.test.ts:689-718` already drives exactly that against a real `Session`. So
+`finish()` runs first and `submit` then sets `isRunning = true` on a transfer **that has already
+ended**: `shouldPreventClose()` is true forever, the window can never be closed, and the
+application has to be killed. Fixed structurally — one state word, a placeholder armed *before* the
+call, and a generation stamp — not by reordering two lines. **Restoring the plan's `run = started`
+reddens 4 tests.**
+
+**AND `cancel` CAN THROW, which made the plan's bare `run?.cancel?.()` in `shutdown` an UNQUITTABLE
+APP on a dropped session.** `transferRun.ts:437-438` reaches `session.ts:1513`'s
+`throw new Error('not connected')`. A throw out of `before-quit` stops the quit. Routed through one
+`cancelRun` wrapper that is the only call site, so `requestCancel` reports the error and `shutdown`
+discards it.
+
+**THE SPEC NAMED FOUR PATHS THAT MUST REACH `cancel` AND THE FIRST IMPLEMENTATION HANDLED THREE.
+THE FOURTH INSTANCE OF THE RECURRING TEARDOWN BUG WAS REAL, and it arrived by a door nobody was
+watching.** **MEASURED: closing a child `BrowserWindow`'s PARENT destroys the child and fires its
+`closed` WITHOUT EVER FIRING ITS `close`.** So an operator closing the terminal window mid-transfer
+never reaches the close guard at all:
+
+```
+tw closed
+  -> transfer = undefined        <-- state cleared, cancel NOT called
+window-all-closed -> app.quit()
+before-quit: transfer=UNDEFINED  <-- the quit hook has nothing left to cancel
+RESULT: cancel() was called 0 time(s)
+```
+
+**`before-quit` LOOKS like the backstop and is not** — the order puts `closed` first, so by the time
+the quit hook runs the state it would have acted on is already gone. Two hooks that each look
+sufficient, and the ordering decides which is. `session.dft` stays set with the window gone, which
+is the spec's own words for the failure. Fixed by canceling inside `closed`'s identity guard.
+**A SECOND MISSING PATH: nothing handled the session closing underneath** — `disconnect` was a
+repaint and nothing more, so `shouldPreventClose()` stayed true forever and **the window refused
+every close on a dead session**, escapable only through a Cancel that throws `not connected`. Now
+calls `shutdown`, which is what the TUI already did from its own close paths (`app.ts:899`).
+
+**A HALF-FIX FOUND IN THE FIX: the generation stamp guarded the STATE and sent `transfer:done`
+UNCONDITIONALLY**, so run 1's stale deadline reached the renderer during run 2 — and
+`transferUi.ts`'s `finished()` has no generation concept, so it re-enabled the whole form and Start
+**mid-transfer** and painted run 1's error over run 2's progress. Same bug class as the one the
+stamp exists to fix. Returns early on a mismatch now, and the test asserts run 2's *own* ending
+still gets through, so it is a generation check and not a mute button.
+
+**THE MUTATION CHECK THAT EARNED ITS KEEP: moving `shutdown()` to AFTER the clear also reddens.**
+A presence-only assertion would have passed, because `shutdown` on an already-cleared `transfer` is
+a silent no-op on `undefined`. **So the test asserts ORDER, not presence** — and that distinction is
+the whole content of the fix.
+
+**CTRL-T WAS DEAD AND THE FAST GATE WAS GREEN BY PERMISSION.** `canvas/src/keys.ts`'s CTRL table had
+no `t`, so a real Electron run printed `keys: sent Ctrl+T` and **no action line**, while the `Xfer`
+keypad button worked perfectly — a click goes through `KEYPAD_KEYS` and never through that table.
+`canvas/test/keys.test.ts` *exempted* the chord, and **the exemption's own comment said "THIS ENTRY
+IS WHAT SHOULD BE DELETED when that lands"**, with the `checked` counter as the mechanism that
+stopped it being forgotten. That mechanism worked. The mapping is added, the exemption deleted, and
+Ctrl+T joined `keys.mjs`: **19 chords/17 actions, from 18/16.** **This touches code SHARED with the
+web gateway**, which is safe and was verified rather than assumed: `protocol.ts:129-131` throws at
+decode and `web/src/main.ts:152-155` catches every decode failure into a per-socket error frame with
+a `return`, no session or process impact, and the browser's own `Xfer` button could already produce
+the kind. **A browser user pressing Ctrl-T now gets an error frame rather than nothing** — accepted;
+whether the web side should ignore it instead is stage 4's call.
+
+**FOUR SMALLER PLAN DEFECTS:** `focusCancel` did not focus Cancel (it focused the whole
+`webContents`) and its docstring said it did — renamed `focusWindow` and implemented honestly, since
+focusing the actual button would need a sixth bridge function and a decision in the untestable file,
+to replace something `setRunning(true)` already leaves as the only enabled control.
+`tw.on('closed')` cleared state unconditionally, so a late `closed` would clear a **replacement**
+window's controller — identity-guarded. `showWindow`, `closeWindow` and `finish` had **no callers**,
+and a public `finish` was a second teardown route with none, which is the exact shape the module's
+docstring is about — removed. And the plan's test fixture built a `TransferRequest` missing `host`,
+`mode` and `cr`: **nothing would have caught it, because no test file in this repo is typechecked**
+(`packages/gui/tsconfig.json` compiles `src/**` only) and vitest does not typecheck either.
+
+**`console-message`'s five-argument form is DEPRECATED in Electron 44 but kept DELIBERATELY**: the
+new `details.level` is a string where the old is a number, and all three GUI harnesses filter stdout
+on the literal `renderer[3]`.
+
+**WHAT IS PINNED AS SOURCE TEXT AND SAYS SO: `main.ts` cannot be imported** (`app.whenReady()` runs
+in the module body and the handlers live in that closure), so `transferTeardown.test.ts` pins the
+four paths textually, following `clicks-harness-flags.test.ts`'s precedent — **and its own header
+states that these would pass against a `shutdown` that did nothing**, so green is not mistaken for
+evidence. The behavioral half is a by-hand Xvfb check now recorded in `docs/live-testing.md` with
+both the failing and passing transcripts. **STILL NOT PROVEN: those runs use a fake
+`startTransfer`, so they show `cancel` is REACHED and not that the right bytes hit the wire.** A GUI
+transfer interrupted by closing the terminal window has never been watched against a live host.
+
+### Tasks 8-10, 2026-10-01 — and the plan is COMPLETE
+
+**THE HARNESS AS WRITTEN WOULD HAVE HUNG FOREVER, which is the failure its own docstring warns
+about.** Nothing made the client exit under a transfer-only seam — `quitIfKeysOnly` returns early
+unless the keys or clicks seam is set — so the plan's `spawn` + `child.on('close')` would have waited
+on a process holding two windows open. Fixed at both ends: `spawnSync` with a timeout (the house
+pattern), and the seam quits itself after the measured pipe drain, leaving a `SHOT` run alone so the
+two compose.
+
+**AND THE PLAN'S TRACE PATH IS A FILE THAT EXISTS BUT IS THE WRONG ONE, so a wrong choice here would
+have been silent.** `x3270/tso-query-reply.txt` is real, which is what makes it dangerous; the
+fixtures README says it "would be meaningless as a replay fixture" and it carries no negotiation, so
+it replays as a **blank screen**. Uses `traces/synthetic-ispf-like.trace`, as the other three
+harnesses do.
+
+**TWO OF THE PLAN'S CHECKS PASS VACUOUSLY — on EMPTY OUTPUT, which is the one case a harness must
+never score as success.** `/^(?!.*transfer window failed to load).*$/s.test('')` is **`true`**, so a
+process that printed nothing passed the `no did-fail-load` check. And **`fields=\d+` matches
+`fields=0`**, which is *precisely* the blank window this harness exists to catch. The count is now
+asserted exactly (6 applicable rows) and the lookahead is paired with positive evidence.
+
+**THE PLAN'S SCENARIO STEPS NAME FIELDS THAT DO NOT EXIST, AND THE FAILURE IS A PLAUSIBLE PASS.**
+`path=` and `host=` are not field ids. Measured: `path=` echoed **empty**, and `host=` echoed
+**`tso`** — because `host` is the TSO/VM **cycle** field, not the host filename. So
+`host=HARNESS.DATA` would have printed a confident line from a form where **nothing was typed**, and
+the `open` step was consumed by nothing at all. The steps are now the real ids, `localFile` and
+`hostFile`, which also removes the translation table a renaming would have had to keep in sync.
+`split('=', 2)` was wrong too — **JS limits the OUTPUT, not the number of splits**, so
+`path=/tmp/a=b` yields `['path','/tmp/a']` and any value containing `=` is truncated. Uses
+`indexOf`/`slice`.
+
+**`__tn3270Submit` INFERRED SUCCESS BY STRING-MATCHING THE STATUS TEXT.** That duplicated the
+`'transferring'` literal from `transferUi.ts`, put a decision in the file whose whole discipline is
+to hold none, and was untestable. It calls `ui.running()` — which answers the same question
+directly — and still returns the status text to say *which* refusal.
+
+**A TRAP IN THE GUARD TESTS THEMSELVES, hit twice: three assertions reddened against a CORRECT
+harness, because the harness documents the spellings it REJECTS** and a source-text grep cannot tell
+a rejected spelling in a comment from a live one. Resolved with a comment-stripped view rather than
+by deleting the explanations.
+
+**THE PLAN'S README TEXT OVERSTATED THE CLOSE GUARD AND WOULD HAVE BEEN FALSE.** "While a transfer is
+running the window refuses to close" is true only of the window's **own** `close`. Closing the
+terminal window never fires it, `Cmd-Q` goes through `before-quit`, and a session drop through a
+third listener. The README names the three paths separately.
+
+**AND AN ASYMMETRY NOBODY HAD WRITTEN DOWN: DFT REPORTS NO PROGRESS AT ALL.** `onProgress` is called
+from exactly one place — the **CUT** frame handler, `transferRun.ts:323` — so a DFT transfer is
+silent until it completes. The plan's "the window reports progress either way" would have shipped as
+a false README claim. **A silent DFT transfer is normal, not a hang**, and the README now says so.
+
+**THE GATEWAY'S REFUSAL HAD EXPIRED AND NOTHING PINNED IT.** No test asserted the old wording:
+`integration.test.ts`'s `REFUSED` loop checks only `toContain(kind)`, which both messages satisfy, so
+**the suite stayed green through the change** — the failure mode itself. A test now pins the reason,
+mutation-verified by restoring the old string.
+
+**AND THE PLAN'S JUSTIFICATION FOR THROWING THERE IS FALSE.** It says an unhandled throw "ends the
+gateway process and every other operator's session with it." `web/src/main.ts:151-154` wraps
+`decodeClientMessage` and answers **every** decode failure with a per-socket error frame and a
+`return`. **The real hazard is one line lower — `applyAction` at `main.ts:228` sits outside any try
+inside a socket data handler** — which is exactly why `toggleKeypad` needs an interception and
+`transferForm` does not. So throwing at decode is the **safe** half. `canvas/src/keys.ts:89-95` had
+already recorded the right answer and the plan contradicted it.
+
+**SIX STALE README CLAIMS, more than the plan anticipated** — including `keys.mjs` documented as
+18 chords/16 actions (it is 19/17) and the test count in two places. [[readme-audits-find-real-defects]]
+again: checking docs against code finds real defects, and some of them are hours old.
+
+**THE SAME MISTAKE THIS PLAN KEEPS PUNISHING, MADE ONCE MORE AND CAUGHT:** the broken `path=`/`host=`
+step names were fixed in the code and left standing in two `main.ts` docstrings. Amended.
+[[summary-lines-outlive-their-corrections]] — the fix reaches the body and not the summary.
+
+### The final pre-merge review, 2026-10-01 — the FIFTH instance, one layer out
+
+**THE PER-TASK REVIEWS COULD NOT SEE THIS, WHICH IS THE ARGUMENT FOR A WHOLE-BRANCH REVIEW: both
+halves were individually correct and jointly wrong, and 2239 tests stayed green while they were.**
+
+**A TRANSFER THAT SUCCEEDED REPORTED AS PERMANENTLY IN PROGRESS.** `start()` set `isRunning = true`
+and `setStatus('transferring')` *after* `await deps.submit(...)` — so when the completion had already
+arrived during that await, `start()`'s tail **overwrote the success**. Reproduced against the real
+built module:
+
+```
+setRunning false
+setStatus "done: 3 bytes"     <-- the real completion, correctly handled
+setRunning true
+setStatus "transferring"      <-- start()'s tail overwrites it
+--- final: ui.running() = true
+```
+
+**AND THE ORDERING IS NOT HYPOTHETICAL: a `webContents.send` issued synchronously inside an
+`ipcMain.handle` handler reaches the renderer BEFORE the `invoke()` promise resolves — measured 20/20
+in real Electron 44** (20/20 for a microtask-deferred send, 2/20 at `setImmediate`, 0/20 at
+`setTimeout 0`). The trigger is the same synchronous `onDone` that Task 6 already had to defend
+against on the main side: a whole DFT transfer finishing inside `sendAID`. **So the main half's
+generation stamp was right and its mirror image on the renderer side was missing.**
+Consequences: Cancel dead (the UI's guard passes, main's `run` is already `undefined`), Start dead
+for the window's life, the operator must close and reopen. **The window stayed closable and the app
+quittable** — `startRun`'s placeholder did its job; only the renderer half broke.
+**AND THE HARNESS COULD NOT SEE IT**, because `__tn3270Submit` returns `ui.running()`, which was
+`true` *because* of the bug: a passing scenario printed `ok=true status=transferring`.
+
+**`progress()` HAD THE SAME DEFECT**: a `transfer:progress` arriving during the await was dropped by
+its `isRunning` guard and then painted over by the tail. And a second Start during the await passed
+the guard, sending **two `invoke`s for one button**. Fixed by arming the flag and the announcement
+*before* the await, with `isRunning` itself as the latch a completion clears — **no new state word**,
+where a renderer-side generation would have been a second copy of main's that nothing in the renderer
+could falsify. **The fix has a liability that was closed in the same commit:** the refusal arm must
+now clear the flag it armed, and so must a rejected `invoke` — main's `submit` catches only
+`buildCommand`, so a throw out of `startTransfer` arrives as a rejection, which with early arming
+would have frozen the form. **C1 through another door.**
+
+**A SESSION DROPPING MID-TRANSFER AT 24x80 LEFT THE FORM STUCK FOR 30 SECONDS AND THEN LIED.**
+`shutdown` deliberately sent no `transfer:done`; the cancel throws `not connected` before the
+driver's `finish`, so `onDone` never fired and **the renderer was never told**. It self-healed by an
+undocumented route — the still-armed 30 s frame timer — and then displayed
+`press Attn or Clear: host may still be transferring`, **which is false: the session is gone and
+there is no host to press Attn at.** **GEOMETRY-DEPENDENT, AND THE COMMON CASE IS THE BROKEN ONE**:
+at any non-CUT geometry `transferRun.ts:429-432` returns `finish(...)` before the throwing `sendAID`,
+so 43x80 behaved correctly and 24x80 did not. **The root cause was one comment covering two
+callers**: "there is nobody left to tell" is true of a QUIT and false of a DISCONNECT, where the
+window is still on screen and the operator is still looking at it. `shutdown` now takes a
+**required** reason so each call site states what happened, and `generation` is bumped — **verified
+load-bearing by removing only the bump, which reddens with the exact false message.**
+
+**THE TEST THAT SHOULD HAVE EXISTED ALL ALONG: nothing composed `createTransferUi` with
+`createTransferController`.** `transferUi.test.ts` drove `finished()` only after `start()` had
+resumed; `transferWindow.test.ts` asserted controller state only. So the seam was untested by
+construction. `transferSeamIpc.test.ts` now drives both halves through an ordered queue that can
+deliver `transfer:done` before `submit` resolves. **Reverting the C1 fix as an ORDER mutation reddens
+5 of its tests while the pre-existing 51 stay green — which demonstrates the gap rather than
+asserting it.**
+
+**TWO PROCESS NOTES FROM THE FIX ITSELF, both the shape this repo keeps recording:** a first-draft
+test asserted Cancel against the *driver's* `cancel` and **survived** the mutation, because the driver
+is not reached either way — rewritten to count the bridge hop. And a seam helper that held *every*
+send rather than only those during a submit broke a normal-path test. Both are noted in the file.
+
 ## Verification checklist for the whole plan
 
-- [ ] `npm run build` clean
-- [ ] `npm run typecheck` clean (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
-- [ ] `npx vitest run` — 2183 tests in 86 files, up from 2156 in 82
-- [ ] `node packages/gui/scripts/shot.mjs` — 3/3, after `npx tsc --build --force packages/gui`
-- [ ] `node packages/gui/scripts/keys.mjs` — 18 chords/16 actions
-- [ ] `node packages/gui/scripts/clicks.mjs` — 9 buttons/10 actions
-- [ ] `node packages/gui/scripts/transfer.mjs` — 6/6
-- [ ] `python3 packages/tui/scripts/pty-smoke.py` — 12/12
-- [ ] `node packages/web/scripts/browser-shot.mjs` — 2/2 (the gateway is untouched but shares `frontend`)
-- [ ] A normal GUI run prints no `transfer window:` line
-- [ ] The three by-hand items in `docs/live-testing.md` remain OPEN and are labeled as such
+**ALL TICKED, re-measured on `0414f96` (branch `gui-transfer-ui`, 17 commits), 2026-10-01 — after the
+final review's fixes. The numbers below supersede the 15-commit run: 2253 tests in 89 files (from
+2239 in 88) and `transfer.mjs` 10/10 (from 9/9, the new check being a field edit after a refused
+submit, confirmed to discriminate at 8/10 against a mutated renderer in the real window). Three of the
+predicted numbers were WRONG and are corrected in place rather than quietly satisfied** — the test
+target was computed from a baseline that had already moved, `keys.mjs` went up because Ctrl-T was
+dead and is now mapped, and `transfer.mjs` grew checks when the plan's two vacuous ones were
+replaced.
+
+- [x] `npm run build` clean — exit 0
+- [x] `npm run typecheck` clean — exit 0 (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
+- [x] `npx vitest run` — **2253 tests in 89 files**, up from **2157 in 82**. *(The plan predicted
+      2184 in 86 from a 2156/82 baseline: the baseline was one low, and seven more test FILES and
+      sixty-odd more tests exist than it budgeted for, because the plan's defects needed pinning —
+      the last file being the composed-seam test the final review showed was missing.)*
+- [x] `node packages/gui/scripts/shot.mjs` — **3/3 goldens matched**, after `npx tsc --build --force packages/gui packages/web`
+- [x] `node packages/gui/scripts/keys.mjs` — **19 chords/17 actions**, *not* the predicted 18/16:
+      **Ctrl-T was DEAD and is now mapped**, and the exemption that hid it is deleted
+- [x] `node packages/gui/scripts/clicks.mjs` — **9 buttons/10 actions**
+- [x] `node packages/gui/scripts/transfer.mjs` — **10/10**, not the predicted 6/6: two of the plan's
+      checks passed **vacuously on empty output** and were replaced by checks that cannot
+- [x] `python3 packages/tui/scripts/pty-smoke.py` — **12 PASS / 0 FAIL, exit 0**
+- [x] `node packages/web/scripts/browser-shot.mjs` — **2/2** (the gateway is untouched but shares
+      `frontend` — and Task 10 *did* touch `packages/web`, so this one is load-bearing here rather
+      than precautionary)
+- [x] `node packages/web/scripts/browser-keys.mjs` — **13 chords/11 actions** (not in the plan's
+      list; run because Task 7 touched `canvas/src/keys.ts`, which the gateway shares)
+- [x] A normal GUI run prints no `transfer window:` line — **0**, and now unit-tested as well as
+      checked by hand, because it is a privacy property rather than tidiness
+- [x] ~~The three by-hand items~~ **FOUR by-hand items** in `docs/live-testing.md` remain OPEN and are
+      labeled as such — a fourth was added for the progress line versus real byte counts
+
+**NOT RUN, and the reason, because "the gate was green" must never cover a subset without naming
+it:** `drive-playback.py` and `drive-e.py`. Nothing on this branch touches telnet negotiation or the
+stream layer. **And the gate has NOT been re-run on a merge commit** — this repo's practice is to
+re-run it there too, so that remains to do at merge time.

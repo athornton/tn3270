@@ -1100,6 +1100,19 @@ export class App {
     this.transferRun = run;
     this.transferPhase = 'running';
     this.transferProgress = undefined;
+    // THE PREVIOUS REFUSAL IS CLEARED HERE, and nothing else would ever clear it. `statusLine`
+    // recomputes from the phase on every draw but returns `state.error` FIRST
+    // (`transferOverlay.ts`), so a refusal left set shadows the `transferring` line for the
+    // WHOLE run and the `done:` line after it -- a form reporting 'not in 3270 mode' over a
+    // transfer the host is answering.
+    //
+    // REACHABLE WITH NO INTERVENING EDIT, which is why it cannot be left to the next keystroke:
+    // `setFieldText`/`cycleField` write `error: undefined`, so an accepted edit clears it by
+    // accident, but a TRANSIENT refusal needs no edit to recover from. Submit while the keyboard
+    // is locked or the session is briefly not in 3270 mode, let the condition clear, press Enter
+    // again. The GUI clears it at the same point in `transferUi.ts`'s `start()` for the same
+    // reason, so the two front ends agree about when a message stops being true.
+    this.transferState = { ...this.transferState, error: undefined };
     this.draw();
   }
 

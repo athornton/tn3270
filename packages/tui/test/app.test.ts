@@ -1288,6 +1288,35 @@ describe('the transfer form: submitting', () => {
     expect(h.aids).toEqual([]);
   });
 
+  it('CLEARS a previous refusal when a later submit succeeds', () => {
+    // A TRANSIENT refusal is the reachable case and needs NO edit to recover from, which is
+    // what makes the bug reachable: `setFieldText`/`cycleField` both write `error: undefined`,
+    // so any accepted edit clears the message by accident. Here the operator submits while the
+    // session is briefly not in 3270 mode, the condition clears on its own, and they press
+    // Enter again having touched nothing.
+    //
+    // WITHOUT THE CLEAR the stale error outranks everything for the WHOLE running transfer:
+    // `statusLine` recomputes from the phase on every draw but returns `state.error` first
+    // (`transferOverlay.ts`), so the form says 'not in 3270 mode' while a transfer the host IS
+    // answering runs to completion, and then over the `done:` line after it. The GUI had the
+    // same defect on its own success path and fixed it there; this is the TUI's half, so the
+    // two front ends clear it at the same moment.
+    const h = app({ files: fakeFiles() });
+    const mode = vi.spyOn(h.session, 'is3270Mode').mockReturnValue(false);
+    fillAndSubmit(h);
+    expect(h.app.transferError, 'the transient refusal must show in the first place')
+      .toMatch(/not in 3270 mode/);
+    expect(h.aids).toEqual([]);
+
+    mode.mockReturnValue(true);              // the condition clears on its own
+    h.send(ENTER);                           // and nothing was typed in between
+
+    expect(h.app.transferRunning).toBe(true);
+    expect(h.app.transferError, 'a stale refusal would shadow the status line for the whole run')
+      .toBeUndefined();
+    expect(h.aids).toEqual([AID.ENTER]);
+  });
+
   it('IGNORES a second Enter while a transfer is running', () => {
     // Starting a second transfer over the first would interleave two machines' frames on one
     // screen, and the host is answering the first one.

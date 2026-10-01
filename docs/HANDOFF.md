@@ -1,21 +1,168 @@
-# Handoff — state as of 2026-09-30
+# Handoff — state as of 2026-10-01
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, end of 2026-09-30
+## START HERE — NEXT ACTION, end of 2026-10-01
 
-**THE GUI TRANSFER UI IS SPECCED AND PLANNED, NOT STARTED. GO STRAIGHT TO
-`docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`, TASK 1** — ten tasks, each with complete
-code, exact commands and its own mutation check. Its *Read this before Task 1* section carries six
-measured facts written for exactly this cold start; do not re-derive them, and **do not trust the
-plan over the source.** Spec: `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md`.
-**NOTHING IS WAITING ON THE USER**, and the spec records their five design decisions so none needs
-re-asking.
+**THE GUI TRANSFER UI IS BUILT — ALL TEN TASKS — AND IS ON BRANCH `gui-transfer-ui`, 14 COMMITS,
+NOT MERGED AND NOT PUSHED.** The branch was cut from `main` at `9d5fb42` and `git merge-base`
+equalled `main` exactly, per the standing rule. **THE NEXT ACTION IS THE MERGE DECISION** — see
+*Finishing the GUI transfer branch* below for what has and has not been gated.
 
-**State: `main` at `45fec33`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
-stashes. 2157 tests in 82 files, build and typecheck clean.**
+**State: branch `gui-transfer-ui`, tree clean, no stashes. `main` is at `9d5fb42`, pushed,
+untouched. 2253 tests in 89 files (from 2157 in 82), build and typecheck clean.** The last commit
+is the pre-merge review's three fixes — two operator-visible defects at the IPC seam plus the
+composed test that catches them; see *Finishing the GUI transfer branch*.
+
+**THE WEB TRANSFER UI IS NOW THE OUTSTANDING HALF AND NEEDS ITS OWN SPEC** — roadmap item (0c).
+The user's decision stands: **real browser file I/O**, bytes over the WebSocket so "local file"
+means the operator's machine. `packages/web/src/protocol.ts` still refuses the action, and its
+message now gives the *durable* reason rather than the expired one — see below.
+**NOTHING IS WAITING ON THE USER.**
+
+## Finishing the GUI transfer branch
+
+**WHAT IS GATED, re-measured after the pre-merge review fixes:** build and typecheck clean;
+**2253 tests in 89 files** (was 2239 in 88 — the new file is `gui/test/transferSeamIpc.test.ts`, and
+the last test is the TUI stale-error fix);
+`shot.mjs` 3/3; `transfer.mjs` **10/10** (was 9/9 — one new check, see below);
+`keys.mjs` **19 chords/17 actions**; `clicks.mjs` 9 buttons/10 actions; `browser-shot.mjs` 2/2;
+`browser-keys.mjs` 13 chords/11 actions; `pty-smoke.py` 12/12.
+
+**TWO DEFECTS THE PRE-MERGE REVIEW FOUND AT THE IPC SEAM, both operator-visible, both fixed:**
+
+- **A transfer that completed *synchronously* left the form permanently claiming `transferring`, on
+  the SUCCESS path.** `transferUi.ts`'s `start()` awaited `deps.submit` and only then armed
+  `isRunning`, so an ending that arrived during the await was overwritten by the submit that started
+  it (`startTransfer` can call `onDone` before returning, and a `webContents.send` issued inside an
+  `ipcMain.handle` handler reaches the renderer *before* the `invoke()` resolves). Cancel and Start
+  were both dead for the window's life. `start()` now announces the transfer *before* the await and
+  treats `isRunning` as the latch, which is the shape `transferWindow.ts`'s `startRun` already used.
+- **A session dropping mid-CUT-transfer at 24x80 left the form stuck, then told it a lie.**
+  `shutdown` sent no `transfer:done` ("there is nobody left to tell" — true for a quit, false for a
+  disconnect), and the cancel throws `not connected` on its way to the driver's `finish`, so `onDone`
+  never fired. 30 seconds later the driver's own frame timer reported `press Attn or Clear: host may
+  still be transferring` at a host that was gone. `shutdown` now takes a `ShutdownReason`, sends an
+  honest ending for `'sessionLost'` only, and bumps `generation` so the stale timeout is dropped.
+
+**WHY 2239 TESTS DID NOT CATCH EITHER: nothing composed the two halves.** Both were individually
+green and individually correct. `transferSeamIpc.test.ts` instantiates `createTransferUi` and
+`createTransferController` together over an ordering-controlled seam, and is the file to extend when
+a new interleaving appears — *an ordering it does not encode is an ordering nobody checks*.
+
+`transfer.mjs`'s tenth check drives a field edit *after* the refused submit. It covers the liability
+the first fix introduces (the refusal arm must clear the flag it armed) and is the nearest a headless
+run can get to the bug itself — replay forces a refusal, so the harness can never see a *completed*
+transfer. Confirmed to redden: 8/10 with that clearing mutated out of the built renderer.
+
+**WHAT IS NOT DONE:** the gate has **not** been re-run on a merge commit (this repo's practice is to
+re-run it there, not only on the branch — and to say which subset was run when it is a subset), and
+**`drive-playback.py` and `drive-e.py` were not run at all** because nothing on this branch touches
+telnet negotiation or the stream layer. That reasoning should be stated rather than implied if the
+merge is taken.
+
+**WHAT HAS NO LIVE WITNESS, AND THIS IS THE HONEST LIMIT OF THE WHOLE BRANCH: no transfer has been
+driven from this window against a real host.** The protocol is live-verified from the TUI (DFT on
+TK5 at 43x80, CUT on VM, bytes identical both directions) and this work adds a *renderer*, not
+transfer logic — but the window itself has only ever run in **replay** mode against a committed
+trace. Four by-hand items are OPEN in `docs/live-testing.md` under *The GUI transfer window*, and
+they are labeled as not-run rather than implied. **The teardown runs there use a FAKE
+`startTransfer`, so they prove `cancel` is REACHED, not that the right bytes reach the wire.**
+
+## What the GUI transfer work delivered, 2026-10-01
+
+**`Ctrl-T` (or the `Xfer` keypad button) opens a real `BrowserWindow` with HTML controls**, its own
+preload and its own five-function bridge. The canvas window's four-function bridge is **untouched**,
+so `renderer.ts` stays shared with the web gateway. New files in `packages/gui`: `transfer.html`,
+`src/transferUi.ts` (the form logic, DOM **injected**, plus `caretAfterEdit`), `src/transferBoot.ts`,
+`src/transferPreload.cts`, `src/transferWindow.ts` (the controller, Electron injected), and
+`scripts/transfer.mjs`. The shared model and driver are reused **unchanged**.
+
+**`CTRL-T WAS DEAD AND THE FAST GATE WAS GREEN BY PERMISSION`** — `canvas/src/keys.ts` had no `t` in
+its CTRL table, so the chord emitted **no action** while the `Xfer` button worked (a click goes
+through `KEYPAD_KEYS`, never that table). `canvas/test/keys.test.ts` *exempted* it, and the
+exemption's own comment said **"THIS ENTRY IS WHAT SHOULD BE DELETED when that lands"**, with the
+`checked` counter as the mechanism that stopped it being forgotten. **That mechanism worked.** This
+touches code **shared with the web gateway**: a browser user pressing Ctrl-T now gets a per-client
+error frame rather than nothing, which is safe (`protocol.ts` throws at decode, `web/src/main.ts`
+catches every decode failure per-socket) and is a second route to an answer the `Xfer` button could
+already produce. **Whether the web side should ignore it instead is stage (0d)'s call.**
+
+**THE GATEWAY'S REFUSAL REASON WAS CORRECTED, because it had expired.** It said "the gateway has no
+transfer UI", which stopped being true the moment the GUI had one; it now gives the reason that was
+always the real one — a browser transfer would write to the **gateway's** filesystem, not the
+operator's. **AND NO TEST PINNED THE OLD WORDING AT ALL**, so the suite stayed green through the
+change: `integration.test.ts`'s `REFUSED` loop asserts only `toContain(kind)`, which both wordings
+satisfy. A test now pins the *reason*, mutation-verified against the old string.
+
+**AND THE PLAN'S CLAIM ABOUT WHY IT MUST THROW WAS FALSE.** It said an unhandled throw there "ends
+the gateway process and every other operator's session with it." `web/src/main.ts:151-154` wraps
+`decodeClientMessage` and answers **every** decode failure with a per-socket error frame and a
+`return`. The real hazard is one line lower: **`applyAction` at `main.ts:228` sits outside any try
+inside a socket data handler** — which is exactly why `toggleKeypad` needs an interception above it
+and `transferForm` does not. So throwing at decode is the **safe** half of the two. `keys.ts:89-95`
+had already recorded the correct answer, and the plan contradicted it.
+
+**EIGHTEEN-ODD DEFECTS WERE FOUND EXECUTING THIS PLAN, NEARLY ALL IN THE PLAN** — the same ratio as
+every feature here. **Every one is written up in that plan's `PROGRESS / AS BUILT` section; read it
+before re-deriving anything.** The five worth knowing cold, because each would have shipped:
+
+1. **`ui?.running()` SHIPPED A BLANK WINDOW.** It appears three times in the plan's `render`, which
+   `createTransferUi` calls **synchronously**, so `ui` is in its temporal dead zone — and
+   **optional chaining does NOT guard a TDZ read.** The module throws partway through evaluation,
+   no listener attaches, and the console is **empty**. Proven by building the plan's verbatim file
+   and **loading it in real Electron under Xvfb**: `rows painted: 0`. **No unit test here could
+   catch it — there is no `document` under vitest.** When the untestable file is the one that cannot
+   be tested, **load it**.
+2. **THE FORM WAS UNUSABLE FOR ITS MAIN JOB.** `render` does `replaceChildren()` on every model
+   change and a text input routes every keystroke through `ui.type`, so typing one character blurred
+   the input and **the second character went to `<body>`.**
+3. **THE WINDOW WAS UNCLOSABLE AND THE APP UNQUITTABLE, TWICE OVER.** `onDone` **can fire
+   synchronously** (`transferRun.ts:358-361` says so and an existing test drives it), so the plan's
+   `isRunning = true` *after* the call set it on a transfer that had already ended. And `cancel`
+   **can throw** (`not connected`), which out of `before-quit` stops the quit.
+4. **THE FOURTH INSTANCE OF THE RECURRING TEARDOWN BUG WAS REAL, and the spec predicted it.**
+   **Closing a child `BrowserWindow`'s PARENT destroys the child and fires `closed` WITHOUT EVER
+   FIRING `close`**, so closing the terminal window mid-transfer never reached the close guard:
+   `cancel` was called **zero** times with `session.dft` still set. **`before-quit` LOOKS like the
+   backstop and is not** — `closed` runs first and has already nulled the state it would act on. A
+   second missing path: the session dropping underneath left the window refusing **every** close.
+   All four paths now reach `cancel`, and **the test asserts ORDER rather than presence**, because
+   moving `shutdown()` after the clear is a silent no-op that a presence check would pass.
+5. **A HARNESS THAT WOULD HAVE HUNG FOREVER, AND CHECKS THAT PASSED VACUOUSLY.** Nothing made the
+   client exit under a transfer-only seam; the plan's `no did-fail-load` lookahead is **true on
+   empty output**; `fields=\d+` matches `fields=0`, which is precisely the blank window the harness
+   exists to catch; and the plan's step names `path=`/`host=` **are not field ids** — `host` is the
+   TSO/VM **cycle** field, so `host=HARNESS.DATA` echoed `tso` and would have produced a
+   plausible-looking PASS from a form where nothing was typed.
+
+**ONE ASYMMETRY THE PLAN GOT WRONG AND THE README NOW RECORDS: DFT REPORTS NO PROGRESS.**
+`onProgress` is called from exactly one place, the **CUT** frame handler (`transferRun.ts:323`), so
+a DFT transfer is silent until it finishes. The plan's "the window reports progress either way"
+would have been a false claim in the README. **A silent DFT transfer is normal, not a hang.**
+
+**A DIVERGENCE THIS WORK CREATED IN THE TUI, ~~AND DID NOT FIX~~ — FIXED 2026-10-01 on the user's
+instruction, before the merge.** `app.ts` left `transferState.error` set on its success path, and
+there the stale error shadowed the status line for the **whole** running transfer and the `done:`
+line after it — **worse than the GUI's was**, because `statusLine` recomputes from the phase every
+draw and `error` outranks it. Reproduced directly: with `error: 'keyboard locked'` and
+`phase: 'running'`, `statusLine` returned `"keyboard locked"`.
+**Reachable with no intervening edit** — submit while the keyboard is locked or the session is
+briefly not in 3270 mode, let the condition clear, press Enter again. **That is what makes it
+reachable at all:** `setFieldText`/`cycleField` both write `error: undefined`, so any *accepted* edit
+clears the message by accident, and only a transient refusal needs no edit to recover from.
+**Fixed beside the `transferPhase = 'running'` assignment, not in `statusLine`, so both front ends
+clear it at the same moment** — the GUI does it at the same point in `transferUi.ts`'s `start()`.
+**Pinned by a test that flips `is3270Mode` mid-test and submits twice with nothing typed between**,
+mutation-verified: removing the clear reddens exactly that one test and nothing else.
+
+**TWO NUMBERS IN THE PLAN HAD ALREADY EXPIRED when it was executed**, which is worth expecting
+rather than discovering: the baseline was 2157 in 82 and not 2156 in 82, and
+`frontend/dist/transferForm.js` is **9139** bytes and not 9141 — both moved by the
+ellipsis-ligature fix. **The guard test asserts the IMPORTS and not the size**, which is why it
+survived the drift.
 
 **SPELLING CONVENTION, set 2026-09-30: THIS REPO USES US ENGLISH.** Identifiers, comments, test
 names, scripts and docs were swept (~1,500 occurrences, 146 files, merged at `6063e0f`). **THREE
@@ -153,14 +300,18 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    **`SessionOptions.dftBufferSize` is still reachable from no flag** — deliberately; it is the
    programmatic default, and a `-dft-buffer-size` flag would be additive if ever wanted.
 2. **A transfer UI for GUI and web.** `transferRun.ts` now lives in `frontend` precisely so those two
-   are renderers rather than rewrites. The gateway half is a **security decision first** —
-   `web/src/protocol.ts` refuses the `transferForm` action outright, because a browser-initiated
-   transfer moves bytes between the host and the *gateway's* filesystem, not the operator's.
-   **SPLIT IN TWO ON 2026-09-30, on the user's decision, and the GUI half is SPECCED AND PLANNED but
-   NOT STARTED:** spec `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md`, plan
-   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks). **The WEB half is now the
-   outstanding piece and needs its own spec** — the user's call is real browser file I/O over the
-   WebSocket, so that "local file" means the operator's machine. See the START HERE section.
+   are renderers rather than rewrites. **SPLIT IN TWO ON 2026-09-30 on the user's decision, and the
+   GUI HALF IS DONE — all ten tasks, 2026-10-01, on branch `gui-transfer-ui`, 14 commits, NOT
+   MERGED.** Spec `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md`, plan
+   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`, whose `PROGRESS / AS BUILT` section
+   records the eighteen-odd defects found executing it. See the START HERE section.
+   **THE WEB HALF IS NOW THE OUTSTANDING PIECE AND NEEDS ITS OWN SPEC** — the user's call is real
+   browser file I/O over the WebSocket, so that "local file" means the operator's machine.
+   The gateway half remains a **security decision first**: `web/src/protocol.ts` still refuses the
+   `transferForm` action, because a browser-initiated transfer moves bytes between the host and the
+   *gateway's* filesystem, not the operator's. **Its MESSAGE was corrected 2026-10-01** — it used to
+   say "the gateway has no transfer UI", which the GUI's arrival falsified — and **no test pinned the
+   old wording**, so the suite stayed green through the change. One now pins the reason.
 3. ~~The `-ddm` default flip.~~ **DONE 2026-09-29, on the user's instruction — DFT plan Task 12
    Step 4, the last step of that plan.** DDM is now advertised by default and `-ddm off` restores
    the old behavior. **BLAST RADIUS MEASURED BEFORE COMMITTING, as the plan required: exactly 6
@@ -190,8 +341,15 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    **THE 2026-09-30 CHANGE: FOUR UI PIECES COME FIRST, ahead of everything that was previously next.**
    The order is now:
 
-   **(0a) the GUI transfer UI** — specced and planned, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
-   **(0b) the GUI keypad WINDOW** — ready to spec, `docs/ideas/native-widget-dialogs-idea.md`;
+   **(0a) the GUI transfer UI** — ~~specced and planned~~ **DONE 2026-10-01, branch
+   `gui-transfer-ui`, not merged**, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
+   **(0b) the GUI keypad WINDOW** — **NOW THE NEXT ONE TO BUILD**; ready to spec,
+   `docs/ideas/native-widget-dialogs-idea.md`, and its four open questions are already answered
+   (see the parked-keypad note below). **The transfer window is its precedent and is worth reading
+   first**: a second `BrowserWindow` with its own preload and its own bridge, the canvas window's
+   four-function bridge untouched, which is exactly the shape (0b) wants — and its AS BUILT notes
+   record what that shape costs, including that a browser-loaded module's import graph must close
+   and that the untestable boot file must be LOADED rather than reasoned about;
    **(0c) the WEB transfer UI** — needs its own spec: real browser file I/O over the WebSocket;
    **(0d) the WEB keypad window** — follows the GUI's, per the user's answer that the gateway comes later;
 
@@ -204,7 +362,10 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    of the four is one of TWO features × TWO canvas front ends, and the shared halves already exist —
    `frontend/src/transferForm.ts` + `transferRun.ts` for transfers, `frontend/src/keypad.ts` for the
    key table. Doing all four consecutively means the GUI's answer is still in hand when the web one is
-   written, which is exactly the argument the user used on 2026-09-29 for pairing oversize with local
+   written — **and (0a) landing on 2026-10-01 is the first evidence that the grouping pays: the GUI
+   transfer window reused `transferForm.ts` and `transferRun.ts` UNCHANGED and added a renderer, so
+   the web half (0c) now has a worked example of the same split rather than a design to re-derive.**
+   This is exactly the argument the user used on 2026-09-29 for pairing oversize with local
    model-switching (*"both imply the users doing unpredictable things with their windows"*, and both
    drive the one `Screen.resize()` path). **The reverse ordering is what would cost: interleaving these
    with oversize would mean deciding twice what a native-window front end looks like.**
@@ -1290,9 +1451,10 @@ are in `docs/live-testing.md`.
 `TN3270_GUI_KEYS` seam sends modifier chords (`packages/gui/src/keyspec.ts` parses the
 spellings), and `packages/gui/scripts/keys.mjs` is a committed harness that drove **15 chords
 through real Chromium key events and asserted 13 actions in order, plus two required
-absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **It is 18 chords / 16 actions
-as of the keypad branch**, which added `Ctrl-D`, `Ctrl-F` and `Ctrl-K`; the figures in this
-paragraph are the ones that were measured when the guard was built. **Be precise about what
+absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **It went to 18 chords / 16
+actions on the keypad branch**, which added `Ctrl-D`, `Ctrl-F` and `Ctrl-K`, **and to 19 / 17 on
+2026-10-01**, when the transfer window gave `Ctrl-T` something to open and the dead chord was mapped;
+the 15/13 figures in this paragraph are the ones that were measured when the guard was built. **Be precise about what
 is newly guarded:** the Alt-digit *mapping* was already unit-tested — `keys.test.ts` calls
 `actionForKey` directly, and unbinding `PA_CODES` reddens `npm test` too (3 failures) — so what
 this harness adds is the **renderer `keydown` listener, the IPC hop and `ipcMain`'s dispatch**,
@@ -1304,7 +1466,9 @@ the whole experiment in the MOUSE path** and got the same shape: a bare `return`
 of that measurement — while every keypad button is dead, and only `clicks.mjs` reddens.
 
 **`keys.mjs` is NOT part of `npm test`** — it spawns Electron, so run it by hand
-(`node packages/gui/scripts/keys.mjs`, expecting `ok       18 chords, 16 actions in order`),
+(`node packages/gui/scripts/keys.mjs`, expecting `ok       19 chords, 17 actions in order` — **18/16
+until 2026-10-01, when the dead `Ctrl-T` was mapped**; the dated figures elsewhere in this file are
+history and are left alone),
 like `shot.mjs`, `clicks.mjs` and `pty-smoke.py`. What `npm test` carries is
 `packages/gui/test/keys-harness-flags.test.ts`, which pins that harness's argv, cases and
 pass conditions as text so it cannot rot unnoticed. **Read `docs/live-testing.md`, *The GUI's

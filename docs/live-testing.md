@@ -3696,3 +3696,163 @@ sent the unit — which is the whole reason `TraceText` was added to the VM prob
 
 Clean runs: no `?CP:` on VM and `LOGOFF AT` present in both VM runs; no `IN USE` on TK5 and both TSO
 runs ended at a fresh VTAM logon panel. No userid was stranded.
+
+## The transfer window's four teardown paths — verified by hand under Xvfb, 2026-10-01
+
+**BY HAND BECAUSE NOTHING ELSE CAN REACH THEM, and this section exists so a green `npm test` is not
+mistaken for evidence.** `packages/gui/test/transferTeardown.test.ts` pins these four wirings as
+SOURCE TEXT — `main.ts` calls `app.whenReady()` in its module body, so it cannot be imported, and the
+handlers live inside that callback's closure. Those assertions would pass against a `shutdown` that
+did nothing. The controller's own half *is* unit-tested properly against a fake
+(`transferWindow.test.ts`: `shutdown` cancels, is idempotent, survives a throwing `cancel`, and a
+late ending cannot resurrect a run). What follows is the behavioural half.
+
+Driven with the REAL `createTransferController` from `dist/`, real parent and child
+`BrowserWindow`s, and a counting `cancel`, reproducing `main.ts`'s wirings verbatim.
+
+### Closing the TERMINAL window mid-transfer — the fourth instance of the teardown bug
+
+**The mechanism, measured first on a bare parent/child pair:** closing a child window's PARENT
+destroys the child and fires the child's `closed` **without ever firing its `close`**.
+
+```
+--- closing PARENT only ---
+EVENT child closed            <-- `close` never fired, so the close guard is BYPASSED
+EVENT parent closed
+EVENT window-all-closed
+child destroyed? true
+```
+
+So the close guard at `main.ts`'s `tw.on('close')` cannot see this path at all. And `closed` runs
+*before* `window-all-closed` → `app.quit()` → `before-quit`, so the quit hook arrives too late:
+
+```
+WITHOUT the fix (the committed code):     WITH the fix:
+running after submit: true                running after submit: true
+--- closing the PARENT window ---         --- closing the PARENT window ---
+EVENT closed                              EVENT closed
+                                          CANCEL CALLED
+EVENT before-quit transfer=UNDEFINED      EVENT before-quit transfer=UNDEFINED
+RESULT cancel called 0 time(s)            RESULT cancel called 1 time(s)
+```
+
+`transfer` is already `undefined` by the time `before-quit` runs, so **`before-quit` is not
+sufficient on its own** — the non-obvious part, and why the fix is a `shutdown()` inside the `closed`
+handler, ordered BEFORE the two assignments that clear the state. Left unfixed this is the spec's
+"`session.dft` set with the window gone": the host's program waits for a frame that never comes.
+
+Not a double cancel on the ordinary paths: a `closed` following a REFUSED close can only happen after
+the transfer ended, so `run` is already clear. Cmd-Q does reach `before-quit` first — verified order
+`before-quit` → child `close` → PREVENTED → `closed` — and both `shutdown` and
+`TransferRun.cancel` (`transferRun.ts:388`) are idempotent.
+
+### The session dropping underneath
+
+`Session.handleClose` clears its own `dft`, so core does not leak — but the controller kept
+`run !== undefined` forever, and `shouldPreventClose()` with it, so **the window refused every close
+on a dead session**. The only control left was Cancel, which throws `not connected`
+(`session.ts:1513`), gets swallowed by `cancelRun` and reported: an escape by error message rather
+than by a working control.
+
+```
+running after submit: true
+--- session disconnects underneath ---
+EVENT disconnect
+CANCEL CALLED
+shouldPreventClose after disconnect: false      <-- the window can be closed again
+RESULT cancel called 1 time(s)
+```
+
+The repaint listener (`session.on('disconnect', send)`) stays alongside the new one: a disconnect
+still has to redraw the OIA, which is how the operator learns the session dropped.
+
+#### Canceling was NOT sufficient — the pre-merge review found the form was never told, 2026-10-01
+
+**The run above proves `cancel` is REACHED. It does not prove the FORM learned anything, and it did
+not.** With a fake `startTransfer` the cancel returns normally; with the real one at **24x80** it
+throws `not connected` (`transferRun.ts:438` → `session.sendAID` → `session.ts:1513`) *before* the
+driver's own `finish`, so `onDone` never fired — and the old `shutdown` discarded the failure by
+design, on the reasoning that "there is nobody left to tell". That is true for a quit and **false for
+a disconnect**: the window is still on screen and the operator is still looking at it.
+
+Measured with a real `Session`, real `startTransfer`, real controller and real UI composed together:
+
+```
+BEFORE THE FIX                                          AFTER
+24x80 (size=1920): running=true  "transferring"  STUCK  running=false "transfer ended: the session disconnected"
+43x80 (size=3440): running=false "transfer canceled by user"   running=false  (same honest message)
+AFTER CANCEL  running=true "transferring"   (dead)      --
+AFTER START   running=true "transferring"   (dead)      --
+```
+
+**Geometry-dependent, and 24x80 — the common case — was the broken one:** at any non-CUT geometry
+`transferRun.ts:429-432` returns `finish(...)` before the throwing `sendAID`. It then self-healed
+after 30 seconds by an undocumented route: `shutdown` did not bump `generation`, so the driver's
+still-armed frame timer fired and reported `press Attn or Clear: host may still be transferring` —
+**a false message, because the session is gone and there is no host to press Attn at.**
+
+`shutdown` now takes a `ShutdownReason` (`'quit' | 'windowGone' | 'sessionLost'`), sends
+`transfer:done` for `'sessionLost'` only, and bumps `generation` so the stale timeout is dropped
+rather than contradicting the truth. Both halves are mutation-confirmed in
+`gui/test/transferSeamIpc.test.ts`: removing the send reddens 3 tests, and removing *only* the
+generation bump reddens the stale-timeout test with that exact false message.
+
+### Still to be driven against a live host
+
+These runs use a fake `startTransfer`, so what they prove is that `cancel` is REACHED on each path.
+That it then puts the right bytes on the wire is `TransferRun.cancel`'s own business and is covered
+for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
+not yet been watched against a real host.** That is the next live item for this window.
+
+## The GUI transfer window by hand — OPEN, NOT RUN, 2026-10-01
+
+**NO LIVE HOST HAS SEEN THIS FRONT END. Nothing below has been executed**, and this section exists so
+that the green harnesses are not read as a live witness. The *protocol* is live-verified in both
+directions on both hosts (DFT on TK5 at 43x80, CUT on VM/CMS — see the three transfer sections
+above); what is new and unwitnessed is **this window driving it**.
+
+What is already covered, so a run does not re-prove it: `packages/gui/scripts/transfer.mjs` drives
+the window under Xvfb in replay mode with a **stubbed** dialog and passes **10 checks** — the window
+opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is
+refused with `not in 3270 mode`, **the form still accepts an edit after that refusal**, every step was
+understood, the window did not fail to load, the renderer did not throw, and the client exited on its
+own. (The tenth is new: it covers the refusal arm clearing the running state that `start()` now arms
+*before* awaiting the submit. Replay always refuses, so this harness can never see a transfer that
+COMPLETES — which is exactly the blind spot that let the synchronous-completion bug through, and why
+`gui/test/transferSeamIpc.test.ts` exists.) The four teardown paths are covered by the
+section immediately above, **with a fake `startTransfer`**. `keys.mjs` drives `Ctrl+T` as a real
+Chromium key event.
+
+**Four things no harness here can reach. Each is OPEN:**
+
+1. **The native dialog's appearance and behavior on macOS — OPEN.** There is no macOS on the build
+   box, and the harness replaces the whole dialog rather than its default (a real modal under Xvfb
+   has nobody to click it and would stall the run, not fail it). Check that `Browse…` on a
+   `Direction=send` offers an **Open** panel and on a `receive` offers a **Save** panel
+   (`gui/src/main.ts`'s `openDialog`/`saveDialog`, chosen by direction in `transferUi.ts`'s
+   `browseLocal`). **The panel must NOT set `Exist`**: pick `replace` in the form and confirm the
+   transfer overwrites, then `keep` and confirm it refuses *locally*, without telling the host.
+   Confirm too that **canceling the panel leaves the Local file field as it was** rather than
+   blanking it — the `canceled` check exists for that, and a Save panel returns `''` where an Open
+   panel returns an empty array.
+2. **A real transfer, both directions, against TK5 and VM — OPEN.** Compare **BYTES** against the
+   host's own listing (`LISTFILE` on CMS, a `DELETE`/listing on TSO), never the status line — this
+   document's own rule, and the reason the TUI's runs are trusted. Both protocols are worth a run
+   for the same reason they were on the TUI: CUT and DFT are different engines and the host picks.
+3. **The close guard against a transfer actually in flight — OPEN.** Start a receive large enough to
+   watch (the TUI runs used 200KB, which gave a usable window), then try the red button and `Cmd-W`:
+   both must be refused and the window brought forward with Cancel as the only enabled control.
+   **Then check the paths the guard does NOT cover, because they are guarded elsewhere and by a
+   different mechanism:** closing the TERMINAL window never fires the transfer window's `close` at
+   all (measured above) and is caught by its `closed` handler instead, and `Cmd-Q` is caught by
+   `before-quit` — so each must be tried separately rather than assumed from the red button. In every
+   case the host must LEAVE transfer mode afterwards. **Judge that by the next command being obeyed,
+   not by an error message**: MECAFF prints `>> TRANS99 - Protocol error` and TSO's FFTP prints
+   **nothing at all** before returning to `READY`, both correct (see *MID-FLIGHT CANCELLATION*).
+   `Cmd-Q` must cancel and then quit rather than hanging.
+4. **The progress line against real byte counts — OPEN.** `onProgress` reaches the status line
+   through IPC and is unit-tested with synthetic text; no run has yet watched a real count climb in
+   this window, and the status line is also where an error and the idle help text land (they are
+   indistinguishable strings by the time they reach the DOM — `transfer.html` says why there is no
+   error styling). Worth one deliberate look, since a progress report that silently stops is the
+   failure this window would hide best.

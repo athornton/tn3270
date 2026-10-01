@@ -222,9 +222,10 @@ export function buildServer(args: WebArgs) {
        */
       if (msg.action.kind === 'toggleKeypad') { showKeypad = !showKeypad; repaint?.(); return; }
       // `transferForm` NEEDS NO INTERCEPTION HERE: it takes the other branch of `protocol.ts`'s
-      // two-branch rule and is rejected at decode, before it can reach this handler at all. See
-      // the note there for why a rejection rather than an interception -- in short, the gateway has
-      // no transfer dialog and stage 4 must settle whose filesystem a browser transfer writes to.
+      // two-branch rule and is rejected at decode, before it can reach this handler at all -- and
+      // the try at line 151 answers that throw on this socket alone. See the note there for why a
+      // rejection rather than an interception: the reason is WHOSE FILESYSTEM a browser transfer
+      // writes to, not a missing dialog (the Electron GUI has had one since 2026-10-01).
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
