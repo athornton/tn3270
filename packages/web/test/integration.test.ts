@@ -87,12 +87,17 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * TWO MEMBERS NOW. `quit` would stop the gateway. `transferForm` opens a dialog the browser front
- * end does not have, and a browser-initiated transfer would move bytes between the host and the
- * GATEWAY's filesystem rather than the operator's machine -- a security question stage 4 of the
- * transfer work has to settle first. It is reachable from a CLICK, not just a hand-built frame,
- * because `KEYPAD_KEYS` carries an `Xfer` button. When stage 4 lands, `transferForm` moves out of
- * this list and into an interception in `main.ts`.
+ * TWO MEMBERS NOW. `quit` would stop the gateway. `transferForm` is refused because a
+ * browser-initiated transfer would move bytes between the host and the GATEWAY's filesystem rather
+ * than the operator's machine -- NOT because no front end has a transfer dialog, which stopped
+ * being the reason on 2026-10-01 when the Electron GUI got one. It is reachable from a CLICK, not
+ * just a hand-built frame, because `KEYPAD_KEYS` carries an `Xfer` button and `canvas/src/keys.ts`
+ * maps Ctrl-T. When browser file I/O over the socket lands, `transferForm` moves out of this list
+ * and into an interception in `main.ts`.
+ *
+ * THE MESSAGE CHECK BELOW IS `toContain(kind)` AND THAT IS ALL IT IS. It cannot tell the current
+ * refusal from the superseded one, both of which name the kind; `protocol.test.ts` pins the REASON,
+ * which is the half that went stale here.
  */
 const REFUSED: readonly string[] = ['quit', 'transferForm'];
 

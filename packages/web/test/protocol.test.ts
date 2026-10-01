@@ -88,6 +88,27 @@ describe('decodeClientMessage', () => {
       .toThrow(/quit/i);
   });
 
+  it('REFUSES transferForm, and gives the FILESYSTEM as the reason rather than a missing UI', () => {
+    /**
+     * THE REASON IS WHAT THIS PINS, not merely the refusal: `integration.test.ts`'s REFUSED loop
+     * already asserts the message `toContain(kind)`, which the old wording ("the gateway has no
+     * transfer UI") and the new one BOTH satisfy, so nothing distinguished them and the reason
+     * could rot unobserved. It did: the Electron GUI has had a transfer window since 2026-10-01,
+     * which made "no front end has a transfer UI" false while every test stayed green.
+     *
+     * `/filesystem/` and NOT `/transferForm/`, for that reason -- a regression to the old text must
+     * redden here. The negative half is the load-bearing one and is asserted separately so a
+     * failure says which property broke.
+     */
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"transferForm"}}'))
+      .toThrow(/transferForm/);
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"transferForm"}}'))
+      .toThrow(/filesystem/);
+    // The GUI HAS a transfer UI now, so the refusal must not claim otherwise.
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"transferForm"}}'))
+      .not.toThrow(/no transfer UI/);
+  });
+
   it('refuses malformed input rather than passing it on', () => {
     // `{"kind":"action","action":{}}` is here because the `typeof aKind !== 'string'` branch was
     // otherwise VACUOUS: mutating it to `if (false)` left every test passing.

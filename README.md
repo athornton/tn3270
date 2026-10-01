@@ -16,8 +16,9 @@ The protocol core, an s3270-compatible scripting CLI, extended data stream with 
 Reply, 3279 color, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
 c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
 TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is reachable
-from the **TUI** as well as the CLI — `Ctrl-T` opens a transfer form; the GUI and the browser
-are stages 3 and 4. See *What is not implemented*.)
+from the **TUI and the GUI** as well as the CLI — `Ctrl-T` opens a transfer form in the TUI and a
+transfer window in the GUI. The **browser** is the one front end that still cannot transfer, and
+deliberately: see *What is not implemented*.)
 
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
@@ -54,8 +55,9 @@ parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
 color-capable 3279.
 
 **`IND$FILE` file transfer works on both hosts, in both directions, in BOTH PROTOCOLS**, with a
-binary round-tripping byte-identically each way. **`Ctrl-T` in the TUI opens a transfer
-form**; the GUI and the browser cannot reach it yet.
+binary round-tripping byte-identically each way. **`Ctrl-T` opens a transfer form in the TUI and a
+transfer window in the GUI**; the browser still cannot reach it. **The GUI's window has NOT been
+driven against a live host** — see *Using the GUI* and `docs/live-testing.md`.
 
 **DFT MODE WORKS, AND THE HOST CHOOSES IT — 2026-09-29.** Both engines are built for every
 transfer and the first inbound frame decides, because the client does not select the protocol:
@@ -190,7 +192,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 2157 tests, 82 files
+npm test           # 2239 tests, 88 files
 npm run typecheck
 ```
 
@@ -261,12 +263,14 @@ than a terminal in a window, and it is also why screenshots of it can be compare
 byte (`packages/gui/scripts/shot.mjs`).
 
 **What it does not have yet:** no connect dialog, no menus, no preferences, and no packaging —
-so the host goes on the command line and there is no `.app` to double-click. **The mouse presses
-keypad buttons and does nothing else**: clicking the screen does not place the cursor, dragging
-does not select text, and there is no light pen. **What is implemented but not yet verified
-against a live host:** the PF and
+so the host goes on the command line and there is no `.app` to double-click. **On the 3270 canvas the
+mouse presses keypad buttons and does nothing else**: clicking the screen does not place the cursor,
+dragging does not select text, and there is no light pen. (The *transfer* window is ordinary HTML, so
+the mouse works normally there — that is a separate window, not the canvas.) **What is implemented
+but not yet verified against a live host:** the PF and
 Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
-the `Ctrl-]` quit, and the in-window error message for a failed connection. **Attn is a
+the `Ctrl-]` quit, the in-window error message for a failed connection, and **the whole transfer
+window** — see *File transfer* above. **Attn is a
 Telnet BREAK, measured against VM/370's pre-logon banner with no visible reaction** — a real
 null result, not a gap in testing; whether CP responds once logged into CMS is a different,
 untested state. **PA1/PA2 are verified on one half and not the other, and the two halves
@@ -279,9 +283,12 @@ reported PA1 working from a real keypress in the app against MVS on 2026-09-15, 
 guard as well. `actionForKey` maps Alt+digit and is unit-tested against a synthetic key-like
 object; the plumbing from a real keypress to that mapper — the renderer's `keydown` listener,
 the IPC hop,
-`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **18 chords as real
-Chromium key events and asserts the 16 actions that must arrive, in order, plus two that must
-not**. It is **not part of `npm test`** (it spawns Electron): run it by hand,
+`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **19 chords as real
+Chromium key events and asserts the 17 actions that must arrive, in order, plus two that must
+not** (`Ctrl+Z` and `F13`). **The nineteenth is `Ctrl+T`, and this list exists to have caught it and
+did not**: the chord was dead — `canvas/src/keys.ts` had no `t` in its CTRL table — while the `Xfer`
+keypad button opened the window fine, because the keypad route never goes through that table. The
+harness only found it once the chord was added to the list. It is **not part of `npm test`** (it spawns Electron): run it by hand,
 `node packages/gui/scripts/keys.mjs`, as you would `shot.mjs` or `pty-smoke.py`. `npm test`
 only pins its invocation. Its failure has been observed rather than assumed — breaking the
 renderer's `keydown` listener leaves the suite green and reddens only the harness.
@@ -301,6 +308,47 @@ keypad button is dead, and only this harness reddens. Like `keys.mjs` it is not 
 server; a Mac needs neither. Without `--disable-gpu` a hidden window hangs rather than
 failing, which reads as a broken build. Full recipe: `docs/live-testing.md`, *The Electron GUI
 against both hosts*.
+
+### File transfer (IND$FILE)
+
+Press `Ctrl-T`, or click `Xfer` on the virtual keypad, to open the transfer window. Choose a local
+file with `Browse…`, name the host file, and press Start. `Direction=send` offers an Open panel;
+`receive` offers a Save panel.
+
+**It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
+mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on
+the 3270 canvas. The canvas window's preload stays at four functions, so `renderer.ts` goes on being
+shared with the browser gateway unchanged.
+
+The host decides which protocol is used — CUT or DFT — and the window drives both. **Progress
+reporting differs between them, and the difference is the engine's, not the window's**: a CUT
+transfer reports a running byte count per frame, while DFT reports nothing until it finishes and then
+gives the total (`frontend/src/transferRun.ts` calls `onProgress` only from its CUT frame handler).
+A DFT transfer that sits silent is therefore normal; judge it by the final count.
+
+**While a transfer is running, the transfer window refuses its own close** — the red button and
+`Cmd-W` are both prevented, the window is brought forward, and `Cancel` is left as the only enabled
+control. Cancel tells the host to leave transfer mode rather than abandoning it mid-frame. **Two
+other ways out do not refuse, they cancel**, and they must not be read as the same guard: quitting
+the app (`Ctrl-]` or `Cmd-Q`) cancels a running transfer first and then quits, rather than becoming
+unquittable; and closing the TERMINAL window destroys the transfer window with it, which also
+cancels — Electron fires the child's `closed` **without** its `close`, so the refusal never runs on
+that path and a separate hook does the cancelling. **If the session drops underneath**, the transfer
+is cancelled too, so the window does not sit refusing every close on a dead session.
+
+`Exist` is yours to set and the Save panel deliberately does not set it: `append` has no equivalent
+in a file chooser, so the three-way choice (`keep`/`replace`/`append`) stays explicit. Canceling
+either panel leaves whatever you had typed in the Local file field alone.
+
+**NOT YET DRIVEN AGAINST A LIVE HOST.** The *protocol* is live-verified on both hosts in both
+directions and in both modes (see *Verification*), and this window's Electron wiring is covered by
+`packages/gui/scripts/transfer.mjs` — 9 checks, under Xvfb, in replay mode with the native dialog
+**stubbed**, because a real modal under Xvfb has nobody to click it. The four close/cancel paths
+described above were each driven by hand under Xvfb with a **fake** transfer, which proves `cancel`
+is reached on each and nothing about the bytes it then sends. What
+no run here has seen is a real transfer through this front end, or the native dialog on macOS (there
+is no Mac on the build box). Both logs are in `docs/live-testing.md` — *The transfer window's four
+teardown paths* for what was driven, and *The GUI transfer window by hand* for what is still open.
 
 ## Using the TUI
 
@@ -656,10 +704,11 @@ data against a classic host such as either Hercules system, Telnet `IAC AO` unde
 command for the keypad toggle: a script-driven client has no renderer, which is why `-scheme` is
 absent here too.
 
-**`Transfer`** is `IND$FILE`, CUT mode, and it works on both hosts in both directions.
-**The TUI reaches it too, through `Ctrl-T`** — the same validator and the same command builder,
-so a form and a script cannot disagree about what is legal. The GUI and the browser cannot yet;
-see *What is not implemented*.
+**`Transfer`** is `IND$FILE`, and it works on both hosts in both directions and in both protocols —
+the host chooses CUT or DFT.
+**The TUI and the GUI reach it too, through `Ctrl-T`** — the same validator and the same command
+builder, so a form, a window and a script cannot disagree about what is legal. The browser is the
+one front end that cannot; see *What is not implemented*.
 Two things that will otherwise cost you an afternoon: quote CMS file names, because the
 argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
 `-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
@@ -843,7 +892,8 @@ packages/frontend  rules every front end shares: host argument, TLS flags, sessi
 packages/canvas    the canvas renderer, glyph atlas, keymap-to-action layer and the virtual
                    keypad's layout and hit-testing, shared by the GUI and the web gateway
 packages/cli       s3270-style scripting CLI
-packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas
+packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas, plus a second
+                   HTML BrowserWindow for IND$FILE transfers (its own preload and boot module)
 packages/tui       c3270-style terminal front end, plus the live/pty harnesses
 packages/web       browser gateway: the same renderer, served over a WebSocket
 packages/fixtures  recorded traces, golden screens, x3270 reference captures
@@ -935,9 +985,9 @@ Done:
 Remaining, in the order the author wants it.
 
 **REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
-after it.** Two features across the two canvas front ends — **the GUI transfer UI** (specced and
-planned), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web
-keypad window**. They are grouped deliberately rather than by coincidence: the shared halves already
+after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
+2026-10-01**), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web
+keypad window**, so three remain. They are grouped deliberately rather than by coincidence: the shared halves already
 exist in `packages/frontend` (`transferForm.ts` and `transferRun.ts` for transfers, `keypad.ts` for
 the key table), so doing all four consecutively means the GUI's answer is still in hand when the
 browser's is written. Interleaving them with oversize would mean deciding twice what a native-window
@@ -946,7 +996,7 @@ needs one and so does the connect dialog — before packaging puts that chrome i
 user. Items 11 onward keep the order agreed on 2026-09-29.
 
 
-9a. **Interactive `IND$FILE` — stages 1 and 2 of four are DONE.** The transfer itself was finished and
+9a. **Interactive `IND$FILE` — stages 1, 2 and 3 of four are DONE.** The transfer itself was finished and
    live-verified long before any interactive front end could reach it, which is the same shape as
    Sys Req and Newline before item 9. **Stage 1, the TUI's `Ctrl-T` form, is built** — see
    *Using the TUI*. **STAGE 2, DFT, IS DONE AND LIVE — 2026-09-29.** It matters because it is
@@ -963,18 +1013,24 @@ user. Items 11 onward keep the order agreed on 2026-09-29.
    stays on CUT, which makes it the control. **Stage 2 is now COMPLETE**: `Transfer(BufferSize=N)`
    sets the DFT frame size, and it is the SAME number advertised in the DDM Query Reply — verified
    live, `BufferSize=512` moving the host's own `Open` record size to 495.
-   **STAGE 3 IS DESIGNED AND PLANNED, NOT BUILT — 2026-09-30**:
+   **STAGE 3, THE GUI's TRANSFER WINDOW, IS BUILT — 2026-10-01**:
    `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md` and
-   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks). It is still a renderer rather
-   than a rewrite — the model and the driver are already shared in `packages/frontend`, and the `Xfer`
-   keypad button already exists — but **not a CANVAS renderer**, which earlier drafts of this line
-   assumed. The user's decision is a **separate `BrowserWindow` with real HTML controls** and a
+   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks, all executed). It was a
+   renderer rather than
+   a rewrite — the model and the driver were already shared in `packages/frontend`, and the `Xfer`
+   keypad button already existed — but **not a CANVAS renderer**, which earlier drafts of this line
+   assumed. The user's decision was a **separate `BrowserWindow` with real HTML controls** and a
    native file dialog for the local file: the canvas preload has to stay at four functions for
    `renderer.ts` to keep being shared with the browser, and teaching a canvas text editing, focus and
    a file chooser buys nothing. x3270 puts its own transfer dialog in Xaw widgets for the same reason.
+   **Stage 3's own live verification is OPEN**: no host has driven the window, and the native dialog
+   has not run on macOS. The work also found that **`Ctrl-T` in the GUI was DEAD** — mapped in
+   `frontend` and absent from `canvas/src/keys.ts`, so the chord did nothing while the keypad button
+   worked, which is why `keys.mjs` now drives it.
    **Stage 4** is the web gateway, and it is a security decision before it is a UI one: the gateway
-   currently **refuses** the action, because a browser-initiated transfer would move bytes to the
-   gateway's filesystem and not the operator's. **The decided answer is real browser file I/O** —
+   still **refuses** the action, because a browser-initiated transfer would move bytes to the
+   gateway's filesystem and not the operator's — **and the refusal message now says that**, where it
+   used to blame a missing front end. **The decided answer is real browser file I/O** —
    bytes over the WebSocket, so "local file" means the operator's machine — which is a new protocol
    message pair, chunking and a `TransferFiles` over the socket, and therefore its own spec.
 10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
@@ -1171,28 +1227,36 @@ worse than one that says which quarter is missing.
   check needs a multi-field panel, which needs a logon. The keypad as a whole needs no live
   verification, because a button press produces the same wire bytes as the equivalent keystroke and
   those *are* live-verified.
-- **`IND$FILE` IS INTERACTIVE IN THE TUI ONLY — the GUI and the browser still cannot transfer a
-  file.** `Ctrl-T` opens a form in the TUI: ten fields, `Tab` and the arrows to move and change,
+- **`IND$FILE` IS INTERACTIVE IN THE TUI AND THE GUI — THE BROWSER IS THE ONE THAT STILL CANNOT
+  TRANSFER A FILE.** (This bullet used to say "the TUI only"; the GUI half landed 2026-10-01.)
+  `Ctrl-T` opens a form in the TUI: ten fields, `Tab` and the arrows to move and change,
   `Enter` to start, `Esc` to close, and closing mid-transfer **aborts** rather than abandoning, so
-  the host leaves transfer mode. **Two things it does not do yet.** ~~(1) CUT mode only, so it
-  needs a 24x80 screen.~~ **DONE 2026-09-29 — BOTH PROTOCOLS WORK AND THE HOST CHOOSES.** With
+  the host leaves transfer mode. **Three things it did not do yet; two are now done.** ~~(1) CUT
+  mode only, so it needs a 24x80 screen.~~ **DONE 2026-09-29 — BOTH PROTOCOLS WORK AND THE HOST
+  CHOOSES.** With
   `-ddm on` a DFT host transfers at any geometry, live-verified at 43x80 on TK5; `-ddm on` really
   does get you DFT now, where it used to be a measurement instrument that broke transfers. The
   24x80 requirement survives only for CUT, and is raised when CUT is chosen rather than up front.
-  (2) **The GUI has the form's
-  model and no renderer for it** —
-  `frontend/src/transferForm.ts` is shared and the `Xfer` keypad button exists. It is now **designed
-  and planned**: `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md` and
-  `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`. **NOT a canvas view, which is what this
-  said before the design existed** — the user's call (2026-09-30) is a separate `BrowserWindow` with
-  real HTML controls and a native file dialog for the local file, because the canvas preload must
+  ~~(2) The GUI has the form's model and no renderer for it.~~ **DONE 2026-10-01 — `Ctrl-T` and the
+  `Xfer` button open a transfer window**: a separate `BrowserWindow` with real HTML controls and a
+  native file dialog, **not a canvas view**, because the canvas preload must
   stay at four functions for `renderer.ts` to keep being shared with the browser, and teaching a
-  canvas text editing and focus buys nothing. (3) **The web gateway REFUSES the action outright, in
-  `web/src/protocol.ts`**, and that is deliberate: a browser-initiated transfer moves bytes between
+  canvas text editing and focus buys nothing. See *Using the GUI*, *File transfer*. **Its own live
+  gap is open and is NOT the protocol's:** no live host has driven this window, and the native file
+  dialog has never run on macOS — `docs/live-testing.md`, *The GUI transfer window by hand*.
+  (3) **The web gateway STILL REFUSES the action outright, in
+  `web/src/protocol.ts`**, and that is deliberate — **and as of 2026-10-01 the refusal gives the
+  right reason.** It used to say "the gateway has no transfer UI", which stopped being the reason
+  the moment the GUI had one; the reason is that a browser-initiated transfer moves bytes between
   the host and the *gateway's* filesystem, not the operator's machine. **The answer decided on
   2026-09-30 is real browser file I/O** — the bytes travelling over the WebSocket so that "local
   file" means the operator's machine — which needs a new protocol message pair, chunking and a
-  `TransferFiles` over the socket, and is its own spec rather than part of the GUI's. **Live-verified on BOTH hosts in both directions** — see *Verification*.
+  `TransferFiles` over the socket, and is its own spec rather than part of the GUI's. The refusal is
+  a rejection at **decode** rather than an interception, which is safe because
+  `web/src/main.ts:151-154` answers every decode failure with a per-socket `error` frame and a
+  `return`; the hazard that needs an interception is one line lower, at the untried `applyAction`.
+  **The transfer protocol itself is live-verified on BOTH hosts in both directions** — see
+  *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*), but there
   is **no connect dialog, no menus and no preferences** — the host and
@@ -1244,13 +1308,14 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2157 tests, 82 files (measured 2026-09-30 on `main`) |
+| `npm test` | **pass** — 2239 tests, 88 files (measured 2026-10-01 on `gui-transfer-ui`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
 | `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **2 of 2 cases** pixel-identical, with and without the keypad, which is what says the renderer is shared and not merely similar |
 | `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 11 actions in order over a WebSocket, 2 asserted absences |
-| `keys.mjs` — real Chromium key events in Electron | **pass** — 18 chords, 16 actions in order, 2 asserted absences |
+| `keys.mjs` — real Chromium key events in Electron | **pass** — 19 chords, 17 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). The 19th is `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked |
+| `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **9 of 9 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
 | `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |

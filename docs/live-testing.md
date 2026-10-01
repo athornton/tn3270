@@ -3772,3 +3772,52 @@ These runs use a fake `startTransfer`, so what they prove is that `cancel` is RE
 That it then puts the right bytes on the wire is `TransferRun.cancel`'s own business and is covered
 for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
 not yet been watched against a real host.** That is the next live item for this window.
+
+## The GUI transfer window by hand — OPEN, NOT RUN, 2026-10-01
+
+**NO LIVE HOST HAS SEEN THIS FRONT END. Nothing below has been executed**, and this section exists so
+that the green harnesses are not read as a live witness. The *protocol* is live-verified in both
+directions on both hosts (DFT on TK5 at 43x80, CUT on VM/CMS — see the three transfer sections
+above); what is new and unwitnessed is **this window driving it**.
+
+What is already covered, so a run does not re-prove it: `packages/gui/scripts/transfer.mjs` drives
+the window under Xvfb in replay mode with a **stubbed** dialog and passes **9 checks** — the window
+opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is
+refused with `not in 3270 mode`, every step was understood, the window did not fail to load, the
+renderer did not throw, and the client exited on its own. The four teardown paths are covered by the
+section immediately above, **with a fake `startTransfer`**. `keys.mjs` drives `Ctrl+T` as a real
+Chromium key event.
+
+**Four things no harness here can reach. Each is OPEN:**
+
+1. **The native dialog's appearance and behavior on macOS — OPEN.** There is no macOS on the build
+   box, and the harness replaces the whole dialog rather than its default (a real modal under Xvfb
+   has nobody to click it and would stall the run, not fail it). Check that `Browse…` on a
+   `Direction=send` offers an **Open** panel and on a `receive` offers a **Save** panel
+   (`gui/src/main.ts`'s `openDialog`/`saveDialog`, chosen by direction in `transferUi.ts`'s
+   `browseLocal`). **The panel must NOT set `Exist`**: pick `replace` in the form and confirm the
+   transfer overwrites, then `keep` and confirm it refuses *locally*, without telling the host.
+   Confirm too that **canceling the panel leaves the Local file field as it was** rather than
+   blanking it — the `canceled` check exists for that, and a Save panel returns `''` where an Open
+   panel returns an empty array.
+2. **A real transfer, both directions, against TK5 and VM — OPEN.** Compare **BYTES** against the
+   host's own listing (`LISTFILE` on CMS, a `DELETE`/listing on TSO), never the status line — this
+   document's own rule, and the reason the TUI's runs are trusted. Both protocols are worth a run
+   for the same reason they were on the TUI: CUT and DFT are different engines and the host picks.
+3. **The close guard against a transfer actually in flight — OPEN.** Start a receive large enough to
+   watch (the TUI runs used 200KB, which gave a usable window), then try the red button and `Cmd-W`:
+   both must be refused and the window brought forward with Cancel as the only enabled control.
+   **Then check the paths the guard does NOT cover, because they are guarded elsewhere and by a
+   different mechanism:** closing the TERMINAL window never fires the transfer window's `close` at
+   all (measured above) and is caught by its `closed` handler instead, and `Cmd-Q` is caught by
+   `before-quit` — so each must be tried separately rather than assumed from the red button. In every
+   case the host must LEAVE transfer mode afterwards. **Judge that by the next command being obeyed,
+   not by an error message**: MECAFF prints `>> TRANS99 - Protocol error` and TSO's FFTP prints
+   **nothing at all** before returning to `READY`, both correct (see *MID-FLIGHT CANCELLATION*).
+   `Cmd-Q` must cancel and then quit rather than hanging.
+4. **The progress line against real byte counts — OPEN.** `onProgress` reaches the status line
+   through IPC and is unit-tested with synthetic text; no run has yet watched a real count climb in
+   this window, and the status line is also where an error and the idle help text land (they are
+   indistinguishable strings by the time they reach the DOM — `transfer.html` says why there is no
+   error styling). Worth one deliberate look, since a progress report that silently stops is the
+   failure this window would hide best.
