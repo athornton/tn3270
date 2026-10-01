@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>File Transfer</title>
+<!--
+  The import map is what lets `transferUi.js` say `@tn3270/frontend` while a browser resolves it.
+  A bare specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go
+  blank with no error, which this repo has met five separate ways. The map points that one
+  specifier at `packages/frontend/dist/transferForm.js`, which has no runtime imports of its own
+  (measured 2026-10-01: 9139 bytes, zero) -- so the graph closes at one file.
+
+  A map address resolves against the DOCUMENT's base URL, not against the importing module's, so
+  `../frontend/...` is relative to this file in `packages/gui/` even though the importer that says
+  `@tn3270/frontend` lives a directory deeper in `packages/gui/dist/`.
+
+  This reaches across packages exactly as `index.html` does for `../canvas/dist/renderer.js`, and
+  carries the same caveat: it assumes `gui` and `frontend` stay siblings on disk, which is true in
+  the workspace and false in an asar bundle. Packaging has to rewrite both.
+-->
+<script type="importmap">
+{ "imports": { "@tn3270/frontend": "../frontend/dist/transferForm.js" } }
+</script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px 14px; }
+  h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+  .row { display: grid; grid-template-columns: 90px 1fr auto; gap: 6px 8px;
+         align-items: center; margin-bottom: 6px; }
+  label { text-align: right; color: GrayText; }
+  input, select { font: inherit; padding: 2px 4px; min-width: 0; }
+  input[disabled], select[disabled] { opacity: 0.5; }
+  /*
+    NO `#status.error` RULE, deliberately. The draft carried one, but `UiDeps.setStatus` takes a
+    BARE STRING: the help line, a progress report and a validator complaint are indistinguishable
+    by the time they reach the DOM, so nothing in `transferBoot.ts` could ever add that class and
+    the rule would be dead CSS promising a color it never paints. Styling an error needs the
+    distinction carried across the boundary -- a second argument on `setStatus`, or a separate
+    `setError` -- which is a change to `transferUi.ts`'s interface and its tests, not to markup.
+  */
+  #status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap;
+            color: GrayText; }
+  #buttons { display: flex; gap: 8px; justify-content: flex-end; }
+  button { font: inherit; padding: 3px 12px; }
+</style>
+</head>
+<body>
+  <h1>File Transfer (IND$FILE)</h1>
+  <div id="fields"></div>
+  <div id="status"></div>
+  <!--
+    These two `disabled` attributes ARE the initial running state. `createTransferUi` calls
+    `redraw()` and `show()` before it returns but never `deps.setRunning(false)`, so nothing in
+    JavaScript establishes the idle enablement -- the markup has to, and it must agree with
+    `transferBoot.ts`'s module-level `running = false`.
+  -->
+  <div id="buttons">
+    <button id="cancel" disabled>Cancel</button>
+    <button id="start">Start</button>
+  </div>
+  <script type="module" src="./dist/transferBoot.js"></script>
+</body></html>
