@@ -3766,6 +3766,37 @@ RESULT cancel called 1 time(s)
 The repaint listener (`session.on('disconnect', send)`) stays alongside the new one: a disconnect
 still has to redraw the OIA, which is how the operator learns the session dropped.
 
+#### Canceling was NOT sufficient — the pre-merge review found the form was never told, 2026-10-01
+
+**The run above proves `cancel` is REACHED. It does not prove the FORM learned anything, and it did
+not.** With a fake `startTransfer` the cancel returns normally; with the real one at **24x80** it
+throws `not connected` (`transferRun.ts:438` → `session.sendAID` → `session.ts:1513`) *before* the
+driver's own `finish`, so `onDone` never fired — and the old `shutdown` discarded the failure by
+design, on the reasoning that "there is nobody left to tell". That is true for a quit and **false for
+a disconnect**: the window is still on screen and the operator is still looking at it.
+
+Measured with a real `Session`, real `startTransfer`, real controller and real UI composed together:
+
+```
+BEFORE THE FIX                                          AFTER
+24x80 (size=1920): running=true  "transferring"  STUCK  running=false "transfer ended: the session disconnected"
+43x80 (size=3440): running=false "transfer canceled by user"   running=false  (same honest message)
+AFTER CANCEL  running=true "transferring"   (dead)      --
+AFTER START   running=true "transferring"   (dead)      --
+```
+
+**Geometry-dependent, and 24x80 — the common case — was the broken one:** at any non-CUT geometry
+`transferRun.ts:429-432` returns `finish(...)` before the throwing `sendAID`. It then self-healed
+after 30 seconds by an undocumented route: `shutdown` did not bump `generation`, so the driver's
+still-armed frame timer fired and reported `press Attn or Clear: host may still be transferring` —
+**a false message, because the session is gone and there is no host to press Attn at.**
+
+`shutdown` now takes a `ShutdownReason` (`'quit' | 'windowGone' | 'sessionLost'`), sends
+`transfer:done` for `'sessionLost'` only, and bumps `generation` so the stale timeout is dropped
+rather than contradicting the truth. Both halves are mutation-confirmed in
+`gui/test/transferSeamIpc.test.ts`: removing the send reddens 3 tests, and removing *only* the
+generation bump reddens the stale-timeout test with that exact false message.
+
 ### Still to be driven against a live host
 
 These runs use a fake `startTransfer`, so what they prove is that `cancel` is REACHED on each path.
@@ -3781,10 +3812,14 @@ directions on both hosts (DFT on TK5 at 43x80, CUT on VM/CMS — see the three t
 above); what is new and unwitnessed is **this window driving it**.
 
 What is already covered, so a run does not re-prove it: `packages/gui/scripts/transfer.mjs` drives
-the window under Xvfb in replay mode with a **stubbed** dialog and passes **9 checks** — the window
+the window under Xvfb in replay mode with a **stubbed** dialog and passes **10 checks** — the window
 opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is
-refused with `not in 3270 mode`, every step was understood, the window did not fail to load, the
-renderer did not throw, and the client exited on its own. The four teardown paths are covered by the
+refused with `not in 3270 mode`, **the form still accepts an edit after that refusal**, every step was
+understood, the window did not fail to load, the renderer did not throw, and the client exited on its
+own. (The tenth is new: it covers the refusal arm clearing the running state that `start()` now arms
+*before* awaiting the submit. Replay always refuses, so this harness can never see a transfer that
+COMPLETES — which is exactly the blind spot that let the synchronous-completion bug through, and why
+`gui/test/transferSeamIpc.test.ts` exists.) The four teardown paths are covered by the
 section immediately above, **with a fake `startTransfer`**. `keys.mjs` drives `Ctrl+T` as a real
 Chromium key event.
 

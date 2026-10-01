@@ -109,7 +109,28 @@ describe('the transfer harness', () => {
     // id, the TSO/VM CYCLE field, which refuses a text edit and echoed back the value that was
     // always there). A plausible-looking line from a form where nothing had been typed.
     expect(harness).toMatch(
-      /const STEPS = `localFile=\$\{LOCAL\},hostFile=\$\{HOST_FILE\},submit`/,
+      /const STEPS = `localFile=\$\{LOCAL\},hostFile=\$\{HOST_FILE\},submit,hostFile=\$\{AFTER_SUBMIT\}`/,
+    );
+  });
+
+  /**
+   * THE STEP AFTER THE SUBMIT, AND THE CHECK THAT READS IT, pinned together because either alone is
+   * worthless: a step nobody scores proves nothing, and a check with no step to read fails every run.
+   *
+   * It covers the liability the C1 fix introduced. `transferUi.ts`'s `start()` now arms the running
+   * state BEFORE awaiting the submit -- which is what stops a synchronous completion being overwritten
+   * by its own submit -- so the refusal arm has to CLEAR that flag. A refusal that forgot would leave
+   * the form frozen for the window's life while every OTHER check in the harness still passed: the
+   * field count, the two echoes and the refusal text are all printed before it happens.
+   *
+   * This is the nearest a headless run can get to C1 itself. The real thing needs a transfer that
+   * COMPLETES, and replay cannot produce one -- `is3270Mode()` is false for the whole run, so the
+   * submit is always refused. The composed reproduction is `transferSeamIpc.test.ts`.
+   */
+  it('drives an edit AFTER the refused submit, and scores it', () => {
+    expect(code).toMatch(/const AFTER_SUBMIT = 'AFTER\.SUBMIT'/);
+    expect(harness).toMatch(
+      /\['the form still accepts an edit after the refusal',\s*\n\s*\(\) => out\.includes\(`transfer window: hostFile=\$\{AFTER_SUBMIT\}\\n`\)\]/,
     );
   });
 

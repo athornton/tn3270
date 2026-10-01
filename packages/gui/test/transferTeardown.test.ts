@@ -36,7 +36,7 @@ describe('every path that ends a transfer reaches shutdown', () => {
    * PATH 1: the app quitting. Cmd-Q, Ctrl-], `maybeCapture`'s own `app.quit()`.
    */
   it('a quit cancels rather than being blocked', () => {
-    expect(main).toMatch(/app\.on\('before-quit', \(\) => \{ transfer\?\.shutdown\(\); \}\)/);
+    expect(main).toMatch(/app\.on\('before-quit', \(\) => \{ transfer\?\.shutdown\('quit'\); \}\)/);
   });
 
   /**
@@ -56,7 +56,7 @@ describe('every path that ends a transfer reaches shutdown', () => {
     const closed = /tw\.on\('closed', \(\) => \{([\s\S]*?)\n    \}\);/.exec(main);
     expect(closed, "no tw.on('closed') handler found in main.ts").not.toBeNull();
     const body = closed![1]!;
-    const shutdownAt = body.indexOf('transfer?.shutdown();');
+    const shutdownAt = body.indexOf("transfer?.shutdown('windowGone');");
     const clearAt = body.indexOf('transfer = undefined;');
     expect(shutdownAt, 'the closed handler must cancel the run').toBeGreaterThanOrEqual(0);
     expect(clearAt, 'the closed handler must clear the controller').toBeGreaterThanOrEqual(0);
@@ -78,9 +78,18 @@ describe('every path that ends a transfer reaches shutdown', () => {
    *
    * A SECOND listener on `disconnect`, deliberately not folded into the repaint one: `send` runs on
    * every frame and is the paint path.
+   *
+   * THE REASON IS PINNED, NOT JUST THE CALL, and that is the whole content of the second defect
+   * found on this path: canceling is not sufficient, because at 24x80 the cancel throws on its way
+   * to the driver's `finish` and the form is never told the transfer ended. Only `'sessionLost'`
+   * makes `shutdown` send an honest ending; `'quit'` or `'windowGone'` here would compile, pass a
+   * presence-only check, and leave the form stuck for 30 seconds followed by a false message about
+   * a host that is gone. See `transferSeamIpc.test.ts` for the behavioral half.
    */
-  it('a session that disconnects cancels the transfer', () => {
-    expect(main).toMatch(/session\.on\('disconnect', \(\) => \{ transfer\?\.shutdown\(\); \}\)/);
+  it('a session that disconnects cancels the transfer AND says it was the session', () => {
+    expect(main).toMatch(
+      /session\.on\('disconnect', \(\) => \{ transfer\?\.shutdown\('sessionLost'\); \}\)/,
+    );
     // The repaint listener must SURVIVE alongside it: a disconnect still has to redraw the OIA,
     // which is how the operator learns the session dropped at all.
     expect(main).toMatch(/session\.on\('disconnect', send\)/);

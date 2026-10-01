@@ -72,6 +72,22 @@ export interface TransferDeps {
 }
 
 export interface TransferController {
+  /**
+   * Whether a transfer is in flight. **NO PRODUCTION CALLER -- tests only** (confirmed by sweeping
+   * `packages/gui/src`: `main.ts` reads `shouldPreventClose()`, never this).
+   *
+   * KEPT ANYWAY, which is a departure from the rule that removed `finish`, `showWindow` and
+   * `closeWindow` from this interface, so here is the distinction. Those three were SECOND TEARDOWN
+   * ROUTES -- extra ways to end a transfer, with no caller, which is precisely the shape this
+   * module's docstring is about and the reason they had to go. This is a read-only accessor; it
+   * cannot create a path, cannot get out of step with `run` (it IS `run !== undefined`), and removing
+   * it would cost real test clarity: a dozen assertions in `transferWindow.test.ts` and
+   * `transferSeamIpc.test.ts` say "is a transfer running", and the only survivor to say it with would
+   * be `shouldPreventClose()` -- an assertion about the CLOSE GUARD, which happens to be implemented
+   * the same way today. Writing the close guard's name to ask about the run is how two facts become
+   * one by accident, and this branch's own history is one teardown bug after another from exactly
+   * that.
+   */
   running(): boolean;
   browse(direction: string): Promise<string | undefined>;
   submit(keywords: readonly string[]): Promise<{ ok: boolean; error?: string }>;
@@ -79,9 +95,33 @@ export interface TransferController {
   /** True while a close must be refused. */
   shouldPreventClose(): boolean;
   onCloseAttempt(): void;
-  /** App quit, or the session going away: cancel rather than block. */
-  shutdown(): void;
+  /**
+   * The transfer is over because something outside it ended: cancel rather than block.
+   *
+   * THE CALLER NAMES WHAT HAPPENED AND THIS MODULE DECIDES WHAT THAT MEANS, which is the division
+   * the single no-argument `shutdown` got wrong -- see the implementation. The argument is REQUIRED
+   * and has no default: a new teardown path must state which of these it is, rather than inheriting
+   * whichever behavior happened to be the default and being silently wrong about a window that is
+   * still on screen.
+   */
+  shutdown(why: ShutdownReason): void;
 }
+
+/**
+ * WHY a transfer is being torn down from outside, which decides whether anyone is told.
+ *
+ * `'quit'` and `'windowGone'` are distinct VALUES with identical handling, deliberately: they are
+ * different events (`app.on('before-quit')` and `tw.on('closed')`) and a reader at either call site
+ * should see its own name rather than having to know which bucket it falls in. Collapsing them into
+ * one word would also be a claim that they can never need to differ, which nothing here establishes.
+ */
+export type ShutdownReason =
+  /** `app.on('before-quit')`: every renderer in the process is about to be torn down. */
+  | 'quit'
+  /** `tw.on('closed')`: the window has ALREADY been destroyed, form and all. */
+  | 'windowGone'
+  /** `session.on('disconnect')`: the socket dropped and THE FORM IS STILL ON SCREEN. */
+  | 'sessionLost';
 
 export function createTransferController(deps: TransferDeps): TransferController {
   /**
@@ -182,7 +222,47 @@ export function createTransferController(deps: TransferDeps): TransferController
     // renderer out. It carries no `cancel`, which is honest -- there is nothing to cancel until
     // the driver hands one back.
     run = { ok: true };
-    const started = deps.startTransfer(build(mine));
+    /**
+     * THE PLACEHOLDER IS GIVEN BACK IF THE CALL THROWS -- DEFENSE IN DEPTH, WITH NO DEMONSTRATED
+     * TRIGGER.
+     *
+     * Read that second clause before deleting this. `run` is armed above and cleared on exactly two
+     * paths: `onDone` firing (through `finish`) and `submit`'s `!started.ok` arm. AN EXCEPTION OUT
+     * OF `deps.startTransfer` SKIPS BOTH, leaving the placeholder set for the window's life --
+     * `shouldPreventClose()` permanently true, so the window refuses every Cmd-W and red button and
+     * the app has to be killed. That is the same user-visible failure this function's main docstring
+     * is about, reached by a different door.
+     *
+     * NOBODY HAS DEMONSTRATED A THROW THAT GETS HERE, and this comment does not claim one.
+     * `startTransfer` was audited: every local refusal is a RETURN rather than a throw, `files.read`
+     * is already wrapped there, `files.exists` is `existsSync` (which answers false rather than
+     * throwing), and the one reachable `session.sendAID` throw -- `not connected` -- is pre-empted
+     * by `startTransfer`'s own first guard, since `is3270Mode()` reads through the same
+     * `this.telnet` whose absence is what makes `sendAID` throw.
+     *
+     * SO WHY KEEP IT: the argument above is an audit of ANOTHER PACKAGE, and it has to be redone
+     * from scratch every time `transferRun.ts` changes. This makes the guarantee STRUCTURAL instead
+     * -- the placeholder cannot outlive the call that armed it, whatever that call does. The cost is
+     * three lines; the failure it bounds is an application that must be killed.
+     *
+     * AND IT IS NOT A LICENCE TO DELETE ON A GREEN SUITE. Failing to find a trigger is not a proof
+     * that none exists, which is the whole reason this is written as defense in depth rather than as
+     * a fix for a known bug: no test can redden this, by construction, because nothing reachable
+     * throws here today.
+     *
+     * RETHROWN, not swallowed. The caller is `ipcMain.handle`, which turns a rejection into a
+     * rejected `invoke()` the form reports (`transferUi.ts`'s `start` catches exactly this); eating
+     * it here would leave the operator a form that went idle for no stated reason.
+     */
+    let started: TransferRun;
+    try {
+      started = deps.startTransfer(build(mine));
+    } catch (err) {
+      // CONDITIONAL, for the same reason the success assignment below is: if `onDone` already fired
+      // and cleared the run before the throw, it must STAY cleared.
+      if (mine === generation) run = undefined;
+      throw err;
+    }
     // CONDITIONAL. If `onDone` already fired, `run` is `undefined` and must STAY undefined --
     // overwriting it here is the plan's bug restated.
     if (run !== undefined && mine === generation) run = started;
@@ -297,18 +377,80 @@ export function createTransferController(deps: TransferDeps): TransferController
       deps.focusWindow();
     },
 
-    shutdown() {
-      // QUIT CANCELS, IT DOES NOT BLOCK. The window may refuse a close; it may not make the
-      // application unquittable. Canceling first is what tells the host to leave transfer mode
-      // rather than leaving its program waiting for a frame -- the abort/abandon distinction
-      // this module's docstring turns on.
-      //
-      // NO `transfer:done` IS SENT, and that is a decision rather than an omission. This runs on
-      // `app.on('before-quit')`, after which every renderer in the process is torn down, so the
-      // message would arrive at a window that is going away -- and `requestCancel`'s report
-      // exists for the case where a human is still looking. A failed cancel is therefore
-      // DISCARDED here: there is nobody left to tell, and throwing would be the unquittable app.
+    /**
+     * Cancel rather than block, and TELL THE FORM IF THERE IS STILL A FORM TO TELL.
+     *
+     * ## THE THREE CALLERS DO NOT AGREE ABOUT WHO IS LOOKING, WHICH IS WHY THEY NAME THEMSELVES
+     *
+     * This method used to take no argument and send nothing, justified as "there is nobody left to
+     * tell". That is TRUE for a quit (`app.on('before-quit')`, after which every renderer in the
+     * process is torn down) and for a destroyed window (`tw.on('closed')`, where the form is
+     * already gone -- and `main.ts`'s `send` would no-op on `tw.isDestroyed()` regardless). It is
+     * FALSE for a dropped session: the window is still on screen and the operator is still looking
+     * at it.
+     *
+     * ## WHAT THE DISCONNECT CASE ACTUALLY DID, MEASURED AGAINST REAL OBJECTS
+     *
+     * The chain: socket drops -> `shutdown()` -> `cancelRun()` -> `TransferRun.cancel` reaches
+     * `session.sendAID(step.ack)` (`transferRun.ts:438`) -> `Session.sendAID` throws
+     * `not connected` (`core/src/session.ts:1513`) -> `cancelRun` returns the message -> the old
+     * `shutdown` DISCARDED it. So the driver's own `finish()` never ran, `onDone` never fired, and
+     * the renderer was never told anything at all.
+     *
+     * It is GEOMETRY-DEPENDENT, and the common case is the broken one, because
+     * `transferRun.ts:429-432` returns `finish(...)` before that throwing `sendAID` at any
+     * non-CUT geometry. Driven with a real `Session`, real `startTransfer`, real controller and
+     * real UI:
+     *
+     *     24x80 (screen.size=1920): ui.running()=true  status="transferring"   <-- STUCK
+     *     43x80 (screen.size=3440): ui.running()=false status="transfer canceled by user"
+     *
+     * and at 24x80 both remaining controls were dead: Cancel because main answered
+     * `if (run === undefined) return;`, Start because the form's own `isRunning` was still armed.
+     *
+     * It eventually self-healed by an undocumented route, which is the part that made it WORSE
+     * than a stuck form: the old `shutdown` did not bump `generation`, so the driver's still-armed
+     * 30-second frame timer fired and `finish` forwarded it -- showing `press Attn or Clear: host
+     * may still be transferring. stalled: no CUT frame...`. That message is FALSE. The session is
+     * gone; there is no host to press Attn at.
+     *
+     * ## SO: AN HONEST ENDING, AND THE GENERATION BUMPED SO NOTHING CAN CONTRADICT IT
+     *
+     * `generation += 1` is what makes the stale timeout harmless, and it is the same mechanism
+     * `finish`'s own docstring is about rather than a new one. The timer is still armed -- nothing
+     * here can reach into the driver and disarm it, since `cancel` threw on its way to `finish` and
+     * `ended` therefore stayed false -- so run N's `onDone` WILL arrive about 30 seconds later.
+     * With the generation moved on, `finish` drops it entirely: it neither clears state nor speaks
+     * to the window. Without the bump it would arrive and overwrite the true message with the false
+     * one, which is the contradiction this fix exists to prevent.
+     *
+     * The bump is correct for the quit and window-gone cases too, for the same reason and at no
+     * cost: a late ending there has nothing to speak to anyway.
+     */
+    shutdown(why) {
+      // CANCEL FIRST, WHATEVER THE REASON. The window may refuse a close; it may not make the
+      // application unquittable, and a session that dropped must not leave the host's program
+      // waiting for a frame -- the abort/abandon distinction this module's docstring turns on. A
+      // failed cancel is never thrown: on a dropped socket it is the EXPECTED outcome.
+      const running = run !== undefined;
       cancelRun();
+      // MOVED ON BEFORE ANYTHING IS SENT, so the ending below is the last word about this run. See
+      // the docstring: the driver's 30-second frame timer survives a `cancel` that threw, and
+      // `finish` compares against this number to decide whether an ending still belongs to anyone.
+      generation += 1;
+      // NOTHING TO REPORT, AND NOBODY TO REPORT IT TO. A quit tears down every renderer; a
+      // destroyed window has no form left. Only a dropped session leaves a form on screen -- and
+      // only if something was actually running, since a `transfer:done` for a transfer that never
+      // started would make the renderer's `finished()` paint 'transfer failed' over the help text.
+      if (why !== 'sessionLost' || !running) return;
+      // THE HONEST MESSAGE: the session dropped. NOT the driver's timeout text, which names a host
+      // that is no longer there, and not 'transfer canceled by user' -- the operator canceled
+      // nothing. `requestCancel`'s report is the model for saying so rather than leaving the form
+      // showing 'transferring' with nothing to press.
+      deps.send('transfer:done', {
+        ok: false,
+        error: 'transfer ended: the session disconnected',
+      });
     },
   };
 }

@@ -116,13 +116,33 @@ describe('createTransferUi', () => {
     expect(sent.some((k) => k.startsWith('Recfm='))).toBe(false);
   });
 
-  it('shows a local refusal on the form and does NOT go running', async () => {
+  /**
+   * A LOCAL REFUSAL LEAVES THE FORM IDLE -- ASSERTED ON THE END STATE, NOT ON THE CALL HISTORY.
+   *
+   * This used to read `expect(deps.setRunning).not.toHaveBeenCalledWith(true)`, which encoded the
+   * IMPLEMENTATION rather than the property: it was true only because `start()` armed the running
+   * state AFTER awaiting the submit, and that ordering was a defect in its own right -- a completion
+   * arriving during the await was overwritten by the submit that started it, leaving a SUCCESSFUL
+   * transfer reporting as permanently in progress (see `transferUi.ts`'s `start`, and
+   * `transferSeamIpc.test.ts` for the composed reproduction).
+   *
+   * `start()` now announces the transfer before the await, so a refusal legitimately passes through
+   * `setRunning(true)` and back to `setRunning(false)`. The thing an operator can actually tell apart
+   * is WHERE IT ENDS UP: nothing running, the controls re-enabled, and the refusal on the status
+   * line. A transient `true` is invisible -- it is one synchronous turn with no paint between.
+   */
+  it('shows a local refusal on the form and ENDS UP not running', async () => {
     const deps = fakeDeps();
     deps.submit = vi.fn(async () => ({ ok: false as const, error: 'keyboard locked' }));
     const ui = createTransferUi(deps);
     await ui.start();
     expect(deps.setStatus).toHaveBeenCalledWith('keyboard locked');
-    expect(deps.setRunning).not.toHaveBeenCalledWith(true);
+    expect(ui.running(), 'a refused transfer is not running').toBe(false);
+    // THE LAST WORD TO THE DOM must re-enable the form. A refusal that left the controls disabled
+    // would freeze the window for its whole life, which is the failure the early arming exists to
+    // prevent -- so this is the assertion that keeps the fix from moving the bug one path over.
+    const said = vi.mocked(deps.setRunning).mock.calls.map((c) => c[0]);
+    expect(said[said.length - 1], 'the controls must be re-enabled after a refusal').toBe(false);
   });
 
   it('IGNORES a second start while one is running', async () => {

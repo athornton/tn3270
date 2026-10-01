@@ -11,9 +11,10 @@ NOT MERGED AND NOT PUSHED.** The branch was cut from `main` at `9d5fb42` and `gi
 equalled `main` exactly, per the standing rule. **THE NEXT ACTION IS THE MERGE DECISION** — see
 *Finishing the GUI transfer branch* below for what has and has not been gated.
 
-**State: branch `gui-transfer-ui` at `db424fd`, 14 commits, tree clean, no stashes. `main` is at
-`9d5fb42`, pushed, untouched. 2239 tests in 88 files (from 2157 in 82), build and typecheck
-clean.**
+**State: branch `gui-transfer-ui`, tree clean, no stashes. `main` is at `9d5fb42`, pushed,
+untouched. 2252 tests in 89 files (from 2157 in 82), build and typecheck clean.** The last commit
+is the pre-merge review's three fixes — two operator-visible defects at the IPC seam plus the
+composed test that catches them; see *Finishing the GUI transfer branch*.
 
 **THE WEB TRANSFER UI IS NOW THE OUTSTANDING HALF AND NEEDS ITS OWN SPEC** — roadmap item (0c).
 The user's decision stands: **real browser file I/O**, bytes over the WebSocket so "local file"
@@ -23,10 +24,37 @@ message now gives the *durable* reason rather than the expired one — see below
 
 ## Finishing the GUI transfer branch
 
-**WHAT IS GATED, measured on `db424fd`:** build and typecheck clean; **2239 tests in 88 files**;
-`shot.mjs` 3/3; `transfer.mjs` **9/9**; `keys.mjs` **19 chords/17 actions** (was 18/16 — Ctrl-T);
-`clicks.mjs` 9 buttons/10 actions; `browser-shot.mjs` 2/2; `browser-keys.mjs` 13 chords/11 actions;
-`pty-smoke.py` 12/12.
+**WHAT IS GATED, re-measured after the pre-merge review fixes:** build and typecheck clean;
+**2252 tests in 89 files** (was 2239 in 88 — the new file is `gui/test/transferSeamIpc.test.ts`);
+`shot.mjs` 3/3; `transfer.mjs` **10/10** (was 9/9 — one new check, see below);
+`keys.mjs` **19 chords/17 actions**; `clicks.mjs` 9 buttons/10 actions; `browser-shot.mjs` 2/2;
+`browser-keys.mjs` 13 chords/11 actions; `pty-smoke.py` 12/12.
+
+**TWO DEFECTS THE PRE-MERGE REVIEW FOUND AT THE IPC SEAM, both operator-visible, both fixed:**
+
+- **A transfer that completed *synchronously* left the form permanently claiming `transferring`, on
+  the SUCCESS path.** `transferUi.ts`'s `start()` awaited `deps.submit` and only then armed
+  `isRunning`, so an ending that arrived during the await was overwritten by the submit that started
+  it (`startTransfer` can call `onDone` before returning, and a `webContents.send` issued inside an
+  `ipcMain.handle` handler reaches the renderer *before* the `invoke()` resolves). Cancel and Start
+  were both dead for the window's life. `start()` now announces the transfer *before* the await and
+  treats `isRunning` as the latch, which is the shape `transferWindow.ts`'s `startRun` already used.
+- **A session dropping mid-CUT-transfer at 24x80 left the form stuck, then told it a lie.**
+  `shutdown` sent no `transfer:done` ("there is nobody left to tell" — true for a quit, false for a
+  disconnect), and the cancel throws `not connected` on its way to the driver's `finish`, so `onDone`
+  never fired. 30 seconds later the driver's own frame timer reported `press Attn or Clear: host may
+  still be transferring` at a host that was gone. `shutdown` now takes a `ShutdownReason`, sends an
+  honest ending for `'sessionLost'` only, and bumps `generation` so the stale timeout is dropped.
+
+**WHY 2239 TESTS DID NOT CATCH EITHER: nothing composed the two halves.** Both were individually
+green and individually correct. `transferSeamIpc.test.ts` instantiates `createTransferUi` and
+`createTransferController` together over an ordering-controlled seam, and is the file to extend when
+a new interleaving appears — *an ordering it does not encode is an ordering nobody checks*.
+
+`transfer.mjs`'s tenth check drives a field edit *after* the refused submit. It covers the liability
+the first fix introduces (the refusal arm must clear the flag it armed) and is the nearest a headless
+run can get to the bug itself — replay forces a refusal, so the harness can never see a *completed*
+transfer. Confirmed to redden: 8/10 with that clearing mutated out of the built renderer.
 
 **WHAT IS NOT DONE:** the gate has **not** been re-run on a merge commit (this repo's practice is to
 re-run it there, not only on the branch — and to say which subset was run when it is a subset), and

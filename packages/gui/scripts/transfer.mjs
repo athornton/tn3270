@@ -119,8 +119,28 @@ const HOST_FILE = 'HARNESS.DATA';
  *
  * The ids come straight from `TRANSFER_FIELDS`, so there is no table to drift. This is also what
  * made the echo worth having: without it both steps reported success.
+ *
+ * ## THE EDIT **AFTER** THE SUBMIT IS NOT PADDING -- IT IS THE ONLY WAY TO SEE A FROZEN FORM
+ *
+ * `transferUi.ts`'s `start()` arms the running state BEFORE it awaits the submit, which is the fix for
+ * a defect this harness was BLIND TO: a transfer completing synchronously used to have its ending
+ * overwritten by the submit that started it, leaving a form permanently claiming `transferring`. The
+ * harness could not see it because `__tn3270Submit` answers with `ui.running()`, which was `true`
+ * *because of* the bug -- so a broken run printed `ok=true status=transferring` and SCORED.
+ *
+ * That ordering has a liability of its own, and it is the one reachable from here: the refusal arm must
+ * now CLEAR the flag it armed. A refusal that forgets leaves every control disabled for the window's
+ * life -- the same frozen form, moved one path over. A disabled form is not visible in `ok=false`, nor
+ * in the status text, nor in the field count: the only symptom is that nothing can be typed afterwards.
+ *
+ * So the scenario edits a field AFTER the refused submit and the check below reads the echo. Under
+ * replay the submit is always refused (`not in 3270 mode`), which makes this the one C1-adjacent
+ * property a headless run can establish -- in the REAL window, over REAL IPC, where `isRunning` and
+ * the DOM's `disabled` attributes are the actual ones. Note it proves the MODEL still accepts an edit;
+ * `transferBoot.ts`'s `disabled` half is the defense-in-depth twin and needs a human at the keyboard.
  */
-const STEPS = `localFile=${LOCAL},hostFile=${HOST_FILE},submit`;
+const AFTER_SUBMIT = 'AFTER.SUBMIT';
+const STEPS = `localFile=${LOCAL},hostFile=${HOST_FILE},submit,hostFile=${AFTER_SUBMIT}`;
 
 /**
  * HOW MANY ROWS THE FORM MUST DRAW, as a literal with its derivation written down.
@@ -319,6 +339,19 @@ const CHECKS = [
    */
   [`submit refused with '${REFUSAL}'`,
     () => out.includes(`transfer window: submit -> ok=false status=${REFUSAL}\n`)],
+  /**
+   * THE FORM IS STILL USABLE AFTER THE REFUSAL -- THE CHECK THIS HARNESS DID NOT HAVE.
+   *
+   * See `STEPS` for the whole argument. `start()` now arms the running state BEFORE awaiting the
+   * submit, which is the fix for a synchronous completion being overwritten by its own submit; the
+   * refusal arm therefore has to CLEAR that flag, and a refusal that forgot would leave the form
+   * frozen for the window's life with EVERY OTHER LINE HERE STILL PASSING. The echo comes back
+   * through `ui.values()`, so this fails rather than lying if the model refused the edit.
+   *
+   * ONE MORE CHECK THAN THIS HARNESS USED TO SCORE: 9 became 10.
+   */
+  ['the form still accepts an edit after the refusal',
+    () => out.includes(`transfer window: hostFile=${AFTER_SUBMIT}\n`)],
   /**
    * A STEP NOBODY CONSUMES. `main.ts` prints this rather than ignoring the step, the same way
    * `clicks: NO BUTTON` reports a label that is not in the layout: a typo in `STEPS` above would

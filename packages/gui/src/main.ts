@@ -458,7 +458,9 @@ app.whenReady().then(async () => {
        * the two hooks overlapping costs nothing. `TransferRun.cancel` is itself idempotent too
        * (`transferRun.ts:388`).
        */
-      transfer?.shutdown();
+      // `'windowGone'` AND NOT `'sessionLost'`: the form this reason decides about has already been
+      // destroyed, so there is nothing on screen to tell. `shutdown`'s own docstring has the split.
+      transfer?.shutdown('windowGone');
       transferWin = undefined;
       transfer = undefined;
     });
@@ -526,7 +528,7 @@ app.whenReady().then(async () => {
    * which it can, on a dropped session -- because a throw here would be the unquittable app this
    * hook exists to prevent.
    */
-  app.on('before-quit', () => { transfer?.shutdown(); });
+  app.on('before-quit', () => { transfer?.shutdown('quit'); });
 
   /**
    * Compute the DRAW LIST here and send that, rather than sending the snapshot.
@@ -593,8 +595,18 @@ app.whenReady().then(async () => {
    * `shutdown` and not `requestCancel`: this is the same "cancel rather than block" case as a quit,
    * and it must not throw out of an event listener -- `shutdown` swallows a failed cancel, which on
    * a dropped socket is the expected outcome rather than a surprise.
+   *
+   * ## `'sessionLost'` IS THE ONE REASON THAT STILL HAS SOMEBODY TO TELL
+   *
+   * AND THE ONE THING CANCELING DOES NOT ACHIEVE BY ITSELF, which cost this branch a defect: at
+   * 24x80 the cancel THROWS on its way to the driver's `finish` (`transferRun.ts:438` ->
+   * `session.sendAID` -> `not connected`), so `onDone` never fires and the form was left showing
+   * 'transferring' with a dead Cancel and a dead Start -- then 30 seconds later the driver's own
+   * frame timer said `press Attn or Clear: host may still be transferring`, at a host that was gone.
+   * Geometry-dependent, and 24x80 is the broken one. Naming the reason is what lets `shutdown` send
+   * an honest ending instead, and bump the generation so that stale timeout cannot contradict it.
    */
-  session.on('disconnect', () => { transfer?.shutdown(); });
+  session.on('disconnect', () => { transfer?.shutdown('sessionLost'); });
 
   /**
    * Every action the renderer sends, logged for the chord harness -- and ONLY while BOTH

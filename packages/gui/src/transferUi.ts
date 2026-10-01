@@ -259,18 +259,57 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       show();
     },
 
+    /**
+     * Submit the form, ANNOUNCING THE TRANSFER BEFORE THE AWAIT RATHER THAN AFTER IT.
+     *
+     * ## THE INVARIANT: AN ENDING THAT HAS ALREADY ARRIVED MUST NOT BE UNDONE BY THE SUBMIT THAT
+     * ## STARTED IT
+     *
+     * This method used to `await deps.submit(...)` and only THEN arm `isRunning` and paint
+     * `transferring`. That is the renderer's copy of the bug `transferWindow.ts`'s `startRun`
+     * documents at length, and it is REACHABLE for the same reason: `startTransfer` can call
+     * `onDone` BEFORE IT RETURNS -- a whole DFT transfer finishing inside
+     * `session.sendAID(AID.ENTER)`'s record handling, `transferRun.ts:377`'s
+     * `if (ended) return { ok: true };`, driven against a real `Session` by
+     * `tui/test/transferRun.test.ts`'s "notices a DFT transfer that finished BEFORE the first
+     * wait". The controller's `finish` then runs INSIDE the `ipcMain.handle` handler and issues
+     * `webContents.send('transfer:done', ...)`, and that send reaches the renderer BEFORE the
+     * `invoke()` promise resolves -- measured in real Electron 44, 20 runs out of 20.
+     *
+     * So `finished()` ran first and this method's tail then clobbered it: a transfer that had
+     * SUCCEEDED reported as permanently in progress, `Cancel` was dead (this object's
+     * `requestCancel` passed its own `isRunning` check and main's answered
+     * `if (run === undefined) return;`), and `Start` was dead for the window's life. Measured
+     * against the built module: `setRunning false` / `setStatus "done: 3 bytes"` /
+     * `setRunning true` / `setStatus "transferring"`, leaving `running() === true`.
+     *
+     * ## THE FIX IS THE SHAPE THIS MODULE'S OTHER HALF ALREADY USES, WITH NO NEW STATE
+     *
+     * `isRunning` is armed, and the whole "we are transferring" announcement made, BEFORE the
+     * await. The tail is then EMPTY on the success path -- there is nothing left to clobber with
+     * -- and `isRunning` doubles as the latch: `finished()` clears it, so the refusal arm below is
+     * CONDITIONAL on this submit still being the one the form is waiting for. That is exactly
+     * `startRun`'s placeholder-then-conditional-assignment, and it adds no second word for "is a
+     * transfer running"; a renderer-side generation counter would have been one more fact to keep
+     * in step with main's, and nothing here could falsify it.
+     *
+     * TWO SIBLING HAZARDS CLOSE WITH IT, both from the same await:
+     *
+     *  - A `transfer:progress` arriving during the await used to be DROPPED by `progress()`'s
+     *    `if (!isRunning) return;`, and then painted over by the tail's `transferring` even if it
+     *    had not been. Both ends are fixed: the flag is already armed when it arrives, and the
+     *    tail no longer paints.
+     *  - A SECOND Start during the await used to pass the guard below -- two `invoke`s for one
+     *    button -- and came back as main's 'a transfer is already running', a message about the
+     *    operator's OWN transfer. The early arming refuses the second press here instead.
+     */
     async start() {
       // A SECOND START WHILE ONE RUNS IS IGNORED, matching the TUI: two transfers would
       // interleave two machines' frames on one screen, and the host is answering only one.
       if (isRunning) return;
-      const result = await deps.submit(formKeywords(state));
-      if (!result.ok) {
-        // A LOCAL REFUSAL LEAVES THE FORM OPEN AND POPULATED. Nothing reached the host, so the
-        // user's next move is to fix one field -- a form that reset would make them retype ten.
-        state = { ...state, error: result.error ?? 'transfer refused' };
-        show();
-        return;
-      }
+      // ARMED, AND ANNOUNCED, BEFORE THE AWAIT. See the docstring: everything this used to do
+      // after `deps.submit` resolved is done here, where no ending can have overtaken it. The
+      // submit IS in flight, so the form is honestly busy for the duration.
       isRunning = true;
       // THE ERROR FROM A PREVIOUS REFUSAL IS CLEARED HERE, because a submit that got through
       // makes the old message false and nothing else would ever clear it. Not during the
@@ -286,6 +325,43 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // TUI's arrows out of `transferOverlay.ts`'s help line. The present participle carries the
       // sense without it, and `transferOverlay.test.ts` sweeps every phase for the pairs.
       deps.setStatus('transferring');
+      /**
+       * A REFUSAL, OR A SUBMIT THAT NEVER ANSWERED AT ALL.
+       *
+       * The `catch` is NOT decoration, and it is the one liability the early arming above
+       * introduces. `deps.submit` is `ipcRenderer.invoke` (`transferPreload.cts`), which REJECTS
+       * when main's handler throws -- and `transferWindow.ts`'s `submit` catches only
+       * `buildCommand`, so a throw out of `deps.startTransfer` comes back here as a rejection
+       * rather than as `{ ok: false }`. Before this method armed the flag early, such a rejection
+       * left a form that was merely idle and still usable; with the flag armed it would leave one
+       * FROZEN for the window's life, which is C1 reappearing through a different door. Reported
+       * as a refusal, because from the form's seat that is what it is: nothing is running, and the
+       * operator is owed the reason.
+       */
+      let refusal: string | undefined;
+      try {
+        const result = await deps.submit(formKeywords(state));
+        if (!result.ok) refusal = result.error ?? 'transfer refused';
+      } catch (err) {
+        refusal = `transfer refused: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      // THE LATCH, AND THE WHOLE OF THIS METHOD'S TAIL. A completion that arrived while the
+      // submit was in flight has already run `finished()`, which cleared `isRunning`, reported
+      // the real outcome and re-enabled the form. Nothing below may speak about this submit
+      // after that: the ending is the truth and the submit is merely how it began.
+      if (!isRunning) return;
+      if (refusal === undefined) return;
+      // A LOCAL REFUSAL LEAVES THE FORM OPEN AND POPULATED. Nothing reached the host, so the
+      // user's next move is to fix one field -- a form that reset would make them retype ten.
+      //
+      // AND THE FORM GOES IDLE AGAIN, which is now this arm's job rather than something it never
+      // had to do: `isRunning` was armed above, so a refusal that failed to clear it would freeze
+      // the form for the window's life -- the very failure the early arming exists to prevent,
+      // moved one path over.
+      isRunning = false;
+      deps.setRunning(false);
+      state = { ...state, error: refusal };
+      show();
     },
 
     requestCancel() {

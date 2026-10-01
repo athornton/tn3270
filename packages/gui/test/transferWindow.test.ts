@@ -143,14 +143,14 @@ describe('createTransferController', () => {
     const d = deps({ startTransfer: vi.fn((): TransferRun => ({ ok: true, cancel })) });
     const c = createTransferController(d);
     await c.submit([]);
-    c.shutdown();
+    c.shutdown('quit');
     expect(cancel, 'quit must tell the host, not leave it waiting for a frame').toHaveBeenCalled();
   });
 
   it('shutdown is safe with no transfer running', () => {
     const d = deps();
     const c = createTransferController(d);
-    expect(() => { c.shutdown(); }).not.toThrow();
+    expect(() => { c.shutdown('quit'); }).not.toThrow();
   });
 
   it('shutdown does not cancel twice if it is called twice', async () => {
@@ -158,8 +158,8 @@ describe('createTransferController', () => {
     const d = deps({ startTransfer: vi.fn((): TransferRun => ({ ok: true, cancel })) });
     const c = createTransferController(d);
     await c.submit([]);
-    c.shutdown();
-    c.shutdown();
+    c.shutdown('quit');
+    c.shutdown('quit');
     // `TransferRun.cancel` is itself idempotent (`transferRun.ts:388`), so a second call is
     // harmless -- but a controller that still HELD the run after quitting would also still
     // report `shouldPreventClose()`, which is the state this asserts about.
@@ -182,7 +182,7 @@ describe('createTransferController', () => {
     const d = deps({ startTransfer: vi.fn((): TransferRun => ({ ok: true, cancel })) });
     const c = createTransferController(d);
     await c.submit([]);
-    expect(() => { c.shutdown(); }).not.toThrow();
+    expect(() => { c.shutdown('quit'); }).not.toThrow();
     expect(c.shouldPreventClose(), 'a failed cancel must not leave the close guard armed')
       .toBe(false);
   });
@@ -307,7 +307,7 @@ describe('createTransferController', () => {
     const c = createTransferController(d);
     await c.submit([]);
     c.requestCancel();
-    c.shutdown();
+    c.shutdown('quit');
     expect(cancel, 'a run that already ended must not be cancelled afterwards')
       .not.toHaveBeenCalled();
   });
@@ -353,7 +353,7 @@ describe('createTransferController', () => {
     const c = createTransferController(d);
     await c.submit([]);
     const opts = startedWith(d);
-    c.shutdown();
+    c.shutdown('quit');
     opts.onDone({ ok: false, error: 'transfer canceled by user' });
     expect(c.running()).toBe(false);
     expect(c.shouldPreventClose()).toBe(false);
@@ -404,7 +404,7 @@ describe('createTransferController', () => {
     expect(c.running(), 'the SECOND transfer is still running').toBe(true);
     expect(c.shouldPreventClose(), 'and the window must still refuse to close over it').toBe(true);
     // The decisive one: a quit now must still abort the live transfer.
-    c.shutdown();
+    c.shutdown('quit');
     expect(cancel2, 'the live run must still be cancellable on quit').toHaveBeenCalled();
   });
 
