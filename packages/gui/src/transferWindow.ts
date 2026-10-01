@@ -107,18 +107,36 @@ export function createTransferController(deps: TransferDeps): TransferController
   let generation = 0;
 
   /**
-   * End the current run, if the ending belongs to it, and tell the window either way.
+   * End the run this ending BELONGS TO, and tell the window only if it is the current one.
    *
    * NOT PART OF THE PUBLIC INTERFACE. The plan exported a `finish` member; nothing in `main.ts`
    * called it, and the only ending there is `onDone`'s -- so a public `finish` was a second
    * teardown route with no caller, which is the exact shape the module docstring is about.
    * Removed rather than left as an invitation.
+   *
+   * ## THE GENERATION GOVERNS THE MESSAGE, NOT ONLY THE STATE
+   *
+   * The first version of this guarded `run` and then sent `transfer:done` UNCONDITIONALLY, which
+   * left the bug it exists to fix half-fixed. The reachable sequence is the one
+   * `transferWindow.test.ts` already constructs: a cancel that throws leaves the driver's timers
+   * armed, run 2 starts, and run 1's 30-second deadline then fires. Main-side state stayed
+   * correct -- no cancel was lost -- but run 1's ending still reached the renderer, and
+   * `transferUi.ts`'s `finished()` has NO generation concept: it sets `isRunning = false` and
+   * `setRunning(false)`, re-enabling the whole form and the Start button MID-TRANSFER, and paints
+   * run 1's error over run 2's live progress line. Measured against the committed code:
+   * `transfer:done {"ok":false,"error":"stale timeout from run 1"}` delivered while run 2 ran.
+   *
+   * So a mismatch returns EARLY and sends nothing. The renderer is told about one transfer at a
+   * time, which is the same one-transfer rule `submit` enforces at the other end.
    */
   const finish = (
     forGeneration: number,
     result: { ok: boolean; error?: string; bytes?: number },
   ): void => {
-    if (forGeneration === generation) run = undefined;
+    // A STALE ENDING IS DROPPED ENTIRELY. It cannot clear the live run's state and it cannot
+    // speak to the window about it -- the run it describes is one nobody is watching any more.
+    if (forGeneration !== generation) return;
+    run = undefined;
     deps.send('transfer:done', result);
   };
 

@@ -409,6 +409,44 @@ describe('createTransferController', () => {
   });
 
   /**
+   * THE SAME STALE ENDING MUST NOT REACH THE RENDERER EITHER, which is the half the first version
+   * of `finish` left undone: it guarded `run` on the generation and then sent unconditionally.
+   *
+   * Main-side state was correct -- no cancel lost -- so the window still refused to close and a
+   * quit still aborted the live transfer. But the renderer has NO generation concept:
+   * `transferUi.ts`'s `finished()` sets `isRunning = false` and `setRunning(false)`, which
+   * re-enables every field and the Start button while run 2 is still moving bytes, and paints run
+   * 1's error over run 2's progress line. From the operator's seat that is a transfer that
+   * reported a failure and then kept running, with a form inviting them to start a third.
+   */
+  it('a LATE onDone from a cancelled run is not reported to the window at all', async () => {
+    const cancel1 = vi.fn(() => { throw new Error('not connected'); });
+    const runs: TransferRun[] = [{ ok: true, cancel: cancel1 }, { ok: true, cancel: vi.fn() }];
+    const d = deps({
+      startTransfer: vi.fn((): TransferRun => runs.shift() ?? { ok: false, error: 'no more' }),
+    });
+    const c = createTransferController(d);
+
+    await c.submit([]);
+    const first = startedWith(d, 0);
+    c.requestCancel();
+    // The throw IS reported, because the operator pressed Cancel and deserves an answer -- that
+    // is `requestCancel`'s own message and it belongs to run 1 while run 1 is still current.
+    expect(d.sent).toHaveLength(1);
+    await c.submit([]);
+
+    // Run 1's 30s frame deadline, arriving while run 2 is live. NOTHING may be sent for it.
+    first.onDone({ ok: false, error: 'press Attn or Clear: host may still be transferring' });
+    expect(d.sent, 'a stale ending must not speak to the window about the live transfer')
+      .toHaveLength(1);
+
+    // Run 2's OWN ending still gets through, so this is a generation check and not a mute button.
+    startedWith(d, 1).onDone({ ok: true, bytes: 99 });
+    expect(d.sent).toContainEqual(['transfer:done', { ok: true, bytes: 99 }]);
+    expect(c.running()).toBe(false);
+  });
+
+  /**
    * `browse` DOES NOT CARE WHETHER A TRANSFER IS RUNNING, and that is the renderer's job rather
    * than an omission here: `transferUi.ts`'s `browseLocal` checks `isRunning` on BOTH sides of
    * its `await` (the second check is the measured fix for a non-modal dialog resolving

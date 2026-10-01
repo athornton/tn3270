@@ -400,6 +400,29 @@ app.whenReady().then(async () => {
       // and leave `transfer` undefined while a form sat on screen -- every submit answered 'the
       // transfer window is not open'. Nothing reaches `transfer = undefined` in that case now.
       if (transferWin !== tw) return;
+      /**
+       * CANCEL BEFORE CLEARING -- THE FOURTH INSTANCE OF THE TEARDOWN BUG, AND IT IS REACHABLE.
+       *
+       * `closed` can mean "the window was destroyed out from under a LIVE transfer", not only
+       * "nothing was running". MEASURED in real Electron: closing a child window's PARENT destroys
+       * the child and fires the child's `closed` WITHOUT EVER FIRING ITS `close`. So an operator
+       * who closes the terminal window mid-transfer never reaches the close guard above at all.
+       *
+       * WHY `before-quit` IS NOT SUFFICIENT ON ITS OWN, which is the non-obvious part: the order
+       * is `closed` -> this handler -> `window-all-closed` -> `app.quit()` -> `before-quit`. So by
+       * the time the quit hook runs, `transfer` is ALREADY `undefined` and it has nothing left to
+       * cancel. Observed: `cancel() was called 0 time(s)`, with `session.dft` still set and the
+       * host waiting for a frame that never comes -- the spec's "session.dft set with the window
+       * gone", reached by a different door than the identity guard above is watching.
+       *
+       * NOT A DOUBLE CANCEL on the ordinary paths. A `closed` that follows a REFUSED close can
+       * only happen after the transfer ended -- `onDone` cleared `run` -- so `shutdown` finds
+       * nothing and does nothing. Cmd-Q genuinely does reach `before-quit` first (verified order:
+       * `before-quit` -> child `close` -> PREVENTED -> `closed`), and `shutdown` is idempotent, so
+       * the two hooks overlapping costs nothing. `TransferRun.cancel` is itself idempotent too
+       * (`transferRun.ts:388`).
+       */
+      transfer?.shutdown();
       transferWin = undefined;
       transfer = undefined;
     });
@@ -490,6 +513,27 @@ app.whenReady().then(async () => {
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+  /**
+   * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
+   * docstring names and the one nothing handled.
+   *
+   * A repaint alone is not enough, and the gap is not a leak in core: `Session.handleClose` clears
+   * its own `dft`, so nothing is left registered down there. It is the CONTROLLER that keeps
+   * `run !== undefined` forever, which makes `shouldPreventClose()` permanently true -- so the
+   * transfer window refuses EVERY close on a session that is already dead. The only control left is
+   * Cancel, and that throws `not connected` (`core/src/session.ts:1513`), which `cancelRun`
+   * swallows and reports: an escape by error message rather than by a working control.
+   *
+   * A SEPARATE LISTENER rather than a line inside `send`, because `send` is the paint path and runs
+   * on every frame -- putting teardown in it would mean re-deciding this on each of them. The TUI
+   * does the equivalent from its own close path (`tui/src/app.ts:899-900`, `closeTransfer`), so
+   * this makes the two front ends agree rather than inventing a rule for this one.
+   *
+   * `shutdown` and not `requestCancel`: this is the same "cancel rather than block" case as a quit,
+   * and it must not throw out of an event listener -- `shutdown` swallows a failed cancel, which on
+   * a dropped socket is the expected outcome rather than a surprise.
+   */
+  session.on('disconnect', () => { transfer?.shutdown(); });
 
   /**
    * Every action the renderer sends, logged for the chord harness -- and ONLY while BOTH

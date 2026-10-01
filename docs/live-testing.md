@@ -3696,3 +3696,79 @@ sent the unit — which is the whole reason `TraceText` was added to the VM prob
 
 Clean runs: no `?CP:` on VM and `LOGOFF AT` present in both VM runs; no `IN USE` on TK5 and both TSO
 runs ended at a fresh VTAM logon panel. No userid was stranded.
+
+## The transfer window's four teardown paths — verified by hand under Xvfb, 2026-10-01
+
+**BY HAND BECAUSE NOTHING ELSE CAN REACH THEM, and this section exists so a green `npm test` is not
+mistaken for evidence.** `packages/gui/test/transferTeardown.test.ts` pins these four wirings as
+SOURCE TEXT — `main.ts` calls `app.whenReady()` in its module body, so it cannot be imported, and the
+handlers live inside that callback's closure. Those assertions would pass against a `shutdown` that
+did nothing. The controller's own half *is* unit-tested properly against a fake
+(`transferWindow.test.ts`: `shutdown` cancels, is idempotent, survives a throwing `cancel`, and a
+late ending cannot resurrect a run). What follows is the behavioural half.
+
+Driven with the REAL `createTransferController` from `dist/`, real parent and child
+`BrowserWindow`s, and a counting `cancel`, reproducing `main.ts`'s wirings verbatim.
+
+### Closing the TERMINAL window mid-transfer — the fourth instance of the teardown bug
+
+**The mechanism, measured first on a bare parent/child pair:** closing a child window's PARENT
+destroys the child and fires the child's `closed` **without ever firing its `close`**.
+
+```
+--- closing PARENT only ---
+EVENT child closed            <-- `close` never fired, so the close guard is BYPASSED
+EVENT parent closed
+EVENT window-all-closed
+child destroyed? true
+```
+
+So the close guard at `main.ts`'s `tw.on('close')` cannot see this path at all. And `closed` runs
+*before* `window-all-closed` → `app.quit()` → `before-quit`, so the quit hook arrives too late:
+
+```
+WITHOUT the fix (the committed code):     WITH the fix:
+running after submit: true                running after submit: true
+--- closing the PARENT window ---         --- closing the PARENT window ---
+EVENT closed                              EVENT closed
+                                          CANCEL CALLED
+EVENT before-quit transfer=UNDEFINED      EVENT before-quit transfer=UNDEFINED
+RESULT cancel called 0 time(s)            RESULT cancel called 1 time(s)
+```
+
+`transfer` is already `undefined` by the time `before-quit` runs, so **`before-quit` is not
+sufficient on its own** — the non-obvious part, and why the fix is a `shutdown()` inside the `closed`
+handler, ordered BEFORE the two assignments that clear the state. Left unfixed this is the spec's
+"`session.dft` set with the window gone": the host's program waits for a frame that never comes.
+
+Not a double cancel on the ordinary paths: a `closed` following a REFUSED close can only happen after
+the transfer ended, so `run` is already clear. Cmd-Q does reach `before-quit` first — verified order
+`before-quit` → child `close` → PREVENTED → `closed` — and both `shutdown` and
+`TransferRun.cancel` (`transferRun.ts:388`) are idempotent.
+
+### The session dropping underneath
+
+`Session.handleClose` clears its own `dft`, so core does not leak — but the controller kept
+`run !== undefined` forever, and `shouldPreventClose()` with it, so **the window refused every close
+on a dead session**. The only control left was Cancel, which throws `not connected`
+(`session.ts:1513`), gets swallowed by `cancelRun` and reported: an escape by error message rather
+than by a working control.
+
+```
+running after submit: true
+--- session disconnects underneath ---
+EVENT disconnect
+CANCEL CALLED
+shouldPreventClose after disconnect: false      <-- the window can be closed again
+RESULT cancel called 1 time(s)
+```
+
+The repaint listener (`session.on('disconnect', send)`) stays alongside the new one: a disconnect
+still has to redraw the OIA, which is how the operator learns the session dropped.
+
+### Still to be driven against a live host
+
+These runs use a fake `startTransfer`, so what they prove is that `cancel` is REACHED on each path.
+That it then puts the right bytes on the wire is `TransferRun.cancel`'s own business and is covered
+for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
+not yet been watched against a real host.** That is the next live item for this window.
