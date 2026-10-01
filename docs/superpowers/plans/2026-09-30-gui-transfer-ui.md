@@ -2088,11 +2088,82 @@ checks showed, and any defect found in this plan rather than in the code. Previo
 recorded forty-odd such defects each, nearly all in the plan — so an empty section at the end of
 implementation means the annotations were skipped, not that the plan was perfect.)*
 
+### Tasks 1-3, 2026-10-01
+
+**THE BASELINE IN THIS PLAN IS OFF BY ONE: it says 2156 tests in 82 files; `main` at `9d5fb42` has
+2157.** The ellipsis-ligature fix landed after the plan was written. So every count in the checklist
+below is one low, and the plan's target of 2183 is really **2184**.
+
+**AND THE SAME FIX MOVED `transferForm.js` FROM 9141 BYTES TO 9139**, which the plan quotes in four
+places as a measured fact. The number is now re-measured in `transferModule.test.ts`'s comment, and
+**the test asserts the IMPORTS and not the size** — which is the whole reason it survived the drift.
+A guard that had pinned 9141 would have failed on an unrelated commit and taught everyone to loosen
+it. [[summary-lines-outlive-their-corrections]] is the shape: the fix reached the prose body and not
+the four numbers summarising it.
+
+**Task 1** pins an existing property, so it was green on arrival. **Mutation-verified**: prepending
+`import { AID } from '@tn3270/core';` to the built file reddens it *naming `@tn3270/core`*, so it is
+not vacuous.
+
+**Task 2** is config only and the full suite was run to prove it: 83 files / 2159 tests, i.e. exactly
+baseline + Task 1's two. A `lib` and a dependency addition have zero blast radius, and confirming
+that *is* the test.
+
+**TASK 3 HAD A REAL DEFECT THE PLAN'S OWN TESTS COULD NOT SEE, and it is the one worth carrying:
+`offered()` AS WRITTEN RETURNS THE OPTIONS LIST ROTATED.** It collects by cycling from the field's
+*current* value, so once `Recfm` is `variable` it returns `['variable','undefined','','fixed']`
+instead of table order — **a `<select>` that reorders its own menu every time the operator picks an
+item.** Measured against the built model, not argued. **None of the plan's eleven tests reads
+`.options`, so this would have shipped GREEN** — the [[check-what-a-comparison-covers]] shape, in a
+plan that was otherwise careful. Fixed by filtering `TRANSFER_FIELDS` by what the walk saw, so
+cycling still discovers *which* values are legal and the VM `Recfm=undefined` rule keeps its one home
+in the model's private `valuesFor`. Proved equivalent to `valuesFor` across **520 reachable states
+and 2727 applicable cycle-field checks, zero mismatches**. Two tests added, both mutation-verified.
+
+**A SECOND DEFECT, in `start()`: the plan sets `state.error` on a refusal and never clears it on a
+later success**, while `show()` gives `error` precedence over everything. One line added beside
+`isRunning = true`, and a regression test, because **deleting that line left all thirteen tests
+green** — an unpinned behavioral fix is the thing this repo keeps finding.
+**ITS SYMPTOM WAS FIRST DESCRIBED WRONG, and the correction is the useful part:** the stale error
+*cannot* print over `transferring`, because `start()` calls `setStatus('transferring')` directly and
+`cycle`/`type`/`browseLocal` all open with `if (isRunning) return`. It resurfaces on the first
+post-`finished()` edit **the model REJECTS** — a non-digit into a numeric field — because a rejected
+edit returns the state unchanged (`transferForm.ts:143,147,148`) while an **accepted** edit writes
+`error: undefined` and clears it by accident. That accident is what would have made it intermittent.
+
+**A DEFECT CLAIMED AND THEN WITHDRAWN, recorded because the reasoning error is a trap:** the
+implementer reported that importing the `@tn3270/frontend` BARREL would blank the window, since
+`frontend/dist/index.js` re-exports `./tls.js`, which imports `node:net`/`node:tls`/`node:fs`. **Every
+one of those sub-facts is true and the conclusion is false.** Task 4's `<script type="importmap">`
+remaps that one bare specifier **in the browser, before any fetch**, so the barrel is never requested.
+The plan's phrase *"rewritten to a relative path at build time"* is loose about *when* (runtime, by the
+map) and is what invited the error. **The verified mechanism:** the emitted `transferUi.js` keeps the
+bare specifier as its only runtime import, and all six imported names are exported directly by
+`dist/transferForm.js`, so one map entry satisfies the whole list. **The real hazard is therefore a
+SECOND workspace import in that file**, which would resolve to nothing — and that is what the comment
+now warns about.
+
+**STILL UNTESTABLE HERE, AND TASK 8 IS WHAT MUST CATCH IT: the import map is load-bearing and no unit
+test in `packages/gui` executes it.** The window must be LOADED and seen to paint.
+
+**A DIVERGENCE THIS WORK CREATED IN THE TUI, found by the review and confirmed by measurement — NOT
+fixed, and out of scope for this plan.** `app.ts:1096-1103` sets `transferPhase = 'running'` without
+touching `transferState.error`, so the TUI now carries the bug the GUI just fixed. **Its blast radius
+is WORSE, not narrower:** `statusLine` recomputes from the phase on every draw and `state.error`
+outranks the phase (`transferOverlay.ts:148`), so a stale error shadows the `transferring` line **for
+the entire duration of a running transfer**, and then the `done:` line after it. **Reproduced
+directly:** with `error: 'keyboard locked'` and `phase: 'running'`, `statusLine` returns
+`"keyboard locked"` where `"transferring 100 bytes (Esc cancels)"` is correct. **Reachable with no
+intervening edit** — submit while the keyboard is locked, the host clears the lock, press Enter again;
+nothing called `setFieldText`, so nothing cleared the error. The fix belongs beside those lines rather
+than in `statusLine`, so both front ends clear it at the same moment.
+
 ## Verification checklist for the whole plan
 
 - [ ] `npm run build` clean
 - [ ] `npm run typecheck` clean (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
-- [ ] `npx vitest run` — 2183 tests in 86 files, up from 2156 in 82
+- [ ] `npx vitest run` — **2184** tests in 86 files, up from **2157 in 82** (the plan was written
+      against 2156/82 and the ellipsis-ligature fix added one; see the AS BUILT note)
 - [ ] `node packages/gui/scripts/shot.mjs` — 3/3, after `npx tsc --build --force packages/gui`
 - [ ] `node packages/gui/scripts/keys.mjs` — 18 chords/16 actions
 - [ ] `node packages/gui/scripts/clicks.mjs` — 9 buttons/10 actions
