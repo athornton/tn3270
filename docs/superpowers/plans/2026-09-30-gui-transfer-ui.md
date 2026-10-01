@@ -2399,9 +2399,78 @@ again: checking docs against code finds real defects, and some of them are hours
 step names were fixed in the code and left standing in two `main.ts` docstrings. Amended.
 [[summary-lines-outlive-their-corrections]] — the fix reaches the body and not the summary.
 
+### The final pre-merge review, 2026-10-01 — the FIFTH instance, one layer out
+
+**THE PER-TASK REVIEWS COULD NOT SEE THIS, WHICH IS THE ARGUMENT FOR A WHOLE-BRANCH REVIEW: both
+halves were individually correct and jointly wrong, and 2239 tests stayed green while they were.**
+
+**A TRANSFER THAT SUCCEEDED REPORTED AS PERMANENTLY IN PROGRESS.** `start()` set `isRunning = true`
+and `setStatus('transferring')` *after* `await deps.submit(...)` — so when the completion had already
+arrived during that await, `start()`'s tail **overwrote the success**. Reproduced against the real
+built module:
+
+```
+setRunning false
+setStatus "done: 3 bytes"     <-- the real completion, correctly handled
+setRunning true
+setStatus "transferring"      <-- start()'s tail overwrites it
+--- final: ui.running() = true
+```
+
+**AND THE ORDERING IS NOT HYPOTHETICAL: a `webContents.send` issued synchronously inside an
+`ipcMain.handle` handler reaches the renderer BEFORE the `invoke()` promise resolves — measured 20/20
+in real Electron 44** (20/20 for a microtask-deferred send, 2/20 at `setImmediate`, 0/20 at
+`setTimeout 0`). The trigger is the same synchronous `onDone` that Task 6 already had to defend
+against on the main side: a whole DFT transfer finishing inside `sendAID`. **So the main half's
+generation stamp was right and its mirror image on the renderer side was missing.**
+Consequences: Cancel dead (the UI's guard passes, main's `run` is already `undefined`), Start dead
+for the window's life, the operator must close and reopen. **The window stayed closable and the app
+quittable** — `startRun`'s placeholder did its job; only the renderer half broke.
+**AND THE HARNESS COULD NOT SEE IT**, because `__tn3270Submit` returns `ui.running()`, which was
+`true` *because* of the bug: a passing scenario printed `ok=true status=transferring`.
+
+**`progress()` HAD THE SAME DEFECT**: a `transfer:progress` arriving during the await was dropped by
+its `isRunning` guard and then painted over by the tail. And a second Start during the await passed
+the guard, sending **two `invoke`s for one button**. Fixed by arming the flag and the announcement
+*before* the await, with `isRunning` itself as the latch a completion clears — **no new state word**,
+where a renderer-side generation would have been a second copy of main's that nothing in the renderer
+could falsify. **The fix has a liability that was closed in the same commit:** the refusal arm must
+now clear the flag it armed, and so must a rejected `invoke` — main's `submit` catches only
+`buildCommand`, so a throw out of `startTransfer` arrives as a rejection, which with early arming
+would have frozen the form. **C1 through another door.**
+
+**A SESSION DROPPING MID-TRANSFER AT 24x80 LEFT THE FORM STUCK FOR 30 SECONDS AND THEN LIED.**
+`shutdown` deliberately sent no `transfer:done`; the cancel throws `not connected` before the
+driver's `finish`, so `onDone` never fired and **the renderer was never told**. It self-healed by an
+undocumented route — the still-armed 30 s frame timer — and then displayed
+`press Attn or Clear: host may still be transferring`, **which is false: the session is gone and
+there is no host to press Attn at.** **GEOMETRY-DEPENDENT, AND THE COMMON CASE IS THE BROKEN ONE**:
+at any non-CUT geometry `transferRun.ts:429-432` returns `finish(...)` before the throwing `sendAID`,
+so 43x80 behaved correctly and 24x80 did not. **The root cause was one comment covering two
+callers**: "there is nobody left to tell" is true of a QUIT and false of a DISCONNECT, where the
+window is still on screen and the operator is still looking at it. `shutdown` now takes a
+**required** reason so each call site states what happened, and `generation` is bumped — **verified
+load-bearing by removing only the bump, which reddens with the exact false message.**
+
+**THE TEST THAT SHOULD HAVE EXISTED ALL ALONG: nothing composed `createTransferUi` with
+`createTransferController`.** `transferUi.test.ts` drove `finished()` only after `start()` had
+resumed; `transferWindow.test.ts` asserted controller state only. So the seam was untested by
+construction. `transferSeamIpc.test.ts` now drives both halves through an ordered queue that can
+deliver `transfer:done` before `submit` resolves. **Reverting the C1 fix as an ORDER mutation reddens
+5 of its tests while the pre-existing 51 stay green — which demonstrates the gap rather than
+asserting it.**
+
+**TWO PROCESS NOTES FROM THE FIX ITSELF, both the shape this repo keeps recording:** a first-draft
+test asserted Cancel against the *driver's* `cancel` and **survived** the mutation, because the driver
+is not reached either way — rewritten to count the bridge hop. And a seam helper that held *every*
+send rather than only those during a submit broke a normal-path test. Both are noted in the file.
+
 ## Verification checklist for the whole plan
 
-**ALL TICKED, measured on `0dd8b20` (branch `gui-transfer-ui`, 15 commits), 2026-10-01. Three of the
+**ALL TICKED, re-measured on `0414f96` (branch `gui-transfer-ui`, 17 commits), 2026-10-01 — after the
+final review's fixes. The numbers below supersede the 15-commit run: 2252 tests in 89 files (from
+2239 in 88) and `transfer.mjs` 10/10 (from 9/9, the new check being a field edit after a refused
+submit, confirmed to discriminate at 8/10 against a mutated renderer in the real window). Three of the
 predicted numbers were WRONG and are corrected in place rather than quietly satisfied** — the test
 target was computed from a baseline that had already moved, `keys.mjs` went up because Ctrl-T was
 dead and is now mapped, and `transfer.mjs` grew checks when the plan's two vacuous ones were
@@ -2409,14 +2478,15 @@ replaced.
 
 - [x] `npm run build` clean — exit 0
 - [x] `npm run typecheck` clean — exit 0 (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
-- [x] `npx vitest run` — **2239 tests in 88 files**, up from **2157 in 82**. *(The plan predicted
-      2184 in 86 from a 2156/82 baseline: the baseline was one low, and six more test FILES and
-      fifty-odd more tests exist than it budgeted for, because nine plan defects needed pinning.)*
+- [x] `npx vitest run` — **2252 tests in 89 files**, up from **2157 in 82**. *(The plan predicted
+      2184 in 86 from a 2156/82 baseline: the baseline was one low, and seven more test FILES and
+      sixty-odd more tests exist than it budgeted for, because the plan's defects needed pinning —
+      the last file being the composed-seam test the final review showed was missing.)*
 - [x] `node packages/gui/scripts/shot.mjs` — **3/3 goldens matched**, after `npx tsc --build --force packages/gui packages/web`
 - [x] `node packages/gui/scripts/keys.mjs` — **19 chords/17 actions**, *not* the predicted 18/16:
       **Ctrl-T was DEAD and is now mapped**, and the exemption that hid it is deleted
 - [x] `node packages/gui/scripts/clicks.mjs` — **9 buttons/10 actions**
-- [x] `node packages/gui/scripts/transfer.mjs` — **9/9**, not the predicted 6/6: two of the plan's
+- [x] `node packages/gui/scripts/transfer.mjs` — **10/10**, not the predicted 6/6: two of the plan's
       checks passed **vacuously on empty output** and were replaced by checks that cannot
 - [x] `python3 packages/tui/scripts/pty-smoke.py` — **12 PASS / 0 FAIL, exit 0**
 - [x] `node packages/web/scripts/browser-shot.mjs` — **2/2** (the gateway is untouched but shares

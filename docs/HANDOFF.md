@@ -1444,9 +1444,10 @@ are in `docs/live-testing.md`.
 `TN3270_GUI_KEYS` seam sends modifier chords (`packages/gui/src/keyspec.ts` parses the
 spellings), and `packages/gui/scripts/keys.mjs` is a committed harness that drove **15 chords
 through real Chromium key events and asserted 13 actions in order, plus two required
-absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **It is 18 chords / 16 actions
-as of the keypad branch**, which added `Ctrl-D`, `Ctrl-F` and `Ctrl-K`; the figures in this
-paragraph are the ones that were measured when the guard was built. **Be precise about what
+absences** (`Ctrl+Z` must not type "z"; `F13` must not become PF13). **It went to 18 chords / 16
+actions on the keypad branch**, which added `Ctrl-D`, `Ctrl-F` and `Ctrl-K`, **and to 19 / 17 on
+2026-10-01**, when the transfer window gave `Ctrl-T` something to open and the dead chord was mapped;
+the 15/13 figures in this paragraph are the ones that were measured when the guard was built. **Be precise about what
 is newly guarded:** the Alt-digit *mapping* was already unit-tested — `keys.test.ts` calls
 `actionForKey` directly, and unbinding `PA_CODES` reddens `npm test` too (3 failures) — so what
 this harness adds is the **renderer `keydown` listener, the IPC hop and `ipcMain`'s dispatch**,
@@ -1458,7 +1459,9 @@ the whole experiment in the MOUSE path** and got the same shape: a bare `return`
 of that measurement — while every keypad button is dead, and only `clicks.mjs` reddens.
 
 **`keys.mjs` is NOT part of `npm test`** — it spawns Electron, so run it by hand
-(`node packages/gui/scripts/keys.mjs`, expecting `ok       18 chords, 16 actions in order`),
+(`node packages/gui/scripts/keys.mjs`, expecting `ok       19 chords, 17 actions in order` — **18/16
+until 2026-10-01, when the dead `Ctrl-T` was mapped**; the dated figures elsewhere in this file are
+history and are left alone),
 like `shot.mjs`, `clicks.mjs` and `pty-smoke.py`. What `npm test` carries is
 `packages/gui/test/keys-harness-flags.test.ts`, which pins that harness's argv, cases and
 pass conditions as text so it cannot rot unnoticed. **Read `docs/live-testing.md`, *The GUI's

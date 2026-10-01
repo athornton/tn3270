@@ -192,7 +192,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 2239 tests, 88 files
+npm test           # 2252 tests, 89 files
 npm run typecheck
 ```
 
@@ -342,7 +342,7 @@ either panel leaves whatever you had typed in the Local file field alone.
 
 **NOT YET DRIVEN AGAINST A LIVE HOST.** The *protocol* is live-verified on both hosts in both
 directions and in both modes (see *Verification*), and this window's Electron wiring is covered by
-`packages/gui/scripts/transfer.mjs` — 9 checks, under Xvfb, in replay mode with the native dialog
+`packages/gui/scripts/transfer.mjs` — 10 checks, under Xvfb, in replay mode with the native dialog
 **stubbed**, because a real modal under Xvfb has nobody to click it. The four close/cancel paths
 described above were each driven by hand under Xvfb with a **fake** transfer, which proves `cancel`
 is reached on each and nothing about the bytes it then sends. What
@@ -959,7 +959,7 @@ Done:
    each get a real, distinct host reaction. See *Using the GUI*. **Both halves of the PA1/PA2
    gap are now closed**: the protocol half by those host reactions, and the local half first by
    hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
-   then by `packages/gui/scripts/keys.mjs`, which drives 18 real Chromium chords and asserts 16
+   then by `packages/gui/scripts/keys.mjs`, which drives 19 real Chromium chords and asserts 17
    ordered actions plus two required absences. What remains untested is only the *packaged* app,
    because there is no packaging yet.
 
@@ -1308,14 +1308,14 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2239 tests, 88 files (measured 2026-10-01 on `gui-transfer-ui`) |
+| `npm test` | **pass** — 2252 tests, 89 files (measured 2026-10-01 on `gui-transfer-ui`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
 | `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **2 of 2 cases** pixel-identical, with and without the keypad, which is what says the renderer is shared and not merely similar |
 | `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 11 actions in order over a WebSocket, 2 asserted absences |
 | `keys.mjs` — real Chromium key events in Electron | **pass** — 19 chords, 17 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). The 19th is `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked |
-| `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **9 of 9 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
+| `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
 | `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |
