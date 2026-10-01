@@ -2481,7 +2481,12 @@ send rather than only those during a submit broke a normal-path test. Both are n
 
 ## Verification checklist for the whole plan
 
-**ALL TICKED, re-measured on `0414f96` (branch `gui-transfer-ui`, 17 commits), 2026-10-01 — after the
+**ALL TICKED, AND RE-RUN ON THE MERGE COMMIT `a363d39` ITSELF** — this repo's practice, not only on
+the branch. Same numbers there, with `npx tsc --build --force packages/gui packages/web` first, which
+a merge makes mandatory because it rewrites mtimes and both staleness guards redden on that alone.
+`drive-playback.py` and `drive-e.py` were **not** run: nothing here touches telnet negotiation or the
+stream layer, and that is said rather than implied.
+Figures below first measured on `0414f96` (branch `gui-transfer-ui`, 19 commits), 2026-10-01 — after the
 final review's fixes. The numbers below supersede the 15-commit run: 2253 tests in 89 files (from
 2239 in 88) and `transfer.mjs` 10/10 (from 9/9, the new check being a field edit after a refused
 submit, confirmed to discriminate at 8/10 against a mutated renderer in the real window). Three of the

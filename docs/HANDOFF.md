@@ -6,25 +6,42 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, end of 2026-10-01
 
-**THE GUI TRANSFER UI IS BUILT — ALL TEN TASKS — AND IS ON BRANCH `gui-transfer-ui`, 14 COMMITS,
-NOT MERGED AND NOT PUSHED.** The branch was cut from `main` at `9d5fb42` and `git merge-base`
-equalled `main` exactly, per the standing rule. **THE NEXT ACTION IS THE MERGE DECISION** — see
-*Finishing the GUI transfer branch* below for what has and has not been gated.
+**THE GUI TRANSFER UI IS BUILT — ALL TEN TASKS — AND IS MERGED TO `main` AND PUSHED.** Branch
+`gui-transfer-ui`, 19 commits, merged `--no-ff` at `a363d39` and deleted. The branch was cut from
+`main` at `9d5fb42` and **`git merge-base` equalled `main` exactly before the merge**, per the
+standing rule; **the merge reported exactly 19 commits, all of them this feature's**, which is the
+check that once caught 44 unfinished commits riding along.
 
-**State: branch `gui-transfer-ui`, tree clean, no stashes. `main` is at `9d5fb42`, pushed,
-untouched. 2253 tests in 89 files (from 2157 in 82), build and typecheck clean.** The last commit
-is the pre-merge review's three fixes — two operator-visible defects at the IPC seam plus the
-composed test that catches them; see *Finishing the GUI transfer branch*.
+**State: `main` at the merge, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
+stashes. 2253 tests in 89 files (from 2157 in 82), build and typecheck clean.**
 
-**THE WEB TRANSFER UI IS NOW THE OUTSTANDING HALF AND NEEDS ITS OWN SPEC** — roadmap item (0c).
+**THE NEXT ACTION IS ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
+`docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
+window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
+preload, its own bridge, the canvas bridge untouched), and its AS BUILT notes record what that shape
+costs. **NOTHING IS WAITING ON THE USER.**
+
+**THE WEB TRANSFER UI IS THE OTHER OUTSTANDING HALF AND NEEDS ITS OWN SPEC** — roadmap item (0c).
 The user's decision stands: **real browser file I/O**, bytes over the WebSocket so "local file"
 means the operator's machine. `packages/web/src/protocol.ts` still refuses the action, and its
 message now gives the *durable* reason rather than the expired one — see below.
 **NOTHING IS WAITING ON THE USER.**
 
-## Finishing the GUI transfer branch
+## Finishing the GUI transfer branch — DONE, merged 2026-10-01
 
-**WHAT IS GATED, re-measured after the pre-merge review fixes:** build and typecheck clean;
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF, not only on the branch**, as this repo's
+practice requires: build and typecheck clean, **2253 tests in 89 files**, `shot.mjs` 3/3,
+`keys.mjs` 19 chords/17 actions, `clicks.mjs` 9 buttons/10 actions, `transfer.mjs` 10/10,
+`browser-shot.mjs` 2/2, `browser-keys.mjs` 13 chords/11 actions, `pty-smoke.py` 12 PASS / 0 FAIL
+exit 0. **`npx tsc --build --force packages/gui packages/web` first, which is mandatory after a
+merge** — it rewrites mtimes and the GUI *and* web staleness guards redden on that alone; forcing
+only `gui` has failed `browser-keys.mjs` before.
+
+**`drive-playback.py` AND `drive-e.py` WERE NOT RUN, and the reason is that nothing in this work
+touches telnet negotiation or the stream layer.** Said plainly rather than implied, because "the gate
+was green" must never cover a subset without naming it.
+
+**WHAT WAS GATED ON THE BRANCH, re-measured after the pre-merge review fixes:** build and typecheck clean;
 **2253 tests in 89 files** (was 2239 in 88 — the new file is `gui/test/transferSeamIpc.test.ts`, and
 the last test is the TUI stale-error fix);
 `shot.mjs` 3/3; `transfer.mjs` **10/10** (was 9/9 — one new check, see below);
@@ -341,8 +358,8 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    **THE 2026-09-30 CHANGE: FOUR UI PIECES COME FIRST, ahead of everything that was previously next.**
    The order is now:
 
-   **(0a) the GUI transfer UI** — ~~specced and planned~~ **DONE 2026-10-01, branch
-   `gui-transfer-ui`, not merged**, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
+   **(0a) the GUI transfer UI** — ~~specced and planned~~ **DONE 2026-10-01, MERGED `--no-ff` at
+   `a363d39` and pushed**, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
    **(0b) the GUI keypad WINDOW** — **NOW THE NEXT ONE TO BUILD**; ready to spec,
    `docs/ideas/native-widget-dialogs-idea.md`, and its four open questions are already answered
    (see the parked-keypad note below). **The transfer window is its precedent and is worth reading
