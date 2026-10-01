@@ -1,15 +1,18 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
 import {
-  applyAction, defaultSession, describeTlsError, resolveScheme, type Action,
+  applyAction, defaultSession, describeTlsError, resolveScheme, startTransfer, transferCommand,
+  type Action,
 } from '@tn3270/frontend';
+import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
 import { parseKeySpec } from './keyspec.js';
+import { createTransferController } from './transferWindow.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -280,6 +283,168 @@ app.whenReady().then(async () => {
   let showKeypad = false;
 
   /**
+   * The transfer window, created on first request and reused after that.
+   *
+   * LAZY because most sessions never transfer a file, and an Electron window costs a renderer
+   * process. Reused rather than recreated so that reopening mid-transfer shows the RUNNING
+   * state instead of a fresh form -- two submits would interleave two machines' frames on one
+   * screen.
+   *
+   * ## ONE PER PROCESS, WHICH IS WHY THE HANDLERS BELOW ARE SAFE
+   *
+   * Everything in this block runs inside `app.whenReady().then(...)`, and that callback is
+   * registered exactly ONCE at module scope (line 151). There is no `second-instance` or
+   * `activate` handler in this file, so nothing re-enters it -- which matters because
+   * `ipcMain.handle` THROWS on a second registration for the same channel ("Attempted to
+   * register a second handler for 'transfer:browse'") and `app.on('before-quit')` would
+   * accumulate a listener per entry. Both are therefore correct HERE and would be bugs if this
+   * callback ever became re-entrant; a second window per process needs the three handlers and
+   * the quit hook hoisted to module scope, keyed on which window asked.
+   */
+  let transferWin: BrowserWindow | undefined;
+  let transfer: ReturnType<typeof createTransferController> | undefined;
+
+  const openTransferWindow = async (): Promise<void> => {
+    if (transferWin !== undefined && !transferWin.isDestroyed()) {
+      transferWin.show();
+      transferWin.focus();
+      return;
+    }
+    const tw = new BrowserWindow({
+      width: 460,
+      height: 420,
+      useContentSize: true,
+      title: 'File Transfer',
+      // A CHILD of the terminal window so it travels with it, but NOT modal: the operator may
+      // want to look at the screen behind it, and a 3270 transfer is typed at a command prompt
+      // they may need to see.
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        // `.cjs`, compiled from transferPreload.cts: an ESM preload cannot load.
+        preload: join(here, 'transferPreload.cjs'),
+      },
+    });
+    transferWin = tw;
+    // Same forwarding as the main window: a renderer that throws otherwise produces a window
+    // that does nothing with no explanation anywhere.
+    //
+    // THE DEPRECATED FIVE-ARGUMENT FORM, MATCHING THE MAIN WINDOW'S HANDLER ABOVE RATHER THAN
+    // electron.d.ts's preferred shape. Electron 44 still declares both -- `(details, level,
+    // message, line, sourceId)` with the last four marked `@deprecated` -- and `level` is a
+    // NUMBER there, where the `details.level` of the new form is a STRING ('info' | 'warning' |
+    // 'error' | 'debug'). That difference is not cosmetic for the harnesses: `shot.mjs`,
+    // `keys.mjs` and `clicks.mjs` all filter stdout on the literal `renderer[3]`, and each
+    // records that the numeric level is deprecated and will drift silently on an upgrade. Using
+    // the new shape here would print `transfer[error]` while the main window printed
+    // `renderer[3]` -- two spellings of one thing in one stream, for a window whose log nothing
+    // greps yet. One spelling, one upgrade to do when the level finally moves.
+    tw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      process.stdout.write(`transfer[${level}] ${sourceId}:${line} ${message}\n`);
+    });
+    tw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      process.stdout.write(`transfer window failed to load ${url}: ${code} ${desc}\n`);
+    });
+
+    transfer = createTransferController({
+      send: (channel, payload) => {
+        if (!tw.isDestroyed()) tw.webContents.send(channel, payload);
+      },
+      // THE WINDOW, NOT THE BUTTON, and the dep is named `focusWindow` for that reason -- see its
+      // docstring. `webContents.focus()` moves focus to no particular control; the form's only
+      // enabled control while a transfer runs IS Cancel, because `setRunning(true)` disables
+      // everything else, so bringing the window forward is the whole of the remedy. `show()`
+      // first, because a close attempt can come from a window that is behind the terminal.
+      focusWindow: () => { tw.show(); tw.focus(); },
+      openDialog: async () => {
+        // `tw` AS THE FIRST ARGUMENT IS WHAT MAKES THIS WINDOW-MODAL (the `showOpenDialog(window,
+        // options)` overload, electron.d.ts:7850), which is what closes the interleaving recorded
+        // in the AS BUILT notes: a parentless dialog leaves Start clickable while it is open, and
+        // a late resolution then lands mid-transfer. `transferUi.ts`'s post-await `isRunning`
+        // check is the primary guard for that and stays -- this is the half that stops the race
+        // being reachable at all.
+        const r = await dialog.showOpenDialog(tw, {
+          title: 'Send which file?',
+          properties: ['openFile'],
+        });
+        return r.canceled ? undefined : r.filePaths[0];
+      },
+      saveDialog: async () => {
+        const r = await dialog.showSaveDialog(tw, { title: 'Receive into which file?' });
+        // `filePath`, SINGULAR, and a STRING rather than an optional one: `SaveDialogReturnValue`
+        // (electron.d.ts:23629-23637) gives '' when the dialog was canceled, where
+        // `OpenDialogReturnValue` gives a `filePaths` array. So the `canceled` check is what
+        // distinguishes them, and returning '' would put an empty path in the form's Local file
+        // field -- erasing whatever the operator had typed, which `browseLocal` treats `undefined`
+        // as specifically meaning it must not do.
+        return r.canceled ? undefined : r.filePath;
+      },
+      startTransfer: (opts) => startTransfer({ ...opts, session, files: nodeTransferFiles }),
+      buildCommand: (keywords) => transferCommand(keywords),
+    });
+
+    // THE CLOSE GUARD. `preventDefault` on `close` is what makes an accidental Cmd-W or red
+    // button unable to abandon a running transfer; Cancel is the only route out.
+    tw.on('close', (e) => {
+      if (transfer?.shouldPreventClose() === true) {
+        e.preventDefault();
+        transfer.onCloseAttempt();
+      }
+    });
+    tw.on('closed', () => {
+      // GUARDED ON IDENTITY, because `closed` can arrive after a replacement window has already
+      // been built: `openTransferWindow` only reuses a window that is not destroyed, so a
+      // destroyed-but-not-yet-notified window would otherwise clear the NEW window's controller
+      // and leave `transfer` undefined while a form sat on screen -- every submit answered 'the
+      // transfer window is not open'. Nothing reaches `transfer = undefined` in that case now.
+      if (transferWin !== tw) return;
+      transferWin = undefined;
+      transfer = undefined;
+    });
+
+    await tw.loadFile(join(here, '..', 'transfer.html'));
+  };
+
+  /**
+   * ONE REGISTRATION PER PROCESS, for the reason given at `transferWin` above.
+   *
+   * Registered OUT HERE rather than inside `openTransferWindow`, which is the difference between
+   * working and crashing: `ipcMain.handle` throws on a second handler for the same channel, so
+   * registering them per window would die the second time the operator closed the form and
+   * pressed Ctrl-T again -- and that throw would come out of `openTransferWindow`'s promise,
+   * i.e. as an unhandled rejection with no window, which is this file's worst failure shape.
+   *
+   * They tolerate a MISSING controller rather than assuming one, because these channels outlive
+   * any particular window: the preload is only loaded by the transfer window, so in practice
+   * nothing can call them while it is closed, but a handler that threw on the way to finding out
+   * would reject the renderer's `invoke` with a stack trace instead of an answer.
+   */
+  ipcMain.handle('transfer:browse', async (_e, direction: string) =>
+    transfer === undefined ? undefined : transfer.browse(direction));
+  ipcMain.handle('transfer:submit', async (_e, keywords: readonly string[]) =>
+    transfer === undefined
+      ? { ok: false, error: 'the transfer window is not open' }
+      : transfer.submit(keywords));
+  ipcMain.on('transfer:cancel', () => { transfer?.requestCancel(); });
+
+  /**
+   * A QUIT CANCELS A RUNNING TRANSFER RATHER THAN BEING BLOCKED BY IT.
+   *
+   * The window refuses a close while running; it must not make the application unquittable.
+   * Canceling here is what tells the host to leave transfer mode -- walking away leaves its
+   * program waiting for a frame that never comes.
+   *
+   * ONE LISTENER, for the same scope reason as the handlers above: `app.on` accumulates, and a
+   * per-window registration would cancel the same transfer once per window ever opened.
+   * `shutdown` is safe to reach with nothing running, and swallows a `cancel` that throws --
+   * which it can, on a dropped session -- because a throw here would be the unquittable app this
+   * hook exists to prevent.
+   */
+  app.on('before-quit', () => { transfer?.shutdown(); });
+
+  /**
    * Compute the DRAW LIST here and send that, rather than sending the snapshot.
    *
    * `drawList` needs core's palette and code page, and a browser cannot resolve a bare
@@ -363,6 +528,16 @@ app.whenReady().then(async () => {
     // display decision, and this is the front end that owns this display. Recomputing the frame is
     // what makes the window resize, since `fit` sizes from the draw list.
     if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
+    // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
+    // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own
+    // business. A front end that forgot this arm would die on the keystroke rather than being
+    // silently inert -- which is the property that throw exists to give.
+    //
+    // `void`, NOT AWAITED, and the handler is deliberately not `async`: this is a fire-and-forget
+    // UI action, and making the listener async would swallow a `loadFile` failure into an
+    // unhandled rejection. The window reports its own load failures through the `did-fail-load`
+    // forwarding above, which is where a diagnosis belongs.
+    if (action.kind === 'transferForm') { void openTransferWindow(); return; }
     applyAction(session, action);
     send();
   });

@@ -99,24 +99,21 @@ describe('actionForKey', () => {
       'Ctrl-D': ev({ key: 'd', code: 'KeyD', ctrlKey: true }),
       'Ctrl-F': ev({ key: 'f', code: 'KeyF', ctrlKey: true }),
       'Ctrl-K': ev({ key: 'k', code: 'KeyK', ctrlKey: true }),
+      // Ctrl-T joins them: the GUI now HAS the dialog, so the exemption below is gone and this
+      // chord is checked against `BINDING_INTENT` like every other.
+      'Ctrl-T': ev({ key: 't', code: 'KeyT', ctrlKey: true }),
     };
     // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
     // written reason does not type-check. The hole this replaced was exactly an unexamined
     // one-line dismissal ("Alt-1, a terminal-only spelling" -- it is not), so "you must say
     // why" is enforced by the shape rather than by a comment asking nicely. NO LONGER EMPTY.
-    const TERMINAL_ONLY: Readonly<Record<string, string>> = {
-      // The chord exists and is bound in the TUI; the canvas front ends have nowhere to put the
-      // form yet. Porting it is stage 3 of the transfer work, and THIS ENTRY IS WHAT SHOULD BE
-      // DELETED when that lands -- the `checked` count below then goes back up by one, so the
-      // exemption cannot be forgotten silently.
-      //
-      // NOTE the keypad button is a different matter and already works: `KEYPAD_KEYS` carries
-      // `Xfer`, so a click produces `{ kind: 'transferForm' }` in both canvas front ends today.
-      // What is missing is the DIALOG, not the action -- which is why the web gateway swallows
-      // the kind (`web/src/main.ts`) rather than letting `applyAction` throw into a socket
-      // handler and take every session down with it.
-      'Ctrl-T': 'the GUI has no transfer dialog yet -- stage 3 of the transfer work',
-    };
+    // NOW EMPTY AGAIN, and `Ctrl-T` is why. Its exemption said in as many words that it "SHOULD BE
+    // DELETED when that lands", so this is that deletion: the GUI has a transfer window, `keys.ts`
+    // maps the chord, and `checked` goes back up by one -- which is the mechanism that stopped the
+    // exemption being forgotten silently. The entry had become actively WRONG rather than merely
+    // stale: it claimed the canvas front ends had nowhere to put the form, and for one commit
+    // between Task 7's window and this fix the GUI had the window and not the keystroke.
+    const TERMINAL_ONLY: Readonly<Record<string, string>> = {};
     let checked = 0;
     for (const b of BINDING_INTENT) {
       const key = named[b.key];

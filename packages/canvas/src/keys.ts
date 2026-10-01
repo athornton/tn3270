@@ -77,6 +77,24 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   d: { kind: 'dup' },
   f: { kind: 'fieldMark' },
   k: { kind: 'toggleKeypad' },
+  /**
+   * Ctrl-T, the transfer form -- `BINDING_INTENT`'s own spelling, now that the GUI has a dialog.
+   *
+   * THE GUI HAD THIS CHORD DEAD WHILE THE WINDOW WORKED, which is how this was found: a real
+   * Electron run with `TN3270_GUI_KEYS=Ctrl+T` printed `keys: sent Ctrl+T` and NO `action:` line
+   * at all, where a click on the `Xfer` keypad button opened the window fine. The keypad route
+   * went through `KEYPAD_KEYS` and never through this table, so the one that was missing was also
+   * the one no harness drove.
+   *
+   * ACCEPTED BY THE WEB FRONT END TOO, since this mapper is shared, and that is safe rather than
+   * merely tolerable: `protocol.ts:129-131` REJECTS the kind at decode with a per-client `error`
+   * frame, and `web/src/main.ts:151-154` answers a decode failure on that one socket without
+   * touching the session or the process. The browser could already produce this kind from the
+   * `Xfer` button it draws today, so this adds a second route to an answer that already exists --
+   * no new failure mode, and the refusal names its reason. When stage 4 gives the gateway a
+   * transfer path that rejection becomes an interception, and this entry needs no change.
+   */
+  t: { kind: 'transferForm' },
 });
 
 /** Physical digit keys that carry the PA keys when Alt is held. Same shape as CTRL. */
