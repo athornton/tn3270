@@ -101,8 +101,26 @@ const HOST_FILE = 'HARNESS.DATA';
  * "already open" while nothing in `main.ts` had opened anything, so the whole scenario would have
  * printed nothing at all. The window is opened by the PRESENCE of this variable instead, which is
  * one fact in one place.
+ *
+ * ## REAL FIELD IDS -- `localFile`/`hostFile` -- AND NOT THE PLAN'S `path`/`host`
+ *
+ * MEASURED, and it is the sharpest finding of this task. With the plan's step names the run printed
+ *
+ *     transfer window: path=
+ *     transfer window: host=tso
+ *
+ * `path` is not a field id at all, so `setFieldText` missed in `FIELD_BY_ID`, returned the state
+ * untouched, and the local path was never set. Worse, `host` IS a field id -- the TSO/VM CYCLE field
+ * -- so `ui.type` was asked to put `HARNESS.DATA` into it; `setFieldText` refuses a cycle field, and
+ * the echo came back `tso`, the value that was always there. A seam with an alias table would have
+ * had to translate `host` to `hostFile`, i.e. hold a second copy of the field names, and it would
+ * have been WRONG IN A WAY THAT LOOKED RIGHT: a plausible-looking `host=` line, from a form where
+ * nothing had been typed.
+ *
+ * The ids come straight from `TRANSFER_FIELDS`, so there is no table to drift. This is also what
+ * made the echo worth having: without it both steps reported success.
  */
-const STEPS = `path=${LOCAL},host=${HOST_FILE},submit`;
+const STEPS = `localFile=${LOCAL},hostFile=${HOST_FILE},submit`;
 
 /**
  * HOW MANY ROWS THE FORM MUST DRAW, as a literal with its derivation written down.

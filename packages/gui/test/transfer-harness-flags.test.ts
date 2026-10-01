@@ -102,7 +102,15 @@ describe('the transfer harness', () => {
     // And the scenario must still FILL THE FORM AND SUBMIT. A STEPS that lost its `submit` would
     // leave the two field checks passing and the submit check failing, which reads as a broken
     // controller rather than as the truncated scenario it is.
-    expect(harness).toMatch(/const STEPS = `path=\$\{LOCAL\},host=\$\{HOST_FILE\},submit`/);
+    //
+    // REAL FIELD IDS, which is the one thing here that was measured rather than reasoned. The plan
+    // for this task used `path=` and `host=`, and the run printed `path=` (empty -- not a field id,
+    // so `setFieldText` missed and the local path was never set) and `host=tso` (`host` IS a field
+    // id, the TSO/VM CYCLE field, which refuses a text edit and echoed back the value that was
+    // always there). A plausible-looking line from a form where nothing had been typed.
+    expect(harness).toMatch(
+      /const STEPS = `localFile=\$\{LOCAL\},hostFile=\$\{HOST_FILE\},submit`/,
+    );
   });
 
   it('bounds the run, because a client that does not exit would HANG it forever', () => {

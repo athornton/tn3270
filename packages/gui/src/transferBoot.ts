@@ -253,3 +253,67 @@ startBtn.addEventListener('click', () => { void ui.start(); });
 cancelBtn.addEventListener('click', () => { ui.requestCancel(); });
 bridge.onProgress((text) => { ui.progress(text); });
 bridge.onDone((r) => { ui.finished(r); });
+
+/**
+ * TWO HOOKS FOR THE HARNESS, and nothing else on `window`.
+ *
+ * `executeJavaScript` is how main drives this window without a mouse, the same way
+ * `__tn3270ButtonCenter` lets `clicks.mjs` click a keypad button by label (`canvas/src/renderer.ts`).
+ * They go through the SAME `ui` object a real click does, so a scenario cannot pass while the wiring
+ * is broken -- which is exactly what a hook that manipulated the DOM directly would allow.
+ *
+ * ## THEY ADD NO DECISION TO THIS FILE, WHICH WAS THE CONSTRAINT
+ *
+ * This module's discipline is that it holds no decision worth testing, because no test can reach it.
+ * The plan for these hooks broke that: its `__tn3270Submit` inferred success by STRING-MATCHING the
+ * status line for `'transferring'` -- a literal duplicated out of `transferUi.ts`, a judgement about
+ * what the form means, and unreachable by any test. `ui.running()` answers the same question
+ * directly, is a method on the object already in hand, and is unit-tested at its own end
+ * (`transferUi.test.ts`). So both hooks only READ `ui` and the DOM; nothing here decides anything.
+ *
+ * ## EACH RETURNS WHAT THE MODEL ACTUALLY HOLDS, NOT WHAT IT WAS ASKED FOR
+ *
+ * `__tn3270SetField` returns `ui.values()[id]` AFTER the edit, so a value the model refused -- a
+ * non-digit into `Lrecl`, a cycle field, an id outside `TransferFieldId` -- comes back as what is
+ * really there and the seam's report says so. A hook returning `void` would let a scenario pass over
+ * a form that ignored every step.
+ *
+ * `__tn3270Submit` returns `running()` AND the status text: `running()` is the fact, and the text is
+ * WHICH refusal, which is what distinguishes `not in 3270 mode` from a validator complaint from 'the
+ * transfer window is not open'. Both come from the same places a user reads.
+ */
+declare global {
+  interface Window {
+    __tn3270SetField(id: string, text: string): string;
+    __tn3270Submit(): Promise<{ ok: boolean; status: string }>;
+  }
+}
+
+window.__tn3270SetField = (id: string, text: string): string => {
+  /**
+   * THE CAST IS UNAVOIDABLE AND IT IS NARROW. `executeJavaScript` hands over a `string` -- the
+   * boundary is JSON over IPC, where no union survives -- so something has to assert it, and
+   * asserting it here is better than widening `TransferUi.type` to take any string and losing the
+   * union everywhere else.
+   *
+   * IT IS NOT UNCHECKED, which is what makes it safe: `setFieldText` looks the id up in
+   * `FIELD_BY_ID` and returns the state UNTOUCHED when it misses (`transferForm.ts:142-143`), and
+   * `values()[id]` on an unknown key is `undefined`. So a bad id is a visible empty echo rather than
+   * a crash or a silent success.
+   */
+  ui.type(id as TransferFieldId, text);
+  return ui.values()[id as TransferFieldId] ?? '';
+};
+
+window.__tn3270Submit = async (): Promise<{ ok: boolean; status: string }> => {
+  await ui.start();
+  /**
+   * `ui.running()` IS THE ANSWER, and the status line is only the explanation.
+   *
+   * `start()` sets `isRunning` true only after `deps.submit` came back `ok` (`transferUi.ts`), so
+   * this is the same fact the form's own enablement is driven from rather than a reading of its
+   * prose. The status text is read second, for the diagnosis.
+   */
+  const status = document.querySelector('#status')?.textContent ?? '';
+  return { ok: ui.running(), status };
+};

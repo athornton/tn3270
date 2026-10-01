@@ -130,6 +130,37 @@ const SEAM = Object.freeze({
    * straight back off. So the caller shows the keypad; this seam only clicks.
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
+  /**
+   * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
+   * window without a mouse.
+   *
+   * Comma-separated steps, applied in order, so one variable expresses a whole scenario and the
+   * harness needs no IPC of its own. Like `TN3270_GUI_CLICKS` it names WHAT to do rather than where
+   * to click: a coordinate list would be a second copy of the layout and would pass while the
+   * layout was wrong.
+   *
+   * ITS PRESENCE IS WHAT OPENS THE WINDOW, and the plan for this seam had an `open` STEP instead --
+   * which nothing would have consumed. Its loop skipped `open` with "already open" while nothing in
+   * this file had opened anything, so the whole scenario would have printed nothing at all. One
+   * fact, one place.
+   *
+   * A STEP THIS FILE DOES NOT RECOGNISE IS REPORTED, not ignored, the same way `clicks: NO BUTTON`
+   * reports a label that is not in the layout: a typo would otherwise present as a field that never
+   * got set, which reads as a broken form.
+   */
+  transfer: process.env['TN3270_GUI_TRANSFER'] ?? '',
+  /**
+   * What the native file dialog should return, INSTEAD OF SHOWING.
+   *
+   * Separate from `transfer` above because it substitutes a MODAL, and a modal nobody can click
+   * does not fail -- it HANGS, which is the failure shape this project has met in four other
+   * places. Empty means show the real dialog.
+   *
+   * ONE VALUE FOR BOTH DIRECTIONS, which is honest about what it is: a stub for a chooser, not a
+   * model of one. A scenario that needed an Open and a Save to answer differently would need two
+   * variables, and no scenario does.
+   */
+  transferPath: process.env['TN3270_GUI_TRANSFER_PATH'] ?? '',
 });
 
 /** Turn any startup failure into something a person can act on. */
@@ -359,6 +390,9 @@ app.whenReady().then(async () => {
       // first, because a close attempt can come from a window that is behind the terminal.
       focusWindow: () => { tw.show(); tw.focus(); },
       openDialog: async () => {
+        // THE STUB SUBSTITUTES THE WHOLE DIALOG, never merely its default. A real modal under Xvfb
+        // has nobody to click it and would HANG the harness -- a stall, not an error.
+        if (SEAM.transferPath !== '') return SEAM.transferPath;
         // `tw` AS THE FIRST ARGUMENT IS WHAT MAKES THIS WINDOW-MODAL (the `showOpenDialog(window,
         // options)` overload, electron.d.ts:7850), which is what closes the interleaving recorded
         // in the AS BUILT notes: a parentless dialog leaves Start clickable while it is open, and
@@ -372,6 +406,8 @@ app.whenReady().then(async () => {
         return r.canceled ? undefined : r.filePaths[0];
       },
       saveDialog: async () => {
+        // Same stub, same reason as `openDialog` above.
+        if (SEAM.transferPath !== '') return SEAM.transferPath;
         const r = await dialog.showSaveDialog(tw, { title: 'Receive into which file?' });
         // `filePath`, SINGULAR, and a STRING rather than an optional one: `SaveDialogReturnValue`
         // (electron.d.ts:23629-23637) gives '' when the dialog was canceled, where
@@ -428,6 +464,31 @@ app.whenReady().then(async () => {
     });
 
     await tw.loadFile(join(here, '..', 'transfer.html'));
+    await driveTransferWindow(tw);
+  };
+
+  /**
+   * THE SIXTH SEAM'S ENTRY POINT: open the transfer window because `TN3270_GUI_TRANSFER` is set.
+   *
+   * A WRAPPER RATHER THAN A CALL AT EACH SITE, so the "is the seam active?" question is asked in one
+   * place. `main.ts`'s own `SEAM` docstring records why that matters: three places once asked "is
+   * the keys seam active?" with their own inline emptiness checks, agreed only by coincidence, and
+   * one of them was the gate keeping a typed password off stdout.
+   *
+   * CALLED FROM THE REPLAY AND LIVE PATHS, after the input seams and before `maybeCapture`. Not from
+   * the URL branch: there is no `Session` there, no `openTransferWindow` in scope, and
+   * `TN3270_GUI_CLICKS` is ignored in that mode for the same reason -- an untested call site is a
+   * claim this file has not earned.
+   *
+   * AFTER the keys, which matters for composition rather than for this seam alone: `keys.mjs` sends
+   * a real Ctrl+T, and that opens the window through the `action` handler. Reaching here afterwards
+   * finds the window already open, `openTransferWindow` shows and focuses it, and `driveTransferWindow`
+   * is NOT re-entered -- it runs from the `loadFile` path only. A chord run therefore cannot be
+   * driven by this seam, which is correct: `keys.mjs` sets no `TN3270_GUI_TRANSFER`.
+   */
+  const maybeOpenTransferWindow = async (): Promise<void> => {
+    if (SEAM.transfer === '') return;
+    await openTransferWindow();
   };
 
   /**
@@ -604,6 +665,7 @@ app.whenReady().then(async () => {
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win);
+    await maybeOpenTransferWindow();
     await maybeCapture(win);
     await quitIfKeysOnly();
     return;
@@ -621,6 +683,7 @@ app.whenReady().then(async () => {
 
   await maybeSendKeys(win);
   await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
+  await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
 });
@@ -801,6 +864,133 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
     await new Promise((r) => setTimeout(r, 120));
   }
   process.stdout.write(`clicks: sent ${SEAM.clicks}\n`);
+}
+
+/**
+ * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
+ * window, and reports what it did.
+ *
+ * ## WHAT IT COVERS THAT NOTHING ELSE CAN
+ *
+ * A second `BrowserWindow`, its own preload bridge, `transfer.html`'s IMPORT MAP, every line of
+ * `transferBoot.ts`, and the `transfer:submit` hop into the controller. None of that is reachable
+ * from vitest: `transferBoot.ts` needs a `document` and there is none under `environment: 'node'`,
+ * this file cannot be imported at all, and no fake DOM can fail to resolve a module specifier.
+ * `transferUi.ts`'s docstring names this seam's harness as the only thing that can see a
+ * blank-window-with-no-error -- which this branch shipped once already, as a TDZ read in
+ * `transferBoot.ts`.
+ *
+ * ## STEPS, NOT COORDINATES, AND THE ECHO IS THE MODEL'S OWN VALUE
+ *
+ * Each step names a FIELD BY ID and goes through `window.__tn3270SetField`, which calls the same
+ * `ui.type` a keystroke does. The line printed back carries `ui.values()[id]` rather than the
+ * string this function handed over, so a value the MODEL REFUSED cannot be reported as set -- a
+ * non-digit into `Lrecl`, a cycle field, an id that is not in the table. A seam that echoed its own
+ * input would pass while the form ignored it.
+ *
+ * ## EVERY LINE HERE IS GATED, AND THAT IS A PRIVACY RULE RATHER THAN TIDINESS
+ *
+ * A `localFile=` line carries a PATH, in a window opened in front of a live logged-on session. The
+ * same argument gates the action log (see `logActions`) and keeps goldens away from live logons.
+ *
+ * THE GATE IS THE EARLY RETURN BELOW AND NOTHING ELSE -- one `if` ahead of every write, rather than
+ * a condition on each. That is deliberate: a per-line gate is a thing each new line has to
+ * remember, and the one that forgets is the one that prints a path. A whole FUNCTION that is not
+ * entered is structural. `transferSeam.test.ts` pins it by reading this file as text, since nothing
+ * can import it.
+ *
+ * NOT GATED ON REPLAY MODE, unlike `logActions`, and the asymmetry is reasoned. That gate exists
+ * because `TN3270_GUI_KEYS` is used against live hosts and `keys.ts` builds a `type` action
+ * carrying typed text for every printable keypress -- so the seam variable alone says nothing about
+ * what is on screen. This seam has no such life: it is set by a harness, the paths it prints are
+ * the harness's own, and requiring replay would make it unable to ever drive a real transfer by
+ * hand -- which is the thing a human would most want it for.
+ */
+async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
+  if (SEAM.transfer === '') return;
+  process.stdout.write('transfer window: opened\n');
+  /**
+   * THE FIELD COUNT FIRST, BEFORE ANY STEP RUNS.
+   *
+   * This is the blank-window check, and it describes the form AS FIRST DRAWN, which is what "did it
+   * render" means. The plan for this seam printed it LAST, after the submit, where the number
+   * describes whatever the submit left behind and a reader has to know which -- and where a
+   * scenario that crashed mid-way would print no count at all, losing the one line that says the
+   * window is not blank.
+   */
+  const rows = await tw.webContents.executeJavaScript(
+    'document.querySelectorAll("#fields .row").length',
+  ) as number;
+  process.stdout.write(`transfer window: fields=${rows}\n`);
+
+  for (const step of SEAM.transfer.split(',')) {
+    /**
+     * SPLIT ON THE FIRST `=` ONLY, KEEPING THE REMAINDER -- and `split('=', 2)` DOES NOT DO THAT.
+     *
+     * The plan for this seam used it. JavaScript's second argument is a LIMIT ON THE OUTPUT, not
+     * Python's maxsplit: `'path=/tmp/a=b'.split('=', 2)` is `['path', '/tmp/a']`, silently
+     * discarding `=b`. Verified under node. So a Windows path, or any value containing `=`, would
+     * have been TRUNCATED and the field set to a prefix -- and the echoed line would have agreed
+     * with the truncation, because it reports what the model holds. `indexOf` plus `slice` keeps
+     * the remainder whole.
+     */
+    const at = step.indexOf('=');
+    const name = at < 0 ? step : step.slice(0, at);
+    const value = at < 0 ? undefined : step.slice(at + 1);
+
+    if (name === 'submit') {
+      const r = await tw.webContents.executeJavaScript('window.__tn3270Submit()') as
+        { ok: boolean; status: string };
+      // THE FORM'S OWN STATUS LINE, which is what a user would see and what distinguishes a
+      // validator complaint from `not in 3270 mode` from 'the transfer window is not open'. `ok`
+      // alone is satisfied by all three, i.e. by the form never having been filled in.
+      process.stdout.write(`transfer window: submit -> ok=${r.ok} status=${r.status}\n`);
+      continue;
+    }
+    if (value === undefined) {
+      // REPORTED, not ignored, for the reason `SEAM.transfer`'s docstring gives.
+      process.stdout.write(`transfer window: UNKNOWN STEP ${step}\n`);
+      continue;
+    }
+    /**
+     * THE FIELD ID IS NOT VALIDATED HERE, and that is the renderer's job rather than an omission.
+     * `__tn3270SetField` returns what the model holds afterwards, so an id outside
+     * `TransferFieldId` comes back as the empty string and the echo below says so -- a line reading
+     * `localFil=` is a visible failure, where a list of legal ids in this file would be a second
+     * copy of `TRANSFER_FIELDS` that could agree with itself while the form disagreed.
+     */
+    const held = await tw.webContents.executeJavaScript(
+      `window.__tn3270SetField(${JSON.stringify(name)}, ${JSON.stringify(value)})`,
+    ) as string;
+    process.stdout.write(`transfer window: ${name}=${held}\n`);
+  }
+
+  /**
+   * THE RUN HAS TO END ITSELF, and `quitIfKeysOnly` will not do it: it returns early unless the
+   * keys or clicks seam is set, so a transfer-only run reaches the end of `app.whenReady()`'s
+   * callback with two windows open and SITS THERE until something kills it. Measured before this
+   * line existed: the harness burned its full 120-second timeout, which is the stall-rather-than-
+   * fail shape this file keeps writing comments about.
+   *
+   * NOT FOLDED INTO `quitIfKeysOnly`, deliberately. That function is reached from three places on
+   * the main window's paths, all AFTER `maybeCapture`; this seam runs inside `openTransferWindow`,
+   * which is called from the `action` handler and from Ctrl-T -- i.e. at a time nothing in those
+   * paths is waiting. Widening its condition would make it quit from whichever path happened to
+   * reach it first, which for a `transferForm` action is a race with the scenario still running.
+   *
+   * THE DRAIN IS NOT OPTIONAL, and `quitIfKeysOnly` has the measurement: writing to a PIPE is
+   * asynchronous, and with no drain output stops at one 64000-byte buffer with the last line GONE,
+   * three runs out of three. Everything this function prints is what the harness scores, and the
+   * `submit ->` line is the LAST of them.
+   *
+   * A SHOT RUN IS LEFT ALONE, so the two seams compose rather than racing: `maybeCapture` quits
+   * when it has its picture, and quitting here first would leave a zero-byte PNG. That is also what
+   * makes the privacy check in the AS BUILT notes runnable -- a `TN3270_GUI_SHOT` run with this
+   * variable unset prints nothing and exits on its own.
+   */
+  if (SEAM.shot !== '') return;
+  await new Promise<void>((r) => { process.stdout.write('', () => { r(); }); });
+  app.quit();
 }
 
 /**
