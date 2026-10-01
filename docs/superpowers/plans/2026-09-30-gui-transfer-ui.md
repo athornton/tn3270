@@ -2146,8 +2146,9 @@ now warns about.
 **STILL UNTESTABLE HERE, AND TASK 8 IS WHAT MUST CATCH IT: the import map is load-bearing and no unit
 test in `packages/gui` executes it.** The window must be LOADED and seen to paint.
 
-**A DIVERGENCE THIS WORK CREATED IN THE TUI, found by the review and confirmed by measurement — NOT
-fixed, and out of scope for this plan.** `app.ts:1096-1103` sets `transferPhase = 'running'` without
+**A DIVERGENCE THIS WORK CREATED IN THE TUI, found by the review and confirmed by measurement —
+~~NOT fixed, and out of scope for this plan~~. FIXED 2026-10-01 on the user's instruction, before the
+merge; see the note at the end of this section for how.** `app.ts` set `transferPhase = 'running'` without
 touching `transferState.error`, so the TUI now carries the bug the GUI just fixed. **Its blast radius
 is WORSE, not narrower:** `statusLine` recomputes from the phase on every draw and `state.error`
 outranks the phase (`transferOverlay.ts:148`), so a stale error shadows the `transferring` line **for
@@ -2157,6 +2158,19 @@ directly:** with `error: 'keyboard locked'` and `phase: 'running'`, `statusLine`
 intervening edit** — submit while the keyboard is locked, the host clears the lock, press Enter again;
 nothing called `setFieldText`, so nothing cleared the error. The fix belongs beside those lines rather
 than in `statusLine`, so both front ends clear it at the same moment.
+
+**AS FIXED, 2026-10-01 (the user asked for it before the merge):** the clear went beside the
+`transferPhase = 'running'` assignment, exactly where the note above predicted. **The test is the
+interesting part, because the obvious one does not work:** `app.test.ts`'s existing
+*RUNS a valid submit* already asserts `transferError` is `undefined`, and it passed throughout — it
+submits on a **fresh** form where the error was never set, so it cannot distinguish "cleared" from
+"never set". [[check-what-a-comparison-covers]]. The new test instead spies `is3270Mode` to `false`,
+submits (getting a genuine `not in 3270 mode` refusal and asserting it arrived), flips the spy back,
+and presses Enter again **with nothing typed between** — which is the whole point, since
+`setFieldText`/`cycleField` write `error: undefined` and any accepted edit would have cleared it by
+accident. **A TRANSIENT refusal is what makes this reachable**, and it is why the fix cannot be left
+to the next keystroke. Mutation-verified with the sed's landing confirmed by `diff` first: removing
+the clear reddens exactly that one test, 1 failed / 96 passed.
 
 ### Tasks 4-5, 2026-10-01
 
@@ -2468,7 +2482,7 @@ send rather than only those during a submit broke a normal-path test. Both are n
 ## Verification checklist for the whole plan
 
 **ALL TICKED, re-measured on `0414f96` (branch `gui-transfer-ui`, 17 commits), 2026-10-01 — after the
-final review's fixes. The numbers below supersede the 15-commit run: 2252 tests in 89 files (from
+final review's fixes. The numbers below supersede the 15-commit run: 2253 tests in 89 files (from
 2239 in 88) and `transfer.mjs` 10/10 (from 9/9, the new check being a field edit after a refused
 submit, confirmed to discriminate at 8/10 against a mutated renderer in the real window). Three of the
 predicted numbers were WRONG and are corrected in place rather than quietly satisfied** — the test
@@ -2478,7 +2492,7 @@ replaced.
 
 - [x] `npm run build` clean — exit 0
 - [x] `npm run typecheck` clean — exit 0 (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
-- [x] `npx vitest run` — **2252 tests in 89 files**, up from **2157 in 82**. *(The plan predicted
+- [x] `npx vitest run` — **2253 tests in 89 files**, up from **2157 in 82**. *(The plan predicted
       2184 in 86 from a 2156/82 baseline: the baseline was one low, and seven more test FILES and
       sixty-odd more tests exist than it budgeted for, because the plan's defects needed pinning —
       the last file being the composed-seam test the final review showed was missing.)*

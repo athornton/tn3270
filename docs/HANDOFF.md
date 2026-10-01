@@ -12,7 +12,7 @@ equalled `main` exactly, per the standing rule. **THE NEXT ACTION IS THE MERGE D
 *Finishing the GUI transfer branch* below for what has and has not been gated.
 
 **State: branch `gui-transfer-ui`, tree clean, no stashes. `main` is at `9d5fb42`, pushed,
-untouched. 2252 tests in 89 files (from 2157 in 82), build and typecheck clean.** The last commit
+untouched. 2253 tests in 89 files (from 2157 in 82), build and typecheck clean.** The last commit
 is the pre-merge review's three fixes — two operator-visible defects at the IPC seam plus the
 composed test that catches them; see *Finishing the GUI transfer branch*.
 
@@ -25,7 +25,8 @@ message now gives the *durable* reason rather than the expired one — see below
 ## Finishing the GUI transfer branch
 
 **WHAT IS GATED, re-measured after the pre-merge review fixes:** build and typecheck clean;
-**2252 tests in 89 files** (was 2239 in 88 — the new file is `gui/test/transferSeamIpc.test.ts`);
+**2253 tests in 89 files** (was 2239 in 88 — the new file is `gui/test/transferSeamIpc.test.ts`, and
+the last test is the TUI stale-error fix);
 `shot.mjs` 3/3; `transfer.mjs` **10/10** (was 9/9 — one new check, see below);
 `keys.mjs` **19 chords/17 actions**; `clicks.mjs` 9 buttons/10 actions; `browser-shot.mjs` 2/2;
 `browser-keys.mjs` 13 chords/11 actions; `pty-smoke.py` 12/12.
@@ -142,14 +143,20 @@ before re-deriving anything.** The five worth knowing cold, because each would h
 a DFT transfer is silent until it finishes. The plan's "the window reports progress either way"
 would have been a false claim in the README. **A silent DFT transfer is normal, not a hang.**
 
-**A DIVERGENCE THIS WORK CREATED IN THE TUI AND DID NOT FIX:** `app.ts` leaves `transferState.error`
-set on its success path, and there the stale error shadows the status line for the **whole** running
-transfer and the `done:` line after it — **worse than the GUI's was**, because `statusLine`
-recomputes from the phase every draw and `error` outranks it. Reproduced directly: with
-`error: 'keyboard locked'` and `phase: 'running'`, `statusLine` returns `"keyboard locked"`.
-**Reachable with no intervening edit** — submit while the keyboard is locked, the host clears it,
-press Enter again. The fix belongs beside `app.ts:1096-1103`, not in `statusLine`, so both front
-ends clear it at the same moment.
+**A DIVERGENCE THIS WORK CREATED IN THE TUI, ~~AND DID NOT FIX~~ — FIXED 2026-10-01 on the user's
+instruction, before the merge.** `app.ts` left `transferState.error` set on its success path, and
+there the stale error shadowed the status line for the **whole** running transfer and the `done:`
+line after it — **worse than the GUI's was**, because `statusLine` recomputes from the phase every
+draw and `error` outranks it. Reproduced directly: with `error: 'keyboard locked'` and
+`phase: 'running'`, `statusLine` returned `"keyboard locked"`.
+**Reachable with no intervening edit** — submit while the keyboard is locked or the session is
+briefly not in 3270 mode, let the condition clear, press Enter again. **That is what makes it
+reachable at all:** `setFieldText`/`cycleField` both write `error: undefined`, so any *accepted* edit
+clears the message by accident, and only a transient refusal needs no edit to recover from.
+**Fixed beside the `transferPhase = 'running'` assignment, not in `statusLine`, so both front ends
+clear it at the same moment** — the GUI does it at the same point in `transferUi.ts`'s `start()`.
+**Pinned by a test that flips `is3270Mode` mid-test and submits twice with nothing typed between**,
+mutation-verified: removing the clear reddens exactly that one test and nothing else.
 
 **TWO NUMBERS IN THE PLAN HAD ALREADY EXPIRED when it was executed**, which is worth expecting
 rather than discovering: the baseline was 2157 in 82 and not 2156 in 82, and
