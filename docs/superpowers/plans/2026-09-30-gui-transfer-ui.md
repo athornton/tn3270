@@ -2327,17 +2327,109 @@ both the failing and passing transcripts. **STILL NOT PROVEN: those runs use a f
 `startTransfer`, so they show `cancel` is REACHED and not that the right bytes hit the wire.** A GUI
 transfer interrupted by closing the terminal window has never been watched against a live host.
 
+### Tasks 8-10, 2026-10-01 — and the plan is COMPLETE
+
+**THE HARNESS AS WRITTEN WOULD HAVE HUNG FOREVER, which is the failure its own docstring warns
+about.** Nothing made the client exit under a transfer-only seam — `quitIfKeysOnly` returns early
+unless the keys or clicks seam is set — so the plan's `spawn` + `child.on('close')` would have waited
+on a process holding two windows open. Fixed at both ends: `spawnSync` with a timeout (the house
+pattern), and the seam quits itself after the measured pipe drain, leaving a `SHOT` run alone so the
+two compose.
+
+**AND THE PLAN'S TRACE PATH IS A FILE THAT EXISTS BUT IS THE WRONG ONE, so a wrong choice here would
+have been silent.** `x3270/tso-query-reply.txt` is real, which is what makes it dangerous; the
+fixtures README says it "would be meaningless as a replay fixture" and it carries no negotiation, so
+it replays as a **blank screen**. Uses `traces/synthetic-ispf-like.trace`, as the other three
+harnesses do.
+
+**TWO OF THE PLAN'S CHECKS PASS VACUOUSLY — on EMPTY OUTPUT, which is the one case a harness must
+never score as success.** `/^(?!.*transfer window failed to load).*$/s.test('')` is **`true`**, so a
+process that printed nothing passed the `no did-fail-load` check. And **`fields=\d+` matches
+`fields=0`**, which is *precisely* the blank window this harness exists to catch. The count is now
+asserted exactly (6 applicable rows) and the lookahead is paired with positive evidence.
+
+**THE PLAN'S SCENARIO STEPS NAME FIELDS THAT DO NOT EXIST, AND THE FAILURE IS A PLAUSIBLE PASS.**
+`path=` and `host=` are not field ids. Measured: `path=` echoed **empty**, and `host=` echoed
+**`tso`** — because `host` is the TSO/VM **cycle** field, not the host filename. So
+`host=HARNESS.DATA` would have printed a confident line from a form where **nothing was typed**, and
+the `open` step was consumed by nothing at all. The steps are now the real ids, `localFile` and
+`hostFile`, which also removes the translation table a renaming would have had to keep in sync.
+`split('=', 2)` was wrong too — **JS limits the OUTPUT, not the number of splits**, so
+`path=/tmp/a=b` yields `['path','/tmp/a']` and any value containing `=` is truncated. Uses
+`indexOf`/`slice`.
+
+**`__tn3270Submit` INFERRED SUCCESS BY STRING-MATCHING THE STATUS TEXT.** That duplicated the
+`'transferring'` literal from `transferUi.ts`, put a decision in the file whose whole discipline is
+to hold none, and was untestable. It calls `ui.running()` — which answers the same question
+directly — and still returns the status text to say *which* refusal.
+
+**A TRAP IN THE GUARD TESTS THEMSELVES, hit twice: three assertions reddened against a CORRECT
+harness, because the harness documents the spellings it REJECTS** and a source-text grep cannot tell
+a rejected spelling in a comment from a live one. Resolved with a comment-stripped view rather than
+by deleting the explanations.
+
+**THE PLAN'S README TEXT OVERSTATED THE CLOSE GUARD AND WOULD HAVE BEEN FALSE.** "While a transfer is
+running the window refuses to close" is true only of the window's **own** `close`. Closing the
+terminal window never fires it, `Cmd-Q` goes through `before-quit`, and a session drop through a
+third listener. The README names the three paths separately.
+
+**AND AN ASYMMETRY NOBODY HAD WRITTEN DOWN: DFT REPORTS NO PROGRESS AT ALL.** `onProgress` is called
+from exactly one place — the **CUT** frame handler, `transferRun.ts:323` — so a DFT transfer is
+silent until it completes. The plan's "the window reports progress either way" would have shipped as
+a false README claim. **A silent DFT transfer is normal, not a hang**, and the README now says so.
+
+**THE GATEWAY'S REFUSAL HAD EXPIRED AND NOTHING PINNED IT.** No test asserted the old wording:
+`integration.test.ts`'s `REFUSED` loop checks only `toContain(kind)`, which both messages satisfy, so
+**the suite stayed green through the change** — the failure mode itself. A test now pins the reason,
+mutation-verified by restoring the old string.
+
+**AND THE PLAN'S JUSTIFICATION FOR THROWING THERE IS FALSE.** It says an unhandled throw "ends the
+gateway process and every other operator's session with it." `web/src/main.ts:151-154` wraps
+`decodeClientMessage` and answers **every** decode failure with a per-socket error frame and a
+`return`. **The real hazard is one line lower — `applyAction` at `main.ts:228` sits outside any try
+inside a socket data handler** — which is exactly why `toggleKeypad` needs an interception and
+`transferForm` does not. So throwing at decode is the **safe** half. `canvas/src/keys.ts:89-95` had
+already recorded the right answer and the plan contradicted it.
+
+**SIX STALE README CLAIMS, more than the plan anticipated** — including `keys.mjs` documented as
+18 chords/16 actions (it is 19/17) and the test count in two places. [[readme-audits-find-real-defects]]
+again: checking docs against code finds real defects, and some of them are hours old.
+
+**THE SAME MISTAKE THIS PLAN KEEPS PUNISHING, MADE ONCE MORE AND CAUGHT:** the broken `path=`/`host=`
+step names were fixed in the code and left standing in two `main.ts` docstrings. Amended.
+[[summary-lines-outlive-their-corrections]] — the fix reaches the body and not the summary.
+
 ## Verification checklist for the whole plan
 
-- [ ] `npm run build` clean
-- [ ] `npm run typecheck` clean (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
-- [ ] `npx vitest run` — **2184** tests in 86 files, up from **2157 in 82** (the plan was written
-      against 2156/82 and the ellipsis-ligature fix added one; see the AS BUILT note)
-- [ ] `node packages/gui/scripts/shot.mjs` — 3/3, after `npx tsc --build --force packages/gui`
-- [ ] `node packages/gui/scripts/keys.mjs` — 18 chords/16 actions
-- [ ] `node packages/gui/scripts/clicks.mjs` — 9 buttons/10 actions
-- [ ] `node packages/gui/scripts/transfer.mjs` — 6/6
-- [ ] `python3 packages/tui/scripts/pty-smoke.py` — 12/12
-- [ ] `node packages/web/scripts/browser-shot.mjs` — 2/2 (the gateway is untouched but shares `frontend`)
-- [ ] A normal GUI run prints no `transfer window:` line
-- [ ] The three by-hand items in `docs/live-testing.md` remain OPEN and are labeled as such
+**ALL TICKED, measured on `0dd8b20` (branch `gui-transfer-ui`, 15 commits), 2026-10-01. Three of the
+predicted numbers were WRONG and are corrected in place rather than quietly satisfied** — the test
+target was computed from a baseline that had already moved, `keys.mjs` went up because Ctrl-T was
+dead and is now mapped, and `transfer.mjs` grew checks when the plan's two vacuous ones were
+replaced.
+
+- [x] `npm run build` clean — exit 0
+- [x] `npm run typecheck` clean — exit 0 (vitest does NOT typecheck — 15 green tests once sat over a failing build here)
+- [x] `npx vitest run` — **2239 tests in 88 files**, up from **2157 in 82**. *(The plan predicted
+      2184 in 86 from a 2156/82 baseline: the baseline was one low, and six more test FILES and
+      fifty-odd more tests exist than it budgeted for, because nine plan defects needed pinning.)*
+- [x] `node packages/gui/scripts/shot.mjs` — **3/3 goldens matched**, after `npx tsc --build --force packages/gui packages/web`
+- [x] `node packages/gui/scripts/keys.mjs` — **19 chords/17 actions**, *not* the predicted 18/16:
+      **Ctrl-T was DEAD and is now mapped**, and the exemption that hid it is deleted
+- [x] `node packages/gui/scripts/clicks.mjs` — **9 buttons/10 actions**
+- [x] `node packages/gui/scripts/transfer.mjs` — **9/9**, not the predicted 6/6: two of the plan's
+      checks passed **vacuously on empty output** and were replaced by checks that cannot
+- [x] `python3 packages/tui/scripts/pty-smoke.py` — **12 PASS / 0 FAIL, exit 0**
+- [x] `node packages/web/scripts/browser-shot.mjs` — **2/2** (the gateway is untouched but shares
+      `frontend` — and Task 10 *did* touch `packages/web`, so this one is load-bearing here rather
+      than precautionary)
+- [x] `node packages/web/scripts/browser-keys.mjs` — **13 chords/11 actions** (not in the plan's
+      list; run because Task 7 touched `canvas/src/keys.ts`, which the gateway shares)
+- [x] A normal GUI run prints no `transfer window:` line — **0**, and now unit-tested as well as
+      checked by hand, because it is a privacy property rather than tidiness
+- [x] ~~The three by-hand items~~ **FOUR by-hand items** in `docs/live-testing.md` remain OPEN and are
+      labeled as such — a fourth was added for the progress line versus real byte counts
+
+**NOT RUN, and the reason, because "the gate was green" must never cover a subset without naming
+it:** `drive-playback.py` and `drive-e.py`. Nothing on this branch touches telnet negotiation or the
+stream layer. **And the gate has NOT been re-run on a merge commit** — this repo's practice is to
+re-run it there too, so that remains to do at merge time.
