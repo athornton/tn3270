@@ -2234,6 +2234,99 @@ the await**, where it is testable; the `render`-side flag read is kept as **defe
 documented as such at both ends**, because this repo has twice recorded that such pairs are invisible
 to single mutation. A parent window makes the dialog modal and closes it at the source.
 
+### Tasks 6-7, 2026-10-01
+
+**THE PLAN'S `submit` MAKES THE WINDOW UNCLOSABLE AND THE APP UNQUITTABLE, because `onDone` CAN
+FIRE SYNCHRONOUSLY.** It sets `run`/`isRunning` *after* calling `startTransfer`, with `onDone`
+passed into that call — and `transferRun.ts:358-361` says in as many words that "a whole DFT
+transfer really can begin and finish inside `sendAID`'s record handling… the run completes
+synchronously", with the listeners registered before `sendAID` at `:370-372` and
+`if (ended) return { ok: true };` at `:377` returning a run **with no `cancel`**.
+`tui/test/transferRun.test.ts:689-718` already drives exactly that against a real `Session`. So
+`finish()` runs first and `submit` then sets `isRunning = true` on a transfer **that has already
+ended**: `shouldPreventClose()` is true forever, the window can never be closed, and the
+application has to be killed. Fixed structurally — one state word, a placeholder armed *before* the
+call, and a generation stamp — not by reordering two lines. **Restoring the plan's `run = started`
+reddens 4 tests.**
+
+**AND `cancel` CAN THROW, which made the plan's bare `run?.cancel?.()` in `shutdown` an UNQUITTABLE
+APP on a dropped session.** `transferRun.ts:437-438` reaches `session.ts:1513`'s
+`throw new Error('not connected')`. A throw out of `before-quit` stops the quit. Routed through one
+`cancelRun` wrapper that is the only call site, so `requestCancel` reports the error and `shutdown`
+discards it.
+
+**THE SPEC NAMED FOUR PATHS THAT MUST REACH `cancel` AND THE FIRST IMPLEMENTATION HANDLED THREE.
+THE FOURTH INSTANCE OF THE RECURRING TEARDOWN BUG WAS REAL, and it arrived by a door nobody was
+watching.** **MEASURED: closing a child `BrowserWindow`'s PARENT destroys the child and fires its
+`closed` WITHOUT EVER FIRING ITS `close`.** So an operator closing the terminal window mid-transfer
+never reaches the close guard at all:
+
+```
+tw closed
+  -> transfer = undefined        <-- state cleared, cancel NOT called
+window-all-closed -> app.quit()
+before-quit: transfer=UNDEFINED  <-- the quit hook has nothing left to cancel
+RESULT: cancel() was called 0 time(s)
+```
+
+**`before-quit` LOOKS like the backstop and is not** — the order puts `closed` first, so by the time
+the quit hook runs the state it would have acted on is already gone. Two hooks that each look
+sufficient, and the ordering decides which is. `session.dft` stays set with the window gone, which
+is the spec's own words for the failure. Fixed by canceling inside `closed`'s identity guard.
+**A SECOND MISSING PATH: nothing handled the session closing underneath** — `disconnect` was a
+repaint and nothing more, so `shouldPreventClose()` stayed true forever and **the window refused
+every close on a dead session**, escapable only through a Cancel that throws `not connected`. Now
+calls `shutdown`, which is what the TUI already did from its own close paths (`app.ts:899`).
+
+**A HALF-FIX FOUND IN THE FIX: the generation stamp guarded the STATE and sent `transfer:done`
+UNCONDITIONALLY**, so run 1's stale deadline reached the renderer during run 2 — and
+`transferUi.ts`'s `finished()` has no generation concept, so it re-enabled the whole form and Start
+**mid-transfer** and painted run 1's error over run 2's progress. Same bug class as the one the
+stamp exists to fix. Returns early on a mismatch now, and the test asserts run 2's *own* ending
+still gets through, so it is a generation check and not a mute button.
+
+**THE MUTATION CHECK THAT EARNED ITS KEEP: moving `shutdown()` to AFTER the clear also reddens.**
+A presence-only assertion would have passed, because `shutdown` on an already-cleared `transfer` is
+a silent no-op on `undefined`. **So the test asserts ORDER, not presence** — and that distinction is
+the whole content of the fix.
+
+**CTRL-T WAS DEAD AND THE FAST GATE WAS GREEN BY PERMISSION.** `canvas/src/keys.ts`'s CTRL table had
+no `t`, so a real Electron run printed `keys: sent Ctrl+T` and **no action line**, while the `Xfer`
+keypad button worked perfectly — a click goes through `KEYPAD_KEYS` and never through that table.
+`canvas/test/keys.test.ts` *exempted* the chord, and **the exemption's own comment said "THIS ENTRY
+IS WHAT SHOULD BE DELETED when that lands"**, with the `checked` counter as the mechanism that
+stopped it being forgotten. That mechanism worked. The mapping is added, the exemption deleted, and
+Ctrl+T joined `keys.mjs`: **19 chords/17 actions, from 18/16.** **This touches code SHARED with the
+web gateway**, which is safe and was verified rather than assumed: `protocol.ts:129-131` throws at
+decode and `web/src/main.ts:152-155` catches every decode failure into a per-socket error frame with
+a `return`, no session or process impact, and the browser's own `Xfer` button could already produce
+the kind. **A browser user pressing Ctrl-T now gets an error frame rather than nothing** — accepted;
+whether the web side should ignore it instead is stage 4's call.
+
+**FOUR SMALLER PLAN DEFECTS:** `focusCancel` did not focus Cancel (it focused the whole
+`webContents`) and its docstring said it did — renamed `focusWindow` and implemented honestly, since
+focusing the actual button would need a sixth bridge function and a decision in the untestable file,
+to replace something `setRunning(true)` already leaves as the only enabled control.
+`tw.on('closed')` cleared state unconditionally, so a late `closed` would clear a **replacement**
+window's controller — identity-guarded. `showWindow`, `closeWindow` and `finish` had **no callers**,
+and a public `finish` was a second teardown route with none, which is the exact shape the module's
+docstring is about — removed. And the plan's test fixture built a `TransferRequest` missing `host`,
+`mode` and `cr`: **nothing would have caught it, because no test file in this repo is typechecked**
+(`packages/gui/tsconfig.json` compiles `src/**` only) and vitest does not typecheck either.
+
+**`console-message`'s five-argument form is DEPRECATED in Electron 44 but kept DELIBERATELY**: the
+new `details.level` is a string where the old is a number, and all three GUI harnesses filter stdout
+on the literal `renderer[3]`.
+
+**WHAT IS PINNED AS SOURCE TEXT AND SAYS SO: `main.ts` cannot be imported** (`app.whenReady()` runs
+in the module body and the handlers live in that closure), so `transferTeardown.test.ts` pins the
+four paths textually, following `clicks-harness-flags.test.ts`'s precedent — **and its own header
+states that these would pass against a `shutdown` that did nothing**, so green is not mistaken for
+evidence. The behavioral half is a by-hand Xvfb check now recorded in `docs/live-testing.md` with
+both the failing and passing transcripts. **STILL NOT PROVEN: those runs use a fake
+`startTransfer`, so they show `cancel` is REACHED and not that the right bytes hit the wire.** A GUI
+transfer interrupted by closing the terminal window has never been watched against a live host.
+
 ## Verification checklist for the whole plan
 
 - [ ] `npm run build` clean
