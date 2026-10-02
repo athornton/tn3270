@@ -43,6 +43,29 @@ const boot = readFileSync(join(guiDir, 'src', 'transferBoot.ts'), 'utf8');
  */
 const driveBody = /async function driveTransferWindow\([\s\S]*?\n\}/.exec(main);
 
+/**
+ * `driveSteps`'s body -- the half that does the printing.
+ *
+ * ## WHY THE GATED REGION IS TWO FUNCTIONS NOW, AND WHY THAT IS STILL SOUND
+ *
+ * `driveTransferWindow` grew a `transferScenarioRunning` flag (so `quitIfKeysOnly` cannot quit while
+ * a live transfer is mid-flight -- it did, and killed one), and the steps moved into `driveSteps`.
+ * These five tests reddened on that refactor and were RIGHT to: they read one function's text, and
+ * the printing had moved out of it.
+ *
+ * The property they check is unchanged and is checked here in two parts:
+ *   1. `driveTransferWindow` gates on the seam BEFORE it calls anything (asserted below), and
+ *   2. `driveSteps` HAS EXACTLY ONE CALLER, which is that gated function (asserted below too).
+ *
+ * The second half is what keeps this structural rather than a convention. An ungated second caller
+ * of `driveSteps` is the leak this file exists to prevent, and it would now be caught by the
+ * call-count assertion rather than by the `transfer window:` census alone.
+ */
+const stepsBody = /async function driveSteps\([\s\S]*?\n\}/.exec(main);
+
+/** The gated region: the two functions that together make up the seam. */
+const gatedRegion = (): string => `${driveBody![0]}\n${stepsBody![0]}`;
+
 describe('the transfer seam prints nothing in a normal run', () => {
   it('gates the WHOLE function on the seam, as its first statement', () => {
     expect(driveBody, 'no driveTransferWindow function found in main.ts').not.toBeNull();
@@ -50,13 +73,21 @@ describe('the transfer seam prints nothing in a normal run', () => {
     const gateAt = body.indexOf("if (SEAM.transfer === '') return;");
     expect(gateAt, 'the seam must refuse to run when TN3270_GUI_TRANSFER is unset')
       .toBeGreaterThan(-1);
-    // BEFORE EVERY WRITE, which is the actual property: a gate that came after the first
-    // `process.stdout.write` would leak the line it was meant to suppress.
-    const firstWriteAt = body.indexOf('process.stdout.write');
-    expect(firstWriteAt, 'the seam must write something, or there is nothing to gate')
+    // BEFORE EVERYTHING THAT PRINTS, which is the actual property. The writes live in
+    // `driveSteps` now, so what must precede the gate is the CALL to it -- a gate after that call
+    // would leak every line it was meant to suppress.
+    const callAt = body.indexOf('await driveSteps(tw);');
+    expect(callAt, 'driveTransferWindow must call driveSteps, or there is nothing to gate')
       .toBeGreaterThan(-1);
-    expect(gateAt, 'the gate must come BEFORE the first write, or a normal run prints a path')
-      .toBeLessThan(firstWriteAt);
+    expect(gateAt, 'the gate must come BEFORE the call, or a normal run prints a path')
+      .toBeLessThan(callAt);
+    // AND `driveSteps` MUST HAVE EXACTLY ONE CALLER, which is what makes its lack of a gate of its
+    // own safe rather than merely conventional. A second, ungated caller is the leak this file is
+    // about, and splitting the function is precisely what would make one easy to add by accident.
+    expect(stepsBody, 'no driveSteps function found in main.ts').not.toBeNull();
+    const callers = main.match(/driveSteps\(/g) ?? [];
+    expect(callers.length, 'driveSteps must be declared once and called from exactly one place')
+      .toBe(2);
   });
 
   it('writes to stdout from NOWHERE outside that gated function', () => {
@@ -64,10 +95,12 @@ describe('the transfer seam prints nothing in a normal run', () => {
     // the reporting -- a stray `transfer window: localFile=` added to `openTransferWindow`, or to the
     // `closed` handler -- would pass every assertion above while printing a path on every run.
     //
-    // So every `transfer window:` write in the file must be INSIDE `driveTransferWindow`. Counted,
-    // rather than located, because counting is what makes a new one visible wherever it is put.
+    // So every `transfer window:` write in the file must be inside the GATED REGION -- the two
+    // functions above, which the previous test proves are reachable only behind the seam check.
+    // Counted rather than located, because counting is what makes a new one visible wherever it is
+    // put.
     const all = main.match(/process\.stdout\.write\(\s*`?transfer window:/g) ?? [];
-    const inside = driveBody![0].match(/process\.stdout\.write\(\s*`?transfer window:/g) ?? [];
+    const inside = gatedRegion().match(/process\.stdout\.write\(\s*`?transfer window:/g) ?? [];
     expect(all.length, 'no transfer-window reporting found at all').toBeGreaterThan(0);
     expect(inside.length, 'every `transfer window:` line must live inside the gated function')
       .toBe(all.length);
@@ -91,14 +124,14 @@ describe('the transfer seam prints nothing in a normal run', () => {
     // silently discarding `=b`. Verified under node. A Windows path, or any value containing `=`,
     // would have been set to a prefix -- and the seam's echo would have AGREED with the truncation,
     // because it reports what the model holds.
-    expect(driveBody![0]).toMatch(/const at = step\.indexOf\('='\);/);
-    expect(driveBody![0]).toMatch(/step\.slice\(at \+ 1\)/);
+    expect(stepsBody![0]).toMatch(/const at = step\.indexOf\('='\);/);
+    expect(stepsBody![0]).toMatch(/step\.slice\(at \+ 1\)/);
     // ON THE CODE WITH ITS COMMENTS STRIPPED, and this was measured rather than anticipated: the
     // assertion failed first time against a `main.ts` that is correct, because the comment above the
     // parser QUOTES the spelling it rejects. Deleting that explanation to satisfy a regex would trade
     // the durable half for the convenient one. `transfer-harness-flags.test.ts` hit the same thing
     // three times and carries the same note.
-    const code = driveBody![0]
+    const code = stepsBody![0]
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
     expect(code).not.toMatch(/split\('=', 2\)/);
@@ -112,10 +145,18 @@ describe('the transfer seam prints nothing in a normal run', () => {
     // The DRAIN is part of it: writing to a pipe is asynchronous, and `quitIfKeysOnly`'s own
     // measurement found output truncated at one 64000-byte buffer with the last line GONE, three
     // runs out of three. The `submit ->` line is the last thing this function prints.
+    // IN `driveTransferWindow` AND AFTER THE `finally`, which is where the flag is cleared: a quit
+    // issued while `transferScenarioRunning` was still set would deadlock against
+    // `quitIfKeysOnly`'s wait on exactly that flag.
     expect(driveBody![0]).toMatch(/process\.stdout\.write\('',\s*\(\) => \{ r\(\); \}\)/);
     expect(driveBody![0]).toMatch(/app\.quit\(\);/);
     // And it must leave a SHOT run alone, or the two seams race and the PNG is zero bytes.
     expect(driveBody![0]).toMatch(/if \(SEAM\.shot !== ''\) return;/);
+    const clearAt = driveBody![0].indexOf('transferScenarioRunning = false;');
+    const quitAt = driveBody![0].indexOf('app.quit();');
+    expect(clearAt, 'the scenario flag must be cleared').toBeGreaterThan(-1);
+    expect(clearAt, 'the flag must be cleared BEFORE the quit, or quitIfKeysOnly waits forever')
+      .toBeLessThan(quitAt);
   });
 });
 
@@ -143,11 +184,48 @@ describe("the harness hooks go through the form's own object", () => {
     expect(boot).toMatch(/document\.querySelector\('#status'\)\?\.textContent \?\? ''/);
   });
 
-  it('exposes exactly those two hooks and nothing else on window', () => {
+  it('exposes exactly the FIVE named hooks and nothing else on window', () => {
     // The surface is the thing to keep small: this window handles file paths and sits in front of a
     // logged-on session, which is why its preload keeps `contextIsolation` on and `nodeIntegration`
-    // off. A third hook added without thought is a third thing a page could reach.
-    const hooks = boot.match(/^window\.__tn3270\w+ =/gm) ?? [];
-    expect(hooks.length, 'exactly two harness hooks belong on window').toBe(2);
+    // off. A hook added without thought is one more thing a page could reach.
+    //
+    // WENT FROM TWO TO FIVE ON 2026-10-02, and each addition was forced by a measured gap in the
+    // live run rather than wanted for convenience:
+    //   - `__tn3270FieldKind`  -- `setFieldText` is a NO-OP on a cycle field, so `direction=send`
+    //                            echoed `receive` and a scenario could believe it had set it.
+    //   - `__tn3270CycleField` -- the fix for that, clicking the model the way an arrow key does.
+    //   - `__tn3270AwaitDone`  -- `__tn3270Submit` returns when the submit was ACCEPTED, so the
+    //                            seam quit mid-transfer and killed a real one against VM/CMS.
+    //
+    // LISTED BY NAME rather than counted, which is the stronger form and the reason this assertion
+    // changed shape as well as number: a count tempts the next person to increment it, while a list
+    // makes adding a hook a decision that has to be written down here.
+    const hooks = (boot.match(/^window\.(__tn3270\w+) =/gm) ?? [])
+      .map((m) => /^window\.(__tn3270\w+)/.exec(m)![1]).sort();
+    expect(hooks, 'the harness hook surface is fixed; add one only deliberately').toEqual([
+      '__tn3270AwaitDone', '__tn3270CycleField', '__tn3270FieldKind',
+      '__tn3270SetField', '__tn3270Submit',
+    ]);
+  });
+
+  it('waits for a transfer to END by asking running(), not by reading prose', () => {
+    // MEASURED against VM/CMS: `submit -> ok=true status=transferring` was the LAST thing a run
+    // printed, because the seam quit as soon as the submit was accepted -- so a real transfer was
+    // started and then killed by the harness. No run could observe a COMPLETION, and replay mode
+    // cannot see it at all, since there a submit is always refused.
+    //
+    // `running()` is the same fact the form's enablement uses and `finished()` clears it on EVERY
+    // ending, so this cannot miss one by watching the wrong signal; the three endings are different
+    // STRINGS and reading the status line would be reading prose.
+    expect(boot).toMatch(/while \(ui\.running\(\) && Date\.now\(\) < deadline\)/);
+    expect(boot).toMatch(/timedOut: ui\.running\(\)/);
+  });
+
+  it('asks the DOM which control a field is drawn as, not the field table', () => {
+    // Reading `TRANSFER_FIELDS` here would need a second runtime import, and `transfer.html`'s
+    // import map has ONE entry -- an unresolved specifier blanks this window with no error in any
+    // console. The DOM is also the better oracle: it answers what the form actually DREW.
+    expect(boot).toMatch(/\[data-field="\$\{id\}"\]\[data-role="value"\]/);
+    expect(boot).toMatch(/if \(el instanceof HTMLSelectElement\) return 'cycle';/);
   });
 });

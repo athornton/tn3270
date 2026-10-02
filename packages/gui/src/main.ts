@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError } from '@tn3270/core';
+import {
+  resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
+} from '@tn3270/core';
 import {
   applyAction, defaultSession, describeTlsError, resolveScheme, startTransfer, transferCommand,
   type Action,
@@ -11,7 +13,7 @@ import {
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
-import { parseKeySpec } from './keyspec.js';
+import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -161,7 +163,85 @@ const SEAM = Object.freeze({
    * variables, and no scenario does.
    */
   transferPath: process.env['TN3270_GUI_TRANSFER_PATH'] ?? '',
+  /**
+   * A SEVENTH TEST SEAM: `TN3270_GUI_KEYS='wait:CP READ,l,o,g,o,n,Enter'` makes a `wait:TEXT`
+   * step in the KEYS list block until the host has painted TEXT on the screen.
+   *
+   * ## WHY THE KEYS SEAM COULD NOT DRIVE A LIVE HOST WITHOUT THIS
+   *
+   * `maybeSendKeys` waits a FIXED `keysMs` and then sends each chord 150ms apart. That is right
+   * for a replay, which paints synchronously, and wrong for a host: `docs/live-testing.md`'s own
+   * rule is that every step waits for TEXT THE HOST SENT, because the keyboard is locked until
+   * the host writes and anything typed early is correctly REFUSED. The failure is a stall rather
+   * than an error -- the keys all "succeed", the screen never advances, and the run burns its
+   * timeout looking like a broken client. `live-drive.py` has driven the TUI this way since
+   * 2026-08-25; the GUI is the one front end that had no equivalent, which is why no transfer had
+   * ever been driven from its window against a real host.
+   *
+   * ## IT IS A STEP IN THE KEYS LIST, NOT A SEPARATE VARIABLE
+   *
+   * A second variable would have to express WHICH key each wait precedes, i.e. re-encode the
+   * ordering the keys list already has. Reusing the list keeps one ordering in one place --
+   * the same argument `SEAM.transfer`'s docstring makes for putting a whole scenario in one
+   * variable.
+   *
+   * ## HOW LONG, AND WHAT A TIMEOUT MEANS
+   *
+   * `TN3270_GUI_WAIT_MS` per wait, default 40000 to match `live-drive.py`'s `STEP_TIMEOUT`.
+   * **A WAIT THAT TIMES OUT FAILS THE RUN** -- it does not proceed hopefully. A seam that gave up
+   * quietly and typed anyway would produce exactly the stall-dressed-as-success this seam exists
+   * to remove, and the subsequent keys would be refused by a locked keyboard with nothing saying
+   * why.
+   *
+   * ## WHAT IT MATCHES ON, AND THE ONE THING IT MUST NOT PRINT
+   *
+   * The RESOLVED screen text (`resolve(snapshot).map(c => c.text)`), which is what the operator
+   * sees -- not the draw list, and not the OIA. Matching is a plain substring on a
+   * whitespace-collapsed copy, because a 3270 screen pads with blanks and a phrase can straddle a
+   * field boundary.
+   *
+   * **`|` SEPARATES ALTERNATIVES, and the first one found wins.** `wait:CP READ|VM/370` is needed
+   * rather than convenient: VM has TWO legal entry states and which one appears is not under the
+   * harness's control. A fresh connection paints the `VM/370` banner; a HELD account **reconnects
+   * and lands at `CP READ` with no banner at all** (`docs/live-testing.md`: "a held account
+   * reconnects and lands you at `CP READ`"). MEASURED on the first live run of
+   * `live-transfer.py`, which timed out on `VM/370` for exactly this reason after its own previous
+   * attempt had left CMSUSER held. `live-drive.py` has always passed a LIST of needles per step
+   * for the same reason; this is that, in one string.
+   *
+   * A `|` in a needle is therefore not matchable, which costs nothing: these are host prompts.
+   *
+   * **THE SEARCH TEXT IS ECHOED; THE SCREEN IS NEVER ECHOED.** A wait for `PASSWORD` is fine to
+   * print -- the harness chose it -- but the screen at that moment contains whatever the operator
+   * typed, and on the next screen it contains the LOGMSG of a live system. `live-drive.py` writes
+   * its panels to `/tmp` with a warning that they may contain the password, and nothing of the
+   * kind belongs on this process's stdout.
+   */
+  waitMs: Number(process.env['TN3270_GUI_WAIT_MS'] ?? '40000'),
 });
+
+/** The `wait:` prefix on a `TN3270_GUI_KEYS` step. Exported for the test that pins the seam. */
+export const WAIT_PREFIX = 'wait:';
+
+/**
+ * Set while a `TN3270_GUI_TRANSFER` scenario is mid-flight, so `quitIfKeysOnly` does not cut it off.
+ *
+ * ## THE RACE THIS CLOSES, MEASURED AGAINST VM/CMS
+ *
+ * `Ctrl+t` in a KEYS list opens the transfer window through the `action` handler, so
+ * `driveTransferWindow` runs INSIDE `maybeSendKeys`'s loop -- and `quitIfKeysOnly` fires as soon as
+ * that loop ends. The log showed the ordering plainly: `submit -> ok=true status=transferring`,
+ * then `keys: sent ...`, and NO `done ->` line at all. **So a real transfer against a real host was
+ * started and then killed by the harness's own quit**, twice, and the byte comparison could never
+ * have passed.
+ *
+ * `driveTransferWindow`'s own docstring predicted a race here and guessed the wrong direction: it
+ * reasoned that folding its quit into `quitIfKeysOnly` would let whichever path arrived first quit
+ * "with the scenario still running". That is exactly what happened -- but from the OTHER side, with
+ * `quitIfKeysOnly` as the one that arrived first. A flag is the smallest thing that orders the two,
+ * and it is read ONLY by the quit helpers, so nothing about the product path depends on it.
+ */
+let transferScenarioRunning = false;
 
 /** Turn any startup failure into something a person can act on. */
 function explain(err: unknown, host?: string, port?: number): string {
@@ -650,11 +730,43 @@ app.whenReady().then(async () => {
     // business. A front end that forgot this arm would die on the keystroke rather than being
     // silently inert -- which is the property that throw exists to give.
     //
-    // `void`, NOT AWAITED, and the handler is deliberately not `async`: this is a fire-and-forget
-    // UI action, and making the listener async would swallow a `loadFile` failure into an
-    // unhandled rejection. The window reports its own load failures through the `did-fail-load`
-    // forwarding above, which is where a diagnosis belongs.
-    if (action.kind === 'transferForm') { void openTransferWindow(); return; }
+    /**
+     * NOT AWAITED -- this is a fire-and-forget UI action and the listener is deliberately not
+     * `async` -- but the rejection IS CAUGHT, and the difference is not cosmetic.
+     *
+     * MEASURED 2026-10-01, on the first live run of `live-transfer.py`: a bare
+     * `void openTransferWindow()` printed
+     * `UnhandledPromiseRejectionWarning: Error: ERR_FAILED (-2) loading transfer.html`. The trigger
+     * is any failure inside that promise, and the one that fired is worth knowing: the wait seam
+     * called `app.exit(1)` on a timed-out `wait:` step while `loadFile` was in flight, so the load
+     * was aborted by the shutdown it was racing. An earlier version of this comment claimed `void`
+     * AVOIDED an unhandled rejection; `void` on a rejecting promise is what CREATES one, and the
+     * `did-fail-load` forwarding it pointed at reports the failure without settling the promise.
+     *
+     * `catch` and not `await`, because awaiting would make the listener async and delay every
+     * other action behind a window load. The handler reports and continues: a transfer window that
+     * failed to open must not take the session down with it, and this is the one action whose
+     * failure is recoverable by pressing the key again.
+     */
+    if (action.kind === 'transferForm') {
+      openTransferWindow().catch((err: unknown) => {
+        /**
+         * NOT PREFIXED `transfer window:`, deliberately, and the guard test is what forced the
+         * question. That prefix is the SEAM's reporting vocabulary and every line carrying it is
+         * required to live inside the gated function -- because those lines carry paths. This one
+         * is a real user-facing diagnosis on an UNGATED path: it must print on a normal run, since
+         * a window that failed to open is something the operator needs told. Keeping the prefix
+         * would have put an ungated write into the census the gate is proved by, which is the leak
+         * that test exists to catch; borrowing the vocabulary of a gated channel for an ungated
+         * line is how a privacy rule gets quietly widened.
+         *
+         * It carries no path -- only Electron's own load error -- which is what makes it safe to
+         * print unconditionally.
+         */
+        process.stdout.write(`transfer window failed to open: ${explain(err)}\n`);
+      });
+      return;
+    }
     applyAction(session, action);
     send();
   });
@@ -673,7 +785,10 @@ app.whenReady().then(async () => {
   if (SEAM.replay !== '') {
     session.replay(readFileSync(SEAM.replay, 'utf8'));
     send();
-    await maybeSendKeys(win);
+    // The session is passed so a `wait:` step works here too -- a replay paints synchronously, so
+    // every wait in a replay run matches on its first poll. That is what makes the seam's own
+    // guard test runnable without a host.
+    await maybeSendKeys(win, session);
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win);
@@ -693,7 +808,9 @@ app.whenReady().then(async () => {
     fail(explain(err, args.host, args.port));
   }
 
-  await maybeSendKeys(win);
+  // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
+  // real host is on, and the one `live-transfer.py` drives.
+  await maybeSendKeys(win, session);
   await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
   await maybeOpenTransferWindow();
   await maybeCapture(win);
@@ -721,11 +838,66 @@ app.whenReady().then(async () => {
  * `key === '¡'` there, which is the whole reason `keys.ts` matches the PA keys on `e.code`,
  * and this is the first place to look if a chord goes missing on a laptop.
  *
- * Deliberately does not type a logon. On VM a completed logon arms the reconnect trap for
- * the next run (docs/live-testing.md), and a golden of a logged-on screen can contain a
- * password.
+ * THE COMMITTED HARNESSES deliberately do not type a logon: on VM a completed logon arms the
+ * reconnect trap for the next run (docs/live-testing.md), and a golden of a logged-on screen can
+ * contain a password. **That is a property of `keys.mjs` and `clicks.mjs`, not a limit of this
+ * function** -- `live-transfer.py` DOES log on, because a live transfer cannot happen anywhere but
+ * at a logged-on command prompt. It logs off again at the end for the reconnect-trap reason, and
+ * it prints no screen text for the password one. The `wait:` step is what makes that possible; see
+ * `SEAM.waitMs`.
+ *
+ * `session` is optional because the `TN3270_GUI_URL` branch has none at all -- in that mode the
+ * served page owns the protocol. A `wait:` step there is refused rather than silently skipped,
+ * since a wait nobody can satisfy is the stall this seam exists to remove.
  */
-async function maybeSendKeys(win: BrowserWindow): Promise<void> {
+/**
+ * Collapse a 3270 screen to something a substring match can be written against.
+ *
+ * A formatted screen PADS WITH BLANKS and a phrase can straddle a field boundary, so
+ * `CP READ` on screen may be `CP   READ` in cells. Runs of whitespace become one space and the
+ * ends are trimmed, which is the same normalisation `live-drive.py`'s `plain()` applies before its
+ * own `wait_for`. Exported for the test, which cannot otherwise reach it.
+ */
+export function screenNeedleText(cells: readonly { readonly text: string }[]): string {
+  return cells.map((c) => c.text).join('').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Block until the host has painted `text`, or `SEAM.waitMs` elapses.
+ *
+ * Returns whether it matched; the CALLER ends the run on false, because only it can drain stdout
+ * and pick an exit code.
+ *
+ * ## IT POLLS RATHER THAN LISTENING, DELIBERATELY
+ *
+ * `session.on('screen')` would be the event-driven form and is the wrong one here: the text may
+ * ALREADY be on screen when the wait begins -- the common case for the first step of a scenario,
+ * and for any wait that follows a key the host answered quickly -- and a listener-only wait would
+ * then block until the next unrelated repaint, or forever. Polling asks the question the scenario
+ * is actually asking ("is it there yet?") and answers it immediately when it already is.
+ *
+ * The 200ms interval is well under any human-visible delay and far above the cost of one
+ * `snapshot()` + `resolve()`, which is what the renderer already does on every frame.
+ */
+async function waitForScreen(session: Session, text: string): Promise<string | undefined> {
+  // ALTERNATIVES, and an empty one is dropped rather than matching everything: `a|` would
+  // otherwise succeed against any screen including a blank one, which is the vacuous-wait failure
+  // the whole seam is built to avoid.
+  const needles = text.split('|').map((n) => n.replace(/\s+/g, ' ').trim()).filter((n) => n !== '');
+  const deadline = Date.now() + SEAM.waitMs;
+  for (;;) {
+    const seen = screenNeedleText(resolve(session.screen.snapshot(), {}));
+    // RETURNS WHICH ONE MATCHED, so the caller can log it: on VM the difference between seeing
+    // `VM/370` and `CP READ` is the difference between a fresh session and a reconnect to a held
+    // one, and a run that cannot tell them apart cannot explain its own result afterwards.
+    const hit = needles.find((n) => seen.includes(n));
+    if (hit !== undefined) return hit;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<void> {
   if (SEAM.keys === '') return;
   /**
    * EVERY spec is parsed before ANY key is delivered, and a refusal EXITS rather than throws.
@@ -738,9 +910,30 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
    * also means a bad third spec cannot half-deliver the first two, which would leave the
    * action log looking like a mapping bug.
    */
-  let chords;
+  /**
+   * A `wait:` STEP IS NOT PARSED AS A CHORD, and it is validated in this same up-front pass so a
+   * wait with no session fails before any key goes in -- the whole point of parsing everything
+   * first.
+   */
+  type Step =
+    | { readonly kind: 'chord'; readonly spec: KeySpec }
+    | { readonly kind: 'wait'; readonly text: string };
+  let steps: Step[];
   try {
-    chords = SEAM.keys.split(',').map((spec) => parseKeySpec(spec));
+    steps = SEAM.keys.split(',').map((spec): Step => {
+      if (!spec.startsWith(WAIT_PREFIX)) return { kind: 'chord', spec: parseKeySpec(spec) };
+      const text = spec.slice(WAIT_PREFIX.length);
+      // AN EMPTY WAIT MATCHES EVERY SCREEN INCLUDING A BLANK ONE, so it is a typo rather than a
+      // no-op and is refused the way `parseKeySpec` refuses an empty chord.
+      if (text.trim() === '') throw new Error(`empty ${WAIT_PREFIX} text in ${JSON.stringify(spec)}`);
+      if (session === undefined) {
+        throw new Error(
+          `${WAIT_PREFIX}${text} needs a session, and TN3270_GUI_URL mode has none: in that mode `
+          + 'the served page owns the protocol and this process never sees the screen',
+        );
+      }
+      return { kind: 'wait', text };
+    });
   } catch (err) {
     // Drained before exiting, for the reason quitIfKeysOnly spells out: a write to a PIPE is
     // asynchronous, and app.exit would otherwise be free to discard the one line that says
@@ -773,7 +966,38 @@ async function maybeSendKeys(win: BrowserWindow): Promise<void> {
    */
   const settleMs = SEAM.shot !== '' ? Math.max(SEAM.keysMs, SEAM.shotMs) : SEAM.keysMs;
   await new Promise((r) => setTimeout(r, settleMs));
-  for (const { keyCode, modifiers } of chords) {
+  for (const step of steps) {
+    if (step.kind === 'wait') {
+      const hit = await waitForScreen(session!, step.text);
+      if (hit === undefined) {
+        /**
+         * A TIMED-OUT WAIT ENDS THE RUN, and this is the single most important line in the seam.
+         *
+         * Proceeding would type into a keyboard the host still has locked, so every remaining
+         * key would be correctly refused and the run would report that it sent them all -- a
+         * stall dressed as success, which is the shape this seam exists to remove rather than to
+         * reproduce one layer up.
+         *
+         * THE SEARCH TEXT IS NAMED AND THE SCREEN IS NOT. What the harness asked for is the
+         * harness's own string; what is on screen at that moment may be a LOGMSG or a password
+         * the previous step typed. `live-drive.py` keeps its panels in /tmp behind a warning for
+         * exactly this reason, and stdout is not /tmp.
+         */
+        await new Promise<void>((r) => {
+          process.stderr.write(
+            `keys: TIMED OUT after ${SEAM.waitMs}ms waiting for ${JSON.stringify(step.text)}\n`,
+            () => { r(); },
+          );
+        });
+        app.exit(1);
+        return;
+      }
+      // WHICH alternative matched, not the whole spec: for an alternation that is the informative
+      // half, and for a single needle the two are the same string.
+      process.stdout.write(`keys: saw ${JSON.stringify(hit)}\n`);
+      continue;
+    }
+    const { keyCode, modifiers } = step.spec;
     // Spread conditionally: an empty `modifiers` array is not the same as absent under
     // exactOptionalPropertyTypes, and the rest of this file builds options the same way.
     const chord = { keyCode, ...(modifiers.length > 0 ? { modifiers: [...modifiers] } : {}) };
@@ -920,6 +1144,61 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
  */
 async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
   if (SEAM.transfer === '') return;
+  /**
+   * THE WHOLE BODY STAYS IN THIS FUNCTION, deliberately, and an earlier attempt at the
+   * `transferScenarioRunning` flag split it into a wrapper plus a `runTransferScenario`. **Five
+   * tests in `transferSeam.test.ts` reddened**, and they were right to: they read THIS function's
+   * body as text to prove the privacy gate is its first statement and that every
+   * `transfer window:` line lives inside it. A wrapper moved every one of those lines outside the
+   * function the test inspects, so the gate it checks would have been guarding an empty shell while
+   * the printing happened elsewhere. The guard test did its job; the flag is set inline instead.
+   */
+  transferScenarioRunning = true;
+  try {
+    await driveSteps(tw);
+  } finally {
+    // CLEARED IN A `finally`, so a scenario that throws cannot leave the process unquittable --
+    // which would turn one failure mode into a worse one.
+    transferScenarioRunning = false;
+  }
+  /**
+   * THE RUN HAS TO END ITSELF, and `quitIfKeysOnly` will not do it: it returns early unless the
+   * keys or clicks seam is set, so a transfer-only run reaches the end of `app.whenReady()`'s
+   * callback with two windows open and SITS THERE until something kills it. Measured before this
+   * line existed: the harness burned its full 120-second timeout, which is the stall-rather-than-
+   * fail shape this file keeps writing comments about.
+   *
+   * NOT FOLDED INTO `quitIfKeysOnly`, and THAT FUNCTION NOW WAITS FOR THIS ONE. It is reached
+   * from three places on the main window's paths, all AFTER `maybeCapture`, while this seam runs
+   * inside `openTransferWindow` -- from the `action` handler and from Ctrl-T. This paragraph used
+   * to warn that folding the two would let whichever arrived first quit "with the scenario still
+   * running". **That race was real and it fired from the OTHER side:** `quitIfKeysOnly` arrived
+   * first and killed a live transfer against VM/CMS mid-flight, so no run could ever print a
+   * `done ->` line. Hence `transferScenarioRunning`, which that function spins on.
+   *
+   * THE DRAIN IS NOT OPTIONAL, and `quitIfKeysOnly` has the measurement: writing to a PIPE is
+   * asynchronous, and with no drain output stops at one 64000-byte buffer with the last line GONE,
+   * three runs out of three. Everything `driveSteps` prints is what the harness scores, and the
+   * `submit ->` line is the LAST of them.
+   *
+   * A SHOT RUN IS LEFT ALONE, so the two seams compose rather than racing: `maybeCapture` quits
+   * when it has its picture, and quitting here first would leave a zero-byte PNG. That is also what
+   * makes the privacy check in the AS BUILT notes runnable -- a `TN3270_GUI_SHOT` run with this
+   * variable unset prints nothing and exits on its own.
+   */
+  if (SEAM.shot !== '') return;
+  await new Promise<void>((r) => { process.stdout.write('', () => { r(); }); });
+  app.quit();
+}
+
+/**
+ * Every step of the scenario, and every line it prints.
+ *
+ * REACHED ONLY FROM `driveTransferWindow`, i.e. only behind that function's seam gate -- which is
+ * what keeps the privacy property structural: this function has no gate of its own because it has
+ * exactly one caller that does. `transferSeam.test.ts` pins both halves.
+ */
+async function driveSteps(tw: BrowserWindow): Promise<void> {
   process.stdout.write('transfer window: opened\n');
   /**
    * THE FIELD COUNT FIRST, BEFORE ANY STEP RUNS.
@@ -959,6 +1238,29 @@ async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
       process.stdout.write(`transfer window: submit -> ok=${r.ok} status=${r.status}\n`);
       continue;
     }
+    /**
+     * `done` WAITS FOR A RUNNING TRANSFER TO END, and without it no scenario could ever see one.
+     *
+     * MEASURED against VM/CMS: `submit` returns as soon as the submit was ACCEPTED, so the seam
+     * printed `ok=true status=transferring` and then the quit below tore the process down MID
+     * TRANSFER. The send had genuinely started -- that was the first transfer this window ever
+     * drove against a real host -- and the harness killed it. **Replay mode could not have found
+     * this**, because there a submit is always refused and there is nothing to wait for; that is
+     * the same blind spot that let the synchronous-completion bug through.
+     *
+     * Optional rather than implied by `submit`, because a scenario that WANTS to leave a transfer
+     * running is the one that tests the close guard -- and that is the whole of roadmap item 3.
+     */
+    if (name === 'done') {
+      const budget = value === undefined ? 120000 : Number(value);
+      const r = await tw.webContents.executeJavaScript(
+        `window.__tn3270AwaitDone(${JSON.stringify(budget)})`,
+      ) as { running: boolean; status: string; timedOut: boolean };
+      process.stdout.write(
+        `transfer window: done -> running=${r.running} timedOut=${r.timedOut} status=${r.status}\n`,
+      );
+      continue;
+    }
     if (value === undefined) {
       // REPORTED, not ignored, for the reason `SEAM.transfer`'s docstring gives.
       process.stdout.write(`transfer window: UNKNOWN STEP ${step}\n`);
@@ -966,43 +1268,46 @@ async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
     }
     /**
      * THE FIELD ID IS NOT VALIDATED HERE, and that is the renderer's job rather than an omission.
-     * `__tn3270SetField` returns what the model holds afterwards, so an id outside
-     * `TransferFieldId` comes back as the empty string and the echo below says so -- a line reading
-     * `localFil=` is a visible failure, where a list of legal ids in this file would be a second
-     * copy of `TRANSFER_FIELDS` that could agree with itself while the form disagreed.
+     * The hooks return what the model holds afterwards, so an id outside `TransferFieldId` comes
+     * back as the empty string and the echo below says so -- a line reading `localFil=` is a
+     * visible failure, where a list of legal ids in this file would be a second copy of
+     * `TRANSFER_FIELDS` that could agree with itself while the form disagreed.
+     *
+     * ## WHICH HOOK IS CHOSEN BY THE MODEL, NOT BY A LIST KEPT HERE
+     *
+     * A CYCLE FIELD CANNOT BE SET AS TEXT, and this seam shipped not knowing it: `setFieldText` is
+     * a documented no-op on `kind === 'cycle'`, so `direction=send,host=vm` echoed
+     * `direction=receive,host=tso`. The echo was honest and the scenario was still wrong -- a
+     * RECEIVE sent to a TSO host while the harness believed it had set both. Found by running it
+     * against a real host, which is the only thing that could have found it.
+     *
+     * So the kind is asked of `TRANSFER_FIELDS` -- the model's own table, already in the renderer
+     * -- rather than listed here. A second list is exactly the drift that produced the bug: it
+     * would agree with itself while the form disagreed, and a field changing kind would break the
+     * seam silently.
      */
-    const held = await tw.webContents.executeJavaScript(
-      `window.__tn3270SetField(${JSON.stringify(name)}, ${JSON.stringify(value)})`,
+    const kind = await tw.webContents.executeJavaScript(
+      `window.__tn3270FieldKind(${JSON.stringify(name)})`,
     ) as string;
+    const hook = kind === 'cycle' ? '__tn3270CycleField' : '__tn3270SetField';
+    const held = await tw.webContents.executeJavaScript(
+      `window.${hook}(${JSON.stringify(name)}, ${JSON.stringify(value)})`,
+    ) as string;
+    /**
+     * THE ECHO IS CHECKED, not merely printed, and only here -- a text field legitimately holds
+     * what it was given, so a mismatch is a REFUSAL (a non-digit into `Lrecl`) and worth seeing;
+     * for a cycle field a mismatch means the value is not one the field offers, which a scenario
+     * cannot recover from and should not proceed past. Printed either way so the log shows what
+     * the form really holds.
+     */
     process.stdout.write(`transfer window: ${name}=${held}\n`);
+    if (held !== value) {
+      process.stdout.write(
+        `transfer window: REFUSED ${name}: asked ${JSON.stringify(value)}, holds ${JSON.stringify(held)}\n`,
+      );
+    }
   }
 
-  /**
-   * THE RUN HAS TO END ITSELF, and `quitIfKeysOnly` will not do it: it returns early unless the
-   * keys or clicks seam is set, so a transfer-only run reaches the end of `app.whenReady()`'s
-   * callback with two windows open and SITS THERE until something kills it. Measured before this
-   * line existed: the harness burned its full 120-second timeout, which is the stall-rather-than-
-   * fail shape this file keeps writing comments about.
-   *
-   * NOT FOLDED INTO `quitIfKeysOnly`, deliberately. That function is reached from three places on
-   * the main window's paths, all AFTER `maybeCapture`; this seam runs inside `openTransferWindow`,
-   * which is called from the `action` handler and from Ctrl-T -- i.e. at a time nothing in those
-   * paths is waiting. Widening its condition would make it quit from whichever path happened to
-   * reach it first, which for a `transferForm` action is a race with the scenario still running.
-   *
-   * THE DRAIN IS NOT OPTIONAL, and `quitIfKeysOnly` has the measurement: writing to a PIPE is
-   * asynchronous, and with no drain output stops at one 64000-byte buffer with the last line GONE,
-   * three runs out of three. Everything this function prints is what the harness scores, and the
-   * `submit ->` line is the LAST of them.
-   *
-   * A SHOT RUN IS LEFT ALONE, so the two seams compose rather than racing: `maybeCapture` quits
-   * when it has its picture, and quitting here first would leave a zero-byte PNG. That is also what
-   * makes the privacy check in the AS BUILT notes runnable -- a `TN3270_GUI_SHOT` run with this
-   * variable unset prints nothing and exits on its own.
-   */
-  if (SEAM.shot !== '') return;
-  await new Promise<void>((r) => { process.stdout.write('', () => { r(); }); });
-  app.quit();
 }
 
 /**
@@ -1038,6 +1343,14 @@ async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
  */
 async function quitIfKeysOnly(): Promise<void> {
   if ((SEAM.keys === '' && SEAM.clicks === '') || SEAM.shot !== '') return;
+  /**
+   * A TRANSFER SCENARIO STILL RUNNING OUTRANKS THIS QUIT, and the measurement is at
+   * `transferScenarioRunning`: a `Ctrl+t` in the keys list makes `driveTransferWindow` run inside
+   * `maybeSendKeys`, so without this the quit arrived while a REAL TRANSFER was mid-flight and the
+   * `done ->` line never printed. `driveTransferWindow` does its own quit when it finishes, which
+   * is why waiting here is enough and no second quit is needed.
+   */
+  while (transferScenarioRunning) await new Promise((r) => { setTimeout(r, 200); });
   await new Promise<void>((resolve) => { process.stdout.write('', () => { resolve(); }); });
   app.quit();
 }
