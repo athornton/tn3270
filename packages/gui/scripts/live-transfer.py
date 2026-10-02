@@ -489,13 +489,43 @@ def main():
         # EVERYTHING THE LOGON USED TO DO BLIND, now in the scenario where `drain:` exists.
         # `***` is TSO's more-output marker; `x` leaves ISPF for `READY`, which is where IND$FILE
         # runs -- TK5's is Rayborn's FFTP 2.0.5 and no ISPF panel is involved.
-        # **WAIT FOR THE ISPF PANEL ITSELF, and drain only if `***` is actually there.** Measured on
-        # TK5 2026-10-02: after `LOGON IN PROGRESS` the OIA shows `X Wait` -- the host is still
-        # working -- and ISPF then arrives with NO `***` prompt on this system at all. So
-        # `drain:***` found nothing to drain (`drained "***" after 0 Enter(s)`) and the next step
-        # typed into a Wait state. The drain is KEPT because `live-drive.py` documents runs where the
-        # prompts DO appear (a welcome banner, a fortune cookie) and it is a no-op when they do not;
-        # what was missing is the wait that actually synchronises.
+        #
+        # **THE TSO LOGON NEVER REACHES ISPF FROM THIS HARNESS, AND `drain:***` CANNOT GET IT THERE
+        # -- MEASURED THREE TIMES 2026-10-02, at 249 bytes and at 200 KB, with the drain both after
+        # the wait and before it.** All three runs ended on the SAME screen, which the seam now prints:
+        #
+        #     ENTER CURRENT PASSWORD FOR HERC02- <redacted> HERC02 LOGON IN PROGRESS AT 18:23:02
+        #     ON OCTOBER 2, 2026 NO BROADCAST MESSAGES +------------------...------+ !
+        #
+        # Read that screen carefully, because it names the defect: it is the PASSWORD PANEL with the
+        # logon message appended, and it ends in a BOX BORDER -- **there is no `***` on it at all**, so
+        # `drain:***` breaks on its first poll (`drained "***" after 0 Enter(s)`) and presses nothing.
+        # TSO is mid-logon behind that panel and the wait then burns its whole budget.
+        #
+        # **THE ROOT CAUSE IS IN `tso_logon`, ONE STEP EARLIER, AND IT IS A TRAP THIS PROJECT HAS
+        # ALREADY PAID FOR ON VM:** it waits for `LOGON IN PROGRESS|Welcome|***` and sends ONE Enter --
+        # but `LOGON IN PROGRESS` is printed ONTO THE PASSWORD PANEL, so the needle matches a screen
+        # that is still protected and still logging on. The Enter is consumed by it (`live-drive.py`:
+        # *"the FIRST Enter is consumed dismissing the all-protected banner and its text is
+        # discarded"*), the welcome banner arrives afterwards, and nothing ever presses past it.
+        # `live-drive.py` survives the same needle only because its `DRAIN***` SETTLES 3s before each
+        # check and loops 8 times, so it is still pressing when the banner shows up; the GUI's drain
+        # polls 1.5s and BREAKS ON ABSENCE, which on this screen is immediately.
+        #
+        # **WHAT THIS COST, and it is the reason for the detail:** `host x` then typed into the logon,
+        # never reached `READY`, and `IND$FILE` was typed at a screen that has no such command -- so
+        # the transfer moved ZERO BYTES with ZERO DFT FRAMES. That was recorded in `docs/HANDOFF.md`
+        # as a protocol-layer fault ("no DFT frames are arriving") and attributed to the 200 KB SIZE.
+        # It is neither: the 249-byte run fails identically, and 200 KB round-trips BYTE-IDENTICALLY
+        # over DFT from the CLI against this very host (`/tmp/dftbig-rt.log`, 35 DFT frames, 0 CUT).
+        #
+        # **NOT FIXED HERE, DELIBERATELY.** The fix belongs in the SEAM's `drain:` step -- it must
+        # settle and keep pressing until the TARGET panel appears, rather than until one needle
+        # disappears -- and that is a change to `main.ts` that wants its own verification against a
+        # host. All four TK5 userids were held when this was diagnosed (each failed run's logoff step
+        # times out, which is how the harness strands them), so it could not be verified today. The
+        # order below is the ORIGINAL one; leaving it unchanged keeps this a diagnosis rather than an
+        # unverified edit, and `docs/live-testing.md` carries the measurement and the remedy.
         prep = (f"wait:Primary Option|USERID|BROWSE,drain:***,"
                 f"wait:Primary Option|USERID|BROWSE,"
                 f"host:x|READY,host:delete {ds_full}|READY")
@@ -591,22 +621,29 @@ def main():
             if m:
                 counts.append(int(m.group(1)))
         rising = len(counts) >= 2 and all(b >= a for a, b in zip(counts, counts[1:]))
-        if which == "tso":
-            # **DFT REPORTS NO PROGRESS AT ALL, and that is CORRECT rather than a fault.**
-            # `onProgress` is called only from the CUT frame handler (`transferRun.ts:323`), so a
-            # silent DFT transfer is the engine's design. Asserted as an ABSENCE so the asymmetry is
-            # observed rather than merely read off the source -- and so that the day DFT grows
-            # progress reporting, this check fails and says so.
-            checks.append(report("DFT reported NO intermediate progress (correct for DFT)",
-                                 len(counts) <= 1,
-                                 f"counts seen: {counts[:6]}"))
-        else:
-            checks.append(report("the byte count CLIMBED during the transfer", rising,
-                                 f"{len(counts)} counts, {counts[:3]}...{counts[-2:]}"
-                                 if counts else "no byte counts in any status line"))
-            checks.append(report("the last count is the whole file",
-                                 bool(counts) and counts[-1] == len(payload),
-                                 f"last={counts[-1] if counts else None} of {len(payload)}"))
+        # **ONE RULE FOR BOTH ENGINES NOW, AND THE TSO BRANCH USED TO ASSERT THE OPPOSITE.** It read:
+        #
+        #     report("DFT reported NO intermediate progress (correct for DFT)", len(counts) <= 1)
+        #
+        # which was TRUE of the engine when it was written -- `onProgress` was reached only from the
+        # CUT frame handler -- and became FALSE on 2026-10-02, when `Session` started emitting
+        # `transferProgress` per accepted DFT frame and `transferRun.ts` started reporting bytes on it.
+        # The comment even promised "the day DFT grows progress reporting, this check fails and says
+        # so". **It did not say so. It PASSED**, twice, on transfers that moved ZERO BYTES -- because
+        # zero progress lines satisfy `<= 1` exactly as a silent-by-design engine would, and the thing
+        # it was certifying had become the symptom it should have caught.
+        #
+        # A check whose pass condition is an ABSENCE cannot tell "correctly silent" from "completely
+        # broken", and this is the second time on this harness that one has passed on the absence of a
+        # failure rather than the presence of a result. Both engines now assert the SAME property --
+        # a count that climbs and ends at the whole file -- which is what a working transfer looks
+        # like on either path.
+        checks.append(report("the byte count CLIMBED during the transfer", rising,
+                             f"{len(counts)} counts, {counts[:3]}...{counts[-2:]}"
+                             if counts else "no byte counts in any status line"))
+        checks.append(report("the last count is the whole file",
+                             bool(counts) and counts[-1] == len(payload),
+                             f"last={counts[-1] if counts else None} of {len(payload)}"))
 
         # ---- ITEM 3: THE CLOSE GUARD AND A CANCEL, AGAINST A REAL TRANSFER ----
         #
@@ -639,11 +676,20 @@ def main():
         m = re.search(r"cancel -> enabled=\w+ at .*?(\d+) bytes", cancel_line)
         at = int(m.group(1)) if m else None
         if which == "tso":
-            # No progress to read on DFT, so the interruption cannot be timed from the status line.
-            # Reported rather than asserted, because asserting a number that cannot exist would be
-            # a check that passes for the wrong reason.
-            print(f"  NOTE  DFT shows no byte count, so the cancel's timing is not observable "
-                  f"from the status line (cancel line: {cancel_line.strip() or 'none'})")
+            # **THE PREMISE OF THIS BRANCH EXPIRED on 2026-10-02 and it is kept only as a NOTE, not
+            # promoted to a check.** It used to read "No progress to read on DFT, so the interruption
+            # cannot be timed from the status line" -- true until `Session` began emitting
+            # `transferProgress` per accepted DFT frame, after which a DFT cancel DOES carry a byte
+            # count and the timing IS observable.
+            #
+            # It stays a NOTE rather than becoming the same assertion the VM branch makes because no
+            # run has yet shown a DFT cancel landing mid-flight: the TSO scenario cannot currently
+            # reach a transfer at all (see the logon defect in `prep` above), so promoting it would
+            # add a check that has never once been satisfied. **Printing the number is what lets the
+            # next person promote it on evidence** -- and the number is now real, where before there
+            # was none to print.
+            print(f"  NOTE  DFT now reports a byte count, so this timing IS assertable once the TSO "
+                  f"scenario reaches a transfer (cancel line: {cancel_line.strip() or 'none'})")
         else:
             checks.append(report("the cancel landed MID-FLIGHT, short of the whole file",
                                  at is not None and 0 < at < len(payload),

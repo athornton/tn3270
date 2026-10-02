@@ -1416,11 +1416,44 @@ async function driveSteps(
     }
     if (step.startsWith(WAIT_PREFIX)) {
       const hit = await waitForScreen(session, step.slice(WAIT_PREFIX.length));
-      process.stdout.write(
-        hit === undefined
-          ? `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}\n`
-          : `transfer window: saw ${JSON.stringify(hit)}\n`,
-      );
+      if (hit === undefined) {
+        /**
+         * SAY WHAT WAS ON SCREEN INSTEAD, because a timeout that does not is nearly undiagnosable
+         * here -- and that cost a whole misdirected diagnosis.
+         *
+         * A timeout on this path REPORTS AND CONTINUES (deliberately, see above), so every later
+         * step runs against whatever screen the host is actually showing. On TSO 2026-10-02 that
+         * meant the ISPF wait expired, `drain:***` pressed two blind Enters into a panel that was
+         * not the one it was written for, `host x` never reached `READY`, and `IND$FILE` was typed
+         * somewhere it does not exist -- producing a transfer with ZERO DFT frames that was recorded
+         * as "no DFT frames are arriving" at the protocol layer. The whole chain is visible in one
+         * line of screen text and was invisible in three lines of `TIMED OUT`.
+         *
+         * ## IT REDACTS, AND THAT IS NOT PRECAUTIONARY -- THE FIRST RUN PRINTED A REAL PASSWORD
+         *
+         * My first version of this printed the leading 200 characters on the reasoning that a
+         * scenario step runs after the logon, so the screen could only be a host panel. **MEASURED
+         * 2026-10-02, and it was wrong: the screen at the timeout was TSO's logon panel with
+         * `ENTER CURRENT PASSWORD FOR HERC01- CUL8TR` on it** -- the password ECHOED IN PLAIN TEXT,
+         * because that is exactly the failure being diagnosed (the wait expired while the logon was
+         * still in progress). The one state a timeout here is most likely to catch is the state the
+         * assumption ruled out.
+         *
+         * So the text after TSO's own prompt is replaced. Matched on the HOST'S WORDING rather than
+         * on a field attribute, because the panel echoes it as ordinary text: there is no
+         * `hidden` cell to honour here, which is what makes a structural fix unavailable.
+         * `docs/live-testing.md` already warns the /tmp log may carry a password; this keeps the one
+         * line that is MEANT to be read from being the thing that puts it there.
+         */
+        const seen = screenNeedleText(resolve(session.screen.snapshot(), {}))
+          .replace(/(ENTER CURRENT PASSWORD FOR \S+)[^!+]*/i, '$1 <redacted> ');
+        process.stdout.write(
+          `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}`
+          + ` -- screen was ${JSON.stringify(seen.slice(0, 200))}\n`,
+        );
+      } else {
+        process.stdout.write(`transfer window: saw ${JSON.stringify(hit)}\n`);
+      }
       continue;
     }
     if (step.startsWith('drain:')) {

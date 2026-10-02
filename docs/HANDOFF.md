@@ -64,15 +64,48 @@ its next command afterwards. 200 KB round-tripped byte-identical. `live-transfer
 **AND THAT RUN FOUND A BUG IN SHIPPED CODE: ANY DFT TRANSFER LONGER THAN 30 SECONDS WAS KILLED.** See
 the corrected asymmetry note below. **Fixed, with two mutation-verified regression tests.**
 
-**STILL OPEN AND NOT DIAGNOSED: TSO/DFT AT 200 KB.** After the fix it still ends
-`stalled ... 0 bytes` with **no progress events at all** -- so no DFT frames are arriving, which is
-not the timer. **Zero bytes moved.** Two leads: the TUI's 204800-byte TSO result predates the `-ddm`
-default flip and was therefore **CUT**, so *no harness anywhere has moved 200 KB over DFT*; and
-`-ddm off` forces CUT and is the obvious comparison. **TWO USERIDS ARE HELD -- `HERC03` and `HERC04`**
-(`/c u=herc03`, `/c u=herc04`); `HERC01` and `HERC02` are free, both having released themselves
-within the hour, so **re-probe before spending console time.**
+**DIAGNOSED 2026-10-02 AND IT WAS NOT WHAT THIS SAID: "TSO/DFT AT 200 KB" WAS NEITHER A DFT PROBLEM
+NOR A SIZE PROBLEM.** The paragraph below is kept because a reader who remembers it must find the
+correction rather than its absence; every claim in it is wrong.
 
-**THE NEXT ACTION IS EITHER (a) THE TSO/DFT 200 KB DIAGNOSIS above, or (b) ROADMAP ITEM (0b), THE
+~~**STILL OPEN AND NOT DIAGNOSED: TSO/DFT AT 200 KB.** After the fix it still ends
+`stalled ... 0 bytes` with **no progress events at all** -- so no DFT frames are arriving, which is
+not the timer. **Zero bytes moved.**~~ Two leads, BOTH NOW MOOT: the TUI's 204800-byte TSO result
+predates the `-ddm` default flip and was therefore **CUT**; and `-ddm off` forces CUT as a comparison.
+
+**WHAT IS ACTUALLY TRUE, measured both offline and live the same day:**
+- **200 KB round-trips BYTE-IDENTICALLY over DFT on TSO**, from the CLI against TK5: 35 DFT frames,
+  **zero** CUT frames, at 43x80, `cmp` clean, `LISTDS` `VB 1024`, clean in-run LOGOFF. Both engines
+  work at size and the protocol was never in question.
+- **Our own stack was cleared OFFLINE first** (the cheap half, and it should always come first): a
+  full 200 KB upload through a real `Session` with a fake socket answered 13 GETs, moved 204800
+  bytes, fired 17 progress events, returned `ok:true`.
+- **What fails is the GUI HARNESS'S TSO LOGON, at ANY size** -- `live-transfer.py tso` scores 4/9 and
+  `--big` 5/13, and **the 249-byte run fails identically**, which is what retires "200 KB" from the
+  description. `tso_logon` waits on `LOGON IN PROGRESS`, which TSO prints **onto the password panel**,
+  so the needle matches a screen still protected and still logging on; its one Enter is consumed
+  dismissing that, and `drain:***` then finds no `***` (the pending screen is the welcome banner,
+  ending in a box border) so it presses nothing. `IND$FILE` is finally typed at a screen that has no
+  such command -- hence zero DFT frames. `live-drive.py` survives the same needle only because its
+  drain settles 3 s and loops 8 times.
+- **The wrong diagnosis survived because the stall message read CUT's byte counter on a DFT
+  transfer**, where it is zero by construction. "Zero bytes moved, so this is not the timer" came from
+  a number that could not have said anything else. **Fixed** (`bytesMoved()` in `transferRun.ts`, and
+  the same in the CLI's loop), with a mutation-verified test.
+
+**THE REMEDY FOR THE HARNESS IS NOT IMPLEMENTED, DELIBERATELY:** `drain:` must settle and keep
+pressing until the TARGET panel appears rather than until one needle disappears. That is a `main.ts`
+change wanting live verification, and **all four TK5 userids were held by then** (each failed run's
+`host:logoff` times out -- the defect strands a userid every time it fires), so it was left undone
+rather than committed unrun. Full measurements, the screen text, and the remedy:
+`docs/live-testing.md`, *TSO/DFT at 200 KB was never a DFT problem*.
+
+**RE-PROBE THE USERIDS BEFORE SPENDING CONSOLE TIME:** `HERC02` released itself overnight and
+`HERC01` within the hour on 2026-10-01, so a strand here is usually temporary. Type the userid at the
+VTAM panel and compare `IKJ56425I ... IN USE` against `ENTER CURRENT PASSWORD FOR`.
+
+**THE NEXT ACTION IS EITHER (a) THE GUI HARNESS `drain:` FIX above -- small, understood, and needing
+one free TK5 userid to verify -- or (b) ROADMAP ITEM (0b), THE
 GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own

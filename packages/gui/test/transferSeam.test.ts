@@ -253,3 +253,63 @@ describe("the harness hooks go through the form's own object", () => {
     expect(boot).toMatch(/if \(el instanceof HTMLSelectElement\) return 'cycle';/);
   });
 });
+
+describe('a timed-out scenario wait says what was on screen, WITHOUT the password', () => {
+  /**
+   * THE REDACTION IS LOAD-BEARING AND IT WAS MEASURED, NOT ANTICIPATED.
+   *
+   * A scenario `wait:` that times out reports and CONTINUES (deliberately -- a transfer may be
+   * mid-flight), so every later step runs against the wrong screen. On TSO 2026-10-02 that chain
+   * produced a transfer with ZERO DFT frames which was then recorded as a protocol-layer failure
+   * ("no DFT frames are arriving"), when the real cause was an ISPF wait expiring during logon.
+   * Printing the screen is what makes that one-line-visible instead of a three-line mystery.
+   *
+   * **But the first version printed a REAL PASSWORD.** It assumed a scenario step runs after the
+   * logon, so the screen could only be a host panel. The measured screen was TSO's logon panel with
+   * `ENTER CURRENT PASSWORD FOR HERC01- CUL8TR` on it, echoed as ORDINARY TEXT -- because the state
+   * a timeout here is most likely to catch is precisely the one the assumption excluded.
+   *
+   * Asserted against THE REAL MEASURED SCREEN STRING rather than a contrived one, and by applying
+   * the regex the source actually uses, so this tests the behavior and not a spelling.
+   */
+  const SEEN_LIVE_2026_10_02 = 'ENTER CURRENT PASSWORD FOR HERC01- CUL8TR HERC01 LOGON IN '
+    + 'PROGRESS AT 18:18:13 ON OCTOBER 2, 2026 NO BROADCAST MESSAGES '
+    + '+----------------------------------------------------------------------------+ !';
+
+  /** The redaction exactly as `main.ts` writes it, extracted so the test cannot drift from it. */
+  const redactionFrom = (src: string): RegExp => {
+    const m = /\.replace\((\/(?:[^/\\]|\\.)+\/[a-z]*),\s*'\$1 <redacted> '\)/.exec(src);
+    expect(m, 'no password redaction found in main.ts').not.toBeNull();
+    const body = m![1]!;
+    const lastSlash = body.lastIndexOf('/');
+    return new RegExp(body.slice(1, lastSlash), body.slice(lastSlash + 1));
+  };
+
+  it('REDACTS the echoed password out of the measured live screen', () => {
+    const out = SEEN_LIVE_2026_10_02.replace(redactionFrom(main), '$1 <redacted> ');
+    expect(out, 'the password must not survive into a harness log').not.toContain('CUL8TR');
+    expect(out, 'and the prompt itself is kept, so the state is still diagnosable')
+      .toContain('ENTER CURRENT PASSWORD FOR HERC01-');
+    expect(out).toContain('<redacted>');
+  });
+
+  it('leaves an ordinary host panel ALONE, so the diagnostic still diagnoses', () => {
+    // The whole point is to print the screen. A redaction that ate every screen would be a
+    // regression dressed as a fix -- this is the case the ISPF-wait failure actually wants.
+    const ispf = 'ISPF Primary Option Menu USERID : HERC01 TERMINAL : 3277 PANEL : ISP@PRIM';
+    expect(ispf.replace(redactionFrom(main), '$1 <redacted> ')).toBe(ispf);
+  });
+
+  it('prints the screen on the TIMEOUT arm only, not on a successful wait', () => {
+    // A successful wait prints which needle MATCHED and nothing else: the screen at that moment is
+    // by definition the one the scenario asked for, and printing it on every step would put a
+    // host panel in the log 20 times a run -- including, on the keys seam, a password prompt.
+    const steps = stepsBody![0];
+    const timeoutArm = steps.indexOf('wait TIMED OUT for');
+    expect(timeoutArm).toBeGreaterThan(-1);
+    expect(steps.slice(timeoutArm, timeoutArm + 400)).toMatch(/screen was/);
+    const sawAt = steps.indexOf('transfer window: saw ');
+    expect(sawAt).toBeGreaterThan(-1);
+    expect(steps.slice(sawAt, sawAt + 120)).not.toMatch(/screen was/);
+  });
+});

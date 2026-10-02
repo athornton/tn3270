@@ -3972,6 +3972,11 @@ that a gap LONGER than `frameMs` should survive. It should not -- that is a stal
 the timer's whole job. The property is that **each gap is shorter than the deadline while the TOTAL
 is far longer**, which is what a long transfer actually looks like.
 
+**SUPERSEDED 2026-10-02 (later the same day) -- EVERY CLAIM IN THE PARAGRAPH BELOW IS WRONG, AND HOW
+IT CAME TO BE WRONG IS THE LESSON. See *TSO/DFT at 200 KB was never a DFT problem* immediately after
+it.** Kept rather than deleted because the reasoning is instructive and because a reader who
+remembers it needs to find the correction, not its absence.
+
 **TSO/DFT AT 200 KB IS STILL NOT WORKING AND IS STILL OPEN.** After the fix the transfer still ends
 `stalled ... 0 bytes` with **no progress events at all**, which means no DFT frames are reaching us
 rather than the timer firing early. **Zero bytes moved, so this is not the timer.** Not diagnosed;
@@ -3983,9 +3988,71 @@ the session's budget ran out. Two leads for whoever picks it up:
 - `-ddm off` forces CUT and is the obvious comparison: if 200 KB succeeds over CUT on TSO and fails
   over DFT, the fault is in the DFT path at size rather than in the host or the window.
 
-**TWO TK5 USERIDS ARE HELD: `HERC03` and `HERC04`** (`/c u=herc03`, `/c u=herc04`). `HERC01` and
-`HERC02` are free -- **both released themselves within the hour**, so re-probe before spending console
-time.
+### TSO/DFT at 200 KB was never a DFT problem, nor a size problem — diagnosed 2026-10-02
+
+**200 KB ROUND-TRIPS BYTE-IDENTICALLY OVER DFT ON TSO.** Measured from the CLI against TK5 the same
+day: `/tmp/dftbig-rt.log`, **35 `FileTransferData` frames, ZERO CUT frames, at 43x80**, both
+directions, `cmp` clean, `LISTDS` reporting `VB 1024`, a clean in-run `LOGOFF`, and `0` occurrences of
+`input inhibited`. A send-only run beforehand moved 204800 bytes with 18 DFT frames. **So both engines
+work at size and the protocol was never in question.** Scripts: the two `/tmp/dftbig-*.txt` step
+lists, which are `packages/cli/scripts/dft-tso.txt` with a 200 KB payload and a longer `Wait(Unlock)`.
+
+**AND OUR OWN STACK WAS CLEARED OFFLINE FIRST, which is the cheap half and should always be done
+first:** a full 200 KB upload driven through a real `Session` with a fake socket answered **13 GETs,
+moved 204800 bytes, fired 17 progress events and returned `ok:true`** — so no size-dependent fault
+exists in the engine, the chunking or the IAC doubling. (Reply frames measure 16451/16453/16455 bytes:
+~16 KB each, differing because `doubleIac` expands the payload. Hercules's own 3270 buffer is
+`BUFLEN_3270` 65536, `console.c:48`, so there is ample room — worth knowing before suspecting it.)
+
+**WHAT ACTUALLY FAILS IS THE GUI HARNESS'S TSO LOGON, AT ANY SIZE.** `live-transfer.py tso` scores
+**4 of 9** and `--big` scores **5 of 13**, and the 249-byte run fails IDENTICALLY to the 200 KB one --
+which is what retires "200 KB" from the description of this bug. The chain, now visible in one line
+because a timed-out scenario wait prints the screen:
+
+    transfer window: drained "***" after 0 Enter(s)
+    transfer window: wait TIMED OUT for "Primary Option|USERID|BROWSE" -- screen was
+      "ENTER CURRENT PASSWORD FOR HERC02- <redacted> HERC02 LOGON IN PROGRESS AT 18:23:02
+       ON OCTOBER 2, 2026 NO BROADCAST MESSAGES +-------------------------+ !"
+    transfer window: host x -> TIMED OUT waiting for "READY"
+    transfer window: host delete 'HERC02.GUIXFER.BIN' -> TIMED OUT waiting for "READY"
+
+**READ THAT SCREEN: it is the PASSWORD PANEL with the logon message appended, and it ends in a BOX
+BORDER — there is no `***` on it anywhere.** So `drain:***` breaks on its first poll and presses
+nothing, TSO is still mid-logon behind that panel, and the ISPF wait burns its whole 45 s budget.
+
+**THE ROOT CAUSE IS ONE STEP EARLIER, IN `tso_logon`, AND IT IS A TRAP THIS RUNBOOK ALREADY RECORDS
+FOR VM.** It waits for `LOGON IN PROGRESS|Welcome|***` and sends ONE Enter — but `LOGON IN PROGRESS`
+is printed **onto the password panel**, so the needle matches a screen that is still protected and
+still logging on. That Enter is consumed dismissing it (`live-drive.py`: *"the FIRST Enter is consumed
+dismissing the all-protected banner and its text is discarded"*), the welcome banner arrives
+afterwards, and nothing presses past it. **`live-drive.py` survives the SAME needle only because its
+`DRAIN***` settles 3 s before each check and loops 8 times**, so it is still pressing when the banner
+appears; the GUI's `drain:` polls 1.5 s and **breaks on absence**, which here is immediately.
+Same family as *"never match the bare string `CMS`"* and *"TSO has THREE more-output prompts, not
+two"*: **a needle that matches the screen you are leaving rather than the one you are waiting for.**
+
+**THE REMEDY, NOT YET IMPLEMENTED:** the seam's `drain:` must settle and keep pressing until the
+TARGET panel appears, rather than until one needle disappears — i.e. take both needles
+(`drain:***|Primary Option`-shaped), or let `tso_logon` wait on a needle that cannot match the
+password panel. That is a `main.ts` change wanting its own live verification, and **all four TK5
+userids were held by the time it was diagnosed**, so it was left undone rather than committed unrun.
+`live-transfer.py`'s TSO `prep` therefore still has its ORIGINAL step order.
+
+**HOW THE WRONG DIAGNOSIS SURVIVED, because the mechanism generalises:** the stall message
+interpolated **CUT's** byte counter on a **DFT** transfer, where it is zero by construction. So
+`stalled ... 0 bytes` was printed for every DFT stall whatever had moved, and "zero bytes moved, so
+this is not the timer" was derived from a number that could not have said anything else. The harness
+compounded it by asserting `len(counts) <= 1` as a PASS for TSO (*"DFT reported NO intermediate
+progress (correct for DFT)"*) — a check written before DFT progress existed, which now certifies the
+silence it was meant to expose. **Fixed: one `bytesMoved()` in `transferRun.ts`, and the same fix in
+the CLI's blocking loop.** See [[check-what-a-comparison-covers]].
+
+**ALL FOUR TK5 USERIDS WERE HELD when this was written** (`HERC01`-`HERC04`), each stranded by a
+failed GUI run whose `host:logoff` step timed out — **the harness defect strands a userid every time
+it fires.** `/c u=<userid>` at the MVS console clears one, but **re-probe first: HERC02 released
+itself overnight and HERC01 did so within the hour on 2026-10-01**, so a strand here is usually
+temporary. Probe cheaply by typing the userid at the VTAM panel and looking for `IKJ56425I ... IN USE`
+versus `ENTER CURRENT PASSWORD FOR`.
 
 **A KNOWN HARNESS GAP: `live-transfer.py`'s logoff step is unreliable on VM and you must check the
 host.** The transfer run leaves CMS running, so the logoff run RECONNECTS into an indeterminate
