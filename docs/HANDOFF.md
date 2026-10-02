@@ -23,6 +23,17 @@ engine (VM declines DDM); TSO/TK5 and its DFT path are WRITTEN AND UNRUN** — d
 result as covering DFT. Full results, four defects replay structurally could not find, and three
 needle traps: `docs/live-testing.md`, *The GUI transfer window*.
 
+**macOS IS CLOSED, BY THE USER, 2026-10-02 — AND IN ASCII MODE, which no scripted run here has ever
+used.** They transferred to and from VM through the GUI on a Mac (and through the TUI), so the native
+file chooser -- the one thing no harness on this box can drive -- is verified. **MVS was not reachable
+from that Mac, so it is VM only.**
+**READ WHAT ASCII MODE DOES AND DOES NOT PROVE:** `transfer.ts` puts `ASCII` (and `CRLF`) in the
+`IND$FILE` command, so the **HOST** translates. Our local half -- CR/EOF suppression, codepage remap,
+DBCS shift state -- **is not implemented**, exactly as `core/src/ft/cut.ts` says under *SCOPE: binary
+mode only*. So host-side ASCII works end to end through this window; `upload_convert`/
+`download_convert` remain unwritten and that docstring is still correct. ASCII mode also draws the
+`Cr` field, which is inapplicable in binary and had never been exercised live.
+
 **THE NEXT ACTION IS EITHER (a) RUN THE TSO HALF** — `live-transfer.py tso`, written and never
 executed, where `Recfm=variable` matters because fixed PADS and turns 249 bytes into 320 — **or
 (b) ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,

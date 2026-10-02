@@ -345,10 +345,14 @@ directions and in both modes (see *Verification*), and this window's Electron wi
 `packages/gui/scripts/transfer.mjs` — 10 checks, under Xvfb, in replay mode with the native dialog
 **stubbed**, because a real modal under Xvfb has nobody to click it. The four close/cancel paths
 described above were each driven by hand under Xvfb with a **fake** transfer, which proves `cancel`
-is reached on each and nothing about the bytes it then sends. What
-no run here has seen is a real transfer through this front end, or the native dialog on macOS (there
-is no Mac on the build box). Both logs are in `docs/live-testing.md` — *The transfer window's four
-teardown paths* for what was driven, and *The GUI transfer window by hand* for what is still open.
+is reached on each and nothing about the bytes it then sends. **BOTH OF THOSE GAPS ARE NOW CLOSED, 2026-10-02.** A real transfer through this front end is
+live-verified against VM/CMS -- 249 bytes both directions, byte-identical, reproduced twice
+(`packages/gui/scripts/live-transfer.py vm`) -- and **the user verified the native dialog on macOS by
+hand, in ASCII mode**, which no scripted run here has ever used. Both logs and the four remaining
+open items are in `docs/live-testing.md` — *The transfer window's four teardown paths* for what was
+driven with a fake transfer, and *The GUI transfer window* for the live results. **Still open there:
+TSO/DFT from any platform**, the close guard against a transfer actually in flight, and the progress
+line against real byte counts.
 
 ## Using the TUI
 
@@ -1023,8 +1027,9 @@ user. Items 11 onward keep the order agreed on 2026-09-29.
    native file dialog for the local file: the canvas preload has to stay at four functions for
    `renderer.ts` to keep being shared with the browser, and teaching a canvas text editing, focus and
    a file chooser buys nothing. x3270 puts its own transfer dialog in Xaw widgets for the same reason.
-   **Stage 3's own live verification is OPEN**: no host has driven the window, and the native dialog
-   has not run on macOS. The work also found that **`Ctrl-T` in the GUI was DEAD** — mapped in
+   **Stage 3's live verification LANDED 2026-10-02**: VM/CMS drove the window for real (249 bytes
+   both ways, byte-identical, twice) and the user verified the macOS dialog by hand in ASCII mode.
+   **TSO/DFT is still unrun.** The work also found that **`Ctrl-T` in the GUI was DEAD** — mapped in
    `frontend` and absent from `canvas/src/keys.ts`, so the chord did nothing while the keypad button
    worked, which is why `keys.mjs` now drives it.
    **Stage 4** is the web gateway, and it is a security decision before it is a UI one: the gateway
@@ -1241,9 +1246,10 @@ worse than one that says which quarter is missing.
   `Xfer` button open a transfer window**: a separate `BrowserWindow` with real HTML controls and a
   native file dialog, **not a canvas view**, because the canvas preload must
   stay at four functions for `renderer.ts` to keep being shared with the browser, and teaching a
-  canvas text editing and focus buys nothing. See *Using the GUI*, *File transfer*. **Its own live
-  gap is open and is NOT the protocol's:** no live host has driven this window, and the native file
-  dialog has never run on macOS — `docs/live-testing.md`, *The GUI transfer window by hand*.
+  canvas text editing and focus buys nothing. See *Using the GUI*, *File transfer*. **Its live gap is now
+  mostly closed and was never the protocol's:** VM/CMS has driven this window for real and the macOS
+  dialog is verified by hand in ASCII mode; **TSO/DFT remains unrun** —
+  `docs/live-testing.md`, *The GUI transfer window*.
   (3) **The web gateway STILL REFUSES the action outright, in
   `web/src/protocol.ts`**, and that is deliberate — **and as of 2026-10-01 the refusal gives the
   right reason.** It used to say "the gateway has no transfer UI", which stopped being the reason

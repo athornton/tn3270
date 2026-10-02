@@ -3824,6 +3824,10 @@ PASS BYTES ARE IDENTICAL: identical
 host — WAS NOT RUN: the session's budget ran out first, and the flow is written but UNEXERCISED.**
 Do not read the VM result as covering DFT; it is a different engine and the host chooses.
 
+**THE SCRIPTED RUN IS `Mode=binary`. The USER separately verified ASCII mode by hand on macOS**, GUI
+and TUI, to and from VM -- see *macOS, BY HAND BY THE USER* below, which also explains why that
+exercises the HOST's translation and not our unimplemented local one.
+
 **FOUR THINGS THE LIVE RUN FOUND THAT REPLAY COULD NOT, all now fixed:**
 
 1. **The seam quit mid-transfer and killed a real one.** `Ctrl+t` in a keys list makes
@@ -3856,27 +3860,49 @@ Do not read the VM result as covering DFT; it is a different engine and the host
   run that dies mid-flow poisons the next one, including the TUI harness. That happened three times
   here.
 
-**STILL OPEN, and item 1 is not reachable on this box at all:**
+### macOS, BY HAND BY THE USER — CLOSED 2026-10-02, and in a MODE the scripted run never touched
 
-1. **The native dialog's appearance and behavior on macOS — OPEN, and NOT TOUCHED BY THE RUN ABOVE.**
-   There is no macOS here, and `live-transfer.py` sets `TN3270_GUI_TRANSFER_PATH`, which substitutes
-   the whole chooser -- so a green run says **nothing** about `Browse...`. Check that a
-   `Direction=send` offers an **Open** panel and a `receive` a **Save** panel; that the panel does
-   **not** set `Exist` (pick `replace`, confirm it overwrites; then `keep`, confirm it refuses
-   LOCALLY without telling the host); and that canceling the panel leaves the Local file field as it
-   was rather than blanking it.
-2. **TSO/TK5, the DFT host — OPEN.** `python3 packages/gui/scripts/live-transfer.py tso` is written
+**THE USER TRANSFERRED TO AND FROM VM IN *ASCII* MODE THROUGH THE GUI ON macOS, AND THROUGH THE TUI
+AS WELL.** That closes the macOS item -- the native chooser, which no harness here can drive -- and
+it is the FIRST ASCII-mode transfer recorded anywhere in this project. Every scripted run, CLI, TUI
+and GUI, has been `Mode=binary`.
+
+**WHAT ASCII MODE ACTUALLY EXERCISES, because it is NOT the local translation and the code says so.**
+`transfer.ts` puts the word `ASCII` in the `IND$FILE` command (and `CRLF` unless `Cr=keep`), so **the
+HOST does the translation**. Our own local half -- CR/EOF suppression, the codepage remap, DBCS
+shift-in/shift-out -- is **genuinely not implemented**, which `packages/core/src/ft/cut.ts` states
+outright under *SCOPE: binary mode only, for now*. Nothing refuses the mode; we simply do not do the
+local conversion, and for plain text the host's own is sufficient. **So this result says host-side
+ASCII works end to end through this window; it does NOT mean `upload_convert`/`download_convert`
+have been implemented, and that docstring is still accurate.** A file needing the local remap (DBCS,
+or a codepage the host will not do) remains unimplemented and untested.
+
+**AND ASCII MODE REACHES A FIELD BINARY MODE CANNOT:** `Cr` is applicable only when
+`mode === 'ascii'` (`transferForm.ts`'s `applicable`), so this is also the first live exercise of
+that field being drawn, and of `wantsCrlf`'s rule that every `Cr` value except `keep` adds `CRLF`.
+
+**MVS WAS NOT REACHABLE FROM THE MAC** (the user's note), so the macOS verification is **VM only**.
+TSO/TK5 remains unrun from any platform -- see item 2.
+
+**WHAT THE USER'S RUN DOES NOT SETTLE, and these were in the item's checklist rather than assumed:**
+whether the panel leaves `Exist` alone (pick `replace`, confirm it overwrites; then `keep`, confirm
+it refuses LOCALLY without telling the host), and whether CANCELING the panel leaves the Local file
+field as it was rather than blanking it. Both are cheap to check next time a Mac is in front of
+someone, and neither is claimed here.
+
+**STILL OPEN:**
+1. **TSO/TK5, the DFT host — OPEN.** `python3 packages/gui/scripts/live-transfer.py tso` is written
    and has never been run. Expect `Recfm=variable` to matter: fixed PADS to the record boundary and
    the same 249 bytes came back as 320 (249 + 71 nulls) on the TUI run -- correct behavior that
    fails a byte comparison.
-3. **The close guard against a transfer actually in flight — OPEN.** 249 bytes is far too fast to
+2. **The close guard against a transfer actually in flight — OPEN.** 249 bytes is far too fast to
    interrupt; the TUI runs used 200KB. Try the red button and `Cmd-W` (both must refuse, with Cancel
    the only enabled control), then the paths the guard does NOT cover and which are caught
    elsewhere: closing the TERMINAL window never fires the transfer window's `close` at all, and
    `Cmd-Q` goes through `before-quit`. In every case the host must LEAVE transfer mode afterwards --
    **judged by the next command being obeyed, not by an error message**, since MECAFF prints
    `>> TRANS99 - Protocol error` and TSO's FFTP prints nothing at all.
-4. **The progress line against real byte counts — OPEN.** 249 bytes arrives in one frame, so the
+3. **The progress line against real byte counts — OPEN.** 249 bytes arrives in one frame, so the
    count never visibly climbs. Needs the 200KB file. **And expect NO progress at all on TSO:**
    `onProgress` is called only from the CUT frame handler (`transferRun.ts`), so a silent DFT
    transfer is correct rather than a hang.
