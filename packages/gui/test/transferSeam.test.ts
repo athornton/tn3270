@@ -206,9 +206,15 @@ describe("the harness hooks go through the form's own object", () => {
     // makes adding a hook a decision that has to be written down here.
     const hooks = (boot.match(/^window\.(__tn3270\w+) =/gm) ?? [])
       .map((m) => /^window\.(__tn3270\w+)/.exec(m)![1]).sort();
+    // SEVEN ON 2026-10-02, and the last two are for the live items 249 bytes could not reach:
+    //   - `__tn3270SampleStatus` -- a byte count CLIMBING cannot be seen in one reading, and a
+    //                              report that silently stops is the failure this window hides best.
+    //   - `__tn3270ClickCancel`  -- clicks the REAL button, because that is the operator's only way
+    //                              out of a running transfer and a direct `requestCancel()` would
+    //                              pass while the control was disabled or wired to nothing.
     expect(hooks, 'the harness hook surface is fixed; add one only deliberately').toEqual([
-      '__tn3270AwaitDone', '__tn3270CycleField', '__tn3270FieldKind',
-      '__tn3270SetField', '__tn3270Submit',
+      '__tn3270AwaitDone', '__tn3270ClickCancel', '__tn3270CycleField', '__tn3270FieldKind',
+      '__tn3270SampleStatus', '__tn3270SetField', '__tn3270Submit',
     ]);
   });
 
@@ -223,6 +229,20 @@ describe("the harness hooks go through the form's own object", () => {
     // STRINGS and reading the status line would be reading prose.
     expect(boot).toMatch(/while \(ui\.running\(\) && Date\.now\(\) < deadline\)/);
     expect(boot).toMatch(/timedOut: ui\.running\(\)/);
+  });
+
+  it('samples the status line as a SEQUENCE, and reports whether Cancel was enabled', () => {
+    // A sequence because the property is that a real byte count CLIMBS; distinct-only because at
+    // 15ms a frame and a 100ms poll most readings are repeats, and a hundred identical lines in a
+    // harness log hide the three that differ.
+    expect(boot).toMatch(/if \(seen\[seen\.length - 1\] !== text\) seen\.push\(text\)/);
+    // RETURNS EARLY when the transfer ends, or a 3-second transfer holds the scenario for the whole
+    // budget and the most interesting sample is followed by nothing but waiting.
+    expect(boot).toMatch(/if \(!ui\.running\(\) \|\| Date\.now\(\) >= deadline\) return seen;/);
+    // THROUGH THE BUTTON, and `enabled` reported separately: `click()` on a disabled button is a
+    // silent no-op, so a cancel that "worked" against a dead control would look identical.
+    expect(boot).toMatch(/const enabled = !btn\.disabled;/);
+    expect(boot).toMatch(/btn\.click\(\);/);
   });
 
   it('asks the DOM which control a field is drawn as, not the field table', () => {

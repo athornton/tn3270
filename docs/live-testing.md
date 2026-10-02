@@ -3925,17 +3925,67 @@ someone, and neither is claimed here.
    `live-drive.py` has warned about since 2026-08, and the reason a fixed number of Enters cannot
    work. Note it was **0 Enters on one run and 2 on another against the same host**, which is the
    whole argument.
-2. **The close guard against a transfer actually in flight — OPEN.** 249 bytes is far too fast to
-   interrupt; the TUI runs used 200KB. Try the red button and `Cmd-W` (both must refuse, with Cancel
-   the only enabled control), then the paths the guard does NOT cover and which are caught
-   elsewhere: closing the TERMINAL window never fires the transfer window's `close` at all, and
-   `Cmd-Q` goes through `before-quit`. In every case the host must LEAVE transfer mode afterwards --
-   **judged by the next command being obeyed, not by an error message**, since MECAFF prints
-   `>> TRANS99 - Protocol error` and TSO's FFTP prints nothing at all.
-3. **The progress line against real byte counts — OPEN.** 249 bytes arrives in one frame, so the
-   count never visibly climbs. Needs the 200KB file. **And expect NO progress at all on TSO:**
-   `onProgress` is called only from the CUT frame handler (`transferRun.ts`), so a silent DFT
-   transfer is correct rather than a hang.
+2. ~~**The close guard against a transfer actually in flight — OPEN.**~~ **DONE ON VM/CMS
+   2026-10-02, 15 of 15 checks, with a 200 KB file** (`live-transfer.py vm --big`). The window
+   **refused to close** mid-transfer (`close -> survived=true`), **Cancel was enabled and clickable**,
+   and the cancel landed at **73987 of 204800 bytes** -- genuinely mid-flight, which is the hard part
+   rather than the cancel itself: *"A canceled 200KB transfer that reports 204800 bytes was not
+   canceled."* The host then **obeyed its next command** (`#cp logoff` → `LOGOFF AT`), which is how an
+   abort is judged here and not by an error message.
+   **STILL OPEN on TSO**, for the reason in item 1 below.
+   **AND TWO CLOSE PATHS ARE DELIBERATELY NOT DRIVEN, rather than half-claimed:** closing the
+   TERMINAL window never fires the transfer window's `close` at all (a parent's destruction fires only
+   `closed`) and `Cmd-Q` goes through `before-quit` -- **both END THE PROCESS, so neither can be
+   observed from inside a scenario that has to report afterwards.** They remain covered only by the
+   fake-`startTransfer` Xvfb runs recorded above.
+3. ~~**The progress line against real byte counts — OPEN.**~~ **DONE ON VM/CMS 2026-10-02.** A real
+   count climbed in the window's own status line -- 17 distinct lines,
+   `9898 → 23162 → 35342 → … → 198764 → 204800`, ending `done: 204800 bytes`, with the 200 KB file
+   round-tripping **byte-identical**. Sampled as a SEQUENCE and not a reading, because climbing is the
+   property: a transfer that reports one count and goes quiet is the failure this window hides best.
+
+   **AND THE "DFT IS SILENT BY DESIGN" CLAIM WAS WRONG -- IT WAS A LIVE BUG, found by this very run
+   and now FIXED. See *A 200 KB DFT transfer was killed by CUT's stall detector* below.**
+
+### A 200 KB DFT transfer was killed by CUT's stall detector — FOUND AND FIXED 2026-10-02
+
+**THE BUG, IN SHIPPED CODE, AND ONLY A BIG LIVE FILE COULD FIND IT.** `transferRun.ts` re-armed its
+30-second per-frame deadline **only from the CUT path**, so nothing re-armed it during a DFT
+transfer: **any DFT transfer taking longer than 30 seconds was killed by a timer meant to detect a
+stalled CUT host.** The 249-byte runs finished well inside the window, which is why every previous
+result was green.
+
+**The error message was DOUBLY WRONG, which is what made it hard to read:**
+`stalled: no CUT frame from the host within 30s, 0 bytes` -- nothing was stalled, and nothing was
+speaking CUT.
+
+**AND IT UNMASKED A SECOND CLAIM AS FALSE.** This document and the README both said DFT reporting no
+progress was *correct by design*, because `onProgress` was reached only from the CUT frame handler.
+That was the same silence seen from the operator's side. `Session` now emits a `transferProgress`
+event per accepted DFT frame -- **including the Open frame, which matters because a host that
+announces a transfer and then thinks is the commonest real pause** -- and `transferRun.ts` re-arms
+the deadline and reports bytes on it. **Two regression tests, mutation-verified:** removing the
+re-arm reddens the long-transfer test specifically.
+
+**A TEST I WROTE WRONG FIRST, worth recording because the correction is the insight:** it asserted
+that a gap LONGER than `frameMs` should survive. It should not -- that is a stall by definition and
+the timer's whole job. The property is that **each gap is shorter than the deadline while the TOTAL
+is far longer**, which is what a long transfer actually looks like.
+
+**TSO/DFT AT 200 KB IS STILL NOT WORKING AND IS STILL OPEN.** After the fix the transfer still ends
+`stalled ... 0 bytes` with **no progress events at all**, which means no DFT frames are reaching us
+rather than the timer firing early. **Zero bytes moved, so this is not the timer.** Not diagnosed;
+the session's budget ran out. Two leads for whoever picks it up:
+- **The TUI's `cancel-transfer.py tso` reached 204800 bytes on 2026-09-24** -- but that was BEFORE the
+  `-ddm` default flip on 2026-09-29, so it was a **CUT** transfer. Re-run today it reports
+  `'transferring' present: False` with counts ending at 204800, i.e. it now takes the DFT path too
+  and its cancel can no longer be timed. **So no harness anywhere has moved 200 KB over DFT.**
+- `-ddm off` forces CUT and is the obvious comparison: if 200 KB succeeds over CUT on TSO and fails
+  over DFT, the fault is in the DFT path at size rather than in the host or the window.
+
+**TWO TK5 USERIDS ARE HELD: `HERC03` and `HERC04`** (`/c u=herc03`, `/c u=herc04`). `HERC01` and
+`HERC02` are free -- **both released themselves within the hour**, so re-probe before spending console
+time.
 
 **A KNOWN HARNESS GAP: `live-transfer.py`'s logoff step is unreliable on VM and you must check the
 host.** The transfer run leaves CMS running, so the logoff run RECONNECTS into an indeterminate

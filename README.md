@@ -320,11 +320,17 @@ mouse and the keyboard behave as they do in any window, which is the whole reaso
 the 3270 canvas. The canvas window's preload stays at four functions, so `renderer.ts` goes on being
 shared with the browser gateway unchanged.
 
-The host decides which protocol is used — CUT or DFT — and the window drives both. **Progress
-reporting differs between them, and the difference is the engine's, not the window's**: a CUT
-transfer reports a running byte count per frame, while DFT reports nothing until it finishes and then
-gives the total (`frontend/src/transferRun.ts` calls `onProgress` only from its CUT frame handler).
-A DFT transfer that sits silent is therefore normal; judge it by the final count.
+The host decides which protocol is used — CUT or DFT — and the window drives both, **reporting a
+running byte count on each**. CUT reports per frame; DFT reports per accepted data frame, through
+`Session`'s `transferProgress` event.
+
+**THAT USED TO SAY DFT WAS SILENT BY DESIGN, AND IT WAS A BUG RATHER THAN A DESIGN.** `onProgress`
+was reached only from the CUT frame handler, and the same gap meant nothing re-armed the 30-second
+per-frame deadline during a DFT transfer — so **any DFT transfer longer than 30 seconds was killed by
+a timer meant to detect a stalled CUT host**, with the doubly-misleading message `stalled: no CUT
+frame from the host within 30s`. Found 2026-10-02 by a 200 KB live run; 249-byte files had always
+finished inside the window. See `docs/live-testing.md`, *A 200 KB DFT transfer was killed by CUT's
+stall detector*.
 
 **While a transfer is running, the transfer window refuses its own close** — the red button and
 `Cmd-W` are both prevented, the window is brought forward, and `Cancel` is left as the only enabled

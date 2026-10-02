@@ -48,7 +48,24 @@ time out, so re-probe before assuming a strand is permanent. The cause is worth 
 and not read until three runs had been spent, and a run that fails mid-logon never reaches its own
 logoff. The scenario is now ordered so every earlier failure still falls through to the logoff.
 
-**THE NEXT ACTION IS ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
+**THE 200 KB ITEMS ARE DONE ON VM, 2026-10-02: 15 of 15 checks.** A real byte count CLIMBED in the
+window (17 lines, `9898 → … → 204800`), the window **REFUSED to close** mid-transfer, Cancel was
+enabled and the cancel landed at **73987 of 204800** -- genuinely mid-flight -- and the host obeyed
+its next command afterwards. 200 KB round-tripped byte-identical. `live-transfer.py vm --big`.
+
+**AND THAT RUN FOUND A BUG IN SHIPPED CODE: ANY DFT TRANSFER LONGER THAN 30 SECONDS WAS KILLED.** See
+the corrected asymmetry note below. **Fixed, with two mutation-verified regression tests.**
+
+**STILL OPEN AND NOT DIAGNOSED: TSO/DFT AT 200 KB.** After the fix it still ends
+`stalled ... 0 bytes` with **no progress events at all** -- so no DFT frames are arriving, which is
+not the timer. **Zero bytes moved.** Two leads: the TUI's 204800-byte TSO result predates the `-ddm`
+default flip and was therefore **CUT**, so *no harness anywhere has moved 200 KB over DFT*; and
+`-ddm off` forces CUT and is the obvious comparison. **TWO USERIDS ARE HELD -- `HERC03` and `HERC04`**
+(`/c u=herc03`, `/c u=herc04`); `HERC01` and `HERC02` are free, both having released themselves
+within the hour, so **re-probe before spending console time.**
+
+**THE NEXT ACTION IS EITHER (a) THE TSO/DFT 200 KB DIAGNOSIS above, or (b) ROADMAP ITEM (0b), THE
+GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
 preload, its own bridge, the canvas bridge untouched), and its AS BUILT notes record what that shape
@@ -188,10 +205,15 @@ before re-deriving anything.** The five worth knowing cold, because each would h
    TSO/VM **cycle** field, so `host=HARNESS.DATA` echoed `tso` and would have produced a
    plausible-looking PASS from a form where nothing was typed.
 
-**ONE ASYMMETRY THE PLAN GOT WRONG AND THE README NOW RECORDS: DFT REPORTS NO PROGRESS.**
-`onProgress` is called from exactly one place, the **CUT** frame handler (`transferRun.ts:323`), so
-a DFT transfer is silent until it finishes. The plan's "the window reports progress either way"
-would have been a false claim in the README. **A silent DFT transfer is normal, not a hang.**
+**AN ASYMMETRY RECORDED ON 2026-10-01 AS CORRECT-BY-DESIGN, AND IT WAS A BUG — FIXED 2026-10-02.**
+The claim was that `onProgress` is reached only from the CUT frame handler so a silent DFT transfer is
+normal. The silence was real; calling it normal was wrong. **The same missing hook meant nothing
+re-armed the 30-second per-frame deadline during a DFT transfer, so ANY DFT TRANSFER LONGER THAN 30
+SECONDS WAS KILLED** by a timer meant to detect a stalled CUT host — message
+`stalled: no CUT frame from the host within 30s, 0 bytes`, in which nothing was stalled and nothing
+was speaking CUT. `Session` now emits `transferProgress` per accepted DFT frame (Open included) and
+`transferRun.ts` re-arms on it. **Two regression tests, mutation-verified.** Only a 200 KB live run
+could find it; every 249-byte transfer finished inside the window.
 
 **A DIVERGENCE THIS WORK CREATED IN THE TUI, ~~AND DID NOT FIX~~ — FIXED 2026-10-01 on the user's
 instruction, before the merge.** `app.ts` left `transferState.error` set on its success path, and

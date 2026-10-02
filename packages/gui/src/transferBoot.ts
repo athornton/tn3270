@@ -291,6 +291,8 @@ declare global {
     __tn3270AwaitDone(budgetMs: number): Promise<{
       running: boolean; status: string; timedOut: boolean;
     }>;
+    __tn3270SampleStatus(budgetMs: number, everyMs: number): Promise<string[]>;
+    __tn3270ClickCancel(): { enabled: boolean; statusBefore: string };
   }
 }
 
@@ -412,4 +414,60 @@ window.__tn3270AwaitDone = async (budgetMs: number): Promise<{
     status: document.querySelector('#status')?.textContent ?? '',
     timedOut: ui.running(),
   };
+};
+
+/**
+ * Sample the status line over a window and return the DISTINCT texts seen, in order.
+ *
+ * ## WHY A SEQUENCE AND NOT A READING
+ *
+ * The property worth observing is that a real byte count **CLIMBS**. One reading cannot show that,
+ * and the runbook names the failure it would miss: *"a progress report that silently stops is the
+ * failure this window would hide best"* -- a transfer that reports `1107 bytes` once and then goes
+ * quiet for two seconds looks identical to one reporting it continuously, through a single sample.
+ *
+ * DISTINCT, not every poll, because the poll rate and the host's frame rate are unrelated: at 15 ms
+ * a frame and a 100 ms sample most readings are repeats, and a hundred identical lines in a harness
+ * log hide the three that differ.
+ *
+ * ## IT RETURNS EARLY WHEN THE TRANSFER ENDS
+ *
+ * Otherwise a 200 KB transfer that finishes in 3 s would still hold the scenario for the full
+ * budget, and the `done:` line -- the last and most interesting sample -- would be followed by
+ * nothing but waiting. The caller gets the ending in the sequence either way.
+ */
+window.__tn3270SampleStatus = async (budgetMs: number, everyMs: number): Promise<string[]> => {
+  const seen: string[] = [];
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const text = document.querySelector('#status')?.textContent ?? '';
+    if (seen[seen.length - 1] !== text) seen.push(text);
+    if (!ui.running() || Date.now() >= deadline) return seen;
+    await new Promise((r) => { setTimeout(r, everyMs); });
+  }
+};
+
+/**
+ * Click the REAL Cancel button, and report whether it was enabled and what the status said.
+ *
+ * ## WHY A CLICK RATHER THAN `ui.requestCancel()`
+ *
+ * Calling the method directly would pass while the button was disabled, mislabelled, or wired to
+ * nothing -- and the button IS the operator's only route out of a running transfer, because the
+ * window refuses to close. So this goes through the same listener a mouse does
+ * (`cancelBtn.addEventListener('click', ...)`), and reports `enabled` separately: a disabled button
+ * that is "clicked" proves nothing, and `click()` on one is a silent no-op in the DOM.
+ *
+ * `statusBefore` is captured BEFORE the click because that is the byte count the cancel interrupted,
+ * and it is the number that says the transfer was genuinely mid-flight. `cancel-transfer.py` makes
+ * the same recording for the same reason: *"A canceled 200KB transfer that reports 204800 bytes was
+ * not canceled."*
+ */
+window.__tn3270ClickCancel = (): { enabled: boolean; statusBefore: string } => {
+  const btn = document.querySelector<HTMLButtonElement>('#cancel');
+  const statusBefore = document.querySelector('#status')?.textContent ?? '';
+  if (btn === null) return { enabled: false, statusBefore };
+  const enabled = !btn.disabled;
+  btn.click();
+  return { enabled, statusBefore };
 };

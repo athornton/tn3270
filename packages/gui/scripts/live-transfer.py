@@ -43,6 +43,7 @@ against; the screen at a password prompt contains the password, and at the next 
 system's LOGMSG.
 """
 import os
+import re
 import subprocess
 import sys
 import time
@@ -56,6 +57,26 @@ ELECTRON = REPO / "node_modules" / ".bin" / "electron"
 # theirs rather than a new measurement. Deterministic content: a random file would make a
 # mismatch harder to describe than it needs to be.
 PAYLOAD = bytes(range(249))
+
+# 200 KB for `--big`, and the size is `cancel-transfer.py`'s MEASUREMENT rather than a guess: CUT
+# runs ~15 ms a frame against local Hercules and the codec expands RANDOM data 1.727x (worst case --
+# a byte outside the current quadrant costs two encoded bytes), so ~1107 source bytes fit per frame.
+# 200 KB is therefore ~185 frames and ~2.8 s per direction, which is long enough for a script to
+# fire a cancel partway and long enough to watch a byte count climb.
+#
+# **THE 249-BYTE FIXTURE CANNOT EXERCISE EITHER ITEM**: it completes in ONE frame, so there is
+# nothing to interrupt and exactly one status line to sample.
+#
+# RANDOM WITH A FIXED SEED, matching `cancel-transfer.py`: random maximises the codec expansion (so
+# the frame count is the worst case rather than a lucky one) and the seed keeps the run repeatable.
+BIG_SEED = 11
+BIG_SIZE = 200 * 1024
+
+
+def big_payload():
+    import random
+    r = random.Random(BIG_SEED)
+    return bytes(r.getrandbits(8) for _ in range(BIG_SIZE))
 
 # The userspace GUI stack this box needs. Mirrors `xvfb.mjs`'s `guiEnv` -- NOT a second opinion
 # about it: if that file's paths change this must follow, and the duplication is deliberate only
@@ -391,8 +412,10 @@ def report(label, ok, detail=""):
 
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else ""
+    big = "--big" in sys.argv[2:]
     if which not in FLOWS:
-        print(f"usage: live-transfer.py [{'|'.join(FLOWS)}]")
+        print(f"usage: live-transfer.py [{'|'.join(FLOWS)}] [--big]")
+        print("  --big: 200 KB instead of 249 bytes, to watch progress climb and cancel mid-flight")
         return 2
     pw = os.environ.get("TN3270_PASSWORD")
     if not pw:
@@ -401,18 +424,23 @@ def main():
     cfg = FLOWS[which]
     user = os.environ.get("TN3270_USER", cfg["user"])
 
-    src = Path(os.environ.get("TN3270_SRC", f"/tmp/gui-xfer-src-{which}.bin"))
-    back = Path(os.environ.get("TN3270_BACK", f"/tmp/gui-xfer-back-{which}.bin"))
-    log = f"/tmp/gui-live-transfer-{which}.log"
+    suffix = "-big" if big else ""
+    src = Path(os.environ.get("TN3270_SRC", f"/tmp/gui-xfer-src-{which}{suffix}.bin"))
+    back = Path(os.environ.get("TN3270_BACK", f"/tmp/gui-xfer-back-{which}{suffix}.bin"))
+    log = f"/tmp/gui-live-transfer-{which}{suffix}.log"
     Path(log).write_text("")
-    src.write_bytes(PAYLOAD)
+    payload = big_payload() if big else PAYLOAD
+    src.write_bytes(payload)
     # The receive target must NOT exist: `Exist=keep` is the default and the engine correctly
     # refuses a receive onto an existing file. Removing it here is what makes the run repeatable.
     back.unlink(missing_ok=True)
 
     print(f"-- {which}: {cfg['target']} as {user}, engine expected: {cfg['engine']}")
-    print(f"-- src {src} ({len(PAYLOAD)}B) -> host -> {back}")
+    print(f"-- src {src} ({len(payload)}B) -> host -> {back}")
     print(f"-- log {log}  MAY CONTAIN THE PASSWORD; not for git")
+    if big:
+        print("-- BIG MODE: watching progress climb, then canceling mid-flight")
+        print("-- NOTE a canceled transfer leaves a PARTIAL file on the host. Expected, not a fault.")
 
     checks = []
     if which == "vm":
@@ -485,8 +513,19 @@ def main():
     # more faithful test -- an operator transfers twice from one window rather than restarting the
     # app -- and it exercises the ONE SESSION, ONE TRANSFER rule, since the second submit happens
     # on a form that has already run one to completion.
-    scenario = (f"{prep},{send_fields},{recv_fields},{logoff_step}"
-                if which == "tso" else f"{send_fields},{recv_fields},{logoff_step}")
+    if big:
+        # **SAMPLE BETWEEN THE SUBMIT AND THE `done`**, so the window the status line is watched over
+        # is exactly the one the transfer runs in. `sample:` returns early when the transfer ends, so
+        # a generous budget costs nothing.
+        #
+        # The SEND is sampled and the receive is not: one direction is enough to show a count
+        # climbing, and `onProgress` is the same call on both.
+        send_sampled = send_fields.replace(",submit,done=", ",submit,sample:30000,done=")
+        scenario = (f"{prep},{send_sampled},{recv_fields},{logoff_step}"
+                    if which == "tso" else f"{send_sampled},{recv_fields},{logoff_step}")
+    else:
+        scenario = (f"{prep},{send_fields},{recv_fields},{logoff_step}"
+                    if which == "tso" else f"{send_fields},{recv_fields},{logoff_step}")
     st, out = run(which, "both", keys(logon, "Ctrl+t"), scenario, str(src), log)
     checks.append(report("the run reached the form", "transfer window: opened" in out))
     checks.append(report("the form drew its rows",
@@ -495,7 +534,15 @@ def main():
     submits = [l.strip() for l in out.splitlines() if "submit ->" in l]
     dones = [l.strip() for l in out.splitlines() if "done ->" in l]
     ok_submits = [l for l in submits if "ok=true" in l.lower()]
-    finished = [l for l in dones if "running=false timedOut=false" in l]
+    # **`running=false timedOut=false` IS TRUE OF A STALL, and this scored two PASSes against
+    # transfers that moved ZERO BYTES.** The 200 KB TSO run ended `stalled: no CUT frame from the
+    # host within 30s, 0 bytes` on both directions, and both were reported as having "run to
+    # completion" -- the wait did return cleanly, because the driver had given up cleanly. So a
+    # completion must ALSO carry the engine's own success wording. This is the third time on this
+    # harness that a check has passed on the absence of a failure rather than the presence of a
+    # result; the pattern is worth naming each time it appears.
+    finished = [l for l in dones
+                if "running=false timedOut=false" in l and "status=done:" in l]
 
     checks.append(report("the SEND was accepted locally", len(ok_submits) >= 1,
                          submits[0] if submits else "(no submit line)"))
@@ -516,9 +563,9 @@ def main():
     # ---- THE CHECK THAT MATTERS ----
     got = back.read_bytes() if back.exists() else b""
     checks.append(report("the file came back at all", len(got) > 0, f"{len(got)}B"))
-    checks.append(report("BYTES ARE IDENTICAL", got == PAYLOAD,
-                         "identical" if got == PAYLOAD
-                         else f"expected {len(PAYLOAD)}B, got {len(got)}B"))
+    checks.append(report("BYTES ARE IDENTICAL", got == payload,
+                         "identical" if got == payload
+                         else f"expected {len(payload)}B, got {len(got)}B"))
 
     # THE LOGOFF IS PART OF THE SCENARIO NOW (see `logoff_step`), so this only reports what it did.
     # The separate `logoff()` helper is kept as a FALLBACK for a run that died before the step --
@@ -532,6 +579,85 @@ def main():
                          "-> saw" in host_line,
                          host_line.strip() or "(no host step line -- CHECK THE HOST)"))
 
+    if big:
+        # ---- ITEM 4: DID A REAL BYTE COUNT CLIMB? ----
+        #
+        # Parsed from the sampled status lines rather than from a single reading, because CLIMBING is
+        # the property. A transfer that reported one count and went quiet would pass a single-sample
+        # check and is precisely the failure the runbook says this window would hide best.
+        counts = []
+        for line in out.splitlines():
+            m = re.search(r"transfer window: status .*?(\d+) bytes", line)
+            if m:
+                counts.append(int(m.group(1)))
+        rising = len(counts) >= 2 and all(b >= a for a, b in zip(counts, counts[1:]))
+        if which == "tso":
+            # **DFT REPORTS NO PROGRESS AT ALL, and that is CORRECT rather than a fault.**
+            # `onProgress` is called only from the CUT frame handler (`transferRun.ts:323`), so a
+            # silent DFT transfer is the engine's design. Asserted as an ABSENCE so the asymmetry is
+            # observed rather than merely read off the source -- and so that the day DFT grows
+            # progress reporting, this check fails and says so.
+            checks.append(report("DFT reported NO intermediate progress (correct for DFT)",
+                                 len(counts) <= 1,
+                                 f"counts seen: {counts[:6]}"))
+        else:
+            checks.append(report("the byte count CLIMBED during the transfer", rising,
+                                 f"{len(counts)} counts, {counts[:3]}...{counts[-2:]}"
+                                 if counts else "no byte counts in any status line"))
+            checks.append(report("the last count is the whole file",
+                                 bool(counts) and counts[-1] == len(payload),
+                                 f"last={counts[-1] if counts else None} of {len(payload)}"))
+
+        # ---- ITEM 3: THE CLOSE GUARD AND A CANCEL, AGAINST A REAL TRANSFER ----
+        #
+        # A SECOND RUN, because the first one's transfers must COMPLETE for the byte comparison above
+        # to mean anything -- and this one deliberately interrupts. The host file is re-sent so there
+        # is something in flight to interrupt.
+        #
+        # `close` BEFORE `cancel`, in that order, because that is the operator's actual sequence: try
+        # to close a window mid-transfer, be refused, then use the one control that works.
+        cancel_scenario = (f"{send_fields.replace(',submit,done=', ',submit,close,cancel,done=')}"
+                          f",{logoff_step}")
+        if which == "tso":
+            cancel_scenario = f"{prep},{cancel_scenario}"
+        st2, out2 = run(which, "cancel", keys(logon, "Ctrl+t"), cancel_scenario, str(src), log)
+
+        close_line = next((l for l in out2.splitlines() if "close ->" in l), "")
+        checks.append(report("the window REFUSED to close mid-transfer",
+                             "survived=true" in close_line, close_line.strip() or "(no close line)"))
+
+        cancel_line = next((l for l in out2.splitlines() if "cancel ->" in l), "")
+        checks.append(report("Cancel was ENABLED and clickable mid-transfer",
+                             "enabled=true" in cancel_line,
+                             cancel_line.strip() or "(no cancel line)"))
+
+        # **THE TIMING IS THE HARD PART, and this is the check that proves it.** A cancel fired
+        # before the first frame or after the last exercises nothing: `cancel` is idempotent and a
+        # finished transfer swallows it. So the byte count the cancel interrupted must be short of
+        # the file -- `cancel-transfer.py`'s rule: *"A canceled 200KB transfer that reports 204800
+        # bytes was not canceled."*
+        m = re.search(r"cancel -> enabled=\w+ at .*?(\d+) bytes", cancel_line)
+        at = int(m.group(1)) if m else None
+        if which == "tso":
+            # No progress to read on DFT, so the interruption cannot be timed from the status line.
+            # Reported rather than asserted, because asserting a number that cannot exist would be
+            # a check that passes for the wrong reason.
+            print(f"  NOTE  DFT shows no byte count, so the cancel's timing is not observable "
+                  f"from the status line (cancel line: {cancel_line.strip() or 'none'})")
+        else:
+            checks.append(report("the cancel landed MID-FLIGHT, short of the whole file",
+                                 at is not None and 0 < at < len(payload),
+                                 f"interrupted at {at} of {len(payload)} bytes"))
+
+        # **AND THE HOST MUST STILL OBEY ITS NEXT COMMAND**, which is how an abort is judged here --
+        # NOT by an error message. MECAFF prints `>> TRANS99 - Protocol error` and TSO's FFTP prints
+        # NOTHING AT ALL before returning to READY; both are correct, so the message proves nothing
+        # and the next command proves everything.
+        obeyed = ("host logoff -> saw" in out2) or ("cp logoff -> saw" in out2)
+        checks.append(report("the host LEFT transfer mode (its next command was obeyed)", obeyed,
+                             next((l.strip() for l in out2.splitlines()
+                                   if "logoff ->" in l), "(no logoff line)")))
+
     # TALLIED AFTER EVERY CHECK IS APPENDED, which it was not: the logoff check above used to be
     # added AFTER this sum, so the run printed `8/8 checks passed` while a NINTH had failed and the
     # exit code said 1 with no visible reason. A summary that disagrees with its own detail lines is
@@ -539,7 +665,7 @@ def main():
     passed = sum(1 for c in checks if c)
     print(f"\n{passed}/{len(checks)} checks passed")
     print(f"log: {log}")
-    if got != PAYLOAD:
+    if got != payload:
         print("A STATUS LINE SAYING 'done' PROVES NOTHING -- this is the comparison that counts.")
     return 0 if passed == len(checks) else 1
 

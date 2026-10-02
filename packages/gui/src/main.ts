@@ -1351,6 +1351,69 @@ async function driveSteps(
      * subsequent steps report their own failures -- which is how the stranded-userid diagnosis
      * stayed legible.
      */
+    /**
+     * `sample:MS` WATCHES THE STATUS LINE CLIMB, which is the whole of the progress item.
+     *
+     * Prints each DISTINCT line seen, so the harness can assert the byte counts are monotonic and
+     * that the last one is the whole file. A single reading cannot show a count climbing, and the
+     * runbook names what that misses: *"a progress report that silently stops is the failure this
+     * window would hide best"*.
+     *
+     * **249 BYTES CANNOT EXERCISE THIS** -- it completes in one frame, so there is exactly one line
+     * to see. `cancel-transfer.py` measured the sizing for the TUI's equivalent: CUT runs ~15 ms a
+     * frame against local Hercules and the codec expands random data 1.727x, so 200 KB is ~185
+     * frames and ~2.8 s per direction.
+     */
+    if (step.startsWith('sample:')) {
+      const budget = Number(step.slice('sample:'.length));
+      const seen = await tw.webContents.executeJavaScript(
+        `window.__tn3270SampleStatus(${JSON.stringify(budget)}, 100)`,
+      ) as string[];
+      for (const line of seen) process.stdout.write(`transfer window: status ${line}\n`);
+      process.stdout.write(`transfer window: sampled ${seen.length} distinct status line(s)\n`);
+      continue;
+    }
+    /**
+     * `cancel` CLICKS THE REAL BUTTON, mid-flight, and says what it interrupted.
+     *
+     * Through the button and not through `requestCancel()`, because the button IS the operator's
+     * only route out of a running transfer -- the window refuses to close -- so a test that bypassed
+     * it would pass while the control was disabled or wired to nothing.
+     *
+     * `enabled` is reported separately because `click()` on a disabled button is a SILENT no-op, and
+     * `statusBefore` because that byte count is the evidence the transfer was genuinely under way.
+     * `cancel-transfer.py`: *"A canceled 200KB transfer that reports 204800 bytes was not
+     * canceled."*
+     */
+    if (step === 'cancel') {
+      const r = await tw.webContents.executeJavaScript('window.__tn3270ClickCancel()') as
+        { enabled: boolean; statusBefore: string };
+      process.stdout.write(
+        `transfer window: cancel -> enabled=${r.enabled} at ${r.statusBefore}\n`,
+      );
+      continue;
+    }
+    /**
+     * `close` ASKS THE WINDOW TO CLOSE AND REPORTS WHETHER IT SURVIVED.
+     *
+     * Survival is the close guard's whole observable: `tw.on('close')` calls `preventDefault` while
+     * `shouldPreventClose()` is true, so a window still alive afterwards is the guard working and a
+     * destroyed one is a transfer abandoned mid-frame.
+     *
+     * **THIS DRIVES ONLY THE WINDOW'S OWN `close`.** The other paths that end this window are
+     * caught elsewhere and by different mechanisms -- closing the TERMINAL window never fires this
+     * event at all (measured: a parent's destruction fires only `closed`), and Cmd-Q goes through
+     * `before-quit`. Both of those END THE PROCESS, so neither can be observed from inside a
+     * scenario that has to report afterwards; they stay by-hand items rather than being
+     * half-claimed here.
+     */
+    if (step === 'close') {
+      tw.close();
+      await new Promise((r) => { setTimeout(r, 700); });
+      const alive = !tw.isDestroyed();
+      process.stdout.write(`transfer window: close -> survived=${alive}\n`);
+      continue;
+    }
     if (step.startsWith(WAIT_PREFIX)) {
       const hit = await waitForScreen(session, step.slice(WAIT_PREFIX.length));
       process.stdout.write(
@@ -1387,6 +1450,24 @@ async function driveSteps(
       win.show();
       win.focus();
       await new Promise((r) => { setTimeout(r, 400); });
+      /**
+       * CLEAR BEFORE TYPING, and this is not belt-and-braces -- it is the difference between a
+       * command running and vanishing.
+       *
+       * VM's `MORE...` state silently EATS input, which this project has already recorded as what
+       * once swallowed a LOGOFF and left an account logged on. An ABORTED TRANSFER lands there:
+       * measured 2026-10-02, a canceled 200 KB send left the screen mid-page and `#cp logoff` typed
+       * into it did nothing at all, so the run reported the host had not left transfer mode when in
+       * fact the question had never been asked. The account stayed logged on and the next run met
+       * the reconnect trap.
+       *
+       * Ctrl-C is the CLEAR AID here, not an interrupt -- which is the whole reason Ctrl-] is this
+       * app's quit binding.
+       */
+      for (const t of ['keyDown', 'char', 'keyUp'] as const) {
+        win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
+      }
+      await new Promise((r) => { setTimeout(r, 600); });
       for (const ch of [...cmd, '\r']) {
         const keyCode = ch === '\r' ? 'Enter' : ch === ' ' ? 'Space' : ch;
         win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
