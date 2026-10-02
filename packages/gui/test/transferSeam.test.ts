@@ -300,6 +300,49 @@ describe('a timed-out scenario wait says what was on screen, WITHOUT the passwor
     expect(ispf.replace(redactionFrom(main), '$1 <redacted> ')).toBe(ispf);
   });
 
+  it('prints essentially the WHOLE panel, because 240 characters hid the answer', () => {
+    // THE TRUNCATION WAS ITSELF A DEFECT. The TSO failure was narrowed to "`X` does not exit this
+    // ISPF", and the one thing that would have named the real exit -- the panel's own option list --
+    // sat PAST THE CUT in every capture. Four TK5 userids were spent on hypotheses that one full
+    // panel would have settled. Pinned as a MINIMUM so a later "tidy up the log line" cannot
+    // reintroduce it, and read off the constant rather than the call sites so both stay in step.
+    const m = /const SCREEN_DUMP_CHARS = (\d+);/.exec(main);
+    expect(m, 'no SCREEN_DUMP_CHARS constant found').not.toBeNull();
+    expect(Number(m![1]), 'a 24x80 panel is 1920 cells; anything much less truncates the evidence')
+      .toBeGreaterThanOrEqual(1900);
+    // BOTH arms must use it. The `host:` arm was added second and is the one that caught the ISPF
+    // refusal, so a constant applied to only one of them would leave the important half short.
+    const uses = main.match(/seen\.slice\(0, SCREEN_DUMP_CHARS\)/g) ?? [];
+    expect(uses.length, 'both the wait: and host: timeout arms must print the full screen').toBe(2);
+    // AND NO BARE NUMBER LEFT BEHIND, which is how one site silently keeps the old cap.
+    expect(main).not.toMatch(/seen\.slice\(0, \d+\)/);
+  });
+
+  it('WAITS FOR THE KEYBOARD after Clear, instead of a fixed delay', () => {
+    // THIS IS WHY EVERY TSO `host:` STEP TYPED NOTHING. Clear is an AID: it locks the keyboard
+    // (`X Wait`) until the host repaints. On VM's `MORE...` the answer is instant, so a flat 600ms
+    // was never caught there; on TK5's ISPF the host redraws a full panel, the characters went out
+    // while the keyboard was still inhibited, and `Option ===>` came back EMPTY. Same
+    // fixed-delay-versus-condition mistake `live-drive.py` names and that `drain:` was just fixed for.
+    const steps = stepsBody![0];
+    const hostAt = steps.indexOf("step.startsWith('host:')");
+    expect(hostAt).toBeGreaterThan(-1);
+    const arm = steps.slice(hostAt);
+    expect(arm, 'the step must poll the OIA, not sleep a guessed interval')
+      .toMatch(/while \(session\.oia\.isInhibited\(\)/);
+    // A DEADLINE, not an unbounded wait: a host that never unlocks must still reach the report
+    // rather than hanging the whole scenario, which is this seam's standing rule for every wait.
+    expect(arm).toMatch(/Date\.now\(\) < unlockBy/);
+    // AND THE CLEAR MUST COME FIRST, which is the property the fixed delay was protecting: VM's
+    // MORE... eats input, and that once swallowed a LOGOFF and left an account logged on.
+    const clearAt = arm.indexOf("keyCode: 'c', modifiers: ['control']");
+    const waitAt = arm.indexOf('session.oia.isInhibited()');
+    const typeAt = arm.indexOf("for (const ch of [...cmd");
+    expect(clearAt).toBeGreaterThan(-1);
+    expect(clearAt, 'Clear, then wait for the unlock, then type').toBeLessThan(waitAt);
+    expect(waitAt, 'the unlock wait must precede the typing').toBeLessThan(typeAt);
+  });
+
   it('prints the screen on the TIMEOUT arm only, not on a successful wait', () => {
     // A successful wait prints which needle MATCHED and nothing else: the screen at that moment is
     // by definition the one the scenario asked for, and printing it on every step would put a

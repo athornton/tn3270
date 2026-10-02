@@ -107,15 +107,26 @@ command arrived.** That retires three hypotheses: not the drain, not character c
 tested and refuted), not an inhibited keyboard. `IND$FILE` runs only from `READY`, the session never
 left ISPF, and every downstream failure follows from this one step.
 
-**NEXT ACTION, AND IT IS CHEAP: READ THE WHOLE PANEL.** The diagnostic truncates at 240 characters and
-the exit option is past the cut -- raise the slice or take one `shot.mjs`-style capture, and the
-option list will name the exit. `live-drive.py` sends `b"X" + CR` and has worked since 2026-08, so
-either the panel differs or the `X` is not landing on `Option ===>`: **the `host:` step sends Ctrl-C
-(Clear) before typing**, which exists for VM's `MORE...` state and may reposition the cursor on a
-menu. **Do not guess a fourth time** -- four TK5 userids were spent getting here, because each failed
-run's `host:logoff` is typed into the same wrong screen and strands its account. The `host:` step now
-prints the OIA and the screen on a timeout, which is what makes a refused keystroke distinguishable
-from an ignored command. Full detail: `docs/live-testing.md`, *The TSO scenario is STILL broken*.
+**THE PANEL HAS BEEN READ IN FULL** (the dump is ~1900 chars now, up from 240 -- the truncation was
+itself hiding the answer) and it says `X EXIT  Terminate ISPF`. **So the step is not sending the wrong
+command; the keystrokes are not arriving as typed.** Two captures bracket it: with plain characters a
+command DOES reach the field (`Option ===> IND$FILE GET 'HERC02...'`, host answers `INVALID OPTION
+SELECTED`); with `modifiers: ['shift']` the field came back EMPTY and the host said nothing at all --
+**strictly worse, so that change was REVERTED rather than shipped.**
+
+**FIVE HYPOTHESES TESTED AND REFUTED on this one step** -- drain ordering, harness letter case, a
+keyboard lock after Clear, window focus, and `actionForKey` not mapping letters (tested directly: `x`,
+`X`, `$`, `'` and Shift-held all map correctly). Each is recorded with its refutation in
+`docs/live-testing.md`, *The TSO scenario is STILL broken*, so a sixth attempt does not repeat the list.
+
+**NEXT PROBE IS OFFLINE AND NEEDS NO USERID, which is the point:** the working/failing split is
+`keyCode: 'Enter'` (works, via `drain:`) versus a literal character (reaches the field but folded), and
+adding a modifier array breaks delivery outright. That is a `sendInputEvent` spelling problem in the
+`host:` step -- `keyspec.ts` already documents that an invalid `keyCode` is delivered as an EMPTY event
+rather than refused, and **`host:` is the one path that bypasses `parseKeySpec`**. Drive `host:`-style
+sends under `TN3270_GUI_REPLAY` with the action log on and see which spellings produce a `type` action
+at all. **Six TK5 userid-runs were spent on the live route**; each failed run strands one, because
+`host:logoff` is typed into the same wrong screen.
 
 **RE-PROBE THE USERIDS BEFORE SPENDING CONSOLE TIME:** `HERC02` released itself overnight and
 `HERC01` within the hour on 2026-10-01, so a strand here is usually temporary. Type the userid at the

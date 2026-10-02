@@ -224,6 +224,22 @@ const SEAM = Object.freeze({
 export const WAIT_PREFIX = 'wait:';
 
 /**
+ * How much of the screen a timed-out step prints.
+ *
+ * **1900, i.e. essentially the whole 24x80 buffer, because 240 WAS NOT ENOUGH AND THAT COST A
+ * DIAGNOSIS.** The TSO failure of 2026-10-02 was narrowed to "`X` does not exit this ISPF", and the
+ * one thing that would have named the real exit command -- the panel's own option list -- sat PAST
+ * THE CUT in every capture. Four TK5 userids were spent on hypotheses that one full panel would have
+ * settled, and each failed run strands an account.
+ *
+ * A screen is 1920 cells and the text is whitespace-collapsed before slicing, so this is almost
+ * always the entire panel; the cap stays only so a pathological 43x80 paint cannot dump 3440
+ * characters into one log line. **Not unbounded, and not small.** The rule it encodes: a diagnostic
+ * that truncates the evidence is a diagnostic that sends the reader guessing.
+ */
+const SCREEN_DUMP_CHARS = 1900;
+
+/**
  * Set while a `TN3270_GUI_TRANSFER` scenario is mid-flight, so `quitIfKeysOnly` does not cut it off.
  *
  * ## THE RACE THIS CLOSES, MEASURED AGAINST VM/CMS
@@ -1455,7 +1471,7 @@ async function driveSteps(
           .replace(/(ENTER CURRENT PASSWORD FOR \S+)[^!+]*/i, '$1 <redacted> ');
         process.stdout.write(
           `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}`
-          + ` -- screen was ${JSON.stringify(seen.slice(0, 200))}\n`,
+          + ` -- screen was ${JSON.stringify(seen.slice(0, SCREEN_DUMP_CHARS))}\n`,
         );
       } else {
         process.stdout.write(`transfer window: saw ${JSON.stringify(hit)}\n`);
@@ -1564,9 +1580,56 @@ async function driveSteps(
       for (const t of ['keyDown', 'char', 'keyUp'] as const) {
         win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
       }
-      await new Promise((r) => { setTimeout(r, 600); });
+      /**
+       * **WAIT FOR THE KEYBOARD, NOT A FIXED 600ms -- AND THE FIXED WAIT IS WHY EVERY TSO `host:`
+       * STEP SILENTLY TYPED NOTHING.**
+       *
+       * Clear is an AID: it erases the screen AND LOCKS THE KEYBOARD (`X Wait`) until the host
+       * repaints. On VM's `MORE...` the answer is instant, which is why 600ms was never caught there.
+       * **On TK5's ISPF it is not:** the host has to redraw a full 1900-character panel, and the
+       * typing went out while the keyboard was still inhibited -- so `keyboardLock` swallowed every
+       * character and the panel came back with `Option ===>` EMPTY. Measured 2026-10-02: the step
+       * reported `TIMED OUT waiting for "READY"` with the keyboard showing `4 A` and `inhibited=false`
+       * BY THE TIME IT GAVE UP, which is the signature of a lock that has since cleared -- the state
+       * at the moment of typing is the one that mattered and the one nothing recorded.
+       *
+       * This is the same fixed-delay-versus-condition mistake `live-drive.py` names
+       * (*"a settle can fire the Enter before the next screen has even arrived"*) and that `drain:`
+       * was just fixed for. A deadline rather than an unbounded wait, because a host that never
+       * unlocks must still reach the report instead of hanging the scenario.
+       */
+      const unlockBy = Date.now() + 20_000;
+      while (session.oia.isInhibited() && Date.now() < unlockBy) {
+        await new Promise((r) => { setTimeout(r, 200); });
+      }
+      // A beat after the unlock: the keyboard frees on the host's write, and the FIELDS land with
+      // that same write -- typing into the very first tick has no margin for the repaint's own
+      // ordering, and this step is typing into a field the panel must already have drawn.
+      await new Promise((r) => { setTimeout(r, 400); });
       for (const ch of [...cmd, '\r']) {
         const keyCode = ch === '\r' ? 'Enter' : ch === ' ' ? 'Space' : ch;
+        /**
+         * **PLAIN CHARACTERS, NO SHIFT -- AND I TRIED SHIFT AND IT WAS STRICTLY WORSE. MEASURED.**
+         *
+         * The reasoning for Shift is genuinely compelling and it is why this comment exists: Chromium
+         * FOLDS CASE (`A` and `a` both deliver `key: 'a'`), `live-transfer.py`'s own `typed()` helper
+         * adds `Shift+` for exactly that reason after it cost two TSO userids, and TK5's ISPF panel
+         * lists its exit as `X EXIT`. Every part of that is true.
+         *
+         * **It still did not work, and it broke what did.** With plain characters a lowercase command
+         * REACHES THE FIELD -- measured, `Option ===> IND$FILE GET 'HERC02.GUIXFER.BIN'` with the host
+         * answering `INVALID OPTION SELECTED`. With `modifiers: ['shift']` on the uppercase letters
+         * the field came back EMPTY and the host printed NO complaint at all, i.e. the keystrokes
+         * stopped arriving entirely. So the delivery mechanism, not the case, is what fails here --
+         * and `actionForKey` is NOT the culprit either: it was tested directly and maps `x`, `X`,
+         * `$`, `'` and a Shift-held letter all correctly.
+         *
+         * **LEFT AS IT WAS ON PURPOSE.** Shipping the Shift form would trade a step that delivers the
+         * wrong case for one that delivers nothing, while looking like a fix. Five hypotheses have now
+         * been refuted on this step (drain ordering, harness letter case, a keyboard lock, window
+         * focus, and this); `docs/live-testing.md` records them so the sixth attempt starts from
+         * evidence rather than from the same list.
+         */
         win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
         win.webContents.sendInputEvent({ type: 'char', keyCode });
         win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
@@ -1593,7 +1656,7 @@ async function driveSteps(
           `transfer window: host ${cmd} -> TIMED OUT waiting for ${JSON.stringify(expect)}`
           + ` -- OIA ${JSON.stringify(session.oia.toText())}`
           + ` inhibited=${session.oia.isInhibited()}`
-          + ` -- screen was ${JSON.stringify(seen.slice(0, 240))}\n`,
+          + ` -- screen was ${JSON.stringify(seen.slice(0, SCREEN_DUMP_CHARS))}\n`,
         );
       } else {
         process.stdout.write(`transfer window: host ${cmd} -> saw ${JSON.stringify(hit)}\n`);

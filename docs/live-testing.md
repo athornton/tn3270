@@ -4061,11 +4061,44 @@ needs to land somewhere this step does not put it — **the `host:` step sends C
 typing**, which on a menu may leave the cursor off `Option ===>`, and that Clear exists for VM's
 `MORE...` state rather than for ISPF.
 
-**READ THE WHOLE PANEL FIRST, and that is the actionable next step:** the diagnostic truncates at 240
-characters and the exit option is past the cut. Raise the slice or take one `shot.mjs`-style capture
-of the menu; the option list will name it. **Do not guess a fourth time — four TK5 userids were spent
-reaching this point**, because each failed run's `host:logoff` is typed into the same wrong screen and
-strands its account.
+**THE PANEL HAS NOW BEEN READ IN FULL** (the diagnostic prints ~1900 characters, up from 240 — the
+truncation was itself hiding the answer). Its own option list says:
+
+    X EXIT  Terminate ISPF using log and list defaults
+    Enter END command to terminate ISPF.
+
+**So `X` IS the right option, and the step is not sending the wrong command — the keystrokes are not
+arriving as typed.** Two captures bracket it exactly:
+- With **plain characters**, a command DOES reach the field: `Option ===> IND$FILE GET
+  'HERC02.GUIXFER.BIN'`, with the host answering `INVALID OPTION SELECTED`. Lowercase arrives.
+- With **`modifiers: ['shift']`** on the uppercase letters, the field came back **EMPTY with ZERO
+  `INVALID OPTION`** — i.e. the keystrokes stopped arriving at all. **Strictly worse**, so that change
+  was REVERTED rather than shipped: it trades delivering the wrong case for delivering nothing, while
+  looking like a fix.
+
+**FIVE HYPOTHESES HAVE BEEN TESTED AND REFUTED ON THIS ONE STEP.** Recorded so a sixth attempt starts
+from evidence and not from this same list:
+1. **Drain ordering** (`drain` before `wait`) — refuted; the drain was separately broken and is now
+   fixed and verified, and the step still fails.
+2. **The harness's letter case** (`host:X` instead of `host:x`) — refuted; identical behavior, because
+   the seam folds case before it reaches the host either way.
+3. **A keyboard lock after Clear** — refuted; waiting on `oia.isInhibited()` instead of a flat 600 ms
+   changed nothing, and the OIA reads `4 A inhibited=false` at the timeout.
+4. **Window focus** (the transfer window being on top under Xvfb) — refuted; the `drain:` step shares
+   the same `win.show()`/`win.focus()` and its Enters DO reach the host.
+5. **`actionForKey` not mapping plain letters** — refuted by direct test: `x`, `X`, `$`, `'` and a
+   Shift-held letter all map correctly to `{kind:'type'}`.
+
+**WHAT THE EVIDENCE NOW POINTS AT, untested:** the difference between what works and what does not is
+`keyCode: 'Enter'` (works, via `drain:`) versus a literal character (reaches the field but folded), and
+adding a modifier array breaks delivery entirely. That is a `sendInputEvent` spelling problem in the
+`host:` step, not a host problem — `keyspec.ts` already documents that an invalid `keyCode` is
+delivered as an EMPTY event rather than refused, and `host:` is the one path that bypasses
+`parseKeySpec`. **The cheap next probe is offline, not live:** drive `host:`-style sends under
+`TN3270_GUI_REPLAY` with the action log on (`logActions` needs `SEAM.replay`, which is also the privacy
+gate that keeps typed text out of a live log) and see which spellings produce a `type` action at all.
+**No userid needed for that**, which matters: each failed live run strands one, because `host:logoff`
+is typed into the same wrong screen. Six TK5 userid-runs were spent reaching this point.
 
 **The `host:` step now prints the OIA and the screen on a timeout**, which is what makes the
 difference between a refused keystroke and an ignored command readable at all; a bare

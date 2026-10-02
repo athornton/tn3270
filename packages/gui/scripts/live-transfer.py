@@ -459,6 +459,12 @@ def main():
         recv_fields = f"direction=receive,host=vm,{recv_fields}"
         # LOGGING OFF INSIDE THE RUN, at the prompt the transfers left the session at. `#cp logoff`
         # rather than bare `logoff` so one spelling works from CMS as well as from CP READ.
+        # LOWERCASE IS CORRECT HERE AND MUST NOT BE "FIXED" TO MATCH TSO'S: **CP FOLDS CASE**, which
+        # is the same asymmetry `typed()` records for passwords (`logon CMSUSER` and its password both
+        # work lowercase on VM, while TSO's password field does not fold). This step is live-verified
+        # lowercase; TSO's equivalents had to go uppercase because ISPF's `Option ===>` and TSO's
+        # command field do not fold. One host folding and the other not is precisely what a second
+        # host exists to find.
         logoff_step = "host:#cp logoff|LOGOFF AT"
     else:
         ds_plain = os.environ.get("TN3270_DSN", "GUIXFER.BIN")
