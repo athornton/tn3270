@@ -15,7 +15,17 @@ check that once caught 44 unfinished commits riding along.
 **State: `main` at the merge, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean, no
 stashes. 2253 tests in 89 files (from 2157 in 82), build and typecheck clean.**
 
-**THE NEXT ACTION IS ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
+**THE GUI TRANSFER WINDOW IS NOW LIVE-VERIFIED ON VM/CMS, 2026-10-02 — branch `gui-live-transfer`,
+NOT MERGED.** 249 bytes, both directions, **BYTE-IDENTICAL, reproduced twice**, confirmed by `cmp`
+independently of the harness. New: `packages/gui/scripts/live-transfer.py`, and a `wait:TEXT` step on
+the keys seam without which the GUI could not be driven against a host at all. **This is the CUT
+engine (VM declines DDM); TSO/TK5 and its DFT path are WRITTEN AND UNRUN** — do not read the VM
+result as covering DFT. Full results, four defects replay structurally could not find, and three
+needle traps: `docs/live-testing.md`, *The GUI transfer window*.
+
+**THE NEXT ACTION IS EITHER (a) RUN THE TSO HALF** — `live-transfer.py tso`, written and never
+executed, where `Recfm=variable` matters because fixed PADS and turns 249 bytes into 320 — **or
+(b) ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
 preload, its own bridge, the canvas bridge untouched), and its AS BUILT notes record what that shape
