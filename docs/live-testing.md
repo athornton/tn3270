@@ -4031,12 +4031,45 @@ appears; the GUI's `drain:` polls 1.5 s and **breaks on absence**, which here is
 Same family as *"never match the bare string `CMS`"* and *"TSO has THREE more-output prompts, not
 two"*: **a needle that matches the screen you are leaving rather than the one you are waiting for.**
 
-**THE REMEDY, NOT YET IMPLEMENTED:** the seam's `drain:` must settle and keep pressing until the
-TARGET panel appears, rather than until one needle disappears — i.e. take both needles
-(`drain:***|Primary Option`-shaped), or let `tso_logon` wait on a needle that cannot match the
-password panel. That is a `main.ts` change wanting its own live verification, and **all four TK5
-userids were held by the time it was diagnosed**, so it was left undone rather than committed unrun.
-`live-transfer.py`'s TSO `prep` therefore still has its ORIGINAL step order.
+**THE DRAIN IS FIXED AND LIVE-VERIFIED — `drain:PROMPT>TARGET`, 2026-10-02.** The stopping rule is
+now the ARRIVAL of the target panel rather than the absence of the prompt, because an absent prompt
+cannot be told from one not yet painted. Live on TK5: `drained "***" after 2 Enter(s) -- reached
+"Primary Option|USERID|BROWSE"`, where the old form pressed **0** Enters and never reached it.
+**The target takes `|` alternatives, and that was a second real defect, not a nicety:** with a bare
+`>Primary Option` the drain reported `NEVER REACHED` while the very next step `saw "USERID"` — TK5
+names this panel `USERID`, so a one-name target drains its full budget on a finished host. The
+one-needle spelling still means exactly what it did, since `drain:` is a shared seam.
+
+### The TSO scenario is STILL broken, and the remaining defect is LOCATED — `X` does not exit ISPF
+
+**The host's own words settle it.** After the `X` step the panel reads:
+
+    ISPF primary option menu   INVALID OPTION SELECTED
+    Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'
+
+**So typing WORKS — the whole 38-character command reached the field.** That retires three
+hypotheses in one line: it is **not** the drain (which now reports `reached`), **not** character case
+(`X` and `x` behave identically here, and the uppercase theory was tested and refuted), and **not** an
+inhibited keyboard (the field accepted the text). `IND$FILE` is a plain TSO command that runs only
+from `READY`; the session never left ISPF, so the host correctly refused it as a menu option. Every
+downstream failure — both transfers, the byte comparison, the stranded userid — follows from this one
+step.
+
+**WHAT IS NOT YET KNOWN is what this ISPF's exit actually is.** `live-drive.py` sends `b"X" + CR` here
+and has worked since 2026-08, so either the panel differs from what that harness meets, or the `X`
+needs to land somewhere this step does not put it — **the `host:` step sends Ctrl-C (Clear) before
+typing**, which on a menu may leave the cursor off `Option ===>`, and that Clear exists for VM's
+`MORE...` state rather than for ISPF.
+
+**READ THE WHOLE PANEL FIRST, and that is the actionable next step:** the diagnostic truncates at 240
+characters and the exit option is past the cut. Raise the slice or take one `shot.mjs`-style capture
+of the menu; the option list will name it. **Do not guess a fourth time — four TK5 userids were spent
+reaching this point**, because each failed run's `host:logoff` is typed into the same wrong screen and
+strands its account.
+
+**The `host:` step now prints the OIA and the screen on a timeout**, which is what makes the
+difference between a refused keystroke and an ignored command readable at all; a bare
+`TIMED OUT waiting for "READY"` cannot distinguish them, and that ambiguity is what cost the guesses.
 
 **HOW THE WRONG DIAGNOSIS SURVIVED, because the mechanism generalises:** the stall message
 interpolated **CUT's** byte counter on a **DFT** transfer, where it is zero by construction. So

@@ -313,3 +313,91 @@ describe('a timed-out scenario wait says what was on screen, WITHOUT the passwor
     expect(steps.slice(sawAt, sawAt + 120)).not.toMatch(/screen was/);
   });
 });
+
+describe('drain: stops on the TARGET arriving, not on a needle vanishing', () => {
+  /**
+   * THE STOPPING RULE IS THE WHOLE BUG. `drain:***` stops when `***` is ABSENT, and an absent prompt
+   * is indistinguishable from one that has not been painted yet. Measured on TK5 2026-10-02 at both
+   * payload sizes: the screen after the TSO password carried no `***` at all, so the drain broke on
+   * its first poll, pressed nothing, and the welcome banner arrived with nobody left to dismiss it --
+   * which ended as a transfer with zero DFT frames, recorded as a protocol fault and blamed on size.
+   *
+   * These read the source because `main.ts` cannot be imported (it calls `app.whenReady()` in its
+   * module body), which is this file's established pattern.
+   */
+  const drainArm = (): string => {
+    const body = stepsBody![0];
+    const at = body.indexOf("step.startsWith('drain:')");
+    expect(at, 'no drain arm found in driveSteps').toBeGreaterThan(-1);
+    // ANCHORED ON THE NEXT ARM, not a character count: a fixed slice silently truncates when the arm
+    // grows, and three of these tests failed that way first -- a false negative that reads exactly
+    // like the feature being absent.
+    const next = body.indexOf("step.startsWith('host:')", at);
+    expect(next, 'no host: arm after the drain arm').toBeGreaterThan(at);
+    return body.slice(at, next);
+  };
+
+  it('parses a `>` into a separate TARGET, keeping the one-needle form intact', () => {
+    const arm = drainArm();
+    expect(arm).toMatch(/const gt = spec\.indexOf\('>'\);/);
+    // The OLD spelling must still mean what it meant: with no `>`, target is empty and the absence
+    // rule applies. `drain:` is a seam other scenarios may use, so redefining it silently would
+    // break them -- the same reasoning that kept `-ddm`'s default explicit.
+    expect(arm).toMatch(/const needle = gt < 0 \? spec : spec\.slice\(0, gt\);/);
+    expect(arm).toMatch(/const target = gt < 0 \? '' : spec\.slice\(gt \+ 1\);/);
+  });
+
+  it('tests the TARGET before the prompt, so it cannot press into the panel it wanted', () => {
+    // Order matters and is not stylistic: once ISPF is up, a further Enter SELECTS AN OPTION and
+    // navigates away from the panel the next step needs. A screen can show both while repainting.
+    const arm = drainArm();
+    const targetAt = arm.indexOf("targetNeedles.some(");
+    const needleAt = arm.indexOf("seen.includes(needle)");
+    expect(targetAt).toBeGreaterThan(-1);
+    expect(needleAt).toBeGreaterThan(-1);
+    expect(targetAt, 'the target check must come first, or the drain overshoots')
+      .toBeLessThan(needleAt);
+  });
+
+  it('KEEPS POLLING when neither is on screen, but only when a target was given', () => {
+    // This is the actual fix. "Neither" with a target means the host is still working -- the case
+    // that broke -- so it must not break out. Without a target it is the ORIGINAL stopping rule and
+    // must remain one, or every existing `drain:` burns the whole poll budget before continuing.
+    const arm = drainArm();
+    expect(arm).toMatch(/if \(target === ''\) break;/);
+  });
+
+  it('REPORTS whether the target was reached, so a drain that gave up is visible', () => {
+    // It continues rather than failing the run (a transfer may be mid-flight), so the log line is
+    // the only evidence. A silent give-up is what let three runs be misdiagnosed.
+    const arm = drainArm();
+    expect(arm).toMatch(/NEVER REACHED/);
+    expect(arm).toMatch(/arrived/);
+  });
+
+  it('the TARGET takes `|` ALTERNATIVES, because one panel name was not enough', () => {
+    // MEASURED, not anticipated: with a bare `>Primary Option` the live drain reported
+    // `NEVER REACHED` while the very next step `saw "USERID"`. The panel HAD arrived, under another
+    // of the three names the scenario already lists for it -- so a one-name target drains to its
+    // full poll budget on a finished host and prints a line contradicting the step after it.
+    const arm = drainArm();
+    expect(arm).toMatch(/target\.split\('\|'\)/);
+    expect(arm).toMatch(/targetNeedles\.some\(\(n\) => seen\.includes\(n\)\)/);
+    // EMPTIES DROPPED, as `waitForScreen` does: an empty alternative matches every screen including
+    // a blank one, which is the vacuous-wait failure the seam exists to avoid.
+    expect(arm).toMatch(/\.filter\(\(n\) => n !== ''\)/);
+  });
+
+  it('the TSO scenario uses the target form, which is what it was built for', () => {
+    const harness = readFileSync(
+      join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    expect(harness).toMatch(/drain:\*\*\*>Primary Option\|USERID\|BROWSE/);
+    // THE SAME SET THE WAIT USES. If the two disagree about what "arrived" means, the drain either
+    // gives up on a ready host or presses into the panel the wait is about to require.
+    expect(harness).toMatch(/wait:Primary Option\|USERID\|BROWSE/);
+    // AND THE LEADING `wait:` IS GONE: it existed to synchronise before the drain, and a wait for a
+    // panel sitting BEHIND a prompt can never succeed -- it burned its whole budget, which is how
+    // the failure began. The trailing one stays, as the thing that surfaces a drain that gave up.
+    expect(harness).not.toMatch(/wait:Primary Option\|USERID\|BROWSE,drain:/);
+  });
+});

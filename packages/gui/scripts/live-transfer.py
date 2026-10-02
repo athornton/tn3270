@@ -485,6 +485,10 @@ def main():
         # since 2026-08; this is the same list. A check that cries wolf on success trains the reader
         # to ignore it, which the runbook already records as worse than no check at all -- and here
         # the thing it would teach them to ignore is a stranded userid.
+        # NOTE: this step is why a failed TSO run STRANDS A USERID -- it is typed into whatever screen
+        # the earlier steps left behind, and when they leave the session in ISPF it reaches a menu
+        # rather than TSO. Every failed run in this diagnosis held its account afterwards, verified by
+        # probe. It is not itself broken; it is downstream of the ISPF exit defect noted in `prep`.
         logoff_step = "host:logoff|LOGGED OFF|Logon|RUNNING"
         # EVERYTHING THE LOGON USED TO DO BLIND, now in the scenario where `drain:` exists.
         # `***` is TSO's more-output marker; `x` leaves ISPF for `READY`, which is where IND$FILE
@@ -519,14 +523,47 @@ def main():
         # It is neither: the 249-byte run fails identically, and 200 KB round-trips BYTE-IDENTICALLY
         # over DFT from the CLI against this very host (`/tmp/dftbig-rt.log`, 35 DFT frames, 0 CUT).
         #
-        # **NOT FIXED HERE, DELIBERATELY.** The fix belongs in the SEAM's `drain:` step -- it must
-        # settle and keep pressing until the TARGET panel appears, rather than until one needle
-        # disappears -- and that is a change to `main.ts` that wants its own verification against a
-        # host. All four TK5 userids were held when this was diagnosed (each failed run's logoff step
-        # times out, which is how the harness strands them), so it could not be verified today. The
-        # order below is the ORIGINAL one; leaving it unchanged keeps this a diagnosis rather than an
-        # unverified edit, and `docs/live-testing.md` carries the measurement and the remedy.
-        prep = (f"wait:Primary Option|USERID|BROWSE,drain:***,"
+        # **THE FIX IS `drain:***>Primary Option`, IN THE SEAM, and it is one step not three.** The
+        # `>TARGET` form presses Enter until the ISPF PANEL ARRIVES rather than until `***` is absent,
+        # so a host that has not caught up yet means "keep pressing" instead of "nothing to do". The
+        # leading `wait:` is GONE: it was there to synchronise before the drain, and with the drain
+        # now ending on the panel itself it has nothing left to do -- and as the diagnosis above
+        # records, a leading wait cannot succeed anyway when the panel is behind a prompt.
+        #
+        # The trailing `wait:` is KEPT, and it is not redundant: the drain reports `NEVER REACHED` and
+        # CONTINUES rather than failing the run (a transfer may be mid-flight by the time a scenario
+        # step misbehaves), so the wait is what makes a drain that gave up visible as a timeout on the
+        # step that actually needs the panel.
+        # **ALL THREE PANEL NAMES IN THE TARGET, not just the first.** Measured 2026-10-02: with a
+        # bare `>Primary Option` the drain reported `NEVER REACHED` while the very next step
+        # `saw "USERID"` -- TK5 identifies this panel by `USERID` here, so a one-name target drains to
+        # its full poll budget on a host that is already finished. The target takes `|` alternatives
+        # as `wait:` does, and it must list the SAME set the wait does or the two disagree about what
+        # "arrived" means.
+        # **THE REMAINING DEFECT, LOCATED BUT NOT FIXED: `X` DOES NOT LEAVE THIS ISPF, so every later
+        # command is typed into the menu.** The evidence is unambiguous and is the host's own words --
+        # after the `X` step the panel reads:
+        #
+        #     ISPF primary option menu   INVALID OPTION SELECTED
+        #     Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'
+        #
+        # **So typing WORKS: the whole command reached the field.** That retires three hypotheses in
+        # one line -- it is not the drain (which now reports `reached`), not character case (`X` and
+        # `x` behave identically here), and not an inhibited keyboard (the field accepted 38
+        # characters). `IND$FILE` is a plain TSO command that only runs from `READY`, and the session
+        # never left ISPF, so the host correctly refused it as a menu option.
+        #
+        # **WHAT IS NOT YET KNOWN is what this ISPF's exit actually is.** `live-drive.py` sends
+        # `b"X" + CR` here and has worked since 2026-08, so either TK5's panel differs from what that
+        # harness meets, or `X` needs to land somewhere this step does not put it (the `host:` step
+        # sends Ctrl-C first, which on a menu may reposition the cursor off `Option ===>`). The
+        # diagnostic now prints the OIA alongside the screen so the next run can tell a refused
+        # keystroke from an ignored command -- but the panel is truncated at 240 characters and the
+        # exit option is past the cut, so READ THE WHOLE PANEL FIRST: raise that slice, or take one
+        # `shot.mjs`-style capture of the menu, and the answer will be in the option list.
+        # Four TK5 userids were spent reaching this point (each failed run strands one), which is why
+        # it stops here rather than trying a fifth guess.
+        prep = (f"drain:***>Primary Option|USERID|BROWSE,"
                 f"wait:Primary Option|USERID|BROWSE,"
                 f"host:x|READY,host:delete {ds_full}|READY")
 

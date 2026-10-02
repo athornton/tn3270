@@ -93,19 +93,38 @@ predates the `-ddm` default flip and was therefore **CUT**; and `-ddm off` force
   a number that could not have said anything else. **Fixed** (`bytesMoved()` in `transferRun.ts`, and
   the same in the CLI's loop), with a mutation-verified test.
 
-**THE REMEDY FOR THE HARNESS IS NOT IMPLEMENTED, DELIBERATELY:** `drain:` must settle and keep
-pressing until the TARGET panel appears rather than until one needle disappears. That is a `main.ts`
-change wanting live verification, and **all four TK5 userids were held by then** (each failed run's
-`host:logoff` times out -- the defect strands a userid every time it fires), so it was left undone
-rather than committed unrun. Full measurements, the screen text, and the remedy:
-`docs/live-testing.md`, *TSO/DFT at 200 KB was never a DFT problem*.
+**THE DRAIN IS FIXED AND LIVE-VERIFIED: `drain:PROMPT>TARGET`** stops on the TARGET ARRIVING rather
+than on the prompt vanishing. Live on TK5: `drained "***" after 2 Enter(s) -- reached "Primary
+Option|USERID|BROWSE"`, where the old form pressed **0** and never got there. The target takes `|`
+alternatives, which was a second real defect -- with a bare `>Primary Option` it reported `NEVER
+REACHED` while the next step `saw "USERID"`. Mutation-verified tests; the one-needle spelling is
+unchanged for other scenarios.
+
+**BUT THE TSO SCENARIO IS STILL BROKEN, AND THE REMAINING DEFECT IS LOCATED: `X` DOES NOT EXIT THIS
+ISPF.** The host says so itself -- after the `X` step the panel reads `INVALID OPTION SELECTED` with
+`Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'` sitting in the field. **So typing WORKS; the whole
+command arrived.** That retires three hypotheses: not the drain, not character case (uppercase was
+tested and refuted), not an inhibited keyboard. `IND$FILE` runs only from `READY`, the session never
+left ISPF, and every downstream failure follows from this one step.
+
+**NEXT ACTION, AND IT IS CHEAP: READ THE WHOLE PANEL.** The diagnostic truncates at 240 characters and
+the exit option is past the cut -- raise the slice or take one `shot.mjs`-style capture, and the
+option list will name the exit. `live-drive.py` sends `b"X" + CR` and has worked since 2026-08, so
+either the panel differs or the `X` is not landing on `Option ===>`: **the `host:` step sends Ctrl-C
+(Clear) before typing**, which exists for VM's `MORE...` state and may reposition the cursor on a
+menu. **Do not guess a fourth time** -- four TK5 userids were spent getting here, because each failed
+run's `host:logoff` is typed into the same wrong screen and strands its account. The `host:` step now
+prints the OIA and the screen on a timeout, which is what makes a refused keystroke distinguishable
+from an ignored command. Full detail: `docs/live-testing.md`, *The TSO scenario is STILL broken*.
 
 **RE-PROBE THE USERIDS BEFORE SPENDING CONSOLE TIME:** `HERC02` released itself overnight and
 `HERC01` within the hour on 2026-10-01, so a strand here is usually temporary. Type the userid at the
-VTAM panel and compare `IKJ56425I ... IN USE` against `ENTER CURRENT PASSWORD FOR`.
+VTAM panel and compare `IKJ56425I ... IN USE` against `ENTER CURRENT PASSWORD FOR`. **The user cleared
+all four from the operator console on 2026-10-02 on request, which unblocked the drain verification;
+all four were spent again by the runs that followed.**
 
-**THE NEXT ACTION IS EITHER (a) THE GUI HARNESS `drain:` FIX above -- small, understood, and needing
-one free TK5 userid to verify -- or (b) ROADMAP ITEM (0b), THE
+**THE NEXT ACTION IS EITHER (a) THE ISPF-EXIT FIX above -- located, one panel capture from being
+understood, needing one free TK5 userid -- or (b) ROADMAP ITEM (0b), THE
 GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
