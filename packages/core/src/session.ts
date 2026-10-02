@@ -144,10 +144,23 @@ export interface ConnectOptions {
  * the host's own error message, a cancellation, or a malformed frame. A front end
  * uses it to close a progress display without polling.
  *
+ * `transferProgress` fires once per DFT data frame accepted, and it exists because a DFT
+ * transfer is otherwise COMPLETELY SILENT between its start and its end. That silence was a
+ * live bug, not a cosmetic gap: `transferRun.ts` re-arms its 30-second per-frame deadline only
+ * from the CUT path, so nothing re-armed it during a DFT transfer and **any DFT transfer taking
+ * longer than 30 seconds was killed by a timer meant to detect a stalled CUT host.** Measured
+ * 2026-10-02 against MVS/TSO: a 249-byte file finished well inside the window and a 200 KB one
+ * died with `stalled: no CUT frame from the host within 30s, 0 bytes` — a message that was
+ * doubly misleading, since the host was neither stalled nor speaking CUT.
+ *
+ * It also gives DFT the progress display it never had, which is the same fact seen from the
+ * operator's side.
+ *
  * Not exported from `index.ts` and referenced only by `on`/`off`/`listenerCount`/
- * `emit`, so widening it has no blast radius (checked 2026-09-25).
+ * `emit`, so widening it has no blast radius (checked 2026-09-25, re-checked 2026-10-02).
  */
-export type SessionEvent = 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd';
+export type SessionEvent =
+  | 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd' | 'transferProgress';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
@@ -1323,7 +1336,13 @@ export class Session {
       this.dft = undefined;
       this.dftBuffer = undefined;
       this.emit('transferEnd');
+      return;
     }
+    // ONE PER ACCEPTED FRAME, and ONLY when the transfer is still running -- a `done` frame has
+    // already emitted `transferEnd` above and returned, so a front end never sees progress after
+    // the ending. See `SessionEvent` for why this event exists at all: without it a DFT transfer
+    // is silent, and a silent transfer was being killed at 30 seconds by CUT's stall detector.
+    this.emit('transferProgress');
   }
 
   /**

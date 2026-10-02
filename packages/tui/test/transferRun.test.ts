@@ -687,6 +687,83 @@ describe('protocol selection: deciding', () => {
     expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
   });
 
+  it('a DFT data frame RE-ARMS the frame deadline, so a long transfer is not killed', async () => {
+    /**
+     * THE BUG THIS PINS SHIPPED, AND IT TOOK A 200 KB LIVE RUN TO FIND.
+     *
+     * `armFrameTimer` was called from the CUT path only, so nothing re-armed the per-frame deadline
+     * during a DFT transfer -- and the deadline fired. Measured 2026-10-02 against MVS/TSO: a
+     * 249-byte file finished well inside the 30-second window and a 200 KB one died with
+     * `stalled: no CUT frame from the host within 30s, 0 bytes` while the host was transferring
+     * perfectly well. **The message was doubly wrong: nothing was stalled, and nothing was speaking
+     * CUT.**
+     *
+     * Every existing DFT test here completes inside one tick, so none of them could see it -- which
+     * is the whole reason the fixture below spends LONGER THAN `frameMs` between frames.
+     */
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    let done: { ok: boolean; error?: string } | undefined;
+
+    vi.useFakeTimers();
+    try {
+      startTransfer({
+        session, files, request: aReceive('/tmp/got.bin'), command: 'IND$FILE GET A.BIN',
+        onProgress: () => {}, onDone: (d) => { done = d; },
+        // Short, so the test does not take 30 seconds; the RATIO is what matters.
+        frameMs: 1000, totalMs: 60_000,
+      });
+
+      const records = wholeDftDownload();
+      // The Open, then a gap LONGER than the whole deadline, then the rest. Before the fix the
+      // timer fired in this gap and the transfer was declared stalled.
+      // THE OPEN FRAME FIRST, and the gap after it is the one that matters most: a host that
+      // announces a transfer and then thinks for a while is the commonest real pause, and before
+      // the fix NOTHING re-armed the deadline there -- `handleTransferData` emits per accepted
+      // frame, Open included, which is why re-arming on the event and not on "bytes moved" is the
+      // correct hook. Asserting on Open specifically is what proves that.
+      // EACH GAP IS SHORTER THAN `frameMs` BUT THE TOTAL IS MUCH LONGER, which is exactly what a
+      // real long transfer looks like and exactly what the broken code could not survive: the
+      // deadline measures the GAP between frames, so a re-armed timer tolerates any number of
+      // them. Before the fix the FIRST gap already exceeded the one-and-only timer, because
+      // nothing re-armed it after `startTransfer` set it.
+      //
+      // A gap LONGER than `frameMs` is a stall BY DEFINITION and must still fail -- that is the
+      // timer's job, and the test below this one pins it.
+      conn.host(...records[0]!);
+      for (const record of records.slice(1)) {
+        await vi.advanceTimersByTimeAsync(800);
+        expect(done, 'the deadline must not fire while frames keep arriving').toBeUndefined();
+        conn.host(...record);
+      }
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(done).toMatchObject({ ok: true });
+      expect([...(files.files.get('/tmp/got.bin') ?? [])]).toEqual([0x41, 0x42, 0x43]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports DFT progress, which it used to do only for CUT', async () => {
+    // The same silence as the bug above, seen from the operator's side: a DFT transfer reported
+    // nothing between its start and its end, and that was written down as correct-by-design. A
+    // progress line that never moves is also indistinguishable from a hang, which is the thing the
+    // runbook says this window would hide best.
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    const progress: string[] = [];
+
+    startTransfer({
+      session, files, request: aReceive('/tmp/got.bin'), command: 'IND$FILE GET A.BIN',
+      onProgress: (t) => { progress.push(t); }, onDone: () => {},
+    });
+    for (const record of wholeDftDownload()) conn.host(...record);
+
+    expect(progress.length, 'a DFT transfer must report progress at least once').toBeGreaterThan(0);
+    expect(progress.some((p) => /\d+ bytes/.test(p))).toBe(true);
+  });
+
   it('notices a DFT transfer that finished BEFORE the first wait', async () => {
     // CHECK STATE FIRST, THEN WAIT. A whole DFT transfer can begin and finish inside record
     // handling -- here, inside `sendAID`'s own call stack -- and a driver that only
@@ -979,3 +1056,4 @@ describe('the timeout message reports what was OBSERVED', () => {
     }
   });
 });
+

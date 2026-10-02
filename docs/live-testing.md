@@ -3804,7 +3804,198 @@ That it then puts the right bytes on the wire is `TransferRun.cancel`'s own busi
 for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
 not yet been watched against a real host.** That is the next live item for this window.
 
-## The GUI transfer window by hand — OPEN, NOT RUN, 2026-10-01
+## The GUI transfer window — LIVE-VERIFIED ON BOTH HOSTS AND BOTH ENGINES, 2026-10-02
+
+**THE WINDOW HAS NOW DRIVEN A REAL TRANSFER, BOTH DIRECTIONS, AGAINST VM/370 CMS: 8 of 8 checks and
+249 bytes BYTE-IDENTICAL, reproduced twice.** Harness:
+`packages/gui/scripts/live-transfer.py vm`, which logs on, erases the host file, sends, waits for
+completion, receives into a different path, and `cmp`s. Confirmed independently afterwards with
+`cmp /tmp/gui-xfer-src-vm.bin /tmp/gui-xfer-back-vm.bin`.
+
+```
+transfer window: submit -> ok=true status=transferring
+transfer window: done -> running=false timedOut=false status=done: 249 bytes   (send)
+transfer window: submit -> ok=true status=transferring
+transfer window: done -> running=false timedOut=false status=done: 249 bytes   (receive)
+PASS BYTES ARE IDENTICAL: identical
+```
+
+**BOTH ENGINES ARE COVERED.** VM exercises **CUT** (MECAFF declines DDM); **TSO/TK5 exercises DFT**
+and was verified the same day -- 9 of 9 checks, 249 bytes byte-identical, reproduced on two userids.
+See item 1 under *STILL OPEN* below, which is now closed, for the TSO specifics.
+
+**FOUR TSO LESSONS THAT COST TWO STRANDED USERIDS -- of which ONE RELEASED ITSELF within the hour,
+so re-probe before spending console time. `HERC02` was still held at the end of the session and
+wants `/c u=herc02`; `HERC01`, `HERC03` and `HERC04` were verified free. The first lesson is the
+embarrassing one:**
+
+1. **`HERC03` AND `HERC04` USE `PASS4U`, NOT `CUL8TR`.** This document has recorded it since 2026-08
+   -- *"`HERC01`/`CUL8TR` fully authorized with RAKF table access, `HERC02`/`CUL8TR` fully authorized
+   without it, `HERC03` and `HERC04`/`PASS4U` regular users"* -- and three runs were spent before it
+   was read. `PASSWORD NOT AUTHORIZED FOR USERID` was literally true and was chased as a client bug.
+   **A screenshot settled it in one run where log-reading had failed three times.**
+2. **Chromium's `sendInputEvent` FOLDS CASE, and a 3270 field does not fold it back.** `CUL8TR`
+   arrived as `cul8tr`. The harness's own docstring had named this exception while walking into it.
+   Fixed with `Shift+<letter>`, which **does** carry uppercase: `Shift+C` produces
+   `{"kind":"type","text":"C"}` through the renderer's `keydown` path even though a modified chord
+   sends no `char` event. **This was a real bug and NOT the cause of the failure above** -- two
+   defects with one symptom, and fixing the first one did not move the needle.
+3. **TSO RETURNS TO THE VTAM PANEL RATHER THAN PRINTING A LOGOFF MESSAGE.** Waiting only for
+   `LOGGED OFF` reported a failure on a logoff that had succeeded -- the userid was verified free
+   afterwards. `Logon` and `RUNNING` are accepted too, as `live-drive.py` has always done.
+4. **A RUN THAT DIES MID-LOGON NEVER REACHES ITS OWN LOGOFF, which is what strands a userid.**
+   HERC01 and HERC02 were lost that way. The scenario's steps are now ordered so **every earlier
+   failure still falls through to the logoff step** -- verified deliberately by driving a scenario
+   whose every preceding step times out.
+
+**THE SCRIPTED RUN IS `Mode=binary`. The USER separately verified ASCII mode by hand on macOS**, GUI
+and TUI, to and from VM -- see *macOS, BY HAND BY THE USER* below, which also explains why that
+exercises the HOST's translation and not our unimplemented local one.
+
+**FOUR THINGS THE LIVE RUN FOUND THAT REPLAY COULD NOT, all now fixed:**
+
+1. **The seam quit mid-transfer and killed a real one.** `Ctrl+t` in a keys list makes
+   `driveTransferWindow` run inside `maybeSendKeys`, and `quitIfKeysOnly` fires as soon as that loop
+   ends -- so the log read `submit -> ok=true status=transferring` and then stopped, with **no
+   completion ever observed**. A real send to VM was started and torn down, twice, before this was
+   understood. Replay mode cannot see it: there a submit is always refused, so there is never
+   anything to cut off.
+2. **`__tn3270Submit` returns when the submit is ACCEPTED, not when the transfer ENDS.** Hence
+   `__tn3270AwaitDone` and the `done=` step.
+3. **A CYCLE FIELD CANNOT BE SET AS TEXT, and the seam echoed the unchanged value honestly while the
+   scenario was still wrong.** `direction=send,host=vm` echoed `direction=receive,host=tso`, i.e. a
+   RECEIVE aimed at a TSO host. Hence `__tn3270CycleField`, and `__tn3270FieldKind` which asks the
+   DOM which control was drawn rather than keeping a second copy of the field table.
+4. **`void openTransferWindow()` made any failure in it an UnhandledPromiseRejection** --
+   `ERR_FAILED (-2) loading transfer.html`, seen when a timed-out wait called `app.exit` while the
+   load was in flight. The old comment claimed `void` *avoided* an unhandled rejection; `void` on a
+   rejecting promise is what creates one.
+
+**THREE NEEDLE TRAPS, each of which cost a run, and all three generalise:**
+
+- **The first screen from VM is the HERCULES banner, not VM's.** Waiting for `VM/370` timed out on a
+  screen that genuinely does not contain it; the logo appears only after an Enter. (`370` DOES match
+  it, via Hercules' own "S/370" -- an accidental match that would have looked like success.)
+- **An alternation is only as good as its WEAKEST needle.** `wait:CP READ|VM/370` satisfied on the
+  LOGO, a moment before `CP READ` appeared, so the `logon` went in against a locked keyboard and was
+  correctly refused. Adding an alternative to cover a second entry state also widens what the first
+  state accepts, and the wider needle wins the race.
+- **A HELD VM ACCOUNT RECONNECTS**, landing at `CP READ` with `RECONNECTED AT` and no logo -- so a
+  run that dies mid-flow poisons the next one, including the TUI harness. That happened three times
+  here.
+
+### macOS, BY HAND BY THE USER — CLOSED 2026-10-02, and in a MODE the scripted run never touched
+
+**THE USER TRANSFERRED TO AND FROM VM IN *ASCII* MODE THROUGH THE GUI ON macOS, AND THROUGH THE TUI
+AS WELL.** That closes the macOS item -- the native chooser, which no harness here can drive -- and
+it is the FIRST ASCII-mode transfer recorded anywhere in this project. Every scripted run, CLI, TUI
+and GUI, has been `Mode=binary`.
+
+**WHAT ASCII MODE ACTUALLY EXERCISES, because it is NOT the local translation and the code says so.**
+`transfer.ts` puts the word `ASCII` in the `IND$FILE` command (and `CRLF` unless `Cr=keep`), so **the
+HOST does the translation**. Our own local half -- CR/EOF suppression, the codepage remap, DBCS
+shift-in/shift-out -- is **genuinely not implemented**, which `packages/core/src/ft/cut.ts` states
+outright under *SCOPE: binary mode only, for now*. Nothing refuses the mode; we simply do not do the
+local conversion, and for plain text the host's own is sufficient. **So this result says host-side
+ASCII works end to end through this window; it does NOT mean `upload_convert`/`download_convert`
+have been implemented, and that docstring is still accurate.** A file needing the local remap (DBCS,
+or a codepage the host will not do) remains unimplemented and untested.
+
+**AND ASCII MODE REACHES A FIELD BINARY MODE CANNOT:** `Cr` is applicable only when
+`mode === 'ascii'` (`transferForm.ts`'s `applicable`), so this is also the first live exercise of
+that field being drawn, and of `wantsCrlf`'s rule that every `Cr` value except `keep` adds `CRLF`.
+
+**MVS WAS NOT REACHABLE FROM THE MAC** (the user's note), so the macOS verification is **VM only**.
+TSO/TK5 remains unrun from any platform -- see item 2.
+
+**WHAT THE USER'S RUN DOES NOT SETTLE, and these were in the item's checklist rather than assumed:**
+whether the panel leaves `Exist` alone (pick `replace`, confirm it overwrites; then `keep`, confirm
+it refuses LOCALLY without telling the host), and whether CANCELING the panel leaves the Local file
+field as it was rather than blanking it. Both are cheap to check next time a Mac is in front of
+someone, and neither is claimed here.
+
+**STILL OPEN:**
+1. ~~**TSO/TK5, the DFT host — OPEN.**~~ **DONE 2026-10-02: 9 of 9 checks, 249 bytes BYTE-IDENTICAL,
+   reproduced on HERC03 and HERC04, with a clean in-run logoff.** `Recfm=variable` with `Lrecl=1024`
+   on the send, as the TUI run established -- fixed PADS to the record boundary and turns 249 bytes
+   into 320. **Both engines are now covered from this window: CUT on VM, DFT on TSO.**
+   `python3 packages/gui/scripts/live-transfer.py tso`, with `TN3270_PASSWORD=PASS4U`.
+
+   **THE DRAIN EARNED ITS KEEP HERE:** `drained "***" after 2 Enter(s)` -- the variable prompt count
+   `live-drive.py` has warned about since 2026-08, and the reason a fixed number of Enters cannot
+   work. Note it was **0 Enters on one run and 2 on another against the same host**, which is the
+   whole argument.
+2. ~~**The close guard against a transfer actually in flight — OPEN.**~~ **DONE ON VM/CMS
+   2026-10-02, 15 of 15 checks, with a 200 KB file** (`live-transfer.py vm --big`). The window
+   **refused to close** mid-transfer (`close -> survived=true`), **Cancel was enabled and clickable**,
+   and the cancel landed at **73987 of 204800 bytes** -- genuinely mid-flight, which is the hard part
+   rather than the cancel itself: *"A canceled 200KB transfer that reports 204800 bytes was not
+   canceled."* The host then **obeyed its next command** (`#cp logoff` → `LOGOFF AT`), which is how an
+   abort is judged here and not by an error message.
+   **STILL OPEN on TSO**, for the reason in item 1 below.
+   **AND TWO CLOSE PATHS ARE DELIBERATELY NOT DRIVEN, rather than half-claimed:** closing the
+   TERMINAL window never fires the transfer window's `close` at all (a parent's destruction fires only
+   `closed`) and `Cmd-Q` goes through `before-quit` -- **both END THE PROCESS, so neither can be
+   observed from inside a scenario that has to report afterwards.** They remain covered only by the
+   fake-`startTransfer` Xvfb runs recorded above.
+3. ~~**The progress line against real byte counts — OPEN.**~~ **DONE ON VM/CMS 2026-10-02.** A real
+   count climbed in the window's own status line -- 17 distinct lines,
+   `9898 → 23162 → 35342 → … → 198764 → 204800`, ending `done: 204800 bytes`, with the 200 KB file
+   round-tripping **byte-identical**. Sampled as a SEQUENCE and not a reading, because climbing is the
+   property: a transfer that reports one count and goes quiet is the failure this window hides best.
+
+   **AND THE "DFT IS SILENT BY DESIGN" CLAIM WAS WRONG -- IT WAS A LIVE BUG, found by this very run
+   and now FIXED. See *A 200 KB DFT transfer was killed by CUT's stall detector* below.**
+
+### A 200 KB DFT transfer was killed by CUT's stall detector — FOUND AND FIXED 2026-10-02
+
+**THE BUG, IN SHIPPED CODE, AND ONLY A BIG LIVE FILE COULD FIND IT.** `transferRun.ts` re-armed its
+30-second per-frame deadline **only from the CUT path**, so nothing re-armed it during a DFT
+transfer: **any DFT transfer taking longer than 30 seconds was killed by a timer meant to detect a
+stalled CUT host.** The 249-byte runs finished well inside the window, which is why every previous
+result was green.
+
+**The error message was DOUBLY WRONG, which is what made it hard to read:**
+`stalled: no CUT frame from the host within 30s, 0 bytes` -- nothing was stalled, and nothing was
+speaking CUT.
+
+**AND IT UNMASKED A SECOND CLAIM AS FALSE.** This document and the README both said DFT reporting no
+progress was *correct by design*, because `onProgress` was reached only from the CUT frame handler.
+That was the same silence seen from the operator's side. `Session` now emits a `transferProgress`
+event per accepted DFT frame -- **including the Open frame, which matters because a host that
+announces a transfer and then thinks is the commonest real pause** -- and `transferRun.ts` re-arms
+the deadline and reports bytes on it. **Two regression tests, mutation-verified:** removing the
+re-arm reddens the long-transfer test specifically.
+
+**A TEST I WROTE WRONG FIRST, worth recording because the correction is the insight:** it asserted
+that a gap LONGER than `frameMs` should survive. It should not -- that is a stall by definition and
+the timer's whole job. The property is that **each gap is shorter than the deadline while the TOTAL
+is far longer**, which is what a long transfer actually looks like.
+
+**TSO/DFT AT 200 KB IS STILL NOT WORKING AND IS STILL OPEN.** After the fix the transfer still ends
+`stalled ... 0 bytes` with **no progress events at all**, which means no DFT frames are reaching us
+rather than the timer firing early. **Zero bytes moved, so this is not the timer.** Not diagnosed;
+the session's budget ran out. Two leads for whoever picks it up:
+- **The TUI's `cancel-transfer.py tso` reached 204800 bytes on 2026-09-24** -- but that was BEFORE the
+  `-ddm` default flip on 2026-09-29, so it was a **CUT** transfer. Re-run today it reports
+  `'transferring' present: False` with counts ending at 204800, i.e. it now takes the DFT path too
+  and its cancel can no longer be timed. **So no harness anywhere has moved 200 KB over DFT.**
+- `-ddm off` forces CUT and is the obvious comparison: if 200 KB succeeds over CUT on TSO and fails
+  over DFT, the fault is in the DFT path at size rather than in the host or the window.
+
+**TWO TK5 USERIDS ARE HELD: `HERC03` and `HERC04`** (`/c u=herc03`, `/c u=herc04`). `HERC01` and
+`HERC02` are free -- **both released themselves within the hour**, so re-probe before spending console
+time.
+
+**A KNOWN HARNESS GAP: `live-transfer.py`'s logoff step is unreliable on VM and you must check the
+host.** The transfer run leaves CMS running, so the logoff run RECONNECTS into an indeterminate
+state and has not been made to catch it reliably. Treat a FAIL there as "the account is probably
+held" and clear it with `TN3270_PASSWORD=CMSUSER python3 packages/tui/scripts/live-drive.py vm`,
+which logs off reliably and is what every run here used to reset the host. The right fix is to log
+off from inside the TRANSFER run, which needs a seam step that runs AFTER `driveTransferWindow`;
+`maybeSendKeys` runs before it and cannot express that. **Not attempted.**
+
+## The GUI transfer window by hand — superseded by the section above, 2026-10-01
 
 **NO LIVE HOST HAS SEEN THIS FRONT END. Nothing below has been executed**, and this section exists so
 that the green harnesses are not read as a live witness. The *protocol* is live-verified in both

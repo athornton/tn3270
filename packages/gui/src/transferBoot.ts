@@ -285,7 +285,14 @@ bridge.onDone((r) => { ui.finished(r); });
 declare global {
   interface Window {
     __tn3270SetField(id: string, text: string): string;
+    __tn3270FieldKind(id: string): string;
+    __tn3270CycleField(id: string, to: string): string;
     __tn3270Submit(): Promise<{ ok: boolean; status: string }>;
+    __tn3270AwaitDone(budgetMs: number): Promise<{
+      running: boolean; status: string; timedOut: boolean;
+    }>;
+    __tn3270SampleStatus(budgetMs: number, everyMs: number): Promise<string[]>;
+    __tn3270ClickCancel(): { enabled: boolean; statusBefore: string };
   }
 }
 
@@ -305,6 +312,59 @@ window.__tn3270SetField = (id: string, text: string): string => {
   return ui.values()[id as TransferFieldId] ?? '';
 };
 
+/**
+ * Which kind of control a field is DRAWN as: `cycle`, `text`, or `''` if it is not on screen.
+ *
+ * READ FROM THE DOM, not from `TRANSFER_FIELDS`, and for two reasons. The weaker one is the import
+ * graph: this file's only runtime import is `./transferUi.js` and `transfer.html`'s import map has
+ * ONE entry, so pulling the field table in here would need a second -- and an unresolved specifier
+ * blanks this window with no error in any console, which is this repo's most-repeated failure.
+ *
+ * The stronger one is that the DOM is the better oracle. `render` draws a `<select>` for
+ * `kind === 'cycle'` and an `<input>` for everything else, so asking the document answers "what did
+ * the form actually draw" rather than "what does the table say it should have". A field the form
+ * failed to draw reports `''`, which is a visible failure rather than a confident answer about a
+ * control that is not there.
+ */
+window.__tn3270FieldKind = (id: string): string => {
+  const el = fields.querySelector(`[data-field="${id}"][data-role="value"]`);
+  if (el instanceof HTMLSelectElement) return 'cycle';
+  if (el instanceof HTMLInputElement) return 'text';
+  return '';
+};
+
+/**
+ * Cycle a cycle field until it reads `to`, and report what it holds.
+ *
+ * ## WHY `__tn3270SetField` COULD NOT DO THIS, MEASURED
+ *
+ * It routes through `ui.type` -> `setFieldText`, which is a documented NO-OP on a cycle field
+ * (`transferForm.ts`: `field.kind === 'cycle'` returns the state untouched). So
+ * `direction=send,host=vm` echoed `direction=receive,host=tso` -- the seam reported the unchanged
+ * value honestly, but a scenario that did not read the echo would have sent a RECEIVE to a TSO host
+ * while believing it had set both. Found by running it; nothing in the type system objects.
+ *
+ * ## IT CLICKS THROUGH THE MODEL RATHER THAN ASSIGNING
+ *
+ * `ui.cycle(id, 1)` is what a real arrow key does, so this cannot set a combination the operator
+ * could not reach -- and `clearInapplicable` runs on every step, which is the whole reason the
+ * model owns cycling. Assigning the value directly would bypass the rule that makes VM drop
+ * `Recfm=undefined`.
+ *
+ * BOUNDED BY THE NUMBER OF VALUES THE FIELD OFFERS, so an unreachable target stops rather than
+ * spinning: the caller sees an echo that is not what it asked for, which is the same visible
+ * failure a bad id gives. A fixed bound also covers the case where the target becomes
+ * inapplicable mid-walk and the field stops changing.
+ */
+window.__tn3270CycleField = (id: string, to: string): string => {
+  const field = id as TransferFieldId;
+  for (let i = 0; i < 12; i++) {
+    if (ui.values()[field] === to) break;
+    ui.cycle(field, 1);
+  }
+  return ui.values()[field] ?? '';
+};
+
 window.__tn3270Submit = async (): Promise<{ ok: boolean; status: string }> => {
   await ui.start();
   /**
@@ -316,4 +376,98 @@ window.__tn3270Submit = async (): Promise<{ ok: boolean; status: string }> => {
    */
   const status = document.querySelector('#status')?.textContent ?? '';
   return { ok: ui.running(), status };
+};
+
+/**
+ * Wait for a RUNNING transfer to end, and report the status line it ended on.
+ *
+ * ## WHY `__tn3270Submit` ALONE WAS NOT ENOUGH, MEASURED AGAINST A LIVE HOST
+ *
+ * It returns as soon as the submit was ACCEPTED -- `ok: true, status: "transferring"` -- and the
+ * seam then quit the app, killing the transfer it had just started. The first live run against
+ * VM/CMS reported exactly that and nothing more: a real transfer began and the harness tore the
+ * process down mid-flight, so no run could ever observe a COMPLETION. Replay mode hid this
+ * perfectly, because there a submit is always refused and there is never anything to wait for.
+ *
+ * ## IT POLLS `running()`, WHICH IS THE SAME FACT THE FORM'S ENABLEMENT USES
+ *
+ * `finished()` clears `isRunning` on every ending -- success, failure, cancel, a stale-generation
+ * drop -- so this cannot miss one by watching the wrong signal. Reading the status line instead
+ * would be reading prose, and the three endings are different strings.
+ *
+ * ## IT RETURNS `timedOut` RATHER THAN THROWING
+ *
+ * The caller is `executeJavaScript` across an IPC boundary, where a throw arrives as a rejected
+ * promise with a stack from the renderer -- unreadable in a harness log. A flag the seam can print
+ * keeps the diagnosis legible, and a transfer still running when the budget expires is a real
+ * result worth reporting rather than an error.
+ */
+window.__tn3270AwaitDone = async (budgetMs: number): Promise<{
+  running: boolean; status: string; timedOut: boolean;
+}> => {
+  const deadline = Date.now() + budgetMs;
+  while (ui.running() && Date.now() < deadline) {
+    await new Promise((r) => { setTimeout(r, 250); });
+  }
+  return {
+    running: ui.running(),
+    status: document.querySelector('#status')?.textContent ?? '',
+    timedOut: ui.running(),
+  };
+};
+
+/**
+ * Sample the status line over a window and return the DISTINCT texts seen, in order.
+ *
+ * ## WHY A SEQUENCE AND NOT A READING
+ *
+ * The property worth observing is that a real byte count **CLIMBS**. One reading cannot show that,
+ * and the runbook names the failure it would miss: *"a progress report that silently stops is the
+ * failure this window would hide best"* -- a transfer that reports `1107 bytes` once and then goes
+ * quiet for two seconds looks identical to one reporting it continuously, through a single sample.
+ *
+ * DISTINCT, not every poll, because the poll rate and the host's frame rate are unrelated: at 15 ms
+ * a frame and a 100 ms sample most readings are repeats, and a hundred identical lines in a harness
+ * log hide the three that differ.
+ *
+ * ## IT RETURNS EARLY WHEN THE TRANSFER ENDS
+ *
+ * Otherwise a 200 KB transfer that finishes in 3 s would still hold the scenario for the full
+ * budget, and the `done:` line -- the last and most interesting sample -- would be followed by
+ * nothing but waiting. The caller gets the ending in the sequence either way.
+ */
+window.__tn3270SampleStatus = async (budgetMs: number, everyMs: number): Promise<string[]> => {
+  const seen: string[] = [];
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const text = document.querySelector('#status')?.textContent ?? '';
+    if (seen[seen.length - 1] !== text) seen.push(text);
+    if (!ui.running() || Date.now() >= deadline) return seen;
+    await new Promise((r) => { setTimeout(r, everyMs); });
+  }
+};
+
+/**
+ * Click the REAL Cancel button, and report whether it was enabled and what the status said.
+ *
+ * ## WHY A CLICK RATHER THAN `ui.requestCancel()`
+ *
+ * Calling the method directly would pass while the button was disabled, mislabelled, or wired to
+ * nothing -- and the button IS the operator's only route out of a running transfer, because the
+ * window refuses to close. So this goes through the same listener a mouse does
+ * (`cancelBtn.addEventListener('click', ...)`), and reports `enabled` separately: a disabled button
+ * that is "clicked" proves nothing, and `click()` on one is a silent no-op in the DOM.
+ *
+ * `statusBefore` is captured BEFORE the click because that is the byte count the cancel interrupted,
+ * and it is the number that says the transfer was genuinely mid-flight. `cancel-transfer.py` makes
+ * the same recording for the same reason: *"A canceled 200KB transfer that reports 204800 bytes was
+ * not canceled."*
+ */
+window.__tn3270ClickCancel = (): { enabled: boolean; statusBefore: string } => {
+  const btn = document.querySelector<HTMLButtonElement>('#cancel');
+  const statusBefore = document.querySelector('#status')?.textContent ?? '';
+  if (btn === null) return { enabled: false, statusBefore };
+  const enabled = !btn.disabled;
+  btn.click();
+  return { enabled, statusBefore };
 };

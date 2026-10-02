@@ -2009,7 +2009,8 @@ The transfer window's Electron wiring is covered by `packages/gui/scripts/transf
 replay mode, stubbed dialog). **Three things that harness cannot reach, and they must be said so
 rather than implied:**
 
-1. **The native dialog's appearance and behavior on macOS.** There is no macOS on the build box.
+1. ~~**The native dialog's appearance and behavior on macOS.**~~ **DONE 2026-10-02, by the user, on
+   a Mac, in ASCII mode, to and from VM.** There is no macOS on the build box.
    Check: `Browse…` on a send offers an Open panel that refuses a non-existent file; on a receive it
    offers a Save panel. **The panel must NOT set `Exist`** — pick `replace` in the form and confirm
    the transfer overwrites, then `keep` and confirm it refuses locally without telling the host.

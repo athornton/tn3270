@@ -214,6 +214,10 @@ could log a typed path and a real logon is a seam that can leak.
 
 **What has no test and must be said so**: that the native dialog looks and behaves correctly on macOS.
 There is no macOS here. `docs/live-testing.md` gets a by-hand item.
+**CLOSED 2026-10-02: the user
+verified it on a Mac, GUI and TUI, to and from VM in ASCII mode** -- a mode no scripted run has
+used, and one where the HOST does the translation because our local `upload_convert` half is still
+unimplemented (`core/src/ft/cut.ts`, *SCOPE: binary mode only*).
 
 **A golden is NOT proposed for this window.** The canvas goldens exist because glyph rendering through
 a baked atlas is byte-reproducible; a native form is system-font-dependent and would not reproduce

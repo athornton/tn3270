@@ -185,6 +185,11 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     // run ends -- the same discipline as `Session.handleClose` owning TN3270E teardown.
     session.off('screen', onScreen);
     session.off('transferEnd', onTransferEnd);
+    // REMOVED WITH THE OTHERS, or a finished run keeps a listener on a live session: the next
+    // transfer's frames would re-arm a timer belonging to a run that had ended, and this file's own
+    // history has the shape -- a stale deadline firing into a later run is what the generation stamp
+    // in `gui/src/transferWindow.ts` exists to contain.
+    session.off('transferProgress', onDftProgress);
     clearTimers();
     // NARROWED, not `result.error`: `TransferResult` is a DISCRIMINATED UNION
     // (`ft/transfer.ts:98`) and `error` exists only on the `ok: false` arm, so reading it
@@ -254,6 +259,34 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
    * under a SUCCESS message -- the failure mode this project's live-transfer rule already
    * names: compare bytes, not the status line.
    */
+  /**
+   * One accepted DFT data frame.
+   *
+   * ## THIS RE-ARMS THE DEADLINE, AND WITHOUT IT A LONG DFT TRANSFER IS KILLED
+   *
+   * `armFrameTimer` is called from the CUT path only, so before this handler existed nothing
+   * re-armed the 30-second per-frame timer during a DFT transfer -- and the timer fired. Measured
+   * 2026-10-02 against MVS/TSO: a 249-byte file finished inside the window, and a 200 KB one died
+   * with `stalled: no CUT frame from the host within 30s, 0 bytes` while the host was transferring
+   * perfectly well. **The message was doubly wrong -- nothing was stalled and nothing was speaking
+   * CUT -- which is why this took a live 200 KB run to find rather than a unit test.**
+   *
+   * ## AND IT IS WHY DFT NOW HAS A PROGRESS LINE AT ALL
+   *
+   * `onProgress` used to be reached only from the CUT frame handler, so a DFT transfer reported
+   * nothing between its start and its end. That was documented as correct-by-design; it was really
+   * the same silence as the bug above, seen from the operator's side.
+   *
+   * `committed` is NOT set here. The protocol race is decided by whichever side speaks first, and a
+   * data frame is already proof DFT won -- but `onTransferEnd` is the one place that owns that
+   * transition, and setting it in two places is how the two would eventually disagree.
+   */
+  const onDftProgress = (): void => {
+    if (ended) return;
+    armFrameTimer();
+    onProgress(`${dft.transferred} bytes`);
+  };
+
   const onTransferEnd = (): void => {
     if (ended) return;
     committed = 'dft';
@@ -369,6 +402,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   // invariant; reversing these two lines is what would break, and does.
   session.on('screen', onScreen);
   session.on('transferEnd', onTransferEnd);
+  session.on('transferProgress', onDftProgress);
   session.sendAID(AID.ENTER);
 
   // IF IT ALREADY FINISHED, `finish` has run and these are no-ops that must not be armed: a
