@@ -170,6 +170,36 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   };
 
   /**
+   * How many bytes moved, from WHICHEVER ENGINE RAN.
+   *
+   * ## WHY THIS CANNOT JUST READ `committed`
+   *
+   * `committed` becomes `'dft'` only inside `onTransferEnd` (and `'cut'` on the first CUT frame),
+   * so on every path that ends a transfer EARLY it is still `undefined` -- which is precisely the
+   * timeout path. `cancel` already documents this and reaches for the engine's own byte count for
+   * the same reason; this is that reasoning in one place instead of two.
+   *
+   * ## THE BUG IT FIXES, AND IT COST A WHOLE DIAGNOSIS RATHER THAN A COSMETIC LINE
+   *
+   * `timeout` interpolated `cut.bytesTransferred` unconditionally, and on a DFT transfer that
+   * counter is ZERO BY CONSTRUCTION because the CUT engine never ran. So a DFT transfer that
+   * stalled after moving 150 KB still reported `0 bytes` -- and the TSO/DFT 200 KB failure was
+   * recorded on 2026-10-02 as "no progress events at all ... zero bytes moved, so this is not the
+   * timer" ON THE STRENGTH OF THAT NUMBER. The message could not have said anything else.
+   *
+   * `finish` had the same hole by a different route: it reads `committed`, which the timeout path
+   * leaves `undefined`, so the `bytes` handed to `onDone` was also CUT's zero. One helper, both
+   * sites -- the one-path-reads-it-right-and-another-does-not shape this file's history carries
+   * twice over (`Session.e`, `tn3270eNegotiated`).
+   *
+   * A nonzero `dft.transferred` is proof DFT ran: the CUT path releases the DFT registration on
+   * its first frame (`onScreen`), so the two counters can never both be nonzero.
+   */
+  const bytesMoved = (): number => (
+    dft.transferred > 0 ? dft.transferred : cut.bytesTransferred
+  );
+
+  /**
    * End the run exactly once: drop the listener, kill both timers, report.
    *
    * `ended` guards against every way two endings could race -- a frame completing as a
@@ -204,7 +234,11 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
       // itself, and the one number they would check against the host's own listing. The
       // counters are per-engine and not interchangeable: `bytesTransferred` on CUT,
       // `transferred` on DFT (`dft.ts:181`).
-      bytes: committed === 'dft' ? dft.transferred : cut.bytesTransferred,
+      //
+      // VIA `bytesMoved`, NOT `committed`: this runs on the TIMEOUT path too, where `committed` is
+      // still `undefined` and the old expression therefore reported CUT's zero for a DFT transfer
+      // that had moved real bytes. See `bytesMoved`.
+      bytes: bytesMoved(),
     });
   };
 
@@ -239,8 +273,12 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     }
     finish({
       ok: false,
+      // `bytesMoved()`, NOT `cut.bytesTransferred`: on a DFT transfer the CUT counter is zero by
+      // construction, so this message used to report `0 bytes` however much DFT had moved -- and
+      // that zero was read as evidence of a dead protocol rather than a stalled one. See
+      // `bytesMoved`.
       error: `press Attn or Clear: host may still be transferring. `
-        + `${why}, ${cut.bytesTransferred} bytes${extra}`,
+        + `${why}, ${bytesMoved()} bytes${extra}`,
     });
   };
 

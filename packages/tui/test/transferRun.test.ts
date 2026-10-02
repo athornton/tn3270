@@ -745,6 +745,50 @@ describe('protocol selection: deciding', () => {
     }
   });
 
+  it('A STALLED DFT TRANSFER REPORTS THE BYTES IT MOVED, not CUT\'s zero', async () => {
+    /**
+     * THE TIMEOUT PATH READ THE WRONG COUNTER, and it cost a whole diagnosis.
+     *
+     * `finish` picks per engine (`committed === 'dft' ? dft.transferred : cut.bytesTransferred`)
+     * but `timeout` interpolated `cut.bytesTransferred` unconditionally -- and on a DFT transfer
+     * that counter is ZERO BY CONSTRUCTION, because the CUT engine never ran. So every stalled
+     * DFT transfer reported `0 bytes` however much it had moved.
+     *
+     * **This is not cosmetic: it is why the TSO/DFT 200 KB failure was recorded as "no DFT frames
+     * are arriving, so this is not the timer".** That conclusion was drawn from the `0 bytes` in
+     * the message, and the message could not have said anything else. The same
+     * one-path-reads-it-right-and-another-does-not shape this file's own history already carries.
+     *
+     * Asserted with frames that DID arrive and then a gap that genuinely stalls, because that is
+     * the only state in which the two counters disagree -- and it is exactly the live state.
+     */
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    let done: { ok: boolean; error?: string } | undefined;
+
+    vi.useFakeTimers();
+    try {
+      startTransfer({
+        session, files, request: aReceive('/tmp/got.bin'), command: 'IND$FILE GET A.BIN',
+        onProgress: () => {}, onDone: (d) => { done = d; },
+        frameMs: 1000, totalMs: 60_000,
+      });
+
+      // Open, then a data frame carrying three bytes -- so the DFT engine HAS moved bytes --
+      // and then nothing at all, which is a real stall rather than a slow host.
+      const records = wholeDftDownload();
+      conn.host(...records[0]!);
+      conn.host(...records[1]!);
+      await vi.advanceTimersByTimeAsync(1200);
+
+      expect(done?.ok).toBe(false);
+      expect(done?.error, 'the stall message must report what DFT moved').toMatch(/3 bytes/);
+      expect(done?.error, 'and must NOT claim zero, which is CUT\'s counter').not.toMatch(/0 bytes/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports DFT progress, which it used to do only for CUT', async () => {
     // The same silence as the bug above, seen from the operator's side: a DFT transfer reported
     // nothing between its start and its end, and that was written down as correct-by-design. A
