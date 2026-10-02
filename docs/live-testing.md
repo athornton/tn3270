@@ -3824,7 +3824,10 @@ PASS BYTES ARE IDENTICAL: identical
 and was verified the same day -- 9 of 9 checks, 249 bytes byte-identical, reproduced on two userids.
 See item 1 under *STILL OPEN* below, which is now closed, for the TSO specifics.
 
-**FOUR TSO LESSONS THAT COST TWO STRANDED USERIDS, and the first one is the embarrassing one:**
+**FOUR TSO LESSONS THAT COST TWO STRANDED USERIDS -- of which ONE RELEASED ITSELF within the hour,
+so re-probe before spending console time. `HERC02` was still held at the end of the session and
+wants `/c u=herc02`; `HERC01`, `HERC03` and `HERC04` were verified free. The first lesson is the
+embarrassing one:**
 
 1. **`HERC03` AND `HERC04` USE `PASS4U`, NOT `CUL8TR`.** This document has recorded it since 2026-08
    -- *"`HERC01`/`CUL8TR` fully authorized with RAKF table access, `HERC02`/`CUL8TR` fully authorized

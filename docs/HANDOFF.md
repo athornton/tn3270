@@ -38,10 +38,12 @@ mode only*. So host-side ASCII works end to end through this window; `upload_con
 HERC04 with a clean in-run logoff. BOTH HOSTS AND BOTH ENGINES ARE NOW COVERED from this window** --
 CUT on VM, DFT on TSO.
 
-**TWO TK5 USERIDS WERE STRANDED GETTING THERE AND NEED THE MVS CONSOLE: `HERC01` and `HERC02`**, both
-answering `IKJ56425I LOGON REJECTED, USERID ... IN USE`. Clear them with `/c u=herc01` and
-`/c u=herc02` at the operator console; nothing reachable from a TN3270 client will. **HERC03 and
-HERC04 are free and verified so.** The cause is worth knowing because it is cheap to avoid:
+**ONE TK5 USERID IS STILL HELD AND NEEDS THE MVS CONSOLE: `HERC02`** -- `/c u=herc02` at the
+operator console; nothing reachable from a TN3270 client will clear it.
+**`HERC01`, `HERC03` and `HERC04` are FREE, verified by logon probe after the work.**
+HERC01 and HERC02 were both stranded during the session; **HERC01 RELEASED ITSELF within the hour**,
+which is worth knowing before anyone spends console time: a held TSO address space does eventually
+time out, so re-probe before assuming a strand is permanent. The cause is worth knowing because it is cheap to avoid:
 **`HERC03`/`HERC04` use `PASS4U`, not `CUL8TR`** -- recorded in `docs/live-testing.md` since 2026-08
 and not read until three runs had been spent, and a run that fails mid-logon never reaches its own
 logoff. The scenario is now ordered so every earlier failure still falls through to the logoff.
