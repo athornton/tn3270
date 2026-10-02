@@ -34,9 +34,19 @@ mode only*. So host-side ASCII works end to end through this window; `upload_con
 `download_convert` remain unwritten and that docstring is still correct. ASCII mode also draws the
 `Cr` field, which is inapplicable in binary and had never been exercised live.
 
-**THE NEXT ACTION IS EITHER (a) RUN THE TSO HALF** — `live-transfer.py tso`, written and never
-executed, where `Recfm=variable` matters because fixed PADS and turns 249 bytes into 320 — **or
-(b) ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
+**AND TSO/DFT IS DONE TOO, 2026-10-02: 9 of 9, 249 bytes BYTE-IDENTICAL, reproduced on HERC03 and
+HERC04 with a clean in-run logoff. BOTH HOSTS AND BOTH ENGINES ARE NOW COVERED from this window** --
+CUT on VM, DFT on TSO.
+
+**TWO TK5 USERIDS WERE STRANDED GETTING THERE AND NEED THE MVS CONSOLE: `HERC01` and `HERC02`**, both
+answering `IKJ56425I LOGON REJECTED, USERID ... IN USE`. Clear them with `/c u=herc01` and
+`/c u=herc02` at the operator console; nothing reachable from a TN3270 client will. **HERC03 and
+HERC04 are free and verified so.** The cause is worth knowing because it is cheap to avoid:
+**`HERC03`/`HERC04` use `PASS4U`, not `CUL8TR`** -- recorded in `docs/live-testing.md` since 2026-08
+and not read until three runs had been spent, and a run that fails mid-logon never reaches its own
+logoff. The scenario is now ordered so every earlier failure still falls through to the logoff.
+
+**THE NEXT ACTION IS ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
 preload, its own bridge, the canvas bridge untouched), and its AS BUILT notes record what that shape

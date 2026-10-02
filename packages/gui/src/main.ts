@@ -243,6 +243,23 @@ export const WAIT_PREFIX = 'wait:';
  */
 let transferScenarioRunning = false;
 
+/**
+ * Set when a seam has decided to END the process, so nothing starts new async work afterwards.
+ *
+ * ## THE FAILURE THIS REMOVES, MEASURED TWICE ON TK5
+ *
+ * A timed-out `wait:` step calls `app.exit`, and `Ctrl+t` earlier in the same keys list has already
+ * put `openTransferWindow` in flight -- so `loadFile` loses its renderer mid-load and rejects with
+ * `ERR_FAILED (-2) loading transfer.html`. Catching at the `action` handler fixed one route;
+ * `maybeOpenTransferWindow` then started a SECOND window on the way out and rejected again.
+ *
+ * **Why it matters beyond tidiness:** that rejection is the last thing in the log, so it buries the
+ * `keys: TIMED OUT` line that says what actually went wrong -- and on TSO a run that dies mid-logon
+ * never reaches its own logoff, which STRANDS A USERID recoverable only from the MVS operator
+ * console. A misleading log is expensive when the diagnosis costs a userid.
+ */
+let shuttingDown = false;
+
 /** Turn any startup failure into something a person can act on. */
 function explain(err: unknown, host?: string, port?: number): string {
   if (err instanceof UsageError) return err.message;
@@ -546,7 +563,7 @@ app.whenReady().then(async () => {
     });
 
     await tw.loadFile(join(here, '..', 'transfer.html'));
-    await driveTransferWindow(tw);
+    await driveTransferWindow(tw, win, session);
   };
 
   /**
@@ -570,6 +587,9 @@ app.whenReady().then(async () => {
    */
   const maybeOpenTransferWindow = async (): Promise<void> => {
     if (SEAM.transfer === '') return;
+    // NOTHING NEW ONCE A SEAM HAS GIVEN UP: see `shuttingDown`. Opening a window while the process
+    // is exiting produces an ERR_FAILED rejection that buries the line explaining the real failure.
+    if (shuttingDown) return;
     await openTransferWindow();
   };
 
@@ -989,6 +1009,7 @@ async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<voi
             () => { r(); },
           );
         });
+        shuttingDown = true;
         app.exit(1);
         return;
       }
@@ -1142,7 +1163,9 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
  * the harness's own, and requiring replay would make it unable to ever drive a real transfer by
  * hand -- which is the thing a human would most want it for.
  */
-async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
+async function driveTransferWindow(
+  tw: BrowserWindow, win: BrowserWindow, session: Session,
+): Promise<void> {
   if (SEAM.transfer === '') return;
   /**
    * THE WHOLE BODY STAYS IN THIS FUNCTION, deliberately, and an earlier attempt at the
@@ -1155,7 +1178,7 @@ async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
    */
   transferScenarioRunning = true;
   try {
-    await driveSteps(tw);
+    await driveSteps(tw, win, session);
   } finally {
     // CLEARED IN A `finally`, so a scenario that throws cannot leave the process unquittable --
     // which would turn one failure mode into a worse one.
@@ -1198,7 +1221,9 @@ async function driveTransferWindow(tw: BrowserWindow): Promise<void> {
  * what keeps the privacy property structural: this function has no gate of its own because it has
  * exactly one caller that does. `transferSeam.test.ts` pins both halves.
  */
-async function driveSteps(tw: BrowserWindow): Promise<void> {
+async function driveSteps(
+  tw: BrowserWindow, win: BrowserWindow, session: Session,
+): Promise<void> {
   process.stdout.write('transfer window: opened\n');
   /**
    * THE FIELD COUNT FIRST, BEFORE ANY STEP RUNS.
@@ -1258,6 +1283,123 @@ async function driveSteps(tw: BrowserWindow): Promise<void> {
       ) as { running: boolean; status: string; timedOut: boolean };
       process.stdout.write(
         `transfer window: done -> running=${r.running} timedOut=${r.timedOut} status=${r.status}\n`,
+      );
+      continue;
+    }
+    /**
+     * `host:CMD|AWAIT` TYPES A COMMAND INTO THE SESSION, after the transfers, and it exists for
+     * ONE job: **logging off without stranding the account.**
+     *
+     * ## WHY NOTHING ELSE COULD DO IT
+     *
+     * `maybeSendKeys` runs to COMPLETION before the transfer window opens, so a `LOGOFF` at the end
+     * of the keys list executes before the transfer has started. A separate logoff PROCESS does not
+     * work either, because it has no session: it must log on first, and **a held TSO userid is
+     * REFUSED** (`IKJ56425I ... IN USE`), so the one case that needs recovering is the one case it
+     * cannot reach. Three TK5 userids were stranded exactly this way in 2026-08, and the only
+     * recovery is `/c u=<userid>` at the MVS operator console -- Hercules' controlling terminal,
+     * which an agent cannot read or type into.
+     *
+     * So this types into the ALREADY LOGGED-ON session, at the prompt the transfers left it at.
+     *
+     * ## IT WAITS ON HOST TEXT, LIKE EVERY OTHER STEP HERE
+     *
+     * `host:logoff|LOGGED OFF` types `logoff`, sends Enter, and waits for `LOGGED OFF` (alternatives
+     * with `|` as `wait:` takes them). A logoff that did not take must be VISIBLE, because the cost
+     * of missing it is a stranded userid and a manual console step.
+     */
+    /**
+     * SPLIT ON `:` AND NOT `=`, which is why this arm comes BEFORE the `value === undefined` guard
+     * and tests `step` rather than `name`. The step parser above splits on the first `=`, so
+     * `host:logoff|LOGGED OFF` arrives with `name` holding the whole thing and `value` undefined --
+     * measured, it printed `UNKNOWN STEP host:test`. A `:` separator is also what keeps a command
+     * containing `=` expressible, which a host command may well be.
+     *
+     * AND IT CANNOT COLLIDE WITH THE `host` FIELD, whose steps are `host=vm`: one uses `=`, this
+     * one `:`, and the field arm below never sees a step starting `host:`.
+     */
+    /**
+     * `drain:TEXT` PRESSES ENTER UNTIL `TEXT` IS GONE FROM THE SCREEN.
+     *
+     * ## WHY A COUNT OF ENTERS CANNOT WORK, AND THIS COST A STRANDED USERID
+     *
+     * TSO shows an indeterminate number of more-output prompts after logon -- a welcome banner, then
+     * a FORTUNE COOKIE, then the fortune's own `***`. `live-drive.py` has a `DRAIN***` step for
+     * exactly this and says why in as many words: *"A fixed settle then one Enter was not enough:
+     * the count is not fixed ... and a settle can fire the Enter before the next screen has even
+     * arrived."*
+     *
+     * The GUI harness guessed two Enters, which was not enough: the run timed out waiting for the
+     * ISPF panel, died before the transfer window opened, and so never reached its own logoff --
+     * **stranding HERC01 with `IKJ56425I LOGON REJECTED, USERID HERC01 IN USE`, recoverable only
+     * from the MVS operator console.** A loop that asks the screen is the only form that does not
+     * depend on counting.
+     *
+     * Bounded, because an unbounded loop against a host that never clears the prompt is a hang.
+     */
+    /**
+     * `wait:TEXT` HERE TOO, with the same meaning and the same implementation as in the keys seam.
+     *
+     * The scenario needs it because the steps that follow type into the SESSION (`host:`, `drain:`),
+     * and those must not run before the host is ready -- the same rule that made `wait:` necessary
+     * for the keys list. Measured: without it, `host x` typed while the OIA still showed `X Wait`
+     * and the ISPF panel had not arrived.
+     *
+     * A TIMEOUT HERE DOES NOT END THE PROCESS, unlike the keys seam's, and the asymmetry is
+     * deliberate: by this point a transfer may be mid-flight and a `app.exit` would abandon it
+     * rather than let the scenario's own logoff step run. It REPORTS and continues, and the
+     * subsequent steps report their own failures -- which is how the stranded-userid diagnosis
+     * stayed legible.
+     */
+    if (step.startsWith(WAIT_PREFIX)) {
+      const hit = await waitForScreen(session, step.slice(WAIT_PREFIX.length));
+      process.stdout.write(
+        hit === undefined
+          ? `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}\n`
+          : `transfer window: saw ${JSON.stringify(hit)}\n`,
+      );
+      continue;
+    }
+    if (step.startsWith('drain:')) {
+      const needle = step.slice('drain:'.length);
+      win.show();
+      win.focus();
+      let pressed = 0;
+      for (; pressed < 10; pressed++) {
+        await new Promise((r) => { setTimeout(r, 1500); });
+        const seen = screenNeedleText(resolve(session.screen.snapshot(), {}));
+        if (!seen.includes(needle)) break;
+        for (const t of ['keyDown', 'char', 'keyUp'] as const) {
+          win.webContents.sendInputEvent({ type: t, keyCode: 'Enter' });
+        }
+      }
+      process.stdout.write(`transfer window: drained ${JSON.stringify(needle)} after ${pressed} Enter(s)\n`);
+      continue;
+    }
+    if (step.startsWith('host:')) {
+      const spec = step.slice('host:'.length);
+      const bar = spec.indexOf('|');
+      const cmd = bar < 0 ? spec : spec.slice(0, bar);
+      const expect = bar < 0 ? '' : spec.slice(bar + 1);
+      // FOCUSED FIRST: the transfer window has the keyboard, and `sendInputEvent` goes to the
+      // window it is called on -- but a background window's renderer may not be the one Chromium
+      // routes to. Showing the main window is what makes the typing land on the session.
+      win.show();
+      win.focus();
+      await new Promise((r) => { setTimeout(r, 400); });
+      for (const ch of [...cmd, '\r']) {
+        const keyCode = ch === '\r' ? 'Enter' : ch === ' ' ? 'Space' : ch;
+        win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
+        win.webContents.sendInputEvent({ type: 'char', keyCode });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+        await new Promise((r) => { setTimeout(r, 90); });
+      }
+      if (expect === '') { process.stdout.write(`transfer window: host ${cmd} (no wait)\n`); continue; }
+      const hit = await waitForScreen(session, expect);
+      process.stdout.write(
+        hit === undefined
+          ? `transfer window: host ${cmd} -> TIMED OUT waiting for ${JSON.stringify(expect)}\n`
+          : `transfer window: host ${cmd} -> saw ${JSON.stringify(hit)}\n`,
       );
       continue;
     }

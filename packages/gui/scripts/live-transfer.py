@@ -104,21 +104,30 @@ def typed(text):
     """
     One key per character, because the seam sends CHORDS and not strings.
 
-    Case is ignored by Chromium (`A` and `a` both deliver `key: 'a'`), so anything that must be
-    uppercase on the wire relies on the host folding it -- which CP, CMS and TSO all do for
-    commands. A 3270 field would NOT fold, which is why the file and dataset names below are
-    chosen to be case-insensitive on both hosts.
+    ## UPPERCASE NEEDS `Shift+`, AND THIS COST TWO TSO USERIDS TO LEARN
+
+    Chromium's `sendInputEvent` folds case: `A` and `a` both deliver `key: 'a'`. An earlier version
+    of this function relied on the HOST folding instead, and its own docstring named the exception it
+    then walked into -- *"a 3270 field would NOT fold"*. **The TSO password field is exactly that
+    case.** `CUL8TR` arrived as `cul8tr` and TK5 answered `PASSWORD NOT AUTHORIZED FOR USERID`;
+    because the run then died mid-logon it never reached its own logoff, which STRANDED the userid.
+    Twice, on HERC01 and HERC02, before a screenshot showed the actual message.
+
+    VM did not expose it: CP folds passwords, so `logon CMSUSER` and its password both worked
+    lowercase. One host folding and the other not is precisely the kind of difference a second host
+    exists to find.
+
+    So an uppercase letter is sent as `Shift+<letter>`. Lowercase and digits pass through.
     """
     out = []
     for ch in text:
         if ch == " ":
             out.append("Space")
-        elif ch == ".":
-            out.append(".")
-        elif ch == "/":
-            out.append("/")
-        elif ch == "'":
-            out.append("'")
+        elif ch.isupper():
+            # `Shift+A` -- and the seam sends NO `char` event for a modified chord (a real
+            # Ctrl-/Alt-held keystroke produces none), which is why this relies on the renderer's
+            # `keydown` path rather than on text input.
+            out.append(f"Shift+{ch}")
         else:
             out.append(ch)
     return out
@@ -206,25 +215,28 @@ def tso_logon(user, pw):
         "wait:Logon", *typed(user), "Enter",
         "wait:PASSWORD|password", *typed(pw), "Enter",
         "wait:LOGON IN PROGRESS|Welcome|***", "Enter",
-        # Two more Enters drain the more-output prompts, whose NUMBER IS NOT FIXED -- TK5 shows a
-        # welcome banner and a FORTUNE COOKIE. Waiting for the ISPF panel is what actually
-        # synchronises, so a spare Enter at a settled screen is harmless and a missing one is not.
-        "Enter", "Enter",
-        # Leave ISPF with `X`, because IND$FILE is a PLAIN TSO COMMAND run from `READY` -- TK5's is
-        # Rayborn's FFTP 2.0.5 and no ISPF panel is involved.
-        "wait:Primary Option|USERID|BROWSE", *typed("x"), "Enter",
-        "wait:READY|CLST",
     )
+    # ^ STOPS HERE DELIBERATELY. Everything after the first Enter -- draining the more-output
+    # prompts and leaving ISPF -- happens in the TRANSFER SCENARIO instead, because only that runs
+    # after the transfer window exists and only it has a `drain:` step.
+    #
+    # THE REASON IS A STRANDED USERID. This function used to press TWO blind Enters and then wait for
+    # the ISPF panel. **TK5's more-output prompt count is NOT FIXED** -- a welcome banner, a FORTUNE
+    # COOKIE, and the fortune's own `***` -- so the wait timed out, the run died before the transfer
+    # window opened, its in-run logoff never executed, and HERC01 was left answering
+    # `IKJ56425I LOGON REJECTED, USERID HERC01 IN USE`. `live-drive.py` has had a `DRAIN***` step for
+    # this since 2026-08 and documents exactly why a count cannot work; the GUI harness guessed, and
+    # the guess cost a userid that only the MVS console can release.
 
 
 def tso_flow(user, pw, ds_plain, ds_full):
-    """The TSO logon, then DELETE -- quoted, so TSO is unambiguous about the userid."""
-    return keys(
-        tso_logon(user, pw),
-        *typed(f"delete {ds_full}"), "Enter",
-        # Either outcome is fine: deleted, or not there to begin with.
-        "wait:READY|NOT IN CATALOG|IDC|ENTRY", "Ctrl+c",
-    )
+    """
+    The TSO logon only. The DELETE moved into the transfer scenario.
+
+    It has to run AFTER the drain, and the drain is a scenario step -- so the scenario owns both.
+    DELETE wants the QUOTED form, so TSO is unambiguous about the userid.
+    """
+    return tso_logon(user, pw)
 
 
 FLOWS = {
@@ -417,6 +429,9 @@ def main():
         # `cannot read local file ... ENOENT`, which is the engine correctly refusing a send of a
         # file that does not exist, and reads nothing like "the direction was wrong".
         recv_fields = f"direction=receive,host=vm,{recv_fields}"
+        # LOGGING OFF INSIDE THE RUN, at the prompt the transfers left the session at. `#cp logoff`
+        # rather than bare `logoff` so one spelling works from CMS as well as from CP READ.
+        logoff_step = "host:#cp logoff|LOGOFF AT"
     else:
         ds_plain = os.environ.get("TN3270_DSN", "GUIXFER.BIN")
         ds_full = f"'{user}.{ds_plain}'"
@@ -432,6 +447,30 @@ def main():
         # transfers, and the form still holds `send`. `recfm`/`lrecl` become inapplicable on a
         # receive and the SHARED MODEL clears them itself -- which is why they are not reset here.
         recv_fields = f"direction=receive,localFile={back},hostFile={ds_full},submit,done=180000"
+        # **THE LOGOFF MUST HAPPEN IN THIS RUN, NOT A LATER ONE.** A held TSO userid is REFUSED
+        # (`IKJ56425I ... IN USE`), so a separate logoff process -- which has to log on first --
+        # cannot recover the one case that needs it. Three TK5 userids were stranded this way in
+        # 2026-08 and only the MVS operator console could clear them, which an agent cannot reach.
+        # **`Logon` AND `RUNNING` TOO, not just `LOGGED OFF`.** TSO returns to the VTAM panel rather
+        # than printing a logoff message, so the narrow needle timed out on a logoff that HAD
+        # succeeded -- the userid was verified free afterwards. `live-drive.py` has accepted all three
+        # since 2026-08; this is the same list. A check that cries wolf on success trains the reader
+        # to ignore it, which the runbook already records as worse than no check at all -- and here
+        # the thing it would teach them to ignore is a stranded userid.
+        logoff_step = "host:logoff|LOGGED OFF|Logon|RUNNING"
+        # EVERYTHING THE LOGON USED TO DO BLIND, now in the scenario where `drain:` exists.
+        # `***` is TSO's more-output marker; `x` leaves ISPF for `READY`, which is where IND$FILE
+        # runs -- TK5's is Rayborn's FFTP 2.0.5 and no ISPF panel is involved.
+        # **WAIT FOR THE ISPF PANEL ITSELF, and drain only if `***` is actually there.** Measured on
+        # TK5 2026-10-02: after `LOGON IN PROGRESS` the OIA shows `X Wait` -- the host is still
+        # working -- and ISPF then arrives with NO `***` prompt on this system at all. So
+        # `drain:***` found nothing to drain (`drained "***" after 0 Enter(s)`) and the next step
+        # typed into a Wait state. The drain is KEPT because `live-drive.py` documents runs where the
+        # prompts DO appear (a welcome banner, a fortune cookie) and it is a no-op when they do not;
+        # what was missing is the wait that actually synchronises.
+        prep = (f"wait:Primary Option|USERID|BROWSE,drain:***,"
+                f"wait:Primary Option|USERID|BROWSE,"
+                f"host:x|READY,host:delete {ds_full}|READY")
 
     # ---- BOTH DIRECTIONS IN ONE RUN, ONE LOGON ----
     #
@@ -446,7 +485,8 @@ def main():
     # more faithful test -- an operator transfers twice from one window rather than restarting the
     # app -- and it exercises the ONE SESSION, ONE TRANSFER rule, since the second submit happens
     # on a form that has already run one to completion.
-    scenario = f"{send_fields},{recv_fields}"
+    scenario = (f"{prep},{send_fields},{recv_fields},{logoff_step}"
+                if which == "tso" else f"{send_fields},{recv_fields},{logoff_step}")
     st, out = run(which, "both", keys(logon, "Ctrl+t"), scenario, str(src), log)
     checks.append(report("the run reached the form", "transfer window: opened" in out))
     checks.append(report("the form drew its rows",
@@ -480,14 +520,25 @@ def main():
                          "identical" if got == PAYLOAD
                          else f"expected {len(PAYLOAD)}B, got {len(got)}B"))
 
+    # THE LOGOFF IS PART OF THE SCENARIO NOW (see `logoff_step`), so this only reports what it did.
+    # The separate `logoff()` helper is kept as a FALLBACK for a run that died before the step --
+    # and on TSO it cannot help a held userid at all, which is why the in-run step exists.
+    # MATCHED ON `host logoff`, NOT ON ANY `host ` LINE. The first version took the first host step
+    # it found, which on TSO is `host x` (leaving ISPF) -- so a run whose logoff never happened
+    # reported the ISPF step's result instead, and a stranded userid would have been described by a
+    # line about something else entirely.
+    host_line = next((l for l in out.splitlines() if "host logoff" in l or "cp logoff" in l), "")
+    checks.append(report("logged off IN THE RUN (so no userid is stranded)",
+                         "-> saw" in host_line,
+                         host_line.strip() or "(no host step line -- CHECK THE HOST)"))
+
+    # TALLIED AFTER EVERY CHECK IS APPENDED, which it was not: the logoff check above used to be
+    # added AFTER this sum, so the run printed `8/8 checks passed` while a NINTH had failed and the
+    # exit code said 1 with no visible reason. A summary that disagrees with its own detail lines is
+    # worse than no summary, and the detail it was dropping is the stranded-userid warning.
     passed = sum(1 for c in checks if c)
     print(f"\n{passed}/{len(checks)} checks passed")
     print(f"log: {log}")
-    # LOG OFF LAST, in its own run, and it must LOG ON to do it -- a fresh process has no session.
-    # Skipping it is what strands the account: VM reconnects the next attempt to `CP READ` and TSO
-    # refuses the userid outright, needing `/c u=<userid>` at the operator console.
-    logoff(which, user, pw, log)
-
     if got != PAYLOAD:
         print("A STATUS LINE SAYING 'done' PROVES NOTHING -- this is the comparison that counts.")
     return 0 if passed == len(checks) else 1

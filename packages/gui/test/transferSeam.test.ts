@@ -76,7 +76,11 @@ describe('the transfer seam prints nothing in a normal run', () => {
     // BEFORE EVERYTHING THAT PRINTS, which is the actual property. The writes live in
     // `driveSteps` now, so what must precede the gate is the CALL to it -- a gate after that call
     // would leak every line it was meant to suppress.
-    const callAt = body.indexOf('await driveSteps(tw);');
+    // MATCHED ON THE CALL, NOT ITS ARGUMENT LIST, which a later edit is free to change -- it did:
+    // `driveSteps` gained the main window and the session so a `host:` step could type a LOGOFF into
+    // the live session, and a literal `await driveSteps(tw);` stopped matching. Pinning the argument
+    // list here would make this test fail on every signature change while proving nothing more.
+    const callAt = body.search(/await driveSteps\(/);
     expect(callAt, 'driveTransferWindow must call driveSteps, or there is nothing to gate')
       .toBeGreaterThan(-1);
     expect(gateAt, 'the gate must come BEFORE the call, or a normal run prints a path')

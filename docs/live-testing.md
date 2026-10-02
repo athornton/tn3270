@@ -3804,7 +3804,7 @@ That it then puts the right bytes on the wire is `TransferRun.cancel`'s own busi
 for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
 not yet been watched against a real host.** That is the next live item for this window.
 
-## The GUI transfer window — LIVE-VERIFIED ON VM/CMS, 2026-10-02
+## The GUI transfer window — LIVE-VERIFIED ON BOTH HOSTS AND BOTH ENGINES, 2026-10-02
 
 **THE WINDOW HAS NOW DRIVEN A REAL TRANSFER, BOTH DIRECTIONS, AGAINST VM/370 CMS: 8 of 8 checks and
 249 bytes BYTE-IDENTICAL, reproduced twice.** Harness:
@@ -3820,9 +3820,30 @@ transfer window: done -> running=false timedOut=false status=done: 249 bytes   (
 PASS BYTES ARE IDENTICAL: identical
 ```
 
-**THIS IS THE CUT ENGINE.** MECAFF declines DDM, so VM exercises CUT. **TSO/TK5 — the DFT reference
-host — WAS NOT RUN: the session's budget ran out first, and the flow is written but UNEXERCISED.**
-Do not read the VM result as covering DFT; it is a different engine and the host chooses.
+**BOTH ENGINES ARE COVERED.** VM exercises **CUT** (MECAFF declines DDM); **TSO/TK5 exercises DFT**
+and was verified the same day -- 9 of 9 checks, 249 bytes byte-identical, reproduced on two userids.
+See item 1 under *STILL OPEN* below, which is now closed, for the TSO specifics.
+
+**FOUR TSO LESSONS THAT COST TWO STRANDED USERIDS, and the first one is the embarrassing one:**
+
+1. **`HERC03` AND `HERC04` USE `PASS4U`, NOT `CUL8TR`.** This document has recorded it since 2026-08
+   -- *"`HERC01`/`CUL8TR` fully authorized with RAKF table access, `HERC02`/`CUL8TR` fully authorized
+   without it, `HERC03` and `HERC04`/`PASS4U` regular users"* -- and three runs were spent before it
+   was read. `PASSWORD NOT AUTHORIZED FOR USERID` was literally true and was chased as a client bug.
+   **A screenshot settled it in one run where log-reading had failed three times.**
+2. **Chromium's `sendInputEvent` FOLDS CASE, and a 3270 field does not fold it back.** `CUL8TR`
+   arrived as `cul8tr`. The harness's own docstring had named this exception while walking into it.
+   Fixed with `Shift+<letter>`, which **does** carry uppercase: `Shift+C` produces
+   `{"kind":"type","text":"C"}` through the renderer's `keydown` path even though a modified chord
+   sends no `char` event. **This was a real bug and NOT the cause of the failure above** -- two
+   defects with one symptom, and fixing the first one did not move the needle.
+3. **TSO RETURNS TO THE VTAM PANEL RATHER THAN PRINTING A LOGOFF MESSAGE.** Waiting only for
+   `LOGGED OFF` reported a failure on a logoff that had succeeded -- the userid was verified free
+   afterwards. `Logon` and `RUNNING` are accepted too, as `live-drive.py` has always done.
+4. **A RUN THAT DIES MID-LOGON NEVER REACHES ITS OWN LOGOFF, which is what strands a userid.**
+   HERC01 and HERC02 were lost that way. The scenario's steps are now ordered so **every earlier
+   failure still falls through to the logoff step** -- verified deliberately by driving a scenario
+   whose every preceding step times out.
 
 **THE SCRIPTED RUN IS `Mode=binary`. The USER separately verified ASCII mode by hand on macOS**, GUI
 and TUI, to and from VM -- see *macOS, BY HAND BY THE USER* below, which also explains why that
@@ -3891,10 +3912,16 @@ field as it was rather than blanking it. Both are cheap to check next time a Mac
 someone, and neither is claimed here.
 
 **STILL OPEN:**
-1. **TSO/TK5, the DFT host — OPEN.** `python3 packages/gui/scripts/live-transfer.py tso` is written
-   and has never been run. Expect `Recfm=variable` to matter: fixed PADS to the record boundary and
-   the same 249 bytes came back as 320 (249 + 71 nulls) on the TUI run -- correct behavior that
-   fails a byte comparison.
+1. ~~**TSO/TK5, the DFT host — OPEN.**~~ **DONE 2026-10-02: 9 of 9 checks, 249 bytes BYTE-IDENTICAL,
+   reproduced on HERC03 and HERC04, with a clean in-run logoff.** `Recfm=variable` with `Lrecl=1024`
+   on the send, as the TUI run established -- fixed PADS to the record boundary and turns 249 bytes
+   into 320. **Both engines are now covered from this window: CUT on VM, DFT on TSO.**
+   `python3 packages/gui/scripts/live-transfer.py tso`, with `TN3270_PASSWORD=PASS4U`.
+
+   **THE DRAIN EARNED ITS KEEP HERE:** `drained "***" after 2 Enter(s)` -- the variable prompt count
+   `live-drive.py` has warned about since 2026-08, and the reason a fixed number of Enters cannot
+   work. Note it was **0 Enters on one run and 2 on another against the same host**, which is the
+   whole argument.
 2. **The close guard against a transfer actually in flight — OPEN.** 249 bytes is far too fast to
    interrupt; the TUI runs used 200KB. Try the red button and `Cmd-W` (both must refuse, with Cancel
    the only enabled control), then the paths the guard does NOT cover and which are caught
