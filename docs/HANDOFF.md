@@ -6,6 +6,14 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, end of 2026-10-01
 
+**THE LIVE-VERIFICATION WORK IS MERGED TOO, 2026-10-02: branch `gui-live-transfer`, 6 commits,
+merged `--no-ff` and deleted. `git merge-base` equalled `main` exactly beforehand and the merge
+reported exactly 6 commits, all this feature's. THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT
+ITSELF:** build and typecheck clean, **2258 tests in 89 files**, `shot.mjs` 3/3, `keys.mjs` 19/17,
+`clicks.mjs` 9/10, `transfer.mjs` 10/10, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11,
+`pty-smoke.py` 12 PASS / 0 FAIL. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing in
+this work touches telnet negotiation or the stream layer, said rather than implied.
+
 **THE GUI TRANSFER UI IS BUILT — ALL TEN TASKS — AND IS MERGED TO `main` AND PUSHED.** Branch
 `gui-transfer-ui`, 19 commits, merged `--no-ff` at `a363d39` and deleted. The branch was cut from
 `main` at `9d5fb42` and **`git merge-base` equalled `main` exactly before the merge**, per the
