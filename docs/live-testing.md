@@ -4040,7 +4040,46 @@ cannot be told from one not yet painted. Live on TK5: `drained "***" after 2 Ent
 names this panel `USERID`, so a one-name target drains its full budget on a finished host. The
 one-needle spelling still means exactly what it did, since `drain:` is a shared seam.
 
-### The TSO scenario is STILL broken, and the remaining defect is LOCATED — `X` does not exit ISPF
+### THE TSO SCENARIO IS FIXED — 9 of 9, bytes byte-identical over DFT, 2026-10-03
+
+**Two defects, and the second is the one that mattered.** `live-transfer.py tso` now scores **9/9**
+with the 249-byte payload: both directions `done: 249 bytes`, `cmp` clean, and a clean in-run
+`LOGOFF` (`host LOGOFF -> saw "Logon"`), so no userid is stranded.
+
+**1. `sendInputEvent` FOLDS CASE, so `host:X` delivered a lowercase `x`.** Proved **offline, with no
+host and no userid**, by replaying a trace with the action log on: `host:X` printed
+`action: {"kind":"type","text":"x"}`. Nothing was lost — every character arrived, just lowercase,
+which is invisible against VM (CP folds) and fatal against TSO's ISPF `Option ===>`, whose exit is
+`X EXIT`. Fixed by sending `modifiers: ['shift']` **and keeping the `char` event**. Both halves are
+required: an earlier attempt added the modifier and suppressed `char` (copying `sendKeys`'s rule that
+a Ctrl-/Alt-held keystroke produces none) and delivery stopped **entirely** — strictly worse than the
+folding, and reverted. **Shift is not like Ctrl/Alt: a real Shift-held letter DOES produce a `char`.**
+
+**2. THE CLEAR WAS AN AID THAT RACED THE HOST'S REPAINT — this is what actually unblocked it.** The
+`host:` step sent Ctrl-C (CLEAR) before every command. Clear erases the screen and **the host
+repaints**; on TK5's ISPF the menu was already up and unlocked, Clear wiped it, and the characters
+went out while ISPF was still rebuilding its fields, so `Option ===>` came back **empty**. **The
+contrast is what proves it rather than suggests it:** the FORM's own `IND$FILE` text lands in that
+same field reliably, and `primeAndType` does it with purely **local** operations — `home()`,
+`eraseEOF()`, `typeString()` — sending no AID and so racing no repaint. The Clear is now conditional
+(`oia.isInhibited() || !screen.isFormatted()`), which keeps it for the VM `MORE...` state it was
+built for and skips it at a live prompt. The step logs `clear=` so the decision is visible.
+
+**A HARNESS CHECK WENT BLIND TWICE WHILE THIS WAS FIXED, both times on its own output format:** the
+logoff matcher is `host logoff` lowercase (TSO's step is now `host:LOGOFF`), and the new `clear=`
+line meant `next()` took the decision line instead of the result line — so a logoff that plainly
+succeeded reported `(no host step line)` and scored FAIL. Now case-insensitive **and** requiring
+`->`. The thing it stops reporting correctly is a stranded userid, which is why it is tested.
+
+**FIVE EARLIER HYPOTHESES WERE TESTED AND REFUTED** before the two real causes: drain ordering (the
+drain *was* separately broken, is fixed and verified, and the step still failed), the harness's own
+letter case, a keyboard lock after Clear, window focus, and `actionForKey` not mapping letters
+(tested directly — `x`, `X`, `$`, `'` and Shift-held all map correctly). **The offline replay probe
+is what ended the guessing, and it costs no userid** — drive `host:`-style sends under
+`TN3270_GUI_REPLAY` with the action log on and read which spellings produce which `type` action.
+Reach for it before a live run next time: six userid-runs were spent on the live route first.
+
+### SUPERSEDED — `X` does not exit ISPF (the intermediate reading, kept for its refutations)
 
 **The host's own words settle it.** After the `X` step the panel reads:
 

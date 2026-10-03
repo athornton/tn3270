@@ -335,12 +335,95 @@ describe('a timed-out scenario wait says what was on screen, WITHOUT the passwor
     expect(arm).toMatch(/Date\.now\(\) < unlockBy/);
     // AND THE CLEAR MUST COME FIRST, which is the property the fixed delay was protecting: VM's
     // MORE... eats input, and that once swallowed a LOGOFF and left an account logged on.
+    // ORDER: the (now conditional) Clear, then the unlock wait, then the typing. Anchored on the
+    // UNLOCK LOOP rather than on the first `isInhibited()` mention -- the Clear DECISION reads that
+    // same getter now, so matching the bare call found the guard and inverted the comparison.
     const clearAt = arm.indexOf("keyCode: 'c', modifiers: ['control']");
-    const waitAt = arm.indexOf('session.oia.isInhibited()');
+    const waitAt = arm.indexOf('while (session.oia.isInhibited()');
     const typeAt = arm.indexOf("for (const ch of [...cmd");
     expect(clearAt).toBeGreaterThan(-1);
+    expect(waitAt).toBeGreaterThan(-1);
     expect(clearAt, 'Clear, then wait for the unlock, then type').toBeLessThan(waitAt);
     expect(waitAt, 'the unlock wait must precede the typing').toBeLessThan(typeAt);
+  });
+
+  it('sends Shift for uppercase AND KEEPS the char event -- both, or it breaks', () => {
+    /**
+     * PROVED OFFLINE, which is why this fix is trustworthy where two live guesses were not: replaying
+     * a trace with the action log on, `host:X` printed `action: {"kind":"type","text":"x"}`.
+     * `sendInputEvent` FOLDS CASE, so nothing was lost -- every character arrived LOWERCASE. Harmless
+     * against VM (CP folds) and fatal against TSO's ISPF `Option ===>`, whose exit is `X EXIT`.
+     *
+     * THE PAIR IS THE FIX. An earlier attempt added the modifier AND suppressed `char`, copying
+     * `sendKeys`'s rule that a Ctrl-/Alt-held keystroke produces none. Live result: delivery stopped
+     * ENTIRELY -- strictly worse than the folding -- and it was reverted. **Shift is not like
+     * Ctrl/Alt: a real Shift-held letter DOES produce a `char`**, which is how a keyboard types a
+     * capital. Both halves are asserted, because either alone is a regression.
+     */
+    const steps = stepsBody![0];
+    const arm = steps.slice(steps.indexOf("step.startsWith('host:')"));
+    expect(arm, 'an uppercase character must carry a shift modifier')
+      .toMatch(/const shifted = \/\^\[A-Z\]\$\/\.test\(ch\)/);
+    expect(arm).toMatch(/modifiers: \['shift' as const\]/);
+    // THE `char` MUST BE UNCONDITIONAL. A `if (...) sendInputEvent({type:'char'...})` here is the
+    // exact regression that broke delivery, so this asserts the send is NOT guarded.
+    const charSend = /win\.webContents\.sendInputEvent\(\{ type: 'char', \.\.\.chord \}\);/;
+    expect(arm, 'the char event carries the character and must be sent for every key')
+      .toMatch(charSend);
+    const charAt = arm.search(charSend);
+    const before = arm.slice(Math.max(0, charAt - 160), charAt);
+    expect(before, 'the char send must not be conditional').not.toMatch(/if \([^)]*\)\s*$/);
+  });
+
+  it('the TSO scenario sends UPPERCASE, while VM deliberately stays lowercase', () => {
+    const harness = readFileSync(join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    // TSO: ISPF's `Option ===>` and the TSO command field do not fold.
+    expect(harness).toMatch(/host:X\|READY/);
+    expect(harness).toMatch(/host:DELETE /);
+    expect(harness).toMatch(/host:LOGOFF\|LOGGED OFF/);
+    // VM STAYS LOWERCASE AND THAT IS CORRECT, NOT AN OVERSIGHT: CP folds case, and that step is
+    // live-verified lowercase. Pinned so a consistency sweep cannot quietly change a verified step --
+    // one host folding and the other not is the asymmetry a second host exists to find.
+    expect(harness).toMatch(/host:#cp logoff\|LOGOFF AT/);
+  });
+
+  it('CLEARS ONLY WHEN NEEDED, because Clear is an AID that races the host repaint', () => {
+    /**
+     * THIS IS WHAT FINALLY FIXED THE TSO SCENARIO -- 4/9 to 8/9, bytes byte-identical over DFT.
+     *
+     * Clear is an AID: it erases the screen and the HOST REPAINTS. On VM's `MORE...` that is the
+     * point (the state eats input, and `#cp logoff` typed into it once vanished and left an account
+     * logged on). **On a panel already accepting input it is harmful** -- measured on TK5: ISPF's
+     * menu was up and unlocked, Clear wiped it, and the characters went out while ISPF was still
+     * rebuilding, so `Option ===>` came back EMPTY.
+     *
+     * The contrast is what proves it rather than suggests it: the FORM's own `IND$FILE` text lands
+     * in that same field reliably, and `primeAndType` does it with purely LOCAL operations --
+     * `home()`, `eraseEOF()`, `typeString()` -- sending NO AID and so racing no repaint.
+     */
+    const steps = stepsBody![0];
+    const arm = steps.slice(steps.indexOf("step.startsWith('host:')"));
+    expect(arm, 'the Clear must be conditional, not unconditional')
+      .toMatch(/const needsClear = session\.oia\.isInhibited\(\) \|\| !session\.screen\.isFormatted\(\)/);
+    // AND THE CONDITION MUST STILL COVER VM'S `MORE...`: a locked or unformatted screen gets the
+    // Clear, which is the case this step was originally built for and must not lose.
+    const clearAt = arm.indexOf("keyCode: 'c', modifiers: ['control']");
+    const guardAt = arm.indexOf('if (needsClear)');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt, 'the guard must precede the Clear send').toBeLessThan(clearAt);
+    // REPORTED, so a run's log says which decision was taken -- otherwise the one thing that
+    // distinguishes a prompt from a MORE... state is invisible after the fact.
+    expect(arm).toMatch(/clear=\$\{needsClear\}/);
+  });
+
+  it('the logoff check reads the RESULT line, not the clear-decision line', () => {
+    // The seam prints TWO lines per host step now, and the check took the wrong one: a logoff that
+    // had succeeded (`host LOGOFF -> saw "Logon"`) was reported as `(no host step line)` and scored
+    // FAIL. The thing it stops reporting correctly is a STRANDED USERID, so it earns a test.
+    const harness = readFileSync(join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    expect(harness).toMatch(/\) and "->" in l\), ""\)/);
+    // Case-insensitive: TSO's step is `host:LOGOFF`, VM's is `#cp logoff`.
+    expect(harness).toMatch(/in l\.lower\(\)/);
   });
 
   it('prints the screen on the TIMEOUT arm only, not on a successful wait', () => {

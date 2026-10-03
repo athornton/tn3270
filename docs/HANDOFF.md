@@ -107,6 +107,37 @@ command arrived.** That retires three hypotheses: not the drain, not character c
 tested and refuted), not an inhibited keyboard. `IND$FILE` runs only from `READY`, the session never
 left ISPF, and every downstream failure follows from this one step.
 
+**THE TSO SCENARIO IS FIXED AND LIVE-VERIFIED, 2026-10-03: `live-transfer.py tso` scores 9/9 and
+`--big` round-trips 200 KB BYTE-IDENTICALLY OVER DFT** -- the exact thing this section used to call
+broken. Both directions `done: 204800 bytes`, `cmp` clean, byte count climbing (`98142 -> 204800`),
+the window refusing to close mid-transfer, and a clean in-run `LOGOFF` so no userid is stranded.
+
+**TWO DEFECTS, and the second is the one that actually unblocked it:**
+1. **`sendInputEvent` FOLDS CASE**, so `host:X` delivered a lowercase `x` -- fatal on ISPF, whose exit
+   is `X EXIT`, invisible on VM where CP folds. Fixed with `modifiers: ['shift']` **and the `char`
+   event kept**; both halves are required, and an earlier attempt that suppressed `char` stopped
+   delivery entirely (reverted). **Proved OFFLINE with no host and no userid** -- replay plus the
+   action log printed `{"kind":"type","text":"x"}` for `host:X`.
+2. **THE CLEAR WAS AN AID THAT RACED THE HOST REPAINT.** `host:` sent Ctrl-C before every command;
+   Clear erases the screen and the host repaints, so on an ISPF menu that was already up and unlocked
+   the characters went out mid-rebuild and `Option ===>` came back EMPTY. The contrast proved it: the
+   FORM's own text lands in that same field reliably because `primeAndType` uses purely LOCAL
+   operations (`home`/`eraseEOF`/`typeString`) and sends no AID. Clear is now conditional on
+   `oia.isInhibited() || !screen.isFormatted()`, keeping it for VM's `MORE...` and skipping it at a
+   prompt.
+
+**FIVE HYPOTHESES WERE TESTED AND REFUTED FIRST** (drain ordering, harness letter case, a keyboard
+lock, window focus, `actionForKey`), and **the offline replay probe is what ended the guessing** --
+reach for it before a live run: six TK5 userid-runs were spent on the live route first. Details:
+`docs/live-testing.md`, *THE TSO SCENARIO IS FIXED*.
+
+**TWO HARNESS CHECKS WENT BLIND ON THEIR OWN OUTPUT while this was fixed** -- the logoff matchers are
+written lowercase (`host logoff`) and TSO's step is now `host:LOGOFF`, and a new `clear=` line made
+`next()` take the decision line instead of the result line. Both now case-insensitive and requiring
+`->`. What they stop reporting is a stranded userid, so both are tested.
+
+**SUPERSEDED BELOW — the intermediate reading, kept for its refutations.**
+
 **THE PANEL HAS BEEN READ IN FULL** (the dump is ~1900 chars now, up from 240 -- the truncation was
 itself hiding the answer) and it says `X EXIT  Terminate ISPF`. **So the step is not sending the wrong
 command; the keystrokes are not arriving as typed.** Two captures bracket it: with plain characters a

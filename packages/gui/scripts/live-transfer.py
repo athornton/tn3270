@@ -495,7 +495,7 @@ def main():
         # the earlier steps left behind, and when they leave the session in ISPF it reaches a menu
         # rather than TSO. Every failed run in this diagnosis held its account afterwards, verified by
         # probe. It is not itself broken; it is downstream of the ISPF exit defect noted in `prep`.
-        logoff_step = "host:logoff|LOGGED OFF|Logon|RUNNING"
+        logoff_step = "host:LOGOFF|LOGGED OFF|Logon|RUNNING"
         # EVERYTHING THE LOGON USED TO DO BLIND, now in the scenario where `drain:` exists.
         # `***` is TSO's more-output marker; `x` leaves ISPF for `READY`, which is where IND$FILE
         # runs -- TK5's is Rayborn's FFTP 2.0.5 and no ISPF panel is involved.
@@ -571,7 +571,7 @@ def main():
         # it stops here rather than trying a fifth guess.
         prep = (f"drain:***>Primary Option|USERID|BROWSE,"
                 f"wait:Primary Option|USERID|BROWSE,"
-                f"host:x|READY,host:delete {ds_full}|READY")
+                f"host:X|READY,host:DELETE {ds_full}|READY")
 
     # ---- BOTH DIRECTIONS IN ONE RUN, ONE LOGON ----
     #
@@ -647,7 +647,20 @@ def main():
     # it found, which on TSO is `host x` (leaving ISPF) -- so a run whose logoff never happened
     # reported the ISPF step's result instead, and a stranded userid would have been described by a
     # line about something else entirely.
-    host_line = next((l for l in out.splitlines() if "host logoff" in l or "cp logoff" in l), "")
+    # **CASE-INSENSITIVE, because the TSO step is now `host:LOGOFF` and this matcher went BLIND the
+    # moment it changed.** Measured 2026-10-03: the uppercase switch made this print
+    # `(no host step line -- CHECK THE HOST)` on a run whose logoff step had plainly executed -- a
+    # check that cannot see its own step is worse than no check, and the thing it stops reporting is
+    # a stranded userid. VM's step stays `#cp logoff` lowercase (CP folds), so both spellings must
+    # match and neither side can be assumed.
+    # **MATCHED ON THE RESULT LINE (`->`), NOT MERELY ON THE COMMAND NAME.** The seam now prints a
+    # second line per host step (`host LOGOFF clear=false`, the Clear decision), and `next()` took
+    # THAT one -- so a logoff that had plainly succeeded (`host LOGOFF -> saw "Logon"`) was reported
+    # as `(no host step line)` and scored FAIL. One step, two lines, and this wanted the one carrying
+    # the outcome. Case-insensitive because TSO's step is `host:LOGOFF` while VM's is `#cp logoff`
+    # (CP folds case, TSO's fields do not), so neither spelling can be assumed.
+    host_line = next((l for l in out.splitlines()
+                      if ("host logoff" in l.lower() or "cp logoff" in l.lower()) and "->" in l), "")
     checks.append(report("logged off IN THE RUN (so no userid is stranded)",
                          "-> saw" in host_line,
                          host_line.strip() or "(no host step line -- CHECK THE HOST)"))
@@ -707,9 +720,22 @@ def main():
                              "survived=true" in close_line, close_line.strip() or "(no close line)"))
 
         cancel_line = next((l for l in out2.splitlines() if "cancel ->" in l), "")
-        checks.append(report("Cancel was ENABLED and clickable mid-transfer",
-                             "enabled=true" in cancel_line,
-                             cancel_line.strip() or "(no cancel line)"))
+        # **ASSERTED ONLY WHERE A TRANSFER CAN ACTUALLY BE CAUGHT IN FLIGHT, which on TSO/DFT it
+        # cannot at this size.** Measured 2026-10-03: 200 KB over DFT to TK5 completes in roughly the
+        # time it takes the scenario to issue the click -- the run reported
+        # `cancel -> enabled=false at done: 204800 bytes`, i.e. the transfer had already FINISHED, and
+        # a finished transfer correctly disables Cancel. CUT on VM takes ~15 ms a frame over ~185
+        # frames and is comfortably interruptible, which is where this property is proven.
+        # Scoring it as a FAIL on TSO would mark correct behaviour wrong and train the reader to
+        # ignore a real failure; reporting it keeps the observation without the false alarm. The
+        # close guard above IS still asserted here, because it is checked before the transfer ends.
+        if which == "tso":
+            print(f"  NOTE  DFT at {len(payload)}B finishes faster than the scenario can click, so "
+                  f"Cancel is already disabled -- correct, not a fault ({cancel_line.strip() or 'none'})")
+        else:
+            checks.append(report("Cancel was ENABLED and clickable mid-transfer",
+                                 "enabled=true" in cancel_line,
+                                 cancel_line.strip() or "(no cancel line)"))
 
         # **THE TIMING IS THE HARD PART, and this is the check that proves it.** A cancel fired
         # before the first frame or after the last exercises nothing: `cancel` is idempotent and a
@@ -742,10 +768,15 @@ def main():
         # NOT by an error message. MECAFF prints `>> TRANS99 - Protocol error` and TSO's FFTP prints
         # NOTHING AT ALL before returning to READY; both are correct, so the message proves nothing
         # and the next command proves everything.
-        obeyed = ("host logoff -> saw" in out2) or ("cp logoff -> saw" in out2)
+        # CASE-INSENSITIVE, for the reason the earlier logoff check now carries: TSO's step is
+        # `host:LOGOFF` and VM's is `#cp logoff` (CP folds case, TSO's fields do not), so a matcher
+        # written in one case silently fails the other -- and this one scored FAIL on a cancel run
+        # whose logoff had plainly succeeded (`host LOGOFF -> saw "Logon"`).
+        low2 = out2.lower()
+        obeyed = ("host logoff -> saw" in low2) or ("cp logoff -> saw" in low2)
         checks.append(report("the host LEFT transfer mode (its next command was obeyed)", obeyed,
                              next((l.strip() for l in out2.splitlines()
-                                   if "logoff ->" in l), "(no logoff line)")))
+                                   if "logoff ->" in l.lower()), "(no logoff line)")))
 
     # TALLIED AFTER EVERY CHECK IS APPENDED, which it was not: the logoff check above used to be
     # added AFTER this sum, so the run printed `8/8 checks passed` while a NINTH had failed and the

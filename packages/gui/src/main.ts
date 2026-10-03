@@ -1577,9 +1577,29 @@ async function driveSteps(
        * Ctrl-C is the CLEAR AID here, not an interrupt -- which is the whole reason Ctrl-] is this
        * app's quit binding.
        */
-      for (const t of ['keyDown', 'char', 'keyUp'] as const) {
-        win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
+      /**
+       * **CLEAR ONLY WHERE IT IS NEEDED, AND THAT CONDITION IS WHY THE TSO STEPS TYPED INTO NOTHING.**
+       *
+       * Clear is an AID: it erases the screen and the HOST REPAINTS. On VM's `MORE...` that is the
+       * whole point (the state eats input, and this step existed because `#cp logoff` typed into it
+       * vanished). **On a panel that is already accepting input it is actively harmful** -- measured
+       * on TK5 2026-10-03: ISPF's menu was up and unlocked, Clear wiped it, and the characters went
+       * out while ISPF was still rebuilding its fields, so `Option ===>` came back EMPTY. The
+       * contrast proves it: the FORM's own `IND$FILE` text lands in that same field reliably, and
+       * `primeAndType` does it with purely LOCAL operations -- `home()`, `eraseEOF()`, `typeString()`
+       * -- sending NO AID and so racing no repaint.
+       *
+       * So: skip the Clear when the keyboard is free and the screen already has an unprotected field
+       * to type into, which is exactly the "already at a prompt" case. A locked or unformatted screen
+       * still gets it, which keeps the VM `MORE...` behaviour this step was built for.
+       */
+      const needsClear = session.oia.isInhibited() || !session.screen.isFormatted();
+      if (needsClear) {
+        for (const t of ['keyDown', 'char', 'keyUp'] as const) {
+          win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
+        }
       }
+      process.stdout.write(`transfer window: host ${cmd} clear=${needsClear}\n`);
       /**
        * **WAIT FOR THE KEYBOARD, NOT A FIXED 600ms -- AND THE FIXED WAIT IS WHY EVERY TSO `host:`
        * STEP SILENTLY TYPED NOTHING.**
@@ -1609,30 +1629,34 @@ async function driveSteps(
       for (const ch of [...cmd, '\r']) {
         const keyCode = ch === '\r' ? 'Enter' : ch === ' ' ? 'Space' : ch;
         /**
-         * **PLAIN CHARACTERS, NO SHIFT -- AND I TRIED SHIFT AND IT WAS STRICTLY WORSE. MEASURED.**
+         * **UPPERCASE NEEDS `Shift` AND THE `char` EVENT KEPT -- BOTH, AND THAT PAIR IS THE WHOLE FIX.**
          *
-         * The reasoning for Shift is genuinely compelling and it is why this comment exists: Chromium
-         * FOLDS CASE (`A` and `a` both deliver `key: 'a'`), `live-transfer.py`'s own `typed()` helper
-         * adds `Shift+` for exactly that reason after it cost two TSO userids, and TK5's ISPF panel
-         * lists its exit as `X EXIT`. Every part of that is true.
+         * `sendInputEvent` FOLDS CASE, so a bare `keyCode: 'X'` arrives as `x`. **PROVED OFFLINE, no
+         * host and no userid**, by replaying a trace with the action log on: `host:X` printed
+         * `action: {"kind":"type","text":"x"}`. Nothing was lost -- every character arrived -- they
+         * simply arrived LOWERCASE, which is invisible against any host whose fields fold (VM/CP
+         * does) and fatal against one whose do not (TSO's ISPF `Option ===>`, measured, came back
+         * empty because `x` is not its `X EXIT`).
          *
-         * **It still did not work, and it broke what did.** With plain characters a lowercase command
-         * REACHES THE FIELD -- measured, `Option ===> IND$FILE GET 'HERC02.GUIXFER.BIN'` with the host
-         * answering `INVALID OPTION SELECTED`. With `modifiers: ['shift']` on the uppercase letters
-         * the field came back EMPTY and the host printed NO complaint at all, i.e. the keystrokes
-         * stopped arriving entirely. So the delivery mechanism, not the case, is what fails here --
-         * and `actionForKey` is NOT the culprit either: it was tested directly and maps `x`, `X`,
-         * `$`, `'` and a Shift-held letter all correctly.
+         * **MY FIRST ATTEMPT AT THIS FAILED FOR A DIFFERENT REASON AND THAT IS WHY IT IS SPELLED OUT.**
+         * It added `modifiers: ['shift']` AND suppressed the `char` event, copying `sendKeys`'s rule
+         * that a real Ctrl-/Alt-held keystroke produces no `char`. Live result: the field came back
+         * EMPTY with no host complaint at all, i.e. delivery stopped entirely -- strictly worse than
+         * the folding it was meant to fix, so it was reverted. **Shift is NOT like Ctrl/Alt here: a
+         * real Shift-held letter DOES produce a `char` event**, which is exactly how a keyboard types
+         * a capital. Sending the modifier while withholding the `char` simulates a keyboard that
+         * cannot.
          *
-         * **LEFT AS IT WAS ON PURPOSE.** Shipping the Shift form would trade a step that delivers the
-         * wrong case for one that delivers nothing, while looking like a fix. Five hypotheses have now
-         * been refuted on this step (drain ordering, harness letter case, a keyboard lock, window
-         * focus, and this); `docs/live-testing.md` records them so the sixth attempt starts from
-         * evidence rather than from the same list.
+         * So: modifier for the keyDown/keyUp, and the `char` kept unconditionally. Verified offline
+         * the same way the fold was found -- `host:X` must print `text":"X"`.
          */
-        win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
-        win.webContents.sendInputEvent({ type: 'char', keyCode });
-        win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+        const shifted = /^[A-Z]$/.test(ch);
+        const chord = { keyCode, ...(shifted ? { modifiers: ['shift' as const] } : {}) };
+        win.webContents.sendInputEvent({ type: 'keyDown', ...chord });
+        // THE `char` CARRIES THE CHARACTER and is sent for every key, shifted or not. Withholding it
+        // on a shifted letter is what broke delivery outright; see above.
+        win.webContents.sendInputEvent({ type: 'char', ...chord });
+        win.webContents.sendInputEvent({ type: 'keyUp', ...chord });
         await new Promise((r) => { setTimeout(r, 90); });
       }
       if (expect === '') { process.stdout.write(`transfer window: host ${cmd} (no wait)\n`); continue; }
