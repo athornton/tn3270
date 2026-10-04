@@ -1,10 +1,41 @@
-# Handoff — state as of 2026-10-01
+# Handoff — state as of 2026-10-04
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, end of 2026-10-01
+## START HERE — NEXT ACTION, 2026-10-04
+
+**THE DFT DIAGNOSIS IS MERGED AND PUSHED: branch `dft-big-diagnosis`, 5 commits, merged `--no-ff`
+as `389aae0` and deleted. `main` at `389aae0`, PUSHED and in sync, THE ONLY BRANCH local and remote,
+tree clean, no stashes.** `git merge-base` equalled `main` exactly beforehand and the merge reported
+**exactly 5** commits, all this work's — the check that once caught 44 unfinished commits.
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF:** build and typecheck clean, **2274 tests in
+89 files**, `shot.mjs` 3/3, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs` 10/10,
+`browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11, `pty-smoke.py` 12 PASS / 0 FAIL, **and the LIVE
+`live-transfer.py tso` 9/9 on the merge commit too** (`tso --big` scored 13/13 on the branch).
+**`drive-playback.py` and `drive-e.py` were NOT run** — nothing in this work touches telnet
+negotiation or the stream layer, said rather than implied.
+
+**"TSO/DFT AT 200 KB" IS CLOSED AND IT WAS NEVER A DFT OR A SIZE PROBLEM.** 200 KB round-trips
+byte-identically over DFT from the CLI *and* from the GUI transfer window. The faults were two
+defects in the GUI live harness plus one measurement defect that kept the wrong diagnosis alive for
+a day. Full account: `docs/live-testing.md`, *THE TSO SCENARIO IS FIXED*.
+
+**NEXT ACTION: ROADMAP ITEM (0b), THE GUI KEYPAD WINDOW** — ready to spec, four open questions
+already answered, `docs/ideas/native-widget-dialogs-idea.md`. **The transfer window is its precedent
+and should be read first:** same shape (a second `BrowserWindow`, its own preload, its own bridge,
+the canvas bridge untouched), and its AS BUILT notes record what that shape costs. Then (0c) the WEB
+transfer UI (needs its own spec: real browser file I/O over the WebSocket) and (0d) the web keypad.
+**NOTHING IS WAITING ON THE USER.**
+
+**ONE THING WORTH CARRYING INTO ANY LIVE HARNESS WORK:** the offline replay probe
+(`TN3270_GUI_REPLAY` + the action log) settled in one line what five live hypotheses could not, and
+it costs **no TK5 userid**. Six userid-runs were spent on the live route first. Reach for it before
+dialling a host — and remember a failed TSO run strands a userid, because its `host:logoff` is typed
+into whatever wrong screen the failure left behind.
+
+## SUPERSEDED — NEXT ACTION, end of 2026-10-01
 
 **THE LIVE-VERIFICATION WORK IS MERGED TOO, 2026-10-02: branch `gui-live-transfer`, 6 commits,
 merged `--no-ff` and deleted. `git merge-base` equalled `main` exactly beforehand and the merge
