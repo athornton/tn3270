@@ -64,15 +64,109 @@ its next command afterwards. 200 KB round-tripped byte-identical. `live-transfer
 **AND THAT RUN FOUND A BUG IN SHIPPED CODE: ANY DFT TRANSFER LONGER THAN 30 SECONDS WAS KILLED.** See
 the corrected asymmetry note below. **Fixed, with two mutation-verified regression tests.**
 
-**STILL OPEN AND NOT DIAGNOSED: TSO/DFT AT 200 KB.** After the fix it still ends
-`stalled ... 0 bytes` with **no progress events at all** -- so no DFT frames are arriving, which is
-not the timer. **Zero bytes moved.** Two leads: the TUI's 204800-byte TSO result predates the `-ddm`
-default flip and was therefore **CUT**, so *no harness anywhere has moved 200 KB over DFT*; and
-`-ddm off` forces CUT and is the obvious comparison. **TWO USERIDS ARE HELD -- `HERC03` and `HERC04`**
-(`/c u=herc03`, `/c u=herc04`); `HERC01` and `HERC02` are free, both having released themselves
-within the hour, so **re-probe before spending console time.**
+**DIAGNOSED 2026-10-02 AND IT WAS NOT WHAT THIS SAID: "TSO/DFT AT 200 KB" WAS NEITHER A DFT PROBLEM
+NOR A SIZE PROBLEM.** The paragraph below is kept because a reader who remembers it must find the
+correction rather than its absence; every claim in it is wrong.
 
-**THE NEXT ACTION IS EITHER (a) THE TSO/DFT 200 KB DIAGNOSIS above, or (b) ROADMAP ITEM (0b), THE
+~~**STILL OPEN AND NOT DIAGNOSED: TSO/DFT AT 200 KB.** After the fix it still ends
+`stalled ... 0 bytes` with **no progress events at all** -- so no DFT frames are arriving, which is
+not the timer. **Zero bytes moved.**~~ Two leads, BOTH NOW MOOT: the TUI's 204800-byte TSO result
+predates the `-ddm` default flip and was therefore **CUT**; and `-ddm off` forces CUT as a comparison.
+
+**WHAT IS ACTUALLY TRUE, measured both offline and live the same day:**
+- **200 KB round-trips BYTE-IDENTICALLY over DFT on TSO**, from the CLI against TK5: 35 DFT frames,
+  **zero** CUT frames, at 43x80, `cmp` clean, `LISTDS` `VB 1024`, clean in-run LOGOFF. Both engines
+  work at size and the protocol was never in question.
+- **Our own stack was cleared OFFLINE first** (the cheap half, and it should always come first): a
+  full 200 KB upload through a real `Session` with a fake socket answered 13 GETs, moved 204800
+  bytes, fired 17 progress events, returned `ok:true`.
+- **What fails is the GUI HARNESS'S TSO LOGON, at ANY size** -- `live-transfer.py tso` scores 4/9 and
+  `--big` 5/13, and **the 249-byte run fails identically**, which is what retires "200 KB" from the
+  description. `tso_logon` waits on `LOGON IN PROGRESS`, which TSO prints **onto the password panel**,
+  so the needle matches a screen still protected and still logging on; its one Enter is consumed
+  dismissing that, and `drain:***` then finds no `***` (the pending screen is the welcome banner,
+  ending in a box border) so it presses nothing. `IND$FILE` is finally typed at a screen that has no
+  such command -- hence zero DFT frames. `live-drive.py` survives the same needle only because its
+  drain settles 3 s and loops 8 times.
+- **The wrong diagnosis survived because the stall message read CUT's byte counter on a DFT
+  transfer**, where it is zero by construction. "Zero bytes moved, so this is not the timer" came from
+  a number that could not have said anything else. **Fixed** (`bytesMoved()` in `transferRun.ts`, and
+  the same in the CLI's loop), with a mutation-verified test.
+
+**THE DRAIN IS FIXED AND LIVE-VERIFIED: `drain:PROMPT>TARGET`** stops on the TARGET ARRIVING rather
+than on the prompt vanishing. Live on TK5: `drained "***" after 2 Enter(s) -- reached "Primary
+Option|USERID|BROWSE"`, where the old form pressed **0** and never got there. The target takes `|`
+alternatives, which was a second real defect -- with a bare `>Primary Option` it reported `NEVER
+REACHED` while the next step `saw "USERID"`. Mutation-verified tests; the one-needle spelling is
+unchanged for other scenarios.
+
+**BUT THE TSO SCENARIO IS STILL BROKEN, AND THE REMAINING DEFECT IS LOCATED: `X` DOES NOT EXIT THIS
+ISPF.** The host says so itself -- after the `X` step the panel reads `INVALID OPTION SELECTED` with
+`Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'` sitting in the field. **So typing WORKS; the whole
+command arrived.** That retires three hypotheses: not the drain, not character case (uppercase was
+tested and refuted), not an inhibited keyboard. `IND$FILE` runs only from `READY`, the session never
+left ISPF, and every downstream failure follows from this one step.
+
+**THE TSO SCENARIO IS FIXED AND LIVE-VERIFIED, 2026-10-03: `live-transfer.py tso` scores 9/9 and
+`--big` round-trips 200 KB BYTE-IDENTICALLY OVER DFT** -- the exact thing this section used to call
+broken. Both directions `done: 204800 bytes`, `cmp` clean, byte count climbing (`98142 -> 204800`),
+the window refusing to close mid-transfer, and a clean in-run `LOGOFF` so no userid is stranded.
+
+**TWO DEFECTS, and the second is the one that actually unblocked it:**
+1. **`sendInputEvent` FOLDS CASE**, so `host:X` delivered a lowercase `x` -- fatal on ISPF, whose exit
+   is `X EXIT`, invisible on VM where CP folds. Fixed with `modifiers: ['shift']` **and the `char`
+   event kept**; both halves are required, and an earlier attempt that suppressed `char` stopped
+   delivery entirely (reverted). **Proved OFFLINE with no host and no userid** -- replay plus the
+   action log printed `{"kind":"type","text":"x"}` for `host:X`.
+2. **THE CLEAR WAS AN AID THAT RACED THE HOST REPAINT.** `host:` sent Ctrl-C before every command;
+   Clear erases the screen and the host repaints, so on an ISPF menu that was already up and unlocked
+   the characters went out mid-rebuild and `Option ===>` came back EMPTY. The contrast proved it: the
+   FORM's own text lands in that same field reliably because `primeAndType` uses purely LOCAL
+   operations (`home`/`eraseEOF`/`typeString`) and sends no AID. Clear is now conditional on
+   `oia.isInhibited() || !screen.isFormatted()`, keeping it for VM's `MORE...` and skipping it at a
+   prompt.
+
+**FIVE HYPOTHESES WERE TESTED AND REFUTED FIRST** (drain ordering, harness letter case, a keyboard
+lock, window focus, `actionForKey`), and **the offline replay probe is what ended the guessing** --
+reach for it before a live run: six TK5 userid-runs were spent on the live route first. Details:
+`docs/live-testing.md`, *THE TSO SCENARIO IS FIXED*.
+
+**TWO HARNESS CHECKS WENT BLIND ON THEIR OWN OUTPUT while this was fixed** -- the logoff matchers are
+written lowercase (`host logoff`) and TSO's step is now `host:LOGOFF`, and a new `clear=` line made
+`next()` take the decision line instead of the result line. Both now case-insensitive and requiring
+`->`. What they stop reporting is a stranded userid, so both are tested.
+
+**SUPERSEDED BELOW — the intermediate reading, kept for its refutations.**
+
+**THE PANEL HAS BEEN READ IN FULL** (the dump is ~1900 chars now, up from 240 -- the truncation was
+itself hiding the answer) and it says `X EXIT  Terminate ISPF`. **So the step is not sending the wrong
+command; the keystrokes are not arriving as typed.** Two captures bracket it: with plain characters a
+command DOES reach the field (`Option ===> IND$FILE GET 'HERC02...'`, host answers `INVALID OPTION
+SELECTED`); with `modifiers: ['shift']` the field came back EMPTY and the host said nothing at all --
+**strictly worse, so that change was REVERTED rather than shipped.**
+
+**FIVE HYPOTHESES TESTED AND REFUTED on this one step** -- drain ordering, harness letter case, a
+keyboard lock after Clear, window focus, and `actionForKey` not mapping letters (tested directly: `x`,
+`X`, `$`, `'` and Shift-held all map correctly). Each is recorded with its refutation in
+`docs/live-testing.md`, *The TSO scenario is STILL broken*, so a sixth attempt does not repeat the list.
+
+**NEXT PROBE IS OFFLINE AND NEEDS NO USERID, which is the point:** the working/failing split is
+`keyCode: 'Enter'` (works, via `drain:`) versus a literal character (reaches the field but folded), and
+adding a modifier array breaks delivery outright. That is a `sendInputEvent` spelling problem in the
+`host:` step -- `keyspec.ts` already documents that an invalid `keyCode` is delivered as an EMPTY event
+rather than refused, and **`host:` is the one path that bypasses `parseKeySpec`**. Drive `host:`-style
+sends under `TN3270_GUI_REPLAY` with the action log on and see which spellings produce a `type` action
+at all. **Six TK5 userid-runs were spent on the live route**; each failed run strands one, because
+`host:logoff` is typed into the same wrong screen.
+
+**RE-PROBE THE USERIDS BEFORE SPENDING CONSOLE TIME:** `HERC02` released itself overnight and
+`HERC01` within the hour on 2026-10-01, so a strand here is usually temporary. Type the userid at the
+VTAM panel and compare `IKJ56425I ... IN USE` against `ENTER CURRENT PASSWORD FOR`. **The user cleared
+all four from the operator console on 2026-10-02 on request, which unblocked the drain verification;
+all four were spent again by the runs that followed.**
+
+**THE NEXT ACTION IS EITHER (a) THE ISPF-EXIT FIX above -- located, one panel capture from being
+understood, needing one free TK5 userid -- or (b) ROADMAP ITEM (0b), THE
 GUI KEYPAD WINDOW** — ready to spec,
 `docs/ideas/native-widget-dialogs-idea.md`, its four open questions already answered. **The transfer
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own

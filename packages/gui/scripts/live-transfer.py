@@ -459,6 +459,12 @@ def main():
         recv_fields = f"direction=receive,host=vm,{recv_fields}"
         # LOGGING OFF INSIDE THE RUN, at the prompt the transfers left the session at. `#cp logoff`
         # rather than bare `logoff` so one spelling works from CMS as well as from CP READ.
+        # LOWERCASE IS CORRECT HERE AND MUST NOT BE "FIXED" TO MATCH TSO'S: **CP FOLDS CASE**, which
+        # is the same asymmetry `typed()` records for passwords (`logon CMSUSER` and its password both
+        # work lowercase on VM, while TSO's password field does not fold). This step is live-verified
+        # lowercase; TSO's equivalents had to go uppercase because ISPF's `Option ===>` and TSO's
+        # command field do not fold. One host folding and the other not is precisely what a second
+        # host exists to find.
         logoff_step = "host:#cp logoff|LOGOFF AT"
     else:
         ds_plain = os.environ.get("TN3270_DSN", "GUIXFER.BIN")
@@ -485,20 +491,87 @@ def main():
         # since 2026-08; this is the same list. A check that cries wolf on success trains the reader
         # to ignore it, which the runbook already records as worse than no check at all -- and here
         # the thing it would teach them to ignore is a stranded userid.
-        logoff_step = "host:logoff|LOGGED OFF|Logon|RUNNING"
+        # NOTE: this step is why a failed TSO run STRANDS A USERID -- it is typed into whatever screen
+        # the earlier steps left behind, and when they leave the session in ISPF it reaches a menu
+        # rather than TSO. Every failed run in this diagnosis held its account afterwards, verified by
+        # probe. It is not itself broken; it is downstream of the ISPF exit defect noted in `prep`.
+        logoff_step = "host:LOGOFF|LOGGED OFF|Logon|RUNNING"
         # EVERYTHING THE LOGON USED TO DO BLIND, now in the scenario where `drain:` exists.
         # `***` is TSO's more-output marker; `x` leaves ISPF for `READY`, which is where IND$FILE
         # runs -- TK5's is Rayborn's FFTP 2.0.5 and no ISPF panel is involved.
-        # **WAIT FOR THE ISPF PANEL ITSELF, and drain only if `***` is actually there.** Measured on
-        # TK5 2026-10-02: after `LOGON IN PROGRESS` the OIA shows `X Wait` -- the host is still
-        # working -- and ISPF then arrives with NO `***` prompt on this system at all. So
-        # `drain:***` found nothing to drain (`drained "***" after 0 Enter(s)`) and the next step
-        # typed into a Wait state. The drain is KEPT because `live-drive.py` documents runs where the
-        # prompts DO appear (a welcome banner, a fortune cookie) and it is a no-op when they do not;
-        # what was missing is the wait that actually synchronises.
-        prep = (f"wait:Primary Option|USERID|BROWSE,drain:***,"
+        #
+        # **THE TSO LOGON NEVER REACHES ISPF FROM THIS HARNESS, AND `drain:***` CANNOT GET IT THERE
+        # -- MEASURED THREE TIMES 2026-10-02, at 249 bytes and at 200 KB, with the drain both after
+        # the wait and before it.** All three runs ended on the SAME screen, which the seam now prints:
+        #
+        #     ENTER CURRENT PASSWORD FOR HERC02- <redacted> HERC02 LOGON IN PROGRESS AT 18:23:02
+        #     ON OCTOBER 2, 2026 NO BROADCAST MESSAGES +------------------...------+ !
+        #
+        # Read that screen carefully, because it names the defect: it is the PASSWORD PANEL with the
+        # logon message appended, and it ends in a BOX BORDER -- **there is no `***` on it at all**, so
+        # `drain:***` breaks on its first poll (`drained "***" after 0 Enter(s)`) and presses nothing.
+        # TSO is mid-logon behind that panel and the wait then burns its whole budget.
+        #
+        # **THE ROOT CAUSE IS IN `tso_logon`, ONE STEP EARLIER, AND IT IS A TRAP THIS PROJECT HAS
+        # ALREADY PAID FOR ON VM:** it waits for `LOGON IN PROGRESS|Welcome|***` and sends ONE Enter --
+        # but `LOGON IN PROGRESS` is printed ONTO THE PASSWORD PANEL, so the needle matches a screen
+        # that is still protected and still logging on. The Enter is consumed by it (`live-drive.py`:
+        # *"the FIRST Enter is consumed dismissing the all-protected banner and its text is
+        # discarded"*), the welcome banner arrives afterwards, and nothing ever presses past it.
+        # `live-drive.py` survives the same needle only because its `DRAIN***` SETTLES 3s before each
+        # check and loops 8 times, so it is still pressing when the banner shows up; the GUI's drain
+        # polls 1.5s and BREAKS ON ABSENCE, which on this screen is immediately.
+        #
+        # **WHAT THIS COST, and it is the reason for the detail:** `host x` then typed into the logon,
+        # never reached `READY`, and `IND$FILE` was typed at a screen that has no such command -- so
+        # the transfer moved ZERO BYTES with ZERO DFT FRAMES. That was recorded in `docs/HANDOFF.md`
+        # as a protocol-layer fault ("no DFT frames are arriving") and attributed to the 200 KB SIZE.
+        # It is neither: the 249-byte run fails identically, and 200 KB round-trips BYTE-IDENTICALLY
+        # over DFT from the CLI against this very host (`/tmp/dftbig-rt.log`, 35 DFT frames, 0 CUT).
+        #
+        # **THE FIX IS `drain:***>Primary Option`, IN THE SEAM, and it is one step not three.** The
+        # `>TARGET` form presses Enter until the ISPF PANEL ARRIVES rather than until `***` is absent,
+        # so a host that has not caught up yet means "keep pressing" instead of "nothing to do". The
+        # leading `wait:` is GONE: it was there to synchronise before the drain, and with the drain
+        # now ending on the panel itself it has nothing left to do -- and as the diagnosis above
+        # records, a leading wait cannot succeed anyway when the panel is behind a prompt.
+        #
+        # The trailing `wait:` is KEPT, and it is not redundant: the drain reports `NEVER REACHED` and
+        # CONTINUES rather than failing the run (a transfer may be mid-flight by the time a scenario
+        # step misbehaves), so the wait is what makes a drain that gave up visible as a timeout on the
+        # step that actually needs the panel.
+        # **ALL THREE PANEL NAMES IN THE TARGET, not just the first.** Measured 2026-10-02: with a
+        # bare `>Primary Option` the drain reported `NEVER REACHED` while the very next step
+        # `saw "USERID"` -- TK5 identifies this panel by `USERID` here, so a one-name target drains to
+        # its full poll budget on a host that is already finished. The target takes `|` alternatives
+        # as `wait:` does, and it must list the SAME set the wait does or the two disagree about what
+        # "arrived" means.
+        # **THE REMAINING DEFECT, LOCATED BUT NOT FIXED: `X` DOES NOT LEAVE THIS ISPF, so every later
+        # command is typed into the menu.** The evidence is unambiguous and is the host's own words --
+        # after the `X` step the panel reads:
+        #
+        #     ISPF primary option menu   INVALID OPTION SELECTED
+        #     Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'
+        #
+        # **So typing WORKS: the whole command reached the field.** That retires three hypotheses in
+        # one line -- it is not the drain (which now reports `reached`), not character case (`X` and
+        # `x` behave identically here), and not an inhibited keyboard (the field accepted 38
+        # characters). `IND$FILE` is a plain TSO command that only runs from `READY`, and the session
+        # never left ISPF, so the host correctly refused it as a menu option.
+        #
+        # **WHAT IS NOT YET KNOWN is what this ISPF's exit actually is.** `live-drive.py` sends
+        # `b"X" + CR` here and has worked since 2026-08, so either TK5's panel differs from what that
+        # harness meets, or `X` needs to land somewhere this step does not put it (the `host:` step
+        # sends Ctrl-C first, which on a menu may reposition the cursor off `Option ===>`). The
+        # diagnostic now prints the OIA alongside the screen so the next run can tell a refused
+        # keystroke from an ignored command -- but the panel is truncated at 240 characters and the
+        # exit option is past the cut, so READ THE WHOLE PANEL FIRST: raise that slice, or take one
+        # `shot.mjs`-style capture of the menu, and the answer will be in the option list.
+        # Four TK5 userids were spent reaching this point (each failed run strands one), which is why
+        # it stops here rather than trying a fifth guess.
+        prep = (f"drain:***>Primary Option|USERID|BROWSE,"
                 f"wait:Primary Option|USERID|BROWSE,"
-                f"host:x|READY,host:delete {ds_full}|READY")
+                f"host:X|READY,host:DELETE {ds_full}|READY")
 
     # ---- BOTH DIRECTIONS IN ONE RUN, ONE LOGON ----
     #
@@ -574,7 +647,20 @@ def main():
     # it found, which on TSO is `host x` (leaving ISPF) -- so a run whose logoff never happened
     # reported the ISPF step's result instead, and a stranded userid would have been described by a
     # line about something else entirely.
-    host_line = next((l for l in out.splitlines() if "host logoff" in l or "cp logoff" in l), "")
+    # **CASE-INSENSITIVE, because the TSO step is now `host:LOGOFF` and this matcher went BLIND the
+    # moment it changed.** Measured 2026-10-03: the uppercase switch made this print
+    # `(no host step line -- CHECK THE HOST)` on a run whose logoff step had plainly executed -- a
+    # check that cannot see its own step is worse than no check, and the thing it stops reporting is
+    # a stranded userid. VM's step stays `#cp logoff` lowercase (CP folds), so both spellings must
+    # match and neither side can be assumed.
+    # **MATCHED ON THE RESULT LINE (`->`), NOT MERELY ON THE COMMAND NAME.** The seam now prints a
+    # second line per host step (`host LOGOFF clear=false`, the Clear decision), and `next()` took
+    # THAT one -- so a logoff that had plainly succeeded (`host LOGOFF -> saw "Logon"`) was reported
+    # as `(no host step line)` and scored FAIL. One step, two lines, and this wanted the one carrying
+    # the outcome. Case-insensitive because TSO's step is `host:LOGOFF` while VM's is `#cp logoff`
+    # (CP folds case, TSO's fields do not), so neither spelling can be assumed.
+    host_line = next((l for l in out.splitlines()
+                      if ("host logoff" in l.lower() or "cp logoff" in l.lower()) and "->" in l), "")
     checks.append(report("logged off IN THE RUN (so no userid is stranded)",
                          "-> saw" in host_line,
                          host_line.strip() or "(no host step line -- CHECK THE HOST)"))
@@ -591,22 +677,29 @@ def main():
             if m:
                 counts.append(int(m.group(1)))
         rising = len(counts) >= 2 and all(b >= a for a, b in zip(counts, counts[1:]))
-        if which == "tso":
-            # **DFT REPORTS NO PROGRESS AT ALL, and that is CORRECT rather than a fault.**
-            # `onProgress` is called only from the CUT frame handler (`transferRun.ts:323`), so a
-            # silent DFT transfer is the engine's design. Asserted as an ABSENCE so the asymmetry is
-            # observed rather than merely read off the source -- and so that the day DFT grows
-            # progress reporting, this check fails and says so.
-            checks.append(report("DFT reported NO intermediate progress (correct for DFT)",
-                                 len(counts) <= 1,
-                                 f"counts seen: {counts[:6]}"))
-        else:
-            checks.append(report("the byte count CLIMBED during the transfer", rising,
-                                 f"{len(counts)} counts, {counts[:3]}...{counts[-2:]}"
-                                 if counts else "no byte counts in any status line"))
-            checks.append(report("the last count is the whole file",
-                                 bool(counts) and counts[-1] == len(payload),
-                                 f"last={counts[-1] if counts else None} of {len(payload)}"))
+        # **ONE RULE FOR BOTH ENGINES NOW, AND THE TSO BRANCH USED TO ASSERT THE OPPOSITE.** It read:
+        #
+        #     report("DFT reported NO intermediate progress (correct for DFT)", len(counts) <= 1)
+        #
+        # which was TRUE of the engine when it was written -- `onProgress` was reached only from the
+        # CUT frame handler -- and became FALSE on 2026-10-02, when `Session` started emitting
+        # `transferProgress` per accepted DFT frame and `transferRun.ts` started reporting bytes on it.
+        # The comment even promised "the day DFT grows progress reporting, this check fails and says
+        # so". **It did not say so. It PASSED**, twice, on transfers that moved ZERO BYTES -- because
+        # zero progress lines satisfy `<= 1` exactly as a silent-by-design engine would, and the thing
+        # it was certifying had become the symptom it should have caught.
+        #
+        # A check whose pass condition is an ABSENCE cannot tell "correctly silent" from "completely
+        # broken", and this is the second time on this harness that one has passed on the absence of a
+        # failure rather than the presence of a result. Both engines now assert the SAME property --
+        # a count that climbs and ends at the whole file -- which is what a working transfer looks
+        # like on either path.
+        checks.append(report("the byte count CLIMBED during the transfer", rising,
+                             f"{len(counts)} counts, {counts[:3]}...{counts[-2:]}"
+                             if counts else "no byte counts in any status line"))
+        checks.append(report("the last count is the whole file",
+                             bool(counts) and counts[-1] == len(payload),
+                             f"last={counts[-1] if counts else None} of {len(payload)}"))
 
         # ---- ITEM 3: THE CLOSE GUARD AND A CANCEL, AGAINST A REAL TRANSFER ----
         #
@@ -627,9 +720,22 @@ def main():
                              "survived=true" in close_line, close_line.strip() or "(no close line)"))
 
         cancel_line = next((l for l in out2.splitlines() if "cancel ->" in l), "")
-        checks.append(report("Cancel was ENABLED and clickable mid-transfer",
-                             "enabled=true" in cancel_line,
-                             cancel_line.strip() or "(no cancel line)"))
+        # **ASSERTED ONLY WHERE A TRANSFER CAN ACTUALLY BE CAUGHT IN FLIGHT, which on TSO/DFT it
+        # cannot at this size.** Measured 2026-10-03: 200 KB over DFT to TK5 completes in roughly the
+        # time it takes the scenario to issue the click -- the run reported
+        # `cancel -> enabled=false at done: 204800 bytes`, i.e. the transfer had already FINISHED, and
+        # a finished transfer correctly disables Cancel. CUT on VM takes ~15 ms a frame over ~185
+        # frames and is comfortably interruptible, which is where this property is proven.
+        # Scoring it as a FAIL on TSO would mark correct behaviour wrong and train the reader to
+        # ignore a real failure; reporting it keeps the observation without the false alarm. The
+        # close guard above IS still asserted here, because it is checked before the transfer ends.
+        if which == "tso":
+            print(f"  NOTE  DFT at {len(payload)}B finishes faster than the scenario can click, so "
+                  f"Cancel is already disabled -- correct, not a fault ({cancel_line.strip() or 'none'})")
+        else:
+            checks.append(report("Cancel was ENABLED and clickable mid-transfer",
+                                 "enabled=true" in cancel_line,
+                                 cancel_line.strip() or "(no cancel line)"))
 
         # **THE TIMING IS THE HARD PART, and this is the check that proves it.** A cancel fired
         # before the first frame or after the last exercises nothing: `cancel` is idempotent and a
@@ -639,11 +745,20 @@ def main():
         m = re.search(r"cancel -> enabled=\w+ at .*?(\d+) bytes", cancel_line)
         at = int(m.group(1)) if m else None
         if which == "tso":
-            # No progress to read on DFT, so the interruption cannot be timed from the status line.
-            # Reported rather than asserted, because asserting a number that cannot exist would be
-            # a check that passes for the wrong reason.
-            print(f"  NOTE  DFT shows no byte count, so the cancel's timing is not observable "
-                  f"from the status line (cancel line: {cancel_line.strip() or 'none'})")
+            # **THE PREMISE OF THIS BRANCH EXPIRED on 2026-10-02 and it is kept only as a NOTE, not
+            # promoted to a check.** It used to read "No progress to read on DFT, so the interruption
+            # cannot be timed from the status line" -- true until `Session` began emitting
+            # `transferProgress` per accepted DFT frame, after which a DFT cancel DOES carry a byte
+            # count and the timing IS observable.
+            #
+            # It stays a NOTE rather than becoming the same assertion the VM branch makes because no
+            # run has yet shown a DFT cancel landing mid-flight: the TSO scenario cannot currently
+            # reach a transfer at all (see the logon defect in `prep` above), so promoting it would
+            # add a check that has never once been satisfied. **Printing the number is what lets the
+            # next person promote it on evidence** -- and the number is now real, where before there
+            # was none to print.
+            print(f"  NOTE  DFT now reports a byte count, so this timing IS assertable once the TSO "
+                  f"scenario reaches a transfer (cancel line: {cancel_line.strip() or 'none'})")
         else:
             checks.append(report("the cancel landed MID-FLIGHT, short of the whole file",
                                  at is not None and 0 < at < len(payload),
@@ -653,10 +768,15 @@ def main():
         # NOT by an error message. MECAFF prints `>> TRANS99 - Protocol error` and TSO's FFTP prints
         # NOTHING AT ALL before returning to READY; both are correct, so the message proves nothing
         # and the next command proves everything.
-        obeyed = ("host logoff -> saw" in out2) or ("cp logoff -> saw" in out2)
+        # CASE-INSENSITIVE, for the reason the earlier logoff check now carries: TSO's step is
+        # `host:LOGOFF` and VM's is `#cp logoff` (CP folds case, TSO's fields do not), so a matcher
+        # written in one case silently fails the other -- and this one scored FAIL on a cancel run
+        # whose logoff had plainly succeeded (`host LOGOFF -> saw "Logon"`).
+        low2 = out2.lower()
+        obeyed = ("host logoff -> saw" in low2) or ("cp logoff -> saw" in low2)
         checks.append(report("the host LEFT transfer mode (its next command was obeyed)", obeyed,
                              next((l.strip() for l in out2.splitlines()
-                                   if "logoff ->" in l), "(no logoff line)")))
+                                   if "logoff ->" in l.lower()), "(no logoff line)")))
 
     # TALLIED AFTER EVERY CHECK IS APPENDED, which it was not: the logoff check above used to be
     # added AFTER this sum, so the run printed `8/8 checks passed` while a NINTH had failed and the

@@ -253,3 +253,277 @@ describe("the harness hooks go through the form's own object", () => {
     expect(boot).toMatch(/if \(el instanceof HTMLSelectElement\) return 'cycle';/);
   });
 });
+
+describe('a timed-out scenario wait says what was on screen, WITHOUT the password', () => {
+  /**
+   * THE REDACTION IS LOAD-BEARING AND IT WAS MEASURED, NOT ANTICIPATED.
+   *
+   * A scenario `wait:` that times out reports and CONTINUES (deliberately -- a transfer may be
+   * mid-flight), so every later step runs against the wrong screen. On TSO 2026-10-02 that chain
+   * produced a transfer with ZERO DFT frames which was then recorded as a protocol-layer failure
+   * ("no DFT frames are arriving"), when the real cause was an ISPF wait expiring during logon.
+   * Printing the screen is what makes that one-line-visible instead of a three-line mystery.
+   *
+   * **But the first version printed a REAL PASSWORD.** It assumed a scenario step runs after the
+   * logon, so the screen could only be a host panel. The measured screen was TSO's logon panel with
+   * `ENTER CURRENT PASSWORD FOR HERC01- CUL8TR` on it, echoed as ORDINARY TEXT -- because the state
+   * a timeout here is most likely to catch is precisely the one the assumption excluded.
+   *
+   * Asserted against THE REAL MEASURED SCREEN STRING rather than a contrived one, and by applying
+   * the regex the source actually uses, so this tests the behavior and not a spelling.
+   */
+  const SEEN_LIVE_2026_10_02 = 'ENTER CURRENT PASSWORD FOR HERC01- CUL8TR HERC01 LOGON IN '
+    + 'PROGRESS AT 18:18:13 ON OCTOBER 2, 2026 NO BROADCAST MESSAGES '
+    + '+----------------------------------------------------------------------------+ !';
+
+  /** The redaction exactly as `main.ts` writes it, extracted so the test cannot drift from it. */
+  const redactionFrom = (src: string): RegExp => {
+    const m = /\.replace\((\/(?:[^/\\]|\\.)+\/[a-z]*),\s*'\$1 <redacted> '\)/.exec(src);
+    expect(m, 'no password redaction found in main.ts').not.toBeNull();
+    const body = m![1]!;
+    const lastSlash = body.lastIndexOf('/');
+    return new RegExp(body.slice(1, lastSlash), body.slice(lastSlash + 1));
+  };
+
+  it('REDACTS the echoed password out of the measured live screen', () => {
+    const out = SEEN_LIVE_2026_10_02.replace(redactionFrom(main), '$1 <redacted> ');
+    expect(out, 'the password must not survive into a harness log').not.toContain('CUL8TR');
+    expect(out, 'and the prompt itself is kept, so the state is still diagnosable')
+      .toContain('ENTER CURRENT PASSWORD FOR HERC01-');
+    expect(out).toContain('<redacted>');
+  });
+
+  it('leaves an ordinary host panel ALONE, so the diagnostic still diagnoses', () => {
+    // The whole point is to print the screen. A redaction that ate every screen would be a
+    // regression dressed as a fix -- this is the case the ISPF-wait failure actually wants.
+    const ispf = 'ISPF Primary Option Menu USERID : HERC01 TERMINAL : 3277 PANEL : ISP@PRIM';
+    expect(ispf.replace(redactionFrom(main), '$1 <redacted> ')).toBe(ispf);
+  });
+
+  it('prints essentially the WHOLE panel, because 240 characters hid the answer', () => {
+    // THE TRUNCATION WAS ITSELF A DEFECT. The TSO failure was narrowed to "`X` does not exit this
+    // ISPF", and the one thing that would have named the real exit -- the panel's own option list --
+    // sat PAST THE CUT in every capture. Four TK5 userids were spent on hypotheses that one full
+    // panel would have settled. Pinned as a MINIMUM so a later "tidy up the log line" cannot
+    // reintroduce it, and read off the constant rather than the call sites so both stay in step.
+    const m = /const SCREEN_DUMP_CHARS = (\d+);/.exec(main);
+    expect(m, 'no SCREEN_DUMP_CHARS constant found').not.toBeNull();
+    expect(Number(m![1]), 'a 24x80 panel is 1920 cells; anything much less truncates the evidence')
+      .toBeGreaterThanOrEqual(1900);
+    // BOTH arms must use it. The `host:` arm was added second and is the one that caught the ISPF
+    // refusal, so a constant applied to only one of them would leave the important half short.
+    const uses = main.match(/seen\.slice\(0, SCREEN_DUMP_CHARS\)/g) ?? [];
+    expect(uses.length, 'both the wait: and host: timeout arms must print the full screen').toBe(2);
+    // AND NO BARE NUMBER LEFT BEHIND, which is how one site silently keeps the old cap.
+    expect(main).not.toMatch(/seen\.slice\(0, \d+\)/);
+  });
+
+  it('WAITS FOR THE KEYBOARD after Clear, instead of a fixed delay', () => {
+    // THIS IS WHY EVERY TSO `host:` STEP TYPED NOTHING. Clear is an AID: it locks the keyboard
+    // (`X Wait`) until the host repaints. On VM's `MORE...` the answer is instant, so a flat 600ms
+    // was never caught there; on TK5's ISPF the host redraws a full panel, the characters went out
+    // while the keyboard was still inhibited, and `Option ===>` came back EMPTY. Same
+    // fixed-delay-versus-condition mistake `live-drive.py` names and that `drain:` was just fixed for.
+    const steps = stepsBody![0];
+    const hostAt = steps.indexOf("step.startsWith('host:')");
+    expect(hostAt).toBeGreaterThan(-1);
+    const arm = steps.slice(hostAt);
+    expect(arm, 'the step must poll the OIA, not sleep a guessed interval')
+      .toMatch(/while \(session\.oia\.isInhibited\(\)/);
+    // A DEADLINE, not an unbounded wait: a host that never unlocks must still reach the report
+    // rather than hanging the whole scenario, which is this seam's standing rule for every wait.
+    expect(arm).toMatch(/Date\.now\(\) < unlockBy/);
+    // AND THE CLEAR MUST COME FIRST, which is the property the fixed delay was protecting: VM's
+    // MORE... eats input, and that once swallowed a LOGOFF and left an account logged on.
+    // ORDER: the (now conditional) Clear, then the unlock wait, then the typing. Anchored on the
+    // UNLOCK LOOP rather than on the first `isInhibited()` mention -- the Clear DECISION reads that
+    // same getter now, so matching the bare call found the guard and inverted the comparison.
+    const clearAt = arm.indexOf("keyCode: 'c', modifiers: ['control']");
+    const waitAt = arm.indexOf('while (session.oia.isInhibited()');
+    const typeAt = arm.indexOf("for (const ch of [...cmd");
+    expect(clearAt).toBeGreaterThan(-1);
+    expect(waitAt).toBeGreaterThan(-1);
+    expect(clearAt, 'Clear, then wait for the unlock, then type').toBeLessThan(waitAt);
+    expect(waitAt, 'the unlock wait must precede the typing').toBeLessThan(typeAt);
+  });
+
+  it('sends Shift for uppercase AND KEEPS the char event -- both, or it breaks', () => {
+    /**
+     * PROVED OFFLINE, which is why this fix is trustworthy where two live guesses were not: replaying
+     * a trace with the action log on, `host:X` printed `action: {"kind":"type","text":"x"}`.
+     * `sendInputEvent` FOLDS CASE, so nothing was lost -- every character arrived LOWERCASE. Harmless
+     * against VM (CP folds) and fatal against TSO's ISPF `Option ===>`, whose exit is `X EXIT`.
+     *
+     * THE PAIR IS THE FIX. An earlier attempt added the modifier AND suppressed `char`, copying
+     * `sendKeys`'s rule that a Ctrl-/Alt-held keystroke produces none. Live result: delivery stopped
+     * ENTIRELY -- strictly worse than the folding -- and it was reverted. **Shift is not like
+     * Ctrl/Alt: a real Shift-held letter DOES produce a `char`**, which is how a keyboard types a
+     * capital. Both halves are asserted, because either alone is a regression.
+     */
+    const steps = stepsBody![0];
+    const arm = steps.slice(steps.indexOf("step.startsWith('host:')"));
+    expect(arm, 'an uppercase character must carry a shift modifier')
+      .toMatch(/const shifted = \/\^\[A-Z\]\$\/\.test\(ch\)/);
+    expect(arm).toMatch(/modifiers: \['shift' as const\]/);
+    // THE `char` MUST BE UNCONDITIONAL. A `if (...) sendInputEvent({type:'char'...})` here is the
+    // exact regression that broke delivery, so this asserts the send is NOT guarded.
+    const charSend = /win\.webContents\.sendInputEvent\(\{ type: 'char', \.\.\.chord \}\);/;
+    expect(arm, 'the char event carries the character and must be sent for every key')
+      .toMatch(charSend);
+    const charAt = arm.search(charSend);
+    const before = arm.slice(Math.max(0, charAt - 160), charAt);
+    expect(before, 'the char send must not be conditional').not.toMatch(/if \([^)]*\)\s*$/);
+  });
+
+  it('the TSO scenario sends UPPERCASE, while VM deliberately stays lowercase', () => {
+    const harness = readFileSync(join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    // TSO: ISPF's `Option ===>` and the TSO command field do not fold.
+    expect(harness).toMatch(/host:X\|READY/);
+    expect(harness).toMatch(/host:DELETE /);
+    expect(harness).toMatch(/host:LOGOFF\|LOGGED OFF/);
+    // VM STAYS LOWERCASE AND THAT IS CORRECT, NOT AN OVERSIGHT: CP folds case, and that step is
+    // live-verified lowercase. Pinned so a consistency sweep cannot quietly change a verified step --
+    // one host folding and the other not is the asymmetry a second host exists to find.
+    expect(harness).toMatch(/host:#cp logoff\|LOGOFF AT/);
+  });
+
+  it('CLEARS ONLY WHEN NEEDED, because Clear is an AID that races the host repaint', () => {
+    /**
+     * THIS IS WHAT FINALLY FIXED THE TSO SCENARIO -- 4/9 to 8/9, bytes byte-identical over DFT.
+     *
+     * Clear is an AID: it erases the screen and the HOST REPAINTS. On VM's `MORE...` that is the
+     * point (the state eats input, and `#cp logoff` typed into it once vanished and left an account
+     * logged on). **On a panel already accepting input it is harmful** -- measured on TK5: ISPF's
+     * menu was up and unlocked, Clear wiped it, and the characters went out while ISPF was still
+     * rebuilding, so `Option ===>` came back EMPTY.
+     *
+     * The contrast is what proves it rather than suggests it: the FORM's own `IND$FILE` text lands
+     * in that same field reliably, and `primeAndType` does it with purely LOCAL operations --
+     * `home()`, `eraseEOF()`, `typeString()` -- sending NO AID and so racing no repaint.
+     */
+    const steps = stepsBody![0];
+    const arm = steps.slice(steps.indexOf("step.startsWith('host:')"));
+    expect(arm, 'the Clear must be conditional, not unconditional')
+      .toMatch(/const needsClear = session\.oia\.isInhibited\(\) \|\| !session\.screen\.isFormatted\(\)/);
+    // AND THE CONDITION MUST STILL COVER VM'S `MORE...`: a locked or unformatted screen gets the
+    // Clear, which is the case this step was originally built for and must not lose.
+    const clearAt = arm.indexOf("keyCode: 'c', modifiers: ['control']");
+    const guardAt = arm.indexOf('if (needsClear)');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt, 'the guard must precede the Clear send').toBeLessThan(clearAt);
+    // REPORTED, so a run's log says which decision was taken -- otherwise the one thing that
+    // distinguishes a prompt from a MORE... state is invisible after the fact.
+    expect(arm).toMatch(/clear=\$\{needsClear\}/);
+  });
+
+  it('the logoff check reads the RESULT line, not the clear-decision line', () => {
+    // The seam prints TWO lines per host step now, and the check took the wrong one: a logoff that
+    // had succeeded (`host LOGOFF -> saw "Logon"`) was reported as `(no host step line)` and scored
+    // FAIL. The thing it stops reporting correctly is a STRANDED USERID, so it earns a test.
+    const harness = readFileSync(join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    expect(harness).toMatch(/\) and "->" in l\), ""\)/);
+    // Case-insensitive: TSO's step is `host:LOGOFF`, VM's is `#cp logoff`.
+    expect(harness).toMatch(/in l\.lower\(\)/);
+  });
+
+  it('prints the screen on the TIMEOUT arm only, not on a successful wait', () => {
+    // A successful wait prints which needle MATCHED and nothing else: the screen at that moment is
+    // by definition the one the scenario asked for, and printing it on every step would put a
+    // host panel in the log 20 times a run -- including, on the keys seam, a password prompt.
+    const steps = stepsBody![0];
+    const timeoutArm = steps.indexOf('wait TIMED OUT for');
+    expect(timeoutArm).toBeGreaterThan(-1);
+    expect(steps.slice(timeoutArm, timeoutArm + 400)).toMatch(/screen was/);
+    const sawAt = steps.indexOf('transfer window: saw ');
+    expect(sawAt).toBeGreaterThan(-1);
+    expect(steps.slice(sawAt, sawAt + 120)).not.toMatch(/screen was/);
+  });
+});
+
+describe('drain: stops on the TARGET arriving, not on a needle vanishing', () => {
+  /**
+   * THE STOPPING RULE IS THE WHOLE BUG. `drain:***` stops when `***` is ABSENT, and an absent prompt
+   * is indistinguishable from one that has not been painted yet. Measured on TK5 2026-10-02 at both
+   * payload sizes: the screen after the TSO password carried no `***` at all, so the drain broke on
+   * its first poll, pressed nothing, and the welcome banner arrived with nobody left to dismiss it --
+   * which ended as a transfer with zero DFT frames, recorded as a protocol fault and blamed on size.
+   *
+   * These read the source because `main.ts` cannot be imported (it calls `app.whenReady()` in its
+   * module body), which is this file's established pattern.
+   */
+  const drainArm = (): string => {
+    const body = stepsBody![0];
+    const at = body.indexOf("step.startsWith('drain:')");
+    expect(at, 'no drain arm found in driveSteps').toBeGreaterThan(-1);
+    // ANCHORED ON THE NEXT ARM, not a character count: a fixed slice silently truncates when the arm
+    // grows, and three of these tests failed that way first -- a false negative that reads exactly
+    // like the feature being absent.
+    const next = body.indexOf("step.startsWith('host:')", at);
+    expect(next, 'no host: arm after the drain arm').toBeGreaterThan(at);
+    return body.slice(at, next);
+  };
+
+  it('parses a `>` into a separate TARGET, keeping the one-needle form intact', () => {
+    const arm = drainArm();
+    expect(arm).toMatch(/const gt = spec\.indexOf\('>'\);/);
+    // The OLD spelling must still mean what it meant: with no `>`, target is empty and the absence
+    // rule applies. `drain:` is a seam other scenarios may use, so redefining it silently would
+    // break them -- the same reasoning that kept `-ddm`'s default explicit.
+    expect(arm).toMatch(/const needle = gt < 0 \? spec : spec\.slice\(0, gt\);/);
+    expect(arm).toMatch(/const target = gt < 0 \? '' : spec\.slice\(gt \+ 1\);/);
+  });
+
+  it('tests the TARGET before the prompt, so it cannot press into the panel it wanted', () => {
+    // Order matters and is not stylistic: once ISPF is up, a further Enter SELECTS AN OPTION and
+    // navigates away from the panel the next step needs. A screen can show both while repainting.
+    const arm = drainArm();
+    const targetAt = arm.indexOf("targetNeedles.some(");
+    const needleAt = arm.indexOf("seen.includes(needle)");
+    expect(targetAt).toBeGreaterThan(-1);
+    expect(needleAt).toBeGreaterThan(-1);
+    expect(targetAt, 'the target check must come first, or the drain overshoots')
+      .toBeLessThan(needleAt);
+  });
+
+  it('KEEPS POLLING when neither is on screen, but only when a target was given', () => {
+    // This is the actual fix. "Neither" with a target means the host is still working -- the case
+    // that broke -- so it must not break out. Without a target it is the ORIGINAL stopping rule and
+    // must remain one, or every existing `drain:` burns the whole poll budget before continuing.
+    const arm = drainArm();
+    expect(arm).toMatch(/if \(target === ''\) break;/);
+  });
+
+  it('REPORTS whether the target was reached, so a drain that gave up is visible', () => {
+    // It continues rather than failing the run (a transfer may be mid-flight), so the log line is
+    // the only evidence. A silent give-up is what let three runs be misdiagnosed.
+    const arm = drainArm();
+    expect(arm).toMatch(/NEVER REACHED/);
+    expect(arm).toMatch(/arrived/);
+  });
+
+  it('the TARGET takes `|` ALTERNATIVES, because one panel name was not enough', () => {
+    // MEASURED, not anticipated: with a bare `>Primary Option` the live drain reported
+    // `NEVER REACHED` while the very next step `saw "USERID"`. The panel HAD arrived, under another
+    // of the three names the scenario already lists for it -- so a one-name target drains to its
+    // full poll budget on a finished host and prints a line contradicting the step after it.
+    const arm = drainArm();
+    expect(arm).toMatch(/target\.split\('\|'\)/);
+    expect(arm).toMatch(/targetNeedles\.some\(\(n\) => seen\.includes\(n\)\)/);
+    // EMPTIES DROPPED, as `waitForScreen` does: an empty alternative matches every screen including
+    // a blank one, which is the vacuous-wait failure the seam exists to avoid.
+    expect(arm).toMatch(/\.filter\(\(n\) => n !== ''\)/);
+  });
+
+  it('the TSO scenario uses the target form, which is what it was built for', () => {
+    const harness = readFileSync(
+      join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+    expect(harness).toMatch(/drain:\*\*\*>Primary Option\|USERID\|BROWSE/);
+    // THE SAME SET THE WAIT USES. If the two disagree about what "arrived" means, the drain either
+    // gives up on a ready host or presses into the panel the wait is about to require.
+    expect(harness).toMatch(/wait:Primary Option\|USERID\|BROWSE/);
+    // AND THE LEADING `wait:` IS GONE: it existed to synchronise before the drain, and a wait for a
+    // panel sitting BEHIND a prompt can never succeed -- it burned its whole budget, which is how
+    // the failure began. The trailing one stays, as the thing that surfaces a drain that gave up.
+    expect(harness).not.toMatch(/wait:Primary Option\|USERID\|BROWSE,drain:/);
+  });
+});

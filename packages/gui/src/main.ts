@@ -224,6 +224,22 @@ const SEAM = Object.freeze({
 export const WAIT_PREFIX = 'wait:';
 
 /**
+ * How much of the screen a timed-out step prints.
+ *
+ * **1900, i.e. essentially the whole 24x80 buffer, because 240 WAS NOT ENOUGH AND THAT COST A
+ * DIAGNOSIS.** The TSO failure of 2026-10-02 was narrowed to "`X` does not exit this ISPF", and the
+ * one thing that would have named the real exit command -- the panel's own option list -- sat PAST
+ * THE CUT in every capture. Four TK5 userids were spent on hypotheses that one full panel would have
+ * settled, and each failed run strands an account.
+ *
+ * A screen is 1920 cells and the text is whitespace-collapsed before slicing, so this is almost
+ * always the entire panel; the cap stays only so a pathological 43x80 paint cannot dump 3440
+ * characters into one log line. **Not unbounded, and not small.** The rule it encodes: a diagnostic
+ * that truncates the evidence is a diagnostic that sends the reader guessing.
+ */
+const SCREEN_DUMP_CHARS = 1900;
+
+/**
  * Set while a `TN3270_GUI_TRANSFER` scenario is mid-flight, so `quitIfKeysOnly` does not cut it off.
  *
  * ## THE RACE THIS CLOSES, MEASURED AGAINST VM/CMS
@@ -1321,6 +1337,12 @@ async function driveSteps(
     /**
      * `drain:TEXT` PRESSES ENTER UNTIL `TEXT` IS GONE FROM THE SCREEN.
      *
+     * **`drain:TEXT>TARGET` presses until `TARGET` ARRIVES instead, and that is the form a slow host
+     * needs** -- an absent `TEXT` cannot be told apart from a `TEXT` that has not been painted yet,
+     * which is what broke every TSO run on 2026-10-02. The implementation below carries the
+     * measurement; the short version is that the stopping rule must be the arrival of what you are
+     * waiting for, not the absence of what you are dismissing.
+     *
      * ## WHY A COUNT OF ENTERS CANNOT WORK, AND THIS COST A STRANDED USERID
      *
      * TSO shows an indeterminate number of more-output prompts after logon -- a welcome banner, then
@@ -1416,27 +1438,118 @@ async function driveSteps(
     }
     if (step.startsWith(WAIT_PREFIX)) {
       const hit = await waitForScreen(session, step.slice(WAIT_PREFIX.length));
-      process.stdout.write(
-        hit === undefined
-          ? `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}\n`
-          : `transfer window: saw ${JSON.stringify(hit)}\n`,
-      );
+      if (hit === undefined) {
+        /**
+         * SAY WHAT WAS ON SCREEN INSTEAD, because a timeout that does not is nearly undiagnosable
+         * here -- and that cost a whole misdirected diagnosis.
+         *
+         * A timeout on this path REPORTS AND CONTINUES (deliberately, see above), so every later
+         * step runs against whatever screen the host is actually showing. On TSO 2026-10-02 that
+         * meant the ISPF wait expired, `drain:***` pressed two blind Enters into a panel that was
+         * not the one it was written for, `host x` never reached `READY`, and `IND$FILE` was typed
+         * somewhere it does not exist -- producing a transfer with ZERO DFT frames that was recorded
+         * as "no DFT frames are arriving" at the protocol layer. The whole chain is visible in one
+         * line of screen text and was invisible in three lines of `TIMED OUT`.
+         *
+         * ## IT REDACTS, AND THAT IS NOT PRECAUTIONARY -- THE FIRST RUN PRINTED A REAL PASSWORD
+         *
+         * My first version of this printed the leading 200 characters on the reasoning that a
+         * scenario step runs after the logon, so the screen could only be a host panel. **MEASURED
+         * 2026-10-02, and it was wrong: the screen at the timeout was TSO's logon panel with
+         * `ENTER CURRENT PASSWORD FOR HERC01- CUL8TR` on it** -- the password ECHOED IN PLAIN TEXT,
+         * because that is exactly the failure being diagnosed (the wait expired while the logon was
+         * still in progress). The one state a timeout here is most likely to catch is the state the
+         * assumption ruled out.
+         *
+         * So the text after TSO's own prompt is replaced. Matched on the HOST'S WORDING rather than
+         * on a field attribute, because the panel echoes it as ordinary text: there is no
+         * `hidden` cell to honour here, which is what makes a structural fix unavailable.
+         * `docs/live-testing.md` already warns the /tmp log may carry a password; this keeps the one
+         * line that is MEANT to be read from being the thing that puts it there.
+         */
+        const seen = screenNeedleText(resolve(session.screen.snapshot(), {}))
+          .replace(/(ENTER CURRENT PASSWORD FOR \S+)[^!+]*/i, '$1 <redacted> ');
+        process.stdout.write(
+          `transfer window: wait TIMED OUT for ${JSON.stringify(step.slice(WAIT_PREFIX.length))}`
+          + ` -- screen was ${JSON.stringify(seen.slice(0, SCREEN_DUMP_CHARS))}\n`,
+        );
+      } else {
+        process.stdout.write(`transfer window: saw ${JSON.stringify(hit)}\n`);
+      }
       continue;
     }
     if (step.startsWith('drain:')) {
-      const needle = step.slice('drain:'.length);
+      /**
+       * `drain:PROMPT` or `drain:PROMPT>TARGET` -- press Enter until the host gets somewhere.
+       *
+       * ## WHY `>TARGET` EXISTS, AND IT IS A MEASURED FIX RATHER THAN A GENERALISATION
+       *
+       * The one-needle form stops when `PROMPT` is ABSENT, and that is the wrong stopping rule
+       * whenever the host has not caught up yet: an absent prompt is indistinguishable from a prompt
+       * that has not arrived. **Measured on TK5 2026-10-02, three runs, at both payload sizes:** the
+       * screen after the TSO password was the PASSWORD PANEL with `LOGON IN PROGRESS` appended and a
+       * box border -- **no `***` anywhere on it** -- so `drain:***` broke on its first poll
+       * (`drained "***" after 0 Enter(s)`), pressed nothing, and the welcome banner it should have
+       * dismissed arrived afterwards with nobody left to press past it. Every later step then ran
+       * against the logon: `host x` never reached `READY` and `IND$FILE` was typed at a screen with
+       * no such command, producing a transfer with ZERO DFT frames that was recorded as a
+       * protocol-layer fault and blamed on the 200 KB size. It was neither.
+       *
+       * With `>TARGET` the stopping rule becomes the ARRIVAL of what the scenario is waiting for,
+       * which is the question actually being asked. `PROMPT` keeps its job -- it is what makes a
+       * press WORTHWHILE -- but a screen showing neither now means "wait longer", not "done".
+       * `live-drive.py` gets this right by accident of shape: its `DRAIN***` settles 3s per check and
+       * loops 8 times, so it is still pressing when the banner shows up.
+       *
+       * The one-needle spelling is kept working and unchanged, because `drain:` is a seam other
+       * scenarios may use and silently redefining it would break them: with no `>`, `TARGET` is empty
+       * and the old absence rule applies exactly as before.
+       */
+      const spec = step.slice('drain:'.length);
+      const gt = spec.indexOf('>');
+      const needle = gt < 0 ? spec : spec.slice(0, gt);
+      const target = gt < 0 ? '' : spec.slice(gt + 1);
+      // SPLIT AND EMPTIES DROPPED, exactly as `waitForScreen` does it: an empty alternative would
+      // match every screen including a blank one, which is the vacuous-wait failure this whole seam
+      // is built to avoid.
+      const targetNeedles = target.split('|')
+        .map((n) => n.replace(/\s+/g, ' ').trim()).filter((n) => n !== '');
       win.show();
       win.focus();
       let pressed = 0;
-      for (; pressed < 10; pressed++) {
+      let arrived = false;
+      for (let poll = 0; poll < 20; poll++) {
         await new Promise((r) => { setTimeout(r, 1500); });
         const seen = screenNeedleText(resolve(session.screen.snapshot(), {}));
-        if (!seen.includes(needle)) break;
-        for (const t of ['keyDown', 'char', 'keyUp'] as const) {
-          win.webContents.sendInputEvent({ type: t, keyCode: 'Enter' });
+        // THE TARGET WINS, and it is tested FIRST: once the panel is up, a further Enter would type
+        // into it -- on ISPF that selects an option and navigates away from the panel the next step
+        // needs. Checked before the prompt because a screen can carry both while repainting.
+        //
+        // **`|` ALTERNATIVES, as `wait:` takes them, and the first version's absence of them was a
+        // REAL defect rather than a missing nicety.** With a bare substring target the live run
+        // reported `NEVER REACHED "Primary Option"` while the very next step `saw "USERID"` -- the
+        // panel HAD arrived, under one of the other names the scenario already lists for it
+        // (`Primary Option|USERID|BROWSE`). A one-name target therefore drains to its full 20 polls
+        // on a host that is finished, which is a 30-second stall and a log line that contradicts the
+        // step after it. The needle and the target must be able to say the same thing.
+        if (target !== '' && targetNeedles.some((n) => seen.includes(n))) { arrived = true; break; }
+        if (seen.includes(needle)) {
+          for (const t of ['keyDown', 'char', 'keyUp'] as const) {
+            win.webContents.sendInputEvent({ type: t, keyCode: 'Enter' });
+          }
+          pressed++;
+          continue;
         }
+        // NEITHER ON SCREEN. With no target this is the ORIGINAL stopping rule and must stay one, or
+        // every existing `drain:` spends 30s before continuing. With a target it means the host is
+        // still working, which is the whole case this form exists for -- so keep polling.
+        if (target === '') break;
       }
-      process.stdout.write(`transfer window: drained ${JSON.stringify(needle)} after ${pressed} Enter(s)\n`);
+      process.stdout.write(
+        `transfer window: drained ${JSON.stringify(needle)} after ${pressed} Enter(s)`
+        + (target === '' ? '' : ` -- ${arrived ? 'reached' : 'NEVER REACHED'} ${JSON.stringify(target)}`)
+        + '\n',
+      );
       continue;
     }
     if (step.startsWith('host:')) {
@@ -1464,24 +1577,114 @@ async function driveSteps(
        * Ctrl-C is the CLEAR AID here, not an interrupt -- which is the whole reason Ctrl-] is this
        * app's quit binding.
        */
-      for (const t of ['keyDown', 'char', 'keyUp'] as const) {
-        win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
+      /**
+       * **CLEAR ONLY WHERE IT IS NEEDED, AND THAT CONDITION IS WHY THE TSO STEPS TYPED INTO NOTHING.**
+       *
+       * Clear is an AID: it erases the screen and the HOST REPAINTS. On VM's `MORE...` that is the
+       * whole point (the state eats input, and this step existed because `#cp logoff` typed into it
+       * vanished). **On a panel that is already accepting input it is actively harmful** -- measured
+       * on TK5 2026-10-03: ISPF's menu was up and unlocked, Clear wiped it, and the characters went
+       * out while ISPF was still rebuilding its fields, so `Option ===>` came back EMPTY. The
+       * contrast proves it: the FORM's own `IND$FILE` text lands in that same field reliably, and
+       * `primeAndType` does it with purely LOCAL operations -- `home()`, `eraseEOF()`, `typeString()`
+       * -- sending NO AID and so racing no repaint.
+       *
+       * So: skip the Clear when the keyboard is free and the screen already has an unprotected field
+       * to type into, which is exactly the "already at a prompt" case. A locked or unformatted screen
+       * still gets it, which keeps the VM `MORE...` behaviour this step was built for.
+       */
+      const needsClear = session.oia.isInhibited() || !session.screen.isFormatted();
+      if (needsClear) {
+        for (const t of ['keyDown', 'char', 'keyUp'] as const) {
+          win.webContents.sendInputEvent({ type: t, keyCode: 'c', modifiers: ['control'] });
+        }
       }
-      await new Promise((r) => { setTimeout(r, 600); });
+      process.stdout.write(`transfer window: host ${cmd} clear=${needsClear}\n`);
+      /**
+       * **WAIT FOR THE KEYBOARD, NOT A FIXED 600ms -- AND THE FIXED WAIT IS WHY EVERY TSO `host:`
+       * STEP SILENTLY TYPED NOTHING.**
+       *
+       * Clear is an AID: it erases the screen AND LOCKS THE KEYBOARD (`X Wait`) until the host
+       * repaints. On VM's `MORE...` the answer is instant, which is why 600ms was never caught there.
+       * **On TK5's ISPF it is not:** the host has to redraw a full 1900-character panel, and the
+       * typing went out while the keyboard was still inhibited -- so `keyboardLock` swallowed every
+       * character and the panel came back with `Option ===>` EMPTY. Measured 2026-10-02: the step
+       * reported `TIMED OUT waiting for "READY"` with the keyboard showing `4 A` and `inhibited=false`
+       * BY THE TIME IT GAVE UP, which is the signature of a lock that has since cleared -- the state
+       * at the moment of typing is the one that mattered and the one nothing recorded.
+       *
+       * This is the same fixed-delay-versus-condition mistake `live-drive.py` names
+       * (*"a settle can fire the Enter before the next screen has even arrived"*) and that `drain:`
+       * was just fixed for. A deadline rather than an unbounded wait, because a host that never
+       * unlocks must still reach the report instead of hanging the scenario.
+       */
+      const unlockBy = Date.now() + 20_000;
+      while (session.oia.isInhibited() && Date.now() < unlockBy) {
+        await new Promise((r) => { setTimeout(r, 200); });
+      }
+      // A beat after the unlock: the keyboard frees on the host's write, and the FIELDS land with
+      // that same write -- typing into the very first tick has no margin for the repaint's own
+      // ordering, and this step is typing into a field the panel must already have drawn.
+      await new Promise((r) => { setTimeout(r, 400); });
       for (const ch of [...cmd, '\r']) {
         const keyCode = ch === '\r' ? 'Enter' : ch === ' ' ? 'Space' : ch;
-        win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
-        win.webContents.sendInputEvent({ type: 'char', keyCode });
-        win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+        /**
+         * **UPPERCASE NEEDS `Shift` AND THE `char` EVENT KEPT -- BOTH, AND THAT PAIR IS THE WHOLE FIX.**
+         *
+         * `sendInputEvent` FOLDS CASE, so a bare `keyCode: 'X'` arrives as `x`. **PROVED OFFLINE, no
+         * host and no userid**, by replaying a trace with the action log on: `host:X` printed
+         * `action: {"kind":"type","text":"x"}`. Nothing was lost -- every character arrived -- they
+         * simply arrived LOWERCASE, which is invisible against any host whose fields fold (VM/CP
+         * does) and fatal against one whose do not (TSO's ISPF `Option ===>`, measured, came back
+         * empty because `x` is not its `X EXIT`).
+         *
+         * **MY FIRST ATTEMPT AT THIS FAILED FOR A DIFFERENT REASON AND THAT IS WHY IT IS SPELLED OUT.**
+         * It added `modifiers: ['shift']` AND suppressed the `char` event, copying `sendKeys`'s rule
+         * that a real Ctrl-/Alt-held keystroke produces no `char`. Live result: the field came back
+         * EMPTY with no host complaint at all, i.e. delivery stopped entirely -- strictly worse than
+         * the folding it was meant to fix, so it was reverted. **Shift is NOT like Ctrl/Alt here: a
+         * real Shift-held letter DOES produce a `char` event**, which is exactly how a keyboard types
+         * a capital. Sending the modifier while withholding the `char` simulates a keyboard that
+         * cannot.
+         *
+         * So: modifier for the keyDown/keyUp, and the `char` kept unconditionally. Verified offline
+         * the same way the fold was found -- `host:X` must print `text":"X"`.
+         */
+        const shifted = /^[A-Z]$/.test(ch);
+        const chord = { keyCode, ...(shifted ? { modifiers: ['shift' as const] } : {}) };
+        win.webContents.sendInputEvent({ type: 'keyDown', ...chord });
+        // THE `char` CARRIES THE CHARACTER and is sent for every key, shifted or not. Withholding it
+        // on a shifted letter is what broke delivery outright; see above.
+        win.webContents.sendInputEvent({ type: 'char', ...chord });
+        win.webContents.sendInputEvent({ type: 'keyUp', ...chord });
         await new Promise((r) => { setTimeout(r, 90); });
       }
       if (expect === '') { process.stdout.write(`transfer window: host ${cmd} (no wait)\n`); continue; }
       const hit = await waitForScreen(session, expect);
-      process.stdout.write(
-        hit === undefined
-          ? `transfer window: host ${cmd} -> TIMED OUT waiting for ${JSON.stringify(expect)}\n`
-          : `transfer window: host ${cmd} -> saw ${JSON.stringify(hit)}\n`,
-      );
+      if (hit === undefined) {
+        // THE SCREEN HERE TOO, for the reason the `wait:` arm gives: this step also reports and
+        // continues, so a `host:` that went nowhere leaves every later step typing into the wrong
+        // panel -- and a bare `TIMED OUT waiting for "READY"` cannot say whether the command was
+        // refused, swallowed, or typed into a screen that has no such command. REDACTED identically;
+        // a `host:` step runs after the logon, but that was exactly the assumption that printed a
+        // live password from the `wait:` arm, so the same guard applies rather than being re-argued.
+        const seen = screenNeedleText(resolve(session.screen.snapshot(), {}))
+          .replace(/(ENTER CURRENT PASSWORD FOR \S+)[^!+]*/i, '$1 <redacted> ');
+        // **AND THE OIA, because the screen alone cannot say whether the command was even ACCEPTED.**
+        // This step types BLIND -- it checks no keyboard state -- and `drain:`'s own comment records
+        // the failure once already ("`host x` typed while the OIA still showed `X Wait`"). A panel
+        // that looks untouched is produced equally by a command the host ignored and by a keystroke
+        // the KEYBOARD refused, and those want opposite fixes: the first is the wrong command, the
+        // second is the wrong moment. The OIA is the only thing that tells them apart.
+        process.stdout.write(
+          `transfer window: host ${cmd} -> TIMED OUT waiting for ${JSON.stringify(expect)}`
+          + ` -- OIA ${JSON.stringify(session.oia.toText())}`
+          + ` inhibited=${session.oia.isInhibited()}`
+          + ` -- screen was ${JSON.stringify(seen.slice(0, SCREEN_DUMP_CHARS))}\n`,
+        );
+      } else {
+        process.stdout.write(`transfer window: host ${cmd} -> saw ${JSON.stringify(hit)}\n`);
+      }
       continue;
     }
     if (value === undefined) {

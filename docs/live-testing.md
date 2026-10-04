@@ -3972,6 +3972,11 @@ that a gap LONGER than `frameMs` should survive. It should not -- that is a stal
 the timer's whole job. The property is that **each gap is shorter than the deadline while the TOTAL
 is far longer**, which is what a long transfer actually looks like.
 
+**SUPERSEDED 2026-10-02 (later the same day) -- EVERY CLAIM IN THE PARAGRAPH BELOW IS WRONG, AND HOW
+IT CAME TO BE WRONG IS THE LESSON. See *TSO/DFT at 200 KB was never a DFT problem* immediately after
+it.** Kept rather than deleted because the reasoning is instructive and because a reader who
+remembers it needs to find the correction, not its absence.
+
 **TSO/DFT AT 200 KB IS STILL NOT WORKING AND IS STILL OPEN.** After the fix the transfer still ends
 `stalled ... 0 bytes` with **no progress events at all**, which means no DFT frames are reaching us
 rather than the timer firing early. **Zero bytes moved, so this is not the timer.** Not diagnosed;
@@ -3983,9 +3988,176 @@ the session's budget ran out. Two leads for whoever picks it up:
 - `-ddm off` forces CUT and is the obvious comparison: if 200 KB succeeds over CUT on TSO and fails
   over DFT, the fault is in the DFT path at size rather than in the host or the window.
 
-**TWO TK5 USERIDS ARE HELD: `HERC03` and `HERC04`** (`/c u=herc03`, `/c u=herc04`). `HERC01` and
-`HERC02` are free -- **both released themselves within the hour**, so re-probe before spending console
-time.
+### TSO/DFT at 200 KB was never a DFT problem, nor a size problem — diagnosed 2026-10-02
+
+**200 KB ROUND-TRIPS BYTE-IDENTICALLY OVER DFT ON TSO.** Measured from the CLI against TK5 the same
+day: `/tmp/dftbig-rt.log`, **35 `FileTransferData` frames, ZERO CUT frames, at 43x80**, both
+directions, `cmp` clean, `LISTDS` reporting `VB 1024`, a clean in-run `LOGOFF`, and `0` occurrences of
+`input inhibited`. A send-only run beforehand moved 204800 bytes with 18 DFT frames. **So both engines
+work at size and the protocol was never in question.** Scripts: the two `/tmp/dftbig-*.txt` step
+lists, which are `packages/cli/scripts/dft-tso.txt` with a 200 KB payload and a longer `Wait(Unlock)`.
+
+**AND OUR OWN STACK WAS CLEARED OFFLINE FIRST, which is the cheap half and should always be done
+first:** a full 200 KB upload driven through a real `Session` with a fake socket answered **13 GETs,
+moved 204800 bytes, fired 17 progress events and returned `ok:true`** — so no size-dependent fault
+exists in the engine, the chunking or the IAC doubling. (Reply frames measure 16451/16453/16455 bytes:
+~16 KB each, differing because `doubleIac` expands the payload. Hercules's own 3270 buffer is
+`BUFLEN_3270` 65536, `console.c:48`, so there is ample room — worth knowing before suspecting it.)
+
+**WHAT ACTUALLY FAILS IS THE GUI HARNESS'S TSO LOGON, AT ANY SIZE.** `live-transfer.py tso` scores
+**4 of 9** and `--big` scores **5 of 13**, and the 249-byte run fails IDENTICALLY to the 200 KB one --
+which is what retires "200 KB" from the description of this bug. The chain, now visible in one line
+because a timed-out scenario wait prints the screen:
+
+    transfer window: drained "***" after 0 Enter(s)
+    transfer window: wait TIMED OUT for "Primary Option|USERID|BROWSE" -- screen was
+      "ENTER CURRENT PASSWORD FOR HERC02- <redacted> HERC02 LOGON IN PROGRESS AT 18:23:02
+       ON OCTOBER 2, 2026 NO BROADCAST MESSAGES +-------------------------+ !"
+    transfer window: host x -> TIMED OUT waiting for "READY"
+    transfer window: host delete 'HERC02.GUIXFER.BIN' -> TIMED OUT waiting for "READY"
+
+**READ THAT SCREEN: it is the PASSWORD PANEL with the logon message appended, and it ends in a BOX
+BORDER — there is no `***` on it anywhere.** So `drain:***` breaks on its first poll and presses
+nothing, TSO is still mid-logon behind that panel, and the ISPF wait burns its whole 45 s budget.
+
+**THE ROOT CAUSE IS ONE STEP EARLIER, IN `tso_logon`, AND IT IS A TRAP THIS RUNBOOK ALREADY RECORDS
+FOR VM.** It waits for `LOGON IN PROGRESS|Welcome|***` and sends ONE Enter — but `LOGON IN PROGRESS`
+is printed **onto the password panel**, so the needle matches a screen that is still protected and
+still logging on. That Enter is consumed dismissing it (`live-drive.py`: *"the FIRST Enter is consumed
+dismissing the all-protected banner and its text is discarded"*), the welcome banner arrives
+afterwards, and nothing presses past it. **`live-drive.py` survives the SAME needle only because its
+`DRAIN***` settles 3 s before each check and loops 8 times**, so it is still pressing when the banner
+appears; the GUI's `drain:` polls 1.5 s and **breaks on absence**, which here is immediately.
+Same family as *"never match the bare string `CMS`"* and *"TSO has THREE more-output prompts, not
+two"*: **a needle that matches the screen you are leaving rather than the one you are waiting for.**
+
+**THE DRAIN IS FIXED AND LIVE-VERIFIED — `drain:PROMPT>TARGET`, 2026-10-02.** The stopping rule is
+now the ARRIVAL of the target panel rather than the absence of the prompt, because an absent prompt
+cannot be told from one not yet painted. Live on TK5: `drained "***" after 2 Enter(s) -- reached
+"Primary Option|USERID|BROWSE"`, where the old form pressed **0** Enters and never reached it.
+**The target takes `|` alternatives, and that was a second real defect, not a nicety:** with a bare
+`>Primary Option` the drain reported `NEVER REACHED` while the very next step `saw "USERID"` — TK5
+names this panel `USERID`, so a one-name target drains its full budget on a finished host. The
+one-needle spelling still means exactly what it did, since `drain:` is a shared seam.
+
+### THE TSO SCENARIO IS FIXED — 9 of 9, bytes byte-identical over DFT, 2026-10-03
+
+**Two defects, and the second is the one that mattered.** `live-transfer.py tso` now scores **9/9**
+with the 249-byte payload: both directions `done: 249 bytes`, `cmp` clean, and a clean in-run
+`LOGOFF` (`host LOGOFF -> saw "Logon"`), so no userid is stranded.
+
+**1. `sendInputEvent` FOLDS CASE, so `host:X` delivered a lowercase `x`.** Proved **offline, with no
+host and no userid**, by replaying a trace with the action log on: `host:X` printed
+`action: {"kind":"type","text":"x"}`. Nothing was lost — every character arrived, just lowercase,
+which is invisible against VM (CP folds) and fatal against TSO's ISPF `Option ===>`, whose exit is
+`X EXIT`. Fixed by sending `modifiers: ['shift']` **and keeping the `char` event**. Both halves are
+required: an earlier attempt added the modifier and suppressed `char` (copying `sendKeys`'s rule that
+a Ctrl-/Alt-held keystroke produces none) and delivery stopped **entirely** — strictly worse than the
+folding, and reverted. **Shift is not like Ctrl/Alt: a real Shift-held letter DOES produce a `char`.**
+
+**2. THE CLEAR WAS AN AID THAT RACED THE HOST'S REPAINT — this is what actually unblocked it.** The
+`host:` step sent Ctrl-C (CLEAR) before every command. Clear erases the screen and **the host
+repaints**; on TK5's ISPF the menu was already up and unlocked, Clear wiped it, and the characters
+went out while ISPF was still rebuilding its fields, so `Option ===>` came back **empty**. **The
+contrast is what proves it rather than suggests it:** the FORM's own `IND$FILE` text lands in that
+same field reliably, and `primeAndType` does it with purely **local** operations — `home()`,
+`eraseEOF()`, `typeString()` — sending no AID and so racing no repaint. The Clear is now conditional
+(`oia.isInhibited() || !screen.isFormatted()`), which keeps it for the VM `MORE...` state it was
+built for and skips it at a live prompt. The step logs `clear=` so the decision is visible.
+
+**A HARNESS CHECK WENT BLIND TWICE WHILE THIS WAS FIXED, both times on its own output format:** the
+logoff matcher is `host logoff` lowercase (TSO's step is now `host:LOGOFF`), and the new `clear=`
+line meant `next()` took the decision line instead of the result line — so a logoff that plainly
+succeeded reported `(no host step line)` and scored FAIL. Now case-insensitive **and** requiring
+`->`. The thing it stops reporting correctly is a stranded userid, which is why it is tested.
+
+**FIVE EARLIER HYPOTHESES WERE TESTED AND REFUTED** before the two real causes: drain ordering (the
+drain *was* separately broken, is fixed and verified, and the step still failed), the harness's own
+letter case, a keyboard lock after Clear, window focus, and `actionForKey` not mapping letters
+(tested directly — `x`, `X`, `$`, `'` and Shift-held all map correctly). **The offline replay probe
+is what ended the guessing, and it costs no userid** — drive `host:`-style sends under
+`TN3270_GUI_REPLAY` with the action log on and read which spellings produce which `type` action.
+Reach for it before a live run next time: six userid-runs were spent on the live route first.
+
+### SUPERSEDED — `X` does not exit ISPF (the intermediate reading, kept for its refutations)
+
+**The host's own words settle it.** After the `X` step the panel reads:
+
+    ISPF primary option menu   INVALID OPTION SELECTED
+    Option ===> IND$FILE GET 'HERC04.GUIXFER.BIN'
+
+**So typing WORKS — the whole 38-character command reached the field.** That retires three
+hypotheses in one line: it is **not** the drain (which now reports `reached`), **not** character case
+(`X` and `x` behave identically here, and the uppercase theory was tested and refuted), and **not** an
+inhibited keyboard (the field accepted the text). `IND$FILE` is a plain TSO command that runs only
+from `READY`; the session never left ISPF, so the host correctly refused it as a menu option. Every
+downstream failure — both transfers, the byte comparison, the stranded userid — follows from this one
+step.
+
+**WHAT IS NOT YET KNOWN is what this ISPF's exit actually is.** `live-drive.py` sends `b"X" + CR` here
+and has worked since 2026-08, so either the panel differs from what that harness meets, or the `X`
+needs to land somewhere this step does not put it — **the `host:` step sends Ctrl-C (Clear) before
+typing**, which on a menu may leave the cursor off `Option ===>`, and that Clear exists for VM's
+`MORE...` state rather than for ISPF.
+
+**THE PANEL HAS NOW BEEN READ IN FULL** (the diagnostic prints ~1900 characters, up from 240 — the
+truncation was itself hiding the answer). Its own option list says:
+
+    X EXIT  Terminate ISPF using log and list defaults
+    Enter END command to terminate ISPF.
+
+**So `X` IS the right option, and the step is not sending the wrong command — the keystrokes are not
+arriving as typed.** Two captures bracket it exactly:
+- With **plain characters**, a command DOES reach the field: `Option ===> IND$FILE GET
+  'HERC02.GUIXFER.BIN'`, with the host answering `INVALID OPTION SELECTED`. Lowercase arrives.
+- With **`modifiers: ['shift']`** on the uppercase letters, the field came back **EMPTY with ZERO
+  `INVALID OPTION`** — i.e. the keystrokes stopped arriving at all. **Strictly worse**, so that change
+  was REVERTED rather than shipped: it trades delivering the wrong case for delivering nothing, while
+  looking like a fix.
+
+**FIVE HYPOTHESES HAVE BEEN TESTED AND REFUTED ON THIS ONE STEP.** Recorded so a sixth attempt starts
+from evidence and not from this same list:
+1. **Drain ordering** (`drain` before `wait`) — refuted; the drain was separately broken and is now
+   fixed and verified, and the step still fails.
+2. **The harness's letter case** (`host:X` instead of `host:x`) — refuted; identical behavior, because
+   the seam folds case before it reaches the host either way.
+3. **A keyboard lock after Clear** — refuted; waiting on `oia.isInhibited()` instead of a flat 600 ms
+   changed nothing, and the OIA reads `4 A inhibited=false` at the timeout.
+4. **Window focus** (the transfer window being on top under Xvfb) — refuted; the `drain:` step shares
+   the same `win.show()`/`win.focus()` and its Enters DO reach the host.
+5. **`actionForKey` not mapping plain letters** — refuted by direct test: `x`, `X`, `$`, `'` and a
+   Shift-held letter all map correctly to `{kind:'type'}`.
+
+**WHAT THE EVIDENCE NOW POINTS AT, untested:** the difference between what works and what does not is
+`keyCode: 'Enter'` (works, via `drain:`) versus a literal character (reaches the field but folded), and
+adding a modifier array breaks delivery entirely. That is a `sendInputEvent` spelling problem in the
+`host:` step, not a host problem — `keyspec.ts` already documents that an invalid `keyCode` is
+delivered as an EMPTY event rather than refused, and `host:` is the one path that bypasses
+`parseKeySpec`. **The cheap next probe is offline, not live:** drive `host:`-style sends under
+`TN3270_GUI_REPLAY` with the action log on (`logActions` needs `SEAM.replay`, which is also the privacy
+gate that keeps typed text out of a live log) and see which spellings produce a `type` action at all.
+**No userid needed for that**, which matters: each failed live run strands one, because `host:logoff`
+is typed into the same wrong screen. Six TK5 userid-runs were spent reaching this point.
+
+**The `host:` step now prints the OIA and the screen on a timeout**, which is what makes the
+difference between a refused keystroke and an ignored command readable at all; a bare
+`TIMED OUT waiting for "READY"` cannot distinguish them, and that ambiguity is what cost the guesses.
+
+**HOW THE WRONG DIAGNOSIS SURVIVED, because the mechanism generalises:** the stall message
+interpolated **CUT's** byte counter on a **DFT** transfer, where it is zero by construction. So
+`stalled ... 0 bytes` was printed for every DFT stall whatever had moved, and "zero bytes moved, so
+this is not the timer" was derived from a number that could not have said anything else. The harness
+compounded it by asserting `len(counts) <= 1` as a PASS for TSO (*"DFT reported NO intermediate
+progress (correct for DFT)"*) — a check written before DFT progress existed, which now certifies the
+silence it was meant to expose. **Fixed: one `bytesMoved()` in `transferRun.ts`, and the same fix in
+the CLI's blocking loop.** See [[check-what-a-comparison-covers]].
+
+**ALL FOUR TK5 USERIDS WERE HELD when this was written** (`HERC01`-`HERC04`), each stranded by a
+failed GUI run whose `host:logoff` step timed out — **the harness defect strands a userid every time
+it fires.** `/c u=<userid>` at the MVS console clears one, but **re-probe first: HERC02 released
+itself overnight and HERC01 did so within the hour on 2026-10-01**, so a strand here is usually
+temporary. Probe cheaply by typing the userid at the VTAM panel and looking for `IKJ56425I ... IN USE`
+versus `ENTER CURRENT PASSWORD FOR`.
 
 **A KNOWN HARNESS GAP: `live-transfer.py`'s logoff step is unreliable on VM and you must check the
 host.** The transfer run leaves CMS running, so the logoff run RECONNECTS into an indeterminate

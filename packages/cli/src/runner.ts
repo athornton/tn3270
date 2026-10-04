@@ -733,8 +733,15 @@ export class Runner {
           }
           return {
             ok: false,
-            error: `transfer ${why} after ${transfer.bytesTransferred} bytes; ` +
-              `the host may still be in transfer mode (press Attn or Clear)${extra}`,
+            // FROM WHICHEVER ENGINE RAN, which this said `transfer.bytesTransferred` for -- the CUT
+            // counter, ZERO BY CONSTRUCTION on a DFT transfer because the CUT engine never ran. A
+            // DFT transfer that stalled after moving 150 KB reported `after 0 bytes`, and in the
+            // event-driven driver that same zero was read as evidence that no frames were arriving
+            // at all. A nonzero `dft.transferred` is proof DFT ran, since the CUT path releases the
+            // DFT registration on its first frame. See `transferRun.ts`'s `bytesMoved`.
+            error: `transfer ${why} after `
+              + `${dft.transferred > 0 ? dft.transferred : transfer.bytesTransferred} bytes; `
+              + `the host may still be in transfer mode (press Attn or Clear)${extra}`,
           };
         }
         await new Promise((r) => setTimeout(r, 10));
