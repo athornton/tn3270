@@ -1202,6 +1202,25 @@ own client. Unscheduled, and much larger than this project.
 Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
 worse than one that says which quarter is missing.
 
+- **`Attn` SENDS TELNET BREAK EVEN ON A TN3270E SESSION, WHERE x3270 SENDS `IAC IP`.** Found
+  2026-10-06, while reviewing a *comment* about Attn during the keypad work — so it is an
+  unverified divergence rather than an observed failure. `Session.sendAttn()` is unconditional
+  `IAC BREAK` (`core/src/telnet.ts:227`), which is right for a classic TN3270 session
+  (RFC 1576 §8). But x3270's `Attn_action` is documented *"ATTN key, per RFC 2355. **Sends IP,
+  regardless**"* and its first branch is `if (IN_E) { if (net_bound()) net_interrupt(0); }`
+  (`Common/kybd.c:978-1002`) — `IAC IP`, with `net_break` only on the non-E fallthrough. x3270
+  also records that its separate `Interrupt()` action "is now the same as the Attn action"
+  (`:1008`), so the two have *converged* there rather than staying distinct.
+  **A second, smaller divergence on the same key, in the branch we *do* take:** x3270's classic
+  arm sends `ctlr_read_modified(AID_PA1, false)` *before* `net_break(0)` — **PA1, then BREAK**,
+  commented "This is what PCOMM does in plain TN3270 mode" — while `Telnet.sendAttn()` sends the
+  two BREAK bytes alone. So even against the classic hosts here, our Attn is missing the leading
+  PA1 that x3270 and PCOMM send. Equally untested and equally unfixed, for the same reason.
+  **The asymmetry inside our own code is the strongest hint this is an oversight:**
+  `Session.sysreq()` (`core/src/session.ts:1601`) *does* branch on `inTn3270e()` and check the
+  negotiated function, and `sendAttn()` immediately below it does neither. **Nothing tests Attn in
+  E mode**, and neither Hercules host here offers TN3270E, so there is no witness either way —
+  which is also why it has not been "fixed" on a guess. Whoever takes it needs a TN3270E host.
 - **No client certificates.** TLS works (see *Connecting over TLS*), but only for
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
