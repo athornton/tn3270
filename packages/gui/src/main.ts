@@ -1,4 +1,6 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
+import {
+  app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, screen,
+} from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -7,13 +9,14 @@ import {
   resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
 } from '@tn3270/core';
 import {
-  applyAction, defaultSession, describeTlsError, resolveScheme, startTransfer, transferCommand,
-  type Action,
+  applyAction, defaultSession, describeTlsError, pasteString, resolveScheme, startTransfer,
+  transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
-import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
+import { drawList, blankColumns, bestScale, extractText, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
+import { buildMenuTemplate } from './menu.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -692,6 +695,94 @@ app.whenReady().then(async () => {
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+
+  /**
+   * THE APPLICATION MENU, and the app's first -- `setApplicationMenu` was never called before
+   * copy/paste needed somewhere to live. Installed HERE, after `send` exists, because Paste needs
+   * it to repaint.
+   *
+   * ## ITS ITEMS ARE INERT WHILE THE TRANSFER WINDOW HAS FOCUS
+   *
+   * AN ACCELERATOR REGISTERED HERE FIRES REGARDLESS OF WHICH WINDOW IS FOCUSED, so with the
+   * transfer window open a `Cmd-V` would paste into the SESSION BEHIND IT -- the operator would
+   * watch their clipboard land in a 3270 field while typing into an HTML form. That window's
+   * fields are HTML inputs and get Chromium's native clipboard behavior for free, so the right
+   * answer is to DECLINE rather than to forward. Same family as the recorded
+   * closing-a-parent-skips-the-child-close finding: two windows, one global mechanism, and the
+   * second window is the one nobody remembers.
+   *
+   * `isDestroyed()` BEFORE `isFocused()`, in that order: calling a method on a destroyed
+   * BrowserWindow throws, and a closed transfer window leaves `transferWin` set.
+   */
+  const transferHasFocus = (): boolean => {
+    const tw = transferWin;
+    return tw !== undefined && !tw.isDestroyed() && tw.isFocused();
+  };
+  // `[...]` AND NOT A CAST, AND NO CAST AT ALL BEYOND IT: `buildMenuTemplate` returns a `readonly`
+  // array and `buildFromTemplate` wants a mutable one, which is a real difference rather than a
+  // nuisance -- Electron is free to sort or splice the array it is handed. A spread gives it its
+  // own copy and keeps the template immutable on our side.
+  //
+  // THE REST TYPECHECKS STRUCTURALLY, which is the point of `menu.ts` not importing Electron:
+  // `MenuItemTemplate` is assignable to `MenuItemConstructorOptions` because its `role` is a
+  // LITERAL union rather than `string`. It was `string` first, and that does not overlap with
+  // Electron's 40-name union at all -- TypeScript refuses even an `as` between them -- so the
+  // alternative was an `as unknown as` double cast right here, which would have switched off
+  // checking on the whole template to paper over one field.
+  Menu.setApplicationMenu(Menu.buildFromTemplate(
+    [...buildMenuTemplate(process.platform, {
+      onCopy: () => {
+        if (transferHasFocus()) return;
+        // THROUGH THE RENDERER, because the SELECTION lives there -- main knows the screen but not
+        // what is selected on it. The global returns false when nothing is selected, which is not
+        // an error worth reporting: the operator pressed Copy with no selection.
+        void win.webContents.executeJavaScript('window.__tn3270Copy && window.__tn3270Copy()');
+      },
+      /**
+       * ASYNC, BECAUSE ELECTRON 44's CLIPBOARD IS PROMISE-BASED AND THERE IS NO SYNC ALTERNATIVE.
+       * `clipboard.readText(): Promise<string>` and `writeText(): Promise<void>`, modeled on the
+       * W3C `navigator.clipboard` API (`electron.d.ts:7002`, `:7012`); the old synchronous forms
+       * this feature's plan assumed are gone from the typings entirely. Nothing is lost -- a menu
+       * click is already asynchronous from the session's point of view -- but it must be AWAITED
+       * rather than voided, or a paste would read an empty string and silently do nothing.
+       *
+       * The `catch` is what keeps a clipboard failure from becoming an unhandled rejection:
+       * measured on this project's transfer window, `void` on a rejecting promise is what CREATES
+       * one. A clipboard the OS refuses (no X selection owner, a locked Wayland portal) must
+       * report and leave the session alone.
+       */
+      onPaste: () => {
+        if (transferHasFocus()) return;
+        void (async (): Promise<void> => {
+          const text = await clipboard.readText();
+          if (text === '') return;
+          const r = pasteString(session.keyboard, session.screen, text);
+          /**
+           * REPORTED TO THE OPERATOR, REMEDY FIRST, because the status line TRUNCATES and this
+           * project has already shipped a message whose only actionable phrase fell past the cut.
+           * A silently half-applied paste is the worst outcome available here: the operator cannot
+           * see how much of a dataset name arrived, and a short one may be a VALID different name.
+           */
+          if (r.reason !== undefined) {
+            win.webContents.send('error-message',
+              `paste stopped: ${r.reason} after ${r.typed} of ${r.typed + r.dropped} characters`);
+          } else if (r.dropped > 0) {
+            win.webContents.send('error-message',
+              `paste short: ${r.typed} of ${r.typed + r.dropped} characters (field full or protected)`);
+          }
+          // UNCONDITIONALLY, whatever the outcome: a paste is a LOCAL action and emits no `screen`
+          // event, so without this the window shows nothing until the host next speaks. Measured on
+          // the same path for `tab` in the web gateway, where it cost a 5-second test timeout.
+          send();
+        })().catch((err: unknown) => {
+          // A CLIPBOARD THE OS REFUSES is reportable and recoverable, not fatal: no X selection
+          // owner, a Wayland portal that declined. Carries no path, so it is safe to print on an
+          // ungated run -- the same rule the transfer window's load failure follows.
+          process.stdout.write(`paste failed: ${String(err)}\n`);
+        });
+      },
+    })],
+  ));
   /**
    * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
    * docstring names and the one nothing handled.
@@ -761,6 +852,35 @@ app.whenReady().then(async () => {
     // display decision, and this is the front end that owns this display. Recomputing the frame is
     // what makes the window resize, since `fit` sizes from the draw list.
     if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
+    /**
+     * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
+     * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the
+     * gateway has the operator's browser, and refuses the action outright for that reason.
+     *
+     * THE EXTRACTION HAPPENS ON THIS SIDE AND NOT IN THE RENDERER, and that is forced rather than
+     * chosen: a `DrawCell` carries a CG-order atlas glyph and NO character
+     * (`canvas/src/drawlist.ts:111-121`), so the renderer has no text to send and sends the
+     * RECTANGLE. This side already calls `resolve(snapshot)` every frame in `send` above, which is
+     * where `text` and `hidden` both live.
+     *
+     * `hidden` IS HONORED INSIDE `extractText`, which is the one line in this feature whose
+     * failure mode is a leaked credential -- `ResolvedCell.text` is still the real character in a
+     * password field. Mutation-verified in `canvas/test/selection.test.ts`.
+     *
+     * AN EMPTY RESULT DOES NOT TOUCH THE CLIPBOARD. Copying a blank region must not silently wipe
+     * whatever the operator had copied from somewhere else; doing nothing is the lesser surprise.
+     */
+    if (action.kind === 'copy') {
+      const snapshot = session.screen.snapshot();
+      const text = extractText(resolve(snapshot), snapshot.cols, action.rect);
+      if (text !== '') clipboard.writeText(text);
+      // THE LENGTH AND NEVER THE TEXT. The action log above is gated behind `--log-actions`
+      // precisely because a `type` action carries typed characters; this line is UNGATED and runs
+      // against a live host, and a copied rectangle can contain anything on the screen. A count is
+      // enough for `select.mjs` to assert against and cannot leak a field.
+      process.stdout.write(`copy: ${text.length} chars\n`);
+      return;
+    }
     // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
     // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own
     // business. A front end that forgot this arm would die on the keystroke rather than being

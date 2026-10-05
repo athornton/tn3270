@@ -23,13 +23,33 @@
 /** The platform strings this file distinguishes. `process.platform`'s type. */
 export type Platform = 'darwin' | 'linux' | 'win32' | string;
 
+/**
+ * The menu roles this file uses.
+ *
+ * A LITERAL UNION AND NOT `string`, which is what lets `main.ts` pass the template to
+ * `Menu.buildFromTemplate` with no cast at all: Electron's own `role` is a union of its 40-odd
+ * role names, and `string` does not overlap with it -- TypeScript rejects even an `as` between
+ * them ("neither type sufficiently overlaps"), which would have left a `as unknown as` double
+ * cast in main. Naming only the role we actually use keeps that honest AND documents the
+ * dependency; adding a role here is a one-word change.
+ */
+export type MenuRole = 'appMenu';
+
 export interface MenuItemTemplate {
   readonly label?: string;
-  readonly role?: string;
+  readonly role?: MenuRole;
   readonly accelerator?: string;
   readonly id?: string;
   readonly click?: () => void;
-  readonly submenu?: readonly MenuItemTemplate[];
+  /**
+   * MUTABLE, UNLIKE EVERY FIELD BESIDE IT, and that asymmetry is deliberate rather than an
+   * oversight to tidy. Electron's `MenuItemConstructorOptions.submenu` is a MUTABLE array, and a
+   * `readonly` one is not assignable to it -- so a `readonly` here would force a double cast in
+   * `main.ts` and switch off checking on the whole template to paper over one nested field.
+   * Electron is entitled to sort or splice what it is given; `buildMenuTemplate` hands out a fresh
+   * array on every call, so there is nothing shared for a caller to corrupt.
+   */
+  readonly submenu?: MenuItemTemplate[];
 }
 
 /**
