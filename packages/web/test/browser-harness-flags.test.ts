@@ -108,3 +108,100 @@ describe('browser-keys.mjs', () => {
     expect(harness).toMatch(/finally\s*\{[\s\S]*server\.kill\(\)/);
   });
 });
+
+/**
+ * `browser-clicks.mjs` gets the same treatment, and needs it more than its sibling.
+ *
+ * It is the ONLY thing in the repo that loads the web gateway's keypad overlay in a browser, so
+ * its silent rot would leave three mechanisms with no cover at all: the client-side `Ctrl+K`
+ * interception, `index.html`'s import map, and `httpstatic.ts` serving the five modules behind it.
+ * Each of those failed at least once while this harness was being written, and two of them
+ * reported the WRONG FILE when they did.
+ */
+const clicksHarness = readFileSync(
+  join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts', 'browser-clicks.mjs'), 'utf8');
+
+describe('browser-clicks.mjs', () => {
+  it('passes the three flags without which it hangs or lies', () => {
+    // `--no-sandbox`/`--disable-gpu`: no GL on this box, and a window HANGS without the second.
+    // `--no-proxy-server` IS THE SILENT ONE -- measured: HTTP_PROXY is set here and Chromium
+    // routes even a loopback request through it, ignoring `no_proxy`. The window opens,
+    // `did-fail-load` never fires, and the gateway logs not one HTTP request.
+    for (const flag of ['--no-sandbox', '--disable-gpu', '--no-proxy-server']) {
+      expect(clicksHarness, `missing ${flag}`).toContain(flag);
+    }
+  });
+
+  it('opens the overlay with a REAL Ctrl+K before clicking anything', () => {
+    // The overlay starts hidden on every page load -- the no-persistence decision -- and main's
+    // seam refuses to click an invisible button. So without the chord every label reports
+    // `NO BUTTON` and the run cannot pass; and delivering it as a real chord is what makes this
+    // run ALSO prove `Ctrl+K` reaches the client-side interception.
+    expect(clicksHarness).toMatch(/const SHOW_KEYPAD = 'Ctrl\+K'/);
+    expect(clicksHarness).toMatch(/TN3270_GUI_KEYS:\s*SHOW_KEYPAD/);
+  });
+
+  it('expects NO toggleKeypad in the gateway log, unlike the Electron twin', () => {
+    /**
+     * THE DIFFERENCE BETWEEN THE TWO HARNESSES *IS* THE CLIENT-SIDE INTERCEPTION, asserted from
+     * the far side. `clicks.mjs`'s expectation opens with a `toggleKeypad` because in Electron
+     * that action crosses IPC and main logs it; here it never leaves the browser, so a tenth
+     * entry in the gateway's log would mean the interception had broken.
+     *
+     * Pinned as the SHAPE of `expected`, since that is what encodes the claim.
+     */
+    expect(clicksHarness).toMatch(/const expected = CASES\.map\(\(c\) => canon\(c\.action\)\)/);
+    expect(clicksHarness, 'a toggleKeypad in `expected` would contradict the interception')
+      .not.toMatch(/expected = \[canon\(\{ kind: 'toggleKeypad' \}\)/);
+  });
+
+  it('clicks BY LABEL and keeps the two chordless keys among its cases', () => {
+    // By label because a coordinate list would be a second copy of the layout that passes while
+    // the layout is wrong. `SysRq` and `NewLn` have NO keyboard chord in any front end, so for
+    // those two the button is the only route that exists -- a dead button is a lost capability,
+    // not an inconvenience.
+    expect(clicksHarness).toMatch(/TN3270_GUI_CLICKS:\s*labels/);
+    expect(clicksHarness).toMatch(/const labels = CASES\.map\(\(c\) => c\.label\)\.join\(','\)/);
+    for (const label of ['SysRq', 'NewLn']) {
+      expect(clicksHarness, `${label} left the CASES table`).toContain(`'${label}'`);
+    }
+  });
+
+  it('bails separately on NO BUTTON, which is the overlay-not-shown case', () => {
+    // A different diagnosis from a wrong action: the overlay was not visible, or the label is not
+    // in the table. Merging it into the sequence comparison would report "0 actions" and point at
+    // the socket.
+    expect(clicksHarness).toContain('clicks: NO BUTTON');
+    expect(clicksHarness).toMatch(/did Ctrl\+K open it/);
+  });
+
+  it('checks the seam RAN, so an ignored TN3270_GUI_CLICKS cannot pass', () => {
+    // URL mode ignored this seam entirely until this feature wired it, which is exactly the state
+    // where a comparison of zero against zero looks green.
+    expect(clicksHarness).toContain('clicks: sent');
+  });
+
+  it('bails on a SIGNAL before reading status, so a crash cannot pass', () => {
+    // Measured here: a SIGSEGV gives `status=null, signal='SIGSEGV'` with stdout intact, so a
+    // bare `status !== 0` check once scored a crashed client as a pass.
+    const sigAt = clicksHarness.indexOf('result.signal');
+    const statusAt = clicksHarness.indexOf('result.status !== 0');
+    expect(sigAt).toBeGreaterThan(-1);
+    expect(sigAt).toBeLessThan(statusAt);
+  });
+
+  it('does NOT use spawnSync for the browser, and tears the gateway down', () => {
+    // The bug that made its sibling lie: `spawnSync` blocks the event loop, so the gateway's
+    // output sits unread in its pipe and the harness parses an empty transcript -- reporting the
+    // product broken while it was fine.
+    expect(clicksHarness).not.toMatch(/spawnSync\s*\(/);
+    expect(clicksHarness).toMatch(/finally\s*\{[\s\S]*server\.kill\(/);
+  });
+
+  it('compares all four packages dist against src, canvas included', () => {
+    // `keypadUi.js` lives in `canvas` now, so a stale build there is a run that clicks
+    // yesterday's buttons and reports ok. Per package, never one `max` across all of them: a
+    // fresh build of one would mask a stale build of another.
+    expect(clicksHarness).toMatch(/\['gui', 'canvas', 'web', 'frontend'\]/);
+  });
+});
