@@ -51,6 +51,7 @@
  */
 
 import { KEYPAD_KEYS, type KeypadKey } from './keypad.js';
+import { BINDING_INTENT } from './bindings.js';
 
 export interface KeypadBlock {
   /**
@@ -223,3 +224,43 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     keys: ['Enter', 'Xfer'].map(byLabel),
   },
 ]);
+
+/**
+ * Tooltip text for a key: its name, plus the binding note when there is one.
+ *
+ * ## THE DATA IS UNEVEN IN TWO DIFFERENT WAYS, AND BOTH HAVE TO BE HANDLED
+ *
+ * MEASURED 2026-10-06:
+ *
+ *  - `BINDING_INTENT` has NO ENTRY AT ALL for 22 of the 48 keys -- PF14-24, PF2-11, `SysRq`
+ *    and `NewLn`.
+ *  - It has an entry with NO `note` for a further 15 -- PF1, PF3, PA2, PA3, `Home`, all four
+ *    arrows, `Reset`, `ErInp`, `Tab`, `BkTab`, `Del`, `BkSp`. `note` is OPTIONAL on `Binding`
+ *    (`bindings.ts:32`).
+ *
+ * SO "FOUND A BINDING" AND "HAS PROSE" ARE DIFFERENT QUESTIONS, and conflating them is not a
+ * cosmetic slip: the first draft of this function tested only `binding === undefined` and then
+ * read `binding.note.startsWith(...)`, which throws on all 15 -- including `Tab`, `Home` and
+ * every arrow, i.e. most of the cursor cluster. `note === undefined` is the condition that
+ * matters, and it subsumes the missing-entry case through the optional chain below.
+ *
+ * `name` IS THEREFORE THE FLOOR AND THE NOTE IS THE BONUS. Nothing is ever blank, and no prose
+ * has to be invented to fill a table -- which matters because the 22 with no entry are mostly PF
+ * keys, whose meaning is HOST-DEPENDENT and cannot honestly be described beyond their number.
+ *
+ * ## MATCHED ON THE ACTION, NOT THE LABEL
+ *
+ * `BINDING_INTENT`'s `key` field is a keyboard chord -- `'Ctrl-C'`, `'Enter'` -- and not a keypad
+ * label. Matching on it would silently find nothing for most keys, and "silently finds nothing"
+ * is indistinguishable here from "has no note": every tooltip would quietly degrade to the bare
+ * name and no test asserting non-emptiness would notice.
+ */
+export function tooltipFor(key: KeypadKey): string {
+  const wanted = JSON.stringify(key.action);
+  const note = BINDING_INTENT.find((b) => JSON.stringify(b.action) === wanted)?.note;
+  if (note === undefined) return key.name;
+  // Do not repeat the name when the note already opens with it: several do, and
+  // "Enter -- the Enter AID" must not become "Enter -- Enter -- the Enter AID".
+  if (note.startsWith(key.name)) return note;
+  return `${key.name} -- ${note}`;
+}

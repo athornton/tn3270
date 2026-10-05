@@ -47,6 +47,18 @@ export type { Action } from './keymap.js';
 export { KEYPAD_KEYS, KEYPAD_ROWS, KEYPAD_KEY_WIDTH } from './keypad.js';
 export type { KeypadKey } from './keypad.js';
 
+// The DOM-facing view of the same 48 keys: semantic blocks and tooltip text. SEPARATE from
+// `KEYPAD_KEYS` rather than folded into it, because `row`/`col` there are cell coordinates for a
+// blitter -- six cells per key, sized to fit an 80-column screen -- and a DOM layout uses none of
+// that. `tooltipFor` is the first thing in this project to show `BINDING_INTENT`'s prose to a user.
+//
+// NOTE FOR ANYONE IMPORTING THESE INTO BROWSER-LOADED CODE: take them from `./keypadView.js`
+// DIRECTLY, never from this barrel. The barrel re-exports `tls.js`, whose `node:net`/`node:tls`/
+// `node:fs` imports no browser can resolve, and the failure is a BLANK WINDOW with no error at
+// all. `keypadModule.test.ts` walks the built graph to pin that boundary.
+export { KEYPAD_BLOCKS, tooltipFor } from './keypadView.js';
+export type { KeypadBlock } from './keypadView.js';
+
 // The action dispatch. The one translation from a named action onto the session that
 // every front end needs and none should own -- the CLI's command table, the TUI's keymap
 // and the GUI's KeyboardEvent mapper all produce these same names.

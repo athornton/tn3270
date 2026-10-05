@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { KEYPAD_BLOCKS } from '../src/keypadView.js';
-import { KEYPAD_KEYS } from '../src/keypad.js';
+import { KEYPAD_BLOCKS, tooltipFor } from '../src/keypadView.js';
+import { KEYPAD_KEYS, type KeypadKey } from '../src/keypad.js';
 
 describe('KEYPAD_BLOCKS', () => {
   it('accounts for EVERY key exactly once', () => {
@@ -59,3 +59,69 @@ describe('KEYPAD_BLOCKS', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('tooltipFor', () => {
+  it('uses the key NAME for a key with no BINDING_INTENT entry', () => {
+    // MEASURED 2026-10-06: `BINDING_INTENT` has an ENTRY for 26 of the 48 keys. The 22 without
+    // are PF14-24, PF2-11, SysRq and NewLn. Those must still get a tooltip, or a third of the
+    // window is bare.
+    expect(tooltipFor(byLabelInTest('PF14'))).toBe('PF14');
+    expect(tooltipFor(byLabelInTest('SysRq'))).toBe('System Request');
+  });
+
+  it('uses the key NAME when a binding EXISTS but carries no note', () => {
+    /**
+     * THE CASE THAT IS NOT THE SAME AS "no entry", AND IT IS THE BIGGER OF THE TWO. `note` is
+     * OPTIONAL on `Binding` (`bindings.ts:32`), and MEASURED 2026-10-06, 15 keypad keys match an
+     * entry that has none: PF1, PF3, PA2, PA3, Home, all four arrows, Reset, ErInp, Tab, BkTab,
+     * Del, BkSp -- most of the cursor cluster among them.
+     *
+     * So "found a binding" and "has prose" are different questions. Reading `binding.note` after
+     * checking only `binding === undefined` throws on all 15, which is what the first draft of
+     * `tooltipFor` did.
+     */
+    expect(tooltipFor(byLabelInTest('Tab'))).toBe('Tab');
+    expect(tooltipFor(byLabelInTest('Home'))).toBe('Home');
+    expect(tooltipFor(byLabelInTest('<'))).toBe('Cursor left');
+  });
+
+  it('APPENDS the BINDING_INTENT note when there is one', () => {
+    // `BINDING_INTENT` holds prose nothing currently shows a user, which is the cheapest visible
+    // win in this whole feature. Matched on the ACTION, not the label: its `key` field is a chord
+    // like 'Ctrl-C', not a keypad label, so matching on it would silently find nothing for most
+    // keys -- and "silently finds nothing" is indistinguishable from "has no note".
+    const tip = tooltipFor(byLabelInTest('Clear'));
+    expect(tip.startsWith('Clear')).toBe(true);
+    expect(tip).toContain('MORE...');          // from the Clear note
+    expect(tip.length).toBeGreaterThan('Clear'.length);
+  });
+
+  it('NEVER returns an empty tooltip, for any of the 48', () => {
+    // The property, rather than a spot check: a blank `title` attribute is a tooltip that
+    // flickers and says nothing, which is worse than none at all.
+    for (const key of KEYPAD_KEYS) {
+      expect(tooltipFor(key), `${key.label} has no tooltip`).not.toBe('');
+    }
+  });
+
+  it('never repeats the name when the note already starts with it', () => {
+    // Guards the join, not the data: "Enter -- the Enter AID ..." must not come out as
+    // "Enter -- Enter -- ...". Checked across all 48 rather than on one example, because which
+    // notes happen to open with their own key name is data that can change.
+    for (const key of KEYPAD_KEYS) {
+      expect(tooltipFor(key)).not.toMatch(/^(.+?) -- \1/);
+    }
+  });
+});
+
+/**
+ * Local lookup, so these tests do not depend on `keypadView`'s private helper.
+ *
+ * THROWS rather than returning undefined: a typo in a label here would otherwise make
+ * `tooltipFor(undefined)` the thing under test, which fails for the wrong reason.
+ */
+function byLabelInTest(label: string): KeypadKey {
+  const k = KEYPAD_KEYS.find((x) => x.label === label);
+  if (k === undefined) throw new Error(`test asked for a missing label ${label}`);
+  return k;
+}
