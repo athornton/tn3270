@@ -1,10 +1,55 @@
-# Handoff — state as of 2026-10-05
+# Handoff — state as of 2026-10-05 (copy/paste built)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-05
+## START HERE — NEXT ACTION, 2026-10-05 (end of day)
+
+**GUI COPY AND PASTE IS BUILT — ALL TEN TASKS — ON BRANCH `gui-copy-paste`, NOT YET MERGED.**
+Spec `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md`, plan
+`docs/superpowers/plans/2026-10-05-gui-copy-paste.md`.
+
+**THE FULL GATE, MEASURED ON THE BRANCH TIP:** build and typecheck clean, **2312 tests in 93 files**
+(from 2274 in 89), `shot.mjs` 3/3, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs` 10/10,
+**`select.mjs` 3/3 (new)**, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11, `pty-smoke.py`
+**12 PASS / 0 FAIL**. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing here touches
+telnet negotiation or the stream layer, said rather than implied. **NO LIVE RUN AT ALL**, which is
+the honest gap: see below.
+
+**WHAT IT DOES.** Drag to select (rectangular), copy from an Edit menu — the app's first — with
+**platform-split accelerators**: `Cmd-C`/`Cmd-V` on macOS, `Ctrl-Shift-C`/`Ctrl-Shift-V` elsewhere,
+because **`Ctrl-C` is the Clear AID and stays Clear**. Paste types the clipboard in with x3270's
+measured rules and **never sends Enter**. Non-display fields contribute a space, so a password
+cannot be copied out.
+
+**THE ONE THING STILL UNWITNESSED: A LIVE PASTE.** Offline evidence is complete and strong — the
+Xvfb harness drives a real drag and reads the OS clipboard back, asserting exact text — but "a
+38-character dataset name lands in TSO's `Option ===>` field" needs a TK5 userid and has not been
+run. The recipe and what it must confirm (including that no Enter was sent) are in
+`docs/live-testing.md` under *Executed so far*. **Probe the userids first and remember a failed TSO
+run strands one.** macOS is also unverified, since no harness here can press `Cmd`.
+
+**FOUR THINGS WORTH CARRYING, each of which cost real time:**
+1. **THE PLAN HAD NINE DEFECTS AND THE SOURCE CAUGHT ALL OF THEM.** Two would not have compiled,
+   one asserted an outcome that was simply wrong, three were caught by existing guards the plan
+   never mentioned, and one would have **crashed the web gateway**. Details in the commits; the
+   habit is the point, and it is the same one that found six plan defects in stage 2a.
+2. **THE SPEC'S "the gateway gets copy FREE" WAS WRONG** — transmitting the action is free,
+   returning the TEXT is not. `copy` is now rejected at decode beside `transferForm`, and **that
+   rejection is load-bearing: without it the first browser copy ends the gateway process.**
+3. **`select.mjs` IS THE ONLY COVER THE GESTURE HAS, and it was mutation-proved.** With the
+   `mousedown` selection branch disabled, build, typecheck and all 2312 tests stay green while the
+   harness reports `copied=false`. Do not trust the fast gate for anything in `renderer.ts`.
+4. **ELECTRON 44's CLIPBOARD IS PROMISE-BASED.** `readText()` returns `Promise<string>`; the sync
+   forms are gone from the typings. The plan assumed otherwise and would have pasted nothing.
+
+**NEXT: FINISH THE BRANCH.** Merge `--no-ff` per the standing rule — confirm `git merge-base` equals
+`main` beforehand and that the merge reports **exactly this branch's commits** (the check that once
+caught 44 riding along), then **re-run the full gate ON THE MERGE COMMIT**. Then **(0b), THE GUI
+KEYPAD WINDOW**, which the user has already asked for next.
+
+## SUPERSEDED — NEXT ACTION, earlier on 2026-10-05
 
 **THE ROADMAP IS REORDERED BY THE USER, 2026-10-05: GUI COPY AND PASTE COMES FIRST, AHEAD OF THE
 GUI KEYPAD WINDOW.** The keypad window is not cancelled and not demoted in importance — it is the
@@ -612,8 +657,9 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
 
    **(0a) the GUI transfer UI** — ~~specced and planned~~ **DONE 2026-10-01, MERGED `--no-ff` at
    `a363d39` and pushed**, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
-   **(0ab) GUI COPY AND PASTE — INSERTED HERE BY THE USER 2026-10-05, AND NOW THE NEXT ONE TO
-   BUILD**, ahead of the keypad window. Spec and plan are both written and approved:
+   **(0ab) GUI COPY AND PASTE — INSERTED HERE BY THE USER 2026-10-05, AND BUILT THE SAME DAY**
+   on branch `gui-copy-paste` (all ten tasks; gate numbers in START HERE above; live paste still
+   unwitnessed), ahead of the keypad window. Spec and plan are both written and approved:
    `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
    `docs/superpowers/plans/2026-10-05-gui-copy-paste.md` (ten tasks). **It is not one of the
    two-features-×-two-front-ends four** — it is a fifth item, which is why it is lettered (0ab)

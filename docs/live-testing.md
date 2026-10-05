@@ -9,6 +9,52 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **COPY AND PASTE IN THE GUI — OFFLINE EVIDENCE COMPLETE, LIVE PASTE NOT YET WITNESSED,
+  2026-10-05.** Said in that order deliberately, because the offline half is strong and the live
+  half is simply absent rather than failing.
+
+  **What IS proven, and how.** `packages/gui/scripts/select.mjs` drives a real drag under Xvfb —
+  Chromium `mouseDown`/`mouseMove`/`mouseUp` through `sendInputEvent`, the renderer's own `cellAt`,
+  `sendAction`, the IPC hop, main's `extractText` over `resolve(snapshot)`, `clipboard.writeText`,
+  and then the OS clipboard **read back through Electron**. **3/3 cases, asserting the EXACT text**
+  against the replayed fixture's screen: one row with trailing blanks trimmed (`" MENU"`), two rows
+  joined by a newline, and a column out of the middle of a row. Nothing short of the read-back is
+  honest — every earlier step can pass while the text never reaches the clipboard.
+
+  ```bash
+  npm run build && npx tsc --build --force packages/gui packages/web
+  node packages/gui/scripts/select.mjs        # 3/3 selection cases passed
+  ```
+
+  **The mutation that makes that number mean something.** Put `if (Date.now() > 0) return;` at the
+  top of the `mousedown` selection branch in `canvas/src/renderer.ts`. `npm run build`,
+  `npm run typecheck` and **all 2312 unit tests stay green** while `select.mjs` reports
+  `copied=false` and an empty clipboard on all three cases. The entire gesture is dead and the fast
+  gate cannot see it — which is the whole argument for this harness existing, and the same shape
+  `clicks.mjs` measured for the keypad in 2026-09-16.
+
+  **Paste's semantics are unit-tested, not live-witnessed.** Every rule is measured from
+  `Common/kybd.c` and pinned in `frontend/test/paste.test.ts`, including the two that would have
+  been guessed wrong — `\n` is Newline and **not** Enter (`:3928` against `:3957`), and `\f` types a
+  space where outside a paste it is Clear (`:3918` against `:3920`). The `just_wrapped` suppression
+  is mutation-verified. What none of that proves is that **a 38-character dataset name lands in
+  TSO's `Option ===>` field on a real host.**
+
+  **The live check, when a userid is free.** Probe first — type the userid at the VTAM panel and
+  compare `IKJ56425I ... IN USE` against `ENTER CURRENT PASSWORD FOR` — and remember **a failed TSO
+  run strands one**, because its `host:logoff` is typed into whatever wrong screen the failure left
+  behind. Then: log on, reach ISPF, put a dataset name on the clipboard, press the paste accelerator
+  over the `Option ===>` field, and confirm the characters land and that **no Enter was sent** (the
+  panel must still be waiting, not submitted). **If it fails, use the offline replay probe BEFORE a
+  second live run** — `TN3270_GUI_REPLAY` plus the action log settled in one line what five live
+  hypotheses could not, and it costs no userid.
+
+  **Not verified, stated rather than left to be inferred:** the live paste above; macOS, where the
+  accelerators differ (`Cmd-C`/`Cmd-V`) and no harness on this box can press them; and the **web
+  gateway, which refuses both copy and paste** — the gesture runs there (same renderer) but the
+  action is rejected at decode, because the gateway would extract onto its own machine. Both web
+  halves are committed before packaging.
+
 - **THE `-ddm` DEFAULT FLIP IS LIVE-VERIFIED ON BOTH HOSTS, WITH NO FLAG ON EITHER COMMAND LINE —
   2026-09-29.** The point of the run is the *absent* flag: before the flip these exact command lines
   produced zero DFT frames.

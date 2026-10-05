@@ -232,9 +232,46 @@ manual's permitted set (p. 4-13).
 **`Ctrl-K` shows and hides the virtual keypad**, and `Alt-K` does the same — `Ctrl-K` is c3270's
 terminal binding (`Common/fb-c3270:191`) and `Alt-K` is how its Windows keymap spells the same
 command, so both are honored here rather than one being a divergence. The window grows and
-shrinks to fit; nothing above the keypad moves. **Clicking a button is the only thing the mouse
-does.** A press highlight is drawn locally and never reaches the host, so it cannot lag behind
-your finger over a WebSocket.
+shrinks to fit; nothing above the keypad moves. A press highlight is drawn locally and never
+reaches the host, so it cannot lag behind your finger over a WebSocket.
+
+### Copy and paste
+
+**Drag across the screen to select, then copy from the Edit menu.** The accelerators are
+**platform-split, and that is forced rather than stylistic: `Ctrl-C` is the Clear AID** and stays
+Clear everywhere. So it is **`Cmd-C` / `Cmd-V` on macOS**, where `Cmd` is free, and
+**`Ctrl-Shift-C` / `Ctrl-Shift-V` on Linux and Windows** — the convention gnome-terminal and VS
+Code's terminal adopted for exactly this collision. "Ctrl-C copies when something is selected" was
+considered and rejected: it makes a destructive AID conditional on invisible state, and its failure
+mode is a missed Clear on a locked `MORE...` screen.
+
+**Selection is RECTANGULAR**, not linear. A 3270 panel is columnar — datasets, LRECLs and option
+lists sit in columns — so the common want is one column of a list without the labels either side,
+and linear selection on a fixed grid has a question with no good answer: whether to include the
+trailing spaces at the end of every row. x3270 selects rectangularly on a 3270 screen for the same
+reason. **Trailing whitespace is trimmed per LINE**, which is what makes a copied column paste
+usefully; interior spaces are kept, because they carry the panel's alignment.
+
+**A non-display field contributes a SPACE, never its character.** Password fields cannot be copied
+out, by construction rather than by convention — the check is mutation-verified in the test suite.
+
+**Paste types the text in; it never presses Enter.** A newline in pasted text means *next field*,
+not *submit* — which is what x3270's own paste does (`Common/kybd.c:3928`, where `\n` becomes
+`Enter_action` only when **not** pasting). Quietly submitting a half-filled panel to a live host is
+not a trade this makes. A form feed types a space, where outside a paste it would be Clear and would
+wipe the screen; a carriage return is dropped, so CRLF text does not gain a stray character per
+line. If a field fills up or refuses a character the paste stops and the status line says how much
+got in.
+
+**The selection is cleared by any keystroke that does something, and by every repaint from the
+host** — a highlight over changed text would offer you a copy of something that is no longer there.
+
+**The web gateway has NEITHER copy nor paste yet**, and refuses both. The reason is whose machine
+the bytes are on: the gateway would extract the text onto its own filesystem, not yours, and
+returning it to your browser needs a protocol message that does not exist yet. Both are committed
+before packaging — see the roadmap. **Clicking a keypad button and selecting text are the only
+things the mouse does**; the light pen is not implemented, and text selection is deliberately not
+built on it (see *Remaining* for why that distinction matters).
 
 **Sys Req and Newline have no chord, in any front end, and that is deliberate.** c3270 defines no
 Sys Req chord either; Newline's would be `Ctrl-J`, which *is* `\n` (0x0a) and already means Enter
@@ -985,18 +1022,21 @@ Done:
    keys in the TUI, which has no mouse. It brought canvas hit-testing with it, and made **Dup,
    Field Mark, Sys Req and Newline** reachable — four keys `core` could do and no interactive
    front end could press. Proven with real mouse events (`clicks.mjs`) and in pixels, identically
-   in Electron and in the browser. **The mouse does keypad buttons and nothing else.** Text
-   selection, click-to-place-cursor and the light pen are all still absent, and text selection is
-   **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so drag-to-select would
-   transmit on every copy attempt. x3270 keeps the two apart deliberately. **Sys Req was
+   in Electron and in the browser. At the time this was written the mouse did keypad buttons and
+   nothing else; **drag-to-select landed later, for the GUI's copy and paste** (see *Using the
+   GUI*). **Click-to-place-cursor and the light pen are still absent**, and text selection is
+   **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so a selection built on it
+   would transmit on every copy attempt. x3270 keeps the two apart deliberately, and so does this
+   implementation — the selection path sends no AID at all. **Sys Req was
    reachable but inert on this branch until the classic path landed**; it now sends a test
    request read, **live-verified on both hosts 2026-09-21** — see *What is not implemented*.
 
 Remaining, in the order the author wants it.
 
-**REORDERED AGAIN 2026-10-05: GUI COPY AND PASTE goes first of all of these, ahead of the GUI
-keypad window.** It is a fifth UI item rather than one of the four below, and it is next to be
-built: specced and planned, `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
+**REORDERED AGAIN 2026-10-05: GUI COPY AND PASTE went first of all of these, ahead of the GUI
+keypad window — and is now BUILT** (see *Using the GUI*; the live paste against a real host is the
+one piece still unwitnessed). It is a fifth UI item rather than one of the four below:
+`docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
 `docs/superpowers/plans/2026-10-05-gui-copy-paste.md`. The reason is the user's experience of the
 shipped GUI — *neither copying text out of the window nor pasting into it was possible*, which is a
 **behaves-like-a-normal-application** gap and so belongs before packaging, on the same argument that
@@ -1214,15 +1254,17 @@ worse than one that says which quarter is missing.
   answered that form with **nothing at all**, because option 40 is something *we* do and the
   handler only reacted to options the *host* does. Both now route through one teardown, and
   the second has a recorded-host witness in `wont-tn3270e.trc`.
-- **The mouse does keypad buttons and NOTHING ELSE**, in both canvas front ends. A `mousedown`
-  on a keypad button fires that button's action; a click anywhere else — on the screen, on a gap
-  between buttons, or anywhere at all with the keypad hidden — is ignored. So there is **no
-  click-to-place-cursor, no drag-to-select and no light pen**, and the right and middle buttons do
-  nothing at all (deliberately: a right-click on `Clear` would otherwise send it to a live host
-  while the context menu opened over the label). Mouse support is three separate jobs and only
-  the first is built. Whoever takes the others: text selection is **not** the light pen, and must
-  not be implemented with `lightpen_select()`, which sends an AID and sets MDT — drag-to-select
-  would then transmit on every copy attempt. x3270 keeps them apart deliberately
+- **The mouse does keypad buttons and TEXT SELECTION, and nothing else.** A `mousedown` on a
+  keypad button fires that button's action; a press on the screen starts a rectangular selection
+  for copy (**GUI only** — the web gateway runs the same renderer, so the gesture works there, but
+  the gateway refuses the `copy` action because it would extract onto its own machine rather than
+  yours). A press on a gap between buttons, or anywhere with the keypad hidden and off the screen
+  region, is ignored, and the right and middle buttons do nothing at all (deliberately: a
+  right-click on `Clear` would otherwise send it to a live host while the context menu opened over
+  the label). So there is still **no click-to-place-cursor and no light pen**. Mouse support is
+  three separate jobs and two are built. Whoever takes the light pen: text selection is **not** it,
+  and must not be implemented with `lightpen_select()`, which sends an AID and sets MDT — a
+  selection built on that would transmit on every copy attempt. x3270 keeps them apart deliberately
   (`wc3270/screen.c:2357`).
 - **SYS REQ'S CLASSIC PATH IS LIVE-VERIFIED (2026-09-21); ITS TN3270E PATH STILL HAS NO WITNESS.**
   The keypad's `SysRq` button, the TUI overlay's entry and the CLI's `SysReq()` all put bytes on the
