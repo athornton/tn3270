@@ -121,11 +121,18 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // separate `Interrupt()` action. x3270 does close to the OPPOSITE, read from
     // `Common/kybd.c:978-1002`: `Attn_action`'s docstring is "ATTN key, per RFC 2355. Sends IP,
     // regardless." and its FIRST branch is `if (IN_E) { if (net_bound()) net_interrupt(0); ... }`.
-    // `net_break` is only the `IN_3270` fallthrough for a CLASSIC session, and even there x3270
-    // sends `ctlr_read_modified(AID_PA1, false)` BEFORE `net_break(0)` -- PA1 then BREAK, with the
-    // comment "This is what PCOMM does in plain TN3270 mode". And `Interrupt_action` is not a
-    // separate key at all any more: its docstring ends "This is now the same as the Attn action"
-    // (`:1008`), so x3270 says the two have CONVERGED.
+    // `net_break` is only the `IN_3270` fallthrough for a CLASSIC session. And `Interrupt_action`
+    // is not a separate key at all any more: its docstring ends "This is now the same as the Attn
+    // action" (`:1008`), so x3270 says the two have CONVERGED.
+    //
+    // A PA1-BEFORE-BREAK CLAIM WAS ALSO DRAFTED HERE AND IS REMOVED, BECAUSE IT IS NOT TRUE OF
+    // THE VERSION THIS PROJECT CITES. A newer upstream `Attn_action` does send
+    // `ctlr_read_modified(AID_PA1, false)` before `net_break(0)`, commented "This is what PCOMM
+    // does in plain TN3270 mode" -- but that line does not exist in SUITE3270 4.5, which is the
+    // tree in `~/src/suite3270-4.5` that every other citation in this repo is measured against
+    // (`grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` -> zero hits there; the `IN_3270` arm is
+    // a bare `net_break(0)`). Mixing versions is how a wrong wire constant gets in: cite the tree
+    // we build and test against, and if a newer one diverges say WHICH version did what.
     //
     // ## FINDING: OUR ATTN DIVERGES FROM x3270 IN TN3270E MODE, AND IS UNTESTED THERE
     //

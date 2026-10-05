@@ -1211,11 +1211,15 @@ worse than one that says which quarter is missing.
   (`Common/kybd.c:978-1002`) — `IAC IP`, with `net_break` only on the non-E fallthrough. x3270
   also records that its separate `Interrupt()` action "is now the same as the Attn action"
   (`:1008`), so the two have *converged* there rather than staying distinct.
-  **A second, smaller divergence on the same key, in the branch we *do* take:** x3270's classic
-  arm sends `ctlr_read_modified(AID_PA1, false)` *before* `net_break(0)` — **PA1, then BREAK**,
-  commented "This is what PCOMM does in plain TN3270 mode" — while `Telnet.sendAttn()` sends the
-  two BREAK bytes alone. So even against the classic hosts here, our Attn is missing the leading
-  PA1 that x3270 and PCOMM send. Equally untested and equally unfixed, for the same reason.
+  **A SECOND CLAIM ABOUT THE CLASSIC BRANCH WAS DRAFTED AND WITHDRAWN, AND THE WITHDRAWAL IS
+  WORTH RECORDING.** A newer upstream `Attn_action` sends `ctlr_read_modified(AID_PA1, false)`
+  *before* `net_break(0)` — PA1 then BREAK, commented "This is what PCOMM does in plain TN3270
+  mode" — which would be a divergence in the branch we *do* take, against the hosts we *do* have.
+  **But that line does not exist in suite3270 4.5**, the tree in `~/src/suite3270-4.5` that every
+  other x3270 citation in this project is measured against: there the `IN_3270` arm is a bare
+  `net_break(0)`, and `grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` finds nothing. So it is
+  a divergence from a *later* x3270 and not from our reference — worth knowing if the pinned
+  version ever moves, and a reminder that a citation without a version is not a measurement.
   **The asymmetry inside our own code is the strongest hint this is an oversight:**
   `Session.sysreq()` (`core/src/session.ts:1601`) *does* branch on `inTn3270e()` and check the
   negotiated function, and `sendAttn()` immediately below it does neither. **Nothing tests Attn in
