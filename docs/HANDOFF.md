@@ -1,10 +1,67 @@
-# Handoff — state as of 2026-10-05 (copy/paste built)
+# Handoff — state as of 2026-10-06 (the keypad is real controls)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-05 (end of day)
+## START HERE — NEXT ACTION, 2026-10-06
+
+**THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — ALL TEN TASKS — ON BRANCH
+`keypad-window`, NOT YET MERGED.** Spec `docs/superpowers/specs/2026-10-06-keypad-window-design.md`,
+plan `docs/superpowers/plans/2026-10-06-keypad-window.md`.
+
+A separate `BrowserWindow` in the GUI, an opaque in-pane overlay in the browser, both built from
+ONE shared view (`canvas/src/keypadUi.ts`) over ONE shared table (`frontend`'s `KEYPAD_KEYS`).
+`Ctrl-K` OPENS rather than toggling, a **View → Keypad** menu item makes it discoverable, every
+button carries a tooltip, and nothing is remembered between runs. **The canvas keypad is deleted.**
+
+**THE FULL GATE, MEASURED ON THE BRANCH TIP:** build and typecheck clean, **2324 tests in 99
+files**, `shot.mjs` **2/2**, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs` 10/10,
+`select.mjs` 3/3, `browser-shot.mjs` **1/1**, `browser-keys.mjs` 13 chords/10 actions,
+`browser-clicks.mjs` **9/9 (new)**, `pty-smoke.py` 12 PASS / 0 FAIL. **`drive-playback.py` and
+`drive-e.py` were NOT run** — nothing here touches telnet negotiation or the stream layer, said
+rather than implied.
+
+**THE TEST COUNT FELL, AND BOTH NUMBERS ARE SEPARATE ON PURPOSE** (the recorded
+merge-totals-hide-lost-tests trap): **−37 from the deletion** — 32 in `canvas/test/keypad.test.ts`
+plus 5 in `drawlist.test.ts`'s keypad-region block — and **+3 added back**, against 2358 before.
+The plan predicted 38; the real figure is 37, because that block held five tests and not six.
+**The 37 were not bad tests**: `hitTestAt`'s pinned the inverse arithmetic at scale 3 with a
+non-zero offset, which no Xvfb harness can reach. They went because their subject did.
+
+**TWO GOLDEN CASES WERE DELETED, NOT REGENERATED, and that is a real loss of evidence stated
+plainly: THE KEYPAD'S APPEARANCE IS NOW VERIFIED BY NOTHING.** Its behaviour is covered three ways
+(`clicks.mjs`, `browser-clicks.mjs`, `keypadUi.test.ts` on all 48 pairs), but a capture of
+system-font HTML is machine-dependent — the one thing that stops a golden reproducing, and the
+reason this project blits its own atlas for the screen. `browser-shot.mjs`'s surviving case still
+proves `renderer.ts` is genuinely shared rather than duplicated, which was always its purpose.
+
+**FIVE THINGS WORTH CARRYING:**
+1. **THE WEB HALF LANDED IN THE SAME CHANGE, which the plan and the idea doc both assumed it would
+   not.** Once the keypad was HTML the view was shared outright and only the container differed, so
+   building the gateway's separately would have meant writing it twice. The consequence: the canvas
+   keypad ended with NO consumers rather than one, so it was deleted rather than left behind.
+2. **`browser-clicks.mjs` IS NEW AND IS THE ONLY THING THAT LOADS THE WEB OVERLAY IN A BROWSER.**
+   It found four defects the unit suite could not see, including `ui.css` styling `body` and
+   **displacing the 3270 canvas by 15px** — which would have put every keypad and selection click
+   off target in the browser, silently.
+3. **A STALE `dist/` ARTIFACT FAILED A TEST.** `tsc` does not remove outputs for deleted sources,
+   so `dist/keypad.js` outlived its `.ts`. Caught by `module-cycles.test.ts` rather than by a green
+   run over dead code — the harness-passes-on-stale-artifacts hazard, inverted for once.
+4. **THE GATEWAY'S `toggleKeypad` INTERCEPT IS NOW AN EMPTY `return` AND MUST STAY.** `applyAction`
+   still throws on the kind, and `web/src/main.ts` calls it outside any try in a socket data
+   handler. Deleting it ends the process on the first raw frame, which `integration.test.ts` sends
+   by construction.
+5. **`Attn` HAS AN UNFIXED PROTOCOL DIVERGENCE, found in Task 1 by reviewing a COMMENT.** We send
+   `IAC BREAK` unconditionally where x3270 sends `IAC IP` on a TN3270E session. Recorded in
+   README's *What is not implemented*; it needs a TN3270E host, which nothing here is.
+
+**NEXT: FINISH THE BRANCH.** Merge `--no-ff` per the standing rule — confirm `git merge-base`
+equals `main` beforehand and that the merge reports exactly this branch's commits, then **re-run
+the full gate ON THE MERGE COMMIT**. After that, roadmap item **(0c) the WEB TRANSFER UI**, and
+**(0e) WEB COPY AND PASTE** — the user has committed to both before packaging.
+
+## SUPERSEDED — NEXT ACTION, 2026-10-05 (end of day)
 
 **GUI COPY AND PASTE IS BUILT — ALL TEN TASKS — AND IS MERGED TO `main` AND PUSHED.** Branch
 `gui-copy-paste`, 9 commits, merged `--no-ff` as `d949243` and deleted. **`main` at `d949243`,
@@ -679,7 +736,14 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    front-loads the MENU BAR, which (0b) needs for its toolbar icon anyway, so the ordering pays
    twice. **The light pen is NOT part of it and gets its own spec** — `lightpen_select()` sends an
    AID, so a copy built on it would transmit on every copy attempt;
-   **(0b) the GUI keypad WINDOW** — **the one after (0ab)**; ready to spec,
+   **(0b) the GUI keypad WINDOW** — **BUILT 2026-10-06, AND IT TOOK (0d), THE WEB KEYPAD, WITH
+   IT IN THE SAME CHANGE.** That was not the plan: both the plan and the idea doc had the web
+   following later. Once the keypad was real HTML the view was shared outright
+   (`canvas/src/keypadUi.ts`) and only the container differed -- a window in Electron, an overlay
+   in the browser -- so doing the gateway separately would have meant writing the view twice. The
+   consequence is that the CANVAS keypad ended with no consumers rather than one, and was deleted.
+   **So (0d) is done too, and the four UI pieces are now three.** Original entry follows:
+   ready to spec,
    `docs/ideas/native-widget-dialogs-idea.md`, and its four open questions are already answered
    (see the parked-keypad note below). **The transfer window is its precedent and is worth reading
    first**: a second `BrowserWindow` with its own preload and its own bridge, the canvas window's
@@ -687,7 +751,10 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    record what that shape costs, including that a browser-loaded module's import graph must close
    and that the untestable boot file must be LOADED rather than reasoned about;
    **(0c) the WEB transfer UI** — needs its own spec: real browser file I/O over the WebSocket;
-   **(0d) the WEB keypad window** — follows the GUI's, per the user's answer that the gateway comes later;
+   **(0d) the WEB keypad window** — ~~follows the GUI's, per the user's answer that the gateway
+   comes later~~ **BUILT 2026-10-06 ALONGSIDE (0b), see above.** The "gateway comes later" answer
+   was given when the web keypad was expected to stay canvas-drawn; the user's 2026-10-06 decision
+   made it an HTML overlay, which made it the same work as the GUI's rather than a second job;
    **(0e) WEB COPY AND PASTE — ADDED BY THE USER 2026-10-05, and it is NOT the free ride the
    copy/paste spec claimed.** The spec said the gateway got copy free because `sendAction` already
    crosses the socket; implementing (0ab) disproved it. Transmitting the action is free, returning

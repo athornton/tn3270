@@ -9,6 +9,51 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
+  RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:
+  **nothing about this change alters what reaches the host.** A keypad button raises the same
+  `Action` it always did, through the same `applyAction`; only the thing the operator clicks moved
+  from a blitted canvas region to a DOM button. There is no new wire format, no new protocol
+  message, and no path a host could tell apart.
+
+  **What IS proven, and how:**
+
+  ```bash
+  npm run build && npx tsc --build --force packages/gui packages/web
+  node packages/gui/scripts/clicks.mjs          # 9 buttons, 10 actions in order
+  node packages/web/scripts/browser-clicks.mjs  # 9 buttons, 9 actions, over a WebSocket
+  ```
+
+  `clicks.mjs` opens the GUI's keypad **window** with a real `Ctrl+K`, clicks nine buttons by
+  querying `button[data-label=...]`, and compares the whole ordered action sequence from main's own
+  log. `browser-clicks.mjs` does the same against the **web overlay** in a served page and reads
+  the GATEWAY's log back over the socket — which is the only thing in the repo that loads that
+  overlay in a browser at all. Both sample one button from every block of `KEYPAD_BLOCKS`, so no
+  block can go dead unseen, and both include `SysRq` and `NewLn`, the two keys with no chord
+  anywhere.
+
+  **The ten-action/nine-action difference between them IS an assertion.** `clicks.mjs` expects a
+  leading `toggleKeypad` because in Electron that action crosses IPC and main logs it;
+  `browser-clicks.mjs` expects nine, because the browser intercepts the chord client-side and it
+  never reaches the gateway. A tenth entry there would mean that interception had broken.
+
+  **Mutation checks that make those numbers mean something.** Removing the client-side toggle, and
+  separately dropping one served module, each fail `browser-clicks.mjs` with
+  `the overlay had no clickable button -- did Ctrl+K open it?`. Swapping two keys' actions in the
+  shared view reddens the label/action pairs.
+
+  **Four defects this found that reasoning had not,** all in the web half and all invisible to the
+  unit suite: `keypadUi.ts` sitting in `packages/gui` where the gateway cannot import it; two
+  missing entries in `httpstatic.ts` (one of which made `bridge.js` fail to load entirely, so the
+  error surfaced in `renderer.js` as `Cannot read properties of undefined (reading 'onAtlas')` —
+  naming the wrong file); and `ui.css` styling `body`, which **displaced the 3270 canvas by 15px**
+  and would have put every keypad and selection click off target in the browser, silently.
+
+  **Not verified, stated rather than left to be inferred:** the keypad's APPEARANCE, by anything.
+  The golden that photographed the drawn keypad was deleted rather than regenerated — HTML in
+  system fonts is machine-dependent, which is the one thing that stops a golden reproducing. And
+  macOS, where the window chrome and the menu bar differ and no harness on this box can look.
+
 - **COPY AND PASTE IN THE GUI — OFFLINE EVIDENCE COMPLETE, LIVE PASTE NOT YET WITNESSED,
   2026-10-05.** Said in that order deliberately, because the offline half is strong and the live
   half is simply absent rather than failing.
