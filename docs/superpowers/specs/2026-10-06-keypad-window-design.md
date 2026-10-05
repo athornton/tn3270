@@ -85,13 +85,19 @@ the same two assertions going the other way.
 was guarding a caller you forgot. The same shape here is code kept "in case the web needs it",
 whose tests keep passing while nothing calls it.
 
-**`canvas/test/keypad.test.ts` LOSES ITS SUBJECT: 32 tests across `keypadRegion`, `hitTest` and
-`hitTestAt`.** They are not bad tests — `hitTestAt`'s are the ones that pin the inverse arithmetic
-at scale 3 with a non-zero offset, which the Xvfb harnesses explicitly *cannot* reach. **So the
-total test count will FALL, and the plan must say so rather than letting a drop look like
-breakage.** A recorded finding is exactly on point: *merge totals hide lost tests* — a count that
-moves for two reasons at once hides one of them. **Expect roughly −32 from this and + whatever
-`keypadView.ts` adds, and state both numbers separately.**
+**38 TESTS LOSE THEIR SUBJECT.** All **32** in `canvas/test/keypad.test.ts` (`keypadRegion`,
+`hitTest`, `hitTestAt`) plus the **6** in `canvas/test/drawlist.test.ts`'s
+`describe('the keypad region')` block, which asserts the keypad's contribution to `DrawList.height`.
+**That second file is the one a build will not warn about**, because test files are not typechecked
+here — `vitest` strips types rather than checking them, so its import of `KEYPAD_ROWS_TALL` fails
+at run time, after the build looks clean.
+
+They are not bad tests — `hitTestAt`'s are the ones that pin the inverse arithmetic at scale 3 with
+a non-zero offset, which the Xvfb harnesses explicitly *cannot* reach. **So the total test count
+will FALL, and the plan must say so rather than letting a drop look like breakage.** A recorded
+finding is exactly on point: *merge totals hide lost tests* — a count that moves for two reasons at
+once hides one of them. **State −38 from the deletion and + whatever the new tests add as separate
+numbers, against the 2312 baseline.**
 
 **AND ONE LIVE DEPENDENCY THE COPY/PASTE WORK JUST CREATED.** `renderer.ts`'s `cellAt` computes
 `const screenBottom = list.oia?.y ?? list.keypad?.y ?? list.height;` — the keypad is one of its
