@@ -33,6 +33,12 @@ describe('KEYPAD_BLOCKS', () => {
       expect(b.id, 'a block has no id').not.toBe('');
       expect(b.title, `block ${b.id} has no title`).not.toBe('');
       expect(b.keys.length, `block ${b.id} is empty`).toBeGreaterThan(0);
+      // LOWERCASE AND HYPHENATED, which `keypadView.ts` documents as the rule because the id
+      // reaches a DOM `id` attribute and a CSS selector -- and nothing enforced it until this
+      // line. `id: 'PF High'` is a legal string and an ILLEGAL selector: `querySelector` on it
+      // throws, and a leading digit would be invalid too, so the window would fail to wire up
+      // one block's buttons with nothing in the model to point at.
+      expect(b.id, `block id ${b.id} is not a safe DOM id`).toMatch(/^[a-z][a-z0-9-]*$/);
     }
   });
 

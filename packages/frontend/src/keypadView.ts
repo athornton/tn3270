@@ -98,14 +98,39 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
   { id: 'pf-high', title: 'PF13-24', keys: pfRange(13) },
   { id: 'pf-low', title: 'PF1-12', keys: pfRange(1) },
   {
-    // The INTERRUPT keys: each one reaches the host OUTSIDE the ordinary read-modified exchange
-    // -- PA1-3 and Clear as short-read AIDs, `Attn` as Telnet IP and `SysRq` as Telnet AO or an
-    // AID depending on the negotiated mode (`actions.ts:108-120` records both). None of them is
-    // the ordinary "submit this screen" that `Enter` is, which is why `Enter` is not in this
-    // block despite also being an AID. `Reset` is the odd one, and it is here
+    // The INTERRUPT keys: each one reaches the host OUTSIDE the ordinary read-modified exchange.
+    // PA1-3 and Clear go as short-read AIDs; `SysRq` is Telnet IAC AO on a TN3270E session that
+    // agreed the SYSREQ function and a TEST REQUEST READ on a classic one (`actions.ts:109-120`
+    // records both forms); and `Attn` is TELNET BREAK.
+    //
+    // `Attn` IS `IAC BREAK` AND NOT `IAC IP`. Stated this loudly because the first version of
+    // this comment said IP, and because the two are a real pair of Telnet commands that a reader
+    // can plausibly swap. MEASURED: `Telnet.sendAttn()` is `Uint8Array.of(T.IAC, T.BREAK)` with
+    // the trace label `'Attn (IAC BREAK)'` (`core/src/telnet.ts:225-230`), both it and
+    // `Session.sendAttn()` (`core/src/session.ts:1616`) carry the docstring "The 3270 Attn key is
+    // Telnet BREAK (RFC 1576 §8), not an AID", three tests assert the exact two bytes
+    // (`core/test/telnet.test.ts:448`, `core/test/session.test.ts:493`,
+    // `cli/test/runner.test.ts:373`) and a fourth pins that it never reaches `sendAID`
+    // (`frontend/test/actions.test.ts:119`), and `T.IP` is
+    // referenced NOWHERE in this repository (`grep -rn 'T\.IP\b' packages/*/src` -> no hits).
+    // x3270 draws the same distinction: `Attn_action` calls `net_break` for `{IAC, BREAK}`, while
+    // `IAC IP` is `net_interrupt` behind a SEPARATE `Interrupt()` action this project does not
+    // implement. So IP is not a loose synonym here; it is a different command backing a different
+    // key. `actions.ts:108` is a bare `case 'attn': session.sendAttn(); break;` with no wire note,
+    // which is why the citation for this half points at core and not at the dispatch.
+    //
+    // None of the six is the ordinary "submit this screen" that `Enter` is, which is why `Enter`
+    // is not in this block despite also being an AID. `Reset` is the odd one, and it is here
     // deliberately: `Keyboard.reset()` (`core/src/keyboard.ts:434`) only calls `oia.reset()`, and
-    // the input-inhibit state it clears is the state these keys and a host error put you in. A
-    // user who needs Reset got here by pressing something in this block.
+    // the input-inhibit state it clears is the state a host error and the AID keys leave you in.
+    //
+    // THAT IS AN AFFINITY, NOT A RULE, and the stronger version of it is false: `Enter` and all
+    // 24 PF keys raise `SystemWait` through the same `sendAID` path from OTHER blocks
+    // (`session.ts:1553`), the three operator-error inhibits come from typing into a protected or
+    // numeric field rather than from any key here, and `Attn` -- which IS in this block -- does
+    // not touch the OIA at all (`session.ts:1617-1620` goes straight to the Telnet layer). Reset
+    // is grouped with the keys whose kind of trouble it answers; it is not claimed that this
+    // block is the only way to need it.
     id: 'attention',
     title: 'Attention',
     keys: ['PA1', 'PA2', 'PA3', 'Attn', 'SysRq', 'Clear', 'Reset'].map(byLabel),
@@ -128,8 +153,16 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // Everything that CHANGES THE BUFFER locally, with no transmission to the host. `Dup` and
     // `FldMk` are here because they are TYPED CHARACTERS and not AIDs -- see the note on the
     // `Action` union in `keymap.ts` -- so a user hunting them under "Attention" beside PA1 would
-    // be looking in the wrong place. `Ins` toggles a mode rather than editing, but it is the mode
-    // that decides what every other key in this block does.
+    // be looking in the wrong place.
+    //
+    // `Ins` toggles a mode rather than editing, and it is the mode that decides what `Dup` and
+    // `FldMk` write into -- the only two keys here that go through `writeControl`
+    // (`core/src/keyboard.ts:127` and `:165`). NOT "what every other key in this block does",
+    // which an earlier draft of this comment claimed: `insertMode` is read in exactly two places,
+    // `type()` (`keyboard.ts:74`) and `writeControl()` (`:223`), and `Del` (`:413`), `BkSp`
+    // (`:398`), `ErEOF` (`:369`) and `ErInp` (`:393`) never read it. Four of the six are
+    // unaffected by the toggle, so `Ins` earns its place here by editing the buffer like the
+    // rest and not by governing them.
     id: 'editing',
     title: 'Editing',
     keys: ['Ins', 'Del', 'BkSp', 'ErEOF', 'ErInp', 'Dup', 'FldMk'].map(byLabel),
