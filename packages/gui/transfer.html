@@ -18,28 +18,22 @@
 <script type="importmap">
 { "imports": { "@tn3270/frontend": "../frontend/dist/transferForm.js" } }
 </script>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px 14px; }
-  h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
-  .row { display: grid; grid-template-columns: 90px 1fr auto; gap: 6px 8px;
-         align-items: center; margin-bottom: 6px; }
-  label { text-align: right; color: GrayText; }
-  input, select { font: inherit; padding: 2px 4px; min-width: 0; }
-  input[disabled], select[disabled] { opacity: 0.5; }
-  /*
-    NO `#status.error` RULE, deliberately. The draft carried one, but `UiDeps.setStatus` takes a
-    BARE STRING: the help line, a progress report and a validator complaint are indistinguishable
-    by the time they reach the DOM, so nothing in `transferBoot.ts` could ever add that class and
-    the rule would be dead CSS promising a color it never paints. Styling an error needs the
-    distinction carried across the boundary -- a second argument on `setStatus`, or a separate
-    `setError` -- which is a change to `transferUi.ts`'s interface and its tests, not to markup.
-  */
-  #status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap;
-            color: GrayText; }
-  #buttons { display: flex; gap: 8px; justify-content: flex-end; }
-  button { font: inherit; padding: 3px 12px; }
-</style>
+<!--
+  THE SHARED STYLESHEET, not an inlined copy. `ui.css` carries these rules verbatim -- including
+  the note on why there is deliberately no `#status.error` rule, which is the part that stops it
+  being re-added by someone who only sees the markup.
+
+  EXTRACTED 2026-10-06 because the keypad window needs the same chrome: the user's requirement is
+  that the two look stylistically similar, and the web gateway's keypad overlay makes a third
+  surface. Three copies of one `font:` declaration diverge the first time anybody touches one.
+
+  A PLAIN RELATIVE PATH, resolved against THIS document in `packages/gui/` -- where `ui.css` also
+  lives. Note that is a different base from the import map above, whose address reaches up into
+  `../frontend/`: a map address resolves against the document's base URL too, but the module that
+  USES it sits a directory deeper in `dist/`, which is what makes the `../` there look wrong and
+  be right.
+-->
+<link rel="stylesheet" href="./ui.css">
 </head>
 <body>
   <h1>File Transfer (IND$FILE)</h1>
