@@ -127,12 +127,18 @@ const SEAM = Object.freeze({
    * `TN3270_GUI_KEYS` does for keys.
    *
    * IT DOES NOT IMPLY THE KEYPAD, and the plan for it said it did -- so this is written down rather
-   * than left as an omission. The keypad is a per-window display flag toggled by a `toggleKeypad`
-   * action (see `showKeypad` below), and a run with the keypad hidden has no `list.keypad`, so
-   * `__tn3270ButtonCenter` returns `null` and every label reports `NO BUTTON`. Turning it on from
-   * here would ALSO be wrong: `clicks.mjs` shows the keypad with `TN3270_GUI_KEYS=Ctrl+K`, which
-   * proves the chord and the click path in one run, and a second on-switch here would toggle it
-   * straight back off. So the caller shows the keypad; this seam only clicks.
+   * than left as an omission. `clicks.mjs` shows the keypad with `TN3270_GUI_KEYS=Ctrl+K`, which
+   * proves the chord and the click path in one run, and a second on-switch here would be wrong.
+   * So the caller opens the keypad; this seam only clicks.
+   *
+   * **STALE AS OF 2026-10-06 AND REWRITTEN IN TASK 8 OF THE KEYPAD WORK.** The description below
+   * this point was written for the CANVAS keypad: a per-window `showKeypad` flag, a `list.keypad`
+   * region, and `__tn3270ButtonCenter` returning canvas coordinates for `hitTestAt`. None of that
+   * exists in this front end any more -- `Ctrl-K` opens a `BrowserWindow` of real HTML controls,
+   * and a DOM button has no canvas coordinates to aim at. The seam becomes a DOM query by label,
+   * keeping the by-LABEL property deliberately, since a coordinate list would be a second copy of
+   * the layout that passes while the layout is wrong. Marked rather than silently deleted so the
+   * reasoning that survives the rewrite is not lost with the mechanism that does not.
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
   /**
@@ -442,9 +448,110 @@ app.whenReady().then(async () => {
   const blank = [...blankColumns(coverage, geometry)];
   win.webContents.send('atlas', { geometry, coverage, blank });
 
-  // Per WINDOW, not per session: whether the keypad is shown is a property of this display, and
-  // `Session` knows nothing about it. Off by default -- the keypad is toggled, not permanent.
-  let showKeypad = false;
+  /**
+   * The KEYPAD window, created on first request and reused after that.
+   *
+   * ## IT REPLACED A `showKeypad` BOOLEAN AND A DRAW-LIST REGION
+   *
+   * Until 2026-10-06 the keypad was drawn INTO the canvas: a per-window flag here, a `keypad`
+   * region in the `DrawList`, and `fit()` growing the window to make room. The user judged that
+   * version "ugly" (3270 glyphs blitted through x3270's own atlas, so the buttons were characters
+   * rather than buttons) and "modal in an annoying way" -- and explicitly NOT a problem for
+   * taking up screen space, which is what ruled out merely shrinking it. The medium was the
+   * problem, so it is real HTML controls now. Task 9 deletes the canvas side.
+   *
+   * ## NON-MODAL BY CONSTRUCTION, WHICH IS THE COMPLAINT ANSWERED STRUCTURALLY
+   *
+   * A separate window has no reason to steal the terminal's keyboard, so it can simply be left
+   * open beside the screen. An in-canvas overlay had to own the display it was drawn on.
+   *
+   * ## NO PERSISTENCE, CONFIRMED ON ITS MERITS AND NOT AS A HOLDING POSITION
+   *
+   * x3270 remembers through its `keypadOn` resource ("Turn on pop-up keypad at start-up",
+   * `x3270/x3270.c:264`) and we deliberately do not. The user's words: "making the user reopen
+   * the keypad on each new application start, if they need it, is fine." **This is explicitly NOT
+   * on the list of things a future preferences store should bring** -- reopening is one keystroke,
+   * and a keypad that reappears unbidden costs window space to an operator who may not want it
+   * this session. Recorded so the weaker reading ("wait for preferences") cannot invite someone to
+   * add it the moment a preferences store exists.
+   *
+   * The transfer window below is this one's precedent in every structural respect; read it first.
+   */
+  let keypadWin: BrowserWindow | undefined;
+  const openKeypadWindow = async (): Promise<void> => {
+    // SHOW AND FOCUS AN EXISTING ONE rather than building a second. Same as the transfer window,
+    // and here it is also what makes `Ctrl-K` idempotent: the chord OPENS, it does not toggle, so
+    // pressing it twice must not stack two windows.
+    if (keypadWin !== undefined && !keypadWin.isDestroyed()) {
+      keypadWin.show();
+      keypadWin.focus();
+      return;
+    }
+    const kw = new BrowserWindow({
+      width: 560,
+      height: 480,
+      // As the terminal window does, so the content area is the size asked for.
+      useContentSize: true,
+      title: 'Keypad',
+      // A CHILD of the terminal window so it travels with it, but NOT modal -- the whole point is
+      // that it can be left up while the operator works on the screen behind it.
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        // `.cjs`, compiled from keypadPreload.cts: an ESM preload cannot load, and when it fails
+        // the bridge silently never appears -- a window whose 48 buttons all do nothing.
+        preload: join(here, 'keypadPreload.cjs'),
+      },
+    });
+    keypadWin = kw;
+    // THE DEPRECATED FIVE-ARGUMENT FORM, matching the other two windows rather than
+    // electron.d.ts's preferred shape. Electron 44 declares both; `level` is a NUMBER here and a
+    // STRING in the new form, and the harnesses filter stdout on the literal `renderer[3]`. One
+    // spelling across all three windows, one upgrade to do when the level finally moves.
+    kw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      process.stdout.write(`keypad[${level}] ${sourceId}:${line} ${message}\n`);
+    });
+    // WITHOUT THIS A FAILED LOAD IS A BLANK WINDOW AND NOTHING ELSE. Measured on the transfer
+    // window, where `ERR_FAILED (-2) loading transfer.html` was the line that explained it.
+    kw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      process.stdout.write(`keypad window failed to load ${url}: ${code} ${desc}\n`);
+    });
+    // CLEARED ON CLOSE, so the next `Ctrl-K` builds a fresh one instead of calling `show()` on a
+    // destroyed object. The transfer window learned this the hard way -- see the recorded
+    // closing-a-parent-skips-the-child-close finding.
+    kw.on('closed', () => { keypadWin = undefined; });
+    await kw.loadFile(join(here, '..', 'keypad.html'));
+    /**
+     * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
+     *
+     * THE ONLY THING THAT CAN SEE A BLANK KEYPAD. `loadFile` resolving means the document
+     * parsed; it says nothing about whether the module graph resolved, whether the preload
+     * installed its bridge, or whether `createKeypadUi` ran -- and all three failures produce the
+     * SAME window: a title, a heading, and no buttons. `did-fail-load` above catches a 404 on the
+     * document itself and nothing deeper.
+     *
+     * So this counts the buttons in the DOM and prints the number. `clicks.mjs` reads the line to
+     * bail early with a diagnosis instead of reporting 48 mysterious `NO BUTTON`s, and it is also
+     * how this window was first proved to work at all.
+     *
+     * UNGATED, deliberately. It carries a COUNT and no screen content, so unlike the action log
+     * it cannot leak what an operator typed -- which is the test every ungated write in this file
+     * has to pass. One line per window open is not noise worth gating.
+     *
+     * A THROW HERE WOULD BE A HANG, so it is caught: this runs inside `app.whenReady()`'s promise
+     * chain, where an unhandled rejection means `quitIfKeysOnly` never fires and the client sits
+     * until the harness's timeout -- which reads as a broken client rather than a broken probe.
+     */
+    try {
+      const count = await kw.webContents.executeJavaScript(
+        'document.querySelectorAll(\'button[data-label]\').length');
+      process.stdout.write(`keypad: buttons=${String(count)}\n`);
+    } catch (err) {
+      process.stdout.write(`keypad: PROBE FAILED ${explain(err)}\n`);
+    }
+  };
 
   /**
    * The transfer window, created on first request and reused after that.
@@ -704,7 +811,11 @@ app.whenReady().then(async () => {
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
     const list = drawList(
-      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia, showKeypad,
+      // `false` FOR THE KEYPAD FLAG, AND IT IS NOW ALWAYS FALSE IN THIS FRONT END: the GUI's
+      // keypad is a separate window of real HTML controls, not a region of the draw list. The
+      // parameter still exists because `packages/web` has not been converted yet; Task 9 of the
+      // keypad work removes it from `drawList` entirely, at which point this argument goes too.
+      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia, false,
     );
     fit(list);
     win.webContents.send('frame', list);
@@ -748,6 +859,24 @@ app.whenReady().then(async () => {
   // checking on the whole template to paper over one field.
   Menu.setApplicationMenu(Menu.buildFromTemplate(
     [...buildMenuTemplate(process.platform, {
+      /**
+       * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
+       *
+       * The gate exists for those two because they act on the SESSION, so firing one while the
+       * transfer window has focus would paste into the 3270 screen behind an HTML form. Opening a
+       * window is not that: it is the same harmless thing to ask for from anywhere, and an
+       * operator who has the transfer window up and wants the keypad should get it rather than
+       * silent nothing.
+       *
+       * `openKeypadWindow` shows-and-focuses an existing window, so a second invocation brings it
+       * forward rather than stacking one. Rejection CAUGHT for the measured reason given at the
+       * `toggleKeypad` intercept: `void` on a rejecting promise is what creates an unhandled one.
+       */
+      onKeypad: () => {
+        openKeypadWindow().catch((err: unknown) => {
+          process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
+        });
+      },
       onCopy: () => {
         if (transferHasFocus()) return;
         // THROUGH THE RENDERER, because the SELECTION lives there -- main knows the screen but not
@@ -865,10 +994,34 @@ app.whenReady().then(async () => {
     // `quit` is THIS front end's business: applyAction throws on it rather than ignoring
     // it, so a front end that forgot this check fails loudly instead of being unquittable.
     if (action.kind === 'quit') { app.quit(); return; }
-    // INTERCEPTED HERE, like `quit`, because `applyAction` throws on it: showing a keypad is a
-    // display decision, and this is the front end that owns this display. Recomputing the frame is
-    // what makes the window resize, since `fit` sizes from the draw list.
-    if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
+    /**
+     * `Ctrl-K` NOW OPENS A WINDOW instead of toggling a region of the canvas.
+     *
+     * STILL INTERCEPTED HERE, because `applyAction` still throws on it: showing a keypad is a
+     * display decision and this is the front end that owns this display. The ACTION'S NAME is
+     * unchanged, which is what lets `canvas/src/keys.ts`, the keypad's own `Ctrl-K` and
+     * `keys.mjs` all keep working with no edit -- the kind is the seam, not the mechanism.
+     *
+     * OPEN, NOT TOGGLE, and that is the user's decision rather than a simplification: the
+     * complaint was that the keypad was MODAL and awkward to leave up. Closing it is the window's
+     * own close button. A chord that closed it again would rebuild exactly the toggle this work
+     * exists to remove -- and `openKeypadWindow` shows-and-focuses an existing window, so pressing
+     * the chord twice brings it forward rather than stacking a second one.
+     *
+     * NO `send()` ANY MORE. The old arm repainted because the keypad lived in the draw list and
+     * `fit()` resized the window from it. Nothing about a separate window touches the frame, so a
+     * repaint here would be work with no visible effect.
+     *
+     * THE REJECTION IS CAUGHT, NOT VOIDED. Measured on the transfer window: `void` on a rejecting
+     * promise is what CREATES an unhandled rejection, and there it buried a `keys: TIMED OUT` line
+     * that said what had actually gone wrong.
+     */
+    if (action.kind === 'toggleKeypad') {
+      openKeypadWindow().catch((err: unknown) => {
+        process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
+      });
+      return;
+    }
     /**
      * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
      * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the
