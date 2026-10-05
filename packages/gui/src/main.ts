@@ -136,6 +136,23 @@ const SEAM = Object.freeze({
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
   /**
+   * AN EIGHTH TEST SEAM: `TN3270_GUI_SELECT='0,0,0,9'` drags from one cell to another and copies.
+   *
+   * `top,left,bottom,right` in CELLS, NOT PIXELS, for exactly the reason `TN3270_GUI_CLICKS` takes
+   * labels: a pixel list would be a second copy of the geometry that would pass while the geometry
+   * was wrong. Main asks the RENDERER to turn cells into viewport pixels
+   * (`__tn3270CellCenter`, the inverse of the renderer's own `cellAt`), then drives real Chromium
+   * mouse events through them -- so `mousedown`, `mousemove`, `cellAt`, the highlight,
+   * `__tn3270Copy`, `sendAction`, the IPC hop, `extractText` and `clipboard.writeText` are ALL
+   * under test. A seam that called `extractText` directly would skip precisely the plumbing that
+   * has never run.
+   *
+   * THIS IS THE ONLY COVER THE SELECTION GESTURE HAS. `renderer.ts` throws at module load outside
+   * a browser and the barrel does not export it, so no vitest file can execute a line of the
+   * gesture -- the same argument the chord and click seams won.
+   */
+  select: process.env['TN3270_GUI_SELECT'] ?? '',
+  /**
    * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
    * window without a mouse.
    *
@@ -948,6 +965,9 @@ app.whenReady().then(async () => {
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win);
+    // AFTER the clicks and the keys: a selection is cleared by any claimed keystroke and by every
+    // host frame, so a drag delivered before them would be wiped before it could be copied.
+    await maybeSelect(win);
     await maybeOpenTransferWindow();
     await maybeCapture(win);
     await quitIfKeysOnly();
@@ -968,6 +988,7 @@ app.whenReady().then(async () => {
   // real host is on, and the one `live-transfer.py` drives.
   await maybeSendKeys(win, session);
   await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
+  await maybeSelect(win);                // and after both, for the reason given there too
   await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
@@ -1257,6 +1278,83 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
     await new Promise((r) => setTimeout(r, 120));
   }
   process.stdout.write(`clicks: sent ${SEAM.clicks}\n`);
+}
+
+/**
+ * AN EIGHTH TEST SEAM: `TN3270_GUI_SELECT='0,0,0,9'` drags across cells and copies.
+ *
+ * ## WHAT IT COVERS THAT NOTHING ELSE CAN
+ *
+ * The whole selection gesture lives in `renderer.ts` -- `mousedown`'s selection branch,
+ * `mousemove`, `cellAt`, the inverse-video highlight and `__tn3270Copy` -- and NO vitest file can
+ * execute a line of it: that module throws at load outside a browser, so `canvas/src/index.ts`
+ * deliberately does not export it. Same argument as the chord and click seams, and the same
+ * answer.
+ *
+ * ## IT ASKS THE RENDERER WHERE THE CELL IS
+ *
+ * `__tn3270CellCenter(row, col)` is the inverse of the renderer's own `cellAt`, so the two must
+ * agree or this fails -- a harness carrying its own pixel arithmetic would be testing itself.
+ * Cells rather than pixels for the reason `TN3270_GUI_CLICKS` takes labels.
+ *
+ * ## THE MOVE BETWEEN PRESS AND RELEASE IS THE POINT
+ *
+ * A press and a release at two points is NOT a drag: `mousemove` is what advances `focus`, so
+ * without it this would pass against a renderer that never tracked the drag at all and selected
+ * only the anchor cell -- which `isEmptyRect` then rejects, making the whole feature inert. The
+ * `mouseMove` carries `button: 'left'` because a move with no button held is not a drag either.
+ *
+ * REPORTS THE CLIPBOARD ITSELF, read back through Electron, which is the only honest end of this
+ * path: everything short of it could pass while the text never reached the OS.
+ */
+async function maybeSelect(win: BrowserWindow): Promise<void> {
+  if (SEAM.select === '') return;
+  // The same settle as `maybeSendClicks`, and for the same reason: a frame has to have been
+  // painted before the renderer has a `last` to measure cells against.
+  await new Promise((r) => setTimeout(r, SEAM.keysMs));
+  const parts = SEAM.select.split(',').map((n) => Number(n));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n))) {
+    // REPORTED, not ignored, the same way `clicks: NO BUTTON` is: a typo'd seam value must not
+    // read as a failure of the path under test.
+    process.stdout.write(`select: BAD SPEC ${SEAM.select}\n`);
+    return;
+  }
+  const [top, left, bottom, right] = parts as [number, number, number, number];
+  let from: { x: number; y: number } | null;
+  let to: { x: number; y: number } | null;
+  try {
+    from = await win.webContents.executeJavaScript(
+      `window.__tn3270CellCenter(${top}, ${left})`) as { x: number; y: number } | null;
+    to = await win.webContents.executeJavaScript(
+      `window.__tn3270CellCenter(${bottom}, ${right})`) as { x: number; y: number } | null;
+  } catch (err) {
+    // A REJECTION HERE WOULD HANG THE PROCESS, measured on the click seam: a throw inside
+    // `app.whenReady()`'s promise is an unhandled rejection, so the quit never runs and the client
+    // sits until the harness's timeout -- reading as a broken client rather than a broken
+    // renderer. The reachable cause is a renderer that threw before installing the global.
+    await new Promise<void>((r) => {
+      process.stdout.write(`select: PROBE FAILED ${explain(err)}\n`, () => { r(); });
+    });
+    app.exit(2);
+    return;
+  }
+  if (from === null || to === null) {
+    process.stdout.write(`select: NO CELL ${SEAM.select}\n`);
+    return;
+  }
+  win.webContents.sendInputEvent(
+    { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent(
+    { type: 'mouseMove', x: to.x, y: to.y, button: 'left' });
+  win.webContents.sendInputEvent(
+    { type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 });
+  await new Promise((r) => setTimeout(r, 200));
+  const copied = await win.webContents.executeJavaScript('window.__tn3270Copy()') as boolean;
+  // The copy crosses IPC to main, which extracts and writes the clipboard, so the read below must
+  // not race it.
+  await new Promise((r) => setTimeout(r, 300));
+  const text = await clipboard.readText();
+  process.stdout.write(`select: copied=${copied} clipboard=${JSON.stringify(text)}\n`);
 }
 
 /**
@@ -1888,7 +1986,10 @@ async function driveSteps(
  * drain earns its place for the run that adds a longer chord list or a slower reader.
  */
 async function quitIfKeysOnly(): Promise<void> {
-  if ((SEAM.keys === '' && SEAM.clicks === '') || SEAM.shot !== '') return;
+  // `select` COUNTS AS A DRIVEN RUN TOO. Without it a selection-only invocation drives the drag,
+  // prints its line and then SITS until the harness's 90s timeout -- which reads as a hung client
+  // rather than as a seam nobody taught to quit.
+  if ((SEAM.keys === '' && SEAM.clicks === '' && SEAM.select === '') || SEAM.shot !== '') return;
   /**
    * A TRANSFER SCENARIO STILL RUNNING OUTRANKS THIS QUIT, and the measurement is at
    * `transferScenarioRunning`: a `Ctrl+t` in the keys list makes `driveTransferWindow` run inside
