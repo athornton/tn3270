@@ -6,16 +6,20 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, 2026-10-06
 
-**THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — ALL TEN TASKS — ON BRANCH
-`keypad-window`, NOT YET MERGED.** Spec `docs/superpowers/specs/2026-10-06-keypad-window-design.md`,
-plan `docs/superpowers/plans/2026-10-06-keypad-window.md`.
+**THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — ALL TEN TASKS — AND IS MERGED TO `main`
+AND PUSHED.** Branch `keypad-window`, 15 commits, merged `--no-ff` as `17ee7bb` and deleted.
+**`main` at `17ee7bb`, PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean.**
+`git merge-base` equalled `main` exactly beforehand and the merge reported **exactly 15** commits,
+all this work's — the check that once caught 44 unfinished commits riding along. Spec
+`docs/superpowers/specs/2026-10-06-keypad-window-design.md`, plan
+`docs/superpowers/plans/2026-10-06-keypad-window.md`.
 
 A separate `BrowserWindow` in the GUI, an opaque in-pane overlay in the browser, both built from
 ONE shared view (`canvas/src/keypadUi.ts`) over ONE shared table (`frontend`'s `KEYPAD_KEYS`).
 `Ctrl-K` OPENS rather than toggling, a **View → Keypad** menu item makes it discoverable, every
 button carries a tooltip, and nothing is remembered between runs. **The canvas keypad is deleted.**
 
-**THE FULL GATE, MEASURED ON THE BRANCH TIP:** build and typecheck clean, **2324 tests in 99
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF:** build and typecheck clean, **2324 tests in 99
 files**, `shot.mjs` **2/2**, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs` 10/10,
 `select.mjs` 3/3, `browser-shot.mjs` **1/1**, `browser-keys.mjs` 13 chords/10 actions,
 `browser-clicks.mjs` **9/9 (new)**, `pty-smoke.py` 12 PASS / 0 FAIL. **`drive-playback.py` and
@@ -56,10 +60,19 @@ proves `renderer.ts` is genuinely shared rather than duplicated, which was alway
    `IAC BREAK` unconditionally where x3270 sends `IAC IP` on a TN3270E session. Recorded in
    README's *What is not implemented*; it needs a TN3270E host, which nothing here is.
 
-**NEXT: FINISH THE BRANCH.** Merge `--no-ff` per the standing rule — confirm `git merge-base`
-equals `main` beforehand and that the merge reports exactly this branch's commits, then **re-run
-the full gate ON THE MERGE COMMIT**. After that, roadmap item **(0c) the WEB TRANSFER UI**, and
-**(0e) WEB COPY AND PASTE** — the user has committed to both before packaging.
+**NEXT ACTION: ROADMAP ITEM (0c), THE WEB TRANSFER UI** — it needs its own spec, and the decision
+it rests on was taken long ago: **real browser file I/O**, bytes over the WebSocket so "local file"
+means the operator's machine rather than the gateway's. `packages/web/src/protocol.ts` still
+refuses `transferForm` for exactly that reason, and its message gives it. Then **(0e) WEB COPY AND
+PASTE**, which the copy/paste spec wrongly called a free ride — returning the TEXT needs a new
+server→client message, since `ServerMessage` is `frame | error`.
+
+**THE USER HAS COMMITTED TO BOTH BEFORE PACKAGING**, in their own words: *"we're still going to
+need to implement copy/paste and the transfer form in the Web interface before we go to
+packaging."* So the web gateway reaches parity with the GUI before anything is shipped. Both
+`REFUSED` members in `web/test/integration.test.ts` leave that list when they land.
+
+**NOTHING IS WAITING ON THE USER.**
 
 ## SUPERSEDED — NEXT ACTION, 2026-10-05 (end of day)
 
