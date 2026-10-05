@@ -57,6 +57,16 @@ export function applyAction(session: Session, action: Action): void {
   if (action.kind === 'transferForm') {
     throw new Error('applyAction does not handle transferForm: the front end owns its own dialog');
   }
+  // THE FOURTH OF THE SAME SHAPE, and outside the `try` for the reason the three above give: the
+  // catch-all would swallow the throw and hand back the silent no-op it exists to prevent.
+  //
+  // What a clipboard IS differs per front end, which is why this cannot be dispatched here: the
+  // Electron GUI has an OS clipboard, the gateway has the operator's browser at the far end of a
+  // socket, and the CLI and TUI have neither. The action carries a RECTANGLE rather than text
+  // because the renderer that raises it has no characters to send -- see the union member.
+  if (action.kind === 'copy') {
+    throw new Error('applyAction does not handle copy: the front end owns its own clipboard');
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

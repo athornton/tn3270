@@ -52,6 +52,13 @@ export type { KeypadKey } from './keypad.js';
 // and the GUI's KeyboardEvent mapper all produce these same names.
 export { applyAction } from './actions.js';
 
+// Paste semantics, here rather than in a front end because every front end wants the SAME rules
+// and they are measured from `Common/kybd.c` rather than invented -- `\n` is Newline and not
+// Enter, `\f` types a space where outside a paste it would Clear the screen. The keyboard is
+// injected, so this is testable with no Electron and no Session.
+export { pasteString } from './paste.js';
+export type { PasteResult, PasteOptions } from './paste.js';
+
 // Which key means which action, in words. Documentation with a test rather than a code
 // generator: each front end satisfies it in its own encoding, and bindings.test.ts checks
 // the terminal keymap actually agrees.

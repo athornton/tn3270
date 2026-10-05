@@ -35,9 +35,15 @@ export function assetDir(): string {
  * point imports and this list omits 404s, and the page is then a BLACK CANVAS WITH NO ERROR in any
  * console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts` walks the built import
  * graph rather than trusting this list to be complete.
+ *
+ * `selection.js` joined for the selection gesture, and it is the reason that walker earned its
+ * keep a second time: the plan for copy/paste never mentioned this list, and the renderer's new
+ * import would have 404'd the WEB gateway's page -- blank, silent -- while every Electron harness
+ * stayed green, because Electron loads from the filesystem and never asks this server for anything.
+ * It is safe to serve: `selection.ts`'s only workspace import is an `import type`, which erases.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js', 'hittest.js',
+  'renderer.js', 'blit.js', 'keys.js', 'hittest.js', 'selection.js',
 ]);
 
 /**

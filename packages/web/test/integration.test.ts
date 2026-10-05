@@ -87,7 +87,7 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * TWO MEMBERS NOW. `quit` would stop the gateway. `transferForm` is refused because a
+ * THREE MEMBERS NOW. `quit` would stop the gateway. `transferForm` is refused because a
  * browser-initiated transfer would move bytes between the host and the GATEWAY's filesystem rather
  * than the operator's machine -- NOT because no front end has a transfer dialog, which stopped
  * being the reason on 2026-10-01 when the Electron GUI got one. It is reachable from a CLICK, not
@@ -95,11 +95,25 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * maps Ctrl-T. When browser file I/O over the socket lands, `transferForm` moves out of this list
  * and into an interception in `main.ts`.
  *
+ * `copy` IS THE THIRD, added 2026-10-05 with the Electron GUI's clipboard, and it is refused for
+ * the same shape of reason as `transferForm`: WHOSE MACHINE the result lands on. Electron's main
+ * extracts the text and writes an OS clipboard the operator owns; the gateway's "main" is the
+ * SERVER, so it would extract onto its own machine. The feature's spec claimed the gateway got copy
+ * "free" because `sendAction` already crosses the socket -- THIS TEST IS WHAT DISPROVED IT, by
+ * reporting `no reply to the copy action` over an uncaught `applyAction does not handle copy`.
+ * Returning the text needs a server->client message that does not exist (`ServerMessage` is
+ * `frame | error`) plus a clipboard write in a bridge that has none. It is reachable from a gesture
+ * too, since the browser runs the same `renderer.ts`.
+ *
+ * BOTH `transferForm` AND `copy` LEAVE THIS LIST BEFORE PACKAGING -- the user committed to web
+ * copy/paste and the web transfer form on 2026-10-05, each with its own spec. When they land, this
+ * list should be back to one member.
+ *
  * THE MESSAGE CHECK BELOW IS `toContain(kind)` AND THAT IS ALL IT IS. It cannot tell the current
  * refusal from the superseded one, both of which name the kind; `protocol.test.ts` pins the REASON,
  * which is the half that went stale here.
  */
-const REFUSED: readonly string[] = ['quit', 'transferForm'];
+const REFUSED: readonly string[] = ['quit', 'transferForm', 'copy'];
 
 /**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop

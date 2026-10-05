@@ -36,3 +36,10 @@ export { keypadRegion, KEYPAD_ROWS_TALL } from './keypad.js';
 export type { KeypadRegion } from './keypad.js';
 export { hitTest, hitTestAt } from './hittest.js';
 export type { KeypadButton } from './hittest.js';
+// Rectangular selection. `extractText` runs in MAIN and not in the renderer, for the reason
+// `selection.ts` gives at length: a `DrawCell` carries a CG-order atlas glyph and no character, so
+// only the side holding `resolve(snapshot)` can turn a rectangle into text. `renderer.ts` imports
+// the two geometry functions from the MODULE rather than from this barrel -- importing them from
+// here would pull `drawlist.js` and `@tn3270/core` into its graph and blank the window.
+export { normalizeRect, isEmptyRect, extractText } from './selection.js';
+export type { CellAddr, CellRect } from './selection.js';

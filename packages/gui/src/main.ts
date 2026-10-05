@@ -1,4 +1,6 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
+import {
+  app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, screen,
+} from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -7,13 +9,14 @@ import {
   resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
 } from '@tn3270/core';
 import {
-  applyAction, defaultSession, describeTlsError, resolveScheme, startTransfer, transferCommand,
-  type Action,
+  applyAction, defaultSession, describeTlsError, pasteString, resolveScheme, startTransfer,
+  transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
-import { drawList, blankColumns, bestScale, readAtlas } from '@tn3270/canvas';
+import { drawList, blankColumns, bestScale, extractText, readAtlas } from '@tn3270/canvas';
 import { parseGuiArgs, UsageError } from './args.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
+import { buildMenuTemplate } from './menu.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -132,6 +135,23 @@ const SEAM = Object.freeze({
    * straight back off. So the caller shows the keypad; this seam only clicks.
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
+  /**
+   * AN EIGHTH TEST SEAM: `TN3270_GUI_SELECT='0,0,0,9'` drags from one cell to another and copies.
+   *
+   * `top,left,bottom,right` in CELLS, NOT PIXELS, for exactly the reason `TN3270_GUI_CLICKS` takes
+   * labels: a pixel list would be a second copy of the geometry that would pass while the geometry
+   * was wrong. Main asks the RENDERER to turn cells into viewport pixels
+   * (`__tn3270CellCenter`, the inverse of the renderer's own `cellAt`), then drives real Chromium
+   * mouse events through them -- so `mousedown`, `mousemove`, `cellAt`, the highlight,
+   * `__tn3270Copy`, `sendAction`, the IPC hop, `extractText` and `clipboard.writeText` are ALL
+   * under test. A seam that called `extractText` directly would skip precisely the plumbing that
+   * has never run.
+   *
+   * THIS IS THE ONLY COVER THE SELECTION GESTURE HAS. `renderer.ts` throws at module load outside
+   * a browser and the barrel does not export it, so no vitest file can execute a line of the
+   * gesture -- the same argument the chord and click seams won.
+   */
+  select: process.env['TN3270_GUI_SELECT'] ?? '',
   /**
    * A SIXTH TEST SEAM: `TN3270_GUI_TRANSFER='localFile=/tmp/f,hostFile=A.B,submit'` drives the transfer
    * window without a mouse.
@@ -692,6 +712,94 @@ app.whenReady().then(async () => {
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+
+  /**
+   * THE APPLICATION MENU, and the app's first -- `setApplicationMenu` was never called before
+   * copy/paste needed somewhere to live. Installed HERE, after `send` exists, because Paste needs
+   * it to repaint.
+   *
+   * ## ITS ITEMS ARE INERT WHILE THE TRANSFER WINDOW HAS FOCUS
+   *
+   * AN ACCELERATOR REGISTERED HERE FIRES REGARDLESS OF WHICH WINDOW IS FOCUSED, so with the
+   * transfer window open a `Cmd-V` would paste into the SESSION BEHIND IT -- the operator would
+   * watch their clipboard land in a 3270 field while typing into an HTML form. That window's
+   * fields are HTML inputs and get Chromium's native clipboard behavior for free, so the right
+   * answer is to DECLINE rather than to forward. Same family as the recorded
+   * closing-a-parent-skips-the-child-close finding: two windows, one global mechanism, and the
+   * second window is the one nobody remembers.
+   *
+   * `isDestroyed()` BEFORE `isFocused()`, in that order: calling a method on a destroyed
+   * BrowserWindow throws, and a closed transfer window leaves `transferWin` set.
+   */
+  const transferHasFocus = (): boolean => {
+    const tw = transferWin;
+    return tw !== undefined && !tw.isDestroyed() && tw.isFocused();
+  };
+  // `[...]` AND NOT A CAST, AND NO CAST AT ALL BEYOND IT: `buildMenuTemplate` returns a `readonly`
+  // array and `buildFromTemplate` wants a mutable one, which is a real difference rather than a
+  // nuisance -- Electron is free to sort or splice the array it is handed. A spread gives it its
+  // own copy and keeps the template immutable on our side.
+  //
+  // THE REST TYPECHECKS STRUCTURALLY, which is the point of `menu.ts` not importing Electron:
+  // `MenuItemTemplate` is assignable to `MenuItemConstructorOptions` because its `role` is a
+  // LITERAL union rather than `string`. It was `string` first, and that does not overlap with
+  // Electron's 40-name union at all -- TypeScript refuses even an `as` between them -- so the
+  // alternative was an `as unknown as` double cast right here, which would have switched off
+  // checking on the whole template to paper over one field.
+  Menu.setApplicationMenu(Menu.buildFromTemplate(
+    [...buildMenuTemplate(process.platform, {
+      onCopy: () => {
+        if (transferHasFocus()) return;
+        // THROUGH THE RENDERER, because the SELECTION lives there -- main knows the screen but not
+        // what is selected on it. The global returns false when nothing is selected, which is not
+        // an error worth reporting: the operator pressed Copy with no selection.
+        void win.webContents.executeJavaScript('window.__tn3270Copy && window.__tn3270Copy()');
+      },
+      /**
+       * ASYNC, BECAUSE ELECTRON 44's CLIPBOARD IS PROMISE-BASED AND THERE IS NO SYNC ALTERNATIVE.
+       * `clipboard.readText(): Promise<string>` and `writeText(): Promise<void>`, modeled on the
+       * W3C `navigator.clipboard` API (`electron.d.ts:7002`, `:7012`); the old synchronous forms
+       * this feature's plan assumed are gone from the typings entirely. Nothing is lost -- a menu
+       * click is already asynchronous from the session's point of view -- but it must be AWAITED
+       * rather than voided, or a paste would read an empty string and silently do nothing.
+       *
+       * The `catch` is what keeps a clipboard failure from becoming an unhandled rejection:
+       * measured on this project's transfer window, `void` on a rejecting promise is what CREATES
+       * one. A clipboard the OS refuses (no X selection owner, a locked Wayland portal) must
+       * report and leave the session alone.
+       */
+      onPaste: () => {
+        if (transferHasFocus()) return;
+        void (async (): Promise<void> => {
+          const text = await clipboard.readText();
+          if (text === '') return;
+          const r = pasteString(session.keyboard, session.screen, text);
+          /**
+           * REPORTED TO THE OPERATOR, REMEDY FIRST, because the status line TRUNCATES and this
+           * project has already shipped a message whose only actionable phrase fell past the cut.
+           * A silently half-applied paste is the worst outcome available here: the operator cannot
+           * see how much of a dataset name arrived, and a short one may be a VALID different name.
+           */
+          if (r.reason !== undefined) {
+            win.webContents.send('error-message',
+              `paste stopped: ${r.reason} after ${r.typed} of ${r.typed + r.dropped} characters`);
+          } else if (r.dropped > 0) {
+            win.webContents.send('error-message',
+              `paste short: ${r.typed} of ${r.typed + r.dropped} characters (field full or protected)`);
+          }
+          // UNCONDITIONALLY, whatever the outcome: a paste is a LOCAL action and emits no `screen`
+          // event, so without this the window shows nothing until the host next speaks. Measured on
+          // the same path for `tab` in the web gateway, where it cost a 5-second test timeout.
+          send();
+        })().catch((err: unknown) => {
+          // A CLIPBOARD THE OS REFUSES is reportable and recoverable, not fatal: no X selection
+          // owner, a Wayland portal that declined. Carries no path, so it is safe to print on an
+          // ungated run -- the same rule the transfer window's load failure follows.
+          process.stdout.write(`paste failed: ${String(err)}\n`);
+        });
+      },
+    })],
+  ));
   /**
    * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
    * docstring names and the one nothing handled.
@@ -761,6 +869,35 @@ app.whenReady().then(async () => {
     // display decision, and this is the front end that owns this display. Recomputing the frame is
     // what makes the window resize, since `fit` sizes from the draw list.
     if (action.kind === 'toggleKeypad') { showKeypad = !showKeypad; send(); return; }
+    /**
+     * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
+     * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the
+     * gateway has the operator's browser, and refuses the action outright for that reason.
+     *
+     * THE EXTRACTION HAPPENS ON THIS SIDE AND NOT IN THE RENDERER, and that is forced rather than
+     * chosen: a `DrawCell` carries a CG-order atlas glyph and NO character
+     * (`canvas/src/drawlist.ts:111-121`), so the renderer has no text to send and sends the
+     * RECTANGLE. This side already calls `resolve(snapshot)` every frame in `send` above, which is
+     * where `text` and `hidden` both live.
+     *
+     * `hidden` IS HONORED INSIDE `extractText`, which is the one line in this feature whose
+     * failure mode is a leaked credential -- `ResolvedCell.text` is still the real character in a
+     * password field. Mutation-verified in `canvas/test/selection.test.ts`.
+     *
+     * AN EMPTY RESULT DOES NOT TOUCH THE CLIPBOARD. Copying a blank region must not silently wipe
+     * whatever the operator had copied from somewhere else; doing nothing is the lesser surprise.
+     */
+    if (action.kind === 'copy') {
+      const snapshot = session.screen.snapshot();
+      const text = extractText(resolve(snapshot), snapshot.cols, action.rect);
+      if (text !== '') clipboard.writeText(text);
+      // THE LENGTH AND NEVER THE TEXT. The action log above is gated behind `--log-actions`
+      // precisely because a `type` action carries typed characters; this line is UNGATED and runs
+      // against a live host, and a copied rectangle can contain anything on the screen. A count is
+      // enough for `select.mjs` to assert against and cannot leak a field.
+      process.stdout.write(`copy: ${text.length} chars\n`);
+      return;
+    }
     // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
     // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own
     // business. A front end that forgot this arm would die on the keystroke rather than being
@@ -828,6 +965,9 @@ app.whenReady().then(async () => {
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win);
+    // AFTER the clicks and the keys: a selection is cleared by any claimed keystroke and by every
+    // host frame, so a drag delivered before them would be wiped before it could be copied.
+    await maybeSelect(win);
     await maybeOpenTransferWindow();
     await maybeCapture(win);
     await quitIfKeysOnly();
@@ -848,6 +988,7 @@ app.whenReady().then(async () => {
   // real host is on, and the one `live-transfer.py` drives.
   await maybeSendKeys(win, session);
   await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
+  await maybeSelect(win);                // and after both, for the reason given there too
   await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
@@ -1137,6 +1278,83 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
     await new Promise((r) => setTimeout(r, 120));
   }
   process.stdout.write(`clicks: sent ${SEAM.clicks}\n`);
+}
+
+/**
+ * AN EIGHTH TEST SEAM: `TN3270_GUI_SELECT='0,0,0,9'` drags across cells and copies.
+ *
+ * ## WHAT IT COVERS THAT NOTHING ELSE CAN
+ *
+ * The whole selection gesture lives in `renderer.ts` -- `mousedown`'s selection branch,
+ * `mousemove`, `cellAt`, the inverse-video highlight and `__tn3270Copy` -- and NO vitest file can
+ * execute a line of it: that module throws at load outside a browser, so `canvas/src/index.ts`
+ * deliberately does not export it. Same argument as the chord and click seams, and the same
+ * answer.
+ *
+ * ## IT ASKS THE RENDERER WHERE THE CELL IS
+ *
+ * `__tn3270CellCenter(row, col)` is the inverse of the renderer's own `cellAt`, so the two must
+ * agree or this fails -- a harness carrying its own pixel arithmetic would be testing itself.
+ * Cells rather than pixels for the reason `TN3270_GUI_CLICKS` takes labels.
+ *
+ * ## THE MOVE BETWEEN PRESS AND RELEASE IS THE POINT
+ *
+ * A press and a release at two points is NOT a drag: `mousemove` is what advances `focus`, so
+ * without it this would pass against a renderer that never tracked the drag at all and selected
+ * only the anchor cell -- which `isEmptyRect` then rejects, making the whole feature inert. The
+ * `mouseMove` carries `button: 'left'` because a move with no button held is not a drag either.
+ *
+ * REPORTS THE CLIPBOARD ITSELF, read back through Electron, which is the only honest end of this
+ * path: everything short of it could pass while the text never reached the OS.
+ */
+async function maybeSelect(win: BrowserWindow): Promise<void> {
+  if (SEAM.select === '') return;
+  // The same settle as `maybeSendClicks`, and for the same reason: a frame has to have been
+  // painted before the renderer has a `last` to measure cells against.
+  await new Promise((r) => setTimeout(r, SEAM.keysMs));
+  const parts = SEAM.select.split(',').map((n) => Number(n));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n))) {
+    // REPORTED, not ignored, the same way `clicks: NO BUTTON` is: a typo'd seam value must not
+    // read as a failure of the path under test.
+    process.stdout.write(`select: BAD SPEC ${SEAM.select}\n`);
+    return;
+  }
+  const [top, left, bottom, right] = parts as [number, number, number, number];
+  let from: { x: number; y: number } | null;
+  let to: { x: number; y: number } | null;
+  try {
+    from = await win.webContents.executeJavaScript(
+      `window.__tn3270CellCenter(${top}, ${left})`) as { x: number; y: number } | null;
+    to = await win.webContents.executeJavaScript(
+      `window.__tn3270CellCenter(${bottom}, ${right})`) as { x: number; y: number } | null;
+  } catch (err) {
+    // A REJECTION HERE WOULD HANG THE PROCESS, measured on the click seam: a throw inside
+    // `app.whenReady()`'s promise is an unhandled rejection, so the quit never runs and the client
+    // sits until the harness's timeout -- reading as a broken client rather than a broken
+    // renderer. The reachable cause is a renderer that threw before installing the global.
+    await new Promise<void>((r) => {
+      process.stdout.write(`select: PROBE FAILED ${explain(err)}\n`, () => { r(); });
+    });
+    app.exit(2);
+    return;
+  }
+  if (from === null || to === null) {
+    process.stdout.write(`select: NO CELL ${SEAM.select}\n`);
+    return;
+  }
+  win.webContents.sendInputEvent(
+    { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent(
+    { type: 'mouseMove', x: to.x, y: to.y, button: 'left' });
+  win.webContents.sendInputEvent(
+    { type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 });
+  await new Promise((r) => setTimeout(r, 200));
+  const copied = await win.webContents.executeJavaScript('window.__tn3270Copy()') as boolean;
+  // The copy crosses IPC to main, which extracts and writes the clipboard, so the read below must
+  // not race it.
+  await new Promise((r) => setTimeout(r, 300));
+  const text = await clipboard.readText();
+  process.stdout.write(`select: copied=${copied} clipboard=${JSON.stringify(text)}\n`);
 }
 
 /**
@@ -1768,7 +1986,10 @@ async function driveSteps(
  * drain earns its place for the run that adds a longer chord list or a slower reader.
  */
 async function quitIfKeysOnly(): Promise<void> {
-  if ((SEAM.keys === '' && SEAM.clicks === '') || SEAM.shot !== '') return;
+  // `select` COUNTS AS A DRIVEN RUN TOO. Without it a selection-only invocation drives the drag,
+  // prints its line and then SITS until the harness's 90s timeout -- which reads as a hung client
+  // rather than as a seam nobody taught to quit.
+  if ((SEAM.keys === '' && SEAM.clicks === '' && SEAM.select === '') || SEAM.shot !== '') return;
   /**
    * A TRANSFER SCENARIO STILL RUNNING OUTRANKS THIS QUIT, and the measurement is at
    * `transferScenarioRunning`: a `Ctrl+t` in the keys list makes `driveTransferWindow` run inside

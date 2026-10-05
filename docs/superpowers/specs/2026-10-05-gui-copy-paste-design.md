@@ -92,10 +92,37 @@ between Electron and the browser, and that sharing is what made the web gateway 
 as a new action kind. The transfer window hit this same wall and was solved with a second window and
 its own preload rather than by widening the bridge; this feature does not need even that.
 
-**A side benefit, and it is free:** `sendAction` already crosses the WebSocket, so the web gateway
-gets **copy** with the same renderer code. Its **paste** is explicitly out of scope and stays refused
-as it is today (`web/src/protocol.ts`), because a browser's clipboard is the operator's machine — the
-same asymmetry already written down for the web transfer UI.
+~~**A side benefit, and it is free:** `sendAction` already crosses the WebSocket, so the web gateway
+gets **copy** with the same renderer code.~~
+
+**CORRECTED DURING IMPLEMENTATION, 2026-10-05 — THAT WAS WRONG, AND THE GATEWAY'S OWN TEST IS WHAT
+DISPROVED IT.** Transmitting the *action* is free; getting the *text back* is not, and nothing in
+that direction exists:
+
+- `ServerMessage` is `frame | error` (`web/src/protocol.ts:27-30`) — **no message can carry copied
+  text to a browser.**
+- `bridgecore.ts` has no clipboard function among its four, and `web/static/` is one `index.html`
+  with no clipboard code at all.
+- The browser's renderer **cannot extract the text itself** — a `DrawCell` carries a CG-order atlas
+  glyph and no character, which is the whole reason the Electron side extracts in main. In the
+  gateway, "main" is the **server**, so it would extract onto the *gateway's* machine.
+
+So web copy is the same shape as the web transfer UI: a new server→client message plus a
+`navigator.clipboard` write in the bridge, and **its own spec**. Worse, leaving it alone was not a
+gap but a **crash**: `applyAction` throws on `copy` and `web/src/main.ts:229` calls it outside any
+try inside a socket `data` handler, so the first copy from any browser would have ended the gateway
+process and every other operator's session with it. `packages/web/src/protocol.ts` states that rule
+in its own docstring, and `integration.test.ts` reported it immediately as *"no reply to the copy
+action"*. **`copy` is therefore REJECTED at decode, beside `transferForm`**, with the durable reason
+pinned in `protocol.test.ts`.
+
+**BOTH LEAVE THAT REJECTION LIST BEFORE PACKAGING.** The user's decision, 2026-10-05: **web
+copy/paste AND the web transfer form are required before the packaging work**, each with its own
+spec. When they land, both rejections become interceptions in `main.ts`.
+
+The GUI's **paste** is out of scope for the gateway in this feature either way, and stays refused as
+it is today, because a browser's clipboard is the operator's machine — the same asymmetry already
+written down for the web transfer UI.
 
 ## Data flow
 
@@ -246,7 +273,10 @@ TK5's panel paints a live clock, so a whole-screen comparison proves nothing.
 - **No linear selection** — rectangular only.
 - **No overlay-paste mode** — not requesting it keeps the branch unreachable.
 - **No right-click context menu** — menu and accelerators only.
-- **No web gateway paste** — stays refused. Copy comes along free.
+- **No web gateway copy OR paste.** ~~Copy comes along free.~~ **Corrected 2026-10-05: it does
+  not** — see the struck-through claim above for the three measurements. Both are REJECTED at
+  decode, and the rejection is load-bearing rather than cosmetic: without it the first browser copy
+  ends the gateway process. **Both are committed before packaging, each with its own spec.**
 - **No claim of a live paste witness.** The semantics are unit-testable, but "a 38-character dataset
   name lands in TSO's field" needs TK5. **Verify offline with the replay probe FIRST**
   (`TN3270_GUI_REPLAY` plus the action log): it settled in one line what five live hypotheses could
