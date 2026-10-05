@@ -111,13 +111,42 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // Telnet BREAK (RFC 1576 §8), not an AID", three tests assert the exact two bytes
     // (`core/test/telnet.test.ts:448`, `core/test/session.test.ts:493`,
     // `cli/test/runner.test.ts:373`) and a fourth pins that it never reaches `sendAID`
-    // (`frontend/test/actions.test.ts:119`), and `T.IP` is
-    // referenced NOWHERE in this repository (`grep -rn 'T\.IP\b' packages/*/src` -> no hits).
-    // x3270 draws the same distinction: `Attn_action` calls `net_break` for `{IAC, BREAK}`, while
-    // `IAC IP` is `net_interrupt` behind a SEPARATE `Interrupt()` action this project does not
-    // implement. So IP is not a loose synonym here; it is a different command backing a different
-    // key. `actions.ts:108` is a bare `case 'attn': session.sendAttn(); break;` with no wire note,
-    // which is why the citation for this half points at core and not at the dispatch.
+    // (`frontend/test/actions.test.ts:120`, with the `sendAID` assertion at `:128`), and `T.IP` is
+    // referenced NOWHERE in this repository (`grep -rn 'T\.IP\b' packages/*/src` -> no hits). IP
+    // is not a loose synonym for BREAK: they are two distinct Telnet commands, and a reader who
+    // swaps them has the wrong byte on the wire.
+    //
+    // BUT THAT IS OURS, NOT x3270's, AND WE DIVERGE FROM IT. An earlier draft of this comment
+    // claimed x3270 "draws the same distinction", with `net_break` for Attn and `IAC IP` behind a
+    // separate `Interrupt()` action. x3270 does close to the OPPOSITE, read from
+    // `Common/kybd.c:978-1002`: `Attn_action`'s docstring is "ATTN key, per RFC 2355. Sends IP,
+    // regardless." and its FIRST branch is `if (IN_E) { if (net_bound()) net_interrupt(0); ... }`.
+    // `net_break` is only the `IN_3270` fallthrough for a CLASSIC session, and even there x3270
+    // sends `ctlr_read_modified(AID_PA1, false)` BEFORE `net_break(0)` -- PA1 then BREAK, with the
+    // comment "This is what PCOMM does in plain TN3270 mode". And `Interrupt_action` is not a
+    // separate key at all any more: its docstring ends "This is now the same as the Attn action"
+    // (`:1008`), so x3270 says the two have CONVERGED.
+    //
+    // ## FINDING: OUR ATTN DIVERGES FROM x3270 IN TN3270E MODE, AND IS UNTESTED THERE
+    //
+    // `Session.sendAttn()` (`core/src/session.ts:1617-1620`) is three lines with NO branch on
+    // `inTn3270e()`: it calls `Telnet.sendAttn()`, which sends `{IAC, BREAK}` unconditionally. So
+    // on a TN3270E session x3270 sends IP and we send BREAK. No test covers Attn in E mode --
+    // the only three are classic (cited above) -- and nothing else in the repo records this.
+    //
+    // THE ASYMMETRY WITH `sysreq()` IS THE REASON TO THINK THIS IS AN OVERSIGHT RATHER THAN A
+    // DECISION: `sysreq()` sits IMMEDIATELY ABOVE `sendAttn()` in the same file (`:1596`), it
+    // branches on `inTn3270e()` as its first act, and its docstring opens "TWO COMPLETELY
+    // DIFFERENT THINGS ON THE WIRE, chosen by whether the session is TN3270E" and cites x3270's
+    // `IN_E` split for exactly that. The neighbouring key got the branch; this one did not, and
+    // no comment anywhere says it was considered.
+    //
+    // DELIBERATELY NOT FIXED HERE. Changing what `Attn` puts on the wire is protocol work, it is
+    // outside a keypad-presentation feature, and it wants a live TN3270E witness this project
+    // does not have -- both of its live hosts answer `IAC WILL TN3270E` with DONT, measured three
+    // times (`session.ts`, on `sysreq`). Recorded rather than silently repaired or silently
+    // ignored. `actions.ts:108` is a bare `case 'attn': session.sendAttn(); break;` with no wire
+    // note, which is why the citation for this half points at core and not at the dispatch.
     //
     // None of the six is the ordinary "submit this screen" that `Enter` is, which is why `Enter`
     // is not in this block despite also being an AID. `Reset` is the odd one, and it is here

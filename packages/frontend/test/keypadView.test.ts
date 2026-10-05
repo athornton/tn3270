@@ -35,9 +35,21 @@ describe('KEYPAD_BLOCKS', () => {
       expect(b.keys.length, `block ${b.id} is empty`).toBeGreaterThan(0);
       // LOWERCASE AND HYPHENATED, which `keypadView.ts` documents as the rule because the id
       // reaches a DOM `id` attribute and a CSS selector -- and nothing enforced it until this
-      // line. `id: 'PF High'` is a legal string and an ILLEGAL selector: `querySelector` on it
-      // throws, and a leading digit would be invalid too, so the window would fail to wire up
-      // one block's buttons with nothing in the model to point at.
+      // line. The two ways it can go wrong FAIL DIFFERENTLY, and an earlier draft of this comment
+      // had them backwards. MEASURED in Electron's own Chromium 152.0.7977.78 under this repo's
+      // Xvfb harness (`gui/scripts/xvfb.mjs`), not assumed:
+      //
+      //   `querySelector('#PF High')` does NOT throw. It is a VALID selector meaning "a
+      //   descendant `High` of an element with id `PF`", so it returned null -- the window
+      //   wires up no buttons for that block and reports nothing anywhere.
+      //
+      //   `querySelector('#1cursor')` DOES throw, a `DOMException` whose `name` is
+      //   `SyntaxError` (`instanceof DOMException` confirmed true): an identifier may not
+      //   start with a digit.
+      //
+      // The silent one is the worse of the two, which is the real argument for this assertion:
+      // a throw at least names the problem, while a null is a block of dead buttons with
+      // nothing in the model to point at.
       expect(b.id, `block id ${b.id} is not a safe DOM id`).toMatch(/^[a-z][a-z0-9-]*$/);
     }
   });
