@@ -824,11 +824,7 @@ app.whenReady().then(async () => {
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
     const list = drawList(
-      // `false` FOR THE KEYPAD FLAG, AND IT IS NOW ALWAYS FALSE IN THIS FRONT END: the GUI's
-      // keypad is a separate window of real HTML controls, not a region of the draw list. The
-      // parameter still exists because `packages/web` has not been converted yet; Task 9 of the
-      // keypad work removes it from `drawList` entirely, at which point this argument goes too.
-      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia, false,
+      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia,
     );
     fit(list);
     win.webContents.send('frame', list);

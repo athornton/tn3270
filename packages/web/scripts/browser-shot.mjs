@@ -58,8 +58,22 @@ const goldenDir = join(repo, 'packages', 'gui', 'test', 'golden');
  */
 const CASES = [
   { golden: 'synthetic-ispf', keys: '' },
-  { golden: 'synthetic-ispf-keypad', keys: 'Ctrl+K' },
 ];
+
+/*
+  A SECOND CASE, `synthetic-ispf-keypad`, WAS HERE AND IS GONE, 2026-10-06, with the canvas keypad
+  it photographed. The GUI's `shot.mjs` lost the same case and the golden PNG was deleted.
+
+  WHAT THIS HARNESS STILL PROVES, which is the thing worth being precise about: its surviving case
+  compares the BROWSER's pixels against the GUI's OWN golden, so `renderer.ts` is demonstrably
+  shared rather than merely duplicated -- that was always the point, and one case carries it.
+
+  WHAT IT NO LONGER PROVES: that the two front ends agree about the KEYPAD. They cannot be
+  compared in pixels any more, because they are no longer the same thing -- Electron opens a window
+  of HTML controls and the browser shows an overlay. What covers the keypad instead is
+  `browser-clicks.mjs`, which clicks nine of its buttons in a served page and reads the gateway's
+  own action log back over the socket. Stronger for behaviour, nothing for appearance.
+*/
 
 /** `--no-proxy-server`: measured, Chromium routes even loopback through HTTP_PROXY. See browser-keys.mjs. */
 const ELECTRON_ARGV = ['--no-sandbox', '--disable-gpu', '--no-proxy-server'];

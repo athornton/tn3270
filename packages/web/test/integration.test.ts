@@ -116,6 +116,24 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
 const REFUSED: readonly string[] = ['quit', 'transferForm', 'copy'];
 
 /**
+ * Kinds the gateway accepts and answers with SILENCE, which is a third category this loop needed.
+ *
+ * `toggleKeypad` is the only member, as of 2026-10-06. It is neither refused nor applied: the web
+ * keypad is a browser-side DOM overlay, so `bridgecore.ts` intercepts the action client-side and
+ * `main.ts` keeps an empty `return` for the clients that send it anyway -- which is exactly this
+ * test, since it builds raw frames rather than running the served bridge.
+ *
+ * IT USED TO ANSWER WITH A FRAME, because the keypad was a region of the draw list and flipping a
+ * `showKeypad` flag owed a repaint. There is no flag and no repaint now, so a frame here would
+ * mean the gateway had taken on work it should not have.
+ *
+ * A MEMBER OF THIS LIST IS STILL FULLY TESTED, which is what keeps it from being an exemption: the
+ * `tab` sent after every kind must still come back as a frame, and that is the assertion that
+ * `applyAction` was never reached -- the throw would have taken the socket handler with it.
+ */
+const SWALLOWED: readonly string[] = ['toggleKeypad'];
+
+/**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop
  * and discards whatever is left.
  *
@@ -460,7 +478,7 @@ describe('the gateway end to end', () => {
     ws.close();
   });
 
-  it('HANDLES toggleKeypad instead of throwing, and STAYS UP to serve the next action', async () => {
+  it('SWALLOWS toggleKeypad without throwing, and STAYS UP to serve the next action', async () => {
     // THE SAME HOLE AS `quit`, AND IT WAS LIVE. `applyAction` throws on `toggleKeypad`, `main.ts`
     // calls it outside any try, and that runs in a socket 'data' handler -- so while this kind was
     // reachable but unhandled, one frame from any client ended the gateway PROCESS and took every
@@ -468,13 +486,16 @@ describe('the gateway end to end', () => {
     // `decodeClientMessage`; this task replaced the rejection with real handling, so what closes the
     // hole now is the interception in `main.ts` that returns BEFORE `applyAction`.
     //
-    // A FRAME, NOT AN ERROR, is therefore the first assertion: an error message here would mean the
-    // rejection came back, and a silence would mean the throw got through.
+    // IT ANSWERS WITH SILENCE NOW, AND THAT IS THE 2026-10-06 CHANGE. This test used to assert a
+    // FRAME came back, because the gateway flipped a `showKeypad` flag and repainted. The web
+    // keypad is a browser-side DOM overlay now: the server holds no keypad state, owes no repaint,
+    // and the interception is an empty `return` whose ONLY job is keeping the kind away from
+    // `applyAction`. So a frame here would mean the gateway had taken on work it should not have.
     //
-    // THE SECOND HALF IS THE POINT, and it is why this is one test and not two. Asserting the first
-    // reply alone would pass just as well against a gateway that answered and then died, since the
-    // reply is written before the process goes. Sending a real action afterwards and getting a frame
-    // back is what proves it survived.
+    // THE SURVIVAL HALF IS NOW THE WHOLE TEST, and it is unchanged in intent: sending a real
+    // action afterwards and getting a frame back is what proves the process is still up. Asserting
+    // the interception alone would pass against a gateway that swallowed the action and then died,
+    // since silence is what both look like.
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
@@ -482,14 +503,17 @@ describe('the gateway end to end', () => {
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
 
-    const handled = collect(ws, 1);
     ws.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
-    expect((await handled)[0]!['kind']).toBe('frame');
 
     const after = collect(ws, 1);
     ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
     // `toBe('frame')`, not `toBeTypeOf('string')`: the loose form this replaces was satisfied by an
     // `error` message too, so it proved the socket was answering and nothing about the action.
+    //
+    // AND IT IS EXACTLY ONE REPLY, which is what makes the silence above an assertion rather than
+    // an absence of one: `collect(ws, 1)` resolves on the FIRST message, so had the toggle also
+    // produced a frame this would have read that one and the `tab` frame would be left unread --
+    // passing for the wrong reason. The count is the pin.
     expect((await after)[0]!['kind']).toBe('frame');
     ws.close();
   });
@@ -538,16 +562,24 @@ describe('the gateway end to end', () => {
     for (const kind of kinds) {
       const action = { kind, ...(ACTION_FIELDS[kind] ?? {}) };
       ws.send(JSON.stringify({ kind: 'action', action }));
-      const reply = await io.next(`the ${kind} action`);
-      if (REFUSED.includes(kind)) {
-        expect(reply['kind'], `${kind} must be refused, not applied`).toBe('error');
-        expect(String(reply['message']), `${kind}'s refusal must name it`).toContain(kind);
+      if (SWALLOWED.includes(kind)) {
+        // NO REPLY AT ALL IS THE CORRECT ANSWER for these, so there is nothing to read -- and
+        // reading would block until `next`'s deadline and report the kind as hung. The survival
+        // check below is what proves the gateway handled it rather than died on it, which is the
+        // same property the other branches get from their reply.
+        await io.settle();
       } else {
-        // An `error` here means the gateway refused a kind nothing documents as refusable; a
-        // timeout in `next` above means `applyAction` threw and took the handler with it.
-        expect(reply['kind'], `${kind} must be answered with a frame`).toBe('frame');
+        const reply = await io.next(`the ${kind} action`);
+        if (REFUSED.includes(kind)) {
+          expect(reply['kind'], `${kind} must be refused, not applied`).toBe('error');
+          expect(String(reply['message']), `${kind}'s refusal must name it`).toContain(kind);
+        } else {
+          // An `error` here means the gateway refused a kind nothing documents as refusable; a
+          // timeout in `next` above means `applyAction` threw and took the handler with it.
+          expect(reply['kind'], `${kind} must be answered with a frame`).toBe('frame');
+        }
+        await io.settle();
       }
-      await io.settle();
       ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
       expect((await io.next(`a tab after ${kind}`))['kind'],
         `the gateway must still serve actions after ${kind}`).toBe('frame');
@@ -559,7 +591,29 @@ describe('the gateway end to end', () => {
     // would be reported as a whole-test timeout instead of by name. See `reader`'s own 2s deadline.
   }, 30_000);
 
-  it('toggles the keypad per CONNECTION, and does not force it on a reattaching client', async () => {
+  it('REATTACHES to the same session without carrying display state across the socket', async () => {
+    /*
+      THIS WAS 'toggles the keypad per CONNECTION', AND MOST OF IT WAS DELETED ON 2026-10-06.
+
+      It toggled the keypad three times and asserted the `keypad` region's presence, its top edge
+      against the frame's old bottom, and the frame's new height against the lowest BUTTON -- all of
+      which named things the server no longer sends. The web keypad is a browser-side DOM overlay:
+      there is no `showKeypad` flag, no `DrawList.keypad`, and a `toggleKeypad` frame is answered
+      with silence.
+
+      WHAT SURVIVES IS THE PROPERTY THAT WAS NEVER ABOUT THE KEYPAD: a reattach returns the SAME
+      session and the second connection inherits no display state from the first. That mattered
+      because a gateway `Session` deliberately outlives its socket, so anything held per session is
+      handed to whoever attaches next -- a different window, possibly a different person. The old
+      test measured something sharp here and the measurement is worth keeping verbatim: with only
+      the first two toggles, it PASSED against a flag stored per SESSION, because the second toggle
+      left the preference OFF and a surviving flag had nothing to carry. Closing with it ON is what
+      made per-session and per-connection give different answers.
+
+      The overlay now starts hidden on every page load for exactly that reason -- the same rule
+      arriving at the same answer one layer up, where `keypadOverlay.test.ts` pins it. So this test
+      keeps the SESSION half, which is the half only a real socket can show.
+    */
     const { url } = await start();
     const a = new WebSocket(url);
     await new Promise((r) => a.addEventListener('open', r, { once: true }));
@@ -567,72 +621,47 @@ describe('the gateway end to end', () => {
     a.send(JSON.stringify({ kind: 'hello' }));
     const id = (await first)[0]!['id'] as string;
 
-    // Toggle on: the next frame carries the region.
-    const shown = collect(a, 1);
+    // A toggle still goes over the wire from a client that does not run the served bridge, and the
+    // gateway must swallow it: no reply, and the session unharmed. Proven by what follows working.
     a.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
-    const withKeypad = (await shown)[0]!['list'] as FrameList;
-    expect(withKeypad.keypad).toBeDefined();
-
-    // Toggle off again: gone, and the height goes back.
-    const hidden = collect(a, 1);
-    a.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
-    const without = (await hidden)[0]!['list'] as FrameList;
-    expect(without.keypad).toBeUndefined();
-
-    /**
-     * THE HEIGHT IS PINNED AGAINST WHAT OCCUPIES IT, not against the arithmetic that declared it.
-     *
-     * `withKeypad.height > without.height` was the obvious assertion and it is nearly free: any
-     * positive number added to the frame satisfies it, including a keypad placed one row too low or
-     * a region an inch taller than its own buttons. So the two edges are pinned to the drawn
-     * content instead -- the keypad's top edge must be exactly where the frame used to end (no gap,
-     * no row of the OIA covered), and the frame's new bottom edge must be exactly the bottom of the
-     * lowest BUTTON (nothing clipped, no slack). `drawlist.ts:126-129` warns that `keypadY` and
-     * `oiaY` coincide only when there is no OIA; this trace paints one, so the first of these two
-     * would fail against that confusion.
-     */
-    const kp = withKeypad.keypad!;
-    const bottom = Math.max(...kp.buttons.map((b) => b.y + b.h));
-    expect(without.height).toBe(kp.y);
-    expect(withKeypad.height).toBe(bottom);
-
-    /**
-     * SHOWING WHEN THE SOCKET CLOSES, and this third toggle is the whole reattach case.
-     *
-     * MEASURED: with the two toggles above and nothing else, this test PASSED against a flag stored
-     * per SESSION (a `WeakMap<Session, boolean>` in `buildServer`'s scope, which the registry's
-     * reattach hands straight back). Of course it did -- the second toggle left the preference OFF,
-     * so a flag that survived the socket had nothing to carry over, and the assertion below was
-     * satisfied by the state rather than by the lifetime. Closing with it ON is what makes
-     * per-session and per-connection give different answers.
-     */
-    const again = collect(a, 1);
-    a.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
-    expect(((await again)[0]!['list'] as FrameList).keypad).toBeDefined();
+    const typed = collect(a, 1);
+    a.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await typed)[0]!['kind']).toBe('frame');
     a.close();
 
-    // A SECOND connection to the SAME session starts with the keypad hidden. The preference
-    // belongs to the window, not to the 3270 session that outlives it: two browsers attached at
-    // different times are two operators looking at two windows, and one showing a keypad must not
-    // force it on the other.
     const b = new WebSocket(url);
     await new Promise((r) => b.addEventListener('open', r, { once: true }));
     const second = collect(b, 2);
     b.send(JSON.stringify({ kind: 'hello', sessionId: id }));
     const got = await second;
-    // No `session` message: the same session came back, which is what makes this a reattach rather
-    // than a fresh connection that would show the keypad hidden for a much less interesting reason.
+    // NO `session` MESSAGE: the same session came back, which is what makes this a reattach rather
+    // than a fresh connection -- and a fresh connection would satisfy everything below for a much
+    // less interesting reason.
     expect(got.map((m) => m['kind'])).toEqual(['atlas', 'frame']);
     const frame = got.find((m) => m['kind'] === 'frame')!['list'] as FrameList;
-    expect(frame.keypad).toBeUndefined();
+    // AND THE FRAME CARRIES NO KEYPAD REGION, which is now a statement about the SHAPE of what the
+    // server sends rather than about a toggle: `DrawList` has no such member any more, so this
+    // would fail if one came back.
+    expect('keypad' in frame).toBe(false);
     b.close();
   });
 
-  it('logs a toggleKeypad BEFORE intercepting it, so the chord harness still sees it', async () => {
-    // ORDERING, and it is otherwise inert. `--log-actions` is the only observable the browser chord
-    // harness has -- `browser-keys.mjs:49` runs the gateway with it and greps stdout -- and in
-    // replay mode a keypad toggle changes no screen, so an interception placed ABOVE the log line
-    // would make Task 4's Ctrl-K chord unprovable while every other test here stayed green.
+  it('logs an action BEFORE intercepting it, so an intercepted kind is still observable', async () => {
+    /*
+      ORDERING, and `toggleKeypad` is still the kind that shows it -- but the REASON changed on
+      2026-10-06 and the old one is now false.
+
+      It used to be that `--log-actions` was the only observable `browser-keys.mjs` had for the
+      Ctrl-K chord, so an interception above the log line would make that chord unprovable. The web
+      keypad is a client-side overlay now: the chord never crosses the socket, and that harness
+      asserts its ABSENCE from this very log. So the old justification has expired.
+
+      WHAT THE ORDERING STILL BUYS, and why this is not deleted: it is the ONLY way an intercepted
+      action is visible to anyone at all. A kind that returns early reaches no `Session`, changes no
+      screen and produces no frame -- so if the log line sat below the interception, a gateway
+      swallowing actions it should have applied would look identical to one applying them. This
+      kind is the one the suite can reach; the property is general.
+    */
     const written: string[] = [];
     // CALLS THROUGH, rather than returning `true` and swallowing the write. Nothing else writes to
     // stdout in this window today, so a swallowing spy would be harmless -- and silently wrong the
@@ -653,8 +682,12 @@ describe('the gateway end to end', () => {
       const first = collect(ws, 3);
       ws.send(JSON.stringify({ kind: 'hello' }));
       await first;
-      const next = collect(ws, 1);
       ws.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
+      // NO REPLY TO WAIT FOR -- the interception is silent now, where it used to repaint. A real
+      // action afterwards gives this something to await, and doubles as the proof the gateway
+      // survived: `collect` would hang if the handler had died on the throw.
+      const next = collect(ws, 1);
+      ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
       await next;
       ws.close();
       expect(written.join('')).toContain('action: {"kind":"toggleKeypad"}');

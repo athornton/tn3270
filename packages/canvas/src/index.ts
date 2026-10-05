@@ -28,14 +28,18 @@ export type { KeyLike } from './keys.js';
 export { assetDir, readAtlas, BROWSER_MODULES } from './assets.js';
 export { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 export { parseBdf } from './bdf.js';
-// The virtual keypad's geometry: scale-1 pixels, so a consumer needs no cell arithmetic of its own.
-// `hitTest` is in its OWN module because a click is hit-tested IN THE BROWSER, and `keypad.js`
-// value-imports core, frontend and `drawlist.js` -- see hittest.ts on what importing it from there
-// does to the renderer's graph.
-export { keypadRegion, KEYPAD_ROWS_TALL } from './keypad.js';
-export type { KeypadRegion } from './keypad.js';
-export { hitTest, hitTestAt } from './hittest.js';
-export type { KeypadButton } from './hittest.js';
+// THE CANVAS-DRAWN KEYPAD WAS HERE AND IS GONE, 2026-10-06: `keypadRegion`,
+// `KEYPAD_ROWS_TALL`, `KeypadRegion`, `hitTest`, `hitTestAt` and `KeypadButton`, with
+// `keypad.ts` and `hittest.ts` deleted outright.
+//
+// NOT DIVERGENCE BUT DELETION, which is the opposite of what this feature's idea doc predicted.
+// That doc assumed the GUI would move to real controls while the web gateway stayed
+// canvas-drawn, leaving `keypad.ts` exactly one consumer. The user's 2026-10-06 decision made
+// the WEB keypad an HTML overlay too, so it ended up with NONE -- and code with no consumer
+// whose tests still pass is the shape the recorded deleting-a-gate finding warns about.
+//
+// The 48 keys themselves never moved: they are `KEYPAD_KEYS` in `@tn3270/frontend`, grouped for
+// a DOM layout by `keypadView.ts` and built into buttons by `keypadUi.ts` below.
 // Rectangular selection. `extractText` runs in MAIN and not in the renderer, for the reason
 // `selection.ts` gives at length: a `DrawCell` carries a CG-order atlas glyph and no character, so
 // only the side holding `resolve(snapshot)` can turn a rectangle into text. `renderer.ts` imports

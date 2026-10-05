@@ -64,16 +64,28 @@ const CASES = [
     host: '127.0.0.1:3270',
     extraArgv: ['-scheme', 'green'],
   },
-  {
-    name: 'synthetic-ispf-keypad',
-    trace: join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace'),
-    host: '127.0.0.1:1',
-    // Ctrl+K SHOWS the keypad. Without it this would be a duplicate of the first case, and it
-    // would pass -- a golden that silently checks nothing new is worse than no golden. MEASURED
-    // by deleting this line: the capture came back byte-identical to synthetic-ispf's hash.
-    keys: 'Ctrl+K',
-  },
 ];
+
+/*
+  A THIRD CASE, `synthetic-ispf-keypad`, WAS HERE AND IS GONE, 2026-10-06.
+
+  It pressed Ctrl+K and photographed the canvas-drawn keypad, and its own comment recorded the
+  measurement that made it worth having: deleting the chord made the capture byte-identical to
+  `synthetic-ispf`, so the case really did check something new.
+
+  IT CANNOT BE REWRITTEN OR MOVED, which is why the golden PNG was deleted rather than
+  regenerated. Ctrl+K now opens a separate `BrowserWindow`; `capturePage()` here photographs the
+  TERMINAL window, which looks exactly like `synthetic-ispf` whether the keypad is open or not. A
+  capture of the keypad window would be a picture of HTML controls rendered by system fonts --
+  machine-dependent, which is the one thing that stops a golden reproducing, and the reason this
+  project blits its own atlas instead of calling `fillText`.
+
+  WHAT REPLACED ITS COVERAGE, stated so the loss is not mistaken for a gap: `clicks.mjs` proves
+  all nine sampled buttons reach the right action through real DOM clicks, and
+  `canvas/test/keypadUi.test.ts` pins all 48 label/action pairs. Neither is a pixel test. The
+  keypad's APPEARANCE is now unverified by machine, which is accepted: it is HTML, and the user's
+  objection to the old one was precisely that it did not look like HTML.
+*/
 
 const update = process.argv.includes('--update');
 

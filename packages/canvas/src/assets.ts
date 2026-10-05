@@ -31,10 +31,14 @@ export function assetDir(): string {
 /**
  * The modules a browser must be served: the entry point and every module its runtime graph reaches.
  *
- * `hittest.js` is here because the renderer hit-tests a keypad click itself. A module the entry
- * point imports and this list omits 404s, and the page is then a BLACK CANVAS WITH NO ERROR in any
- * console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts` walks the built import
- * graph rather than trusting this list to be complete.
+ * A module the entry point imports and this list omits 404s, and the page is then a BLACK CANVAS
+ * WITH NO ERROR in any console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts`
+ * walks the built import graph rather than trusting this list to be complete.
+ *
+ * `hittest.js` WAS A MEMBER because the renderer hit-tested a keypad click itself. It left on
+ * 2026-10-06 with the canvas keypad, so this list went DOWN by one as `keypadUi.js` arrived --
+ * worth noting because a list that only ever grows invites a count assertion, and this one does
+ * not only grow.
  *
  * `selection.js` joined for the selection gesture, and it is the reason that walker earned its
  * keep a second time: the plan for copy/paste never mentioned this list, and the renderer's new
@@ -50,7 +54,7 @@ export function assetDir(): string {
  * graph reaches" is now one sentence short of the truth, because the page has two entry points.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js', 'hittest.js', 'selection.js', 'keypadUi.js',
+  'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js',
 ]);
 
 /**
