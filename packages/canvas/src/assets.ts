@@ -31,19 +31,30 @@ export function assetDir(): string {
 /**
  * The modules a browser must be served: the entry point and every module its runtime graph reaches.
  *
- * `hittest.js` is here because the renderer hit-tests a keypad click itself. A module the entry
- * point imports and this list omits 404s, and the page is then a BLACK CANVAS WITH NO ERROR in any
- * console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts` walks the built import
- * graph rather than trusting this list to be complete.
+ * A module the entry point imports and this list omits 404s, and the page is then a BLACK CANVAS
+ * WITH NO ERROR in any console -- measured on `bridgecore.js`, which is why `httpstatic.test.ts`
+ * walks the built import graph rather than trusting this list to be complete.
+ *
+ * `hittest.js` WAS A MEMBER because the renderer hit-tested a keypad click itself. It left on
+ * 2026-10-06 with the canvas keypad, so this list went DOWN by one as `keypadUi.js` arrived --
+ * worth noting because a list that only ever grows invites a count assertion, and this one does
+ * not only grow.
  *
  * `selection.js` joined for the selection gesture, and it is the reason that walker earned its
  * keep a second time: the plan for copy/paste never mentioned this list, and the renderer's new
  * import would have 404'd the WEB gateway's page -- blank, silent -- while every Electron harness
  * stayed green, because Electron loads from the filesystem and never asks this server for anything.
  * It is safe to serve: `selection.ts`'s only workspace import is an `import type`, which erases.
+ *
+ * `keypadUi.js` joined for the keypad overlay, and it is the FIRST ENTRY HERE THE RENDERER DOES
+ * NOT REACH -- `web/src/bridge.js` imports it directly, through an import-map entry naming this
+ * exact module rather than the package barrel. So `renderer-imports.test.ts` cannot see it (it
+ * walks the renderer's graph) and `canvas/test/keypadUiModule.test.ts` walks its one-import graph
+ * instead. Note what that means for this list's own description: "every module the ENTRY POINT's
+ * graph reaches" is now one sentence short of the truth, because the page has two entry points.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js', 'hittest.js', 'selection.js',
+  'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js',
 ]);
 
 /**

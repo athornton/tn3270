@@ -55,9 +55,11 @@ describe('the renderer bundle', () => {
     // into a scan of nothing.
     expect(graph.some((f) => f.endsWith('keys.js')), 'keys.js not reached').toBe(true);
     expect(graph.some((f) => f.endsWith('blit.js')), 'blit.js not reached').toBe(true);
-    // The third real edge, since the renderer hit-tests a keypad click itself. Named for the same
+    // The third real edge. It was `hittest.js` until 2026-10-06, since the renderer hit-tested a
+    // keypad click itself; that module went with the canvas keypad, and `selection.js` -- which the
+    // copy/paste gesture added -- is now the third thing the renderer reaches. Named for the same
     // reason as the other two: an unnamed edge is one the walker may quietly stop following.
-    expect(graph.some((f) => f.endsWith('hittest.js')), 'hittest.js not reached').toBe(true);
+    expect(graph.some((f) => f.endsWith('selection.js')), 'selection.js not reached').toBe(true);
     const offenders: string[] = [];
     for (const file of graph) {
       const text = readFileSync(file, 'utf8');
@@ -77,14 +79,29 @@ describe('the renderer bundle', () => {
     expect(graph.some((f) => f.endsWith('drawlist.js'))).toBe(false);
   });
 
-  it('can import hittest.js, whose whole graph is itself', () => {
-    // The keypad's hit test is the one part of `keypad.ts` the RENDERER needs, and importing it from
-    // `keypad.js` would pull in `drawlist.js`, `@tn3270/core` and `@tn3270/frontend` -- MEASURED
-    // during review: both assertions above failed. So it lives in its own module whose only import
-    // is `import type { Action }`, which erases. This pins that property BEFORE the renderer takes
-    // the import, because afterwards the failure is a blank window rather than a red test.
-    const graph = graphFrom(join(distDir, 'hittest.js'));
-    expect(graph.map((f) => f.replace(`${distDir}/`, ''))).toEqual(['hittest.js']);
-    expect(/@tn3270\//.test(readFileSync(join(distDir, 'hittest.js'), 'utf8'))).toBe(false);
+  it('can import selection.js, whose whole graph is itself', () => {
+    /*
+      THIS TEST WAS ABOUT `hittest.js` UNTIL 2026-10-06, and the property it pins is worth keeping
+      even though its subject changed. The keypad's hit test was the one part of `keypad.ts` the
+      RENDERER needed, and importing it from `keypad.js` would have pulled in `drawlist.js`,
+      `@tn3270/core` and `@tn3270/frontend` -- MEASURED during review, when both assertions failed.
+      It therefore lived in its own module whose only import was an erasing `import type`.
+
+      `selection.js` is in exactly that position now: the renderer needs `normalizeRect` and
+      `isEmptyRect`, its only import is `import type { ResolvedCell }`, and taking them from the
+      barrel instead would blank the window. The point of pinning it HERE rather than trusting the
+      offender scan above is that the scan reports a generic list, where this names the module --
+      and that it fails as a RED TEST rather than as a blank window.
+    */
+    const graph = graphFrom(join(distDir, 'selection.js'));
+    expect(graph.map((f) => f.replace(`${distDir}/`, ''))).toEqual(['selection.js']);
+    // MATCHED ON THE IMPORT FORM, not on the bare string `@tn3270/`, and that is a correction the
+    // switch of subject forced: `selection.js`'s own docstring EXPLAINS the hazard and so contains
+    // `@tn3270/core` as prose. The old `hittest.js` happened not to mention it, so a substring
+    // test passed there and would fail here for the wrong reason -- rejecting a file whose only
+    // offence is documenting the rule it obeys.
+    const text = readFileSync(join(distDir, 'selection.js'), 'utf8');
+    const specifiers = [...text.matchAll(/(?:from|import)\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+    expect(specifiers, 'selection.js must import nothing at runtime').toEqual([]);
   });
 });

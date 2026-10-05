@@ -1,0 +1,154 @@
+/*
+  Shared chrome for every HTML surface in this project: the GUI's transfer window, the GUI's
+  keypad window, and the web gateway's keypad overlay.
+
+  ## ONE FILE, THREE DOCUMENTS, AND THAT IS A REQUIREMENT RATHER THAN TIDINESS
+
+  The user's call, 2026-10-06: the keypad and the transfer window must be stylistically similar.
+  `transfer.html` inlined these rules, so a second HTML surface meant a second copy and a third
+  meant a third -- and three copies of one `font:` declaration diverge the first time anybody
+  touches one of them.
+
+  ## "NATIVE, NOT X-ISH", CONCRETELY
+
+  The user asked for something that "looks like a native app, not an X-windows app", with a
+  pleasant font. That means, specifically:
+
+   - `system-ui`, so each platform supplies its own face rather than us shipping one;
+   - `color-scheme: light dark`, so the OS theme is honored instead of a hardcoded palette;
+   - system color KEYWORDS (`GrayText`, `Canvas`, `CanvasText`) rather than hex values, so
+     high-contrast and dark modes keep working without a second stylesheet.
+
+  NOTHING HERE USES THE 3270 ATLAS. That is the entire point of moving the keypad off the canvas:
+  the old one drew its buttons as 3270 glyphs through x3270's `3270.bdf`, which is why the user
+  called it ugly.
+
+  ## THE 3270 SCREEN ITSELF IS NOT STYLED BY THIS FILE
+
+  The canvas is pixels blitted from an atlas and must stay that way, so `gui/index.html` and
+  `web/static/index.html` keep their own two-line style blocks. Those two also encode a
+  LOAD-BEARING difference from each other -- `overflow:hidden` against `overflow:auto`, measured
+  against a 43-row model 4 -- and merging them into here would lose it.
+
+  A SECOND REASON NOT TO TOUCH THOSE PAGES: `gui/src/main.ts:1234` records that the click path's
+  `offsetX` arithmetic depends on the canvas sitting at the viewport origin -- "give the page a
+  body margin and every click here misses by it". The `body { padding }` below applies to the two
+  HTML surfaces, never to a canvas page.
+*/
+
+:root { color-scheme: light dark; }
+
+/*
+  SCOPED TO `.ui-surface`, NOT APPLIED TO `body`, AND THAT WAS MEASURED RATHER THAN FORESEEN.
+
+  The first version styled `body` directly, which was fine while only the transfer and keypad
+  WINDOWS loaded this file -- in those, the HTML form IS the document. The web gateway loads it
+  into the page that also holds the 3270 CANVAS, and `body { padding: 12px 14px }` displaced that
+  canvas: `browser-shot.mjs` reported both goldens differing, and the measurement was content
+  moving from x=1 to x=16, a 15px shift of the whole screen.
+
+  That is worse than a cosmetic regression. `gui/src/main.ts` records that the click path's
+  `offsetX` arithmetic assumes the canvas sits at the viewport origin -- "give the page a body
+  margin and every click here misses by it" -- so padding on `body` would have put every keypad
+  and selection click 15px off target in the browser, silently, with the goldens as the only
+  witness. The warning was already written down in this file's own header; scoping is what makes
+  it structural instead of advisory.
+
+  So every HTML surface carries `class="ui-surface"` on its `body`, and the canvas pages simply do
+  not. The keypad OVERLAY is styled through `#keypad-overlay` below, which is its own element and
+  never the page.
+*/
+body.ui-surface {
+  font: 13px system-ui, sans-serif;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.ui-surface h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+
+/* The overlay is a surface too, but it is an element inside a canvas page rather than a body. */
+#keypad-overlay h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+
+/* ---- The transfer form ---- */
+
+.row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 6px 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ui-surface label { text-align: right; color: GrayText; }
+.ui-surface input, .ui-surface select { font: inherit; padding: 2px 4px; min-width: 0; }
+.ui-surface input[disabled], .ui-surface select[disabled] { opacity: 0.5; }
+
+/*
+  NO `#status.error` RULE, deliberately -- moved here from `transfer.html` with its reasoning
+  intact, because the reasoning is what stops it being re-added. `UiDeps.setStatus` takes a BARE
+  STRING: a help line, a progress report and a validator complaint are indistinguishable by the
+  time they reach the DOM, so nothing in `transferBoot.ts` could ever add that class and the rule
+  would be dead CSS promising a color it never paints. Styling an error needs the distinction
+  carried across the boundary -- a second argument on `setStatus`, or a separate `setError` --
+  which is a change to `transferUi.ts`'s interface and its tests, not to markup.
+*/
+#status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
+
+#buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.ui-surface button, #keypad-overlay button { font: inherit; padding: 3px 12px; }
+
+/* ---- The keypad ---- */
+
+/*
+  One block per semantic group from `KEYPAD_BLOCKS`, each a wrapping flex row of buttons.
+
+  NO FIXED PIXEL GRID AND NO PER-KEY POSITIONING, which is the substantive difference from the
+  canvas keypad: that one computed a left edge in CHARACTER CELLS for every key (`KeypadKey.col`,
+  six cells per key, sized to fit inside 80 columns). Here the browser lays the buttons out, so a
+  longer label grows its own button instead of overflowing into the next one -- the 5-character
+  limit on `KeypadKey.label` exists for the canvas, and is why labels read `FldMk` and `BkSp`.
+  Those abbreviations stay for now: they are shared with the TUI overlay, and widening them is a
+  separate change to a table two front ends read.
+*/
+.keypad-block { margin: 0 0 10px; }
+
+.keypad-block > h2 {
+  font-size: 11px;
+  font-weight: 600;
+  color: GrayText;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.keypad-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+.keypad-keys > button { min-width: 3.4em; padding: 3px 6px; }
+
+/*
+  THE WEB OVERLAY, which the GUI does not use: in a window the keypad IS the document, but a
+  browser tab has only the one pane, so the web gets an overlay over its canvas.
+
+  OPAQUE, NOT TRANSLUCENT -- the user's call, and there is a measured reason to respect it. The
+  TUI's overlay once had host text leak through into its chord column, and opacity was the
+  hard-won fix. An overlay that lets the screen show through is a legibility bug waiting to be
+  re-found, so `background: Canvas` is a rule rather than a default.
+
+  `position: fixed` AND NOT A SIBLING IN FLOW, for the reason the header gives: the canvas must
+  stay at the viewport origin or every keypad click in the OTHER front end misses by the offset.
+  Fixed positioning paints over it without displacing it.
+
+  `overflow: auto` because the keypad is taller than some viewports and a browser page cannot
+  resize its own window -- the same argument that made `web/static/index.html` scroll where the
+  Electron page does not.
+*/
+#keypad-overlay {
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  background: Canvas;
+  color: CanvasText;
+  padding: 12px 14px;
+}
+
+#keypad-overlay[hidden] { display: none; }
+#keypad-overlay > .keypad-close { position: absolute; top: 8px; right: 10px; }

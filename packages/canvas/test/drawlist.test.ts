@@ -6,7 +6,6 @@ import { Screen, resolve, Color, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { drawList } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
-import { KEYPAD_ROWS_TALL } from '../src/keypad.js';
 import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
 
 /** The real atlas, so the glyph indices under test are the ones that will be drawn. */
@@ -146,67 +145,51 @@ describe('the OIA', () => {
   });
 });
 
-describe('the keypad region', () => {
-  /** Same construction as `listFor`, with the appended flag the front ends will pass. */
-  const keypadList = (oia?: string, showKeypad?: boolean) => {
+describe('the drawing height', () => {
+  /*
+    THE KEYPAD-REGION BLOCK WAS HERE: five tests covering `keypadRegion`'s placement below the
+    screen and the OIA, its button extent, and that showing it changed no screen cell. Deleted
+    2026-10-06 with the canvas keypad itself -- neither front end draws one now, so `drawList` has
+    no `showKeypad` parameter and `DrawList` no `keypad` member.
+
+    ONE ASSERTION IS KEPT RATHER THAN DELETED WITH THEM, because it was never about the keypad:
+    the height of a drawing with an OIA. That was the control case in the old block ("is absent
+    unless asked for, and the height is then screen plus OIA"), and with the keypad gone it is the
+    WHOLE of what `height` means -- `main.ts`'s `fit` sizes the window from it, and the model-4
+    bug that cost an entire operator status line was a height one row short. A deletion that
+    removed the keypad's four tests AND this one would have left `height` unpinned for the case
+    that still exists, which is the recorded deleting-a-gate shape: the gate goes, and the caller
+    it was guarding is forgotten.
+  */
+  const listWith = (oia?: string) => {
     const snap = screenWith([]).snapshot();
-    return drawList(snap, resolve(snap), atlas, SCHEMES.default!, oia, showKeypad);
+    return drawList(snap, resolve(snap), atlas, SCHEMES.default!, oia);
   };
 
-  it('is absent unless asked for, and the height is then screen plus OIA', () => {
-    const list = keypadList('X Wait');
-    expect(list.keypad).toBeUndefined();
+  it('is the screen plus the OIA row when there is OIA text', () => {
+    const list = listWith('X Wait');
+    expect(list.oia!.y).toBe(24 * atlas.cellHeight);
     expect(list.height).toBe(25 * atlas.cellHeight);
   });
 
-  it('sits BELOW the screen and the OIA, and grows the height', () => {
-    // The order is screen, OIA, keypad. Showing it must never move or cover a row the host
-    // wrote -- the same rule the TUI's refusal-to-clip and the GUI's resize come from.
-    const list = keypadList('X Wait', true);
-    expect(list.oia!.y).toBe(24 * atlas.cellHeight);
-    expect(list.keypad!.y).toBe(25 * atlas.cellHeight);
-    // Pins the OIA-inclusive offset and that the keypad is counted at all; the over-declaration
-    // is caught by the button extent below, not here. MEASURED: this form imports the same
-    // constant the mutation moves, so at KEYPAD_ROWS_TALL 6 -> 7 it stays green -- as does
-    // `expect(height).toBe(keypad.y + keypad.height)`, which is a tautology over the
-    // implementation's own expression.
-    expect(list.height).toBe((25 + KEYPAD_ROWS_TALL) * atlas.cellHeight);
+  it('is the screen alone when there is none', () => {
+    // The OIA's row is CONDITIONAL, and this is the half a single test would have missed: a
+    // `height` that always added a row would pass the case above and leave a blank line here.
+    const list = listWith(undefined);
+    expect(list.oia).toBeUndefined();
+    expect(list.height).toBe(24 * atlas.cellHeight);
   });
 
-  it('sits directly below the screen when there is no OIA', () => {
-    const list = keypadList(undefined, true);
-    expect(list.keypad!.y).toBe(24 * atlas.cellHeight);
-    expect(list.height).toBe((24 + KEYPAD_ROWS_TALL) * atlas.cellHeight);
-  });
-
-  it('reserves room for EVERY button it declares, and not a pixel more', () => {
-    // Independent of both `KEYPAD_ROWS_TALL` and the height arithmetic: measured off the
-    // buttons themselves. `main.ts:312` sizes the window from `height` and the page is
-    // `overflow:hidden` (`gui/index.html:3`), so a height short of the bottom button clips it
-    // -- the model-4 OIA bug -- while an over-declared one leaves dead space no test would
-    // otherwise notice.
-    const list = keypadList('X Wait', true);
-    const buttons = list.keypad!.buttons;
-    expect(buttons.length).toBeGreaterThan(0);
-    expect(Math.max(...buttons.map((b) => b.y + b.h))).toBe(list.height);
-    expect(Math.min(...buttons.map((b) => b.y))).toBe(list.keypad!.y);
-    // and nothing it draws reaches back up into the OIA's row or the host's cells
-    expect(list.keypad!.cells.length).toBeGreaterThan(0);
-    expect(list.keypad!.cells.every((c) => c.y >= list.keypad!.y)).toBe(true);
-  });
-
-  it('does not change the screen cells, the OIA or the width', () => {
-    const without = keypadList('X Wait');
-    const with_ = keypadList('X Wait', true);
-    expect(with_.cells).toEqual(without.cells);
-    // Explicit, because `toEqual` above only proves the two agree: appending the keypad's
-    // cells to BOTH lists would satisfy it.
-    expect(with_.cells).toHaveLength(24 * 80);
-    expect(with_.oia!.cells).toEqual(without.oia!.cells);
-    // 12 keys of 6 cells span 72 columns, so the keypad is NARROWER than any 3270 screen and
-    // the window's width is still the screen's.
-    expect(with_.width).toBe(without.width);
-    expect(with_.keypad!.width).toBeLessThanOrEqual(with_.width);
+  it('is never taller than its own cells need', () => {
+    // Measured off the CELLS rather than recomputed from a row count, so this cannot agree with
+    // the implementation's arithmetic by construction. An over-declared height is dead space at
+    // the bottom of the window that nothing else would notice.
+    const list = listWith('X Wait');
+    const lowest = Math.max(
+      ...list.cells.map((c) => c.y),
+      ...(list.oia?.cells ?? []).map((c) => c.y),
+    );
+    expect(lowest + atlas.cellHeight).toBe(list.height);
   });
 });
 

@@ -79,18 +79,34 @@ const ELECTRON_ARGV = ['--no-sandbox', '--disable-gpu', '--no-proxy-server'];
  * "z", and F13 must not become PF13. Both are asserted as absences, which is why the pass
  * condition is the whole ORDERED sequence rather than a set of sightings.
  *
- * `Ctrl+K` IS THE ONLY OBSERVABLE FOR THE KEYPAD CHORD OVER THIS PATH, and `integration.test.ts`'s
- * 'logs a toggleKeypad BEFORE intercepting it' names this harness as the reason that order matters:
- * the gateway swallows the action, a keypad changes no screen in replay mode, so an interception
- * placed above the log line would make the chord unprovable here while every unit test stayed
- * green. Alt+K, the second spelling, is covered directly in `keys.test.ts`.
+ * `Ctrl+K` IS NOW A NEGATIVE, AND THAT INVERSION IS THE POINT OF THE 2026-10-06 KEYPAD WORK.
+ *
+ * It used to be a positive here -- the keypad was a REGION OF THE DRAW LIST the server built, so
+ * the chord crossed the socket, the gateway logged it and flipped a flag. The web keypad is a DOM
+ * OVERLAY now, so `bridgecore.ts` intercepts `toggleKeypad` CLIENT-SIDE and it never reaches the
+ * gateway at all. Asserting its absence is therefore asserting the new behaviour, not giving up
+ * on the old one: a `toggleKeypad` appearing in this log would mean the client-side interception
+ * had stopped working and the server was being asked to repaint for nothing.
+ *
+ * MEASURED when the interception landed: leaving this as a positive failed positions 4 through 12,
+ * every one shifted by a single entry -- which is what an action quietly leaving an ordered
+ * sequence looks like, and why the pass condition is the whole ORDERED list rather than a set of
+ * sightings.
+ *
+ * WHAT IS NO LONGER COVERED HERE, STATED RATHER THAN LEFT IMPLICIT: that the chord actually opens
+ * the overlay. This harness can only see what crosses the socket, and the answer is now "nothing".
+ * `bridgecore.test.ts` pins the interception and `keypadOverlay.test.ts` pins the toggle, but
+ * neither loads a browser -- so the gap between "the handler fires" and "48 buttons appear over
+ * the canvas" is covered by `browser-clicks.mjs`. Alt+K, the second spelling, is in `keys.test.ts`.
  */
 const CASES = [
   { spec: 'Alt+1', action: { kind: 'pa', n: 1 } },
   { spec: 'Alt+2', action: { kind: 'pa', n: 2 } },
   { spec: 'Ctrl+A', action: { kind: 'attn' } },
   { spec: 'Ctrl+C', action: { kind: 'clear' } },
-  { spec: 'Ctrl+K', action: { kind: 'toggleKeypad' } },
+  // A NEGATIVE as of 2026-10-06: intercepted client-side, so the gateway never sees it. See the
+  // note above -- this asserts the new behaviour rather than abandoning the old assertion.
+  { spec: 'Ctrl+K', action: null },
   { spec: 'Ctrl+Z', action: null },
   { spec: 'Shift+Tab', action: { kind: 'backTab' } },
   { spec: 'Tab', action: { kind: 'tab' } },

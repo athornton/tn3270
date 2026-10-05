@@ -40,6 +40,20 @@ export interface BridgeDeps {
   readonly storage: { getItem(k: string): string | null; setItem(k: string, v: string): void };
   /** Inflate one binary message to JSON text. Injected because Node and the browser differ. */
   readonly inflate: (data: unknown) => Promise<string>;
+  /**
+   * Show or hide the keypad overlay. OPTIONAL, and absent means "this client has no keypad".
+   *
+   * THIS IS THE FIFTH MEMBER OF `BridgeDeps` AND IT DOES NOT BREAK THE FOUR-FUNCTION RULE, which
+   * is about `BridgeApi` below -- the surface `renderer.ts` consumes, and whose width is what lets
+   * that file be reused UNMODIFIED by Electron. `BridgeDeps` is what the BROWSER ENTRY POINT hands
+   * in, and it has always been browser-specific (a socket, `sessionStorage`, a
+   * `DecompressionStream`). The renderer never sees it.
+   *
+   * Here because `toggleKeypad` is intercepted in `sendAction` below rather than sent: the keypad
+   * is a DOM overlay in this front end, so showing it is a local display decision with nothing for
+   * the server to do. Injected rather than imported so this module still needs no DOM.
+   */
+  readonly toggleKeypad?: () => void;
 }
 
 export interface BridgeApi {
@@ -108,6 +122,33 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       if ((action as { kind?: unknown }).kind === 'quit') {
         deps.socket.close();
         dispatch('error', 'Disconnected. Reload to start a new session.');
+        return;
+      }
+      /**
+       * `toggleKeypad` IS NOW CLIENT-SIDE AND MUST NOT REACH THE SERVER.
+       *
+       * It used to, and the reason is worth keeping: the keypad was a REGION OF THE DRAW LIST the
+       * server builds, so `web/src/main.ts` flipped a `showKeypad` flag and repainted. As of
+       * 2026-10-06 the web keypad is a DOM overlay drawn in the browser, so the server has nothing
+       * to toggle and a round trip would be a full repaint for no visible change.
+       *
+       * ## THE SERVER'S OWN INTERCEPT STAYS, AND REMOVING IT WOULD BE A BUG RATHER THAN A CLEANUP
+       *
+       * `applyAction` still THROWS on this kind, and `web/src/main.ts` calls it OUTSIDE any try
+       * inside a socket `data` handler -- where a throw ends the GATEWAY PROCESS and every other
+       * operator's session with it. This interception is served code, and a client is not obliged
+       * to run served code: `integration.test.ts` sends every `Action` kind as a raw frame, which
+       * is precisely the unobliged client. So BOTH halves are required, which is the two-branch
+       * rule `protocol.ts` writes down at length -- and `toggleKeypad` has already spent one
+       * commit in the forbidden "neither" state.
+       *
+       * `deps.toggleKeypad` is OPTIONAL, so the gateway's own tests and any caller with no DOM
+       * can construct a bridge without one. Absent, the action is simply dropped -- which is
+       * correct for a client that has no keypad to show, and is why this returns either way
+       * rather than falling through to the socket.
+       */
+      if ((action as { kind?: unknown }).kind === 'toggleKeypad') {
+        deps.toggleKeypad?.();
         return;
       }
       deps.socket.send(JSON.stringify({ kind: 'action', action }));

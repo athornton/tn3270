@@ -24,10 +24,11 @@ deliberately: see *What is not implemented*.)
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
 **It is not yet something you can hand to someone else.** There is no packaging, so no
-`.app` to download; the GUI has no connect dialog, menus or preferences, and takes its host on
-the command line like the other front ends. The mouse does exactly one thing — press the
-virtual keypad's buttons — and nothing else: no click-to-place-cursor, no drag-to-select, no
-light pen. See *What is not implemented* below, which is the honest part of this file.
+`.app` to download; the GUI has no connect dialog and no preferences, and takes its host on the
+command line like the other front ends. It does now have a menu bar — Edit for copy and paste,
+View for the keypad. The mouse presses keypad buttons and selects text for copying, and nothing
+else: no click-to-place-cursor and no light pen. See *What is not implemented* below, which is
+the honest part of this file.
 
 ## What works today
 
@@ -118,15 +119,24 @@ That the renderer is genuinely shared rather than merely similar is checked in p
 `packages/web/scripts/browser-shot.mjs` compares the served page against the Electron app's
 own screenshot golden and requires them to be identical, with and without the keypad shown.
 
-**There is a virtual keypad, and four keys that had no way to be pressed.** `Ctrl-K` shows and
-hides a 48-button keypad in the Electron GUI and in a browser — PF1–PF24, PA1–PA3, and the
-special keys a PC keyboard has not got — drawn through the same glyph atlas as the screen, so it
-looks like a 3270 rather than like a native widget. Each key is **inverse video**, a black label on a
-white block, on a grid spaced by a blank row between key rows and a blank column at the end of every
-key: one cell tall and butted together, the blocks would merge into bars instead of reading as keys. It is a third region of the draw list,
-appended *below* the screen and the status line, so showing it never moves or covers a row the
-host wrote: the Electron window grows to fit and a browser page scrolls. Clicking a button fires
-exactly the action its label names; a click anywhere else is ignored.
+**There is a keypad of 48 buttons, two of which had no other way to be pressed.** `Ctrl-K` opens
+it — PF1–PF24, PA1–PA3, and the special keys a PC keyboard has not got. In the **Electron GUI** it
+is a separate window you can leave open beside the terminal; in a **browser** it is an opaque
+overlay over the page, because a tab cannot open an OS window. Either way the buttons are **real
+HTML controls** with tooltips naming what each key does, grouped under headings, and styled like a
+native application rather than like a 3270.
+
+**It was drawn into the canvas until 2026-10-06** — inverse-video blocks blitted through the
+screen's own glyph atlas, as a third region of the draw list below the status line. That looked
+like a 3270 and the author's verdict on it was *ugly*, and *modal in an annoying way*: it toggled,
+and was awkward to leave up while working. A separate window is non-modal by construction, which
+is the complaint answered structurally rather than tuned. The keypad **no longer grows the window
+or scrolls the page**, since it is not part of the drawing at all.
+
+Clicking a button fires exactly the action its label names. **`Sys Req` and `Newline` have no
+keyboard chord in any front end**, so for those two the button is the only route there is; `Dup`
+and `Field Mark` do have chords (`Ctrl-D`/`Ctrl-F`), so losing their buttons would cost the mouse
+and not the keyboard.
 
 The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 48 keys
 instead — arrows move (`k`/`w` and `j`/`s` too), Enter fires, `Esc` closes — with each key's chord shown beside it, read
@@ -229,11 +239,27 @@ what x3270's auto-skip suppression looks like on its own; **Field Mark writes `0
 like an ordinary typed character.** A numeric field accepts Dup and refuses Field Mark, per the
 manual's permitted set (p. 4-13).
 
-**`Ctrl-K` shows and hides the virtual keypad**, and `Alt-K` does the same — `Ctrl-K` is c3270's
-terminal binding (`Common/fb-c3270:191`) and `Alt-K` is how its Windows keymap spells the same
-command, so both are honored here rather than one being a divergence. The window grows and
-shrinks to fit; nothing above the keypad moves. A press highlight is drawn locally and never
-reaches the host, so it cannot lag behind your finger over a WebSocket.
+### The keypad
+
+**`Ctrl-K` opens the keypad window**, and `Alt-K` does the same — `Ctrl-K` is c3270's terminal
+binding (`Common/fb-c3270:191`) and `Alt-K` is how its Windows keymap spells the same command, so
+both are honored here rather than one being a divergence. **View → Keypad** does it too, which is
+what makes the thing discoverable: a chord nothing on screen mentions is not an affordance. x3270
+uses a keyboard icon in its own toolbar for the same purpose.
+
+**It OPENS rather than toggling**, and the window's own close button closes it. That is deliberate:
+the old in-canvas keypad toggled, and being hard to leave up was half the objection to it. Pressing
+`Ctrl-K` again brings the window forward rather than stacking a second one.
+
+**It is not remembered between runs.** x3270 does remember, through its `keypadOn` resource, and
+this does not: reopening is one keystroke, and a keypad that reappears unbidden costs window space
+to someone who did not want it this session. That is a decision rather than a missing feature, and
+it is explicitly not on the list of things a preferences store should bring.
+
+**Every button carries a tooltip** naming what the key does, from the same `BINDING_INTENT` table
+the TUI's keypad list reads. 22 of the 48 keys have no prose entry there and 15 more have an entry
+with no note, so the tooltip falls back to the key's short name — which means nothing is ever
+blank, and no description had to be invented for a PF key whose meaning is the host's business.
 
 ### Copy and paste
 
@@ -348,7 +374,7 @@ against both hosts*.
 
 ### File transfer (IND$FILE)
 
-Press `Ctrl-T`, or click `Xfer` on the virtual keypad, to open the transfer window. Choose a local
+Press `Ctrl-T`, or click `Xfer` on the keypad, to open the transfer window. Choose a local
 file with `Browse…`, name the host file, and press Start. `Direction=send` offers an Open panel;
 `receive` offers a Save panel.
 
@@ -855,13 +881,22 @@ WebSocket instead of Electron's IPC. Frames are whole and deflated; measured, a 
 draw list is 237220 bytes of JSON and 6760 compressed, which is why dirty-cell diffing is
 deliberately not part of the design.
 
-**`Ctrl-K` (or `Alt-K`) shows the virtual keypad here too, and clicking a button is an ordinary
-action** — the same message a keystroke sends, so **nothing about the protocol changed** to add
-it. The flag is held **per connection**, not per session: a 3270 session deliberately outlives its
-socket so a reload reattaches, and a keypad forced on whoever attaches next — possibly a different
-person, whose screen would come back six rows taller than they left it — is not a preference worth
-inheriting. A reattaching client therefore starts with the keypad hidden. A screen plus keypad
-taller than the viewport **scrolls**, which is what the browser already did for a model 4.
+**`Ctrl-K` (or `Alt-K`) opens the keypad here too, as an OPAQUE OVERLAY over the page** — a browser
+tab cannot open an OS window the way the Electron GUI does, so the pane is what it has. Opaque
+rather than translucent on purpose: the TUI's keypad overlay once let host text leak through into
+its chord column, and reading 48 buttons over a 3270 screen is the same problem waiting to happen.
+A `Close` button dismisses it, and so does `Ctrl-K` again.
+
+**Clicking a button is an ordinary action** — the same message a keystroke sends, so **nothing
+about the protocol changed** to add it. The keypad itself is now **entirely client-side**: the
+toggle never reaches the gateway, which holds no keypad state at all. It used to be a region of the
+draw list the server built, with a flag held **per connection** rather than per session — because a
+3270 session deliberately outlives its socket, so a keypad forced on whoever attaches next,
+possibly a different person, is not a preference worth inheriting. That reasoning survived the
+move: the overlay starts hidden on every page load, which is the same rule one layer up.
+
+**The screen no longer grows when the keypad opens**, since the overlay floats over it rather than
+being appended below. A model 4 taller than the viewport still scrolls, as it always did.
 
 **A browser pressing `Enter` on a disconnected session makes the GATEWAY redial the mainframe.**
 That is the intended reading: the `Session` is server-side, so it is the server's own socket that
@@ -1022,7 +1057,12 @@ Done:
    keys in the TUI, which has no mouse. It brought canvas hit-testing with it, and made **Dup,
    Field Mark, Sys Req and Newline** reachable — four keys `core` could do and no interactive
    front end could press. Proven with real mouse events (`clicks.mjs`) and in pixels, identically
-   in Electron and in the browser. At the time this was written the mouse did keypad buttons and
+   in Electron and in the browser. **THE CANVAS KEYPAD THIS DESCRIBES WAS REPLACED ON 2026-10-06**
+   by real HTML controls in both front ends, and the canvas hit-testing it brought was deleted
+   with it — the author's verdict on the drawn version was *ugly* and *modal*. The 48 keys, their
+   actions and the TUI's list are unchanged; `clicks.mjs` still proves nine of them by label, now
+   through DOM clicks. The pixel half of that proof is gone, because HTML in system fonts is not
+   reproducible the way a blitted atlas is. At the time this was written the mouse did keypad buttons and
    nothing else; **drag-to-select landed later, for the GUI's copy and paste** (see *Using the
    GUI*). **Click-to-place-cursor and the light pen are still absent**, and text selection is
    **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so a selection built on it
@@ -1057,14 +1097,24 @@ it.
 
 **REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
 after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
-2026-10-01**), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web
-keypad window**, so three remain. They are grouped deliberately rather than by coincidence: the shared halves already
-exist in `packages/frontend` (`transferForm.ts` and `transferRun.ts` for transfers, `keypad.ts` for
-the key table), so doing all four consecutively means the GUI's answer is still in hand when the
-browser's is written. Interleaving them with oversize would mean deciding twice what a native-window
-front end looks like. It also settles everything the **menu bar** touches — the keypad's toolbar icon
-needs one and so does the connect dialog — before packaging puts that chrome in front of a first-time
-user. Items 11 onward keep the order agreed on 2026-09-29.
+2026-10-01**), ~~the GUI keypad window~~ (**BUILT 2026-10-06, and it took the WEB keypad with
+it**), then **the web transfer UI**, so one of the original four remains. They were grouped
+deliberately rather than by coincidence: the shared halves already exist in `packages/frontend`
+(`transferForm.ts` and `transferRun.ts` for transfers, `keypad.ts` for the key table), so doing
+them consecutively means the GUI's answer is still in hand when the browser's is written.
+
+**AND THAT GROUPING PAID OFF MORE THAN EXPECTED ON THE KEYPAD: the two front ends landed in ONE
+change rather than two.** The plan had the web following later, which is what the idea doc assumed
+too — but once the keypad was real HTML controls, the view itself (`keypadUi.ts`) was shared
+outright, and the only thing that differed was the container: a window in Electron, an overlay in
+the browser. Doing the second front end separately would have meant building that view twice or
+extracting it afterwards. The flip side is that the canvas keypad ended up with **no** consumers
+rather than one, so it was deleted rather than left for the gateway.
+
+Interleaving these with oversize would have meant deciding twice what a native-window front end
+looks like. It also settled everything the **menu bar** touches — the keypad needed one, and so
+does the connect dialog — before packaging puts that chrome in front of a first-time user. Items
+11 onward keep the order agreed on 2026-09-29.
 
 
 9a. **Interactive `IND$FILE` — stages 1, 2 and 3 of four are DONE.** The transfer itself was finished and
@@ -1202,6 +1252,29 @@ own client. Unscheduled, and much larger than this project.
 Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
 worse than one that says which quarter is missing.
 
+- **`Attn` SENDS TELNET BREAK EVEN ON A TN3270E SESSION, WHERE x3270 SENDS `IAC IP`.** Found
+  2026-10-06, while reviewing a *comment* about Attn during the keypad work — so it is an
+  unverified divergence rather than an observed failure. `Session.sendAttn()` is unconditional
+  `IAC BREAK` (`core/src/telnet.ts:227`), which is right for a classic TN3270 session
+  (RFC 1576 §8). But x3270's `Attn_action` is documented *"ATTN key, per RFC 2355. **Sends IP,
+  regardless**"* and its first branch is `if (IN_E) { if (net_bound()) net_interrupt(0); }`
+  (`Common/kybd.c:978-1002`) — `IAC IP`, with `net_break` only on the non-E fallthrough. x3270
+  also records that its separate `Interrupt()` action "is now the same as the Attn action"
+  (`:1008`), so the two have *converged* there rather than staying distinct.
+  **A SECOND CLAIM ABOUT THE CLASSIC BRANCH WAS DRAFTED AND WITHDRAWN, AND THE WITHDRAWAL IS
+  WORTH RECORDING.** A newer upstream `Attn_action` sends `ctlr_read_modified(AID_PA1, false)`
+  *before* `net_break(0)` — PA1 then BREAK, commented "This is what PCOMM does in plain TN3270
+  mode" — which would be a divergence in the branch we *do* take, against the hosts we *do* have.
+  **But that line does not exist in suite3270 4.5**, the tree in `~/src/suite3270-4.5` that every
+  other x3270 citation in this project is measured against: there the `IN_3270` arm is a bare
+  `net_break(0)`, and `grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` finds nothing. So it is
+  a divergence from a *later* x3270 and not from our reference — worth knowing if the pinned
+  version ever moves, and a reminder that a citation without a version is not a measurement.
+  **The asymmetry inside our own code is the strongest hint this is an oversight:**
+  `Session.sysreq()` (`core/src/session.ts:1601`) *does* branch on `inTn3270e()` and check the
+  negotiated function, and `sendAttn()` immediately below it does neither. **Nothing tests Attn in
+  E mode**, and neither Hercules host here offers TN3270E, so there is no witness either way —
+  which is also why it has not been "fixed" on a guess. Whoever takes it needs a TN3270E host.
 - **No client certificates.** TLS works (see *Connecting over TLS*), but only for
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
@@ -1254,18 +1327,27 @@ worse than one that says which quarter is missing.
   answered that form with **nothing at all**, because option 40 is something *we* do and the
   handler only reacted to options the *host* does. Both now route through one teardown, and
   the second has a recorded-host witness in `wont-tn3270e.trc`.
-- **The mouse does keypad buttons and TEXT SELECTION, and nothing else.** A `mousedown` on a
-  keypad button fires that button's action; a press on the screen starts a rectangular selection
-  for copy (**GUI only** — the web gateway runs the same renderer, so the gesture works there, but
-  the gateway refuses the `copy` action because it would extract onto its own machine rather than
-  yours). A press on a gap between buttons, or anywhere with the keypad hidden and off the screen
-  region, is ignored, and the right and middle buttons do nothing at all (deliberately: a
-  right-click on `Clear` would otherwise send it to a live host while the context menu opened over
-  the label). So there is still **no click-to-place-cursor and no light pen**. Mouse support is
-  three separate jobs and two are built. Whoever takes the light pen: text selection is **not** it,
-  and must not be implemented with `lightpen_select()`, which sends an AID and sets MDT — a
-  selection built on that would transmit on every copy attempt. x3270 keeps them apart deliberately
+- **On the CANVAS the mouse does TEXT SELECTION and nothing else.** A press on the screen starts a
+  rectangular selection for copy (**GUI only** — the web gateway runs the same renderer, so the
+  gesture works there, but the gateway refuses the `copy` action because it would extract onto its
+  own machine rather than yours). A press off the screen region — the status line, past the last
+  column — is ignored, and the right and middle buttons do nothing at all (deliberately: a
+  right-click that sent `Clear` to a live host while a context menu opened would be a misfire
+  nobody asked for). **Keypad buttons are no longer on the canvas**: since 2026-10-06 they are real
+  HTML controls in their own window or overlay, so the browser hit-tests them and this client does
+  no coordinate arithmetic for them at all. So there is still **no click-to-place-cursor and no
+  light pen**. Whoever takes the light pen: text selection is **not** it, and must not be
+  implemented with `lightpen_select()`, which sends an AID and sets MDT — a selection built on that
+  would transmit on every copy attempt. x3270 keeps them apart deliberately
   (`wc3270/screen.c:2357`).
+- **THE KEYPAD'S APPEARANCE IS NOT VERIFIED BY ANY TEST.** Its BEHAVIOUR is: `clicks.mjs` clicks
+  nine buttons by label in the GUI's window, `browser-clicks.mjs` does the same in a served page
+  and reads the gateway's own action log back, and `keypadUi.test.ts` pins all 48 label/action
+  pairs. But the screenshot golden that used to photograph the drawn keypad was **deleted** rather
+  than regenerated when the keypad became HTML — a capture of system-font controls is
+  machine-dependent, which is the one thing that stops a golden reproducing, and is why this
+  project blits its own atlas for the screen instead of calling `fillText`. If the keypad looks
+  wrong, no automated check here will say so.
 - **SYS REQ'S CLASSIC PATH IS LIVE-VERIFIED (2026-09-21); ITS TN3270E PATH STILL HAS NO WITNESS.**
   The keypad's `SysRq` button, the TUI overlay's entry and the CLI's `SysReq()` all put bytes on the
   wire against VM/370 and MVS 3.8j, and the key has now been driven at both and the reply read.

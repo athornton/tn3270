@@ -78,6 +78,8 @@ export function pasteAccelerator(platform: Platform): string {
 export interface MenuHandlers {
   readonly onCopy: () => void;
   readonly onPaste: () => void;
+  /** Open the keypad window. OPEN, not toggle -- see the View menu below. */
+  readonly onKeypad: () => void;
 }
 
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */
@@ -104,7 +106,40 @@ export function buildMenuTemplate(
       },
     ],
   };
+  /**
+   * The keypad's MENU route, which is what makes it discoverable.
+   *
+   * `Ctrl-K` alone is undiscoverable: nothing on screen says the keypad exists, and an operator
+   * who has not read the README has no way to find 48 keys behind an unannounced chord. x3270
+   * solves this with a keyboard ICON in its own toolbar (`x3270/keypad.bm`, placed by
+   * `menubar.c:604`, shipped at three sizes beside a TLS padlock); a menu item is the
+   * Electron-native spelling of the same affordance, and this app now has a menu bar to put it in
+   * -- which the copy/paste work added, and which was one of the stated reasons for doing that
+   * feature first.
+   *
+   * THE ACCELERATOR IS NOT PLATFORM-SPLIT, unlike Copy and Paste. `Ctrl+K` collides with nothing
+   * in the 3270 keyboard -- the collision that forced the Copy/Paste split was `Ctrl-C` being the
+   * Clear AID -- and `Ctrl-K` is already c3270's own binding (`Common/fb-c3270:191`) plus the
+   * TUI's, so an operator moving between front ends does not learn two spellings. `Alt-K` is
+   * honored too, in `canvas/src/keys.ts`, because that is how x3270's Windows keymap spells the
+   * same command; only one of them can be shown here, and `Ctrl-K` is the documented one.
+   *
+   * "KEYPAD" AND NOT "SHOW KEYPAD" OR A CHECKBOX, because this OPENS and does not toggle: the
+   * window's own close button closes it. A checked menu item would promise a toggle and then
+   * misreport the state the moment the operator closed the window instead.
+   */
+  const view: MenuItemTemplate = {
+    label: 'View',
+    submenu: [
+      {
+        label: 'Keypad',
+        id: 'keypad',
+        accelerator: 'Ctrl+K',
+        ...(handlers !== undefined ? { click: handlers.onKeypad } : {}),
+      },
+    ],
+  };
   // AN APP MENU IS MANDATORY ON macOS: without one the window gets NO menu bar at all, which is a
   // behavioral difference rather than a cosmetic one.
-  return platform === 'darwin' ? [{ role: 'appMenu' }, edit] : [edit];
+  return platform === 'darwin' ? [{ role: 'appMenu' }, edit, view] : [edit, view];
 }

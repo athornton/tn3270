@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Keypad</title>
+<!--
+  The import map is what lets `keypadUi.js` say `@tn3270/frontend` while a browser resolves it.
+  A bare specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go
+  blank with no error in any console, which this repo has met five separate ways.
+
+  IT POINTS AT `keypadView.js` AND NOT AT THE PACKAGE BARREL, deliberately. The barrel reaches
+  `tls.js`, whose `node:net`/`node:tls`/`node:fs` imports no browser can resolve.
+  `keypadView.js` value-imports exactly two modules -- `keypad.js` and `bindings.js` -- and each
+  of those has ZERO runtime imports of its own (8209 and 5052 bytes, measured 2026-10-06), so the
+  graph closes at three files, all inside `packages/frontend/dist` and all reachable by relative
+  path from the map's address. `frontend/test/keypadModule.test.ts` WALKS that graph and fails on
+  any `@tn3270/` or `node:` specifier in it, because a comment cannot notice a new import.
+
+  A map address resolves against the DOCUMENT's base URL, not against the importing module's, so
+  `../frontend/...` is relative to this file in `packages/gui/` even though the importer that says
+  `@tn3270/frontend` lives a directory deeper in `packages/gui/dist/`.
+
+  Same cross-package reach as `transfer.html` and `index.html`, and the same caveat: it assumes
+  `gui` and `frontend` stay siblings on disk, which is true in the workspace and false in an asar
+  bundle. Packaging has to rewrite all three.
+-->
+<!--
+  TWO ENTRIES, AND BOTH POINT AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL.
+
+  `@tn3270/canvas` -> `keypadUi.js`, which is where the DOM view lives. It is in `canvas` and not
+  in `gui` because the WEB GATEWAY needs the same view, and `packages/web` neither depends on
+  `@tn3270/gui` nor could -- that package imports `electron`.
+
+  NOT `../canvas/dist/index.js`: the canvas BARREL reaches `drawlist.js`, which value-imports
+  `@tn3270/core`, and the barrel's own docstring says so in capitals. `keypadUi.js` has exactly
+  one runtime import (`@tn3270/frontend`, resolved by the second entry), so naming the module
+  keeps the graph at two files.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@tn3270/canvas": "../canvas/dist/keypadUi.js",
+    "@tn3270/frontend": "../frontend/dist/keypadView.js"
+  }
+}
+</script>
+<!--
+  THE SHARED STYLESHEET, the same one `transfer.html` loads. That shared file IS the user's
+  requirement that the keypad and the transfer window look stylistically similar, rather than two
+  copies of a `<style>` block that diverge the first time one is touched. `uiAssets.test.ts`
+  checks this `href` resolves to a file that exists -- measured, because a 404'd stylesheet still
+  scores a full 10/10 on the Xvfb harness: an unstyled window behaves exactly like a styled one.
+-->
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body class="ui-surface">
+  <h1>Keypad</h1>
+  <!--
+    The ONLY element `keypadBoot.ts` looks up. Everything inside it is built by `createKeypadUi`
+    from `KEYPAD_BLOCKS`, so the 48 keys are never spelled in markup -- which is what keeps this
+    document from becoming a second, drifting copy of the key table.
+  -->
+  <div id="keys"></div>
+  <script type="module" src="./dist/keypadBoot.js"></script>
+</body></html>

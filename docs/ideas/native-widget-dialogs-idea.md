@@ -1,5 +1,27 @@
 # Idea: move the GUI's keypad out of the canvas and into a native window
 
+**IMPLEMENTED 2026-10-06. This file is kept as the record of how the idea was reasoned about, and
+of one conclusion it got WRONG.** The spec is
+`docs/superpowers/specs/2026-10-06-keypad-window-design.md` and the plan is
+`docs/superpowers/plans/2026-10-06-keypad-window.md`; what shipped is described in README under
+*Using the GUI* and *Using the web gateway*.
+
+**THE WRONG CONCLUSION, which is the most useful thing here:** this file argued at length that the
+job was *"not deletion, it is divergence"* — that the GUI would move to native controls while the
+web gateway stayed canvas-drawn, leaving `canvas/src/keypad.ts` with exactly one consumer. The
+user's 2026-10-06 decision was that the WEB keypad should be real HTML too, as an in-pane overlay.
+That made the view shareable outright, so both front ends landed in one change and
+`canvas/src/keypad.ts` ended with **no** consumers at all. It and `hittest.ts` were deleted, along
+with 37 tests. The reasoning below for keeping them is sound given its premise; the premise changed.
+
+**Two other predictions worth scoring, since the point of keeping this file is calibration.**
+`clicks.mjs` did need rethinking rather than rerunning, exactly as predicted — it became a DOM
+query by label. And the GUI goldens did change, but not in the way suggested: the keypad golden
+could not "move to the web harness", because the web stopped drawing one too, so it was deleted
+and the keypad's appearance is now verified by nothing.
+
+---
+
 **The user's judgement after using the shipped keypad, 2026-09-30. Not designed, not scheduled.**
 Parked here rather than folded into the transfer-UI spec, because it would change a SHIPPED feature
 that a second front end shares and that has pixel goldens and two by-hand harnesses pinned to it.

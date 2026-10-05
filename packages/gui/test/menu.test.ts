@@ -50,15 +50,55 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     // `undefined`: Electron treats a present-but-undefined click differently from no click.
     let copied = 0;
     let pasted = 0;
-    const t = buildMenuTemplate('linux', { onCopy: () => { copied++; }, onPaste: () => { pasted++; } });
+    let keypad = 0;
+    const t = buildMenuTemplate('linux', {
+      onCopy: () => { copied++; },
+      onPaste: () => { pasted++; },
+      onKeypad: () => { keypad++; },
+    });
     const items = (t.find((m) => m.label === 'Edit')!.submenu) as
       { label: string; click?: () => void }[];
     items.find((i) => i.label === 'Copy')!.click!();
     items.find((i) => i.label === 'Paste')!.click!();
-    expect([copied, pasted]).toEqual([1, 1]);
+    // THE VIEW MENU'S HANDLER TOO, and each is checked to fire its OWN callback: three items
+    // wired to one handler would satisfy a "something was called" assertion.
+    const viewItems = (t.find((m) => m.label === 'View')!.submenu) as
+      { label: string; click?: () => void }[];
+    viewItems.find((i) => i.label === 'Keypad')!.click!();
+    expect([copied, pasted, keypad]).toEqual([1, 1, 1]);
 
     const bare = (buildMenuTemplate('linux').find((m) => m.label === 'Edit')!.submenu) as
       readonly Record<string, unknown>[];
     expect(Object.prototype.hasOwnProperty.call(bare[0]!, 'click')).toBe(false);
+    const bareView = (buildMenuTemplate('linux').find((m) => m.label === 'View')!.submenu) as
+      readonly Record<string, unknown>[];
+    expect(Object.prototype.hasOwnProperty.call(bareView[0]!, 'click')).toBe(false);
+  });
+
+  it('offers the keypad on a View menu, on every platform', () => {
+    /**
+     * `Ctrl-K` ALONE IS UNDISCOVERABLE -- nothing on screen says 48 keys exist behind it -- so the
+     * menu item is what makes the keypad findable. x3270 uses a keyboard icon in its own toolbar
+     * for the same purpose; a menu item is the Electron-native spelling.
+     *
+     * ASSERTED ON EVERY PLATFORM because this accelerator is NOT platform-split, unlike Copy and
+     * Paste. That split exists only because `Ctrl-C` is the Clear AID; `Ctrl+K` collides with
+     * nothing in the 3270 keyboard and is already c3270's and the TUI's binding.
+     */
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      const view = buildMenuTemplate(platform).find((m) => m.label === 'View');
+      expect(view, `${platform} has no View menu`).toBeDefined();
+      const items = view!.submenu as { label: string; accelerator?: string }[];
+      expect(items.find((i) => i.label === 'Keypad')?.accelerator).toBe('Ctrl+K');
+    }
+  });
+
+  it('does NOT give the keypad a platform-split accelerator', () => {
+    // The inverse of the Copy/Paste rule, pinned so nobody "fixes" an inconsistency that is
+    // deliberate: Cmd+K on macOS would diverge from c3270 and the TUI for no collision at all.
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      const flat = JSON.stringify(buildMenuTemplate(platform));
+      expect(flat, `${platform} bound Cmd+K`).not.toContain('"Cmd+K"');
+    }
   });
 });

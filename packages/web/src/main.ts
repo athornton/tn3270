@@ -130,22 +130,18 @@ export function buildServer(args: WebArgs) {
      * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
      */
     let stopListening: (() => void) | undefined;
-    /**
-     * Per CONNECTION, and that is the one thing this differs from Electron in (`gui/src/main.ts:279`,
-     * where the same flag is per WINDOW and the two coincide).
-     *
-     * Here they do not, and the harm is SEQUENTIAL rather than concurrent. Two sockets can never
-     * hold one `Session` at the same time -- `attach` reattaches only a DETACHED entry
-     * (`sessions.ts:61`) and an id someone is using falls through to a new session, which is the
-     * anti-hijacking rule, and `bridge.ts:35` keeps the id in `sessionStorage`, which is per TAB. So
-     * there is no other window to resize. What a session-scoped flag would do instead is hand the
-     * preference to whoever attaches NEXT: a gateway `Session` deliberately outlives its socket so a
-     * reload reattaches, and the next attacher is a different window -- possibly a different person
-     * -- that never asked for a keypad and would find its screen 9 rows taller than it left it.
-     * Declared in the `upgrade` scope, so it dies with the socket, which is exactly the lifetime the
-     * preference has; a reattaching client therefore starts with the keypad hidden.
-     */
-    let showKeypad = false;
+    /*
+      A per-CONNECTION `showKeypad` flag lived here and is gone, 2026-10-06: the keypad is a DOM
+      overlay the browser owns, so the server holds no keypad state at all.
+
+      ITS REASONING SURVIVED THE FLAG AND IS NOW THE BROWSER'S PROBLEM, so it is worth keeping. It
+      was per CONNECTION rather than per session because a gateway `Session` deliberately outlives
+      its socket -- a reload reattaches -- so a session-scoped flag would have handed the
+      preference to whoever attached NEXT: a different window, possibly a different person, who
+      never asked for a keypad and would find their screen 9 rows taller than they left it.
+      `createKeypadOverlay` starts hidden on every page load for exactly that reason, which is the
+      same rule arriving at the same answer one layer up.
+    */
     conn.onText((text) => {
       let msg;
       try { msg = decodeClientMessage(text); } catch (err) {
@@ -173,11 +169,11 @@ export function buildServer(args: WebArgs) {
           const oia = mine.oia.toText();
           conn.sendBinary(encodeServerMessage({
             kind: 'frame',
-            // The VARIABLE is closed over, so this reads whatever it holds at paint time and the
-            // toggle below needs no more than a repaint. Every route into this closure -- a host
-            // frame, a local action, a reattach -- therefore draws what THIS socket last asked for.
+            // NO KEYPAD ARGUMENT ANY MORE: the web keypad is a DOM overlay the browser builds and
+            // toggles itself, so there is nothing for this side to draw or to remember per socket.
+            // A `showKeypad` boolean lived here, closed over so a toggle needed only a repaint.
             list: drawList(snapshot, resolve(snapshot), atlas.geometry, scheme,
-              oia === '' ? undefined : oia, showKeypad),
+              oia === '' ? undefined : oia),
           }));
         };
         mine.on('screen', send);
@@ -217,10 +213,24 @@ export function buildServer(args: WebArgs) {
        * AFTER the log line above, on purpose: `--log-actions` is the only thing the browser chord
        * harness can observe, and in replay mode a toggle changes no screen.
        *
-       * A repaint and nothing else, because `send` reads `showKeypad` itself -- and a repaint IS
-       * required, since no `Session` event fires for a decision no `Session` knows about.
+       * ## IT NOW DOES NOTHING BUT RETURN, AND DELETING IT WOULD REOPEN THE HOLE
+       *
+       * The keypad became a BROWSER-SIDE DOM OVERLAY on 2026-10-06, so `bridgecore.ts` intercepts
+       * this action client-side and it should never arrive here at all -- and there is no
+       * `showKeypad` flag left to flip, nor any repaint owed, since no frame this side builds
+       * depends on it.
+       *
+       * BUT A CLIENT IS NOT OBLIGED TO RUN SERVED CODE. `integration.test.ts` sends every `Action`
+       * kind as a raw frame, which is precisely that client, and `applyAction` still THROWS on this
+       * one. So the `return` is the whole point and the body is empty on purpose: it is the
+       * server-side half of `protocol.ts`'s two-branch rule, and `toggleKeypad` has already spent
+       * one commit in the forbidden "neither" state.
+       *
+       * The log line above still runs, which is what `browser-keys.mjs` reads -- and that harness
+       * now asserts this action's ABSENCE from the log, since a client-side interception means it
+       * never crosses the socket. An entry appearing here would mean that interception had broken.
        */
-      if (msg.action.kind === 'toggleKeypad') { showKeypad = !showKeypad; repaint?.(); return; }
+      if (msg.action.kind === 'toggleKeypad') return;
       // `transferForm` NEEDS NO INTERCEPTION HERE: it takes the other branch of `protocol.ts`'s
       // two-branch rule and is rejected at decode, before it can reach this handler at all -- and
       // the try at line 151 answers that throw on this socket alone. See the note there for why a

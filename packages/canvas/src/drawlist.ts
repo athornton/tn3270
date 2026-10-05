@@ -30,14 +30,18 @@
  *
  * ## `AtlasGeometry` AND `DrawCell` ARE NOT DECLARED HERE ANY MORE
  *
- * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `keypad.ts`,
- * `assets.ts` and `blit.ts` all took them from here with `import type` -- while this module
- * value-imports `column` from `cg.ts` and `keypadRegion` from `keypad.ts`. That is an import
- * cycle in the type position: harmless while the imports erase, and a module-initialization
- * ordering bug the day one of them becomes a value. See `geometry.ts` and the guard in
- * `test/module-cycles.test.ts`.
+ * They are in `geometry.ts`, which imports no sibling. They were here, and `cg.ts`, `assets.ts`
+ * and `blit.ts` all took them from here with `import type` -- while this module value-imports
+ * `column` from `cg.ts`. That is an import cycle in the type position: harmless while the imports
+ * erase, and a module-initialization ordering bug the day one of them becomes a value. See
+ * `geometry.ts` and the guard in `test/module-cycles.test.ts`.
  *
- * `DrawList` below stays, because it names `KeypadRegion` and so cannot live in a leaf.
+ * `keypad.ts` WAS THE OTHER HALF OF THAT CYCLE and is gone (2026-10-06): neither front end draws
+ * a keypad into the canvas any more, so `keypadRegion` had no consumer. `DrawList` named its
+ * `KeypadRegion`, which was the stated reason the type could not live in a leaf module -- that
+ * reason has now expired, and moving `DrawList` into `geometry.ts` is a tidy somebody could do.
+ * Not done here: this change is already deleting a shipped feature's worth of code, and mixing a
+ * type move into it would make the diff harder to read than the tidy is worth.
  */
 
 import {
@@ -45,7 +49,6 @@ import {
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
-import { keypadRegion, type KeypadRegion } from './keypad.js';
 import type { AtlasGeometry, DrawCell } from './geometry.js';
 
 export interface DrawList {
@@ -64,17 +67,6 @@ export interface DrawList {
     readonly y: number;
     readonly cells: readonly DrawCell[];
   };
-  /**
-   * The virtual keypad, absent unless the front end asked for it.
-   *
-   * Present in the DRAW LIST rather than owned by the renderer, and that is decided by
-   * `gui/src/main.ts:312`, which sizes the window from `list.height`. A renderer-owned keypad would
-   * leave main unaware the drawing had grown, and the Electron page is `overflow:hidden`
-   * (`gui/index.html:3`) -- so the keypad would be clipped, which is exactly the model-4 OIA bug
-   * live verification found. The alternative was a fifth bridge function, and
-   * `web/src/bridgecore.ts:5` says a fifth function means the renderer has stopped being shared.
-   */
-  readonly keypad?: KeypadRegion;
   readonly width: number;
   readonly height: number;
 }
@@ -83,16 +75,19 @@ export interface DrawList {
 const EBCDIC_SPACE = 0x40;
 
 // `scheme` comes BEFORE `oiaText`: an existing call passing OIA text positionally would
-// otherwise silently take it as the scheme, with no type error and no failing test. For the same
-// reason `showKeypad` is APPENDED and defaults to off, so every existing caller keeps its meaning
-// and neither screenshot golden moves.
+// otherwise silently take it as the scheme, with no type error and no failing test.
+//
+// A SIXTH `showKeypad` PARAMETER WAS HERE AND IS GONE (2026-10-06). It was appended and defaulted
+// to off for exactly the reason above -- so existing callers kept their meaning -- and both front
+// ends now draw their keypad as real HTML controls instead, so nothing ever passed `true`.
+// Removing it rather than leaving a parameter no caller sets: a defaulted flag that cannot be
+// turned on is a reader trap, and `tsc` catches every stale `true` at the call site.
 export function drawList(
   snapshot: ScreenSnapshot,
   resolved: readonly ResolvedCell[],
   atlas: AtlasGeometry,
   scheme: Scheme,
   oiaText?: string,
-  showKeypad = false,
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
   const cells: DrawCell[] = [];
@@ -123,11 +118,6 @@ export function drawList(
 
   const rows = snapshot.rows + (oiaText !== undefined ? 1 : 0);
   const oiaY = snapshot.rows * atlas.cellHeight;
-  // BELOW BOTH: `rows` already counts the OIA's row when there is one, so this is the screen's
-  // bottom edge with no OIA and the OIA's with one. `oiaY` is deliberately NOT reused here -- the
-  // two coincide only in the no-OIA case, which is why the tests pin both.
-  const keypadY = rows * atlas.cellHeight;
-  const keypad = showKeypad ? keypadRegion(atlas, scheme, keypadY) : undefined;
   return {
     cells,
     ...(oiaText !== undefined
@@ -139,18 +129,16 @@ export function drawList(
         },
       }
       : {}),
-    // A conditional spread and not `keypad,`: `exactOptionalPropertyTypes` makes an explicit
-    // `undefined` a type error for an optional property, as it already does for `oia` above.
-    ...(keypad !== undefined ? { keypad } : {}),
-    // The keypad is narrower than any 3270 MODEL (72 columns against 80, and 132 on a model 5), so
-    // it never widens the window. Not narrower than any GEOMETRY: `checkGeometry`
-    // (`core/src/screen.ts:101`) accepts any positive `cols`, and 40 columns would be 360 pixels
-    // against the keypad's 648 -- `drawlist.test.ts` writes the assumption down as
-    // `keypad.width <= width`. The height it adds is measured from the region's OWN extent rather
-    // than recomputed from a row count, so `keypad.ts` stays the only place that knows how tall
-    // the keypad is.
     width: snapshot.cols * atlas.cellWidth,
-    height: keypad !== undefined ? keypadY + keypad.height : rows * atlas.cellHeight,
+    // SCREEN PLUS THE OIA's ROW, AND NOTHING ELSE NOW. A `keypadY + keypad.height` branch was here
+    // until 2026-10-06 and the keypad was the only thing that ever made the drawing taller than
+    // its rows; `rows` already counts the OIA's row when there is one, so this one expression
+    // covers both cases. `gui/src/main.ts`'s `fit` sizes the window from this, which is why the
+    // keypad had to live in the draw list at all -- a renderer-owned one would have left main
+    // unaware the drawing had grown and the Electron page is `overflow:hidden`, so it would have
+    // been clipped. That whole argument is moot now: the keypad is a separate WINDOW in Electron
+    // and an overlay in the browser, and neither changes this height.
+    height: rows * atlas.cellHeight,
   };
 }
 

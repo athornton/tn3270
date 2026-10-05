@@ -111,14 +111,18 @@ describe('the canvas package import graph', () => {
     // silently stopped matching would return an empty graph and pass the cycle check trivially.
     // These four are chosen to cover every FORM the scan has to see.
     expect([...src.keys()], 'the source scan found no modules').toContain('drawlist.ts');
-    // A plain value import, and the edge that made both historical cycles.
-    expect(src.get('drawlist.ts'), 'drawlist -> keypad').toContain('keypad.ts');
-    expect(src.get('keypad.ts'), 'keypad -> cg').toContain('cg.ts');
+    // A plain value import. THE EDGE NAMED HERE USED TO BE `drawlist -> keypad`, which was the
+    // one that made both historical cycles -- `keypad.ts` was deleted on 2026-10-06 with the
+    // canvas keypad, so the surviving plain value import out of `drawlist.ts` stands in. The FORM
+    // is what this assertion is for, and it is the same form.
+    expect(src.get('drawlist.ts'), 'drawlist -> cg (value import)').toContain('cg.ts');
     // A TYPE-ONLY import, which is the form a `dist` scan cannot see and the one both cycles
     // hid behind. If this stops matching, the source half of this file proves nothing.
     expect(src.get('cg.ts'), 'cg -> geometry (import type)').toContain('geometry.ts');
-    // An `export ... from` re-export, which is the only shape `index.ts` has.
-    expect(src.get('index.ts'), 'index -> hittest (export from)').toContain('hittest.ts');
+    // An `export ... from` re-export, which is the only shape `index.ts` has. Was `-> hittest`
+    // until that module was deleted with the canvas keypad; `selection.ts` is re-exported the same
+    // way, and again the FORM is the point.
+    expect(src.get('index.ts'), 'index -> selection (export from)').toContain('selection.ts');
     // And the direction that must NOT exist, stated positively so the extraction cannot quietly
     // come back: the shared drawing types are a LEAF, imported by everything and importing
     // nothing.
@@ -142,15 +146,17 @@ describe('the canvas package import graph', () => {
     }
   });
 
-  it('leaves dist/cg.js and dist/hittest.js with NO imports at all', () => {
-    // Both are pure arithmetic over their arguments and both say in their own docstrings that this
-    // is why they can be used from anywhere -- `hittest.js` is SERVED to the browser
-    // (`BROWSER_MODULES`, `assets.ts:39`) and `cg.js` is imported by `keypad.js`, which the
-    // renderer must not reach. Their `import type` lines erase; a value import would not, and the
-    // cycle checks above cannot see the difference because a one-way edge is not a cycle.
-    for (const file of ['cg.js', 'hittest.js']) {
-      const text = readFileSync(join(distDir, file), 'utf8');
-      expect(text.match(/^import\b.*$/gm) ?? [], `${file} must import nothing`).toEqual([]);
-    }
+  it('leaves dist/cg.js with NO imports at all', () => {
+    // Pure arithmetic over its arguments, which its own docstring says is why it can be used from
+    // anywhere. Its `import type` lines erase; a value import would not, and the cycle checks
+    // above cannot see the difference because a one-way edge is not a cycle.
+    //
+    // `hittest.js` WAS CHECKED HERE TOO and was deleted with the canvas keypad on 2026-10-06. It
+    // was the browser-served half of the pair; the module now in that role is `keypadUi.js`, which
+    // is NOT import-free -- it imports `@tn3270/frontend` through an import map, and
+    // `keypadUiModule.test.ts` asserts that is its ONLY import. Different property, different
+    // test, so it is not folded in here.
+    const text = readFileSync(join(distDir, 'cg.js'), 'utf8');
+    expect(text.match(/^import\b.*$/gm) ?? [], 'cg.js must import nothing').toEqual([]);
   });
 });

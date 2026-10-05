@@ -75,16 +75,23 @@ describe('the screenshot harness', () => {
     expect(shot).toMatch(/extraArgv:\s*\[\s*['"]-scheme['"]/);
   });
 
-  it("threads a case's keys into the seam, while still defaulting it to empty", () => {
-    // The SAME hazard as extraArgv above, on the keypad golden. That golden shows a keypad only
-    // because its case asks for Ctrl+K, and nothing else can show one: hardcode `''` back here and
-    // the next --update would silently re-baseline it to a keypad-less screen identical to the
-    // first case's, which would then pass forever while checking nothing new.
-    //
-    // `?? ''` is the other half, and it is a privacy guard rather than a tidiness one: this env is
-    // inherited from the operator's shell, and a stray TN3270_GUI_KEYS there would type into every
-    // golden that did not ask for keys.
+  it('defaults a case s keys to empty rather than inheriting the shell s', () => {
+    /**
+     * `?? ''` IS A PRIVACY GUARD, not a tidiness one: this env is inherited from the operator's
+     * shell, and a stray `TN3270_GUI_KEYS` there would type into every golden that did not ask for
+     * keys -- silently changing what the baseline photographs.
+     *
+     * THE SECOND HALF OF THIS TEST WAS DELETED WITH THE KEYPAD GOLDEN, 2026-10-06. It asserted
+     * that some case set `keys: 'Ctrl+K'`, because the keypad golden showed a keypad ONLY by
+     * asking for that chord -- hardcoding `''` would have let the next `--update` re-baseline it to
+     * a keypad-less screen identical to the first case's, passing forever while checking nothing.
+     * That golden is gone: `Ctrl+K` now opens a separate window, which `capturePage()` here does
+     * not photograph, so no surviving case uses `keys` at all.
+     *
+     * THE THREADING IS STILL PINNED, through `kase.keys` rather than a literal, so a case that
+     * needs keys in future gets them -- and the privacy half, which was always the more important
+     * of the two, is unchanged.
+     */
     expect(shot).toMatch(/TN3270_GUI_KEYS:\s*kase\.keys \?\? ''/);
-    expect(shot).toMatch(/keys:\s*['"]Ctrl\+K['"]/);
   });
 });

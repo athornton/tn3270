@@ -137,8 +137,14 @@ a pixel diff never did.
   decision, and the throw is what makes a front end that forgot the arm fail loudly.
 - **The TUI's overlay is untouched.** It is a different answer to the same action, it is liked, and
   `tui/src/keypadOverlay.ts` is out of scope entirely.
-- **The four otherwise-unreachable keys keep a route** — **Sys Req, Dup, Field Mark, Newline**.
-  Nothing else in any interactive front end can press them.
+- **All four of Sys Req, Dup, Field Mark and Newline keep a route** — and **the precise claim,
+  corrected during Task 1 because the original overstated it: only `SysRq` and `NewLn` have NO
+  chord at all.** `Dup` and `FldMk` are Ctrl-D/Ctrl-F in both the terminal keymap
+  (`frontend/src/keymap.ts:190-191`) and the GUI/web mapper (`canvas/src/keys.ts:77-78`), so
+  losing their buttons would cost the MOUSE route, not every route. `SysRq` and `NewLn` are the
+  two with nothing else, and they are the ones a dropped button makes genuinely unreachable.
+  Keeping all four is still the requirement; knowing which two are load-bearing matters when
+  triaging a failure.
 - **`Xfer` stays a keypad button**, and its action still opens the transfer window. Clicking a
   button in one palette to open another window is fine; it already works that way.
 

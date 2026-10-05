@@ -1,0 +1,266 @@
+/**
+ * The 48 keys of `KEYPAD_KEYS` grouped for a DOM layout.
+ *
+ * ## WHY A SECOND GROUPING RATHER THAN `KeypadKey.row`/`col`
+ *
+ * Those two are CELL COORDINATES for a blitter. `KeypadKey.col` is a left edge in character
+ * cells, `KEYPAD_KEY_WIDTH` cells per key (6, so twelve of them span 72 and fit inside an
+ * 80-column screen -- `keypad.ts`'s own note on the constant), and `row` is an index into
+ * `canvas/src/keypad.ts`'s `DRAWN_ROW` = `[0, 2, 4, 6, 8]`, which spreads the five table rows
+ * over nine drawn ones so that no two buttons touch vertically. Both numbers exist to satisfy a
+ * character grid that a DOM layout does not have: there is no column budget, and the blank
+ * separator row exists because a one-cell-tall inverse-video button would otherwise merge into
+ * the one above it (measured, same file) -- a problem CSS does not have either.
+ *
+ * Read the other way round, the cell coordinates ENCODE the clusters without naming them -- the
+ * gap at column 18 on rows 2-4 "is NOT free space: it separates the Tab/BkTab clusters
+ * deliberately" (`keypad.ts`, on `Xfer`). This file names what those gaps mean, so a reader does
+ * not have to reconstruct the intent from column numbers, and so the blocks survive the deletion
+ * of the canvas keypad that Task 9 of this feature performs.
+ *
+ * `row`/`col` are LEFT ALONE on `KeypadKey`, neither deleted nor annotated: `canvas/src/keypad.ts`
+ * still reads both and is still shipping, so they are live fields, not legacy ones. They become
+ * dead only when that file is deleted, and deleting fields from a 48-row table in the same change
+ * that rewrites two front ends mixes two risks. (The plan's draft of this header called them
+ * "marked deprecated"; nothing in `keypad.ts` says that, and saying it here would have been a
+ * comment describing a state of the code that does not exist.)
+ *
+ * ## THE GROUPING IS WRITTEN DOWN, NOT DERIVED
+ *
+ * Deriving blocks from `col` gaps would make this agree with the canvas layout by construction,
+ * and so unable to disagree -- the same argument `KEYPAD_ROWS` already makes for itself in
+ * `keypad.ts`. It would also tie a DOM layout to a table that Task 9 is about to stop being the
+ * authority on. Written down, a key that falls out of every block is a test failure, and a key
+ * in two blocks is a test failure too -- see `keypadView.test.ts`, whose first case is the whole
+ * protection against a dropped or doubled button.
+ *
+ * The blocks are therefore ALLOWED to disagree with the canvas rows, and they deliberately do.
+ * The canvas has `Reset` at row 2 column 60 and `Enter` at row 3 column 60 -- a right-hand column
+ * holding two keys with nothing in common but their column -- and `Xfer` at row 4 column 48,
+ * placed there because, in its own note's words, `NewLn` "ended at 48, so this takes 48 ... still
+ * inside 72 and still NO NEW ROW". That is a column budget talking, not a grouping. Here `Reset`
+ * joins the modal keys whose state it clears, and `Enter`/`Xfer` get a block of their own.
+ *
+ * ## NO DOM, NO ELECTRON
+ *
+ * Pure data and pure functions, for the same reason `transferForm.ts` is: `vitest.config.ts` sets
+ * `environment: 'node'`, there is no `document` in any test in this repo and jsdom is not a
+ * dependency. Everything worth testing about the grouping is testable without an element. The
+ * views that consume this (the GUI's keypad window, the web gateway's overlay) take their DOM
+ * injected.
+ */
+
+import { KEYPAD_KEYS, type KeypadKey } from './keypad.js';
+import { BINDING_INTENT } from './bindings.js';
+
+export interface KeypadBlock {
+  /**
+   * Stable identifier, used as a DOM id suffix and in tests. Lowercase and hyphenated because it
+   * ends up in an `id` attribute and in a CSS selector.
+   */
+  readonly id: string;
+  /** Visible heading, in words, shown above the block's buttons. */
+  readonly title: string;
+  readonly keys: readonly KeypadKey[];
+}
+
+/**
+ * The one key with this label, or a throw.
+ *
+ * THROWS RATHER THAN SKIPS. A typo'd label here would otherwise silently drop a button from the
+ * window, and the test's "exactly once" case would report it as a count mismatch somewhere in a
+ * flattened list of 48 rather than at the typo. For `SysRq` and `NewLn` a dropped button is worse
+ * than cosmetic: those two have NO chord in ANY front end -- `keymap.ts` records "Sys Req gets NO
+ * chord: c3270 defines none in either keymap", and `keypad.ts` records the same for Newline, whose
+ * c3270 chord Ctrl-J is already `enter` in the terminal keymap -- so the keypad button and the
+ * TUI overlay are their only interactive route at all.
+ *
+ * `Dup` and `FldMk` are often listed with those two (the spec's "four otherwise-unreachable
+ * keys"), but they are not in the same position TODAY: both have Ctrl-D/Ctrl-F in the terminal
+ * keymap (`keymap.ts:190-191`, from `Common/fb-c3270:186-187`) and in the GUI/web key mapper
+ * (`canvas/src/keys.ts:77-78`). Losing their button would cost them the mouse, not the keyboard.
+ */
+const byLabel = (label: string): KeypadKey => {
+  const key = KEYPAD_KEYS.find((k) => k.label === label);
+  if (key === undefined) throw new Error(`no keypad key labelled ${label}`);
+  return key;
+};
+
+/** Twelve consecutive PF keys, by label, so a renumbering of the table cannot reorder them. */
+const pfRange = (from: number): readonly KeypadKey[] =>
+  Array.from({ length: 12 }, (_, i) => byLabel(`PF${from + i}`));
+
+export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
+  // PF13-24 ABOVE PF1-12. That is `KEYPAD_KEYS`' own order -- it opens `pfRow(0, 13)` then
+  // `pfRow(1, 1)` -- and its header cites c3270 for the same arrangement
+  // (`Common/c3270/keypad.labels:2` and `:4`). Reversing it here would be a silent relearn for
+  // anyone used to the shipped keypad, which is why the test pins the first label of each row
+  // rather than just the count.
+  { id: 'pf-high', title: 'PF13-24', keys: pfRange(13) },
+  { id: 'pf-low', title: 'PF1-12', keys: pfRange(1) },
+  {
+    // The INTERRUPT keys: each one reaches the host OUTSIDE the ordinary read-modified exchange.
+    // PA1-3 and Clear go as short-read AIDs; `SysRq` is Telnet IAC AO on a TN3270E session that
+    // agreed the SYSREQ function and a TEST REQUEST READ on a classic one (`actions.ts:109-120`
+    // records both forms); and `Attn` is TELNET BREAK.
+    //
+    // `Attn` IS `IAC BREAK` AND NOT `IAC IP`. Stated this loudly because the first version of
+    // this comment said IP, and because the two are a real pair of Telnet commands that a reader
+    // can plausibly swap. MEASURED: `Telnet.sendAttn()` is `Uint8Array.of(T.IAC, T.BREAK)` with
+    // the trace label `'Attn (IAC BREAK)'` (`core/src/telnet.ts:225-230`), both it and
+    // `Session.sendAttn()` (`core/src/session.ts:1616`) carry the docstring "The 3270 Attn key is
+    // Telnet BREAK (RFC 1576 §8), not an AID", three tests assert the exact two bytes
+    // (`core/test/telnet.test.ts:448`, `core/test/session.test.ts:493`,
+    // `cli/test/runner.test.ts:373`) and a fourth pins that it never reaches `sendAID`
+    // (`frontend/test/actions.test.ts:120`, with the `sendAID` assertion at `:128`), and `T.IP` is
+    // referenced NOWHERE in this repository (`grep -rn 'T\.IP\b' packages/*/src` -> no hits). IP
+    // is not a loose synonym for BREAK: they are two distinct Telnet commands, and a reader who
+    // swaps them has the wrong byte on the wire.
+    //
+    // BUT THAT IS OURS, NOT x3270's, AND WE DIVERGE FROM IT. An earlier draft of this comment
+    // claimed x3270 "draws the same distinction", with `net_break` for Attn and `IAC IP` behind a
+    // separate `Interrupt()` action. x3270 does close to the OPPOSITE, read from
+    // `Common/kybd.c:978-1002`: `Attn_action`'s docstring is "ATTN key, per RFC 2355. Sends IP,
+    // regardless." and its FIRST branch is `if (IN_E) { if (net_bound()) net_interrupt(0); ... }`.
+    // `net_break` is only the `IN_3270` fallthrough for a CLASSIC session. And `Interrupt_action`
+    // is not a separate key at all any more: its docstring ends "This is now the same as the Attn
+    // action" (`:1008`), so x3270 says the two have CONVERGED.
+    //
+    // A PA1-BEFORE-BREAK CLAIM WAS ALSO DRAFTED HERE AND IS REMOVED, BECAUSE IT IS NOT TRUE OF
+    // THE VERSION THIS PROJECT CITES. A newer upstream `Attn_action` does send
+    // `ctlr_read_modified(AID_PA1, false)` before `net_break(0)`, commented "This is what PCOMM
+    // does in plain TN3270 mode" -- but that line does not exist in SUITE3270 4.5, which is the
+    // tree in `~/src/suite3270-4.5` that every other citation in this repo is measured against
+    // (`grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` -> zero hits there; the `IN_3270` arm is
+    // a bare `net_break(0)`). Mixing versions is how a wrong wire constant gets in: cite the tree
+    // we build and test against, and if a newer one diverges say WHICH version did what.
+    //
+    // ## FINDING: OUR ATTN DIVERGES FROM x3270 IN TN3270E MODE, AND IS UNTESTED THERE
+    //
+    // `Session.sendAttn()` (`core/src/session.ts:1617-1620`) is three lines with NO branch on
+    // `inTn3270e()`: it calls `Telnet.sendAttn()`, which sends `{IAC, BREAK}` unconditionally. So
+    // on a TN3270E session x3270 sends IP and we send BREAK. No test covers Attn in E mode --
+    // the only three are classic (cited above) -- and nothing else in the repo records this.
+    //
+    // THE ASYMMETRY WITH `sysreq()` IS THE REASON TO THINK THIS IS AN OVERSIGHT RATHER THAN A
+    // DECISION: `sysreq()` sits IMMEDIATELY ABOVE `sendAttn()` in the same file (`:1596`), it
+    // branches on `inTn3270e()` as its first act, and its docstring opens "TWO COMPLETELY
+    // DIFFERENT THINGS ON THE WIRE, chosen by whether the session is TN3270E" and cites x3270's
+    // `IN_E` split for exactly that. The neighbouring key got the branch; this one did not, and
+    // no comment anywhere says it was considered.
+    //
+    // DELIBERATELY NOT FIXED HERE. Changing what `Attn` puts on the wire is protocol work, it is
+    // outside a keypad-presentation feature, and it wants a live TN3270E witness this project
+    // does not have -- both of its live hosts answer `IAC WILL TN3270E` with DONT, measured three
+    // times (`session.ts`, on `sysreq`). Recorded rather than silently repaired or silently
+    // ignored. `actions.ts:108` is a bare `case 'attn': session.sendAttn(); break;` with no wire
+    // note, which is why the citation for this half points at core and not at the dispatch.
+    //
+    // None of the six is the ordinary "submit this screen" that `Enter` is, which is why `Enter`
+    // is not in this block despite also being an AID. `Reset` is the odd one, and it is here
+    // deliberately: `Keyboard.reset()` (`core/src/keyboard.ts:434`) only calls `oia.reset()`, and
+    // the input-inhibit state it clears is the state a host error and the AID keys leave you in.
+    //
+    // THAT IS AN AFFINITY, NOT A RULE, and the stronger version of it is false: `Enter` and all
+    // 24 PF keys raise `SystemWait` through the same `sendAID` path from OTHER blocks
+    // (`session.ts:1553`), the three operator-error inhibits come from typing into a protected or
+    // numeric field rather than from any key here, and `Attn` -- which IS in this block -- does
+    // not touch the OIA at all (`session.ts:1617-1620` goes straight to the Telnet layer). Reset
+    // is grouped with the keys whose kind of trouble it answers; it is not claimed that this
+    // block is the only way to need it.
+    id: 'attention',
+    title: 'Attention',
+    keys: ['PA1', 'PA2', 'PA3', 'Attn', 'SysRq', 'Clear', 'Reset'].map(byLabel),
+  },
+  {
+    // Everything that MOVES THE CURSOR without altering the buffer. `NewLn` is a cursor move in
+    // 3270 terms and nothing else: `Keyboard.newline()` (`core/src/keyboard.ts:348`) is documented
+    // "first unprotected cell at or after the start of the next line" and its whole body assigns
+    // `s.cursor`. It belongs here, not beside `Enter`, which its name invites a reader to assume.
+    //
+    // The four arrows are `^ v < >` because that is what `KEYPAD_KEYS` labels them, and the
+    // labels are the button text. `keypad.ts` records why they exist at all: c3270's keypad has
+    // no cursor callbacks, but a keypad drivable by MOUSE ALONE needs them or a mouse user could
+    // never move the cursor -- which is exactly the DOM keypad's case too.
+    id: 'cursor',
+    title: 'Cursor',
+    keys: ['Home', '^', 'v', '<', '>', 'Tab', 'BkTab', 'NewLn'].map(byLabel),
+  },
+  {
+    // Everything that CHANGES THE BUFFER locally, with no transmission to the host. `Dup` and
+    // `FldMk` are here because they are TYPED CHARACTERS and not AIDs -- see the note on the
+    // `Action` union in `keymap.ts` -- so a user hunting them under "Attention" beside PA1 would
+    // be looking in the wrong place.
+    //
+    // `Ins` toggles a mode rather than editing, and it is the mode that decides what `Dup` and
+    // `FldMk` write into -- the only two keys here that go through `writeControl`
+    // (`core/src/keyboard.ts:127` and `:165`). NOT "what every other key in this block does",
+    // which an earlier draft of this comment claimed: `insertMode` is read in exactly two places,
+    // `type()` (`keyboard.ts:74`) and `writeControl()` (`:223`), and `Del` (`:413`), `BkSp`
+    // (`:398`), `ErEOF` (`:369`) and `ErInp` (`:393`) never read it. Four of the six are
+    // unaffected by the toggle, so `Ins` earns its place here by editing the buffer like the
+    // rest and not by governing them.
+    id: 'editing',
+    title: 'Editing',
+    keys: ['Ins', 'Del', 'BkSp', 'ErEOF', 'ErInp', 'Dup', 'FldMk'].map(byLabel),
+  },
+  {
+    // The two keys that SUBMIT OR START SOMETHING: `Enter` transmits the modified fields, `Xfer`
+    // starts a file transfer. Both reach the host, neither is an interrupt, which is what keeps
+    // them out of the `attention` block.
+    //
+    // `Xfer` IS THE ONE KEY IN THIS TABLE WHOSE ACTION `applyAction` REFUSES -- `actions.ts:57`,
+    // "applyAction does not handle transferForm: the front end owns its own dialog" -- so a
+    // button wired straight through to `applyAction` is a button that only throws. Whoever
+    // renders this block must give it the same treatment that front end already gives Ctrl-T,
+    // and THAT DIFFERS BY FRONT END rather than being one rule: the Electron GUI opens a
+    // window (`gui/src/main.ts:924`) and the TUI opens an overlay (`tui/src/app.ts:672`), but
+    // the web gateway deliberately REJECTS it with an error frame naming the kind
+    // (`web/src/protocol.ts:146`), because a browser-initiated transfer would write to the
+    // gateway's filesystem and not the operator's. The web keypad therefore still shows the
+    // button -- the rejection is the feedback, and `protocol.ts` says so in as many words.
+    id: 'send',
+    title: 'Send',
+    keys: ['Enter', 'Xfer'].map(byLabel),
+  },
+]);
+
+/**
+ * Tooltip text for a key: its name, plus the binding note when there is one.
+ *
+ * ## THE DATA IS UNEVEN IN TWO DIFFERENT WAYS, AND BOTH HAVE TO BE HANDLED
+ *
+ * MEASURED 2026-10-06:
+ *
+ *  - `BINDING_INTENT` has NO ENTRY AT ALL for 22 of the 48 keys -- PF14-24, PF2-11, `SysRq`
+ *    and `NewLn`.
+ *  - It has an entry with NO `note` for a further 15 -- PF1, PF3, PA2, PA3, `Home`, all four
+ *    arrows, `Reset`, `ErInp`, `Tab`, `BkTab`, `Del`, `BkSp`. `note` is OPTIONAL on `Binding`
+ *    (`bindings.ts:32`).
+ *
+ * SO "FOUND A BINDING" AND "HAS PROSE" ARE DIFFERENT QUESTIONS, and conflating them is not a
+ * cosmetic slip: the first draft of this function tested only `binding === undefined` and then
+ * read `binding.note.startsWith(...)`, which throws on all 15 -- including `Tab`, `Home` and
+ * every arrow, i.e. most of the cursor cluster. `note === undefined` is the condition that
+ * matters, and it subsumes the missing-entry case through the optional chain below.
+ *
+ * `name` IS THEREFORE THE FLOOR AND THE NOTE IS THE BONUS. Nothing is ever blank, and no prose
+ * has to be invented to fill a table -- which matters because the 22 with no entry are mostly PF
+ * keys, whose meaning is HOST-DEPENDENT and cannot honestly be described beyond their number.
+ *
+ * ## MATCHED ON THE ACTION, NOT THE LABEL
+ *
+ * `BINDING_INTENT`'s `key` field is a keyboard chord -- `'Ctrl-C'`, `'Enter'` -- and not a keypad
+ * label. Matching on it would silently find nothing for most keys, and "silently finds nothing"
+ * is indistinguishable here from "has no note": every tooltip would quietly degrade to the bare
+ * name and no test asserting non-emptiness would notice.
+ */
+export function tooltipFor(key: KeypadKey): string {
+  const wanted = JSON.stringify(key.action);
+  const note = BINDING_INTENT.find((b) => JSON.stringify(b.action) === wanted)?.note;
+  if (note === undefined) return key.name;
+  // Do not repeat the name when the note already opens with it: several do, and
+  // "Enter -- the Enter AID" must not become "Enter -- Enter -- the Enter AID".
+  if (note.startsWith(key.name)) return note;
+  return `${key.name} -- ${note}`;
+}
