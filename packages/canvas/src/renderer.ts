@@ -4,6 +4,12 @@ import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
 import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 import { hitTestAt, type KeypadButton } from './hittest.js';
+// FROM THE MODULE AND NOT FROM THE BARREL (`./index.js`), which would be the natural reach and
+// would BLANK THIS WINDOW WITH NO ERROR: the barrel re-exports `drawlist.js`, which value-imports
+// `@tn3270/core`, and a browser has no bundler to resolve a bare specifier.
+// `renderer-imports.test.ts` walks this file's built graph to catch exactly that. `selection.ts`
+// itself is safe here -- its only workspace import is an `import type`, which erases.
+import { normalizeRect, isEmptyRect, type CellAddr } from './selection.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -68,6 +74,36 @@ let last: DrawList | undefined;
  * leave the highlight stuck on.
  */
 let pressed: KeypadButton | undefined;
+/**
+ * The selection, in CELL coordinates, with `anchor` where the drag began and `focus` where it is
+ * now. Both null means no selection.
+ *
+ * RENDERER-LOCAL AND DELIBERATELY NOT IN THE `DrawList`: the draw list comes from main, and
+ * selection is a display concern the renderer owns. Main learns about it only when a copy is asked
+ * for, and then only as a RECTANGLE -- it cannot learn the text from here, because a `DrawCell`
+ * carries a CG-order atlas glyph and no character. (Contrast the KEYPAD, which IS in the draw
+ * list -- because `gui/src/main.ts` sizes the window from `list.height`, so a renderer-owned
+ * keypad would be clipped.)
+ *
+ * `dragging` is separate from "has a selection" ON PURPOSE: the mouse release ends the drag but
+ * must KEEP the selection, because the operator presses Copy afterwards. Clearing on release would
+ * make every copy impossible.
+ */
+let anchor: CellAddr | null = null;
+let focus: CellAddr | null = null;
+let dragging = false;
+
+/**
+ * Forget the selection. One function and not two assignments at four call sites, so a later edit
+ * cannot clear one half and leave the other -- this project has been bitten five times by
+ * one-path-clears-and-another-doesn't, most recently when closing a parent window skipped the
+ * child's close handler.
+ */
+function clearSelection(): void {
+  anchor = null;
+  focus = null;
+  dragging = false;
+}
 /**
  * True while the canvas holds an ERROR MESSAGE rather than a screen.
  *
@@ -207,6 +243,42 @@ function paint(list: DrawList): void {
       pressed.w * scale, pressed.h * scale,
     );
   }
+
+  /**
+   * THE SELECTION HIGHLIGHT, inverse video over the selected cells.
+   *
+   * `difference` COMPOSITION RATHER THAN A FIXED INVERSE COLOR, which is what makes one line work
+   * for every palette scheme: it inverts whatever is already under it, so there is no per-scheme
+   * inverse table to keep in step with `palette.ts`. Drawn as an OVERLAY and not by re-blitting the
+   * glyphs, so a selection can never change which character is on screen.
+   *
+   * GATED ON `isEmptyRect`, so a plain click -- which sets anchor and focus to the same cell -- draws
+   * nothing. Without that every click would flash a one-cell block.
+   *
+   * THE GOLDENS MUST NOT MOVE because of this. `shot.mjs`'s three cases have no selection, so this
+   * block cannot execute in them; if a golden does move, that is a real failure meaning the
+   * highlight draws when nothing is selected, and NOT a golden to regenerate.
+   *
+   * LAST, after the keypad and its press wash, for the same reason the press highlight is last
+   * among those: it sits over what it marks. It cannot stray onto the keypad or the OIA anyway --
+   * `cellAt` bounds every cell it returns to the screen region.
+   */
+  if (anchor !== null && focus !== null) {
+    const rect = normalizeRect(anchor, focus);
+    if (!isEmptyRect(rect) && atlas !== undefined) {
+      const g = atlas.geometry;
+      ctx.save();
+      ctx.globalCompositeOperation = 'difference';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(
+        at.x + rect.left * g.cellWidth * scale,
+        at.y + rect.top * g.cellHeight * scale,
+        (rect.right - rect.left + 1) * g.cellWidth * scale,
+        (rect.bottom - rect.top + 1) * g.cellHeight * scale,
+      );
+      ctx.restore();
+    }
+  }
 }
 
 window.tn3270.onAtlas((message) => {
@@ -218,7 +290,12 @@ window.tn3270.onAtlas((message) => {
 });
 
 // A frame means the session is drawing again, so whatever `onError` put up is both gone and stale.
-window.tn3270.onFrame((list) => { errored = false; paint(list); });
+//
+// AND IT INVALIDATES THE SELECTION, because a new frame means the cells those coordinates named
+// now hold different text. Keeping the highlight across a repaint would offer the operator a copy
+// of text that is no longer there -- and main extracts from the CURRENT snapshot, so the rectangle
+// would silently pick up whatever replaced it.
+window.tn3270.onFrame((list) => { errored = false; clearSelection(); paint(list); });
 
 window.tn3270.onError((message) => {
   // Failures must be VISIBLE: someone who double-clicked a .app has no console. This is the
@@ -245,6 +322,15 @@ window.addEventListener('keydown', (e) => {
   // preventDefault only for keys we CLAIMED, so shortcuts we do not use keep working and
   // Tab does not move focus out of the canvas.
   e.preventDefault();
+  // ANY KEYSTROKE THAT DOES SOMETHING INVALIDATES THE SELECTION, because the screen is about to
+  // change under it and a highlight over changed text would offer a copy of something never seen.
+  //
+  // AFTER the `action === null` return above, so a key we did NOT claim leaves the selection alone:
+  // the Copy accelerator itself arrives as a keystroke, and clearing on unclaimed keys would wipe
+  // the selection a moment before main asked for it. (On macOS the accelerator is consumed by the
+  // menu before the page sees it; on Linux `Ctrl+Shift+C` is not in `actionForKey`'s table, so it
+  // lands here as an unclaimed key. Either way the selection must survive it.)
+  clearSelection();
   window.tn3270.sendAction(action);
 });
 
@@ -280,11 +366,71 @@ window.addEventListener('keydown', (e) => {
  * sent `clear` or a PF key to a live host on a right-click -- while the context menu opened over
  * it -- would be a misfire the operator never asked for.
  */
+/**
+ * A mouse position in the canvas's own space to a SCREEN cell, or `null` if it is not on one.
+ *
+ * ## THE ARITHMETIC IS `hitTestAt`'s INVERSE, OFFSET AND ALL
+ *
+ * `paint` multiplies the scale-1 draw list by `scale` and adds the centring offset `at`, so going
+ * back subtracts `at` and divides by `scale` -- exactly what `hitTestAt` does for a keypad button.
+ * The plan for this feature omitted the offset and divided only by the scale, which is correct ONLY
+ * when the drawing exactly fills the viewport: `center` clamps at 0, so in a window wider than the
+ * screen every selected cell would be shifted left by the margin, and at scale 1 in a tight window
+ * it would look perfect -- the same trap `browser-shot.mjs` runs at scale 1 to expose.
+ *
+ * `offsetX`/`offsetY` for the reason the `mousedown` handler below documents at length: they and
+ * the draw list's `at` are measured from the SAME origin, the canvas's own box, so the expression
+ * has no scroll term at all to get wrong.
+ *
+ * ## THE BOUNDS COME FROM THE DRAW LIST'S REGIONS, NOT FROM A ROW COUNT
+ *
+ * A selection must cover the 3270 SCREEN and not the OIA or the keypad -- copying the operator
+ * status line as if it were host data would be a lie about what is on the screen. The screen's
+ * bottom edge is therefore whichever region starts first below it (`oia.y`, else `keypad.y`, else
+ * the drawing's full height), which is how `drawlist.ts` computes them in the first place; deriving
+ * it from `list.height` alone would include both. Columns come from `list.width`, which IS
+ * `cols * cellWidth` by construction.
+ */
+function cellAt(offsetX: number, offsetY: number, list: DrawList): CellAddr | null {
+  if (atlas === undefined) return null;
+  const g = atlas.geometry;
+  const within = { width: window.innerWidth, height: window.innerHeight };
+  const scale = bestScale(list, within);
+  const at = center(list, within, scale);
+  const x = (offsetX - at.x) / scale;
+  const y = (offsetY - at.y) / scale;
+  if (x < 0 || y < 0) return null;
+  const screenBottom = list.oia?.y ?? list.keypad?.y ?? list.height;
+  const cols = Math.floor(list.width / g.cellWidth);
+  const rows = Math.floor(screenBottom / g.cellHeight);
+  const col = Math.floor(x / g.cellWidth);
+  const row = Math.floor(y / g.cellHeight);
+  if (col >= cols || row >= rows) return null;
+  return { row, col };
+}
+
 canvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   // Read the module state ONCE: everything below must agree about which frame was clicked.
   const list = last;
-  if (errored || list?.keypad === undefined) return;
+  if (errored || list === undefined) return;
+  // A SELECTION DRAG STARTS WHEN THE PRESS IS ON THE SCREEN. The keypad gets first refusal below,
+  // so a press on a button is a button press and not the start of a selection -- and this cannot
+  // be a separate listener for exactly that reason: two listeners would both act on one press.
+  //
+  // `cellAt` ALREADY EXCLUDES the keypad and the OIA by bounding to the screen region, so a press
+  // on a keypad button returns null here and falls through to the hit test. The ordering is still
+  // deliberate rather than incidental: it is what makes the keypad's claim authoritative if those
+  // regions ever overlap.
+  const cell = cellAt(e.offsetX, e.offsetY, list);
+  if (cell !== null) {
+    anchor = cell;
+    focus = cell;
+    dragging = true;
+    paint(list);
+    return;
+  }
+  if (list.keypad === undefined) return;
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(list, within);
   // The arithmetic is `hitTestAt`'s, not this file's, and DELIBERATELY: nothing can execute a line
@@ -309,6 +455,11 @@ canvas.addEventListener('mousedown', (e) => {
  * every later frame.
  */
 function release(): void {
+  // THE DRAG ENDS BUT THE SELECTION SURVIVES, and the early return below is why this is cleared
+  // first: with no keypad press outstanding the function used to return immediately, so folding
+  // `dragging = false` in after it would leave a selection drag latched on forever -- every later
+  // `mousemove` would keep extending it with no button held.
+  dragging = false;
   if (pressed === undefined) return;
   pressed = undefined;
   if (last !== undefined) paint(last);
@@ -317,10 +468,90 @@ function release(): void {
 window.addEventListener('mouseup', release);
 window.addEventListener('blur', release);
 
+/**
+ * Extend the selection while the button is held.
+ *
+ * ON THE WINDOW AND NOT THE CANVAS, matching `mouseup` above: Chromium takes native mouse capture
+ * on `mousedown`, so a drag that leaves the canvas still reports here, and a selection that stopped
+ * growing at the canvas edge would be a surprise. `cellAt` returns null off the screen region, and
+ * the null is IGNORED rather than ending the drag -- dragging out over the keypad and back must
+ * keep the selection the operator was building.
+ */
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const list = last;
+  if (list === undefined) return;
+  const cell = cellAt(e.offsetX, e.offsetY, list);
+  if (cell === null) return;
+  // Repaint ONLY when the cell actually changed. A mousemove fires per pixel, and repainting the
+  // whole canvas 14 times per cell crossed is work the highlight cannot show.
+  if (focus !== null && focus.row === cell.row && focus.col === cell.col) return;
+  focus = cell;
+  paint(list);
+});
+
 window.addEventListener('resize', () => { if (last !== undefined) paint(last); });
 
 /**
- * TEST SEAM, and the only thing in this file that exists for a test.
+ * Copy the current selection, or do nothing and say so.
+ *
+ * A `window` GLOBAL, NOT A FIFTH BRIDGE FUNCTION -- `bridgecore.ts` records that a fifth function
+ * means the renderer has stopped being shared between Electron and the browser, and both hosts get
+ * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
+ *
+ * IT SENDS THE RECTANGLE AND NOT THE TEXT, which is forced rather than chosen: this file only ever
+ * sees a `DrawList`, whose cells carry a CG-order atlas glyph and NO character. Main holds
+ * `resolve(snapshot)`, where `text` and `hidden` both live, so main extracts.
+ *
+ * RETURNS A BOOLEAN so the harness and the menu can tell "nothing was selected" from "copied",
+ * rather than both looking like silence. Main's Copy handler calls this through
+ * `executeJavaScript`; a false means the operator pressed Copy with no selection, which is not an
+ * error worth a message.
+ */
+(window as unknown as { __tn3270Copy: () => boolean }).__tn3270Copy = (): boolean => {
+  if (anchor === null || focus === null) return false;
+  const rect = normalizeRect(anchor, focus);
+  if (isEmptyRect(rect)) return false;
+  window.tn3270.sendAction({ kind: 'copy', rect });
+  return true;
+};
+
+/**
+ * TEST SEAM: the viewport-pixel center of a SCREEN CELL, or `null`.
+ *
+ * The twin of `__tn3270ButtonCenter` below and it exists for the same reason: `select.mjs` drives a
+ * real drag through Chromium's input pipeline, and it must name CELLS rather than pixels, because a
+ * pixel list in the harness would be a second copy of the geometry that would pass while the
+ * geometry was wrong. Returning coordinates rather than setting `anchor`/`focus` directly is what
+ * keeps `mousedown`, `mousemove`, `cellAt` and the highlight all under test.
+ *
+ * THE INVERSE OF `cellAt`, so the two must agree: this adds the offset and multiplies by the
+ * scale where `cellAt` subtracts and divides. A harness built on a different expression would be
+ * testing its own arithmetic.
+ */
+(window as unknown as {
+  __tn3270CellCenter: (row: number, col: number) => { x: number; y: number } | null;
+}).__tn3270CellCenter = (row, col) => {
+  const list = last;
+  if (list === undefined || atlas === undefined) return null;
+  const g = atlas.geometry;
+  const within = { width: window.innerWidth, height: window.innerHeight };
+  const scale = bestScale(list, within);
+  const at = center(list, within, scale);
+  const screenBottom = list.oia?.y ?? list.keypad?.y ?? list.height;
+  if (row < 0 || col < 0) return null;
+  if (col >= Math.floor(list.width / g.cellWidth)) return null;
+  if (row >= Math.floor(screenBottom / g.cellHeight)) return null;
+  return {
+    x: at.x + (col + 0.5) * g.cellWidth * scale,
+    y: at.y + (row + 0.5) * g.cellHeight * scale,
+  };
+};
+
+/**
+ * TEST SEAM. One of TWO in this file now -- `__tn3270CellCenter` above is its twin, added with the
+ * selection gesture; this docstring used to say "the only thing in this file that exists for a
+ * test" and that stopped being true.
  *
  * Returns the CENTER of a named button in viewport pixels, so `gui/scripts/clicks.mjs` can click it
  * without knowing the layout, the scale or the offset. Returning COORDINATES rather than firing the

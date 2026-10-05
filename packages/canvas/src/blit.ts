@@ -32,6 +32,21 @@ export interface Surface {
 export interface Ctx2D {
   fillStyle: string;
   imageSmoothingEnabled: boolean;
+  /**
+   * Composition mode, for the SELECTION HIGHLIGHT only.
+   *
+   * A string and not a union of the 26 canvas modes: narrowing it would buy nothing here (the one
+   * caller passes a literal) and would make this interface a second, drifting copy of a DOM type.
+   * `blit` itself never touches it -- it is here so `renderer.ts` can set `difference` without a
+   * cast, which is what inverts a selection for every palette scheme without a per-scheme table.
+   */
+  globalCompositeOperation: string;
+  /**
+   * Save and restore the drawing state, so the selection highlight's `difference` mode and fill
+   * color cannot leak into the next frame's blit. Paired, always.
+   */
+  save(): void;
+  restore(): void;
   fillRect(x: number, y: number, w: number, h: number): void;
   drawImage(
     image: unknown, sx: number, sy: number, sw: number, sh: number,
