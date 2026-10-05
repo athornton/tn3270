@@ -994,6 +994,16 @@ Done:
 
 Remaining, in the order the author wants it.
 
+**REORDERED AGAIN 2026-10-05: GUI COPY AND PASTE goes first of all of these, ahead of the GUI
+keypad window.** It is a fifth UI item rather than one of the four below, and it is next to be
+built: specced and planned, `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
+`docs/superpowers/plans/2026-10-05-gui-copy-paste.md`. The reason is the user's experience of the
+shipped GUI — *neither copying text out of the window nor pasting into it was possible*, which is a
+**behaves-like-a-normal-application** gap and so belongs before packaging, on the same argument that
+put packaging ahead of graphics. The keypad window is a restyle of something that already works;
+this is absent capability. **Text selection here is NOT the light pen** — that distinction is spelled
+out two paragraphs above and is why the light pen keeps its own later spec.
+
 **REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
 after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
 2026-10-01**), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web

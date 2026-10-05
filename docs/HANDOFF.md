@@ -1,10 +1,61 @@
-# Handoff — state as of 2026-10-04
+# Handoff — state as of 2026-10-05
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-04
+## START HERE — NEXT ACTION, 2026-10-05
+
+**THE ROADMAP IS REORDERED BY THE USER, 2026-10-05: GUI COPY AND PASTE COMES FIRST, AHEAD OF THE
+GUI KEYPAD WINDOW.** The keypad window is not cancelled and not demoted in importance — it is the
+item immediately after, and the user asked for both in one instruction: *copy-paste first, then the
+keypad*. So where the section below says the next action is (0b), read **(0ab) copy and paste**
+first.
+
+**Why the insertion, in the user's words after using the shipped GUI:** *"it was disconcerting that
+I could neither copy text out of the window, nor paste it in. Before we package the emulator, it's a
+feature we need to have."* That is a **behaves-like-a-normal-application gap**, and it is the same
+argument that put packaging ahead of graphics: a shipped app a first-time user cannot copy out of is
+a worse first impression than one with no vector graphics. It belongs ahead of the keypad window
+because the keypad is a *restyle of something that works*, while this is a *missing* capability.
+
+**BOTH DOCUMENTS ARE WRITTEN AND NO QUESTION IS OPEN:**
+- spec `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` — approved by the user; scope,
+  paste rule, selection shape, clipboard path and accelerators were all decided.
+- plan `docs/superpowers/plans/2026-10-05-gui-copy-paste.md` — **ten tasks, TDD throughout**, pure
+  units first: selection geometry (1), extraction and the password rule (2), the `copy` action (3),
+  paste character rules (4), `just_wrapped` and both aborts (5), the menu (6), the renderer
+  gesture (7), main's clipboard and paste wiring (8), the `select.mjs` Xvfb harness (9), docs and the
+  full gate (10).
+
+**FOUR FACTS FROM THOSE DOCUMENTS THAT AN IMPLEMENTER SHOULD NOT RE-DERIVE:**
+1. **SELECTION IS NOT THE LIGHT PEN, and this is the load-bearing constraint.** `lightpen_select()`
+   sends an AID and sets MDT, so a copy built on anything resembling it would **transmit to the host
+   on every copy attempt**. x3270 keeps them apart deliberately. The light pen gets its own spec and
+   nothing here touches it.
+2. **A DRAW LIST HAS NO TEXT.** `DrawCell` is pixel geometry plus a CG-order atlas index, and
+   `drawlist.ts:114` has already blanked a hidden cell's glyph. So **the renderer sends the
+   RECTANGLE and main extracts**, because main already calls `resolve(snapshot)` every frame and
+   that is where `text` and `hidden` both live. This keeps the canvas preload at four functions.
+3. **PASTE SEMANTICS ARE MEASURED FROM `Common/kybd.c`, NOT RECALLED.** `\n` while pasting is
+   **Newline (next field), NOT Enter** — conflating them would submit a half-filled panel to a live
+   host. `\f` while pasting types a **SPACE**, where outside pasting it is Clear.
+4. **`Ctrl-C` IS ALREADY CLEAR and stays Clear.** Accelerators are platform-split: **Cmd-C/Cmd-V on
+   macOS**, **Ctrl-Shift-C/V on Linux**. "Ctrl-C copies when a selection exists" is recorded as
+   REJECTED so it is not revisited — it makes a destructive AID conditional on invisible state.
+
+**AND ONE NON-NEGOTIABLE:** `hidden` cells must never reach the clipboard. `ResolvedCell.text` is
+still the real character when `hidden` is set, a copy feature is exactly how a password reaches a
+clipboard, and this project has already shipped a diagnostic that printed a live password on its
+first run. **That test must be mutation-verified**, along with the `just_wrapped` suppression and the
+selection gesture.
+
+**THEN (0b), THE GUI KEYPAD WINDOW** — unchanged and still ready to spec, four open questions
+already answered, `docs/ideas/native-widget-dialogs-idea.md`; the transfer window is its precedent
+and should be read first. Then (0c) the web transfer UI and (0d) the web keypad.
+**NOTHING IS WAITING ON THE USER.**
+
+## SUPERSEDED — NEXT ACTION, 2026-10-04
 
 **THE DFT DIAGNOSIS IS MERGED AND PUSHED: branch `dft-big-diagnosis`, 5 commits, merged `--no-ff`
 as `389aae0` and deleted. `main` at `389aae0`, PUSHED and in sync, THE ONLY BRANCH local and remote,
@@ -28,6 +79,8 @@ and should be read first:** same shape (a second `BrowserWindow`, its own preloa
 the canvas bridge untouched), and its AS BUILT notes record what that shape costs. Then (0c) the WEB
 transfer UI (needs its own spec: real browser file I/O over the WebSocket) and (0d) the web keypad.
 **NOTHING IS WAITING ON THE USER.**
+**OVERTAKEN 2026-10-05: GUI COPY AND PASTE (0ab) GOES AHEAD OF (0b)** — see the START HERE section
+at the top of this file. The keypad window is still the item after it.
 
 **ONE THING WORTH CARRYING INTO ANY LIVE HARNESS WORK:** the offline replay probe
 (`TN3270_GUI_REPLAY` + the action log) settled in one line what five live hypotheses could not, and
@@ -203,6 +256,8 @@ GUI KEYPAD WINDOW** — ready to spec,
 window is its precedent and should be read first:** same shape (a second `BrowserWindow`, its own
 preload, its own bridge, the canvas bridge untouched), and its AS BUILT notes record what that shape
 costs. **NOTHING IS WAITING ON THE USER.**
+**OVERTAKEN 2026-10-05: the answer is now neither of those two.** GUI COPY AND PASTE (0ab) is the
+next action, spec and plan both written; the keypad window follows it. See START HERE at the top.
 
 **THE WEB TRANSFER UI IS THE OTHER OUTSTANDING HALF AND NEEDS ITS OWN SPEC** — roadmap item (0c).
 The user's decision stands: **real browser file I/O**, bytes over the WebSocket so "local file"
@@ -548,7 +603,18 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
 
    **(0a) the GUI transfer UI** — ~~specced and planned~~ **DONE 2026-10-01, MERGED `--no-ff` at
    `a363d39` and pushed**, `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md`;
-   **(0b) the GUI keypad WINDOW** — **NOW THE NEXT ONE TO BUILD**; ready to spec,
+   **(0ab) GUI COPY AND PASTE — INSERTED HERE BY THE USER 2026-10-05, AND NOW THE NEXT ONE TO
+   BUILD**, ahead of the keypad window. Spec and plan are both written and approved:
+   `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
+   `docs/superpowers/plans/2026-10-05-gui-copy-paste.md` (ten tasks). **It is not one of the
+   two-features-×-two-front-ends four** — it is a fifth item, which is why it is lettered (0ab)
+   rather than renumbering them. It earns the position on the same argument that put packaging ahead
+   of graphics: *"before we package the emulator, it's a feature we need to have"*, and the keypad
+   window is a restyle of something that already works where this is missing capability. It also
+   front-loads the MENU BAR, which (0b) needs for its toolbar icon anyway, so the ordering pays
+   twice. **The light pen is NOT part of it and gets its own spec** — `lightpen_select()` sends an
+   AID, so a copy built on it would transmit on every copy attempt;
+   **(0b) the GUI keypad WINDOW** — **the one after (0ab)**; ready to spec,
    `docs/ideas/native-widget-dialogs-idea.md`, and its four open questions are already answered
    (see the parked-keypad note below). **The transfer window is its precedent and is worth reading
    first**: a second `BrowserWindow` with its own preload and its own bridge, the canvas window's
