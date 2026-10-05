@@ -17,10 +17,17 @@ source if the two disagree** — the copy/paste feature's plan carried nine defe
 implementation and the source caught every one.
 
 1. **THE ORDER IS REPLACEMENTS FIRST, DELETION LAST, and that is not a style preference.** The spec
-   makes "the four otherwise-unreachable keys keep a route" non-negotiable — **Sys Req, Dup, Field
-   Mark, Newline** have no other route in any interactive front end. Deleting the canvas keypad
-   before the replacements work would leave them unreachable mid-branch, with `clicks.mjs` unable to
-   pass either way. Tasks 1-8 build; Tasks 9-10 delete.
+   makes keeping a route for **Sys Req, Dup, Field Mark and Newline** non-negotiable. Deleting the
+   canvas keypad before the replacements work would leave buttons missing mid-branch, with
+   `clicks.mjs` unable to pass either way. Tasks 1-8 build; Tasks 9-10 delete.
+
+   **CORRECTED DURING TASK 1 — THE PRECISE CLAIM, because the first draft of this plan overstated
+   it and an implementer checked:** only **`SysRq` and `NewLn` have NO chord at all**. `Dup` and
+   `FldMk` are **Ctrl-D/Ctrl-F** in both the terminal keymap (`frontend/src/keymap.ts:190-191`)
+   and the GUI/web `KeyboardEvent` mapper (`canvas/src/keys.ts:77-78`), so losing their buttons
+   costs the MOUSE route and not every route. Verified by enumerating all 48 actions against
+   `canvas/src/keys.ts`: `sysreq` and `newline` are the only two absent. Keeping all four is still
+   the requirement — but when triaging, those two are the load-bearing ones.
 2. **`frontend/dist/keypad.js` AND `bindings.js` EACH HAVE ZERO RUNTIME IMPORTS** (8209 and 5052
    bytes, measured 2026-10-06). That is what makes the one-entry import map legal in a browser, and
    it is a **FACT WITH A DATE, not an invariant** — `transferModule.test.ts` pins the same property
@@ -1144,6 +1151,17 @@ git commit -am "feat: Ctrl-K opens a real keypad window, and a View menu makes i
 - Modify: `packages/web/src/bridgecore.ts`
 - Modify: `packages/web/src/httpstatic.ts`
 
+**BEFORE YOU START: THE `Xfer` BUTTON IN THIS OVERLAY WILL PRODUCE AN ERROR FRAME, AND THAT IS
+CORRECT BEHAVIOR — DO NOT "FIX" IT.** Flagged after Task 1's implementer found the plan implied one
+uniform rule for `Xfer` across front ends. It is not uniform: the GUI opens a window
+(`gui/src/main.ts`), the TUI opens an overlay (`tui/src/app.ts`), and **the web gateway REJECTS
+`transferForm` at decode** (`web/src/protocol.ts`), with `web/src/main.ts:224` stating it "NEEDS NO
+INTERCEPTION HERE". The reason is whose filesystem a browser transfer would write to — the
+gateway's, not the operator's — and it is the same decided asymmetry as web copy/paste. So a
+clicked `Xfer` in the browser returns an `error` frame naming the kind, which is the intended
+message. **Adding a web-side interception here would reopen a decision already taken and
+documented.** The web transfer UI is its own roadmap item, committed before packaging.
+
 - [ ] **Step 1: Write the failing test for the toggle**
 
 ```typescript
@@ -1409,8 +1427,9 @@ git commit -am "test: clicks.mjs clicks real DOM buttons, still by label, mutati
 - Modify: `packages/gui/scripts/shot.mjs`, `packages/web/scripts/browser-shot.mjs`
 - Modify: `packages/web/src/main.ts`, `packages/web/test/httpstatic.test.ts`
 
-**LAST, AND DELIBERATELY.** Both replacements work by now, so the four otherwise-unreachable keys
-never lose their route — which the spec calls non-negotiable.
+**LAST, AND DELIBERATELY.** Both replacements work by now, so Sys Req, Dup, Field Mark and Newline
+never lose their route — which the spec calls non-negotiable. `SysRq` and `NewLn` are the two with
+no chord to fall back on (see the correction in *Read this before Task 1*).
 
 - [ ] **Step 1: Delete, and let the compiler find every caller**
 
@@ -1576,7 +1595,7 @@ or the stream layer. Say so explicitly rather than letting "the gate was green" 
 - [ ] **Step 5: A live check is NOT required, and say why**
 
 Nothing here changes what reaches the host: a button raises the same `Action` it always did.
-**But the four otherwise-unreachable keys still have no live witness** — Sys Req, Dup, Field Mark
+**But those four keys still have no live witness** — Sys Req, Dup, Field Mark
 and Newline — and that was already true before this work. Do not claim this feature changed it.
 
 - [ ] **Step 6: Commit and finish**
