@@ -41,9 +41,16 @@ export function assetDir(): string {
  * import would have 404'd the WEB gateway's page -- blank, silent -- while every Electron harness
  * stayed green, because Electron loads from the filesystem and never asks this server for anything.
  * It is safe to serve: `selection.ts`'s only workspace import is an `import type`, which erases.
+ *
+ * `keypadUi.js` joined for the keypad overlay, and it is the FIRST ENTRY HERE THE RENDERER DOES
+ * NOT REACH -- `web/src/bridge.js` imports it directly, through an import-map entry naming this
+ * exact module rather than the package barrel. So `renderer-imports.test.ts` cannot see it (it
+ * walks the renderer's graph) and `canvas/test/keypadUiModule.test.ts` walks its one-import graph
+ * instead. Note what that means for this list's own description: "every module the ENTRY POINT's
+ * graph reaches" is now one sentence short of the truth, because the page has two entry points.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js', 'hittest.js', 'selection.js',
+  'renderer.js', 'blit.js', 'keys.js', 'hittest.js', 'selection.js', 'keypadUi.js',
 ]);
 
 /**

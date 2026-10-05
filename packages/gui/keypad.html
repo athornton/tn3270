@@ -21,8 +21,25 @@
   `gui` and `frontend` stay siblings on disk, which is true in the workspace and false in an asar
   bundle. Packaging has to rewrite all three.
 -->
+<!--
+  TWO ENTRIES, AND BOTH POINT AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL.
+
+  `@tn3270/canvas` -> `keypadUi.js`, which is where the DOM view lives. It is in `canvas` and not
+  in `gui` because the WEB GATEWAY needs the same view, and `packages/web` neither depends on
+  `@tn3270/gui` nor could -- that package imports `electron`.
+
+  NOT `../canvas/dist/index.js`: the canvas BARREL reaches `drawlist.js`, which value-imports
+  `@tn3270/core`, and the barrel's own docstring says so in capitals. `keypadUi.js` has exactly
+  one runtime import (`@tn3270/frontend`, resolved by the second entry), so naming the module
+  keeps the graph at two files.
+-->
 <script type="importmap">
-{ "imports": { "@tn3270/frontend": "../frontend/dist/keypadView.js" } }
+{
+  "imports": {
+    "@tn3270/canvas": "../canvas/dist/keypadUi.js",
+    "@tn3270/frontend": "../frontend/dist/keypadView.js"
+  }
+}
 </script>
 <!--
   THE SHARED STYLESHEET, the same one `transfer.html` loads. That shared file IS the user's
@@ -33,7 +50,7 @@
 -->
 <link rel="stylesheet" href="./ui.css">
 </head>
-<body>
+<body class="ui-surface">
   <h1>Keypad</h1>
   <!--
     The ONLY element `keypadBoot.ts` looks up. Everything inside it is built by `createKeypadUi`

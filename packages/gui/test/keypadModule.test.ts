@@ -45,7 +45,9 @@ function mappedSpecifiers(): string[] {
 
 describe('the keypad window s browser graph', () => {
   it('was built (run npm run build first)', () => {
-    for (const f of ['keypadBoot.js', 'keypadUi.js']) {
+    // `keypadUi.js` is NOT in this list: it moved to `packages/canvas` so the web gateway could
+    // share it, and `canvas/test/keypadUiModule.test.ts` checks it there.
+    for (const f of ['keypadBoot.js']) {
       expect(existsSync(join(distDir, f)), `missing dist/${f}`).toBe(true);
     }
     expect(existsSync(join(distDir, 'keypadPreload.cjs')),
@@ -82,9 +84,22 @@ describe('the keypad window s browser graph', () => {
     }
     expect(offenders, 'these are unresolvable in a browser and would blank the keypad window')
       .toEqual([]);
-    // NAMED EDGE, so a walker that silently stopped following cannot pass the scan above by
-    // finding nothing at all.
-    expect(seen.has('keypadUi.js'), 'keypadUi.js was not reached from keypadBoot.js').toBe(true);
+    /**
+     * A NAMED EDGE, so a walker that silently stopped following cannot pass the scan above by
+     * finding nothing at all. `length > 1` could not tell "found everything" from "found
+     * something".
+     *
+     * THE EDGE IS A MAPPED SPECIFIER AND NOT A RELATIVE FILE, which is the shape after
+     * `keypadUi.ts` moved from `packages/gui` to `packages/canvas` -- it had to, because the web
+     * gateway needs the same view and cannot depend on an Electron app. So `keypadBoot.js`'s only
+     * import is now `@tn3270/canvas`, which the map resolves OUT OF THIS PACKAGE and this
+     * walker therefore cannot follow: it reads `gui/dist`. `canvas`'s side of that boundary is
+     * walked by `canvas/test/keypadUiModule.test.ts`, and the far side of the `frontend` entry by
+     * `frontend/test/keypadModule.test.ts`. Three tests, three packages, one graph.
+     */
+    const bootImports = importsOf(join(distDir, 'keypadBoot.js'));
+    expect(bootImports, 'keypadBoot.js no longer imports the canvas view')
+      .toContain('@tn3270/canvas');
   });
 
   it('keeps the preload OUT of that graph, because it is not a module', () => {

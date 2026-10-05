@@ -57,9 +57,9 @@ describe('resolveAsset', () => {
   it('serves every module `canvas` declares a browser needs', () => {
     // The drift guard. `BROWSER_MODULES` is the list `canvas` publishes for exactly this consumer,
     // so naming those files again here would be a second copy to keep in step -- which is the
-    // failure `assets.ts` was extracted to prevent. FIVE since the selection gesture's
-    // `selection.js` joined it; four before that, when the keypad's `hittest.js` did.
-    expect(BROWSER_MODULES.length).toBe(5);
+    // failure `assets.ts` was extracted to prevent. SIX since the keypad overlay's `keypadUi.js`
+    // joined it; five when the selection gesture's `selection.js` did, four for `hittest.js`.
+    expect(BROWSER_MODULES.length).toBe(6);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 
@@ -72,8 +72,12 @@ describe('resolveAsset', () => {
     // `/bridge.js` IS NOT IN THIS LOOP, and the reason is a trap rather than an omission -- see the
     // separate test below. Adding it here fails, because the two kinds of path in the table resolve
     // differently under vitest.
+    // `/ui.css` IS IN THIS LOOP AND IS THE FIRST NON-JS, NON-OWN-PACKAGE ASSET -- it is served
+    // from `packages/gui`, where the shared stylesheet lives because the GUI's two windows were
+    // its first consumers. A path into a third package is exactly the kind of thing that resolves
+    // in the table and 404s at runtime, which is what this loop exists to catch.
     for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js', '/hittest.js',
-      '/selection.js']) {
+      '/selection.js', '/keypadUi.js', '/ui.css']) {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }

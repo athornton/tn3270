@@ -121,6 +121,46 @@ describe('createBridge', () => {
     expect(errors.join(' ')).toMatch(/disconnect/i);
   });
 
+  it('INTERCEPTS toggleKeypad: calls the local handler, never sends it', () => {
+    /**
+     * THE KEYPAD IS A DOM OVERLAY IN THIS FRONT END AS OF 2026-10-06, so showing it is a local
+     * display decision with nothing for the server to do. It USED to cross the socket, because
+     * the keypad was a region of the draw list the server built.
+     *
+     * Both halves are asserted, and the second is the one that matters: a handler that fired AND
+     * also sent would make the server repaint for no visible change, and -- worse -- would reach
+     * `applyAction`, which THROWS on this kind outside any try in a socket handler. The server
+     * keeps its own intercept for exactly that reason, since a client is not obliged to run
+     * served code; this is the other half of `protocol.ts`'s two-branch rule.
+     */
+    const socket = fakeSocket();
+    let toggled = 0;
+    const api = createBridge({
+      socket: socket as never,
+      storage: fakeStorage() as never,
+      inflate: async (d) => String(d),
+      toggleKeypad: () => { toggled += 1; },
+    });
+    socket.onopen?.();
+    api.sendAction({ kind: 'toggleKeypad' });
+    expect(toggled).toBe(1);
+    expect(socket.sent.filter((s) => s.includes('toggleKeypad'))).toHaveLength(0);
+  });
+
+  it('DROPS toggleKeypad when no handler is given, rather than sending it', () => {
+    // `toggleKeypad` is optional on the deps, so a caller with no DOM -- the gateway's own tests,
+    // or a future headless client -- can build a bridge without one. Dropping is correct for a
+    // client with no keypad to show; falling through to the socket would hand the server an
+    // action that throws.
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    socket.onopen?.();
+    api.sendAction({ kind: 'toggleKeypad' });
+    expect(socket.sent.filter((s) => s.includes('toggleKeypad'))).toHaveLength(0);
+  });
+
   it('reports an unexpected close through onError, so the canvas is not silently frozen', () => {
     const socket = fakeSocket();
     const api = createBridge({ socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d) });

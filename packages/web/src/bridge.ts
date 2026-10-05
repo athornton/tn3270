@@ -1,4 +1,10 @@
 import { createBridge, type BridgeApi } from './bridgecore.js';
+import { createKeypadOverlay } from './keypadOverlay.js';
+// FROM THE MODULE AND NOT FROM `@tn3270/canvas`'s BARREL, which would blank this page: the barrel
+// reaches `drawlist.js` and `@tn3270/core`, and a browser has no bundler for a bare specifier.
+// `index.html`'s import map resolves this one name to `canvas/dist/keypadUi.js`, whose only
+// runtime import is `@tn3270/frontend` -- the second map entry.
+import { createKeypadUi } from '@tn3270/canvas';
 
 /**
  * The few lines that touch real browser globals. Everything testable is in `bridgecore.ts`.
@@ -31,9 +37,105 @@ async function inflate(data: unknown): Promise<string> {
   return new Response(stream.readable).text();
 }
 
-(window as unknown as { tn3270: BridgeApi }).tn3270 = createBridge({
-  socket, storage: sessionStorage, inflate,
+/**
+ * The keypad overlay, built here because this is the file that owns the real `document`.
+ *
+ * ## THE SAME VIEW AS THE ELECTRON KEYPAD WINDOW, IN A DIFFERENT CONTAINER
+ *
+ * `createKeypadUi` is shared (`packages/canvas`), so the 48 buttons, their labels, their tooltips
+ * and which action each sends are identical in both front ends by construction rather than by
+ * two tables agreeing. What differs is only the container: a `BrowserWindow` there, an overlay
+ * over this pane here -- because a browser tab cannot open an OS window the operator can place
+ * beside the terminal.
+ *
+ * ## DECLARED BEFORE THE BRIDGE, AND THAT ORDER IS LOAD-BEARING
+ *
+ * `createBridge` takes `toggleKeypad` as a dep, so the overlay has to exist first. Getting this
+ * backwards is a TDZ read on a `const`, which this project has already shipped once in
+ * `transferBoot.ts` -- and the recorded finding is that OPTIONAL CHAINING DOES NOT GUARD IT:
+ * `overlay?.toggle()` would still throw. So the declaration order IS the guard.
+ *
+ * ## A MISSING ELEMENT IS A HARD FAILURE, NOT A DEAD CHORD
+ *
+ * `index.html` carries `#keypad-overlay` and `#keypad-keys`; if either is gone, every `Ctrl-K`
+ * would silently do nothing, which looks like a protocol fault and is not one. Thrown rather
+ * than logged so it reaches the console with a file and a line.
+ */
+const overlayEl = document.getElementById('keypad-overlay');
+const keysEl = document.getElementById('keypad-keys');
+if (overlayEl === null || keysEl === null) {
+  throw new Error('bridge: #keypad-overlay or #keypad-keys is missing from index.html');
+}
+
+const overlay = createKeypadOverlay({
+  element: overlayEl,
+  // BUILT LAZILY, on the first toggle only -- see `createKeypadOverlay`. Most sessions never open
+  // the keypad, and rebuilding per toggle would also discard focus.
+  build: () => {
+    createKeypadUi({
+      root: keysEl,
+      create: (tag) => document.createElement(tag),
+      append: (parent, child) => { parent.appendChild(child); },
+      setText: (el, text) => { el.textContent = text; },
+      setTitle: (el, title) => { el.title = title; },
+      setAttr: (el, name, value) => { el.setAttribute(name, value); },
+      onClick: (el, fn) => { el.addEventListener('click', fn); },
+      /**
+       * THROUGH THE BRIDGE, so a keypad press takes exactly the path a keystroke does: the same
+       * `sendAction`, the same socket, the same server handler. Nothing about the keypad is a
+       * special case on the wire, which is why this feature adds no protocol message.
+       *
+       * ## THIS READS `bridge` BEFORE ITS DECLARATION, AND IT IS SAFE FOR ONE SPECIFIC REASON
+       *
+       * `bridge` is a `const` declared BELOW, so the reference is inside the temporal dead zone
+       * at the point this arrow is created -- and `tsc` does not flag it, because the read is
+       * inside a closure rather than at the top level. What makes it correct is WHEN the closure
+       * runs: `build` is invoked only on the FIRST TOGGLE, i.e. the operator's first `Ctrl-K`,
+       * which cannot happen before module evaluation finishes and `bridge` is assigned.
+       *
+       * MEASURED rather than assumed, because this project has already shipped one blank window
+       * from a TDZ read and the recorded finding is that OPTIONAL CHAINING DOES NOT GUARD IT:
+       * a closure capturing a later `const` returns fine when called after initialisation and
+       * throws `ReferenceError: Cannot access 'x' before initialization` when called before.
+       *
+       * SO DO NOT CALL `build` EAGERLY. Dropping the laziness in `createKeypadOverlay` -- say to
+       * "simplify" it by building at construction -- would move this call above `bridge`'s
+       * declaration and blank the page with a ReferenceError. The laziness is load-bearing twice
+       * over: it also keeps 48 buttons off the sessions that never ask for them.
+       */
+      sendAction: (action) => { bridge.sendAction(action); },
+    });
+  },
 });
+
+const bridge = createBridge({
+  socket,
+  storage: sessionStorage,
+  inflate,
+  // INTERCEPTED CLIENT-SIDE: the keypad is a DOM overlay, so showing it is a local display
+  // decision and `toggleKeypad` never reaches the gateway. The server keeps its own intercept
+  // regardless, because served code is not code a client is obliged to run.
+  toggleKeypad: () => { overlay.toggle(); },
+});
+
+(window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;
+
+/**
+ * The overlay's own Close button.
+ *
+ * `hide()` AND NOT `toggle()`, which is the whole reason `hide` exists as a separate method: a
+ * toggle here would RE-SHOW the keypad on a double-click, because the first click already hid it.
+ *
+ * REQUIRED, not optional. `Ctrl-K` does toggle, so the keypad is dismissible without this button
+ * -- but only by someone who knows the chord, and the button is the discoverable route for an
+ * operator who opened the keypad from it in the first place. A missing one is a keypad that
+ * covers the screen with no visible way out, so it fails loudly like the other two elements.
+ */
+const closeEl = document.getElementById('keypad-close');
+if (closeEl === null) {
+  throw new Error('bridge: #keypad-close is missing from index.html, so the keypad cannot be shut');
+}
+closeEl.addEventListener('click', () => { overlay.hide(); });
 
 
 // The token was in the query string on the first load only; the cookie carries it from here, so

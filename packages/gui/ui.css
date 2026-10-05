@@ -38,13 +38,36 @@
 
 :root { color-scheme: light dark; }
 
-body {
+/*
+  SCOPED TO `.ui-surface`, NOT APPLIED TO `body`, AND THAT WAS MEASURED RATHER THAN FORESEEN.
+
+  The first version styled `body` directly, which was fine while only the transfer and keypad
+  WINDOWS loaded this file -- in those, the HTML form IS the document. The web gateway loads it
+  into the page that also holds the 3270 CANVAS, and `body { padding: 12px 14px }` displaced that
+  canvas: `browser-shot.mjs` reported both goldens differing, and the measurement was content
+  moving from x=1 to x=16, a 15px shift of the whole screen.
+
+  That is worse than a cosmetic regression. `gui/src/main.ts` records that the click path's
+  `offsetX` arithmetic assumes the canvas sits at the viewport origin -- "give the page a body
+  margin and every click here misses by it" -- so padding on `body` would have put every keypad
+  and selection click 15px off target in the browser, silently, with the goldens as the only
+  witness. The warning was already written down in this file's own header; scoping is what makes
+  it structural instead of advisory.
+
+  So every HTML surface carries `class="ui-surface"` on its `body`, and the canvas pages simply do
+  not. The keypad OVERLAY is styled through `#keypad-overlay` below, which is its own element and
+  never the page.
+*/
+body.ui-surface {
   font: 13px system-ui, sans-serif;
   margin: 0;
   padding: 12px 14px;
 }
 
-h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+.ui-surface h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+
+/* The overlay is a surface too, but it is an element inside a canvas page rather than a body. */
+#keypad-overlay h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
 
 /* ---- The transfer form ---- */
 
@@ -56,9 +79,9 @@ h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
   margin-bottom: 6px;
 }
 
-label { text-align: right; color: GrayText; }
-input, select { font: inherit; padding: 2px 4px; min-width: 0; }
-input[disabled], select[disabled] { opacity: 0.5; }
+.ui-surface label { text-align: right; color: GrayText; }
+.ui-surface input, .ui-surface select { font: inherit; padding: 2px 4px; min-width: 0; }
+.ui-surface input[disabled], .ui-surface select[disabled] { opacity: 0.5; }
 
 /*
   NO `#status.error` RULE, deliberately -- moved here from `transfer.html` with its reasoning
@@ -72,7 +95,7 @@ input[disabled], select[disabled] { opacity: 0.5; }
 #status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
 
 #buttons { display: flex; gap: 8px; justify-content: flex-end; }
-button { font: inherit; padding: 3px 12px; }
+.ui-surface button, #keypad-overlay button { font: inherit; padding: 3px 12px; }
 
 /* ---- The keypad ---- */
 

@@ -1,4 +1,4 @@
-import { createKeypadUi } from './keypadUi.js';
+import { createKeypadUi } from '@tn3270/canvas';
 
 /**
  * The keypad window's entry point: the real DOM, handed to the testable view.

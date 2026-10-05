@@ -3,6 +3,20 @@ import { KEYPAD_BLOCKS, tooltipFor, type Action } from '@tn3270/frontend';
 /**
  * The keypad's browser-side view, with the DOM INJECTED.
  *
+ * ## IT LIVES IN `canvas` BECAUSE BOTH FRONT ENDS NEED IT, AND THAT WAS A CORRECTION
+ *
+ * It was written in `packages/gui` first, which was wrong and would not have compiled for the web
+ * gateway: `packages/web` does not depend on `@tn3270/gui` and must not -- that package is an
+ * Electron app, with `electron` imports and a `.cts` preload. `canvas` is the package whose own
+ * docstring says it exists for exactly this, "the canvas presentation layer, shared by the
+ * Electron GUI and the web gateway", and it already depends on `frontend` where `KEYPAD_BLOCKS`
+ * lives. Found when wiring the web overlay, i.e. one task later than it should have been.
+ *
+ * NOTE THE PACKAGE NAME IS NOW SLIGHTLY WRONG FOR THIS FILE and that is accepted: nothing here
+ * touches a canvas. `canvas` is the shared-presentation package, and a `frontend`-level home
+ * would be worse -- that package's docstring explicitly excludes "anything a front end owns
+ * because of HOW it presents", and a DOM is precisely that.
+ *
  * ## WHY THE DOM IS INJECTED AND NOT REACHED FOR
  *
  * `vitest.config.ts` sets `environment: 'node'`, so there is no `document` in any test in this

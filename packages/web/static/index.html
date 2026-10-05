@@ -8,7 +8,61 @@
   See the matching note in `canvas/src/renderer.ts` about the canvas size.
 -->
 <style>html,body{margin:0;background:#000;overflow:auto}canvas{display:block}</style>
+<!--
+  THE SHARED STYLESHEET, the same `ui.css` the GUI's transfer and keypad windows load -- which is
+  what the user's "stylistically similar" requirement actually implies, rather than a third copy
+  of the same rules. It styles ONLY the keypad overlay here; the two-line canvas style above is
+  separate and deliberately so, because the 3270 screen is pixels from an atlas and must stay
+  that way.
+
+  AFTER the canvas style, so nothing in it can be overridden by the shared file by accident.
+-->
+<link rel="stylesheet" href="./ui.css">
+<!--
+  THE IMPORT MAP, which `bridge.js` needs because it imports two bare specifiers and a browser has
+  no bundler to resolve them.
+
+  BOTH NAME A SINGLE MODULE, never a package barrel: `canvas`'s barrel reaches `drawlist.js` and
+  `@tn3270/core`, and `frontend`'s reaches `tls.js` and its `node:` builtins. Either would be
+  unresolvable here and the page would come up BLANK WITH NO ERROR.
+
+  FLAT PATHS, UNLIKE THE ELECTRON WINDOWS' `../frontend/dist/...`, and that difference is the
+  point rather than an inconsistency. An Electron window loads from `file://`, where `..` is a
+  real directory; a served page's `..` is a URL the server has to answer. `httpstatic.ts` serves
+  all of these at the root, so `keypadView.js`'s own relative imports of `./keypad.js` and
+  `./bindings.js` resolve against the same flat root and need no entries of their own.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@tn3270/canvas": "./keypadUi.js",
+    "@tn3270/frontend": "./keypadView.js"
+  }
+}
+</script>
 </head><body><canvas id="screen"></canvas>
+<!--
+  THE KEYPAD OVERLAY, after the canvas in document order and `position: fixed` in `ui.css`.
+
+  BOTH OF THOSE MATTER. Fixed positioning paints it OVER the screen without displacing it, and
+  `gui/src/main.ts` records why that is load-bearing rather than tidy: the click path's `offsetX`
+  arithmetic depends on the canvas sitting at the viewport origin -- "give the page a body margin
+  and every click here misses by it". A sibling in normal flow would push the canvas down and
+  break keypad clicks in the OTHER front end, through the renderer both share.
+
+  `hidden` IN THE MARKUP as well as in `createKeypadOverlay`, which sets it again at construction.
+  Belt and braces on purpose: either one alone is removable by someone who sees the other, and the
+  cost of getting it wrong is a keypad covering the screen on every page load.
+
+  EMPTY OF BUTTONS. All 48 are built by `createKeypadUi` from `KEYPAD_BLOCKS` on the first toggle,
+  so this document never spells the key table -- which is what stops it becoming a second,
+  drifting copy of it.
+-->
+<div id="keypad-overlay" hidden>
+  <button type="button" class="keypad-close" id="keypad-close">Close</button>
+  <h1>Keypad</h1>
+  <div id="keypad-keys"></div>
+</div>
 <!--
   ORDER MATTERS. Module scripts execute in document order, and `renderer.js` reads
   `window.tn3270` in its module body, so the bridge must install it first. `bridge.js` ALSO

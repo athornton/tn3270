@@ -375,6 +375,19 @@ app.whenReady().then(async () => {
     await win.loadURL(SEAM.url);
     globalShortcut.register('Control+]', () => { app.quit(); });
     await maybeSendKeys(win);
+    /**
+     * CALLED IN URL MODE NOW, WHICH IT WAS NOT BEFORE, and the reason it could not be is gone.
+     *
+     * The old `TN3270_GUI_CLICKS` asked the RENDERER for a keypad button's canvas coordinates, and
+     * in URL mode the served page owns its own renderer -- main sees no frames, so there was
+     * nothing to ask and an untested call site would have been a claim this file had not earned.
+     *
+     * The seam is a DOM QUERY now, which works identically in both modes: the keypad is an overlay
+     * in the page either way. So this is the ONLY cover for the web gateway's keypad actually
+     * being clickable -- `browser-clicks.mjs` drives it, and nothing else in the repo loads that
+     * overlay in a browser at all.
+     */
+    await maybeSendClicks(win);
     await maybeCapture(win);
     await quitIfKeysOnly();
     return;
@@ -1117,7 +1130,7 @@ app.whenReady().then(async () => {
     await maybeSendKeys(win, session);
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
-    await maybeSendClicks(win);
+    await maybeSendClicks(win, () => keypadWin);
     // AFTER the clicks and the keys: a selection is cleared by any claimed keystroke and by every
     // host frame, so a drag delivered before them would be wiped before it could be copied.
     await maybeSelect(win);
@@ -1140,7 +1153,7 @@ app.whenReady().then(async () => {
   // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
   // real host is on, and the one `live-transfer.py` drives.
   await maybeSendKeys(win, session);
-  await maybeSendClicks(win);            // after the keys, for the reason the replay branch gives
+  await maybeSendClicks(win, () => keypadWin);  // after the keys, for the reason the replay branch gives
   await maybeSelect(win);                // and after both, for the reason given there too
   await maybeOpenTransferWindow();
   await maybeCapture(win);
@@ -1378,9 +1391,33 @@ async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<voi
  * `TN3270_GUI_URL`, which fails loudly rather than quietly: no `clicks: sent` line is printed, and
  * `clicks.mjs`'s seam-ran bail is exactly the check for that.
  */
-async function maybeSendClicks(win: BrowserWindow): Promise<void> {
+async function maybeSendClicks(
+  win: BrowserWindow,
+  /**
+   * WHICH WINDOW HOLDS THE KEYPAD, because the two front ends differ and this is the one seam
+   * that has to know.
+   *
+   * In the BROWSER (`TN3270_GUI_URL` mode) the keypad is an OVERLAY inside the page `win` already
+   * shows, so the default -- `win` itself -- is right. In ELECTRON it is a SEPARATE
+   * `BrowserWindow` opened by `Ctrl+K`, and querying `win`'s document would find no buttons and
+   * report 48 `NO BUTTON` lines while the real keypad sat beside it, fully working.
+   *
+   * A GETTER AND NOT A WINDOW, because the keypad window does not exist when this function is
+   * called: it is created by the `Ctrl+K` that `maybeSendKeys` delivers moments earlier, and a
+   * value captured at call time would always be `undefined`. The getter is evaluated after the
+   * settle below, by which point the window exists.
+   */
+  keypadTarget: () => BrowserWindow | undefined = () => win,
+): Promise<void> {
   if (SEAM.clicks === '') return;
   await new Promise((r) => setTimeout(r, SEAM.keysMs));
+  const target = keypadTarget() ?? win;
+  if (target.isDestroyed()) {
+    // REPORTED, not crashed: calling into a destroyed window throws, and the reachable cause is a
+    // keypad window that failed to open -- which `keypad window failed to load` already named.
+    process.stdout.write('clicks: NO KEYPAD WINDOW\n');
+    return;
+  }
   for (const label of SEAM.clicks.split(',')) {
     /**
      * VIEWPORT PIXELS, which is what `sendInputEvent` wants -- and that equality is a property of
@@ -1390,24 +1427,50 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
      * `offsetX` is measured from too). Give the page a body margin and every click here misses by
      * it.
      */
-    let at;
+    let clicked;
     try {
-      at = await win.webContents.executeJavaScript(
-        `window.__tn3270ButtonCenter(${JSON.stringify(label)})`,
-      ) as { x: number; y: number } | null;
+      /**
+       * A DOM QUERY BY LABEL, which replaced canvas coordinates on 2026-10-06.
+       *
+       * The keypad used to be blitted into the canvas, so clicking a button meant asking the
+       * renderer where it was (`__tn3270ButtonCenter`) and delivering a real `mouseDown`/`mouseUp`
+       * pair at that point -- the hit-test arithmetic WAS the thing under test. It is real HTML
+       * now, so the browser does the hit testing and there are no coordinates to compute.
+       *
+       * STILL BY LABEL, which is the property worth preserving: a coordinate list would be a
+       * second copy of the layout that passes while the layout is wrong. `data-label` carries it,
+       * separate from the visible text so that giving the arrows real icons later cannot break
+       * this query.
+       *
+       * `.click()` AND NOT `sendInputEvent`: a DOM button's own `click()` runs the same listener a
+       * real press does, through the same `addEventListener('click', ...)` that
+       * `keypadUi.test.ts` asserts against. `sendInputEvent` would need the element's viewport
+       * rectangle -- reintroducing exactly the geometry this change removes, and with it the
+       * possibility of aiming at the wrong place.
+       *
+       * WHICH DOCUMENT IS SEARCHED DIFFERS BY FRONT END, and the same expression serves both: in
+       * the browser the keypad is an OVERLAY in this window's own page, so `document` finds it; in
+       * Electron it is a SEPARATE WINDOW, and `clickKeypadButton` below is what reaches that one.
+       * This path handles the overlay case.
+       */
+      clicked = await target.webContents.executeJavaScript(
+        `(() => {
+           const b = document.querySelector('button[data-label=' + JSON.stringify(${JSON.stringify(label)}) + ']');
+           if (b === null || b.offsetParent === null) return false;
+           b.click();
+           return true;
+         })()`,
+      ) as boolean;
     } catch (err) {
       /**
        * A REJECTION HERE WOULD OTHERWISE HANG THE PROCESS, which is the exact trap `maybeSendKeys`
        * measured for `parseKeySpec`: a throw inside `app.whenReady()`'s promise is an unhandled
        * rejection, so `quitIfKeysOnly` never runs and the client SITS until the harness's 120s
-       * timeout -- which reads as a broken client rather than as the broken renderer it is.
+       * timeout -- which reads as a broken client rather than as the broken page it is.
        *
-       * The reachable cause is a renderer that threw before installing the probe: it is a `window`
-       * global set in `renderer.js`'s module body, and if the canvas or the 2D context is missing
-       * that module throws at load, leaving `window.__tn3270ButtonCenter` undefined and this call
-       * rejecting with a TypeError. Exiting 2 keeps the diagnosis and loses the hang, exactly as the
-       * bad-spelling path above does -- and `clicks.mjs`'s status bail then dumps the stdout, which
-       * has the renderer's own `renderer[3]` line in it.
+       * The reachable cause is now a page that threw before building the keypad -- `bridge.js`
+       * failing to load, say, which is a 404 away and takes `window.tn3270` with it. Exiting 2
+       * keeps the diagnosis and loses the hang.
        */
       await new Promise<void>((r) => {
         process.stdout.write(`clicks: PROBE FAILED ${label}: ${explain(err)}\n`, () => { r(); });
@@ -1415,18 +1478,20 @@ async function maybeSendClicks(win: BrowserWindow): Promise<void> {
       app.exit(2);
       return;
     }
-    if (at === null) {
-      // NOT a plumbing failure and reported as its own thing: either the keypad is hidden -- so
-      // there is no `list.keypad` to search -- or the label is not in the table. `clicks.mjs` bails
-      // on this line separately for that reason.
+    if (!clicked) {
+      /**
+       * NOT a plumbing failure and reported as its own thing: either the keypad is not SHOWING --
+       * `offsetParent` is null for a hidden overlay, which is the common case and means the caller
+       * forgot `Ctrl+K` -- or the label is not in the table.
+       *
+       * `offsetParent === null` IS THE VISIBILITY TEST, deliberately, and it is why a hidden
+       * overlay reports rather than silently succeeding: `querySelector` finds buttons inside a
+       * `hidden` container perfectly well, and `.click()` on one would fire the handler and send
+       * the action with nothing on screen. That would be a harness proving the keypad works while
+       * it was invisible.
+       */
       process.stdout.write(`clicks: NO BUTTON ${label}\n`);
       continue;
-    }
-    // A PAIR, because a press without a release leaves Chromium holding the button down and the
-    // renderer holding its highlight: `release()` runs on `mouseup`, and the next `mousedown`
-    // would arrive during a drag.
-    for (const type of ['mouseDown', 'mouseUp'] as const) {
-      win.webContents.sendInputEvent({ type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
     }
     await new Promise((r) => setTimeout(r, 120));
   }

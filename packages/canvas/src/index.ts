@@ -43,3 +43,13 @@ export type { KeypadButton } from './hittest.js';
 // here would pull `drawlist.js` and `@tn3270/core` into its graph and blank the window.
 export { normalizeRect, isEmptyRect, extractText } from './selection.js';
 export type { CellAddr, CellRect } from './selection.js';
+// The keypad's DOM view, shared by the Electron keypad WINDOW and the web gateway's in-pane
+// OVERLAY. It is here rather than in `packages/gui` because `packages/web` needs it and cannot
+// depend on an Electron app; see the file's own header.
+//
+// EXPORTED FOR TYPESCRIPT, WHICH IS NOT HOW THE BROWSER GETS IT. Both front ends' import maps
+// name `canvas/dist/keypadUi.js` DIRECTLY, because this barrel reaches `drawlist.js` and
+// `@tn3270/core` -- a bare specifier that blanks the window. So the two resolutions differ on
+// purpose: `tsc` follows the package entry point, the browser follows the map.
+export { createKeypadUi } from './keypadUi.js';
+export type { KeypadDeps } from './keypadUi.js';
