@@ -96,6 +96,23 @@ export type Action =
   // click -- the front end intercepts it exactly as it intercepts the chord. See the note on
   // `KeypadKey.action`.
   | { kind: 'transferForm' }
+  // THE RECTANGLE, NOT THE TEXT, and that is forced rather than chosen: the renderer only ever
+  // receives a `DrawList`, whose `DrawCell` carries a CG-order atlas glyph and NO character
+  // (`canvas/src/drawlist.ts:111-121`). So the front end that holds the `Session` extracts the
+  // text from `resolve(snapshot)`, where `text` and `hidden` both live. Sending coordinates is
+  // also the discipline `keypadButtonCenter` already documents -- it keeps the seam honest.
+  //
+  // `applyAction` THROWS on this, like `quit`, `toggleKeypad` and `transferForm`: what a clipboard
+  // is belongs to the front end, and the GUI has an OS clipboard where the gateway has the
+  // operator's browser.
+  //
+  // SPELLED INLINE AND NOT IMPORTED AS `CellRect`, WHICH IS NOT AN OVERSIGHT: `CellRect` lives in
+  // `@tn3270/canvas`, and the graph is `core <- frontend <- { cli, tui, canvas, gui, web }` --
+  // `frontend` importing from `canvas` would INVERT it and create a cycle (verified from the
+  // package.json files: `canvas` depends on `frontend`, not the reverse). The four fields are
+  // structurally identical, so `extractText(cells, cols, action.rect)` typechecks without a cast.
+  // Do not "tidy" this into an import.
+  | { kind: 'copy'; rect: { top: number; left: number; bottom: number; right: number } }
   | { kind: 'type'; text: string }
   | { kind: 'quit' };
 

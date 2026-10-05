@@ -109,6 +109,36 @@ describe('decodeClientMessage', () => {
       .not.toThrow(/no transfer UI/);
   });
 
+  it('REFUSES copy, and gives WHOSE MACHINE as the reason rather than a missing feature', () => {
+    /**
+     * THE SAME DISCIPLINE AS `transferForm` ABOVE, AND FOR A REASON THAT HAS ALREADY GONE WRONG
+     * ONCE IN THIS FEATURE. The copy/paste spec asserted the gateway got copy "free" because
+     * `sendAction` already crosses the WebSocket. Transmitting the ACTION is free; returning the
+     * TEXT is not, and nothing in that direction exists -- `ServerMessage` is `frame | error`,
+     * `bridgecore.ts` has no clipboard among its four functions, and the browser's own renderer
+     * holds a `DrawList` whose cells carry a CG-order atlas glyph and no character. So the gateway
+     * would extract onto ITS OWN machine, which is the same objection as the transfer one.
+     *
+     * `/machine/` and NOT `/copy/`: a future refusal rewritten to say "no clipboard support yet"
+     * would still contain the kind and still pass `integration.test.ts`'s `toContain` check, which
+     * is exactly how the transfer reason rotted for months while every test stayed green. The
+     * durable reason is whose machine the bytes land on, and that does not expire when web copy
+     * ships -- at which point this becomes an interception in `main.ts` and this test is deleted
+     * rather than reworded.
+     *
+     * AND IT MUST NOT CLAIM THE FEATURE IS MERELY ABSENT, because the user has committed to web
+     * copy/paste before packaging (2026-10-05). "Not implemented" would read as an invitation to
+     * delete the rejection the moment a bridge clipboard call appears, which would restore the
+     * process-ending throw this exists to prevent.
+     */
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
+      .toThrow(/copy/);
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
+      .toThrow(/machine/);
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
+      .not.toThrow(/not implemented|unsupported/i);
+  });
+
   it('refuses malformed input rather than passing it on', () => {
     // `{"kind":"action","action":{}}` is here because the `typeof aKind !== 'string'` branch was
     // otherwise VACUOUS: mutating it to `if (false)` left every test passing.

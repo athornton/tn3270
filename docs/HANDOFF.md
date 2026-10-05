@@ -52,7 +52,16 @@ selection gesture.
 
 **THEN (0b), THE GUI KEYPAD WINDOW** — unchanged and still ready to spec, four open questions
 already answered, `docs/ideas/native-widget-dialogs-idea.md`; the transfer window is its precedent
-and should be read first. Then (0c) the web transfer UI and (0d) the web keypad.
+and should be read first. Then (0c) the web transfer UI, (0d) the web keypad, and **(0e) WEB COPY
+AND PASTE, added 2026-10-05**.
+
+**AND ONE ORDERING CONSTRAINT THE USER SET THE SAME DAY: (0c) AND (0e) BOTH COME BEFORE PACKAGING.**
+Their words: *"we're still going to need to implement copy/paste and the transfer form in the Web
+interface before we go to packaging."* **(0e) IS NOT THE FREE RIDE THIS FEATURE'S SPEC CLAIMED** —
+that claim was disproved while implementing (0ab), and the spec now carries the correction with its
+three measurements. `copy` is rejected at decode for now, and **that rejection is load-bearing, not
+cosmetic: without it the first copy from any browser ends the gateway process** and every other
+operator's session with it.
 **NOTHING IS WAITING ON THE USER.**
 
 ## SUPERSEDED — NEXT ACTION, 2026-10-04
@@ -623,6 +632,26 @@ own advertised `DFT_BUF` less DFT's frame overhead, and x3270 only traces it. Re
    and that the untestable boot file must be LOADED rather than reasoned about;
    **(0c) the WEB transfer UI** — needs its own spec: real browser file I/O over the WebSocket;
    **(0d) the WEB keypad window** — follows the GUI's, per the user's answer that the gateway comes later;
+   **(0e) WEB COPY AND PASTE — ADDED BY THE USER 2026-10-05, and it is NOT the free ride the
+   copy/paste spec claimed.** The spec said the gateway got copy free because `sendAction` already
+   crosses the socket; implementing (0ab) disproved it. Transmitting the action is free, returning
+   the TEXT is not: `ServerMessage` is `frame | error`, `bridgecore.ts` has no clipboard among its
+   four functions, `web/static/` is one `index.html`, and the browser's renderer holds a `DrawList`
+   whose cells carry a CG-order atlas glyph and NO character — so the gateway would extract onto its
+   own machine. It needs a new server→client message plus a `navigator.clipboard` write in the
+   bridge. **`copy` is REJECTED at decode for now, beside `transferForm`, and that rejection is
+   load-bearing: `applyAction` throws on it and `web/src/main.ts:229` is outside any try inside a
+   socket `data` handler, so without it the first browser copy ENDS THE GATEWAY PROCESS and every
+   other operator's session.**
+
+   **THE USER'S ORDERING DECISION, 2026-10-05: (0c) AND (0e) BOTH LAND BEFORE PACKAGING** — in their
+   words, *"we're still going to need to implement copy/paste and the transfer form in the Web
+   interface before we go to packaging."* So the web gateway reaches feature parity with the GUI
+   before anything is shipped to a first-time user, which is the same argument that put the four UI
+   pieces ahead of oversize: a packaged app whose browser front end cannot copy or transfer is the
+   first impression packaging exists to avoid. Both `REFUSED` members in
+   `web/test/integration.test.ts` leave that list when these land, and each becomes an interception
+   in `main.ts`;
 
    then the previously-agreed list, unchanged in content and order:
    **(a) oversize + `IBM-DYNAMIC`**, **(b) local model-switching**,

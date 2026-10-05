@@ -1004,6 +1004,17 @@ put packaging ahead of graphics. The keypad window is a restyle of something tha
 this is absent capability. **Text selection here is NOT the light pen** — that distinction is spelled
 out two paragraphs above and is why the light pen keeps its own later spec.
 
+**AND THE WEB GATEWAY REACHES PARITY BEFORE PACKAGING, decided by the user the same day:** **web
+copy/paste** and the **web transfer form** are both required before any packaging work. Web copy
+needs its own spec rather than coming along with the GUI's — a claim the GUI's spec made and
+implementation disproved. `sendAction` crossing the WebSocket transmits the *action* for free, but
+nothing can return the *text*: the server's only messages to a browser are `frame` and `error`, the
+bridge has no clipboard function, and the browser's renderer holds a draw list whose cells carry an
+atlas glyph and no character — so the gateway would extract the text onto its own machine rather than
+the operator's. Until that lands the gateway **refuses** `copy` at decode, and the refusal is
+load-bearing: without it the first browser copy would end the gateway process and every session on
+it.
+
 **REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
 after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
 2026-10-01**), **the GUI keypad window** (ready to spec), then **the web transfer UI** and **the web

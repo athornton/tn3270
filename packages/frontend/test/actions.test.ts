@@ -360,6 +360,22 @@ describe('the keypad-era actions', () => {
     const { session } = newSession();
     expect(() => applyAction(session, { kind: 'transferForm' })).toThrow(/does not handle transferForm/);
   });
+
+  it('REFUSES copy, because the clipboard is the front end s own business', () => {
+    // The FOURTH of the same shape, after quit, toggleKeypad and transferForm. What a clipboard
+    // IS differs per front end -- this GUI has an OS clipboard where the gateway has the
+    // operator's browser -- so a shared dispatch cannot do it, and a front end that bound the
+    // accelerator and forgot to intercept must fail LOUDLY rather than silently doing nothing.
+    //
+    // `/does not handle copy/` rather than `/copy/`, for the reason measured on the `toggleKeypad`
+    // twin above and NOT as the plan for this feature wrote it: the loose pattern also matches
+    // Node's own `TypeError: ...copy is not a function`, so it would pass against an accidental
+    // crash as well as the deliberate refusal. `copy` is a worse case than most for this, being a
+    // plausible method name on several objects in scope.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 1 } }))
+      .toThrow(/does not handle copy/);
+  });
 });
 
 /**
@@ -538,6 +554,12 @@ const ROWS: readonly Row[] = [
   // reason its display is -- and a dialog is the one action that cannot be finished by the key
   // that starts it, since a transfer needs arguments.
   { action: { kind: 'transferForm' }, throws: /does not handle transferForm/ },
+  // FOUR now. `copy` carries a rectangle and reaches an OS clipboard in this front end and the
+  // operator's browser in the gateway, so like the three above it is intercepted rather than
+  // dispatched. The `rect` is required by the union, so it is spelled even though the throw
+  // happens before anything reads it.
+  { action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 1 } },
+    throws: /does not handle copy/ },
 ];
 
 /**
@@ -617,8 +639,9 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 26 members, 23 switch cases plus the 3 guards --
-    // `transferForm` is the third guard, added with the TUI's transfer form.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(26);
+    // a decision someone has to write down. 27 members, 23 switch cases plus the 4 guards --
+    // `copy` is the fourth guard, added with the GUI's clipboard support; `transferForm` was the
+    // third, added with the TUI's transfer form.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(27);
   });
 });

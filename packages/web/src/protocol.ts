@@ -78,6 +78,13 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  * compile-time link between these files -- `applyAction`'s own `satisfies never` catches a missing
  * case in `frontend`, not a missing one here -- which is why it is written down.
  *
+ * THE RULE HAS NOW CAUGHT A SECOND KIND: `copy`, added for the Electron GUI's clipboard on
+ * 2026-10-05. Its feature spec asserted the gateway would get copy "free" because `sendAction`
+ * already crosses the socket; the integration test answered with an uncaught throw and a dead
+ * handler. Sending an action is free, returning its RESULT is not -- see the rejection below. The
+ * lesson for the next kind is the one this rule already states: ask what `applyAction` does with
+ * it, not whether the action can be transmitted.
+ *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
  * `Keyboard.typeString` loops char by char, and on an UNFORMATTED screen `advanceAfterType` has no
@@ -140,6 +147,41 @@ export function decodeClientMessage(text: string): ClientMessage {
       throw new Error(
         'transferForm is not accepted from a client: a browser transfer would write to the '
         + "gateway's filesystem, not yours");
+    }
+    // `copy` IS REJECTED FOR THE SAME REASON AS `transferForm`, AND IT IS THE SAME SHAPE OF REASON:
+    // whose machine the result lands on. The Electron GUI extracts the text in main and writes an
+    // OS clipboard that belongs to the operator; here "main" is the GATEWAY, so the extracted text
+    // would land on the gateway's machine and the operator's clipboard would never see it.
+    //
+    // THE SPEC FOR THIS FEATURE SAID THE GATEWAY GETS COPY "FREE" BECAUSE `sendAction` ALREADY
+    // CROSSES THE SOCKET, AND THAT IS WRONG -- recorded here because it is the kind of claim that
+    // gets re-adopted from a design doc. Sending the ACTION is indeed free; getting the TEXT BACK
+    // is not, and nothing in that direction exists: `ServerMessage` is `frame | error` (line 27-30),
+    // so there is no message that could carry copied text to a browser, `bridgecore.ts` has no
+    // clipboard function among its four, and `static/` is one `index.html` with no clipboard code.
+    // The browser's own renderer cannot extract it either -- a `DrawCell` carries a CG-order atlas
+    // glyph and no character, which is the whole reason the Electron side extracts in main.
+    //
+    // So web copy needs a new server->client message plus a `navigator.clipboard` write in the
+    // bridge, which is its own spec -- exactly the conclusion already reached for the web transfer
+    // UI. THE USER HAS COMMITTED TO BOTH BEFORE PACKAGING (2026-10-05): web copy/paste and the web
+    // transfer form. When that lands, this rejection becomes an interception in `main.ts` and the
+    // integration test's REFUSED list loses a member -- same sentence the `transferForm` note above
+    // has been carrying.
+    //
+    // A REJECTION AND NOT AN OMISSION, which is this file's second documented rule: `applyAction`
+    // THROWS on `copy`, and `main.ts:229` calls it outside any try inside a socket 'data' handler,
+    // so leaving this out would end the GATEWAY PROCESS and every other operator's session on the
+    // first copy a browser sent. Measured, not feared: without this branch the integration test
+    // reports `no reply to the copy action` and an uncaught `applyAction does not handle copy`.
+    // `toggleKeypad` spent a commit in exactly that state.
+    //
+    // REACHABLE FROM A GESTURE, not just a hand-built frame: the browser runs the same
+    // `renderer.ts`, so a drag plus the Copy accelerator raises this action there too.
+    if (aKind === 'copy') {
+      throw new Error(
+        'copy is not accepted from a client: the gateway would extract the text onto its own '
+        + "machine, not yours");
     }
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
