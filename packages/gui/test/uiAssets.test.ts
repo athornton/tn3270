@@ -42,8 +42,14 @@ function assetRefs(html: string): string[] {
  * `index.html` IS INCLUDED even though it is the canvas page with no shared CSS: it carries the
  * renderer's own `<script src>`, which is exactly the blank-window case, and a page added to this
  * package later should land in this list rather than be forgotten.
+ *
+ * `keypad.html` joined when the keypad window was built. Note what this checks for it and what it
+ * does NOT: that its `./ui.css` and `./dist/keypadBoot.js` exist on disk, NOT that the bare
+ * specifier inside that module resolves -- the import map is a different mechanism and
+ * `keypadModule.test.ts` walks it. Two tests because they catch two unrelated failures, both of
+ * which look identical from outside: a window with nothing in it.
  */
-const DOCUMENTS = ['index.html', 'transfer.html'];
+const DOCUMENTS = ['index.html', 'transfer.html', 'keypad.html'];
 
 describe('the GUI s HTML surfaces', () => {
   it('reference only assets that EXIST, resolved as a browser would', () => {
