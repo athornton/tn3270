@@ -6,13 +6,17 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — NEXT ACTION, 2026-10-05 (end of day)
 
-**GUI COPY AND PASTE IS BUILT — ALL TEN TASKS — ON BRANCH `gui-copy-paste`, NOT YET MERGED.**
-Spec `docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md`, plan
+**GUI COPY AND PASTE IS BUILT — ALL TEN TASKS — AND IS MERGED TO `main` AND PUSHED.** Branch
+`gui-copy-paste`, 9 commits, merged `--no-ff` as `d949243` and deleted. **`main` at `d949243`,
+PUSHED and in sync, THE ONLY BRANCH local and remote, tree clean.** `git merge-base` equalled `main`
+exactly beforehand and the merge reported **exactly 9** commits, all this work's — the check that
+once caught 44 unfinished commits riding along. Spec
+`docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md`, plan
 `docs/superpowers/plans/2026-10-05-gui-copy-paste.md`.
 
-**THE FULL GATE, MEASURED ON THE BRANCH TIP:** build and typecheck clean, **2312 tests in 93 files**
-(from 2274 in 89), `shot.mjs` 3/3, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs` 10/10,
-**`select.mjs` 3/3 (new)**, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11, `pty-smoke.py`
+**THE FULL GATE WAS RE-RUN ON THE MERGE COMMIT ITSELF:** build and typecheck clean, **2312 tests in
+93 files** (from 2274 in 89), `shot.mjs` 3/3, `keys.mjs` 19/17, `clicks.mjs` 9/10, `transfer.mjs`
+10/10, **`select.mjs` 3/3 (new)**, `browser-shot.mjs` 2/2, `browser-keys.mjs` 13/11, `pty-smoke.py`
 **12 PASS / 0 FAIL**. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing here touches
 telnet negotiation or the stream layer, said rather than implied. **NO LIVE RUN AT ALL**, which is
 the honest gap: see below.
@@ -44,10 +48,16 @@ run strands one.** macOS is also unverified, since no harness here can press `Cm
 4. **ELECTRON 44's CLIPBOARD IS PROMISE-BASED.** `readText()` returns `Promise<string>`; the sync
    forms are gone from the typings. The plan assumed otherwise and would have pasted nothing.
 
-**NEXT: FINISH THE BRANCH.** Merge `--no-ff` per the standing rule — confirm `git merge-base` equals
-`main` beforehand and that the merge reports **exactly this branch's commits** (the check that once
-caught 44 riding along), then **re-run the full gate ON THE MERGE COMMIT**. Then **(0b), THE GUI
-KEYPAD WINDOW**, which the user has already asked for next.
+**NEXT ACTION: (0b), THE GUI KEYPAD WINDOW**, which the user asked for in the same instruction that
+ordered copy-paste first. **It is ready to spec and needs no brainstorming** — its four open
+questions were answered on 2026-09-30, recorded in `docs/ideas/native-widget-dialogs-idea.md` and in
+the parked-keypad note further down this file. **Read the transfer window first: it is the
+precedent** — a second `BrowserWindow` with its own preload and its own bridge, the canvas window's
+four-function bridge untouched — and its AS BUILT notes record what that shape costs.
+
+**AND THE MENU BAR NOW EXISTS**, which (0b) was going to have to invent: `gui/src/menu.ts` is a
+pure, unit-tested template function with `main.ts` installing it. The keypad's toolbar icon has
+somewhere to go. That was the front-loading argument for this ordering and it has already paid.
 
 ## SUPERSEDED — NEXT ACTION, earlier on 2026-10-05
 
