@@ -56,8 +56,10 @@ in-memory `TransferFiles` over a buffer it already holds. **`TransferFiles`, `st
 
 Rejected: making `TransferFiles` async (ripples into the TUI, the GUI and the timer logic — the
 code with the most live-host evidence behind it, to buy streaming nothing uses), and a chunked
-streaming protocol (fights CUT's up-front retransmit buffer to solve a problem CUT's throughput
-makes theoretical).
+streaming engine. The case against streaming is **not** that CUT is too slow for large files — see
+*Throughput*, where that turns out to be false — but that `CutTransfer` is **built around holding
+the source up front so it can answer a retransmit**. Streaming would have to buffer anyway or
+rework retransmit, for a 10 MB ceiling that fits in memory by decision 1.
 
 ## THE 8 KB TRAP — the constraint that shapes the protocol
 
@@ -145,8 +147,10 @@ the first to do it.
   `browser-clicks.mjs` asserts the fallback explicitly rather than whichever route the harness
   browser happens to take.
 - **A real file round trip** through the browser against live VM/370 CMS, end to end, byte-identical
-  — matching what `docs/live-testing.md` already records for the GUI. The 10 MB refusal is checked
-  offline; a 10 MB CUT transfer would take hours and proves nothing the gate does not.
+  — matching what `docs/live-testing.md` already records for the GUI. Use a **small** file: the
+  existing live evidence is a 249-byte binary, and the round trip proves the plumbing regardless of
+  size. **The 10 MB gate is checked offline**, because it is arithmetic on a declared total and a
+  real 10 MB transfer would exercise only patience (see *Throughput*).
 
 ## What this does not do
 
@@ -158,6 +162,37 @@ the first to do it.
 - **No raised global frame cap.** 8192 stays for every other message kind.
 - **`MAX_MESSAGE_BYTES` is not made configurable.** A flag inviting an operator to raise it would
   re-open the exhaustion it prevents.
+
+## Throughput — what 10 MB actually costs
+
+**The only measured figures this project has** (`docs/live-testing.md:413`, from the 2026-09-24
+mid-flight cancellation run): **CUT runs at ~15 ms/frame locally** and **its codec expands random
+data 1.727x**. Everything below is derived from those two numbers plus the frame capacities, and is
+stated as derived rather than measured.
+
+A CUT upload frame holds `O_UP_MAX` = **1912 encoded** bytes (`frames.ts:239`, `O_SF - O_UP_DATA`
+= 1919 − 7), so ~1107 source bytes per frame after the 1.727x expansion. A DFT frame carries
+`dftBufferSize − 27`, default **16384** (`queryreply.ts:447`), so ~16357.
+
+| Engine | per frame | at 15 ms/frame (local) | 10 MB |
+|---|---|---|---|
+| CUT | ~1107 source bytes | ~72 KiB/s | **~2.4 min** |
+| DFT | ~16357 bytes | ~1065 KiB/s | **~10 s** |
+
+**THE "HOURS" CLAIM IN AN EARLIER DRAFT OF THIS SPEC WAS WRONG, and so is the one in
+`transferRun.ts:97`** — "a file big enough to matter would take hours over CUT". At the measured
+local frame rate, 10 MB over CUT is minutes. That comment predates any throughput measurement and
+should be corrected when something next touches that file; it is not load-bearing for any decision,
+but it is quotable and wrong.
+
+**THE RATE IS FRAME-LATENCY-BOUND, NOT BANDWIDTH-BOUND**, which is why the 15 ms matters more than
+any byte count: each frame is a screen round trip. The 15 ms is **Hercules on this machine** — a
+genuinely remote host at ~100 ms RTT would give roughly **11 KiB/s on CUT (10 MB ≈ 16 min)** and
+**160 KiB/s on DFT (≈ 1 min)**. So the honest statement is: **10 MB is tolerable on DFT, tedious on
+CUT, and the cap is about gateway memory rather than time.**
+
+That is also the real justification for decision 1 — 16 sessions × 10 MB staged in one process is
+160 MB of worst-case resident buffer, and *that* is what the cap bounds.
 
 ## The Browse control, and why the file NAME is the right default
 
