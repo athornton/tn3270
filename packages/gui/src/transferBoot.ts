@@ -1,4 +1,6 @@
-import { caretAfterEdit, createTransferUi, type UiField } from './transferUi.js';
+import {
+  caretAfterEdit, createTransferUi, type UiField,
+} from '@tn3270/canvas/dist/transferUi.js';
 import type { TransferFieldId } from '@tn3270/frontend';
 
 /**
@@ -315,16 +317,27 @@ window.__tn3270SetField = (id: string, text: string): string => {
 /**
  * Which kind of control a field is DRAWN as: `cycle`, `text`, or `''` if it is not on screen.
  *
- * READ FROM THE DOM, not from `TRANSFER_FIELDS`, and for two reasons. The weaker one is the import
- * graph: this file's only runtime import is `./transferUi.js` and `transfer.html`'s import map has
- * ONE entry, so pulling the field table in here would need a second -- and an unresolved specifier
- * blanks this window with no error in any console, which is this repo's most-repeated failure.
+ * READ FROM THE DOM, not from `TRANSFER_FIELDS`, and the reason is that the DOM is the better
+ * oracle.
  *
- * The stronger one is that the DOM is the better oracle. `render` draws a `<select>` for
- * `kind === 'cycle'` and an `<input>` for everything else, so asking the document answers "what did
- * the form actually draw" rather than "what does the table say it should have". A field the form
- * failed to draw reports `''`, which is a visible failure rather than a confident answer about a
- * control that is not there.
+ * THERE USED TO BE A SECOND, WEAKER REASON HERE AND IT WAS RETIRED ON 2026-10-06 AS FALSE, which
+ * is worth a line because it read convincingly. It argued that this file's only runtime import was
+ * `./transferUi.js` and that `transfer.html`'s map had ONE entry, so importing the field table
+ * would need a second -- and an unresolved specifier blanks this window with no error in any
+ * console, this repo's most-repeated failure. Both premises went stale when `transferUi.ts` moved
+ * to `packages/canvas`: the runtime import is now `@tn3270/canvas/dist/transferUi.js` and the map
+ * has TWO entries. More to the point the CONCLUSION was never true. `TRANSFER_FIELDS` is a
+ * top-level export of `frontend/dist/transferForm.js`, which is precisely what the map's existing
+ * `@tn3270/frontend` entry already names, and `transferUi.js` imports that very symbol through it
+ * at runtime in this same window at 10/10. The field table needs NO new entry, and never did.
+ *
+ * The blank-window hazard is real and is covered by `transfer.html`'s own map comment; it just
+ * does not bear on this function. The reason below is the one that does, and it stands alone.
+ *
+ * `render` draws a `<select>` for `kind === 'cycle'` and an `<input>` for everything else, so
+ * asking the document answers "what did the form actually draw" rather than "what does the table
+ * say it should have". A field the form failed to draw reports `''`, which is a visible failure
+ * rather than a confident answer about a control that is not there.
  */
 window.__tn3270FieldKind = (id: string): string => {
   const el = fields.querySelector(`[data-field="${id}"][data-role="value"]`);

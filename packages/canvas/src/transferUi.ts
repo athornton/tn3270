@@ -4,6 +4,18 @@ import {
 } from '@tn3270/frontend';
 
 /**
+ * MOVED HERE FROM `packages/gui` on 2026-10-06, for the same reason `keypadUi.ts` lives here:
+ * `packages/web` needs this view and cannot depend on an Electron app. The move was
+ * behaviour-preserving and the test came with it unchanged, which is the evidence.
+ *
+ * IT IMPORTS ONLY `@tn3270/frontend`, and must keep doing so. Electron's `dialog` and `ipcRenderer`
+ * reach this form through `UiDeps` -- whose `browse()` and `submit()` are already
+ * `Promise`-returning, which is why a browser needs no change to the interface at all. The GUI's
+ * `browse()` resolves to a PATH; the web's resolves to a `File.name`. This module shows the string
+ * and submits it, and cannot tell the difference.
+ */
+
+/**
  * The transfer form's browser-side logic, with the DOM INJECTED.
  *
  * ## WHY THE DOM IS INJECTED AND NOT REACHED FOR
@@ -29,21 +41,32 @@ import {
  * `from '@tn3270/frontend'`, and it is the file's ONLY runtime import, the type-only ones
  * having been erased).
  *
- * `transfer.html` carries an import map that resolves that specifier to
- * `../frontend/dist/transferForm.js`. The browser applies the map BEFORE it fetches anything,
- * so `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and
- * `tls.js`'s `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never
- * reached. All six names imported here are exported directly by `transferForm.js` (verified),
- * so the one map entry satisfies the whole list.
+ * Each consuming document carries an import map that resolves that specifier to
+ * `transferForm.js`. The browser applies the map BEFORE it fetches anything, so
+ * `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and `tls.js`'s
+ * `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never reached. All
+ * six names imported here are exported directly by `transferForm.js` (verified), so that single
+ * `@tn3270/frontend` entry satisfies the whole list.
+ *
+ * TWO DOCUMENTS DO THIS NOW, not one, since this module moved here on 2026-10-06:
+ * `packages/gui/transfer.html` for the Electron window, and `packages/web/static/index.html` for
+ * the gateway's in-pane overlay. Their maps are NOT copies of each other -- the GUI's names
+ * `../canvas/dist/transferUi.js` by relative path, which works only because an Electron window
+ * loads from `file://`, while a served page needs the gateway to answer that URL.
  *
  * `transferForm.js` has ZERO runtime imports of its own (9139 bytes, measured 2026-10-01), so
  * the module graph closes at that single file. That is a FACT WITH A DATE, not an invariant:
  * `transferModule.test.ts` pins the property, and the day it expires this window goes blank
  * with no error in any console.
  *
- * SO DO NOT ADD A SECOND WORKSPACE IMPORT TO THIS FILE. The map has one entry; a new bare
- * specifier would resolve to nothing, and the failure arrives as a blank window rather than as
- * an error. Anything else this module needs comes in through `UiDeps`.
+ * SO DO NOT ADD A SECOND WORKSPACE IMPORT TO THIS FILE. A specifier no map entry names resolves
+ * to nothing, and the failure arrives as a blank window rather than as an error -- in BOTH front
+ * ends now, and each map would need its own new entry. Anything else this module needs comes in
+ * through `UiDeps`.
+ *
+ * AN EARLIER VERSION OF THIS PARAGRAPH SAID "the map has one entry", which went stale the day
+ * this module gained a second consumer; the GUI's map has carried two since 2026-10-06. The
+ * advice was always the right advice and its stated reason had quietly stopped being a fact.
  *
  * No unit test in this file can detect any of that -- a fake DOM cannot fail to resolve a
  * module. The window must be LOADED and seen to paint, which is Task 8's Electron harness's

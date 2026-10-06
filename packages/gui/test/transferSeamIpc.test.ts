@@ -6,7 +6,7 @@ import {
 } from '@tn3270/core';
 import { startTransfer, type StartTransferOptions, type TransferFiles, type TransferRun } from '@tn3270/frontend';
 import { createTransferController, type TransferDeps } from '../src/transferWindow.js';
-import { createTransferUi, type UiDeps } from '../src/transferUi.js';
+import { createTransferUi, type UiDeps } from '@tn3270/canvas/dist/transferUi.js';
 
 /**
  * THE TWO HALVES OF THE TRANSFER WINDOW, COMPOSED ACROSS THE IPC SEAM THAT SEPARATES THEM.

@@ -1,22 +1,45 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>File Transfer</title>
 <!--
-  The import map is what lets `transferUi.js` say `@tn3270/frontend` while a browser resolves it.
-  A bare specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go
-  blank with no error, which this repo has met five separate ways. The map points that one
-  specifier at `packages/frontend/dist/transferForm.js`, which has no runtime imports of its own
-  (measured 2026-10-01: 9139 bytes, zero) -- so the graph closes at one file.
+  The import map is what lets these modules name packages while a browser resolves them. A bare
+  specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go blank
+  with no error, which this repo has met five separate ways.
+
+  TWO ENTRIES, AND BOTH POINT AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL, exactly as
+  `keypad.html` does.
+
+  `@tn3270/frontend` -> `packages/frontend/dist/transferForm.js`, which has no runtime imports of
+  its own (measured 2026-10-01: 9139 bytes, zero) -- so that branch closes at one file.
+
+  `@tn3270/canvas/dist/transferUi.js` -> the matching file in `canvas`, where the form's view moved
+  on 2026-10-06 because the WEB GATEWAY needs it and `packages/web` neither depends on
+  `@tn3270/gui` nor could -- that package imports `electron`. NOT `../canvas/dist/index.js`: the
+  canvas BARREL reaches `drawlist.js`, which value-imports `@tn3270/core`, and the barrel's own
+  docstring says so in capitals. `transferUi.js` has exactly one runtime import, resolved by the
+  first entry, so the graph stays at two files.
+
+  THE KEY IS THE WHOLE DEEP SPECIFIER, NOT THE BARE PACKAGE NAME, and that is MEASURED: an import
+  map key without a trailing `/` matches EXACTLY, so a `"@tn3270/canvas"` entry does not resolve
+  the `@tn3270/canvas/dist/transferUi.js` that `transferBoot.js` actually emits. Tried on
+  2026-10-06 -- the window came up blank and `transfer.mjs` scored 3/10, with the renderer's only
+  complaint a bare "Script failed to execute". The key here is the specifier verbatim; a
+  `"@tn3270/canvas/"` prefix mapping would also work and maps more than is wanted.
+  (`keypad.html` differs legitimately: `keypadBoot.js` imports the BARE name, so a bare key is
+  right there. The two documents are not copies of each other.)
 
   A map address resolves against the DOCUMENT's base URL, not against the importing module's, so
-  `../frontend/...` is relative to this file in `packages/gui/` even though the importer that says
-  `@tn3270/frontend` lives a directory deeper in `packages/gui/dist/`.
+  `../frontend/...` and `../canvas/...` are relative to this file in `packages/gui/` even though
+  the importer that names them lives a directory deeper in `packages/gui/dist/`.
 
   This reaches across packages exactly as `index.html` does for `../canvas/dist/renderer.js`, and
-  carries the same caveat: it assumes `gui` and `frontend` stay siblings on disk, which is true in
-  the workspace and false in an asar bundle. Packaging has to rewrite both.
+  carries the same caveat: it assumes `gui`, `frontend` and `canvas` stay siblings on disk, which
+  is true in the workspace and false in an asar bundle. Packaging has to rewrite all three.
 -->
 <script type="importmap">
-{ "imports": { "@tn3270/frontend": "../frontend/dist/transferForm.js" } }
+{ "imports": {
+    "@tn3270/frontend": "../frontend/dist/transferForm.js",
+    "@tn3270/canvas/dist/transferUi.js": "../canvas/dist/transferUi.js"
+} }
 </script>
 <!--
   THE SHARED STYLESHEET, not an inlined copy. `ui.css` carries these rules verbatim -- including

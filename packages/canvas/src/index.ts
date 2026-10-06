@@ -57,3 +57,12 @@ export type { CellAddr, CellRect } from './selection.js';
 // purpose: `tsc` follows the package entry point, the browser follows the map.
 export { createKeypadUi } from './keypadUi.js';
 export type { KeypadDeps } from './keypadUi.js';
+// The transfer form's view, shared by the Electron transfer WINDOW and the web gateway's in-pane
+// OVERLAY -- here for the same reason `keypadUi.ts` is, and moved here on the same day the web
+// gateway needed it.
+//
+// EXPORTED FOR TYPESCRIPT, WHICH IS NOT HOW THE BROWSER GETS IT, exactly as the keypad note above
+// says: both front ends' import maps name `canvas/dist/transferUi.js` DIRECTLY, because this
+// barrel reaches `drawlist.js` and `@tn3270/core` -- a bare specifier that blanks the window.
+export { createTransferUi, caretAfterEdit } from './transferUi.js';
+export type { UiDeps, UiField, TransferUi } from './transferUi.js';
