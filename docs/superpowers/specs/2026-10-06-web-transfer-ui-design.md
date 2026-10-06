@@ -18,6 +18,9 @@ Recorded first because the design follows from them and none is derivable from t
    mysterious failure, and (see *The 8 KB trap*) not a dropped connection.
 3. **The form is an OVERLAY in the same pane, like the keypad** — not a second window.
 4. **Web copy/paste is the NEXT step after this**, before packaging. It stays a separate spec.
+5. **The local file's NAME is the default** shown in the form — the browser has no paths to offer.
+6. **A SAVE DIALOG for a receive, where the browser has one**, with a plain download as the
+   fallback. See *The save dialog and where it is not available*.
 
 ## What makes this smaller than it looks
 
@@ -135,6 +138,12 @@ the first to do it.
   handoff records that this harness found four defects the unit suite could not see, including a
   15px canvas displacement — **the overlay work is exactly the kind of change that regresses there**,
   so this is not optional cover.
+- **BOTH SAVE ROUTES, and the fallback is the one at risk.** The picker route is what a developer on
+  Chrome-over-localhost exercises by default, so the `Blob` download is the path that can rot
+  unnoticed. Feature detection is injected (a dependency, not a bare `'showSaveFilePicker' in
+  window` read at the call site) so a unit test can drive **both** branches, and
+  `browser-clicks.mjs` asserts the fallback explicitly rather than whichever route the harness
+  browser happens to take.
 - **A real file round trip** through the browser against live VM/370 CMS, end to end, byte-identical
   — matching what `docs/live-testing.md` already records for the GUI. The 10 MB refusal is checked
   offline; a 10 MB CUT transfer would take hours and proves nothing the gate does not.
@@ -150,13 +159,65 @@ the first to do it.
 - **`MAX_MESSAGE_BYTES` is not made configurable.** A flag inviting an operator to raise it would
   re-open the exhaustion it prevents.
 
+## The Browse control, and why the file NAME is the right default
+
+A real `<input type="file">` needs a user gesture, which an overlay button supplies. But
+`UiDeps.browse()` returns a **path**, and the browser has none: `File.name` is the bare filename
+and the full path is withheld on purpose. So the web's `browse()` resolves to **`File.name`** for
+display while the bytes are stashed beside it, and **`UiDeps` is unchanged** — the GUI keeps
+returning a path, the web returns a name, and `transferUi.ts` neither knows nor cares because it
+only ever shows the string and submits it.
+
+**The name is also what the HOST side wants defaulted.** An operator uploading `BRACE.C` almost
+always wants a host file named after it, and a path prefix would be noise on a system with no
+directories (CMS has `FILENAME FILETYPE FILEMODE`, not paths). The host field stays **typed and
+editable** either way — the GUI spec's decision 2, unchanged here, because only the host knows its
+own dataset naming.
+
+## The save dialog, and where it is not available
+
+**Decision 6 is a save dialog where one exists, and a download where one does not.** Both paths
+ship; the dialog is not a later enhancement.
+
+`showSaveFilePicker()` is the only web API that genuinely prompts for a location. **MEASURED from
+caniuse's File System Access data and MDN, 2026-10-06:**
+
+| Browser | `showSaveFilePicker` |
+|---|---|
+| Chrome 105+, Edge 105+, Opera 91+ (desktop) | **yes** |
+| **Firefox** (all versions) | **no** |
+| **Safari**, desktop and iOS (all versions) | **no** |
+| **Chrome for Android**, Firefox for Android, Samsung Internet | **no** |
+
+So roughly **30% of global usage**, and — the part that matters for this project — **no Safari and
+no Firefox, and nothing on mobile at all**. A Mac operator in Safari is squarely in the unsupported
+set, and this project exists because its author wanted a Mac 3270 client.
+
+**TWO FURTHER CONDITIONS, either of which disables it even on Chrome:**
+
+1. **It requires a SECURE CONTEXT.** TLS is **optional**: `main.ts:83` builds a plain
+   `node:http` server unless `--tls-cert`/`--tls-key` are given, and `main.ts:275` prints an
+   `http://` URL in that case. **`localhost` counts as a secure context even over plain HTTP**, and
+   the gateway binds loopback by default (`main.ts:24`), so the common local run keeps the dialog.
+   It is the *other* supported configuration — a LAN gateway on `http://<host>:<port>` reached from
+   another machine — where the dialog disappears **on every browser, Chrome included**. That is
+   also the configuration where the operator's machine is genuinely not the gateway's, i.e. the
+   whole reason this feature exists.
+2. **It requires transient user activation.** The save must be initiated from the operator's click,
+   which means **the picker cannot be opened when the transfer completes** — by then the click that
+   started it is spent. So a receive ends with an enabled **Save** button in the overlay, and the
+   operator's click on *that* opens the dialog.
+
+**The fallback is a plain `Blob` download** — an anchor with `download=<filename>`, which works
+everywhere and lands the file in the browser's download directory without asking. Feature detection
+is a single `'showSaveFilePicker' in window` test, and the overlay says which route it will take so
+the operator is never surprised about where the file went.
+
+**Where the bytes wait meanwhile:** a completed receive is held in the browser as a `Blob` until the
+operator saves it, and that is the one place a 10 MB file sits in browser memory. Dismissing the
+overlay with unsaved bytes must warn rather than silently discard — the same shape of rule as the
+GUI's "the window refuses to close while a transfer runs".
+
 ## Open questions
 
-1. **Where does the overlay's Browse control get its file?** A real `<input type="file">` needs a
-   user gesture, which an overlay button supplies — but the GUI's `UiDeps.browse()` returns a
-   *path* and the browser has none. The likely answer is that the web's `browse()` resolves to the
-   file's **name** for display while the bytes are stashed separately, leaving `UiDeps` intact.
-   Worth confirming during planning rather than assuming.
-2. **Does the receive direction need a save dialog, or is a plain download acceptable?** A download
-   lands in the browser's download directory without asking. The File System Access API would
-   prompt, but is not available in every browser this gateway might serve.
+None outstanding. The two from the first draft are resolved above as decisions 5 and 6.
