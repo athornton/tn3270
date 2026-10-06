@@ -32,7 +32,14 @@ export type ServerMessage =
   // Transfer progress and completion. `ServerMessage` was `frame | error | session | atlas`
   // until now; web copy will be the next thing to widen it, as the handoff records.
   | { kind: 'transferProgress'; text: string }
-  | { kind: 'transferDone'; ok: boolean; error?: string; bytes?: number }
+  // TWO ARMS, SO `error` NARROWS. `{ ok: boolean; error?: string }` was the first shape and it is
+  // the exact one `transferChunk.ts`'s `AcceptResult` replaced ONE COMMIT EARLIER, for the reason
+  // recorded there: inside `if (!msg.ok)` the message a caller just branched on is still
+  // `string | undefined`, so every reader needs a non-null assertion to print it. `handshake.ts`
+  // and `frontend`'s `transferRun.ts` both use unions for this, and `transferRun.ts:224` comments
+  // on relying on the narrowing. Cheap to fix with no consumers; structurally awkward by Task 8.
+  | { kind: 'transferDone'; ok: true; bytes?: number }
+  | { kind: 'transferDone'; ok: false; error: string }
   // A receive's bytes, chunked the same way an upload's are, then terminated by `transferDone`.
   | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array };
 
@@ -49,8 +56,14 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
   // The bridge decodes it back to a Uint8Array, so the renderer sees exactly what Electron's
   // structured clone gave it and needs no knowledge of the transport.
   // `transferData` carries file bytes for exactly the same reason and in the same shape, so its
-  // browser-side decode is the same `Buffer.from(b64, 'base64')` the bridge already does for
-  // `coverage` rather than a second convention.
+  // browser-side decode is the one the bridge ALREADY uses for `coverage` rather than a second
+  // convention: `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` at `bridgecore.ts:105`.
+  //
+  // `atob`, NOT `Buffer.from(s, 'base64')` -- and the distinction is not stylistic. An earlier
+  // version of this comment named `Buffer`, which is the API THIS file uses on the server and
+  // which DOES NOT EXIST in `bridgecore.ts`: that module is served to the browser by
+  // `httpstatic.ts` and contains zero occurrences of `Buffer`. Naming it here would have sent the
+  // consumer of this message at an API unavailable in its own environment.
   const wire = msg.kind === 'atlas'
     ? { ...msg, coverage: Buffer.from(msg.coverage).toString('base64') }
     : msg.kind === 'transferData'
@@ -106,8 +119,12 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  * being rejected -- it MOVED TO THE RULE'S OTHER BRANCH, and `main.ts` grew the interception in the
  * same change. THE LESSON THE PLAN FOR IT GOT WRONG: a task that only deletes a rejection here
  * looks like a one-file change and is not one, because deleting a rejection without adding the
- * interception leaves the kind in the forbidden "neither" state -- measured as `no reply to the
- * transferForm action` in `integration.test.ts`, the same signature as the other two.
+ * interception leaves the kind in the forbidden "neither" state -- measured in
+ * `integration.test.ts` as `no reply to a tab after transferForm` over an uncaught
+ * `applyAction does not handle transferForm`. (The quoted string names the TAB because the case
+ * sends a tab after each kind to prove the session survived it; an earlier version of this note
+ * quoted `no reply to the transferForm action`, which is what the message would be only if the
+ * kind were absent from `SWALLOWED` too. Re-measured 2026-10-06.)
  *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
@@ -160,9 +177,10 @@ export function decodeClientMessage(text: string): ClientMessage {
     // STILL THROWS on `transferForm` (`frontend/src/actions.ts:57-59`), and `main.ts` calls it
     // outside any try in a socket 'data' handler, so dropping this rejection on its own would have
     // ended the gateway process on the first `Xfer` click. MEASURED 2026-10-06, not feared: with
-    // the acceptance here and no interception there, `integration.test.ts` reports `no reply to the
-    // transferForm action` over an uncaught `applyAction does not handle transferForm` -- the same
-    // signature `toggleKeypad` and `copy` each produced. `main.ts` now returns before
+    // the acceptance here and no interception there, `integration.test.ts` reports `no reply to a
+    // tab after transferForm` over an uncaught `applyAction does not handle transferForm` -- the
+    // same shape `toggleKeypad` and `copy` each produced, the tab being how that case proves the
+    // session survived the kind. `main.ts` now returns before
     // `applyAction` for this kind, and the integration test's `SWALLOWED` list is where that is
     // asserted; this kind moved from its `REFUSED` list to that one, rather than out of both.
     // `copy` IS REJECTED FOR THE SAME SHAPE OF REASON `transferForm` WAS:

@@ -139,8 +139,10 @@ const REFUSED: readonly string[] = ['quit', 'copy'];
  * stating: `applyAction` still THROWS on it, so `protocol.ts` accepting the kind would have ended
  * the gateway process without the `main.ts` interception that landed with it. That is `protocol.ts`'s
  * two-branch rule -- a rejection OR an interception, never neither -- taking its other branch.
- * MEASURED 2026-10-06: with the interception removed this case reports `no reply to the
- * transferForm action` over an uncaught `applyAction does not handle transferForm`.
+ * MEASURED 2026-10-06, by deleting that line and re-running: this case reports `no reply to a
+ * tab after transferForm` over an uncaught `applyAction does not handle transferForm`. The string
+ * names the TAB this case sends after each kind to prove the session survived it -- which is the
+ * point of the tab, and is why the message is not `no reply to the transferForm action`.
  *
  * IT USED TO ANSWER WITH A FRAME, because the keypad was a region of the draw list and flipping a
  * `showKeypad` flag owed a repaint. There is no flag and no repaint now, so a frame here would

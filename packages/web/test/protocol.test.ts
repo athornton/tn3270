@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { inflateSync } from 'node:zlib';
 import { PA_AIDS, PF_AIDS } from '@tn3270/core';
 import type { DrawCell } from '@tn3270/canvas';
-import { encodeServerMessage, decodeClientMessage } from '../src/protocol.js';
+import { encodeServerMessage, decodeClientMessage, type ServerMessage } from '../src/protocol.js';
 
 /**
  * A realistic screenful of cells: EVERY field `DrawCell` declares, because a test object that
@@ -285,5 +285,21 @@ describe('transfer messages', () => {
     };
     const wire = JSON.parse(inflateSync(encodeServerMessage(msg)).toString());
     expect(wire.bytes).toBe('AQID');
+  });
+});
+
+describe('transferDone narrows', () => {
+  it('gives `error` as a string on the failure arm, with no assertion', () => {
+    // THE CONVENTION THIS PINS: `{ok: boolean; error?: string}` leaves `error` as
+    // `string | undefined` after `if (!m.ok)`, so every consumer needs a `!` to print the
+    // message it just branched on. Two arms make the compiler do that work. The type-level
+    // claim is what matters here; this case keeps it executable.
+    const bad: ServerMessage = { kind: 'transferDone', ok: false, error: 'nope' };
+    if (bad.kind !== 'transferDone') throw new Error('narrowing');
+    const text: string = bad.ok ? 'fine' : bad.error;
+    expect(text).toBe('nope');
+    const good: ServerMessage = { kind: 'transferDone', ok: true, bytes: 249 };
+    if (good.kind !== 'transferDone' || !good.ok) throw new Error('narrowing');
+    expect(good.bytes).toBe(249);
   });
 });

@@ -694,6 +694,35 @@ Then update the docblock above it: the sentence saying `transferForm` is refused
 Run: `npx vitest run packages/web/test/protocol.test.ts packages/web/test/integration.test.ts`
 Expected: PASS. The integration test asserting the refusal list must now pass with two members.
 
+> **AS BUILT, 2026-10-06 — THIS TASK IS NOT A ONE-FILE CHANGE, and the plan above was wrong to
+> forbid touching `main.ts`.** Accepting `transferForm` at decode without a `main.ts` counterpart
+> moves it from REFUSED to SWALLOWED, which is the "neither" state `protocol.ts`'s own two-branch
+> rule forbids. Measured two independent failures:
+>
+> 1. **`applyAction` still throws** on `transferForm` (`frontend/src/actions.ts:57-59`), outside any
+>    try, in a socket `data` handler — so the integration test reports `no reply to a tab after
+>    transferForm` and a real gateway would end the process and every other session.
+> 2. **Widening `ClientMessage` breaks narrowing-by-elimination** in `main.ts`'s three `msg.action`
+>    uses: three `TS2339`s. `typecheck` catches it; `vitest` does not.
+>
+> So `main.ts` gained exactly two guard lines — `if (msg.kind !== 'action') return;` and
+> `if (msg.action.kind === 'transferForm') return;` — and no wiring.
+>
+> **⚠ THIS CHANGES TASK 7's INSERTION POINT.** Task 7 below says to add the transfer branches
+> "after the existing `action` case". That site is now DEAD: the `kind !== 'action'` guard returns
+> first, and putting them there yields `TS2367` (no overlap) plus `TS2339` (no `seq`). **Insert
+> ABOVE that guard.** `tsc` fails loudly rather than silently, but the plan's own text was wrong.
+>
+> Also corrected after review: `transferDone` is now TWO arms (`ok: true` / `ok: false; error`) so
+> `error` narrows — the plan supplied `{ok: boolean; error?: string}`, the exact shape Task 2
+> replaced one commit earlier for the same reason. And two of the plan's three new decode guards
+> were **vacuous**: deleting `|| seq < 0`, or replacing the whole `total` check with `if (false)`,
+> left the plan's own tests 22/22 green. The implementer found that by mutation and added the
+> covering case. **One known gap left for Task 7:** `Buffer.from(s, 'base64')` is lenient, so a
+> mangled chunk decodes SHORT, and a short chunk stalls `ChunkReassembler` at
+> `complete() === false` forever rather than being refused — the reassembler catches overruns
+> only. Task 7 owns completion/timeout.
+
 - [ ] **Step 9: Run the full gate**
 
 Run: `npm run build && npm run typecheck && npx vitest run 2>&1 | tail -4`

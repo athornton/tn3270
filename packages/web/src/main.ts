@@ -257,10 +257,11 @@ export function buildServer(args: WebArgs) {
         IT IS NOT OPTIONAL AND IT IS NOT TIDINESS, measured both ways 2026-10-06. `applyAction`
         still THROWS on `transferForm` (`frontend/src/actions.ts:57-59`, "the front end owns its own
         dialog"), and the call below is outside any try inside a socket 'data' handler. Without this
-        line `integration.test.ts`'s every-Action-kind case reports `no reply to the transferForm
-        action` over an uncaught `applyAction does not handle transferForm` -- the exact signature
+        line `integration.test.ts`'s every-Action-kind case reports `no reply to a tab after
+        transferForm` over an uncaught `applyAction does not handle transferForm` -- the same shape
         `copy` and `toggleKeypad` produced -- and on a real gateway that ends the process and every
-        other operator's session.
+        other operator's session. (Re-measured 2026-10-06 by deleting this line; the string names
+        the TAB the case sends afterwards to prove the session survived, not the action itself.)
 
         AN EMPTY RETURN AND NOTHING MORE, on purpose: the transfer is driven by the `transferStart`,
         `transferChunk` and `transferCancel` messages `protocol.ts` now decodes, which is where the
