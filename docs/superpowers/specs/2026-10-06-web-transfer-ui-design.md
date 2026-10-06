@@ -21,6 +21,12 @@ Recorded first because the design follows from them and none is derivable from t
 5. **The local file's NAME is the default** shown in the form — the browser has no paths to offer.
 6. **A SAVE DIALOG for a receive, where the browser has one**, with a plain download as the
    fallback. See *The save dialog and where it is not available*.
+7. **SHIP THE BUFFERED VERSION FIRST.** Streaming the download is a follow-on, not part of this
+   spec. See *Streaming the download — the follow-on, and why it is not here*.
+8. **A Chrome-only disk-backed sink is acceptable, and 10 MB in browser memory is a non-issue** —
+   the user's words: *"In this day and age, my browser is always consuming multiple GB of virtual
+   storage; no one will ever notice 10MB usage."* So the `Blob` fallback is a real answer rather
+   than a stopgap, and browser-side memory is explicitly NOT a reason to prioritise streaming.
 
 ## What makes this smaller than it looks
 
@@ -54,12 +60,16 @@ So the bytes cross the socket **outside** `startTransfer`, and the gateway hands
 in-memory `TransferFiles` over a buffer it already holds. **`TransferFiles`, `startTransfer`,
 `transferRun.ts`, both engines and `renderer.ts` are all untouched.**
 
-Rejected: making `TransferFiles` async (ripples into the TUI, the GUI and the timer logic — the
-code with the most live-host evidence behind it, to buy streaming nothing uses), and a chunked
-streaming engine. The case against streaming is **not** that CUT is too slow for large files — see
-*Throughput*, where that turns out to be false — but that `CutTransfer` is **built around holding
-the source up front so it can answer a retransmit**. Streaming would have to buffer anyway or
-rework retransmit, for a 10 MB ceiling that fits in memory by decision 1.
+Rejected for **this** spec: making `TransferFiles` async (ripples into the TUI, the GUI and the
+timer logic — the code with the most live-host evidence behind it, to buy streaming nothing uses),
+and a chunked streaming engine.
+
+**That second rejection is a DEFERRAL in the download direction and a real refusal in the upload
+direction**, which the first draft of this spec conflated. Downloads could stream without touching
+`TransferFiles` at all; uploads cannot, because `CutTransfer` is built around holding the source up
+front to answer a retransmit. Decision 7 ships buffered first either way. The evidence for both
+halves is in *Streaming the download*, including the fact — found later, from *Throughput* — that
+"CUT is too slow for large files to matter" is simply false and was never a good argument.
 
 ## THE 8 KB TRAP — the constraint that shapes the protocol
 
@@ -157,8 +167,9 @@ the first to do it.
 - **No web copy/paste.** Decision 4: it is the next step. `copy` stays in `REFUSED`, and **that
   refusal is load-bearing** — the handoff records that without it the first browser copy ends the
   gateway process, because `applyAction` throws on the kind outside any try in a socket handler.
-- **No streaming, no resume, no queue, no concurrent transfers.** One session, one transfer, as the
-  GUI has it.
+- **No streaming** — deferred by decision 7, with the groundwork recorded in *Streaming the
+  download* so the follow-on need not re-derive it. **No resume, no queue, no concurrent
+  transfers:** one session, one transfer, as the GUI has it.
 - **No raised global frame cap.** 8192 stays for every other message kind.
 - **`MAX_MESSAGE_BYTES` is not made configurable.** A flag inviting an operator to raise it would
   re-open the exhaustion it prevents.
@@ -193,6 +204,49 @@ CUT, and the cap is about gateway memory rather than time.**
 
 That is also the real justification for decision 1 — 16 sessions × 10 MB staged in one process is
 160 MB of worst-case resident buffer, and *that* is what the cap bounds.
+
+## Streaming the download — the follow-on, and why it is not here
+
+Decision 7 ships the buffered version first. This section records what was found while considering
+streaming, so the follow-on starts from evidence rather than re-deriving it.
+
+**IT IS EASY IN THE DOWNLOAD DIRECTION, AND IT IS NOT A SYNC/ASYNC PROBLEM.** Both engines already
+accumulate exactly the way a streamer would want:
+
+```
+packages/core/src/ft/dft.ts:124        private readonly chunks: Uint8Array[] = []
+packages/core/src/ft/transfer.ts:232   private readonly chunks: Uint8Array[] = []
+```
+
+Each keeps `chunks` plus `receivedLength` and **joins once at the end** (`dft.ts:378`). The bytes
+land frame by frame, already discrete and already copied — `dft.ts:267` uses `Uint8Array.from`
+deliberately, because a subarray would alias a buffer the next read overwrites. So streaming means
+emitting each chunk as it arrives and letting `chunks` stay empty: the gateway would hold **one
+frame** (1912 bytes on CUT, ~16 KB on DFT) instead of the whole file.
+
+`onProgress` already fires per frame (`transferRun.ts:325` and `:394`) and is the natural hook. It
+is a callback the engine invokes, so sending a WebSocket message from it is ordinary — **no
+`TransferFiles` call happens mid-receive**, which is why the sync/async question does not arise in
+this direction.
+
+**THE UPLOAD DIRECTION IS THE HARD ONE, AND NOT FOR THROUGHPUT REASONS.** `CutTransfer` holds
+`source: Uint8Array` and `lastBlock: RetainedBlock` (`transfer.ts:220`, `:226`) **to answer a
+retransmit** — the host may ask for a block again. Streaming an upload means buffering anyway, or
+teaching the engine to re-request bytes from the browser mid-transfer. *That* would be the genuine
+sync/async problem, since `files.read()` is synchronous and runs before the host is told anything.
+**Uploads stay buffered, and the 10 MB cap therefore governs uploads only.**
+
+**WHAT STREAMING WOULD AND WOULD NOT BUY.** It removes the gateway's worst case entirely for
+receives — the 16 × 10 MB = 160 MB resident figure that justifies decision 1 — and that is the
+whole of its value. It does **not** help the browser except on Chrome-ish browsers, because only
+`FileSystemWritableFileStream` is a disk-backed sink (MDN: *"changes are typically written to a
+temporary file"*), and that is the same Chrome/Edge/Opera-only, secure-context-only API as the save
+picker. Elsewhere the bytes accumulate in a `Blob` regardless. **Decision 8 says that is fine**, so
+browser memory is not an argument for doing this.
+
+**The deferred cost is protocol complexity:** chunk ordering, abort mid-stream, and backpressure if
+the browser sink is slower than the host. None of it is needed for a 10 MB ceiling, and all of it
+would have to be designed before the buffered version worked at all.
 
 ## The Browse control, and why the file NAME is the right default
 
@@ -249,9 +303,12 @@ is a single `'showSaveFilePicker' in window` test, and the overlay says which ro
 the operator is never surprised about where the file went.
 
 **Where the bytes wait meanwhile:** a completed receive is held in the browser as a `Blob` until the
-operator saves it, and that is the one place a 10 MB file sits in browser memory. Dismissing the
-overlay with unsaved bytes must warn rather than silently discard — the same shape of rule as the
-GUI's "the window refuses to close while a transfer runs".
+operator saves it. **Decision 8 settles that this is fine** — 10 MB is nothing beside a browser's
+normal footprint — so the warning below is about LOSING A COMPLETED TRANSFER, not about memory.
+Dismissing the overlay with unsaved bytes must warn rather than silently discard: the transfer
+succeeded, the host is out of transfer mode, and there is nothing to retry from. That is the same
+shape of rule as the GUI's "the window refuses to close while a transfer runs", and the same
+principle as `transferRun.ts`'s refusal to report a "complete" that left no file.
 
 ## Open questions
 
