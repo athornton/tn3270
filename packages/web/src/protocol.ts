@@ -28,20 +28,34 @@ export type ServerMessage =
   | { kind: 'atlas'; geometry: AtlasGeometry; coverage: Uint8Array; blank: readonly number[] }
   | { kind: 'frame'; list: DrawList }
   | { kind: 'error'; message: string }
-  | { kind: 'session'; id: string };
+  | { kind: 'session'; id: string }
+  // Transfer progress and completion. `ServerMessage` was `frame | error | session | atlas`
+  // until now; web copy will be the next thing to widen it, as the handoff records.
+  | { kind: 'transferProgress'; text: string }
+  | { kind: 'transferDone'; ok: boolean; error?: string; bytes?: number }
+  // A receive's bytes, chunked the same way an upload's are, then terminated by `transferDone`.
+  | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array };
 
 export type ClientMessage =
   | { kind: 'hello'; sessionId?: string }
-  | { kind: 'action'; action: Action };
+  | { kind: 'action'; action: Action }
+  | { kind: 'transferChunk'; seq: number; total: number; bytes: Uint8Array }
+  | { kind: 'transferStart'; keywords: readonly string[] }
+  | { kind: 'transferCancel' };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
   // `coverage` is bytes and JSON has no way to hold them, so the atlas message carries base64.
   // The bridge decodes it back to a Uint8Array, so the renderer sees exactly what Electron's
   // structured clone gave it and needs no knowledge of the transport.
+  // `transferData` carries file bytes for exactly the same reason and in the same shape, so its
+  // browser-side decode is the same `Buffer.from(b64, 'base64')` the bridge already does for
+  // `coverage` rather than a second convention.
   const wire = msg.kind === 'atlas'
     ? { ...msg, coverage: Buffer.from(msg.coverage).toString('base64') }
-    : msg;
+    : msg.kind === 'transferData'
+      ? { ...msg, bytes: Buffer.from(msg.bytes).toString('base64') }
+      : msg;
   return deflateSync(Buffer.from(JSON.stringify(wire)));
 }
 
@@ -85,6 +99,16 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  * lesson for the next kind is the one this rule already states: ask what `applyAction` does with
  * it, not whether the action can be transmitted.
  *
+ * AND IT HAS NOW CAUGHT A THIRD CASE, WHICH IS THE FIRST TO RUN THE RULE BACKWARDS: `transferForm`
+ * on 2026-10-06. The other two arrived as new refusals in `applyAction`; this one kept its refusal
+ * there and lost its reason HERE, because socket-carried file I/O meant a browser transfer no
+ * longer wrote to the gateway's filesystem. So the kind did not leave the rule when it stopped
+ * being rejected -- it MOVED TO THE RULE'S OTHER BRANCH, and `main.ts` grew the interception in the
+ * same change. THE LESSON THE PLAN FOR IT GOT WRONG: a task that only deletes a rejection here
+ * looks like a one-file change and is not one, because deleting a rejection without adding the
+ * interception leaves the kind in the forbidden "neither" state -- measured as `no reply to the
+ * transferForm action` in `integration.test.ts`, the same signature as the other two.
+ *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
  * `Keyboard.typeString` loops char by char, and on an UNFORMATTED screen `advanceAfterType` has no
@@ -117,38 +141,31 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
-    // `transferForm` IS REJECTED, and as of 2026-10-01 the REASON is not that no front end has a
-    // transfer UI -- the Electron GUI does (`gui/src/transferWindow.ts`, a real `BrowserWindow` with
-    // HTML controls and a native file dialog). The reason is the one this comment always gave
-    // second and must now give first: a browser-initiated transfer would move bytes between the
-    // host and the GATEWAY's filesystem, not the operator's.
+    // `transferForm` IS NOW ACCEPTED, 2026-10-06. It was refused because a browser-initiated
+    // transfer would have moved bytes between the host and the GATEWAY's filesystem rather than
+    // the operator's -- and socket-carried file I/O is precisely what removes that reason. The
+    // bytes now arrive as `transferChunk` messages and leave as `transferData`, so "local file"
+    // means the operator's machine.
     //
-    // The user's decision (2026-09-30) is that the browser must get REAL browser file I/O -- the
-    // bytes traveling over the WebSocket so that "local file" means the operator's machine. That
-    // needs a new protocol message pair, chunking, and a `TransferFiles` implemented over the
-    // socket, and it is its own spec.
+    // `copy` AND `quit` STAY REFUSED and their reasons are unchanged: `quit` would stop the
+    // gateway, and `copy` would extract text onto the SERVER's clipboard. Web copy is the next
+    // roadmap item and will remove the second one the same way this removed this one.
     //
-    // WHY A REJECTION RATHER THAN AN INTERCEPTION, stated as MEASURED rather than as the hazard
-    // this comment used to claim. The old text said an unhandled throw here would "end the gateway
-    // process"; that is FALSE at this boundary and was never true of it. `main.ts:151-154` wraps
-    // `decodeClientMessage` in a try and answers EVERY decode failure with a per-socket `error`
-    // frame plus a `return`, so a throw from this function is already contained to one client. The
-    // process-ending hazard is real one line LOWER: `applyAction` at `main.ts:228` is OUTSIDE any
-    // try, inside a socket 'data' handler, which is why `toggleKeypad` needed an interception
-    // above it. Throwing HERE is therefore the safe half of the two, not the dangerous one -- it is
-    // the reason this can stay a rejection at all, and an `error` naming the kind tells a clicked
-    // `Xfer` button something where a silent no-op would not.
+    // THE REFUSAL THAT REMAINS IS LOAD-BEARING: `applyAction` throws on `copy`, and
+    // `web/src/main.ts` calls it outside any try in a socket data handler, so deleting that
+    // refusal ends the gateway process on the first browser copy.
     //
-    // REACHABLE FROM A CLICK, not just a hand-built frame: `KEYPAD_KEYS` carries an `Xfer` button
-    // and `canvas/src/keys.ts` maps Ctrl-T, and the browser runs both. When the gateway gets a
-    // transfer path over the socket, this rejection becomes an interception in `main.ts` and the
-    // integration test's REFUSED list loses a member.
-    if (aKind === 'transferForm') {
-      throw new Error(
-        'transferForm is not accepted from a client: a browser transfer would write to the '
-        + "gateway's filesystem, not yours");
-    }
-    // `copy` IS REJECTED FOR THE SAME REASON AS `transferForm`, AND IT IS THE SAME SHAPE OF REASON:
+    // AND ACCEPTING THIS KIND OWED `main.ts` AN INTERCEPTION, WHICH LANDED IN THE SAME CHANGE --
+    // the other branch of this file's two-branch rule, taken rather than skipped. `applyAction`
+    // STILL THROWS on `transferForm` (`frontend/src/actions.ts:57-59`), and `main.ts` calls it
+    // outside any try in a socket 'data' handler, so dropping this rejection on its own would have
+    // ended the gateway process on the first `Xfer` click. MEASURED 2026-10-06, not feared: with
+    // the acceptance here and no interception there, `integration.test.ts` reports `no reply to the
+    // transferForm action` over an uncaught `applyAction does not handle transferForm` -- the same
+    // signature `toggleKeypad` and `copy` each produced. `main.ts` now returns before
+    // `applyAction` for this kind, and the integration test's `SWALLOWED` list is where that is
+    // asserted; this kind moved from its `REFUSED` list to that one, rather than out of both.
+    // `copy` IS REJECTED FOR THE SAME SHAPE OF REASON `transferForm` WAS:
     // whose machine the result lands on. The Electron GUI extracts the text in main and writes an
     // OS clipboard that belongs to the operator; here "main" is the GATEWAY, so the extracted text
     // would land on the gateway's machine and the operator's clipboard would never see it.
@@ -156,21 +173,24 @@ export function decodeClientMessage(text: string): ClientMessage {
     // THE SPEC FOR THIS FEATURE SAID THE GATEWAY GETS COPY "FREE" BECAUSE `sendAction` ALREADY
     // CROSSES THE SOCKET, AND THAT IS WRONG -- recorded here because it is the kind of claim that
     // gets re-adopted from a design doc. Sending the ACTION is indeed free; getting the TEXT BACK
-    // is not, and nothing in that direction exists: `ServerMessage` is `frame | error` (line 27-30),
-    // so there is no message that could carry copied text to a browser, `bridgecore.ts` has no
-    // clipboard function among its four, and `static/` is one `index.html` with no clipboard code.
-    // The browser's own renderer cannot extract it either -- a `DrawCell` carries a CG-order atlas
-    // glyph and no character, which is the whole reason the Electron side extracts in main.
+    // is not, and nothing in that direction CARRIES IT. `ServerMessage` is no longer the
+    // `frame | error` this comment used to cite -- it gained three transfer members on 2026-10-06
+    // (see the union above) -- but not one of them carries clipboard text, so the objection is
+    // unchanged and only its evidence moved. `bridgecore.ts` still has no clipboard function among
+    // its four, and `static/` is one `index.html` with no clipboard code. The browser's own
+    // renderer cannot extract it either -- a `DrawCell` carries a CG-order atlas glyph and no
+    // character, which is the whole reason the Electron side extracts in main.
     //
     // So web copy needs a new server->client message plus a `navigator.clipboard` write in the
     // bridge, which is its own spec -- exactly the conclusion already reached for the web transfer
-    // UI. THE USER HAS COMMITTED TO BOTH BEFORE PACKAGING (2026-10-05): web copy/paste and the web
-    // transfer form. When that lands, this rejection becomes an interception in `main.ts` and the
-    // integration test's REFUSED list loses a member -- same sentence the `transferForm` note above
-    // has been carrying.
+    // UI. THE USER COMMITTED TO BOTH BEFORE PACKAGING (2026-10-05): web copy/paste and the web
+    // transfer form. THE TRANSFER HALF HAS NOW LANDED, and it is the worked example of how this one
+    // goes: its rejection above became an acceptance here plus an interception in `main.ts`, and
+    // the integration test's REFUSED list lost a member -- the sentence this note has been carrying
+    // all along, now with a precedent rather than a plan.
     //
     // A REJECTION AND NOT AN OMISSION, which is this file's second documented rule: `applyAction`
-    // THROWS on `copy`, and `main.ts:229` calls it outside any try inside a socket 'data' handler,
+    // THROWS on `copy`, and `main.ts:272` calls it outside any try inside a socket 'data' handler,
     // so leaving this out would end the GATEWAY PROCESS and every other operator's session on the
     // first copy a browser sent. Measured, not feared: without this branch the integration test
     // reports `no reply to the copy action` and an uncaught `applyAction does not handle copy`.
@@ -213,6 +233,71 @@ export function decodeClientMessage(text: string): ClientMessage {
     }
     return { kind: 'action', action: action as Action };
   }
+
+  // THESE MUST STAY ABOVE THE `unknown client message kind` THROW BELOW, which is the whole of why
+  // placement is called out: it is a catch-all, not a default case, so a branch written after it is
+  // unreachable and every transfer message would be refused as an unknown kind.
+  //
+  // A 4096-BYTE CHUNK FITS THE FRAME CAP WITH ROOM TO SPARE, and this is the number the chunk size
+  // was chosen against. MEASURED 2026-10-06: 4096 source bytes base64-encode to 5464 characters,
+  // and the worst-case envelope -- `seq` at 2559 and `total` at the 10485760-byte ceiling, i.e. the
+  // widest both fields can be under `MAX_TRANSFER_BYTES` -- brings the whole `JSON.stringify` to
+  // 5527 bytes against `wsserver.ts`'s `MAX_MESSAGE_BYTES` of 8192. 2665 bytes of headroom. An
+  // oversize frame CLOSES THE SOCKET with no message (`wsserver.ts:106`, `:114`), so a chunk size
+  // that fit only BEFORE encoding would kill the 3270 session rather than refuse the transfer.
+  if (kind === 'transferChunk') {
+    const { seq, total, bytes } = raw as { seq?: unknown; total?: unknown; bytes?: unknown };
+    // `Number.isInteger` rejects NaN, 1.5 and "0" alike -- so the `typeof` clauses below are
+    // redundant AT RUNTIME and are not removable: each NARROWS `unknown` to `number`, and dropping
+    // either makes `tsc` report `'seq' is of type 'unknown'` and `Type 'unknown' is not assignable
+    // to type 'number'` at the return. Verified by deletion 2026-10-06, and noted because mutation
+    // testing flags them as surviving changes -- they are the one kind of survivor that is correct.
+    //
+    // The RANGE of `total` is NOT bounded here, and deliberately not: `ChunkReassembler`'s
+    // constructor owns the `MAX_TRANSFER_BYTES` refusal and phrases it for an operator, and
+    // duplicating the ceiling here would be a second number to drift. This checks only that the
+    // fields are usable as a sequence and a length.
+    if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
+      throw new Error('transferChunk seq must be a non-negative integer');
+    }
+    if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) {
+      throw new Error('transferChunk total must be a non-negative integer');
+    }
+    if (typeof bytes !== 'string') {
+      throw new Error('transferChunk bytes must be a base64 string');
+    }
+    // `Buffer.from(s, 'base64')` IS LENIENT and does not throw on non-base64 input -- it skips the
+    // characters it cannot use -- so there is no validity check to make here, only a type one. The
+    // length disagreement that a mangled chunk produces is caught by `ChunkReassembler`, which
+    // compares the running total against the declared one and refuses rather than repairs.
+    //
+    // A FRESH BUFFER PER CHUNK, which is what makes `ChunkReassembler.accept` safe to retain it:
+    // that class's docstring warns that a caller passing a subarray of a reused accumulator would
+    // corrupt every chunk but the last. This allocates, so nothing can overwrite it.
+    return {
+      kind: 'transferChunk', seq, total, bytes: new Uint8Array(Buffer.from(bytes, 'base64')),
+    };
+  }
+  if (kind === 'transferStart') {
+    const { keywords } = raw as { keywords?: unknown };
+    // NO VALIDATION OF THE KEYWORDS THEMSELVES, on purpose: `frontend`'s transfer code parses them
+    // and reports its own errors, so a second parser here would be a second thing to keep in step.
+    // This bounds only the SHAPE, which is what the rest of the gateway assumes.
+    //
+    // `every` WITH A TYPE PREDICATE, and not the `some((k) => typeof k !== 'string')` that reads
+    // more naturally against the error message. `Array.isArray` on an `unknown` narrows it to
+    // `any[]`, so after a `some` check the elements are still `any` and `keywords` assigns to
+    // `readonly string[]` ONLY because `any` assigns to everything -- it typechecks without
+    // proving anything, which is why the draft of this needed an `as readonly string[]`. `every`
+    // with `k is string` narrows the ARRAY to `string[]`, so the assignment below is checked
+    // rather than waved through and no cast is told to the compiler.
+    if (!Array.isArray(keywords)
+      || !keywords.every((k): k is string => typeof k === 'string')) {
+      throw new Error('transferStart keywords must be an array of strings');
+    }
+    return { kind: 'transferStart', keywords };
+  }
+  if (kind === 'transferCancel') return { kind: 'transferCancel' };
 
   throw new Error(`unknown client message kind ${String(kind)}`);
 }

@@ -87,41 +87,60 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * THREE MEMBERS NOW. `quit` would stop the gateway. `transferForm` is refused because a
- * browser-initiated transfer would move bytes between the host and the GATEWAY's filesystem rather
- * than the operator's machine -- NOT because no front end has a transfer dialog, which stopped
- * being the reason on 2026-10-01 when the Electron GUI got one. It is reachable from a CLICK, not
- * just a hand-built frame, because `KEYPAD_KEYS` carries an `Xfer` button and `canvas/src/keys.ts`
- * maps Ctrl-T. When browser file I/O over the socket lands, `transferForm` moves out of this list
- * and into an interception in `main.ts`.
+ * TWO MEMBERS NOW, since `transferForm` left on 2026-10-06 when socket-carried file I/O landed.
+ * It was refused because a browser-initiated transfer would have moved bytes between the host and
+ * the GATEWAY's filesystem rather than the operator's machine -- and the bytes now cross the
+ * WebSocket as `transferChunk` and `transferData`, so that reason is gone. It moved where this
+ * docblock always said it would: OUT of this list and INTO an interception in `main.ts`, which
+ * means it is a member of `SWALLOWED` below rather than merely deleted from here. It is still
+ * reachable from a CLICK, not just a hand-built frame, because `KEYPAD_KEYS` carries an `Xfer`
+ * button and `canvas/src/keys.ts` maps Ctrl-T.
  *
- * `copy` IS THE THIRD, added 2026-10-05 with the Electron GUI's clipboard, and it is refused for
- * the same shape of reason as `transferForm`: WHOSE MACHINE the result lands on. Electron's main
+ * `quit` would stop the gateway, and that reason does not expire.
+ *
+ * `copy` IS THE OTHER, added 2026-10-05 with the Electron GUI's clipboard, and it is refused for
+ * the same shape of reason `transferForm` was: WHOSE MACHINE the result lands on. Electron's main
  * extracts the text and writes an OS clipboard the operator owns; the gateway's "main" is the
  * SERVER, so it would extract onto its own machine. The feature's spec claimed the gateway got copy
  * "free" because `sendAction` already crosses the socket -- THIS TEST IS WHAT DISPROVED IT, by
  * reporting `no reply to the copy action` over an uncaught `applyAction does not handle copy`.
- * Returning the text needs a server->client message that does not exist (`ServerMessage` is
- * `frame | error`) plus a clipboard write in a bridge that has none. It is reachable from a gesture
- * too, since the browser runs the same `renderer.ts`.
+ * Returning the text needs a server->client message that still does not exist: `ServerMessage`
+ * gained three transfer members on 2026-10-06 and so is no longer `frame | error`, but none of them
+ * carries clipboard text, and the bridge has no clipboard write either. It is reachable from a
+ * gesture too, since the browser runs the same `renderer.ts`.
  *
- * BOTH `transferForm` AND `copy` LEAVE THIS LIST BEFORE PACKAGING -- the user committed to web
- * copy/paste and the web transfer form on 2026-10-05, each with its own spec. When they land, this
- * list should be back to one member.
+ * `copy` LEAVES THIS LIST BEFORE PACKAGING -- the user committed to web copy/paste on 2026-10-05,
+ * with its own spec. When it lands, this list should be back to one member. The transfer half of
+ * that commitment is what this change was, and it is the worked example of how the move goes.
  *
  * THE MESSAGE CHECK BELOW IS `toContain(kind)` AND THAT IS ALL IT IS. It cannot tell the current
  * refusal from the superseded one, both of which name the kind; `protocol.test.ts` pins the REASON,
  * which is the half that went stale here.
  */
-const REFUSED: readonly string[] = ['quit', 'transferForm', 'copy'];
+const REFUSED: readonly string[] = ['quit', 'copy'];
 
 /**
  * Kinds the gateway accepts and answers with SILENCE, which is a third category this loop needed.
  *
- * `toggleKeypad` is the only member, as of 2026-10-06. It is neither refused nor applied: the web
- * keypad is a browser-side DOM overlay, so `bridgecore.ts` intercepts the action client-side and
- * `main.ts` keeps an empty `return` for the clients that send it anyway -- which is exactly this
- * test, since it builds raw frames rather than running the served bridge.
+ * `toggleKeypad` was the only member until `transferForm` JOINED IT on 2026-10-06, moving here out
+ * of `REFUSED` above. Neither is refused and neither is applied.
+ *
+ * THE TWO ARE SWALLOWED FOR DIFFERENT REASONS, AND THE DIFFERENCE IS NOT COSMETIC. `toggleKeypad`
+ * is a browser-side DOM overlay, so `bridgecore.ts` intercepts it client-side (`:150`) and should
+ * never cross the socket at all; `main.ts`'s `return` is only for clients that send it anyway --
+ * which is exactly this test, since it builds raw frames rather than running the served bridge.
+ * `transferForm` has NO client-side interception yet: `bridgecore.ts` contains no `transferForm`
+ * at all as of 2026-10-06, so the action DOES cross the socket and `main.ts`'s `return` is the
+ * only thing standing between it and `applyAction`'s throw. Task 8 of the transfer plan is what
+ * gives the browser its own dialog; until then this entry is load-bearing for real clients, not
+ * just for hand-built frames.
+ *
+ * `transferForm` EARNS ITS PLACE HERE BY THE SAME RULE `toggleKeypad` DOES, which is the half worth
+ * stating: `applyAction` still THROWS on it, so `protocol.ts` accepting the kind would have ended
+ * the gateway process without the `main.ts` interception that landed with it. That is `protocol.ts`'s
+ * two-branch rule -- a rejection OR an interception, never neither -- taking its other branch.
+ * MEASURED 2026-10-06: with the interception removed this case reports `no reply to the
+ * transferForm action` over an uncaught `applyAction does not handle transferForm`.
  *
  * IT USED TO ANSWER WITH A FRAME, because the keypad was a region of the draw list and flipping a
  * `showKeypad` flag owed a repaint. There is no flag and no repaint now, so a frame here would
@@ -131,7 +150,7 @@ const REFUSED: readonly string[] = ['quit', 'transferForm', 'copy'];
  * `tab` sent after every kind must still come back as a frame, and that is the assertion that
  * `applyAction` was never reached -- the throw would have taken the socket handler with it.
  */
-const SWALLOWED: readonly string[] = ['toggleKeypad'];
+const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm'];
 
 /**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop

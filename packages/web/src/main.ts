@@ -196,6 +196,21 @@ export function buildServer(args: WebArgs) {
       // an attached id falls through and BUILDS A NEW SESSION. Calling it per action would open a
       // fresh connection to the mainframe on every keystroke, apply the action to a screen nobody is
       // looking at, and exhaust `--max-sessions` (default 16) within a dozen keys.
+      /*
+        THE TRANSFER MESSAGE KINDS ARE NOT HANDLED YET AND FALL OUT HERE -- 2026-10-06, and this
+        guard is what makes widening `ClientMessage` compile at all rather than a stylistic choice.
+        `protocol.ts` now decodes `transferStart`, `transferChunk` and `transferCancel`, so `msg`
+        past the `hello` branch above is no longer `{kind:'action'}` by elimination: the three
+        `msg.action` uses below stopped typechecking with `Property 'action' does not exist`, which
+        `npm run typecheck` reported and `vitest` -- which does not typecheck -- did not.
+
+        A BARE `return` RATHER THAN AN `error` FRAME, deliberately. These are messages this gateway
+        will answer once Task 7 of this plan gives them a transfer to drive; refusing them with an
+        `error` now would be a reply the browser half would have to learn to ignore and then
+        unlearn. Dropping them leaves the sender waiting, which is the honest description of a
+        protocol kind whose server half is not built.
+      */
+      if (msg.kind !== 'action') return;
       // Gated on `--log-actions`, which `parseWebArgs` refuses without `--replay`. The action
       // carries typed text, so on a live gateway this line would be a password in a log file.
       if (args.logActions) process.stdout.write(`action: ${JSON.stringify(msg.action)}\n`);
@@ -231,11 +246,29 @@ export function buildServer(args: WebArgs) {
        * never crosses the socket. An entry appearing here would mean that interception had broken.
        */
       if (msg.action.kind === 'toggleKeypad') return;
-      // `transferForm` NEEDS NO INTERCEPTION HERE: it takes the other branch of `protocol.ts`'s
-      // two-branch rule and is rejected at decode, before it can reach this handler at all -- and
-      // the try at line 151 answers that throw on this socket alone. See the note there for why a
-      // rejection rather than an interception: the reason is WHOSE FILESYSTEM a browser transfer
-      // writes to, not a missing dialog (the Electron GUI has had one since 2026-10-01).
+      /*
+        `transferForm` NOW NEEDS AN INTERCEPTION HERE, AND THIS LINE IS IT -- 2026-10-06. The note
+        that stood here said the kind "NEEDS NO INTERCEPTION" because `protocol.ts` rejected it at
+        decode. That rejection is gone, since socket-carried file I/O removed the reason for it, so
+        this is the OTHER branch of `protocol.ts`'s two-branch rule arriving in the same change that
+        accepted the kind -- which is what that rule requires and what `toggleKeypad` once spent a
+        commit violating.
+
+        IT IS NOT OPTIONAL AND IT IS NOT TIDINESS, measured both ways 2026-10-06. `applyAction`
+        still THROWS on `transferForm` (`frontend/src/actions.ts:57-59`, "the front end owns its own
+        dialog"), and the call below is outside any try inside a socket 'data' handler. Without this
+        line `integration.test.ts`'s every-Action-kind case reports `no reply to the transferForm
+        action` over an uncaught `applyAction does not handle transferForm` -- the exact signature
+        `copy` and `toggleKeypad` produced -- and on a real gateway that ends the process and every
+        other operator's session.
+
+        AN EMPTY RETURN AND NOTHING MORE, on purpose: the transfer is driven by the `transferStart`,
+        `transferChunk` and `transferCancel` messages `protocol.ts` now decodes, which is where the
+        operator's own file bytes travel. The browser opens the shared form itself. Task 7 of this
+        plan is what gives those messages a session to act on; this line only has to keep the kind
+        away from `applyAction`, and it is unconditional and above every path to it.
+      */
+      if (msg.action.kind === 'transferForm') return;
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
