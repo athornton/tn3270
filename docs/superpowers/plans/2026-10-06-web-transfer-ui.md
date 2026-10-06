@@ -433,12 +433,13 @@ export class ChunkReassembler {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run packages/web/test/transferChunk.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests. (An earlier draft of this plan said 8 here and in Step 5. The test block
+above has always held nine `it()` cases; the SUMMARY was wrong, not the tests. Trust the file.)
 
 - [ ] **Step 5: Run the full gate**
 
 Run: `npm run build && npm run typecheck && npx vitest run 2>&1 | tail -4`
-Expected: all green, total count up by 8.
+Expected: all green, total count up by 9 — 2336 in 101 files, from a 2327-in-100 baseline.
 
 - [ ] **Step 6: Commit**
 
