@@ -978,7 +978,45 @@ Co-Authored-By: SLAC AI"
 
 ## Task 5: The browser-side transfer bridge
 
-File reading, chunk sending, and the save sink. Beside `bridgecore.ts`, never inside it (trap 4).
+File reading, chunk sending, and the save sink.
+
+> **RE-DERIVED AGAINST THE REAL CODE, 2026-10-06, BEFORE DISPATCH.** Ten of the twelve defects
+> found in Tasks 1-4 were in this plan's own literal source, so this task was checked against
+> `bridgecore.ts` and `bridge.ts` rather than trusted. Four things the first draft got wrong or
+> missed, each now folded into the steps below:
+>
+> 1. **"Beside `bridgecore.ts`, never inside it" was imprecise, and the imprecision pointed the
+>    wrong way.** The four-function rule is about **`BridgeApi`** (`bridgecore.ts:59-64`) — the
+>    surface `renderer.ts` consumes, and whose narrowness is what lets that file be reused
+>    UNMODIFIED by Electron. **`BridgeDeps` is a different thing** and already has five members:
+>    its own comment at `:44-56` says so explicitly — *"THIS IS THE FIFTH MEMBER OF `BridgeDeps`
+>    AND IT DOES NOT BREAK THE FOUR-FUNCTION RULE."* So the keypad's `toggleKeypad?: () => void`
+>    callback is the **documented precedent** for hooking a browser feature in, and the transfer
+>    bridge should follow it rather than inventing a parallel arrangement. `BridgeApi` still must
+>    not grow.
+>
+> 2. **THE INBOUND DISPATCH SILENTLY DROPS UNKNOWN KINDS.** `bridgecore.ts:94-111` handles
+>    `session`, `atlas`, `frame` and `error` and then simply falls off the end — no `else`, no
+>    throw, no log. So `transferProgress`, `transferDone` and `transferData` **would vanish
+>    without a trace**: the operator sees a form that never updates and there is nothing in any
+>    console. The first draft of this task never addressed inbound at all, which would have left
+>    Task 8 to discover it. Task 5 now carries the inbound hook.
+>
+> 3. **`atob`, NOT `Buffer`.** `bridgecore.ts:105` decodes the atlas with
+>    `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))`, and `Buffer` does not exist in that
+>    module — it is served to the browser. `transferData` must decode the same way. (A comment in
+>    Task 3 named `Buffer` here and was corrected for exactly this reason.)
+>
+> 4. **There is no `Blob` or save-sink precedent anywhere in the repo** — `grep` for
+>    `createObjectURL` and `showSaveFilePicker` finds nothing. This task introduces both, so the
+>    injected-capability shape matters more than usual: it is the only thing that makes either
+>    testable under `environment: 'node'`.
+>
+> **The test harness to copy is `packages/web/test/bridgecore.test.ts`** — its `fakeSocket()` and
+> `fakeStorage()` helpers at `:12` and `:26`, and its `INTERCEPTS toggleKeypad` / `DROPS
+> toggleKeypad when no handler is given` pair at `:124` and `:150`. That pair is the model for
+> testing an optional callback: prove it fires when present, and prove its absence is a safe
+> no-op rather than a throw.
 
 **Files:**
 - Create: `packages/web/src/transferBridge.ts`
@@ -1228,10 +1266,85 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
 export { CHUNK_BYTES, MAX_TRANSFER_BYTES };
 ```
 
+- [ ] **Step 3b: Add the INBOUND decode, which the first draft of this task omitted entirely**
+
+The three server->client kinds have nowhere to land. `bridgecore.ts:94-111` handles `session`,
+`atlas`, `frame` and `error`, then **falls off the end with no `else` and no log** — so
+`transferProgress`, `transferDone` and `transferData` are silently discarded today. Add to
+`BridgeDeps`, immediately after the existing `toggleKeypad` member and following its shape
+exactly:
+
+```typescript
+  /**
+   * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
+   * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
+   * tests and any caller with no DOM must not need one.
+   *
+   * SIXTH MEMBER OF `BridgeDeps`, AND STILL NOT A BREACH OF THE FOUR-FUNCTION RULE, which is
+   * about `BridgeApi` below -- the surface `renderer.ts` consumes unmodified. See the note on
+   * `toggleKeypad`, which made this argument first.
+   *
+   * WITHOUT THIS HOOK THE THREE KINDS VANISH. The `onmessage` chain below returns on each kind it
+   * knows and then simply ends, so an unhandled kind is dropped with nothing in any console --
+   * the operator would see a transfer form that never updates and no way to tell why.
+   */
+  readonly onTransfer?: (msg: { kind: string } & Record<string, unknown>) => void;
+```
+
+and in `onmessage`, after the `error` branch:
+
+```typescript
+      if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
+        || msg.kind === 'transferData') {
+        // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
+        // `httpstatic.ts` and `Buffer` does not exist here. The atlas branch above decodes its
+        // `coverage` the same way at `:105`, which is the one convention for bytes over this
+        // socket.
+        deps.onTransfer?.(msg.kind === 'transferData'
+          ? { ...msg, bytes: Uint8Array.from(atob(String(msg['bytes'])), (c) => c.charCodeAt(0)) }
+          : msg);
+        return;
+      }
+```
+
+- [ ] **Step 3c: Test the inbound hook, including its absence**
+
+Add to `packages/web/test/bridgecore.test.ts`, modelled on its `INTERCEPTS toggleKeypad` /
+`DROPS toggleKeypad when no handler is given` pair:
+
+```typescript
+  it('hands transfer messages to onTransfer, decoding transferData bytes', async () => {
+    const socket = fakeSocket();
+    const got: unknown[] = [];
+    createBridge({
+      socket: socket.socket, storage: fakeStorage(), inflate: async (d) => String(d),
+      onTransfer: (m) => { got.push(m); },
+    });
+    await socket.deliver(JSON.stringify({ kind: 'transferProgress', text: '512 bytes' }));
+    await socket.deliver(JSON.stringify({ kind: 'transferData', seq: 0, total: 3, bytes: 'AQID' }));
+    expect(got[0]).toEqual({ kind: 'transferProgress', text: '512 bytes' });
+    // Decoded to real bytes, so the form never sees base64 -- the same contract the atlas has.
+    expect((got[1] as { bytes: Uint8Array }).bytes).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it('DROPS transfer messages when no handler is given, rather than throwing', async () => {
+    // The gateway's own tests construct a bridge with no DOM and no form. An unhandled kind must
+    // be inert, exactly as `toggleKeypad`'s absence is.
+    const socket = fakeSocket();
+    createBridge({ socket: socket.socket, storage: fakeStorage(), inflate: async (d) => String(d) });
+    await expect(socket.deliver(JSON.stringify({ kind: 'transferDone', ok: true }))).resolves
+      .not.toThrow();
+  });
+```
+
+**`fakeSocket()`'s real shape may differ from `deliver(...)`** — read `bridgecore.test.ts:12-40`
+and use whatever it actually offers for pushing an inbound message. Match the existing cases.
+
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx vitest run packages/web/test/transferBridge.test.ts`
-Expected: PASS, 8 tests.
+Run: `npx vitest run packages/web/test/transferBridge.test.ts packages/web/test/bridgecore.test.ts`
+Expected: PASS. The plan's own count for the new file was 8; **trust the file you wrote over this
+number** — Task 2's equivalent said 8 and had 9.
 
 - [ ] **Step 5: Run the full gate**
 
