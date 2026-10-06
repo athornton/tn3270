@@ -905,6 +905,33 @@ entry in Task 1 Step 9; verify both still work in Step 9 below.
 Run: `npm run build && npx vitest run packages/web/test/httpstatic.test.ts`
 Expected: PASS.
 
+> **AS BUILT, 2026-10-06 — two files beyond the list were FORCED, and later tasks must know why.**
+>
+> 1. **`packages/frontend/package.json` needed `"./dist/transferForm.js"` in its `exports` map.**
+>    Step 7's deep path does not compile without it: `TS2307` from `tsc` and
+>    `ERR_PACKAGE_PATH_NOT_EXPORTED` from Node. The NARROW form is deliberate and does security
+>    work — a `"./dist/*"` pattern would also expose `dist/tls.js` and its `node:net`/`node:tls`/
+>    `node:fs`, which a browser cannot resolve. **Add one subpath per module, never a wildcard.**
+> 2. **`packages/gui/transfer.html`'s map key had to change too.** The plan claimed "the GUI
+>    already has a matching map entry from Task 1" — WRONG: that entry is for
+>    `@tn3270/canvas/dist/transferUi.js`, not the frontend one, whose key was still bare. Measured:
+>    leaving it bare scores **3/10 with a blank window** on `transfer.mjs`; the deep key scores
+>    10/10.
+>
+> **THE TWO PACKAGES ARE LEGAL FOR OPPOSITE REASONS — do not "tidy" this.**
+> `@tn3270/frontend/dist/transferForm.js` works because that package DECLARES the subpath;
+> `@tn3270/canvas/dist/transferUi.js` works because `canvas` has **NO `exports` field at all**
+> (`canvas/src/index.ts:73` carries the measurement). Adding one to `canvas` breaks the Electron
+> transfer window.
+>
+> **AND AN ENTRY IN `httpstatic.ts`'s OWN-PACKAGE LOOP IS COVERED BY NO AUTOMATIC TEST.** Measured:
+> adding a module that does not exist leaves `httpstatic.test.ts` at 18/18 green, because
+> own-package paths are excluded from the exists-after-build loop (under vitest `import.meta.url`
+> is the SOURCE file, so they resolve into `src/`). **When a later task adds its module there, it
+> must also name it by hand in the `/bridge.js` case** — that assertion is the only cover. It
+> earned its keep immediately: a comment edit of mine silently deleted the `'transferChunk.js'`
+> array element, and that hand-written case was the one thing that caught it.
+
 - [ ] **Step 9: Prove BOTH front ends still load a real browser**
 
 Run:

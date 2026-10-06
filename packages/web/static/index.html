@@ -44,8 +44,17 @@
 
   THE KEYS ARE THE STRINGS `tsc` ALREADY RESOLVES, verbatim, so the browser and the compiler
   agree: `transferBoot.ts` imports `@tn3270/canvas/dist/transferUi.js` and `transferUi.ts`
-  imports `@tn3270/frontend/dist/transferForm.js`. Both deep paths are declared in their
-  packages' `exports` maps, which is what makes them legal to `tsc` and to Node as well as here.
+  imports `@tn3270/frontend/dist/transferForm.js`.
+
+  THE TWO DEEP PATHS ARE LEGAL TO `tsc` AND NODE FOR OPPOSITE REASONS, which matters because the
+  obvious tidy-up breaks one of them. `@tn3270/frontend/dist/transferForm.js` resolves because
+  that package's `exports` map DECLARES the subpath -- deliberately only that one, so
+  `dist/tls.js` and its `node:net`/`node:tls`/`node:fs` stay refused by the resolver.
+  `@tn3270/canvas/dist/transferUi.js` resolves because `canvas` has NO `exports` FIELD AT ALL:
+  see the capitalised warning at `canvas/src/index.ts:73`, which measured that adding one fails
+  the build with `TS2307` at `gui/src/transferBoot.ts`. An earlier version of this comment said
+  both were declared, which would have sent a reader to "tidy" `canvas/package.json` and blank
+  the Electron transfer window.
   The ADDRESSES stay flat at `/`, unlike the GUI's `../frontend/dist/...`, for the reason two
   paragraphs up.
 

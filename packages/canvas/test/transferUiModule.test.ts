@@ -14,13 +14,20 @@ import { dirname, join } from 'node:path';
  * browser-loaded module of THIS package, which is exactly the position `keypadUi.js` is in, and
  * `keypadUiModule.test.ts` beside this file is the precedent this follows.
  *
- * Its header states the invariant in capitals: *"IT IMPORTS ONLY `@tn3270/frontend`, and must
- * keep doing so."* A capitalised comment is not a test. This is the test.
+ * Its header states the invariant in capitals -- that it imports only the ONE frontend module its
+ * field table lives in, and must keep doing so. A capitalised comment is not a test. This is the
+ * test. (The specifier it names became the deep `@tn3270/frontend/dist/transferForm.js` on
+ * 2026-10-06; this paragraph quoted the older bare form until then, which is the summary going
+ * stale one line above the case that was correctly updated.)
  *
  * ## THE FAILURE IT GUARDS IS A BLANK WINDOW WITH NO ERROR
  *
- * `gui/transfer.html`'s import map resolves `@tn3270/frontend` to `transferForm.js` and
- * `@tn3270/canvas/dist/transferUi.js` to this module. A specifier NO map entry names is
+ * `gui/transfer.html`'s import map resolves `@tn3270/frontend/dist/transferForm.js` to
+ * `transferForm.js` and `@tn3270/canvas/dist/transferUi.js` to this module. BOTH KEYS ARE DEEP
+ * PATHS THERE, and the frontend one only became so on 2026-10-06, in step with the import below:
+ * a key without a trailing `/` matches EXACTLY, so the bare key stopped matching the moment this
+ * module grew a subpath. Measured when it was missed once: `transfer.mjs` scored 3/10 with a
+ * blank window. A specifier NO map entry names is
  * unresolvable in a browser with no bundler, and the window comes up blank with nothing in any
  * console -- a shape this repo has met several separate ways, including once in the very commit
  * that moved this file, when the map's key did not match the deep specifier the import emits.

@@ -52,18 +52,26 @@ function table(): Map<string, Asset> {
   // a test walking the graph: the symptom names the wrong file.
   for (const module of [
     'bridge.js', 'bridgecore.js', 'keypadOverlay.js',
-    // `transferChunk.js` joins 2026-10-06: the browser will need `chunkBytes` and the 10 MB cap
-    // to refuse an oversize file BEFORE sending a byte, so this module is loaded by both sides.
-    // Served AHEAD of the overlay that imports it (a later task in the same plan) deliberately --
-    // the entry is what stops it 404ing the day that lands, and an entry costs nothing until then.
+    // `transferChunk.js` joins 2026-10-06: the browser WILL need `chunkBytes` and the 10 MB cap
+    // to refuse an oversize file before sending a byte, so it will be loaded by both sides.
+    // NOTHING LOADS IT TODAY -- the page's module graph is `bridge.js` and `renderer.js` and
+    // reaches neither this nor `transferUi.js`. Served ahead of the overlay that will import it (a
+    // later task in the same plan) deliberately: the entry is what stops it 404ing the day that
+    // lands, and an entry costs nothing until then.
+    //
     // Safe to serve, and checked rather than assumed -- `dist/transferChunk.js` has ZERO imports
     // of any kind (measured 2026-10-06 on the BUILT file, since `import type` erases), so it
     // closes the graph at itself and needs no map entry or neighbour of its own.
     //
-    // `transferOverlay.js`, `transferBoot.js` and `transferBridge.js` are NOT here yet, and
-    // deliberately: Tasks 5, 6 and 8 create them, and the case below asserting that every claimed
-    // file EXISTS after a build would fail on a module that does not. Each task adds its own entry
-    // when it adds its file.
+    // AN ENTRY IN *THIS* LOOP IS NOT COVERED BY THE EXISTS-AFTER-BUILD TEST, which is the trap
+    // worth naming here. An earlier version of this comment claimed the opposite -- that naming a
+    // module Tasks 5/6/8 have not written yet "would fail" that case. MEASURED 2026-10-06: adding
+    // `'transferOverlay.js'` here leaves `httpstatic.test.ts` at 18/18 GREEN. Own-package paths are
+    // deliberately excluded from that loop, because under vitest `import.meta.url` is the SOURCE
+    // file so they resolve into `src/` rather than `dist/` -- the same reason its comment gives for
+    // keeping `/bridge.js` out. So a bogus entry here is caught by NOTHING automatically, and the
+    // only cover is the hand-written assertion in the `/bridge.js` case, where `transferChunk.js`
+    // is named explicitly. ADD YOUR MODULE THERE TOO when you add it here.
     'transferChunk.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
