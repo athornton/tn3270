@@ -34,6 +34,57 @@ export interface KeyLike {
   readonly altKey: boolean;
   readonly metaKey: boolean;
   readonly shiftKey: boolean;
+  /**
+   * `KeyboardEvent.getModifierState`. OPTIONAL, and the optionality is the point: a real
+   * event always has it, but `Electron.sendInputEvent` synthesizes events that do not, and
+   * `keyspec.ts` documents that an unrecognized spelling arrives as `key: ''` with no
+   * methods at all. Code here must therefore treat its absence as "no AltGraph", never
+   * call it unguarded.
+   */
+  readonly getModifierState?: (modifier: string) => boolean;
+}
+
+/**
+ * Does this event carry a LAYOUT CHARACTER -- a character reachable only through a
+ * layout-shift modifier?
+ *
+ * ## THE BUG THIS FIXES
+ *
+ * On a German, Spanish or Nordic layout the C programmer's characters live behind AltGr:
+ * `{` is AltGr+7, `}` is AltGr+0, and `[`, `]`, `@`, `\` and `~` are AltGr chords too. Those
+ * arrive with `altKey` set, so the Alt branch below dropped every one of them and a whole
+ * class of keyboard could not type a brace into a field at all.
+ *
+ * `getModifierState('AltGraph')` is the portable signal (MDN,
+ * `KeyboardEvent.getModifierState`): true for **Windows AltGr**, for **macOS Option**, and
+ * for the **GTK level-3/5 shift** on Linux. Plain `altKey` cannot stand in for it, because
+ * Windows reports AltGr AS ctrlKey+altKey -- so a `ctrlKey && altKey` test would swallow
+ * genuine Ctrl-Alt chords, and an `altKey` test would steal Alt+digit from the PA keys.
+ *
+ * ## WHY THIS IS A FALLBACK AND NOT A BRANCH TAKEN FIRST
+ *
+ * MEASURED, and the first version of this fix got it wrong: on **macOS, Option sets
+ * AltGraph too**, so checking it before the bindings made Option-1 type `¡` instead of
+ * sending PA1 and Option-K type `˚` instead of toggling the keypad. That is precisely the
+ * defect the notes on `KeyLike.code` and the PA tests already warn about -- a change that
+ * works on Linux and silently breaks a Mac -- and the existing tests passed through it
+ * because none of them set `getModifierState`.
+ *
+ * So the order is: **every binding gets its chance first**, and only a keystroke that no
+ * binding claimed is reconsidered as a layout character. Option-1 still reaches PA1,
+ * AltGr+7 still types `{`, because `Digit7` is in no table.
+ *
+ * NOT DRIVEN BY THE Xvfb HARNESS, and `keys.mjs` cannot be extended to cover it:
+ * `sendInputEvent`'s modifier list (`electron.d.ts:8961`) has no `altgr`, so there is no way
+ * to synthesize one of these events from the harness. `keys.test.ts` is the whole of the
+ * cover, which is why it states both platforms' shapes explicitly.
+ */
+function layoutCharacter(e: KeyLike): Action | null {
+  if (e.getModifierState?.('AltGraph') !== true) return null;
+  // The same single-code-point rule the printable path uses, so a dead key (`key: 'Dead'`)
+  // or an F-key with AltGr held still types nothing.
+  if ([...e.key].length === 1) return { kind: 'type', text: e.key };
+  return null;
 }
 
 /** Keys whose `key` value is a name rather than a character. */
@@ -116,7 +167,8 @@ export function actionForKey(e: KeyLike): Action | null {
   // Matched on e.code and not e.key: see the note on KeyLike.code. Checked BEFORE the bail
   // below, which is what used to make every PA key unreachable in this front end. The
   // `!ctrlKey && !metaKey` guard leaves Ctrl-Alt-digit and Cmd-Alt-digit falling through to
-  // that bail as `null`, unchanged from before this patch.
+  // that bail, where they are `null` unless AltGraph says the keystroke is a layout
+  // character -- which is how Windows AltGr+7, reported as ctrlKey+altKey, reaches `{`.
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     // Alt-K is how c3270's _WIN32 keymap spells `Keypad()` (Common/fb-c3270:48-49, which binds
     // both `k` and `K`), so it is honored here alongside the Ctrl-K its terminal keymap uses
@@ -131,12 +183,19 @@ export function actionForKey(e: KeyLike): Action | null {
     //
     // Checked BEFORE PA_CODES so a future Alt entry in that table cannot shadow it silently.
     if (e.code === 'KeyK') return { kind: 'toggleKeypad' };
-    return PA_CODES[e.code] ?? null;
+    // `??` and not `return ... ?? null`: a key no PA entry claims may still be a layout
+    // character. This is the macOS Option path -- Option-1 matched `Digit1` above and never
+    // reaches here, while Option-8 on a German Mac has no binding and types `{`.
+    return PA_CODES[e.code] ?? layoutCharacter(e);
   }
 
   // A Meta or Alt chord belongs to the window or the OS, never to the field. Cmd-digit is
   // deliberately NOT a PA: that is where menu accelerators live.
-  if (e.metaKey || e.altKey) return null;
+  //
+  // THE WINDOWS AltGr PATH ENDS HERE, because Windows reports AltGr as ctrlKey+altKey and so
+  // misses both branches above. A genuine Ctrl-Alt chord has no AltGraph state and still
+  // returns null, which is what keeps Ctrl-Alt-K with the window manager.
+  if (e.metaKey || e.altKey) return layoutCharacter(e);
 
   if (e.key === 'Tab') return e.shiftKey ? { kind: 'backTab' } : { kind: 'tab' };
 

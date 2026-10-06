@@ -163,6 +163,87 @@ describe('the keys the GUI could not reach at all', () => {
     expect(actionForKey(ev({ key: 'f', code: 'KeyF', altKey: true }))).toBeNull();
   });
 
+  it('types the character an AltGr layout puts behind an Alt chord', () => {
+    // THE BUG THIS DESCRIBES: on a German, Spanish or Nordic layout `{` is AltGr+7 and `}`
+    // is AltGr+0 -- and `[`, `]`, `@`, `\`, `~` are AltGr chords too. The Alt branch above
+    // returned null for every one of them, so a whole class of layout could not type a
+    // brace into a field at all. Invisible to every test here before this one, because they
+    // were all written on a US layout where `{` is Shift+[.
+    //
+    // AltGraph is the discriminator, NOT altKey: `getModifierState('AltGraph')` is true for
+    // Windows AltGr and for macOS Option (MDN, KeyboardEvent.getModifierState), which is
+    // exactly the set of events that carry a layout character. Windows reports AltGr as
+    // ctrlKey+altKey, so the plain `altKey` test cannot tell it from a real Ctrl-Alt chord.
+    const altGraph = (init: Partial<KeyLike> & { key: string }): KeyLike =>
+      ({ ...ev(init), getModifierState: (m: string) => m === 'AltGraph' });
+
+    // Windows DE: AltGr reports as ctrlKey + altKey.
+    expect(actionForKey(altGraph({ key: '{', code: 'Digit7', altKey: true, ctrlKey: true })))
+      .toEqual({ kind: 'type', text: '{' });
+    expect(actionForKey(altGraph({ key: '}', code: 'Digit0', altKey: true, ctrlKey: true })))
+      .toEqual({ kind: 'type', text: '}' });
+    expect(actionForKey(altGraph({ key: '@', code: 'KeyQ', altKey: true, ctrlKey: true })))
+      .toEqual({ kind: 'type', text: '@' });
+    // macOS DE: Option alone.
+    expect(actionForKey(altGraph({ key: '{', code: 'Digit8', altKey: true })))
+      .toEqual({ kind: 'type', text: '{' });
+    expect(actionForKey(altGraph({ key: '}', code: 'Digit9', altKey: true })))
+      .toEqual({ kind: 'type', text: '}' });
+  });
+
+  it('still sends PA1 and the keypad toggle on a MAC, where Option sets AltGraph too', () => {
+    // THE REGRESSION THE FIRST VERSION OF THIS FIX SHIPPED, caught by driving the built
+    // module rather than by this file: macOS sets AltGraph for Option (MDN), so an
+    // AltGraph-first branch made Option-1 type "¡" instead of sending PA1, and Option-K type
+    // "˚" instead of toggling the keypad. Exactly the Linux-passes/Mac-breaks shape that the
+    // note on KeyLike.code exists to warn about.
+    //
+    // This is why layoutCharacter is a FALLBACK: bindings are matched first, and only a
+    // keystroke no binding claimed is reconsidered as a character.
+    const macOption = (init: Partial<KeyLike> & { key: string }): KeyLike =>
+      ({ ...ev(init), getModifierState: (m: string) => m === 'AltGraph' });
+
+    expect(actionForKey(macOption({ key: '¡', code: 'Digit1', altKey: true })))
+      .toEqual({ kind: 'pa', n: 1 });
+    expect(actionForKey(macOption({ key: '™', code: 'Digit2', altKey: true })))
+      .toEqual({ kind: 'pa', n: 2 });
+    expect(actionForKey(macOption({ key: '˚', code: 'KeyK', altKey: true })))
+      .toEqual({ kind: 'toggleKeypad' });
+    // Option-Shift-K as well, since c3270 binds both cases.
+    expect(actionForKey(macOption({ key: '', code: 'KeyK', altKey: true, shiftKey: true })))
+      .toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('still honors the PA keys and Alt-K when AltGraph is NOT set', () => {
+    // The regression this guards: AltGr is a layout shift, Alt+digit is a PA key, and both
+    // arrive with altKey set. Only AltGraph separates them, so the PA keys must keep working
+    // for a plain Alt chord -- these are the same assertions as above, restated here because
+    // the AltGraph branch is new code in front of them.
+    expect(actionForKey(ev({ key: '1', code: 'Digit1', altKey: true })))
+      .toEqual({ kind: 'pa', n: 1 });
+    expect(actionForKey(ev({ key: 'k', code: 'KeyK', altKey: true })))
+      .toEqual({ kind: 'toggleKeypad' });
+  });
+
+  it('does not type a multi-character key name just because AltGraph is set', () => {
+    // A dead key reports `key: 'Dead'` and a function key `key: 'F5'`; with AltGraph held
+    // those must not become typed text. The single-code-point rule is what prevents it.
+    const altGraph = (init: Partial<KeyLike> & { key: string }): KeyLike =>
+      ({ ...ev(init), getModifierState: (m: string) => m === 'AltGraph' });
+    expect(actionForKey(altGraph({ key: 'Dead', code: 'BracketLeft', altKey: true }))).toBeNull();
+    expect(actionForKey(altGraph({ key: 'F5', code: 'F5', altKey: true }))).toBeNull();
+    // A bare AltGraph keypress is still a modifier and still types nothing.
+    expect(actionForKey(altGraph({ key: 'AltGraph', code: 'AltRight', altKey: true }))).toBeNull();
+  });
+
+  it('keeps Ctrl chords working, and does not let a Ctrl-Alt chord type a letter', () => {
+    // Without AltGraph set, Ctrl+Alt is not a layout shift. It must stay null rather than
+    // typing, which is what the pre-existing Alt bail did for it.
+    expect(actionForKey(ev({ key: 'f', code: 'KeyF', altKey: true, ctrlKey: true }))).toBeNull();
+    // And a plain Ctrl chord is untouched by any of this.
+    expect(actionForKey(ev({ key: 'c', code: 'KeyC', ctrlKey: true }))).toEqual({ kind: 'clear' });
+  });
+
   it('leaves Cmd-digit alone, because that is where menu accelerators live', () => {
     // The reporter has left-Option mapped to Command at the OS level, so this arrives as a
     // metaKey chord. Binding it would collide with the menus on the roadmap.
