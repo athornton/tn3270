@@ -50,7 +50,22 @@ function table(): Map<string, Asset> {
   // BRIDGE.JS ITSELF NEVER EXECUTES -- `window.tn3270` is never assigned, and the error surfaces
   // in the NEXT script rather than this one. That misdirection is the whole reason this list has
   // a test walking the graph: the symptom names the wrong file.
-  for (const module of ['bridge.js', 'bridgecore.js', 'keypadOverlay.js']) {
+  for (const module of [
+    'bridge.js', 'bridgecore.js', 'keypadOverlay.js',
+    // `transferChunk.js` joins 2026-10-06: the browser will need `chunkBytes` and the 10 MB cap
+    // to refuse an oversize file BEFORE sending a byte, so this module is loaded by both sides.
+    // Served AHEAD of the overlay that imports it (a later task in the same plan) deliberately --
+    // the entry is what stops it 404ing the day that lands, and an entry costs nothing until then.
+    // Safe to serve, and checked rather than assumed -- `dist/transferChunk.js` has ZERO imports
+    // of any kind (measured 2026-10-06 on the BUILT file, since `import type` erases), so it
+    // closes the graph at itself and needs no map entry or neighbour of its own.
+    //
+    // `transferOverlay.js`, `transferBoot.js` and `transferBridge.js` are NOT here yet, and
+    // deliberately: Tasks 5, 6 and 8 create them, and the case below asserting that every claimed
+    // file EXISTS after a build would fail on a module that does not. Each task adds its own entry
+    // when it adds its file.
+    'transferChunk.js',
+  ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }
   // DERIVED FROM `BROWSER_MODULES`, not retyped. That list is what `canvas` publishes for this
@@ -121,7 +136,18 @@ function table(): Map<string, Asset> {
    * reaches `tls.js` and its `node:net`/`node:tls`/`node:fs`.
    */
   const frontendDist = join(here, '..', '..', 'frontend', 'dist');
-  for (const module of ['keypadView.js', 'keypad.js', 'bindings.js']) {
+  // `transferForm.js` joined 2026-10-06 for the transfer overlay. It is SAFE by the same test
+  // as its neighbours: zero imports at all (`gui/test/transferModule.test.ts` asserts exactly
+  // that, and it was re-measured on the built file this day), which is why BOTH front ends'
+  // import maps point straight at it.
+  //
+  // NOTE THE SPECIFIER IT IS REACHED BY, because it differs from its three neighbours above:
+  // `transferUi.js` imports `@tn3270/frontend/dist/transferForm.js`, a DEEP path, since the bare
+  // `@tn3270/frontend` key in `static/index.html` is already bound to `keypadView.js` for the
+  // keypad and an import-map key without a trailing `/` matches EXACTLY. The map therefore needs
+  // its own entry naming that deep specifier -- but the ADDRESS is still `./transferForm.js`,
+  // flat at the root like everything else here.
+  for (const module of ['keypadView.js', 'keypad.js', 'bindings.js', 'transferForm.js']) {
     built.set(`/${module}`, { file: join(frontendDist, module), type: JS });
   }
   cached = built;

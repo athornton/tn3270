@@ -54,7 +54,7 @@ describe('the transfer form DOM view, as a browser loads it', () => {
     expect(existsSync(join(distDir, 'transferUi.js')), 'missing dist/transferUi.js').toBe(true);
   });
 
-  it('imports NOTHING but `@tn3270/frontend`, which the import map resolves', () => {
+  it('imports NOTHING but the DEEP `transferForm.js` path, which both import maps resolve', () => {
     /**
      * EXACT EQUALITY AND NOT A SUBSET CHECK, for the reason `keypadUiModule.test.ts` gives: a new
      * workspace import needs a new map entry, and forgetting it is the blank-window family.
@@ -62,8 +62,24 @@ describe('the transfer form DOM view, as a browser loads it', () => {
      * In particular it must never reach `./drawlist.js`, `./cg.js` or anything else in this
      * package: those are Node-side modules that value-import `@tn3270/core`, whose graph a
      * browser cannot resolve.
+     *
+     * ## WHY THE DEEP PATH, CHANGED 2026-10-06 FROM THE BARE `@tn3270/frontend`
+     *
+     * The web gateway became this module's second consumer, and `packages/web/static/index.html`
+     * had ALREADY bound the bare `@tn3270/frontend` to `keypadView.js` for the keypad overlay.
+     * An import-map key without a trailing `/` matches EXACTLY, so one specifier cannot name two
+     * files: a bare import here would have resolved to `keypadView.js`, which does not export
+     * `TRANSFER_FIELDS`. Blank page, no error -- the failure this case exists to force a decision
+     * about, and it did exactly that.
+     *
+     * So the expected value is the deep path, and BOTH maps now spell it verbatim as a key
+     * (`gui/transfer.html` was updated in the same change, since its bare key stopped matching
+     * the moment this specifier grew a subpath). `packages/frontend/package.json`'s `exports` map
+     * declares the subpath too, which is what lets `tsc` and Node resolve the same string --
+     * without it, `TS2307` and `ERR_PACKAGE_PATH_NOT_EXPORTED` (both measured that day).
      */
-    expect(importsOf(join(distDir, 'transferUi.js'))).toEqual(['@tn3270/frontend']);
+    expect(importsOf(join(distDir, 'transferUi.js')))
+      .toEqual(['@tn3270/frontend/dist/transferForm.js']);
   });
 
   it('reaches no `node:` builtin, directly or through the one import it has', () => {

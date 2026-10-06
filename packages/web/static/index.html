@@ -31,12 +31,36 @@
   real directory; a served page's `..` is a URL the server has to answer. `httpstatic.ts` serves
   all of these at the root, so `keypadView.js`'s own relative imports of `./keypad.js` and
   `./bindings.js` resolve against the same flat root and need no entries of their own.
+
+  TWO DEEP-PATH ENTRIES JOINED 2026-10-06 FOR THE TRANSFER FORM, and they are ADDITIONS rather
+  than edits to the two above for a measured reason: an import-map key without a trailing `/`
+  matches EXACTLY, so one specifier cannot name two files. `@tn3270/canvas` is already spoken for
+  by `keypadUi.js` and `@tn3270/frontend` by `keypadView.js` -- which does NOT export
+  `TRANSFER_FIELDS`. Binding the transfer modules by reusing either key would be a resolution
+  failure presenting as a BLANK PAGE WITH NO ERROR, the same family as everything else in this
+  comment. (Tried on the GUI's own map the same day: the window came up blank and
+  `transfer.mjs` scored 3/10, with the renderer's only complaint a bare "Script failed to
+  execute".)
+
+  THE KEYS ARE THE STRINGS `tsc` ALREADY RESOLVES, verbatim, so the browser and the compiler
+  agree: `transferBoot.ts` imports `@tn3270/canvas/dist/transferUi.js` and `transferUi.ts`
+  imports `@tn3270/frontend/dist/transferForm.js`. Both deep paths are declared in their
+  packages' `exports` maps, which is what makes them legal to `tsc` and to Node as well as here.
+  The ADDRESSES stay flat at `/`, unlike the GUI's `../frontend/dist/...`, for the reason two
+  paragraphs up.
+
+  NOTHING THIS DOCUMENT LOADS USES THOSE TWO ENTRIES YET, and that is not an oversight: the
+  overlay that imports `transferUi.js` is a later task in the same plan. A map entry naming a
+  module the gateway already serves is inert until something imports it, and having it in place
+  first is what stops the specifier being the thing that is missing on the day the overlay lands.
 -->
 <script type="importmap">
 {
   "imports": {
     "@tn3270/canvas": "./keypadUi.js",
-    "@tn3270/frontend": "./keypadView.js"
+    "@tn3270/frontend": "./keypadView.js",
+    "@tn3270/canvas/dist/transferUi.js": "./transferUi.js",
+    "@tn3270/frontend/dist/transferForm.js": "./transferForm.js"
   }
 }
 </script>

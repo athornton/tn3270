@@ -67,8 +67,11 @@ describe('resolveAsset', () => {
     // failure `assets.ts` was extracted to prevent. SIX since the keypad overlay's `keypadUi.js`
     // joined it; five when the selection gesture's `selection.js` did. `hittest.js` was a member
     // until the canvas keypad was deleted on 2026-10-06, which is why this moved 6 -> 5 rather
-    // than up: one module left as another arrived.
-    expect(BROWSER_MODULES.length).toBe(5);
+    // than up: one module left as another arrived. SIX AGAIN since the transfer form's
+    // `transferUi.js` joined later that same day for the gateway's in-pane overlay -- so this
+    // number has now been 5, 6, 7, 6 and 5 before reaching 6, which is the argument for keeping
+    // the history in this comment rather than just the current figure.
+    expect(BROWSER_MODULES.length).toBe(6);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 
@@ -85,8 +88,19 @@ describe('resolveAsset', () => {
     // from `packages/gui`, where the shared stylesheet lives because the GUI's two windows were
     // its first consumers. A path into a third package is exactly the kind of thing that resolves
     // in the table and 404s at runtime, which is what this loop exists to catch.
+    //
+    // `/transferUi.js` and `/transferForm.js` JOINED 2026-10-06 and they belong here for the same
+    // reason `/ui.css` does -- both reach into another package's `dist` (canvas's through
+    // `assetDir()`, frontend's through a relative path), so both are exactly the kind of entry
+    // that resolves in the table and 404s in a browser.
+    //
+    // `/transferChunk.js` IS DELIBERATELY NOT HERE, by the same trap as `/bridge.js` and MEASURED
+    // the same way: it is `join(here, ...)` in this package, and under vitest `import.meta.url` is
+    // the SOURCE file, so it resolves to `packages/web/src/transferChunk.js` -- a path that never
+    // exists, because the source is `.ts`. Its built file is asserted in the `/bridge.js` case
+    // below instead, which is where this table's own-package paths are checked.
     for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js',
-      '/selection.js', '/keypadUi.js', '/ui.css']) {
+      '/selection.js', '/keypadUi.js', '/transferUi.js', '/transferForm.js', '/ui.css']) {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }
@@ -145,6 +159,36 @@ describe('resolveAsset', () => {
     expect(resolveAsset('/bridge.js')!.file).toMatch(/[/\\]bridge\.js$/);
     const pkgDir = dirname(dirname(fileURLToPath(import.meta.url)));
     expect(existsSync(join(pkgDir, 'dist', 'bridge.js'))).toBe(true);
+    // `transferChunk.js` is the SECOND own-package module served (2026-10-06), and it lands in
+    // the same trap -- MEASURED: `resolveAsset('/transferChunk.js').file` is
+    // `packages/web/src/transferChunk.js` under vitest, which does not and cannot exist. So it is
+    // checked here in both halves rather than in the existence loop above.
+    expect(resolveAsset('/transferChunk.js')!.file).toMatch(/[/\\]transferChunk\.js$/);
+    expect(existsSync(join(pkgDir, 'dist', 'transferChunk.js'))).toBe(true);
+  });
+});
+
+describe('transfer modules', () => {
+  it('serves every browser module the transfer overlay needs', () => {
+    // `resolveAsset` is this suite's own entry point -- it is what the existing cases use, and
+    // it answers for one URL path at a time. There is no map-returning helper.
+    // ONLY THE MODULES THAT EXIST TODAY. Tasks 5, 6 and 8 add their own as they create them.
+    for (const path of ['/transferUi.js', '/transferChunk.js']) {
+      expect(resolveAsset(path), path).toBeDefined();
+    }
+  });
+
+  it('serves transferForm.js, which transferUi.js imports for its field table', () => {
+    // The import-graph closure rule this file already tests for the keypad: a 404 on a
+    // transitive import means the IMPORTING module never executes, and the error surfaces in
+    // the next script naming the wrong file.
+    expect(resolveAsset('/transferForm.js')).toBeDefined();
+  });
+
+  it('lists transferUi.js in BROWSER_MODULES, which is what makes it served', () => {
+    // `httpstatic.ts` DERIVES its canvas entries from that list rather than retyping them, so
+    // this is the assertion that one edit reaches the server.
+    expect(BROWSER_MODULES).toContain('transferUi.js');
   });
 });
 

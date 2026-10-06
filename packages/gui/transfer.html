@@ -8,8 +8,17 @@
   TWO ENTRIES, AND BOTH POINT AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL, exactly as
   `keypad.html` does.
 
-  `@tn3270/frontend` -> `packages/frontend/dist/transferForm.js`, which has no runtime imports of
-  its own (measured 2026-10-01: 9139 bytes, zero) -- so that branch closes at one file.
+  `@tn3270/frontend/dist/transferForm.js` -> `packages/frontend/dist/transferForm.js`, which has
+  no runtime imports of its own (measured 2026-10-01: 9139 bytes, zero) -- so that branch closes
+  at one file.
+
+  THAT KEY WAS THE BARE `@tn3270/frontend` UNTIL 2026-10-06, and it had to change in step with
+  `transferUi.ts`'s import. The web gateway became the second consumer of that module, and ITS
+  page had already bound the bare `@tn3270/frontend` to `keypadView.js` for the keypad overlay --
+  so `transferUi.ts` had to name the deep path instead, and a bare key here would then have
+  matched nothing. (Keys match EXACTLY without a trailing `/`; see the paragraph below, which
+  measured exactly that mistake on the OTHER entry.) `packages/frontend/package.json`'s `exports`
+  map declares that subpath so `tsc` and Node resolve the same string a browser does.
 
   `@tn3270/canvas/dist/transferUi.js` -> the matching file in `canvas`, where the form's view moved
   on 2026-10-06 because the WEB GATEWAY needs it and `packages/web` neither depends on
@@ -37,7 +46,7 @@
 -->
 <script type="importmap">
 { "imports": {
-    "@tn3270/frontend": "../frontend/dist/transferForm.js",
+    "@tn3270/frontend/dist/transferForm.js": "../frontend/dist/transferForm.js",
     "@tn3270/canvas/dist/transferUi.js": "../canvas/dist/transferUi.js"
 } }
 </script>

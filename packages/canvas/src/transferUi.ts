@@ -1,14 +1,16 @@
 import {
   TRANSFER_FIELDS, applicable, cycleField, formKeywords, newTransferForm, setFieldText,
   type TransferFieldId, type TransferFormState, type TransferValues,
-} from '@tn3270/frontend';
+} from '@tn3270/frontend/dist/transferForm.js';
 
 /**
  * MOVED HERE FROM `packages/gui` on 2026-10-06, for the same reason `keypadUi.ts` lives here:
  * `packages/web` needs this view and cannot depend on an Electron app. The move was
  * behaviour-preserving and the test came with it unchanged, which is the evidence.
  *
- * IT IMPORTS ONLY `@tn3270/frontend`, and must keep doing so. Electron's `dialog` and `ipcRenderer`
+ * IT IMPORTS ONLY `@tn3270/frontend/dist/transferForm.js`, and must keep doing so -- see the
+ * import-map section below for why that is the DEEP path and not the bare package name since
+ * 2026-10-06. Electron's `dialog` and `ipcRenderer`
  * reach this form through `UiDeps` -- whose `browse()` and `submit()` are already
  * `Promise`-returning, which is why a browser needs no change to the interface at all. The GUI's
  * `browse()` resolves to a PATH; the web's resolves to a `File.name`. This module shows the string
@@ -36,29 +38,44 @@ import {
  *
  * ## A BROWSER LOADS THIS, AND AN IMPORT MAP IS WHAT MAKES THAT LEGAL
  *
- * The import above is a BARE SPECIFIER and stays one in the emitted JS -- deliberately, not by
- * omission. `tsc` rewrites nothing (measured 2026-10-01: `dist/transferUi.js` line 1 carries
- * `from '@tn3270/frontend'`, and it is the file's ONLY runtime import, the type-only ones
- * having been erased).
+ * The import above is a BARE-PACKAGE-ROOTED DEEP SPECIFIER and stays one, verbatim, in the
+ * emitted JS -- deliberately, not by omission. `tsc` rewrites nothing (measured 2026-10-06:
+ * `dist/transferUi.js` line 1 carries `from '@tn3270/frontend/dist/transferForm.js'`, and it is
+ * the file's ONLY runtime import, the type-only ones having been erased).
+ *
+ * ## WHY THE DEEP PATH, AND NOT THE BARE `@tn3270/frontend` IT USED TO BE
+ *
+ * CHANGED 2026-10-06, when `packages/web` became the second consumer. That page's map had
+ * ALREADY bound the bare `@tn3270/frontend` to `keypadView.js` for the keypad overlay, and an
+ * import-map key without a trailing `/` matches EXACTLY -- so a bare specifier here would have
+ * resolved to `keypadView.js`, a module that does not export `TRANSFER_FIELDS`. That is a
+ * resolution failure presenting as a BLANK PAGE WITH NO ERROR in any console, which is the
+ * failure family this whole docblock is about. One specifier cannot name two files, so the two
+ * views are reached by two distinct specifiers.
+ *
+ * `packages/frontend/package.json`'s `exports` map gained `"./dist/transferForm.js"` in the same
+ * change, and it had to: an `exports` map with only `"."` makes every deep path an error, and the
+ * probe said so -- `TS2307: Cannot find module '@tn3270/frontend/dist/transferForm.js'` from
+ * `tsc`, `ERR_PACKAGE_PATH_NOT_EXPORTED` from Node. A browser never consults `exports`, so this
+ * is purely what keeps `tsc`, Node and the browser resolving the one same string.
  *
  * Each consuming document carries an import map that resolves that specifier to
  * `transferForm.js`. The browser applies the map BEFORE it fetches anything, so
  * `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and `tls.js`'s
  * `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never reached. All
  * six names imported here are exported directly by `transferForm.js` (verified), so that single
- * `@tn3270/frontend` entry satisfies the whole list.
+ * entry satisfies the whole list.
  *
- * EXACTLY ONE DOCUMENT DOES THIS TODAY: `packages/gui/transfer.html`, for the Electron window.
- * This module moved here on 2026-10-06 so that `packages/web` COULD share it, but the gateway's
- * in-pane overlay is not built yet -- `packages/web/static/index.html` has no `transferUi` entry
- * and binds `@tn3270/canvas` to `./keypadUi.js` for the keypad. Adding the second consumer is a
- * later task in the same plan, and it needs ITS OWN map entry under a distinct specifier, because
- * an import-map key without a trailing `/` matches EXACTLY and that one is already taken.
+ * TWO DOCUMENTS DO THIS AS OF 2026-10-06: `packages/gui/transfer.html` for the Electron window,
+ * and `packages/web/static/index.html` for the gateway. Both carry a key spelling this deep
+ * specifier verbatim -- the GUI's was updated in the same change, because its single
+ * `@tn3270/frontend` key stopped matching the moment this import grew a subpath, and a key that
+ * no longer matches is that blank window again.
  *
- * The two maps will NOT be copies of each other when that lands. The GUI's names
- * `../canvas/dist/transferUi.js` by relative path, which works only because an Electron window
- * loads from `file://` where `..` is a real directory; a served page has no such thing and needs
- * the gateway to answer that URL itself.
+ * The two maps are NOT copies of each other. The GUI's addresses name
+ * `../frontend/dist/transferForm.js` by relative path, which works only because an Electron
+ * window loads from `file://` where `..` is a real directory; a served page has no such thing,
+ * so the gateway serves every module FLAT at `/` and its addresses are `./transferForm.js`.
  *
  * `transferForm.js` has ZERO runtime imports of its own (9139 bytes, measured 2026-10-01), so
  * the module graph closes at that single file. That is a FACT WITH A DATE, not an invariant:
