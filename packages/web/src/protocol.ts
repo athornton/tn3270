@@ -57,13 +57,20 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
   // structured clone gave it and needs no knowledge of the transport.
   // `transferData` carries file bytes for exactly the same reason and in the same shape, so its
   // browser-side decode is the one the bridge ALREADY uses for `coverage` rather than a second
-  // convention: `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` at `bridgecore.ts:105`.
+  // convention: `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` at `bridgecore.ts:133`.
+  // (`:105` until 2026-10-06, when `onTransfer` and its inbound branch moved it. The consumer
+  // this comment promises exists is now real -- that branch decodes `transferData` exactly so.)
   //
   // `atob`, NOT `Buffer.from(s, 'base64')` -- and the distinction is not stylistic. An earlier
   // version of this comment named `Buffer`, which is the API THIS file uses on the server and
   // which DOES NOT EXIST in `bridgecore.ts`: that module is served to the browser by
-  // `httpstatic.ts` and contains zero occurrences of `Buffer`. Naming it here would have sent the
-  // consumer of this message at an API unavailable in its own environment.
+  // `httpstatic.ts`, where no `Buffer` exists. Naming it here would have sent the consumer of
+  // this message at an API unavailable in its own environment.
+  //
+  // (This clause said "contains zero occurrences of `Buffer`" until 2026-10-06, when the inbound
+  // `transferData` branch landed there and made it literally false -- the word now appears three
+  // times in that file, in the comments warning against it. The claim that matters is about the
+  // ENVIRONMENT, not a grep count, so it is now stated that way.)
   const wire = msg.kind === 'atlas'
     ? { ...msg, coverage: Buffer.from(msg.coverage).toString('base64') }
     : msg.kind === 'transferData'

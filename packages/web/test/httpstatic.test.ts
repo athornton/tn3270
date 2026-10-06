@@ -165,6 +165,26 @@ describe('resolveAsset', () => {
     // checked here in both halves rather than in the existence loop above.
     expect(resolveAsset('/transferChunk.js')!.file).toMatch(/[/\\]transferChunk\.js$/);
     expect(existsSync(join(pkgDir, 'dist', 'transferChunk.js'))).toBe(true);
+    // `transferBridge.js` is the THIRD, added 2026-10-06 with the module itself, and it is in the
+    // same trap for the same reason: under vitest `import.meta.url` is the SOURCE file, so the
+    // entry resolves to `packages/web/src/transferBridge.js`, which never exists.
+    //
+    // ## WHAT THESE TWO LINES DO AND DO NOT CATCH, MEASURED RATHER THAN CLAIMED
+    //
+    // THEY CATCH A MISSING ENTRY. 2026-10-06: deleting `'transferBridge.js'` from
+    // `httpstatic.ts`'s own-package loop reddens both this case and the transfer-modules case
+    // below -- 2 failures. That is the break that matters, because a 404 on a module
+    // `transferBoot.js` imports means the IMPORTING module never runs.
+    //
+    // THEY DO NOT CATCH A BOGUS EXTRA ENTRY, and an earlier version of this very comment claimed
+    // they did. MEASURED the same day: adding `'doesNotExist.js'` to that loop leaves this FILE
+    // at 18/18 green, these two lines included -- they name one module each, so they cannot
+    // notice a neighbour that was invented. Nothing in the suite can: the existence loop above
+    // deliberately excludes own-package paths for the resolution reason just given. So an entry
+    // for a module that does not exist is still caught by NOTHING automatically, which is why
+    // `httpstatic.ts` carries that warning and why a module is added here only when it is built.
+    expect(resolveAsset('/transferBridge.js')!.file).toMatch(/[/\\]transferBridge\.js$/);
+    expect(existsSync(join(pkgDir, 'dist', 'transferBridge.js'))).toBe(true);
   });
 });
 
@@ -172,8 +192,10 @@ describe('transfer modules', () => {
   it('serves every browser module the transfer overlay needs', () => {
     // `resolveAsset` is this suite's own entry point -- it is what the existing cases use, and
     // it answers for one URL path at a time. There is no map-returning helper.
-    // ONLY THE MODULES THAT EXIST TODAY. Tasks 5, 6 and 8 add their own as they create them.
-    for (const path of ['/transferUi.js', '/transferChunk.js']) {
+    // ONLY THE MODULES THAT EXIST TODAY. Tasks 6 and 8 add their own as they create them.
+    // `transferBridge.js` joined 2026-10-06 with the file itself, which is the habit Task 4's
+    // note argues for: the entry and the module land together, so neither can be forgotten.
+    for (const path of ['/transferUi.js', '/transferChunk.js', '/transferBridge.js']) {
       expect(resolveAsset(path), path).toBeDefined();
     }
   });

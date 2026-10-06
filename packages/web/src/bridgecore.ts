@@ -54,6 +54,34 @@ export interface BridgeDeps {
    * the server to do. Injected rather than imported so this module still needs no DOM.
    */
   readonly toggleKeypad?: () => void;
+  /**
+   * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
+   * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
+   * tests and any caller with no DOM must not need one.
+   *
+   * SIXTH MEMBER OF `BridgeDeps`, AND STILL NOT A BREACH OF THE FOUR-FUNCTION RULE, which is
+   * about `BridgeApi` below -- the surface `renderer.ts` consumes unmodified. See the note on
+   * `toggleKeypad`, which made this argument first.
+   *
+   * WITHOUT THIS HOOK THE THREE TRANSFER KINDS VANISH. The `onmessage` chain below returns on
+   * each kind it knows and then simply ends, so an unhandled kind is dropped with nothing in any
+   * console -- the operator would see a transfer form that never updates and no way to tell why.
+   *
+   * NOT ROUTED THROUGH `dispatch`, unlike every other inbound kind, and the asymmetry is the
+   * point: that queue exists because `renderer.js` registers its handlers when its module body
+   * runs, which races the atlas. The transfer overlay is built by the SAME module that constructs
+   * this bridge (`bridge.ts`), so its handler cannot be late and there is nothing to queue --
+   * while `dispatch`ing an unclaimed transfer kind would park it in that queue forever.
+   *
+   * TYPED LOOSELY, MATCHING THE `JSON.parse` RESULT BELOW RATHER THAN `protocol.ts`'s
+   * `ServerMessage`. `import type` from that module would erase at build (checked: no
+   * `verbatimModuleSyntax`, so it does not reach the browser's import graph), so servability is
+   * NOT the reason -- an earlier draft of this comment claimed it was and was wrong. The reason
+   * is that narrowing a parsed JSON object to a discriminated union takes an unchecked `as`, and
+   * this file validates nothing: it would be telling the compiler the gateway sent a well-formed
+   * message, which is exactly the claim a cast must not make. The overlay narrows on `kind`.
+   */
+  readonly onTransfer?: (msg: { kind: string } & Record<string, unknown>) => void;
 }
 
 export interface BridgeApi {
@@ -108,6 +136,22 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       }
       if (msg.kind === 'frame') { dispatch('frame', msg['list']); return; }
       if (msg.kind === 'error') { dispatch('error', String(msg['message'])); return; }
+      if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
+        || msg.kind === 'transferData') {
+        // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
+        // `httpstatic.ts` and `Buffer` does not exist here. The atlas branch above decodes its
+        // `coverage` the same way at `:133`, which is the one convention for bytes over this
+        // socket -- and `protocol.ts:64-68` records that an earlier comment there named `Buffer`
+        // for this very message and had to be corrected.
+        //
+        // ONLY `transferData` CARRIES BYTES. `transferProgress` and `transferDone` are passed
+        // through untouched, and decoding a missing `bytes` field would turn `undefined` into the
+        // string "undefined" and then into nine garbage bytes.
+        deps.onTransfer?.(msg.kind === 'transferData'
+          ? { ...msg, bytes: Uint8Array.from(atob(String(msg['bytes'])), (c) => c.charCodeAt(0)) }
+          : msg);
+        return;
+      }
     })();
   };
 

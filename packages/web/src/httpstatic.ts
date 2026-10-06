@@ -73,6 +73,15 @@ function table(): Map<string, Asset> {
     // only cover is the hand-written assertion in the `/bridge.js` case, where `transferChunk.js`
     // is named explicitly. ADD YOUR MODULE THERE TOO when you add it here.
     'transferChunk.js',
+    // `transferBridge.js` joins the same day, WITH the file rather than ahead of it: it reads a
+    // local file into chunks and writes a received one out, and `transferBoot.js` will import it.
+    // Its only runtime import is `./transferChunk.js` above, so it closes the graph at a module
+    // already served and needs no map entry of its own. MEASURED on the BUILT file, since
+    // `import type` erases -- `dist/transferBridge.js` has exactly that one `from` line.
+    //
+    // NOT LOADED BY ANY PAGE YET, like `transferChunk.js` beside it: the page's graph is still
+    // `bridge.js` and `renderer.js`, and Task 8's boot module is what will reach this.
+    'transferBridge.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }
