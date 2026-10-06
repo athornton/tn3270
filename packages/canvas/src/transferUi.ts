@@ -48,11 +48,17 @@ import {
  * six names imported here are exported directly by `transferForm.js` (verified), so that single
  * `@tn3270/frontend` entry satisfies the whole list.
  *
- * TWO DOCUMENTS DO THIS NOW, not one, since this module moved here on 2026-10-06:
- * `packages/gui/transfer.html` for the Electron window, and `packages/web/static/index.html` for
- * the gateway's in-pane overlay. Their maps are NOT copies of each other -- the GUI's names
+ * EXACTLY ONE DOCUMENT DOES THIS TODAY: `packages/gui/transfer.html`, for the Electron window.
+ * This module moved here on 2026-10-06 so that `packages/web` COULD share it, but the gateway's
+ * in-pane overlay is not built yet -- `packages/web/static/index.html` has no `transferUi` entry
+ * and binds `@tn3270/canvas` to `./keypadUi.js` for the keypad. Adding the second consumer is a
+ * later task in the same plan, and it needs ITS OWN map entry under a distinct specifier, because
+ * an import-map key without a trailing `/` matches EXACTLY and that one is already taken.
+ *
+ * The two maps will NOT be copies of each other when that lands. The GUI's names
  * `../canvas/dist/transferUi.js` by relative path, which works only because an Electron window
- * loads from `file://`, while a served page needs the gateway to answer that URL.
+ * loads from `file://` where `..` is a real directory; a served page has no such thing and needs
+ * the gateway to answer that URL itself.
  *
  * `transferForm.js` has ZERO runtime imports of its own (9139 bytes, measured 2026-10-01), so
  * the module graph closes at that single file. That is a FACT WITH A DATE, not an invariant:

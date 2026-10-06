@@ -6,7 +6,20 @@ import {
 } from '@tn3270/core';
 import { startTransfer, type StartTransferOptions, type TransferFiles, type TransferRun } from '@tn3270/frontend';
 import { createTransferController, type TransferDeps } from '../src/transferWindow.js';
-import { createTransferUi, type UiDeps } from '@tn3270/canvas/dist/transferUi.js';
+// THE CANVAS **SOURCE**, BY RELATIVE PATH, AND NOT `@tn3270/canvas/dist/transferUi.js` -- which is
+// what `transferBoot.ts` must use and what this line briefly did when the module moved out of this
+// package on 2026-10-06.
+//
+// MEASURED, and it is the whole reason this file exists: with the `dist` specifier, mutating
+// `createTransferUi` IN SOURCE left this suite at 12 passed while `canvas/test/transferUi.test.ts`
+// went 15 failed / 8 passed. A seam oracle that only reads built output is one forgotten
+// `npm run build` away from certifying a UI half that no longer exists in that form -- which is
+// precisely the jointly-wrong-and-green failure documented below, reintroduced by its own fix.
+//
+// A BROWSER needs the `dist` path because it has no resolver; a TEST does not, and vitest resolves
+// the `.js` specifier to the `.ts` source. See [[tsc-orphans-outlive-their-sources]]: `tsc --build`
+// leaves outputs for deleted sources behind, so "it passed" can mean "it passed against yesterday".
+import { createTransferUi, type UiDeps } from '../../canvas/src/transferUi.js';
 
 /**
  * THE TWO HALVES OF THE TRANSFER WINDOW, COMPOSED ACROSS THE IPC SEAM THAT SEPARATES THEM.

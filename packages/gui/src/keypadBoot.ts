@@ -10,7 +10,8 @@ import { createKeypadUi } from '@tn3270/canvas';
  * only adapts primitives.
  *
  * THAT SPLIT IS THE LESSON FROM `transferBoot.ts`, which took the other side of the same choice
- * and is 473 untestable lines as a result -- and which shipped this project's one BLANK WINDOW
+ * and runs to several hundred untestable lines as a result (an exact count stood here until
+ * 2026-10-06, and rotted the next time that file gained a comment) -- and which shipped this project's one BLANK WINDOW
  * bug, a TDZ read on an uninitialised `const`. The recorded finding from that is exact:
  * **optional chaining does not guard a TDZ read** (`ui?.x` still throws), so there is no clever
  * guard in this file -- just two hard failures with messages, and a `const` declared after

@@ -106,8 +106,20 @@ describe('the keypad window s browser graph', () => {
     // `keypadPreload.cjs` is loaded by Electron from an absolute path in main, not imported by
     // the page. If it ever appeared in the page's graph that would mean someone had imported it,
     // which cannot work: it calls `contextBridge`, which exists only in a preload context.
-    const graph = importsOf(join(distDir, 'keypadBoot.js'))
-      .concat(importsOf(join(distDir, 'keypadUi.js')));
+    //
+    // THIS READ `gui/dist/keypadUi.js` UNTIL 2026-10-06 AND PASSED ONLY ON A STALE ORPHAN.
+    // `keypadUi.ts` moved to `packages/canvas` in the keypad work, and `tsc --build` NEVER PRUNES
+    // outputs for deleted sources -- so `gui/dist/keypadUi.js` sat there, dated the day before,
+    // with no source behind it, and this walker read it happily. Delete that file and the case
+    // failed `ENOENT`; in a fresh clone plus fresh build the whole repo reported 2323/1-failed
+    // rather than green. Measured both ways. The orphan was the only thing holding it up.
+    //
+    // The fix is to walk what this package actually builds. `keypadUi.js` belongs to `canvas` now
+    // and its graph is walked there, by `canvas/test/keypadUiModule.test.ts` -- which asserts
+    // EXACT equality with `['@tn3270/frontend']` and so would catch a preload import in it far
+    // more sharply than this `some()` ever did. Three tests, three packages, one graph, as the
+    // case above says; this one owns the `gui/dist` side and nothing more.
+    const graph = importsOf(join(distDir, 'keypadBoot.js'));
     expect(graph.some((s) => s.includes('keypadPreload'))).toBe(false);
   });
 });
