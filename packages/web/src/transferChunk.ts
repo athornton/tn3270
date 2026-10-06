@@ -30,7 +30,25 @@ export const CHUNK_BYTES = 4096;
 /** Decision 1: 10 MB, and the number is exact so the refusal message can quote it. */
 export const MAX_TRANSFER_BYTES = 10 * 1024 * 1024;
 
-/** Split a buffer into wire-sized chunks. An empty source yields no chunks. */
+/**
+ * Split a buffer into wire-sized chunks. An empty source yields no chunks.
+ *
+ * ## THESE ARE VIEWS, NOT COPIES, AND THAT IS DELIBERATE
+ *
+ * `subarray` aliases the caller's buffer. The mirror-image decision is recorded at
+ * `core/src/ft/dft.ts:267`, which uses `Uint8Array.from(data)` to COPY *because* its source is a
+ * view into the inbound record's buffer that the next read overwrites in place -- aliasing there
+ * would corrupt every chunk but the last.
+ *
+ * THE HAZARD DOES NOT APPLY HERE, and the difference is the source's lifetime rather than a
+ * preference. The intended caller holds a `File.arrayBuffer()` result: freshly allocated, not
+ * pooled, with no second writer, and each chunk is base64-encoded synchronously at send time. So
+ * there is no window in which the backing bytes could change, and copying would double the peak
+ * memory of the one thing the 10 MB cap exists to bound.
+ *
+ * SO THE RULE FOR CALLERS IS: do not pass a buffer you are about to reuse. That is also true of
+ * `ChunkReassembler.accept`, which retains what it is handed -- see its own note.
+ */
 export function chunkBytes(src: Uint8Array): Uint8Array[] {
   const out: Uint8Array[] = [];
   for (let at = 0; at < src.length; at += CHUNK_BYTES) {
@@ -39,45 +57,92 @@ export function chunkBytes(src: Uint8Array): Uint8Array[] {
   return out;
 }
 
-export interface AcceptResult {
-  readonly ok: boolean;
-  /** True once every declared byte has arrived. */
-  readonly done?: boolean;
-  readonly error?: string;
-}
+/**
+ * A DISCRIMINATED UNION, so `error` narrows to a `string` on the failure arm.
+ *
+ * `{ ok: boolean; error?: string }` was the first shape and it does not narrow: inside
+ * `if (!res.ok)` the message a caller just branched on is still `string | undefined`, forcing a
+ * non-null assertion at every use. `handshake.ts` and `frontend`'s `transfer.ts` both use unions
+ * for exactly this reason, so this now matches them.
+ */
+export type AcceptResult =
+  | { readonly ok: true; readonly done: boolean }
+  | { readonly ok: false; readonly error: string };
 
 /**
  * Reassembles chunks against a total declared up front.
  *
- * STRICT SEQUENCING, AND IT REFUSES RATHER THAN REPAIRS. A gap, a duplicate or an overrun
- * abandons the transfer with a message the operator sees. It does NOT close the socket: a
- * malformed sequence is an operator-visible refusal, not a protocol violation, and closing
- * would take the whole 3270 session with it.
+ * STRICT SEQUENCING, AND IT REFUSES RATHER THAN REPAIRS. A gap, a duplicate, an overrun or a
+ * chunk after completion is refused with a message the operator sees. It does NOT close the
+ * socket: a malformed sequence is an operator-visible refusal, not a protocol violation, and
+ * closing would take the whole 3270 session with it.
+ *
+ * A REFUSAL IS FINAL FOR THIS OBJECT. An earlier version of this comment said a bad chunk
+ * "abandons the transfer" while the code abandoned nothing -- the reject paths changed no state,
+ * so feeding the right chunk next still completed the transfer. The caller was expected to throw
+ * the object away, which is a reasonable contract and was simply not the one written down. Now
+ * `failed` enforces it, because a half-rejected reassembler that still completes is a corrupt
+ * file delivered as a success.
+ *
+ * IT RETAINS THE BUFFERS IT IS HANDED, exactly as `chunkBytes` returns views of its source: the
+ * bytes passed to `accept` are not copied and are read again by `bytes()`. Today's caller decodes
+ * base64 into a fresh buffer per chunk, so nothing can overwrite them. A caller that instead
+ * passed a subarray of a reused read accumulator would corrupt every chunk but the last, which
+ * is precisely the failure `dft.ts:267` copies to avoid.
  */
 export class ChunkReassembler {
   private readonly parts: Uint8Array[] = [];
   private received = 0;
   private next = 0;
+  private failed = false;
 
   constructor(private readonly declared: number) {
+    // THE INTEGER CHECK COMES FIRST, and the order is the whole point rather than tidiness.
+    // With the cap tested first, `Infinity` and `1e9 + 0.5` both answered "exceeds the
+    // 10485760-byte limit" -- telling an operator to try a smaller file when the real fault is a
+    // malformed declared total, i.e. a client bug. Decision 2 makes this text operator-facing,
+    // so it has to name the actual fault. Measured both cases 2026-10-06.
+    if (!Number.isInteger(declared) || declared < 0) {
+      throw new Error(`declared total must be a non-negative integer, got ${declared}`);
+    }
     if (declared > MAX_TRANSFER_BYTES) {
       // DECISION 2: refused ON PURPOSE and the operator is told so. Both numbers appear, and
-      // the limit comes second so a truncated line still shows what was attempted.
+      // the attempted size comes FIRST so a truncated line still shows what was attempted.
       throw new Error(
         `transfer of ${declared} bytes exceeds the ${MAX_TRANSFER_BYTES}-byte limit; `
         + 'the gateway stages the whole file in memory, so larger transfers are refused',
       );
     }
-    if (declared < 0 || !Number.isInteger(declared)) {
-      throw new Error(`declared total must be a non-negative integer, got ${declared}`);
-    }
+  }
+
+  /**
+   * Is every declared byte in?
+   *
+   * TRUE AT CONSTRUCTION FOR A ZERO-BYTE TRANSFER, which is the trap worth naming: `chunkBytes`
+   * emits no chunks for an empty file, so `accept` is never called and a caller waiting for
+   * `done` from `accept` would wait forever. Ask this, not the last `accept`.
+   */
+  complete(): boolean {
+    return !this.failed && this.received === this.declared;
   }
 
   accept(seq: number, bytes: Uint8Array): AcceptResult {
+    if (this.failed) {
+      return { ok: false, error: 'this transfer was already abandoned by an earlier bad chunk' };
+    }
+    if (this.received === this.declared) {
+      // Refused rather than waved through: `chunkBytes` never emits an empty chunk, so an honest
+      // client cannot reach this, and silently accepting more after the declared total is in
+      // would mean the sender and this object disagree about what file was transferred.
+      this.failed = true;
+      return { ok: false, error: `chunk ${seq} arrived after all ${this.declared} bytes` };
+    }
     if (seq !== this.next) {
+      this.failed = true;
       return { ok: false, error: `chunk ${seq} arrived out of sequence, expected ${this.next}` };
     }
     if (this.received + bytes.length > this.declared) {
+      this.failed = true;
       return {
         ok: false,
         error: `chunk ${seq} exceeds declared total: `
@@ -90,9 +155,9 @@ export class ChunkReassembler {
     return { ok: true, done: this.received === this.declared };
   }
 
-  /** The joined bytes, or undefined while incomplete. */
+  /** The joined bytes, or undefined while incomplete or after a refusal. */
   bytes(): Uint8Array | undefined {
-    if (this.received !== this.declared) return undefined;
+    if (!this.complete()) return undefined;
     const out = new Uint8Array(this.declared);
     let at = 0;
     for (const p of this.parts) { out.set(p, at); at += p.length; }

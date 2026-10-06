@@ -433,7 +433,31 @@ export class ChunkReassembler {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run packages/web/test/transferChunk.test.ts`
-Expected: PASS, 9 tests. (An earlier draft of this plan said 8 here and in Step 5. The test block
+Expected: PASS, 9 tests.
+
+> **AS BUILT, 2026-10-06 — this task's source above is SUPERSEDED by review.** Code review of the
+> landed commit found three defects in the literal code this plan supplied, all since fixed; read
+> `packages/web/src/transferChunk.ts` rather than the blocks above if the two disagree.
+>
+> 1. **The constructor's guards were in the wrong order.** With the 10 MB cap tested before the
+>    integer check, `Infinity` and `1e9 + 0.5` both answered *"exceeds the 10485760-byte limit"* —
+>    telling an operator to try a smaller file when the fault is a malformed declared total. The
+>    integer check now runs first.
+> 2. **`AcceptResult` did not narrow.** `{ ok: boolean; error?: string }` leaves `error` as
+>    `string | undefined` inside `if (!res.ok)`, forcing a non-null assertion at every call site.
+>    It is now a discriminated union, matching `handshake.ts` and `frontend`'s `transfer.ts`.
+> 3. **"Abandons the transfer" was false.** The reject paths changed no state, so a gap followed by
+>    the right chunk still completed — delivering a file with a hole in it as a success. A `failed`
+>    flag now enforces what the comment always claimed, and a chunk arriving after the declared
+>    total is refused rather than waved through.
+>
+> Also added: `complete()`, because a zero-byte transfer is complete at construction and `accept`
+> never runs for it, so `done` is not the completion signal; an aliasing note on `chunkBytes` and
+> `accept` (both retain, do not copy — safe for today's callers, and `dft.ts:267` documents the
+> mirror-image decision); and tests for the malformed-total guard, the at-the-cap boundary, the
+> abandonment, and the post-completion refusal. The headroom case now imports the real
+> `MAX_MESSAGE_BYTES` and asks `Buffer` to encode, rather than asserting on a bare `6000` and
+> re-deriving the implementation's own formula. **15 tests, repo-wide 2342 in 101.** (An earlier draft of this plan said 8 here and in Step 5. The test block
 above has always held nine `it()` cases; the SUMMARY was wrong, not the tests. Trust the file.)
 
 - [ ] **Step 5: Run the full gate**
