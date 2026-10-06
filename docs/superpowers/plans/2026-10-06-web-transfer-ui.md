@@ -756,6 +756,21 @@ Co-Authored-By: SLAC AI"
 
 ## Task 4: Serve the browser modules, and give the overlay its specifier
 
+> **SCOPE CORRECTION, 2026-10-06, BEFORE DISPATCH — this task as first written could not pass.**
+> The module list below names `transferOverlay.js`, `transferBoot.js` and `transferBridge.js`,
+> which **Tasks 5, 6 and 8 create**. They do not exist yet, and `httpstatic.test.ts` has a case
+> asserting that *every file the table claims to serve EXISTS after a build* — precisely so an
+> unbuilt module cannot 404 into a blank canvas. Claiming them now fails that test for a real
+> reason.
+>
+> **So this task serves only what exists: `transferUi.js` (moved in Task 1) and
+> `transferChunk.js` (Task 2).** Each later task adds its own module to the list when it creates
+> it, which is also the better habit — the entry and the file land together.
+>
+> Note too that `httpstatic.test.ts` pins `BROWSER_MODULES.length` as an exact number (5 today).
+> Adding `transferUi.js` makes it 6, and that assertion must be updated in the same change, with
+> its comment's running history extended rather than replaced.
+
 **This is the task most likely to produce a blank page**, so it is isolated and has its own real-browser check. The hazard is trap 3: the import map already binds `@tn3270/canvas` to `keypadUi.js`.
 
 **Files:**
@@ -771,10 +786,8 @@ describe('transfer modules', () => {
   it('serves every browser module the transfer overlay needs', () => {
     // `resolveAsset` is this suite's own entry point — it is what the existing cases use, and
     // it answers for one URL path at a time. There is no map-returning helper.
-    for (const path of [
-      '/transferUi.js', '/transferBoot.js', '/transferOverlay.js',
-      '/transferBridge.js', '/transferChunk.js',
-    ]) {
+    // ONLY THE MODULES THAT EXIST TODAY. Tasks 5, 6 and 8 add their own as they create them.
+    for (const path of ['/transferUi.js', '/transferChunk.js']) {
       expect(resolveAsset(path), path).toBeDefined();
     }
   });
@@ -823,10 +836,14 @@ In `packages/web/src/httpstatic.ts`, extend the module loop (currently line 53):
 ```typescript
   for (const module of [
     'bridge.js', 'bridgecore.js', 'keypadOverlay.js',
-    // The transfer form, 2026-10-06. `transferBridge.js` is imported by `bridge.js` and
-    // `transferBoot.js` by `transferOverlay.js`, so all three must be reachable by URL or the
-    // chain breaks at the first missing link -- the measured failure recorded above.
-    'transferOverlay.js', 'transferBoot.js', 'transferBridge.js', 'transferChunk.js',
+    // `transferChunk.js` joins 2026-10-06: the browser needs `chunkBytes` and the 10 MB cap to
+    // refuse an oversize file BEFORE sending a byte, so this module is loaded by both sides.
+    //
+    // `transferOverlay.js`, `transferBoot.js` and `transferBridge.js` are NOT here yet, and
+    // deliberately: Tasks 5, 6 and 8 create them, and the case below asserting that every claimed
+    // file EXISTS after a build would fail on a module that does not. Each task adds its own entry
+    // when it adds its file.
+    'transferChunk.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }
