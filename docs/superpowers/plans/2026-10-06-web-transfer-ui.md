@@ -1382,6 +1382,33 @@ Co-Authored-By: SLAC AI"
 
 Visibility and lifecycle only, modelled directly on `keypadOverlay.ts`.
 
+> **RE-DERIVED AGAINST THE REAL CODE, 2026-10-07, BEFORE DISPATCH.** Thirteen of the ~17 defects
+> found so far were in this plan's own literal code, so this task was checked against
+> `packages/web/src/keypadOverlay.ts` and `packages/gui/ui.css` rather than trusted. Three
+> corrections, the first of which invalidates every assertion in the draft below:
+>
+> 1. **THE REAL OVERLAY USES `element.hidden`, NOT `element.style.display`.** `keypadOverlay.ts`
+>    sets `deps.element.hidden = true` at construction and assigns `hidden` in `toggle`/`hide`.
+>    The draft's tests assert `style.display === 'none'`/`'block'` throughout, which would have
+>    produced a transfer overlay that works by a different mechanism from the keypad's — and
+>    **`packages/gui/ui.css:153` is `#keypad-overlay[hidden] { display: none; }`**, so visibility
+>    here is driven by the ATTRIBUTE through the stylesheet. Writing `style.display` would bypass
+>    `ui.css` and win over it by specificity, which is how the two surfaces would silently diverge.
+>    **Use `hidden`, and mirror the `#transfer-overlay[hidden]` rule in the same stylesheet.**
+>
+> 2. **`hide()` ASSIGNS rather than toggles, and the real file says why**: `hidden = !hidden` in
+>    `hide` would make a second close RE-SHOW the overlay, which is exactly what a double-click on
+>    a Close button does. Keep that property and keep its comment.
+>
+> 3. **Construction hides the element explicitly**, duplicating the markup's own `hidden`
+>    attribute on purpose — the real file's comment calls the belt-and-braces deliberate, and notes
+>    it also covers a REATTACHING client, which the gateway's rules say must not inherit a previous
+>    session's overlay state. Do the same.
+>
+> The real `OverlayDeps` is `{ element, build }` and `KeypadOverlay` is `{ toggle, hide }`. This
+> task's overlay needs `show`/`hide`/`visible` plus the unsaved-bytes guard, so it is a superset
+> rather than a copy — but every shared mechanism should match.
+
 **Files:**
 - Create: `packages/web/src/transferOverlay.ts`
 - Test: `packages/web/test/transferOverlay.test.ts`
@@ -1414,7 +1441,7 @@ describe('createTransferOverlay', () => {
   it('starts hidden and builds nothing until first shown', () => {
     const { deps, element, build } = fake();
     createTransferOverlay(deps);
-    expect(element.style.display).toBe('none');
+    expect(element.hidden).toBe(true);
     expect(build).not.toHaveBeenCalled();
   });
 
@@ -1429,9 +1456,9 @@ describe('createTransferOverlay', () => {
     const { deps, element } = fake();
     const o = createTransferOverlay(deps);
     o.show();
-    expect(element.style.display).toBe('block');
+    expect(element.hidden).toBe(false);
     o.hide();
-    expect(element.style.display).toBe('none');
+    expect(element.hidden).toBe(true);
   });
 
   it('WARNS before discarding a completed transfer nobody saved', () => {
@@ -1443,7 +1470,7 @@ describe('createTransferOverlay', () => {
     o.show();
     o.hide();
     expect(confirmDiscard).toHaveBeenCalled();
-    expect(element.style.display).toBe('none');
+    expect(element.hidden).toBe(true);
   });
 
   it('stays open when the operator declines to discard', () => {
@@ -1453,7 +1480,7 @@ describe('createTransferOverlay', () => {
     const o = createTransferOverlay(deps);
     o.show();
     o.hide();
-    expect(element.style.display, 'must not close over unsaved bytes').toBe('block');
+    expect(element.hidden, 'must not close over unsaved bytes').toBe(false);
   });
 
   it('does not prompt when there is nothing unsaved', () => {
@@ -1523,12 +1550,12 @@ export function createTransferOverlay(deps: TransferOverlayDeps): TransferOverla
     show() {
       if (!built) { deps.build(); built = true; }
       shown = true;
-      deps.element.style.display = 'block';
+      deps.element.hidden = false;
     },
     hide() {
       if (deps.hasUnsaved() && !deps.confirmDiscard()) return;
       shown = false;
-      deps.element.style.display = 'none';
+      deps.element.hidden = true;
     },
     visible() { return shown; },
   };
