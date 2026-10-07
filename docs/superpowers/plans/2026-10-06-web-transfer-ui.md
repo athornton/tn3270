@@ -1595,6 +1595,47 @@ Co-Authored-By: SLAC AI"
 
 Where the staged bytes meet the **unmodified** `startTransfer`.
 
+> **RE-DERIVED AGAINST THE REAL CODE, 2026-10-07, BEFORE DISPATCH.** Thirteen of the ~17 defects
+> found in Tasks 1-6 were in this plan's own literal source, so this task was checked against
+> `main.ts`, `transferRun.ts` and `transferBridge.ts` rather than trusted. Six corrections:
+>
+> 1. **THE INSERTION POINT IN THE DRAFT BELOW IS DEAD CODE.** It says to add the branches "after
+>    the existing `action` case". Task 3 added `if (msg.kind !== 'action') return;` at
+>    **`main.ts:213`**, so anything after it is unreachable — measured as `TS2367` (no overlap)
+>    plus `TS2339` (no `seq`). **Insert ABOVE that guard**, and Task 3 left a signpost there
+>    saying so: the comment at `:200-212` names Task 7 explicitly as the thing that will give
+>    these kinds a session.
+>
+> 2. **The `transferForm` interception at `:271` STAYS.** Its comment says this task "only has to
+>    keep the kind away from `applyAction`" — the browser opens the form itself. Do not replace it
+>    with real handling; `applyAction` still throws on that kind.
+>
+> 3. **`TransferRun` is `{ ok, error?, cancel? }`** (`transferRun.ts:58-63`) — NOT a discriminated
+>    union, so `run.ok === false` needs no narrowing and `run.cancel` is optional ("absent when the
+>    run never started"). The draft's `run?.cancel?.()` is correct as written.
+>
+> 4. **The real send is `conn.sendBinary(encodeServerMessage({...}))`**, not a `sendServer(...)`
+>    helper — there is no such helper. Per-connection state is plain `let` in the connection
+>    closure beside `id`, `session`, `repaint` and `stopListening` (`main.ts:119-132`), which is
+>    where `staging`/`stagedBytes`/`run` belong.
+>
+> 5. **A SHORT CHUNK STALLS FOREVER AND NOTHING REFUSES IT.** `Buffer.from(s, 'base64')` is
+>    lenient: `'!!!!'` decodes to 0 bytes and `'AQ!ID'` silently drops the junk. `ChunkReassembler`
+>    refuses OVERRUNS only, so a short chunk leaves `complete()` false with no `transferDone` ever
+>    sent — the operator watches a progress line stop. **This task owns that**: either validate the
+>    base64 at decode, or bound the wait. Task 3's review flagged it and deliberately left it here.
+>
+> 6. **`transferBridge.ts` gained `finishEmpty()` in Task 5**, for the case no chunk can announce:
+>    a zero-byte receive sends `transferDone` with no `transferData` at all. The gateway half of
+>    that is this task's — a successful receive that staged nothing must still say so.
+>
+> **AND ONE DESIGN NOTE THE DRAFT GETS RIGHT, WORTH KEEPING EXPLICIT:** the four-method in-memory
+> `TransferFiles` is the whole point of the feature. `read` hands back what the operator sent and
+> `write` captures what the host returned, so **neither touches the gateway's disk**. It stays
+> SYNCHRONOUS because no call happens mid-transfer — a send reads once up front before the host is
+> told anything (`transferRun.ts:102`) and a receive writes once at the end with every byte already
+> in memory (`:335`, `:401`).
+
 **Files:**
 - Modify: `packages/web/src/main.ts`
 - Test: `packages/web/test/integration.test.ts`
