@@ -292,3 +292,142 @@ describe('cancel', () => {
     expect(b.acceptData(0, 4, new Uint8Array([1, 2])).ok).toBe(true);
   });
 });
+
+describe('the save paths that can fail, which had no cover until 2026-10-07', () => {
+  /** A file staged and ready to save, as a completed receive leaves it. */
+  function staged(over: Partial<TransferBridgeDeps> = {}) {
+    const { d, saved } = deps(over);
+    const b = createTransferBridge(d);
+    b.acceptData(0, 3, new Uint8Array([1, 2, 3]));
+    return { b, saved };
+  }
+
+  it('reports a rejecting write as a failure, and still CLOSES the sink', async () => {
+    // Measured before the fix: `close()` was never called, leaking the picker's temp file, and
+    // the rejection escaped a method called from a click handler.
+    const closed = vi.fn(async () => {});
+    const { b } = staged({
+      savePicker: async (): Promise<SaveSink> => ({
+        write: async () => { throw new Error('disk full'); },
+        close: closed,
+      }),
+    });
+    const out = await b.save('x.bin');
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('narrowing');
+    expect(out.error).toMatch(/could not save x\.bin/);
+    expect(out.error).toMatch(/disk full/);
+    expect(closed, 'a failed write must still close the sink').toHaveBeenCalled();
+    // RETRYABLE: the host is out of transfer mode, so these bytes are the only copy.
+    expect(b.hasUnsaved()).toBe(true);
+  });
+
+  it('reports a rejecting close, because that is the call that COMMITS the file', async () => {
+    const { b } = staged({
+      savePicker: async (): Promise<SaveSink> => ({
+        write: async () => {},
+        close: async () => { throw new Error('commit failed'); },
+      }),
+    });
+    const out = await b.save('x.bin');
+    expect(out.ok).toBe(false);
+    expect(b.hasUnsaved()).toBe(true);
+  });
+
+  it('treats an ABORTED dialog as ok, since dismissing the picker is the common case', async () => {
+    // `showSaveFilePicker` rejects with AbortError whenever the operator dismisses it. Before the
+    // fix this was an unhandled rejection in the console; it must be quiet AND keep the bytes.
+    const abort = new Error('user dismissed');
+    abort.name = 'AbortError';
+    const { b } = staged({ savePicker: async () => { throw abort; } });
+    const out = await b.save('x.bin');
+    expect(out.ok, 'an aborted dialog is not a failure to report').toBe(true);
+    expect(b.hasUnsaved(), 'and the file is still there to save').toBe(true);
+  });
+
+  it('reports a throwing fallback, the route every non-Chrome browser takes', async () => {
+    const { b } = staged({
+      saveFallback: () => { throw new Error('no object URL'); },
+    });
+    const out = await b.save('x.bin');
+    expect(out.ok).toBe(false);
+    expect(b.hasUnsaved()).toBe(true);
+  });
+
+  it('is INERT on a concurrent double-save against an ASYNC picker', async () => {
+    // THE RACE THE OLD GUARD MISSED. `complete` was cleared after two awaits, so two clicks
+    // landing together each saw bytes: measured TWO dialogs, two writes, two closes, one file
+    // saved twice. The sequential case was already inert and the fallback is synchronous, so the
+    // only two paths a test drove were the two that could not fail.
+    let opened = 0;
+    const writes: number[] = [];
+    const { b } = staged({
+      savePicker: async (): Promise<SaveSink> => {
+        opened += 1;
+        await new Promise((r) => { setTimeout(r, 5); });
+        return { write: async (by) => { writes.push(by.length); }, close: async () => {} };
+      },
+    });
+    const [a, c] = await Promise.all([b.save('x.bin'), b.save('x.bin')]);
+    expect(opened, 'only one dialog may open').toBe(1);
+    expect(writes).toEqual([3]);
+    expect(a.ok && c.ok).toBe(true);
+    expect(b.hasUnsaved()).toBe(false);
+  });
+
+  it('REFUSES a chunk whose declared total contradicts the transfer, and latches', async () => {
+    // Measured before the fix: `total` rode on every chunk and was read only from the first, so a
+    // 6-byte receive whose chunk 0 said 6 and chunk 1 said 2 saved a TRUNCATED FILE AS A SUCCESS.
+    const { d, saved } = deps();
+    const b = createTransferBridge(d);
+    expect(b.acceptData(0, 6, new Uint8Array([1, 2, 3])).ok).toBe(true);
+    const bad = b.acceptData(1, 2, new Uint8Array([4, 5, 6]));
+    expect(bad.ok).toBe(false);
+    if (bad.ok) throw new Error('narrowing');
+    expect(bad.error).toMatch(/declares total 2, but the transfer declared 6/);
+    expect(b.hasUnsaved(), 'a contradicted transfer must not be saveable').toBe(false);
+    // LATCHED: a sender that contradicts itself has disqualified the whole transfer.
+    expect(b.acceptData(1, 6, new Uint8Array([4, 5, 6])).ok).toBe(false);
+    await b.save('x.bin');
+    expect(saved, 'nothing may reach the disk').toEqual([]);
+  });
+});
+
+describe('a zero-byte receive, which no chunk can announce', () => {
+  it('is saveable through finishEmpty, where before it was SILENCE', () => {
+    // `chunkBytes` emits nothing for an empty source, so the gateway sends `transferDone` with no
+    // `transferData`: acceptData never runs. Measured 2026-10-07 before the fix -- hasUnsaved()
+    // false, save() wrote nothing, and an operator downloading an empty host dataset saw nothing
+    // happen at all.
+    const { d, saved } = deps();
+    const b = createTransferBridge(d);
+    expect(b.hasUnsaved()).toBe(false);
+    b.finishEmpty();
+    expect(b.hasUnsaved(), 'an empty file is a real, saveable result').toBe(true);
+    return b.save('empty.bin').then(() => {
+      expect(saved).toEqual([{ name: 'empty.bin', bytes: new Uint8Array(0) }]);
+    });
+  });
+
+  it('REFUSES to invent an empty file over a receive that staged real bytes', () => {
+    // The contradiction guard: a gateway claiming "done, and empty" after sending chunks is
+    // wrong about something, and inventing a 0-byte file would discard what did arrive.
+    const { d, saved } = deps();
+    const b = createTransferBridge(d);
+    b.acceptData(0, 3, new Uint8Array([1, 2, 3]));   // completes, stages 3 bytes
+    b.finishEmpty();
+    expect(b.hasUnsaved()).toBe(true);
+    return b.save('x.bin').then(() => {
+      // THE REAL BYTES, not the empty file finishEmpty would have substituted.
+      expect(saved).toEqual([{ name: 'x.bin', bytes: new Uint8Array([1, 2, 3]) }]);
+    });
+  });
+
+  it('does not clobber a PARTIAL receive either', () => {
+    const { d } = deps();
+    const b = createTransferBridge(d);
+    b.acceptData(0, 9, new Uint8Array([1, 2, 3]));   // incomplete: 3 of 9
+    b.finishEmpty();
+    expect(b.hasUnsaved(), 'a partial transfer is not an empty one').toBe(false);
+  });
+});

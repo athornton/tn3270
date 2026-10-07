@@ -56,8 +56,23 @@ export interface TransferBridgeDeps {
    * not have. See the spec's *The save dialog, and where it is not available*. So `undefined` is
    * the COMMON case for this gateway, not an edge one, which is why `saveFallback` is required
    * and this is not.
+   *
+   * `| undefined` EXPLICITLY, AND IT IS LOAD-BEARING UNDER THIS REPO'S `tsconfig`.
+   * `tsconfig.base.json:8` sets `exactOptionalPropertyTypes: true`, under which a bare `?:`
+   * accepts the property being ABSENT but REJECTS it being present and `undefined`. That is
+   * exactly the shape this dep is designed to be handed, because the whole point is that a caller
+   * COMPUTES the feature detection and injects the result.
+   *
+   * MEASURED 2026-10-07: without the annotation, the documented pattern --
+   * `savePicker: 'showSaveFilePicker' in globalThis ? fn : undefined` -- fails to compile with
+   * `TS2379 ... Consider adding 'undefined' to the types of the target's properties` from a file
+   * in `packages/web/src`. Task 8's `transferBoot.ts` is such a file, so it would have been
+   * pushed into a cast at the one place this module's header says must stay cast-free.
+   *
+   * `toggleKeypad?: () => void` in `bridgecore.ts` needs no annotation because `bridge.ts` always
+   * passes a real function; the difference is that THIS dep is meant to receive `undefined`.
    */
-  readonly savePicker?: (suggestedName: string) => Promise<SaveSink>;
+  readonly savePicker?: ((suggestedName: string) => Promise<SaveSink>) | undefined;
   /** A plain `Blob` download, which works everywhere. REQUIRED, for the reason just above. */
   readonly saveFallback: (name: string, bytes: Uint8Array) => void;
 }
@@ -70,7 +85,11 @@ export interface TransferBridgeDeps {
  * reader needs a non-null assertion to print it.
  *
  * `UiDeps.submit` in `transferUi.ts:182` declares the loose shape, and this still satisfies it --
- * a missing optional property is assignable, so `sendFile` can be handed straight to the form.
+ * a missing optional property is assignable. NOT that it can be handed over DIRECTLY, though:
+ * `sendFile` takes three parameters and `UiDeps.submit` takes one, so a direct assignment fails
+ * with `TS2322: Target signature provides too few arguments`. The form gets a wrapping arrow, as
+ * `gui/src/transferBoot.ts:250` already does for the Electron side. Only the RESULT shape is
+ * shared; the call shape is the boot file's to adapt.
  */
 export type SendResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
@@ -96,8 +115,36 @@ export type ReceiveResult = { readonly ok: true } | { readonly ok: false; readon
 export interface TransferBridge {
   sendFile(name: string, bytes: Uint8Array, keywords: readonly string[]): Promise<SendResult>;
   acceptData(seq: number, total: number, bytes: Uint8Array): ReceiveResult;
-  save(name: string): Promise<void>;
+  /**
+   * Write the received file out. Reports its outcome rather than throwing.
+   *
+   * `Promise<SendResult>` AND NOT `Promise<void>`: four things can fail here -- the picker
+   * rejecting (including the ordinary `AbortError` when the operator dismisses the dialog), the
+   * write rejecting, the close rejecting, and the fallback throwing -- and with `void` a caller
+   * could learn none of them. `SendResult` and `ReceiveResult` are both unions for exactly this
+   * reason; this method was the one surface that could not tell its caller it had failed.
+   *
+   * A FAILURE LEAVES THE BYTES RETRYABLE: `hasUnsaved()` stays true and Save works again, because
+   * the host is out of transfer mode and there is nothing to re-request.
+   */
+  save(name: string): Promise<SendResult>;
   hasUnsaved(): boolean;
+  /**
+   * Declare a receive finished, for the one case no chunk can announce: a ZERO-BYTE FILE.
+   *
+   * `ReceiveResult`'s docstring above names this trap and then -- until 2026-10-07 -- left it
+   * unhandled. `chunkBytes` emits no chunks for an empty source, so the gateway sends
+   * `transferDone` with no `transferData` at all: `acceptData` is never called, nothing is
+   * staged, `hasUnsaved()` is false and `save()` writes nothing. An operator downloading an empty
+   * host dataset got SILENCE. Measured 2026-10-07, along with the other door being shut too --
+   * a gateway that helpfully sent one empty chunk is refused by `ChunkReassembler` with
+   * `chunk 0 arrived after all 0 bytes`, so there was no path at all.
+   *
+   * The caller (Task 8's boot file, on `transferDone`) calls this when a successful receive
+   * staged nothing. A transfer that DID stage bytes is untouched, so this cannot mask a
+   * half-finished one.
+   */
+  finishEmpty(): void;
   cancel(): void;
 }
 
@@ -115,12 +162,19 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
    */
   let inbound: ChunkReassembler | undefined;
   let complete: Uint8Array | undefined;
+  /**
+   * The total the FIRST inbound chunk declared, kept so later chunks can be checked against it.
+   *
+   * `ChunkReassembler` holds its own copy privately and has no getter, so this is not a second
+   * source of truth to drift -- it is the one value this module needs and cannot read back.
+   */
+  let declared = 0;
 
   /**
    * base64 one chunk, THE ONLY CORRECT WAY TO DO IT IN A BROWSER.
    *
    * NO `Buffer`: this module is served to the browser by `httpstatic.ts`, where `Buffer` does not
-   * exist. The server decodes with `Buffer.from(s, 'base64')` in `protocol.ts:298`, which is the
+   * exist. The server decodes with `Buffer.from(s, 'base64')` in `protocol.ts:303`, which is the
    * mirror image of this and is correct THERE.
    *
    * AND NOT `btoa(bytes)` OR `btoa(String(bytes))` either, which is the trap worth naming because
@@ -183,9 +237,30 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
         // forwarded rather than replaced.
         try {
           inbound = new ChunkReassembler(total);
+          declared = total;
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
+      } else if (total !== declared) {
+        // THE DECLARED TOTAL MUST NOT MOVE MID-TRANSFER, and without this check it silently did.
+        // `total` rides on EVERY `transferData` and was read only from the first, so a later
+        // chunk could claim anything and be ignored.
+        //
+        // MEASURED 2026-10-07, and the failure was not a stall: a 6-byte receive whose first
+        // chunk declared `total: 2` COMPLETED at two bytes, `hasUnsaved()` went true, and `save()`
+        // wrote a TRUNCATED FILE AS A SUCCESS. The remaining chunks then failed out of sequence,
+        // after the damage was already saveable. That is the one outcome `transferRun.ts` refuses
+        // to produce on the host side -- a "complete" that is not the file -- arriving by a
+        // different door.
+        //
+        // Refused rather than repaired, matching `ChunkReassembler`'s own posture, and the
+        // reassembler is left LATCHED rather than reset: a sender that contradicts itself has
+        // disqualified the whole transfer, not just this chunk.
+        inbound.accept(-1, new Uint8Array(0));
+        return {
+          ok: false,
+          error: `chunk ${seq} declares total ${total}, but the transfer declared ${declared}`,
+        };
       }
       const out = inbound.accept(seq, bytes);
       // NOT CLEARED ON FAILURE -- see `inbound`'s declaration. The latch is in the object.
@@ -197,25 +272,61 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
     },
 
     async save(name) {
+      // READ AND CLEARED BEFORE THE FIRST `await`, which is what makes a double-save inert.
+      // MEASURED 2026-10-07: with the clear at the END, two concurrent calls against an ASYNC
+      // picker produced TWO dialogs, two writes and two closes -- one file saved twice. The
+      // sequential case was already inert and the fallback route is synchronous, so the existing
+      // guard held for the only two paths a test drove. Clearing up front closes the window; the
+      // restore below is what keeps a FAILED save retryable.
       const bytes = complete;
       // NOTHING TO SAVE IS NOT AN ERROR. The overlay enables its Save button off `hasUnsaved()`,
       // but this runs from a click handler where a throw is an unhandled rejection, and a second
       // click that lost the race to the button's own disabling must be inert.
-      if (bytes === undefined) return;
-      if (deps.savePicker !== undefined) {
-        const sink = await deps.savePicker(name);
-        await sink.write(bytes);
-        // `close()` IS WHAT COMMITS IT. MDN: "No changes are written to the actual file on disk
-        // until the stream has been closed" -- the writes land in a temp file, which is what
-        // makes this sink disk-backed rather than another buffer in memory.
-        await sink.close();
-      } else {
-        deps.saveFallback(name, bytes);
-      }
+      if (bytes === undefined) return { ok: true };
       complete = undefined;
+      try {
+        if (deps.savePicker !== undefined) {
+          const sink = await deps.savePicker(name);
+          try {
+            await sink.write(bytes);
+          } finally {
+            // `close()` IS WHAT COMMITS IT. MDN: "No changes are written to the actual file on
+            // disk until the stream has been closed" -- the writes land in a temp file, which is
+            // what makes this sink disk-backed rather than another buffer in memory.
+            //
+            // IN A `finally` SO A FAILED WRITE STILL CLOSES. Measured 2026-10-07: without it a
+            // rejecting `write` left `close()` uncalled and leaked the picker's temp file.
+            await sink.close();
+          }
+        } else {
+          deps.saveFallback(name, bytes);
+        }
+      } catch (err) {
+        // RESTORED, so the operator can press Save again. The bytes are still the only copy --
+        // the host is out of transfer mode and there is nothing to re-request.
+        complete = bytes;
+        // AN ABORTED DIALOG IS NOT A FAILURE, and it is the COMMON path rather than an edge case:
+        // `showSaveFilePicker` rejects with `AbortError` whenever the operator dismisses it. Until
+        // this `catch` existed that surfaced as an unhandled rejection in the console. Reported as
+        // `ok` with the bytes kept, so the form says nothing alarming and Save still works.
+        if (err instanceof Error && err.name === 'AbortError') return { ok: true };
+        return {
+          ok: false,
+          error: `could not save ${name}: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      return { ok: true };
     },
 
     hasUnsaved() { return complete !== undefined; },
+
+    finishEmpty() {
+      // ONLY WHEN NOTHING IS IN FLIGHT. A staged partial receive means the gateway said "done"
+      // over a transfer that did deliver chunks, which is a contradiction this must not paper
+      // over by inventing an empty file -- `acceptData`'s own checks own that case.
+      if (inbound !== undefined || complete !== undefined) return;
+      complete = new Uint8Array(0);
+    },
 
     cancel() {
       // THE ONLY RESET PATH, and it has to clear `inbound` as well as `complete`: without that a
