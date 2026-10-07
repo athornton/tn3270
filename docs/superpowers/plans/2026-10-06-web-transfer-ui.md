@@ -2365,7 +2365,23 @@ Note how it launches, how it asserts actions in order, and how it reports counts
 
 - [ ] **Step 2: Add the transfer cases**
 
-Extend the harness to, in order: open the overlay (the `Xfer` keypad button or the `transferForm` action), assert the overlay became visible, assert **the canvas did not move** (its bounding rect must be unchanged from before the overlay opened — this is the 15px-displacement regression), fill the host-file field, and assert the `Save…` button starts disabled.
+Extend the harness to cover **the five surviving mutants named at the top of this task**, which is
+what this task is for. In order:
+
+1. **Open the overlay** (the `transferForm` action, as the `Xfer` keypad button produces) and assert
+   it became visible — this kills the `showTransfer: () => {}` mutant.
+2. **Drive a `transferProgress` / `transferData` / `transferDone` sequence** and assert the form
+   shows each — this kills the `onTransfer` drops-everything mutant. (The gateway cannot reach
+   3270 mode under `--replay`, so a real transfer is not available; inject the frames or drive the
+   messages directly, whichever this harness can do honestly.)
+3. **Press Start with no file chosen** and assert the local refusal appears and nothing is sent —
+   this kills the nothing-staged-guard mutant, which is a data-loss guard.
+4. **Assert the Start button is inside the viewport and hit-testable** — this kills the
+   `position: static` mutant. See Step 4; do NOT use a canvas-displacement check for this.
+5. **Assert `Save…` starts disabled**, since a receive enables it only on completion.
+
+Follow the file's existing assertion style and reporting. Keep a canvas-rect invariant if you like,
+but it is NOT cover for anything in this list.
 
 Follow the file's existing assertion style. Keep the canvas-position check as a cheap invariant, but **it is NOT cover for `position: fixed`** — see the correction below:
 
@@ -2406,13 +2422,17 @@ Temporarily give `#transfer-overlay` `position: static` in the served `ui.css` a
 git add packages/web/scripts/browser-clicks.mjs
 git commit -m "test(web): real-browser cover for the transfer overlay
 
-This harness found four defects the unit suite could not see, including
-ui.css styling body and displacing the canvas by 15px -- which would have put
-every keypad and selection click off target, silently. An overlay is exactly
-the change that regresses that, so the canvas-position check is explicit.
+Five mutants survived the entire gate and all three harnesses after Task 8 --
+including the Xfer button wired to a no-op and onTransfer dropping every
+message. What existed was a LIVENESS check on bridge.js, not a functional
+check on the form, so the whole browser half could have been reverted to
+no-ops undetected. These cases are those five survivors by name.
 
-Mutation-proved: with position: static on the overlay the displacement
-assertion fails, which is what makes it cover rather than decoration.
+Mutation-proved each rather than assumed, and NOT with a canvas-displacement
+check: measured 2026-10-07, a `position: static` overlay leaves the canvas
+rect byte-identical, because this overlay follows the canvas in document
+order and a static one lands below it. What static actually breaks is the
+FORM -- below the fold, Start unhittable -- so that is what is asserted.
 
 Generated with AI
 
