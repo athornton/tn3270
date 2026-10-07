@@ -292,9 +292,21 @@ export function decodeClientMessage(text: string): ClientMessage {
       throw new Error('transferChunk bytes must be a base64 string');
     }
     // `Buffer.from(s, 'base64')` IS LENIENT and does not throw on non-base64 input -- it skips the
-    // characters it cannot use -- so there is no validity check to make here, only a type one. The
-    // length disagreement that a mangled chunk produces is caught by `ChunkReassembler`, which
-    // compares the running total against the declared one and refuses rather than repairs.
+    // characters it cannot use -- so there is no validity check to make here, only a type one.
+    //
+    // THE SENTENCE THAT FOLLOWED THIS WAS FALSE AND IS CORRECTED, 2026-10-07. It said the length
+    // disagreement a mangled chunk produces "is caught by `ChunkReassembler`, which compares the
+    // running total against the declared one". That class refuses OVERRUNS ONLY (`accept`'s
+    // `received + bytes.length > declared` test): a SHORT chunk leaves it merely INCOMPLETE and
+    // refuses nothing, which is correct there, because a short chunk and a chunk with more to
+    // follow are indistinguishable until the sender says it has finished. MEASURED 2026-10-07 on
+    // node 26: `'!!!!'` decodes to zero bytes, `'AQ!ID'` silently yields the same three bytes as
+    // `'AQID'`, and deleting any one character from the 8-character encoding of 6 bytes yields 5.
+    //
+    // THE SHORTFALL IS CAUGHT AT `transferStart`, in `transferGateway.ts`, which is the earliest
+    // point at which the sender has said it finished -- and that file records at length why the
+    // check is there and not here. Until it existed the transfer went silent with no
+    // `transferDone` ever sent, which is the stall Task 3's review of this file left behind.
     //
     // A FRESH BUFFER PER CHUNK, which is what makes `ChunkReassembler.accept` safe to retain it:
     // that class's docstring warns that a caller passing a subarray of a reused accumulator would

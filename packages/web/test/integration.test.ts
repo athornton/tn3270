@@ -717,3 +717,404 @@ describe('the gateway end to end', () => {
     }
   });
 });
+
+describe('socket-carried file transfer', () => {
+  /*
+    WHAT THIS SUITE PROVES AND WHAT IT CANNOT, which decides every case in it.
+
+    IT PROVES THE WIRING, over a real socket with a real `startTransfer`: that `main.ts` reaches
+    `transferGateway.ts` at all, that it does so ABOVE the `kind !== 'action'` guard rather than
+    in the dead code past it, that a refusal answers on this socket and LEAVES IT OPEN, and that
+    the 3270 session survives each one.
+
+    IT CANNOT PROVE ANY SUCCESSFUL TRANSFER. Every gateway here runs under `--replay`, and
+    `Session.replay` builds its own local `TelnetLayer` rather than assigning `this.telnet`
+    (`core/src/session.ts:1626-1668`) -- so `is3270Mode()` is FALSE on a replayed session, MEASURED
+    2026-10-07 against all four fixture traces. `startTransfer`'s first guard is exactly that
+    (`transferRun.ts:90`), so a `transferStart` that gets all the way through can only ever come
+    back `not in 3270 mode`. THAT IS WHY `transferGateway.test.ts` EXISTS and injects the driver:
+    the receive path, the progress relay, the chunk-out and the zero-byte receive are unreachable
+    from here, and would have been unmutatable had they been written into this file's closure.
+
+    The one thing that refusal IS good for is the case it names below: `startTransfer`'s early
+    refusal never calls `onDone`, so a gateway that failed to report it at the call site would go
+    silent -- and here that is the ONLY arm, which makes this the sharpest place to pin it.
+  */
+
+  /** Open, handshake, and settle past the unprompted session/atlas/frame. */
+  async function connected(extra: string[] = []): Promise<{
+    ws: WebSocket; r: ReturnType<typeof reader>;
+  }> {
+    const { url } = await start(extra);
+    const ws = new WebSocket(url);
+    await new Promise((res) => { ws.addEventListener('open', res, { once: true }); });
+    const r = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    await r.settle();
+    return { ws, r };
+  }
+
+  const SEND = ['Direction=send', 'LocalFile=local.txt', 'HostFile=HOST.FILE'];
+
+  /** The gateway must still serve actions -- the property every case here shares. */
+  async function stillAlive(ws: WebSocket, r: ReturnType<typeof reader>, what: string): Promise<void> {
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await r.next(`a tab after ${what}`))['kind'],
+      `the gateway must still serve actions after ${what}`).toBe('frame');
+  }
+
+  it('refuses a declared total over 10 MB WITHOUT closing the socket', async () => {
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({
+      kind: 'transferChunk', seq: 0, total: 10 * 1024 * 1024 + 1, bytes: 'AQ==',
+    }));
+    const msg = await r.next('the oversize transferChunk');
+    expect(msg['kind']).toBe('transferDone');
+    expect(msg['ok']).toBe(false);
+    expect(String(msg['error'])).toMatch(/exceeds the 10485760-byte limit/);
+    // THE PROPERTY THAT MATTERS, and it is why `ChunkReassembler`'s constructor throw is caught
+    // rather than allowed to escape: a throw out of this socket 'data' handler ends the PROCESS
+    // (`wsserver.ts:30-34`), and even a deliberate close would take this operator's whole 3270
+    // session with it over a client bug.
+    expect(ws.readyState, 'a refusal must not close the socket').toBe(WebSocket.OPEN);
+    await r.settle();
+    await stillAlive(ws, r, 'an oversize chunk');
+    ws.close();
+  });
+
+  it('does not send an EMPTY file after refusing an over-cap chunk', async () => {
+    /*
+      A DEFECT IN THIS TASK'S FIRST IMPLEMENTATION, found by self-review and measured 2026-10-07
+      against the built `dist`. `ChunkReassembler`'s refusals from `accept` leave a LATCHED object
+      behind, which is how the gateway tells a refused upload from the legal zero-byte one; its
+      CONSTRUCTOR's throw assigns nothing, so `staging` stayed `undefined` and the following
+      `transferStart` was treated as an empty file -- `startTransfer` was called with a zero-length
+      source.
+
+      WHAT THAT COSTS AN OPERATOR, which is why it is worth a socket-level case of its own: they
+      ask to send a file that is too large, are correctly refused, and the gateway then uploads an
+      EMPTY FILE to the host dataset they named -- under `Exist=replace`, destroying it -- and
+      reports success. The `not in 3270 mode` this suite's gateway would answer instead is the
+      tell: it means the start reached `startTransfer` at all.
+    */
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({
+      kind: 'transferChunk', seq: 0, total: 10 * 1024 * 1024 + 1, bytes: 'AQ==',
+    }));
+    expect(String((await r.next('the oversize chunk'))['error']))
+      .toMatch(/exceeds the 10485760-byte limit/);
+    await r.settle();
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await r.next('the transferStart after an over-cap refusal');
+    expect(String(msg['error']), 'a refused upload must not become an empty one')
+      .toMatch(/was refused/);
+    // AND NOT `not in 3270 mode`, which is what reaching `startTransfer` looks like here.
+    expect(String(msg['error'])).not.toMatch(/3270/);
+    ws.close();
+  });
+
+  it('refuses an out-of-sequence chunk, and the session survives it', async () => {
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 4, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 9, total: 4, bytes: 'AwQ=' }));
+    const msg = await r.next('the out-of-sequence transferChunk');
+    expect(msg['ok']).toBe(false);
+    expect(String(msg['error'])).toMatch(/out of sequence/);
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    await r.settle();
+    await stillAlive(ws, r, 'an out-of-sequence chunk');
+    ws.close();
+  });
+
+  it('answers a GOOD chunk with silence, which is what the browser half expects', async () => {
+    // `transferBridge.sendFile` sends every chunk and then `transferStart` without waiting for
+    // any reply (`transferBridge.ts:213-227`), so a per-chunk acknowledgement would be a message
+    // the browser must learn to ignore. The `tab` afterwards is what makes the silence an
+    // assertion rather than an absence of one -- `next` would read an ack as the tab's frame.
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 2, bytes: 'AQI=' }));
+    await r.settle();
+    await stillAlive(ws, r, 'a good chunk');
+    ws.close();
+  });
+
+  it('refuses transferStart before the declared bytes have all arrived', async () => {
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 99, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await r.next('the premature transferStart');
+    expect(msg['ok']).toBe(false);
+    expect(String(msg['error'])).toMatch(/incomplete: 2 of 99 bytes/);
+    ws.close();
+  });
+
+  it('refuses a transferStart whose staged chunk fell SHORT through lenient base64', async () => {
+    /*
+      THE STALL THIS TASK OWNS, DRIVEN OVER A REAL SOCKET.
+
+      `'AQ!DBA'` is the 6-byte-looking encoding of a 6-byte file with a `!` in it, and
+      `Buffer.from(s, 'base64')` SKIPS what it cannot use rather than throwing (`protocol.ts`
+      :294-297) -- so the gateway stages FEWER bytes than the client declared, with no overrun for
+      `ChunkReassembler` to refuse and `complete()` left false. Before this task that was the end
+      of it: no `transferDone` was ever sent, and the operator watched a progress line stop with
+      nothing in any console. `transferStart` is where it is now caught, because that is the
+      earliest moment short can be told from unfinished.
+    */
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 6, bytes: 'AQ!DBA' }));
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await r.next('the short-chunk transferStart');
+    expect(msg['kind']).toBe('transferDone');
+    expect(msg['ok']).toBe(false);
+    // 3 OF 6 IS THE MEASURED DECODE, and the number was measured rather than reasoned: this
+    // assertion first said 4, on the arithmetic that `'AQ!DBA'` is "8 characters minus one". It
+    // is SIX characters, the `!` leaves five usable, and five base64 characters decode to 3
+    // bytes. The suite answered `3 of 6` and the comment was the thing that was wrong -- which is
+    // the whole argument for pinning the number instead of matching a generic word.
+    expect(String(msg['error'])).toMatch(/incomplete: 3 of 6 bytes/);
+    await r.settle();
+    await stillAlive(ws, r, 'a short chunk');
+    ws.close();
+  });
+
+  it('reports a bad keyword list, which the operator typed', async () => {
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 2, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({
+      kind: 'transferStart', keywords: ['Direction=send', 'Nonsense=1'],
+    }));
+    const msg = await r.next('the bad-keyword transferStart');
+    expect(msg['ok']).toBe(false);
+    // `transferCommand` THROWS on this (`frontend/src/transfer.ts:460-464`) and this runs inside a
+    // socket 'data' handler, so an uncaught one would end the gateway and every other operator's
+    // session. The `tab` below is what proves it did not.
+    expect(String(msg['error'])).toMatch(/unknown option 'Nonsense'/);
+    await r.settle();
+    await stillAlive(ws, r, 'a bad keyword list');
+    ws.close();
+  });
+
+  it('reports startTransfer\'s OWN refusal, which never reaches onDone', async () => {
+    /*
+      `startTransfer` returns `{ok:false, error}` for everything checkable locally and `onDone` is
+      NEVER CALLED in that case (`transferRun.ts:80-83`), so the refusal has to be reported at the
+      call site or it is lost entirely -- a form that goes quiet with nothing anywhere.
+
+      AND THIS IS THE ONE ARM A REPLAYED GATEWAY CAN TAKE, which makes this the sharpest place in
+      the repo to pin it: `is3270Mode()` is false on a replayed session (see this suite's header),
+      which is `startTransfer`'s very first guard. The message is asserted exactly, because a
+      generic "a string arrived" would also pass against a gateway that invented its own text and
+      threw the driver's away.
+    */
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 2, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await r.next('the transferStart');
+    expect(msg['kind']).toBe('transferDone');
+    expect(msg['ok']).toBe(false);
+    expect(msg['error']).toBe('not in 3270 mode');
+    await r.settle();
+    await stillAlive(ws, r, 'a refused transfer');
+    ws.close();
+  });
+
+  it('repaints after a start, because a transfer TYPES into the screen', async () => {
+    /*
+      MEASURED 2026-10-07: `primeAndType`'s three keyboard calls -- `home()`, `eraseEOF()`,
+      `typeString(command)` (`transferRun.ts:524-575`) -- change the screen buffer and emit ZERO
+      `screen` events, so this socket's three session listeners see nothing and the browser would
+      show a screen without the IND$FILE command on it until the host next spoke. Same measurement
+      `main.ts`'s action path already carries for a local action.
+
+      THIS GATEWAY REFUSES THE TRANSFER BEFORE TYPING ANYTHING -- not in 3270 mode is the first
+      guard of all -- so what this case pins is that the frame comes on the REFUSAL path too, which
+      is the half most likely to be dropped as pointless. It is not: `eraseEOF` runs before
+      `typeString`, whose own failure is a returned refusal, so a refused start can leave the
+      operator's field already nulled.
+    */
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 2, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    expect((await r.next('the transferStart'))['kind']).toBe('transferDone');
+    // THE FRAME IS THE ASSERTION, and the ORDER is too: the outcome first, then the repaint.
+    expect((await r.next('the repaint after a transferStart'))['kind']).toBe('frame');
+    ws.close();
+  });
+
+  it('swallows a transferCancel with nothing running, and stays up', async () => {
+    // `transferBridge.cancel()` sends one unconditionally (`transferBridge.ts:331-340`), including
+    // when the operator closes a form that never started. Answering it would be a `transferDone`
+    // for a transfer that never existed.
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferCancel' }));
+    await r.settle();
+    await stillAlive(ws, r, 'a transferCancel');
+    ws.close();
+  });
+
+  it('a transferCancel DROPS the staged upload, which is its only socket-visible effect', async () => {
+    /*
+      THE CANCEL BRANCH WAS INERT TO MUTATION UNTIL THIS CASE -- measured 2026-10-07: replacing
+      `transfer.cancel()` in `main.ts` with a bare `return` left all 308 cases in this package
+      green. Every other cancel case here sends one with nothing running, where doing nothing and
+      cancelling nothing are indistinguishable; and this gateway cannot have a LIVE run to cancel,
+      because `is3270Mode()` is false under `--replay` (see this suite's header).
+
+      WHAT IS STILL OBSERVABLE IS THE STAGING CLEAR. Stage an incomplete upload, cancel, then
+      start: with the cancel wired, the staging is gone and the start proceeds as the legal
+      zero-byte upload to be refused by the session's own 3270 guard. Without it, the half-filled
+      buffer survives and the start is refused `incomplete: 2 of 99 bytes` -- which is also the
+      operator-visible bug the clear exists to prevent, since a cancelled half-upload left in place
+      makes every later transfer on this connection fail for the life of the socket.
+    */
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 99, bytes: 'AQI=' }));
+    ws.send(JSON.stringify({ kind: 'transferCancel' }));
+    await r.settle();
+    ws.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await r.next('the transferStart after a cancel');
+    expect(String(msg['error']), 'a cancel must drop the staged upload').toBe('not in 3270 mode');
+    ws.close();
+  });
+
+  it('rejects a malformed transfer message without killing the session', async () => {
+    const { ws, r } = await connected();
+    ws.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 3, bytes: 42 }));
+    const msg = await r.next('the malformed transferChunk');
+    // AN `error` AND NOT A `transferDone`, which is the one place the two answers differ: a decode
+    // failure is caught by `main.ts`'s existing `try` around `decodeClientMessage` and never
+    // reaches the transfer code at all. The distinction matters because it means a chunk refused
+    // at DECODE leaves no trace in the staging -- which is half the reason the short-chunk check
+    // lives at `transferStart` rather than in `protocol.ts`.
+    expect(msg['kind']).toBe('error');
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    await r.settle();
+    await stillAlive(ws, r, 'a malformed chunk');
+    ws.close();
+  });
+
+  it('keeps one connection\'s staged upload out of another\'s, on the SAME session', async () => {
+    /*
+      THE ISOLATION PROPERTY, and it takes two sockets to show: one operator's staged upload must
+      not be reachable from another's connection, and a reattaching client must not inherit it.
+
+      `--grace 30` is what makes this sharp rather than vacuous. Without it the session is gone by
+      the time the second socket attaches and gets a brand-new one, so the staging would be fresh
+      for a much less interesting reason. With it, the SECOND SOCKET REATTACHES TO THE VERY SESSION
+      THE FIRST STAGED AGAINST -- asserted below by the absence of a `session` message -- and its
+      `transferStart` must still find nothing.
+
+      THE FIRST STAGING IS DELIBERATELY INCOMPLETE, AND THAT IS WHAT MAKES THIS OBSERVABLE AT
+      ALL -- the first version of this case staged a COMPLETE one and could not tell the two
+      outcomes apart. "Nothing staged" is a LEGAL ZERO-BYTE UPLOAD on this protocol
+      (`transferGateway.ts`'s `start` records why), so with isolation working the second socket's
+      `transferStart` reaches `startTransfer` and comes back `not in 3270 mode` -- which is exactly
+      what a gateway that HANDED OVER a complete staging would also say. Measured: the assertion
+      read `not in 3270 mode` in both worlds and proved nothing.
+
+      An INCOMPLETE staging separates them, because a leak is then reported BY ITS NUMBERS: a
+      second socket that inherited it answers `incomplete: 2 of 99 bytes`, naming bytes the second
+      operator never sent, while an isolated one answers `not in 3270 mode`.
+    */
+    const { url } = await start(['--grace', '30']);
+    const a = new WebSocket(url);
+    await new Promise((res) => { a.addEventListener('open', res, { once: true }); });
+    const ra = reader(a);
+    a.send(JSON.stringify({ kind: 'hello' }));
+    const first = await ra.next('hello');
+    expect(first['kind']).toBe('session');
+    const id = String(first['id']);
+    await ra.settle();
+    // INCOMPLETE ON PURPOSE -- see the note above. 2 of 99, so a leak names itself.
+    a.send(JSON.stringify({ kind: 'transferChunk', seq: 0, total: 99, bytes: 'AQI=' }));
+    await ra.settle();
+    a.close();
+
+    const b = new WebSocket(url);
+    await new Promise((res) => { b.addEventListener('open', res, { once: true }); });
+    const rb = reader(b);
+    b.send(JSON.stringify({ kind: 'hello', sessionId: id }));
+    // NO `session` MESSAGE: the same session came back, which is what makes this a reattach.
+    expect((await rb.next('the reattach'))['kind']).toBe('atlas');
+    await rb.settle();
+    b.send(JSON.stringify({ kind: 'transferStart', keywords: SEND }));
+    const msg = await rb.next('the reattached transferStart');
+    expect(msg['ok']).toBe(false);
+    // `not in 3270 mode` IS THE PASSING ANSWER HERE, which reads backwards until the note above is
+    // read: it means this socket's `transferStart` got all the way to `startTransfer` with its OWN
+    // empty staging, which is the legal zero-byte upload, and was then refused by the replayed
+    // session's first guard. An `incomplete` answer would mean it had inherited bytes the first
+    // socket staged -- 99 declared, 2 arrived, neither of them this operator's.
+    expect(String(msg['error']), 'a reattaching client must not inherit a staged upload')
+      .toBe('not in 3270 mode');
+    expect(String(msg['error'])).not.toMatch(/incomplete/);
+    b.close();
+  });
+
+  it('refuses the kinds ABOVE the action guard, which is where they have to be', () => {
+    /*
+      A SOURCE SCAN, for a property no assertion above can see: the three branches must sit ABOVE
+      `if (msg.kind !== 'action') return;` and not below it.
+
+      THIS PLAN'S DRAFT SAID TO PUT THEM BELOW -- "after the existing `action` case" -- and that is
+      DEAD CODE: measured 2026-10-07 as `TS2367` (unsatisfiable comparison, no overlap) plus
+      `TS2339` (no `seq`). So the mistake does not compile today, and a scan is still worth having
+      because the mistake that DOES compile is the opposite one: moving the guard up above them,
+      which typechecks perfectly and silently restores the stall this whole task exists to close.
+      `vitest` does not typecheck either way, and the behavioural cases above would all go quiet
+      rather than fail with a reason -- `next`'s 2s deadline naming a kind that hung.
+
+      The same instinct as this file's `tokenMatches` scan and `renderer-imports.test.ts`.
+
+      LINE NUMBERS AND NOT `indexOf` OFFSETS, which the first draft used and which FAILED for a
+      reason worth keeping: `main.ts`'s own comment above those branches QUOTES THE GUARD
+      VERBATIM, to say what it is and why they sit above it. So the first textual occurrence of the
+      guard is inside a comment, 1249 characters ahead of the real statement, and the scan reported
+      the correctly-placed branches as unreachable. A line whose TRIMMED text STARTS WITH the
+      statement cannot match a quotation inside a block comment, where every line is indented prose.
+    */
+    const source = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    const lines = source.split('\n');
+    const lineOf = (code: string, what: string): number => {
+      const at = lines.findIndex((l) => l.trim().startsWith(code));
+      expect(at, `${what} must still be in main.ts`).toBeGreaterThan(0);
+      return at;
+    };
+    const guard = lineOf("if (msg.kind !== 'action') return;", 'the action guard');
+    for (const kind of ['transferChunk', 'transferStart', 'transferCancel']) {
+      expect(lineOf(`if (msg.kind === '${kind}')`, kind),
+        `${kind} must be handled ABOVE the action guard, or it is unreachable`)
+        .toBeLessThan(guard);
+    }
+    // AND THE `transferForm` INTERCEPTION STAYS, which this task was explicitly told not to
+    // replace with real handling: `applyAction` still THROWS on that kind
+    // (`frontend/src/actions.ts:57-59`) and the browser opens the form itself. It is also in this
+    // file's `SWALLOWED` list, which asserts the behaviour; this asserts the LINE, because the
+    // tempting mistake while adding the three branches above is to delete it as now-redundant.
+    expect(source).toMatch(/if \(msg\.action\.kind === 'transferForm'\) return;/);
+    /*
+      AND `discard` IS CALLED WHEN THE CONNECTION CLOSES, scanned rather than driven because it is
+      INVISIBLE TO BEHAVIOUR FROM OUT HERE -- measured 2026-10-07: deleting that call left all 309
+      cases in this package green, and no test in this repo can redden it.
+
+      BOTH OF ITS EFFECTS ARE UNREACHABLE TO A CLIENT, for different reasons. The staging clear is
+      unobservable BY CONSTRUCTION: staging lives in the per-connection closure, so a reattaching
+      client gets a fresh one whether or not the old one was cleared -- what the clear buys is
+      releasing up to 10 MB promptly instead of waiting on a garbage collector, which is a property
+      no assertion can see. And the run cancel needs a LIVE run, which no gateway in this suite can
+      have, because `is3270Mode()` is false under `--replay`.
+
+      So this is the same class as this file's `tokenMatches` scan -- a property that is real,
+      load-bearing and invisible to every functional test, pinned by reading the source. What it
+      actually protects is a reattaching operator finding a session wedged in transfer mode by the
+      previous socket's abandoned run, plus a `totalTimer` firing into a closed connection up to
+      ten minutes later (`transferRun.ts:452-455`).
+    */
+    const close = lineOf('conn.onClose(() => {', "the connection's close handler");
+    const discard = lineOf('transfer.discard();', 'the transfer discard on close');
+    expect(discard, 'discard must be called from the close handler').toBeGreaterThan(close);
+    // BEFORE `detach`, for the same reason `stopListening` is: the grace window must never hold a
+    // session with a transfer still reporting into a socket that has gone.
+    expect(discard).toBeLessThan(lineOf('if (id !== undefined) registry.detach(id);', 'the detach'));
+  });
+});

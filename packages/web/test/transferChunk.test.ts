@@ -130,4 +130,37 @@ describe('ChunkReassembler', () => {
     expect(r.accept(0, new Uint8Array([1, 2, 3]))).toEqual({ ok: true, done: false });
     expect(r.bytes()).toBeUndefined();
   });
+
+  it('reports progress as received-of-declared, which is what a shortfall message needs', () => {
+    // ADDED 2026-10-07 FOR `transferGateway.ts`, which refuses a `transferStart` whose staged
+    // bytes fell SHORT -- the lenient-base64 case this class cannot refuse on its own, because a
+    // short chunk and a chunk with more to follow are indistinguishable until the sender says it
+    // has finished. Both numbers had to be quoted and NEITHER was readable: `received` and
+    // `declared` are private and there were no getters, so the caller's first draft tried to
+    // recover them from `bytes()`, which answers only `undefined` while incomplete.
+    const r = new ChunkReassembler(6);
+    expect(r.progress()).toBe('0 of 6 bytes');
+    r.accept(0, new Uint8Array([1, 2, 3, 4, 5]));
+    // THE ORDER IS PINNED, not just the numbers: received first, which is what the operator-facing
+    // message needs -- "5 of 6" is a damaged chunk worth retrying and "2 of 99" is a transfer that
+    // never ran, and reversing them inverts both diagnoses.
+    expect(r.progress()).toBe('5 of 6 bytes');
+    r.accept(1, new Uint8Array([6]));
+    // A COMPLETE REASSEMBLER STILL ANSWERS, which is stated because the method name invites the
+    // opposite assumption: this reports a POSITION and says nothing about state. `complete()` is
+    // still the question to ask about that, and the gateway asks it separately.
+    expect(r.progress()).toBe('6 of 6 bytes');
+    expect(r.complete()).toBe(true);
+  });
+
+  it('reports progress on a REFUSED reassembler without pretending the bad chunk landed', () => {
+    // The refusal paths set `failed` and return BEFORE `this.received += bytes.length`
+    // (`transferChunk.ts:140-151`), so the count is what legitimately arrived. That is the number
+    // the gateway's message should carry: a refused chunk's bytes were never staged, and counting
+    // them would tell the operator a transfer got further than it did.
+    const r = new ChunkReassembler(6);
+    r.accept(0, new Uint8Array([1, 2]));
+    r.accept(9, new Uint8Array([3, 4]));                 // refused, and latches
+    expect(r.progress()).toBe('2 of 6 bytes');
+  });
 });

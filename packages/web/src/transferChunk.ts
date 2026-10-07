@@ -155,6 +155,32 @@ export class ChunkReassembler {
     return { ok: true, done: this.received === this.declared };
   }
 
+  /**
+   * How far along, as `received of declared bytes`.
+   *
+   * ## WHY THIS IS A METHOD HERE AND NOT TWO GETTERS READ BY A CALLER
+   *
+   * Added 2026-10-07 for `transferGateway.ts`, which refuses a `transferStart` whose staged bytes
+   * FELL SHORT -- the lenient-base64 case this class cannot refuse on its own, because a short
+   * chunk and a chunk with more to follow are indistinguishable until the sender says it has
+   * finished. That refusal has to quote both numbers: "5 of 6" is a damaged chunk worth retrying
+   * and "2 of 99" is a transfer that never ran, and an operator's next move differs.
+   *
+   * Both numbers were UNREADABLE from outside -- `received` and `declared` are private and there
+   * were no getters -- so the caller's first draft tried to recover them from `bytes()`, which
+   * answers only `undefined` while incomplete. The alternative to this method was two getters,
+   * and one method is preferred because it keeps the SENTENCE here too: a caller that formatted
+   * `${a} of ${b}` itself would be a second place that has to agree about which number comes
+   * first, and this class's constructor already records (`:109-114`) why the attempted size
+   * leading matters when a line is truncated.
+   *
+   * NO `complete` INFORMATION IS IMPLIED. A complete reassembler answers `6 of 6 bytes` quite
+   * happily; `complete()` is still the question to ask about state.
+   */
+  progress(): string {
+    return `${this.received} of ${this.declared} bytes`;
+  }
+
   /** The joined bytes, or undefined while incomplete or after a refusal. */
   bytes(): Uint8Array | undefined {
     if (!this.complete()) return undefined;
