@@ -472,9 +472,17 @@ export class Runner {
     }
 
     // The local side. For a send this reads the whole file into memory, which is
-    // what the state machine wants anyway (`CutTransfer` takes the bytes up
-    // front, so it can answer a retransmit without re-reading), and a file big
-    // enough to matter would take hours over CUT regardless.
+    // what the state machine wants anyway: `CutTransfer` TAKES THE BYTES UP FRONT
+    // SO IT CAN ANSWER A RETRANSMIT without re-reading. That, and not throughput,
+    // is the reason this is not streamed.
+    //
+    // THIS SENTENCE USED TO END "a file big enough to matter would take hours over
+    // CUT regardless", which is false. It is the FOURTH copy of that claim found --
+    // the others were in `transferRun.ts:97`, this plan's own spec, and a Task 2
+    // comment -- and the only one no audit had looked for, because nothing cited it.
+    // Measured figures (`docs/live-testing.md:413`: ~15 ms/frame, 1.727x expansion)
+    // put 10 MB at ~2.4 MINUTES over CUT and ~10 seconds over DFT. See
+    // `transferRun.ts`, which carries the arithmetic and the frame-latency caveat.
     let source: Uint8Array | undefined;
     if (request.direction === 'send') {
       try {

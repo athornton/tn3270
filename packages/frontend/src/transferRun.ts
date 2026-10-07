@@ -92,10 +92,21 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     return { ok: false, error: 'not in 3270 mode' };
   }
 
-  // The local side. For a send this reads the whole file into memory, which is what the
-  // state machine wants anyway (`CutTransfer` takes the bytes up front so it can answer a
-  // retransmit without re-reading), and a file big enough to matter would take hours over
-  // CUT regardless.
+  // The local side. For a send this reads the whole file into memory, which is what the state
+  // machine wants anyway: `CutTransfer` TAKES THE BYTES UP FRONT SO IT CAN ANSWER A RETRANSMIT
+  // without re-reading. That, and not throughput, is the reason this is not streamed.
+  //
+  // AN EARLIER VERSION OF THIS COMMENT SAID a file big enough to matter "would take hours over
+  // CUT regardless", which is false and predated any measurement. From `docs/live-testing.md:413`
+  // -- ~15 ms/frame locally and a 1.727x codec expansion -- CUT moves ~72 KiB/s and DFT ~1065
+  // KiB/s, so 10 MB is ~2.4 MINUTES and ~10 seconds respectively, not hours. Recomputed
+  // 2026-10-07 from those two figures plus the frame capacities (`O_UP_MAX` 1912 encoded bytes,
+  // DFT's default 16384 buffer).
+  //
+  // THE RATE IS FRAME-LATENCY-BOUND, NOT BANDWIDTH-BOUND, which is why the 15 ms matters more than
+  // any byte count: every frame is a screen round trip. That figure is Hercules on one machine, so
+  // a genuinely remote host at ~100 ms RTT is roughly 6x slower again -- ~16 min on CUT, ~1 min on
+  // DFT. Quote the mechanism rather than the number if you cite this.
   let source: Uint8Array | undefined;
   if (request.direction === 'send') {
     try {
