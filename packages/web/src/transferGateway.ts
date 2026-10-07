@@ -283,13 +283,24 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
        * carry it (`chunk 0 arrived after all 0 bytes`, since `complete()` is already true at
        * construction for a declared 0).
        *
-       * SO "NOTHING STAGED" MEANS "EMPTY FILE" AND NOTHING ELSE -- which holds only because a
-       * refused chunk LEAVES ITS LATCHED REASSEMBLER IN PLACE and is caught by the guard above.
-       * That is what makes this an acceptance rather than a hole, and it is why `staging`'s
-       * declaration is the longest comment in this file.
+       * SO "NOTHING STAGED" MEANS "EMPTY FILE" AND NOTHING ELSE -- which holds for THREE reasons
+       * and needed all three. A refused chunk leaves its latched reassembler in place and is
+       * caught by the guard above; a refused CONSTRUCTOR sets `poisoned`, also above; and a
+       * refused START PUTS THE BYTES BACK, which is the clause below and the one this file
+       * originally missed.
+       *
+       * THAT THIRD DOOR WAS THE SAME DATA-DESTRUCTION BUG AS THE SECOND, reached with entirely
+       * well-formed messages. MEASURED 2026-10-07: stage a real 5-byte file, have `startTransfer`
+       * refuse it (a locked keyboard is enough), then retry the same keywords -- and
+       * `startTransfer` was called with ZERO bytes, no refusal sent, reported as success. Under
+       * `Exist=replace` that overwrites the operator's host dataset with nothing. The honest
+       * browser half re-chunks on every send so it could not trigger it, which is exactly what
+       * would have made it a trap for whoever wired a retry button later.
        */
       const source = staged ?? new Uint8Array(0);
       staged = undefined;
+      /** Put the bytes back, so a refused start is retryable instead of destructive. */
+      const unconsume = (): void => { if (source.length > 0) staged = source; };
 
       let request;
       let command;
@@ -300,6 +311,9 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
         // an escaping throw ends the gateway and every other operator's session.
         ({ request, command } = transferCommand(keywords));
       } catch (err) {
+        // A MISTYPED HostFile IS THE COMMONEST OPERATOR ERROR, so this is the likeliest refusal
+        // of all -- and the bytes must survive it or the retry sends an empty file.
+        unconsume();
         fail(err instanceof Error ? err.message : String(err));
         return;
       }
@@ -400,7 +414,19 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
         // RELAYED VERBATIM. Both emitters are `${n} bytes` -- `transferRun.ts:325` from
         // `dft.transferred` and `:394` from `cut.bytesTransferred` -- and reformatting here would
         // give the gateway a second opinion about what a transfer has moved.
-        onProgress: (text) => { deps.send({ kind: 'transferProgress', text }); },
+        // GENERATION-GUARDED, LIKE `onDone`. The asymmetry was an oversight rather than a
+        // decision: `onDone` carried a guard described as belt and braces over another package's
+        // invariant, and the SAME invariant was the only thing protecting this callback.
+        //
+        // MEASURED 2026-10-07: after `discard()`, a stale `onProgress` still reached `deps.send`,
+        // and a run-1 progress string landed on the socket while run 2 was live. Not reachable
+        // through a real `startTransfer`, whose own `ended` flag stops it first
+        // (`transferRun.ts:323`, `:370`) -- which is precisely why belt and braces is the stated
+        // standard for the other one.
+        onProgress: (text) => {
+          if (mine !== generation) return;
+          deps.send({ kind: 'transferProgress', text });
+        },
         onDone,
       });
 
@@ -421,6 +447,8 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
         // `{ok: boolean; error?: string; cancel?: ...}` and NOT a discriminated union
         // (`transferRun.ts:58-63`) -- verified 2026-10-07. Hence the `??`, which is the shape
         // `tui/src/app.ts:1095` and `gui/src/transferWindow.ts:342` both live with.
+        // BEFORE `fail`, so a throwing `send` cannot lose the bytes on the way out.
+        unconsume();
         fail(started.error ?? 'the transfer was refused');
         if (mine === generation) { generation += 1; run = undefined; }
       }

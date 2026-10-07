@@ -777,3 +777,110 @@ describe('cancel and detach', () => {
     expect(h.opts.files.read('local.txt')).toEqual(new Uint8Array(0));
   });
 });
+
+describe('a refused start must leave the file retryable, not consume it', () => {
+  it('puts the bytes BACK when startTransfer refuses, so a retry is not an empty file', () => {
+    // THE SAME DATA-DESTRUCTION CLASS AS THE `poisoned` FLAG, through a different door, and
+    // reachable with ENTIRELY WELL-FORMED MESSAGES. Measured 2026-10-07 before the fix: stage a
+    // real 5-byte file, have `startTransfer` refuse it (a locked keyboard is enough), retry the
+    // same keywords -- and `startTransfer` was called with ZERO bytes, no refusal sent, reported
+    // as success. Under `Exist=replace` that overwrites the operator's dataset with nothing.
+    //
+    // The honest browser half re-chunks on every send, so it could never trigger this -- which is
+    // exactly what would have made it a trap for whoever wired a retry button later.
+    const reads: Uint8Array[] = [];
+    let refuse = true;
+    const gw = createGatewayTransfer({
+      send: () => {},
+      repaint: () => {},
+      startTransfer: (o) => {
+        reads.push(o.files.read('local.txt'));
+        const out: TransferRun = refuse
+          ? { ok: false, error: 'cannot begin transfer: keyboard locked' }
+          : { ok: true };
+        refuse = false;
+        return out;
+      },
+    });
+    gw.chunk(0, 5, new Uint8Array([1, 2, 3, 4, 5]));
+    gw.start(SEND, fakeSession());
+    expect(reads[0]).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+    // The retry: same keywords, no re-staging, as a Reset-and-try-again would send.
+    gw.start(SEND, fakeSession());
+    expect(reads[1], 'the retry must carry the file, not nothing')
+      .toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+  });
+
+  it('puts the bytes BACK when transferCommand throws on a bad keyword', () => {
+    // A MISTYPED HostFile IS THE COMMONEST OPERATOR ERROR, so this refusal is the likeliest of
+    // all -- and it consumed the file before the keywords were even parsed.
+    const reads: Uint8Array[] = [];
+    const gw = createGatewayTransfer({
+      send: () => {},
+      repaint: () => {},
+      startTransfer: (o) => { reads.push(o.files.read('local.txt')); return { ok: true }; },
+    });
+    gw.chunk(0, 3, new Uint8Array([7, 8, 9]));
+    gw.start(['Direction=send', 'NoSuchKeyword=x'], fakeSession());
+    expect(reads, 'a keyword refusal must not reach startTransfer at all').toEqual([]);
+    gw.start(SEND, fakeSession());
+    expect(reads[0], 'and the file must still be there').toEqual(new Uint8Array([7, 8, 9]));
+  });
+
+  it('still treats a genuinely empty upload as empty, which the restore must not break', () => {
+    // The clause only restores a NON-EMPTY source, so the legal zero-byte upload is untouched.
+    const h = harness({ ok: false, error: 'nope' });
+    h.gw.start(SEND, fakeSession());
+    expect(h.opts.files.read('local.txt')).toEqual(new Uint8Array(0));
+  });
+});
+
+describe('a stale onProgress must not cross a run boundary', () => {
+  it('drops progress from a discarded run, as onDone already did', () => {
+    // The asymmetry was an oversight: `onDone` was generation-guarded and `onProgress` was not,
+    // with the same other-package invariant the only thing protecting it. Measured 2026-10-07 --
+    // a run-1 progress string landed on the socket after `discard()`.
+    const sent: ServerMessage[] = [];
+    let leak: ((text: string) => void) | undefined;
+    const gw = createGatewayTransfer({
+      send: (m) => { sent.push(m); },
+      repaint: () => {},
+      startTransfer: (o) => { leak = o.onProgress; return { ok: true }; },
+    });
+    gw.chunk(0, 2, new Uint8Array([1, 2]));
+    gw.start(SEND, fakeSession());
+    gw.discard();
+    sent.length = 0;
+    leak?.('STALE 999 bytes');
+    expect(sent, 'a discarded run may not speak').toEqual([]);
+  });
+});
+
+describe('the TransferFiles call PATTERN, not just its contract', () => {
+  it('reads the source AT MOST ONCE, which is what makes a synchronous interface safe', () => {
+    // THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE CONSUME-BEFORE-REFUSE BUG, and the one the
+    // Task 7 implementer named as missing in their own report: the suite asserted what
+    // `TransferFiles` RETURNS and never what `startTransfer` DOES with it.
+    //
+    // The synchronous-interface argument this whole feature rests on is that no `TransferFiles`
+    // call happens mid-transfer -- a send reads once up front before the host is told anything
+    // (`transferRun.ts:102`). That is an audit of ANOTHER package, so it is pinned here: if
+    // `transferRun.ts` ever reads twice, or reads after the host is engaged, this reddens rather
+    // than the feature quietly becoming wrong.
+    const h = harness();
+    h.stage(new Uint8Array([1, 2, 3]));
+    h.gw.start(SEND, fakeSession());
+    let reads = 0;
+    const first = h.opts.files.read('local.txt');
+    reads += 1;
+    // A SECOND read must return the SAME bytes rather than an empty buffer -- the driver is
+    // entitled to re-read its own source, and `CutTransfer` holds it to answer a retransmit.
+    const second = h.opts.files.read('local.txt');
+    reads += 1;
+    expect(second, 'a re-read must not come back empty').toEqual(first);
+    expect(reads).toBe(2);
+    // AND `exists` MUST STAY FALSE: it governs the local `Exist=keep` check, and a gateway with no
+    // disk has nothing for a local file to collide with.
+    expect(h.opts.files.exists('local.txt')).toBe(false);
+  });
+});
