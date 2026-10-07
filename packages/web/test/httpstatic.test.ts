@@ -185,6 +185,12 @@ describe('resolveAsset', () => {
     // `httpstatic.ts` carries that warning and why a module is added here only when it is built.
     expect(resolveAsset('/transferBridge.js')!.file).toMatch(/[/\\]transferBridge\.js$/);
     expect(existsSync(join(pkgDir, 'dist', 'transferBridge.js'))).toBe(true);
+    // `transferOverlay.js` is the FOURTH, added 2026-10-07 with the module itself, in the same
+    // trap for the same reason: under vitest `import.meta.url` is the SOURCE file, so the entry
+    // resolves to `packages/web/src/transferOverlay.js`, which never exists. Same two-line cover,
+    // same documented limit as the three above -- catches a deleted entry, not an invented one.
+    expect(resolveAsset('/transferOverlay.js')!.file).toMatch(/[/\\]transferOverlay\.js$/);
+    expect(existsSync(join(pkgDir, 'dist', 'transferOverlay.js'))).toBe(true);
   });
 });
 
@@ -192,10 +198,12 @@ describe('transfer modules', () => {
   it('serves every browser module the transfer overlay needs', () => {
     // `resolveAsset` is this suite's own entry point -- it is what the existing cases use, and
     // it answers for one URL path at a time. There is no map-returning helper.
-    // ONLY THE MODULES THAT EXIST TODAY. Tasks 6 and 8 add their own as they create them.
+    // ONLY THE MODULES THAT EXIST TODAY. Task 8 adds its own (`transferBoot.js`) when it lands.
     // `transferBridge.js` joined 2026-10-06 with the file itself, which is the habit Task 4's
     // note argues for: the entry and the module land together, so neither can be forgotten.
-    for (const path of ['/transferUi.js', '/transferChunk.js', '/transferBridge.js']) {
+    // `transferOverlay.js` joins the same way, 2026-10-07.
+    for (const path of
+      ['/transferUi.js', '/transferChunk.js', '/transferBridge.js', '/transferOverlay.js']) {
       expect(resolveAsset(path), path).toBeDefined();
     }
   });

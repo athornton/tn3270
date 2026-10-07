@@ -82,6 +82,15 @@ function table(): Map<string, Asset> {
     // NOT LOADED BY ANY PAGE YET, like `transferChunk.js` beside it: the page's graph is still
     // `bridge.js` and `renderer.js`, and Task 8's boot module is what will reach this.
     'transferBridge.js',
+    // `transferOverlay.js` joins the same way, with the file itself (2026-10-07): it has ZERO
+    // imports of its own (checked on the BUILT file -- `dist/transferOverlay.js` has no `from`
+    // line at all, since `import type` erases and this module imports nothing even at the type
+    // level), so it closes the graph at itself and needs no map entry or neighbour.
+    //
+    // NOT LOADED BY ANY PAGE YET, like its two neighbours above: `bridge.ts` is what will
+    // `show()`/`hide()` it once `transferForm` is intercepted client-side, and that wiring is
+    // Task 8's, not this one's.
+    'transferOverlay.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }
