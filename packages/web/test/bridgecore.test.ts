@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createBridge } from '../src/bridgecore.js';
+import { createBridge, socketUrl } from '../src/bridgecore.js';
 
 /**
  * The bridge's LOGIC, with the browser injected.
@@ -343,3 +343,36 @@ describe('createBridge', () => {
  * (A `setTimeout` macrotask drain was measured too and catches the same mutations, so this is a
  * question of which is sufficient, not of which is correct.)
  */
+
+describe('socketUrl, which a reverse proxy breaks if it is built from the host', () => {
+  it('resolves relatively, so a path prefix survives', () => {
+    // MEASURED 2026-10-07 on the Rubin Science Platform's JupyterLab `/proxy/<port>/` route.
+    // Served under that prefix, the old `${proto}//${location.host}/ws` sent the socket to the
+    // PLATFORM's root: all eighteen modules loaded with HTTP 200, the socket went to
+    // `wss://host/ws`, and the canvas stayed black and unresponsive with nothing in the console --
+    // because no atlas and no frame ever arrived.
+    expect(socketUrl('https://usdf-rsp.slac.stanford.edu/nb/user/athor/proxy/8017/'))
+      .toBe('wss://usdf-rsp.slac.stanford.edu/nb/user/athor/proxy/8017/ws');
+  });
+
+  it('is unchanged at the root, which is how every harness and local run serves it', () => {
+    expect(socketUrl('http://127.0.0.1:8017/')).toBe('ws://127.0.0.1:8017/ws');
+  });
+
+  it('resolves against the DIRECTORY when the document names a file', () => {
+    // `new URL('ws', '.../8017/index.html')` drops the filename, which is the behaviour wanted:
+    // the socket belongs beside the document, not beside its name.
+    expect(socketUrl('https://host/a/b/index.html')).toBe('wss://host/a/b/ws');
+  });
+
+  it('swaps the scheme ITSELF, because `new URL` keeps the document`s', () => {
+    // The property `bridge.ts` claims -- a TLS gateway gets `wss:` with no flag -- depends on
+    // this line rather than on `URL`, which would hand back `https:`.
+    expect(socketUrl('https://host/').startsWith('wss://')).toBe(true);
+    expect(socketUrl('http://host/').startsWith('ws://')).toBe(true);
+  });
+
+  it('keeps a non-default port, which a prefixed deployment usually has', () => {
+    expect(socketUrl('http://127.0.0.1:9999/x/')).toBe('ws://127.0.0.1:9999/x/ws');
+  });
+});

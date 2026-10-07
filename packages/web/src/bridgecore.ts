@@ -113,6 +113,39 @@ export interface BridgeApi {
   sendAction(action: unknown): void;
 }
 
+/**
+ * The gateway's WebSocket URL, resolved against the document the page was served from.
+ *
+ * HERE RATHER THAN IN `bridge.ts` SO IT CAN BE TESTED. That file touches real browser globals at
+ * module load, so no unit test can import it -- and this is pure arithmetic on two strings, which
+ * is exactly the split this module exists for.
+ *
+ * ## WHY IT IS RELATIVE AND NOT BUILT FROM THE HOST
+ *
+ * The first version was `` `${proto}//${location.host}/ws` ``, which discards the PATH. That is
+ * correct at the root and broken behind every reverse proxy with a prefix.
+ *
+ * MEASURED 2026-10-07 against a JupyterLab `/proxy/<port>/` route on the Rubin Science Platform:
+ * served at `https://host/nb/user/athor/proxy/8017/`, all eighteen browser modules loaded with
+ * HTTP 200 and the socket went to `wss://host/ws` -- the platform's own root rather than the
+ * gateway. Nothing errored visibly; the page simply never received an atlas or a frame, so the
+ * canvas stayed BLACK AND UNRESPONSIVE. That is this project's most-repeated failure signature,
+ * arriving by a route no harness covers, because every harness loads the page from `/`.
+ *
+ * THE PROTOCOL SWAP IS STILL OURS. `new URL` keeps the document's `http:`/`https:`, so the
+ * `ws:`/`wss:` substitution has to be explicit -- which is also what makes a TLS gateway work
+ * with no flag, the property `bridge.ts`'s header claims.
+ *
+ * NO SERVER CHANGE IS NEEDED, which is worth saying because it looks like it should be:
+ * `main.ts`'s `upgrade` handler parses the request URL only for its query string and NEVER
+ * compares the path, so it accepts an upgrade at any path. `/ws` was a convention, not a route.
+ */
+export function socketUrl(documentHref: string): string {
+  const url = new URL('ws', documentHref);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.href;
+}
+
 const ID_KEY = 'tn3270.sessionId';
 
 export function createBridge(deps: BridgeDeps): BridgeApi {

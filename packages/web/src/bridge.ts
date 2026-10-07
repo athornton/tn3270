@@ -1,4 +1,4 @@
-import { createBridge, type BridgeApi } from './bridgecore.js';
+import { createBridge, socketUrl, type BridgeApi } from './bridgecore.js';
 import { createKeypadOverlay } from './keypadOverlay.js';
 // FROM THE MODULE AND NOT FROM `@tn3270/canvas`'s BARREL, which would blank this page: the barrel
 // reaches `drawlist.js` and `@tn3270/core`, and a browser has no bundler for a bare specifier.
@@ -30,8 +30,12 @@ import { createTransferOverlay } from './transferOverlay.js';
  * payloads, so the two would collide as "subsequent property declarations must have the same type".
  * The cast keeps the augmentation single-sourced in the package that owns the renderer.
  */
-const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const socket = new WebSocket(`${proto}//${location.host}/ws`);
+/**
+ * RESOLVED AGAINST THE DOCUMENT, so a reverse-proxy prefix survives. The arithmetic and the
+ * measurement that forced it live in `bridgecore.ts`'s `socketUrl`, which is unit-tested; this
+ * file cannot be, because it touches browser globals at module load.
+ */
+const socket = new WebSocket(socketUrl(location.href));
 socket.binaryType = 'arraybuffer';
 
 /** Inflate one binary message. Measured: the server sends zlib-wrapped deflate, so 'deflate'. */
