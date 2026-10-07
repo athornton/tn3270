@@ -76,6 +76,16 @@ export function createTransferOverlay(deps: TransferOverlayDeps): TransferOverla
       deps.element.hidden = false;
     },
     hide() {
+      // ALREADY HIDDEN IS A NO-OP, AND IT COMES BEFORE THE PROMPT. Without this, hiding a closed
+      // overlay that still holds unsaved bytes pops a confirm dialog asking whether to discard a
+      // file -- for a form the operator cannot see. MEASURED 2026-10-07: prompts=1 on an overlay
+      // that was never shown.
+      //
+      // Unreachable from the Close button, which lives INSIDE the overlay, so this is cover for
+      // the next caller rather than a live bug. The next caller is already anticipated: both this
+      // file's test and `keypadOverlay.test.ts` note a possible Escape binding, and Escape pressed
+      // with the form closed is exactly the path that would prompt out of nowhere.
+      if (!shown) return;
       // A completed, unsaved transfer must not be silently discarded -- see the header's "WHY IT
       // WARNS" section. Declining leaves the overlay exactly as it was: open, with `shown` and
       // `deps.element.hidden` both untouched.

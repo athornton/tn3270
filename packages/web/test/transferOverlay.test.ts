@@ -178,3 +178,29 @@ describe('the construction-time hide, from a VISIBLE starting state', () => {
     expect(o.visible(), 'and the overlay must agree it is hidden').toBe(false);
   });
 });
+
+describe('hiding an already-hidden overlay', () => {
+  it('does NOT prompt, because there is no visible form to discard anything from', () => {
+    // MEASURED 2026-10-07 before the guard: prompts=1 on an overlay that was never shown -- a
+    // confirm dialog asking whether to discard a file, for a form the operator cannot see.
+    // Unreachable from the Close button (it lives inside the overlay), but both this file and
+    // `keypadOverlay.test.ts` anticipate an Escape binding, and Escape with the form closed is
+    // exactly that path.
+    let prompts = 0;
+    const el = { hidden: true };
+    const o = createTransferOverlay({
+      element: el as unknown as HTMLElement,
+      build: () => {},
+      hasUnsaved: () => true,            // bytes ARE staged
+      confirmDiscard: () => { prompts += 1; return true; },
+    });
+    o.hide();
+    expect(prompts, 'no prompt for a form that is not on screen').toBe(0);
+    expect(el.hidden).toBe(true);
+    // AND THE BYTES ARE STILL GUARDED once it is actually open, which is the property the early
+    // return must not have weakened.
+    o.show();
+    o.hide();
+    expect(prompts, 'an open form with unsaved bytes still prompts').toBe(1);
+  });
+});
