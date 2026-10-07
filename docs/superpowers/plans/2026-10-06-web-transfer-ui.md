@@ -2321,6 +2321,37 @@ Co-Authored-By: SLAC AI"
 
 ## Task 9: Real-browser cover for the form
 
+> **THE GAP THIS TASK CLOSES WAS QUANTIFIED BY MUTATION, 2026-10-07, and it is wider than "the
+> overlay's own behaviour".** Task 8's review ran 8 mutants against the full gate AND all three
+> browser harnesses. **Five survived**, including two that disable the feature outright:
+>
+> | Mutant | Result |
+> |---|---|
+> | `showTransfer: () => {}` — **the Xfer button dead** | build clean, 2467 green, shot 1/1, clicks 9/9 — **SURVIVED** |
+> | `onTransfer` drops every message — **no progress, no data, no done** | same — **SURVIVED** |
+> | `submit`'s nothing-staged guard returns `{ok:true}` | same — **SURVIVED** |
+> | `fileInput.oncancel` deleted | same — **SURVIVED** |
+> | `position: static` on the overlay | same — **SURVIVED** |
+> | overlay id renamed (so `bridge.js` throws at load) | shot **0/1** — caught |
+> | `transferBoot.js` removed from the served table | 2 unit failures + shot **0/1** — caught |
+>
+> **So what IS covered today is liveness, not function:** that the module is served, and that
+> `bridge.js` finishes evaluating with every element present. That is the blank-window class and it
+> is genuinely closed. **Everything behavioural is uncovered** — the entire browser half could be
+> reverted to no-ops and nothing would notice.
+>
+> **THIS TASK'S JOB IS THEREFORE THE FIVE SURVIVORS**, and each should be mutation-proved against
+> the harness rather than assumed: open the overlay and assert it became visible; drive a
+> `transferProgress`/`transferData`/`transferDone` sequence and assert the form shows it; press
+> Start with no file chosen and assert the local refusal; and assert the form is **inside the
+> viewport and hit-testable** rather than asserting the canvas did not move — see the correction
+> below, which Task 8 measured.
+>
+> **ONE METHODOLOGY WARNING, from the same review.** Deleting a guard often produces a `TS18048`
+> and `npm run build` FAILS — but `tsc` still emits JavaScript, so a mutation run that ignores the
+> build result scores it against stale `dist/` and reports green. Mutate semantically (make the
+> guard return the wrong answer) rather than by deletion, and check the build result.
+
 `browser-clicks.mjs` found four defects the unit suite could not see, including the 15px canvas displacement. The overlay is exactly the kind of change that regresses there.
 
 **Files:**
