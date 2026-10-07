@@ -2192,15 +2192,94 @@ function renderFields(
 `caretAfterEdit` is imported because the GUI's boot uses it for text fields; if the simple
 `oninput` above proves to move the caret, apply it exactly as `gui/src/transferBoot.ts:81` does.
 
-- [ ] **Step 5: Hook it into the bridge**
+- [ ] **Step 5: Hook it into the bridge — DERIVED FROM THE REAL CODE, 2026-10-07**
 
-In `packages/web/src/bridge.ts`, where the keypad overlay is wired, add the transfer equivalent: intercept the `transferForm` action client-side to `show()` the overlay, and route the three new server messages to the returned handlers. Read the keypad's interception first so the shape matches:
+> This step was PROSE in every earlier draft ("add the transfer equivalent") and was the one step
+> in this plan without code. Here is the real shape, read off `bridgecore.ts` and `bridge.ts`.
 
-```bash
-grep -n "toggleKeypad\|keypadOverlay\|createKeypadUi" packages/web/src/bridge.ts
+**5a. `bridgecore.ts` needs a `transferForm` intercept, and today there is NONE.** Verified: `grep
+transferForm packages/web/src/bridgecore.ts` is empty, so the action currently crosses the socket
+and `main.ts:314` swallows it with a bare `return`. That is the "SWALLOWED" state Task 3 recorded
+deliberately. Add a **seventh** `BridgeDeps` member beside `onTransfer`, and intercept in
+`sendAction` exactly as `toggleKeypad` does:
+
+```typescript
+  /**
+   * Open the transfer form. OPTIONAL, and absent means "this client has no transfer form" --
+   * the same contract `toggleKeypad` above has, for the same reason.
+   *
+   * THE SERVER'S OWN `transferForm` INTERCEPT STAYS (`main.ts:314`). `applyAction` still THROWS
+   * on this kind outside any try in a socket handler, and a client is not obliged to run served
+   * code -- `integration.test.ts` sends every `Action` kind as a raw frame. Both halves are
+   * required, which is `protocol.ts`'s two-branch rule.
+   */
+  readonly showTransfer?: (() => void) | undefined;
 ```
 
-**The server's `toggleKeypad` intercept must stay** — the handoff records that deleting it ends the process on the first raw frame.
+and in `sendAction`, beside the `toggleKeypad` branch:
+
+```typescript
+      if ((action as { kind?: unknown }).kind === 'transferForm') {
+        deps.showTransfer?.();
+        return;
+      }
+```
+
+**Note `| undefined` explicitly** — `exactOptionalPropertyTypes` is on, and Task 5 lost time to
+exactly this.
+
+**5b. `bridge.ts` wires the three objects together.** The construction ORDER is load-bearing and
+`bridge.ts` already documents why for the keypad: `createBridge` takes the callbacks as deps, so
+the overlay must exist first, and a closure reading `bridge` before its `const` is assigned throws
+a `ReferenceError` that **optional chaining does not guard**. This project has shipped that blank
+window once. So: elements, then `transferBridge`, then `overlay`, then `createBridge`.
+
+```typescript
+const transferEls = {
+  overlay: document.getElementById('transfer-overlay'),
+  fields: document.getElementById('transfer-fields'),
+  status: document.getElementById('transfer-status'),
+  save: document.getElementById('transfer-save'),
+  file: document.getElementById('transfer-file'),
+};
+for (const [name, el] of Object.entries(transferEls)) {
+  // A HARD FAILURE, not a dead button, for the reason the keypad's own check gives: a missing
+  // element would make every Xfer click silently do nothing, which looks like a protocol fault.
+  if (el === null) throw new Error(`bridge: #transfer-${name} is missing from index.html`);
+}
+
+const boot = bootTransfer(document, (text) => { socket.send(text); });
+
+const transferOverlay = createTransferOverlay({
+  element: transferEls.overlay,
+  build: () => { /* the markup is static in index.html; nothing to build */ },
+  hasUnsaved: () => boot.hasUnsaved(),
+  confirmDiscard: () => globalThis.confirm(
+    'The transfer finished but the file has not been saved. Close and lose it?',
+  ),
+});
+```
+
+then `createBridge({ ..., showTransfer: () => { transferOverlay.show(); }, onTransfer: boot.onMessage })`.
+
+**5c. `bootTransfer` returns the message sink, so `bridgecore` never learns the three kinds.**
+`onTransfer`'s real type is `(msg: { kind: string } & Record<string, unknown>) => void`
+(`bridgecore.ts:84`), so the narrowing happens in the boot file — which is where the `as` lives,
+and `bridgecore.ts:76-82` explains why it declines to do it itself.
+
+**THE GATEWAY-SIDE PIECES TASK 7 BUILT THAT THIS MUST REACH:**
+- `transferProgress` → `ui.progress(text)`
+- `transferData` → `bridge.acceptData(seq, total, bytes)` — bytes are ALREADY decoded to a
+  `Uint8Array` by `bridgecore.ts:150`, so do not `atob` again
+- `transferDone` → `ui.finished(result)`, then **`bridge.finishEmpty()` when `ok` and nothing was
+  staged** (Task 5 added it for the zero-byte receive no chunk can announce), then enable Save off
+  `hasUnsaved()`
+
+**AND THE RETRY PATH IS THE ONE TO GET RIGHT.** Task 7's review found that a refused start used to
+CONSUME the staged bytes, so a retry sent an empty file to the host and reported success — fixed
+gateway-side, but this is the step that creates the retry button. `transferUi.ts`'s `submit` is
+called again on each Start, and `sendFile` re-chunks from the browser's own copy every time, which
+is what makes a retry honest. **Do not add a "resend without re-chunking" shortcut.**
 
 - [ ] **Step 6: Build and run the real browser harnesses**
 
