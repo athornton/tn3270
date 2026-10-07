@@ -63,15 +63,25 @@
  *
  * ## AND IT FOUND A LIVE BUG ON ITS FIRST RUN, WHICH IS NOT ONE OF THE FIVE
  *
- * **KEYSTROKES AIMED AT THE TRANSFER FORM'S TEXT FIELDS DO NOT REACH THEM; THEY GO TO THE HOST.**
- * `renderer.ts:268`'s `window.addEventListener('keydown', ...)` sees events targeted at
- * `#transfer-localFile`, `actionForKey` claims any single-code-point key as `{kind:'type'}`, and
- * the `e.preventDefault()` that follows suppresses the character -- so the field stays empty and
- * the letter crosses the socket. Proved three ways; the measurements are at `typeChar` below,
- * including `action: {"kind":"type","text":"a"}` in this harness's own gateway log for a letter
- * typed into a form field. **NOT FIXED HERE** -- this commit adds test cover and changes no
- * production code -- and `typeChar`'s docstring records both the workaround that lets these
- * checks reach the form's real logic and exactly what that workaround costs in honesty.
+ * **IT FOUND A LIVE BUG ON ITS FIRST RUN, AND THAT BUG IS NOW FIXED.** Keystrokes aimed at the
+ * transfer form's text fields did not reach them; they went to the HOST. `renderer.ts`'s
+ * `window.addEventListener('keydown', ...)` saw events targeted at `#transfer-localFile`,
+ * `actionForKey` claimed any single-code-point key as `{kind:'type'}` without knowing what was
+ * focused, and the `e.preventDefault()` that followed suppressed the character -- so the field
+ * stayed empty and the letter crossed the socket. Proved three ways, including
+ * `action: {"kind":"type","text":"a"}` in this harness's own gateway log for a letter typed into a
+ * text field.
+ *
+ * The fix is in `renderer.ts`: the listener now returns early for an INPUT/TEXTAREA/SELECT or
+ * contenteditable target, before `actionForKey` is consulted. It is checked THERE rather than in
+ * `keys.ts` because `KeyLike` is deliberately DOM-free -- six scalar fields and no target, which
+ * is what lets its cases run with no jsdom.
+ *
+ * AND THE FIX IS WHAT MADE THIS HARNESS HONEST. The first version of `typeChar` needed an explicit
+ * CDP `char` event to get a character into a field at all -- an event a physical keyboard would
+ * not produce given that `preventDefault`. With the bug fixed these seven checks pass 7/7 on a
+ * plain `keyDown`/`keyUp` pair, so what they prove is now what an operator would experience. See
+ * `typeChar`.
  *
  * A SEVENTH MUTANT WAS RUN FOR THE OTHER HALF OF THE QUESTION -- not "does a check fail?" but
  * "does this phase diagnose its own inability to run?". `transferBoot.js` removed from
@@ -711,7 +721,19 @@ async function runTransferPhase(url) {
       chooser, the socket, the DOM reads -- is unaffected.
     */
     const typeChar = async (ch) => {
-      for (const type of ['keyDown', 'char', 'keyUp']) {
+      // A PLAIN keyDown/keyUp PAIR, WHICH IS WHAT A PHYSICAL KEYBOARD SENDS.
+      //
+      // THIS USED TO NEED AN EXPLICIT CDP `char` EVENT AS A WORKAROUND, and the workaround is
+      // gone because the bug it worked around is FIXED. `renderer.ts`'s `window` keydown listener
+      // claimed every printable key for the 3270 screen and called `preventDefault()` without
+      // looking at the event target, so a letter typed into `#transfer-localFile` was sent TO THE
+      // MAINFRAME and the field stayed empty. This phase is what found it.
+      //
+      // MEASURED 2026-10-07: with the listener now ignoring INPUT/TEXTAREA/SELECT targets, these
+      // seven checks pass 7/7 on keyDown/keyUp alone. That is the honest version -- the harness no
+      // longer sends an event a real keyboard would not produce, so what it proves is what an
+      // operator would experience.
+      for (const type of ['keyDown', 'keyUp']) {
         await cdp.cmd('Input.dispatchKeyEvent', { type, key: ch, text: ch, unmodifiedText: ch });
       }
     };
