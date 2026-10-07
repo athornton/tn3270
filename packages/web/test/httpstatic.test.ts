@@ -191,6 +191,15 @@ describe('resolveAsset', () => {
     // same documented limit as the three above -- catches a deleted entry, not an invented one.
     expect(resolveAsset('/transferOverlay.js')!.file).toMatch(/[/\\]transferOverlay\.js$/);
     expect(existsSync(join(pkgDir, 'dist', 'transferOverlay.js'))).toBe(true);
+    // `transferBoot.js` is the FIFTH, added 2026-10-07 with the module itself, and it is the one
+    // of the five that `bridge.js` ACTUALLY IMPORTS -- so a missing entry here is not an inert
+    // table gap but the measured misdirection: the 404 stops `bridge.js` executing entirely and
+    // the error surfaces in `renderer.js`, naming the wrong file. Same trap as the four above
+    // (under vitest `import.meta.url` is the SOURCE file, so the entry resolves to
+    // `packages/web/src/transferBoot.js`, which never exists), same two-line cover, and the same
+    // documented limit: this catches a DELETED entry, not an invented one.
+    expect(resolveAsset('/transferBoot.js')!.file).toMatch(/[/\\]transferBoot\.js$/);
+    expect(existsSync(join(pkgDir, 'dist', 'transferBoot.js'))).toBe(true);
   });
 });
 
@@ -198,12 +207,13 @@ describe('transfer modules', () => {
   it('serves every browser module the transfer overlay needs', () => {
     // `resolveAsset` is this suite's own entry point -- it is what the existing cases use, and
     // it answers for one URL path at a time. There is no map-returning helper.
-    // ONLY THE MODULES THAT EXIST TODAY. Task 8 adds its own (`transferBoot.js`) when it lands.
     // `transferBridge.js` joined 2026-10-06 with the file itself, which is the habit Task 4's
     // note argues for: the entry and the module land together, so neither can be forgotten.
-    // `transferOverlay.js` joins the same way, 2026-10-07.
-    for (const path of
-      ['/transferUi.js', '/transferChunk.js', '/transferBridge.js', '/transferOverlay.js']) {
+    // `transferOverlay.js` and then `transferBoot.js` joined the same way, 2026-10-07 -- and with
+    // the last of them the page's module graph finally REACHES all five, since `bridge.js`
+    // imports `transferBoot.js`.
+    for (const path of ['/transferUi.js', '/transferChunk.js', '/transferBridge.js',
+      '/transferOverlay.js', '/transferBoot.js']) {
       expect(resolveAsset(path), path).toBeDefined();
     }
   });

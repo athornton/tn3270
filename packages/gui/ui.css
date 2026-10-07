@@ -95,7 +95,10 @@ body.ui-surface {
 #status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
 
 #buttons { display: flex; gap: 8px; justify-content: flex-end; }
-.ui-surface button, #keypad-overlay button { font: inherit; padding: 3px 12px; }
+.ui-surface button, #keypad-overlay button, #transfer-overlay button {
+  font: inherit;
+  padding: 3px 12px;
+}
 
 /* ---- The keypad ---- */
 
@@ -152,3 +155,81 @@ body.ui-surface {
 
 #keypad-overlay[hidden] { display: none; }
 #keypad-overlay > .keypad-close { position: absolute; top: 8px; right: 10px; }
+
+/*
+  THE WEB TRANSFER OVERLAY, 2026-10-07, which the GUI does not use either: in Electron the transfer
+  form IS a window (`transfer.html`, styled through `body.ui-surface` above), and a browser tab has
+  only the one pane.
+
+  THE TWO RULES ARE THE KEYPAD'S, and both are load-bearing -- but `position: fixed` earns its
+  keep HERE for a different measured reason than the one the keypad's comment gives, and the
+  difference is worth writing down because the obvious claim is FALSE for this element:
+
+   - `position: fixed`, so the form appears IN THE VIEWPORT. It does NOT exist to stop the canvas
+     being displaced: this overlay follows `<canvas id="screen">` in document order, so a static
+     one lands BELOW it and cannot push it anywhere. MEASURED 2026-10-07 under real Chromium with
+     `position: static`, the form shown: the canvas rect was byte-identical (`x:0 y:0` either
+     way), `browser-shot.mjs` still scored 1/1, and what actually broke was the FORM -- its top
+     edge sat at y=773 in a 773px viewport, i.e. entirely below the fold, `body.scrollHeight`
+     grew from 773 to 1105, and `elementFromPoint` over the Start button returned `null` instead
+     of `transfer-start`. So the honest statement is that a static overlay is an INVISIBLE,
+     UNCLICKABLE form the operator must scroll to find, not a displaced canvas.
+     The displacement hazard is real and is the keypad's: `gui/src/main.ts` records what it costs
+     -- "give the page a body margin and every click here misses by it" -- and
+     `browser-clicks.mjs` measured 15px of it once, from this file styling `body`. That is why
+     the shared rules above are scoped to `.ui-surface`. Fixed positioning keeps this element
+     structurally incapable of contributing to it, which is worth having; it is just not what a
+     mutation of this line would demonstrate.
+   - `background: Canvas`, opaque rather than translucent. The TUI's overlay once let host text
+     leak through into its chord column and opacity was the hard-won fix; here the surface
+     contains EDITABLE FIELDS over a logged-on session, which is strictly worse to read through.
+
+  `inset: 0` IS DELIBERATELY NOT COPIED FROM THE KEYPAD. That one fills the viewport because 48
+  buttons need the room; this form is ten rows, and covering the whole screen would hide the host
+  output the operator is naming files from. So it is a panel in the top-left with a `max-height`
+  and its own scrollbar, for the same reason the keypad has one: a browser page cannot resize its
+  own window.
+
+  VISIBILITY IS DRIVEN BY THE `hidden` ATTRIBUTE, matching `#keypad-overlay` above and
+  `transferOverlay.ts`, which sets `element.hidden` and never `style.display` -- an inline style
+  would beat this rule by specificity and silently diverge the two overlays' mechanisms.
+*/
+#transfer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-height: 100%;
+  overflow: auto;
+  background: Canvas;
+  color: CanvasText;
+  padding: 12px 14px;
+  border: 1px solid GrayText;
+}
+
+#transfer-overlay[hidden] { display: none; }
+
+#transfer-overlay h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+
+/*
+  TWO COLUMNS, LABEL AND CONTROL, matching the transfer WINDOW's `.row` grid in spirit without
+  reusing it: that one is a three-column grid per row because the window draws a Browse button
+  beside the `Local file` input. Here Browse lives in the static button row below the fields, so
+  the rows need no third column -- and one grid over all the rows keeps the labels aligned without
+  a fixed pixel width.
+*/
+#transfer-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 8px;
+  align-items: center;
+}
+
+#transfer-overlay label { text-align: right; color: GrayText; }
+#transfer-overlay input, #transfer-overlay select { font: inherit; padding: 2px 4px; min-width: 0; }
+#transfer-overlay input[disabled], #transfer-overlay select[disabled] { opacity: 0.5; }
+#transfer-overlay button[disabled] { opacity: 0.5; }
+
+/* Mirrors `#status` above, including the `min-height` that stops the panel resizing per message. */
+#transfer-status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
+
+#transfer-buttons { display: flex; gap: 8px; }

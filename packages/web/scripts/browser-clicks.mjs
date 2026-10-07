@@ -84,10 +84,21 @@ const SHOW_KEYPAD = 'Ctrl+K';
  * enumerating all 48 actions against `canvas/src/keys.ts` -- so for those two the button is the
  * only route that exists, and a dead button is a lost capability rather than an inconvenience.
  *
- * `Xfer` IS DELIBERATELY ABSENT. The gateway REJECTS `transferForm` at decode, because a browser
- * transfer would write to the gateway's filesystem rather than the operator's; clicking it
- * returns an `error` frame, which is correct behaviour and not an action this log would show. See
- * `web/src/protocol.ts`.
+ * `Xfer` IS DELIBERATELY ABSENT, AND THE REASON CHANGED UNDER IT -- corrected 2026-10-07.
+ *
+ * The note here used to say the gateway REJECTS `transferForm` at decode and answers an `error`
+ * frame. That was true when it was written and is now false twice over: `protocol.ts` accepted
+ * the kind on 2026-10-06 (socket-carried file I/O removed the reason to refuse it, since the
+ * bytes travel as `transferChunk`/`transferData` and never touch the gateway's filesystem), and
+ * `bridgecore.ts` INTERCEPTS it client-side as of 2026-10-07 to show the DOM overlay -- so it no
+ * longer reaches the socket at all.
+ *
+ * The CONCLUSION survives the correction, which is why the case is still absent rather than
+ * added here: clicking `Xfer` produces no `action:` line in the gateway's log, so it cannot be
+ * expressed in this table's one-action-per-click shape. It is intercepted, exactly as `Ctrl+K`
+ * is, and this harness's own expectation comment below explains why an intercepted press is
+ * asserted by its ABSENCE from the log. Task 9 of the transfer plan adds the overlay's positive
+ * cover -- visibility, field rows, button states -- as its own cases.
  */
 const CASES = [
   { label: 'PF1', action: { kind: 'pf', n: 1 } },

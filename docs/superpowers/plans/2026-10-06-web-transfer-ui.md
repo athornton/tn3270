@@ -2336,28 +2336,38 @@ Note how it launches, how it asserts actions in order, and how it reports counts
 
 Extend the harness to, in order: open the overlay (the `Xfer` keypad button or the `transferForm` action), assert the overlay became visible, assert **the canvas did not move** (its bounding rect must be unchanged from before the overlay opened — this is the 15px-displacement regression), fill the host-file field, and assert the `Save…` button starts disabled.
 
-Follow the file's existing assertion style. The canvas-position check is the important one and must be explicit:
+Follow the file's existing assertion style. Keep the canvas-position check as a cheap invariant, but **it is NOT cover for `position: fixed`** — see the correction below:
 
 ```javascript
-// THE DISPLACEMENT CHECK, and it is not theoretical: `ui.css` styling `body` once moved the
-// canvas 15px and every keypad and selection click missed by that much, silently. The overlay
-// is `position: fixed` precisely so this stays true.
+// Kept as a cheap invariant, NOT as cover for `position: fixed`. See the next step.
 const before = await canvasRect(page);
 await openTransferOverlay(page);
 const after = await canvasRect(page);
 assert.deepEqual(after, before, 'the transfer overlay must not displace the canvas');
 ```
 
+**THE DISPLACEMENT CHECK CANNOT FAIL ON THIS ELEMENT — MEASURED 2026-10-07 in Task 8.** The text above called it "the important one" and Step 4 claimed a `position: static` mutant would redden it. Both claims are false, and they were tested directly under real Chromium with the overlay SHOWN: `#transfer-overlay` follows `<canvas id="screen">` in document order, so a static one lands *below* the canvas and cannot push it anywhere. The canvas rect came back byte-identical (`x:0 y:0 width:1000 height:773` either way) and `browser-shot.mjs` still scored 1/1 with the mutant in place.
+
+What `position: static` actually breaks is the **form**: its top edge sat at y=773 in a 773px viewport — entirely below the fold — `body.scrollHeight` grew from 773 to 1105, and `elementFromPoint` over the Start button returned `null` rather than `transfer-start`. The 15px canvas displacement is real, but it belongs to `ui.css` styling `body`, which is why those rules are scoped to `.ui-surface`.
+
 - [ ] **Step 3: Run it**
 
 Run: `node packages/web/scripts/browser-clicks.mjs 2>&1 | tail -5`
 Expected: the previous 9 checks plus the new ones, all passing.
 
-- [ ] **Step 4: Mutation-prove the displacement check**
+- [ ] **Step 4: Mutation-prove the check that CAN fail**
 
-Temporarily give `#transfer-overlay` `position: static` in the served `ui.css`, rebuild, and re-run the harness.
+So assert **viewport containment and hit-testability**, which is what the mutation actually moves:
 
-Expected: the displacement assertion **fails**. Restore `position: fixed`, rebuild, confirm it passes again. A check that cannot fail is not cover — and `select.mjs` is recorded as having been mutation-proved the same way.
+```javascript
+// `position: static` puts this form below the fold and makes Start unhittable -- measured
+// 2026-10-07: top y=773 in a 773px viewport, elementFromPoint over Start returning null.
+const b = await rectOf(page, '#transfer-start');
+assert.ok(b.top >= 0 && b.bottom <= innerHeight, 'the Start button must be in the viewport');
+assert.equal(await elementIdAtCenterOf(page, '#transfer-start'), 'transfer-start');
+```
+
+Temporarily give `#transfer-overlay` `position: static` in the served `ui.css` and re-run. Expected: the containment/hit-test assertion **fails** (it did in Task 8's probe) while the canvas-rect assertion stays green. Restore `position: fixed` and confirm. A check that cannot fail is not cover — and `select.mjs` is recorded as having been mutation-proved the same way.
 
 - [ ] **Step 5: Commit**
 

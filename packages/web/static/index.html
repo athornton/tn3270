@@ -58,10 +58,16 @@
   The ADDRESSES stay flat at `/`, unlike the GUI's `../frontend/dist/...`, for the reason two
   paragraphs up.
 
-  NOTHING THIS DOCUMENT LOADS USES THOSE TWO ENTRIES YET, and that is not an oversight: the
-  overlay that imports `transferUi.js` is a later task in the same plan. A map entry naming a
-  module the gateway already serves is inert until something imports it, and having it in place
-  first is what stops the specifier being the thing that is missing on the day the overlay lands.
+  BOTH DEEP ENTRIES ARE NOW LIVE, 2026-10-07. They were added ahead of their consumer and were
+  inert until this day; `bridge.js` now imports `./transferBoot.js`, which imports
+  `@tn3270/canvas/dist/transferUi.js` (the first key), which imports
+  `@tn3270/frontend/dist/transferForm.js` (the second). Having them in place first is what stopped
+  the specifier being the thing that was missing on the day the overlay landed.
+
+  `transferBoot.js`'s OTHER imports need NO entries, and that is the distinction worth keeping
+  straight: `./transferBridge.js` and `./transferChunk.js` are RELATIVE, so the browser resolves
+  them against this document's own root, where `httpstatic.ts` serves them flat. Only BARE
+  specifiers need the map.
 -->
 <script type="importmap">
 {
@@ -95,6 +101,62 @@
   <button type="button" class="keypad-close" id="keypad-close">Close</button>
   <h1>Keypad</h1>
   <div id="keypad-keys"></div>
+</div>
+<!--
+  THE TRANSFER OVERLAY. Same two rules as the keypad's, next to it in document order: opaque and
+  `position: fixed` in `ui.css`, so it paints over the canvas rather than sitting under it.
+
+  WHAT `position: fixed` BUYS HERE IS NOT WHAT THE KEYPAD'S COMMENT CLAIMS, and `ui.css`'s own
+  rule carries the measurement: because this element FOLLOWS the canvas in document order, a
+  static one cannot displace it -- measured 2026-10-07 under real Chromium as a byte-identical
+  canvas rect and a still-green `browser-shot.mjs`. What broke was the FORM: its top edge at
+  y=773 in a 773px viewport, entirely below the fold, with `elementFromPoint` over Start
+  returning `null`. The 15px canvas displacement is real and belongs to `ui.css` styling `body`,
+  which is why those rules are scoped; it is not what this line prevents.
+
+  Opaque rather than translucent because these are EDITABLE FIELDS over a logged-on host screen,
+  which is worse to read through than the read-only chord column the TUI once leaked into.
+
+  `hidden` IN THE MARKUP as well as in `createTransferOverlay`, which sets it again at
+  construction. Belt and braces on purpose, exactly as for the keypad above: either one alone is
+  removable by someone who sees the other, and the cost of getting it wrong is a form covering the
+  screen on every page load.
+
+  THE IDS ARE PREFIXED `transfer-`, which matters here and not in the Electron GUI: the keypad and
+  the transfer form share ONE document in this front end, so an unprefixed `#close` or `#status`
+  would collide with the keypad's. The field rows' ids are prefixed by `transferBoot.ts` from
+  `UiField.id` for the same reason.
+
+  EMPTY OF FIELD ROWS. All ten are drawn into `#transfer-fields` by `createTransferUi` through
+  `transferBoot.ts`'s `render`, from `TRANSFER_FIELDS` and the applicability rules -- so this
+  document never spells the field table, which is what stops it becoming a second, drifting copy.
+
+  `type="button"` ON EVERY BUTTON IS EXPLICIT AND LOAD-BEARING: a bare `<button>` defaults to
+  `type="submit"`, which `keypadUi.ts` records as the trap that would turn a key press into a page
+  reload. There is no `<form>` element here, so no submit has anywhere to go today -- which is
+  precisely what would make the omission invisible until someone wrapped these in one.
+
+  THE `Save…` BUTTON EXISTS BECAUSE THE SAVE PICKER NEEDS TRANSIENT USER ACTIVATION, and cannot be
+  opened from the completion callback: the click that started the transfer is spent by the time
+  `transferDone` arrives. So a receive ends with this button ENABLED and the operator's click on it
+  is what opens the dialog. It starts `disabled` because there is nothing to save until then.
+
+  THE FILE INPUT IS `hidden` AND DRIVEN BY THE Browse BUTTON. A styled `<input type="file">` is not
+  possible across browsers, and the click on Browse is the user gesture the chooser needs; a
+  `hidden` input still opens one from a scripted `click()`.
+-->
+<div id="transfer-overlay" hidden>
+  <h1>File transfer</h1>
+  <div id="transfer-fields"></div>
+  <p id="transfer-status"></p>
+  <div id="transfer-buttons">
+    <button type="button" id="transfer-browse">Browse…</button>
+    <button type="button" id="transfer-start">Start</button>
+    <button type="button" id="transfer-cancel" disabled>Cancel</button>
+    <button type="button" id="transfer-save" disabled>Save…</button>
+    <button type="button" id="transfer-close">Close</button>
+  </div>
+  <input type="file" id="transfer-file" hidden>
 </div>
 <!--
   ORDER MATTERS. Module scripts execute in document order, and `renderer.js` reads

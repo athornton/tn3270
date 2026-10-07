@@ -57,7 +57,7 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
   // structured clone gave it and needs no knowledge of the transport.
   // `transferData` carries file bytes for exactly the same reason and in the same shape, so its
   // browser-side decode is the one the bridge ALREADY uses for `coverage` rather than a second
-  // convention: `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` at `bridgecore.ts:133`.
+  // convention: `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` at `bridgecore.ts:155`.
   // (`:105` until 2026-10-06, when `onTransfer` and its inbound branch moved it. The consumer
   // this comment promises exists is now real -- that branch decodes `transferData` exactly so.)
   //

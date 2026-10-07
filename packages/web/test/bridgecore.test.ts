@@ -161,6 +161,50 @@ describe('createBridge', () => {
     expect(socket.sent.filter((s) => s.includes('toggleKeypad'))).toHaveLength(0);
   });
 
+  it('INTERCEPTS transferForm: shows the local overlay, never sends it', () => {
+    /**
+     * THE TRANSFER FORM IS A DOM OVERLAY IN THIS FRONT END TOO (2026-10-07), so opening it is a
+     * local display decision. It USED to cross the socket, where `main.ts:314` swallowed it with
+     * a bare return -- so the operator's `Xfer` press was a round trip that produced nothing.
+     *
+     * BOTH HALVES ARE ASSERTED, and the second is the one that matters: a handler that fired AND
+     * also sent would reach `applyAction`, which THROWS on this kind outside any try in a socket
+     * handler -- which `wsserver.ts` records as ending the gateway process. The server keeps its
+     * own intercept for exactly that reason, since a client is not obliged to run served code;
+     * this is the other half of `protocol.ts`'s two-branch rule.
+     */
+    const socket = fakeSocket();
+    let shown = 0;
+    const api = createBridge({
+      socket: socket as never,
+      storage: fakeStorage() as never,
+      inflate: async (d) => String(d),
+      showTransfer: () => { shown += 1; },
+    });
+    socket.onopen?.();
+    api.sendAction({ kind: 'transferForm' });
+    expect(shown).toBe(1);
+    expect(socket.sent.filter((s) => s.includes('transferForm'))).toHaveLength(0);
+  });
+
+  it('DROPS transferForm when no handler is given, rather than sending it', () => {
+    // `showTransfer` is optional on the deps for the reason `toggleKeypad` is: the gateway's own
+    // tests, and any caller with no DOM, must be able to build a bridge without one. Dropping is
+    // correct for a client with no form to show; falling through to the socket would hand the
+    // server an action `applyAction` throws on.
+    //
+    // THE ABSENCE CASE IS NOT CEREMONY. `deps.showTransfer?.()` with a non-optional call --
+    // `deps.showTransfer()` -- is a `TypeError` thrown out of `sendAction`, i.e. out of the
+    // renderer's own key handler, for every client that has no overlay.
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    socket.onopen?.();
+    expect(() => api.sendAction({ kind: 'transferForm' })).not.toThrow();
+    expect(socket.sent.filter((s) => s.includes('transferForm'))).toHaveLength(0);
+  });
+
   it('hands transfer messages to onTransfer, decoding transferData bytes', async () => {
     /**
      * WITHOUT THIS HOOK THE THREE TRANSFER KINDS VANISH WITH NOTHING IN ANY CONSOLE.

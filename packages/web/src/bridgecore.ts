@@ -82,6 +82,28 @@ export interface BridgeDeps {
    * message, which is exactly the claim a cast must not make. The overlay narrows on `kind`.
    */
   readonly onTransfer?: (msg: { kind: string } & Record<string, unknown>) => void;
+  /**
+   * Open the transfer form. OPTIONAL, and absent means "this client has no transfer form" --
+   * the same contract `toggleKeypad` above has, for the same reason.
+   *
+   * SEVENTH MEMBER OF `BridgeDeps`, and still not a breach of the four-function rule, which is
+   * about `BridgeApi` below. See the note on `toggleKeypad`, which made that argument first.
+   *
+   * THE SERVER'S OWN `transferForm` INTERCEPT STAYS (`main.ts:314`), and this does not replace
+   * it. `applyAction` still THROWS on this kind (`frontend/src/actions.ts:57-59`) and `main.ts`
+   * calls it outside any try inside a socket `data` handler, where an escaping throw ends the
+   * GATEWAY PROCESS -- and a client is not obliged to run served code:
+   * `integration.test.ts` sends every `Action` kind as a raw frame. Both halves are required,
+   * which is `protocol.ts`'s two-branch rule.
+   *
+   * `| undefined` EXPLICITLY, unlike `toggleKeypad` beside it. Under
+   * `tsconfig.base.json`'s `exactOptionalPropertyTypes: true` a bare `?:` accepts the property
+   * being ABSENT but rejects it being present and `undefined`, so the annotation is what lets a
+   * caller inject the result of a condition rather than branching on the whole object literal.
+   * `bridge.ts` passes a real function today; `transferBridge.ts`'s `savePicker` records the
+   * measurement (`TS2379`) for the dep that is genuinely handed `undefined`.
+   */
+  readonly showTransfer?: (() => void) | undefined;
 }
 
 export interface BridgeApi {
@@ -193,6 +215,37 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
        */
       if ((action as { kind?: unknown }).kind === 'toggleKeypad') {
         deps.toggleKeypad?.();
+        return;
+      }
+      /**
+       * `transferForm` IS CLIENT-SIDE TOO, AND FOR THE SAME REASON THE KEYPAD IS.
+       *
+       * The transfer form is a DOM overlay drawn in the browser (`transferOverlay.ts`), so
+       * showing it is a local display decision with nothing for the server to do. The operator
+       * reaches this through the keypad's `Xfer` button (`frontend/src/keypad.ts:145`) or the
+       * renderer's key binding, and both arrive here as an `Action`.
+       *
+       * BEFORE THIS BRANCH THE ACTION CROSSED THE SOCKET AND WAS SWALLOWED. `main.ts:314` is
+       * `if (msg.action.kind === 'transferForm') return;` -- a bare return with no reply, which
+       * Task 3 of this plan recorded as the deliberate "SWALLOWED" state while the browser half
+       * did not exist yet. So an `Xfer` press was a round trip that produced nothing visible.
+       *
+       * ## THE SERVER'S INTERCEPT STAYS AND REMOVING IT WOULD BE A BUG, NOT A CLEANUP
+       *
+       * Exactly as the `toggleKeypad` note above argues: `applyAction` THROWS on this kind
+       * (`frontend/src/actions.ts:57-59`, "the front end owns its own dialog") and `main.ts`
+       * calls it outside any try inside a socket `data` handler. This interception is SERVED
+       * code, and a client is not obliged to run served code -- `integration.test.ts` sends
+       * every `Action` kind as a raw frame, which is precisely the unobliged client. Both halves
+       * are required, which is `protocol.ts`'s two-branch rule.
+       *
+       * `deps.showTransfer` is OPTIONAL, so the gateway's own tests and any caller with no DOM
+       * can construct a bridge without one. Absent, the action is DROPPED rather than sent --
+       * which is correct for a client with no form to show, and is why this returns either way
+       * rather than falling through to the socket.
+       */
+      if ((action as { kind?: unknown }).kind === 'transferForm') {
+        deps.showTransfer?.();
         return;
       }
       deps.socket.send(JSON.stringify({ kind: 'action', action }));

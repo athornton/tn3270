@@ -91,6 +91,34 @@ function table(): Map<string, Asset> {
     // `show()`/`hide()` it once `transferForm` is intercepted client-side, and that wiring is
     // Task 8's, not this one's.
     'transferOverlay.js',
+    // `transferBoot.js` joins 2026-10-07 AND IS THE FIRST OF THESE THAT A PAGE ACTUALLY LOADS:
+    // `bridge.js` now imports it, so the three above are reached through it and the page's module
+    // graph finally includes them. That also changes what a missing entry costs here -- a 404 on
+    // this module means BRIDGE.JS ITSELF NEVER EXECUTES, `window.tn3270` is never assigned, and
+    // the error surfaces in RENDERER.JS as `Cannot read properties of undefined (reading
+    // 'onAtlas')`, naming the wrong file. That is the measured misdirection the graph-walking
+    // test above exists for.
+    //
+    // ITS OWN GRAPH, measured 2026-10-07 on the BUILT file, since `import type` erases and only
+    // `dist` tells the truth -- `dist/transferBoot.js` has exactly TWO `from` lines:
+    //
+    //   `./transferBridge.js`                   -- relative, served above, reaches
+    //                                              `./transferChunk.js`, also above
+    //   `@tn3270/canvas/dist/transferUi.js`     -- BARE, mapped by `static/index.html` to
+    //                                              `./transferUi.js` (served through
+    //                                              `BROWSER_MODULES` below), which in turn
+    //                                              imports `@tn3270/frontend/dist/transferForm.js`,
+    //                                              mapped to `./transferForm.js` (served below)
+    //
+    // Its `import type { TransferFieldId }` from `transferForm.js` is NOT in that list: it
+    // erased, which is why the source's three import statements are two at runtime. Every link in
+    // the chain is already in this table. A bare specifier is invisible to the graph-walking test,
+    // which matches only relative ones -- the import map is what resolves it, and only a real
+    // browser can fail to apply one.
+    //
+    // AND THE SAME WARNING AS ITS NEIGHBOURS: nothing in this loop is covered automatically, so
+    // this module is named in the `/bridge.js` case too.
+    'transferBoot.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }

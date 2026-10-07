@@ -5,6 +5,12 @@ import { createKeypadOverlay } from './keypadOverlay.js';
 // `index.html`'s import map resolves this one name to `canvas/dist/keypadUi.js`, whose only
 // runtime import is `@tn3270/frontend` -- the second map entry.
 import { createKeypadUi } from '@tn3270/canvas';
+// The transfer form's two halves, BOTH BY DEEP RELATIVE PATH into this package: they are served
+// flat at `/` beside this module (`httpstatic.ts`'s own-package loop), so `./` is what resolves
+// in the browser and needs no import-map entry. `transferBoot.js`'s own imports are what need
+// the map's two deep keys.
+import { bootTransfer } from './transferBoot.js';
+import { createTransferOverlay } from './transferOverlay.js';
 
 /**
  * The few lines that touch real browser globals. Everything testable is in `bridgecore.ts`.
@@ -108,6 +114,76 @@ const overlay = createKeypadOverlay({
   },
 });
 
+/**
+ * The transfer overlay's two elements THIS FILE itself touches.
+ *
+ * A HARD FAILURE, NOT A DEAD BUTTON, for the reason the keypad's own check above gives: a missing
+ * element would make every `Xfer` press silently do nothing, which looks like a protocol fault and
+ * is not one.
+ *
+ * ONLY THE TWO USED HERE, AND THAT IS NOT AN OVERSIGHT. `bootTransfer` looks up the other seven
+ * itself and throws by NAME on each (`transfer overlay is missing #transfer-fields`), so listing
+ * them again here would be a second copy to drift -- and it is called a few lines below, during
+ * module evaluation, so a missing field element still fails at LOAD rather than at first click.
+ *
+ * CHECKED BEFORE EITHER OBJECT IS CONSTRUCTED, which is what lets `transferEl` be an
+ * `HTMLElement` rather than a `| null` at the point `createTransferOverlay` takes it.
+ */
+const transferEl = document.getElementById('transfer-overlay');
+const transferClose = document.getElementById('transfer-close');
+if (transferEl === null || transferClose === null) {
+  throw new Error('bridge: #transfer-overlay or #transfer-close is missing from index.html');
+}
+
+/**
+ * The transfer form, BUILT BEFORE THE BRIDGE FOR THE SAME REASON THE KEYPAD IS.
+ *
+ * `createBridge` takes `showTransfer` and `onTransfer` as deps, so both the boot object and the
+ * overlay must exist first. Getting this backwards is a TDZ read on a `const`, which this project
+ * has already shipped once -- and the recorded finding is that OPTIONAL CHAINING DOES NOT GUARD
+ * IT: `boot?.onMessage` would still throw `ReferenceError`. So the declaration order IS the guard,
+ * exactly as it is for the keypad overlay above.
+ *
+ * THE ORDER WITHIN THIS BLOCK IS ALSO FIXED, and it is a two-way dependency resolved by one
+ * direction being lazy. `bootTransfer` wires the form's own buttons -- including Close -- so it
+ * needs the overlay; the overlay's `hasUnsaved`/`confirmDiscard` need the boot object. The
+ * overlay's needs are satisfied through ARROWS called on a later click, while `bootTransfer`
+ * builds its handlers at construction, so the boot object is built first and reads the overlay
+ * lazily. Reversing it would put an eager `boot.hasUnsaved` read above `boot`'s own declaration.
+ *
+ * ## `bootTransfer` IS WHAT SENDS, AND IT SENDS TEXT ON THIS SAME SOCKET
+ *
+ * `transferStart`, `transferChunk` and `transferCancel` are JSON TEXT frames, not actions: they
+ * are not part of `Action` and do not go through `sendAction`. `protocol.ts` decodes them from the
+ * client's own text messages and `transferGateway.ts` acts on them, which is why this passes the
+ * raw `socket.send` rather than anything off the bridge.
+ */
+const boot = bootTransfer(document, (text) => { socket.send(text); });
+
+const transferOverlay = createTransferOverlay({
+  element: transferEl,
+  // NOTHING TO BUILD. The overlay's markup is static in `index.html` and its field rows are drawn
+  // by `bootTransfer`'s `render`, which has already run once by now (`createTransferUi` redraws
+  // before it returns). The keypad's 48 buttons are built lazily because they are expensive and
+  // most sessions never ask; ten form rows that are already drawn are not.
+  build: () => { /* static markup; see above */ },
+  hasUnsaved: () => boot.hasUnsaved(),
+  // A COMPLETED RECEIVE HELD IN MEMORY IS LOST BY CLOSING, with the host already out of transfer
+  // mode and nothing to retry from -- see `transferOverlay.ts`'s "WHY IT WARNS" section.
+  confirmDiscard: () => globalThis.confirm(
+    'The transfer finished but the file has not been saved. Close and lose it?',
+  ),
+});
+
+/**
+ * The overlay's own Close button, wired here because `transferOverlay` is this file's object.
+ *
+ * `hide()` AND NOT a toggle, for the reason the keypad's Close button gives below: a toggle would
+ * RE-SHOW the form on a double-click, because the first click already hid it. And `hide()` is
+ * where the unsaved-file warning lives, so this button is the one path that must go through it.
+ */
+transferClose.addEventListener('click', () => { transferOverlay.hide(); });
+
 const bridge = createBridge({
   socket,
   storage: sessionStorage,
@@ -116,6 +192,13 @@ const bridge = createBridge({
   // decision and `toggleKeypad` never reaches the gateway. The server keeps its own intercept
   // regardless, because served code is not code a client is obliged to run.
   toggleKeypad: () => { overlay.toggle(); },
+  // THE SAME BARGAIN FOR THE TRANSFER FORM, which is a DOM overlay here too. `main.ts:314` keeps
+  // its own intercept, for the reason `bridgecore.ts` sets out at length: `applyAction` THROWS on
+  // this kind outside any try in a socket handler, and a client is not obliged to run served code.
+  showTransfer: () => { transferOverlay.show(); },
+  // The three gateway transfer kinds, narrowed by the boot module -- `bridgecore.ts` declines to
+  // narrow a parsed JSON object into a union it never validated, and says so.
+  onTransfer: (msg) => { boot.onMessage(msg); },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

@@ -26,7 +26,7 @@ import { MAX_TRANSFER_BYTES, ChunkReassembler, chunkBytes } from './transferChun
  * Chrome-over-localhost always gets the picker.
  *
  * `btoa` IS THE ONE CAPABILITY NOT INJECTED, deliberately: it is the convention this socket
- * already uses in the other direction (`bridgecore.ts:133` decodes the atlas with
+ * already uses in the other direction (`bridgecore.ts:155` decodes the atlas with
  * `atob`), it is universal in browsers, and Node has had both as globals since 16 -- measured
  * present under this repo's test runner, which is what lets the encoder be asserted directly
  * rather than through a fake.
