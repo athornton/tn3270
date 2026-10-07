@@ -169,6 +169,14 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
    * source of truth to drift -- it is the one value this module needs and cannot read back.
    */
   let declared = 0;
+  /**
+   * Has any inbound chunk been refused in this transfer?
+   *
+   * SEPARATE FROM THE REASSEMBLER'S OWN LATCH, because a constructor failure never produces a
+   * reassembler to latch -- which is precisely the hole `finishEmpty` fell into. Cleared only by
+   * `cancel()`, like every other piece of receive state here.
+   */
+  let refused = false;
 
   /**
    * base64 one chunk, THE ONLY CORRECT WAY TO DO IT IN A BROWSER.
@@ -239,6 +247,8 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
           inbound = new ChunkReassembler(total);
           declared = total;
         } catch (err) {
+          // THE CONSTRUCTOR FAILURE THAT ASSIGNS NOTHING, which is why `refused` exists.
+          refused = true;
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       } else if (total !== declared) {
@@ -257,6 +267,7 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
         // reassembler is left LATCHED rather than reset: a sender that contradicts itself has
         // disqualified the whole transfer, not just this chunk.
         inbound.accept(-1, new Uint8Array(0));
+        refused = true;
         return {
           ok: false,
           error: `chunk ${seq} declares total ${total}, but the transfer declared ${declared}`,
@@ -264,7 +275,7 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
       }
       const out = inbound.accept(seq, bytes);
       // NOT CLEARED ON FAILURE -- see `inbound`'s declaration. The latch is in the object.
-      if (!out.ok) return { ok: false, error: out.error };
+      if (!out.ok) { refused = true; return { ok: false, error: out.error }; }
       // `complete()` AND NOT `out.done` -- equivalent here, and `ReceiveResult` records why it is
       // still the right question to ask.
       if (inbound.complete()) { complete = inbound.bytes(); inbound = undefined; }
@@ -325,10 +336,24 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
       // over a transfer that did deliver chunks, which is a contradiction this must not paper
       // over by inventing an empty file -- `acceptData`'s own checks own that case.
       if (inbound !== undefined || complete !== undefined) return;
+      // NOR WHEN A CHUNK WAS REFUSED, which the two checks above CANNOT see and which was the
+      // fourth instance of this feature's empty-file-as-success class (found 2026-10-07).
+      //
+      // `acceptData`'s `try` returns a `ChunkReassembler` constructor failure WITHOUT assigning
+      // `inbound`, so an over-cap receive left both of those undefined and looked exactly like
+      // the legal zero-byte case. Measured: an 11 MB download -- which the gateway had no cap
+      // against in that direction -- made `hasUnsaved()` true, enabled Save, and wrote a 0-byte
+      // `REPORT.TXT` while the status line correctly said the transfer had been refused.
+      //
+      // THE CALLER ALSO GUARDS THIS (`transferBoot.ts` holds the refusal and skips the call), and
+      // both halves are deliberate: a caller that forgets must still get nothing, because the
+      // cost of this one going wrong is an operator's file silently replaced by an empty one.
+      if (refused) return;
       complete = new Uint8Array(0);
     },
 
     cancel() {
+      refused = false;
       // THE ONLY RESET PATH, and it has to clear `inbound` as well as `complete`: without that a
       // latched refusal would make the overlay refuse every later transfer for the session, since
       // `acceptData` deliberately keeps the dead reassembler. A cancelled transfer's partial

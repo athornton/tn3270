@@ -520,13 +520,27 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
       }
       if (msg.kind !== 'transferDone') return;
       const ok = msg['ok'] === true;
-      if (ok && running?.direction === 'receive') {
+      if (ok && receiveError === undefined && running?.direction === 'receive') {
         // THE ZERO-BYTE RECEIVE, which no chunk can announce: `chunkBytes` emits none for an empty
         // source, and a gateway that helpfully sent one empty chunk is refused by the
         // reassembler with `chunk 0 arrived after all 0 bytes`. `finishEmpty()` is inert when
         // anything was staged or is still in flight, so this cannot mask a half-finished receive
         // -- and it is guarded on the DIRECTION because a SEND that staged nothing is every
         // successful upload there is. See `running`.
+        //
+        // `receiveError === undefined` IS THE FOURTH GUARD IN THIS FEATURE AGAINST AN EMPTY FILE
+        // REPORTED AS A SUCCESS, and `finishEmpty()`'s own inertness does NOT cover the case.
+        // It bails when `inbound` or `complete` is set, but a chunk refused by
+        // `ChunkReassembler`'s CONSTRUCTOR leaves `inbound` undefined (`transferBridge.ts:238-243`
+        // returns the error without assigning) -- so "nothing staged" looked like the legal empty
+        // receive and an empty file became saveable.
+        //
+        // REACHABLE WITH NO BAD CLIENT AND NO MALICE. `transferGateway.ts` applies NO cap to the
+        // receive direction -- it sends `total: received.length` verbatim and the file contains
+        // zero references to `MAX_TRANSFER_BYTES` -- so an 11 MB host dataset trips the cap in the
+        // BROWSER'S reassembler. MEASURED 2026-10-07 before this guard: `hasUnsaved()` true, Save
+        // enabled, and clicking it downloaded a 0-byte `REPORT.TXT` while the status line
+        // correctly said the transfer had been refused. The button contradicted the message.
         bridge.finishEmpty();
       }
       if (ok && receiveError !== undefined) {

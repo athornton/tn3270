@@ -1,7 +1,7 @@
 import type { Session } from '@tn3270/core';
 import { transferCommand, type StartTransferOptions, type TransferRun } from '@tn3270/frontend';
 import type { ServerMessage } from './protocol.js';
-import { ChunkReassembler, chunkBytes } from './transferChunk.js';
+import { ChunkReassembler, MAX_TRANSFER_BYTES, chunkBytes } from './transferChunk.js';
 
 /**
  * The gateway half of socket-carried file transfer: stage, run, relay.
@@ -339,6 +339,30 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
         if (mine !== generation) return;
         generation += 1;
         run = undefined;
+        if (result.ok && received !== undefined && received.length > MAX_TRANSFER_BYTES) {
+          // REFUSED BEFORE A SINGLE CHUNK GOES OUT, because the browser's reassembler would refuse
+          // it anyway -- and badly. ITS CAP LIVES IN `ChunkReassembler`'s CONSTRUCTOR, which
+          // throws with nothing assigned, so `transferBridge.finishEmpty()` could not tell the
+          // refusal from the legal zero-byte receive and made a 0-BYTE FILE SAVEABLE. Measured
+          // 2026-10-07 with an 11 MB total: Save enabled, a 0-byte `REPORT.TXT` on disk, and the
+          // status line correctly saying the transfer had been refused.
+          //
+          // THIS DIRECTION HAD NO CAP AT ALL until then, which was the real asymmetry: the upload
+          // path checks `MAX_TRANSFER_BYTES` twice (in the browser before sending, and again here
+          // because a client is not to be trusted) while a DOWNLOAD was bounded only by whatever
+          // the host happened to hold. Sending ~2560 chunks the receiver is certain to reject is
+          // the worse half of that.
+          //
+          // The bytes are dropped rather than truncated: a partial file reported as a success is
+          // the failure this module's own `staged` comment exists to prevent.
+          fail(
+            `the host sent ${received.length} bytes, over the ${MAX_TRANSFER_BYTES}-byte limit; `
+            + 'the gateway stages the whole file in memory, so larger transfers are refused',
+          );
+          if (mine === generation) { generation += 1; run = undefined; }
+          deps.repaint();
+          return;
+        }
         if (result.ok && received !== undefined) {
           // CHUNKED OUT THE WAY AN UPLOAD COMES IN, then terminated by `transferDone`. The order
           // is load-bearing: the browser stages on `transferData` and finishes on `transferDone`,

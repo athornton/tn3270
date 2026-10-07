@@ -125,15 +125,22 @@ const REFUSED: readonly string[] = ['quit', 'copy'];
  * `toggleKeypad` was the only member until `transferForm` JOINED IT on 2026-10-06, moving here out
  * of `REFUSED` above. Neither is refused and neither is applied.
  *
- * THE TWO ARE SWALLOWED FOR DIFFERENT REASONS, AND THE DIFFERENCE IS NOT COSMETIC. `toggleKeypad`
- * is a browser-side DOM overlay, so `bridgecore.ts` intercepts it client-side (`:150`) and should
- * never cross the socket at all; `main.ts`'s `return` is only for clients that send it anyway --
- * which is exactly this test, since it builds raw frames rather than running the served bridge.
- * `transferForm` has NO client-side interception yet: `bridgecore.ts` contains no `transferForm`
- * at all as of 2026-10-06, so the action DOES cross the socket and `main.ts`'s `return` is the
- * only thing standing between it and `applyAction`'s throw. Task 8 of the transfer plan is what
- * gives the browser its own dialog; until then this entry is load-bearing for real clients, not
- * just for hand-built frames.
+ * BOTH ARE NOW SWALLOWED FOR THE SAME REASON, AND THEY REACHED IT ON DIFFERENT DAYS.
+ * `toggleKeypad` is a browser-side DOM overlay, so `bridgecore.ts` intercepts it client-side
+ * (`:216`) and it should never cross the socket at all; `main.ts`'s `return` is only for clients
+ * that send it anyway -- which is exactly this test, since it builds raw frames rather than
+ * running the served bridge. **`transferForm` joined it on 2026-10-07**: `bridgecore.ts:247`
+ * intercepts that too, now that the browser has its own overlay to show.
+ *
+ * THIS PARAGRAPH SAID THE OPPOSITE UNTIL THEN -- that `bridgecore.ts` "contains no `transferForm`
+ * at all" and that Task 8 of the transfer plan would change it. It was true when written and
+ * Task 8 is what falsified it, which is the shape worth noticing: a comment naming the future
+ * change that will invalidate it does not thereby survive that change.
+ *
+ * SO BOTH `main.ts` RETURNS STAY, and for the reason `protocol.ts`'s two-branch rule gives rather
+ * than because either is now redundant: served code is not code a client is obliged to run, and
+ * this test IS the unobliged client. `applyAction` throws on both kinds outside any try in a
+ * socket handler, where a throw ends the gateway and every other operator's session.
  *
  * `transferForm` EARNS ITS PLACE HERE BY THE SAME RULE `toggleKeypad` DOES, which is the half worth
  * stating: `applyAction` still THROWS on it, so `protocol.ts` accepting the kind would have ended

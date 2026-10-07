@@ -884,3 +884,37 @@ describe('the TransferFiles call PATTERN, not just its contract', () => {
     expect(h.opts.files.exists('local.txt')).toBe(false);
   });
 });
+
+describe('an oversize RECEIVE, the direction that had no cap at all', () => {
+  it('refuses before sending a single chunk, rather than letting the browser choke', () => {
+    // THE ASYMMETRY THIS CLOSES: the upload path checks MAX_TRANSFER_BYTES twice -- in the
+    // browser before sending, and again here because a client is not to be trusted -- while a
+    // DOWNLOAD was bounded only by whatever the host happened to hold. `grep MAX_TRANSFER_BYTES`
+    // in this module returned ZERO hits before 2026-10-07.
+    //
+    // Letting it through was worse than slow. The browser's cap lives in `ChunkReassembler`'s
+    // CONSTRUCTOR, which throws with nothing assigned, so `transferBridge.finishEmpty()` could
+    // not tell that refusal from the legal zero-byte receive -- measured: Save enabled over a
+    // 0-byte file while the status line correctly said the transfer was refused.
+    const h = harness();
+    h.gw.start(['Direction=receive', 'LocalFile=big.bin', 'HostFile=BIG.DATA'], fakeSession());
+    // The host delivers 11 MB, which `transferRun` hands to `files.write` at the end.
+    h.opts.files.write('big.bin', new Uint8Array(11 * 1024 * 1024));
+    h.opts.onDone({ ok: true, bytes: 11 * 1024 * 1024 });
+    expect(h.kinds(), 'not one transferData may go out').not.toContain('transferData');
+    const done = h.sent.filter((m) => m.kind === 'transferDone');
+    expect(done).toHaveLength(1);
+    const last = done[0]!;
+    if (last.kind !== 'transferDone' || last.ok) throw new Error('narrowing');
+    expect(last.error).toMatch(/the host sent 11534336 bytes, over the 10485760-byte limit/);
+  });
+
+  it('still sends a receive that is exactly AT the cap', () => {
+    // The boundary on the operator's side of the limit: 10 MB on the nose must arrive.
+    const h = harness();
+    h.gw.start(['Direction=receive', 'LocalFile=ok.bin', 'HostFile=OK.DATA'], fakeSession());
+    h.opts.files.write('ok.bin', new Uint8Array(10 * 1024 * 1024));
+    h.opts.onDone({ ok: true, bytes: 10 * 1024 * 1024 });
+    expect(h.kinds()).toContain('transferData');
+  });
+});

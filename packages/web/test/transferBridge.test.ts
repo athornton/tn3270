@@ -431,3 +431,27 @@ describe('a zero-byte receive, which no chunk can announce', () => {
     expect(b.hasUnsaved(), 'a partial transfer is not an empty one').toBe(false);
   });
 });
+
+describe('finishEmpty must not invent a file over a REFUSED chunk', () => {
+  it('stays inert when a chunk was refused by the reassembler CONSTRUCTOR', () => {
+    // THE FOURTH INSTANCE OF THIS FEATURE'S DATA-DESTRUCTION CLASS, found 2026-10-07.
+    // `finishEmpty()` bails when `inbound` or `complete` is set -- but a chunk refused by
+    // `ChunkReassembler`'s constructor leaves `inbound` UNDEFINED, because `acceptData`'s `try`
+    // returns the error without assigning. So "nothing staged" looked like the legal zero-byte
+    // receive, `hasUnsaved()` went true, Save was enabled, and clicking it downloaded a 0-byte
+    // file while the status line correctly said the transfer had been refused.
+    //
+    // The caller's own guard (`transferBoot.ts` holds the refusal and skips `finishEmpty`) is the
+    // primary fix; this pins the lower half so the two cannot drift apart.
+    const { d, saved } = deps();
+    const b = createTransferBridge(d);
+    const out = b.acceptData(0, 11 * 1024 * 1024, new Uint8Array([1, 2, 3]));
+    expect(out.ok).toBe(false);
+    // A caller that forgets to check — which is exactly what shipped — must still get nothing.
+    b.finishEmpty();
+    expect(b.hasUnsaved(), 'a refused receive is not an empty file').toBe(false);
+    return b.save('REPORT.TXT').then(() => {
+      expect(saved, 'nothing may reach the disk').toEqual([]);
+    });
+  });
+});
