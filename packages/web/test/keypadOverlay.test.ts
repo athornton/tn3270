@@ -77,3 +77,16 @@ describe('createKeypadOverlay', () => {
     expect(el.hidden).toBe(true);
   });
 });
+
+describe('the construction-time hide, from a VISIBLE starting state', () => {
+  it('hides an element that arrives shown, which the default fake cannot detect', () => {
+    // A MUTATION GAP FOUND 2026-10-07 while building the transfer overlay against this precedent:
+    // deleting `deps.element.hidden = true` from the constructor reddened NOTHING, because the
+    // fake above starts at `hidden: true` and the test could not tell "construction set it" from
+    // "it was already set". Starting visible is what makes the assignment observable -- and it is
+    // the realistic case the line exists for, markup whose `hidden` attribute someone removed.
+    const el = { hidden: false } as unknown as HTMLElement;
+    createKeypadOverlay({ element: el, build: () => {} });
+    expect(el.hidden, 'construction must hide an element that arrived visible').toBe(true);
+  });
+});

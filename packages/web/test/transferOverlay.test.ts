@@ -156,3 +156,25 @@ describe('createTransferOverlay', () => {
     expect(asked).toBe(0);
   });
 });
+
+describe('the construction-time hide, from a VISIBLE starting state', () => {
+  it('hides an element that arrives shown, which the default fake cannot detect', () => {
+    // THIS CLOSES A MUTATION GAP, and the gap is inherited rather than introduced: deleting
+    // `deps.element.hidden = true` from the constructor reddened NOTHING, here or in
+    // `keypadOverlay.ts`'s identical line, because both fakes start at `hidden: true` -- so the
+    // test could not tell "construction set it" from "it was already set".
+    //
+    // Starting from `hidden: false` is what makes the assignment observable. It is also the
+    // realistic case the belt-and-braces line exists for: markup whose `hidden` attribute someone
+    // removed, which is exactly the single-point-of-failure the module's own comment warns about.
+    const el = { hidden: false };
+    const o = createTransferOverlay({
+      element: el as unknown as HTMLElement,
+      build: () => {},
+      hasUnsaved: () => false,
+      confirmDiscard: () => true,
+    });
+    expect(el.hidden, 'construction must hide an element that arrived visible').toBe(true);
+    expect(o.visible(), 'and the overlay must agree it is hidden').toBe(false);
+  });
+});
