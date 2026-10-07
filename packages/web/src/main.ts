@@ -233,9 +233,12 @@ export function buildServer(args: WebArgs) {
         `ClientMessage` compile at all: `protocol.ts` decodes `transferChunk`, `transferStart` and
         `transferCancel`, so `msg` past the `hello` branch is no longer `{kind:'action'}` by
         elimination and the three `msg.action` uses below need the narrowing. ANYTHING AFTER IT IS
-        DEAD CODE, which is where this plan's draft said to put these branches -- measured
-        2026-10-07 as `TS2367` (the comparison is unsatisfiable, no overlap) plus `TS2339` (no
-        `seq` on `never`).
+        DEAD CODE, which is where this plan's draft said to put these branches -- RE-MEASURED
+        2026-10-07 by actually moving this line below the guard and running `tsc`, rather than
+        repeating the plan's figures: `TS2367: This comparison appears to be unintentional because
+        the types '"action"' and '"transferChunk"' have no overlap`, plus a `TS2339` for each of
+        `seq`, `total` and `bytes` -- on `{ kind: "action"; action: Action; }`, which is what `msg`
+        has narrowed to by then, and NOT on `never` as a first draft of this note said.
 
         THEY ANSWER NOW, where the note that stood here described them as deliberately dropped --
         "a protocol kind whose server half is not built". It is built: `transferGateway.ts` stages
