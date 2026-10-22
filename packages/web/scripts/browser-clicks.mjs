@@ -1237,6 +1237,44 @@ async function runTransferPhase(url) {
         PRINTED EVERY RUN, pass or fail. It is diagnostic rather than an assertion: the assertion
         is `overflowing` below, which asks the browser directly which caps are clipped.
       */
+      /*
+        DOES THE FONT ACTUALLY HAVE OUR ARROW GLYPHS, OR IS IT FALLING BACK?
+
+        The table uses a dozen glyphs from the Arrows block (U+2190..U+21FF) -- two-headed arrows,
+        arrows to bar, white arrows, an arrow with a stroke. A font without them renders a
+        TOFU BOX or silently substitutes from another family, and either looks like a bug in the
+        keyboard rather than in the font.
+
+        MEASURED BY COMPARING WIDTHS: `measureText` on the glyph against `measureText` on U+FFFD
+        (the replacement character) in the SAME font. A missing glyph usually measures identically
+        to the fallback notdef box, so an equal width is the signal. Not conclusive on its own --
+        a font could coincidentally match -- so the ZERO-width case is checked too, which means
+        the glyph produced nothing at all.
+      */
+      /*
+        NO ARROW-GLYPH COVERAGE CHECK, AND THE REASON IS WORTH MORE THAN THE CHECK WOULD HAVE BEEN.
+
+        The table draws a dozen glyphs from Unicode's Arrows block, and a font lacking one renders
+        a tofu box -- so a check seemed worthwhile. TWO METHODS WERE TRIED AND BOTH WERE VACUOUS,
+        each proved so by inserting a private-use codepoint (U+E000) that no font can render:
+
+         - COMPARING ADVANCE WIDTHS to U+FFFD's, on the theory that a missing glyph falls back to
+           the notdef box. Measured: the absent codepoint is 5.40px and U+FFFD is 9.23px, so the
+           comparison matched nothing. It passed the absent glyph.
+         - `document.fonts.check(font, text)`, which looks like the right API. It reports whether
+           the FAMILY is available, not whether it covers the characters, so it returned true for
+           the absent glyph too. It passed as well.
+
+        A real check needs per-character coverage, which the DOM does not expose -- it would mean
+        rasterising each glyph and comparing pixels, and this harness has no golden for that.
+
+        SO THE COVERAGE IS HANDLED WHERE IT CAN BE: `ui.css` names explicit symbol fallbacks after
+        `system-ui` (Segoe UI Symbol, Apple Symbols, Noto Sans Symbols 2, DejaVu Sans), per-glyph
+        fallback being something CSS does natively. **A TOFU BOX IS A THING THE USER WILL SEE
+        IMMEDIATELY**, which is the honest reason not to spend a third attempt here -- unlike the
+        clipped labels, which hid behind `overflow: hidden` for three rounds.
+      */
+
       const metrics = await cdp.eval(`(() => {
         const c = document.createElement('canvas').getContext('2d');
         const out = [];

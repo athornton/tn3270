@@ -371,7 +371,31 @@ body.ui-surface {
     match the rest of this stylesheet -- each platform supplies its own face rather than us
     shipping one, which is the reasoning this file's header already gives.
   */
-  font-family: system-ui, sans-serif;
+  /*
+    AN EXPLICIT FALLBACK CHAIN FOR THE ARROW GLYPHS, 2026-10-22.
+
+    The cursor cluster and several other caps draw a dozen glyphs from Unicode's Arrows block
+    (U+2190..U+21FF): two-headed arrows, arrows to bar, white arrows, an arrow with a stroke. A
+    font that lacks any of them renders a TOFU BOX, which looks like a defect in the keyboard
+    rather than in the font.
+
+    MEASURED: `browser-clicks.mjs` now compares each glyph's advance width against U+FFFD's in the
+    RESOLVED font and fails if any matches or is zero. On this machine `system-ui` resolves to a
+    face that has all twelve. **BUT `system-ui` IS A DIFFERENT FACE ON EVERY PLATFORM**, so that
+    result does not travel -- hence the named fallbacks after it, each chosen because it ships with
+    broad Arrows coverage on the platform it belongs to:
+
+      - `Segoe UI Symbol` -- Windows, the usual home for these when Segoe UI itself falls short.
+      - `Apple Symbols` -- macOS, which is the user's own platform.
+      - `Noto Sans Symbols 2` / `DejaVu Sans` -- Linux, the latter being near-universal there.
+
+    THE ORDER PUTS `system-ui` FIRST DELIBERATELY: the keyboard should look native where it can,
+    and a fallback only has to catch the glyphs the native face is missing -- per-character
+    fallback is how CSS font lists already work, so naming these costs nothing when they are
+    unneeded.
+  */
+  font-family: system-ui, 'Segoe UI Symbol', 'Apple Symbols',
+    'Noto Sans Symbols 2', 'DejaVu Sans', sans-serif;
   font-size: 8px;
 }
 
