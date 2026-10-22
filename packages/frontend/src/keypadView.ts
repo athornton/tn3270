@@ -3,7 +3,10 @@
  *
  * ## WHY A SECOND GROUPING RATHER THAN `KeypadKey.row`/`col`
  *
- * Those two are CELL COORDINATES for a blitter. `KeypadKey.col` is a left edge in character
+ * (THOSE FIELDS NO LONGER EXIST -- deleted 2026-10-22, see below. This section is kept in the past
+ * tense because it is the ARGUMENT for this file existing, and that argument is still live.)
+ *
+ * They WERE cell coordinates for a blitter. `KeypadKey.col` is a left edge in character
  * cells, `KEYPAD_KEY_WIDTH` cells per key (6, so twelve of them span 72 and fit inside an
  * 80-column screen -- `keypad.ts`'s own note on the constant), and `row` is an index into
  * `canvas/src/keypad.ts`'s `DRAWN_ROW` = `[0, 2, 4, 6, 8]`, which spreads the five table rows
@@ -18,19 +21,27 @@
  * not have to reconstruct the intent from column numbers, and so the blocks survive the deletion
  * of the canvas keypad that Task 9 of this feature performs.
  *
- * `row`/`col` are LEFT ALONE on `KeypadKey`, neither deleted nor annotated: `canvas/src/keypad.ts`
- * still reads both and is still shipping, so they are live fields, not legacy ones. They become
- * dead only when that file is deleted, and deleting fields from a 48-row table in the same change
- * that rewrites two front ends mixes two risks. (The plan's draft of this header called them
- * "marked deprecated"; nothing in `keypad.ts` says that, and saying it here would have been a
- * comment describing a state of the code that does not exist.)
+ * `row`/`col` ARE GONE FROM `KeypadKey`, DELETED 2026-10-22 -- as is the `KEYPAD_ROWS` /
+ * `KEYPAD_KEY_WIDTH` pair they were checked against. This header used to say they were "LEFT
+ * ALONE ... live fields, not legacy ones", because `canvas/src/keypad.ts` still read them, and
+ * that they "become dead only when that file is deleted". That file WAS deleted with the canvas
+ * keypad, so they did, and the full-keyboard work removed them.
+ *
+ * Three tests went with them (`keypad.test.ts`'s row grouping, whole-key column boundary and
+ * overlap cases). They were not bad tests -- one of them says outright that "Task 5 turns `col`
+ * into pixels" -- they went because their SUBJECT went: a blitter that no longer exists. The
+ * equivalent arithmetic now lives in `keyboard3279.test.ts`, over the geometry that IS live.
+ *
+ * THE BLOCKS BELOW ARE NOW THE ONLY LAYOUT INFORMATION `KEYPAD_KEYS` CARRIES, which is why the
+ * paragraphs above about naming the clusters matter more than they did: nothing else records that
+ * `Tab` and `BkTab` belong to different groups.
  *
  * ## THE GROUPING IS WRITTEN DOWN, NOT DERIVED
  *
- * Deriving blocks from `col` gaps would make this agree with the canvas layout by construction,
- * and so unable to disagree -- the same argument `KEYPAD_ROWS` already makes for itself in
- * `keypad.ts`. It would also tie a DOM layout to a table that Task 9 is about to stop being the
- * authority on. Written down, a key that falls out of every block is a test failure, and a key
+ * Deriving blocks from `col` gaps would have made this agree with the canvas layout by
+ * construction, and so unable to disagree -- the same argument `KEYPAD_ROWS` made for itself
+ * before it too was deleted. (It would also have tied a DOM layout to a table that the canvas
+ * keypad's deletion stopped being the authority on -- which is exactly what happened.) Written down, a key that falls out of every block is a test failure, and a key
  * in two blocks is a test failure too -- see `keypadView.test.ts`, whose first case is the whole
  * protection against a dropped or doubled button.
  *

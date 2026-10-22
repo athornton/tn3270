@@ -75,66 +75,48 @@ export interface KeypadKey {
    * note on `toggleKeypad` in keymap.ts, and the test that pins it.
    */
   readonly action: Action;
-  /** 0-4. Rows 0 and 1 are the PF block; 2-4 are the clusters. */
-  readonly row: number;
-  /** Left edge in cells. */
-  readonly col: number;
   /** For the TUI overlay and for accessibility: what this key is called in words. */
   readonly name: string;
 }
 
-/**
- * The rows the layout uses, written down rather than derived from `KEYPAD_KEYS`.
- *
- * Deriving it would make it agree with the table by construction, and so unable to disagree --
- * which is the whole value of the pair. Written down, an emptied row and a key placed on a row
- * nobody declared are each a test failure.
- */
-export const KEYPAD_ROWS: readonly number[] = Object.freeze([0, 1, 2, 3, 4]);
-
-/** Each key is 6 cells wide, so 12 of them span 72 -- inside an 80-column screen. */
-export const KEYPAD_KEY_WIDTH = 6;
-
-const pfRow = (row: number, from: number): KeypadKey[] => Array.from({ length: 12 }, (_, i) => ({
+const pfRow = (from: number): KeypadKey[] => Array.from({ length: 12 }, (_, i) => ({
   label: `PF${from + i}`,
   action: { kind: 'pf', n: from + i },
-  row,
-  col: i * KEYPAD_KEY_WIDTH,
   name: `PF${from + i}`,
 }));
 
 export const KEYPAD_KEYS: readonly KeypadKey[] = Object.freeze([
-  ...pfRow(0, 13),
-  ...pfRow(1, 1),
+  ...pfRow(13),
+  ...pfRow(1),
 
-  { label: 'PA1', action: { kind: 'pa', n: 1 }, row: 2, col: 0, name: 'PA1' },
-  { label: 'PA2', action: { kind: 'pa', n: 2 }, row: 2, col: 6, name: 'PA2' },
-  { label: 'PA3', action: { kind: 'pa', n: 3 }, row: 2, col: 12, name: 'PA3' },
-  { label: 'Home', action: { kind: 'home' }, row: 2, col: 24, name: 'Home' },
-  { label: '^', action: { kind: 'up' }, row: 2, col: 30, name: 'Cursor up' },
-  { label: 'Ins', action: { kind: 'toggleInsert' }, row: 2, col: 36, name: 'Insert mode' },
-  { label: 'Dup', action: { kind: 'dup' }, row: 2, col: 48, name: 'Dup' },
-  { label: 'Reset', action: { kind: 'reset' }, row: 2, col: 60, name: 'Reset' },
+  { label: 'PA1', action: { kind: 'pa', n: 1 }, name: 'PA1' },
+  { label: 'PA2', action: { kind: 'pa', n: 2 }, name: 'PA2' },
+  { label: 'PA3', action: { kind: 'pa', n: 3 }, name: 'PA3' },
+  { label: 'Home', action: { kind: 'home' }, name: 'Home' },
+  { label: '^', action: { kind: 'up' }, name: 'Cursor up' },
+  { label: 'Ins', action: { kind: 'toggleInsert' }, name: 'Insert mode' },
+  { label: 'Dup', action: { kind: 'dup' }, name: 'Dup' },
+  { label: 'Reset', action: { kind: 'reset' }, name: 'Reset' },
 
-  { label: 'Attn', action: { kind: 'attn' }, row: 3, col: 0, name: 'Attention' },
-  { label: 'SysRq', action: { kind: 'sysreq' }, row: 3, col: 6, name: 'System Request' },
-  { label: 'Clear', action: { kind: 'clear' }, row: 3, col: 12, name: 'Clear' },
-  { label: '<', action: { kind: 'left' }, row: 3, col: 24, name: 'Cursor left' },
-  { label: 'v', action: { kind: 'down' }, row: 3, col: 30, name: 'Cursor down' },
-  { label: '>', action: { kind: 'right' }, row: 3, col: 36, name: 'Cursor right' },
-  { label: 'FldMk', action: { kind: 'fieldMark' }, row: 3, col: 48, name: 'Field Mark' },
-  { label: 'Enter', action: { kind: 'enter' }, row: 3, col: 60, name: 'Enter' },
+  { label: 'Attn', action: { kind: 'attn' }, name: 'Attention' },
+  { label: 'SysRq', action: { kind: 'sysreq' }, name: 'System Request' },
+  { label: 'Clear', action: { kind: 'clear' }, name: 'Clear' },
+  { label: '<', action: { kind: 'left' }, name: 'Cursor left' },
+  { label: 'v', action: { kind: 'down' }, name: 'Cursor down' },
+  { label: '>', action: { kind: 'right' }, name: 'Cursor right' },
+  { label: 'FldMk', action: { kind: 'fieldMark' }, name: 'Field Mark' },
+  { label: 'Enter', action: { kind: 'enter' }, name: 'Enter' },
 
-  { label: 'ErEOF', action: { kind: 'eraseEOF' }, row: 4, col: 0, name: 'Erase EOF' },
-  { label: 'ErInp', action: { kind: 'eraseInput' }, row: 4, col: 6, name: 'Erase Input' },
-  { label: 'Tab', action: { kind: 'tab' }, row: 4, col: 12, name: 'Tab' },
-  { label: 'BkTab', action: { kind: 'backTab' }, row: 4, col: 24, name: 'Back Tab' },
-  { label: 'Del', action: { kind: 'delete' }, row: 4, col: 30, name: 'Delete' },
-  { label: 'BkSp', action: { kind: 'backspace' }, row: 4, col: 36, name: 'Backspace' },
+  { label: 'ErEOF', action: { kind: 'eraseEOF' }, name: 'Erase EOF' },
+  { label: 'ErInp', action: { kind: 'eraseInput' }, name: 'Erase Input' },
+  { label: 'Tab', action: { kind: 'tab' }, name: 'Tab' },
+  { label: 'BkTab', action: { kind: 'backTab' }, name: 'Back Tab' },
+  { label: 'Del', action: { kind: 'delete' }, name: 'Delete' },
+  { label: 'BkSp', action: { kind: 'backspace' }, name: 'Backspace' },
   // The 47th key, and the only one on this row past `BkSp`: row 4 ended at column 36, so this
   // takes 42 for a right edge of 48 -- inside 72, and NO NEW ROW, which is what keeps the Electron
   // window the same size and leaves the two non-keypad goldens byte-identical.
-  { label: 'NewLn', action: { kind: 'newline' }, row: 4, col: 42, name: 'Newline' },
+  { label: 'NewLn', action: { kind: 'newline' }, name: 'Newline' },
   // The 48th key, and the FIRST whose action `applyAction` throws on -- see the note on
   // `KeypadKey.action`, which this key made it necessary to rewrite. A transfer needs arguments,
   // so the button opens a form; the front end intercepts it exactly as it intercepts Ctrl-T.
@@ -142,5 +124,5 @@ export const KEYPAD_KEYS: readonly KeypadKey[] = Object.freeze([
   // `NewLn` ended at 48, so this takes 48 for a right edge of 54 -- still inside 72 and still NO
   // NEW ROW, so the Electron window keeps its size and only the keypad golden moves. The gap at
   // column 18 is NOT free space: it separates the Tab/BkTab clusters deliberately.
-  { label: 'Xfer', action: { kind: 'transferForm' }, row: 4, col: 48, name: 'File Transfer' },
+  { label: 'Xfer', action: { kind: 'transferForm' }, name: 'File Transfer' },
 ]);
