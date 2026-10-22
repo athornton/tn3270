@@ -589,11 +589,20 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     `toggleInsert` IS AN ACTION WE HAVE, so this becomes a working key rather than scenery -- the
     compact keypad carries it as `Ins`.
 
-    THE GLYPH IS THE USER'S SUGGESTION AND IT IS NOT THE HARDWARE'S: there is no Unicode point for
-    an `a` under a caret, so this is the closest available stand-in. Recorded as an approximation
-    rather than a transcription -- an SVG of the real mark is the someday fix.
+    THE GLYPH IS AN APPROXIMATION, NOT A TRANSCRIPTION: there is no Unicode point for an `a` under
+    a caret, so this is the closest available stand-in, and an SVG of the real mark is the someday
+    fix.
+
+    `U+21E7 UPWARDS WHITE ARROW`, AND IT IS THE SECOND CHOICE FOR A MEASURED REASON. The first was
+    `U+21A5 UPWARDS ARROW FROM BAR`, and the user suggested `U+21E7` instead; a 12x crop of the cap
+    settles it in their favour. The mark is a WIDE HOLLOW CARET -- two strokes opening outward with
+    white between them -- with the `a` tucked under its apex. `U+21E7` is exactly that shape;
+    `U+21A5` is a thin SOLID arrow with a bar at its foot, which the cap plainly is not.
+
+    Worth recording as a reminder that "close enough" has degrees: both glyphs mean roughly
+    "insert", and only one of them looks like the key.
   */
-  key('↥', { kind: 'toggleInsert' }, 'cursor', 1, 1, 1, 'Insert (approximate glyph)'),
+  key('⇧', { kind: 'toggleInsert' }, 'cursor', 1, 1, 1, 'Insert (approximate glyph)'),
   /*
     `U+219B RIGHTWARDS ARROW WITH STROKE` FOR DELETE CHARACTER, SHIFTED TO TWO OF THEM.
 
