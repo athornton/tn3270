@@ -186,6 +186,9 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
       */
       const firstX = Math.min(...caps.map((c) => c.x));
       if (firstX > 0) {
+        // THE SAME ARITHMETIC THE CAP WIDTHS USE: `n` units spans `n` caps and the `n` gaps that
+        // precede the next one, so an offset of `n` is `n * (pitch + gap)`. Consistent with
+        // `ui.css`'s width formula, which absorbs the `n-1` gaps INSIDE a wide cap.
         deps.setAttr(line, 'style', `padding-left:calc(${firstX} * (var(--kb-pitch) + 2px))`);
       }
       for (const cap of caps) {

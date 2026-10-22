@@ -421,8 +421,12 @@ describe('KEYBOARD_3279', () => {
         table entry is obviously too long.
       */
       const CHAR_RATIO = 0.61;
+      // RAISED 2026-10-22 with `ui.css`: 7px was unreadable, and the box-sizing and font-inherit
+      // fixes recovered enough width inside each cap to afford these. The harness's own
+      // `scrollWidth > clientWidth` check is the authority; this mirrors it for CI without a
+      // browser.
       const FONT_PX = {
-        pf: 7, 'special-left': 7, main: 10, cursor: 7, numpad: 8,
+        pf: 9, 'special-left': 9, main: 11, cursor: 9, numpad: 10,
       };
 
       /*

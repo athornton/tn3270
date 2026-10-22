@@ -1267,6 +1267,37 @@ async function runTransferPhase(url) {
       })()`);
 
 
+      /*
+        THE NUMERIC PAD'S COLUMNS MUST LINE UP, which is what a multi-unit cap's gap arithmetic
+        buys. The user caught this: the double-width `0` was 2px narrow (a width-n cap was
+        `n * pitch` with no allowance for the n-1 gaps it spans), so `.` did not sit under `3` and
+        `Ent` did not sit under `-`. Measured on left edges, within 2px for sub-pixel rounding.
+      */
+      const capX = (key) => cdp.eval(
+        `(() => { const el = document.querySelector(`
+        + `'#keyboard-overlay button[data-key="' + ${JSON.stringify(key)} + '"]');`
+        + ' if (el === null) return null;'
+        + ' return Math.round(el.getBoundingClientRect().x); })()');
+      const xThree = await capX('3');
+      const xPeriod = await capX('. (numeric pad)');
+      const xMinus = await capX('- (numeric pad)');
+      const xEnter = await capX('Enter (numeric pad)');
+      const numpadAligned = xThree !== null && xPeriod !== null
+        && xMinus !== null && xEnter !== null
+        /*
+          EXACT, NOT WITHIN 2px -- AND THE TOLERANCE WAS THE BUG IN THIS CHECK.
+
+          It was `<= 2`, and the mutant it exists to kill (dropping the gap absorption from a
+          multi-unit cap's width) is off by EXACTLY 2px per extra unit. So the first version of
+          this assertion PASSED against the defect, reporting `. at 702 under 3 at 704` as a
+          success. Measured, not reasoned: I ran the mutant and watched it go green.
+
+          These are integer pixel positions from `Math.round`, and two caps in the same grid either
+          share a column or do not. A tolerance here buys nothing and hides a 2px-per-unit class of
+          error -- which is the whole family of defect this check is for.
+        */
+        && xPeriod === xThree && xEnter === xMinus;
+
       const pfBox = await boxOf('keyboard-pf');
       const barBox = await boxOf('keyboard-special-left');
       const upBox = await cdp.eval(
@@ -1293,7 +1324,7 @@ async function runTransferPhase(url) {
         // THE PF STRIP IS CENTRED OVER THE MAIN BLOCK, the user's other request. Measured on
         // CENTRES rather than edges, which is what "centred" means, and within 20px because the
         // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
-        && pfCentred;
+        && pfCentred && numpadAligned;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1305,7 +1336,9 @@ async function runTransferPhase(url) {
           + `(x ${barBox?.x} < ${wideMain.x}) and the arrows form an inverted T `
           + `(up x ${upBox?.x}, down x ${downBox?.x}); the PF strip is centred over it `
           + `(centres ${Math.round((pfBox?.x ?? 0) + (pfBox?.w ?? 0) / 2)} vs `
-          + `${Math.round(wideMain.x + wideMain.w / 2)}); NO cap is clipped`);
+          + `${Math.round(wideMain.x + wideMain.w / 2)}); the numpad lines up `
+          + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
+          + 'NO cap is clipped');
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1315,6 +1348,7 @@ async function runTransferPhase(url) {
           + `special bar: ${JSON.stringify(barBox)} (must be LEFT of main), `
           + `up: ${JSON.stringify(upBox)}, down: ${JSON.stringify(downBox)} (x must match), `
           + `pf: ${JSON.stringify(pfBox)} (centre must match main's), `
+          + `numpad x: 3=${xThree} .=${xPeriod} -=${xMinus} Ent=${xEnter} (columns must align), `
           + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}. ${metrics}`);
       }
     }

@@ -358,6 +358,20 @@ body.ui-surface {
     WHEN YOU CHANGE THESE.
   */
   --kb-pitch: 28px;
+  /*
+    THE FAMILY, AND ITS ABSENCE IS WHY THE KEYBOARD WENT SERIF.
+
+    `font: 13px system-ui, sans-serif` is set on `body.ui-surface` -- which is the ELECTRON pages'
+    body. The web gateway's page is a bare `<body>` holding a canvas, so this overlay inherited
+    from it, and a bare body's default family is SERIF. The `font: inherit` added to the caps in
+    the previous commit then faithfully inherited the wrong thing: it fixed the SIZE (they had been
+    stuck at the UA's 13.33px) and exposed the family at the same time.
+
+    SET HERE RATHER THAN ON THE CAPS, so one declaration covers the overlay, and `system-ui` to
+    match the rest of this stylesheet -- each platform supplies its own face rather than us
+    shipping one, which is the reasoning this file's header already gives.
+  */
+  font-family: system-ui, sans-serif;
   font-size: 8px;
 }
 
@@ -461,11 +475,25 @@ body.ui-surface {
   margin-left: calc(2 * (var(--kb-pitch) + 2px) + 14px + 1.5 * (var(--kb-pitch) + 2px));
 }
 
-#keyboard-overlay #keyboard-main { font-size: 10px; }
-#keyboard-overlay #keyboard-pf { font-size: 7px; }
-#keyboard-overlay #keyboard-cursor { font-size: 7px; }
-#keyboard-overlay #keyboard-special-left { font-size: 7px; }
-#keyboard-overlay #keyboard-numpad { font-size: 8px; }
+/*
+  THE SIZES, RAISED 2026-10-22 BECAUSE 7px WAS UNREADABLE -- the user's words, and the only
+  judgement in this file that a harness cannot make.
+
+  THE HEADROOM CAME FROM THE PREVIOUS FIX RATHER THAN FROM SHRINKING ANYTHING. `box-sizing:
+  border-box` and `font: inherit` together recovered real width inside each cap (a 28px cap now
+  offers 26px for text, not 24px, and the type is the size the stylesheet asks for rather than the
+  UA's 13.33px). So these can go UP while `browser-clicks.mjs` still reports no cap clipped --
+  which is the check that must stay green, and the reason these numbers are not a guess.
+
+  `PF13` is the binding constraint at 4 characters on a one-unit cap: measured per-character width
+  is 0.61em, so 4 chars at 9px need ~22px of the 26px available. 10px would need ~24.4px and leave
+  under 2px of slack, which is where the last three rounds of clipping lived.
+*/
+#keyboard-overlay #keyboard-main { font-size: 11px; }
+#keyboard-overlay #keyboard-pf { font-size: 9px; }
+#keyboard-overlay #keyboard-cursor { font-size: 9px; }
+#keyboard-overlay #keyboard-special-left { font-size: 9px; }
+#keyboard-overlay #keyboard-numpad { font-size: 10px; }
 
 /*
   AND A CONTAINER QUERY FOR THE ONE THING FLEX CANNOT DO: at the narrowest widths the gaps between
@@ -529,7 +557,20 @@ body.ui-surface {
   */
   font: inherit;
   box-sizing: border-box;
-  width: calc(var(--kb-w, 1) * var(--kb-pitch));
+  /*
+    A MULTI-UNIT CAP MUST ABSORB THE GAPS IT SPANS -- found 2026-10-22 on the numeric pad.
+
+    This was `--kb-w * --kb-pitch`, which is one cap's width per unit and NO allowance for the 2px
+    gaps BETWEEN those units. So an n-unit cap came out 2*(n-1)px short and everything after it in
+    its row shifted left: the user spotted it as the numpad's `.` not lining up under the `3` and
+    `Ent` not under the `-`, because the double-width `0` beside them was 2px narrow. The
+    spacebar, at 7 units, was 12px short.
+
+    `+ (w - 1) * 2px` IS THE GAP COUNT, and it is exact rather than a fudge: n caps have n-1 gaps
+    between them, and a cap spanning n units replaces exactly those. The `2px` matches
+    `.keyboard-row`'s own `gap`, which is the one duplication here -- change both together.
+  */
+  width: calc(var(--kb-w, 1) * var(--kb-pitch) + (var(--kb-w, 1) - 1) * 2px);
   height: var(--kb-pitch);
   padding: 0 1px;
   border-width: 1px;
