@@ -81,12 +81,42 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
   /** Every Shift button, so arming can paint both of them. */
   const shiftButtons: HTMLElement[] = [];
 
+  /**
+   * Every dual-glyph cap, with both of its legends, so arming Shift can RE-LETTER them.
+   *
+   * THE USER'S IDEA, 2026-10-22: "rather than trying to display both glyphs on the same key at the
+   * same time, maybe display the unshifted one by default and if the user clicks shift or caps
+   * lock, go to the shifted one?"
+   *
+   * Half of that was already true -- only `cap.label` was ever drawn, so the shifted legend sat in
+   * the data unseen. This is the other half: the caps now SHOW what they will send.
+   *
+   * SHIFT ONLY, NOT CAPS LOCK, and the reason is specific rather than conservative: on this
+   * keyboard the LETTERS carry no `shiftLabel` (`A` sends `A` unshifted), so Caps Lock would have
+   * nothing to re-letter. It would be a latch whose only visible effect is on punctuation, which is
+   * exactly what Shift already does. It stays inert.
+   */
+  const dualCaps: Array<{ el: HTMLElement; plain: string; shifted: string }> = [];
+
   const paintShift = (): void => {
     for (const button of shiftButtons) {
       // AN ATTRIBUTE RATHER THAN A CLASS, so `ui.css` can key off `[data-armed='true']` and a
       // harness can read the state without parsing a class list.
       if (armed) deps.setAttr(button, 'data-armed', 'true');
       else deps.removeAttr(button, 'data-armed');
+    }
+    /*
+      RE-LETTER EVERY DUAL-GLYPH CAP, so the keyboard shows what it will send.
+
+      `setText` RATHER THAN A CSS TRICK: the shifted legend is DATA (`KeyCap.shiftLabel`), and a
+      stylesheet cannot reach it. Both legends live in `dualCaps` so this never has to look a cap
+      up by its current text -- which would break the moment a cap's two glyphs were ever equal.
+
+      IT IS DRIVEN FROM THE SAME `armed` FLAG as the Shift caps' own paint, in the same function,
+      so the ring on Shift and the legends on the keys cannot disagree about whether Shift is on.
+    */
+    for (const cap of dualCaps) {
+      deps.setText(cap.el, armed ? cap.shifted : cap.plain);
     }
   };
 
@@ -166,6 +196,11 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
 
         const action = cap.action;
         const shiftLabel = cap.shiftLabel;
+        // REGISTERED FOR RE-LETTERING. Only caps with BOTH legends qualify: a letter has no
+        // `shiftLabel`, and re-lettering it to itself would be work with no effect.
+        if (shiftLabel !== undefined) {
+          dualCaps.push({ el: button, plain: cap.label, shifted: shiftLabel });
+        }
         deps.onClick(button, () => {
           /*
             THE ONE-SHOT SHIFT, AND THE ORDER OF THESE TWO BRANCHES IS THE SPECIFICATION.

@@ -186,6 +186,77 @@ describe('createKeyboardUi', () => {
       expect(deps.sent).toEqual([{ kind: 'type', text: '@' }]);
     });
 
+    it('RE-LETTERS the dual-glyph caps when armed, and puts them back', () => {
+      /*
+        THE USER'S IDEA: "display the unshifted one by default and if the user clicks shift or caps
+        lock, go to the shifted one". A cap should SHOW what it will send.
+      */
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const two = button(deps, '@ 2');
+      expect(two.text, 'unshifted by default').toBe('2');
+      click(deps, SHIFT_L);
+      expect(two.text, 'armed: the cap shows what it will send').toBe('@');
+      click(deps, SHIFT_L);
+      expect(two.text, 'disarmed: back to the unshifted legend').toBe('2');
+    });
+
+    it('PUTS THE LEGENDS BACK when the one-shot is CONSUMED, not only when toggled off', () => {
+      // The arm is spent by typing a character, which is the whole point of a one-shot -- so the
+      // caps must re-letter on THAT path too, not just on a second Shift press.
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const six = button(deps, '¢ 6');
+      click(deps, SHIFT_L);
+      expect(six.text).toBe('¢');
+      click(deps, '@ 2');                 // consumes the arm
+      expect(six.text, 'the arm was spent, so every cap reverts').toBe('6');
+    });
+
+    it('re-letters on disarmShift(), which is what closing the surface calls', () => {
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      const two = button(deps, '@ 2');
+      click(deps, SHIFT_L);
+      expect(two.text).toBe('@');
+      ui.disarmShift();
+      expect(two.text).toBe('2');
+    });
+
+    it('LEAVES A LETTER ALONE, because a letter has no shifted legend to show', () => {
+      // `A` sends `A` unshifted on this keyboard, so there is nothing to re-letter -- and this is
+      // also why Caps Lock stays inert: it would have no visible effect at all.
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const q = button(deps, 'Q');
+      click(deps, SHIFT_L);
+      expect(q.text, 'a letter must not flicker').toBe('Q');
+    });
+
+    it('leaves an INERT cap and the Shift caps themselves alone', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const esc = button(deps, 'Escape (not a 3270 key)');
+      const shift = button(deps, SHIFT_L);
+      click(deps, SHIFT_L);
+      expect(esc.text).toBe('Esc');
+      expect(shift.text, 'the Shift cap keeps its own label').toBe('Shift');
+    });
+
+    it('RE-LETTERS EVERY dual cap, not just the one that gets clicked', () => {
+      // A keyboard where only the next key pressed re-lettered would be worse than none: the
+      // operator cannot tell in advance which key they are about to press.
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const named = ['@ 2', '# 3', '¢ 6', '& 7', ': ;'];
+      const before = named.map((n) => button(deps, n).text);
+      click(deps, SHIFT_L);
+      const after = named.map((n) => button(deps, n).text);
+      for (let i = 0; i < named.length; i++) {
+        expect(after[i], `${named[i]} should have re-lettered`).not.toBe(before[i]);
+      }
+    });
+
     it('raises NO action of its own: Shift is pure surface state', () => {
       // Nothing may cross the socket or the IPC boundary when Shift is pressed, which is why the
       // Action union needs no `shift` member.
