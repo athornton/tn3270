@@ -187,9 +187,13 @@ describe('the transfer harness', () => {
     // this harness exists to catch. A `transferBoot.ts` that throws in its module body (the TDZ bug
     // shipped on this very branch) loads fine, answers `did-finish-load` fine, and draws zero rows.
     //
-    // Six, because a fresh form is `direction=receive, host=tso` and `applicable()` hides four:
-    // `recfm`/`lrecl`/`blksize` need a send, `cr` needs ascii.
-    expect(harness).toMatch(/const FIELD_ROWS = 6/);
+    // SEVEN, because a fresh form is `direction=send, host=tso` (the default moved 2026-10-22)
+    // and `applicable()` hides three: `lrecl`/`blksize` need a `recfm` as well as a send, and
+    // `cr` needs ascii. `recfm` itself IS applicable on a send, which is the extra row.
+    //
+    // THIS TEST IS WHY THE NUMBER IS PINNED AT ALL: when the default moved, `transfer.mjs` went
+    // 9/10 and this went red, so neither could be bumped without re-deriving the arithmetic.
+    expect(harness).toMatch(/const FIELD_ROWS = 7/);
     expect(harness).toMatch(/transfer window: fields=\$\{FIELD_ROWS\}/);
     // `code`, because the comment above the check in `transfer.mjs` names the rejected spelling.
     expect(code).not.toMatch(/fields=\\d\+/);
