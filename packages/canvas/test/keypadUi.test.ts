@@ -10,9 +10,10 @@ import { KEYPAD_KEYS } from '@tn3270/frontend';
  *
  * `transferUi.ts` took the other option: it hands its boot file a `render(fields)` callback and
  * lets that file do the element building. The cost is visible in the line counts --
- * `transferBoot.ts` is 473 lines of UNTESTABLE code against `transferUi.ts`'s 387 testable ones,
- * and the boot file is where this project's one blank-window bug actually shipped (a TDZ read on
- * an uninitialised `const`).
+ * `transferBoot.ts` holds several hundred lines of UNTESTABLE code, comparable to the whole of the
+ * testable `transferUi.ts` -- and the boot file is where this project's one blank-window bug
+ * actually shipped (a TDZ read on an uninitialised `const`). Exact integers were cited here until
+ * 2026-10-06 and rotted; the comparison is what matters.
  *
  * Injecting the primitives instead moves the element building into THIS testable module and
  * leaves the boot file as a handful of one-line adapters. The tradeoff is a wider deps interface;

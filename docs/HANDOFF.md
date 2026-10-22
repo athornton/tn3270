@@ -1,10 +1,163 @@
-# Handoff — state as of 2026-10-06 (the keypad is real controls)
+# Handoff — state as of 2026-10-22 (web transfer UI live-verified; direction labels fixed)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-06
+## START HERE — NEXT ACTION, 2026-10-22
+
+**THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
+**52 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
+`docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
+`docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
+
+**Firefox 158.0.1 on macOS, on a different machine from the gateway**, sent a 249-byte binary to
+`WEBX DATA A` on VM/370 CMS and received it back **byte-identical**, through JupyterHub's reverse
+proxy at ~03:02 UTC. Driven by
+hand, because a `DrawCell` carries a glyph index and no character, so no harness can read the
+terminal as text. Details, and the four gaps it leaves, in `live-testing.md`'s newest entry.
+**`transferForm` has left `protocol.ts`'s `REFUSED` list**; `transferText` has not.
+
+**THE FULL GATE, re-run 2026-10-22 after the direction-label work (the last of three changes that
+day):** build and typecheck clean, **2487 tests in 104 files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9
+buttons/10 actions, `select` 3/3, `shot` **2/2**, `browser-shot` **1/1**, `browser-keys` 13
+chords/10 actions, **`browser-clicks` 9 buttons + 7/7 transfer checks**, `pty-smoke.py`
+**12 PASS / 0 FAIL**. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing in this work
+touches telnet negotiation or the stream layer, said rather than implied.
+
+**THE TWO GOLDEN HARNESSES ARE THE ONES THAT MATTERED THIS TIME.** `shot` and `browser-shot`
+compare rendered output, and the focus ring went into a stylesheet **shared with the Electron
+GUI** — both still match, which is the evidence that a `:focus-visible`/`:focus` rule does not
+paint when nothing is focused.
+
+**A HARNESS HAZARD WORTH KNOWING: LEAKED ELECTRON PROCESSES READ AS A CODE FAILURE.** Repeated
+mutation runs left **72** Electron processes contending for the single Xvfb display, and
+`browser-clicks` then reported `0/7` with `the served page never assigned window.tn3270, so
+bridge.js did not load` — indistinguishable from a real regression. Clean sources restored 7/7
+immediately. **`pkill -9 -f node_modules/electron` between repeated browser-harness runs**, and
+treat a sudden total failure as a process leak before believing it. (These scripts also refuse to
+run against a `dist` older than `src`, which caught a `cp`-restored source mid-cleanup — that guard
+works.)
+
+**THE PLAN'S OWN STEP 2 CONTAINED TWO ERRORS, both of which would have cost a failed live run**
+(the recorded plan-code-is-a-draft hazard, again):
+- **`-model 3278-2` is WRONG for this host.** MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` with
+  `requires a MECAFF connected 3270 terminal` and no transfer starts at all (`live-testing.md:312`).
+  **Use `-model 3278-2-E`.**
+- **`--port` DOES NOT EXIST.** The flag is `--listen` (`web/src/args.ts:156`).
+
+Also learned: **`--log-actions` requires `--replay`** and refuses otherwise, because it prints typed
+text including passwords. Correct, and it means a live session cannot be action-logged.
+
+**FOUR THINGS WORTH CARRYING:**
+1. **A reverse-proxied deployment needs BOTH the trailing slash AND `--allow-origin <origin>`.**
+   Without the slash, relative module specifiers resolve against the parent and every module is
+   `NS_ERROR_CORRUPTED_CONTENT`; this is NOT fixable server-side, because the proxy strips the
+   prefix before the gateway sees the request. Worked first try with both.
+2. **THE `<a download>` FALLBACK IS NOW LIVE-WITNESSED AND THE *PICKER* IS THE UNWITNESSED ROUTE** —
+   the reverse of what this handoff said when first written, and of what the plan predicted. The
+   operator was in **Firefox 158.0.1**, which implements `showSaveFilePicker` in **no version**
+   (caniuse 2026-10-22: Firefox 2–161 unsupported, **Mozilla's position "harmful"**), so the
+   detection was false and `saveFallback` ran. **Firefox's own *always ask where to save files*
+   preference showed a dialog anyway**, which is what made it look like the picker — **a visible
+   save dialog does not identify the route.** Closing the picker gap needs a **Chromium-family**
+   browser in a secure context, which no run has used.
+   **AND THE SPEC REQUIREMENT THAT WOULD HAVE PREVENTED THE MISREADING IS UNIMPLEMENTED:** the
+   overlay is supposed to say which route it will take (design doc `:302`) and says nothing. That
+   omission cost a wrong entry in `live-testing.md`, which is the best argument for building it.
+3. **THE START-THEN-SAVE UX DEFECT IS FIXED, and the fix is on this branch.** The user **declined
+   auto-save** — it is impossible on the picker route (transient user activation) and so would have
+   applied only to the fallback, giving the browsers WITHOUT a picker the better flow — and chose
+   the hint-and-focus option instead. Spec
+   `docs/superpowers/specs/2026-10-22-save-affordance-design.md`, plan
+   `docs/superpowers/plans/2026-10-22-save-affordance.md`, both executed.
+   The completion message names Save, the button takes focus so Enter saves, and **all** overlay
+   buttons got a focus ring — `ui.css` had **zero `:focus`/`outline` rules** before, so this was an
+   accessibility fix for a deliberately keyboard-navigable form, and it reaches the Electron GUI's
+   two windows as well. **All three behaviours derive from ONE `hasUnsaved()` read**, so the text,
+   the enablement and the focus cannot disagree.
+   **`:focus-visible` ALONE WAS NOT ENOUGH, and this is the thing to remember:** it is decided by
+   the UA's heuristic about the user's **last input modality**, not by how focus was set, so a
+   programmatic focus after a *click* does **not** match it and the ring did not paint. Caught by
+   the harness on the first run. `#transfer-save` now also has a plain `:focus` rule, narrowly
+   scoped because clicking that button saves and then disables it.
+   **STILL UNWITNESSED: whether the ring is LEGIBLE.** `getComputedStyle` proves a `2px solid`
+   outline resolves on the focused button, which is not the same as a human seeing it. The user has
+   not eyeballed it in Firefox yet.
+4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
+   **The import map needs one specifier per shared module**, because one specifier cannot name two
+   files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.
+
+**NEXT ACTION: ROADMAP ITEM (0e), WEB COPY AND PASTE.** It needs the same `ServerMessage` widening
+this work introduced — returning the TEXT is a new server→client message, which the copy/paste spec
+wrongly called a free ride. `protocol.ts`'s refusal of `transferText` is **load-bearing until it
+lands**, for the reason `web/src/main.ts`'s unguarded `applyAction` call records.
+
+**THE DIRECTION-LABEL DATA-LOSS DEFECT IS FIXED — it was the most dangerous item on this list and
+it is done.** Spec `docs/superpowers/specs/2026-10-22-direction-labels-design.md`, plan
+`docs/superpowers/plans/2026-10-22-direction-labels.md`, both executed.
+
+The form reads `send: local to host` / `receive: host to local` through `frontend`'s
+`directionLabel`, shared by all three front ends, and **opens on `send`**. `local` rather than the
+`this browser` first proposed, because the TUI and GUI have no browser and `local` also matches the
+`Local file` field label directly above it. No arrows: Fira Code ligates `->` and the TUI draws
+ASCII only.
+
+**DISPLAY ONLY, AND THAT IS THE CONSTRAINT TO REMEMBER.** `formKeywords` emits
+`Direction=${value}` and `parseTransferKeywords` validates the literals, so a renamed VALUE would
+emit `Direction=send: local to host` and be refused by our own validator. The stored values are
+untouched and the wire bytes are identical — which is why **no live run was needed**, said
+explicitly in `live-testing.md`.
+
+**`parseTransferKeywords` DEFAULTS TO `send` TOO — A DELIBERATE BREAK WITH x3270, decided by the
+user after an earlier revision of this work had deliberately kept the two apart.** x3270
+initialises `receive_flag` true (`ft.c:319`); we default to `send` in the form *and* in a scripted
+`Transfer(...)` that omits `Direction=`. **The reason:** people are far more likely to use
+`IND$FILE` to get something INTO a historic S/370 system than to get it out, so the default should
+reflect what the tool is for — and a form/parser disagreement is its own trap for anyone who learns
+the tool through the form and then writes a script.
+
+**THE RISK WAS ACCEPTED, NOT REFUTED, and is documented loudly rather than softened:** a script
+written against x3270's default — or against ours from earlier the same day — now means the
+OPPOSITE, and under `Exist=replace` that overwrites a host dataset. Documented at the default in
+`transfer.ts`, as a README call-out, and in the one test that pins it. The superseded argument for
+keeping them apart is preserved verbatim in the spec, because it is still the strongest case
+against what shipped.
+
+**This is the SECOND deliberate divergence from x3270 in that keyword block;** `Mode` defaults to
+`binary` where x3270 sets `ascii_flag` true, because a wrong ascii default silently corrupts a load
+module. Both are now called out together wherever either is mentioned.
+
+**39 OF 48 `Transfer(...)` CALLS IN `cli/test/runner.test.ts` HAD BEEN RELYING ON THAT DEFAULT**
+without naming it, and 23 tests failed the moment it moved — several with symptoms that named a
+local file rather than a direction. **All 48 now state `Direction=` explicitly**, so none can
+change meaning the next time a default moves, and the default has exactly one home
+(`transfer.test.ts`'s `keyword defaults`). The repo's own `cli/scripts/*.txt` already followed that
+discipline, which is why no shipped script changed meaning.
+
+**Knock-on, and two harnesses caught it:** `applicable()` shows `Recfm` only on a send, so the form
+now draws **seven** field rows on open rather than six. `transfer.mjs` went 9/10 and
+`transfer-harness-flags.test.ts` went red on the same literal — the number is pinned in two places
+precisely so it cannot be bumped on faith.
+
+**REMAINING EXPOSURE:** naming the endpoints does nothing about a correct direction with a wrong
+`Host file`, and there is still no confirmation prompt (x3270 has none either).
+
+**ONE ITEM IS STILL WAITING ON THE USER:**
+- **The keypad overlay is opaque and covers the screen**, so the effect of a key just pressed is
+  invisible (`Ctrl-K` dismisses first). The user said they would decide how they want it changed.
+  `keypadOverlay.ts` records that **opacity is LOAD-BEARING** — the TUI's keypad once let host text
+  bleed into its chord column — so "make it translucent" has a recorded failure behind it.
+  Smaller, corner-anchored, auto-dismiss, or docking are the options that do not.
+
+**A NOTE CORRECTED 2026-10-22:** an earlier handoff claimed the **receive direction was blocked** by
+Task 8's nothing-staged guard, with Browse disabled and a typed name refused. **That was wrong.**
+`transferBoot.ts:427-436` returns on a receive *before* that guard, the Local file control is a
+plain text input, and the live run received a file by typing the name. The guard is send-only
+already. **Browse being disabled on a receive is correct** (`:358`): a browser cannot name a file
+that does not exist yet.
+
+## SUPERSEDED — NEXT ACTION, 2026-10-06
 
 **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — ALL TEN TASKS — AND IS MERGED TO `main`
 AND PUSHED.** Branch `keypad-window`, 15 commits, merged `--no-ff` as `17ee7bb` and deleted.

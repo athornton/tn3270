@@ -246,9 +246,15 @@ describe("the harness hooks go through the form's own object", () => {
   });
 
   it('asks the DOM which control a field is drawn as, not the field table', () => {
-    // Reading `TRANSFER_FIELDS` here would need a second runtime import, and `transfer.html`'s
-    // import map has ONE entry -- an unresolved specifier blanks this window with no error in any
-    // console. The DOM is also the better oracle: it answers what the form actually DREW.
+    // THE REASON IS THAT THE DOM IS THE BETTER ORACLE: it answers what the form actually DREW,
+    // not what the table says it should have.
+    //
+    // This comment used to lead with an import-graph argument -- that reading `TRANSFER_FIELDS`
+    // would need a second runtime import against a ONE-entry map. Retired 2026-10-06 as false,
+    // in step with the same claim in `transferBoot.ts`'s own docblock: the map's existing
+    // `@tn3270/frontend` entry already names `transferForm.js`, which EXPORTS that table, and
+    // `transferUi.js` imports it through that entry at runtime in this window. No new entry
+    // needed, and the two copies of a wrong reason were why it survived as long as it did.
     expect(boot).toMatch(/\[data-field="\$\{id\}"\]\[data-role="value"\]/);
     expect(boot).toMatch(/if \(el instanceof HTMLSelectElement\) return 'cycle';/);
   });

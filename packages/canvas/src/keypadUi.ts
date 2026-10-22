@@ -27,10 +27,13 @@ import { KEYPAD_BLOCKS, tooltipFor, type Action } from '@tn3270/frontend';
  * ## PRIMITIVES, NOT A `render(fields)` CALLBACK, AND THE DIFFERENCE IS MEASURABLE
  *
  * `transferUi.ts` made the other choice: it hands its boot file a `render(fields)` callback and
- * lets THAT file build elements. The cost shows up in the line counts -- `transferBoot.ts` is
- * 473 lines no test can execute, against `transferUi.ts`'s 387 that every test can -- and the
- * boot file is exactly where this project's one shipped blank-window bug lived (a TDZ read on an
- * uninitialised `const`, which optional chaining does not guard).
+ * lets THAT file build elements. The cost shows up in the line counts -- `transferBoot.ts` runs to
+ * several hundred lines no test can execute, comparable in size to the `transferUi.ts` that every
+ * test CAN -- and the boot file is exactly where this project's one shipped blank-window bug lived
+ * (a TDZ read on an uninitialised `const`, which optional chaining does not guard).
+ *
+ * (Exact counts were cited here until 2026-10-06 and went stale the first time either file gained
+ * a comment. The ratio is the argument; the integers were never the argument.)
  *
  * Injecting `create`/`append`/`setText`/`setAttr`/`onClick` instead moves the element building
  * into this file, where `keypadUi.test.ts` asserts all 48 buttons and all 48 actions against a

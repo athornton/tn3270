@@ -52,9 +52,21 @@ export function assetDir(): string {
  * walks the renderer's graph) and `canvas/test/keypadUiModule.test.ts` walks its one-import graph
  * instead. Note what that means for this list's own description: "every module the ENTRY POINT's
  * graph reaches" is now one sentence short of the truth, because the page has two entry points.
+ *
+ * `transferUi.js` joined 2026-10-06 for the web gateway's in-pane transfer form, and it is the
+ * SECOND entry the renderer does not reach. NOTHING ON THE SERVED PAGE IMPORTS IT YET -- the
+ * overlay that will is a later task in the same plan, and it is listed here first precisely so the
+ * module cannot 404 on the day that lands. Its one consumer today is the Electron window, through
+ * `gui/transfer.html`'s own map. It is the moved GUI view (`packages/gui` -> here, same day), and
+ * `canvas/test/transferUiModule.test.ts`
+ * walks its one-import graph the way `keypadUiModule.test.ts` does the keypad's. Its single runtime
+ * import is `@tn3270/frontend/dist/transferForm.js`, a DEEP path rather than the bare package name,
+ * because the web page's map already binds the bare `@tn3270/frontend` to `keypadView.js` for the
+ * keypad and an import-map key without a trailing `/` matches EXACTLY -- so `httpstatic.ts` must
+ * serve `transferForm.js` as well, from the `frontend` package rather than from this list.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
-  'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js',
+  'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js', 'transferUi.js',
 ]);
 
 /**

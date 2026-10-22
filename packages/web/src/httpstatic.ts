@@ -50,7 +50,76 @@ function table(): Map<string, Asset> {
   // BRIDGE.JS ITSELF NEVER EXECUTES -- `window.tn3270` is never assigned, and the error surfaces
   // in the NEXT script rather than this one. That misdirection is the whole reason this list has
   // a test walking the graph: the symptom names the wrong file.
-  for (const module of ['bridge.js', 'bridgecore.js', 'keypadOverlay.js']) {
+  for (const module of [
+    'bridge.js', 'bridgecore.js', 'keypadOverlay.js',
+    // `transferChunk.js` joins 2026-10-06: the browser WILL need `chunkBytes` and the 10 MB cap
+    // to refuse an oversize file before sending a byte, so it will be loaded by both sides.
+    // NOTHING LOADS IT TODAY -- the page's module graph is `bridge.js` and `renderer.js` and
+    // reaches neither this nor `transferUi.js`. Served ahead of the overlay that will import it (a
+    // later task in the same plan) deliberately: the entry is what stops it 404ing the day that
+    // lands, and an entry costs nothing until then.
+    //
+    // Safe to serve, and checked rather than assumed -- `dist/transferChunk.js` has ZERO imports
+    // of any kind (measured 2026-10-06 on the BUILT file, since `import type` erases), so it
+    // closes the graph at itself and needs no map entry or neighbour of its own.
+    //
+    // AN ENTRY IN *THIS* LOOP IS NOT COVERED BY THE EXISTS-AFTER-BUILD TEST, which is the trap
+    // worth naming here. An earlier version of this comment claimed the opposite -- that naming a
+    // module Tasks 5/6/8 have not written yet "would fail" that case. MEASURED 2026-10-06: adding
+    // `'transferOverlay.js'` here leaves `httpstatic.test.ts` at 18/18 GREEN. Own-package paths are
+    // deliberately excluded from that loop, because under vitest `import.meta.url` is the SOURCE
+    // file so they resolve into `src/` rather than `dist/` -- the same reason its comment gives for
+    // keeping `/bridge.js` out. So a bogus entry here is caught by NOTHING automatically, and the
+    // only cover is the hand-written assertion in the `/bridge.js` case, where `transferChunk.js`
+    // is named explicitly. ADD YOUR MODULE THERE TOO when you add it here.
+    'transferChunk.js',
+    // `transferBridge.js` joins the same day, WITH the file rather than ahead of it: it reads a
+    // local file into chunks and writes a received one out, and `transferBoot.js` will import it.
+    // Its only runtime import is `./transferChunk.js` above, so it closes the graph at a module
+    // already served and needs no map entry of its own. MEASURED on the BUILT file, since
+    // `import type` erases -- `dist/transferBridge.js` has exactly that one `from` line.
+    //
+    // NOT LOADED BY ANY PAGE YET, like `transferChunk.js` beside it: the page's graph is still
+    // `bridge.js` and `renderer.js`, and Task 8's boot module is what will reach this.
+    'transferBridge.js',
+    // `transferOverlay.js` joins the same way, with the file itself (2026-10-07): it has ZERO
+    // imports of its own (checked on the BUILT file -- `dist/transferOverlay.js` has no `from`
+    // line at all, since `import type` erases and this module imports nothing even at the type
+    // level), so it closes the graph at itself and needs no map entry or neighbour.
+    //
+    // NOT LOADED BY ANY PAGE YET, like its two neighbours above: `bridge.ts` is what will
+    // `show()`/`hide()` it once `transferForm` is intercepted client-side, and that wiring is
+    // Task 8's, not this one's.
+    'transferOverlay.js',
+    // `transferBoot.js` joins 2026-10-07 AND IS THE FIRST OF THESE THAT A PAGE ACTUALLY LOADS:
+    // `bridge.js` now imports it, so the three above are reached through it and the page's module
+    // graph finally includes them. That also changes what a missing entry costs here -- a 404 on
+    // this module means BRIDGE.JS ITSELF NEVER EXECUTES, `window.tn3270` is never assigned, and
+    // the error surfaces in RENDERER.JS as `Cannot read properties of undefined (reading
+    // 'onAtlas')`, naming the wrong file. That is the measured misdirection the graph-walking
+    // test above exists for.
+    //
+    // ITS OWN GRAPH, measured 2026-10-07 on the BUILT file, since `import type` erases and only
+    // `dist` tells the truth -- `dist/transferBoot.js` has exactly TWO `from` lines:
+    //
+    //   `./transferBridge.js`                   -- relative, served above, reaches
+    //                                              `./transferChunk.js`, also above
+    //   `@tn3270/canvas/dist/transferUi.js`     -- BARE, mapped by `static/index.html` to
+    //                                              `./transferUi.js` (served through
+    //                                              `BROWSER_MODULES` below), which in turn
+    //                                              imports `@tn3270/frontend/dist/transferForm.js`,
+    //                                              mapped to `./transferForm.js` (served below)
+    //
+    // Its `import type { TransferFieldId }` from `transferForm.js` is NOT in that list: it
+    // erased, which is why the source's three import statements are two at runtime. Every link in
+    // the chain is already in this table. A bare specifier is invisible to the graph-walking test,
+    // which matches only relative ones -- the import map is what resolves it, and only a real
+    // browser can fail to apply one.
+    //
+    // AND THE SAME WARNING AS ITS NEIGHBOURS: nothing in this loop is covered automatically, so
+    // this module is named in the `/bridge.js` case too.
+    'transferBoot.js',
+  ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }
   // DERIVED FROM `BROWSER_MODULES`, not retyped. That list is what `canvas` publishes for this
@@ -121,7 +190,18 @@ function table(): Map<string, Asset> {
    * reaches `tls.js` and its `node:net`/`node:tls`/`node:fs`.
    */
   const frontendDist = join(here, '..', '..', 'frontend', 'dist');
-  for (const module of ['keypadView.js', 'keypad.js', 'bindings.js']) {
+  // `transferForm.js` joined 2026-10-06 for the transfer overlay. It is SAFE by the same test
+  // as its neighbours: zero imports at all (`gui/test/transferModule.test.ts` asserts exactly
+  // that, and it was re-measured on the built file this day), which is why BOTH front ends'
+  // import maps point straight at it.
+  //
+  // NOTE THE SPECIFIER IT IS REACHED BY, because it differs from its three neighbours above:
+  // `transferUi.js` imports `@tn3270/frontend/dist/transferForm.js`, a DEEP path, since the bare
+  // `@tn3270/frontend` key in `static/index.html` is already bound to `keypadView.js` for the
+  // keypad and an import-map key without a trailing `/` matches EXACTLY. The map therefore needs
+  // its own entry naming that deep specifier -- but the ADDRESS is still `./transferForm.js`,
+  // flat at the root like everything else here.
+  for (const module of ['keypadView.js', 'keypad.js', 'bindings.js', 'transferForm.js']) {
     built.set(`/${module}`, { file: join(frontendDist, module), type: JS });
   }
   cached = built;

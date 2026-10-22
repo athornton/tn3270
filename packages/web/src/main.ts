@@ -4,13 +4,14 @@ import { createReadStream, readFileSync } from 'node:fs';
 import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns } from '@tn3270/canvas';
 import { resolve, resolveTerminalType, resolveAlternateSize } from '@tn3270/core';
-import { applyAction, defaultSession, resolveScheme, resolveTls } from '@tn3270/frontend';
+import { applyAction, defaultSession, resolveScheme, resolveTls, startTransfer } from '@tn3270/frontend';
 import { parseWebArgs, UsageError, type WebArgs } from './args.js';
 import { resolveAsset, tokenCookie, parseCookies } from './httpstatic.js';
 import { checkUpgrade, tokenMatches } from './handshake.js';
 import { Connection } from './wsserver.js';
 import { SessionRegistry } from './sessions.js';
 import { encodeServerMessage, decodeClientMessage } from './protocol.js';
+import { createGatewayTransfer } from './transferGateway.js';
 
 /**
  * The gateway: an HTTP(S) server, a WebSocket per client, and one 3270 Session each.
@@ -130,6 +131,35 @@ export function buildServer(args: WebArgs) {
      * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
      */
     let stopListening: (() => void) | undefined;
+    /**
+     * File transfer's staging and its live run -- PER CONNECTION, and that is the whole reason it
+     * is built here rather than once per process.
+     *
+     * A gateway `Session` deliberately OUTLIVES its socket so a reload can reattach, so anything
+     * held per SESSION is handed to whoever attaches NEXT -- a different window, possibly a
+     * different person. A half-staged upload passed over that way would be a file the new
+     * operator never chose, transferred under their session. The deleted `showKeypad` flag
+     * obeyed the same rule for the same reason; its reasoning is just below.
+     *
+     * In a closure, so the isolation is STRUCTURAL rather than a clear anybody has to remember: a
+     * reattaching client gets a new `Connection`, a new handler closure and a new one of these,
+     * so the previous operator's bytes are not merely cleared but unreachable. `transfer.discard()`
+     * in `onClose` is about releasing up to 10 MB promptly and about aborting a run the dropped
+     * socket can no longer hear from -- see that method's own note, which is careful about which
+     * of the two it actually buys.
+     *
+     * `session` IS NOT CAPTURED HERE. It is `undefined` until `hello`, and the one held below is
+     * the session this socket attached to -- so it is passed per `start` instead, at a point where
+     * the guard above has already proven it exists.
+     */
+    const transfer = createGatewayTransfer({
+      send: (msg) => { conn.sendBinary(encodeServerMessage(msg)); },
+      // `repaint?.()`, so a transfer that types into the screen produces a frame. The optional
+      // call is for a transfer message arriving before `hello`, which the guard below makes
+      // unreachable -- but `repaint` is typed optional and this costs one character.
+      repaint: () => { repaint?.(); },
+      startTransfer,
+    });
     /*
       A per-CONNECTION `showKeypad` flag lived here and is gone, 2026-10-06: the keypad is a DOM
       overlay the browser owns, so the server holds no keypad state at all.
@@ -196,6 +226,33 @@ export function buildServer(args: WebArgs) {
       // an attached id falls through and BUILDS A NEW SESSION. Calling it per action would open a
       // fresh connection to the mainframe on every keystroke, apply the action to a screen nobody is
       // looking at, and exhaust `--max-sessions` (default 16) within a dozen keys.
+      /*
+        THE THREE TRANSFER KINDS ARE HANDLED HERE, AND THEY MUST SIT ABOVE THE GUARD BELOW.
+
+        That guard -- `if (msg.kind !== 'action') return;` -- is what makes the widened
+        `ClientMessage` compile at all: `protocol.ts` decodes `transferChunk`, `transferStart` and
+        `transferCancel`, so `msg` past the `hello` branch is no longer `{kind:'action'}` by
+        elimination and the three `msg.action` uses below need the narrowing. ANYTHING AFTER IT IS
+        DEAD CODE, which is where this plan's draft said to put these branches -- RE-MEASURED
+        2026-10-07 by actually moving this line below the guard and running `tsc`, rather than
+        repeating the plan's figures: `TS2367: This comparison appears to be unintentional because
+        the types '"action"' and '"transferChunk"' have no overlap`, plus a `TS2339` for each of
+        `seq`, `total` and `bytes` -- on `{ kind: "action"; action: Action; }`, which is what `msg`
+        has narrowed to by then, and NOT on `never` as a first draft of this note said.
+
+        THEY ANSWER NOW, where the note that stood here described them as deliberately dropped --
+        "a protocol kind whose server half is not built". It is built: `transferGateway.ts` stages
+        the operator's bytes, hands them to an UNMODIFIED `startTransfer` through an in-memory
+        `TransferFiles`, relays the progress and chunks a received file back out.
+
+        EVERY REFUSAL IS A `transferDone {ok:false}` AND NEVER A CLOSE, which is the property that
+        file's header states and the one most worth repeating at the call site: closing this socket
+        would take the operator's whole 3270 session with it, over a mistyped `HostFile`.
+      */
+      if (msg.kind === 'transferChunk') { transfer.chunk(msg.seq, msg.total, msg.bytes); return; }
+      if (msg.kind === 'transferStart') { transfer.start(msg.keywords, session); return; }
+      if (msg.kind === 'transferCancel') { transfer.cancel(); return; }
+      if (msg.kind !== 'action') return;
       // Gated on `--log-actions`, which `parseWebArgs` refuses without `--replay`. The action
       // carries typed text, so on a live gateway this line would be a password in a log file.
       if (args.logActions) process.stdout.write(`action: ${JSON.stringify(msg.action)}\n`);
@@ -231,11 +288,30 @@ export function buildServer(args: WebArgs) {
        * never crosses the socket. An entry appearing here would mean that interception had broken.
        */
       if (msg.action.kind === 'toggleKeypad') return;
-      // `transferForm` NEEDS NO INTERCEPTION HERE: it takes the other branch of `protocol.ts`'s
-      // two-branch rule and is rejected at decode, before it can reach this handler at all -- and
-      // the try at line 151 answers that throw on this socket alone. See the note there for why a
-      // rejection rather than an interception: the reason is WHOSE FILESYSTEM a browser transfer
-      // writes to, not a missing dialog (the Electron GUI has had one since 2026-10-01).
+      /*
+        `transferForm` NOW NEEDS AN INTERCEPTION HERE, AND THIS LINE IS IT -- 2026-10-06. The note
+        that stood here said the kind "NEEDS NO INTERCEPTION" because `protocol.ts` rejected it at
+        decode. That rejection is gone, since socket-carried file I/O removed the reason for it, so
+        this is the OTHER branch of `protocol.ts`'s two-branch rule arriving in the same change that
+        accepted the kind -- which is what that rule requires and what `toggleKeypad` once spent a
+        commit violating.
+
+        IT IS NOT OPTIONAL AND IT IS NOT TIDINESS, measured both ways 2026-10-06. `applyAction`
+        still THROWS on `transferForm` (`frontend/src/actions.ts:57-59`, "the front end owns its own
+        dialog"), and the call below is outside any try inside a socket 'data' handler. Without this
+        line `integration.test.ts`'s every-Action-kind case reports `no reply to a tab after
+        transferForm` over an uncaught `applyAction does not handle transferForm` -- the same shape
+        `copy` and `toggleKeypad` produced -- and on a real gateway that ends the process and every
+        other operator's session. (Re-measured 2026-10-06 by deleting this line; the string names
+        the TAB the case sends afterwards to prove the session survived, not the action itself.)
+
+        AN EMPTY RETURN AND NOTHING MORE, on purpose: the transfer is driven by the `transferStart`,
+        `transferChunk` and `transferCancel` messages `protocol.ts` now decodes, which is where the
+        operator's own file bytes travel. The browser opens the shared form itself. Task 7 of this
+        plan is what gives those messages a session to act on; this line only has to keep the kind
+        away from `applyAction`, and it is unconditional and above every path to it.
+      */
+      if (msg.action.kind === 'transferForm') return;
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).
       // A LOCAL action emits NO session event: `emit('screen')` fires for host data and for a
@@ -249,6 +325,13 @@ export function buildServer(args: WebArgs) {
       // BEFORE `detach`, so the grace window never holds a session with listeners pointing at a
       // socket that has gone. `stopListening` is undefined for a socket that closed before `hello`.
       stopListening?.();
+      // AND THE TRANSFER'S OWN LISTENERS WITH THEM, which `stopListening` does NOT cover: the
+      // three above are this file's, while `startTransfer` registers three more of its own plus
+      // two timers (`transferRun.ts:441-455`), and only its `cancel` takes those off. Without
+      // this, a drop mid-transfer leaves a run reporting into a socket that is gone and up to ten
+      // minutes later `totalTimer` fires into it -- on a session the next client will reattach to.
+      // `discard` also tells the HOST, which is the difference between aborting and abandoning.
+      transfer.discard();
       if (id !== undefined) registry.detach(id);
     });
   });

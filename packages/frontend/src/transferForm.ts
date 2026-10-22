@@ -67,6 +67,50 @@ export const TRANSFER_FIELDS: readonly TransferField[] = [
   { id: 'blksize', label: 'Blksize', kind: 'numeric', values: [], width: 5 },
 ];
 
+/**
+ * The direction as the operator should READ it: both endpoints named, never a bare verb.
+ *
+ * ## THIS IS DISPLAY ONLY, AND THAT IS A HARD CONSTRAINT RATHER THAN A STYLE CHOICE
+ *
+ * `formKeywords` emits `Direction=${value}` from the STORED value, and `parseTransferKeywords`
+ * validates against the literals `['receive', 'send']`. A renamed VALUE would emit
+ * `Direction=send: local to host` and be refused by this project's own validator. So the stored
+ * value stays `send`/`receive` and only what is DRAWN changes -- the same split the TUI's `shown()`
+ * already uses for `''` -> `-`, and both `<select>` builders for `''` -> `(host default)`.
+ *
+ * ## WHY THIS EXISTS: IT COST A REAL FILE
+ *
+ * On 2026-10-07 the user -- an expert on this protocol, driving their own client -- read the bare
+ * `send`/`receive` the wrong way round and OVERWROTE THEIR OWN `PROFILE EXEC A` on VM/370 under
+ * `Exist=replace`. All four of this feature's guards defend against an EMPTY file reaching the
+ * host; NONE covers a valid file hitting the wrong target. Naming the endpoints is the cheap half
+ * of that gap. x3270 does not confirm a direction either, so the old behaviour was arguably
+ * correct -- it was also one click from data loss.
+ *
+ * ## `local`, NOT `browser`
+ *
+ * The phrasing first proposed was `this browser`, which is right for the web gateway and WRONG for
+ * the other two front ends: in the TUI and the Electron GUI, "local" is this machine's filesystem.
+ * `local` is true in all three AND matches the `Local file` field label directly above it, so the
+ * form reads as one statement rather than two vocabularies.
+ *
+ * ## NO ARROWS
+ *
+ * Fira Code and friends ligate `->` and `<-` -- `canvas/src/transferUi.ts` already took the arrows
+ * out of a help line for exactly this -- and the TUI draws printable ASCII only (`tui/src/app.ts`),
+ * so a real `->` or a U+2192 would force per-front-end text and defeat the point of one shared
+ * mapping. `to` means the same thing in every renderer.
+ *
+ * AN UNRECOGNISED VALUE IS RETURNED UNCHANGED rather than falling through to `undefined`: every
+ * renderer maps the values it offers through this, so a lookup without this property would draw a
+ * blank menu entry if a third direction were ever added.
+ */
+export function directionLabel(value: string): string {
+  if (value === 'send') return 'send: local to host';
+  if (value === 'receive') return 'receive: host to local';
+  return value;
+}
+
 const FIELD_BY_ID = new Map(TRANSFER_FIELDS.map((f) => [f.id, f]));
 
 /** Every field's current string. `''` means unset, for every kind. */
@@ -86,10 +130,45 @@ export interface TransferFormState {
   readonly error?: string | undefined;
 }
 
+/**
+ * A fresh form.
+ *
+ * ## IT OPENS ON `send`, AND THE KEYWORD PARSER'S DEFAULT IS DELIBERATELY DIFFERENT
+ *
+ * The user's reason, recorded because it will look surprising to someone one day: **until VM has a
+ * TCP/IP stack, this client is mostly used to GET SOFTWARE ONTO these systems** -- few people
+ * actually develop software locally on a VM or MVS guest. Upload is the common case, so it is the
+ * default.
+ *
+ * (The user's planned route to such a stack, which is the condition that would make this worth
+ * revisiting: UTS -- v7 Unix -- plus an IUCV-alike backported to VM/370, a simple network driver
+ * over a CTC pair cribbed from Linux on System/390 and z, and a small TCP stack running in UTS.
+ * Hard on a PDP-11 for address-space reasons; not hard on S/370 with up to 16 MB. **If download
+ * stops being the rare direction, reconsider this default.**)
+ *
+ * ## `parseTransferKeywords` STILL DEFAULTS TO `receive`, AND MUST
+ *
+ * That default applies when a SCRIPT's `Transfer(...)` omits `Direction=`. Flipping it would
+ * silently invert every such script -- a run that downloaded would UPLOAD, with `Exist=replace`
+ * reachable and no form to look at -- which is the same data-destruction shape this change exists
+ * to prevent, moved somewhere worse. It is also x3270's own default, which this project matches
+ * absent a documented reason to differ.
+ *
+ * **The asymmetry is the point:** an interactive form with a visible, self-describing control
+ * (`directionLabel`) is a different safety situation from an omitted keyword in an unattended
+ * script. `transfer.test.ts` pins the parser's default so this cannot be "tidied" into agreement.
+ *
+ * ## ONE KNOCK-ON, AND IT IS VISIBLE
+ *
+ * `applicable` shows `Recfm` only on a send, so a fresh form now draws ONE MORE FIELD than it used
+ * to. The TUI's box height is computed from the applicable count, so this is a layout change
+ * there, not merely a value change. 27 tests across four files asserted the old default; each had
+ * its SETUP updated rather than its assertion weakened.
+ */
 export function newTransferForm(): TransferFormState {
   return {
     values: {
-      direction: 'receive', host: 'tso', localFile: '', hostFile: '',
+      direction: 'send', host: 'tso', localFile: '', hostFile: '',
       mode: 'binary', exist: 'keep', cr: '', recfm: '', lrecl: '', blksize: '',
     },
     selected: 0,

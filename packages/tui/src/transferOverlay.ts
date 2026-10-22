@@ -28,7 +28,7 @@
  */
 
 import {
-  TRANSFER_FIELDS, applicable, type TransferFieldId, type TransferFormState,
+  TRANSFER_FIELDS, applicable, directionLabel, type TransferFieldId, type TransferFormState,
   type TransferValues,
 } from '@tn3270/frontend';
 import type { Geometry } from './render.js';
@@ -100,7 +100,21 @@ export function transferFits(terminal: Geometry): boolean {
  */
 function shown(id: TransferFieldId, values: TransferValues): string {
   const raw = values[id];
-  const text = raw === '' ? '-' : raw;
+  /*
+    THE DIRECTION IS DRAWN WITH BOTH ENDPOINTS NAMED, through `frontend`'s `directionLabel` --
+    the one home for that text, shared with both GUIs, so the three front ends cannot drift into
+    three wordings.
+
+    THE STORED VALUE IS UNCHANGED and is still what `formKeywords` emits. This is the same
+    display/value split the line below already makes for `''` -> `-`.
+
+    The label fits without widening anything: `VALUE_WIDTH` is 40, set by the two 40-wide TEXT
+    fields, against a longest label of 24. The truncation below is still the backstop, and
+    `transferOverlay.test.ts` pins the whole box inside 24x80 so a future rewording that did not
+    fit would fail there rather than silently clipping to `>`.
+  */
+  const labelled = id === 'direction' ? directionLabel(raw) : raw;
+  const text = labelled === '' ? '-' : labelled;
   return text.length > VALUE_WIDTH ? text.slice(0, VALUE_WIDTH - 1) + '>' : text;
 }
 

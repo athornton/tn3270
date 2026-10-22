@@ -109,7 +109,7 @@ export type { TransferRun, StartTransferOptions } from './transferRun.js';
 // GUI render the same form without a second field table to drift.
 export {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText,
-  applicable, formKeywords, moveField,
+  applicable, formKeywords, moveField, directionLabel,
 } from './transferForm.js';
 export type {
   TransferFieldId, TransferFieldKind, TransferField, TransferValues, TransferFormState,

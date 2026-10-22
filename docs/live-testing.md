@@ -9,6 +9,185 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE DIRECTION LABELS AND THE `send` DEFAULT ARE BUILT — AND THIS ONE NEEDED NO LIVE RUN,
+  2026-10-22.** Said first because the convention in this file is that an unqualified claim was
+  witnessed on a host: **the emitted keywords are byte-identical to before**, so there is nothing a
+  host could tell apart. `formKeywords` still emits `Direction=send`; only what is DRAWN changed.
+  Spec `docs/superpowers/specs/2026-10-22-direction-labels-design.md`, plan
+  `docs/superpowers/plans/2026-10-22-direction-labels.md`.
+
+  **This closes the defect that cost a real file.** On 2026-10-07 the user — an expert on this
+  protocol, driving their own client — read the bare `send`/`receive` the wrong way round and
+  **overwrote their own `PROFILE EXEC A`** under `Exist=replace`. The form now reads:
+
+  ```
+  > Direction   send: local to host
+    Host        tso
+    Local file  -
+  ```
+
+  which is the point of saying `local` rather than `this browser` (the phrasing first proposed):
+  it sits directly above `Local file`, so the two lines explain each other — **and it is true in
+  all three front ends**, where the web gateway's "local" is a browser but the TUI's and GUI's is
+  this machine's filesystem.
+
+  **BOTH DEFAULTS ARE NOW `send` — the form AND `parseTransferKeywords`**, a deliberate break with
+  x3270 (which initialises `receive_flag` true, `ft.c:319`). The user's reason: people are far more
+  likely to use `IND$FILE` to get something INTO a historic S/370 system than to get it out, so
+  until VM has a TCP/IP stack this client's job is mostly putting software onto these machines.
+
+  An earlier revision the same day kept the two APART — form `send`, parser `receive` — arguing an
+  unattended script has no label to read. **The user overruled that and the risk was accepted, not
+  refuted:** a script written against x3270's default now means the opposite, and under
+  `Exist=replace` that overwrites a host dataset rather than a local file. It is documented at the
+  default, in the README, and in the single test that pins it; the superseded argument is kept
+  verbatim in the spec.
+
+  **39 of 48 `Transfer(...)` calls in `cli/test/runner.test.ts` had relied on that default without
+  naming it**, and 23 tests failed when it moved. All 48 now state their direction, which is the
+  discipline `cli/scripts/*.txt` already followed — and why no shipped script changed meaning.
+
+  **What offline evidence there is, and it is unusually good for a UI change:**
+
+  - **2487 unit tests**, including the pair that distinguishes a display mapping from a renamed
+    value: the keywords must contain `Direction=send` and must NOT contain the label text.
+  - **A real browser reads it**: `browser-clicks`'s `overlay` phase reports *"the direction reading
+    `"send: local to host"` while still submitting `"send"`"*. **Mutation-proved** — making
+    `optionLabels` the identity turns that phase red.
+  - **The TUI's whole box is pinned inside 24x80**, and every line pinned to one width. That second
+    invariant is not cosmetic: a short line once let a live host's screen show through beside it.
+  - **Both golden harnesses still match** (`shot` 2/2, `browser-shot` 1/1).
+
+  **TWO HARNESSES CAUGHT THE EXPECTED KNOCK-ON, which is the part worth recording.** `applicable()`
+  shows `Recfm` only on a send, so opening on send draws **one more field row** — `transfer.mjs`
+  went 9/10 on its `FIELD_ROWS = 6` literal and `transfer-harness-flags.test.ts` went red on the
+  same number. Two independent signals that the arithmetic had to be re-derived rather than bumped.
+
+  **THE REMAINING EXPOSURE, STATED SO IT IS NOT MISTAKEN FOR CLOSED:** naming the endpoints does
+  nothing about a CORRECT direction with a WRONG `Host file`. An operator can still overwrite a
+  different host dataset deliberately, and `Exist=replace` is still one cycle away. There is also
+  **no confirmation prompt** — x3270 has none either, and a modal on every transfer would be worse
+  than the disease.
+
+- **THE WEB TRANSFER UI IS LIVE-VERIFIED THROUGH A REAL BROWSER, BOTH DIRECTIONS, 249 BYTES
+  BYTE-IDENTICAL — 2026-10-22.** Driven BY HAND by the user, which is what this feature needed:
+  a `DrawCell` carries an atlas glyph index and no character (`canvas/src/index.ts:44`), so no
+  harness in this repo can read the terminal half of the page as text.
+
+  **Operator's browser: Firefox 158.0.1 on macOS. Transfer at ~03:02 UTC.** The browser matters
+  more than usual here — see the save-route finding below, which is the opposite of what this
+  entry first claimed.
+
+  **Host:** VM/370 Community Edition V1 R1.2 on `localhost:3270`, CMS, userid `CMSUSER`,
+  **CUT engine** (MECAFF implements no DFT — see the 2026-09-25 entry). Gateway:
+
+  ```bash
+  node packages/web/dist/main.js --listen 8017 \
+    --allow-origin https://usdf-rsp.slac.stanford.edu \
+    127.0.0.1:3270 -insecure -model 3278-2-E
+  ```
+
+  **Browser reached it through JupyterHub's proxy**, not from localhost — there is no browser in
+  the RSP environment the gateway runs in, so the operator's browser was on a different machine
+  entirely: `https://usdf-rsp.slac.stanford.edu/nb/user/athor/proxy/8017/`. This is the
+  reverse-proxy deployment the two bugs fixed at `7878485` were about, and it worked first try with
+  the trailing slash and `--allow-origin` both present.
+
+  **What transferred:** a 249-byte random binary, sent to `WEBX DATA A` with `Recfm=variable`,
+  then received back and saved. **Byte-identical**, verified by the user against the source's
+  sha256 (`52f52dc2ccce3e5b64b2ff89680eaca2fcd55d82b4f664eede9c689f6950ce71`). `WEBX DATA A`
+  erased and `CMSUSER` logged off afterwards, so no reconnect trap is handed forward.
+
+  **STATE THE GAPS, because this file's convention is that an unqualified claim was witnessed:**
+
+  - **THE SAVE ROUTE EXERCISED WAS THE `<a download>` FALLBACK, AND THE PICKER IS THE ROUTE STILL
+    UNWITNESSED LIVE.** This is the REVERSE of what this entry and the plan both first said, and the
+    reversal is worth keeping because the reasoning that produced it was wrong twice over.
+
+    The operator was in **Firefox 158.0.1**, and **Firefox implements `showSaveFilePicker` in no
+    version at all** — checked against caniuse's File System Access data 2026-10-22, which shows
+    Firefox 2–161 unsupported and records **Mozilla's position as "harmful"**, so it is not coming.
+    Safari is unsupported across every version too. So `'showSaveFilePicker' in globalThis` was
+    FALSE, `transferBoot.ts:124` injected `undefined`, and `saveFallback` ran.
+
+    **A FILE DIALOG APPEARED ANYWAY, AND THAT IS WHAT MADE THIS MISREADABLE.** Firefox's own
+    *always ask where to save files* preference prompts on an `<a download>` click, so the operator
+    saw a save dialog and reported one — and a dialog was taken as proof of the picker. **A VISIBLE
+    SAVE DIALOG DOES NOT IDENTIFY THE ROUTE.** The only reliable discriminators are the browser
+    (Chromium-family or not) and the context (secure or not).
+
+    **The plan's stated REASON was also wrong, independently of which route ran.** It said a
+    localhost gateway makes the picker available "localhost being a secure context" — true, but ANY
+    secure context does it, and the proxied `https://` origin here was one. So secure context was
+    never the deciding factor on this run; **the browser was.**
+
+    **Closing the picker gap needs a Chromium-family browser** (Chrome/Edge/Opera desktop, 105+) in
+    a secure context. Neither of this project's live runs has used one, and the author's own stated
+    target is a Mac — where Safari cannot do it either.
+  - **The 10 MB refusal was checked offline only**, never against a host dataset that size.
+  - **`LISTFILE WEBX DATA A` was not captured.** The send's success rests on the client's report
+    plus the byte-identical receive of the same file, which is strong but is not the independent
+    host-side confirmation the plan asked for.
+  - **One file, one size, one host, one engine.** No DFT host (TK5) was driven from the browser,
+    and no file large enough to exercise chunking across many frames.
+
+  **AN UNIMPLEMENTED SPEC REQUIREMENT, FOUND BY THIS MISREADING AND NOT BY ANY TEST.** The spec
+  says the feature detection is one `'showSaveFilePicker' in window` test *"and the overlay says
+  which route it will take so the operator is never surprised about where the file went"*
+  (design doc `:302`). **The overlay says no such thing** — the only text naming either route
+  lives in CODE COMMENTS (`transferBridge.ts:52`, `transferGateway.ts:415`), and the Save button
+  is unlabelled as to destination. Had that line been built, the operator's report would have
+  identified the route and this entry would not have had to be rewritten. **The misrecording IS
+  the cost of the missing feature**, which is the strongest argument for building it.
+
+  **A UX defect the run found: the operator must click Start and then Save**, and found the second
+  click unintuitive — *"if I started the transfer, of course I want to save the file"*.
+
+  **THE CONSTRAINT APPLIES TO THE PICKER ONLY, AND THE OPERATOR WAS NOT ON THE PICKER** — which is
+  what the browser correction above changes about this defect, and why it is stated after it.
+  `showSaveFilePicker` requires **transient user activation**, and the click that started the
+  transfer is spent by the time `transferDone` arrives (`transferBoot.ts:471-478`, spec decision 6
+  condition 2), so on Chromium the dialog genuinely cannot be opened from the completion callback.
+  **But `<a download>` has no activation requirement at all**, so on this operator's own browser —
+  Firefox, the fallback route — auto-saving on completion is **possible today**.
+
+  **THE AWKWARD CONSEQUENCE:** implementing auto-save only where it is possible makes the two
+  routes behave differently, and gives the browsers WITHOUT a picker the smoother flow. Uniformity
+  and the better flow are in genuine conflict.
+
+  **RESOLVED THE SAME DAY: THE USER DECLINED AUTO-SAVE AND CHOSE THE MIDDLE OPTION, WHICH IS NOW
+  BUILT.** Spec `docs/superpowers/specs/2026-10-22-save-affordance-design.md`, plan
+  `docs/superpowers/plans/2026-10-22-save-affordance.md`. Most of the reported friction was not
+  knowing Save was the next step, so: the completion message now names Save, the button takes the
+  focus so Enter saves, and every overlay button got a focus ring — `ui.css` had **no `:focus` or
+  `outline` rule at all** beforehand, which made this an accessibility fix for a form built to be
+  keyboard-navigable. All three facts derive from one `hasUnsaved()` read, so the text, the
+  enablement and the focus cannot disagree.
+
+  **AND BUILDING IT FOUND A DEFECT THAT THE USER HAD ASKED ABOUT IN ADVANCE** — *"assuming there's
+  some highlighting that shows focus, and if not, let's add some"*. The first ring used
+  `:focus-visible`, correct for any button an operator tabs to, and **it did not paint on the
+  programmatically focused Save button**: the harness reported `:focus-visible matched: false` with
+  the focus correctly on `#transfer-save`. `:focus-visible` is decided by the UA's heuristic about
+  the user's **last input modality**, not by how the focus was set — and the operator reaches a
+  completed transfer by CLICKING Start, so the modality is pointer and the ring is suppressed
+  (confirmed against MDN 2026-10-22). **The autofocus would have landed invisibly, which is the
+  whole defect it exists to cure.** `#transfer-save` now opts into plain `:focus` as well; the
+  selector is deliberately narrow, because clicking THAT button saves the file and then disables
+  it, so the left-behind-ring objection to `:focus` cannot arise for it.
+
+  **Covered by `browser-clicks.mjs`'s `progress` phase**, which now asserts `activeElement` is Save
+  after a completed receive, that Save is **not** focused mid-transfer, that the status line names
+  it, and that a `2px solid` outline is **resolved on it** — a `getComputedStyle` read, the first in
+  this repo's harnesses, because matching `:focus` would be trivially true and would prove nothing
+  about a stylesheet that forgot to style it. **Mutation-proved with three mutants** — dropping the
+  focus call, dropping the hint, and removing the outline declaration each turn the phase red (6/7).
+
+  **THE RING'S LEGIBILITY IS UNWITNESSED, and that is the honest state.** `outlineStyle: solid` is
+  not "a human can see it", and no harness here can judge whether a 2px `Highlight` outline reads
+  clearly against the overlay's `Canvas` background. **The user has not yet eyeballed it in
+  Firefox**; this entry will say so until they do.
+
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:
   **nothing about this change alters what reaches the host.** A keypad button raises the same

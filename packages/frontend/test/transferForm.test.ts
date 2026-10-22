@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText, applicable, formKeywords,
+  directionLabel,
   type TransferFormState,
 } from '../src/transferForm.js';
 import { parseTransferKeywords, transferCommand } from '../src/transfer.js';
@@ -19,9 +20,16 @@ describe('TRANSFER_FIELDS', () => {
 });
 
 describe('newTransferForm', () => {
-  it('starts at receive, tso, binary, keep, with Cr and Recfm UNSET', () => {
+  it('starts at SEND, tso, binary, keep, with Cr and Recfm UNSET', () => {
+    // `send` RATHER THAN `receive`, changed 2026-10-22 and this test renamed with it: until VM
+    // has a TCP/IP stack this client is mostly used to get software ONTO these systems, so upload
+    // is the common case. `newTransferForm`'s docstring carries the full reasoning.
+    //
+    // NOTE WHAT THIS DOES *NOT* SAY. `parseTransferKeywords` still defaults to `receive`, which
+    // is x3270's own default and serves SCRIPTS -- see the test pinning that asymmetry in
+    // `transfer.test.ts`. The two defaults disagree on purpose.
     const s = newTransferForm();
-    expect(s.values.direction).toBe('receive');
+    expect(s.values.direction).toBe('send');
     expect(s.values.host).toBe('tso');
     expect(s.values.mode).toBe('binary');
     expect(s.values.exist).toBe('keep');
@@ -44,21 +52,25 @@ describe('newTransferForm', () => {
 
 describe('cycleField', () => {
   it('cycles direction both ways and WRAPS', () => {
+    // STARTS AT `send` NOW (the form's default), so the first step wraps to `receive`. The
+    // table order is still ['receive', 'send'] -- only the starting point moved.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);
     expect(s.values.direction).toBe('send');
     s = cycleField(s, 'direction', 1);
-    expect(s.values.direction).toBe('receive');   // wrapped
+    expect(s.values.direction).toBe('receive');   // wrapped forwards
+    s = cycleField(s, 'direction', 1);
+    expect(s.values.direction).toBe('send');
     s = cycleField(s, 'direction', -1);
-    expect(s.values.direction).toBe('send');      // wraps backwards too
+    expect(s.values.direction).toBe('receive');   // wraps backwards too
   });
 
   it('cycles Recfm through THREE states, unset included', () => {
     // Not an F/V toggle: unset emits no RECFM and lets the host choose, which is a
     // different wire command from RECFM V. Starting at unset preserves "I did not ask
     // for record attributes" as an intention.
+    // NO DIRECTION CYCLE NEEDED: the form now OPENS on send, which is what makes Recfm
+    // applicable. Cycling here would move to `receive` and clear it.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);          // Recfm applies only on a send
     const seen: string[] = [s.values.recfm];
     for (let i = 0; i < 3; i++) { s = cycleField(s, 'recfm', 1); seen.push(s.values.recfm); }
     expect(seen).toEqual(['', 'fixed', 'variable', 'undefined']);
@@ -67,8 +79,8 @@ describe('cycleField', () => {
   });
 
   it("omits Recfm's U when Host is vm, because CMS has only fixed and variable", () => {
+    // Opens on send already, so only Host is cycled.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);
     s = cycleField(s, 'host', 1);
     expect(s.values.host).toBe('vm');
     const seen: string[] = [];
@@ -93,7 +105,7 @@ describe('setFieldText', () => {
     // Typing into a cycle field must not invent a value the validator has never seen:
     // the form collects strings but it does not get to make them up.
     const s = newTransferForm();
-    expect(setFieldText(s, 'direction', 'sideways').values.direction).toBe('receive');
+    expect(setFieldText(s, 'direction', 'sideways').values.direction).toBe('send');
   });
 
   it('accepts only digits in a numeric field', () => {
@@ -172,8 +184,8 @@ describe('clearing on transition', () => {
   it('REPAIRS Recfm=U when Host flips to vm, since CMS cannot express it', () => {
     // `applicable` does not catch this -- U stays legal for a send -- so it is a separate
     // repair. Without it the form would submit `Recfm=undefined` to the VM dialect.
+    // Opens on send, so Recfm is already applicable and no direction cycle is wanted.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);
     s = cycleField(s, 'recfm', 3);             // undefined
     expect(s.values.recfm).toBe('undefined');
     s = cycleField(s, 'host', 1);
@@ -240,8 +252,10 @@ describe('formKeywords', () => {
   });
 
   it('produces a valid send with record attributes', () => {
+    // Opens on send already -- the direction this case is about -- so nothing is cycled to
+    // reach it. THAT IS THE POINT OF THIS TEST NOW: the keywords must carry `Direction=send`,
+    // the STORED value, and never `directionLabel`'s display text.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);
     s = setFieldText(s, 'localFile', '/tmp/a.bin');
     s = setFieldText(s, 'hostFile', 'A.BIN');
     s = cycleField(s, 'recfm', 1);
@@ -251,5 +265,51 @@ describe('formKeywords', () => {
     expect(request.recfm).toBe('fixed');
     expect(request.lrecl).toBe(80);
     expect(command).toContain('IND$FILE PUT');
+    // THE LABEL MUST NOT REACH THE WIRE. This is the assertion that distinguishes a display
+    // mapping from a value change: `Direction=send: local to host` would be refused by our own
+    // validator, and `IND$FILE` would never see it.
+    expect(formKeywords(s)).toContain('Direction=send');
+    expect(formKeywords(s).join(' ')).not.toContain('local to host');
+  });
+});
+
+describe('directionLabel', () => {
+  it('names both endpoints, so a direction cannot be read as a bare verb', () => {
+    expect(directionLabel('send')).toBe('send: local to host');
+    expect(directionLabel('receive')).toBe('receive: host to local');
+  });
+
+  it('returns any other value UNCHANGED, so a new direction cannot vanish from a menu', () => {
+    // Every renderer maps the values it offers through this. A `switch` with no default arm
+    // would return undefined and draw a BLANK menu entry rather than failing loudly.
+    expect(directionLabel('')).toBe('');
+    expect(directionLabel('sideways')).toBe('sideways');
+  });
+
+  it('SAYS LOCAL, NOT BROWSER: the TUI and the Electron GUI have no browser', () => {
+    // `local` is true in all three front ends and matches the `Local file` field label directly
+    // above it. Pinned because the first phrasing proposed was "this browser", which is right
+    // for the web gateway and WRONG for the other two, where local is this machine's filesystem.
+    expect(directionLabel('send')).not.toContain('browser');
+    expect(directionLabel('receive')).not.toContain('browser');
+  });
+
+  it('USES NO LIGATING PUNCTUATION AND NO NON-ASCII, because the TUI draws ASCII only', () => {
+    // Fira Code and friends ligate `->`, `<-` and `...`; `tui/src/app.ts` accepts printable
+    // ASCII only, so a real arrow would force per-front-end text and defeat the shared mapping.
+    for (const v of ['send', 'receive']) {
+      const text = directionLabel(v);
+      expect(text).not.toContain('->');
+      expect(text).not.toContain('<-');
+      expect(text).not.toContain('...');
+      expect(text).toMatch(/^[\x20-\x7e]*$/);
+    }
+  });
+
+  it('FITS the TUI value column, which is what stops the box growing past 80 columns', () => {
+    // `VALUE_WIDTH` there is 40, set by the two 40-wide text fields. Asserted here as well as in
+    // the TUI's own suite so a future rewording is caught in the module that OWNS the text.
+    expect(directionLabel('receive').length).toBeLessThanOrEqual(40);
+    expect(directionLabel('send').length).toBeLessThanOrEqual(40);
   });
 });

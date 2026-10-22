@@ -145,11 +145,15 @@ const STEPS = `localFile=${LOCAL},hostFile=${HOST_FILE},submit,hostFile=${AFTER_
 /**
  * HOW MANY ROWS THE FORM MUST DRAW, as a literal with its derivation written down.
  *
- * A fresh form is `direction=receive, host=tso` (`newTransferForm`), and `applicable()` then hides
- * four of the ten fields: `recfm`, `lrecl` and `blksize` need `direction === 'send'`, and `cr`
- * needs `mode === 'ascii'`. Six remain -- direction, host, localFile, hostFile, mode, exist --
- * which is what `#fields .row` must contain. MEASURED against the built `transferForm.js` rather
- * than read off the table.
+ * A fresh form is `direction=SEND, host=tso` (`newTransferForm`, changed 2026-10-22), and
+ * `applicable()` then hides three of the ten fields: `lrecl` and `blksize` need a `recfm` as well
+ * as a send, and `cr` needs `mode === 'ascii'`. SEVEN remain -- direction, host, localFile,
+ * hostFile, mode, exist, recfm -- which is what `#fields .row` must contain. MEASURED against the
+ * built `transferForm.js` rather than read off the table.
+ *
+ * WAS SIX UNTIL THE DEFAULT MOVED, and this harness caught it: `recfm` is applicable on a send,
+ * so opening on send draws one more row. That is the expected knock-on the direction-labels spec
+ * names, not a regression -- but the number had to be re-derived rather than bumped on faith.
  *
  * A LITERAL AND NOT A COUNT COMPUTED HERE, deliberately: importing `TRANSFER_FIELDS` and filtering
  * it with `applicable()` would be a second copy of the renderer's own logic, and it would agree
@@ -157,7 +161,7 @@ const STEPS = `localFile=${LOCAL},hostFile=${HOST_FILE},submit,hostFile=${AFTER_
  * defect in a smaller way: it matches `fields=0`, which is precisely the blank window this harness
  * exists to catch.
  */
-const FIELD_ROWS = 6;
+const FIELD_ROWS = 7;
 
 /**
  * The status the form must end up showing, and the reason it is asserted rather than `ok=false`.

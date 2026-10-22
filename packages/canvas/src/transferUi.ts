@@ -1,7 +1,22 @@
 import {
-  TRANSFER_FIELDS, applicable, cycleField, formKeywords, newTransferForm, setFieldText,
+  TRANSFER_FIELDS, applicable, cycleField, directionLabel, formKeywords, newTransferForm,
+  setFieldText,
   type TransferFieldId, type TransferFormState, type TransferValues,
-} from '@tn3270/frontend';
+} from '@tn3270/frontend/dist/transferForm.js';
+
+/**
+ * MOVED HERE FROM `packages/gui` on 2026-10-06, for the same reason `keypadUi.ts` lives here:
+ * `packages/web` needs this view and cannot depend on an Electron app. The move was
+ * behaviour-preserving and the test came with it unchanged, which is the evidence.
+ *
+ * IT IMPORTS ONLY `@tn3270/frontend/dist/transferForm.js`, and must keep doing so -- see the
+ * import-map section below for why that is the DEEP path and not the bare package name since
+ * 2026-10-06. Electron's `dialog` and `ipcRenderer`
+ * reach this form through `UiDeps` -- whose `browse()` and `submit()` are already
+ * `Promise`-returning, which is why a browser needs no change to the interface at all. The GUI's
+ * `browse()` resolves to a PATH; the web's resolves to a `File.name`. This module shows the string
+ * and submits it, and cannot tell the difference.
+ */
 
 /**
  * The transfer form's browser-side logic, with the DOM INJECTED.
@@ -24,26 +39,58 @@ import {
  *
  * ## A BROWSER LOADS THIS, AND AN IMPORT MAP IS WHAT MAKES THAT LEGAL
  *
- * The import above is a BARE SPECIFIER and stays one in the emitted JS -- deliberately, not by
- * omission. `tsc` rewrites nothing (measured 2026-10-01: `dist/transferUi.js` line 1 carries
- * `from '@tn3270/frontend'`, and it is the file's ONLY runtime import, the type-only ones
- * having been erased).
+ * The import above is a BARE-PACKAGE-ROOTED DEEP SPECIFIER and stays one, verbatim, in the
+ * emitted JS -- deliberately, not by omission. `tsc` rewrites nothing (measured 2026-10-06:
+ * `dist/transferUi.js` line 1 carries `from '@tn3270/frontend/dist/transferForm.js'`, and it is
+ * the file's ONLY runtime import, the type-only ones having been erased).
  *
- * `transfer.html` carries an import map that resolves that specifier to
- * `../frontend/dist/transferForm.js`. The browser applies the map BEFORE it fetches anything,
- * so `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and
- * `tls.js`'s `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never
- * reached. All six names imported here are exported directly by `transferForm.js` (verified),
- * so the one map entry satisfies the whole list.
+ * ## WHY THE DEEP PATH, AND NOT THE BARE `@tn3270/frontend` IT USED TO BE
+ *
+ * CHANGED 2026-10-06, when `packages/web` became the second consumer. That page's map had
+ * ALREADY bound the bare `@tn3270/frontend` to `keypadView.js` for the keypad overlay, and an
+ * import-map key without a trailing `/` matches EXACTLY -- so a bare specifier here would have
+ * resolved to `keypadView.js`, a module that does not export `TRANSFER_FIELDS`. That is a
+ * resolution failure presenting as a BLANK PAGE WITH NO ERROR in any console, which is the
+ * failure family this whole docblock is about. One specifier cannot name two files, so the two
+ * views are reached by two distinct specifiers.
+ *
+ * `packages/frontend/package.json`'s `exports` map gained `"./dist/transferForm.js"` in the same
+ * change, and it had to: an `exports` map with only `"."` makes every deep path an error, and the
+ * probe said so -- `TS2307: Cannot find module '@tn3270/frontend/dist/transferForm.js'` from
+ * `tsc`, `ERR_PACKAGE_PATH_NOT_EXPORTED` from Node. A browser never consults `exports`, so this
+ * is purely what keeps `tsc`, Node and the browser resolving the one same string.
+ *
+ * Each consuming document carries an import map that resolves that specifier to
+ * `transferForm.js`. The browser applies the map BEFORE it fetches anything, so
+ * `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and `tls.js`'s
+ * `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never reached. All
+ * six names imported here are exported directly by `transferForm.js` (verified), so that single
+ * entry satisfies the whole list.
+ *
+ * TWO DOCUMENTS DO THIS AS OF 2026-10-06: `packages/gui/transfer.html` for the Electron window,
+ * and `packages/web/static/index.html` for the gateway. Both carry a key spelling this deep
+ * specifier verbatim -- the GUI's was updated in the same change, because its single
+ * `@tn3270/frontend` key stopped matching the moment this import grew a subpath, and a key that
+ * no longer matches is that blank window again.
+ *
+ * The two maps are NOT copies of each other. The GUI's addresses name
+ * `../frontend/dist/transferForm.js` by relative path, which works only because an Electron
+ * window loads from `file://` where `..` is a real directory; a served page has no such thing,
+ * so the gateway serves every module FLAT at `/` and its addresses are `./transferForm.js`.
  *
  * `transferForm.js` has ZERO runtime imports of its own (9139 bytes, measured 2026-10-01), so
  * the module graph closes at that single file. That is a FACT WITH A DATE, not an invariant:
  * `transferModule.test.ts` pins the property, and the day it expires this window goes blank
  * with no error in any console.
  *
- * SO DO NOT ADD A SECOND WORKSPACE IMPORT TO THIS FILE. The map has one entry; a new bare
- * specifier would resolve to nothing, and the failure arrives as a blank window rather than as
- * an error. Anything else this module needs comes in through `UiDeps`.
+ * SO DO NOT ADD A SECOND WORKSPACE IMPORT TO THIS FILE. A specifier no map entry names resolves
+ * to nothing, and the failure arrives as a blank window rather than as an error -- in BOTH front
+ * ends now, and each map would need its own new entry. Anything else this module needs comes in
+ * through `UiDeps`.
+ *
+ * AN EARLIER VERSION OF THIS PARAGRAPH SAID "the map has one entry", which went stale the day
+ * this module gained a second consumer; the GUI's map has carried two since 2026-10-06. The
+ * advice was always the right advice and its stated reason had quietly stopped being a fact.
  *
  * No unit test in this file can detect any of that -- a fake DOM cannot fail to resolve a
  * module. The window must be LOADED and seen to paint, which is Task 8's Electron harness's
@@ -59,6 +106,23 @@ export interface UiField {
   readonly value: string;
   /** For a cycle field, the values it offers here; empty otherwise. */
   readonly options: readonly string[];
+  /**
+   * What to DRAW for each entry of `options`, positionally aligned with it.
+   *
+   * SEPARATE FROM `options` BECAUSE THE VALUE IS WHAT GETS SUBMITTED. `formKeywords` emits the
+   * stored value, so a renderer must keep both: the value it reports back, and the text the
+   * operator reads. Today only `direction` differs between the two -- `directionLabel` names
+   * both endpoints, because the bare words cost the user a real file on 2026-10-07 -- and this
+   * is the identity for every other field.
+   *
+   * ALWAYS THE SAME LENGTH AND ORDER AS `options`, so a renderer can zip them by index. The
+   * `''` -> `(host default)` mapping stays in each renderer: that is about an EMPTY value rather
+   * than a named one, and it is presentation rather than a shared decision.
+   *
+   * REQUIRED, NOT OPTIONAL. An optional property would let a renderer silently fall back to the
+   * bare values, which is precisely the defect this exists to fix.
+   */
+  readonly optionLabels: readonly string[];
 }
 
 /**
@@ -165,7 +229,16 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // here are derived by asking it rather than by re-filtering the table.
       const options = f.kind === 'cycle' ? offered(f.id) : [];
       out.push({
-        id: f.id, label: f.label, kind: f.kind, value: state.values[f.id], options,
+        id: f.id,
+        label: f.label,
+        kind: f.kind,
+        value: state.values[f.id],
+        options,
+        // ONE MAPPING FOR EVERY CYCLE FIELD rather than a special case for `direction`:
+        // `directionLabel` returns anything it does not recognise unchanged, so this is the
+        // identity for the rest. Built HERE rather than in each renderer because both `<select>`
+        // builders would otherwise carry the same decision, which is how two front ends drift.
+        optionLabels: options.map((o) => (f.id === 'direction' ? directionLabel(o) : o)),
       });
     }
     return out;

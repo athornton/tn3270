@@ -57,3 +57,24 @@ export type { CellAddr, CellRect } from './selection.js';
 // purpose: `tsc` follows the package entry point, the browser follows the map.
 export { createKeypadUi } from './keypadUi.js';
 export type { KeypadDeps } from './keypadUi.js';
+// The transfer form's view. Here for the same reason `keypadUi.ts` is -- `packages/web` needs it
+// and cannot depend on an Electron app -- and moved here on 2026-10-06 to make that possible.
+//
+// UNLIKE THE KEYPAD ABOVE, ONLY ONE FRONT END CONSUMES IT TODAY. The keypad note's "both front
+// ends" is true of `keypadUi.js` and would be false here: the Electron transfer window names
+// `canvas/dist/transferUi.js` in `gui/transfer.html`'s map, and the gateway's overlay does not
+// exist yet. Do not copy that sentence down here when it does; see `transferUi.ts`'s own header
+// for why the two maps will differ rather than match.
+//
+// EXPORTED FOR TYPESCRIPT, WHICH IS NOT HOW THE BROWSER GETS IT: the consuming document names
+// `canvas/dist/transferUi.js` DIRECTLY, because this barrel reaches `drawlist.js` and
+// `@tn3270/core` -- a bare specifier that blanks the window.
+//
+// THE DEEP SPECIFIER RESOLVES ONLY BECAUSE THIS PACKAGE HAS NO `exports` FIELD, which is a
+// prerequisite rather than an accident: `frontend`, `core`, `node-files` and `cli` all have one,
+// so adding one here looks like tidying. MEASURED -- `"exports": { ".": "./dist/index.js" }` in
+// `canvas/package.json` fails the build with `TS2307: Cannot find module
+// '@tn3270/canvas/dist/transferUi.js'` at `gui/src/transferBoot.ts`. It fails loudly, which is the
+// only mercy in it.
+export { createTransferUi, caretAfterEdit } from './transferUi.js';
+export type { UiDeps, UiField, TransferUi } from './transferUi.js';

@@ -33,21 +33,26 @@ describe('createTransferUi', () => {
     createTransferUi(deps);
     const first = deps.rendered[0]!;
     const ids = first.map((f) => f.id);
-    // A fresh form is Direction=receive, Mode=binary: `recfm`/`lrecl`/`blksize` need a send
-    // and `cr` needs ascii, so all four are inapplicable.
+    // A fresh form is Direction=SEND, Mode=binary (the default moved 2026-10-22), so `recfm`
+    // IS applicable from the start; `lrecl`/`blksize` still need a Recfm and `cr` needs ascii.
     expect(ids).toContain('direction');
     expect(ids).toContain('localFile');
     expect(ids).toContain('hostFile');
-    expect(ids).not.toContain('recfm');
+    expect(ids).toContain('recfm');
+    expect(ids).not.toContain('lrecl');
     expect(ids).not.toContain('cr');
   });
 
-  it('shows Recfm once Direction is send, via the SHARED model', () => {
+  it('HIDES Recfm once Direction is receive, via the SHARED model', () => {
+    // Inverted 2026-10-22 with the default: the form now OPENS on send, so the interesting
+    // transition is the one that makes Recfm inapplicable rather than the one that reveals it.
+    // The rule under test is unchanged -- `applicable` still ties Recfm to a send.
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
-    ui.cycle('direction', 1);
+    expect(deps.rendered[0]!.map((f) => f.id)).toContain('recfm');
+    ui.cycle('direction', 1);          // to receive
     const ids = deps.rendered[deps.rendered.length - 1]!.map((f) => f.id);
-    expect(ids).toContain('recfm');
+    expect(ids).not.toContain('recfm');
   });
 
   it('CLEARS an inapplicable value in the model, not merely hides it', () => {
@@ -56,18 +61,38 @@ describe('createTransferUi', () => {
     // what they send to a live host.
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
-    ui.cycle('direction', 1);          // send: recfm applicable
-    ui.cycle('recfm', 1);              // recfm = fixed
+    ui.cycle('recfm', 1);              // recfm = fixed (the form opens on send already)
     expect(ui.values().recfm).toBe('fixed');
-    ui.cycle('direction', 1);          // back to receive: recfm inapplicable
+    ui.cycle('direction', 1);          // to receive: recfm inapplicable
     expect(ui.values().recfm).toBe('');
+  });
+
+  it('offers the direction with DISPLAY TEXT alongside each value, both endpoints named', () => {
+    const deps = fakeDeps();
+    createTransferUi(deps);
+    const dir = deps.rendered[0]!.find((f) => f.id === 'direction');
+    // `options` is what gets SUBMITTED; `optionLabels` is what the operator READS. Both are
+    // asserted, because the whole design rests on these being different for this one field --
+    // the bare words cost the user a real file on 2026-10-07.
+    expect(dir?.options).toEqual(['receive', 'send']);
+    expect(dir?.optionLabels).toEqual(['receive: host to local', 'send: local to host']);
+  });
+
+  it('LABELS EVERY OPTION OF EVERY CYCLE FIELD, so a renderer can map positionally', () => {
+    // The arrays must agree in length and order for EVERY cycle field, not only `direction`:
+    // the renderers index one by the other, and a short array would draw `undefined` in a menu.
+    const deps = fakeDeps();
+    createTransferUi(deps);
+    for (const f of deps.rendered[0]!) {
+      if (f.kind !== 'cycle') continue;
+      expect(f.optionLabels, `${f.id} labels`).toHaveLength(f.options.length);
+    }
   });
 
   it('refuses a non-digit in a numeric field, through setFieldText', () => {
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
-    ui.cycle('direction', 1);
-    ui.cycle('recfm', 1);              // lrecl becomes applicable
+    ui.cycle('recfm', 1);              // lrecl becomes applicable (already a send)
     ui.type('lrecl', '80');
     expect(ui.values().lrecl).toBe('80');
     ui.type('lrecl', '8x');
@@ -95,11 +120,12 @@ describe('createTransferUi', () => {
   it('asks for an OPEN dialog on a send and a SAVE dialog on a receive', async () => {
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
+    // The form opens on SEND, so the OPEN dialog is the first one asked for now.
     await ui.browseLocal();
-    expect(deps.browse).toHaveBeenCalledWith('receive');
+    expect(deps.browse).toHaveBeenCalledWith('send');
     ui.cycle('direction', 1);
     await ui.browseLocal();
-    expect(deps.browse).toHaveBeenLastCalledWith('send');
+    expect(deps.browse).toHaveBeenLastCalledWith('receive');
   });
 
   it('submits the model keywords, not the DOM', async () => {
@@ -109,7 +135,10 @@ describe('createTransferUi', () => {
     ui.type('hostFile', 'MY.DATASET');
     await ui.start();
     const sent = deps.submitted[0]!;
-    expect(sent).toContain('Direction=receive');
+    // THE STORED VALUE, NEVER `directionLabel`'s display text: `Direction=send: local to host`
+    // would be refused by this project's own validator.
+    expect(sent).toContain('Direction=send');
+    expect(sent.join(' ')).not.toContain('local to host');
     expect(sent).toContain('LocalFile=/tmp/a');
     expect(sent).toContain('HostFile=MY.DATASET');
     // Unset optional fields contribute NOTHING, which is what lets the host choose.
@@ -216,7 +245,8 @@ describe('createTransferUi', () => {
   it('offers a cycle field its values in TABLE order, not rotated by the current value', () => {
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
-    ui.cycle('direction', 1);                 // send: recfm applicable
+    // Opens on send, so Recfm is applicable without cycling -- cycling would hide it and the
+    // `find` below would return undefined.
     const optionsNow = (): readonly string[] => {
       const last = deps.rendered[deps.rendered.length - 1]!;
       return last.find((f) => f.id === 'recfm')!.options;
@@ -240,8 +270,7 @@ describe('createTransferUi', () => {
   it('does not offer Recfm=undefined on VM, without re-stating the rule', () => {
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
-    ui.cycle('direction', 1);                 // send
-    ui.cycle('host', 1);                      // vm
+    ui.cycle('host', 1);                      // vm (the form opens on send already)
     expect(ui.values().host).toBe('vm');
     const last = deps.rendered[deps.rendered.length - 1]!;
     expect(last.find((f) => f.id === 'recfm')!.options)

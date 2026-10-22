@@ -480,7 +480,43 @@ export function parseTransferKeywords(args: readonly string[]): TransferRequest 
   if (localFile === undefined) throw new TransferOptionError("missing 'LocalFile' option");
   if (hostFile === undefined) throw new TransferOptionError("missing 'HostFile' option");
 
-  const direction = enumValue('Direction', get('direction') ?? 'receive', ['receive', 'send'] as const);
+  /*
+    `send`, AND THIS IS THE SECOND DELIBERATE DIVERGENCE FROM x3270 IN THIS BLOCK.
+
+    x3270 defaults to RECEIVE: `receive_flag` is initialised true (`ft.c:319`). We default to
+    `send`, for the reason the user gave when they asked for it: **people are far more likely to
+    use IND$FILE to get something INTO a historic S/370 system than to get it out.** Until VM has
+    a TCP/IP stack, this client's main job is putting software onto these machines -- few people
+    develop software locally on a VM or MVS guest.
+
+    IT MATCHES THE FORM, which opens on `send` too (`transferForm.ts`'s `newTransferForm`). An
+    earlier revision deliberately kept the two APART -- form `send`, parser `receive` -- on the
+    grounds that an unattended script has no label to read. The user overruled that, and their
+    argument is the stronger one: a default should reflect what the tool is FOR, and a divergence
+    between the form and the parser is its own trap for anyone who learns the tool through the
+    form and then writes a script.
+
+    ## THE RISK, STATED PLAINLY RATHER THAN SOFTENED
+
+    A SCRIPT WRITTEN AGAINST x3270's DEFAULT, OR AGAINST OUR OWN EARLIER ONE, NOW MEANS THE
+    OPPOSITE. A `Transfer(LocalFile=...,HostFile=...)` that downloaded will UPLOAD, and with
+    `Exist=replace` that overwrites the host dataset. This is the same hazard the form's
+    `directionLabel` exists to prevent, and a script has no form to look at.
+
+    MEASURED WHEN THIS CHANGED: 39 of the 48 `Transfer(...)` calls in `cli/test/runner.test.ts`
+    omitted `Direction=` and silently relied on `receive` -- which is exactly how much code can
+    depend on a default without naming it. They were made EXPLICIT rather than left to track
+    whatever the default happens to be. Every `Transfer(...)` in `packages/cli/scripts/` already
+    named its direction, so no shipped script changed meaning.
+
+    README's *File transfer* section documents this divergence for operators. **If you are reading
+    this because a script did the wrong thing: name `Direction=` explicitly. Always.**
+
+    The sibling divergence, for symmetry: `Mode` below defaults to `binary` where x3270 sets
+    `ascii_flag` true (`ft.c:321`), because a wrong ascii default silently CORRUPTS a module while
+    a wrong explicit choice is visible in the command.
+  */
+  const direction = enumValue('Direction', get('direction') ?? 'send', ['receive', 'send'] as const);
   const host = enumValue('Host', get('host') ?? 'tso', ['tso', 'vm'] as const);
   const mode = enumValue('Mode', get('mode') ?? 'binary', ['binary', 'ascii'] as const);
   const exist = enumValue('Exist', get('exist') ?? 'keep', ['keep', 'replace', 'append'] as const);

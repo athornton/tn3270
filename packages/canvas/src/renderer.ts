@@ -266,6 +266,36 @@ window.tn3270.onError((message) => {
 });
 
 window.addEventListener('keydown', (e) => {
+  /**
+   * A KEYSTROKE AIMED AT A REAL FORM CONTROL IS NOT FOR THE 3270 SCREEN.
+   *
+   * MEASURED 2026-10-07 by the `browser-clicks.mjs` transfer phase, which found this as a live
+   * bug: typing into the web gateway's transfer form sent every character TO THE MAINFRAME and
+   * left the field empty. This listener is on `window`, so it sees events whose target is
+   * `#transfer-localFile`; `actionForKey` claims any single-code-point key as `{kind:'type'}`
+   * without knowing what was focused; and the `preventDefault()` below then suppressed the
+   * character the operator was trying to type. Proved three ways -- no `input` event at all, the
+   * gateway's own action log showing `{"kind":"type","text":"a"}` for a letter typed into a text
+   * field, and the character arriving correctly once propagation stopped at the overlay.
+   *
+   * NOT A WEB-ONLY FIX. `renderer.js` is loaded by `gui/index.html` too, and the Electron GUI's
+   * windows are separate `BrowserWindow`s only by luck of this feature's design -- the keypad
+   * overlay already puts real `<button>`s in the SAME document as the canvas, and a future
+   * in-window control would have hit this immediately.
+   *
+   * CHECKED BEFORE `actionForKey` RATHER THAN INSIDE IT, because `keys.ts` is deliberately
+   * DOM-free: `KeyLike` carries six scalar fields and no target, which is what lets its 26 cases
+   * run under `environment: 'node'` with no jsdom. The target is a property of the EVENT, so the
+   * file that owns the real event owns this question.
+   *
+   * `isContentEditable` is included for completeness; nothing here uses it today.
+   */
+  const target = e.target as { tagName?: unknown; isContentEditable?: unknown } | null;
+  const tag = typeof target?.tagName === 'string' ? target.tagName : '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+    || target?.isContentEditable === true) {
+    return;
+  }
   const action = actionForKey(e);
   if (action === null) return;
   // preventDefault only for keys we CLAIMED, so shortcuts we do not use keep working and
