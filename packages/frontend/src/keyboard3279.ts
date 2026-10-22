@@ -56,13 +56,33 @@ import type { Action } from './keymap.js';
  * guessing at a correction would have shipped a second error that no longer smelled. Duplication
  * tells you WHERE to look, not WHAT the answer is.
  *
- * **STILL UNRESOLVED: five caps the first photograph could not resolve and the 4978 cannot
- * settle, because that keyboard's furniture differs** -- two glyphs flanking `Home` in the cursor
- * cluster, and three in the numeric pad's right-hand column. They remain INERT with `unread` in
- * their names, which a test enforces. The 4978 also has keys this layout lacks (a `~`/`\` cap, a
- * bullet over plus-minus, `LINE DUP`/`FIELD DUP`/`REP`), and NONE were transplanted: the two units
- * agree on the character set where both have a key, and that is exactly how far a cross-check
- * can be trusted.
+ * ## A THIRD SOURCE, AND IT MATCHES THIS LAYOUT EXACTLY
+ *
+ * The user then supplied a photograph of an **IBM 3270 PC** whose keyboard is the SAME layout as
+ * the first: PF13-24 above PF1-12, the two-column special bar, `Dup`/`PA1` and `Field Mark`/`PA2`
+ * in the cursor cluster, the same arrow arrangement. From it:
+ *
+ *  - **`PA3` was recorded as BLANK and is not** -- the cap reads `PA3`, completing the set beside
+ *    the PA1 and PA2 that ride the Dup and Field Mark caps.
+ *
+ * **AND IT CONTAINS A TRAP WORTH THE WARNING: its NUMERIC PAD IS A PC's.** `7`/`Home`, `8`/up,
+ * `9`/`PgUp`, with `Esc`/`NumLk`/`ScrLk` above -- because a 3270 PC is a PC with 3270 emulation.
+ * A keyboard that agrees everywhere else and differs silently in exactly the place you need is
+ * the worst kind of cross-check, so NOTHING was taken from it there.
+ *
+ * **THE NUMERIC PAD WAS SETTLED FROM THE ORIGINAL PHOTOGRAPH INSTEAD, at 6x: `Space`, a FIELD TAB
+ * arrow, `-` and `Enter` down the right-hand column.** Three of the five `unread` caps had been
+ * resolvable all along -- **I gave up on the zoom too early**, which is the lesson that belongs
+ * next to them.
+ *
+ * **STILL UNRESOLVED: TWO caps, both flanking `Home` in the cursor cluster.** Neither the 4978
+ * (different furniture) nor the 3270 PC (same layout, but those two caps are a smudge at full
+ * resolution) settles them. They remain INERT with `unread` in their names, which a test enforces
+ * -- and that test's count is written to SHRINK as sources arrive, never to grow.
+ *
+ * The 4978 also has keys this layout lacks (a `~`/`\` cap, a bullet over plus-minus,
+ * `LINE DUP`/`FIELD DUP`/`REP`), and none were transplanted: two units agree on the character set
+ * where both have a key, and that is exactly how far a cross-check can be trusted.
  *
  * ## LEGENDS COME FROM THE PHOTOGRAPH, AND THIS IS NOT A PC KEYBOARD
  *
@@ -134,6 +154,13 @@ const ch = (
   action: { kind: 'type', text: label },
   region: 'main', row, x, width: 1,
   name: shiftLabel === undefined ? label : `${shiftLabel} ${label}`,
+});
+
+/** A typed character outside the main block, with an explicit name. */
+const ch2 = (
+  label: string, region: KeyboardRegion, row: number, x: number, name: string,
+): KeyCap => ({
+  label, action: { kind: 'type', text: label }, region, row, x, width: 1, name,
 });
 
 /** An inert cap: drawn, named, and does nothing. */
@@ -387,7 +414,12 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   */
   key('Dup / PA1', { kind: 'dup' }, 'cursor', 0, 0, 1, 'Dup'),
   key('Field Mark / PA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
-  dead('', 'cursor', 0, 2, 1, 'blank'),
+  /*
+    `PA3` -- WAS RECORDED AS BLANK, CORRECTED 2026-10-22 from the IBM 3270 PC photograph, whose
+    layout matches this keyboard's exactly. The cap reads `PA3` clearly there, and it completes
+    the set: PA1 and PA2 ride the Dup and Field Mark caps beside it.
+  */
+  key('PA3', { kind: 'pa', n: 3 }, 'cursor', 0, 2, 1, 'PA3'),
   dead('←', 'cursor', 1, 0, 1, 'unread glyph, left of the Home key'),
   key('⌂', { kind: 'home' }, 'cursor', 1, 1, 1, 'Home'),
   dead('', 'cursor', 1, 2, 1, 'unread glyph, right of the Home key'),
@@ -410,8 +442,23 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   ...[...'123'].map((c, i) => ({ ...ch(c, 2, i), region: 'numpad' as const })),
   { ...ch('0', 3, 0), region: 'numpad' as const, width: 2, name: '0 (numeric pad)' },
   { ...ch('.', 3, 2), region: 'numpad' as const, name: '. (numeric pad)' },
-  dead('Space', 'numpad', 0, 3, 1, 'unread cap, top right of the numeric pad'),
-  dead('', 'numpad', 1, 3, 1, 'unread glyph, right of 6'),
-  dead('-', 'numpad', 2, 3, 1, 'unread cap, right of 3'),
+  /*
+    THE NUMERIC PAD'S RIGHT-HAND COLUMN -- READ AT LAST, 2026-10-22, FROM THE ORIGINAL PHOTOGRAPH.
+
+    These three were inert with `unread` names because I could not resolve them. A 6x crop of the
+    SAME image settles all three: `Space`, a FIELD TAB arrow, and `-`, with `Enter` below. **The
+    pixels were always there; I gave up on the zoom too early**, which is worth recording next to
+    the entries it cost.
+
+    A SECOND KEYBOARD CONFIRMED NOTHING HERE, and that is the interesting part: the IBM 3270 PC
+    (the layout this one otherwise matches exactly) has a PC NUMPAD in this position -- 7/Home,
+    8/up, 9/PgUp, with Esc/NumLk/ScrLk above. It is a PC with 3270 emulation, so its numpad is a
+    PC's. Transplanting those legends would have been the worst kind of cross-check: a keyboard
+    that agrees everywhere else, differing silently in exactly the place I needed.
+  */
+  key('Space', { kind: 'type', text: ' ' }, 'numpad', 0, 3, 1, 'Space (numeric pad)'),
+  // FIELD TAB, the same `→|` glyph the main block's Tab carries.
+  key('→|', { kind: 'tab' }, 'numpad', 1, 3, 1, 'Tab (numeric pad)'),
+  ch2('-', 'numpad', 2, 3, '- (numeric pad)'),
   key('Enter', { kind: 'enter' }, 'numpad', 3, 3, 1, 'Enter (numeric pad)'),
 ]);
