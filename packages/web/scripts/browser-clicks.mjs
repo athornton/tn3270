@@ -375,6 +375,12 @@ const TRANSFER_CHECKS = [
     what: 'the three inbound kinds reach the form, and a completed receive enables, NAMES and FOCUSES Save',
     mutant: 'bridge.ts  onTransfer: () => {}; transferBoot.ts  drop saveButton.focus() or the hint',
   },
+  {
+    name: 'keyboard',
+    kind: 'live',
+    what: 'Ctrl-B opens the full keyboard, its regions sit SIDE BY SIDE when wide and REFLOW when narrow',
+    mutant: "ui.css  .keyboard-band { display: block } -- the stacking defect the user's screenshots found",
+  },
 ];
 
 if (TRANSFER_CHECKS.length === 0) {
@@ -1160,6 +1166,71 @@ async function runTransferPhase(url) {
         + `Save disabled after done: ${saveAfterDone}, focus mid-data: `
         + `${JSON.stringify(focusedMidData)}, focus after done: `
         + `${JSON.stringify(focusedAfterDone)}, outline: ${ringStyle} ${ringWidth}`);
+    }
+
+    // ===== keyboard: Ctrl-B opens it, and the regions REFLOW rather than stacking ============
+    //
+    // THE DEFECT THIS EXISTS FOR WAS FOUND BY THE USER'S SCREENSHOTS, not by any test: the five
+    // regions were appended as plain divs with NO horizontal layout, so they stacked into a column
+    // at every width. A unit test cannot see that -- it has no layout engine -- so the assertion
+    // has to be a real browser measuring real boxes.
+    //
+    // TWO WIDTHS, BECAUSE ONE PROVES NOTHING. Wide: the regions sit side by side, so the main
+    // block and the numeric pad share a row (different x, same y). Narrow: the numpad REFLOWS
+    // below, so its y increases. A `display: block` regression fails the wide half; a layout that
+    // could not reflow at all fails the narrow half.
+    {
+      // Resize the viewport through CDP rather than the window, so this does not depend on a
+      // window manager being present under Xvfb.
+      const setWidth = async (width) => {
+        await cdp.cmd('Emulation.setDeviceMetricsOverride',
+          { width, height: 900, deviceScaleFactor: 1, mobile: false });
+        await new Promise((r) => { setTimeout(r, 250); });
+      };
+      const boxOf = (id) => cdp.eval(
+        `(() => { const el = document.getElementById(${JSON.stringify(id)});`
+        + ' if (el === null) return null;'
+        + ' const r = el.getBoundingClientRect();'
+        + ' return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) }; })()');
+
+      // Ctrl-B, the full keyboard. `CDP_CTRL` is CDP's own Control bit, as the keypad phase uses.
+      await cdp.cmd('Input.dispatchKeyEvent',
+        { type: 'keyDown', modifiers: CDP_CTRL, key: 'b', code: 'KeyB', windowsVirtualKeyCode: 66 });
+      await cdp.cmd('Input.dispatchKeyEvent',
+        { type: 'keyUp', modifiers: CDP_CTRL, key: 'b', code: 'KeyB', windowsVirtualKeyCode: 66 });
+      await new Promise((r) => { setTimeout(r, 400); });
+
+      const shown = await cdp.eval(
+        '!document.getElementById("keyboard-overlay").hidden');
+      const capCount = await cdp.eval(
+        'document.querySelectorAll("#keyboard-overlay button[data-key]").length');
+
+      await setWidth(1400);
+      const wideMain = await boxOf('keyboard-main');
+      const wideNum = await boxOf('keyboard-numpad');
+      await setWidth(520);
+      const narrowMain = await boxOf('keyboard-main');
+      const narrowNum = await boxOf('keyboard-numpad');
+      // Put the viewport back, so later checks in this run are not measuring a 520px window.
+      await cdp.cmd('Emulation.clearDeviceMetricsOverride');
+
+      const sideBySide = wideMain !== null && wideNum !== null
+        && wideNum.x > wideMain.x && Math.abs(wideNum.y - wideMain.y) < 20;
+      const reflowed = narrowMain !== null && narrowNum !== null
+        && narrowNum.y > narrowMain.y;
+
+      if (shown === true && capCount > 110 && sideBySide && reflowed) {
+        ok(check('keyboard'),
+          `Ctrl-B drew ${capCount} caps; at 1400px the numpad sits beside the main block `
+          + `(x ${wideMain.x} -> ${wideNum.x}, same row), at 520px it reflows below `
+          + `(y ${narrowMain.y} -> ${narrowNum.y})`);
+      } else {
+        no(check('keyboard'),
+          'the full keyboard did not open, or its regions do not lay out side by side and reflow',
+          `shown: ${shown}, caps: ${capCount}, `
+          + `wide main: ${JSON.stringify(wideMain)}, wide numpad: ${JSON.stringify(wideNum)}, `
+          + `narrow main: ${JSON.stringify(narrowMain)}, narrow numpad: ${JSON.stringify(narrowNum)}`);
+      }
     }
 
     /**

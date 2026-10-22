@@ -392,7 +392,54 @@ body.ui-surface {
   gap: 14px;
 }
 
+/*
+  WRAP PRIORITY, SO A NARROW WINDOW DEGRADES SENSIBLY RATHER THAN ARBITRARILY.
+
+  `flex-wrap: wrap` above already reflows the regions when the window narrows -- but on its own it
+  wraps in DOCUMENT ORDER, which is the table's order, and that is the wrong priority: the 2-unit
+  left special bar would keep its slot ahead of the 15-unit main block, so the main keyboard would
+  be the thing pushed to a second line. `order` makes the priority deliberate.
+
+  THE MAIN BLOCK IS FIRST AND MUST NEVER WRAP: it is the keyboard. Then the cursor cluster (the
+  arrows and Dup/Field Mark, which an operator reaches for often), then the numeric pad, and the
+  left special bar LAST because it is two units wide and holds four blank caps plus four PC keys
+  that do nothing here -- the cheapest thing on the surface to push down.
+
+  MEASURED BREAKPOINTS at pitch 28px with 14px gaps, so the degradation is known rather than
+  discovered: all four side by side need ~734px; without the numpad ~608px; main plus the special
+  bar ~510px; the main block alone ~440px. Nothing here hard-codes those -- flexbox finds them --
+  but they are written down so a future pitch change can be reasoned about.
+*/
 #keyboard-overlay .keyboard-region { flex: 0 0 auto; }
+#keyboard-overlay #keyboard-main { order: 0; }
+#keyboard-overlay #keyboard-cursor { order: 1; }
+#keyboard-overlay #keyboard-numpad { order: 2; }
+#keyboard-overlay #keyboard-special-left { order: 3; }
+
+/*
+  AND A CONTAINER QUERY FOR THE ONE THING FLEX CANNOT DO: at the narrowest widths the gaps between
+  regions are wasted space, so they tighten before anything else has to move.
+
+  `@container` RATHER THAN `@media`, DELIBERATELY. The question is how wide THIS OVERLAY is, not
+  how wide the viewport is. They are the same today -- the surface is bottom-docked and full-width
+  -- but a media query would be measuring the wrong box the moment that changed, and this file's
+  own history has an example of a rule that was right for the wrong reason.
+*/
+#keyboard-overlay { container-type: inline-size; container-name: keyboard; }
+
+@container keyboard (width < 760px) {
+  #keyboard-overlay .keyboard-band { gap: 8px; }
+}
+
+@container keyboard (width < 620px) {
+  /*
+    Below the width where the numpad can sit beside the main block, the PF strip is the other
+    thing that benefits from tightening: 12 units plus padding is ~356px, so it still fits on one
+    line well past this point, and keeping it there matters more than the gap.
+  */
+  #keyboard-overlay .keyboard-band { gap: 6px; }
+  #keyboard-overlay .keyboard-bands { gap: 6px; }
+}
 #keyboard-overlay .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
 
 /*

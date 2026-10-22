@@ -240,12 +240,30 @@ const letters = (text: string, row: number, x: number): KeyCap[] =>
 
 export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   /*
-    THE PF STRIP: PF13-24 ABOVE PF1-12.
+    THE PF STRIP: TWO ROWS ABOVE THE MAIN KEYBOARD, PF13-24 ON TOP OF PF1-12.
 
-    That is the hardware's order in the photograph, and it matches both `KEYPAD_KEYS` (which opens
-    `pfRow(0, 13)` then `pfRow(1, 1)`) and c3270 (`Common/c3270/keypad.labels:2` and `:4`).
-    Reversing it here would be a silent relearn for anyone used to either. The table's test pins
-    the first label of each row rather than only the count, which is what catches that.
+    ## THE POSITION IS A DECISION, NOT THE ONLY OPTION -- CONFIRMED BY THE USER 2026-10-22
+
+    **"There's also a common layout that puts PF13-24 in a block to the right of the numeric
+    keypad but I prefer the two rows above the main keyboard."** Both arrangements shipped on real
+    3270-family hardware, and this one is what the reference 5271 has -- so the two-band layout in
+    `ui.css` (PF strip across the top, the other four regions in a row beneath) is matching the
+    photographed unit AND the user's stated preference, which happen to agree.
+
+    **RECORDED BECAUSE IT WOULD OTHERWISE LOOK LIKE AN UNEXAMINED DEFAULT.** Someone who knows the
+    right-hand-block variant could "fix" this toward it in good faith; they should know it was
+    considered and declined. If it is ever wanted as an OPTION, the change is in the view's band
+    assignment (`keyboardUi.ts` decides which band a region joins, from its name) and not in this
+    table -- the geometry here is per-region, so a PF block beside the numpad needs no new
+    coordinates, only a different container.
+
+    ## THE ROW ORDER WITHIN THE STRIP
+
+    PF13-24 above PF1-12 is the hardware's order in the photograph, and it matches both
+    `KEYPAD_KEYS` (which opens `pfRow(0, 13)` then `pfRow(1, 1)`) and c3270
+    (`Common/c3270/keypad.labels:2` and `:4`). Reversing it would be a silent relearn for anyone
+    used to either. The table's test pins the first label of each row rather than only the count,
+    which is what catches that.
   */
   ...pfRow(0, 13),
   ...pfRow(1, 1),
