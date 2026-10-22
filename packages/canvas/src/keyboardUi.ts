@@ -1,6 +1,18 @@
+/*
+  A DEEP PATH, NOT THE BARE SPECIFIER, AND IT IS FORCED. `web/static/index.html`'s import map
+  resolves `@tn3270/frontend` to `keypadView.js` -- ONE SPECIFIER CANNOT NAME TWO FILES -- and that
+  module exports no `KEYBOARD_3279`. Importing it bare makes THIS module fail to evaluate in the
+  browser, and the only symptom is `window.tn3270` never being assigned: measured as a blank
+  canvas with `Cannot read properties of undefined (reading 'onAtlas')` in the console, and `0/7`
+  from `browser-clicks.mjs`, which reads like a total regression rather than a bad import.
+
+  `transferUi.ts` imports `@tn3270/frontend/dist/transferForm.js` for exactly the same reason, and
+  every such path needs its OWN entry in that import map.
+*/
 import {
-  KEYBOARD_3279, SHIFT_NAME, type Action, type KeyCap,
-} from '@tn3270/frontend';
+  KEYBOARD_3279, SHIFT_NAME, type KeyCap,
+} from '@tn3270/frontend/dist/keyboard3279.js';
+import type { Action } from '@tn3270/frontend/dist/keymap.js';
 
 /**
  * The full 122-key 3279 keyboard, built into a DOM.

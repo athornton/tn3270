@@ -55,6 +55,15 @@ export interface BridgeDeps {
    */
   readonly toggleKeypad?: () => void;
   /**
+   * Show or hide the FULL 122-KEY KEYBOARD, `Ctrl-B`. 2026-10-22.
+   *
+   * Here for exactly the reason `toggleKeypad` above is: it is a DOM overlay in this front end, so
+   * showing it is a local display decision with nothing for the server to do, and it is
+   * intercepted in `sendAction` below rather than sent. OPTIONAL for the same reason too -- the
+   * gateway's own tests and any caller with no DOM must be able to construct a bridge without one.
+   */
+  readonly toggleKeyboard?: () => void;
+  /**
    * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
    * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
    * tests and any caller with no DOM must not need one.
@@ -248,6 +257,25 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
        */
       if ((action as { kind?: unknown }).kind === 'toggleKeypad') {
         deps.toggleKeypad?.();
+        return;
+      }
+      /**
+       * `toggleKeyboard` IS CLIENT-SIDE TOO, BY THE SAME ARGUMENT, 2026-10-22.
+       *
+       * The full keyboard is a DOM overlay drawn in the browser, so showing it is a local display
+       * decision the server has nothing to do with. `main.ts` keeps its OWN intercept regardless,
+       * which is the two-branch rule rather than belt and braces: a client is not obliged to run
+       * the code we served it, and `applyAction` throws on this kind OUTSIDE ANY TRY in a socket
+       * handler -- so a hand-rolled client sending it would end the gateway process. Measured on
+       * the way in: `integration.test.ts` reported `no reply to the toggleKeyboard action` before
+       * the server-side return existed.
+       *
+       * Absent `deps.toggleKeyboard`, the action is DROPPED rather than falling through to the
+       * socket -- correct for a client with no keyboard to show, and the same bargain the keypad
+       * branch above makes.
+       */
+      if ((action as { kind?: unknown }).kind === 'toggleKeyboard') {
+        deps.toggleKeyboard?.();
         return;
       }
       /**

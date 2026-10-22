@@ -8,7 +8,9 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./dist/transferForm.js": "./dist/transferForm.js"
+    "./dist/transferForm.js": "./dist/transferForm.js",
+    "./dist/keyboard3279.js": "./dist/keyboard3279.js",
+    "./dist/keymap.js": "./dist/keymap.js"
   },
   "dependencies": {
     "@tn3270/core": "0.1.0"

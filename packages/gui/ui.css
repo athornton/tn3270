@@ -291,3 +291,105 @@ body.ui-surface {
 #transfer-status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
 
 #transfer-buttons { display: flex; gap: 8px; }
+
+/* ---- The full 122-key keyboard ---- */
+
+/*
+  BOTTOM-DOCKED, BECAUSE THE GEOMETRY ALLOWS NOTHING ELSE.
+
+  The reference hardware is 2.6:1 and about 24 key units across, so at a readable pitch the
+  keyboard is as wide as a 24x80 screen itself. Corner-anchoring it -- the arrangement the user
+  was considering for the compact KEYPAD -- is simply not available to this surface.
+
+  `position: fixed` LIKE THE OTHER TWO OVERLAYS, and load-bearing for the reason recorded further
+  up this file: the click path's `offsetX` arithmetic assumes the canvas sits at the viewport
+  origin, and a sibling in normal flow would push it down and break the OTHER front end's keypad
+  and selection clicks through the shared renderer.
+
+  OPAQUE, like the keypad, and that is also load-bearing: `keypadOverlay.ts` records that the TUI's
+  keypad once let host text bleed into its chord column. A 3270 screen behind 117 buttons is a
+  denser background still.
+
+  `overflow: auto` rather than `hidden`, matching the web page's own rule: a short viewport must be
+  able to reach the bottom row rather than having it clipped away.
+*/
+#keyboard-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 60vh;
+  overflow: auto;
+  background: Canvas;
+  color: CanvasText;
+  padding: 8px 10px;
+  /*
+    ONE PITCH VARIABLE, which is the whole reason `KEYBOARD_3279` holds KEY UNITS rather than
+    pixels: the table says a cap is 1 or 1.5 or 7 units wide, and this decides what a unit is. To
+    make the keyboard bigger or smaller, change this number and nothing else.
+  */
+  --kb-pitch: 30px;
+  font-size: 11px;
+}
+
+#keyboard-overlay[hidden] { display: none; }
+
+/* One flex row per hardware row. The regions stack, with a gap between them. */
+#keyboard-overlay .keyboard-region { margin-bottom: 8px; }
+#keyboard-overlay .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
+
+/*
+  THE CAP WIDTH COMES FROM THE TABLE, through the `--kb-w` custom property `keyboardUi.ts` sets
+  per button. `flex: 0 0 auto` stops flex from helpfully resizing caps and destroying the layout
+  the table describes.
+*/
+#keyboard-overlay .keyboard-row > button {
+  flex: 0 0 auto;
+  width: calc(var(--kb-w, 1) * var(--kb-pitch));
+  height: var(--kb-pitch);
+  padding: 0 2px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/*
+  AN INERT CAP, AND IT IS DELIBERATELY NOT THE HOUSE `opacity: 0.5`.
+
+  That pattern appears three times above for DISABLED CONTROLS, and it means "not right now -- try
+  again when a transfer finishes". An inert 3279 key means something different: "this exists on the
+  hardware and will never do anything here". Same visual, two incompatible promises, and a Cancel
+  button at 0.5 telling you to wait would be a lie on `Scroll Lock`.
+
+  THE LABEL MUST STAY READABLE, which is the functional reason rather than an aesthetic one: half
+  the value of drawing `Cursr Sel` at all is seeing WHERE IT SITS on the hardware, and 0.5 opacity
+  on a small cap at this font size could make `Print Screen` unreadable -- which defeats the
+  faithfulness the whole surface exists for. Hence `opacity: 1` explicitly, in case a future rule
+  above starts matching these buttons.
+
+  `keyboardUi.ts` STILL SETS THE `disabled` ATTRIBUTE, so clicks do nothing and keyboard and
+  screen-reader behaviour are correct. Only the styling departs. DO NOT "fix" this into consistency
+  with the rules above -- it was the user's explicit choice, of three options offered.
+
+  SHIFT IS NOT SELECTED HERE even though it too has no action: it carries `data-shift` and no
+  `disabled`, because it is a live control. An inert cap and an actionless-but-live cap look
+  different on purpose.
+*/
+#keyboard-overlay button[disabled] {
+  color: GrayText;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+  border-style: inset;
+  opacity: 1;
+}
+
+/*
+  THE ARMED ONE-SHOT SHIFT, so the state is VISIBLE rather than remembered.
+
+  Without this the modifier would be invisible: press Shift, look at the keyboard, and nothing says
+  whether the next character will be shifted. `keyboardUi.ts` sets `data-armed` on BOTH Shift caps
+  together, since neither is distinguishable to us.
+*/
+#keyboard-overlay button[data-armed='true'] {
+  background: Highlight;
+  color: HighlightText;
+  border-style: inset;
+}

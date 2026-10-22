@@ -75,6 +75,9 @@
     "@tn3270/canvas": "./keypadUi.js",
     "@tn3270/frontend": "./keypadView.js",
     "@tn3270/canvas/dist/transferUi.js": "./transferUi.js",
+    "@tn3270/canvas/dist/keyboardUi.js": "./keyboardUi.js",
+    "@tn3270/frontend/dist/keyboard3279.js": "./keyboard3279.js",
+    "@tn3270/frontend/dist/keymap.js": "./keymap.js",
     "@tn3270/frontend/dist/transferForm.js": "./transferForm.js"
   }
 }
@@ -102,6 +105,21 @@
   <h1>Keypad</h1>
   <div id="keypad-keys"></div>
 </div>
+<!--
+  THE FULL 122-KEY KEYBOARD, Ctrl-B. A SECOND surface beside the keypad, not a replacement: the
+  user wants both for now and may later keep only this one.
+
+  NO CLOSE BUTTON AND NO HEADING, unlike the keypad's, and both omissions are deliberate. The
+  surface is bottom-docked and as wide as the screen, so a heading would waste a row of the 60vh
+  it is capped at; and Ctrl-B closes it, as does opening the keypad. A close button would also
+  have to live somewhere that is not a keycap, which on a picture of a keyboard is a thing with
+  nowhere to go.
+
+  EMPTY AND `hidden`: `createKeyboardOverlay` fills it on the first toggle and sets `hidden` in
+  code as well -- either alone is removable by someone who sees the other, and the pair also
+  covers a REATTACHING client, which must not inherit a previous session's display state.
+-->
+<div id="keyboard-overlay" hidden></div>
 <!--
   THE TRANSFER OVERLAY. Same two rules as the keypad's, next to it in document order: opaque and
   `position: fixed` in `ui.css`, so it paints over the canvas rather than sitting under it.

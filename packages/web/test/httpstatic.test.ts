@@ -70,8 +70,12 @@ describe('resolveAsset', () => {
     // than up: one module left as another arrived. SIX AGAIN since the transfer form's
     // `transferUi.js` joined later that same day for the gateway's in-pane overlay -- so this
     // number has now been 5, 6, 7, 6 and 5 before reaching 6, which is the argument for keeping
-    // the history in this comment rather than just the current figure.
-    expect(BROWSER_MODULES.length).toBe(6);
+    // the history in this comment rather than just the current figure. SEVEN since the full
+    // 122-key keyboard's `keyboardUi.js` joined on 2026-10-22, for the gateway's second in-pane
+    // surface -- and that one arrived with a measured lesson: a module MISSING from this list is
+    // a 404 that stops the IMPORTING module evaluating, which the browser reports only as
+    // `window.tn3270` never being assigned. A blank canvas, not a missing file.
+    expect(BROWSER_MODULES.length).toBe(7);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 

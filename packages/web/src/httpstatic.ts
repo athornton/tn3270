@@ -201,7 +201,17 @@ function table(): Map<string, Asset> {
   // keypad and an import-map key without a trailing `/` matches EXACTLY. The map therefore needs
   // its own entry naming that deep specifier -- but the ADDRESS is still `./transferForm.js`,
   // flat at the root like everything else here.
-  for (const module of ['keypadView.js', 'keypad.js', 'bindings.js', 'transferForm.js']) {
+  // `keyboard3279.js` AND `keymap.js` JOINED 2026-10-22 with the full keyboard, by deep specifiers
+  // for the same reason `transferForm.js` is: the bare `@tn3270/frontend` key is bound to
+  // `keypadView.js`. `keymap.js` is needed because `keyboardUi.js` imports the `Action` TYPE from
+  // it -- which `tsc` erases, but the emitted `import type` line is gone only if it was written as
+  // `import type`; it was, so this entry is belt and braces against a future value import from the
+  // same module. Serving a module nothing fetches costs one map entry; NOT serving one that is
+  // fetched is a 404 that stops the importer evaluating and shows up as a blank canvas.
+  for (const module of [
+    'keypadView.js', 'keypad.js', 'bindings.js', 'transferForm.js',
+    'keyboard3279.js', 'keymap.js',
+  ]) {
     built.set(`/${module}`, { file: join(frontendDist, module), type: JS });
   }
   cached = built;

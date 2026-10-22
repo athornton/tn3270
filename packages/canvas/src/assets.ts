@@ -67,6 +67,11 @@ export function assetDir(): string {
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
   'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js', 'transferUi.js',
+  // The full 122-key keyboard's view, 2026-10-22. SERVED BECAUSE `bridge.js` IMPORTS IT: a module
+  // missing from this list is a 404 that makes the IMPORTING module fail to evaluate, which the
+  // browser reports only as `window.tn3270` never being assigned -- measured on the way in, as a
+  // blank canvas with `Cannot read properties of undefined (reading 'onAtlas')` in the console.
+  'keyboardUi.js',
 ]);
 
 /**
