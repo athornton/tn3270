@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText, applicable, formKeywords,
+  directionLabel,
   type TransferFormState,
 } from '../src/transferForm.js';
 import { parseTransferKeywords, transferCommand } from '../src/transfer.js';
@@ -251,5 +252,46 @@ describe('formKeywords', () => {
     expect(request.recfm).toBe('fixed');
     expect(request.lrecl).toBe(80);
     expect(command).toContain('IND$FILE PUT');
+  });
+});
+
+describe('directionLabel', () => {
+  it('names both endpoints, so a direction cannot be read as a bare verb', () => {
+    expect(directionLabel('send')).toBe('send: local to host');
+    expect(directionLabel('receive')).toBe('receive: host to local');
+  });
+
+  it('returns any other value UNCHANGED, so a new direction cannot vanish from a menu', () => {
+    // Every renderer maps the values it offers through this. A `switch` with no default arm
+    // would return undefined and draw a BLANK menu entry rather than failing loudly.
+    expect(directionLabel('')).toBe('');
+    expect(directionLabel('sideways')).toBe('sideways');
+  });
+
+  it('SAYS LOCAL, NOT BROWSER: the TUI and the Electron GUI have no browser', () => {
+    // `local` is true in all three front ends and matches the `Local file` field label directly
+    // above it. Pinned because the first phrasing proposed was "this browser", which is right
+    // for the web gateway and WRONG for the other two, where local is this machine's filesystem.
+    expect(directionLabel('send')).not.toContain('browser');
+    expect(directionLabel('receive')).not.toContain('browser');
+  });
+
+  it('USES NO LIGATING PUNCTUATION AND NO NON-ASCII, because the TUI draws ASCII only', () => {
+    // Fira Code and friends ligate `->`, `<-` and `...`; `tui/src/app.ts` accepts printable
+    // ASCII only, so a real arrow would force per-front-end text and defeat the shared mapping.
+    for (const v of ['send', 'receive']) {
+      const text = directionLabel(v);
+      expect(text).not.toContain('->');
+      expect(text).not.toContain('<-');
+      expect(text).not.toContain('...');
+      expect(text).toMatch(/^[\x20-\x7e]*$/);
+    }
+  });
+
+  it('FITS the TUI value column, which is what stops the box growing past 80 columns', () => {
+    // `VALUE_WIDTH` there is 40, set by the two 40-wide text fields. Asserted here as well as in
+    // the TUI's own suite so a future rewording is caught in the module that OWNS the text.
+    expect(directionLabel('receive').length).toBeLessThanOrEqual(40);
+    expect(directionLabel('send').length).toBeLessThanOrEqual(40);
   });
 });

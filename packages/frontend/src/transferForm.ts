@@ -67,6 +67,50 @@ export const TRANSFER_FIELDS: readonly TransferField[] = [
   { id: 'blksize', label: 'Blksize', kind: 'numeric', values: [], width: 5 },
 ];
 
+/**
+ * The direction as the operator should READ it: both endpoints named, never a bare verb.
+ *
+ * ## THIS IS DISPLAY ONLY, AND THAT IS A HARD CONSTRAINT RATHER THAN A STYLE CHOICE
+ *
+ * `formKeywords` emits `Direction=${value}` from the STORED value, and `parseTransferKeywords`
+ * validates against the literals `['receive', 'send']`. A renamed VALUE would emit
+ * `Direction=send: local to host` and be refused by this project's own validator. So the stored
+ * value stays `send`/`receive` and only what is DRAWN changes -- the same split the TUI's `shown()`
+ * already uses for `''` -> `-`, and both `<select>` builders for `''` -> `(host default)`.
+ *
+ * ## WHY THIS EXISTS: IT COST A REAL FILE
+ *
+ * On 2026-10-07 the user -- an expert on this protocol, driving their own client -- read the bare
+ * `send`/`receive` the wrong way round and OVERWROTE THEIR OWN `PROFILE EXEC A` on VM/370 under
+ * `Exist=replace`. All four of this feature's guards defend against an EMPTY file reaching the
+ * host; NONE covers a valid file hitting the wrong target. Naming the endpoints is the cheap half
+ * of that gap. x3270 does not confirm a direction either, so the old behaviour was arguably
+ * correct -- it was also one click from data loss.
+ *
+ * ## `local`, NOT `browser`
+ *
+ * The phrasing first proposed was `this browser`, which is right for the web gateway and WRONG for
+ * the other two front ends: in the TUI and the Electron GUI, "local" is this machine's filesystem.
+ * `local` is true in all three AND matches the `Local file` field label directly above it, so the
+ * form reads as one statement rather than two vocabularies.
+ *
+ * ## NO ARROWS
+ *
+ * Fira Code and friends ligate `->` and `<-` -- `canvas/src/transferUi.ts` already took the arrows
+ * out of a help line for exactly this -- and the TUI draws printable ASCII only (`tui/src/app.ts`),
+ * so a real `->` or a U+2192 would force per-front-end text and defeat the point of one shared
+ * mapping. `to` means the same thing in every renderer.
+ *
+ * AN UNRECOGNISED VALUE IS RETURNED UNCHANGED rather than falling through to `undefined`: every
+ * renderer maps the values it offers through this, so a lookup without this property would draw a
+ * blank menu entry if a third direction were ever added.
+ */
+export function directionLabel(value: string): string {
+  if (value === 'send') return 'send: local to host';
+  if (value === 'receive') return 'receive: host to local';
+  return value;
+}
+
 const FIELD_BY_ID = new Map(TRANSFER_FIELDS.map((f) => [f.id, f]));
 
 /** Every field's current string. `''` means unset, for every kind. */
