@@ -4,7 +4,34 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-22
+## START HERE — NEXT ACTION, 2026-10-22 (late): FINISH THE FULL KEYBOARD
+
+**`main` IS GREEN AND PUSHED. The full 122-key 3279 keyboard is HALF BUILT, deliberately stopped
+at a spend cap rather than mid-thought.** Spec
+`docs/superpowers/specs/2026-10-22-full-keyboard-design.md`, plan
+`docs/superpowers/plans/2026-10-22-full-keyboard.md` — **the plan's own header now carries the
+execution state, what bisection proved, what is already ruled out, and three things to try next.
+Read that before anything else.**
+
+**Tasks 1-4 of 7 are done:** `KEYBOARD_3279` (117 caps, 23 tests), the dead `row`/`col` deletion,
+the shared `keyboardUi.ts` with the **one-shot Shift** (18 tests, 3 mutants), and `toggleKeyboard`
+on **`Ctrl-B`** with all four gateway guards in one commit. Task 5 is part-done: the overlay, the
+CSS and the serving are in; **`bridge.ts`'s wiring is PARKED at
+`docs/superpowers/wip/bridge.ts.keyboard-wiring.txt`** because it breaks the browser. Tasks 6
+(the GUI window) and 7 (harness, gate, docs) are unstarted.
+
+**THE ONE THING TO KNOW: all 2536 unit tests pass with the broken wiring in place.** The failure
+is visible only to `browser-clicks.mjs`, as `bridge.js did not load` — which is what a module that
+fails to EVALUATE looks like from outside. Bisection proved `bridge.ts` is the only remaining
+problem.
+
+**Everything from earlier in the day is merged, live-verified and done** — the web transfer UI, the
+save affordance, the direction labels. The user confirmed the focus ring is legible in Firefox. The
+keypad opacity question is still open and is now entangled with this work: a 122-key keyboard
+**cannot** be corner-anchored, so it is bottom-docked, and the compact keypad stays on `Ctrl-K`
+for the corner-anchoring the user was leaning toward.
+
+## SUPERSEDED — NEXT ACTION, 2026-10-22 (the web transfer UI is live-verified)
 
 **THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
 **52 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
