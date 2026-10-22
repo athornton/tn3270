@@ -113,6 +113,31 @@ describe('createKeyboardUi', () => {
       expect(ids).toEqual(['keyboard-band-pf', 'keyboard-band-main']);
     });
 
+    it('OFFSETS A ROW THAT DOES NOT START AT ZERO, so the arrows form an inverted T', () => {
+      /*
+        A `keyboard-row` is a flex container, so every cap packed FLUSH LEFT and `KeyCap.x` was
+        ignored entirely. The geometry happened to look right only because every other row starts
+        at 0 -- the cursor cluster's `up` arrow sits at x=1 to be directly above `down`, and it was
+        drawn hard against the left edge, so the inverted-T read as an L. The user caught it on a
+        screenshot.
+
+        ASSERTED ON THE EMITTED PADDING, which is what a unit test can see: there is no layout
+        engine here, so this proves the row CARRIES the offset and leaves "does it line up" to the
+        browser harness, which measures real boxes.
+      */
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const rows = deps.els.filter((e) => e.attrs['class'] === 'keyboard-row');
+      const offset = rows.filter((r) => r.attrs['style'] !== undefined);
+      expect(offset, 'exactly one row has an offset today: the up arrow').toHaveLength(1);
+      expect(offset[0]?.attrs['style']).toContain('padding-left');
+      // ONE KEY UNIT, which is what puts `up` above `down`.
+      expect(offset[0]?.attrs['style']).toContain('1 *');
+      // And the rows that start at 0 must NOT carry a padding, or every row would shift right.
+      expect(rows.length - offset.length, 'every other row starts flush left')
+        .toBeGreaterThan(10);
+    });
+
     it('creates a region container for every region in the table', () => {
       const deps = fakeDeps();
       createKeyboardUi(deps);
@@ -274,7 +299,9 @@ describe('createKeyboardUi', () => {
       const shift = button(deps, SHIFT_L);
       click(deps, SHIFT_L);
       expect(esc.text).toBe('Esc');
-      expect(shift.text, 'the Shift cap keeps its own label').toBe('Shift');
+      // `Shft`, the abbreviation that fits a 1.25-unit cap -- the point of the assertion is that
+      // the cap keeps its OWN label rather than being re-lettered, not what that label spells.
+      expect(shift.text, 'the Shift cap keeps its own label').toBe('Shft');
     });
 
     it('RE-LETTERS EVERY dual cap, not just the one that gets clicked', () => {

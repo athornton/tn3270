@@ -203,7 +203,11 @@ describe('KEYBOARD_3279', () => {
       expect(shifts).toHaveLength(2);
       for (const cap of shifts) {
         expect(cap.action, 'Shift must raise no action').toBeUndefined();
-        expect(cap.label).toBe('Shift');
+        // THE LABEL IS `Shft`, ABBREVIATED TO FIT a 1.25-unit cap at the main block's 10px type --
+        // see the `shift` helper. The NAME is what identifies the cap, which is why the filter
+        // above matches on `SHIFT_NAME` and this only checks the label is the shortened form
+        // rather than something unrelated.
+        expect(cap.label).toBe('Shft');
       }
     });
 
@@ -381,10 +385,32 @@ describe('KEYBOARD_3279', () => {
         alternative is parsing CSS from a unit test, and because a wrong copy fails LOUDLY here
         rather than silently clipping in a browser.
       */
+      /*
+        ## THE CONSTANTS WERE WRONG AND THE TEST PASSED ANYWAY -- CORRECTED 2026-10-22
+
+        This test used ONE font size (8px) and a 0.56 per-character ratio, and it went green while
+        the user's screenshot showed `PF13` rendering as `PF1`. Two errors compounded:
+
+         - **0.56 was too optimistic.** It is roughly right for mixed-case prose and WRONG for the
+           labels here, which are capitals and digits -- `PF13`, `Clear`, `Shift`. Calibrated from
+           the screenshot: four capitals at 8px overflowed a 24px cap, so the ratio is at least
+           24/(4*8) = 0.75.
+         - **One font size was the wrong model.** `ui.css` now sizes each region separately,
+           because the real hardware does: the user's own observation was that on a Model M "the
+           characters are noticeably smaller than A-Z are" on the function keys.
+
+        So the model now mirrors the stylesheet: a per-region font, and a ratio conservative enough
+        for all-capitals. **IF `ui.css` CHANGES EITHER, CHANGE THIS.** It is a copy of a decision
+        made there -- accepted because the alternative is parsing CSS in a unit test, and because a
+        wrong copy here fails loudly instead of clipping silently in a browser.
+      */
       const PITCH_PX = 28;
-      const FONT_PX = 8;
       const PAD_PX = 4;
-      const PER_CHAR_PX = FONT_PX * 0.56;
+      // Capitals and digits, measured from a real clip rather than from a prose average.
+      const CHAR_RATIO = 0.75;
+      const FONT_PX = {
+        pf: 7, 'special-left': 7, main: 10, cursor: 7, numpad: 8,
+      };
 
       /*
         PER LINE, NOT PER LABEL, and getting that wrong first is what found the real defect.
@@ -404,9 +430,10 @@ describe('KEYBOARD_3279', () => {
         // The widest thing a cap can be asked to draw -- the shifted legend can be longer.
         const drawn = Math.max(longestLine(cap.label), longestLine(cap.shiftLabel ?? ''));
         const usable = PITCH_PX * cap.width - PAD_PX;
-        if (drawn * PER_CHAR_PX > usable) {
-          tooWide.push(`${cap.name}: ${drawn} chars on its longest line needs `
-            + `~${Math.ceil(drawn * PER_CHAR_PX)}px, cap is ${usable}px`);
+        const needed = drawn * CHAR_RATIO * FONT_PX[cap.region];
+        if (needed > usable) {
+          tooWide.push(`${cap.name}: ${drawn} chars at ${FONT_PX[cap.region]}px needs `
+            + `~${Math.ceil(needed)}px, cap is ${usable}px`);
         }
       }
       expect(tooWide, `labels that cannot fit:\n  ${tooWide.join('\n  ')}`).toEqual([]);

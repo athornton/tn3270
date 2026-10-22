@@ -411,10 +411,44 @@ body.ui-surface {
   but they are written down so a future pitch change can be reasoned about.
 */
 #keyboard-overlay .keyboard-region { flex: 0 0 auto; }
-#keyboard-overlay #keyboard-main { order: 0; }
-#keyboard-overlay #keyboard-cursor { order: 1; }
-#keyboard-overlay #keyboard-numpad { order: 2; }
-#keyboard-overlay #keyboard-special-left { order: 3; }
+
+/*
+  ORDER: THE LEFT SPECIAL BAR IS FIRST, BECAUSE IT IS ON THE FAR LEFT OF THE HARDWARE.
+
+  CORRECTED 2026-10-22: it was ordered LAST, which put the Attn/Clear cluster on the far RIGHT --
+  the user caught it on a screenshot. That was a wrap-priority decision (two units wide, four
+  blank caps, the cheapest thing to push down) applied to the wrong property: `order` governs
+  POSITION, and on this keyboard that cluster sits left of the main block.
+
+  WRAP PRIORITY AND POSITION ARE NOW SEPARATE CONCERNS. Position comes from `order` and matches the
+  hardware left to right; what drops first when the window narrows is `flex-wrap`'s business, and
+  the container queries below tighten the gaps before anything has to move at all.
+*/
+#keyboard-overlay #keyboard-special-left { order: 0; }
+#keyboard-overlay #keyboard-main { order: 1; }
+#keyboard-overlay #keyboard-cursor { order: 2; }
+#keyboard-overlay #keyboard-numpad { order: 3; }
+
+/*
+  PER-REGION FONT SIZES, WHICH IS WHAT THE REAL HARDWARE DOES.
+
+  The user's observation, and it is the fix: "on my actual Model M, they're just F1-12, but the
+  characters are noticeably smaller than A-Z are". A 3270 keyboard does NOT letter every cap at one
+  size -- the PF and PA legends are visibly smaller than the alphabet.
+
+  WHY ONE GLOBAL SIZE COULD NOT WORK, measured: `PF13` is four capitals-and-digits on a one-unit
+  cap, and `Clear`, `Space`, `Enter`, `Shift` are five. At 24px of usable width, five capitals need
+  the font below 6.5px to fit -- unreadable. So the choice was never "what size fits everything",
+  it was "which regions need smaller type", and the hardware answers that.
+
+  THE MAIN BLOCK KEEPS THE LARGEST TYPE because its caps are mostly ONE character (`Q`, `4`, `;`)
+  and the one five-character legend it has -- `Shift` -- sits on a 1.25-unit cap with room.
+*/
+#keyboard-overlay #keyboard-main { font-size: 10px; }
+#keyboard-overlay #keyboard-pf { font-size: 7px; }
+#keyboard-overlay #keyboard-cursor { font-size: 7px; }
+#keyboard-overlay #keyboard-special-left { font-size: 7px; }
+#keyboard-overlay #keyboard-numpad { font-size: 8px; }
 
 /*
   AND A CONTAINER QUERY FOR THE ONE THING FLEX CANNOT DO: at the narrowest widths the gaps between

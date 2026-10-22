@@ -212,7 +212,12 @@ const dead = (
 export const SHIFT_NAME = 'Shift';
 
 const shift = (row: number, x: number, width: number, side: string): KeyCap => ({
-  label: 'Shift',
+  // `Shft`, NOT `Shift`: the LEFT cap is 1.25 units, which is 31px usable, and five capitals at
+  // the main block's 10px type need ~38px. The real keyboard prints `Shift` in full because its
+  // cap is physically wider than one unit of this layout's pitch; four characters is the honest
+  // abbreviation at this size. The NAME stays `Shift (...)`, which is what the view's `data-key`
+  // and both harnesses address -- a label is presentation, a name is the identifier.
+  label: 'Shft',
   action: undefined,
   region: 'main', row, x, width,
   // The side is in the name for the tooltip and for a screen reader, but `keyboardUi.ts` matches
@@ -287,14 +292,14 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     exactly as it intercepts the chord.
   */
   key('Attn', { kind: 'attn' }, 'special-left', 0, 0, 1, 'Attention'),
-  key('Clear', { kind: 'clear' }, 'special-left', 0, 1, 1, 'Clear'),
-  dead('Cursr\nSel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
+  key('Clr', { kind: 'clear' }, 'special-left', 0, 1, 1, 'Clear'),
+  dead('Cur\nSel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
   // CONFIRMED BLANK, not unreadable -- see the note on the bottom pair below.
   dead('', 'special-left', 1, 1, 1, 'blank'),
   dead('Esc', 'special-left', 2, 0, 1, 'Escape (not a 3270 key)'),
-  dead('Print\nScrn', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
-  dead('Scrl\nLock', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
-  dead('Pause', 'special-left', 3, 1, 1, 'Pause (not a 3270 key)'),
+  dead('Prt\nScr', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
+  dead('Scrl\nLck', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
+  dead('Pse', 'special-left', 3, 1, 1, 'Pause (not a 3270 key)'),
   /*
     THE BOTTOM PAIR: `Xfer` ON ONE BLANK CAP, THE OTHER LEFT BLANK.
 
@@ -471,7 +476,7 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     file's header rule, and are the first thing to fix if a better photograph turns up.
   */
   key('Dup\nPA1', { kind: 'dup' }, 'cursor', 0, 0, 1, 'Dup'),
-  key('Field\nMark\nPA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
+  key('Fld\nMrk\nPA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
   /*
     `PA3` -- WAS RECORDED AS BLANK, CORRECTED 2026-10-22 from the IBM 3270 PC photograph, whose
     layout matches this keyboard's exactly. The cap reads `PA3` clearly there, and it completes
@@ -558,9 +563,9 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     PC's. Transplanting those legends would have been the worst kind of cross-check: a keyboard
     that agrees everywhere else, differing silently in exactly the place I needed.
   */
-  key('Space', { kind: 'type', text: ' ' }, 'numpad', 0, 3, 1, 'Space (numeric pad)'),
+  key('Spc', { kind: 'type', text: ' ' }, 'numpad', 0, 3, 1, 'Space (numeric pad)'),
   // FIELD TAB, the same `→|` glyph the main block's Tab carries.
   key('→|', { kind: 'tab' }, 'numpad', 1, 3, 1, 'Tab (numeric pad)'),
   ch2('-', 'numpad', 2, 3, '- (numeric pad)'),
-  key('Enter', { kind: 'enter' }, 'numpad', 3, 3, 1, 'Enter (numeric pad)'),
+  key('Ent', { kind: 'enter' }, 'numpad', 3, 3, 1, 'Enter (numeric pad)'),
 ]);

@@ -170,6 +170,24 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
     for (const [, caps] of [...rows].sort((a, b) => a[0] - b[0])) {
       const line = deps.create('div');
       deps.setAttr(line, 'class', 'keyboard-row');
+      /*
+        THE ROW'S LEFT OFFSET, WHICH THE TABLE HAS ALWAYS CARRIED AND NOTHING USED.
+
+        A `keyboard-row` is a flex container, so every cap packed FLUSH LEFT and `KeyCap.x` was
+        ignored entirely -- the geometry happened to look right only because every other row
+        starts at 0. The visible symptom, which the user caught on a screenshot: the cursor
+        cluster's `up` arrow sits at x=1 to be directly above `down`, and it was drawn hard against
+        the left edge instead, so the inverted-T read as an L.
+
+        EMITTED AS A PADDING ON THE ROW rather than a margin on the first cap: a margin would be
+        one more thing the cap's own width calculation had to avoid, and a row that starts late is
+        exactly what padding means. Set for EVERY row from the table's own minimum `x`, so a future
+        row with an offset needs no further change here -- today only `cursor:2` has one.
+      */
+      const firstX = Math.min(...caps.map((c) => c.x));
+      if (firstX > 0) {
+        deps.setAttr(line, 'style', `padding-left:calc(${firstX} * (var(--kb-pitch) + 2px))`);
+      }
       for (const cap of caps) {
         const button = deps.create('button');
         // `type=button` EXPLICITLY: a bare <button> inside a form defaults to type=submit, which

@@ -1214,8 +1214,37 @@ async function runTransferPhase(url) {
       // Put the viewport back, so later checks in this run are not measuring a 520px window.
       await cdp.cmd('Emulation.clearDeviceMetricsOverride');
 
+      /*
+        TWO MORE THINGS ONLY A REAL LAYOUT CAN PROVE, both found by the user on screenshots.
+
+        THE LEFT SPECIAL BAR MUST BE ON THE FAR LEFT. It was ordered LAST, which put Attn/Clear on
+        the far RIGHT -- a wrap-priority decision applied to the wrong property, since `order`
+        governs position. Asserted as "left of the main block", which is where the hardware has it.
+
+        THE UP ARROW MUST SIT ABOVE THE DOWN ARROW. Its row is offset by one key unit in the table
+        and a flex row ignored that, packing it flush left so the inverted-T read as an L. Measured
+        on the CAPS rather than on the row, because the cap position is what an operator sees.
+      */
+      const barBox = await boxOf('keyboard-special-left');
+      const upBox = await cdp.eval(
+        '(() => { const el = document.querySelector('
+        + '\'#keyboard-cursor button[data-key="Cursor up"]\');'
+        + ' if (el === null) return null; const r = el.getBoundingClientRect();'
+        + ' return { x: Math.round(r.x), y: Math.round(r.y) }; })()');
+      const downBox = await cdp.eval(
+        '(() => { const el = document.querySelector('
+        + '\'#keyboard-cursor button[data-key="Cursor down"]\');'
+        + ' if (el === null) return null; const r = el.getBoundingClientRect();'
+        + ' return { x: Math.round(r.x), y: Math.round(r.y) }; })()');
+
+      const barOnLeft = barBox !== null && wideMain !== null && barBox.x < wideMain.x;
+      // WITHIN 3px, not exact: sub-pixel rounding on a calc() is normal and not a defect.
+      const arrowsAligned = upBox !== null && downBox !== null
+        && Math.abs(upBox.x - downBox.x) <= 3 && upBox.y < downBox.y;
+
       const sideBySide = wideMain !== null && wideNum !== null
-        && wideNum.x > wideMain.x && Math.abs(wideNum.y - wideMain.y) < 20;
+        && wideNum.x > wideMain.x && Math.abs(wideNum.y - wideMain.y) < 20
+        && barOnLeft && arrowsAligned;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1223,13 +1252,17 @@ async function runTransferPhase(url) {
         ok(check('keyboard'),
           `Ctrl-B drew ${capCount} caps; at 1400px the numpad sits beside the main block `
           + `(x ${wideMain.x} -> ${wideNum.x}, same row), at 520px it reflows below `
-          + `(y ${narrowMain.y} -> ${narrowNum.y})`);
+          + `(y ${narrowMain.y} -> ${narrowNum.y}); the special bar is left of it `
+          + `(x ${barBox?.x} < ${wideMain.x}) and the arrows form an inverted T `
+          + `(up x ${upBox?.x}, down x ${downBox?.x})`);
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
           `shown: ${shown}, caps: ${capCount}, `
           + `wide main: ${JSON.stringify(wideMain)}, wide numpad: ${JSON.stringify(wideNum)}, `
-          + `narrow main: ${JSON.stringify(narrowMain)}, narrow numpad: ${JSON.stringify(narrowNum)}`);
+          + `narrow main: ${JSON.stringify(narrowMain)}, narrow numpad: ${JSON.stringify(narrowNum)}, `
+          + `special bar: ${JSON.stringify(barBox)} (must be LEFT of main), `
+          + `up: ${JSON.stringify(upBox)}, down: ${JSON.stringify(downBox)} (x must match)`);
       }
     }
 
