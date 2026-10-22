@@ -109,11 +109,31 @@ emit `Direction=send: local to host` and be refused by our own validator. The st
 untouched and the wire bytes are identical — which is why **no live run was needed**, said
 explicitly in `live-testing.md`.
 
-**`parseTransferKeywords` STILL DEFAULTS TO `receive`, DELIBERATELY. DO NOT "TIDY" THIS.** That
-default serves SCRIPTS: flipping it would silently invert every `Transfer(...)` that omits
-`Direction=` — a download becoming an upload with `Exist=replace` reachable and no form to look at,
-i.e. this very defect moved somewhere worse. It is also x3270's own default (`ft.c:319`). A test in
-`transfer.test.ts` pins the asymmetry and says so.
+**`parseTransferKeywords` DEFAULTS TO `send` TOO — A DELIBERATE BREAK WITH x3270, decided by the
+user after an earlier revision of this work had deliberately kept the two apart.** x3270
+initialises `receive_flag` true (`ft.c:319`); we default to `send` in the form *and* in a scripted
+`Transfer(...)` that omits `Direction=`. **The reason:** people are far more likely to use
+`IND$FILE` to get something INTO a historic S/370 system than to get it out, so the default should
+reflect what the tool is for — and a form/parser disagreement is its own trap for anyone who learns
+the tool through the form and then writes a script.
+
+**THE RISK WAS ACCEPTED, NOT REFUTED, and is documented loudly rather than softened:** a script
+written against x3270's default — or against ours from earlier the same day — now means the
+OPPOSITE, and under `Exist=replace` that overwrites a host dataset. Documented at the default in
+`transfer.ts`, as a README call-out, and in the one test that pins it. The superseded argument for
+keeping them apart is preserved verbatim in the spec, because it is still the strongest case
+against what shipped.
+
+**This is the SECOND deliberate divergence from x3270 in that keyword block;** `Mode` defaults to
+`binary` where x3270 sets `ascii_flag` true, because a wrong ascii default silently corrupts a load
+module. Both are now called out together wherever either is mentioned.
+
+**39 OF 48 `Transfer(...)` CALLS IN `cli/test/runner.test.ts` HAD BEEN RELYING ON THAT DEFAULT**
+without naming it, and 23 tests failed the moment it moved — several with symptoms that named a
+local file rather than a direction. **All 48 now state `Direction=` explicitly**, so none can
+change meaning the next time a default moves, and the default has exactly one home
+(`transfer.test.ts`'s `keyword defaults`). The repo's own `cli/scripts/*.txt` already followed that
+discipline, which is why no shipped script changed meaning.
 
 **Knock-on, and two harnesses caught it:** `applicable()` shows `Recfm` only on a send, so the form
 now draws **seven** field rows on open rather than six. `transfer.mjs` went 9/10 and

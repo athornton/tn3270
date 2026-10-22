@@ -662,6 +662,22 @@ describe('Quit', () => {
 /**
  * `Transfer()` driven end to end through the fake connection.
  *
+ * ## EVERY CASE BELOW NAMES `Direction=` EXPLICITLY, AND THAT IS NOT NOISE
+ *
+ * It used to be omitted on the receive cases, which silently inherited the parser's default.
+ * **MEASURED 2026-10-22: 39 of the 48 `Transfer(...)` calls in this file depended on that
+ * default** -- and when it changed from `receive` to `send` (see `frontend/src/transfer.ts`, a
+ * deliberate divergence from x3270), 23 tests failed at once, several of them with symptoms that
+ * named a local file rather than the direction.
+ *
+ * So the direction is now STATED by every case that has one. A test about the receive path says
+ * `receive`; the send cases already said `send`. None of them can change meaning the next time a
+ * default moves, and the default itself is pinned in exactly one place --
+ * `frontend/test/transfer.test.ts`'s `keyword defaults` block.
+ *
+ * **This is the same discipline the repo's own `cli/scripts/*.txt` already followed**, which is
+ * why no shipped script changed meaning when the default flipped.
+ *
  * This is the test the task asks for: "drive a synthetic host that emits a
  * host-ack frame, a data frame, an EOF and a completion, and assert the file
  * content that comes out." It is feasible without elaborate mocking because the
@@ -809,7 +825,7 @@ function typedCommand(session: Session): string {
 describe('Transfer(): option and pre-flight failures', () => {
   it('rejects a bad option without typing anything at the host', async () => {
     const { runner, session, conn } = await transferRunner();
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO,Frobnicate=1)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO,Frobnicate=1)');
     expect(reply).toContain('unknown option');
     expect(reply.split('\n').pop()).toBe('error');
     // THE POINT OF THE ORDERING RULE: nothing reached the host, so it is not
@@ -839,7 +855,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     // `if (p->receive_flag && !p->append_flag && !p->allow_overwrite)` (ft.c:666-674).
     const { runner, files, conn } = await transferRunner();
     files.store.set('/tmp/there', Uint8Array.of(0xff));
-    const reply = await runner.run('Transfer(LocalFile=/tmp/there,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/there,HostFile=FOO)');
     expect(reply).toContain('file exists: /tmp/there');
     expect(conn.sent).toEqual([]);
     // ...and the existing bytes are untouched.
@@ -853,7 +869,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     const runner = new Runner(session, { clock: () => 0 });
     await runner.run('Connect(localhost:3270)');
     conn.negotiate();
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO)');
     expect(reply).toContain('requires the file system');
     expect(reply.split('\n').pop()).toBe('error');
   });
@@ -864,7 +880,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     const session = new Session({ connect: () => conn });
     const runner = new Runner(session, { clock: () => 0, files: new FakeFiles() });
     await runner.run('Connect(localhost:3270)'); // no negotiate()
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO)');
     expect(reply).toContain('not in 3270 mode');
   });
 
@@ -879,7 +895,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     await runner.run('Connect(localhost:3270)');
     conn.negotiate();
     conn.host(SnaCmd.EW, 0x02, 0xc1, T.IAC, T.EOR); // data, no fields
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO)');
     expect(reply).toContain('no input field');
     expect(reply).toContain('unformatted');
   });
@@ -896,7 +912,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     // A 4-cell unprotected field between two attributes.
     conn.host(SnaCmd.EW, 0x02, Order.SF, 0x00, Order.IC,
       Order.SBA, ...encodeAddress(5, 1920), Order.SF, FA.PROTECT, T.IAC, T.EOR);
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO)');
     expect(reply).toContain('input field too small');
     expect(reply).toContain('4 cells');
   });
@@ -906,7 +922,7 @@ describe('Transfer(): option and pre-flight failures', () => {
     // reached a settled prompt with Wait(Settle) first.
     const { runner, session } = await transferRunner();
     session.oia.inhibit(KeyboardState.SystemWait);
-    const reply = await runner.run('Transfer(LocalFile=/tmp/x,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/x,HostFile=FOO)');
     expect(reply).toContain('keyboard locked');
   });
 });
@@ -950,7 +966,7 @@ describe('Transfer(): receive, end to end', () => {
     // every step of a receive returns, including the one that completes
     // (ft_cut.c:442-447 acks BEFORE completing).
     const { runner, conn } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     conn.sent = [];
 
@@ -970,7 +986,7 @@ describe('Transfer(): receive, end to end', () => {
 
   it('writes an empty file for a transfer that carries no data', async () => {
     const { runner, conn, files } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/empty,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/empty,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -983,7 +999,7 @@ describe('Transfer(): receive, end to end', () => {
   it('appends to an existing destination with Exist=append', async () => {
     const { runner, conn, files } = await transferRunner();
     files.store.set('/tmp/log', Uint8Array.of(0x11, 0x22));
-    const pending = runner.run('Transfer(LocalFile=/tmp/log,HostFile=FOO,Exist=append)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/log,HostFile=FOO,Exist=append)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -997,7 +1013,7 @@ describe('Transfer(): receive, end to end', () => {
   it('replaces an existing destination with Exist=replace', async () => {
     const { runner, conn, files } = await transferRunner();
     files.store.set('/tmp/dst', Uint8Array.of(0x11, 0x22, 0x33));
-    const pending = runner.run('Transfer(LocalFile=/tmp/dst,HostFile=FOO,Exist=replace)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/dst,HostFile=FOO,Exist=replace)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -1021,7 +1037,7 @@ describe('Transfer(): receive, end to end', () => {
     const cut = 3;
     expect(encoded.length).toBeGreaterThan(cut);
 
-    const pending = runner.run('Transfer(LocalFile=/tmp/split,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/split,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -1113,7 +1129,7 @@ describe('Transfer(): failure paths', () => {
     // (ft_cut.c:448-486) and acks with ENTER, not PF2 — the host has already
     // decided.
     const { runner, conn, files } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=NOPE)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=NOPE)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -1129,7 +1145,7 @@ describe('Transfer(): failure paths', () => {
   it('substitutes x3270\'s text when the host aborts with no message', async () => {
     // `ftHostCancel`, "Transfer canceled by host" (fb-common:36, ft_cut.c:480-482).
     const { runner, conn } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.ABORT_XMIT);
     expect(await pending).toContain('Transfer canceled by host');
@@ -1141,7 +1157,7 @@ describe('Transfer(): failure paths', () => {
     // deliberately do not synthesise an abort sequence no captured session
     // contains.
     const { runner, conn, files } = await transferRunner({ transferFrameSeconds: 0.1 });
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     // ...and then nothing.
@@ -1157,7 +1173,7 @@ describe('Transfer(): failure paths', () => {
     // (ft_cut.c:408-411, SC_ABORT_XMIT). `cut_abort` writes the response area and
     // presses PF2 (ft_cut.c:662-678).
     const { runner, session, conn } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -1178,7 +1194,7 @@ describe('Transfer(): failure paths', () => {
     // nobody can see is not a warning, so it comes out as a data line.
     const { runner, conn, files } = await transferRunner();
     const encoded = Array.from(localToHost(Uint8Array.of(0xc1, 0xc2)));
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     controlCode(conn, StatusCode.HOST_ACK);
     await new Promise((r) => setTimeout(r, 20));
@@ -1275,7 +1291,7 @@ describe('Transfer() protocol selection', () => {
     // why this test is written as the deletion happens rather than after.
     const { runner, session, conn } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.1 });
     expect(session.screen.size).toBe(3440);
-    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     // It gets as far as a TIMEOUT, which means it reached the host -- the old behavior
     // failed with the geometry message and an empty wire.
     expect(reply).not.toContain('needs a 24x80 screen');
@@ -1297,7 +1313,7 @@ describe('Transfer() protocol selection', () => {
     // record. What it never does is paint a CUT frame, so `looksLikeCutFrame` stays false
     // and the inner `while` never exits. Same conclusion, different mechanism.
     const { runner, conn, files } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.1 });
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     dftDownload(conn);
     const reply = await pending;
@@ -1311,7 +1327,7 @@ describe('Transfer() protocol selection', () => {
     // transfer a file at all. DFT is structured fields, not screen scraping, so it has no
     // 24x80 requirement.
     const { runner, conn, files } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.5 });
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     dftDownload(conn, [0x44, 0x45]);
     const reply = await pending;
@@ -1331,7 +1347,7 @@ describe('Transfer() protocol selection', () => {
       registeredWhenPrimed ??= session.dftTransfer !== undefined;
       realSendAID(aid);
     });
-    await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     expect(registeredWhenPrimed).toBe(true);
   });
 
@@ -1345,7 +1361,7 @@ describe('Transfer() protocol selection', () => {
     // the whole suite green -- the spec's rule is that an unpinned call is decoration, so the
     // choice was this test or deleting the line.
     const { runner, session, conn } = await transferRunner();
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     expect(session.dftTransfer).toBeDefined();          // registered before priming
     controlCode(conn, StatusCode.HOST_ACK);             // the host answers with a CUT frame
@@ -1365,7 +1381,7 @@ describe('Transfer() protocol selection', () => {
     const encoded = Array.from(localToHost(Uint8Array.of(0xc1, 0xc2)));
     const drive = async () => {
       const { runner, conn, files } = await transferRunner();
-      const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+      const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
       await new Promise((r) => setTimeout(r, 20));
       conn.sent = [];
       controlCode(conn, StatusCode.HOST_ACK);
@@ -1394,7 +1410,7 @@ describe('Transfer() protocol selection', () => {
       transferFrameSeconds: 0.1, ddm: false,
     });
     expect(session.ddmAdvertised).toBe(false);
-    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     expect(reply).toContain('-ddm on');
     expect(reply).toContain('press Attn or Clear');
   });
@@ -1405,7 +1421,7 @@ describe('Transfer() protocol selection', () => {
       transferFrameSeconds: 0.1, ddm: true,
     });
     expect(session.ddmAdvertised).toBe(true);
-    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     expect(reply).not.toContain('-ddm on');
   });
 
@@ -1415,7 +1431,7 @@ describe('Transfer() protocol selection', () => {
     // second, so the host's own text usually arrives and beats ours. This is for a CUT-only
     // host at 43x80 that goes quiet instead.
     const { runner, conn } = await transferRunnerAt(43, 80, { transferFrameSeconds: 0.2 });
-    const pending = runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
     await new Promise((r) => setTimeout(r, 20));
     // The host paints SOMETHING -- a refusal, a menu -- but never a CUT frame.
     conn.host(SnaCmd.W, 0x02, Order.SBA, ...encodeAddress(0, 3440), 0xc8, T.IAC, T.EOR);
@@ -1528,7 +1544,7 @@ describe('Transfer(): a DFT transfer that finishes before the poll loop', () => 
       dftDownload(conn, [0x41, 0x42, 0x43]);
     });
 
-    const reply = await runner.run('Transfer(LocalFile=/tmp/out.bin,HostFile=FOO)');
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
 
     // NOT a timeout: it noticed a transfer that was over before it looked.
     expect(reply.split('\n').pop()).toBe('ok');

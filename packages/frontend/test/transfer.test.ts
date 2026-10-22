@@ -47,6 +47,26 @@ function withRequired(extra: readonly string[]): string[] {
   return [...REQUIRED.filter((r) => !named.has(r.split('=')[0]!.toLowerCase())), ...extra];
 }
 
+/**
+ * `Direction=receive` unless the case names a direction itself.
+ *
+ * ## WHY THIS EXISTS, AND WHY IT IS *NOT* A WAY TO AVOID UPDATING TESTS
+ *
+ * The parser's default became `send` on 2026-10-22 (see `transfer.ts`), so every case below that
+ * had silently relied on `receive` would otherwise assert the PUT dialect while its name and its
+ * comments talk about GET. These cases are about the RECEIVE command's construction -- quoting,
+ * `ASCII CRLF`, the VM `(` separator -- and that is a property of the direction, not of whichever
+ * way the default happens to point.
+ *
+ * SO THE DIRECTION IS NOW NAMED RATHER THAN INHERITED. That is strictly better cover: a case that
+ * means `receive` says `receive`, and it cannot silently change meaning the next time a default
+ * moves. The DEFAULT itself is pinned by exactly one test, in `keyword defaults` -- which is where
+ * it belongs, so there is one place to update and it is impossible to miss.
+ */
+function recvCmd(...extra: string[]): string {
+  return transferCommand(withRequired(['Direction=receive', ...extra])).command;
+}
+
 function req(...extra: string[]) {
   return parseTransferKeywords(withRequired(extra));
 }
@@ -113,7 +133,7 @@ describe('keyword defaults', () => {
     // default silently corrupts a MODULE while a wrong explicit choice is visible
     // in the command. The live TK5 IND$FILE also defaults to binary.
     expect(req()).toEqual({
-      direction: 'receive', // ft.c:319, receive_flag defaults true
+      direction: 'send', // OURS, not x3270's: ft.c:319 defaults receive_flag true
       localFile: '/tmp/x',
       hostFile: 'FOO',
       host: 'tso', // ft.c:320
@@ -124,25 +144,33 @@ describe('keyword defaults', () => {
     });
   });
 
-  it('DEFAULTS Direction TO receive, which is x3270 and is NOT the form default', () => {
+  it('DEFAULTS Direction TO send, DIVERGING FROM x3270 ON PURPOSE', () => {
     /*
-      LOAD-BEARING, AND THE DISAGREEMENT WITH THE FORM IS THE POINT.
+      THE SECOND DELIBERATE DIVERGENCE IN THIS BLOCK, and the ONLY test that pins this default --
+      every other case in this file names its direction explicitly, so this is the one place to
+      change and it cannot be missed.
 
-      `newTransferForm()` opens on `send` (changed 2026-10-22, because this client is mostly used
-      to get software ONTO these systems until VM has a TCP/IP stack). THIS default serves
-      SCRIPTS -- a `Transfer(...)` that omits `Direction=` -- and must stay `receive`:
+      x3270 initialises `receive_flag` true (`ft.c:319`). We default to `send`, for the reason the
+      user gave: PEOPLE ARE FAR MORE LIKELY TO USE IND$FILE TO GET SOMETHING INTO A HISTORIC S/370
+      SYSTEM THAN TO GET IT OUT. Until VM has a TCP/IP stack, this client's main job is putting
+      software onto these machines; few people develop locally on a VM or MVS guest.
 
-        - Flipping it would SILENTLY INVERT every such script. A run that downloaded would
-          upload, with `Exist=replace` reachable and no form to look at. That is the same
-          data-destruction shape the form's new labels exist to prevent, moved somewhere worse:
-          an unattended script has no affordance to read.
-        - It is x3270's own default (`ft.c:319`, `receive_flag` defaults true), and this project
-          matches x3270 absent a documented reason to differ.
+      IT MATCHES THE FORM, which opens on `send` too. A revision earlier the same day kept them
+      APART -- form `send`, parser `receive` -- reasoning that an unattended script has no label
+      to read. The user overruled that: a default should reflect what the tool is FOR, and a
+      form/parser disagreement is its own trap for anyone who learns the tool through the form and
+      then writes a script.
 
-      An interactive form with a visible, self-describing control (`directionLabel`) is a
-      different safety situation from an omitted keyword. DO NOT "tidy" these two into agreement.
+      THE RISK IS REAL AND IS NOT SOFTENED ANYWHERE: a script written against x3270's default, or
+      against ours from before 2026-10-22, now means the OPPOSITE -- and under `Exist=replace`
+      that overwrites a host dataset. MEASURED when this changed: 39 of 48 `Transfer(...)` calls
+      in `cli/test/runner.test.ts` omitted `Direction=`. They were all made explicit. The sibling
+      divergence is `Mode`, which defaults to binary where x3270 sets ascii_flag.
     */
-    expect(req().direction).toBe('receive');
+    expect(req().direction).toBe('send');
+    // AND THE OTHER DIRECTION IS STILL REACHABLE BY NAMING IT, which is the whole remedy offered
+    // to anyone this default surprises.
+    expect(req('Direction=receive').direction).toBe('receive');
   });
 
   it('omits recfm, lrecl and blksize entirely when unspecified', () => {
@@ -416,8 +444,13 @@ describe('keyword rejection', () => {
     // The whole DCB block is inside `if (!p->receive_flag)` (ft.c:702), so on a
     // GET x3270 accepts `Recfm=fixed` and emits nothing. The visible symptom of
     // that drop is a dataset with attributes nobody chose.
-    expect(() => req('Recfm=fixed')).toThrow(/Recfm applies to Direction=send only/);
-    expect(() => req('Recfm=fixed', 'Lrecl=80')).toThrow(/applies to Direction=send only/);
+    // `Direction=receive` IS NAMED NOW: the parser's default became `send` on 2026-10-22, and
+    // this case is about what a RECEIVE rejects. Inheriting the default would have made it assert
+    // that a SEND rejects its own legal keywords, which is the opposite of the rule.
+    expect(() => req('Direction=receive', 'Recfm=fixed'))
+      .toThrow(/Recfm applies to Direction=send only/);
+    expect(() => req('Direction=receive', 'Recfm=fixed', 'Lrecl=80'))
+      .toThrow(/applies to Direction=send only/);
   });
 
   it('rejects Lrecl or Blksize without Recfm', () => {
@@ -451,7 +484,7 @@ describe('TSO command construction', () => {
     // ft.c:685-688: the third substitution is `(p->host_type != HT_TSO)? "(": ""`,
     // so TSO gets nothing there. Matches the live usage text,
     // `IND$FILE {GET|PUT} 'dataset.name' options`.
-    expect(cmd("HostFile='SYS1.PARMLIB(IEASYS00)'"))
+    expect(recvCmd("HostFile='SYS1.PARMLIB(IEASYS00)'"))
       .toBe(`${IND_FILE} GET 'SYS1.PARMLIB(IEASYS00)'`);
   });
 
@@ -463,7 +496,7 @@ describe('TSO command construction', () => {
   it('emits nothing for binary mode: BINARY is the absence of ASCII', () => {
     // x3270 emits an explicit `BINARY` only for CICS (ft.c:691-692), and the live
     // TK5 usage text lists only `ASCII` among its options.
-    expect(cmd('Mode=binary')).toBe(`${IND_FILE} GET FOO`);
+    expect(recvCmd('Mode=binary')).toBe(`${IND_FILE} GET FOO`);
     expect(cmd('Mode=binary')).not.toContain('BINARY');
   });
 
@@ -471,15 +504,15 @@ describe('TSO command construction', () => {
     // ft.c:689-695 plus ft.c:940-942: `auto` sets cr_flag from ascii_flag, so
     // ascii mode alone asks for CRLF. This is the exact command the design doc's
     // live capture used: `IND$FILE GET 'SYS1.PARMLIB(IEASYS00)' ASCII CRLF`.
-    expect(cmd('Mode=ascii')).toBe(`${IND_FILE} GET FOO ASCII CRLF`);
-    expect(cmd("HostFile='SYS1.PARMLIB(IEASYS00)'", 'Mode=ascii'))
+    expect(recvCmd('Mode=ascii')).toBe(`${IND_FILE} GET FOO ASCII CRLF`);
+    expect(recvCmd("HostFile='SYS1.PARMLIB(IEASYS00)'", 'Mode=ascii'))
       .toBe(`${IND_FILE} GET 'SYS1.PARMLIB(IEASYS00)' ASCII CRLF`);
   });
 
   it('emits ASCII without CRLF for Cr=keep', () => {
     // `p->cr_flag = !strcasecmp(..., "remove") || !strcasecmp(..., "add")`
     // (ft.c:949-950): `keep` is the one value that leaves it false.
-    expect(cmd('Mode=ascii', 'Cr=keep')).toBe(`${IND_FILE} GET FOO ASCII`);
+    expect(recvCmd('Mode=ascii', 'Cr=keep')).toBe(`${IND_FILE} GET FOO ASCII`);
   });
 
   it('treats Cr=remove and Cr=add identically, because the direction decides', () => {
@@ -499,7 +532,7 @@ describe('TSO command construction', () => {
   it('emits nothing for Exist=keep or Exist=replace: both are local-only', () => {
     // ft.c:957-958 maps them to append_flag/allow_overwrite, and only
     // append_flag reaches the command.
-    expect(cmd('Exist=keep')).toBe(`${IND_FILE} GET FOO`);
+    expect(recvCmd('Exist=keep')).toBe(`${IND_FILE} GET FOO`);
     expect(cmd('Direction=send', 'Exist=replace')).toBe(`${IND_FILE} PUT FOO`);
   });
 
@@ -533,7 +566,7 @@ describe('TSO command construction', () => {
     // trim: it is invisible, every host command parser discards it, and it would
     // cost a cell of the input field that the runner's capacity pre-flight then
     // has to allow for.
-    expect(cmd()).toBe(`${IND_FILE} GET FOO`);
+    expect(recvCmd()).toBe(`${IND_FILE} GET FOO`);
     expect(cmd().endsWith(' ')).toBe(false);
   });
 
@@ -541,7 +574,7 @@ describe('TSO command construction', () => {
     // The live usage text's second form, `IND$FILE {GET|PUT} dd:ddname options`.
     // Nothing here interprets the host file name, which is what makes all three
     // forms work without a case for each.
-    expect(cmd('HostFile=dd:INFILE')).toBe(`${IND_FILE} GET dd:INFILE`);
+    expect(recvCmd('HostFile=dd:INFILE')).toBe(`${IND_FILE} GET dd:INFILE`);
   });
 });
 
@@ -553,7 +586,7 @@ describe('VM/CMS command construction', () => {
   it('emits the ( separator before the options', () => {
     // ft.c:688: `(p->host_type != HT_TSO)? "(": ""`. This is the dialect
     // difference the design doc's seam exists for.
-    expect(cmd('Host=vm', 'HostFile=PROFILE EXEC A'))
+    expect(recvCmd('Host=vm', 'HostFile=PROFILE EXEC A'))
       .toBe(`${IND_FILE} GET PROFILE EXEC A (`);
   });
 
@@ -561,7 +594,7 @@ describe('VM/CMS command construction', () => {
     // x3270 substitutes the `(` and then appends `"ASCII"` with no leading space
     // (ft.c:685-690), giving `(ASCII`. Reproduced rather than tidied: this is the
     // string decades of CMS hosts have parsed.
-    expect(cmd('Host=vm', 'Mode=ascii')).toBe(`${IND_FILE} GET FOO (ASCII CRLF`);
+    expect(recvCmd('Host=vm', 'Mode=ascii')).toBe(`${IND_FILE} GET FOO (ASCII CRLF`);
   });
 
   it('uses BARE recfm and lrecl keywords, with no parens', () => {

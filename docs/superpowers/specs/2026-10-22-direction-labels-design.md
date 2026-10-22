@@ -69,7 +69,26 @@ stack in UTS — difficult on the PDP-11 for address-space reasons, but not on S
 and using the IUCV-alike to reach VM service machines. **If that lands, download stops being the
 rare direction and this default should be reconsidered.**
 
-#### ONLY THE FORM'S DEFAULT MOVES. THE KEYWORD PARSER KEEPS `receive`.
+#### BOTH DEFAULTS MOVE TO `send` — REVISED BY THE USER, LATER THE SAME DAY
+
+> **THE SECTION BELOW WAS THE ORIGINAL DECISION AND IT WAS OVERRULED. It is kept verbatim because
+> the argument it makes is still the strongest case against what shipped, and anyone reconsidering
+> this should read it first.**
+>
+> **What shipped:** BOTH defaults are `send` — `newTransferForm()` *and*
+> `parseTransferKeywords`. The user's reasoning, which carried the decision: *people are more
+> likely to use IND$FILE to get something INTO a historic S/370 system than to get it out.* A
+> default should reflect what the tool is FOR, and a form/parser disagreement is its own trap for
+> anyone who learns the tool through the form and then writes a script.
+>
+> **The risk the section below names is real and was accepted, not refuted.** It is documented
+> loudly instead: in `transfer.ts` at the default, in the README's *File transfer* section as a
+> call-out, and in the one test that pins it. **MEASURED when it changed: 39 of the 48
+> `Transfer(...)` calls in `cli/test/runner.test.ts` omitted `Direction=`** and 23 tests failed at
+> once — a good demonstration of how much can depend on an unnamed default. Every one was made
+> explicit rather than left tracking whatever the default happens to be.
+
+##### The original decision, superseded
 
 There are two distinct defaults and **they are deliberately asymmetric**:
 
@@ -110,8 +129,8 @@ height is computed from the applicable count. Both must be re-verified rather th
 ## Verification
 
 - **Unit:** `transferForm.test.ts` for the new default and the unchanged stored values;
-  `transfer.test.ts` must still show the parser defaulting to `receive` — that test is now
-  load-bearing for the asymmetry and should say so.
+  `transfer.test.ts` pins the parser's default in ONE place (its `keyword defaults` block) and
+  every other case in that file names its direction explicitly, so the default has one home.
 - **The display mapping is tested where each front end renders it:** `tui/test/transferOverlay.test.ts`
   recomputes the box geometry, which is what catches a width regression; the web and GUI render
   through `<select>`/`<option>`, covered by `browser-clicks.mjs` and `transfer.mjs`.

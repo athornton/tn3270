@@ -379,13 +379,25 @@ file with `Browse…`, name the host file, and press Start. `Direction=send` off
 `receive` offers a Save panel.
 
 **The form opens on `send`, and the direction names both of its endpoints** —
-`send: local to host` and `receive: host to local`, rather than the bare words. Sending is the
-default because, until VM has a TCP/IP stack, this client is mostly used to get software *onto*
-these systems; few people develop software locally on a VM or MVS guest.
+`send: local to host` and `receive: host to local`, rather than the bare words.
 
-**A scripted `Transfer(...)` that omits `Direction=` still defaults to `receive`**, which is
-x3270's behaviour and is deliberately *not* the form's default: changing it would silently invert
-every existing script. The two defaults disagree on purpose.
+> ### `Direction` DEFAULTS TO `send`, WHICH IS NOT WHAT x3270 DOES
+>
+> x3270 defaults to **receive**. We default to **send**, in the form *and* in a scripted
+> `Transfer(...)` that omits `Direction=`. The reason: people are far more likely to use
+> `IND$FILE` to get something *into* a historic S/370 system than to get it out — until VM has a
+> TCP/IP stack, this client's main job is putting software onto these machines, and few people
+> develop software locally on a VM or MVS guest.
+>
+> **If you are porting a script from x3270, or from a tn3270 build before 2026-10-22, a
+> `Transfer(...)` with no `Direction=` now means the opposite of what it did** — and under
+> `Exist=replace` that overwrites a host dataset rather than a local file. **Name `Direction=`
+> explicitly in every script.** Nothing in `packages/cli/scripts/` relied on the default, so no
+> shipped script changed meaning, but yours might.
+>
+> This is the second deliberate divergence from x3270 in the same keyword block. The other is
+> `Mode`, which defaults to `binary` where x3270 sets `ascii_flag` true: a wrong ascii default
+> silently corrupts a load module, while a wrong explicit choice is visible in the command.
 
 **It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
 mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on

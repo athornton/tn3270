@@ -31,11 +31,21 @@ and the Recording log says what happened when they were run.
   all three front ends**, where the web gateway's "local" is a browser but the TUI's and GUI's is
   this machine's filesystem.
 
-  **The form also opens on `send` now**, because until VM has a TCP/IP stack this client is mostly
-  used to get software ONTO these systems. **`parseTransferKeywords` still defaults to `receive`**
-  — x3270's own default, serving scripts, where flipping it would silently invert every
-  `Transfer(...)` omitting `Direction=`. That asymmetry is pinned by a test that says not to tidy
-  it away.
+  **BOTH DEFAULTS ARE NOW `send` — the form AND `parseTransferKeywords`**, a deliberate break with
+  x3270 (which initialises `receive_flag` true, `ft.c:319`). The user's reason: people are far more
+  likely to use `IND$FILE` to get something INTO a historic S/370 system than to get it out, so
+  until VM has a TCP/IP stack this client's job is mostly putting software onto these machines.
+
+  An earlier revision the same day kept the two APART — form `send`, parser `receive` — arguing an
+  unattended script has no label to read. **The user overruled that and the risk was accepted, not
+  refuted:** a script written against x3270's default now means the opposite, and under
+  `Exist=replace` that overwrites a host dataset rather than a local file. It is documented at the
+  default, in the README, and in the single test that pins it; the superseded argument is kept
+  verbatim in the spec.
+
+  **39 of 48 `Transfer(...)` calls in `cli/test/runner.test.ts` had relied on that default without
+  naming it**, and 23 tests failed when it moved. All 48 now state their direction, which is the
+  discipline `cli/scripts/*.txt` already followed — and why no shipped script changed meaning.
 
   **What offline evidence there is, and it is unusually good for a UI change:**
 
