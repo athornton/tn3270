@@ -566,7 +566,83 @@ body.ui-surface {
   position: absolute;
   right: 0;
   top: 0;
-  height: calc(var(--kb-h) * var(--kb-pitch) + (var(--kb-h) - 1) * 4px);
+  /*
+    `2px` PER ROW GAP, NOT `4px` -- the cap was 2 units tall and 2px TOO TALL, so it crowded the
+    Shift row below it where every other key leaves a clean gap. The user spotted it.
+
+    THE VERTICAL GAP IS `margin-bottom: 2px` ON `.keyboard-row`, so an n-row cap spans n caps and
+    the n-1 margins between them. I had written `4px`, which is the HORIZONTAL `gap` doubled -- a
+    plausible-looking number from the wrong axis.
+  */
+  height: calc(var(--kb-h) * var(--kb-pitch) + (var(--kb-h) - 1) * 2px);
+}
+
+/*
+  THE RETURN KEY IS DRAWN L-SHAPED, AND THIS TIME A `clip-path` IS THE RIGHT TOOL.
+
+  The user's second note: the Return is vertically aligned with the backslash above it but does not
+  extend as far LEFT, so the gap between them is 9.5px where every other gap is 2px. The real key
+  is an L -- wider on its top half, where the QWERTY row's content stops 0.25 units short of the
+  home row's.
+
+  ## WHY A CLIP IS CORRECT HERE AND WAS WRONG BEFORE
+
+  An earlier attempt used a clip to hide the Return OVERLAPPING the `{` cap, and that was a lie: a
+  clip changes what is PAINTED, not what the box covers, so the `{` was still underneath it and
+  `browser-clicks.mjs` said `OVERLAPS by 6px`. The fix there was geometric -- move the box.
+
+  THIS IS THE MIRROR CASE. The box must STAY at x=13.75 and 1.25 units, because widening it to
+  13.5 would overlap the `{` on the home row again -- measured, that row's content ends at 13.75u.
+  So the element is sized to the SMALLER, non-overlapping rectangle and `border-left` plus a
+  negative margin extend only the PAINT leftward on the top half. Nothing is hidden; a region that
+  covers no other key is added.
+
+  `--kb-extend` IS THE 0.25-UNIT DIFFERENCE plus the 2px gap it closes, from the same arithmetic
+  the width formula uses.
+*/
+#keyboard-overlay #keyboard-main .keyboard-row > button[style*='--kb-h'] {
+  --kb-extend: calc(0.25 * var(--kb-pitch) + 2px);
+  /*
+    `::before` RATHER THAN A WIDER BOX, AND THE DIFFERENCE IS THE WHOLE POINT.
+
+    Widening the element with a negative margin was the first attempt and it FAILED exactly as the
+    note above predicts: the harness reported `OVERLAPS by 7px`, because a margin moves the BOX
+    and the box is what covers the `{`. Measured, not reasoned -- I wrote the prediction and then
+    broke it in the same edit.
+
+    So the element keeps its correct, non-overlapping geometry and a pseudo-element paints the
+    upper tab leftward. A `::before` is not in the layout flow and cannot cover a sibling's hit
+    area, so the `{` stays reachable while the key LOOKS like the L it is.
+  */
+  overflow: visible;
+  /*
+    THE NOTCH: full width down to the top row's bottom edge, then inset by the extension for the
+    lower half. `calc` in a polygon, so a pitch change carries through -- the vertical split is at
+    one cap plus the row gap, which is where the two rows meet.
+  */
+}
+
+/*
+  THE UPPER TAB OF THE L, painted outside the button's own box.
+
+  It carries the same border and background as a cap so the two read as one key, and it is offset
+  LEFT by the extension and UP by the border width so the edges meet. `pointer-events: none` is
+  belt and braces -- a `::before` is not hit-tested as a separate target anyway, but saying so
+  documents that this adds no clickable region.
+*/
+#keyboard-overlay #keyboard-main .keyboard-row > button[style*='--kb-h']::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--kb-extend) - 1px);
+  top: -1px;
+  width: var(--kb-extend);
+  height: var(--kb-pitch);
+  box-sizing: border-box;
+  border: 1px solid;
+  border-right: none;
+  border-color: inherit;
+  background: inherit;
+  pointer-events: none;
 }
 
 /*

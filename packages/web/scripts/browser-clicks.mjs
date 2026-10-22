@@ -1293,6 +1293,37 @@ async function runTransferPhase(url) {
         This is the one font question a width CAN answer. Per-character COVERAGE cannot be probed
         from the DOM at all, which the note above this records after two vacuous attempts.
       */
+      /*
+        THE RETURN KEY'S L-SHAPE AND ITS HEIGHT, both of which the user caught on a screenshot.
+
+        TWO DEFECTS: the cap was 2px too tall, so it crowded the Shift row where every other key
+        leaves a clean 2px gap (I had used the horizontal gap doubled, a plausible number from the
+        wrong axis); and it did not extend left to meet the backslash above it, leaving a 9.5px
+        gap where every other gap is 2px.
+
+        THE HEIGHT IS CHECKED AGAINST THE ROW BELOW, which is what "leaves the same gap" means --
+        not against a number, since the arithmetic is exactly what was wrong.
+
+        THE TAB IS CHECKED ON THE `::before` BOX, because the element itself must NOT grow: a
+        wider box overlaps the `{` cap, which is the defect fixed earlier today and which a first
+        attempt at this reintroduced (`OVERLAPS by 7px`). The paint extends; the box does not.
+      */
+      const returnShape = await cdp.eval(`(() => {
+        const tall = document.querySelector('#keyboard-main button[style*="--kb-h"]');
+        if (tall === null) return 'no tall cap';
+        const shift = document.querySelector('#keyboard-main button[data-key^="Shift (left"]');
+        if (shift === null) return 'no shift cap';
+        const t = tall.getBoundingClientRect();
+        const sh = shift.getBoundingClientRect();
+        const gapBelow = Math.round(sh.top - t.bottom);
+        const tab = getComputedStyle(tall, '::before');
+        const tabW = parseFloat(tab.width);
+        return 'gap below=' + gapBelow + 'px tab=' + tabW.toFixed(1) + 'px';
+      })()`);
+      // The gap below must match the ordinary row gap, and the tab must be the 0.25-unit
+      // extension (7px at this pitch) plus the 2px it closes.
+      const returnOk = /gap below=2px tab=9\.0px/.test(returnShape);
+
       const insertGlyph = await cdp.eval(`(() => {
         const el = document.querySelector('#keyboard-cursor button[data-key^="Insert"]');
         if (el === null) return 'no insert cap';
@@ -1479,7 +1510,7 @@ async function runTransferPhase(url) {
         // CENTRES rather than edges, which is what "centred" means, and within 20px because the
         // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
         && pfCentred && numpadAligned && rectangle && staggered && braceClickable
-        && insertGlyph.startsWith('renders');
+        && insertGlyph.startsWith('renders') && returnOk;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1495,7 +1526,8 @@ async function runTransferPhase(url) {
           + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
           + `the main block is a RECTANGLE (row right edges ${edges.join(', ')}) with Z centred `
           + `between A and S (${cZ} vs ${(cA + cS) / 2}); the notched Return leaves { clickable; `
-          + `NO cap is clipped; the Insert glyph ${insertGlyph}`);
+          + `NO cap is clipped; the Insert glyph ${insertGlyph}; the Return is L-shaped `
+          + `(${returnShape})`);
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1511,7 +1543,8 @@ async function runTransferPhase(url) {
           + `at the { cap's right edge the browser finds: ${braceHitTest} (must be the { cap, `
           + 'not the Return key), '
           + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}; `
-          + `Insert glyph: ${insertGlyph}. ${metrics}`);
+          + `Insert glyph: ${insertGlyph}; Return shape: ${returnShape} `
+          + '(want gap below=2px tab=9.0px). ' + metrics);
       }
     }
 
