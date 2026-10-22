@@ -205,7 +205,20 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
         deps.setAttr(button, 'data-key', cap.name);
         // THE WIDTH TRAVELS AS A CUSTOM PROPERTY so `ui.css` multiplies it by one pitch variable.
         // Key units in, pixels decided there -- see `keyboard3279.ts` on why the table holds units.
-        deps.setAttr(button, 'style', `--kb-w:${cap.width}`);
+        /*
+          WIDTH AND HEIGHT BOTH TRAVEL AS CUSTOM PROPERTIES, so `ui.css` owns the pitch.
+
+          `--kb-h` IS NEW, 2026-10-22, FOR THE RETURN KEY, which the reference photograph shows
+          spanning the QWERTY and home rows -- and that span is what makes the main block a
+          rectangle. A tall cap is declared on its TOP row and simply absent from the rows beneath,
+          so a row's own width arithmetic never has to know about it; the CSS lifts it out of flow
+          and gives it the height of two caps plus the gap between them.
+        */
+        const height = cap.height ?? 1;
+        deps.setAttr(button, 'style',
+          height > 1
+            ? `--kb-w:${cap.width};--kb-h:${height}`
+            : `--kb-w:${cap.width}`);
         deps.setText(button, cap.label);
         deps.setTitle(button, cap.name);
 

@@ -522,6 +522,30 @@ body.ui-surface {
 #keyboard-overlay .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
 
 /*
+  A ROW-SPANNING CAP, WHICH IS WHAT MAKES THE MAIN BLOCK A RECTANGLE.
+
+  The Return key covers the QWERTY and home rows on the real keyboard, and without it the home row
+  ends 1.25 units short of the one above -- the raggedness the user asked to fix. `--kb-h` is set
+  by `keyboardUi.ts` only on a cap whose table entry declares a height.
+
+  `position: relative` ON THE ROW and `absolute` on the tall cap, rather than a grid: the rows are
+  flex containers and converting the whole block to grid would re-do a layout that is otherwise
+  correct. The cap is positioned from the row's RIGHT edge, because the only tall cap on this
+  keyboard is flush right -- stated as the limit it is, rather than pretending to be general.
+
+  THE HEIGHT IS `n` CAPS PLUS THE `n-1` GAPS BETWEEN THEIR ROWS, the same arithmetic the width
+  formula uses for units, with `margin-bottom: 2px` per row being the vertical gap.
+*/
+#keyboard-overlay .keyboard-row { position: relative; }
+
+#keyboard-overlay .keyboard-row > button[style*='--kb-h'] {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: calc(var(--kb-h) * var(--kb-pitch) + (var(--kb-h) - 1) * 4px);
+}
+
+/*
   THE CAP WIDTH COMES FROM THE TABLE, through the `--kb-w` custom property `keyboardUi.ts` sets
   per button. `flex: 0 0 auto` stops flex from helpfully resizing caps and destroying the layout
   the table describes.

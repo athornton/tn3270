@@ -153,6 +153,18 @@ export interface KeyCap {
   readonly x: number;
   /** Width in KEY UNITS. 1 is a standard cap. */
   readonly width: number;
+  /**
+   * Height in KEY UNITS, for a cap that spans rows. Absent means 1.
+   *
+   * ADDED 2026-10-22 FOR THE RETURN KEY, which the sharp reference photograph shows spanning the
+   * QWERTY and home rows -- and that span is what makes the main block a RECTANGLE rather than a
+   * ragged stack. Without it row 2 ends 1.25 units short of row 1.
+   *
+   * A TALL CAP IS DECLARED ON ITS TOP ROW and is simply absent from the rows beneath, so a row's
+   * own width calculation does not have to know about it. `keyboardUi.ts` renders the span with a
+   * grid-row rule; the row below leaves the space empty by having no cap at that `x`.
+   */
+  readonly height?: number;
   /** What this key is called in words: the tooltip, and the accessible name. */
   readonly name: string;
 }
@@ -291,35 +303,68 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     click" even though `applyAction` throws on the kind, because the front end intercepts it
     exactly as it intercepts the chord.
   */
+  /*
+    THE LEFT SPECIAL BAR -- REWRITTEN 2026-10-22, AND FOUR OF ITS CAPS WERE SIMPLY WRONG.
+
+    I had `Esc`, `Print Screen`, `Scroll Lock` and `Pause` here: PC keys, read off a blurred
+    photograph and believed because they looked like a plausible PC-ish column. The sharp reference
+    (`DSC08836-scaled.jpeg`) shows what is actually there, and it is all 3270:
+
+      Attn  | Clear
+      Cursr | (blank)
+      Sel   |
+      Ex Sel| Erase EOF
+      Print | Test          <- `Test` is the SHIFTED legend on a blank cap
+      (blk) | (blk)
+
+    **TWO OF THEM ARE FUNCTIONS WE ALREADY IMPLEMENT**, so they become LIVE KEYS rather than grey
+    scenery: `Erase EOF` is `eraseEOF`, which the compact keypad has carried all along as `ErEOF`.
+    That is the most valuable thing this photograph bought -- not geometry, but two working keys
+    where I had drawn dead ones.
+
+    `Ex Sel` IS *NOT* IMPLEMENTED, and the distinction matters: it is Erase Input on some units and
+    a field-select on others, and `keypad.ts` records Erase Input as `ErInp` separately. Rather
+    than guess which this cap is, it stays inert with its real name -- the same discipline the
+    unreadable caps got.
+
+    `Print`'s SHIFTED LEGEND IS `Ident`, and the blank cap beside it carries `Test`. Both were read
+    by the user on this photograph. Neither has an action here, so they are recorded as legends on
+    inert caps: documented as existing and unimplemented rather than silently absent.
+
+    `Attn`'s OWN SHIFTED LEGEND IS STILL UNREADABLE even here -- it is front-printed and blurred in
+    every photograph so far -- as is the row-1 blank's. Those two remain unidentified.
+  */
   key('Attn', { kind: 'attn' }, 'special-left', 0, 0, 1, 'Attention'),
   key('Clr', { kind: 'clear' }, 'special-left', 0, 1, 1, 'Clear'),
   dead('Cur\nSel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
-  // CONFIRMED BLANK, not unreadable -- see the note on the bottom pair below.
-  dead('', 'special-left', 1, 1, 1, 'blank'),
-  dead('Esc', 'special-left', 2, 0, 1, 'Escape (not a 3270 key)'),
-  dead('Prt\nScr', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
-  dead('Scrl\nLck', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
-  dead('Pse', 'special-left', 3, 1, 1, 'Pause (not a 3270 key)'),
+  dead('', 'special-left', 1, 1, 1, 'blank, right of Cursor Select'),
+  dead('Ex\nSel', 'special-left', 2, 0, 1, 'Ex Sel (not implemented: ambiguous function)'),
+  // A REAL 3270 FUNCTION WE IMPLEMENT -- the compact keypad has carried it as `ErEOF` all along.
+  key('Ers\nEOF', { kind: 'eraseEOF' }, 'special-left', 2, 1, 1, 'Erase EOF'),
+  {
+    label: 'Prnt',
+    shiftLabel: 'Idnt',
+    action: undefined,
+    region: 'special-left', row: 3, x: 0, width: 1,
+    name: 'Print (shifted: Ident, not implemented)',
+  },
+  {
+    label: '',
+    shiftLabel: 'Test',
+    action: undefined,
+    region: 'special-left', row: 3, x: 1, width: 1,
+    name: 'blank (shifted: Test, not implemented)',
+  },
   /*
-    THE BOTTOM PAIR: `Xfer` ON ONE BLANK CAP, THE OTHER LEFT BLANK.
+    THE TWO BLANK CAPS AT THE BOTTOM, AND `Xfer` GOES BACK ON ONE OF THEM.
 
-    **THE BLANKNESS IS CONFIRMED, NOT MERELY UNREAD -- 2026-10-22.** The user could not read these
-    and asked; a 13x crop with contrast and an unsharp mask shows BOTH caps with NO INK AT ALL,
-    while `Scroll Lock` and `Pause` directly above them remain legible under the same treatment.
-    Three caps in this bar are blank (this pair and row 1's second), and that is the UNIT, not the
-    photograph: the 5271 shipped with unassigned caps here.
-
-    **THAT DISTINCTION MATTERS FOR WHAT A FUTURE SOURCE COULD SAY.** An `unread` cap means "we
-    failed"; a blank cap means "there is nothing to read", so a sharper photograph of THIS keyboard
-    cannot change it -- only a different unit, or a key-assignment manual, could. The IBM 3270 PC
-    photograph cannot corroborate either way: its left bar sits at a steep angle in deep shadow.
-
-    `Xfer` HERE IS THE USER'S OWN SUGGESTION -- "since there are two unlabelled keys on the left
-    hand special-key bar, one of those could get the `Xfer` label" -- and there is precedent:
-    `KEYPAD_KEYS` already carries `Xfer` as a deliberate non-3270 addition.
+    It had moved to the cursor cluster's third cap on the user's reasoning that the cap had no
+    unshifted function -- but this photograph IDENTIFIES that cap: it carries the
+    `a`-with-a-squiggle glyph, which is delete-to-end-of-line. So it is a real key after all, and
+    `Xfer` returns here, to a cap this file has CONFIRMED blank under maximum zoom.
   */
-  dead('', 'special-left', 4, 0, 1, 'blank'),
-  dead('', 'special-left', 4, 1, 1, 'blank'),
+  key('Xfer', { kind: 'transferForm' }, 'special-left', 4, 0, 1, 'File transfer'),
+  dead('', 'special-left', 4, 1, 1, 'blank, bottom right of the special bar'),
 
   /*
     THE MAIN BLOCK, five rows.
@@ -366,101 +411,104 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     have the key, which is exactly how far a cross-check can be trusted.
   */
   ch('=', 0, 11, '+'),
-  key('←', { kind: 'backspace' }, 'main', 0, 12, 2, 'Backspace'),
+  // BACKSPACE IS 3 UNITS, which is what closes row 0 at 15 -- and the photograph shows it as the
+  // widest cap on that row, running to the right edge above the Return key.
+  key('←', { kind: 'backspace' }, 'main', 0, 12, 3, 'Backspace'),
 
-  // ROW 1: Tab, QWERTY, then `!`/`cent` and `|`/`\`, and the tall Enter.
+  /*
+    ROWS 1-4, AS A TRUE RECTANGLE -- REWRITTEN 2026-10-22 FROM A SHARP REFERENCE PHOTOGRAPH
+    (`DSC08836-scaled.jpeg`), which is the same 5271 and finally legible.
+
+    ## EVERY ROW ENDS AT EXACTLY 15 UNITS, AND THAT IS WHY
+
+    The block used to end at 14, 15, 13.75, 13.5 and 14 units -- ragged by up to 1.5 units, which
+    the user saw immediately: "can we make the main keyboard an actual rectangle?" A real keyboard
+    is a rectangle because its leading keys STAGGER and its edge keys are WIDE, not because it has
+    dead space, so that is what this now models.
+
+    ## THE STAGGER IS MEASURED, NOT EYEBALLED
+
+    `Z` MUST CENTRE BETWEEN `A` AND `S`, which the user named as the test. With Caps at 1.75 units
+    `A` centres at 2.25 and `S` at 3.25, so `Z` must centre at 2.75 -- which a 2.25-unit left
+    Shift gives exactly. Tab 1.5, Caps 1.75, Shift 2.25 is the classic ANSI-ish progression and it
+    falls out of that one requirement rather than being copied from a PC.
+
+    ## THE RETURN KEY SPANS TWO ROWS, WHICH IS WHAT CLOSES THE RECTANGLE
+
+    The photograph shows the bent-arrow Return as one tall cap covering the QWERTY and home rows,
+    with a SEPARATE small `Enter` on the bottom row. Without the span, row 2 ends 1.25 units short
+    and no amount of widening the punctuation keys looks right. `height: 2` is declared on its top
+    row and the home row simply has no cap at that `x` -- see `KeyCap.height`.
+  */
+
+  // ROW 1: Tab, QWERTY, two punctuation caps, and the TALL Return.
   key('→|', { kind: 'tab' }, 'main', 1, 0, 1.5, 'Tab'),
   ...letters('QWERTYUIOP', 1, 1.5),
-  // U+00A2 CENT SIGN over `!`, read off the cap right of `P`.
-  /*
-    `!` OVER `not sign` -- CORRECTED 2026-10-22, AND THIS IS WHERE THE NOT SIGN ACTUALLY LIVES.
-
-    Recorded as `cent`/`!` off a blurred cap. The sharp 4978 photograph shows this position as an
-    EXCLAMATION MARK over a NOT SIGN, and `cent` belongs on `6` instead -- so the two glyphs I had
-    were both real and both in the WRONG PLACES, which is the most misleading kind of
-    transcription error: each one looked defensible on its own.
-
-    THE DUPLICATE-GLYPH TEST IS WHAT SURFACED IT. Once `6` was corrected to `cent`, this cap's
-    `cent` became a repeat and the rule flagged it immediately.
-  */
+  // `!` over a NOT SIGN -- confirmed again on this photograph, right of `P`.
   ch('¬', 1, 11.5, '!'),
-  // A BROKEN BAR (U+00A6) OVER THE BACKSLASH, NOT THE SOLID `|` ON THE `1` KEY. The two were
-  // flattened into one until the repeated-shifted-glyph test caught it, and the sharp 4978
-  // photograph then CONFIRMED the distinction independently -- its own cap here is unmistakably a
-  // broken bar over a backslash. EBCDIC distinguishes the two bars, so this is a real difference
-  // and not a rendering artefact of either photograph.
+  // A BROKEN BAR (U+00A6) over the backslash, distinct from the solid `|` on the `1` key.
   ch('\\', 1, 12.5, '¦'),
-  // THE RETURN KEY IS `newline`, NOT `enter`, AND THAT IS THE 3270 DISTINCTION. `Enter` is the AID
-  // that submits the screen and lives on its own cap in the bottom row (and in the numpad); this
-  // one moves the cursor to the next input field. `keymap.ts` records at length that no TUI chord
-  // could express this because Ctrl-J IS 0x0a, "and the keypad button and the TUI overlay are
-  // Newline's routes" -- a cap has no such spelling problem.
-  key('↵', { kind: 'newline' }, 'main', 1, 13.5, 1.5, 'Newline'),
+  /*
+    RETURN, TWO ROWS TALL AND 1.5 UNITS WIDE.
 
-  // ROW 2: a lock glyph, ASDFGHJKL, then `:`/`;`, `"`/`'`, `)`/`(`.
+    `newline`, NOT `enter`, and that is the 3270 distinction this table has carried from the start:
+    `Enter` is the AID that submits the screen and has its own cap on row 4 (and another on the
+    numeric pad); this one moves the cursor to the next input field. `keymap.ts` records that no
+    TUI chord could express Newline because Ctrl-J IS 0x0a -- a cap has no such spelling problem,
+    which is half the reason this surface is worth having.
+  */
+  {
+    label: '↵',
+    action: { kind: 'newline' },
+    region: 'main', row: 1, x: 13.5, width: 1.5, height: 2,
+    name: 'Newline',
+  },
+
+  // ROW 2: Caps (inert), ASDFGHJKL, three punctuation caps. The Return above covers 13.5-15.
   dead('⇪', 'main', 2, 0, 1.75, 'Caps Lock (not implemented: see the header)'),
   ...letters('ASDFGHJKL', 2, 1.75),
   ch(';', 2, 10.75, ':'),
   ch('\'', 2, 11.75, '"'),
-  /*
-    `}` OVER `{` -- CORRECTED 2026-10-22 FROM A SHARP SECOND PHOTOGRAPH, and this was the suspect
-    the audit called "most likely wrong of the four".
-
-    It was recorded as `(`/`)`, duplicating the pair on `9`/`0`. That duplication is what made it
-    suspect, and the smell was right: an IBM 4978's home row shows this cap as a BRACKET PAIR,
-    perfectly legible. The audit's guess -- "a backtick/tilde or a bracket pair" -- named the
-    answer without being able to confirm it.
-  */
   ch('{', 2, 12.75, '}'),
 
   /*
-    ROW 3: Shift, ZXCVBNM, then `,`/`;`-ish, `.`/`:`-ish, `/`/`?`, and the right Shift.
+    ROW 3: a 2.25-UNIT SHIFT, ZXCVBNM, three punctuation caps, and a WIDE right Shift.
 
-    BOTH SHIFT CAPS DRIVE THE SAME ONE-SHOT STATE -- neither is distinguishable to us. They are
-    identified by NAME in `canvas/src/keyboardUi.ts`, which is why both are called `Shift`.
-
-    THE LEFT SHIFT SHOWS `>`/`<` ON ITS CAP in the photograph, which is a legend rather than a
-    second function: the cap is a Shift. Drawn as `Shift` so the surface reads as a keyboard and
-    not a puzzle.
+    BOTH SHIFT CAPS DRIVE THE SAME ONE-SHOT STATE -- neither is distinguishable to us, and they are
+    matched by NAME in `canvas/src/keyboardUi.ts`. The left cap's printed legend is `>`/`<` on the
+    hardware; it is drawn as `Shft` so the surface reads as a keyboard rather than a puzzle.
   */
-  shift(3, 0, 1.25, 'left'),
-  ...letters('ZXCVBNM', 3, 1.25),
+  shift(3, 0, 2.25, 'left'),
+  ...letters('ZXCVBNM', 3, 2.25),
+  ch(',', 3, 9.25, '\''),
+  ch('.', 3, 10.25, ':'),
+  ch('/', 3, 11.25, '?'),
+  shift(3, 12.25, 2.75, 'right'),
+
   /*
-    `'` OVER `,` AND `:` OVER `.` -- CORRECTED 2026-10-22, AND THE AUDIT'S PREDICTION WAS WRONG TOO.
+    ROW 4: Reset, Alt, the spacebar, Alt, a blank, and `Enter`.
 
-    These were recorded as `,`/`;` and `.`/`:`, duplicating the home row's `;`/`:`. The audit
-    flagged them and predicted `,`/`<` and `.`/`>`, reasoning from PC-adjacent habit. A sharp 4978
-    photograph shows an APOSTROPHE over the comma and a COLON over the period.
-
-    SO THE SMELL WAS A RELIABLE DETECTOR AND THE PREDICTION WAS NOT. Keep both halves of that:
-    duplication FOUND the error, and guessing the correction would have shipped a second wrong
-    answer that no longer smelled.
+    `Reset` CARRIES `DvCntl` AS ITS SHIFTED LEGEND -- front-printed on the cap, read on this
+    photograph and identified by the user as Device Control. We have no action for it, so it is
+    recorded as a `shiftLabel` on a cap whose unshifted function we DO implement: pressing Shift
+    re-letters it, and clicking it still sends `reset`. That is honest -- the shifted function is
+    documented as existing and unimplemented, rather than silently absent.
   */
-  ch(',', 3, 8.25, '\''),
-  ch('.', 3, 9.25, ':'),
-  // `?` OVER `/`, CONFIRMED by the 4978's own cap. (That keyboard also carries a `~`/`\` cap to
-  // its right, which this layout does not appear to have -- the two units differ in furniture even
-  // where their character set agrees, so it is NOT transplanted here.)
-  ch('/', 3, 10.25, '?'),
-  shift(3, 11.25, 2.25, 'right'),
-
-  // ROW 4: Reset, Alt, the spacebar, Alt, a blank, Enter.
-  key('Reset', { kind: 'reset' }, 'main', 4, 0, 1.5, 'Reset'),
+  {
+    label: 'Reset',
+    shiftLabel: 'DvCn',
+    action: { kind: 'reset' },
+    region: 'main', row: 4, x: 0, width: 1.5,
+    name: 'Reset (shifted: Device Control, not implemented)',
+  },
   dead('Alt', 'main', 4, 1.5, 1.25, 'Alt, left (not a 3270 key)'),
-  /*
-    THE SPACEBAR IS SEVEN UNITS AND NAMED, which `ch()` could not express: that helper builds a
-    one-unit cap named after its own label, and a cap named `" "` is invisible to a screen reader
-    and unfindable by a harness. Found by RENDERING the table as ASCII rather than by any
-    assertion -- the overlap arithmetic was perfectly happy with a 1-unit spacebar, because a
-    too-SMALL cap overlaps nothing. `keyboard3279.test.ts` now pins the width and the name.
-  */
   {
     label: '', action: { kind: 'type', text: ' ' },
     region: 'main', row: 4, x: 2.75, width: 7, name: 'Space',
   },
   dead('Alt', 'main', 4, 9.75, 1.25, 'Alt, right (not a 3270 key)'),
-  dead('', 'main', 4, 11, 1.25, 'blank'),
-  key('Enter', { kind: 'enter' }, 'main', 4, 12.25, 1.75, 'Enter'),
+  dead('', 'main', 4, 11, 1.25, 'blank, right of the spacebar'),
+  key('Enter', { kind: 'enter' }, 'main', 4, 12.25, 2.75, 'Enter'),
 
   /*
     THE CURSOR CLUSTER.
@@ -475,65 +523,63 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     arrow, a house-like glyph and a third mark. They are INERT with descriptive names, per this
     file's header rule, and are the first thing to fix if a better photograph turns up.
   */
+  /*
+    THE CURSOR CLUSTER, AS A DIAMOND -- REWRITTEN 2026-10-22 FROM THE SHARP REFERENCE.
+
+    The user prefers this to the modern inverted-T and the photograph shows why: the arrows sit in
+    a 3x3 diamond with a CENTRE CAP between them, which is what the hardware actually has.
+
+      Dup/PA1 | FieldMark/PA2 | PA3
+      BackTab | Home          | DelEOL
+              | up            |
+      left    | (centre)      | right
+              | down          |
+
+    ## WHAT THIS PHOTOGRAPH IDENTIFIED, ALL OF IT NEW
+
+     - THE THIRD CAP OF ROW 1 is the `a`-with-a-squiggle glyph, which the user read as
+       delete-to-end-of-line. We have no such action -- `delete` is a single character and
+       `eraseEOF` erases to the end of the FIELD, not the line -- so it is inert with its real
+       name. **AND THAT IS WHY `Xfer` MOVED OFF IT**: it is a real key, not a spare.
+     - THE CENTRE CAP carries a DIAGONAL ARROW, which the user read as cursor-to-top-left. That is
+       plausibly `Home` -- but `Home` already has its own cap two rows up, and a keyboard does not
+       usually spend two caps on one function. Inert, with the ambiguity recorded rather than
+       guessed away.
+     - THE SHIFTED LEGENDS ON LEFT AND RIGHT ARE DOUBLE ARROWS, which the user read as
+       beginning/end of line. No action exists for either, so they are `shiftLabel`s on live cursor
+       keys: Shift re-letters the cap, and clicking still moves the cursor one position. The
+       shifted function is documented as existing and unimplemented.
+  */
   key('Dup\nPA1', { kind: 'dup' }, 'cursor', 0, 0, 1, 'Dup'),
   key('Fld\nMrk\nPA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
-  /*
-    `PA3` -- WAS RECORDED AS BLANK, CORRECTED 2026-10-22 from the IBM 3270 PC photograph, whose
-    layout matches this keyboard's exactly. The cap reads `PA3` clearly there, and it completes
-    the set: PA1 and PA2 ride the Dup and Field Mark caps beside it.
-  */
   key('PA3', { kind: 'pa', n: 3 }, 'cursor', 0, 2, 1, 'PA3'),
-  /*
-    THE LAST TWO UNREAD CAPS -- READ 2026-10-22, AND NOT BY FINDING A FOURTH PHOTOGRAPH.
 
-    A 10x crop of the ORIGINAL image with contrast and an unsharp mask resolves all three caps in
-    this row: an arrow pointing LEFT INTO A BAR, a HOUSE, and an arrow pointing RIGHT INTO A BAR.
-    Those are the standard 3270 back-tab and field-tab glyphs, and they flank Home exactly as the
-    cursor cluster's logic would predict.
-
-    **SHARPENING WAS THE WHOLE TRICK, AND I SHOULD HAVE TRIED IT FIRST.** These two survived three
-    photographs and two rounds of "still unreadable" -- a 4978 with different furniture and an IBM
-    3270 PC with the SAME layout, where they are a smudge at full resolution. The pixels in the
-    first image were always sufficient; plain LANCZOS upscaling was not. **Exhaust the processing
-    before exhausting the sources.**
-
-    `→|` HERE IS THE SAME GLYPH AND ACTION AS THE MAIN BLOCK'S TAB, and `←|` the same as its
-    BkTab. A keyboard carrying a key twice is ordinary -- `Enter` appears twice on this one -- and
-    the duplicate NAMES are disambiguated for the harnesses' sake.
-  */
-  /*
-    THE TOP ROW OF THE ARROW BLOCK: BACK TAB, HOME, AND A BENT ARROW.
-
-    Resolved 2026-10-22 at 9x with contrast and an unsharp mask. Left is an arrow pointing LEFT
-    INTO A BAR (back tab); centre is a HOUSE (Home); right is an arrow with a RIGHT-ANGLE BEND.
-
-    ## THE BENT ARROW CARRIES `Xfer`, AND THE USER'S REASONING IS WHY
-
-    "Not sure what the front symbol on the center (blank) key of the arrow cluster is supposed to
-    be, but I think that means it had no unshifted function, so that's a safe place to put Xfer."
-
-    THE GLYPH IS AT THE RESOLUTION FLOOR and cannot be named with confidence -- the bend is clear,
-    the terminal direction is not. On a 3270 that shape is usually NEW LINE, but **the main
-    block's Return cap already carries the classic hooked arrow** (checked at 14x, unmistakable),
-    and that is where `newline` is bound. One keyboard would not spend two caps on it with no
-    other mark to tell them apart, so this is something else -- and nothing here can say what.
-
-    SO IT IS AN UNNAMED KEY WITH NO FUNCTION WE CAN IMPLEMENT, which makes it the best available
-    home for a non-3270 addition: `Xfer` displaces nothing an operator could otherwise reach. That
-    is the same argument `KEYPAD_KEYS` already makes for carrying `Xfer` at all.
-
-    **IF A KEY-ASSIGNMENT MANUAL EVER TURNS UP, THIS IS THE FIRST ENTRY TO REVISIT** -- and the
-    `Xfer` that moved here should move back to the blank cap on the left special bar, which is
-    confirmed blank and therefore permanently safe.
-  */
   key('←|', { kind: 'backTab' }, 'cursor', 1, 0, 1, 'Back Tab (cursor cluster)'),
   key('⌂', { kind: 'home' }, 'cursor', 1, 1, 1, 'Home'),
-  key('Xfer', { kind: 'transferForm' }, 'cursor', 1, 2, 1,
-    'File transfer (on the bent-arrow cap, whose own function is unidentified)'),
-  key('↑', { kind: 'up' }, 'cursor', 2, 1, 1, 'Cursor up'),
-  key('←', { kind: 'left' }, 'cursor', 3, 0, 1, 'Cursor left'),
-  key('↓', { kind: 'down' }, 'cursor', 3, 1, 1, 'Cursor down'),
-  key('→', { kind: 'right' }, 'cursor', 3, 2, 1, 'Cursor right'),
+  dead('⌫', 'cursor', 1, 2, 1, 'Delete to end of line (not implemented)'),
+
+  // THE DIAMOND. `up` is centred on its own row; `left`, the centre cap and `right` share the
+  // next; `down` is centred below. The row offsets come from the table and `keyboardUi.ts`
+  // renders them -- see its note on `padding-left`.
+  {
+    label: '↑', action: { kind: 'up' },
+    region: 'cursor', row: 2, x: 1, width: 1, name: 'Cursor up',
+  },
+  {
+    label: '←', shiftLabel: '⇤', action: { kind: 'left' },
+    region: 'cursor', row: 3, x: 0, width: 1,
+    name: 'Cursor left (shifted: start of line, not implemented)',
+  },
+  dead('↖', 'cursor', 3, 1, 1, 'diagonal arrow, function unidentified'),
+  {
+    label: '→', shiftLabel: '⇥', action: { kind: 'right' },
+    region: 'cursor', row: 3, x: 2, width: 1,
+    name: 'Cursor right (shifted: end of line, not implemented)',
+  },
+  {
+    label: '↓', action: { kind: 'down' },
+    region: 'cursor', row: 4, x: 1, width: 1, name: 'Cursor down',
+  },
 
   /*
     THE NUMERIC KEYPAD.

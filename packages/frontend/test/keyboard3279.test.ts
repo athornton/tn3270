@@ -95,10 +95,23 @@ describe('KEYBOARD_3279', () => {
       }
     });
 
-    it('only ever puts a shiftLabel on a typed character', () => {
+    it('puts a shiftLabel only where the HARDWARE has a second legend', () => {
+      /*
+        WAS "only on a typed character" UNTIL 2026-10-22, and the sharp reference photograph is why
+        it changed: several FUNCTION caps carry front-printed shifted legends -- `Reset`/`DvCntl`,
+        `Print`/`Ident`, and double-arrows on the cursor keys for start/end of line. None of those
+        shifted functions is implemented, so the legend documents that it EXISTS and we do not have
+        it, rather than being silently absent.
+
+        WHAT THE RULE STILL FORBIDS is a shiftLabel on a cap that has neither a typed character nor
+        a named second function -- i.e. one invented to fill space. Every entry here is either a
+        `type` action or a cap whose `name` says what the shifted legend means.
+      */
       for (const cap of KEYBOARD_3279.filter((k) => k.shiftLabel !== undefined)) {
-        expect(cap.action?.kind, `${cap.name} has a shiftLabel but is not a typed character`)
-          .toBe('type');
+        const typed = cap.action?.kind === 'type';
+        const documented = /shifted:/.test(cap.name);
+        expect(typed || documented, `${cap.name}: a shiftLabel needs a typed action or a `
+          + 'name saying what the shifted legend is').toBe(true);
       }
     });
 
@@ -136,40 +149,51 @@ describe('KEYBOARD_3279', () => {
       expect(sel?.action).toBeUndefined();
     });
 
-    it('draws the PC-only keys INERT rather than omitting them', () => {
+    it('no longer claims the left bar is full of PC keys, because it is not', () => {
       /*
-        LOOKED UP BY `name`, NOT BY LABEL -- changed 2026-10-22 and the reason is the point.
+        I HAD `Esc`, `Print Screen`, `Scroll Lock` AND `Pause` ON THE LEFT BAR AND ALL FOUR WERE
+        WRONG -- read off a blurred photograph and believed because they looked like a plausible
+        PC-ish column. The sharp reference shows the bar is entirely 3270: Attn/Clear,
+        Cursr Sel, Ex Sel/Erase EOF, Print/Test.
 
-        It matched on `label`, which broke the moment the labels gained newlines and abbreviations
-        so they would FIT their caps (`Print\nScrn`, `Scrl\nLock`). A label is presentation and
-        changes with the layout; a `name` is the stable identifier, which is why the DOM carries
-        `data-key` from the name and the harnesses query on it.
+        **TWO OF THEM TURNED OUT TO BE FUNCTIONS WE ALREADY IMPLEMENT**, so the correction gained
+        working keys rather than just fixing labels: `Erase EOF` is `eraseEOF`, which the compact
+        keypad has carried as `ErEOF` all along.
+
+        THIS TEST NOW GUARDS THE CORRECTION rather than the old mistake: those four names must NOT
+        come back, because the next blurry photograph would make them plausible again.
       */
-      const names = [
-        'Escape (not a 3270 key)',
-        'Print Screen (not a 3270 key)',
-        'Scroll Lock (not a 3270 key)',
-        'Pause (not a 3270 key)',
-        'Alt, left (not a 3270 key)',
-        'Alt, right (not a 3270 key)',
-      ];
-      for (const name of names) {
-        const cap = KEYBOARD_3279.find((k) => k.name === name);
-        expect(cap, `${name} must be drawn`).toBeDefined();
-        expect(cap?.action, `${name} must be inert`).toBeUndefined();
+      const names = KEYBOARD_3279.map((k) => k.name).join(' | ');
+      for (const gone of ['Escape', 'Print Screen', 'Scroll Lock', 'Pause']) {
+        expect(names, `${gone} was a misreading of the left bar and must not return`)
+          .not.toContain(gone);
       }
+      // And the two real keys the correction found:
+      expect(KEYBOARD_3279.find((k) => k.name === 'Erase EOF')?.action)
+        .toEqual({ kind: 'eraseEOF' });
+      expect(KEYBOARD_3279.find((k) => k.name?.startsWith('Ex Sel'))?.action)
+        .toBeUndefined();
     });
 
     it('names every inert cap with a REASON, so a tooltip can explain the grey', () => {
       // An inert cap the operator cannot interrogate is just a broken button. Every one says
       // either why it will never work, or that its legend could not be read.
+      /*
+        BLANK CAPS ARE EXCLUDED, and the distinction is the one this file has kept since the
+        bottom-left caps were confirmed empty: a BLANK cap is inert because the keyboard assigns it
+        nothing, and its name says `blank` plus where it is. An UNIMPLEMENTED cap is inert because
+        WE do not have the function, and that is what needs a reason a tooltip can show. Lumping
+        them together would demand an explanation for a key that has nothing to explain.
+      */
       const inert = KEYBOARD_3279.filter(
-        (k) => k.action === undefined && !k.name.startsWith(SHIFT_NAME) && k.name !== 'blank',
+        (k) => k.action === undefined
+          && !k.name.startsWith(SHIFT_NAME)
+          && !k.name.startsWith('blank'),
       );
       expect(inert.length, 'there should be several inert caps').toBeGreaterThan(3);
       for (const cap of inert) {
         expect(
-          /not a 3270 key|not implemented|unread/.test(cap.name),
+          /not a 3270 key|not implemented|unidentified|ambiguous/.test(cap.name),
           `${JSON.stringify(cap.name)} does not say WHY it is inert`,
         ).toBe(true);
       }
@@ -193,7 +217,14 @@ describe('KEYBOARD_3279', () => {
       */
       const xfer = KEYBOARD_3279.filter((k) => k.action?.kind === 'transferForm');
       expect(xfer, 'two Xfer caps would leave the operator guessing').toHaveLength(1);
-      expect(xfer[0]?.region).toBe('cursor');
+      /*
+        BACK ON THE LEFT SPECIAL BAR, 2026-10-22. It had moved to the cursor cluster on the
+        reasoning that the cap there had no unshifted function -- and the sharp reference then
+        IDENTIFIED that cap as delete-to-end-of-line, a real key. So the move was made on a
+        premise that turned out false, and `Xfer` returns to a cap this file has confirmed BLANK
+        under maximum zoom: a blank cap cannot stop being blank, which an unidentified one can.
+      */
+      expect(xfer[0]?.region).toBe('special-left');
     });
 
     it('has TWO Shift caps, both named so one state drives both, and NEITHER with an action', () => {
@@ -278,13 +309,18 @@ describe('KEYBOARD_3279', () => {
         could. So the names must not be conflated, and `unread` must never be used for a cap that
         is simply empty.
       */
-      const blanks = KEYBOARD_3279.filter((k) => k.name === 'blank');
+      // MATCHED ON A PREFIX since 2026-10-22: the blanks now carry their POSITION in the name
+      // (`blank, right of Cursor Select`) so a failure says which cap, and one of them carries a
+      // shifted `Test` legend. An exact match would silently find none.
+      const blanks = KEYBOARD_3279.filter((k) => k.name.startsWith('blank'));
       expect(blanks.length, 'the 5271 has unassigned caps, and they are drawn')
         .toBeGreaterThanOrEqual(2);
       for (const cap of blanks) {
         expect(cap.label, 'a blank cap carries no legend').toBe('');
         expect(cap.action, 'a blank cap does nothing').toBeUndefined();
         expect(cap.name, 'a blank cap is not an UNREAD one').not.toMatch(/unread/);
+        expect(cap.name, 'a blank cap says WHERE it is, so two are distinguishable')
+          .toMatch(/blank/);
       }
     });
 
@@ -458,7 +494,9 @@ describe('KEYBOARD_3279', () => {
 
     it('fits the THREE-LETTER names the user named, with room to spare', () => {
       // PA1, PF3 and Esc are the common cases, and they are the ones that must never be marginal.
-      for (const name of ['PA3', 'PF3', 'Escape (not a 3270 key)']) {
+      // `Escape` was removed when the left bar was corrected -- it never existed on this
+      // keyboard. `Clear` takes its place as a short-label cap on a standard width.
+      for (const name of ['PA3', 'PF3', 'Clear']) {
         const cap = KEYBOARD_3279.find((k) => k.name === name);
         expect(cap, `${name} must exist`).toBeDefined();
         expect(cap!.label.length, `${name} is a short label on a standard cap`)

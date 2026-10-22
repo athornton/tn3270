@@ -378,7 +378,7 @@ const TRANSFER_CHECKS = [
   {
     name: 'keyboard',
     kind: 'live',
-    what: 'Ctrl-B opens the full keyboard, its regions sit SIDE BY SIDE when wide and REFLOW when narrow',
+    what: 'Ctrl-B opens the keyboard: regions side by side, reflow when narrow, main block a RECTANGLE, no cap clipped',
     mutant: "ui.css  .keyboard-band { display: block } -- the stacking defect the user's screenshots found",
   },
 ];
@@ -1298,6 +1298,48 @@ async function runTransferPhase(url) {
         */
         && xPeriod === xThree && xEnter === xMinus;
 
+      /*
+        THE MAIN BLOCK MUST BE A RECTANGLE, which is what the user asked for and what no unit test
+        can confirm: the table's arithmetic says every row is 15 units, but whether the RENDERED
+        rows share a right edge depends on the gap absorption, the row-spanning Return and the
+        stagger all being right together.
+
+        MEASURED AS THE SPREAD OF ROW RIGHT EDGES. A row's right edge is its last cap's right edge
+        -- except for the home row, whose right edge comes from the TALL Return cap positioned
+        absolutely against the row above. So the tall cap is counted for every row it covers, which
+        is exactly how the table models it.
+      */
+      const rowEdges = await cdp.eval(`(() => {
+        const rows = [...document.querySelectorAll('#keyboard-main .keyboard-row')];
+        const tall = document.querySelector('#keyboard-main button[style*="--kb-h"]');
+        const tallRight = tall === null ? null : tall.getBoundingClientRect().right;
+        return JSON.stringify(rows.map((r, i) => {
+          const caps = [...r.querySelectorAll('button')];
+          let right = Math.max(...caps.map((c) => c.getBoundingClientRect().right));
+          // The row BELOW a tall cap has no cap of its own at that x, so it inherits that edge.
+          if (tallRight !== null && tallRight > right) right = tallRight;
+          return Math.round(right);
+        }));
+      })()`);
+      const edges = JSON.parse(rowEdges);
+      const rectangle = edges.length === 5
+        && Math.max(...edges) - Math.min(...edges) <= 2;
+
+      /*
+        AND `Z` MUST CENTRE BETWEEN `A` AND `S` -- the user's own test for the stagger, and the
+        reason the left Shift is 2.25 units rather than 1.25.
+      */
+      const centreOf = (key) => cdp.eval(
+        `(() => { const el = document.querySelector(`
+        + `'#keyboard-overlay button[data-key="' + ${JSON.stringify(key)} + '"]');`
+        + ' if (el === null) return null; const r = el.getBoundingClientRect();'
+        + ' return Math.round(r.x + r.width / 2); })()');
+      const cA = await centreOf('A');
+      const cS = await centreOf('S');
+      const cZ = await centreOf('Z');
+      const staggered = cA !== null && cS !== null && cZ !== null
+        && Math.abs(cZ - (cA + cS) / 2) <= 2;
+
       const pfBox = await boxOf('keyboard-pf');
       const barBox = await boxOf('keyboard-special-left');
       const upBox = await cdp.eval(
@@ -1324,7 +1366,7 @@ async function runTransferPhase(url) {
         // THE PF STRIP IS CENTRED OVER THE MAIN BLOCK, the user's other request. Measured on
         // CENTRES rather than edges, which is what "centred" means, and within 20px because the
         // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
-        && pfCentred && numpadAligned;
+        && pfCentred && numpadAligned && rectangle && staggered;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1338,7 +1380,8 @@ async function runTransferPhase(url) {
           + `(centres ${Math.round((pfBox?.x ?? 0) + (pfBox?.w ?? 0) / 2)} vs `
           + `${Math.round(wideMain.x + wideMain.w / 2)}); the numpad lines up `
           + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
-          + 'NO cap is clipped');
+          + `the main block is a RECTANGLE (row right edges ${edges.join(', ')}) with Z centred `
+          + `between A and S (${cZ} vs ${(cA + cS) / 2}); NO cap is clipped`);
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1349,6 +1392,8 @@ async function runTransferPhase(url) {
           + `up: ${JSON.stringify(upBox)}, down: ${JSON.stringify(downBox)} (x must match), `
           + `pf: ${JSON.stringify(pfBox)} (centre must match main's), `
           + `numpad x: 3=${xThree} .=${xPeriod} -=${xMinus} Ent=${xEnter} (columns must align), `
+          + `main row right edges: ${edges.join(', ')} (must be equal), `
+          + `A=${cA} S=${cS} Z=${cZ} (Z must centre between A and S), `
           + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}. ${metrics}`);
       }
     }

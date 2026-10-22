@@ -129,10 +129,17 @@ describe('createKeyboardUi', () => {
       createKeyboardUi(deps);
       const rows = deps.els.filter((e) => e.attrs['class'] === 'keyboard-row');
       const offset = rows.filter((r) => r.attrs['style'] !== undefined);
-      expect(offset, 'exactly one row has an offset today: the up arrow').toHaveLength(1);
-      expect(offset[0]?.attrs['style']).toContain('padding-left');
-      // ONE KEY UNIT, which is what puts `up` above `down`.
-      expect(offset[0]?.attrs['style']).toContain('1 *');
+      /*
+        TWO ROWS ARE OFFSET SINCE THE CURSOR CLUSTER BECAME A DIAMOND, 2026-10-22: `up` on its own
+        row and `down` on its own, each one unit in so they centre over the middle column. The
+        `left`/centre/`right` row starts at 0 and carries no padding.
+      */
+      expect(offset, 'the up and down arrow rows are inset by one unit').toHaveLength(2);
+      for (const r of offset) {
+        expect(r.attrs['style']).toContain('padding-left');
+        // ONE KEY UNIT, which is what centres them over the middle of the diamond.
+        expect(r.attrs['style']).toContain('1 *');
+      }
       // And the rows that start at 0 must NOT carry a padding, or every row would shift right.
       expect(rows.length - offset.length, 'every other row starts flush left')
         .toBeGreaterThan(10);
@@ -154,16 +161,16 @@ describe('createKeyboardUi', () => {
     it('MARKS AN INERT CAP DISABLED', () => {
       const deps = fakeDeps();
       createKeyboardUi(deps);
-      expect(button(deps, 'Escape (not a 3270 key)').attrs['disabled']).toBeDefined();
+      expect(button(deps, 'Alt, left (not a 3270 key)').attrs['disabled']).toBeDefined();
     });
 
     it('GIVES AN INERT CAP NO CLICK HANDLER AT ALL, so the no-op cannot be got wrong', () => {
       const deps = fakeDeps();
       createKeyboardUi(deps);
-      const esc = button(deps, 'Escape (not a 3270 key)');
+      const esc = button(deps, 'Alt, left (not a 3270 key)');
       expect(esc.clicks, 'a handler would be a second place for the no-op to be wrong')
         .toHaveLength(0);
-      click(deps, 'Escape (not a 3270 key)');
+      click(deps, 'Alt, left (not a 3270 key)');
       expect(deps.sent).toEqual([]);
     });
 
@@ -220,7 +227,7 @@ describe('createKeyboardUi', () => {
       const deps = fakeDeps();
       const ui = createKeyboardUi(deps);
       click(deps, SHIFT_L);
-      click(deps, 'Escape (not a 3270 key)');
+      click(deps, 'Alt, left (not a 3270 key)');
       expect(ui.shiftArmed()).toBe(true);
     });
 
@@ -295,10 +302,10 @@ describe('createKeyboardUi', () => {
     it('leaves an INERT cap and the Shift caps themselves alone', () => {
       const deps = fakeDeps();
       createKeyboardUi(deps);
-      const esc = button(deps, 'Escape (not a 3270 key)');
+      const esc = button(deps, 'Alt, left (not a 3270 key)');
       const shift = button(deps, SHIFT_L);
       click(deps, SHIFT_L);
-      expect(esc.text).toBe('Esc');
+      expect(esc.text).toBe('Alt');
       // `Shft`, the abbreviation that fits a 1.25-unit cap -- the point of the assertion is that
       // the cap keeps its OWN label rather than being re-lettered, not what that label spells.
       expect(shift.text, 'the Shift cap keeps its own label').toBe('Shft');
