@@ -81,9 +81,9 @@ text including passwords. Correct, and it means a live session cannot be action-
    programmatic focus after a *click* does **not** match it and the ring did not paint. Caught by
    the harness on the first run. `#transfer-save` now also has a plain `:focus` rule, narrowly
    scoped because clicking that button saves and then disables it.
-   **STILL UNWITNESSED: whether the ring is LEGIBLE.** `getComputedStyle` proves a `2px solid`
-   outline resolves on the focused button, which is not the same as a human seeing it. The user has
-   not eyeballed it in Firefox yet.
+   **THE RING IS LEGIBLE, witnessed by the user in Firefox 158.0.1 on macOS, 2026-10-22** — the one
+   thing no harness here could judge, since nothing reads computed styles for legibility. Still
+   unexercised: Chromium (where `Highlight` resolves differently) and a dark system theme.
 4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
    **The import map needs one specifier per shared module**, because one specifier cannot name two
    files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.

@@ -183,10 +183,13 @@ and the Recording log says what happened when they were run.
   about a stylesheet that forgot to style it. **Mutation-proved with three mutants** — dropping the
   focus call, dropping the hint, and removing the outline declaration each turn the phase red (6/7).
 
-  **THE RING'S LEGIBILITY IS UNWITNESSED, and that is the honest state.** `outlineStyle: solid` is
-  not "a human can see it", and no harness here can judge whether a 2px `Highlight` outline reads
-  clearly against the overlay's `Canvas` background. **The user has not yet eyeballed it in
-  Firefox**; this entry will say so until they do.
+  **THE RING IS LEGIBLE — WITNESSED BY THE USER IN FIREFOX 158.0.1 ON macOS, 2026-10-22, over the
+  proxied gateway.** They ran a transfer through the merged code and reported the status text as
+  described and the ring readable. That closes the one claim this entry could not make from a
+  harness: `outlineStyle: solid` is not "a human can see it", and nothing here reads computed
+  styles for legibility. **A 2px `Highlight` outline against the overlay's `Canvas` background is
+  now a measured-good combination on that browser** — untested on Chromium, where `Highlight`
+  resolves differently, and untested in a dark system theme.
 
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:
