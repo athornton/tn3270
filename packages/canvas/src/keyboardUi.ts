@@ -132,6 +132,34 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
     regions.set(cap.region, rows);
   }
 
+  /*
+    TWO BANDS, BECAUSE THE HARDWARE HAS TWO -- ADDED 2026-10-22 AFTER A MEASURED DEFECT.
+
+    The regions were appended straight to the root as plain `div`s, so all five STACKED
+    VERTICALLY: the user's screenshots show a tall column their very wide monitor still could not
+    display in one go. There was no horizontal layout at all, so the stacking was not a
+    narrow-screen fallback -- it was the only thing the markup could do, at every width.
+
+    The PF strip runs across the TOP on its own; the left special bar, the main block, the cursor
+    cluster and the numeric pad sit in a ROW beneath it. `ui.css` lays each band out with flex and
+    explains the arithmetic (24 key units for the lower band, 12 for the PF strip).
+
+    THE BAND A REGION BELONGS TO IS DECIDED HERE, FROM THE REGION NAME, rather than in the CSS:
+    a stylesheet cannot group siblings, and a `:first-child` rule keyed on document order would
+    silently reorganise the keyboard the day a region was added to the table.
+  */
+  const bands = deps.create('div');
+  deps.setAttr(bands, 'class', 'keyboard-bands');
+  const topBand = deps.create('div');
+  deps.setAttr(topBand, 'class', 'keyboard-band');
+  deps.setAttr(topBand, 'id', 'keyboard-band-pf');
+  const lowerBand = deps.create('div');
+  deps.setAttr(lowerBand, 'class', 'keyboard-band');
+  deps.setAttr(lowerBand, 'id', 'keyboard-band-main');
+  deps.append(bands, topBand);
+  deps.append(bands, lowerBand);
+  deps.append(deps.root, bands);
+
   for (const [region, rows] of regions) {
     const section = deps.create('div');
     deps.setAttr(section, 'class', 'keyboard-region');
@@ -227,7 +255,8 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
       }
       deps.append(section, line);
     }
-    deps.append(deps.root, section);
+    // THE PF STRIP GOES IN THE TOP BAND, everything else in the lower one.
+    deps.append(region === 'pf' ? topBand : lowerBand, section);
   }
 
   return {

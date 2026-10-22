@@ -91,6 +91,40 @@ describe('createKeyboardUi', () => {
     expect(button(deps, 'Space').text).toBe('');
   });
 
+  describe('the two bands, which stop the regions stacking into a column', () => {
+    it('puts the PF strip in its OWN band and the other four regions in a second', () => {
+      /*
+        MEASURED DEFECT, 2026-10-22: the regions were appended straight to the root as plain
+        `div`s, so all five STACKED VERTICALLY -- a column the user's very wide monitor still could
+        not show at once. There was no horizontal layout at all, so this was not a narrow-screen
+        fallback; it was the only thing the markup could do, at any width.
+
+        THE ASSERTION IS ON THE STRUCTURE, NOT ON PIXELS. A unit test cannot measure a layout, but
+        it can prove the two containers exist and that each region went to the right one -- which
+        is what the CSS needs in order to lay them out side by side.
+      */
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const bands = deps.els.filter((e) => e.attrs['class'] === 'keyboard-band');
+      expect(bands, 'exactly two bands: the PF strip, and everything else').toHaveLength(2);
+      const ids = deps.els
+        .filter((e) => e.attrs['class'] === 'keyboard-band')
+        .map((e) => e.attrs['id']);
+      expect(ids).toEqual(['keyboard-band-pf', 'keyboard-band-main']);
+    });
+
+    it('creates a region container for every region in the table', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const regions = deps.els.filter((e) => e.attrs['class'] === 'keyboard-region');
+      expect(regions, 'pf, special-left, main, cursor, numpad').toHaveLength(5);
+      for (const r of regions) {
+        expect(r.attrs['id'], 'each region is identified for the CSS and for a harness')
+          .toMatch(/^keyboard-/);
+      }
+    });
+  });
+
   describe('inert caps', () => {
     it('MARKS AN INERT CAP DISABLED', () => {
       const deps = fakeDeps();

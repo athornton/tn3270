@@ -137,10 +137,26 @@ describe('KEYBOARD_3279', () => {
     });
 
     it('draws the PC-only keys INERT rather than omitting them', () => {
-      for (const label of ['Esc', 'Print Screen', 'Scroll Lock', 'Pause', 'Alt']) {
-        const cap = KEYBOARD_3279.find((k) => k.label === label);
-        expect(cap, `${label} must be drawn`).toBeDefined();
-        expect(cap?.action, `${label} must be inert`).toBeUndefined();
+      /*
+        LOOKED UP BY `name`, NOT BY LABEL -- changed 2026-10-22 and the reason is the point.
+
+        It matched on `label`, which broke the moment the labels gained newlines and abbreviations
+        so they would FIT their caps (`Print\nScrn`, `Scrl\nLock`). A label is presentation and
+        changes with the layout; a `name` is the stable identifier, which is why the DOM carries
+        `data-key` from the name and the harnesses query on it.
+      */
+      const names = [
+        'Escape (not a 3270 key)',
+        'Print Screen (not a 3270 key)',
+        'Scroll Lock (not a 3270 key)',
+        'Pause (not a 3270 key)',
+        'Alt, left (not a 3270 key)',
+        'Alt, right (not a 3270 key)',
+      ];
+      for (const name of names) {
+        const cap = KEYBOARD_3279.find((k) => k.name === name);
+        expect(cap, `${name} must be drawn`).toBeDefined();
+        expect(cap?.action, `${name} must be inert`).toBeUndefined();
       }
     });
 
@@ -333,6 +349,76 @@ describe('KEYBOARD_3279', () => {
           `${JSON.stringify(d)} is a NEW duplicated shifted glyph -- almost certainly a `
           + 'transcription error; see the header audit',
         ).toContain(d);
+      }
+    });
+  });
+
+  describe('the labels must FIT the caps the table asks for', () => {
+    it('keeps every label short enough for its own width, at the shipped font size', () => {
+      /*
+        THE USER'S REQUIREMENT, 2026-10-22: "the text size should be adjusted so that all of the
+        (very common) three-letter key names (PA1, PF3, etc) fit on the virtual key, so it should
+        be a bit smaller."
+
+        AND THE DEFECT BEHIND IT: at `font-size: 11px` with a 30px pitch, `PF13` rendered as `PF1`,
+        `PF24` as `PF2` and `Attn` as `Attr` -- silently, because `ui.css` sets `overflow: hidden`
+        on a cap so it cannot grow and wreck the layout. The PF strip was useless, since PF13-24
+        became indistinguishable from PF1-12.
+
+        ## WHY THIS LIVES IN A UNIT TEST AT ALL, AND WHAT IT CANNOT DO
+
+        No test here can measure rendered text: there is no DOM, no font and no layout engine. What
+        it CAN do is check the ARITHMETIC the CSS commits to, so a table entry that cannot possibly
+        fit fails before anyone renders it.
+
+        The model, kept deliberately crude and conservative: a cap is `pitch * width` wide less 4px
+        of padding, and a character of system-ui at 9px averages about 5px -- rounded UP from the
+        ~0.55em metric, because capitals and digits are wider than the average and `PF13` is all
+        capitals and digits.
+
+        **IF `ui.css` CHANGES THE PITCH OR THE FONT, CHANGE THESE TWO CONSTANTS TO MATCH.** They are
+        a copy of a decision made there, which is a real duplication -- accepted because the
+        alternative is parsing CSS from a unit test, and because a wrong copy fails LOUDLY here
+        rather than silently clipping in a browser.
+      */
+      const PITCH_PX = 28;
+      const FONT_PX = 8;
+      const PAD_PX = 4;
+      const PER_CHAR_PX = FONT_PX * 0.56;
+
+      /*
+        PER LINE, NOT PER LABEL, and getting that wrong first is what found the real defect.
+
+        The original version of this test measured the WHOLE label and flagged nine caps -- and
+        the fix was not a smaller font. `Cursr Sel`, `Print Screen`, `Dup / PA1` and the rest are
+        MULTI-WORD legends on SINGLE-UNIT caps, and the hardware prints them STACKED. Asking for
+        one line was the error: at 22px of usable width no font size makes `Print Screen` fit on
+        one line and stay readable. The labels now carry explicit newlines and `ui.css` sets
+        `white-space: pre-line`, so this measures the LONGEST LINE.
+      */
+      const longestLine = (text: string): number =>
+        Math.max(...text.split('\n').map((line) => line.length));
+
+      const tooWide: string[] = [];
+      for (const cap of KEYBOARD_3279) {
+        // The widest thing a cap can be asked to draw -- the shifted legend can be longer.
+        const drawn = Math.max(longestLine(cap.label), longestLine(cap.shiftLabel ?? ''));
+        const usable = PITCH_PX * cap.width - PAD_PX;
+        if (drawn * PER_CHAR_PX > usable) {
+          tooWide.push(`${cap.name}: ${drawn} chars on its longest line needs `
+            + `~${Math.ceil(drawn * PER_CHAR_PX)}px, cap is ${usable}px`);
+        }
+      }
+      expect(tooWide, `labels that cannot fit:\n  ${tooWide.join('\n  ')}`).toEqual([]);
+    });
+
+    it('fits the THREE-LETTER names the user named, with room to spare', () => {
+      // PA1, PF3 and Esc are the common cases, and they are the ones that must never be marginal.
+      for (const name of ['PA3', 'PF3', 'Escape (not a 3270 key)']) {
+        const cap = KEYBOARD_3279.find((k) => k.name === name);
+        expect(cap, `${name} must exist`).toBeDefined();
+        expect(cap!.label.length, `${name} is a short label on a standard cap`)
+          .toBeLessThanOrEqual(4);
       }
     });
   });

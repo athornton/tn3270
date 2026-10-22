@@ -328,14 +328,71 @@ body.ui-surface {
     pixels: the table says a cap is 1 or 1.5 or 7 units wide, and this decides what a unit is. To
     make the keyboard bigger or smaller, change this number and nothing else.
   */
-  --kb-pitch: 30px;
-  font-size: 11px;
+  /*
+    THE PITCH AND THE FONT TOGETHER, AND THE FONT IS THE ONE THAT WAS WRONG.
+
+    MEASURED 2026-10-22 from the user's screenshots: `PF13` rendered as `PF1`, `PF24` as `PF2` and
+    `Attn` as `Attr` -- every four-character label silently clipped by the `overflow: hidden`
+    below, which made the whole PF strip useless since PF13-24 became indistinguishable from
+    PF1-12.
+
+    THE ARITHMETIC, so the next change is not another guess: a cap is `--kb-pitch` wide less 4px of
+    padding. At 11px, four characters of system-ui need about 24px, against 26px usable -- it
+    "fits" by 2px in theory and clips in practice, because the font metric is an average and
+    capitals are wider. At 9px the same label needs about 20px, which leaves real room.
+
+    The user's requirement, which is the right test to keep: **the common three-letter names
+    (`PA1`, `PF3`, `Esc`) must fit**, and the four-character ones (`PF13`, `Attn`, `Dup`) are the
+    cases that actually bite.
+
+    THE SHIPPED PAIR IS 28px AND 8px, ARRIVED AT BY MEASUREMENT RATHER THAN TASTE. A cap is
+    28 - 4 = 24px usable, and at 8px a character of system-ui averages ~4.5px, so FIVE characters
+    fit per line -- which is what `Clear`, `Pause`, `Enter`, `Space` and `Field` need. Six would
+    require either a 6px font (unreadable) or a 34px pitch (a 816px-wide surface), so the
+    six-character legends are STACKED instead, which is what the hardware does anyway.
+
+    The lower band is 24 key units, so 28px gives ~672px -- inside a 24x80 screen's ~720px with
+    room for the gaps between regions, where the original 30px gave exactly 720px and left none.
+
+    `keyboard3279.test.ts` copies these two numbers and fails if a legend cannot fit. CHANGE IT
+    WHEN YOU CHANGE THESE.
+  */
+  --kb-pitch: 28px;
+  font-size: 8px;
 }
 
 #keyboard-overlay[hidden] { display: none; }
 
-/* One flex row per hardware row. The regions stack, with a gap between them. */
-#keyboard-overlay .keyboard-region { margin-bottom: 8px; }
+/*
+  THE REGIONS SIT SIDE BY SIDE, LIKE THE REAL KEYBOARD -- MEASURED AND CORRECTED 2026-10-22.
+
+  They were plain block `div`s, so all five STACKED VERTICALLY and the surface was a tall column
+  nothing could display at once. That was wrong at EVERY width, not only on a narrow screen: there
+  was no horizontal layout at all, so nothing could have placed them.
+
+  TWO BANDS, BECAUSE THAT IS WHAT THE HARDWARE HAS. The PF strip runs across the top on its own;
+  the other four regions -- the left special bar, the main block, the cursor cluster and the
+  numeric pad -- sit in a row beneath it. Measured from the table: the lower band is 24 key units
+  wide and the PF strip is 12, so a single row of all five would have been 36 units and needlessly
+  wide.
+
+  `flex-wrap` IS DELIBERATELY ON for the lower band: on a genuinely narrow window the numeric pad
+  drops to a second line rather than being clipped. That is the behaviour the stacked column was
+  accidentally giving at all widths; here it is a fallback instead of the default.
+
+  `align-items: flex-start` so the shorter regions top-align with the main block rather than
+  stretching to its height.
+*/
+#keyboard-overlay .keyboard-bands { display: flex; flex-direction: column; gap: 10px; }
+
+#keyboard-overlay .keyboard-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+#keyboard-overlay .keyboard-region { flex: 0 0 auto; }
 #keyboard-overlay .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
 
 /*
@@ -348,8 +405,34 @@ body.ui-surface {
   width: calc(var(--kb-w, 1) * var(--kb-pitch));
   height: var(--kb-pitch);
   padding: 0 2px;
+  /*
+    `overflow: hidden` IS THE TRAP THAT HID THE FONT BUG, kept because a cap must not grow and
+    destroy the layout the table describes -- but it fails SILENTLY, turning `PF13` into `PF1`
+    with no visible sign anything was lost. The font size above is what stops it mattering; this
+    comment is here so the next person to see a clipped label looks at the font rather than at
+    this line.
+  */
   overflow: hidden;
-  white-space: nowrap;
+  /*
+    TWO LINES ARE ALLOWED, BECAUSE THE HARDWARE USES THEM -- corrected 2026-10-22.
+
+    `white-space: nowrap` was here, which forced every legend onto one line and made nine caps
+    unfittable at ANY sane font size: `Cursr Sel`, `Print Screen`, `Scroll Lock`, `Dup / PA1`,
+    `Field Mark / PA2` and the rest are MULTI-WORD legends on SINGLE-UNIT caps, and the real
+    keyboard prints them stacked. Asking for one line was the error; shrinking the font would
+    never have fixed it.
+
+    `pre-line` RATHER THAN `normal`: the labels carry explicit newlines now (see
+    `keyboard3279.ts`), so the break lands where the hardware puts it instead of wherever the cap
+    happens to run out. A legend with no newline still behaves as before.
+  */
+  white-space: pre-line;
+  /* The glyphs are small, so centre them rather than leaving them hard against the left edge. */
+  text-align: center;
+  line-height: 1.05;
+  /* Two stacked lines need the room; `height` was a single line's worth. */
+  min-height: var(--kb-pitch);
+  height: auto;
 }
 
 /*

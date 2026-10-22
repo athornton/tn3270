@@ -270,12 +270,12 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   */
   key('Attn', { kind: 'attn' }, 'special-left', 0, 0, 1, 'Attention'),
   key('Clear', { kind: 'clear' }, 'special-left', 0, 1, 1, 'Clear'),
-  dead('Cursr Sel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
+  dead('Cursr\nSel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
   // CONFIRMED BLANK, not unreadable -- see the note on the bottom pair below.
   dead('', 'special-left', 1, 1, 1, 'blank'),
   dead('Esc', 'special-left', 2, 0, 1, 'Escape (not a 3270 key)'),
-  dead('Print Screen', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
-  dead('Scroll Lock', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
+  dead('Print\nScrn', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
+  dead('Scrl\nLock', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
   dead('Pause', 'special-left', 3, 1, 1, 'Pause (not a 3270 key)'),
   /*
     THE BOTTOM PAIR: `Xfer` ON ONE BLANK CAP, THE OTHER LEFT BLANK.
@@ -452,8 +452,8 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     arrow, a house-like glyph and a third mark. They are INERT with descriptive names, per this
     file's header rule, and are the first thing to fix if a better photograph turns up.
   */
-  key('Dup / PA1', { kind: 'dup' }, 'cursor', 0, 0, 1, 'Dup'),
-  key('Field Mark / PA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
+  key('Dup\nPA1', { kind: 'dup' }, 'cursor', 0, 0, 1, 'Dup'),
+  key('Field\nMark\nPA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
   /*
     `PA3` -- WAS RECORDED AS BLANK, CORRECTED 2026-10-22 from the IBM 3270 PC photograph, whose
     layout matches this keyboard's exactly. The cap reads `PA3` clearly there, and it completes
