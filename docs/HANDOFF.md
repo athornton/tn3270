@@ -4,32 +4,107 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-22 (late): FINISH THE FULL KEYBOARD
+## START HERE — NEXT ACTION, 2026-10-22 (end of day): THE KEYBOARD IS BUILT AND LIVE
 
-**`main` IS GREEN AND PUSHED. The full 122-key 3279 keyboard is HALF BUILT, deliberately stopped
-at a spend cap rather than mid-thought.** Spec
+**`main` IS GREEN AND PUSHED at `eb08557`. 2552 tests in 107 files.** The full 122-key 3279
+keyboard works in the **web gateway** on `Ctrl-B`; `Ctrl-K` still gives the compact keypad, and
+opening either closes the other. Spec
 `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`, plan
-`docs/superpowers/plans/2026-10-22-full-keyboard.md` — **the plan's own header now carries the
-execution state, what bisection proved, what is already ruled out, and three things to try next.
-Read that before anything else.**
+`docs/superpowers/plans/2026-10-22-full-keyboard.md`.
 
-**Tasks 1-4 of 7 are done:** `KEYBOARD_3279` (117 caps, 23 tests), the dead `row`/`col` deletion,
-the shared `keyboardUi.ts` with the **one-shot Shift** (18 tests, 3 mutants), and `toggleKeyboard`
-on **`Ctrl-B`** with all four gateway guards in one commit. Task 5 is part-done: the overlay, the
-CSS and the serving are in; **`bridge.ts`'s wiring is PARKED at
-`docs/superpowers/wip/bridge.ts.keyboard-wiring.txt`** because it breaks the browser. Tasks 6
-(the GUI window) and 7 (harness, gate, docs) are unstarted.
+**TASKS 1-5 OF 7 ARE DONE. TWO REMAIN:**
+- **Task 6 — the Electron GUI keyboard window.** Not started. The web surface is the only one.
+- **Task 7 — the GUI harness phase and the docs.** Not started. (The WEB harness phase exists and
+  is extensive — see below.)
 
-**THE ONE THING TO KNOW: all 2536 unit tests pass with the broken wiring in place.** The failure
-is visible only to `browser-clicks.mjs`, as `bridge.js did not load` — which is what a module that
-fails to EVALUATE looks like from outside. Bisection proved `bridge.ts` is the only remaining
-problem.
+**AND THE USER HAS ONE MORE KEYBOARD REQUEST COMING**, stated at the end of the session. Ask before
+starting Task 6.
 
-**Everything from earlier in the day is merged, live-verified and done** — the web transfer UI, the
-save affordance, the direction labels. The user confirmed the focus ring is legible in Firefox. The
-keypad opacity question is still open and is now entangled with this work: a 122-key keyboard
-**cannot** be corner-anchored, so it is bottom-docked, and the compact keypad stays on `Ctrl-K`
-for the corner-anchoring the user was leaning toward.
+### THE KEYBOARD'S STATE, SO NOBODY RE-DERIVES IT
+
+**118 caps, every one read from a photograph, confirmed blank, or explicitly unidentified.** Zero
+guesses. Three reference images settled it, and the table's header carries the full audit:
+the user's own 5271 (`~/s-l960.png`), an IBM 4978, an IBM 3270 PC, and finally a sharp 5271
+(`~/DSC08836-scaled.jpeg`) that corrected four caps I had misread as PC keys.
+
+**THE LAYOUT IS A TRUE RECTANGLE** — every main row exactly 15 key units, verified in a real
+browser as five equal row right edges. `Z` centres between `A` and `S`, which is the constraint
+that generates the stagger. The Return key spans two rows and is drawn L-shaped.
+
+**ONE-SHOT SHIFT WORKS AND RE-LETTERS THE CAPS.** Click Shift and every dual-glyph cap shows its
+shifted legend; the arm survives a PF key (3270 has no shifted PF3) and clears on use, on a second
+press, or when the surface closes.
+
+### WHAT A HARNESS NOW PROVES, AND WHY IT MATTERS HERE
+
+`browser-clicks.mjs`'s `keyboard` phase resizes a real browser and measures **ten** properties:
+side-by-side layout, narrow reflow, the special bar on the left, the arrow diamond, the centred PF
+strip, numpad column alignment, the main block's rectangle, the `Z` stagger, the Return's gap and
+L-tab, and **no cap clipped** (`scrollWidth > clientWidth`, which is the browser saying a label did
+not fit).
+
+**EVERY ONE OF THOSE EXISTS BECAUSE THE USER FOUND THE DEFECT ON A SCREENSHOT AND NO TEST COULD
+SEE IT.** vitest has no layout engine. If a keyboard change is made, run that phase.
+
+### FIVE VACUOUS ASSERTIONS WERE CAUGHT IN ONE DAY — READ THIS BEFORE WRITING A LAYOUT CHECK
+
+Each passed against the very defect it was written for, and each was found by MUTATING the thing
+it claimed to check:
+
+1. **A 2px tolerance** on numpad column alignment — and the defect was off by exactly 2px. Integer
+   grid positions either match or do not; the tolerance hid a whole class of error.
+2. **`elementFromPoint`** to prove the Return did not cover `{` — hit-testing HONOURS `clip-path`,
+   so notched and un-notched both reported the brace. It proved the clip worked by assuming it did.
+3. **Comparing glyph advance widths to `U+FFFD`** to detect a missing font glyph — an absent
+   codepoint measures 5.40px against U+FFFD's 9.23px, so the comparison matched nothing.
+4. **`document.fonts.check(font, text)`**, which looks like exactly the right API — it reports
+   whether the FAMILY is available, not per-character coverage, so it returns true for a glyph no
+   font has.
+5. **`w > 0`** for the same question — a near-blank fallback measures 2.3px, which is not zero. The
+   fix was a RATIO against a glyph known to be present.
+
+**THE RULE THAT CAME OUT OF IT:** assert the thing itself, not a proxy for it, and prove the
+assertion fails by breaking what it watches. Three of these were mine in a single afternoon.
+
+### TWO DESIGN RULES WORTH KEEPING
+
+- **A clip or margin that makes an overlap INVISIBLE is a lie; paint extending into space no other
+  key occupies is not.** The Return's L-tab is a `::before` for exactly this reason — a wider box
+  overlapped the `{` and the harness said so.
+- **A glyph has THREE properties and all matter:** what it looks like, what it already means
+  elsewhere, and whether the font has it. The Insert cap went through four candidates, each failing
+  a different one — including `U+21E7`, which is right-shaped and IS the Shift key, and `U+2041`,
+  which is literally "insert here" and does not render.
+
+### STILL OPEN, BEYOND TASKS 6-7
+
+- **HELD-SHIFT DETECTION.** Both front ends receive `shiftKey` on every key event, so it is
+  feasible in both — `canvas/src/keys.ts` already reads it for Tab→BackTab. **The asymmetry is
+  focus, not capability:** the GUI's keyboard will be a separate `BrowserWindow` and only gets key
+  events while IT is focused, so held-Shift would work when focused and silently not otherwise. And
+  if held and one-shot share one flag, releasing a physical Shift clears an arm set by clicking —
+  two states OR'd together avoids that.
+- **TWO CAPS REMAIN AMBIGUOUS** rather than unread: the arrow cluster's centre diagonal (Home has
+  its own cap, so it is something else) and `Ex Sel` (Erase Input on some units, a field-select on
+  others). Both inert, both named with the ambiguity.
+- **AN SVG FOR THREE APPROXIMATED GLYPHS** is the someday fix: no Unicode point draws an `a` under
+  a caret, an `a` with a diagonal strike, or that strike doubled.
+
+**THE KEYPAD OPACITY QUESTION IS STILL THE USER'S CALL**, and is now entangled with this work: a
+122-key keyboard CANNOT be corner-anchored, so it is bottom-docked, and the compact keypad stays on
+`Ctrl-K` for the corner-anchoring the user was leaning toward.
+
+**RUNNING THE GATEWAY FOR A LOOK:**
+
+```bash
+node packages/web/dist/main.js --listen 8017 \
+  --allow-origin https://usdf-rsp.slac.stanford.edu \
+  127.0.0.1:3270 -insecure -model 3278-2-E
+```
+
+`--listen` not `--port`; `-model 3278-2-E` is mandatory for VM/370; the user reaches it at
+`https://usdf-rsp.slac.stanford.edu/nb/user/athor/proxy/8017/` **with the trailing slash**. Start
+it with `nohup ... & disown` in its OWN shell call — a `pkill` in the same command kills it.
 
 ## SUPERSEDED — NEXT ACTION, 2026-10-22 (the web transfer UI is live-verified)
 
