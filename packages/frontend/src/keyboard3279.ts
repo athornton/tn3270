@@ -24,39 +24,45 @@ import type { Action } from './keymap.js';
  * carries `x` and `width` in units and the CSS multiplies by whatever pitch it picks. Pixels here
  * would freeze a font size into a data table.
  *
- * ## TEN CAPS ARE NOT TRUSTWORTHY, AND THEY ARE LISTED SO NOBODY HAS TO RE-DERIVE WHICH
+ * ## THE TRANSCRIPTION WAS AUDITED AND CORRECTED AGAINST A SECOND KEYBOARD
  *
- * **The user spotted the hole in this transcription on 2026-10-22: "the keyboard picture is clearly
- * missing the 0/) so maybe some of the other keys are also supposed to have caps that have been
- * lost."** They are right, and the audit below is the answer. A BETTER PHOTOGRAPH OR A REAL
- * KEYBOARD MANUAL IS THE FIX; until then these are stated as doubtful rather than quietly shipped.
+ * **The user spotted the hole on 2026-10-22: "the keyboard picture is clearly missing the 0/) so
+ * maybe some of the other keys are also supposed to have caps that have been lost."** They were
+ * right, and the audit it triggered found FIVE wrong pairs plus one physically blank cap. They
+ * then supplied a sharp photograph of an **IBM 4978** -- a different 122-key 3279 layout with the
+ * same typewriter character set -- which settled every one.
  *
- * **ONE CAP IS PHYSICALLY BLANK ON THE REFERENCE UNIT.** The `0` position in the number row shows
- * NO legend at all under maximum zoom, while its neighbours `_`/`-` and `+`/`=` are legible -- so
- * that keycap is missing or worn smooth. **`0`/`)` here was INFERRED from the `9`/`(` pattern, not
- * read.** Almost certainly right, and still an inference this file's own rule forbids.
+ * **WHAT WAS WRONG, because the pattern of error is the useful part:**
  *
- * **FOUR PAIRS ARE SUSPECT ON 3270 GROUNDS, not merely photographic ones**, because a glyph pair
- * appearing TWICE on one keyboard is a smell:
+ *  - **`6` carried a NOT SIGN; it is a CENT SIGN.** I read a blurred cap and then justified it
+ *    with EBCDIC reasoning about the logical-not operator. The reasoning was sound and still
+ *    produced the wrong glyph, because it explained a reading instead of testing one.
+ *  - **The cap right of `P` carried `cent`/`!`; it is `!`/`NOT SIGN`.** So both glyphs were real
+ *    and both were in the wrong places -- the most misleading kind of error, since each looked
+ *    defensible alone.
+ *  - **The home row's third cap carried `(`/`)`; it is `{`/`}`.** Flagged as suspect because it
+ *    duplicated `9`/`0`.
+ *  - **The bottom row carried `,`/`;` and `.`/`:`; they are `,`/`'` and `.`/`:`.** Flagged for
+ *    duplicating the home row's `;`/`:`.
+ *  - **`1` and `\` both claimed a solid `|`.** The backslash cap is a BROKEN bar (U+00A6), which
+ *    EBCDIC distinguishes.
+ *  - **`0`'s cap is genuinely BLANK on the first unit** -- no legend at all under maximum zoom,
+ *    while `_`/`-` beside it is legible, so it is missing or worn smooth. `)` was inferred from
+ *    the `9`/`(` pattern and the 4978 then confirmed it.
  *
- *  - `(`/`)` on the home row (row 2, x=12.75) duplicates the pair already on `9`/`0`. More likely a
- *    backtick/tilde or a bracket pair.
- *  - `,`/`;` and `.`/`:` on the bottom row duplicate the `;`/`:` already on the home row. A real
- *    3270 typewriter keyboard usually has `,`/`<` and `.`/`>` there.
- *  - `¢`/`!` (row 1, x=11.5) is a real 3270 pairing, but was read off a blurred cap.
+ * **TWO LESSONS WORTH KEEPING.** First, a glyph pair appearing TWICE on one keyboard is a
+ * reliable detector: it found three of the five. Second, **the detector's PREDICTIONS were
+ * unreliable** -- the audit guessed `,`/`<` and `.`/`>` from PC-adjacent habit and was wrong, so
+ * guessing at a correction would have shipped a second error that no longer smelled. Duplication
+ * tells you WHERE to look, not WHAT the answer is.
  *
- * **A FIFTH WAS FOUND BY THE TEST THAT FORBIDS A REPEATED SHIFTED GLYPH, and FIXED rather than
- * flagged:** `|` was recorded as the shifted legend on BOTH `1` and `\`. Re-checked under maximum
- * zoom, the `1` cap carries a SOLID vertical bar and the backslash cap a BROKEN one (U+00A6) --
- * two distinct glyphs EBCDIC also distinguishes, flattened into one by a careless read. That test
- * caught it on its first run, which is the argument for keeping it.
- *
- * **AND FIVE MORE ARE ALREADY INERT FOR BEING UNREADABLE** -- two glyphs flanking `Home` in the
- * cursor cluster, and three in the numeric pad's right-hand column. Those say `unread` in their
- * names, which a test enforces.
- *
- * So **10 of 117 caps need a better source** -- one blank, four suspect, five unreadable. The
- * eleventh was the broken bar, now corrected. Everything else was read directly and is sound.
+ * **STILL UNRESOLVED: five caps the first photograph could not resolve and the 4978 cannot
+ * settle, because that keyboard's furniture differs** -- two glyphs flanking `Home` in the cursor
+ * cluster, and three in the numeric pad's right-hand column. They remain INERT with `unread` in
+ * their names, which a test enforces. The 4978 also has keys this layout lacks (a `~`/`\` cap, a
+ * bullet over plus-minus, `LINE DUP`/`FIELD DUP`/`REP`), and NONE were transplanted: the two units
+ * agree on the character set where both have a key, and that is exactly how far a cross-check
+ * can be trusted.
  *
  * ## LEGENDS COME FROM THE PHOTOGRAPH, AND THIS IS NOT A PC KEYBOARD
  *
@@ -237,17 +243,38 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   ch('3', 0, 2, '#'),
   ch('4', 0, 3, '$'),
   ch('5', 0, 4, '%'),
-  // U+00AC NOT SIGN, read off the cap above `6`. On EBCDIC hosts this is the logical-not operator
-  // that CMS and TSO both use; it is NOT a circumflex.
-  ch('6', 0, 5, '¬'),
+  /*
+    `cent` OVER `6`, CORRECTED 2026-10-22 FROM A SECOND PHOTOGRAPH.
+
+    I first read this as U+00AC NOT SIGN off a blurred cap, and reasoned about EBCDIC to justify
+    it. A sharp photograph of another 122-key 3279 -- an IBM 4978, a DIFFERENT layout but the same
+    typewriter character set -- shows `cent` unambiguously over `6`, and re-zooming the original
+    cap is consistent with that rather than with a not-sign.
+
+    TWO KEYBOARDS AGREEING BEATS ONE BLURRED CAP PLUS AN ARGUMENT, which is the lesson: the
+    EBCDIC reasoning was sound and still produced the wrong glyph, because it explained a reading
+    rather than testing it.
+  */
+  ch('6', 0, 5, '¢'),
   ch('7', 0, 6, '&'),
   ch('8', 0, 7, '*'),
   ch('9', 0, 8, '('),
-  // INFERRED, NOT READ: this cap is BLANK on the reference unit -- no legend at all under maximum
-  // zoom, while `_`/`-` beside it is legible, so the keycap is missing or worn smooth. `)` comes
-  // from the `9`/`(` pattern. See the header's audit.
+  /*
+    `)` OVER `0` -- NO LONGER AN INFERENCE, CONFIRMED 2026-10-22.
+
+    The cap is BLANK on the first reference unit (no legend at all under maximum zoom, while
+    `_`/`-` beside it is legible, so it is missing or worn smooth), and `)` was originally guessed
+    from the `9`/`(` pattern. A sharp photograph of an IBM 4978 shows `)` over `0` directly, so
+    the guess is now a reading -- from a different keyboard, which is worth stating.
+  */
   ch('0', 0, 9, ')'),
   ch('-', 0, 10, '_'),
+  /*
+    `+` OVER `=`, CONFIRMED by the 4978's own `+`/`=` cap -- though note that keyboard carries an
+    EXTRA cap to the right of it, a bullet over plus-minus, which this one does not have. Two
+    122-key 3279 keyboards, two different furniture layouts; the CHARACTER SET agrees where both
+    have the key, which is exactly how far a cross-check can be trusted.
+  */
   ch('=', 0, 11, '+'),
   key('←', { kind: 'backspace' }, 'main', 0, 12, 2, 'Backspace'),
 
@@ -255,13 +282,23 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   key('→|', { kind: 'tab' }, 'main', 1, 0, 1.5, 'Tab'),
   ...letters('QWERTYUIOP', 1, 1.5),
   // U+00A2 CENT SIGN over `!`, read off the cap right of `P`.
-  // SUSPECT: read off a blurred cap. `cent`/`!` IS a real 3270 pairing, which is why it was
-  // believed, but it was not clearly legible. See the header's audit.
-  ch('¢', 1, 11.5, '!'),
-  // A BROKEN BAR (U+00A6), NOT THE SOLID `|` ON THE `1` KEY -- and the two were flattened into one
-  // until a test that forbids a repeated shifted glyph caught it. Checked under maximum zoom: the
-  // `1` cap carries a SOLID vertical bar, this one carries a BROKEN one over the backslash. EBCDIC
-  // distinguishes them, so this is a real difference rather than a rendering artefact.
+  /*
+    `!` OVER `not sign` -- CORRECTED 2026-10-22, AND THIS IS WHERE THE NOT SIGN ACTUALLY LIVES.
+
+    Recorded as `cent`/`!` off a blurred cap. The sharp 4978 photograph shows this position as an
+    EXCLAMATION MARK over a NOT SIGN, and `cent` belongs on `6` instead -- so the two glyphs I had
+    were both real and both in the WRONG PLACES, which is the most misleading kind of
+    transcription error: each one looked defensible on its own.
+
+    THE DUPLICATE-GLYPH TEST IS WHAT SURFACED IT. Once `6` was corrected to `cent`, this cap's
+    `cent` became a repeat and the rule flagged it immediately.
+  */
+  ch('¬', 1, 11.5, '!'),
+  // A BROKEN BAR (U+00A6) OVER THE BACKSLASH, NOT THE SOLID `|` ON THE `1` KEY. The two were
+  // flattened into one until the repeated-shifted-glyph test caught it, and the sharp 4978
+  // photograph then CONFIRMED the distinction independently -- its own cap here is unmistakably a
+  // broken bar over a backslash. EBCDIC distinguishes the two bars, so this is a real difference
+  // and not a rendering artefact of either photograph.
   ch('\\', 1, 12.5, '¦'),
   // THE RETURN KEY IS `newline`, NOT `enter`, AND THAT IS THE 3270 DISTINCTION. `Enter` is the AID
   // that submits the screen and lives on its own cap in the bottom row (and in the numpad); this
@@ -275,10 +312,16 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   ...letters('ASDFGHJKL', 2, 1.75),
   ch(';', 2, 10.75, ':'),
   ch('\'', 2, 11.75, '"'),
-  // SUSPECT, AND THE MOST LIKELY WRONG OF THE FOUR: this duplicates the `(`/`)` already on
-  // `9`/`0`, and one glyph pair appearing twice on one keyboard is a smell. A backtick/tilde or a
-  // bracket pair would both be more plausible here. See the header's audit.
-  ch('(', 2, 12.75, ')'),
+  /*
+    `}` OVER `{` -- CORRECTED 2026-10-22 FROM A SHARP SECOND PHOTOGRAPH, and this was the suspect
+    the audit called "most likely wrong of the four".
+
+    It was recorded as `(`/`)`, duplicating the pair on `9`/`0`. That duplication is what made it
+    suspect, and the smell was right: an IBM 4978's home row shows this cap as a BRACKET PAIR,
+    perfectly legible. The audit's guess -- "a backtick/tilde or a bracket pair" -- named the
+    answer without being able to confirm it.
+  */
+  ch('{', 2, 12.75, '}'),
 
   /*
     ROW 3: Shift, ZXCVBNM, then `,`/`;`-ish, `.`/`:`-ish, `/`/`?`, and the right Shift.
@@ -292,10 +335,22 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   */
   shift(3, 0, 1.25, 'left'),
   ...letters('ZXCVBNM', 3, 1.25),
-  // SUSPECT, BOTH: these duplicate the `;`/`:` on the home row, and a real 3270 typewriter
-  // keyboard usually carries `,`/`<` and `.`/`>` in these two positions. See the header's audit.
-  ch(',', 3, 8.25, ';'),
+  /*
+    `'` OVER `,` AND `:` OVER `.` -- CORRECTED 2026-10-22, AND THE AUDIT'S PREDICTION WAS WRONG TOO.
+
+    These were recorded as `,`/`;` and `.`/`:`, duplicating the home row's `;`/`:`. The audit
+    flagged them and predicted `,`/`<` and `.`/`>`, reasoning from PC-adjacent habit. A sharp 4978
+    photograph shows an APOSTROPHE over the comma and a COLON over the period.
+
+    SO THE SMELL WAS A RELIABLE DETECTOR AND THE PREDICTION WAS NOT. Keep both halves of that:
+    duplication FOUND the error, and guessing the correction would have shipped a second wrong
+    answer that no longer smelled.
+  */
+  ch(',', 3, 8.25, '\''),
   ch('.', 3, 9.25, ':'),
+  // `?` OVER `/`, CONFIRMED by the 4978's own cap. (That keyboard also carries a `~`/`\` cap to
+  // its right, which this layout does not appear to have -- the two units differ in furniture even
+  // where their character set agrees, so it is NOT transplanted here.)
   ch('/', 3, 10.25, '?'),
   shift(3, 11.25, 2.25, 'right'),
 

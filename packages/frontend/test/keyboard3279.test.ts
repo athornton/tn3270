@@ -103,15 +103,27 @@ describe('KEYBOARD_3279', () => {
     });
 
     it('carries the 3270 TYPEWRITER number row, not a PC one', () => {
-      // THE NOT SIGN ON 6 IS THE PROOF. A PC keyboard has `^` there, and `!` on 1 where this has
-      // `|`. Pinned because inferring these legends from a PC keyboard is the single easiest way
-      // to get this table subtly wrong.
+      /*
+        PINNED BECAUSE INFERRING THESE FROM A PC KEYBOARD IS THE EASIEST WAY TO GET THIS TABLE
+        SUBTLY WRONG -- and because one of them was wrong until a second photograph settled it.
+
+        `cent` ON 6 IS THE PROOF, where a PC has `^`. This test asserted `not sign` until
+        2026-10-22: I had read a blurred cap that way and justified it with EBCDIC reasoning. A
+        sharp photograph of an IBM 4978 -- a different 122-key 3279 layout, same typewriter
+        character set -- shows `cent` unambiguously, and the original cap is consistent with it.
+        **The reasoning was sound and still produced the wrong glyph, because it explained a
+        reading instead of testing it.**
+
+        `|` on 1 (not `!`) and `)` on 0 are both confirmed by that second keyboard too.
+      */
       const shiftOf = (label: string): string | undefined =>
-        KEYBOARD_3279.find((k) => k.label === label)?.shiftLabel;
-      expect(shiftOf('6')).toBe('¬');   // NOT SIGN, not circumflex
+        KEYBOARD_3279.find((k) => k.label === label && k.region === 'main')?.shiftLabel;
+      expect(shiftOf('6')).toBe('¢');   // CENT, not circumflex and not a not-sign
       expect(shiftOf('1')).toBe('|');        // not '!'
       expect(shiftOf('7')).toBe('&');
       expect(shiftOf('8')).toBe('*');
+      expect(shiftOf('9')).toBe('(');
+      expect(shiftOf('0')).toBe(')');
     });
   });
 
@@ -261,7 +273,11 @@ describe('KEYBOARD_3279', () => {
         named, and any NEW duplicate fails. When a better source arrives, correct the data and
         shrink this list -- do not widen it.
       */
-      const KNOWN_SUSPECT = [')', ';', ':'];
+      // SHRUNK FROM [')', ';', ':'] TO [':'] on 2026-10-22, once a sharp photograph of an IBM
+      // 4978 settled the suspects this rule had flagged. `:` remains because it legitimately
+      // appears twice -- shifted on the home row's `;` and on the bottom row's `.` -- which the
+      // second keyboard confirms rather than contradicts. **SHRINK THIS LIST, NEVER WIDEN IT.**
+      const KNOWN_SUSPECT = [':'];
       const shifted = KEYBOARD_3279
         .map((k) => k.shiftLabel)
         .filter((v): v is string => v !== undefined);
