@@ -10,6 +10,38 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-22-save-affordance-design.md`
 
+**EXECUTED 2026-10-22. All five tasks done; what the plan got wrong is recorded below.**
+
+> ## WHAT THIS PLAN GOT WRONG, found during execution
+>
+> **1. `:focus-visible` ALONE DOES NOT PAINT ON A PROGRAMMATIC FOCUS.** Task 1 and the spec both
+> prescribed `:focus-visible` for everything, reasoning that programmatic focus matches it. It does
+> not reliably: the pseudo-class is decided by the UA's heuristic about the user's **last input
+> modality**, and the operator reaches a completed transfer by CLICKING Start — so the ring was
+> suppressed on the very button the autofocus targets. Caught by Task 4's own check on its first
+> run (`:focus-visible matched: false`, focus correctly on `#transfer-save`), confirmed against MDN,
+> and fixed by giving `#transfer-save` a narrowly-scoped plain `:focus` rule as well.
+>
+> **2. Task 4's ring assertion as written was too weak.** It said `matches(':focus-visible')`. Once
+> the rule changed, `matches(':focus')` would have been trivially true for any focused element and
+> would have proven nothing about a stylesheet that forgot to style it. The shipped check reads
+> `getComputedStyle(...).outlineStyle`/`outlineWidth` — the first computed-style read in this
+> repo's harnesses, a deliberate narrow exception to their otherwise behavioural approach.
+>
+> **3. `kind: 'live'` would have overstated the evidence.** The draft relabelled the `progress`
+> phase from `injected` to `live`; no host sends those three messages. Corrected in the plan before
+> execution and called out there.
+>
+> **4. Task 2's expectation was right, and the plan should be believed on it:** no test imports
+> `transferBoot.ts`, by design. `browser-clicks.mjs` is this change's only cover, and Task 3's
+> commit says so rather than implying unit cover exists.
+>
+> **5. A hazard no task anticipated: leaked Electron processes read as a code failure.** Repeated
+> mutation runs left **72** Electron processes fighting over one Xvfb display, after which
+> `browser-clicks` reported `0/7` with `bridge.js did not load` — indistinguishable from a
+> regression. `pkill -9 -f node_modules/electron` between runs; restoring clean sources gave 7/7
+> immediately.
+
 ---
 
 ## Read this before Task 1
@@ -53,7 +85,7 @@ status-line text must not use three dots.
 **Files:**
 - Modify: `packages/gui/ui.css` (after line 101, the close of the existing button rule)
 
-- [ ] **Step 1: Confirm there is no focus styling to conflict with**
+- [x] **Step 1: Confirm there is no focus styling to conflict with**
 
 ```bash
 cd ~/git/tn3270
@@ -63,7 +95,7 @@ grep -n 'focus\|outline' packages/gui/ui.css
 Expected: **no output.** If anything matches, STOP and report it — the premise of this task is that
 the file has none, and an existing rule changes the design.
 
-- [ ] **Step 2: Add the rule**
+- [x] **Step 2: Add the rule**
 
 Append after the existing button rule (which closes at line 101):
 
@@ -101,7 +133,7 @@ Append after the existing button rule (which closes at line 101):
 the `Canvas` background these surfaces already use — the same system-colour approach the rest of
 this file takes (`GrayText` on the status lines, `Canvas` on the overlay).
 
-- [ ] **Step 3: Verify the stylesheet still parses and is served**
+- [x] **Step 3: Verify the stylesheet still parses and is served**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | tail -3
@@ -111,7 +143,7 @@ npx vitest run packages/web/test/httpstatic.test.ts 2>&1 | tail -4
 Expected: build clean, `httpstatic` tests pass. That suite covers `ui.css` being served at all; it
 does not read the rule.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/gui/ui.css
@@ -134,7 +166,7 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Inspect: `packages/web/test/` (whatever exists)
 
-- [ ] **Step 1: Find out whether `transferBoot.ts` has unit cover at all**
+- [x] **Step 1: Find out whether `transferBoot.ts` has unit cover at all**
 
 ```bash
 cd ~/git/tn3270
@@ -142,7 +174,7 @@ ls packages/web/test/
 grep -rln "transferBoot\|createTransferBoot\|bootTransfer" packages/web/test/
 ```
 
-- [ ] **Step 2: Record what you found, and pick the target**
+- [x] **Step 2: Record what you found, and pick the target**
 
 **If a `transferBoot` unit suite exists**, add Task 3's cases there and follow its existing fake-DOM
 pattern — do not invent a second one.
@@ -157,7 +189,7 @@ commit message rather than implying unit cover exists.
 double for a module whose whole point is real DOM would be cover that cannot fail for the right
 reasons.
 
-- [ ] **Step 3: No commit** — this task produces a decision, not a change.
+- [x] **Step 3: No commit** — this task produces a decision, not a change.
 
 ---
 
@@ -166,7 +198,7 @@ reasons.
 **Files:**
 - Modify: `packages/web/src/transferBoot.ts:558-561` (the tail of the `transferDone` arm)
 
-- [ ] **Step 1: Read the current code, exactly**
+- [x] **Step 1: Read the current code, exactly**
 
 ```bash
 cd ~/git/tn3270 && sed -n '544,562p' packages/web/src/transferBoot.ts
@@ -180,7 +212,7 @@ You are replacing only these two lines at the end of the arm:
       running = undefined;
 ```
 
-- [ ] **Step 2: Write the replacement**
+- [x] **Step 2: Write the replacement**
 
 ```ts
       /**
@@ -222,7 +254,7 @@ You are replacing only these two lines at the end of the arm:
 format: `transferUi.ts` has already written `done: N bytes` (or a refusal) to `#transfer-status` by
 the time this line runs, because `ui.finished(...)` is called a few lines above.
 
-- [ ] **Step 3: Build and typecheck**
+- [x] **Step 3: Build and typecheck**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | tail -3 && npm run typecheck 2>&1 | tail -3
@@ -231,7 +263,7 @@ cd ~/git/tn3270 && npm run build 2>&1 | tail -3 && npm run typecheck 2>&1 | tail
 Expected: both clean. **`npm run build` is not optional before believing any test** — this repo has
 recorded 15 green tests over a build that failed, because vitest does not typecheck.
 
-- [ ] **Step 4: Run the full suite and expect ONE class of failure**
+- [x] **Step 4: Run the full suite and expect ONE class of failure**
 
 ```bash
 cd ~/git/tn3270 && npx vitest run 2>&1 | tail -6
@@ -241,7 +273,7 @@ Expected: **2475 pass**, unless a unit test asserts `#transfer-status`'s exact t
 completion. If one fails, read it before changing it: if it is pinning `transferUi.ts`'s shared
 format it must keep doing so, and only a browser-side assertion should learn the new suffix.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/src/transferBoot.ts
@@ -269,7 +301,7 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Modify: `packages/web/scripts/browser-clicks.mjs` — the `progress` phase (around `:1060-1082`) and its `TRANSFER_CHECKS` entry (around `:373`)
 
-- [ ] **Step 1: Read the phase as it stands**
+- [x] **Step 1: Read the phase as it stands**
 
 ```bash
 cd ~/git/tn3270 && sed -n '1055,1085p' packages/web/scripts/browser-clicks.mjs
@@ -279,7 +311,7 @@ grep -n "name: 'progress'" -A4 packages/web/scripts/browser-clicks.mjs
 It already feeds `transferProgress`, `transferData` and `transferDone` through the page's real
 `onmessage`, and already reads `saveMidData` and `saveAfterDone`.
 
-- [ ] **Step 2: Add the three new reads**
+- [x] **Step 2: Add the three new reads**
 
 After the existing `const saveAfterDone = ...` line, add:
 
@@ -302,7 +334,7 @@ And capture the mid-transfer negative beside the existing `saveMidData` read:
     const focusedMidData = await cdp.eval('document.activeElement?.id');
 ```
 
-- [ ] **Step 3: Extend the assertion**
+- [x] **Step 3: Extend the assertion**
 
 Replace the `doneOk` line and the `if` with:
 
@@ -331,7 +363,7 @@ Replace the `doneOk` line and the `if` with:
     }
 ```
 
-- [ ] **Step 4: Update the phase's `what` and `mutant` fields**
+- [x] **Step 4: Update the phase's `what` and `mutant` fields**
 
 In the `TRANSFER_CHECKS` entry for `progress`:
 
@@ -349,7 +381,7 @@ because no host sends these three messages; the run-time report distinguishes th
 relabelling a phase that fakes its input as `live` would overstate the evidence. Only `what` and
 `mutant` change.
 
-- [ ] **Step 5: Run it**
+- [x] **Step 5: Run it**
 
 ```bash
 cd ~/git/tn3270 && node packages/web/scripts/browser-clicks.mjs 2>&1 | tail -4
@@ -357,7 +389,7 @@ cd ~/git/tn3270 && node packages/web/scripts/browser-clicks.mjs 2>&1 | tail -4
 
 Expected: `transfer form: 7/7 checks`.
 
-- [ ] **Step 6: PROVE THE NEW ASSERTIONS CAN FAIL — two mutants, run one at a time**
+- [x] **Step 6: PROVE THE NEW ASSERTIONS CAN FAIL — two mutants, run one at a time**
 
 A green phase proves nothing until a deliberate break turns it red. This repo has recorded tests
 that passed with the behaviour they claimed to pin deleted.
@@ -380,7 +412,7 @@ npm run build >/dev/null 2>&1 && node packages/web/scripts/browser-clicks.mjs 2>
 **Record both results in the commit message.** If either mutant leaves the phase GREEN, the
 assertion is not wired to the behaviour and must be fixed before committing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/web/scripts/browser-clicks.mjs
@@ -410,7 +442,7 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Modify: `docs/live-testing.md`, `docs/HANDOFF.md`
 
-- [ ] **Step 1: Run the whole gate**
+- [x] **Step 1: Run the whole gate**
 
 ```bash
 cd ~/git/tn3270
@@ -435,21 +467,21 @@ nothing is focused and the design is wrong.
 `drive-playback.py` and `drive-e.py` are **not** required: nothing here touches telnet negotiation
 or the stream layer. Say so in the commit rather than leaving it implied.
 
-- [ ] **Step 2: Record it in `docs/live-testing.md`**
+- [x] **Step 2: Record it in `docs/live-testing.md`**
 
 Add to the 2026-10-22 entry's UX-defect paragraph that the hint-and-focus option was BUILT, with the
 phase that covers it and the two mutants that proved it. **State that the ring's visibility is
 unwitnessed** until the user looks at it in Firefox — this file's convention is that an unqualified
 claim means it was witnessed, and no harness can judge a ring.
 
-- [ ] **Step 3: Update `docs/HANDOFF.md`'s item 3**
+- [x] **Step 3: Update `docs/HANDOFF.md`'s item 3**
 
 It currently says the user "has not chosen" between uniformity and the better flow, and names the
 middle option. Replace with: the user chose the hint-and-focus option, it is built, auto-save was
 declined, and the focus ring was added for all overlay buttons because `ui.css` had no focus styling
 at all.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A docs

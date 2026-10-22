@@ -91,13 +91,42 @@ and the Recording log says what happened when they were run.
   **But `<a download>` has no activation requirement at all**, so on this operator's own browser —
   Firefox, the fallback route — auto-saving on completion is **possible today**.
 
-  **THE AWKWARD CONSEQUENCE, STATED RATHER THAN DESIGNED AROUND HERE:** implementing it only where
-  it is possible makes the two routes behave differently, and gives the browsers WITHOUT a picker
-  the smoother flow. Uniformity and the better flow are in genuine conflict; the choice is the
-  user's and has not been made. **A middle option exists and is cheap:** the completion status line
-  does not currently mention Save at all, and most of the friction reported was not knowing Save
-  was the next step. Naming the button in the completion message — and focusing it, so Enter saves
-  — removes that without the inconsistency.
+  **THE AWKWARD CONSEQUENCE:** implementing auto-save only where it is possible makes the two
+  routes behave differently, and gives the browsers WITHOUT a picker the smoother flow. Uniformity
+  and the better flow are in genuine conflict.
+
+  **RESOLVED THE SAME DAY: THE USER DECLINED AUTO-SAVE AND CHOSE THE MIDDLE OPTION, WHICH IS NOW
+  BUILT.** Spec `docs/superpowers/specs/2026-10-22-save-affordance-design.md`, plan
+  `docs/superpowers/plans/2026-10-22-save-affordance.md`. Most of the reported friction was not
+  knowing Save was the next step, so: the completion message now names Save, the button takes the
+  focus so Enter saves, and every overlay button got a focus ring — `ui.css` had **no `:focus` or
+  `outline` rule at all** beforehand, which made this an accessibility fix for a form built to be
+  keyboard-navigable. All three facts derive from one `hasUnsaved()` read, so the text, the
+  enablement and the focus cannot disagree.
+
+  **AND BUILDING IT FOUND A DEFECT THAT THE USER HAD ASKED ABOUT IN ADVANCE** — *"assuming there's
+  some highlighting that shows focus, and if not, let's add some"*. The first ring used
+  `:focus-visible`, correct for any button an operator tabs to, and **it did not paint on the
+  programmatically focused Save button**: the harness reported `:focus-visible matched: false` with
+  the focus correctly on `#transfer-save`. `:focus-visible` is decided by the UA's heuristic about
+  the user's **last input modality**, not by how the focus was set — and the operator reaches a
+  completed transfer by CLICKING Start, so the modality is pointer and the ring is suppressed
+  (confirmed against MDN 2026-10-22). **The autofocus would have landed invisibly, which is the
+  whole defect it exists to cure.** `#transfer-save` now opts into plain `:focus` as well; the
+  selector is deliberately narrow, because clicking THAT button saves the file and then disables
+  it, so the left-behind-ring objection to `:focus` cannot arise for it.
+
+  **Covered by `browser-clicks.mjs`'s `progress` phase**, which now asserts `activeElement` is Save
+  after a completed receive, that Save is **not** focused mid-transfer, that the status line names
+  it, and that a `2px solid` outline is **resolved on it** — a `getComputedStyle` read, the first in
+  this repo's harnesses, because matching `:focus` would be trivially true and would prove nothing
+  about a stylesheet that forgot to style it. **Mutation-proved with three mutants** — dropping the
+  focus call, dropping the hint, and removing the outline declaration each turn the phase red (6/7).
+
+  **THE RING'S LEGIBILITY IS UNWITNESSED, and that is the honest state.** `outlineStyle: solid` is
+  not "a human can see it", and no harness here can judge whether a 2px `Highlight` outline reads
+  clearly against the overlay's `Canvas` background. **The user has not yet eyeballed it in
+  Firefox**; this entry will say so until they do.
 
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:

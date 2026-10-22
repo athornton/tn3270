@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## START HERE — NEXT ACTION, 2026-10-22
 
 **THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
-**35 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
+**42 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
 `docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
 `docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
 
@@ -18,12 +18,26 @@ hand, because a `DrawCell` carries a glyph index and no character, so no harness
 terminal as text. Details, and the four gaps it leaves, in `live-testing.md`'s newest entry.
 **`transferForm` has left `protocol.ts`'s `REFUSED` list**; `transferText` has not.
 
-**THE FULL GATE, re-run 2026-10-22 at `7878485`:** build and typecheck clean, **2475 tests in 104
-files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9 buttons/10 actions, `select`
-3/3, `shot` 2/2, `browser-shot` 1/1, `browser-keys` 13 chords/10 actions, **`browser-clicks` 9
-buttons + 7/7 transfer checks**, `pty-smoke.py` **12 PASS / 0 FAIL**. **`drive-playback.py` and
-`drive-e.py` were NOT run** — nothing in this work touches telnet negotiation or the stream layer,
-said rather than implied.
+**THE FULL GATE, re-run 2026-10-22 after the save-affordance work:** build and typecheck clean,
+**2475 tests in 104 files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9
+buttons/10 actions, `select` 3/3, `shot` **2/2**, `browser-shot` **1/1**, `browser-keys` 13
+chords/10 actions, **`browser-clicks` 9 buttons + 7/7 transfer checks**, `pty-smoke.py`
+**12 PASS / 0 FAIL**. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing in this work
+touches telnet negotiation or the stream layer, said rather than implied.
+
+**THE TWO GOLDEN HARNESSES ARE THE ONES THAT MATTERED THIS TIME.** `shot` and `browser-shot`
+compare rendered output, and the focus ring went into a stylesheet **shared with the Electron
+GUI** — both still match, which is the evidence that a `:focus-visible`/`:focus` rule does not
+paint when nothing is focused.
+
+**A HARNESS HAZARD WORTH KNOWING: LEAKED ELECTRON PROCESSES READ AS A CODE FAILURE.** Repeated
+mutation runs left **72** Electron processes contending for the single Xvfb display, and
+`browser-clicks` then reported `0/7` with `the served page never assigned window.tn3270, so
+bridge.js did not load` — indistinguishable from a real regression. Clean sources restored 7/7
+immediately. **`pkill -9 -f node_modules/electron` between repeated browser-harness runs**, and
+treat a sudden total failure as a process leak before believing it. (These scripts also refuse to
+run against a `dist` older than `src`, which caught a `cp`-restored source mid-cleanup — that guard
+works.)
 
 **THE PLAN'S OWN STEP 2 CONTAINED TWO ERRORS, both of which would have cost a failed live run**
 (the recorded plan-code-is-a-draft hazard, again):
@@ -51,14 +65,25 @@ text including passwords. Correct, and it means a live session cannot be action-
    **AND THE SPEC REQUIREMENT THAT WOULD HAVE PREVENTED THE MISREADING IS UNIMPLEMENTED:** the
    overlay is supposed to say which route it will take (design doc `:302`) and says nothing. That
    omission cost a wrong entry in `live-testing.md`, which is the best argument for building it.
-3. **A LIVE UX DEFECT: Start-then-Save reads as one click too many**, and the constraint binds only
-   HALF the time. `showSaveFilePicker`'s **transient user activation** requirement means the dialog
-   cannot be opened on completion on Chromium — but **`<a download>` has no such requirement, so on
-   the user's own browser (Firefox, the fallback route) auto-save on completion is possible today.**
-   The conflict is uniformity versus the better flow: building it only where possible gives the
-   browsers WITHOUT a picker the smoother experience. **The user has not chosen**, and a cheap
-   middle option exists — the completion message never mentions Save, and naming/focusing the
-   button removes most of the friction with no inconsistency. See `live-testing.md`.
+3. **THE START-THEN-SAVE UX DEFECT IS FIXED, and the fix is on this branch.** The user **declined
+   auto-save** — it is impossible on the picker route (transient user activation) and so would have
+   applied only to the fallback, giving the browsers WITHOUT a picker the better flow — and chose
+   the hint-and-focus option instead. Spec
+   `docs/superpowers/specs/2026-10-22-save-affordance-design.md`, plan
+   `docs/superpowers/plans/2026-10-22-save-affordance.md`, both executed.
+   The completion message names Save, the button takes focus so Enter saves, and **all** overlay
+   buttons got a focus ring — `ui.css` had **zero `:focus`/`outline` rules** before, so this was an
+   accessibility fix for a deliberately keyboard-navigable form, and it reaches the Electron GUI's
+   two windows as well. **All three behaviours derive from ONE `hasUnsaved()` read**, so the text,
+   the enablement and the focus cannot disagree.
+   **`:focus-visible` ALONE WAS NOT ENOUGH, and this is the thing to remember:** it is decided by
+   the UA's heuristic about the user's **last input modality**, not by how focus was set, so a
+   programmatic focus after a *click* does **not** match it and the ring did not paint. Caught by
+   the harness on the first run. `#transfer-save` now also has a plain `:focus` rule, narrowly
+   scoped because clicking that button saves and then disables it.
+   **STILL UNWITNESSED: whether the ring is LEGIBLE.** `getComputedStyle` proves a `2px solid`
+   outline resolves on the focused button, which is not the same as a human seeing it. The user has
+   not eyeballed it in Firefox yet.
 4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
    **The import map needs one specifier per shared module**, because one specifier cannot name two
    files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.
