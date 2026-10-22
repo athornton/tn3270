@@ -145,6 +145,48 @@ describe('resolveAsset', () => {
     expect(seen.size).toBeGreaterThanOrEqual(served.length);
   });
 
+  it('WALKS BRIDGE.JS ITSELF, which the loop above silently cannot', () => {
+    /*
+      THE HOLE THIS CLOSES, MEASURED 2026-10-22 AND IT COST AN EVENING.
+
+      `keyboardOverlay.js` was missing from `httpstatic.ts`'s own-module list while `bridge.js`
+      imported it. The 404 stopped `bridge.js` executing, so the page had no `window.tn3270` and
+      the console blamed `renderer.js` with `Cannot read properties of undefined (reading
+      'onAtlas')`. `browser-clicks.mjs` reported 0/7. **ALL 2536 UNIT TESTS PASSED, INCLUDING THE
+      GRAPH-CLOSURE TEST ABOVE** -- which exists for exactly this and could not see it.
+
+      WHY IT COULD NOT: under vitest `/bridge.js` resolves to `packages/web/src/bridge.js`, a file
+      that never exists because the source is `bridge.ts` (the next test explains that split at
+      length). The loop above hits `existsSync` false, `continue`s, and NEVER READS BRIDGE'S
+      IMPORTS. So it was vacuous for every module `bridge.js` pulls in -- which is most of this
+      package's own browser code.
+
+      SO THIS TEST READS THE BUILT FILE BY PATH instead of through `resolveAsset`, and checks each
+      relative import against the table. It is the same property the loop above claims, over the
+      one root that loop cannot reach.
+    */
+    // `pkgDir` is derived here rather than borrowed from the test below, which declares it in its
+    // own scope. `import.meta.url` is this TEST file under vitest, so two `dirname`s reach the
+    // package root -- the same derivation that test uses.
+    const root = dirname(dirname(fileURLToPath(import.meta.url)));
+    const built = join(root, 'dist', 'bridge.js');
+    if (!existsSync(built)) {
+      // A source-only tree has no dist. Fail LOUDLY rather than skipping: a silent skip here is
+      // how this guard was vacuous in the first place.
+      throw new Error(`run npm run build first: ${built} does not exist`);
+    }
+    const source = readFileSync(built, 'utf8');
+    const imports = [...source.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)]
+      .map((m) => `/${m[1]!.replace(/^\.\//, '')}`);
+    // NOT VACUOUS: bridge.js imports several modules, and a regex that matched none would
+    // otherwise pass this test by finding nothing to check.
+    expect(imports.length, 'bridge.js should import several relative modules')
+      .toBeGreaterThanOrEqual(4);
+    const unserved = imports.filter((p) => resolveAsset(p) === undefined);
+    expect(unserved, `bridge.js imports these and they are NOT served: ${unserved.join(', ')}`)
+      .toEqual([]);
+  });
+
   it('serves the bridge from beside itself, and the BUILT bridge exists', () => {
     // WHY `/bridge.js` CANNOT JOIN THE LOOP ABOVE, measured by trying it: the table holds two kinds
     // of path, and under vitest they resolve into different trees.

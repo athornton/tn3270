@@ -1,10 +1,22 @@
 import { createBridge, socketUrl, type BridgeApi } from './bridgecore.js';
 import { createKeypadOverlay } from './keypadOverlay.js';
+import { createKeyboardOverlay } from './keyboardOverlay.js';
 // FROM THE MODULE AND NOT FROM `@tn3270/canvas`'s BARREL, which would blank this page: the barrel
 // reaches `drawlist.js` and `@tn3270/core`, and a browser has no bundler for a bare specifier.
 // `index.html`'s import map resolves this one name to `canvas/dist/keypadUi.js`, whose only
 // runtime import is `@tn3270/frontend` -- the second map entry.
 import { createKeypadUi } from '@tn3270/canvas';
+/*
+  A DEEP PATH, NOT THE BARE SPECIFIER, AND THAT IS FORCED RATHER THAN CHOSEN.
+
+  `static/index.html`'s import map resolves `@tn3270/canvas` to `keypadUi.js` alone -- ONE
+  SPECIFIER CANNOT NAME TWO FILES -- so importing `createKeyboardUi` from the bare specifier
+  resolves to a module that does not export it. The browser then fails to evaluate THIS module,
+  and the only symptom is `window.tn3270` never being assigned: measured on the way in as a blank
+  canvas, `bridge.js did not load`, and `Cannot read properties of undefined (reading 'onAtlas')`.
+  `transferUi.js` is imported by deep path for exactly the same reason.
+*/
+import { createKeyboardUi, type KeyboardUi } from '@tn3270/canvas/dist/keyboardUi.js';
 // The transfer form's two halves, BOTH BY DEEP RELATIVE PATH into this package: they are served
 // flat at `/` beside this module (`httpstatic.ts`'s own-package loop), so `./` is what resolves
 // in the browser and needs no import-map entry. `transferBoot.js`'s own imports are what need
@@ -119,6 +131,64 @@ const overlay = createKeypadOverlay({
 });
 
 /**
+ * THE FULL 122-KEY KEYBOARD, `Ctrl-B`, a second surface beside the keypad.
+ *
+ * The user asked for BOTH -- "I like Ctrl-K for the quick special-keys overlay like we have now.
+ * Maybe Ctrl-B for the full keyboard?" -- and may later keep only this one, so nothing here
+ * depends on the keypad existing.
+ *
+ * A HARD FAILURE on a missing element, for the reason the keypad's own check gives: a missing
+ * element would make every `Ctrl-B` silently do nothing, which looks like a protocol fault and is
+ * not one.
+ */
+const keyboardEl = document.getElementById('keyboard-overlay');
+if (keyboardEl === null) {
+  throw new Error('bridge: #keyboard-overlay is missing from index.html');
+}
+
+/**
+ * The keyboard's Shift state, which `onHide` needs and `build` produces.
+ *
+ * ASSIGNED INSIDE `build` AND READ ONLY FROM `onHide`, which is safe in both directions: `onHide`
+ * cannot run before the surface has been shown, and showing it is what builds it. A `let` rather
+ * than a `const` because the value does not exist until the operator's first `Ctrl-B` -- and the
+ * laziness is load-bearing for the TDZ reason the keypad's `sendAction` records at length.
+ */
+let keyboardUi: KeyboardUi | undefined;
+
+const keyboardOverlay = createKeyboardOverlay({
+  element: keyboardEl,
+  // BUILT LAZILY, on the first toggle only. 117 buttons at page load would cost every session for
+  // the few that open the keyboard -- and see the keypad's `sendAction` note on why building
+  // eagerly would blank the page by reading `bridge` inside its temporal dead zone.
+  build: () => {
+    keyboardUi = createKeyboardUi({
+      root: keyboardEl,
+      create: (tag) => document.createElement(tag),
+      append: (parent, child) => { parent.appendChild(child); },
+      setText: (el, text) => { el.textContent = text; },
+      setTitle: (el, title) => { el.title = title; },
+      setAttr: (el, name, value) => { el.setAttribute(name, value); },
+      removeAttr: (el, name) => { el.removeAttribute(name); },
+      onClick: (el, fn) => { el.addEventListener('click', fn); },
+      // THROUGH THE BRIDGE, exactly as the keypad's presses are, so a cap takes the same path a
+      // keystroke does: same `sendAction`, same socket, same server handler. This surface adds no
+      // protocol message of its own.
+      sendAction: (action) => { bridge.sendAction(action); },
+    });
+  },
+  /**
+   * CLOSING THE SURFACE DISARMS THE ONE-SHOT SHIFT -- the sixth of the user's rules.
+   *
+   * A keyboard reopened later must not still be holding a Shift nobody remembers pressing. The
+   * `?.` is not a TDZ guard (this project has recorded that optional chaining does not guard one);
+   * it covers the real case that `hide()` can be called before the surface was ever built, where
+   * there is no Shift to disarm.
+   */
+  onHide: () => { keyboardUi?.disarmShift(); },
+});
+
+/**
  * The transfer overlay's two elements THIS FILE itself touches.
  *
  * A HARD FAILURE, NOT A DEAD BUTTON, for the reason the keypad's own check above gives: a missing
@@ -195,7 +265,27 @@ const bridge = createBridge({
   // INTERCEPTED CLIENT-SIDE: the keypad is a DOM overlay, so showing it is a local display
   // decision and `toggleKeypad` never reaches the gateway. The server keeps its own intercept
   // regardless, because served code is not code a client is obliged to run.
-  toggleKeypad: () => { overlay.toggle(); },
+  /*
+    OPENING ONE SURFACE CLOSES THE OTHER, and that rule lives HERE rather than in either overlay:
+    putting it inside them would make each depend on the other and give the pair two places to
+    disagree about which is open. Two overlapping OPAQUE overlays would be unreadable -- and both
+    are opaque for a measured reason, recorded in `keypadOverlay.ts`.
+
+    The close happens BEFORE the toggle, so opening a surface that is already open still closes the
+    other rather than leaving both up for one frame.
+  */
+  toggleKeypad: () => {
+    keyboardOverlay.hide();
+    overlay.toggle();
+  },
+  // `Ctrl-B`. INTERCEPTED CLIENT-SIDE, exactly as `toggleKeypad` is: this surface is the browser's
+  // and the gateway holds nothing for it. The server keeps its own intercept anyway -- see
+  // `web/src/main.ts`, where `applyAction` would otherwise throw outside any try and end the
+  // process, since a client is not obliged to run the code we served it.
+  toggleKeyboard: () => {
+    overlay.hide();
+    keyboardOverlay.toggle();
+  },
   // THE SAME BARGAIN FOR THE TRANSFER FORM, which is a DOM overlay here too. `main.ts:314` keeps
   // its own intercept, for the reason `bridgecore.ts` sets out at length: `applyAction` THROWS on
   // this kind outside any try in a socket handler, and a client is not obliged to run served code.

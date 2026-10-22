@@ -52,6 +52,14 @@ function table(): Map<string, Asset> {
   // a test walking the graph: the symptom names the wrong file.
   for (const module of [
     'bridge.js', 'bridgecore.js', 'keypadOverlay.js',
+    // `keyboardOverlay.js` joins 2026-10-22 with the full keyboard -- AND ITS ABSENCE WAS MEASURED
+    // TOO, exactly as `keypadOverlay.js`'s was, with exactly the symptom the paragraph above
+    // predicts: `Cannot read properties of undefined (reading 'onAtlas')` from renderer.js, no
+    // `window.tn3270`, and `browser-clicks.mjs` at 0/7 while ALL 2536 UNIT TESTS PASSED. The
+    // misdirection is total -- the console names `renderer.js`, the harness names `bridge.js`, and
+    // the actual fault is a missing line in THIS list. Third time this file's own warning has been
+    // the answer; read it before debugging.
+    'keyboardOverlay.js',
     // `transferChunk.js` joins 2026-10-06: the browser WILL need `chunkBytes` and the 10 MB cap
     // to refuse an oversize file before sending a byte, so it will be loaded by both sides.
     // NOTHING LOADS IT TODAY -- the page's module graph is `bridge.js` and `renderer.js` and
