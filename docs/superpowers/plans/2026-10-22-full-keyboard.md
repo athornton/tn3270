@@ -10,9 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`
 
-> ## EXECUTION STATE, 2026-10-22 (session ended at a spend cap)
+> ## EXECUTION STATE, 2026-10-22
 >
-> **TASKS 1-4 ARE DONE, COMMITTED AND PUSHED. TASK 5 IS PART-DONE. TASKS 6-7 ARE UNSTARTED.**
+> **TASKS 1-5 ARE DONE, COMMITTED AND PUSHED. TASKS 6-7 REMAIN.**
 >
 > | Task | State | Commit |
 > |---|---|---|
@@ -20,50 +20,44 @@
 > | 2 delete `row`/`col` | **done** | `d2a32d4` |
 > | 3 `keyboardUi.ts` + Shift | **done**, 18 tests, 3 mutants | `e7fad38` |
 > | 4 `toggleKeyboard` + 4 guards | **done**, mutation-proved | `5b2d294` |
-> | 5 web surface | **PART-DONE** — everything but `bridge.ts` | `d252bda` |
-> | 6 GUI window | not started | — |
-> | 7 harness + gate + docs | not started | — |
+> | 5 web surface | **done** | `d252bda`, `93730f0` |
+> | 6 GUI window | **not started** | — |
+> | 7 harness phase + gate + docs | **not started** | — |
 >
-> ### WHERE TASK 5 STOPPED, AND WHAT IS KNOWN
+> **The web gateway's keyboard WORKS: `Ctrl-B` opens it, `Ctrl-K` closes it and opens the keypad.**
+> Gate at `93730f0`: 2537 tests in 107 files, browser-clicks 9 buttons + 7/7, browser-keys 13
+> chords, browser-shot 1/1.
 >
-> **The `bridge.ts` wiring breaks the browser and is PARKED, not committed:**
-> `docs/superpowers/wip/bridge.ts.keyboard-wiring.txt` is the verbatim 91-line diff. Drop it over
-> `packages/web/src/bridge.ts` to resume.
+> ### THE ONE DEFECT WORTH READING ABOUT BEFORE TASK 6
 >
-> **PROVEN BY BISECTION: `bridge.ts` is the ONLY remaining problem.** Reverting that one file
-> returns `browser-clicks.mjs` to `9 buttons, 7/7` with every other change in place. So the
-> overlay, the CSS, the serving, the import map and the deep paths are all correct.
+> Task 5 cost an evening to a single missing line -- `keyboardOverlay.js` absent from
+> `httpstatic.ts`'s own-module list -- and the symptom named the wrong file every time:
+> `bridge.js did not load`, no `window.tn3270`, `onAtlas` from `renderer.js`, `0/7`. **That file
+> has a comment above the list describing this exact failure**, written when `keypadOverlay.js`
+> did the same thing. Read it before debugging a blank canvas.
 >
-> **THE SYMPTOM IS MISLEADING AND WILL WASTE TIME IF NOT EXPECTED:** `bridge.js did not load`,
-> `window.tn3270` never assigned, and `Cannot read properties of undefined (reading 'onAtlas')` at
-> `renderer.js:175`. That is what a module which fails to EVALUATE looks like from the outside —
-> never a 404, never a named import error. **ALL 2536 UNIT TESTS PASS WITH IT BROKEN.**
+> **The deeper defect was the GUARD.** `httpstatic.test.ts`'s graph-closure test exists for this
+> class of bug and passed while the module was unserved: under vitest `/bridge.js` resolves to
+> `src/bridge.js`, which never exists, so the walk skipped it and never read its imports. A second
+> test now reads the BUILT `bridge.js` by path. **Task 6 adds a GUI window, not a served module, so
+> this trap does not apply there** -- but Task 7's harness work touches the same file.
 >
-> **ALREADY RULED OUT, so do not re-check these:**
-> - `keyboardUi.js`, `keyboard3279.js`, `keymap.js` and `bridge.js` all return **200** from a live
->   gateway.
-> - The served `index.html` **does** contain `<div id="keyboard-overlay" hidden>` and **does**
->   carry all five import-map entries.
-> - `createKeyboardUi` **builds without throwing** against a fake DOM when imported from
->   `packages/canvas/dist/keyboardUi.js` directly (`/tmp/evalkb.mjs` did this).
-> - `packages/frontend`'s `exports` map exposes both deep paths; `tsc` resolves them.
-> - It is **not** an Electron process leak: `pgrep -c electron` was 0 before the failing runs.
+> ### FOUR IMPORT-PATH FACTS TASK 6 WILL NEED
 >
-> **WHAT I WOULD TRY NEXT, in order:**
-> 1. Read the parked file's top-level statements. `bridge.ts` runs `getElementById` at module
->    scope; if `#keyboard-overlay` were somehow absent the `throw` would stop evaluation exactly
->    like this — so instrument that `throw` with a distinguishing message and re-run, rather than
->    reasoning about it.
-> 2. Check whether `type KeyboardUi` imported as a **value** rather than `import type` survives
->    emission and drags `keyboardUi.js` into a cycle with `bridge.js`. The parked file imports
->    `{ createKeyboardUi, type KeyboardUi }` from a deep path; `module-cycles.test.ts` exists for
->    this class of problem and is worth running.
-> 3. Add a `console.error` at the top of the parked `bridge.ts` and read it from the harness's
->    console capture, which already prints `renderer[N]` lines.
+> One specifier cannot name two files, and this bit four times in Task 5:
+>
+> 1. `@tn3270/canvas` is bound to `keypadUi.js`; `createKeyboardUi` needs the deep path
+>    `@tn3270/canvas/dist/keyboardUi.js`.
+> 2. `@tn3270/frontend` is bound to `keypadView.js`; `KEYBOARD_3279` needs
+>    `@tn3270/frontend/dist/keyboard3279.js`.
+> 3. Every deep path needs its own entry in `static/index.html`'s import map **and** in
+>    `httpstatic.ts`'s serving list **and** in `packages/frontend`'s `exports` map.
+> 4. The GUI window loads modules through Electron rather than an import map, so it needs none of
+>    this -- but it DOES need `keyboard.html` to reference the built paths correctly.
 >
 > ### ONE NOTE ON PROCESS
 >
-> `git stash push <path>` followed by `git stash pop` **did not restore the file** — the pop
+> `git stash push <path>` followed by `git stash pop` **did not restore the file** -- the pop
 > reported success, the file stayed reverted, and the work was recoverable only because
 > `git stash show --stat` proved it was still in `stash@{0}`. Prefer `cp` to a temp file over
 > `stash` for a one-file bisect.
@@ -155,7 +149,7 @@ task ends green and committed, so stopping between any two is safe.**
 - Modify: `packages/frontend/src/index.ts`
 - Test: `packages/frontend/test/keyboard3279.test.ts`
 
-- [ ] **Step 1: Read the photograph before writing a line**
+- [x] **Step 1: Read the photograph before writing a line**
 
 ```bash
 cd ~/git/tn3270
@@ -192,7 +186,7 @@ keys above the arrows; the numpad's right-hand column. **A legend you cannot rea
 `label` set to what you CAN see, `action: undefined`, and a note in your report.** Do not guess
 3270 punctuation from a PC keyboard — the layouts differ (`¬` on 6 is the giveaway).
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -296,7 +290,7 @@ describe('KEYBOARD_3279', () => {
 });
 ```
 
-- [ ] **Step 3: Run it and watch it fail**
+- [x] **Step 3: Run it and watch it fail**
 
 ```bash
 cd ~/git/tn3270 && npx vitest run packages/frontend/test/keyboard3279.test.ts 2>&1 | tail -8
@@ -304,7 +298,7 @@ cd ~/git/tn3270 && npx vitest run packages/frontend/test/keyboard3279.test.ts 2>
 
 Expected: failure to resolve `../src/keyboard3279.js`.
 
-- [ ] **Step 4: Write the module**
+- [x] **Step 4: Write the module**
 
 Create `packages/frontend/src/keyboard3279.ts`. The header must carry the WHY, in this project's
 idiom — a reader needs to know why this is a second table:
@@ -407,7 +401,7 @@ already does it that way; copy that shape rather than fighting the compiler.
 For a dual-glyph cap the `action` must send the **unshifted** text, with `shiftLabel` carrying the
 other; Task 3's Shift logic is what substitutes it.
 
-- [ ] **Step 5: Export it**
+- [x] **Step 5: Export it**
 
 In `packages/frontend/src/index.ts`, beside the existing `KEYPAD_BLOCKS` export:
 
@@ -416,7 +410,7 @@ export { KEYBOARD_3279, KEYBOARD_REGIONS } from './keyboard3279.js';
 export type { KeyCap, KeyboardRegion } from './keyboard3279.js';
 ```
 
-- [ ] **Step 6: Build, typecheck, run**
+- [x] **Step 6: Build, typecheck, run**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | grep -iE "error TS" | head -5
@@ -427,7 +421,7 @@ npx vitest run packages/frontend/test/keyboard3279.test.ts 2>&1 | tail -6
 Expected: build and typecheck clean, every case green. **`npm run build` before believing any test
 result** — vitest does not typecheck, and this repo has recorded 15 green tests over a failed build.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/frontend/src/keyboard3279.ts packages/frontend/src/index.ts \
@@ -459,7 +453,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/frontend/src/keypadView.ts` (its header predicts this deletion)
 - Test: whatever asserts them
 
-- [ ] **Step 1: PROVE they are dead before deleting anything**
+- [x] **Step 1: PROVE they are dead before deleting anything**
 
 ```bash
 cd ~/git/tn3270
@@ -473,13 +467,13 @@ grep -rn "\.row\|\.col" packages/*/test/keypad*.ts
 justification is that `canvas/src/keypad.ts` was deleted in the keypad-window work and
 `keypadView.ts`'s header says these fields *"become dead only when that file is deleted"*.
 
-- [ ] **Step 2: Delete the fields and their docstrings**
+- [x] **Step 2: Delete the fields and their docstrings**
 
 Remove `row` and `col` from the `KeypadKey` interface and from all 48 entries (and from `pfRow`'s
 construction). Update `keypadView.ts`'s header: the section arguing the fields are *"LEFT ALONE…
 still live fields, not legacy ones"* is now false and must say they were deleted, with the reason.
 
-- [ ] **Step 3: Build, typecheck, full suite**
+- [x] **Step 3: Build, typecheck, full suite**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | grep -iE "error TS" | head -5
@@ -490,7 +484,7 @@ npx vitest run 2>&1 | tail -5
 Expected: clean, and the suite green. **The compiler is the real check here** — a surviving reader
 of either field is a type error, not a test failure.
 
-- [ ] **Step 4: Commit separately from the feature**
+- [x] **Step 4: Commit separately from the feature**
 
 ```bash
 git add -A packages/frontend
@@ -518,7 +512,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/canvas/src/index.ts`
 - Test: `packages/canvas/test/keyboardUi.test.ts`
 
-- [ ] **Step 1: Read the pattern you are copying**
+- [x] **Step 1: Read the pattern you are copying**
 
 ```bash
 cd ~/git/tn3270 && sed -n '55,140p' packages/canvas/src/keypadUi.ts
@@ -529,7 +523,7 @@ sed -n '1,30p' packages/canvas/test/keypadUi.test.ts
 `sendAction`). **Copy that shape.** It is what lets the keypad be tested on all 48 pairs with no
 jsdom, and jsdom is deliberately not a dependency here.
 
-- [ ] **Step 2: Write the failing tests — the Shift rules are the interesting half**
+- [x] **Step 2: Write the failing tests — the Shift rules are the interesting half**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -651,7 +645,7 @@ describe('createKeyboardUi', () => {
 });
 ```
 
-- [ ] **Step 3: Run them and watch them fail**
+- [x] **Step 3: Run them and watch them fail**
 
 ```bash
 cd ~/git/tn3270 && npx vitest run packages/canvas/test/keyboardUi.test.ts 2>&1 | tail -8
@@ -659,7 +653,7 @@ cd ~/git/tn3270 && npx vitest run packages/canvas/test/keyboardUi.test.ts 2>&1 |
 
 Expected: cannot resolve `../src/keyboardUi.js`.
 
-- [ ] **Step 4: Implement it**
+- [x] **Step 4: Implement it**
 
 `packages/canvas/src/keyboardUi.ts`, returning an object so the caller can read and reset the Shift
 state:
@@ -713,7 +707,7 @@ might be unreadable. Set `type="button"` explicitly — a bare `<button>` inside
 Identify the Shift caps by `name`, and **both left and right Shift must drive the same state**:
 neither is distinguishable to us.
 
-- [ ] **Step 5: Export, build, run**
+- [x] **Step 5: Export, build, run**
 
 Add to `packages/canvas/src/index.ts`:
 
@@ -728,7 +722,7 @@ npm run typecheck 2>&1 | grep -iE "error TS" | head -5
 npx vitest run packages/canvas/test/keyboardUi.test.ts 2>&1 | tail -6
 ```
 
-- [ ] **Step 6: MUTATION-PROVE the Shift rule that matters**
+- [x] **Step 6: MUTATION-PROVE the Shift rule that matters**
 
 ```bash
 cd ~/git/tn3270
@@ -741,7 +735,7 @@ npm run build >/dev/null 2>&1 && npx vitest run packages/canvas/test/keyboardUi.
 **Record the result in the commit.** A green test over the behaviour it claims to pin is a thing
 this repo has recorded twice.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/canvas/src/keyboardUi.ts packages/canvas/src/index.ts \
@@ -779,7 +773,7 @@ Co-Authored-By: SLAC AI"
 handler, so a kind that exists without its intercept **ends the gateway process** on the first
 browser keystroke. `protocol.ts` records a commit that violated exactly this.
 
-- [ ] **Step 1: Read the rule and the precedent**
+- [x] **Step 1: Read the rule and the precedent**
 
 ```bash
 cd ~/git/tn3270
@@ -791,7 +785,7 @@ grep -n -A8 "toggleKeypad" packages/frontend/src/actions.ts | head -20
 Note `REFUSED = ['quit', 'copy']` and `SWALLOWED = ['toggleKeypad', 'transferForm']`. **A kind in
 neither list is the bug that pair exists to catch.**
 
-- [ ] **Step 2: Add the union member**
+- [x] **Step 2: Add the union member**
 
 In `packages/frontend/src/keymap.ts`, beside `toggleKeypad`:
 
@@ -806,7 +800,7 @@ In `packages/frontend/src/keymap.ts`, beside `toggleKeypad`:
   | { kind: 'toggleKeyboard' }
 ```
 
-- [ ] **Step 3: Map `Ctrl-B` in both mappers**
+- [x] **Step 3: Map `Ctrl-B` in both mappers**
 
 `packages/canvas/src/keys.ts`, in `CTRL`:
 
@@ -854,13 +848,13 @@ documentation. **If it DOES surface, drop the `BINDING_INTENT` row entirely**: t
 in both DOM front ends via `canvas/src/keys.ts`, and a hint for a key that does nothing in the TUI
 is worse than an undocumented intent. Say which you found in your report.
 
-- [ ] **Step 4: Make `applyAction` throw on it**
+- [x] **Step 4: Make `applyAction` throw on it**
 
 In `packages/frontend/src/actions.ts`, extend the existing `quit`/`toggleKeypad` guard to cover
 `toggleKeyboard`, and extend the header comment that explains why those throw rather than being
 ignored.
 
-- [ ] **Step 5: The gateway's two halves, together**
+- [x] **Step 5: The gateway's two halves, together**
 
 `packages/web/src/protocol.ts`: **accept** the kind at decode. It is a legitimate browser action,
 intercepted client-side, so refusing it would refuse a chord the browser may press. Add a comment
@@ -877,7 +871,7 @@ pointing at the `main.ts` intercept as the other branch of the two-branch rule.
       if (msg.action.kind === 'toggleKeyboard') return;
 ```
 
-- [ ] **Step 6: Add it to `SWALLOWED`**
+- [x] **Step 6: Add it to `SWALLOWED`**
 
 In `packages/web/test/integration.test.ts`:
 
@@ -885,7 +879,7 @@ In `packages/web/test/integration.test.ts`:
 const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm', 'toggleKeyboard'];
 ```
 
-- [ ] **Step 7: Build, typecheck, full suite**
+- [x] **Step 7: Build, typecheck, full suite**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | grep -iE "error TS" | head -5
@@ -896,7 +890,7 @@ npx vitest run 2>&1 | tail -5
 Expected: green. A new union member will produce type errors anywhere a `switch` is exhaustive —
 **those are the compiler telling you where the kind must be handled**, not noise to cast away.
 
-- [ ] **Step 8: MUTATION-PROVE the intercept, because its failure is a dead process**
+- [x] **Step 8: MUTATION-PROVE the intercept, because its failure is a dead process**
 
 ```bash
 cd ~/git/tn3270
@@ -907,7 +901,7 @@ npx vitest run packages/web/test/integration.test.ts 2>&1 | tail -5
 # Restore, rebuild, confirm green.
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A packages/frontend packages/canvas packages/web
@@ -944,7 +938,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/gui/ui.css`
 - Test: `packages/web/test/keyboardOverlay.test.ts`
 
-- [ ] **Step 1: Read what you are generalising**
+- [x] **Step 1: Read what you are generalising**
 
 ```bash
 cd ~/git/tn3270
@@ -955,7 +949,7 @@ grep -n -A20 "createKeypadOverlay" packages/web/src/bridge.ts | head -30
 `createKeypadOverlay` already owns: hidden at start, lazy first build, idempotent hide, and the
 no-persistence rule for a reattaching client. **Keep all four.**
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Model it on `packages/web/test/keypadOverlay.test.ts` — same `fakeEl()` shape:
 
@@ -988,7 +982,7 @@ Model it on `packages/web/test/keypadOverlay.test.ts` — same `fakeEl()` shape:
   });
 ```
 
-- [ ] **Step 3: Implement it, then wire `bridge.ts`**
+- [x] **Step 3: Implement it, then wire `bridge.ts`**
 
 `bridgecore.ts` gains `readonly toggleKeyboard?: () => void;` with a comment matching
 `toggleKeypad`'s, and `sendAction` intercepts the kind client-side exactly as it does
@@ -1004,7 +998,7 @@ eagerly.
 `static/index.html` gains `<div id="keyboard-overlay" hidden></div>` **after** `<canvas id="screen">`,
 matching where `#transfer-overlay` sits.
 
-- [ ] **Step 4: The CSS, including the inert style**
+- [x] **Step 4: The CSS, including the inert style**
 
 In `packages/gui/ui.css`:
 
@@ -1074,7 +1068,7 @@ In `packages/gui/ui.css`:
 }
 ```
 
-- [ ] **Step 5: Build and run the browser harness**
+- [x] **Step 5: Build and run the browser harness**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | grep -iE "error TS" | head -5
@@ -1085,7 +1079,7 @@ pkill -9 -f "node_modules/electron" >/dev/null 2>&1; sleep 3; exit 0
 
 Expected: the existing phases still pass. This task adds no new phase; Task 7 does.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A packages/web packages/gui/ui.css
