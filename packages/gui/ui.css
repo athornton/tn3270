@@ -444,6 +444,23 @@ body.ui-surface {
   THE MAIN BLOCK KEEPS THE LARGEST TYPE because its caps are mostly ONE character (`Q`, `4`, `;`)
   and the one five-character legend it has -- `Shift` -- sits on a 1.25-unit cap with room.
 */
+/*
+  THE PF STRIP IS CENTRED OVER THE ALPHANUMERIC BLOCK, which is where the hardware has it.
+
+  The user's request, and the arithmetic is why it needs a rule rather than `justify-content`: the
+  PF strip is 12 key units and the main block is 15, sitting at an offset of its own because the
+  left special bar (2 units) precedes it. Centring the strip within the WHOLE band would put it
+  over the gap between the main block and the cursor cluster.
+
+  SO THE OFFSET IS COMPUTED FROM THE TABLE'S OWN GEOMETRY: the special bar's 2 units plus the gap,
+  then half the difference between the main block's 15 units and the strip's 12 -- i.e. 1.5 units.
+  Written as a `calc` on the pitch so it tracks a pitch change, and as `margin-left` rather than
+  padding so it cannot interact with the band's own gap.
+*/
+#keyboard-overlay #keyboard-pf {
+  margin-left: calc(2 * (var(--kb-pitch) + 2px) + 14px + 1.5 * (var(--kb-pitch) + 2px));
+}
+
 #keyboard-overlay #keyboard-main { font-size: 10px; }
 #keyboard-overlay #keyboard-pf { font-size: 7px; }
 #keyboard-overlay #keyboard-cursor { font-size: 7px; }
@@ -483,9 +500,39 @@ body.ui-surface {
 */
 #keyboard-overlay .keyboard-row > button {
   flex: 0 0 auto;
+  /*
+    `border-box`, AND ITS ABSENCE WAS THE REAL BUG BEHIND THREE ROUNDS OF CLIPPED LABELS.
+
+    A `<button>` defaults to `content-box`, so the 2px padding and the 1px border were ADDED to
+    the width: a 28px cap reported `clientWidth: 24` for text, and the three font reductions I
+    tried were all fighting 6px of chrome rather than a font that was too big. MEASURED by asking
+    the browser which caps overflowed (`scrollWidth > clientWidth`) instead of modelling it --
+    `PF13` at 7px measures 17.2px of text and still reported `37 > 24`.
+
+    THE LESSON, which is why this comment is long: I estimated a per-character ratio twice (0.56,
+    then 0.75) and the user caught the clipping on a screenshot both times. The browser knew the
+    answer all along and `browser-clicks.mjs` now asks it. The real ratio is 0.61 -- so BOTH
+    estimates bracketed it, and neither was the problem.
+  */
+  /*
+    `font: inherit` -- AND ITS ABSENCE IS WHY THREE ROUNDS OF FONT REDUCTION DID NOTHING.
+
+    A `<button>` does NOT inherit `font` from its parent: browsers apply their own UA default, and
+    Chromium's is 13.33px. The rule further up this file that sets `font: inherit` for buttons
+    lists `.ui-surface`, `#keypad-overlay` and `#transfer-overlay` -- and NOT this overlay, which
+    did not exist when it was written. So every cap rendered at 13.33px no matter what
+    `font-size` the region carried, and the per-region sizes below were dead declarations.
+
+    MEASURED, not deduced: the harness printed PF13's computed box as `font: 13.3333px` while the
+    stylesheet said 7px. Three screenshots, three font reductions, and the font was never the
+    thing being changed.
+  */
+  font: inherit;
+  box-sizing: border-box;
   width: calc(var(--kb-w, 1) * var(--kb-pitch));
   height: var(--kb-pitch);
-  padding: 0 2px;
+  padding: 0 1px;
+  border-width: 1px;
   /*
     `overflow: hidden` IS THE TRAP THAT HID THE FONT BUG, kept because a cap must not grow and
     destroy the layout the table describes -- but it fails SILENTLY, turning `PF13` into `PF1`

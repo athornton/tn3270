@@ -406,8 +406,21 @@ describe('KEYBOARD_3279', () => {
       */
       const PITCH_PX = 28;
       const PAD_PX = 4;
-      // Capitals and digits, measured from a real clip rather than from a prose average.
-      const CHAR_RATIO = 0.75;
+      /*
+        0.61, MEASURED IN A REAL BROWSER rather than estimated for the third time.
+
+        `browser-clicks.mjs` now prints `c.measureText('PF13').width / 4 / fontSize` every run, and
+        it is 0.61 at every size from 6px to 10px. My two estimates -- 0.56 then 0.75 -- BRACKETED
+        the true value, and neither was the reason labels clipped: the caps were rendering at the
+        UA's 13.33px default because a `<button>` does not inherit `font` and this overlay was
+        missing from the rule that sets `font: inherit`. Three font reductions changed nothing.
+
+        SO THIS CONSTANT IS NOW CALIBRATED, AND IT IS STILL THE WEAKER CHECK. The real guard is in
+        the harness, which asks the browser `scrollWidth > clientWidth` per cap -- no model, no
+        ratio, no font metric. This test's value is that it fails in CI without a browser when a
+        table entry is obviously too long.
+      */
+      const CHAR_RATIO = 0.61;
       const FONT_PX = {
         pf: 7, 'special-left': 7, main: 10, cursor: 7, numpad: 8,
       };

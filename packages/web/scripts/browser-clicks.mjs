@@ -1225,6 +1225,49 @@ async function runTransferPhase(url) {
         and a flex row ignored that, packing it flush left so the inverted-T read as an L. Measured
         on the CAPS rather than on the row, because the cap position is what an operator sees.
       */
+      /*
+        MEASURE REAL TEXT, BECAUSE TWO ESTIMATES WERE BOTH WRONG.
+
+        `keyboard3279.test.ts` models label width as `chars * ratio * fontSize`, and I guessed that
+        ratio twice -- 0.56, then 0.75 -- and the user's screenshots showed clipping both times.
+        A unit test cannot do better: there is no font in vitest. THIS harness has a real browser,
+        so it reports what the font actually measures, and the unit test's constant is calibrated
+        from this number rather than from an average for prose.
+
+        PRINTED EVERY RUN, pass or fail. It is diagnostic rather than an assertion: the assertion
+        is `overflowing` below, which asks the browser directly which caps are clipped.
+      */
+      const metrics = await cdp.eval(`(() => {
+        const c = document.createElement('canvas').getContext('2d');
+        const out = [];
+        for (const f of [6, 7, 8, 10]) {
+          c.font = f + 'px system-ui, sans-serif';
+          out.push(f + 'px: PF13=' + c.measureText('PF13').width.toFixed(1)
+            + ' per-char=' + (c.measureText('PF13').width / 4 / f).toFixed(2));
+        }
+        return out.join('  ');
+      })()`);
+
+      /*
+        AND THE REAL ASSERTION: ASK THE BROWSER WHICH CAPS ARE CLIPPED.
+
+        `scrollWidth > clientWidth` is how an element reports that `overflow: hidden` is eating
+        its content -- which is exactly the silent failure the user kept catching on screenshots
+        and no test could see. This needs no font metric, no ratio and no estimate: it is the
+        browser saying "this did not fit".
+      */
+      const overflowing = await cdp.eval(`(() => {
+        const bad = [];
+        for (const b of document.querySelectorAll('#keyboard-overlay button[data-key]')) {
+          if (b.scrollWidth > b.clientWidth + 1) {
+            bad.push(b.getAttribute('data-key') + ' (' + b.scrollWidth + '>' + b.clientWidth + ')');
+          }
+        }
+        return bad.join(', ');
+      })()`);
+
+
+      const pfBox = await boxOf('keyboard-pf');
       const barBox = await boxOf('keyboard-special-left');
       const upBox = await cdp.eval(
         '(() => { const el = document.querySelector('
@@ -1238,13 +1281,19 @@ async function runTransferPhase(url) {
         + ' return { x: Math.round(r.x), y: Math.round(r.y) }; })()');
 
       const barOnLeft = barBox !== null && wideMain !== null && barBox.x < wideMain.x;
+      const pfCentred = pfBox !== null && wideMain !== null
+        && Math.abs((pfBox.x + pfBox.w / 2) - (wideMain.x + wideMain.w / 2)) <= 20;
       // WITHIN 3px, not exact: sub-pixel rounding on a calc() is normal and not a defect.
       const arrowsAligned = upBox !== null && downBox !== null
         && Math.abs(upBox.x - downBox.x) <= 3 && upBox.y < downBox.y;
 
       const sideBySide = wideMain !== null && wideNum !== null
         && wideNum.x > wideMain.x && Math.abs(wideNum.y - wideMain.y) < 20
-        && barOnLeft && arrowsAligned;
+        && barOnLeft && arrowsAligned && overflowing === ''
+        // THE PF STRIP IS CENTRED OVER THE MAIN BLOCK, the user's other request. Measured on
+        // CENTRES rather than edges, which is what "centred" means, and within 20px because the
+        // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
+        && pfCentred;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1254,7 +1303,9 @@ async function runTransferPhase(url) {
           + `(x ${wideMain.x} -> ${wideNum.x}, same row), at 520px it reflows below `
           + `(y ${narrowMain.y} -> ${narrowNum.y}); the special bar is left of it `
           + `(x ${barBox?.x} < ${wideMain.x}) and the arrows form an inverted T `
-          + `(up x ${upBox?.x}, down x ${downBox?.x})`);
+          + `(up x ${upBox?.x}, down x ${downBox?.x}); the PF strip is centred over it `
+          + `(centres ${Math.round((pfBox?.x ?? 0) + (pfBox?.w ?? 0) / 2)} vs `
+          + `${Math.round(wideMain.x + wideMain.w / 2)}); NO cap is clipped`);
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1262,7 +1313,9 @@ async function runTransferPhase(url) {
           + `wide main: ${JSON.stringify(wideMain)}, wide numpad: ${JSON.stringify(wideNum)}, `
           + `narrow main: ${JSON.stringify(narrowMain)}, narrow numpad: ${JSON.stringify(narrowNum)}, `
           + `special bar: ${JSON.stringify(barBox)} (must be LEFT of main), `
-          + `up: ${JSON.stringify(upBox)}, down: ${JSON.stringify(downBox)} (x must match)`);
+          + `up: ${JSON.stringify(upBox)}, down: ${JSON.stringify(downBox)} (x must match), `
+          + `pf: ${JSON.stringify(pfBox)} (centre must match main's), `
+          + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}. ${metrics}`);
       }
     }
 
