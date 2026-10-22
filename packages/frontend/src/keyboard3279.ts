@@ -271,11 +271,30 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   key('Attn', { kind: 'attn' }, 'special-left', 0, 0, 1, 'Attention'),
   key('Clear', { kind: 'clear' }, 'special-left', 0, 1, 1, 'Clear'),
   dead('Cursr Sel', 'special-left', 1, 0, 1, 'Cursor Select (not implemented: light-pen work)'),
+  // CONFIRMED BLANK, not unreadable -- see the note on the bottom pair below.
   dead('', 'special-left', 1, 1, 1, 'blank'),
   dead('Esc', 'special-left', 2, 0, 1, 'Escape (not a 3270 key)'),
   dead('Print Screen', 'special-left', 2, 1, 1, 'Print Screen (not a 3270 key)'),
   dead('Scroll Lock', 'special-left', 3, 0, 1, 'Scroll Lock (not a 3270 key)'),
   dead('Pause', 'special-left', 3, 1, 1, 'Pause (not a 3270 key)'),
+  /*
+    THE BOTTOM PAIR: `Xfer` ON ONE BLANK CAP, THE OTHER LEFT BLANK.
+
+    **THE BLANKNESS IS CONFIRMED, NOT MERELY UNREAD -- 2026-10-22.** The user could not read these
+    and asked; a 13x crop with contrast and an unsharp mask shows BOTH caps with NO INK AT ALL,
+    while `Scroll Lock` and `Pause` directly above them remain legible under the same treatment.
+    Three caps in this bar are blank (this pair and row 1's second), and that is the UNIT, not the
+    photograph: the 5271 shipped with unassigned caps here.
+
+    **THAT DISTINCTION MATTERS FOR WHAT A FUTURE SOURCE COULD SAY.** An `unread` cap means "we
+    failed"; a blank cap means "there is nothing to read", so a sharper photograph of THIS keyboard
+    cannot change it -- only a different unit, or a key-assignment manual, could. The IBM 3270 PC
+    photograph cannot corroborate either way: its left bar sits at a steep angle in deep shadow.
+
+    `Xfer` HERE IS THE USER'S OWN SUGGESTION -- "since there are two unlabelled keys on the left
+    hand special-key bar, one of those could get the `Xfer` label" -- and there is precedent:
+    `KEYPAD_KEYS` already carries `Xfer` as a deliberate non-3270 addition.
+  */
   key('Xfer', { kind: 'transferForm' }, 'special-left', 4, 0, 1, 'File transfer'),
   dead('', 'special-left', 4, 1, 1, 'blank'),
 

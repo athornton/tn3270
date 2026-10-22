@@ -234,6 +234,28 @@ describe('KEYBOARD_3279', () => {
   });
 
   describe('the transcription audit, so doubt survives in the test suite', () => {
+    it('DISTINGUISHES A BLANK CAP FROM AN UNREAD ONE, which are different claims', () => {
+      /*
+        `blank` MEANS "THERE IS NOTHING TO READ"; `unread` MEANT "WE FAILED TO READ IT". The 5271
+        shipped with three unassigned caps in its left special bar -- confirmed 2026-10-22 under a
+        13x crop with contrast and an unsharp mask, which shows no ink at all on them while
+        `Scroll Lock` and `Pause` above stay legible under the same treatment.
+
+        THE DISTINCTION DECIDES WHAT A FUTURE SOURCE COULD SETTLE. A sharper photograph of THIS
+        keyboard cannot change a blank cap; only a different unit or a key-assignment manual
+        could. So the names must not be conflated, and `unread` must never be used for a cap that
+        is simply empty.
+      */
+      const blanks = KEYBOARD_3279.filter((k) => k.name === 'blank');
+      expect(blanks.length, 'the 5271 has unassigned caps, and they are drawn')
+        .toBeGreaterThanOrEqual(2);
+      for (const cap of blanks) {
+        expect(cap.label, 'a blank cap carries no legend').toBe('');
+        expect(cap.action, 'a blank cap does nothing').toBeUndefined();
+        expect(cap.name, 'a blank cap is not an UNREAD one').not.toMatch(/unread/);
+      }
+    });
+
     it('HAS NO UNREADABLE CAPS LEFT, and the count may never grow', () => {
       /*
         WENT 5 -> 2 -> 0 ON 2026-10-22, and the route is the lesson.
