@@ -1340,6 +1340,47 @@ async function runTransferPhase(url) {
       const staggered = cA !== null && cS !== null && cZ !== null
         && Math.abs(cZ - (cA + cS) / 2) <= 2;
 
+      /*
+        THE `{` CAP MUST BE CLICKABLE, which is what the Return key's notch buys.
+
+        The user spotted that the two-row Return overlapped it: the home row's content runs 0.25
+        units further right than the QWERTY row's, so a rectangular tall cap covers 7px of `{`.
+        `clip-path` cuts the notch -- and a clip-path is INVISIBLE to a bounding-box measurement,
+        so this asks `elementFromPoint` instead: who does the browser say is at the `{`'s own
+        right-hand edge?
+
+        THAT IS THE SAME TECHNIQUE THE `viewport` PHASE USES for the transfer form's Start button,
+        and for the same reason: a box that merely EXISTS proves nothing about whether a click
+        lands on it.
+      */
+      /*
+        GEOMETRY, NOT A HIT TEST -- AND THE HIT TEST WAS THE WRONG TOOL, MEASURED.
+
+        This check first used `elementFromPoint` at the brace cap's right edge, and a mutant that
+        removed the `clip-path` still PASSED: hit-testing HONOURS a clip-path for pointer events,
+        so the notched and un-notched cases both reported the brace. The check proved the clip
+        worked by assuming it worked -- which is the same shape of mistake as the 2px tolerance
+        that let the numpad defect through.
+
+        SO THIS COMPARES BOXES: the tall Return's left edge must not come left of the brace cap's
+        right edge. That is exactly the overlap the user saw, it is true or false regardless of any
+        clip, and a clip-path cannot hide it. The notch then makes the VISIBLE key match.
+      */
+      const braceHitTest = await cdp.eval(`(() => {
+        const b = document.querySelector('#keyboard-overlay button[data-key="} {"]');
+        if (b === null) return 'no brace cap';
+        const tall = document.querySelector('#keyboard-main button[style*="--kb-h"]');
+        if (tall === null) return 'no tall cap';
+        const r = b.getBoundingClientRect();
+        const t = tall.getBoundingClientRect();
+        const overlap = Math.round(r.right - t.left);
+        return overlap > 0
+          ? ('OVERLAPS by ' + overlap + 'px; brace right=' + Math.round(r.right)
+             + ' tall left=' + Math.round(t.left) + ' tall width=' + Math.round(t.width))
+          : 'clear';
+      })()`);
+      const braceClickable = braceHitTest === 'clear';
+
       const pfBox = await boxOf('keyboard-pf');
       const barBox = await boxOf('keyboard-special-left');
       const upBox = await cdp.eval(
@@ -1366,7 +1407,7 @@ async function runTransferPhase(url) {
         // THE PF STRIP IS CENTRED OVER THE MAIN BLOCK, the user's other request. Measured on
         // CENTRES rather than edges, which is what "centred" means, and within 20px because the
         // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
-        && pfCentred && numpadAligned && rectangle && staggered;
+        && pfCentred && numpadAligned && rectangle && staggered && braceClickable;
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1381,7 +1422,8 @@ async function runTransferPhase(url) {
           + `${Math.round(wideMain.x + wideMain.w / 2)}); the numpad lines up `
           + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
           + `the main block is a RECTANGLE (row right edges ${edges.join(', ')}) with Z centred `
-          + `between A and S (${cZ} vs ${(cA + cS) / 2}); NO cap is clipped`);
+          + `between A and S (${cZ} vs ${(cA + cS) / 2}); the notched Return leaves { clickable; `
+          + 'NO cap is clipped');
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1394,6 +1436,8 @@ async function runTransferPhase(url) {
           + `numpad x: 3=${xThree} .=${xPeriod} -=${xMinus} Ent=${xEnter} (columns must align), `
           + `main row right edges: ${edges.join(', ')} (must be equal), `
           + `A=${cA} S=${cS} Z=${cZ} (Z must centre between A and S), `
+          + `at the { cap's right edge the browser finds: ${braceHitTest} (must be the { cap, `
+          + 'not the Return key), '
           + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}. ${metrics}`);
       }
     }

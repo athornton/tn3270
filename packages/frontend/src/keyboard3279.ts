@@ -460,7 +460,23 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   {
     label: '↵',
     action: { kind: 'newline' },
-    region: 'main', row: 1, x: 13.5, width: 1.5, height: 2,
+    /*
+      x=13.75 AND 1.25 UNITS WIDE, WHICH IS GEOMETRY RATHER THAN DECORATION.
+
+      It was x=13.5, width 1.5 -- and that OVERLAPPED the `{` cap below it by 0.25 units, because
+      the home row's content runs further right than the QWERTY row's (13.75 against 13.5, Caps
+      being 1.75 where Tab is 1.5). The user saw the `{` lose its border.
+
+      A `clip-path` notch in `ui.css` was the first fix and it was NOT ENOUGH: a clip changes what
+      is PAINTED and not what the box covers, so the Return still sat on top of the `{`. The
+      harness said `OVERLAPS by 6px` once it compared boxes instead of hit-testing.
+
+      STARTING AT 13.75 REMOVES THE OVERLAP AND KEEPS THE RECTANGLE: the home row is 13.75 + 1.25
+      = 15, and the QWERTY row is 13.5 of content, a 0.25-unit gap, then the same 1.25 = 15. That
+      gap is real on the hardware too -- the QWERTY row's punctuation does not reach as far right
+      as the home row's, which is exactly why the key is L-shaped.
+    */
+    region: 'main', row: 1, x: 13.75, width: 1.25, height: 2,
     name: 'Newline',
   },
 
@@ -554,9 +570,52 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   key('Fld\nMrk\nPA2', { kind: 'fieldMark' }, 'cursor', 0, 1, 1, 'Field Mark'),
   key('PA3', { kind: 'pa', n: 3 }, 'cursor', 0, 2, 1, 'PA3'),
 
-  key('←|', { kind: 'backTab' }, 'cursor', 1, 0, 1, 'Back Tab (cursor cluster)'),
-  key('⌂', { kind: 'home' }, 'cursor', 1, 1, 1, 'Home'),
-  dead('⌫', 'cursor', 1, 2, 1, 'Delete to end of line (not implemented)'),
+  /*
+    REVERSE TAB: `U+21E4 LEFTWARDS ARROW TO BAR`, AND THE DIRECTION WAS MIRRORED BEFORE.
+
+    I had `←|` -- bar on the RIGHT, as if the arrow left a tab stop. The user caught it and the
+    reference photograph is unambiguous: the BAR IS AT THE LEFT with the arrowhead terminating
+    into it, because you are going back TO a tab stop, not back FROM one. The semantics were
+    backwards, not just the drawing.
+  */
+  key('⇤', { kind: 'backTab' }, 'cursor', 1, 0, 1, 'Back Tab (cursor cluster)'),
+  /*
+    `U+21A5 UPWARDS ARROW FROM BAR` FOR INSERT -- AND THIS CAP WAS MISIDENTIFIED AS `Home`.
+
+    The glyph is a lowercase `a` beneath a WIDE CARET, which the user reads as Insert; the caret is
+    the classic insertion mark and the `a` is the character being inserted. I had drawn it as a
+    house and called it Home, which was a guess from the shape alone.
+
+    `toggleInsert` IS AN ACTION WE HAVE, so this becomes a working key rather than scenery -- the
+    compact keypad carries it as `Ins`.
+
+    THE GLYPH IS THE USER'S SUGGESTION AND IT IS NOT THE HARDWARE'S: there is no Unicode point for
+    an `a` under a caret, so this is the closest available stand-in. Recorded as an approximation
+    rather than a transcription -- an SVG of the real mark is the someday fix.
+  */
+  key('↥', { kind: 'toggleInsert' }, 'cursor', 1, 1, 1, 'Insert (approximate glyph)'),
+  /*
+    `U+219B RIGHTWARDS ARROW WITH STROKE` FOR DELETE CHARACTER, SHIFTED TO TWO OF THEM.
+
+    The cap is a lowercase `a` with a squiggle struck diagonally up-and-right, and its shifted
+    legend is visibly LONGER -- the user reads it as the squiggle running through three `a`s, i.e.
+    the same operation extended to the end of the line.
+
+    I HAD `U+232B ERASE TO THE LEFT`, WHICH WAS WRONG IN MEANING: the user points out the stroke
+    goes up and to the RIGHT, so this deletes forward, not backward. `delete` is exactly that
+    action and we have it, so the unshifted key is LIVE; the shifted form is
+    delete-to-end-of-line, which we do NOT have, and the doubled glyph records it the way the
+    doubled arrows record start/end of line on the cursor keys.
+
+    BOTH GLYPHS ARE APPROXIMATIONS, not transcriptions -- no Unicode point draws an `a` with a
+    diagonal strike. Doubling for the shifted form follows the hardware's own idiom and this
+    table's existing one.
+  */
+  {
+    label: '↛', shiftLabel: '↛↛', action: { kind: 'delete' },
+    region: 'cursor', row: 1, x: 2, width: 1,
+    name: 'Delete character (shifted: delete to end of line, not implemented)',
+  },
 
   // THE DIAMOND. `up` is centred on its own row; `left`, the centre cap and `right` share the
   // next; `down` is centred below. The row offsets come from the table and `keyboardUi.ts`
@@ -566,13 +625,13 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     region: 'cursor', row: 2, x: 1, width: 1, name: 'Cursor up',
   },
   {
-    label: '←', shiftLabel: '⇤', action: { kind: 'left' },
+    label: '←', shiftLabel: '↞', action: { kind: 'left' },
     region: 'cursor', row: 3, x: 0, width: 1,
     name: 'Cursor left (shifted: start of line, not implemented)',
   },
   dead('↖', 'cursor', 3, 1, 1, 'diagonal arrow, function unidentified'),
   {
-    label: '→', shiftLabel: '⇥', action: { kind: 'right' },
+    label: '→', shiftLabel: '↠', action: { kind: 'right' },
     region: 'cursor', row: 3, x: 2, width: 1,
     name: 'Cursor right (shifted: end of line, not implemented)',
   },
