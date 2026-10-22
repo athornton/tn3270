@@ -289,6 +289,25 @@ export function buildServer(args: WebArgs) {
        */
       if (msg.action.kind === 'toggleKeypad') return;
       /*
+        THE FULL KEYBOARD, 2026-10-22, AND THIS LINE IS NOT OPTIONAL.
+
+        `applyAction` THROWS on `toggleKeyboard` (`frontend/src/actions.ts`, the fifth guard of
+        that shape), and this call is OUTSIDE ANY TRY in a socket 'data' handler -- so without
+        this return, the first `Ctrl-B` from any browser ends the gateway PROCESS rather than
+        failing anything. MEASURED on the way in: `integration.test.ts` reported
+        `no reply to the toggleKeyboard action` before this line existed.
+
+        This is the interception branch of `protocol.ts`'s two-branch rule; the decode acceptance
+        is the other, and both landed in the same commit -- which is what that rule demands and
+        what `toggleKeypad` once spent a commit violating.
+
+        The log line above still runs, which is what `browser-keys.mjs` reads: that harness
+        asserts this kind's ABSENCE from the log, since both DOM front ends intercept the chord
+        client-side and it should never cross the socket at all. An entry appearing here would
+        mean the client-side interception had broken.
+      */
+      if (msg.action.kind === 'toggleKeyboard') return;
+      /*
         `transferForm` NOW NEEDS AN INTERCEPTION HERE, AND THIS LINE IS IT -- 2026-10-06. The note
         that stood here said the kind "NEEDS NO INTERCEPTION" because `protocol.ts` rejected it at
         decode. That rejection is gone, since socket-carried file I/O removed the reason for it, so

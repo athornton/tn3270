@@ -228,6 +228,17 @@ export function decodeClientMessage(text: string): ClientMessage {
         'copy is not accepted from a client: the gateway would extract the text onto its own '
         + "machine, not yours");
     }
+    /*
+      `toggleKeyboard` IS ACCEPTED TOO, 2026-10-22, AND BY THE SAME RULE -- stated rather than left
+      to the default, because "accepted because nothing refuses it" is how a kind ends up in
+      NEITHER branch of this file's two-branch rule.
+
+      It toggles the SENDER's own display and reaches no `Session`, so there is nothing here to
+      bound. `applyAction` throws on it, so the OTHER branch was owed and was taken in the same
+      commit: `main.ts` returns before `applyAction` for this kind. Without that return the first
+      `Ctrl-B` from a browser would have ended the gateway process -- and it did, under
+      `integration.test.ts`, before the line was added.
+    */
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
     // already threw on it and nothing in `main.ts` intercepted it; now `main.ts` handles it and

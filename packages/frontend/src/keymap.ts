@@ -84,6 +84,21 @@ export type Action =
   // NOT because a keypad BUTTON needs it: `KEYPAD_KEYS` must contain neither this nor
   // `quit`, since a drawn button for either would be a button whose only effect is to throw.
   | { kind: 'toggleKeypad' }
+  // The front end's own FULL 122-KEY KEYBOARD surface, `Ctrl-B`, added 2026-10-22. `applyAction`
+  // throws on it exactly as it does on `toggleKeypad` and `quit`: what a surface looks like is the
+  // front end's business. It lives in this union so the chord, the GUI's menu item and the
+  // browser's key mapper can all name it the way every other action is named.
+  //
+  // TWO OF THE FOUR FRONT ENDS IMPLEMENT IT, and that asymmetry is the design rather than an
+  // omission: the TUI renders `KEYPAD_KEYS` as a 29-column name-and-chord LIST because it cannot
+  // draw a keyboard -- c3270's own keypad is 78 columns wide and that front end refuses to draw
+  // below 24x80 -- so `buildTable` below deliberately does NOT map `0x02`. The CLI has no
+  // interactive surface at all.
+  //
+  // NEITHER `KEYPAD_KEYS` NOR `KEYBOARD_3279` MAY CONTAIN IT, for a sharper version of the reason
+  // `toggleKeypad` gives: a drawn button for this would be a button that toggles the surface it is
+  // drawn on. Both tables' tests pin that.
+  | { kind: 'toggleKeyboard' }
   // Opens the front end's file-transfer dialog, and `applyAction` throws on it for the same
   // reason it throws on `toggleKeypad`: what a dialog looks like is the front end's business.
   //

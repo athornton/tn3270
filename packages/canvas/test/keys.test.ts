@@ -99,6 +99,10 @@ describe('actionForKey', () => {
       'Ctrl-D': ev({ key: 'd', code: 'KeyD', ctrlKey: true }),
       'Ctrl-F': ev({ key: 'f', code: 'KeyF', ctrlKey: true }),
       'Ctrl-K': ev({ key: 'k', code: 'KeyK', ctrlKey: true }),
+      // Ctrl-B, the full keyboard, 2026-10-22. Its BINDING_INTENT row gives NO `terminal`
+      // sequence, because the TUI has no such surface -- but this mapper is a CANVAS front end's
+      // and must name it, which is exactly what this loop is for.
+      'Ctrl-B': ev({ key: 'b', code: 'KeyB', ctrlKey: true }),
       // Ctrl-T joins them: the GUI now HAS the dialog, so the exemption below is gone and this
       // chord is checked against `BINDING_INTENT` like every other.
       'Ctrl-T': ev({ key: 't', code: 'KeyT', ctrlKey: true }),

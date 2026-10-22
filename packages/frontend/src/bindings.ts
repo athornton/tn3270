@@ -108,6 +108,18 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
       + 'front end owns its own display',
   },
   {
+    key: 'Ctrl-B', action: { kind: 'toggleKeyboard' },
+    note: 'opens the FULL 122-key 3279 keyboard -- THE CANVAS FRONT ENDS ONLY, which is why this '
+      + 'row gives NO `terminal` sequence. The TUI renders the keypad as a LIST because it '
+      + 'cannot draw a keyboard inside 24x80, so `buildTable` deliberately leaves 0x02 unmapped '
+      + 'and this entry documents an intent two of the four front ends honour. Stating a '
+      + 'sequence here would be a lie the table\'s own test catches, since that test demands '
+      + 'every `terminal` resolve in the terminal keymap. NOT c3270\'s either: it binds no such '
+      + 'key in either keymap, so the spelling is ours. Invisible to the TUI overlay, which '
+      + 'looks chords up BY ACTION from KEYPAD_KEYS -- a table this kind may never appear in, '
+      + 'since a button for it would toggle the surface it is drawn on',
+  },
+  {
     key: 'Ctrl-T', action: { kind: 'transferForm' }, terminal: '\x14',
     note: 'opens the IND$FILE transfer form (TUI). NOT c3270\'s -- it binds NO transfer key at '
       + 'all, in either half of Common/fb-c3270, so there is no reference spelling to match and '

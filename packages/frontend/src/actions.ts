@@ -67,6 +67,16 @@ export function applyAction(session: Session, action: Action): void {
   if (action.kind === 'copy') {
     throw new Error('applyAction does not handle copy: the front end owns its own clipboard');
   }
+  // THE FIFTH OF THE SAME SHAPE, 2026-10-22, and outside the `try` for the reason the four above
+  // give. The full 122-key keyboard is a surface, and which surface -- an Electron window or an
+  // in-pane overlay -- is the front end's business, exactly as the keypad's is. Two of the four
+  // front ends have one at all; the TUI cannot draw a keyboard inside 24x80 and the CLI has no
+  // interactive surface.
+  if (action.kind === 'toggleKeyboard') {
+    throw new Error(
+      'applyAction does not handle toggleKeyboard: the front end owns its own display',
+    );
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

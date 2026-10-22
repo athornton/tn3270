@@ -159,7 +159,7 @@ const REFUSED: readonly string[] = ['quit', 'copy'];
  * `tab` sent after every kind must still come back as a frame, and that is the assertion that
  * `applyAction` was never reached -- the throw would have taken the socket handler with it.
  */
-const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm'];
+const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm', 'toggleKeyboard'];
 
 /**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop

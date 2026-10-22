@@ -346,6 +346,21 @@ describe('the keypad-era actions', () => {
     expect(() => applyAction(session, { kind: 'toggleKeypad' })).toThrow(/does not handle toggleKeypad/);
   });
 
+  it('REFUSES toggleKeyboard, the full keyboard being the front end s own surface too', () => {
+    // The FIFTH of the same shape, 2026-10-22. Same reasoning as `toggleKeypad`: two of the four
+    // front ends have such a surface at all -- the TUI cannot draw a keyboard inside 24x80 -- so a
+    // front end that bound Ctrl-B and forgot to intercept it must get an error rather than a dead
+    // chord, since the switch treats an unrecognized kind as a no-op.
+    //
+    // `/does not handle toggleKeyboard/` rather than `/toggleKeyboard/`, for the reason MEASURED
+    // on the `toggleKeypad` twin above: the loose pattern also matches Node's own
+    // `TypeError: ...toggleKeyboard is not a function`, so it would pass against an accidental
+    // crash as well as against the deliberate refusal.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'toggleKeyboard' }))
+      .toThrow(/does not handle toggleKeyboard/);
+  });
+
   it('REFUSES transferForm, because a dialog is the front end s own business', () => {
     // The third of the same shape, and the first that opens a DIALOG rather than toggling a
     // display: a transfer needs a local path, a direction and a host file name, so unlike
@@ -560,6 +575,10 @@ const ROWS: readonly Row[] = [
   // happens before anything reads it.
   { action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 1 } },
     throws: /does not handle copy/ },
+  // FIVE now, 2026-10-22. `toggleKeyboard` is the full 122-key surface, and it is the front end's
+  // business for exactly the reason `toggleKeypad` is -- with the sharper point that only two of
+  // the four front ends have such a surface at all.
+  { action: { kind: 'toggleKeyboard' }, throws: /does not handle toggleKeyboard/ },
 ];
 
 /**
@@ -639,9 +658,9 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 27 members, 23 switch cases plus the 4 guards --
-    // `copy` is the fourth guard, added with the GUI's clipboard support; `transferForm` was the
-    // third, added with the TUI's transfer form.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(27);
+    // a decision someone has to write down. 28 members, 23 switch cases plus the 5 guards --
+    // `toggleKeyboard` is the fifth, added 2026-10-22 with the full keyboard; `copy` was the
+    // fourth, with the GUI's clipboard; `transferForm` the third, with the TUI's transfer form.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(28);
   });
 });

@@ -77,6 +77,12 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   d: { kind: 'dup' },
   f: { kind: 'fieldMark' },
   k: { kind: 'toggleKeypad' },
+  // The full 122-key keyboard, 2026-10-22. Free in both mappers -- the taken chords are
+  // C R U ] A D F K T -- and claiming it also suppresses Firefox's bookmarks sidebar, which is
+  // correct: `renderer.ts` calls `preventDefault` only for keys we claimed, so claiming it is
+  // what makes it ours. Intercepted CLIENT-SIDE in both DOM front ends, exactly as `toggleKeypad`
+  // is, and the gateway returns before `applyAction` for it -- see `web/src/main.ts`.
+  b: { kind: 'toggleKeyboard' },
   /**
    * Ctrl-T, the transfer form -- `BINDING_INTENT`'s own spelling, now that the GUI has a dialog.
    *
