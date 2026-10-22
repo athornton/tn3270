@@ -234,24 +234,26 @@ describe('KEYBOARD_3279', () => {
   });
 
   describe('the transcription audit, so doubt survives in the test suite', () => {
-    it('keeps the TWO still-unreadable caps inert and named, rather than guessed at', () => {
+    it('HAS NO UNREADABLE CAPS LEFT, and the count may never grow', () => {
       /*
-        WAS FIVE UNTIL 2026-10-22; THE COUNT SHRINKS AS SOURCES ARRIVE, and shrinking it is the
-        only legitimate direction. Three of the five were the numeric pad's right-hand column,
-        resolved from a harder zoom on the ORIGINAL photograph -- the pixels were always there.
+        WENT 5 -> 2 -> 0 ON 2026-10-22, and the route is the lesson.
 
-        The two that remain flank `Home` in the cursor cluster. A sharp photograph of an IBM 3270
-        PC with the SAME layout could not settle them either: at full resolution those two caps
-        are still a smudge.
+        Five caps started inert because I could not resolve them. Three were the numeric pad's
+        right-hand column, read from a harder zoom on the ORIGINAL photograph. The last two flanked
+        `Home` and survived THREE photographs -- a 4978 with different furniture, and an IBM 3270 PC
+        with the same layout where they are a smudge at full resolution -- then fell to a 10x crop
+        of the FIRST image with contrast and an unsharp mask. They are the standard 3270 back-tab
+        and field-tab glyphs.
 
-        They stay inert until a third source turns up. GUESSING a legend on historical hardware is
-        the failure this file's header exists to prevent.
+        **THE PIXELS WERE ALWAYS SUFFICIENT; THE PROCESSING WAS NOT.** Exhaust the image you have
+        before asking for another one.
+
+        THIS TEST NOW GUARDS A DIFFERENT DIRECTION: zero is the floor, and an `unread` cap
+        reappearing means someone marked a key unreadable rather than reading it. If that is
+        genuinely necessary, say why at the entry and change this test deliberately.
       */
       const unread = KEYBOARD_3279.filter((k) => /unread/.test(k.name));
-      expect(unread, 'two caps remain unreadable').toHaveLength(2);
-      for (const cap of unread) {
-        expect(cap.action, `${cap.name} must stay inert`).toBeUndefined();
-      }
+      expect(unread.map((k) => k.name), 'every cap has been read').toEqual([]);
     });
 
     it('DOES NOT INVENT a legend for the blank 0 cap -- it is inferred, and says so', () => {

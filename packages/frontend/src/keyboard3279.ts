@@ -75,10 +75,20 @@ import type { Action } from './keymap.js';
  * resolvable all along -- **I gave up on the zoom too early**, which is the lesson that belongs
  * next to them.
  *
- * **STILL UNRESOLVED: TWO caps, both flanking `Home` in the cursor cluster.** Neither the 4978
- * (different furniture) nor the 3270 PC (same layout, but those two caps are a smudge at full
- * resolution) settles them. They remain INERT with `unread` in their names, which a test enforces
- * -- and that test's count is written to SHRINK as sources arrive, never to grow.
+ * ## EVERY CAP IS NOW READ -- ZERO UNREADABLE, AND THE ROUTE IS THE LESSON
+ *
+ * The last two flanked `Home` and had survived all three photographs. They fell to a **10x crop of
+ * the FIRST image with contrast and an unsharp mask**: an arrow pointing left into a bar and one
+ * pointing right into a bar, the standard 3270 back-tab and field-tab glyphs, flanking Home
+ * exactly as the cluster's logic predicts.
+ *
+ * **THE PIXELS WERE ALWAYS SUFFICIENT; THE PROCESSING WAS NOT.** Plain LANCZOS upscaling left them
+ * a smudge through two rounds of "still unreadable", while sharpening resolved them in one. The
+ * rule for next time: **exhaust the image you have before asking for another one.**
+ *
+ * Unreadable caps went 5 -> 2 -> 0 in a day, and the test that tracked the count is now inverted:
+ * zero is the FLOOR, and an `unread` cap reappearing means a key was marked unreadable rather
+ * than read.
  *
  * The 4978 also has keys this layout lacks (a `~`/`\` cap, a bullet over plus-minus,
  * `LINE DUP`/`FIELD DUP`/`REP`), and none were transplanted: two units agree on the character set
@@ -86,7 +96,18 @@ import type { Action } from './keymap.js';
  *
  * ## LEGENDS COME FROM THE PHOTOGRAPH, AND THIS IS NOT A PC KEYBOARD
  *
- * Transcribed from `s-l960.png`, an IBM 122-key terminal keyboard. It is the 3270 TYPEWRITER
+ * Transcribed from `s-l960.png`, an **IBM 5271 Converged Keyboard** -- the user identified it on
+ * 2026-10-22, and the name matters more than it looks: "122-key 3279 keyboard" describes several
+ * distinct units, while *Converged Keyboard* names ONE, a 122-key Model F sold with the 3270 PC
+ * and the 3179/3180 terminals. Deskthority's Model F page confirms the family and says the layout
+ * "was arguably inspired by the DEC LK201, and seems to have been the basis for the layout of the
+ * later Model M Enhanced Keyboard" -- but carries no cap-level legends, so it cannot settle the
+ * two caps still open.
+ *
+ * **SEARCH FOR `5271 Converged Keyboard` RATHER THAN FOR A DESCRIPTION** if a fourth source is
+ * ever wanted. That is the lesson of the identification: the two caps still unread are unread
+ * because I was searching by appearance, and a part number is a key into documentation that a
+ * description is not. It is the 3270 TYPEWRITER
  * layout: the number row reads `| @ # $ % not & * ( )` over `1`-`0`, so `6` carries a NOT SIGN
  * where a PC has `^`, and `1` carries `|` where a PC has `!`. **Never infer a legend from a PC
  * keyboard.** Where the photograph could not be resolved, the cap is INERT with its `name` set and
@@ -420,9 +441,27 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     the set: PA1 and PA2 ride the Dup and Field Mark caps beside it.
   */
   key('PA3', { kind: 'pa', n: 3 }, 'cursor', 0, 2, 1, 'PA3'),
-  dead('←', 'cursor', 1, 0, 1, 'unread glyph, left of the Home key'),
+  /*
+    THE LAST TWO UNREAD CAPS -- READ 2026-10-22, AND NOT BY FINDING A FOURTH PHOTOGRAPH.
+
+    A 10x crop of the ORIGINAL image with contrast and an unsharp mask resolves all three caps in
+    this row: an arrow pointing LEFT INTO A BAR, a HOUSE, and an arrow pointing RIGHT INTO A BAR.
+    Those are the standard 3270 back-tab and field-tab glyphs, and they flank Home exactly as the
+    cursor cluster's logic would predict.
+
+    **SHARPENING WAS THE WHOLE TRICK, AND I SHOULD HAVE TRIED IT FIRST.** These two survived three
+    photographs and two rounds of "still unreadable" -- a 4978 with different furniture and an IBM
+    3270 PC with the SAME layout, where they are a smudge at full resolution. The pixels in the
+    first image were always sufficient; plain LANCZOS upscaling was not. **Exhaust the processing
+    before exhausting the sources.**
+
+    `→|` HERE IS THE SAME GLYPH AND ACTION AS THE MAIN BLOCK'S TAB, and `←|` the same as its
+    BkTab. A keyboard carrying a key twice is ordinary -- `Enter` appears twice on this one -- and
+    the duplicate NAMES are disambiguated for the harnesses' sake.
+  */
+  key('←|', { kind: 'backTab' }, 'cursor', 1, 0, 1, 'Back Tab (cursor cluster)'),
   key('⌂', { kind: 'home' }, 'cursor', 1, 1, 1, 'Home'),
-  dead('', 'cursor', 1, 2, 1, 'unread glyph, right of the Home key'),
+  key('→|', { kind: 'tab' }, 'cursor', 1, 2, 1, 'Tab (cursor cluster)'),
   key('↑', { kind: 'up' }, 'cursor', 2, 1, 1, 'Cursor up'),
   key('←', { kind: 'left' }, 'cursor', 3, 0, 1, 'Cursor left'),
   key('↓', { kind: 'down' }, 'cursor', 3, 1, 1, 'Cursor down'),
