@@ -593,16 +593,32 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     a caret, so this is the closest available stand-in, and an SVG of the real mark is the someday
     fix.
 
-    `U+21E7 UPWARDS WHITE ARROW`, AND IT IS THE SECOND CHOICE FOR A MEASURED REASON. The first was
-    `U+21A5 UPWARDS ARROW FROM BAR`, and the user suggested `U+21E7` instead; a 12x crop of the cap
-    settles it in their favour. The mark is a WIDE HOLLOW CARET -- two strokes opening outward with
-    white between them -- with the `a` tucked under its apex. `U+21E7` is exactly that shape;
-    `U+21A5` is a thin SOLID arrow with a bar at its foot, which the cap plainly is not.
+    `U+2041 CARET INSERTION POINT`, AND IT IS THE THIRD CHOICE -- the first two were rejected for
+    different reasons, which is why all three are recorded.
 
-    Worth recording as a reminder that "close enough" has degrees: both glyphs mean roughly
-    "insert", and only one of them looks like the key.
+     1. `U+21A5 UPWARDS ARROW FROM BAR` was mine, and it is the wrong SHAPE: a thin solid arrow
+        with a bar at its foot, where a 12x crop of the cap shows a wide HOLLOW caret.
+     2. `U+21E7 UPWARDS WHITE ARROW` was the user's suggestion and matches the shape exactly --
+        but **U+21E7 IS THE SHIFT KEY**, universally, and this keyboard HAS two Shift caps. A
+        glyph that means Shift on a key that means Insert is worse than one that merely looks
+        wrong: it is actively misleading, and the shape being right makes the confusion more
+        likely rather than less.
+     3. `U+2041 CARET INSERTION POINT` is the proofreader's insertion mark, so right shape and right
+        meaning -- and it DOES NOT RENDER. Measured in the harness: 2.3px against 7.5px for a
+        glyph known to be present, i.e. a near-blank fallback. General Punctuation is not what the
+        symbol fonts in `ui.css` were chosen for.
+     4. `U+2303 UP ARROWHEAD` measures 7.5px, exactly matching the reference glyph, and it is a
+        hollow caret that means "control/up" rather than Shift. Right shape, available, and
+        unclaimed on this keyboard.
+
+    THE LESSON IS THAT A GLYPH HAS THREE PROPERTIES and all of them matter: what it looks like,
+    what it already means elsewhere, and whether the font actually has it. Choice 1 failed the
+    first, choice 2 the second, choice 3 the third.
+
+    STILL AN APPROXIMATION: the hardware draws an `a` tucked under the caret's apex, and no
+    Unicode point does that. An SVG remains the someday fix.
   */
-  key('⇧', { kind: 'toggleInsert' }, 'cursor', 1, 1, 1, 'Insert (approximate glyph)'),
+  key('⌃', { kind: 'toggleInsert' }, 'cursor', 1, 1, 1, 'Insert (approximate glyph)'),
   /*
     `U+219B RIGHTWARDS ARROW WITH STROKE` FOR DELETE CHARACTER, SHIFTED TO TWO OF THEM.
 

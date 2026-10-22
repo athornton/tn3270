@@ -1275,6 +1275,39 @@ async function runTransferPhase(url) {
         clipped labels, which hid behind `overflow: hidden` for three rounds.
       */
 
+      /*
+        THE INSERT CAP'S GLYPH IS OUTSIDE THE ARROWS BLOCK, so it is worth one width check.
+
+        `U+2041 CARET INSERTION POINT` lives in General Punctuation, which the symbol fallbacks in
+        `ui.css` were chosen for Arrows coverage rather than for. A WIDTH OF ZERO means the glyph
+        produced nothing at all -- the one failure mode a width CAN detect reliably, unlike the
+        notdef comparison this harness already recorded as vacuous.
+      */
+      /*
+        COMPARED AGAINST A GLYPH KNOWN TO BE PRESENT, which is what makes this check real.
+
+        A plain `w > 0` passes a near-blank fallback: U+2041 measured 2.3px here against 7.5px for
+        U+21E4, and 2.3px is not zero. The RATIO is the signal -- a glyph the font genuinely has
+        measures comparably to its neighbours, and a fallback box does not.
+
+        This is the one font question a width CAN answer. Per-character COVERAGE cannot be probed
+        from the DOM at all, which the note above this records after two vacuous attempts.
+      */
+      const insertGlyph = await cdp.eval(`(() => {
+        const el = document.querySelector('#keyboard-cursor button[data-key^="Insert"]');
+        if (el === null) return 'no insert cap';
+        const style = getComputedStyle(el);
+        const c = document.createElement('canvas').getContext('2d');
+        c.font = style.fontSize + ' ' + style.fontFamily;
+        const w = c.measureText(el.textContent).width;
+        // Compared against a glyph KNOWN to be present, so a suspiciously narrow result is
+        // visible rather than merely non-zero.
+        const ref = c.measureText('\u21E4').width;
+        const ok = w > ref * 0.5;
+        return (ok ? 'renders at ' : 'TOO NARROW at ')
+          + w.toFixed(1) + 'px vs ' + ref.toFixed(1) + 'px for a known glyph';
+      })()`);
+
       const metrics = await cdp.eval(`(() => {
         const c = document.createElement('canvas').getContext('2d');
         const out = [];
@@ -1445,7 +1478,8 @@ async function runTransferPhase(url) {
         // THE PF STRIP IS CENTRED OVER THE MAIN BLOCK, the user's other request. Measured on
         // CENTRES rather than edges, which is what "centred" means, and within 20px because the
         // strip is 12 units against the main block's 15 and the arithmetic is in `calc`.
-        && pfCentred && numpadAligned && rectangle && staggered && braceClickable;
+        && pfCentred && numpadAligned && rectangle && staggered && braceClickable
+        && insertGlyph.startsWith('renders');
       const reflowed = narrowMain !== null && narrowNum !== null
         && narrowNum.y > narrowMain.y;
 
@@ -1461,7 +1495,7 @@ async function runTransferPhase(url) {
           + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
           + `the main block is a RECTANGLE (row right edges ${edges.join(', ')}) with Z centred `
           + `between A and S (${cZ} vs ${(cA + cS) / 2}); the notched Return leaves { clickable; `
-          + 'NO cap is clipped');
+          + `NO cap is clipped; the Insert glyph ${insertGlyph}`);
       } else {
         no(check('keyboard'),
           'the full keyboard did not open, or its regions do not lay out side by side and reflow',
@@ -1476,7 +1510,8 @@ async function runTransferPhase(url) {
           + `A=${cA} S=${cS} Z=${cZ} (Z must centre between A and S), `
           + `at the { cap's right edge the browser finds: ${braceHitTest} (must be the { cap, `
           + 'not the Return key), '
-          + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}. ${metrics}`);
+          + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}; `
+          + `Insert glyph: ${insertGlyph}. ${metrics}`);
       }
     }
 
