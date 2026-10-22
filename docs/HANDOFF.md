@@ -11,8 +11,9 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
 `docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
 
-A real browser **on a different machine from the gateway** sent a 249-byte binary to `WEBX DATA A`
-on VM/370 CMS and received it back **byte-identical**, through JupyterHub's reverse proxy. Driven by
+**Firefox 158.0.1 on macOS, on a different machine from the gateway**, sent a 249-byte binary to
+`WEBX DATA A` on VM/370 CMS and received it back **byte-identical**, through JupyterHub's reverse
+proxy at ~03:02 UTC. Driven by
 hand, because a `DrawCell` carries a glyph index and no character, so no harness can read the
 terminal as text. Details, and the four gaps it leaves, in `live-testing.md`'s newest entry.
 **`transferForm` has left `protocol.ts`'s `REFUSED` list**; `transferText` has not.
@@ -39,15 +40,25 @@ text including passwords. Correct, and it means a live session cannot be action-
    Without the slash, relative module specifiers resolve against the parent and every module is
    `NS_ERROR_CORRUPTED_CONTENT`; this is NOT fixable server-side, because the proxy strips the
    prefix before the gateway sees the request. Worked first try with both.
-2. **THE SAVE FALLBACK IS STILL UNWITNESSED LIVE, and the plan was wrong about what would witness
-   it.** It predicted a localhost gateway would give a picker and a non-localhost one would not — but
-   a proxied `https://` origin is *also* a secure context, so the picker appeared anyway. The
-   fallback needs **plain http, or Firefox/Safari**, which no run has used.
-3. **A LIVE UX DEFECT WITH A CONSTRAINED FIX: Start-then-Save reads as one click too many**, and
-   `showSaveFilePicker`'s **transient user activation** requirement is why the dialog cannot simply
-   be opened on completion. Auto-saving is possible only on the `<a download>` route — i.e. only on
-   the browsers with no picker, which would give the less capable browsers the better flow. See
-   `live-testing.md`.
+2. **THE `<a download>` FALLBACK IS NOW LIVE-WITNESSED AND THE *PICKER* IS THE UNWITNESSED ROUTE** —
+   the reverse of what this handoff said when first written, and of what the plan predicted. The
+   operator was in **Firefox 158.0.1**, which implements `showSaveFilePicker` in **no version**
+   (caniuse 2026-10-22: Firefox 2–161 unsupported, **Mozilla's position "harmful"**), so the
+   detection was false and `saveFallback` ran. **Firefox's own *always ask where to save files*
+   preference showed a dialog anyway**, which is what made it look like the picker — **a visible
+   save dialog does not identify the route.** Closing the picker gap needs a **Chromium-family**
+   browser in a secure context, which no run has used.
+   **AND THE SPEC REQUIREMENT THAT WOULD HAVE PREVENTED THE MISREADING IS UNIMPLEMENTED:** the
+   overlay is supposed to say which route it will take (design doc `:302`) and says nothing. That
+   omission cost a wrong entry in `live-testing.md`, which is the best argument for building it.
+3. **A LIVE UX DEFECT: Start-then-Save reads as one click too many**, and the constraint binds only
+   HALF the time. `showSaveFilePicker`'s **transient user activation** requirement means the dialog
+   cannot be opened on completion on Chromium — but **`<a download>` has no such requirement, so on
+   the user's own browser (Firefox, the fallback route) auto-save on completion is possible today.**
+   The conflict is uniformity versus the better flow: building it only where possible gives the
+   browsers WITHOUT a picker the smoother experience. **The user has not chosen**, and a cheap
+   middle option exists — the completion message never mentions Save, and naming/focusing the
+   button removes most of the friction with no inconsistency. See `live-testing.md`.
 4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
    **The import map needs one specifier per shared module**, because one specifier cannot name two
    files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.

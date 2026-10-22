@@ -14,6 +14,10 @@ and the Recording log says what happened when they were run.
   a `DrawCell` carries an atlas glyph index and no character (`canvas/src/index.ts:44`), so no
   harness in this repo can read the terminal half of the page as text.
 
+  **Operator's browser: Firefox 158.0.1 on macOS. Transfer at ~03:02 UTC.** The browser matters
+  more than usual here — see the save-route finding below, which is the opposite of what this
+  entry first claimed.
+
   **Host:** VM/370 Community Edition V1 R1.2 on `localhost:3270`, CMS, userid `CMSUSER`,
   **CUT engine** (MECAFF implements no DFT — see the 2026-09-25 entry). Gateway:
 
@@ -36,14 +40,30 @@ and the Recording log says what happened when they were run.
 
   **STATE THE GAPS, because this file's convention is that an unqualified claim was witnessed:**
 
-  - **The save route exercised was the PICKER, and the `<a download>` FALLBACK REMAINS UNWITNESSED
-    LIVE.** `showSaveFilePicker` was present and offered a real file dialog. **This CORRECTS the
-    plan's prediction about why:** Task 11 assumed a localhost gateway and told us to record the
-    picker as available "localhost being a secure context". The gateway was NOT localhost from the
-    browser's seat — a proxied `https://` origin is a secure context for a different reason, and
-    this run additionally shows the feature detection surviving that proxy. Closing the fallback
-    gap therefore needs **plain http, or Firefox/Safari** — not merely a non-localhost run, which
-    is what the plan implied would do it.
+  - **THE SAVE ROUTE EXERCISED WAS THE `<a download>` FALLBACK, AND THE PICKER IS THE ROUTE STILL
+    UNWITNESSED LIVE.** This is the REVERSE of what this entry and the plan both first said, and the
+    reversal is worth keeping because the reasoning that produced it was wrong twice over.
+
+    The operator was in **Firefox 158.0.1**, and **Firefox implements `showSaveFilePicker` in no
+    version at all** — checked against caniuse's File System Access data 2026-10-22, which shows
+    Firefox 2–161 unsupported and records **Mozilla's position as "harmful"**, so it is not coming.
+    Safari is unsupported across every version too. So `'showSaveFilePicker' in globalThis` was
+    FALSE, `transferBoot.ts:124` injected `undefined`, and `saveFallback` ran.
+
+    **A FILE DIALOG APPEARED ANYWAY, AND THAT IS WHAT MADE THIS MISREADABLE.** Firefox's own
+    *always ask where to save files* preference prompts on an `<a download>` click, so the operator
+    saw a save dialog and reported one — and a dialog was taken as proof of the picker. **A VISIBLE
+    SAVE DIALOG DOES NOT IDENTIFY THE ROUTE.** The only reliable discriminators are the browser
+    (Chromium-family or not) and the context (secure or not).
+
+    **The plan's stated REASON was also wrong, independently of which route ran.** It said a
+    localhost gateway makes the picker available "localhost being a secure context" — true, but ANY
+    secure context does it, and the proxied `https://` origin here was one. So secure context was
+    never the deciding factor on this run; **the browser was.**
+
+    **Closing the picker gap needs a Chromium-family browser** (Chrome/Edge/Opera desktop, 105+) in
+    a secure context. Neither of this project's live runs has used one, and the author's own stated
+    target is a Mac — where Safari cannot do it either.
   - **The 10 MB refusal was checked offline only**, never against a host dataset that size.
   - **`LISTFILE WEBX DATA A` was not captured.** The send's success rests on the client's report
     plus the byte-identical receive of the same file, which is strong but is not the independent
@@ -51,15 +71,33 @@ and the Recording log says what happened when they were run.
   - **One file, one size, one host, one engine.** No DFT host (TK5) was driven from the browser,
     and no file large enough to exercise chunking across many frames.
 
-  **A UX defect the run found, and it is NOT fixable as proposed:** the operator must click
-  **Start** and then **Save**, and found the second click unintuitive — "if I started the transfer,
-  of course I want to save the file". Opening the dialog from the completion callback is what the
-  browser forbids: `showSaveFilePicker` requires **transient user activation**, and the click that
-  started the transfer is spent by the time `transferDone` arrives (`transferBoot.ts:471-478`,
-  spec decision 6, condition 2). The `<a download>` fallback has no such requirement, so
-  auto-saving on completion is possible on exactly the browsers with no picker — which would give
-  the LESS capable browsers the better flow. Recorded as a real complaint with a constrained
-  solution space, not as a thing to be fixed by moving the call.
+  **AN UNIMPLEMENTED SPEC REQUIREMENT, FOUND BY THIS MISREADING AND NOT BY ANY TEST.** The spec
+  says the feature detection is one `'showSaveFilePicker' in window` test *"and the overlay says
+  which route it will take so the operator is never surprised about where the file went"*
+  (design doc `:302`). **The overlay says no such thing** — the only text naming either route
+  lives in CODE COMMENTS (`transferBridge.ts:52`, `transferGateway.ts:415`), and the Save button
+  is unlabelled as to destination. Had that line been built, the operator's report would have
+  identified the route and this entry would not have had to be rewritten. **The misrecording IS
+  the cost of the missing feature**, which is the strongest argument for building it.
+
+  **A UX defect the run found: the operator must click Start and then Save**, and found the second
+  click unintuitive — *"if I started the transfer, of course I want to save the file"*.
+
+  **THE CONSTRAINT APPLIES TO THE PICKER ONLY, AND THE OPERATOR WAS NOT ON THE PICKER** — which is
+  what the browser correction above changes about this defect, and why it is stated after it.
+  `showSaveFilePicker` requires **transient user activation**, and the click that started the
+  transfer is spent by the time `transferDone` arrives (`transferBoot.ts:471-478`, spec decision 6
+  condition 2), so on Chromium the dialog genuinely cannot be opened from the completion callback.
+  **But `<a download>` has no activation requirement at all**, so on this operator's own browser —
+  Firefox, the fallback route — auto-saving on completion is **possible today**.
+
+  **THE AWKWARD CONSEQUENCE, STATED RATHER THAN DESIGNED AROUND HERE:** implementing it only where
+  it is possible makes the two routes behave differently, and gives the browsers WITHOUT a picker
+  the smoother flow. Uniformity and the better flow are in genuine conflict; the choice is the
+  user's and has not been made. **A middle option exists and is cheap:** the completion status line
+  does not currently mention Save at all, and most of the friction reported was not knowing Save
+  was the next step. Naming the button in the completion message — and focusing it, so Enter saves
+  — removes that without the inconsistency.
 
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:

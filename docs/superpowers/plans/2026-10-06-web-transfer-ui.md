@@ -2531,11 +2531,22 @@ no browser — add **`--allow-origin <the origin the browser sees>`** and **use 
 the URL. Both are required and neither is optional: see `handshake.ts`'s `allowOrigins` note for
 the first, and `7878485` for the second.
 
-**ON THE SAVE PICKER, CORRECTED BY THE SAME RUN.** This step used to say `localhost` is a secure
-context, so the picker **will** appear and the fallback therefore needs Task 9's offline check. The
-first half is true but was the wrong reason: **any** secure context does it, and a proxied
-`https://` origin is one. So the picker appears whether or not the gateway is localhost, and
-witnessing the fallback live needs **plain http, or Firefox/Safari** — not merely a remote browser.
+**ON THE SAVE PICKER — THIS STEP'S ORIGINAL CLAIM WAS WRONG, AND SO WAS ITS FIRST CORRECTION.**
+It said `localhost` is a secure context, so the picker **will** appear and the fallback therefore
+needs Task 9's offline check.
+
+**THE DECIDING FACTOR IS THE BROWSER, NOT THE CONTEXT.** The 2026-10-22 run was **Firefox 158.0.1**,
+which implements `showSaveFilePicker` in **no version at all** — caniuse's File System Access data
+checked that day shows Firefox 2–161 unsupported with **Mozilla's position recorded as "harmful"**,
+and Safari unsupported across every version. So the detection was false and the `<a download>`
+fallback ran, through a perfectly good secure context.
+
+**A SAVE DIALOG APPEARED REGARDLESS**, from Firefox's *always ask where to save files* preference
+acting on the anchor click — and it was initially mistaken for the picker. **DO NOT IDENTIFY THE
+ROUTE FROM THE PRESENCE OF A DIALOG.** Identify it from the browser family and the context.
+
+So: **the fallback is now live-witnessed, and the PICKER is the route still needing a live run** —
+in **Chromium-family desktop** (Chrome/Edge/Opera 105+) over a secure context.
 
 - [x] **Step 3: Round-trip a small file through the browser**
 
@@ -2555,7 +2566,9 @@ Confirm on the host with `LISTFILE WEBX DATA A`, and **erase it afterwards**. En
 
 - [x] **Step 4: Record the result in `docs/live-testing.md`**
 
-Add an entry under *Executed so far* stating: the date, both directions, the byte count, that `cmp` was byte-identical, which host and engine (VM/370 CMS, CUT), that the save route exercised was the **picker** (localhost being a secure context) and therefore that the **download fallback remains unwitnessed live**, and that the 10 MB refusal was checked offline rather than live.
+Add an entry under *Executed so far* stating: the date, both directions, the byte count, that `cmp` was byte-identical, which host and engine (VM/370 CMS, CUT), **which BROWSER and version**, which save route actually ran and therefore which one remains unwitnessed, and that the 10 MB refusal was checked offline rather than live.
+
+**RECORD THE BROWSER, AND DERIVE THE ROUTE FROM IT RATHER THAN FROM WHAT THE OPERATOR SAW.** This step originally told itself to record the picker as the exercised route; the 2026-10-22 run was Firefox, which has no picker in any version, so the **fallback** ran and a Firefox save-preference dialog made it look otherwise. See Step 2's corrected note.
 
 **State the gaps explicitly rather than implying them** — this file's convention is that an unqualified claim means it was witnessed.
 
@@ -2567,7 +2580,7 @@ Carry forward, in the handoff's own idiom:
 - The streaming-download groundwork is recorded in the spec and deliberately deferred.
 - `transferUi.ts` now lives in `packages/canvas`; both front ends import it by deep path.
 - The import map needs a specifier per shared module, because one specifier cannot name two files.
-- The save fallback is not live-verified, and cannot be from a localhost gateway.
+- Which save route is live-verified and which is not. **As of 2026-10-22 the `<a download>` fallback IS verified (Firefox) and the PICKER is not** — the reverse of this plan's original prediction.
 
 - [x] **Step 6: Final full gate, then commit**
 

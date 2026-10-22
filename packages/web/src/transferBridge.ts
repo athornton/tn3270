@@ -57,6 +57,15 @@ export interface TransferBridgeDeps {
    * the COMMON case for this gateway, not an edge one, which is why `saveFallback` is required
    * and this is not.
    *
+   * CONFIRMED LIVE 2026-10-22: the first real operator was in Firefox 158.0.1 over a perfectly
+   * good `https://` context, and this was `undefined` -- the FIRST live transfer took the fallback.
+   * `undefined` being the common case is now measured rather than predicted.
+   *
+   * **A SAVE DIALOG DOES NOT PROVE THIS WAS A FUNCTION.** Firefox's *always ask where to save
+   * files* preference prompts on the `saveFallback` anchor click too, and that dialog was briefly
+   * recorded in `live-testing.md` as evidence of the picker. Identify the route by the BROWSER, or
+   * by instrumenting which of the two deps ran -- never by whether the operator saw a dialog.
+   *
    * `| undefined` EXPLICITLY, AND IT IS LOAD-BEARING UNDER THIS REPO'S `tsconfig`.
    * `tsconfig.base.json:8` sets `exactOptionalPropertyTypes: true`, under which a bare `?:`
    * accepts the property being ABSENT but REJECTS it being present and `undefined`. That is
