@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## START HERE — NEXT ACTION, 2026-10-22
 
 **THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
-**50 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
+**52 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
 `docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
 `docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
 
