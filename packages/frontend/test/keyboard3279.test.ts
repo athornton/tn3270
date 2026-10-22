@@ -221,6 +221,61 @@ describe('KEYBOARD_3279', () => {
     });
   });
 
+  describe('the transcription audit, so doubt survives in the test suite', () => {
+    it('keeps the FIVE unreadable caps inert and named, rather than guessed at', () => {
+      // These are the ones the reference photograph could not resolve at all. They stay inert
+      // until a better source turns up; GUESSING a legend on historical hardware is the failure
+      // this file's header exists to prevent.
+      const unread = KEYBOARD_3279.filter((k) => /unread/.test(k.name));
+      expect(unread, 'five caps were unreadable in the reference photograph').toHaveLength(5);
+      for (const cap of unread) {
+        expect(cap.action, `${cap.name} must stay inert`).toBeUndefined();
+      }
+    });
+
+    it('DOES NOT INVENT a legend for the blank 0 cap -- it is inferred, and says so', () => {
+      /*
+        THE USER FOUND THIS, 2026-10-22: "the keyboard picture is clearly missing the 0/) so maybe
+        some of the other keys are also supposed to have caps that have been lost."
+
+        Confirmed under maximum zoom: that cap carries NO legend while `_`/`-` beside it is
+        legible, so it is missing or worn smooth. `)` was inferred from the `9`/`(` pattern.
+
+        This test does not assert the inference is RIGHT -- nothing here can. It asserts the cap is
+        still present and still paired, so a future correction has somewhere to land and cannot
+        quietly delete the key instead.
+      */
+      const zero = KEYBOARD_3279.find((k) => k.label === '0' && k.region === 'main');
+      expect(zero, 'the 0 key must exist even though its cap is blank').toBeDefined();
+      expect(zero?.shiftLabel).toBe(')');
+    });
+
+    it('NEVER repeats a shifted glyph, which is the smell that found four suspect pairs', () => {
+      /*
+        A GLYPH PAIR APPEARING TWICE ON ONE KEYBOARD IS ALMOST ALWAYS A TRANSCRIPTION ERROR, and
+        that reasoning is what flagged `(`/`)` on the home row (duplicating `9`/`0`) and `,`/`;`
+        plus `.`/`:` on the bottom row (duplicating the home row's `;`/`:`).
+
+        THIS TEST IS CURRENTLY EXPECTED TO FAIL-BY-DESIGN IF THE SUSPECTS ARE LEFT AS THEY ARE, so
+        it is written as a KNOWN-BAD LIST rather than a blanket rule: the duplicates that exist are
+        named, and any NEW duplicate fails. When a better source arrives, correct the data and
+        shrink this list -- do not widen it.
+      */
+      const KNOWN_SUSPECT = [')', ';', ':'];
+      const shifted = KEYBOARD_3279
+        .map((k) => k.shiftLabel)
+        .filter((v): v is string => v !== undefined);
+      const dupes = [...new Set(shifted.filter((v, i) => shifted.indexOf(v) !== i))];
+      for (const d of dupes) {
+        expect(
+          KNOWN_SUSPECT,
+          `${JSON.stringify(d)} is a NEW duplicated shifted glyph -- almost certainly a `
+          + 'transcription error; see the header audit',
+        ).toContain(d);
+      }
+    });
+  });
+
   it('is frozen, so no consumer can reorder the hardware', () => {
     expect(Object.isFrozen(KEYBOARD_3279)).toBe(true);
     expect(() => (KEYBOARD_3279 as KeyCap[]).push(

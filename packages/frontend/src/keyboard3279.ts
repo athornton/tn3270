@@ -24,6 +24,40 @@ import type { Action } from './keymap.js';
  * carries `x` and `width` in units and the CSS multiplies by whatever pitch it picks. Pixels here
  * would freeze a font size into a data table.
  *
+ * ## TEN CAPS ARE NOT TRUSTWORTHY, AND THEY ARE LISTED SO NOBODY HAS TO RE-DERIVE WHICH
+ *
+ * **The user spotted the hole in this transcription on 2026-10-22: "the keyboard picture is clearly
+ * missing the 0/) so maybe some of the other keys are also supposed to have caps that have been
+ * lost."** They are right, and the audit below is the answer. A BETTER PHOTOGRAPH OR A REAL
+ * KEYBOARD MANUAL IS THE FIX; until then these are stated as doubtful rather than quietly shipped.
+ *
+ * **ONE CAP IS PHYSICALLY BLANK ON THE REFERENCE UNIT.** The `0` position in the number row shows
+ * NO legend at all under maximum zoom, while its neighbours `_`/`-` and `+`/`=` are legible -- so
+ * that keycap is missing or worn smooth. **`0`/`)` here was INFERRED from the `9`/`(` pattern, not
+ * read.** Almost certainly right, and still an inference this file's own rule forbids.
+ *
+ * **FOUR PAIRS ARE SUSPECT ON 3270 GROUNDS, not merely photographic ones**, because a glyph pair
+ * appearing TWICE on one keyboard is a smell:
+ *
+ *  - `(`/`)` on the home row (row 2, x=12.75) duplicates the pair already on `9`/`0`. More likely a
+ *    backtick/tilde or a bracket pair.
+ *  - `,`/`;` and `.`/`:` on the bottom row duplicate the `;`/`:` already on the home row. A real
+ *    3270 typewriter keyboard usually has `,`/`<` and `.`/`>` there.
+ *  - `¢`/`!` (row 1, x=11.5) is a real 3270 pairing, but was read off a blurred cap.
+ *
+ * **A FIFTH WAS FOUND BY THE TEST THAT FORBIDS A REPEATED SHIFTED GLYPH, and FIXED rather than
+ * flagged:** `|` was recorded as the shifted legend on BOTH `1` and `\`. Re-checked under maximum
+ * zoom, the `1` cap carries a SOLID vertical bar and the backslash cap a BROKEN one (U+00A6) --
+ * two distinct glyphs EBCDIC also distinguishes, flattened into one by a careless read. That test
+ * caught it on its first run, which is the argument for keeping it.
+ *
+ * **AND FIVE MORE ARE ALREADY INERT FOR BEING UNREADABLE** -- two glyphs flanking `Home` in the
+ * cursor cluster, and three in the numeric pad's right-hand column. Those say `unread` in their
+ * names, which a test enforces.
+ *
+ * So **10 of 117 caps need a better source** -- one blank, four suspect, five unreadable. The
+ * eleventh was the broken bar, now corrected. Everything else was read directly and is sound.
+ *
  * ## LEGENDS COME FROM THE PHOTOGRAPH, AND THIS IS NOT A PC KEYBOARD
  *
  * Transcribed from `s-l960.png`, an IBM 122-key terminal keyboard. It is the 3270 TYPEWRITER
@@ -209,6 +243,9 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   ch('7', 0, 6, '&'),
   ch('8', 0, 7, '*'),
   ch('9', 0, 8, '('),
+  // INFERRED, NOT READ: this cap is BLANK on the reference unit -- no legend at all under maximum
+  // zoom, while `_`/`-` beside it is legible, so the keycap is missing or worn smooth. `)` comes
+  // from the `9`/`(` pattern. See the header's audit.
   ch('0', 0, 9, ')'),
   ch('-', 0, 10, '_'),
   ch('=', 0, 11, '+'),
@@ -218,8 +255,14 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   key('→|', { kind: 'tab' }, 'main', 1, 0, 1.5, 'Tab'),
   ...letters('QWERTYUIOP', 1, 1.5),
   // U+00A2 CENT SIGN over `!`, read off the cap right of `P`.
+  // SUSPECT: read off a blurred cap. `cent`/`!` IS a real 3270 pairing, which is why it was
+  // believed, but it was not clearly legible. See the header's audit.
   ch('¢', 1, 11.5, '!'),
-  ch('\\', 1, 12.5, '|'),
+  // A BROKEN BAR (U+00A6), NOT THE SOLID `|` ON THE `1` KEY -- and the two were flattened into one
+  // until a test that forbids a repeated shifted glyph caught it. Checked under maximum zoom: the
+  // `1` cap carries a SOLID vertical bar, this one carries a BROKEN one over the backslash. EBCDIC
+  // distinguishes them, so this is a real difference rather than a rendering artefact.
+  ch('\\', 1, 12.5, '¦'),
   // THE RETURN KEY IS `newline`, NOT `enter`, AND THAT IS THE 3270 DISTINCTION. `Enter` is the AID
   // that submits the screen and lives on its own cap in the bottom row (and in the numpad); this
   // one moves the cursor to the next input field. `keymap.ts` records at length that no TUI chord
@@ -232,6 +275,9 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   ...letters('ASDFGHJKL', 2, 1.75),
   ch(';', 2, 10.75, ':'),
   ch('\'', 2, 11.75, '"'),
+  // SUSPECT, AND THE MOST LIKELY WRONG OF THE FOUR: this duplicates the `(`/`)` already on
+  // `9`/`0`, and one glyph pair appearing twice on one keyboard is a smell. A backtick/tilde or a
+  // bracket pair would both be more plausible here. See the header's audit.
   ch('(', 2, 12.75, ')'),
 
   /*
@@ -246,6 +292,8 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
   */
   shift(3, 0, 1.25, 'left'),
   ...letters('ZXCVBNM', 3, 1.25),
+  // SUSPECT, BOTH: these duplicate the `;`/`:` on the home row, and a real 3270 typewriter
+  // keyboard usually carries `,`/`<` and `.`/`>` in these two positions. See the header's audit.
   ch(',', 3, 8.25, ';'),
   ch('.', 3, 9.25, ':'),
   ch('/', 3, 10.25, '?'),
