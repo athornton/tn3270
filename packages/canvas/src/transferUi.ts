@@ -1,5 +1,6 @@
 import {
-  TRANSFER_FIELDS, applicable, cycleField, formKeywords, newTransferForm, setFieldText,
+  TRANSFER_FIELDS, applicable, cycleField, directionLabel, formKeywords, newTransferForm,
+  setFieldText,
   type TransferFieldId, type TransferFormState, type TransferValues,
 } from '@tn3270/frontend/dist/transferForm.js';
 
@@ -105,6 +106,23 @@ export interface UiField {
   readonly value: string;
   /** For a cycle field, the values it offers here; empty otherwise. */
   readonly options: readonly string[];
+  /**
+   * What to DRAW for each entry of `options`, positionally aligned with it.
+   *
+   * SEPARATE FROM `options` BECAUSE THE VALUE IS WHAT GETS SUBMITTED. `formKeywords` emits the
+   * stored value, so a renderer must keep both: the value it reports back, and the text the
+   * operator reads. Today only `direction` differs between the two -- `directionLabel` names
+   * both endpoints, because the bare words cost the user a real file on 2026-10-07 -- and this
+   * is the identity for every other field.
+   *
+   * ALWAYS THE SAME LENGTH AND ORDER AS `options`, so a renderer can zip them by index. The
+   * `''` -> `(host default)` mapping stays in each renderer: that is about an EMPTY value rather
+   * than a named one, and it is presentation rather than a shared decision.
+   *
+   * REQUIRED, NOT OPTIONAL. An optional property would let a renderer silently fall back to the
+   * bare values, which is precisely the defect this exists to fix.
+   */
+  readonly optionLabels: readonly string[];
 }
 
 /**
@@ -211,7 +229,16 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // here are derived by asking it rather than by re-filtering the table.
       const options = f.kind === 'cycle' ? offered(f.id) : [];
       out.push({
-        id: f.id, label: f.label, kind: f.kind, value: state.values[f.id], options,
+        id: f.id,
+        label: f.label,
+        kind: f.kind,
+        value: state.values[f.id],
+        options,
+        // ONE MAPPING FOR EVERY CYCLE FIELD rather than a special case for `direction`:
+        // `directionLabel` returns anything it does not recognise unchanged, so this is the
+        // identity for the rest. Built HERE rather than in each renderer because both `<select>`
+        // builders would otherwise carry the same decision, which is how two front ends drift.
+        optionLabels: options.map((o) => (f.id === 'direction' ? directionLabel(o) : o)),
       });
     }
     return out;

@@ -817,11 +817,31 @@ async function runTransferPhase(url) {
       // and the count is PRINTED so a reader sees the real number either way.
       const rows = await cdp.eval(
         'document.querySelectorAll("#transfer-fields [data-role=value]").length');
-      if (shown && rows > 1) {
-        ok(check('overlay'), `the Xfer button opened the overlay, with ${rows} field rows drawn`);
+      /*
+        THE DIRECTION NAMES BOTH ENDPOINTS, read off the SELECTED OPTION'S TEXT in a real browser.
+
+        The bare words `send`/`receive` cost the user their own `PROFILE EXEC A` on 2026-10-07
+        (`live-testing.md`), so this is a data-loss guard rather than a cosmetic one. The text
+        comes from `frontend`'s `directionLabel` by way of `UiField.optionLabels`, and asserting
+        the RENDERED text is what proves the chain reached the DOM -- a `<select>` built from the
+        bare `options` would still pass every row count above.
+
+        AND THE VALUE MUST STILL BE THE BARE WORD: `formKeywords` emits `Direction=${value}`, so a
+        `<option value>` carrying the label would submit `Direction=send: local to host` and be
+        refused by our own validator. Both halves are checked, because only together do they show
+        a DISPLAY mapping rather than a renamed value.
+      */
+      const dirText = await cdp.eval(
+        'document.getElementById("transfer-direction").selectedOptions[0].textContent');
+      const dirValue = await cdp.eval('document.getElementById("transfer-direction").value');
+      if (shown && rows > 1 && dirText.includes('local to host') && dirValue === 'send') {
+        ok(check('overlay'),
+          `the Xfer button opened the overlay, with ${rows} field rows drawn and the direction `
+          + `reading ${JSON.stringify(dirText)} while still submitting ${JSON.stringify(dirValue)}`);
       } else {
         no(check('overlay'), 'clicking Xfer did not produce a populated transfer overlay',
-          `overlay shown: ${shown}, field rows: ${rows}`);
+          `overlay shown: ${shown}, field rows: ${rows}, `
+          + `direction text: ${JSON.stringify(dirText)}, value: ${JSON.stringify(dirValue)}`);
       }
     }
 

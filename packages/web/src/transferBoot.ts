@@ -287,12 +287,18 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
         select.id = `transfer-${f.id}`;
         select.dataset['field'] = f.id;
         select.dataset['role'] = 'value';
-        for (const opt of f.options) {
+        for (const [i, opt] of f.options.entries()) {
           const o = doc.createElement('option');
           o.value = opt;
+          // THE VALUE IS SUBMITTED AND THE LABEL IS READ. `optionLabels` is positionally aligned
+          // with `options` (`transferUi.ts` builds both together), so the index is the join --
+          // which is what lets `Direction` read `send: local to host` while still submitting
+          // `Direction=send`.
+          //
           // An empty value is a REAL state meaning "I did not ask", distinct from every named
-          // value -- `transferForm.ts` explains why a two-state toggle would lose it.
-          o.textContent = opt === '' ? '(host default)' : opt;
+          // value -- `transferForm.ts` explains why a two-state toggle would lose it -- and it
+          // keeps its own rendering here because that is presentation, not a shared decision.
+          o.textContent = opt === '' ? '(host default)' : (f.optionLabels[i] ?? opt);
           if (opt === f.value) o.selected = true;
           select.append(o);
         }

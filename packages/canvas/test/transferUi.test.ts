@@ -67,6 +67,28 @@ describe('createTransferUi', () => {
     expect(ui.values().recfm).toBe('');
   });
 
+  it('offers the direction with DISPLAY TEXT alongside each value, both endpoints named', () => {
+    const deps = fakeDeps();
+    createTransferUi(deps);
+    const dir = deps.rendered[0]!.find((f) => f.id === 'direction');
+    // `options` is what gets SUBMITTED; `optionLabels` is what the operator READS. Both are
+    // asserted, because the whole design rests on these being different for this one field --
+    // the bare words cost the user a real file on 2026-10-07.
+    expect(dir?.options).toEqual(['receive', 'send']);
+    expect(dir?.optionLabels).toEqual(['receive: host to local', 'send: local to host']);
+  });
+
+  it('LABELS EVERY OPTION OF EVERY CYCLE FIELD, so a renderer can map positionally', () => {
+    // The arrays must agree in length and order for EVERY cycle field, not only `direction`:
+    // the renderers index one by the other, and a short array would draw `undefined` in a menu.
+    const deps = fakeDeps();
+    createTransferUi(deps);
+    for (const f of deps.rendered[0]!) {
+      if (f.kind !== 'cycle') continue;
+      expect(f.optionLabels, `${f.id} labels`).toHaveLength(f.options.length);
+    }
+  });
+
   it('refuses a non-digit in a numeric field, through setFieldText', () => {
     const deps = fakeDeps();
     const ui = createTransferUi(deps);
