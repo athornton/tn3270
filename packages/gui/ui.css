@@ -100,6 +100,38 @@ body.ui-surface {
   padding: 3px 12px;
 }
 
+/*
+  THE FOCUS RING, AND IT IS AN ACCESSIBILITY FIX RATHER THAN A FLOURISH.
+
+  Before this rule there was NO `:focus` and NO `outline` anywhere in this file, so every button in
+  the keypad and in both transfer surfaces relied on the browser's default ring -- which differs
+  between Firefox and Chromium and can read poorly against the `Canvas` background these overlays
+  set deliberately. The transfer form is built to be keyboard-navigable (`transferBoot.ts`'s focus
+  memo, `transferUi.ts`'s `caretAfterEdit`, and the tab order `TRANSFER_FIELDS` fixes), so having no
+  visible focus indicator was a real defect and not a cosmetic one.
+
+  `:focus-visible` AND NOT `:focus`. The latter leaves a ring behind after a mouse click, which is
+  the reason the pseudo-class was split in the first place. PROGRAMMATIC focus still matches
+  `:focus-visible` -- which `transferBoot.ts` relies on when it focuses Save on a completed receive,
+  and which `browser-clicks.mjs` asserts with `matches(':focus-visible')` precisely so a browser
+  that matched only `:focus` could not leave the ring unpainted unnoticed.
+
+  THIS REACHES THE ELECTRON GUI TOO, deliberately. This file lives in `packages/gui` and is served
+  to the browser as a third asset root (`web/src/httpstatic.ts` sets out why at length); the GUI's
+  keypad and transfer windows had no focus indicator either, and the user requirement that the two
+  look alike is what made the stylesheet shared at all.
+
+  SYSTEM COLOUR, like `GrayText` on the status lines and `Canvas` on the surfaces, so the ring
+  follows the operator's own theme rather than hard-coding a colour that might vanish into it.
+  `outline-offset` keeps it clear of the glyphs on the keypad's 3.4em buttons.
+*/
+.ui-surface button:focus-visible,
+#keypad-overlay button:focus-visible,
+#transfer-overlay button:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}
+
 /* ---- The keypad ---- */
 
 /*
