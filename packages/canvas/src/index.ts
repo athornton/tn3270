@@ -78,3 +78,11 @@ export type { KeypadDeps } from './keypadUi.js';
 // only mercy in it.
 export { createTransferUi, caretAfterEdit } from './transferUi.js';
 export type { UiDeps, UiField, TransferUi } from './transferUi.js';
+
+/*
+  The full 122-key keyboard's view. A SECOND surface beside `createKeypadUi`, not a replacement:
+  the user wants both for now -- `Ctrl-K` for the compact keypad, `Ctrl-B` for this -- and may
+  later drop the keypad, so nothing here depends on it.
+*/
+export { createKeyboardUi } from './keyboardUi.js';
+export type { KeyboardDeps, KeyboardUi } from './keyboardUi.js';

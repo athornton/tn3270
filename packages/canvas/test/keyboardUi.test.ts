@@ -1,0 +1,230 @@
+import { describe, it, expect } from 'vitest';
+import { createKeyboardUi, type KeyboardDeps } from '../src/keyboardUi.js';
+import type { Action } from '@tn3270/frontend';
+
+interface FakeEl {
+  tag: string;
+  attrs: Record<string, string>;
+  text: string;
+  title: string;
+  clicks: Array<() => void>;
+}
+
+/**
+ * A fake DOM, because vitest runs `environment: 'node'` and there is no `document`.
+ *
+ * The same shape as `keypadUi.test.ts`'s and for the same reason: what is worth testing here is
+ * which buttons exist, what each sends, and the one-shot Shift -- none of which needs a real
+ * element. jsdom is deliberately not a dependency of this repo.
+ */
+function fakeDeps(): KeyboardDeps & { readonly sent: Action[]; readonly els: FakeEl[] } {
+  const sent: Action[] = [];
+  const els: FakeEl[] = [];
+  const mk = (tag: string): HTMLElement => {
+    const rec: FakeEl = { tag, attrs: {}, text: '', title: '', clicks: [] };
+    els.push(rec);
+    return rec as unknown as HTMLElement;
+  };
+  const rec = (el: HTMLElement): FakeEl => el as unknown as FakeEl;
+  return {
+    sent,
+    els,
+    root: mk('div'),
+    create: mk,
+    append: () => {},
+    setText: (el, text) => { rec(el).text = text; },
+    setTitle: (el, title) => { rec(el).title = title; },
+    setAttr: (el, name, value) => { rec(el).attrs[name] = value; },
+    removeAttr: (el, name) => { delete rec(el).attrs[name]; },
+    onClick: (el, fn) => { rec(el).clicks.push(fn); },
+    sendAction: (a) => { sent.push(a); },
+  };
+}
+
+/** Find a button by its `data-key`, which is the cap's NAME. */
+function button(deps: ReturnType<typeof fakeDeps>, name: string): FakeEl {
+  const el = deps.els.find((e) => e.tag === 'button' && e.attrs['data-key'] === name);
+  if (el === undefined) throw new Error(`no button named ${JSON.stringify(name)}`);
+  return el;
+}
+
+/** Click a button by cap name. */
+function click(deps: ReturnType<typeof fakeDeps>, name: string): void {
+  for (const fn of button(deps, name).clicks) fn();
+}
+
+describe('createKeyboardUi', () => {
+  it('draws a button for every cap in the table', () => {
+    const deps = fakeDeps();
+    createKeyboardUi(deps);
+    const buttons = deps.els.filter((e) => e.tag === 'button');
+    expect(buttons.length).toBeGreaterThanOrEqual(110);
+  });
+
+  it('sends a cap action on click', () => {
+    const deps = fakeDeps();
+    createKeyboardUi(deps);
+    click(deps, 'PF3');
+    expect(deps.sent).toEqual([{ kind: 'pf', n: 3 }]);
+  });
+
+  it('sends a typed character for a letter', () => {
+    const deps = fakeDeps();
+    createKeyboardUi(deps);
+    click(deps, 'Q');
+    expect(deps.sent).toEqual([{ kind: 'type', text: 'Q' }]);
+  });
+
+  it('carries the cap WIDTH as a custom property, so the CSS owns the pitch', () => {
+    const deps = fakeDeps();
+    createKeyboardUi(deps);
+    expect(button(deps, 'Space').attrs['style']).toBe('--kb-w:7');
+    expect(button(deps, 'Q').attrs['style']).toBe('--kb-w:1');
+  });
+
+  it('addresses buttons by NAME rather than label, since labels repeat and one is empty', () => {
+    const deps = fakeDeps();
+    createKeyboardUi(deps);
+    // `Enter` appears on the main block AND the numeric pad; the spacebar's label is ''.
+    expect(button(deps, 'Enter').attrs['data-key']).toBe('Enter');
+    expect(button(deps, 'Enter (numeric pad)').attrs['data-key']).toBe('Enter (numeric pad)');
+    expect(button(deps, 'Space').text).toBe('');
+  });
+
+  describe('inert caps', () => {
+    it('MARKS AN INERT CAP DISABLED', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      expect(button(deps, 'Escape (not a 3270 key)').attrs['disabled']).toBeDefined();
+    });
+
+    it('GIVES AN INERT CAP NO CLICK HANDLER AT ALL, so the no-op cannot be got wrong', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const esc = button(deps, 'Escape (not a 3270 key)');
+      expect(esc.clicks, 'a handler would be a second place for the no-op to be wrong')
+        .toHaveLength(0);
+      click(deps, 'Escape (not a 3270 key)');
+      expect(deps.sent).toEqual([]);
+    });
+
+    it('does NOT mark an actionable cap disabled', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      expect(button(deps, 'PF3').attrs['disabled']).toBeUndefined();
+    });
+
+    it('does NOT mark SHIFT disabled, though it has no action either', () => {
+      // An inert cap and an actionless-but-LIVE cap must look different: `ui.css` greys
+      // `[disabled]`, and Shift is a working control.
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const shift = deps.els.find((e) => e.attrs['data-shift'] === 'true');
+      expect(shift?.attrs['disabled'], 'Shift must not be greyed out').toBeUndefined();
+    });
+  });
+
+  describe('the one-shot Shift', () => {
+    const SHIFT_L = 'Shift (left, one-shot)';
+    const SHIFT_R = 'Shift (right, one-shot)';
+
+    it('sends the SHIFTED text for the next character, then disarms', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      click(deps, '@ 2');
+      expect(deps.sent).toEqual([{ kind: 'type', text: '@' }]);
+      click(deps, '@ 2');
+      expect(deps.sent, 'disarmed, so the second press is unshifted')
+        .toEqual([{ kind: 'type', text: '@' }, { kind: 'type', text: '2' }]);
+    });
+
+    it('A KEY WITH NO shiftLabel DOES NOT CONSUME THE ARM', () => {
+      /*
+        THE RULE MOST LIKELY TO BE IMPLEMENTED WRONGLY, asserted in both directions.
+
+        3270 has no shifted PF3. If a PF key ate the arm, the operator would press Shift, reach
+        for a character and find it unshifted -- a modifier that feels broken. The user's
+        specification is a one-shot that survives until a CHARACTER uses it.
+      */
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      click(deps, 'PF3');
+      expect(deps.sent).toEqual([{ kind: 'pf', n: 3 }]);
+      expect(ui.shiftArmed(), 'the arm must SURVIVE a PF key').toBe(true);
+      click(deps, '@ 2');
+      expect(deps.sent[1]).toEqual({ kind: 'type', text: '@' });
+    });
+
+    it('is not consumed by an INERT cap either', () => {
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      click(deps, 'Escape (not a 3270 key)');
+      expect(ui.shiftArmed()).toBe(true);
+    });
+
+    it('disarms when Shift is pressed again, so a misclick is undoable', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      click(deps, SHIFT_L);
+      click(deps, '@ 2');
+      expect(deps.sent).toEqual([{ kind: 'type', text: '2' }]);
+    });
+
+    it('BOTH Shift caps drive the SAME state, neither being distinguishable to us', () => {
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      expect(ui.shiftArmed()).toBe(true);
+      click(deps, SHIFT_R);
+      expect(ui.shiftArmed(), 'the right cap must disarm what the left armed').toBe(false);
+      click(deps, SHIFT_R);
+      click(deps, '@ 2');
+      expect(deps.sent).toEqual([{ kind: 'type', text: '@' }]);
+    });
+
+    it('raises NO action of its own: Shift is pure surface state', () => {
+      // Nothing may cross the socket or the IPC boundary when Shift is pressed, which is why the
+      // Action union needs no `shift` member.
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      expect(deps.sent).toEqual([]);
+    });
+
+    it('PAINTS BOTH CAPS when armed, and unpaints them when not', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      const caps = () => deps.els.filter((e) => e.attrs['data-shift'] === 'true');
+      expect(caps()).toHaveLength(2);
+      click(deps, SHIFT_L);
+      for (const c of caps()) expect(c.attrs['data-armed']).toBe('true');
+      click(deps, '@ 2');
+      for (const c of caps()) expect(c.attrs['data-armed']).toBeUndefined();
+    });
+
+    it('reports and clears its state, which is how closing the surface disarms it', () => {
+      // The sixth of the user's rules: a keyboard reopened later must not be holding a Shift
+      // nobody remembers pressing. The overlay's `onHide` calls this.
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      expect(ui.shiftArmed()).toBe(false);
+      click(deps, SHIFT_L);
+      expect(ui.shiftArmed()).toBe(true);
+      ui.disarmShift();
+      expect(ui.shiftArmed()).toBe(false);
+      click(deps, '@ 2');
+      expect(deps.sent).toEqual([{ kind: 'type', text: '2' }]);
+    });
+
+    it('does nothing surprising when a character is pressed UNARMED', () => {
+      const deps = fakeDeps();
+      createKeyboardUi(deps);
+      click(deps, '@ 2');
+      expect(deps.sent).toEqual([{ kind: 'type', text: '2' }]);
+    });
+  });
+});
