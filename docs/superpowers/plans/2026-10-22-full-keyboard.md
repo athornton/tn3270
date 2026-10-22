@@ -10,6 +10,64 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`
 
+> ## EXECUTION STATE, 2026-10-22 (session ended at a spend cap)
+>
+> **TASKS 1-4 ARE DONE, COMMITTED AND PUSHED. TASK 5 IS PART-DONE. TASKS 6-7 ARE UNSTARTED.**
+>
+> | Task | State | Commit |
+> |---|---|---|
+> | 1 `KEYBOARD_3279` | **done**, 117 caps, 23 tests | `bf0aaef` |
+> | 2 delete `row`/`col` | **done** | `d2a32d4` |
+> | 3 `keyboardUi.ts` + Shift | **done**, 18 tests, 3 mutants | `e7fad38` |
+> | 4 `toggleKeyboard` + 4 guards | **done**, mutation-proved | `5b2d294` |
+> | 5 web surface | **PART-DONE** — everything but `bridge.ts` | `d252bda` |
+> | 6 GUI window | not started | — |
+> | 7 harness + gate + docs | not started | — |
+>
+> ### WHERE TASK 5 STOPPED, AND WHAT IS KNOWN
+>
+> **The `bridge.ts` wiring breaks the browser and is PARKED, not committed:**
+> `docs/superpowers/wip/bridge.ts.keyboard-wiring.txt` is the verbatim 91-line diff. Drop it over
+> `packages/web/src/bridge.ts` to resume.
+>
+> **PROVEN BY BISECTION: `bridge.ts` is the ONLY remaining problem.** Reverting that one file
+> returns `browser-clicks.mjs` to `9 buttons, 7/7` with every other change in place. So the
+> overlay, the CSS, the serving, the import map and the deep paths are all correct.
+>
+> **THE SYMPTOM IS MISLEADING AND WILL WASTE TIME IF NOT EXPECTED:** `bridge.js did not load`,
+> `window.tn3270` never assigned, and `Cannot read properties of undefined (reading 'onAtlas')` at
+> `renderer.js:175`. That is what a module which fails to EVALUATE looks like from the outside —
+> never a 404, never a named import error. **ALL 2536 UNIT TESTS PASS WITH IT BROKEN.**
+>
+> **ALREADY RULED OUT, so do not re-check these:**
+> - `keyboardUi.js`, `keyboard3279.js`, `keymap.js` and `bridge.js` all return **200** from a live
+>   gateway.
+> - The served `index.html` **does** contain `<div id="keyboard-overlay" hidden>` and **does**
+>   carry all five import-map entries.
+> - `createKeyboardUi` **builds without throwing** against a fake DOM when imported from
+>   `packages/canvas/dist/keyboardUi.js` directly (`/tmp/evalkb.mjs` did this).
+> - `packages/frontend`'s `exports` map exposes both deep paths; `tsc` resolves them.
+> - It is **not** an Electron process leak: `pgrep -c electron` was 0 before the failing runs.
+>
+> **WHAT I WOULD TRY NEXT, in order:**
+> 1. Read the parked file's top-level statements. `bridge.ts` runs `getElementById` at module
+>    scope; if `#keyboard-overlay` were somehow absent the `throw` would stop evaluation exactly
+>    like this — so instrument that `throw` with a distinguishing message and re-run, rather than
+>    reasoning about it.
+> 2. Check whether `type KeyboardUi` imported as a **value** rather than `import type` survives
+>    emission and drags `keyboardUi.js` into a cycle with `bridge.js`. The parked file imports
+>    `{ createKeyboardUi, type KeyboardUi }` from a deep path; `module-cycles.test.ts` exists for
+>    this class of problem and is worth running.
+> 3. Add a `console.error` at the top of the parked `bridge.ts` and read it from the harness's
+>    console capture, which already prints `renderer[N]` lines.
+>
+> ### ONE NOTE ON PROCESS
+>
+> `git stash push <path>` followed by `git stash pop` **did not restore the file** — the pop
+> reported success, the file stayed reverted, and the work was recoverable only because
+> `git stash show --stat` proved it was still in `stash@{0}`. Prefer `cp` to a temp file over
+> `stash` for a one-file bisect.
+
 ---
 
 ## Read this before Task 1
