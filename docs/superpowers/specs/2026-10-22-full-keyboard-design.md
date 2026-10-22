@@ -204,9 +204,39 @@ behind 48 buttons is a dense background to read over."* 122 buttons is denser st
 ## 5. What this does not do
 
 - **No TUI keyboard**, by the user's direction.
-- **No Shift/Caps state machine.** `shiftLabel` is drawn on the cap; whether a click can *send* the
-  shifted character is a follow-on question, and the typing path is explicitly not what this
-  feature is for.
+- ~~**No Shift/Caps state machine.**~~ **SHIFT WORKS, and it is a ONE-SHOT STICKY MODIFIER** --
+  the user's specification, verbatim: *"if you hit it the next regular character you type acts as
+  if you'd shifted it, and then shift unselects. Basically the same as Caps Lock but it unsets
+  itself after the next character."*
+
+  **The rules, stated so they cannot be read two ways:**
+
+  1. Clicking `Shift` ARMS it. The surface shows it armed (a pressed/held cap), and every dual-glyph
+     cap may show its `shiftLabel` prominently while armed -- that second part is a nicety, not a
+     requirement.
+  2. The next click on a key with a `shiftLabel` sends the SHIFTED text and DISARMS shift.
+  3. **A click on a key with NO `shiftLabel` -- a PF key, `Enter`, a cursor arrow -- does NOT
+     consume the arm and does NOT change behaviour.** 3270 has no shifted `PF3`, and silently
+     eating the arm would make the modifier feel broken. Shift stays armed until a character key
+     uses it.
+  4. Clicking `Shift` again DISARMS it, so an accidental press is undoable.
+  5. **Shift arms NOTHING on the host.** It is pure surface state, held in the view, and no action
+     crosses the socket or the IPC boundary when it is pressed. There is no `shift` member of the
+     `Action` union and none is needed.
+  6. **Closing the surface disarms it**, like every other piece of no-persistence state these
+     overlays keep.
+
+  **Both `Shift` caps behave identically** -- the keyboard has left and right ones and neither is
+  distinguishable to us.
+
+  **Caps Lock is NOT implemented.** The photograph's keyboard has one, and it stays inert like the
+  other non-3270 caps: a latching mode is a second state machine for a typing path nobody is
+  expected to use, and the one-shot above covers the real need (reaching `@` or `:` to type a
+  host file name).
+
+  **This is the one piece of genuinely new logic in the feature**, so it belongs in the shared view
+  module where it can be unit-tested without a DOM -- the same split `transferUi.ts` uses, and for
+  the same reason.
 - **No key-repeat, no chording, no modifier latching.**
 - **`Cursr Sel` stays unimplemented** — it is light-pen work.
 - **No replacement of the compact keypad.** The user wants both *"at least for now"*, and may drift
