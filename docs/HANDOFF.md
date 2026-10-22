@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-10-22 (the web transfer UI is live-verified)
+# Handoff — state as of 2026-10-22 (web transfer UI live-verified; direction labels fixed)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## START HERE — NEXT ACTION, 2026-10-22
 
 **THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
-**42 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
+**50 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
 `docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
 `docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
 
@@ -18,8 +18,8 @@ hand, because a `DrawCell` carries a glyph index and no character, so no harness
 terminal as text. Details, and the four gaps it leaves, in `live-testing.md`'s newest entry.
 **`transferForm` has left `protocol.ts`'s `REFUSED` list**; `transferText` has not.
 
-**THE FULL GATE, re-run 2026-10-22 after the save-affordance work:** build and typecheck clean,
-**2475 tests in 104 files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9
+**THE FULL GATE, re-run 2026-10-22 after the direction-label work (the last of three changes that
+day):** build and typecheck clean, **2487 tests in 104 files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9
 buttons/10 actions, `select` 3/3, `shot` **2/2**, `browser-shot` **1/1**, `browser-keys` 13
 chords/10 actions, **`browser-clicks` 9 buttons + 7/7 transfer checks**, `pty-smoke.py`
 **12 PASS / 0 FAIL**. **`drive-playback.py` and `drive-e.py` were NOT run** — nothing in this work
@@ -93,15 +93,37 @@ this work introduced — returning the TEXT is a new server→client message, wh
 wrongly called a free ride. `protocol.ts`'s refusal of `transferText` is **load-bearing until it
 lands**, for the reason `web/src/main.ts`'s unguarded `applyAction` call records.
 
-**TWO ITEMS ARE WAITING ON THE USER, both found by driving this feature live on 2026-10-07 and
-BOTH STILL UNFIXED:**
-- **The direction labels caused real data loss.** The form shows bare `send`/`receive`
-  (`transferForm.ts:58`) with nothing naming the endpoints, and the user — an expert on this
-  protocol — went the wrong way and **overwrote their own `PROFILE EXEC A`** under `Exist=replace`.
-  All four of this feature's guards defend against an EMPTY file reaching the host; **none covers a
-  valid file hitting the wrong target.** x3270 does not confirm either, so this is arguably correct
-  behaviour — but it is one click away. Something like `send (this browser → host)` would
-  disambiguate. **NOT YET FIXED, and it is the most dangerous thing on this list.**
+**THE DIRECTION-LABEL DATA-LOSS DEFECT IS FIXED — it was the most dangerous item on this list and
+it is done.** Spec `docs/superpowers/specs/2026-10-22-direction-labels-design.md`, plan
+`docs/superpowers/plans/2026-10-22-direction-labels.md`, both executed.
+
+The form reads `send: local to host` / `receive: host to local` through `frontend`'s
+`directionLabel`, shared by all three front ends, and **opens on `send`**. `local` rather than the
+`this browser` first proposed, because the TUI and GUI have no browser and `local` also matches the
+`Local file` field label directly above it. No arrows: Fira Code ligates `->` and the TUI draws
+ASCII only.
+
+**DISPLAY ONLY, AND THAT IS THE CONSTRAINT TO REMEMBER.** `formKeywords` emits
+`Direction=${value}` and `parseTransferKeywords` validates the literals, so a renamed VALUE would
+emit `Direction=send: local to host` and be refused by our own validator. The stored values are
+untouched and the wire bytes are identical — which is why **no live run was needed**, said
+explicitly in `live-testing.md`.
+
+**`parseTransferKeywords` STILL DEFAULTS TO `receive`, DELIBERATELY. DO NOT "TIDY" THIS.** That
+default serves SCRIPTS: flipping it would silently invert every `Transfer(...)` that omits
+`Direction=` — a download becoming an upload with `Exist=replace` reachable and no form to look at,
+i.e. this very defect moved somewhere worse. It is also x3270's own default (`ft.c:319`). A test in
+`transfer.test.ts` pins the asymmetry and says so.
+
+**Knock-on, and two harnesses caught it:** `applicable()` shows `Recfm` only on a send, so the form
+now draws **seven** field rows on open rather than six. `transfer.mjs` went 9/10 and
+`transfer-harness-flags.test.ts` went red on the same literal — the number is pinned in two places
+precisely so it cannot be bumped on faith.
+
+**REMAINING EXPOSURE:** naming the endpoints does nothing about a correct direction with a wrong
+`Host file`, and there is still no confirmation prompt (x3270 has none either).
+
+**ONE ITEM IS STILL WAITING ON THE USER:**
 - **The keypad overlay is opaque and covers the screen**, so the effect of a key just pressed is
   invisible (`Ctrl-K` dismisses first). The user said they would decide how they want it changed.
   `keypadOverlay.ts` records that **opacity is LOAD-BEARING** — the TUI's keypad once let host text

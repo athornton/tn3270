@@ -10,6 +10,34 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-22-direction-labels-design.md`
 
+**EXECUTED 2026-10-22. All five tasks done.**
+
+> ## WHAT HAPPENED THAT THIS PLAN DID NOT PREDICT
+>
+> **1. The measured blast radius was exactly right — 27 failures in the four named files.** Worth
+> saying because it is the first time this project's plans have predicted that precisely, and the
+> method was simply making the change, running the suite, and reverting before writing the plan.
+> **Do that again.**
+>
+> **2. BUT THE *SHAPE* OF SIX OF THEM WAS MISDIAGNOSED.** The plan said every failure was "a test
+> asserting the old default". Six TUI submit tests failed on the **FIXTURE** instead: a send READS
+> the local file, and `fakeFiles()` was empty, so `startTransfer` refused before any AID. The
+> remedy was a `SOURCE` file and a docstring on the shared helper, not a changed assertion.
+>
+> **3. TWO HARNESSES THE PLAN DID NOT MENTION CAUGHT THE `Recfm` KNOCK-ON.** `transfer.mjs` pins
+> `FIELD_ROWS = 6` as a literal and went 9/10; `transfer-harness-flags.test.ts` pins the same
+> number in the harness SOURCE and went red. Task 2's "a failure outside the four files is a real
+> regression" instruction was therefore too strong — these two were expected consequences, and the
+> plan should have named them. **The double pinning did its job: neither could be bumped without
+> re-deriving the arithmetic.**
+>
+> **4. `UiField` gaining a required property broke no fixtures**, which the plan expected it might.
+> No test constructs one by hand.
+>
+> **5. I committed `8e1aa94` with `transfer-harness-flags.test.ts` failing** — I read the harness
+> result and not the vitest line. Fixed in `9d588b0`. **Run the unit suite and read ITS summary
+> before every commit, not the last harness you happened to run.**
+
 ---
 
 ## Read this before Task 1
@@ -68,7 +96,7 @@ first three, and the TUI renders printable ASCII only (`tui/src/app.ts:958`).
 - Modify: `packages/frontend/src/index.ts`
 - Test: `packages/frontend/test/transferForm.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/frontend/test/transferForm.test.ts`:
 
@@ -130,7 +158,7 @@ Add to `packages/frontend/test/transferForm.test.ts`:
 
 Add `directionLabel` to the existing import from `../src/transferForm.js` at the top of that file.
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```bash
 cd ~/git/tn3270 && npx vitest run packages/frontend/test/transferForm.test.ts 2>&1 | tail -15
@@ -140,7 +168,7 @@ Expected: failures naming `directionLabel is not a function` (or a TS error that
 exported). **The `formKeywords` case may fail on `Direction=send` until Task 2 flips the default —
 that is expected and Task 2 closes it.**
 
-- [ ] **Step 3: Implement it**
+- [x] **Step 3: Implement it**
 
 In `packages/frontend/src/transferForm.ts`, after `TRANSFER_FIELDS`:
 
@@ -188,12 +216,12 @@ export function directionLabel(value: string): string {
 }
 ```
 
-- [ ] **Step 4: Export it**
+- [x] **Step 4: Export it**
 
 In `packages/frontend/src/index.ts`, add `directionLabel` to the existing
 `TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText,` export group (around `:111`).
 
-- [ ] **Step 5: Build, typecheck, run**
+- [x] **Step 5: Build, typecheck, run**
 
 ```bash
 cd ~/git/tn3270 && npm run build 2>&1 | tail -3 && npm run typecheck 2>&1 | tail -3
@@ -203,7 +231,7 @@ npx vitest run packages/frontend/test/transferForm.test.ts 2>&1 | tail -6
 Expected: every new case passes except possibly the `Direction=send` one, which Task 2 fixes.
 **`npm run build` before believing any result** — vitest does not typecheck.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/frontend/src/transferForm.ts packages/frontend/src/index.ts packages/frontend/test/transferForm.test.ts
@@ -229,7 +257,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/frontend/src/transferForm.ts:92`
 - Test: `packages/frontend/test/transferForm.test.ts` and the three other suites listed above
 
-- [ ] **Step 1: Make the change**
+- [x] **Step 1: Make the change**
 
 ```ts
       direction: 'send', host: 'tso', localFile: '', hostFile: '',
@@ -268,7 +296,7 @@ And extend `newTransferForm`'s docstring:
  */
 ```
 
-- [ ] **Step 2: Run the suite and CHECK THE SHAPE OF THE DAMAGE**
+- [x] **Step 2: Run the suite and CHECK THE SHAPE OF THE DAMAGE**
 
 ```bash
 cd ~/git/tn3270 && npm run build >/dev/null 2>&1 && npx vitest run 2>&1 | grep -E "Tests |FAIL" | head -32
@@ -279,7 +307,7 @@ Expected: **27 failures in exactly these four files** — `tui/test/app.test.ts`
 `tui/test/transferOverlay.test.ts` (2). **A failure anywhere else is a real regression: stop and
 report it rather than editing the test.**
 
-- [ ] **Step 3: Fix each failing test by UPDATING ITS SETUP, not its assertion**
+- [x] **Step 3: Fix each failing test by UPDATING ITS SETUP, not its assertion**
 
 Read each one. The pattern is a test that built a form and cycled to `send`; it now starts there, so
 the setup cycles one step too far. **Where a test's PURPOSE is the old default** — notably
@@ -289,7 +317,7 @@ and assert the new default, and say in the test body WHY it changed.
 **DO NOT weaken an assertion to make it pass.** If a test pins `Recfm` being absent on a fresh form,
 that fact genuinely changed; re-point it at a receive rather than deleting it.
 
-- [ ] **Step 4: Add the test that pins the asymmetry**
+- [x] **Step 4: Add the test that pins the asymmetry**
 
 In `packages/frontend/test/transfer.test.ts`:
 
@@ -309,7 +337,7 @@ In `packages/frontend/test/transfer.test.ts`:
 hand-written `parseTransferKeywords([...])` would throw `missing 'LocalFile' option` before it ever
 reached the direction default, and would fail for the wrong reason. Verified against the file.
 
-- [ ] **Step 5: Full suite green**
+- [x] **Step 5: Full suite green**
 
 ```bash
 cd ~/git/tn3270 && npm run build && npm run typecheck && npx vitest run 2>&1 | tail -5
@@ -317,7 +345,7 @@ cd ~/git/tn3270 && npm run build && npm run typecheck && npx vitest run 2>&1 | t
 
 Expected: all tests pass. The total will have grown by the new cases from Tasks 1 and 2.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A packages/frontend packages/canvas packages/tui
@@ -347,7 +375,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/tui/src/transferOverlay.ts` — `shown()` (`:101-105`) and `VALUE_WIDTH` (`:42-47`)
 - Test: `packages/tui/test/transferOverlay.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
   it('draws the direction with BOTH ENDPOINTS named, not as a bare verb', () => {
@@ -368,7 +396,7 @@ Co-Authored-By: SLAC AI"
   });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 cd ~/git/tn3270 && npx vitest run packages/tui/test/transferOverlay.test.ts 2>&1 | tail -8
@@ -376,7 +404,7 @@ cd ~/git/tn3270 && npx vitest run packages/tui/test/transferOverlay.test.ts 2>&1
 
 Expected: the first case fails, the row showing a bare `send`.
 
-- [ ] **Step 3: Use the label in `shown()`**
+- [x] **Step 3: Use the label in `shown()`**
 
 ```ts
 function shown(id: TransferFieldId, values: TransferValues): string {
@@ -396,7 +424,7 @@ Import `directionLabel` from `@tn3270/frontend` (match the existing import style
 24. **Verify that rather than trusting it:** if `VALUE_WIDTH` were ever driven by the cycle values,
 this label would widen the box.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 ```bash
 cd ~/git/tn3270 && npm run build >/dev/null 2>&1 && npx vitest run packages/tui/test/transferOverlay.test.ts 2>&1 | tail -5
@@ -404,7 +432,7 @@ cd ~/git/tn3270 && npm run build >/dev/null 2>&1 && npx vitest run packages/tui/
 
 Expected: pass, including the geometry case.
 
-- [ ] **Step 5: See it, rather than only testing it**
+- [x] **Step 5: See it, rather than only testing it**
 
 ```bash
 cd ~/git/tn3270 && python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -3
@@ -413,7 +441,7 @@ cd ~/git/tn3270 && python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -3
 Expected: 12 PASS / 0 FAIL. This does not open the transfer form, so it is a regression check on the
 surrounding draw path rather than evidence of the label.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/tui/src/transferOverlay.ts packages/tui/test/transferOverlay.test.ts
@@ -438,7 +466,7 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/gui/src/transferBoot.ts` — the equivalent `<option>` text
 - Test: `packages/canvas/test/transferUi.test.ts`
 
-- [ ] **Step 1: Decide the seam, and read both renderers first**
+- [x] **Step 1: Decide the seam, and read both renderers first**
 
 ```bash
 cd ~/git/tn3270
@@ -451,7 +479,7 @@ itself.** Both `<select>` builders already map `''` to `(host default)` locally 
 local mapping in each would put the same decision in two files, which is how the two front ends
 drift. `transferUi.ts` already owns what the renderers draw.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```ts
   it('offers the direction with DISPLAY TEXT alongside each value, both endpoints named', () => {
@@ -482,7 +510,7 @@ file, which uses `environment: 'node'` and a hand-rolled fake rather than jsdom.
 this plan invented a `harness()` returning a `fields()` accessor; no such helper exists. These cases
 go inside the existing `describe('createTransferUi', ...)`, at its indentation.
 
-- [ ] **Step 3: Carry the labels on `UiField`**
+- [x] **Step 3: Carry the labels on `UiField`**
 
 In `packages/canvas/src/transferUi.ts`, add to `UiField`:
 
@@ -518,7 +546,7 @@ and in `view()`:
 
 Import `directionLabel` from `@tn3270/frontend` beside the existing `TRANSFER_FIELDS` import.
 
-- [ ] **Step 4: Draw it in the browser**
+- [x] **Step 4: Draw it in the browser**
 
 In `packages/web/src/transferBoot.ts`'s `renderFields`, replace the option loop:
 
@@ -535,12 +563,12 @@ In `packages/web/src/transferBoot.ts`'s `renderFields`, replace the option loop:
         }
 ```
 
-- [ ] **Step 5: Draw it in the Electron GUI**
+- [x] **Step 5: Draw it in the Electron GUI**
 
 Apply the same change to `packages/gui/src/transferBoot.ts`'s option loop. **Read it first** — its
 structure differs from the browser's, and its `(host default)` handling may not be identical.
 
-- [ ] **Step 6: Build, typecheck, full suite**
+- [x] **Step 6: Build, typecheck, full suite**
 
 ```bash
 cd ~/git/tn3270 && npm run build && npm run typecheck && npx vitest run 2>&1 | tail -5
@@ -550,7 +578,7 @@ cd ~/git/tn3270 && npm run build && npm run typecheck && npx vitest run 2>&1 | t
 `optionLabels` to those fixtures rather than making the property optional** — an optional one would
 let a renderer silently fall back to bare values, which is the defect being fixed.
 
-- [ ] **Step 7: Prove both GUIs really draw it**
+- [x] **Step 7: Prove both GUIs really draw it**
 
 ```bash
 cd ~/git/tn3270
@@ -564,7 +592,7 @@ Expected: `10/10` and `7/7`. **`pkill` BETWEEN RUNS IS NOT OPTIONAL**: leaked El
 contending for the one Xvfb display made `browser-clicks` report `0/7` with `bridge.js did not
 load` during the save-affordance work — indistinguishable from a real regression.
 
-- [ ] **Step 8: Add a real-browser assertion on the drawn text**
+- [x] **Step 8: Add a real-browser assertion on the drawn text**
 
 In `packages/web/scripts/browser-clicks.mjs`, in the `overlay` phase where the field rows are
 already counted, read the direction `<select>`'s selected option text and assert it names both
@@ -579,7 +607,7 @@ Fold it into that phase's existing pass condition with `dirText.includes('local 
 it to the failure detail. **Then prove it can fail**: revert `optionLabels` in `transferBoot.ts` to
 `opt`, rebuild, confirm the phase goes red, and restore.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A packages/canvas packages/web packages/gui
@@ -607,7 +635,7 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Modify: `docs/live-testing.md`, `docs/HANDOFF.md`, `README.md` (only if it documents the form default)
 
-- [ ] **Step 1: Check whether the README states a default**
+- [x] **Step 1: Check whether the README states a default**
 
 ```bash
 cd ~/git/tn3270 && grep -n "Direction\|receive" README.md | head -10
@@ -617,7 +645,7 @@ If it documents the FORM's default, update it. If it documents the KEYWORD defau
 that is unchanged, and this project has recorded that doc audits find real defects, so read before
 editing.
 
-- [ ] **Step 2: The full gate, serially**
+- [x] **Step 2: The full gate, serially**
 
 ```bash
 cd ~/git/tn3270
@@ -640,20 +668,20 @@ do not regenerate.
 `drive-playback.py` and `drive-e.py` are **not** required: the emitted keywords are byte-identical
 and nothing touches telnet negotiation or the stream layer. Say so in the commit.
 
-- [ ] **Step 3: Record it in `docs/live-testing.md`**
+- [x] **Step 3: Record it in `docs/live-testing.md`**
 
 State that the direction labels and the `send` default are built and **verified offline only**, that
 **no live run was needed because the wire bytes are unchanged**, and that the remaining exposure is a
 correct direction with a wrong `Host file` — which naming the endpoints does not address.
 
-- [ ] **Step 4: Update `docs/HANDOFF.md`**
+- [x] **Step 4: Update `docs/HANDOFF.md`**
 
 The direction-label defect is currently listed as one of two items waiting on the user. Move it to
 done, note that the form now opens on `send` with the user's reason, and **state plainly that the
 keyword parser's default is deliberately still `receive`** — that asymmetry is exactly the kind of
 thing a future session would "fix" without the reasoning in front of it.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A docs README.md

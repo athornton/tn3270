@@ -378,6 +378,15 @@ Press `Ctrl-T`, or click `Xfer` on the keypad, to open the transfer window. Choo
 file with `Browse…`, name the host file, and press Start. `Direction=send` offers an Open panel;
 `receive` offers a Save panel.
 
+**The form opens on `send`, and the direction names both of its endpoints** —
+`send: local to host` and `receive: host to local`, rather than the bare words. Sending is the
+default because, until VM has a TCP/IP stack, this client is mostly used to get software *onto*
+these systems; few people develop software locally on a VM or MVS guest.
+
+**A scripted `Transfer(...)` that omits `Direction=` still defaults to `receive`**, which is
+x3270's behaviour and is deliberately *not* the form's default: changing it would silently invert
+every existing script. The two defaults disagree on purpose.
+
 **It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
 mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on
 the 3270 canvas. The canvas window's preload stays at four functions, so `renderer.ts` goes on being

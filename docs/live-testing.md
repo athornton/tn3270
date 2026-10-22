@@ -9,6 +9,56 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE DIRECTION LABELS AND THE `send` DEFAULT ARE BUILT — AND THIS ONE NEEDED NO LIVE RUN,
+  2026-10-22.** Said first because the convention in this file is that an unqualified claim was
+  witnessed on a host: **the emitted keywords are byte-identical to before**, so there is nothing a
+  host could tell apart. `formKeywords` still emits `Direction=send`; only what is DRAWN changed.
+  Spec `docs/superpowers/specs/2026-10-22-direction-labels-design.md`, plan
+  `docs/superpowers/plans/2026-10-22-direction-labels.md`.
+
+  **This closes the defect that cost a real file.** On 2026-10-07 the user — an expert on this
+  protocol, driving their own client — read the bare `send`/`receive` the wrong way round and
+  **overwrote their own `PROFILE EXEC A`** under `Exist=replace`. The form now reads:
+
+  ```
+  > Direction   send: local to host
+    Host        tso
+    Local file  -
+  ```
+
+  which is the point of saying `local` rather than `this browser` (the phrasing first proposed):
+  it sits directly above `Local file`, so the two lines explain each other — **and it is true in
+  all three front ends**, where the web gateway's "local" is a browser but the TUI's and GUI's is
+  this machine's filesystem.
+
+  **The form also opens on `send` now**, because until VM has a TCP/IP stack this client is mostly
+  used to get software ONTO these systems. **`parseTransferKeywords` still defaults to `receive`**
+  — x3270's own default, serving scripts, where flipping it would silently invert every
+  `Transfer(...)` omitting `Direction=`. That asymmetry is pinned by a test that says not to tidy
+  it away.
+
+  **What offline evidence there is, and it is unusually good for a UI change:**
+
+  - **2487 unit tests**, including the pair that distinguishes a display mapping from a renamed
+    value: the keywords must contain `Direction=send` and must NOT contain the label text.
+  - **A real browser reads it**: `browser-clicks`'s `overlay` phase reports *"the direction reading
+    `"send: local to host"` while still submitting `"send"`"*. **Mutation-proved** — making
+    `optionLabels` the identity turns that phase red.
+  - **The TUI's whole box is pinned inside 24x80**, and every line pinned to one width. That second
+    invariant is not cosmetic: a short line once let a live host's screen show through beside it.
+  - **Both golden harnesses still match** (`shot` 2/2, `browser-shot` 1/1).
+
+  **TWO HARNESSES CAUGHT THE EXPECTED KNOCK-ON, which is the part worth recording.** `applicable()`
+  shows `Recfm` only on a send, so opening on send draws **one more field row** — `transfer.mjs`
+  went 9/10 on its `FIELD_ROWS = 6` literal and `transfer-harness-flags.test.ts` went red on the
+  same number. Two independent signals that the arithmetic had to be re-derived rather than bumped.
+
+  **THE REMAINING EXPOSURE, STATED SO IT IS NOT MISTAKEN FOR CLOSED:** naming the endpoints does
+  nothing about a CORRECT direction with a WRONG `Host file`. An operator can still overwrite a
+  different host dataset deliberately, and `Exist=replace` is still one cycle away. There is also
+  **no confirmation prompt** — x3270 has none either, and a modal on every transfer would be worse
+  than the disease.
+
 - **THE WEB TRANSFER UI IS LIVE-VERIFIED THROUGH A REAL BROWSER, BOTH DIRECTIONS, 249 BYTES
   BYTE-IDENTICAL — 2026-10-22.** Driven BY HAND by the user, which is what this feature needed:
   a `DrawCell` carries an atlas glyph index and no character (`canvas/src/index.ts:44`), so no
