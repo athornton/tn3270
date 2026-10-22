@@ -111,10 +111,14 @@ body.ui-surface {
   visible focus indicator was a real defect and not a cosmetic one.
 
   `:focus-visible` AND NOT `:focus`. The latter leaves a ring behind after a mouse click, which is
-  the reason the pseudo-class was split in the first place. PROGRAMMATIC focus still matches
-  `:focus-visible` -- which `transferBoot.ts` relies on when it focuses Save on a completed receive,
-  and which `browser-clicks.mjs` asserts with `matches(':focus-visible')` precisely so a browser
-  that matched only `:focus` could not leave the ring unpainted unnoticed.
+  the reason the pseudo-class was split in the first place. That is the right rule for every button
+  an operator TABS to.
+
+  **BUT IT IS NOT ENOUGH FOR A PROGRAMMATIC FOCUS, which this comment originally claimed it was.**
+  MEASURED the same day: `:focus-visible` is decided by the UA's heuristic about the user's LAST
+  INPUT MODALITY, not by how the focus was set -- so the Save button that `transferBoot.ts` focuses
+  on a completed receive did NOT match it, because the operator got there by CLICKING Start. See
+  the `#transfer-save` rule below, which is why it exists.
 
   THIS REACHES THE ELECTRON GUI TOO, deliberately. This file lives in `packages/gui` and is served
   to the browser as a third asset root (`web/src/httpstatic.ts` sets out why at length); the GUI's
