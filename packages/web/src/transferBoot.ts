@@ -556,8 +556,53 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
           ? { ok: true, ...(typeof bytes === 'number' ? { bytes } : {}) }
           : { ok: false, error: String(msg['error'] ?? 'the transfer failed') });
       }
-      // ENABLED ONLY NOW, AND THE PICKER IS NOT OPENED HERE -- see the Save handler above.
-      saveButton.disabled = !bridge.hasUnsaved();
+      /**
+       * SAVE IS ENABLED, NAMED AND FOCUSED HERE -- ALL THREE FROM ONE READ OF ONE CONDITION.
+       *
+       * ENABLED ONLY NOW, AND THE PICKER IS NOT OPENED HERE -- see the Save handler above, which
+       * explains why the dialog needs the operator's own click.
+       *
+       * `hasUnsaved()` IS READ ONCE INTO `unsaved` AND USED FOR ALL THREE, which is the point
+       * rather than a tidy. A status line telling the operator to press Save while the button sits
+       * disabled is the button-contradicts-the-message defect this file already records fixing
+       * once: the `receiveError` arm above exists because an 11 MB receive refused by the
+       * reassembler left `hasUnsaved()` true, Save enabled, and a 0-byte file downloadable under a
+       * message that correctly said the transfer had failed. Three facts derived from one read
+       * cannot drift into that shape.
+       *
+       * ## WHY THE HINT IS APPENDED HERE AND NOT IN `transferUi.ts`'s `finished()`
+       *
+       * That module is shared by ALL THREE front ends and ONLY THIS ONE HAS A SAVE BUTTON.
+       * `gui/transfer.html` carries Cancel and Start alone -- Electron writes the file to disk
+       * itself -- and the TUI likewise. Naming Save in the shared string would tell those
+       * operators to press a button that does not exist, so `done: N bytes` stays exactly as
+       * `finished()` wrote it and this file adds its own suffix.
+       *
+       * THE EXISTING TEXT IS READ RATHER THAN REBUILT, so this cannot drift from `finished()`'s
+       * format: `ui.finished(...)` a few lines above has already put `done: N bytes` (or a
+       * refusal) on the status line by the time this runs.
+       *
+       * NO ELLIPSIS IN STATUS TEXT. Fira Code and friends ligate `..` and `...`
+       * (`transferUi.ts:370`). The BUTTON's `Save…` label is a real U+2026 and is unaffected.
+       *
+       * ## TWO ORDERING FACTS, BOTH LOAD-BEARING
+       *
+       * THE FOCUS MUST FOLLOW THE `disabled` ASSIGNMENT: focusing a disabled button is a no-op, so
+       * swapping these two statements silently loses the affordance while every other assertion
+       * still passes.
+       *
+       * NO REDRAW CAN TAKE THIS FOCUS BACK, verified rather than assumed: `finished()` calls
+       * `setRunning` and `setStatus` and NEVER `redraw()` (`transferUi.ts:423-431`), and
+       * `renderFields` -- the only caller of `restoreFocus` -- runs only from `render`. IF
+       * `finished()` EVER REDRAWS, this focus call must move after that redraw or the focus memo
+       * will take it straight back.
+       */
+      const unsaved = bridge.hasUnsaved();
+      saveButton.disabled = !unsaved;
+      if (unsaved) {
+        status.textContent = `${status.textContent ?? ''} — press Save to keep it`;
+        saveButton.focus();
+      }
       running = undefined;
     },
   };
