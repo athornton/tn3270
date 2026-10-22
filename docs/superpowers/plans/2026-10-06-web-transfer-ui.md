@@ -2495,7 +2495,7 @@ Co-Authored-By: SLAC AI"
 **Files:**
 - Modify: `docs/live-testing.md`, `docs/HANDOFF.md`
 
-- [ ] **Step 1: Check the host and the userid before anything else**
+- [x] **Step 1: Check the host and the userid before anything else**
 
 ```bash
 (timeout 5 bash -c 'cat < /dev/null > /dev/tcp/localhost/3270' && echo "VM/370 UP") 2>&1
@@ -2506,16 +2506,38 @@ A TUI session of the user's holding `CMSUSER` makes CP answer `DMKLOG054E ALREAD
 
 **Do not kill a session that is not yours.** If the userid is held, stop and ask.
 
-- [ ] **Step 2: Start the gateway**
+- [x] **Step 2: Start the gateway**
+
+**CORRECTED 2026-10-22, AFTER THIS STEP AS WRITTEN FAILED TWICE.** The original read
+`--port 8017 ... -model 3278-2`, and **both flags were wrong**:
+
+- **`--port` does not exist**; the flag is `--listen` (`web/src/args.ts:156`).
+- **`-model 3278-2` cannot transfer on this host.** MECAFF's `IND$FILE` refuses a plain
+  `IBM-3278-2` with `Error: IND$FILE requires a MECAFF connected 3270 terminal` and no transfer
+  starts at all — `live-testing.md:312`, and `cli/scripts/transfer-vm.txt`'s own header says
+  `-model 3278-2-E` "is not optional".
 
 ```bash
 cd ~/git/tn3270
-node packages/web/dist/main.js --port 8017 127.0.0.1:3270 -insecure -model 3278-2
+node packages/web/dist/main.js --listen 8017 127.0.0.1:3270 -insecure -model 3278-2-E
 ```
 
-Note the printed URL and token. `localhost` is a secure context even over plain http, so the save picker **will** be available in Chromium here — which means the fallback route needs the deliberate check from Task 9 rather than this run.
+Note the printed URL. There is **no token unless `--auth on`** is passed, which also contradicted
+the original text. `--log-actions` is refused without `--replay`, because it prints typed text
+including passwords — so a live session cannot be action-logged.
 
-- [ ] **Step 3: Round-trip a small file through the browser**
+**IF THE BROWSER IS NOT ON THIS MACHINE** — as it was not on 2026-10-22, the RSP environment having
+no browser — add **`--allow-origin <the origin the browser sees>`** and **use a trailing slash** on
+the URL. Both are required and neither is optional: see `handshake.ts`'s `allowOrigins` note for
+the first, and `7878485` for the second.
+
+**ON THE SAVE PICKER, CORRECTED BY THE SAME RUN.** This step used to say `localhost` is a secure
+context, so the picker **will** appear and the fallback therefore needs Task 9's offline check. The
+first half is true but was the wrong reason: **any** secure context does it, and a proxied
+`https://` origin is one. So the picker appears whether or not the gateway is localhost, and
+witnessing the fallback live needs **plain http, or Firefox/Safari** — not merely a remote browser.
+
+- [x] **Step 3: Round-trip a small file through the browser**
 
 Use a **small** file — the existing live evidence is a 249-byte binary and the plumbing is what is being proved:
 
@@ -2531,13 +2553,13 @@ cmp /tmp/wx.bin /tmp/wx-back.bin && echo "BYTE-IDENTICAL"
 
 Confirm on the host with `LISTFILE WEBX DATA A`, and **erase it afterwards**. End with `LOGOFF`.
 
-- [ ] **Step 4: Record the result in `docs/live-testing.md`**
+- [x] **Step 4: Record the result in `docs/live-testing.md`**
 
 Add an entry under *Executed so far* stating: the date, both directions, the byte count, that `cmp` was byte-identical, which host and engine (VM/370 CMS, CUT), that the save route exercised was the **picker** (localhost being a secure context) and therefore that the **download fallback remains unwitnessed live**, and that the 10 MB refusal was checked offline rather than live.
 
 **State the gaps explicitly rather than implying them** — this file's convention is that an unqualified claim means it was witnessed.
 
-- [ ] **Step 5: Rewrite the handoff's START HERE section**
+- [x] **Step 5: Rewrite the handoff's START HERE section**
 
 Replace the *NEXT ACTION* block with the web transfer UI's outcome: the branch, the commit, the full gate numbers, `transferForm` leaving the `REFUSED` list, and **the next action being (0e) web copy and paste** — which needs the same `ServerMessage` widening this work introduced, and whose refusal in `protocol.ts` is load-bearing until it lands.
 
@@ -2547,7 +2569,7 @@ Carry forward, in the handoff's own idiom:
 - The import map needs a specifier per shared module, because one specifier cannot name two files.
 - The save fallback is not live-verified, and cannot be from a localhost gateway.
 
-- [ ] **Step 6: Final full gate, then commit**
+- [x] **Step 6: Final full gate, then commit**
 
 ```bash
 npm run build && npm run typecheck && npx vitest run 2>&1 | tail -4
@@ -2559,7 +2581,7 @@ node packages/gui/scripts/shot.mjs 2>&1 | tail -2
 node packages/web/scripts/browser-shot.mjs 2>&1 | tail -2
 node packages/web/scripts/browser-keys.mjs 2>&1 | tail -2
 node packages/web/scripts/browser-clicks.mjs 2>&1 | tail -2
-python3 packages/tui/pty-smoke.py 2>&1 | tail -2
+python3 packages/tui/scripts/pty-smoke.py 2>&1 | tail -2   # CORRECTED: it is under scripts/
 ```
 
 `drive-playback.py` and `drive-e.py` are **not** required — nothing here touches telnet negotiation or the stream layer. Say so in the commit rather than leaving it implied.

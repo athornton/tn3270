@@ -1,10 +1,85 @@
-# Handoff — state as of 2026-10-06 (the keypad is real controls)
+# Handoff — state as of 2026-10-22 (the web transfer UI is live-verified)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-06
+## START HERE — NEXT ACTION, 2026-10-22
+
+**THE WEB TRANSFER UI IS COMPLETE AND LIVE-VERIFIED. ALL ELEVEN TASKS.** Branch `web-transfer-ui`,
+**35 commits** ahead of `main`, **PUSHED, NOT MERGED** — `main` is untouched at `64955b1`. Spec
+`docs/superpowers/specs/2026-10-06-web-transfer-ui-design.md`, plan
+`docs/superpowers/plans/2026-10-06-web-transfer-ui.md`.
+
+A real browser **on a different machine from the gateway** sent a 249-byte binary to `WEBX DATA A`
+on VM/370 CMS and received it back **byte-identical**, through JupyterHub's reverse proxy. Driven by
+hand, because a `DrawCell` carries a glyph index and no character, so no harness can read the
+terminal as text. Details, and the four gaps it leaves, in `live-testing.md`'s newest entry.
+**`transferForm` has left `protocol.ts`'s `REFUSED` list**; `transferText` has not.
+
+**THE FULL GATE, re-run 2026-10-22 at `7878485`:** build and typecheck clean, **2475 tests in 104
+files**, GUI `transfer` 10/10, `keys` 19 chords/17 actions, `clicks` 9 buttons/10 actions, `select`
+3/3, `shot` 2/2, `browser-shot` 1/1, `browser-keys` 13 chords/10 actions, **`browser-clicks` 9
+buttons + 7/7 transfer checks**, `pty-smoke.py` **12 PASS / 0 FAIL**. **`drive-playback.py` and
+`drive-e.py` were NOT run** — nothing in this work touches telnet negotiation or the stream layer,
+said rather than implied.
+
+**THE PLAN'S OWN STEP 2 CONTAINED TWO ERRORS, both of which would have cost a failed live run**
+(the recorded plan-code-is-a-draft hazard, again):
+- **`-model 3278-2` is WRONG for this host.** MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` with
+  `requires a MECAFF connected 3270 terminal` and no transfer starts at all (`live-testing.md:312`).
+  **Use `-model 3278-2-E`.**
+- **`--port` DOES NOT EXIST.** The flag is `--listen` (`web/src/args.ts:156`).
+
+Also learned: **`--log-actions` requires `--replay`** and refuses otherwise, because it prints typed
+text including passwords. Correct, and it means a live session cannot be action-logged.
+
+**FOUR THINGS WORTH CARRYING:**
+1. **A reverse-proxied deployment needs BOTH the trailing slash AND `--allow-origin <origin>`.**
+   Without the slash, relative module specifiers resolve against the parent and every module is
+   `NS_ERROR_CORRUPTED_CONTENT`; this is NOT fixable server-side, because the proxy strips the
+   prefix before the gateway sees the request. Worked first try with both.
+2. **THE SAVE FALLBACK IS STILL UNWITNESSED LIVE, and the plan was wrong about what would witness
+   it.** It predicted a localhost gateway would give a picker and a non-localhost one would not — but
+   a proxied `https://` origin is *also* a secure context, so the picker appeared anyway. The
+   fallback needs **plain http, or Firefox/Safari**, which no run has used.
+3. **A LIVE UX DEFECT WITH A CONSTRAINED FIX: Start-then-Save reads as one click too many**, and
+   `showSaveFilePicker`'s **transient user activation** requirement is why the dialog cannot simply
+   be opened on completion. Auto-saving is possible only on the `<a download>` route — i.e. only on
+   the browsers with no picker, which would give the less capable browsers the better flow. See
+   `live-testing.md`.
+4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
+   **The import map needs one specifier per shared module**, because one specifier cannot name two
+   files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.
+
+**NEXT ACTION: ROADMAP ITEM (0e), WEB COPY AND PASTE.** It needs the same `ServerMessage` widening
+this work introduced — returning the TEXT is a new server→client message, which the copy/paste spec
+wrongly called a free ride. `protocol.ts`'s refusal of `transferText` is **load-bearing until it
+lands**, for the reason `web/src/main.ts`'s unguarded `applyAction` call records.
+
+**TWO ITEMS ARE WAITING ON THE USER, both found by driving this feature live on 2026-10-07 and
+BOTH STILL UNFIXED:**
+- **The direction labels caused real data loss.** The form shows bare `send`/`receive`
+  (`transferForm.ts:58`) with nothing naming the endpoints, and the user — an expert on this
+  protocol — went the wrong way and **overwrote their own `PROFILE EXEC A`** under `Exist=replace`.
+  All four of this feature's guards defend against an EMPTY file reaching the host; **none covers a
+  valid file hitting the wrong target.** x3270 does not confirm either, so this is arguably correct
+  behaviour — but it is one click away. Something like `send (this browser → host)` would
+  disambiguate. **NOT YET FIXED, and it is the most dangerous thing on this list.**
+- **The keypad overlay is opaque and covers the screen**, so the effect of a key just pressed is
+  invisible (`Ctrl-K` dismisses first). The user said they would decide how they want it changed.
+  `keypadOverlay.ts` records that **opacity is LOAD-BEARING** — the TUI's keypad once let host text
+  bleed into its chord column — so "make it translucent" has a recorded failure behind it.
+  Smaller, corner-anchored, auto-dismiss, or docking are the options that do not.
+
+**A NOTE CORRECTED 2026-10-22:** an earlier handoff claimed the **receive direction was blocked** by
+Task 8's nothing-staged guard, with Browse disabled and a typed name refused. **That was wrong.**
+`transferBoot.ts:427-436` returns on a receive *before* that guard, the Local file control is a
+plain text input, and the live run received a file by typing the name. The guard is send-only
+already. **Browse being disabled on a receive is correct** (`:358`): a browser cannot name a file
+that does not exist yet.
+
+## SUPERSEDED — NEXT ACTION, 2026-10-06
 
 **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — ALL TEN TASKS — AND IS MERGED TO `main`
 AND PUSHED.** Branch `keypad-window`, 15 commits, merged `--no-ff` as `17ee7bb` and deleted.

@@ -9,6 +9,58 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE WEB TRANSFER UI IS LIVE-VERIFIED THROUGH A REAL BROWSER, BOTH DIRECTIONS, 249 BYTES
+  BYTE-IDENTICAL — 2026-10-22.** Driven BY HAND by the user, which is what this feature needed:
+  a `DrawCell` carries an atlas glyph index and no character (`canvas/src/index.ts:44`), so no
+  harness in this repo can read the terminal half of the page as text.
+
+  **Host:** VM/370 Community Edition V1 R1.2 on `localhost:3270`, CMS, userid `CMSUSER`,
+  **CUT engine** (MECAFF implements no DFT — see the 2026-09-25 entry). Gateway:
+
+  ```bash
+  node packages/web/dist/main.js --listen 8017 \
+    --allow-origin https://usdf-rsp.slac.stanford.edu \
+    127.0.0.1:3270 -insecure -model 3278-2-E
+  ```
+
+  **Browser reached it through JupyterHub's proxy**, not from localhost — there is no browser in
+  the RSP environment the gateway runs in, so the operator's browser was on a different machine
+  entirely: `https://usdf-rsp.slac.stanford.edu/nb/user/athor/proxy/8017/`. This is the
+  reverse-proxy deployment the two bugs fixed at `7878485` were about, and it worked first try with
+  the trailing slash and `--allow-origin` both present.
+
+  **What transferred:** a 249-byte random binary, sent to `WEBX DATA A` with `Recfm=variable`,
+  then received back and saved. **Byte-identical**, verified by the user against the source's
+  sha256 (`52f52dc2ccce3e5b64b2ff89680eaca2fcd55d82b4f664eede9c689f6950ce71`). `WEBX DATA A`
+  erased and `CMSUSER` logged off afterwards, so no reconnect trap is handed forward.
+
+  **STATE THE GAPS, because this file's convention is that an unqualified claim was witnessed:**
+
+  - **The save route exercised was the PICKER, and the `<a download>` FALLBACK REMAINS UNWITNESSED
+    LIVE.** `showSaveFilePicker` was present and offered a real file dialog. **This CORRECTS the
+    plan's prediction about why:** Task 11 assumed a localhost gateway and told us to record the
+    picker as available "localhost being a secure context". The gateway was NOT localhost from the
+    browser's seat — a proxied `https://` origin is a secure context for a different reason, and
+    this run additionally shows the feature detection surviving that proxy. Closing the fallback
+    gap therefore needs **plain http, or Firefox/Safari** — not merely a non-localhost run, which
+    is what the plan implied would do it.
+  - **The 10 MB refusal was checked offline only**, never against a host dataset that size.
+  - **`LISTFILE WEBX DATA A` was not captured.** The send's success rests on the client's report
+    plus the byte-identical receive of the same file, which is strong but is not the independent
+    host-side confirmation the plan asked for.
+  - **One file, one size, one host, one engine.** No DFT host (TK5) was driven from the browser,
+    and no file large enough to exercise chunking across many frames.
+
+  **A UX defect the run found, and it is NOT fixable as proposed:** the operator must click
+  **Start** and then **Save**, and found the second click unintuitive — "if I started the transfer,
+  of course I want to save the file". Opening the dialog from the completion callback is what the
+  browser forbids: `showSaveFilePicker` requires **transient user activation**, and the click that
+  started the transfer is spent by the time `transferDone` arrives (`transferBoot.ts:471-478`,
+  spec decision 6, condition 2). The `<a download>` fallback has no such requirement, so
+  auto-saving on completion is possible on exactly the browsers with no picker — which would give
+  the LESS capable browsers the better flow. Recorded as a real complaint with a constrained
+  solution space, not as a thing to be fixed by moving the call.
+
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:
   **nothing about this change alters what reaches the host.** A keypad button raises the same
