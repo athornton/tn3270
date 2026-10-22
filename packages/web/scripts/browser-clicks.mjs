@@ -372,8 +372,8 @@ const TRANSFER_CHECKS = [
   {
     name: 'progress',
     kind: 'injected',
-    what: 'transferProgress, transferData and transferDone each reach the form',
-    mutant: 'bridge.ts  onTransfer: () => {}',
+    what: 'the three inbound kinds reach the form, and a completed receive enables, NAMES and FOCUSES Save',
+    mutant: 'bridge.ts  onTransfer: () => {}; transferBoot.ts  drop saveButton.focus() or the hint',
   },
 ];
 
@@ -1063,22 +1063,83 @@ async function runTransferPhase(url) {
     // MID-TRANSFER, Save must still be disabled: the bytes are staged but the transfer has not
     // ended, and `transferBoot.ts` enables the button only on `transferDone`.
     const saveMidData = await cdp.eval('document.getElementById("transfer-save").disabled');
+    // THE NEGATIVE HALF OF THE AFFORDANCE, read before the ending arrives: Save must NOT hold the
+    // focus mid-transfer. Without this a blanket `focus()` anywhere in the file would pass the
+    // check below, and the affordance is specifically about the COMPLETION.
+    const focusedMidData = await cdp.eval('document.activeElement?.id');
     await feed({ kind: 'transferDone', ok: true, bytes: INJECTED_BYTES.length });
     const sawDone = await statusText();
     const saveAfterDone = await cdp.eval('document.getElementById("transfer-save").disabled');
-    // `done: N bytes` IS `transferUi.ts`'s OWN FORMAT (`finished()`), and the N asserted is the
-    // one the injected `transferDone` carried -- so a form that printed a constant cannot pass.
-    const doneOk = sawDone === `done: ${INJECTED_BYTES.length} bytes`;
+    /*
+      THE AFFORDANCE: a completed receive NAMES Save on the status line and gives it the FOCUS, so
+      Enter saves. Both come from one `hasUnsaved()` read in `transferBoot.ts`, which is what stops
+      the text and the button's enabled state from disagreeing.
+
+      `activeElement?.id` RATHER THAN THE LABEL, deliberately: the button reads `Save…` with a real
+      U+2026, which is easy to mistype in a harness and would fail for the wrong reason.
+    */
+    const focusedAfterDone = await cdp.eval('document.activeElement?.id');
+    /*
+      A RULE THAT ACTUALLY PAINTS IS ASSERTED, AND THE RING IS STILL NOT ASSERTED TO BE VISIBLE.
+
+      ## THIS ASSERTION ALREADY CAUGHT A REAL DEFECT, which is why it is phrased this way
+
+      It was first written as `matches(':focus-visible')`, because that is the pseudo-class
+      `ui.css` styles for every other button. IT FAILED on the first run -- `:focus-visible
+      matched: false` with the focus correctly on `#transfer-save`. `:focus-visible` is decided by
+      the UA's heuristic about the user's LAST INPUT MODALITY, not by how the focus was set, and
+      the operator reaches a completed transfer by CLICKING Start. So the autofocus was landing
+      with NO RING PAINTED -- invisible focus, the exact defect the autofocus exists to cure.
+      `ui.css` now gives `#transfer-save` a plain `:focus` rule as well, for that reason alone.
+
+      SO THE CHECK IS `getComputedStyle(...).outlineStyle`, NOT A PSEUDO-CLASS MATCH. Matching
+      `:focus` would be trivially true for any focused element and would prove nothing about a
+      stylesheet that forgot to style it; reading the resolved `outline` asks the question that
+      matters -- IS A RING APPLIED TO THIS BUTTON RIGHT NOW -- and would fail again if the
+      modality heuristic, the selector, or the rule's specificity ever changed.
+
+      It is the FIRST computed-style read in this repo's harnesses, which otherwise verify CSS
+      behaviourally (hit-testing, `elementFromPoint`). That is a deliberate narrow exception:
+      nothing else can distinguish "focused" from "focused and visibly so".
+
+      WHAT IT STILL CANNOT DO, said plainly because this file's convention is that an unqualified
+      claim was witnessed: `outlineStyle: solid` is not "a human can see it". Whether a 2px
+      `Highlight` outline READS clearly against the overlay's `Canvas` background is a rendering
+      judgement, and this project has recorded that apparent rendering bugs are sometimes the
+      emulator rather than the code. The user eyeballs that; this harness does not pretend to.
+    */
+    const ringStyle = await cdp.eval(
+      'getComputedStyle(document.getElementById("transfer-save")).outlineStyle');
+    const ringWidth = await cdp.eval(
+      'getComputedStyle(document.getElementById("transfer-save")).outlineWidth');
+    const ringPaints = ringStyle === 'solid' && ringWidth !== '0px';
+    /*
+      `done: N bytes` IS `transferUi.ts`'s OWN FORMAT (`finished()`), and the N asserted is the one
+      the injected `transferDone` carried -- so a form that printed a constant cannot pass.
+
+      `startsWith` RATHER THAN THE EXACT EQUALITY THIS LINE USED TO BE. `transferBoot.ts` now
+      appends its own hint, so an `===` against the bare format would fail by construction. The
+      PREFIX is still pinned exactly, which keeps the whole point of the old check -- the shared
+      module's format and the real byte count -- and the suffix is asserted separately below.
+    */
+    const doneOk = sawDone.startsWith(`done: ${INJECTED_BYTES.length} bytes`)
+      && sawDone.includes('press Save');
     if (armed === 'transferring' && sawProgress === '4096 bytes' && doneOk
-      && saveMidData === true && saveAfterDone === false) {
+      && saveMidData === true && saveAfterDone === false
+      && focusedMidData !== 'transfer-save' && focusedAfterDone === 'transfer-save'
+      && ringPaints === true) {
       ok(check('progress'),
         `progress reached the form (${JSON.stringify(sawProgress)}), then `
-        + `${JSON.stringify(sawDone)}, and the ${INJECTED_BYTES.length} received bytes enabled Save`);
+        + `${JSON.stringify(sawDone)}, and the ${INJECTED_BYTES.length} received bytes enabled, `
+        + `named and FOCUSED Save, with a ${ringWidth} ${ringStyle} outline resolved on it`);
     } else {
-      no(check('progress'), 'the three inbound transfer kinds did not all reach the form',
+      no(check('progress'),
+        'the three inbound transfer kinds did not all reach the form, or Save was not offered',
         `armed: ${JSON.stringify(armed)}, after progress: ${JSON.stringify(sawProgress)}, `
         + `after done: ${JSON.stringify(sawDone)}, Save disabled mid-data: ${saveMidData}, `
-        + `Save disabled after done: ${saveAfterDone}`);
+        + `Save disabled after done: ${saveAfterDone}, focus mid-data: `
+        + `${JSON.stringify(focusedMidData)}, focus after done: `
+        + `${JSON.stringify(focusedAfterDone)}, outline: ${ringStyle} ${ringWidth}`);
     }
 
     /**
