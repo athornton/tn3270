@@ -206,3 +206,43 @@ describe('transferLines', () => {
     }
   });
 });
+
+describe('the direction is drawn with both endpoints named', () => {
+  it('draws the direction as more than a bare verb', () => {
+    // THE DEFECT THIS CLOSES: the bare words cost the user their PROFILE EXEC A on 2026-10-07.
+    // The text comes from `frontend`'s `directionLabel`, shared with both GUIs, so the three
+    // front ends cannot drift into three wordings.
+    const lines = transferLines(newTransferForm(), 'idle', undefined);
+    const row = lines.find((l) => l.includes('Direction'));
+    expect(row).toContain('send: local to host');
+  });
+
+  it('draws the receive direction the same way', () => {
+    let s = newTransferForm();
+    s = cycleField(s, 'direction', 1);          // from the send default
+    const row = transferLines(s, 'idle', undefined).find((l) => l.includes('Direction'));
+    expect(row).toContain('receive: host to local');
+  });
+
+  it('KEEPS THE WHOLE BOX INSIDE 24x80 with the longer direction text', () => {
+    // NOT just the direction row: `TRANSFER_MIN.cols` derives from `LINE_WIDTH`, which derives
+    // from `VALUE_WIDTH`. A direction label longer than the two 40-wide text fields would widen
+    // EVERY row and could push the form past the 80-column floor `tooSmall` imposes on the
+    // session -- which would make the form refuse a terminal the session itself accepted.
+    expect(TRANSFER_MIN.cols).toBeLessThanOrEqual(80);
+    expect(TRANSFER_MIN.rows).toBeLessThanOrEqual(24);
+    for (const phase of ['idle', 'form'] as const) {
+      for (const line of transferLines(newTransferForm(), phase, undefined)) {
+        expect(line.length).toBeLessThanOrEqual(80);
+      }
+    }
+  });
+
+  it('draws every line the SAME width, which the label must not break', () => {
+    // The invariant this module's own header calls non-cosmetic: a short line lets the host
+    // screen show through beside it. A longer value must pad, not ragged-edge.
+    const lines = transferLines(newTransferForm(), 'idle', undefined);
+    const widths = new Set(lines.map((l) => l.length));
+    expect(widths.size, `ragged lines: ${[...widths].join(',')}`).toBe(1);
+  });
+});
