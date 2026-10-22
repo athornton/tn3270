@@ -130,10 +130,45 @@ export interface TransferFormState {
   readonly error?: string | undefined;
 }
 
+/**
+ * A fresh form.
+ *
+ * ## IT OPENS ON `send`, AND THE KEYWORD PARSER'S DEFAULT IS DELIBERATELY DIFFERENT
+ *
+ * The user's reason, recorded because it will look surprising to someone one day: **until VM has a
+ * TCP/IP stack, this client is mostly used to GET SOFTWARE ONTO these systems** -- few people
+ * actually develop software locally on a VM or MVS guest. Upload is the common case, so it is the
+ * default.
+ *
+ * (The user's planned route to such a stack, which is the condition that would make this worth
+ * revisiting: UTS -- v7 Unix -- plus an IUCV-alike backported to VM/370, a simple network driver
+ * over a CTC pair cribbed from Linux on System/390 and z, and a small TCP stack running in UTS.
+ * Hard on a PDP-11 for address-space reasons; not hard on S/370 with up to 16 MB. **If download
+ * stops being the rare direction, reconsider this default.**)
+ *
+ * ## `parseTransferKeywords` STILL DEFAULTS TO `receive`, AND MUST
+ *
+ * That default applies when a SCRIPT's `Transfer(...)` omits `Direction=`. Flipping it would
+ * silently invert every such script -- a run that downloaded would UPLOAD, with `Exist=replace`
+ * reachable and no form to look at -- which is the same data-destruction shape this change exists
+ * to prevent, moved somewhere worse. It is also x3270's own default, which this project matches
+ * absent a documented reason to differ.
+ *
+ * **The asymmetry is the point:** an interactive form with a visible, self-describing control
+ * (`directionLabel`) is a different safety situation from an omitted keyword in an unattended
+ * script. `transfer.test.ts` pins the parser's default so this cannot be "tidied" into agreement.
+ *
+ * ## ONE KNOCK-ON, AND IT IS VISIBLE
+ *
+ * `applicable` shows `Recfm` only on a send, so a fresh form now draws ONE MORE FIELD than it used
+ * to. The TUI's box height is computed from the applicable count, so this is a layout change
+ * there, not merely a value change. 27 tests across four files asserted the old default; each had
+ * its SETUP updated rather than its assertion weakened.
+ */
 export function newTransferForm(): TransferFormState {
   return {
     values: {
-      direction: 'receive', host: 'tso', localFile: '', hostFile: '',
+      direction: 'send', host: 'tso', localFile: '', hostFile: '',
       mode: 'binary', exist: 'keep', cr: '', recfm: '', lrecl: '', blksize: '',
     },
     selected: 0,

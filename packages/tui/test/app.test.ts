@@ -1031,7 +1031,7 @@ describe('the transfer form', () => {
     const h = started();
     h.send(CTRL_T);
     h.send(0x78);                                    // "x" with Direction selected
-    expect(h.app.transferValues.direction).toBe('receive');
+    expect(h.app.transferValues.direction).toBe('send');   // the default, unchanged by "x"
   });
 
   it('Backspace deletes the last character', () => {
@@ -1059,10 +1059,11 @@ describe('the transfer form', () => {
   it('left and right cycle a cycle field', () => {
     const h = started();
     h.send(CTRL_T);
+    // Starts at `send` (the form's default), so right WRAPS to `receive` and left comes back.
     h.send(0x1b, 0x5b, 0x43);                        // CSI C = right
-    expect(h.app.transferValues.direction).toBe('send');
-    h.send(0x1b, 0x5b, 0x44);                        // CSI D = left
     expect(h.app.transferValues.direction).toBe('receive');
+    h.send(0x1b, 0x5b, 0x44);                        // CSI D = left
+    expect(h.app.transferValues.direction).toBe('send');
   });
 
   it('accepts the SS3 form of the arrows too, since any layer can flip DECCKM', () => {
@@ -1071,7 +1072,7 @@ describe('the transfer form', () => {
     const h = started();
     h.send(CTRL_T);
     h.send(0x1b, 0x4f, 0x43);                        // SS3 C = right
-    expect(h.app.transferValues.direction).toBe('send');
+    expect(h.app.transferValues.direction).toBe('receive');   // one step from the send default
   });
 
   it('A SPLIT ARROW MUST NOT CLOSE THE FORM', () => {
@@ -1085,7 +1086,8 @@ describe('the transfer form', () => {
     expect(h.app.transferOpen).toBe(true);
     h.send(0x5b, 0x43);
     expect(h.app.transferOpen).toBe(true);
-    expect(h.app.transferValues.direction).toBe('send');
+    // The arrow ARRIVED and moved the field: one right from the `send` default is `receive`.
+    expect(h.app.transferValues.direction).toBe('receive');
   });
 
   it('a LONE Esc that outlives the window closes it', () => {
@@ -1110,11 +1112,12 @@ describe('the transfer form', () => {
   it('AUTOREPEAT COALESCED INTO ONE READ moves more than once', () => {
     // A slow link delivers `\x1b[C\x1b[C` as a single read, which no whole-chunk
     // comparison recognizes -- the field would appear to stop changing while the key was
-    // held. Two rights from `receive` wrap back to `receive`, so assert three.
+    // held. Two rights from `send` wrap back to `send`, so assert THREE -- which lands on
+    // `receive` and so cannot pass if only one or two of them were seen.
     const h = started();
     h.send(CTRL_T);
     h.send(0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x43);
-    expect(h.app.transferValues.direction).toBe('send');
+    expect(h.app.transferValues.direction).toBe('receive');
   });
 
   it('BackTab moves the selection backwards', () => {
@@ -1226,7 +1229,17 @@ describe('the transfer form: submitting', () => {
     return { app: a, session, stdout, aids, send, type };
   }
 
-  /** Fill in the two required fields of a fresh (receive) form and submit. */
+  /**
+   * Fill in the two required fields of a fresh form and submit.
+   *
+   * A FRESH FORM IS A **SEND** SINCE 2026-10-22, so callers must give `fakeFiles` a
+   * `/tmp/a.bin` to READ -- see `SOURCE`. A send of a file that does not exist is refused by
+   * `startTransfer` before any AID is sent, which is what made six tests here fail when the
+   * default moved: the fixture, not the behaviour.
+   *
+   * The tab count is unchanged. `Recfm` became applicable with the new default but it sorts
+   * AFTER both file fields in `TRANSFER_FIELDS`, so Tab Tab still lands on `Local file`.
+   */
   function fillAndSubmit(h: ReturnType<typeof app>): void {
     h.send(CTRL_T);
     h.send(0x09, 0x09);                    // Tab Tab: Local file
@@ -1235,6 +1248,10 @@ describe('the transfer form: submitting', () => {
     h.type('A.BIN');
     h.send(ENTER);
   }
+
+  /** The file a fresh (send) form reads, so `fillAndSubmit` can succeed. */
+  const SOURCE = { '/tmp/a.bin': new Uint8Array([7, 7, 7]) };
+
 
   it('keeps the form OPEN and shows the validator message on a bad submit', () => {
     const h = app({ files: fakeFiles() });
@@ -1268,23 +1285,27 @@ describe('the transfer form: submitting', () => {
   });
 
   it('RUNS a valid submit: the command is typed and Enter sent', () => {
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     expect(h.app.transferRunning).toBe(true);
     expect(h.app.transferError).toBeUndefined();
     expect(h.aids).toEqual([AID.ENTER]);
     // The IND$FILE command really reached the screen, which is the only thing the host sees.
+    // `PUT`, NOT `GET`: a fresh form is a send since 2026-10-22, and this asserts the real
+    // verb rather than being loosened to match either.
     const text = resolve(h.session.screen.snapshot(), {}).map((c) => c.text).join('');
-    expect(text).toContain('IND$FILE GET A.BIN');
+    expect(text).toContain('IND$FILE PUT A.BIN');
   });
 
   it('shows the ENGINE\'S refusal on the form when a local check fails', () => {
-    // A receive onto a file that exists with Exist=keep: refused by startTransfer, not by the
-    // validator, and the form must show it the same way.
-    const h = app({ files: fakeFiles({ '/tmp/a.bin': new Uint8Array([1]) }) });
+    // THE PURPOSE IS UNCHANGED -- an engine refusal, not a validator one, must reach the form --
+    // but the reachable case moved with the default. A SEND of a file that does not exist is
+    // refused by `startTransfer` after the validator has passed, which is the same shape as the
+    // receive-onto-an-existing-file case this used to use. `fakeFiles()` is deliberately EMPTY.
+    const h = app({ files: fakeFiles() });
     fillAndSubmit(h);
     expect(h.app.transferRunning).toBe(false);
-    expect(h.app.transferError).toMatch(/file exists/);
+    expect(h.app.transferError).toMatch(/cannot read local file/);
     expect(h.aids).toEqual([]);
   });
 
@@ -1301,7 +1322,7 @@ describe('the transfer form: submitting', () => {
     // answering runs to completion, and then over the `done:` line after it. The GUI had the
     // same defect on its own success path and fixed it there; this is the TUI's half, so the
     // two front ends clear it at the same moment.
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     const mode = vi.spyOn(h.session, 'is3270Mode').mockReturnValue(false);
     fillAndSubmit(h);
     expect(h.app.transferError, 'the transient refusal must show in the first place')
@@ -1320,7 +1341,7 @@ describe('the transfer form: submitting', () => {
   it('IGNORES a second Enter while a transfer is running', () => {
     // Starting a second transfer over the first would interleave two machines' frames on one
     // screen, and the host is answering the first one.
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     expect(h.aids).toEqual([AID.ENTER]);
     h.send(ENTER);
@@ -1330,7 +1351,7 @@ describe('the transfer form: submitting', () => {
   it('CLOSING MID-TRANSFER ABORTS, so the host leaves transfer mode', () => {
     // Walking away leaves the host program waiting for a CUT frame that never comes, and the
     // operator's next keystroke goes into a host that is not listening for it.
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     h.send(CTRL_T);                         // close the form
     expect(h.app.transferOpen).toBe(false);
@@ -1357,7 +1378,7 @@ describe('the transfer form: submitting', () => {
     // the second call. Removing BOTH reddens core's own three cancel tests, not this one.
     // Defense in depth: this assertion pins the app's half of the contract so a reader does
     // not delete it as redundant, but the guarantee lives in core.
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     vi.advanceTimersByTime(700_000);        // past the overall deadline: the run ends
     expect(h.app.transferRunning).toBe(false);
@@ -1373,7 +1394,7 @@ describe('the transfer form: submitting', () => {
     // did not complete within 600s after 0 bytes; " with nothing about what to do. The
     // recovery now leads the message. Same shape as the help string that did not fit, one
     // layer down.
-    const h = app({ files: fakeFiles() });
+    const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     vi.advanceTimersByTime(700_000);
     expect(h.stdout.all).toMatch(/Attn or Clear/);

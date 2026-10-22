@@ -68,17 +68,21 @@ describe('transferLines', () => {
   });
 
   it('omits an inapplicable field entirely rather than drawing it blank', () => {
-    const s = newTransferForm();                  // receive, binary
+    // A FRESH FORM IS SEND, BINARY since 2026-10-22, so Recfm is drawn and `Cr` is the one that
+    // is not -- it needs ascii. `Lrecl` is the other, needing a Recfm first.
+    const s = newTransferForm();
     const text = transferLines(s, 'idle', undefined).join('\n');
-    expect(text).not.toContain('Recfm');
     expect(text).not.toContain('Cr');
+    expect(text).not.toContain('Lrecl');
   });
 
-  it('shows a field once it becomes applicable', () => {
+  it('omits a field once it becomes INapplicable', () => {
+    // Inverted with the default: the interesting transition is now the one that hides Recfm.
+    // The rule is unchanged -- Recfm belongs to a send.
     let s = newTransferForm();
-    s = cycleField(s, 'direction', 1);
-    const text = transferLines(s, 'idle', undefined).join('\n');
-    expect(text).toContain('Recfm');
+    expect(transferLines(s, 'idle', undefined).join('\n')).toContain('Recfm');
+    s = cycleField(s, 'direction', 1);             // to receive
+    expect(transferLines(s, 'idle', undefined).join('\n')).not.toContain('Recfm');
   });
 
   it('shows a text field value', () => {

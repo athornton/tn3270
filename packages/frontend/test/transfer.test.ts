@@ -124,6 +124,27 @@ describe('keyword defaults', () => {
     });
   });
 
+  it('DEFAULTS Direction TO receive, which is x3270 and is NOT the form default', () => {
+    /*
+      LOAD-BEARING, AND THE DISAGREEMENT WITH THE FORM IS THE POINT.
+
+      `newTransferForm()` opens on `send` (changed 2026-10-22, because this client is mostly used
+      to get software ONTO these systems until VM has a TCP/IP stack). THIS default serves
+      SCRIPTS -- a `Transfer(...)` that omits `Direction=` -- and must stay `receive`:
+
+        - Flipping it would SILENTLY INVERT every such script. A run that downloaded would
+          upload, with `Exist=replace` reachable and no form to look at. That is the same
+          data-destruction shape the form's new labels exist to prevent, moved somewhere worse:
+          an unattended script has no affordance to read.
+        - It is x3270's own default (`ft.c:319`, `receive_flag` defaults true), and this project
+          matches x3270 absent a documented reason to differ.
+
+      An interactive form with a visible, self-describing control (`directionLabel`) is a
+      different safety situation from an omitted keyword. DO NOT "tidy" these two into agreement.
+    */
+    expect(req().direction).toBe('receive');
+  });
+
   it('omits recfm, lrecl and blksize entirely when unspecified', () => {
     // Absence, not a sentinel: x3270's DEFAULT_RECFM (ft_private.h:44) means
     // "emit nothing and let the host choose", and `exactOptionalPropertyTypes`
