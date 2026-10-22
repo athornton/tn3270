@@ -111,6 +111,14 @@ export {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText,
   applicable, formKeywords, moveField, directionLabel,
 } from './transferForm.js';
+
+/*
+  The 122-key 3279 keyboard, for the two DOM front ends only. A SECOND table beside `KEYPAD_KEYS`
+  rather than an extension of it -- see `keyboard3279.ts`'s header for why, and note the TUI
+  consumes neither this nor its geometry.
+*/
+export { KEYBOARD_3279, KEYBOARD_REGIONS, SHIFT_NAME } from './keyboard3279.js';
+export type { KeyCap, KeyboardRegion } from './keyboard3279.js';
 export type {
   TransferFieldId, TransferFieldKind, TransferField, TransferValues, TransferFormState,
 } from './transferForm.js';
