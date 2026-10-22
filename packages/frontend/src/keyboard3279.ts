@@ -295,7 +295,7 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     hand special-key bar, one of those could get the `Xfer` label" -- and there is precedent:
     `KEYPAD_KEYS` already carries `Xfer` as a deliberate non-3270 addition.
   */
-  key('Xfer', { kind: 'transferForm' }, 'special-left', 4, 0, 1, 'File transfer'),
+  dead('', 'special-left', 4, 0, 1, 'blank'),
   dead('', 'special-left', 4, 1, 1, 'blank'),
 
   /*
@@ -478,9 +478,35 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     BkTab. A keyboard carrying a key twice is ordinary -- `Enter` appears twice on this one -- and
     the duplicate NAMES are disambiguated for the harnesses' sake.
   */
+  /*
+    THE TOP ROW OF THE ARROW BLOCK: BACK TAB, HOME, AND A BENT ARROW.
+
+    Resolved 2026-10-22 at 9x with contrast and an unsharp mask. Left is an arrow pointing LEFT
+    INTO A BAR (back tab); centre is a HOUSE (Home); right is an arrow with a RIGHT-ANGLE BEND.
+
+    ## THE BENT ARROW CARRIES `Xfer`, AND THE USER'S REASONING IS WHY
+
+    "Not sure what the front symbol on the center (blank) key of the arrow cluster is supposed to
+    be, but I think that means it had no unshifted function, so that's a safe place to put Xfer."
+
+    THE GLYPH IS AT THE RESOLUTION FLOOR and cannot be named with confidence -- the bend is clear,
+    the terminal direction is not. On a 3270 that shape is usually NEW LINE, but **the main
+    block's Return cap already carries the classic hooked arrow** (checked at 14x, unmistakable),
+    and that is where `newline` is bound. One keyboard would not spend two caps on it with no
+    other mark to tell them apart, so this is something else -- and nothing here can say what.
+
+    SO IT IS AN UNNAMED KEY WITH NO FUNCTION WE CAN IMPLEMENT, which makes it the best available
+    home for a non-3270 addition: `Xfer` displaces nothing an operator could otherwise reach. That
+    is the same argument `KEYPAD_KEYS` already makes for carrying `Xfer` at all.
+
+    **IF A KEY-ASSIGNMENT MANUAL EVER TURNS UP, THIS IS THE FIRST ENTRY TO REVISIT** -- and the
+    `Xfer` that moved here should move back to the blank cap on the left special bar, which is
+    confirmed blank and therefore permanently safe.
+  */
   key('←|', { kind: 'backTab' }, 'cursor', 1, 0, 1, 'Back Tab (cursor cluster)'),
   key('⌂', { kind: 'home' }, 'cursor', 1, 1, 1, 'Home'),
-  key('→|', { kind: 'tab' }, 'cursor', 1, 2, 1, 'Tab (cursor cluster)'),
+  key('Xfer', { kind: 'transferForm' }, 'cursor', 1, 2, 1,
+    'File transfer (on the bent-arrow cap, whose own function is unidentified)'),
   key('↑', { kind: 'up' }, 'cursor', 2, 1, 1, 'Cursor up'),
   key('←', { kind: 'left' }, 'cursor', 3, 0, 1, 'Cursor left'),
   key('↓', { kind: 'down' }, 'cursor', 3, 1, 1, 'Cursor down'),

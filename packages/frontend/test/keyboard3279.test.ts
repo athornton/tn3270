@@ -161,11 +161,23 @@ describe('KEYBOARD_3279', () => {
   });
 
   describe('the additions and the one-shot Shift', () => {
-    it('carries Xfer on one of the two blank special caps', () => {
-      // The user's suggestion, and KEYPAD_KEYS already carries Xfer as a deliberate non-3270 key.
+    it('carries Xfer EXACTLY ONCE, on a cap with no function we can implement', () => {
+      /*
+        MOVED 2026-10-22 from a blank cap on the left special bar to the BENT-ARROW cap in the
+        cursor cluster, on the user's reasoning: "I think that means it had no unshifted function,
+        so that's a safe place to put Xfer."
+
+        The region is asserted so the move is a DECISION rather than a drift -- and `toHaveLength(1)`
+        matters more than where: two Xfer caps would be the real defect, since the operator would
+        not know which to trust. KEYPAD_KEYS already carries Xfer as a deliberate non-3270 key, so
+        there is precedent for the addition itself.
+
+        IF A KEY-ASSIGNMENT MANUAL IDENTIFIES THAT CAP, Xfer should move back to the left bar's
+        blank pair, which is CONFIRMED blank and therefore permanently safe.
+      */
       const xfer = KEYBOARD_3279.filter((k) => k.action?.kind === 'transferForm');
-      expect(xfer).toHaveLength(1);
-      expect(xfer[0]?.region).toBe('special-left');
+      expect(xfer, 'two Xfer caps would leave the operator guessing').toHaveLength(1);
+      expect(xfer[0]?.region).toBe('cursor');
     });
 
     it('has TWO Shift caps, both named so one state drives both, and NEITHER with an action', () => {
