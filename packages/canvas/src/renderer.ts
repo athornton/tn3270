@@ -2,6 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry } from './geometry.js';
 import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
+import { isEditableTarget } from './forwardKeys.js';
 import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 // FROM THE MODULE AND NOT FROM THE BARREL (`./index.js`), which would be the natural reach and
 // would BLANK THIS WINDOW WITH NO ERROR: the barrel re-exports `drawlist.js`, which value-imports
@@ -20,9 +21,13 @@ import { normalizeRect, isEmptyRect, type CellAddr } from './selection.js';
  * assumed: an earlier version imported `drawList` and died with "Failed to resolve module
  * specifier", leaving a blank window and no clue anywhere. So the draw list arrives finished
  * over IPC, the atlas arrives as bytes over IPC, and the only runtime imports are
- * `./blit.js`, `./keys.js` and `./hittest.js`, whose own imports are all `import type` and
- * thus erased. Each of the three is also listed in `BROWSER_MODULES` (`assets.ts:39`),
- * without which the web front end serves a 404 for it and the canvas goes black instead.
+ * `./blit.js`, `./keys.js`, `./selection.js` and `./forwardKeys.js`, whose own imports are
+ * either `import type` and thus erased or (for `forwardKeys.js`) `./keys.js`, already here.
+ * EACH ONE IS ALSO LISTED IN `BROWSER_MODULES` (`assets.ts`), without which the web front end
+ * serves a 404 for it and the canvas goes black instead -- measured twice now, for
+ * `selection.js` and again for `forwardKeys.js` on 2026-10-23. ADDING AN IMPORT HERE IS A CHANGE
+ * TO THE WEB GATEWAY, and the test that fails on the omission lives in `web`, so run the whole
+ * suite rather than this package's.
  *
  * IF YOU ADD A RUNTIME IMPORT FROM A WORKSPACE PACKAGE HERE, THE WINDOW GOES BLANK.
  * Compute it in main and send the result instead.
@@ -286,14 +291,13 @@ window.addEventListener('keydown', (e) => {
    * CHECKED BEFORE `actionForKey` RATHER THAN INSIDE IT, because `keys.ts` is deliberately
    * DOM-free: `KeyLike` carries six scalar fields and no target, which is what lets its 26 cases
    * run under `environment: 'node'` with no jsdom. The target is a property of the EVENT, so the
-   * file that owns the real event owns this question.
+   * code that owns real events owns this question.
    *
-   * `isContentEditable` is included for completeness; nothing here uses it today.
+   * The predicate counts `isContentEditable` for completeness; nothing here uses it today.
    */
-  const target = e.target as { tagName?: unknown; isContentEditable?: unknown } | null;
-  const tag = typeof target?.tagName === 'string' ? target.tagName : '';
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-    || target?.isContentEditable === true) {
+  // THE PREDICATE NOW LIVES IN `forwardKeys.ts` and is shared with the GUI's child windows, which
+  // need the identical rule. The long note above is why it exists; this is now the only copy.
+  if (isEditableTarget(e.target as { tagName?: unknown; isContentEditable?: unknown } | null)) {
     return;
   }
   const action = actionForKey(e);

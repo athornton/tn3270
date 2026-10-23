@@ -75,7 +75,14 @@ describe('resolveAsset', () => {
     // surface -- and that one arrived with a measured lesson: a module MISSING from this list is
     // a 404 that stops the IMPORTING module evaluating, which the browser reports only as
     // `window.tn3270` never being assigned. A blank canvas, not a missing file.
-    expect(BROWSER_MODULES.length).toBe(7);
+    // EIGHT since `forwardKeys.js` joined on 2026-10-23, when `renderer.ts` stopped inlining the
+    // editable-target rule and imported the shared one -- a renderer-graph entry again, like
+    // `selection.js`, and the same measured symptom as the sentence above: omitting it took
+    // `browser-clicks.mjs` from 9/9 and 8/8 to no keypad buttons and 1/8, with every failing check
+    // naming a module other than the one that 404'd. THE GRAPH-CLOSURE CASE BELOW DID CATCH IT,
+    // unlike the 2026-10-22 miss it describes -- what hid it for a while was running only
+    // `vitest run packages/canvas`, which cannot reach this file.
+    expect(BROWSER_MODULES.length).toBe(8);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 

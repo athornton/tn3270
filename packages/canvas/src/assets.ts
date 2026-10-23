@@ -64,6 +64,12 @@ export function assetDir(): string {
  * because the web page's map already binds the bare `@tn3270/frontend` to `keypadView.js` for the
  * keypad and an import-map key without a trailing `/` matches EXACTLY -- so `httpstatic.ts` must
  * serve `transferForm.js` as well, from the `frontend` package rather than from this list.
+ *
+ * `forwardKeys.js` joined 2026-10-23 and is back INSIDE the renderer's graph, like `selection.js`
+ * and unlike the three entries before it. Note which test that does and does not bring into play:
+ * `renderer-imports.test.ts` walks the same graph but only asks whether the imports are relative,
+ * so it passes either way; the case that fails on an omission is `httpstatic.test.ts`'s graph
+ * closure, over in `web`. See the comment on the entry itself.
  */
 export const BROWSER_MODULES: readonly string[] = Object.freeze([
   'renderer.js', 'blit.js', 'keys.js', 'selection.js', 'keypadUi.js', 'transferUi.js',
@@ -72,6 +78,21 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
   // browser reports only as `window.tn3270` never being assigned -- measured on the way in, as a
   // blank canvas with `Cannot read properties of undefined (reading 'onAtlas')` in the console.
   'keyboardUi.js',
+  // `forwardKeys.js` joins 2026-10-23, and unlike the three entries above it IS in the renderer's
+  // own graph: `renderer.ts` stopped inlining the is-this-target-editable rule and imports the
+  // shared `isEditableTarget` from here, so the served page's `renderer.js` now has a fourth
+  // relative import. Safe to serve: `dist/forwardKeys.js` imports only `./keys.js`, already here.
+  //
+  // `httpstatic.test.ts`'s graph-closure case DOES catch its absence (`imported but not served:
+  // /forwardKeys.js`) -- verified by removing this line, not assumed. What it cost anyway is a
+  // lesson about SCOPE: the task that added the import ran only `vitest run packages/canvas`, where
+  // the build was clean, 171/171 passed and `module-cycles` and `renderer-imports` BOTH passed,
+  // because the guard that matters lives in another package. `browser-clicks.mjs` then went from
+  // 9/9 plus 8/8 to ZERO keypad buttons and 1/8 transfer checks, since `renderer.js` 404'd on its
+  // own import and never evaluated -- and every failing check named something else
+  // (`showTransfer`, `onTransfer`, a deleted `oncancel`). A RENDERER IMPORT IS A WEB-GATEWAY
+  // CHANGE: run the whole suite, not this package's.
+  'forwardKeys.js',
 ]);
 
 /**
