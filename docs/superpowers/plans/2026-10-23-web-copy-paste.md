@@ -457,6 +457,16 @@ Co-Authored-By: SLAC AI"
 - Modify: `packages/web/test/integration.test.ts`
 - Modify: `packages/web/test/protocol.test.ts`
 
+**TASK 1 ALREADY ADDED A REJECTION FOR `paste`, SO THIS TASK REMOVES IT RATHER THAN ADDING ONE.**
+Found during Task 1 (2026-10-23): the whole-suite run failed with `no reply to the paste action`
+the moment the kind existed, because `protocol.ts`'s two-branch rule says a kind `applyAction`
+throws on must grow EITHER a rejection there OR an interception in `main.ts` **in the same change
+-- "WHAT IS NOT ALLOWED IS NEITHER."** Leaving it in that state for several commits is the mistake
+the `transferForm` plan made, which that docblock warns about. So Task 1 took the cheap branch.
+**This task therefore: deletes the `paste` rejection and its `protocol.test.ts` case, moves `paste`
+from `REFUSED` to `SWALLOWED`, and adds the interception** -- exactly the path `transferForm` took.
+`copy` still makes the full journey described below.
+
 **THIS TASK MUST NOT BE SPLIT.** `protocol.ts` accepting a kind owes `main.ts` an interception in
 the same commit. `applyAction` throws on both `copy` and `paste`, and `main.ts:334` calls it
 outside any try inside a socket `data` handler — so an acceptance without an interception **ends
@@ -835,8 +845,13 @@ After the `keydown` listener, add:
  * ## IT SENDS `paste`, NOT `type`
  *
  * `keymap.ts` records the whole reason: `type` reaches `Keyboard.typeString`, which would send
- * every `\n` as Enter -- an AID that SUBMITS a half-filled panel -- and every `\f` as Clear.
- * `pasteString`'s x3270 semantics are what the `paste` kind buys.
+ * every `\n` and `\f` into the field AS A CHARACTER (EBCDIC 0x25 and 0x0c, MDT set), so the next
+ * AID carries the corruption to the host as field data. `pasteString`'s x3270 semantics are what
+ * the `paste` kind buys.
+ *
+ * (An earlier draft of this plan said `\n` became ENTER and submitted the panel. That is x3270's
+ * `kybd.c`, not this codebase -- `core/src/keyboard.ts` has no AID path at all. Corruption, not
+ * submission.)
  */
 window.addEventListener('paste', (e) => {
   const target = e.target as { tagName?: unknown; isContentEditable?: unknown } | null;

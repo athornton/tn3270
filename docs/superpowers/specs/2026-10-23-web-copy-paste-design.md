@@ -28,8 +28,23 @@ nothing in either web bridge file.
 `applyAction`'s `type` arm is `k.typeString(action.text)`, and `core`'s `typeString` is a bare loop
 over `type(ch)` returning a boolean. Pasting multi-line text through it would send:
 
-- every `\n` as **Enter — an AID that SUBMITS a half-filled panel to a live host**
-- every `\f` as **Clear, which WIPES the screen mid-paste**
+- every `\n` and `\f` **written into the field as a CHARACTER** — EBCDIC 0x25 and 0x0c in the
+  buffer, with MDT set, so the next AID the operator sends carries that corruption to the host as
+  field data.
+
+**CORRECTED 2026-10-23 BY THE TASK 1 IMPLEMENTER, AND THE CORRECTION MATTERS MORE THAN THE CLAIM.**
+This section first said `\n` would be sent as **Enter, an AID submitting a half-filled panel**, and
+`\f` as **Clear, wiping the screen**. **That is x3270's `kybd.c` behaviour, NOT this codebase's.**
+Measured by driving the real function: `typeString('AB\nC\fD')` leaves six cells reading
+`A B \n C \f D` and advances the cursor six positions. `packages/core/src/keyboard.ts` contains
+**zero** occurrences of `AID` or `sendAID` — `type()` routes every character through
+`CodePage.fromUnicode` and nothing reaches the wire.
+
+So the hazard is **CORRUPTION, NOT SUBMISSION**: quieter, still real, and still worth a separate
+kind. A dataset name with an embedded 0x25 is a different name, and the operator cannot see why.
+The overstated version is recorded because a design doc's dramatic claim is exactly what gets
+re-adopted downstream — this one reached a spec, a plan and a commit message before anyone drove
+the function.
 
 `frontend/src/paste.ts`'s `pasteString` exists precisely because those two cases were measured from
 x3270's `Common/kybd.c` (`:3928`, `:3957`, `:3918`, `:3920`) and its header says both "would have
