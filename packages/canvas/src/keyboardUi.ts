@@ -263,24 +263,46 @@ export function createKeyboardUi(deps: KeyboardDeps): KeyboardUi {
         if (shiftLabel !== undefined) {
           dualCaps.push({ el: button, plain: cap.label, shifted: shiftLabel });
         }
+        /*
+          IS THIS A REGULAR CHARACTER? -- AND THE ANSWER IS THE ACTION'S KIND, NOT THE LEGEND.
+
+          `{kind:'type'}` is what "a character" means in this table: 40 caps type (the 26 letters,
+          `Space`, the numeric pad's digits and `.`/`-`, and the 20 dual-glyph punctuation caps),
+          and every other kind is a control key or an AID.
+
+          THIS LINE IS THE FIX FOR A STICKY SHIFT THE USER FOUND IN THE GUI WINDOW, 2026-10-23,
+          and the bug was a PROXY rather than a typo. The handler below used to ask
+          `shiftLabel !== undefined` to mean "is this a regular character?", because the rule it
+          implements excuses control keys. But a LETTER has no `shiftLabel` -- `A` shifted is
+          still `A` -- so all 40 character caps without a shifted legend fell through the
+          consuming branch and LEFT THE ARM SET. Shift became a latch, which is the one thing the
+          spec says it is not: *"the next regular character you type ... and then shift unselects"*.
+        */
+        const isCharacter = action.kind === 'type';
         deps.onClick(button, () => {
           /*
-            THE ONE-SHOT SHIFT, AND THE ORDER OF THESE TWO BRANCHES IS THE SPECIFICATION.
+            THE ONE-SHOT SHIFT, AND THE ORDER OF THESE BRANCHES IS THE SPECIFICATION.
 
-            A cap WITH a `shiftLabel` consumes the arm and sends the shifted text. A cap WITHOUT
-            one -- a PF key, `Enter`, a cursor arrow -- sends its own action and LEAVES THE ARM
-            ALONE.
+            A CHARACTER CONSUMES THE ARM. If it has a `shiftLabel` it sends that; if it has none
+            -- a letter, `Space`, a numpad digit -- it sends its own text unchanged, because there
+            is nothing else to send. EITHER WAY THE ARM IS SPENT, which is rule 2 read as the user
+            wrote it: *"the next regular character"*, not "the next character that looks different
+            when shifted".
 
-            THAT SECOND HALF IS THE RULE MOST LIKELY TO BE GOT WRONG, and it is the user's
-            explicit intent rather than an edge case nobody considered: 3270 has no shifted `PF3`,
-            so eating the arm there would make the modifier feel broken -- press Shift, reach for
-            a character, and find it unshifted because a PF key stole the arm on the way. The test
-            asserts it in both directions.
+            A CONTROL KEY LEAVES THE ARM ALONE -- a PF key, `Enter`, a cursor arrow. That is rule
+            3, and it is the half most likely to be got wrong in the other direction: 3270 has no
+            shifted `PF3`, so eating the arm there would make the modifier feel broken -- press
+            Shift, reach for a character, and find it unshifted because a PF key stole the arm on
+            the way. The tests assert both halves, in both directions.
           */
-          if (shiftLabel !== undefined && armed) {
+          if (isCharacter && armed) {
             armed = false;
             paintShift();
-            deps.sendAction({ kind: 'type', text: shiftLabel });
+            // THE SHIFTED TEXT IF THERE IS ONE, otherwise this cap's own action untouched. A
+            // letter re-sent as `{kind:'type', text: cap.label}` would be the same bytes by a
+            // longer route, so the original action is reused and only the arm is spent.
+            deps.sendAction(
+              shiftLabel !== undefined ? { kind: 'type', text: shiftLabel } : action);
             return;
           }
           deps.sendAction(action);

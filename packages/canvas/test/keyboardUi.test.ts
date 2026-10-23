@@ -223,6 +223,55 @@ describe('createKeyboardUi', () => {
       expect(deps.sent[1]).toEqual({ kind: 'type', text: '@' });
     });
 
+    /**
+     * A LETTER CONSUMES THE ARM, WHICH IS THE BUG THE USER FOUND IN THE GUI WINDOW, 2026-10-23.
+     *
+     * Their report: *"shift is sticky beyond a single keystroke in the keyboard window"*. Click
+     * Shift, click `A`, and Shift was STILL ARMED -- so it behaved as a latch, which is the one
+     * thing the spec says it is not.
+     *
+     * ## THE ROOT CAUSE IS A PROXY, NOT A TYPO
+     *
+     * The handler asked `shiftLabel !== undefined` to mean "is this a regular character?". The
+     * spec's rule 3 excuses *"a PF key, `Enter`, a cursor arrow"* -- CONTROL keys -- and the
+     * implementation used "has no shifted legend" as a stand-in for "is not a character". Those
+     * two predicates differ on exactly 40 caps: the 26 LETTERS, `Space`, and the numeric pad's
+     * digits all send `{kind:'type'}` and carry no `shiftLabel`, because `A` shifted is still `A`.
+     *
+     * So every one of them fell through the dual-glyph branch and left the arm set. The user's
+     * own words are the specification -- *"the next REGULAR CHARACTER you type"* -- and a letter
+     * is the most regular character there is.
+     *
+     * THE DISCRIMINATOR IS NOW `action.kind === 'type'`, which is what "a character" actually
+     * means in this table: 40 caps type, every other kind is a control key or an AID.
+     */
+    it('A LETTER CONSUMES THE ARM, because a letter IS a regular character', () => {
+      const deps = fakeDeps();
+      const ui = createKeyboardUi(deps);
+      click(deps, SHIFT_L);
+      click(deps, 'A');
+      expect(deps.sent, 'a letter is unchanged by Shift: A shifted is still A')
+        .toEqual([{ kind: 'type', text: 'A' }]);
+      expect(ui.shiftArmed(), 'STICKY SHIFT: the arm must NOT survive a letter').toBe(false);
+    });
+
+    /*
+      SPACE AND A NUMPAD DIGIT TOO, named rather than left to the letter case above.
+
+      All three are `{kind:'type'}` caps with no `shiftLabel`, and they are the other members of
+      the 40 the proxy caught. A fix that special-cased only the alphabet would pass the test
+      above and still latch on Space -- which is a character an operator types constantly.
+    */
+    it('SPACE and a NUMPAD DIGIT consume the arm too, being characters as well', () => {
+      for (const name of ['Space', '7']) {
+        const deps = fakeDeps();
+        const ui = createKeyboardUi(deps);
+        click(deps, SHIFT_L);
+        click(deps, name);
+        expect(ui.shiftArmed(), `${name} must consume the arm`).toBe(false);
+      }
+    });
+
     it('is not consumed by an INERT cap either', () => {
       const deps = fakeDeps();
       const ui = createKeyboardUi(deps);
