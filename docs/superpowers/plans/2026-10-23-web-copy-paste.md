@@ -22,6 +22,17 @@ two design corrections made during review and the reasons behind the `paste` kin
 
 ## READ THIS BEFORE TASK 1 — FIVE TRAPS, EVERY ONE ALREADY PAID FOR IN THIS REPO
 
+**0. THE TWO-BRANCH RULE IS NECESSARY BUT NOT SUFFICIENT -- AND THE CODE THIS PLAN GAVE FOR TASK 3
+WAS ITSELF PROCESS-ENDING.** Found by the Task 3 implementer, 2026-10-23, and verified
+independently: `extractText(cells, cols, undefined)` throws `TypeError: Cannot read properties of
+undefined (reading top)`, and `pasteString` throws `text is not iterable`. My Task 3 snippet
+called both DIRECTLY in the socket handler, outside any try -- so a malformed `copy` or `paste`
+frame from any client ended the gateway for every connected operator. The honest renderer always
+fills those fields; `integration.test.ts` builds raw frames and does not, which is how it
+surfaced. **So a kind accepted at decode must also have its FIELDS shape-checked there** (the
+`transferChunk`/`pf` precedent), or the interception is a guard against one failure mode while
+leaving another wide open. Obeying the rule I spent two paragraphs on was not enough to satisfy it.
+
 **1. THE TWO-BRANCH RULE IS THE WHOLE SHAPE OF THIS FEATURE, AND BREAKING IT ENDS THE GATEWAY FOR
 EVERY CONNECTED OPERATOR.** `applyAction` THROWS on `copy`, and `web/src/main.ts:334` calls it
 **outside any try inside a socket `data` handler**. So: accepting a kind at decode (`protocol.ts`)
