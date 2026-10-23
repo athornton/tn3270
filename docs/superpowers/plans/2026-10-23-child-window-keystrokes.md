@@ -30,7 +30,17 @@ be imported by its DEEP path and both documents need a new entry. Two tests alre
 `gui/test/keyboardModule.test.ts` — so skipping either map fails the suite rather than only the
 window. **Task 3 does both; do not split them.**
 
-**2. `dist/` CAN BE STALE AFTER A REBASE OR A TIMESTAMP SHUFFLE.** Every browser harness refuses to
+**2. A NEW RUNTIME IMPORT IN `renderer.ts` MUST JOIN `BROWSER_MODULES` — THIS PLAN MISSED IT.**
+FOUND DURING TASK 2, 2026-10-23: `renderer.js` is SERVED to the web gateway, so a new relative
+import of its must be added to `BROWSER_MODULES` in `packages/canvas/src/assets.ts` and the drift
+count in `packages/web/test/httpstatic.test.ts` bumped. Without it the module 404s, `renderer.js`
+never evaluates, and `browser-clicks.mjs` reports `1/8` while blaming unrelated checks
+(`showTransfer`, `onTransfer`, a deleted `oncancel`). **The repo's own guard DOES catch it**
+(`imported but not served: /forwardKeys.js`) -- but that guard lives in `packages/web`, and this
+plan told the implementer to run only `packages/canvas`. **Run the WHOLE suite for any
+`renderer.ts` change.**
+
+**3. `dist/` CAN BE STALE AFTER A REBASE OR A TIMESTAMP SHUFFLE.** Every browser harness refuses to
 run with `dist is OLDER than src`. If `npm run build` says everything is up to date and a harness
 still refuses, run `npx tsc --build --force packages/canvas packages/gui`.
 
@@ -329,7 +339,8 @@ export function forwardKeys(deps: ForwardKeysDeps): void {
 cd ~/git/tn3270 && npx vitest run packages/canvas/test/forwardKeys.test.ts 2>&1 | tail -6
 ```
 
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests. (The three form tags are a loop INSIDE one `it`, so the file declares
+11 `it` blocks -- an earlier draft of this plan said 12.)
 
 - [ ] **Step 5: Verify `KeyLike` is exported from `keys.ts`**
 
