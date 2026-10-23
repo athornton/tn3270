@@ -2,9 +2,11 @@ import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
 import { createReadStream, readFileSync } from 'node:fs';
 import type { Session } from '@tn3270/core';
-import { readAtlas, drawList, blankColumns } from '@tn3270/canvas';
+import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
 import { resolve, resolveTerminalType, resolveAlternateSize } from '@tn3270/core';
-import { applyAction, defaultSession, resolveScheme, resolveTls, startTransfer } from '@tn3270/frontend';
+import {
+  applyAction, applyPaste, defaultSession, resolveScheme, resolveTls, startTransfer,
+} from '@tn3270/frontend';
 import { parseWebArgs, UsageError, type WebArgs } from './args.js';
 import { resolveAsset, tokenCookie, parseCookies } from './httpstatic.js';
 import { checkUpgrade, tokenMatches } from './handshake.js';
@@ -330,6 +332,110 @@ export function buildServer(args: WebArgs) {
         plan is what gives those messages a session to act on; this line only has to keep the kind
         away from `applyAction`, and it is unconditional and above every path to it.
       */
+      /*
+        `copy` IS INTERCEPTED HERE AND ANSWERED WITH THE TEXT, 2026-10-23. This is the other branch
+        of `protocol.ts`'s two-branch rule, landing in the SAME commit that deleted that file's
+        `copy` rejection -- which is what the rule demands and what `toggleKeypad` once spent a
+        commit violating. `applyAction` THROWS on this kind ("the front end owns its own
+        clipboard"), and the call below is outside any try inside a socket text handler that
+        `wsserver.ts` runs from a socket 'data' handler, so without this `return` the first browser
+        copy would end the gateway PROCESS and every other operator's session. MUTATION-PROVED by
+        deleting this block: `integration.test.ts` reports `no reply to the copy action` over an
+        uncaught `applyAction does not handle copy` -- the same shape `toggleKeypad`,
+        `transferForm` and `toggleKeyboard` each produced on the way in.
+
+        ONLY THIS SIDE CAN EXTRACT, which is forced rather than chosen and is why a server->client
+        message was needed at all. A `DrawCell` carries a CG-order atlas glyph and NO character
+        (`canvas/src/drawlist.ts`), so the browser's renderer has nothing to read and sends the
+        RECTANGLE; `text` and `hidden` live on `ResolvedCell`, and `resolve(snapshot)` is called
+        only here. Electron's main does the identical thing and writes an OS clipboard
+        (`gui/src/main.ts`); the difference is only where the result goes, and `copyText` going
+        back to the operator's own browser is what removed this kind's refusal.
+
+        `hidden` IS HONORED INSIDE `extractText`, AND IT IS THE ONE LINE IN THIS FEATURE WHOSE
+        FAILURE MODE IS A LEAKED PASSWORD. `ResolvedCell.text` is STILL THE REAL CHARACTER in a
+        non-display field -- core leaves redaction to the consumer, because only the consumer knows
+        what to substitute -- so a hidden cell yields a space there and would otherwise put a
+        typed password on the wire. Mutation-verified in `canvas/test/selection.test.ts`, which is
+        where that check lives and where it must stay: duplicating it here would be a second copy
+        that could disagree with the one the GUI relies on.
+
+        AN EMPTY RESULT SENDS NOTHING. Copying a blank region must not silently wipe whatever the
+        operator copied from somewhere else: the consumer of this message is a clipboard WRITE, so
+        sending `''` would be exactly that wipe. Doing nothing is the lesser surprise, and it is
+        the same rule Electron's main follows for the same reason -- `if (text !== '')` there too.
+
+        THAT CONSUMER DOES NOT EXIST YET, and saying so is the point rather than a caveat:
+        `bridgecore.ts` has no `copyText` branch and no `navigator.clipboard` call as of this
+        commit, so nothing a browser runs reacts to this message. It is a later task's half. The
+        gateway's half lands first because the two-branch rule made it urgent -- the kind is now
+        accepted at decode, so the interception above is owed TODAY, and a `copyText` nobody reads
+        yet is inert while an acceptance nobody intercepts is the gateway process.
+
+        THE LENGTH IS LOGGED AND NEVER THE TEXT. The action log above is gated behind
+        `--log-actions` precisely because a `type` action carries typed characters; this line is
+        UNGATED and runs against a live host, and a copied rectangle can contain anything on the
+        screen -- including the field the `hidden` check just redacted. A count is enough for a
+        harness to assert against and cannot leak a field.
+
+        THE RECT IS ALREADY VALIDATED, by `decodeClientMessage`, and that is not belt-and-braces --
+        it is what makes this line safe. MEASURED 2026-10-23: with both branches of the two-branch
+        rule correctly in place and no field check, `extractText(cells, cols, undefined)` throws a
+        TypeError right here, in the same handler and with the same process-ending consequence as
+        the `applyAction` throw the rule is about; `integration.test.ts` reported `no reply to the
+        copy action`, and then `no reply to a tab after copy` -- the session itself gone. The
+        RANGE is deliberately not checked anywhere: `extractText` clamps a rect to the grid.
+      */
+      if (msg.action.kind === 'copy') {
+        const snapshot = session.screen.snapshot();
+        const text = extractText(resolve(snapshot), snapshot.cols, msg.action.rect);
+        if (text !== '') {
+          conn.sendBinary(encodeServerMessage({ kind: 'copyText', text }));
+        }
+        process.stdout.write(`copy: ${text.length} chars\n`);
+        return;
+      }
+      /*
+        `paste` IS INTERCEPTED HERE, AND THIS RETURN IS NOT OPTIONAL EITHER -- same commit, same
+        rule, same measured consequence. `applyAction` THROWS on `paste` for the reason it throws
+        on `copy`: a clipboard belongs to whoever has one, and in a browser reading it is async and
+        permissioned while `applyAction` is neither. Deleting this block turns
+        `integration.test.ts` red with an uncaught `applyAction does not handle paste`.
+
+        `applyPaste` IS THE SHARED HELPER AND NOT A SECOND COPY OF THE RULES. The Electron GUI
+        calls the same function (`frontend/src/pasteAction.ts`), so which outcomes deserve a
+        warning, and in which words, is decided in exactly one place -- this project has already
+        watched a fix reach a message's prose body and never the heading that summarised it.
+
+        THE WARNING TRAVELS AS THE EXISTING `error` MESSAGE rather than a new kind. It is already
+        operator-facing text and remedy-first, because the browser's status line TRUNCATES; a
+        dedicated message would have needed a bridge handler for something `onError` already
+        renders. A paste that lost nothing returns no warning and sends none.
+
+        THE REPAINT IS WHAT DISMISSES IT, and it does two jobs at once:
+          1. `onError` BLANKS THE CANVAS to draw its text, and `onFrame` is what clears that state
+             -- so the frame is what takes the warning back off the screen. The order matters: the
+             error goes first, the frame second.
+          2. A paste emits NO session event. `emit('screen')` fires for host data and for a replay,
+             but typing into the buffer does not, so without this the browser would show nothing
+             until the host next spoke -- the same 5-second timeout the `tab` case measured.
+        UNCONDITIONAL, deliberately: the characters that DID land must become visible even on the
+        warning paths, which is the rule the GUI's own `send()` after this call follows.
+
+        `msg.action.text` IS ALREADY VALIDATED AS A STRING by `decodeClientMessage`, for the reason
+        the `copy` block above records in full: `pasteString` does `[...text]`, which throws `text
+        is not iterable` on a number or a missing field -- in this handler, so the gateway process.
+        An EMPTY string is valid and reaches here: it types nothing, warns about nothing, and still
+        repaints.
+      */
+      if (msg.action.kind === 'paste') {
+        const outcome = applyPaste(session, msg.action.text);
+        if (outcome.warning !== undefined) {
+          conn.sendBinary(encodeServerMessage({ kind: 'error', message: outcome.warning }));
+        }
+        repaint?.();
+        return;
+      }
       if (msg.action.kind === 'transferForm') return;
       applyAction(session, msg.action);
       // REPAINT UNCONDITIONALLY, exactly as Electron's main does (`gui/src/main.ts:365-366`).

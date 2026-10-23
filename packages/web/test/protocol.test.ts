@@ -45,6 +45,34 @@ describe('encodeServerMessage', () => {
     expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
   });
 
+  it("round-trips copyText, which carries the operator's own copied text", () => {
+    /*
+      PLAIN JSON, NO BASE64 BRANCH: unlike `atlas`'s `coverage` and `transferData`'s `bytes`, which
+      are byte arrays JSON cannot hold, this payload is already a STRING. A branch for it would be
+      a third convention in `encodeServerMessage` for no reason, and the `wire` expression there
+      names the two kinds that need one -- so a new one must be absent from it on purpose.
+
+      INTERIOR SPACES ARE THE PART WORTH PINNING. `extractText` trims trailing whitespace per line
+      but keeps interior runs, because those carry a panel's column alignment; a transport that
+      collapsed them would make a copied column paste wrong. The double space here is that, and it
+      survives `JSON.stringify` and `deflateSync` intact.
+    */
+    const buf = encodeServerMessage({ kind: 'copyText', text: 'HELLO  WORLD' });
+    const back = JSON.parse(inflateSync(buf).toString()) as Record<string, unknown>;
+    expect(back['kind']).toBe('copyText');
+    expect(back['text']).toBe('HELLO  WORLD');
+    // AND NOTHING ELSE, which is what says it took no base64 detour: the two kinds that do get a
+    // branch in `encodeServerMessage` arrive with a field whose type CHANGED on the wire.
+    expect(Object.keys(back).sort()).toEqual(['kind', 'text']);
+  });
+
+  it('round-trips a multi-line copyText, since a rectangle is usually several rows', () => {
+    // NEWLINE-JOINED, which is `extractText`'s output shape for any rect taller than one row --
+    // and the one character in this payload a transport could plausibly mangle.
+    const msg = { kind: 'copyText' as const, text: 'ROW ONE\nROW TWO\n' };
+    expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
+  });
+
   it('compresses a realistic frame by more than 20x', () => {
     // The measured figure is 237220 -> 6760 for a 24x80 screen. This asserts the PROPERTY that
     // makes full frames acceptable over a network, without pinning an exact byte count that a
@@ -88,6 +116,101 @@ describe('decodeClientMessage', () => {
       .toThrow(/quit/i);
   });
 
+  it('accepts copy and paste, both of which it refused until 2026-10-23', () => {
+    /*
+      THE DECODE HALF ONLY, AND SAYING SO IS THE POINT. `applyAction` THROWS on both of these
+      kinds, so this file accepting them is one branch of `protocol.ts`'s two-branch rule and is
+      WORTHLESS WITHOUT THE OTHER -- the `main.ts` interception, which landed in the same commit
+      and is asserted by `integration.test.ts`'s every-Action-kind case, not here. This case would
+      pass just as happily against the forbidden "neither" state that ends the gateway process,
+      which is why the deleted refusals above point at that case rather than at this.
+
+      AND NEITHER KIND IS IN THAT TEST'S `SWALLOWED` LIST, which the plan for this change expected
+      and the repo contradicted: a swallowed kind is one answered with SILENCE, and these two are
+      both answered. `copy` replies with `copyText` -- it is the first kind whose correct reply is
+      neither a frame, an error, nor silence, so that test grew an `ANSWERS` map for it -- and
+      `paste` types into the screen, so its interception repaints and it replies with an ordinary
+      `frame`. They left `REFUSED` without joining `SWALLOWED`.
+
+      THE FIELDS SURVIVE THE DECODE UNCHANGED, which the two cases below then make load-bearing:
+      what is accepted is a WELL-FORMED frame, and a malformed one is refused rather than passed on
+      to a helper that throws on it.
+    */
+    const copy = decodeClientMessage(JSON.stringify({
+      kind: 'action', action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 9 } },
+    }));
+    expect(copy).toEqual({
+      kind: 'action', action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 9 } },
+    });
+    const paste = decodeClientMessage(JSON.stringify({
+      kind: 'action', action: { kind: 'paste', text: 'ABC' },
+    }));
+    expect(paste).toEqual({ kind: 'action', action: { kind: 'paste', text: 'ABC' } });
+    // AN EMPTY PASTE IS VALID and must stay so: it is what a paste from an empty clipboard is.
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'action', action: { kind: 'paste', text: '' },
+    }))).toEqual({ kind: 'action', action: { kind: 'paste', text: '' } });
+  });
+
+  it('REFUSES a copy whose rect would make extractText throw IN THE SOCKET HANDLER', () => {
+    /*
+      THIS IS THE LINE THE PLAN FOR THIS CHANGE DID NOT HAVE, AND IT IS A PROCESS-ENDING ONE.
+
+      MEASURED 2026-10-23, not feared. With both branches of `protocol.ts`'s two-branch rule
+      correctly in place -- the rejection deleted, the `main.ts` interception added -- and no field
+      check, `integration.test.ts` STILL reported `no reply to the copy action`, and with `copy`
+      parked in `SWALLOWED` to expose the other half, `no reply to a tab after copy`: the session
+      itself had gone. The cause is that `extractText(cells, cols, undefined)` throws
+      `Cannot read properties of undefined (reading 'top')`, inside the same socket 'data' handler
+      and with the same consequence as the `applyAction` throw the rule is about.
+
+      SO THE TWO-BRANCH RULE IS NECESSARY AND NOT SUFFICIENT. It keeps a kind away from a THROWING
+      `applyAction` and says nothing about the interception throwing on its own. A kind whose
+      fields the honest renderer always fills is still a kind a HAND-BUILT FRAME can send empty --
+      and that is not hypothetical, since `integration.test.ts` is exactly such a client by design.
+
+      A NON-INTEGER RECT IS INCLUDED FOR A DIFFERENT REASON: it does not throw, it silently
+      extracts NOTHING. MEASURED: `{top:0.5,left:0.5,bottom:1.5,right:3.5}` returns the empty
+      string, so a browser bug of that shape would look to an operator like an empty selection
+      rather than an error. `Number.isInteger` refuses NaN and the string "0" in the same stroke.
+
+      THE RANGE IS DELIBERATELY NOT CHECKED, and the last case pins that: `extractText` CLAMPS to
+      the grid (measured -- a `1e9` rect yields the screen, and so does an infinite one), so a
+      second set of bounds here would be a second thing to keep in step with it.
+    */
+    const bad: readonly unknown[] = [
+      undefined,                                        // no rect at all: the measured TypeError
+      null,
+      'x',                                              // a string has no `top`
+      {},                                               // every field missing
+      { top: 0, left: 0, bottom: 1 },                   // one field missing
+      { top: 0, left: 0, bottom: 1.5, right: 9 },        // fractional: extracts nothing, silently
+      { top: 0, left: 0, bottom: NaN, right: 9 },
+      { top: 0, left: 0, bottom: '1', right: 9 },        // the string a JSON client can send
+    ];
+    for (const rect of bad) {
+      const frame = JSON.stringify({ kind: 'action', action: { kind: 'copy', rect } });
+      expect(() => decodeClientMessage(frame), `for rect ${JSON.stringify(rect)}`)
+        .toThrow(/copy (needs a rect|rect )/);
+    }
+    // AND A HUGE RECT IS ACCEPTED, because clamping is `extractText`'s job and not this file's.
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'action', action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1e9, right: 1e9 } },
+    })).kind).toBe('action');
+  });
+
+  it('REFUSES a paste whose text would make pasteString throw IN THE SOCKET HANDLER', () => {
+    // THE SAME DEFECT AS THE `copy` CASE ABOVE, in the other direction and with its own measured
+    // signature: `pasteString` does `[...text]`, which throws `text is not iterable` on a missing
+    // field or a NUMBER -- and a number is something JSON carries natively and `String()` would
+    // have quietly accepted. Same handler, same ended process.
+    for (const text of [undefined, null, 7, [], {}, true]) {
+      const frame = JSON.stringify({ kind: 'action', action: { kind: 'paste', text } });
+      expect(() => decodeClientMessage(frame), `for text ${JSON.stringify(text)}`)
+        .toThrow(/paste text must be a string/);
+    }
+  });
+
   /*
    * `REFUSES transferForm, and gives the FILESYSTEM as the reason rather than a missing UI` WAS
    * HERE AND IS DELETED, 2026-10-06, because its subject is gone rather than reworded. It pinned
@@ -101,76 +224,34 @@ describe('decodeClientMessage', () => {
    * for this change did not mention this test at all; it was found by grep, and leaving it would
    * have made the suite assert both halves of a contradiction.
    */
-  it('REFUSES copy, and gives WHOSE MACHINE as the reason rather than a missing feature', () => {
-    /**
-     * THE SAME DISCIPLINE THE DELETED `transferForm` CASE CARRIED, AND FOR A REASON THAT HAS
-     * ALREADY GONE WRONG ONCE IN THIS FEATURE. The copy/paste spec asserted the gateway got copy
-     * "free" because `sendAction` already crosses the WebSocket. Transmitting the ACTION is free;
-     * returning the TEXT is not, and nothing in that direction carries it -- `ServerMessage` gained
-     * three transfer members on 2026-10-06 and so is no longer `frame | error`, but none of them is
-     * a clipboard message; `bridgecore.ts` has no clipboard among its four functions; and the
-     * browser's own renderer holds a `DrawList` whose cells carry a CG-order atlas glyph and no
-     * character. So the gateway would extract onto ITS OWN machine, which was the same objection
-     * socket-carried file I/O has now answered for transfers.
-     *
-     * `/machine/` and NOT `/copy/`: a future refusal rewritten to say "no clipboard support yet"
-     * would still contain the kind and still pass `integration.test.ts`'s `toContain` check, which
-     * is exactly how the transfer reason rotted unobserved while every test stayed green. The
-     * durable reason is whose machine the bytes land on, and that does not expire when web copy
-     * ships -- at which point this becomes an interception in `main.ts` and this test is deleted
-     * rather than reworded.
-     *
-     * AND IT MUST NOT CLAIM THE FEATURE IS MERELY ABSENT, because the user has committed to web
-     * copy/paste before packaging (2026-10-05). "Not implemented" would read as an invitation to
-     * delete the rejection the moment a bridge clipboard call appears, which would restore the
-     * process-ending throw this exists to prevent.
-     */
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
-      .toThrow(/copy/);
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
-      .toThrow(/machine/);
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"copy"}}'))
-      .not.toThrow(/not implemented|unsupported/i);
-  });
-
-  it('REFUSES paste too, because accepting it would END THE GATEWAY', () => {
-    /*
-      THIS IS A HOLE-CLOSING TEST AND IT IS TEMPORARY BY DESIGN, 2026-10-23.
-
-      `paste` joined the `Action` union in this commit and `applyAction` THROWS on it, which is
-      the state `protocol.ts`'s two-branch rule calls forbidden: a kind `applyAction` refuses must
-      grow EITHER a rejection here OR an interception in `main.ts`, in the SAME change, never
-      neither. `main.ts` calls `applyAction` outside any try inside a socket text handler, so
-      without this rejection the first `paste` frame from any client ends the gateway PROCESS and
-      every other operator's session with it.
-
-      MEASURED, NOT FEARED: adding the union member and the `applyAction` guard alone turned
-      `integration.test.ts`'s every-Action-kind case red with `no reply to the paste action` over
-      an uncaught `applyAction does not handle paste` -- the identical signature `copy`,
-      `toggleKeypad` and `transferForm` each produced. The plan for this feature assigned the
-      gateway's half to Task 3 and did not account for Task 1 leaving the kind in the forbidden
-      state in the meantime; the rule is in the repo and the repo wins.
-
-      `/machine/` AS WELL AS `/paste/`, for the reason the `copy` case above measures: a loose
-      pattern on the kind's name alone also passes against a refusal reworded to "no paste support
-      yet", which is how the `transferForm` reason rotted while every test stayed green. The
-      durable reason is WHOSE MACHINE the text comes from -- the operator's, not the gateway's.
-
-      IT MUST NOT CLAIM THE FEATURE IS MERELY ABSENT, same as `copy`: the user committed to web
-      copy/paste before packaging, and "not implemented" reads as an invitation to delete the
-      rejection the moment a browser paste listener appears -- which would restore the
-      process-ending throw this exists to prevent. WHEN TASK 3 LANDS the kind moves to the rule's
-      OTHER branch -- accepted here, intercepted in `main.ts`, and a member of
-      `integration.test.ts`'s `SWALLOWED` list -- and THIS TEST IS DELETED rather than reworded,
-      exactly as the `transferForm` case above was.
-    */
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
-      .toThrow(/paste/);
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
-      .toThrow(/machine/);
-    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
-      .not.toThrow(/not implemented|unsupported/i);
-  });
+  /*
+   * `REFUSES copy, and gives WHOSE MACHINE as the reason rather than a missing feature` AND
+   * `REFUSES paste too, because accepting it would END THE GATEWAY` WERE BOTH HERE AND ARE BOTH
+   * DELETED, 2026-10-23 -- deleted rather than reworded, which is exactly what each of them said
+   * should happen to it and exactly what the `transferForm` note above records happening.
+   *
+   * THE REASON THEY PINNED IS THE REASON THE KINDS ARE NOW ACCEPTED, which is the same inversion
+   * the transfer half went through. Both pinned `/machine/` and deliberately not the kind's name,
+   * because WHOSE MACHINE the text lands on is the durable objection: the gateway extracting onto
+   * its own clipboard, and the gateway unable to read the operator's. A `copyText` server message
+   * carrying the text back to the operator's own browser answers the first, and the browser
+   * sending text it already holds answers the second. Neither refusal survives its own reason.
+   *
+   * WHAT REPLACES THEM IS NOT ANOTHER DECODE CASE. The `accepts copy and paste` case above pins
+   * the decode half; the half that actually matters is the `main.ts` INTERCEPTION, and it is
+   * `integration.test.ts`'s every-Action-kind case that asserts it -- both kinds left its
+   * `REFUSED` list in this same commit. A rejection deleted without that interception is the
+   * forbidden "neither" state, and the acceptance case alone could not tell the difference.
+   *
+   * THEY DID NOT JOIN THAT TEST'S `SWALLOWED` LIST, though the plan for this change said they
+   * would: silence is the wrong answer for both. `copy` is answered with `copyText` and `paste`
+   * with a `frame` from its repaint, so they left `REFUSED` for the ordinary answered path.
+   *
+   * THE `not.toThrow(/not implemented/)` ASSERTIONS GO WITH THEM, and their point is worth
+   * keeping in view: both refusals were deliberately worded about whose machine rather than about
+   * absence, so that nobody would read them as "unbuilt" and delete them while `applyAction` still
+   * threw. That wording is what made these deletions safe to reason about rather than a guess.
+   */
 
   it('refuses malformed input rather than passing it on', () => {
     // `{"kind":"action","action":{}}` is here because the `typeof aKind !== 'string'` branch was
@@ -300,10 +381,18 @@ describe('transfer messages', () => {
     expect(msg.kind).toBe('action');
   });
 
-  it('STILL refuses copy and quit, which are refused for other reasons', () => {
-    expect(() => decodeClientMessage(JSON.stringify({
-      kind: 'action', action: { kind: 'copy' },
-    }))).toThrow();
+  it('STILL refuses quit, which is refused for another reason', () => {
+    /*
+      `copy` WAS THE OTHER HALF OF THIS CASE AND IS GONE, 2026-10-23. It is now accepted, so
+      asserting a throw here would have made this suite claim both halves of a contradiction --
+      which is precisely the trap the deleted `transferForm` note above records, and this case was
+      NOT NAMED IN THE PLAN for this change either. Found by grep for the kind, the same way that
+      one was.
+
+      `quit` STAYS, and its reason does not expire the way the other two did: it would stop the
+      gateway for every connected operator, and no message travelling back to a browser changes
+      that. It is the only member of `integration.test.ts`'s `REFUSED` list now.
+    */
     expect(() => decodeClientMessage(JSON.stringify({
       kind: 'action', action: { kind: 'quit' },
     }))).toThrow();

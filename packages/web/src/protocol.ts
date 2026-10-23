@@ -32,6 +32,32 @@ export type ServerMessage =
   // Transfer progress and completion. `ServerMessage` was `frame | error | session | atlas`
   // until now; web copy will be the next thing to widen it, as the handoff records.
   | { kind: 'transferProgress'; text: string }
+  /*
+    WEB COPY'S ANSWER, 2026-10-23 -- AND THE LINE ABOVE CALLED IT: "web copy will be the next
+    thing to widen it" was written on 2026-10-06 and is now spent, which is worth noting because
+    a comment naming the future change that invalidates it does not usually survive that change.
+
+    A MESSAGE IS NEEDED AT ALL BECAUSE ONLY THIS SIDE CAN EXTRACT THE TEXT. A `DrawCell` carries a
+    CG-order atlas glyph and NO character (`canvas/src/drawlist.ts`), so the browser's renderer
+    holds nothing to read and sends the RECTANGLE; `text` and `hidden` live on `ResolvedCell`, and
+    `resolve(snapshot)` is called on this side. So the extraction cannot move to the client, and
+    the result has to travel back. That is what removes `copy`'s refusal rather than merely
+    relocating it: the text lands on the OPERATOR's clipboard, which was the whole objection.
+
+    THE SPEC CLAIMED THIS WAS FREE because `sendAction` already crosses the socket. Sending the
+    ACTION is free; nothing carried the TEXT, and this member is the thing that was missing.
+
+    PLAIN JSON WITH NO BASE64 BRANCH, unlike `atlas`'s `coverage` and `transferData`'s `bytes`.
+    Those are byte arrays JSON cannot hold; this is already a string, so a branch in
+    `encodeServerMessage` would be a third convention for nothing. `protocol.test.ts` pins its
+    absence by asserting the wire object has exactly `kind` and `text`.
+
+    NOT SIZE-CAPPED HERE, and it does not need to be: a 24x80 screenful of text is under 2 KB and
+    an alternate-size screen a few times that, both far under what `deflateSync` then compresses.
+    This is a SERVER->client message, so `wsserver.ts`'s `MAX_MESSAGE_BYTES` inbound cap does not
+    apply to it in either direction.
+  */
+  | { kind: 'copyText'; text: string }
   // TWO ARMS, SO `error` NARROWS. `{ ok: boolean; error?: string }` was the first shape and it is
   // the exact one `transferChunk.ts`'s `AcceptResult` replaced ONE COMMIT EARLIER, for the reason
   // recorded there: inside `if (!msg.ok)` the message a caller just branched on is still
@@ -171,13 +197,10 @@ export function decodeClientMessage(text: string): ClientMessage {
     // bytes now arrive as `transferChunk` messages and leave as `transferData`, so "local file"
     // means the operator's machine.
     //
-    // `copy` AND `quit` STAY REFUSED and their reasons are unchanged: `quit` would stop the
-    // gateway, and `copy` would extract text onto the SERVER's clipboard. Web copy is the next
-    // roadmap item and will remove the second one the same way this removed this one.
-    //
-    // THE REFUSAL THAT REMAINS IS LOAD-BEARING: `applyAction` throws on `copy`, and
-    // `web/src/main.ts` calls it outside any try in a socket data handler, so deleting that
-    // refusal ends the gateway process on the first browser copy.
+    // `copy` HAS SINCE FOLLOWED IT, 2026-10-23, in exactly the way the sentences below predicted
+    // -- so only `quit` stays refused now. Those sentences are kept rather than deleted because
+    // they are the record of why the refusal existed and of what removed it; see the `copy` and
+    // `paste` acceptance note further down for what replaced them.
     //
     // AND ACCEPTING THIS KIND OWED `main.ts` AN INTERCEPTION, WHICH LANDED IN THE SAME CHANGE --
     // the other branch of this file's two-branch rule, taken rather than skipped. `applyAction`
@@ -190,7 +213,8 @@ export function decodeClientMessage(text: string): ClientMessage {
     // session survived the kind. `main.ts` now returns before
     // `applyAction` for this kind, and the integration test's `SWALLOWED` list is where that is
     // asserted; this kind moved from its `REFUSED` list to that one, rather than out of both.
-    // `copy` IS REJECTED FOR THE SAME SHAPE OF REASON `transferForm` WAS:
+    // `copy` WAS REJECTED FOR THE SAME SHAPE OF REASON `transferForm` WAS, AND IS NOW ACCEPTED FOR
+    // THE SAME SHAPE OF REASON TOO (2026-10-23). The refusal's reason was:
     // whose machine the result lands on. The Electron GUI extracts the text in main and writes an
     // OS clipboard that belongs to the operator; here "main" is the GATEWAY, so the extracted text
     // would land on the gateway's machine and the operator's clipboard would never see it.
@@ -206,62 +230,108 @@ export function decodeClientMessage(text: string): ClientMessage {
     // renderer cannot extract it either -- a `DrawCell` carries a CG-order atlas glyph and no
     // character, which is the whole reason the Electron side extracts in main.
     //
-    // So web copy needs a new server->client message plus a `navigator.clipboard` write in the
-    // bridge, which is its own spec -- exactly the conclusion already reached for the web transfer
+    // So web copy needed a new server->client message plus a `navigator.clipboard` write in the
+    // bridge, which was its own spec -- exactly the conclusion already reached for the web transfer
     // UI. THE USER COMMITTED TO BOTH BEFORE PACKAGING (2026-10-05): web copy/paste and the web
-    // transfer form. THE TRANSFER HALF HAS NOW LANDED, and it is the worked example of how this one
-    // goes: its rejection above became an acceptance here plus an interception in `main.ts`, and
-    // the integration test's REFUSED list lost a member -- the sentence this note has been carrying
-    // all along, now with a precedent rather than a plan.
-    //
-    // A REJECTION AND NOT AN OMISSION, which is this file's second documented rule: `applyAction`
-    // THROWS on `copy`, and `main.ts:272` calls it outside any try inside a socket 'data' handler,
-    // so leaving this out would end the GATEWAY PROCESS and every other operator's session on the
-    // first copy a browser sent. Measured, not feared: without this branch the integration test
-    // reports `no reply to the copy action` and an uncaught `applyAction does not handle copy`.
-    // `toggleKeypad` spent a commit in exactly that state.
-    //
-    // REACHABLE FROM A GESTURE, not just a hand-built frame: the browser runs the same
-    // `renderer.ts`, so a drag plus the Copy accelerator raises this action there too.
-    if (aKind === 'copy') {
-      throw new Error(
-        'copy is not accepted from a client: the gateway would extract the text onto its own '
-        + "machine, not yours");
-    }
+    // transfer form. BOTH HALVES HAVE NOW LANDED: the transfer one first, as the worked example,
+    // and this one on 2026-10-23 by the same route -- a rejection here became an acceptance plus
+    // an interception in `main.ts`, and the integration test's REFUSED list lost a member.
     /*
-      `paste` IS REJECTED FOR NOW, 2026-10-23, AND THIS IS THE HOLE-CLOSING BRANCH RATHER THAN A
-      JUDGEMENT THAT A BROWSER MUST NEVER PASTE.
+      `copy` AND `paste` ARE BOTH ACCEPTED NOW, 2026-10-23, AND BOTH REFUSALS ABOVE ARE DELETED --
+      which is why their reasoning is preserved rather than removed with them: the reason each was
+      refused is the reason each is now accepted, and that inversion is the thing worth keeping.
 
-      The kind joined the `Action` union in this same commit and `applyAction` THROWS on it, so
-      this file's two-branch rule was owed one of its two branches immediately. This is the
-      cheaper one: the acceptance branch needs a browser `paste` listener and a shared helper that
-      do not exist yet, and leaving BOTH branches unbuilt is the one state the rule forbids.
+      WHAT REMOVED EACH REASON, specifically, since "whose machine" was both of them:
+        - `copy`: the text would have landed on the GATEWAY's clipboard. The new `copyText` server
+          message (see the `ServerMessage` union above) carries the extracted text back to the
+          OPERATOR's own browser, which is what removes that reason -- not a relocation of the
+          problem but its answer. The extraction itself cannot move to the client: a `DrawCell`
+          carries a CG-order atlas glyph and NO character, so the browser's renderer has nothing
+          to read and sends the RECTANGLE, while `text` and `hidden` live on `ResolvedCell`, which
+          only this side computes.
+        - `paste`: the text was on the OPERATOR's machine and the gateway could no more read that
+          clipboard than write it. The browser sending text it ALREADY HOLDS is what removes that,
+          and `frontend/src/pasteAction.ts`'s `applyPaste` -- the shared helper the refusal said
+          did not exist yet -- is what both DOM front ends now call.
 
-      NOT FEARED, MEASURED: with the union member and the `applyAction` guard in place and nothing
-      here, `integration.test.ts`'s every-Action-kind case reported `no reply to the paste action`
-      over an uncaught `applyAction does not handle paste`, which on a real gateway is the process
-      and every connected operator's session. The identical signature `copy`, `toggleKeypad` and
-      `transferForm` each produced on the way in.
+      `quit` STAYS REFUSED and is now the whole of the refusal list. Its reason does not expire the
+      way these two did: it would stop the GATEWAY, ending every connected operator's session, and
+      no message travelling back to a browser changes whose process is being stopped. There is no
+      "the operator's own quit" to send back the way there is an operator's own clipboard.
 
-      THE IMPLEMENTATION PLAN FOR THIS FEATURE PUT THIS LINE IN A LATER TASK, which would have left
-      the kind in the forbidden "neither" state across several commits. Recorded because it is the
-      same mistake the plan for `transferForm` made and this docblock already warns about: a task
-      that only adds a refusal in `frontend` looks like a one-package change and is not one.
+      BOTH KINDS NOW OWE `main.ts` AN INTERCEPTION, AND IT LANDS IN THIS SAME COMMIT, because
+      `applyAction` THROWS on both (`frontend/src/actions.ts`) and `main.ts` calls it outside any
+      try inside a socket text handler -- which `wsserver.ts` runs from a socket 'data' handler, so
+      an uncaught throw there ends the PROCESS and every other operator's session. Accepting a kind
+      here without that return is the one state this file's two-branch rule forbids, and
+      `toggleKeypad` has already spent a commit in it.
 
-      THE REASON IS WHOSE MACHINE THE TEXT COMES FROM, which is `copy`'s reason read backwards and
-      does not expire: the characters are on the OPERATOR's clipboard, and the gateway can no more
-      read that than it can write it. What removes this rejection is the browser sending the text
-      it already has -- at which point the kind moves to the OTHER branch, accepted here and
-      intercepted in `main.ts` in one change, exactly as `transferForm` did.
+      BUT NEITHER INTERCEPTION IS A BARE `return`, which is where these two differ from the four
+      above and from what the plan for this change assumed. `transferForm`, `toggleKeypad` and
+      `toggleKeyboard` are SWALLOWED -- answered with silence -- because each is the sender's own
+      display business. These two are ANSWERED: `copy` with the `copyText` message, which is the
+      whole point of accepting it, and `paste` with the frame its repaint produces, since typing
+      into the screen emits no session event. So neither joined `integration.test.ts`'s
+      `SWALLOWED` list on the way out of its `REFUSED` one.
 
-      DELIBERATELY NOT WORDED AS "not implemented": `protocol.test.ts` asserts that, for the reason
-      it records -- a refusal that claims mere absence invites deletion the moment a paste listener
-      appears, which would restore the process-ending throw.
+      MUTATION-PROVED 2026-10-23 by deleting each
+      interception separately and re-running `integration.test.ts`; both failures are quoted at
+      those lines in `main.ts`.
+
+      AND BOTH KINDS CARRY A FIELD, SO BOTH ARE SHAPE-CHECKED BELOW -- which is the part of this
+      change that was NOT in its plan, and was found by measuring rather than by reading. The plan
+      deleted these two rejections, added the two interceptions, and stopped; with exactly that,
+      `integration.test.ts` still reported `no reply to the copy action`, and then -- with `copy`
+      parked in `SWALLOWED` to expose the other half -- `no reply to a tab after copy`, meaning the
+      SESSION HAD GONE. `extractText(cells, cols, undefined)` throws a TypeError, and `pasteString`
+      throws `text is not iterable` on a non-string, both inside the same socket handler and with
+      the same process-ending consequence as the `applyAction` throw this whole rule is about.
+
+      SO THE TWO-BRANCH RULE IS NECESSARY AND NOT SUFFICIENT, which is worth stating plainly next
+      to it: it keeps a kind away from a THROWING `applyAction`, and says nothing about the
+      interception throwing on its own. A kind whose fields the honest client always fills is
+      still a kind a hand-built frame can send empty -- and `integration.test.ts` IS that client,
+      by design, which is why it caught this and nothing else could have.
+
+      HERE AND NOT IN `main.ts`, for the reason this file already gives for `pf`/`pa` below and for
+      `transferChunk`'s `seq`/`total`/`bytes` above: the boundary that admits untrusted input is
+      where the bound belongs, and a malformed frame then takes the SAME path every other malformed
+      frame takes -- the decode `try` in `main.ts` answers with an `error` naming the problem, with
+      the socket and the session intact. Validating at the call site instead would have needed its
+      own error-reply code, duplicated for both kinds.
+
+      WHAT IS CHECKED IS THE SHAPE ONLY, and deliberately not the range. `extractText` CLAMPS a
+      rect to the grid (measured: `{top:0,left:0,bottom:1e9,right:1e9}` yields the screen, and
+      `-Infinity`/`Infinity` clamp too), and `pasteString` owns what every control character in the
+      text means. Re-checking either here would be a second copy of rules that live with their
+      consumers. `Number.isInteger` is the test for the four rect fields because a FRACTIONAL rect
+      silently extracts NOTHING -- measured: `{top:0.5,left:0.5,bottom:1.5,right:3.5}` returns the
+      empty string, so a browser bug of that shape would look like an empty selection rather than
+      an error, and `Number.isInteger` rejects NaN and the string "0" in the same stroke.
     */
+    if (aKind === 'copy') {
+      const rect = (action as { rect?: unknown }).rect;
+      if (typeof rect !== 'object' || rect === null) {
+        throw new Error('copy needs a rect object');
+      }
+      // THE FOUR FIELDS BY NAME. `typeof r[k] !== 'number'` is redundant AT RUNTIME next to
+      // `Number.isInteger` -- the same redundancy `transferChunk` above documents -- but it is not
+      // removable there for narrowing reasons and is simply the clearer phrasing here.
+      const r = rect as Record<string, unknown>;
+      for (const k of ['top', 'left', 'bottom', 'right']) {
+        if (typeof r[k] !== 'number' || !Number.isInteger(r[k])) {
+          throw new Error(`copy rect ${k} must be an integer`);
+        }
+      }
+    }
     if (aKind === 'paste') {
-      throw new Error(
-        'paste is not accepted from a client yet: the text is on your machine, not the '
-        + "gateway's, so the browser must send it with its own helper");
+      // `pasteString` does `[...text]`, which throws `text is not iterable` on anything else --
+      // including a NUMBER, which JSON can carry and `String()` would have quietly accepted. An
+      // EMPTY string is valid and must stay valid: it is what a paste from an empty clipboard is,
+      // and it pastes nothing and warns about nothing.
+      if (typeof (action as { text?: unknown }).text !== 'string') {
+        throw new Error('paste text must be a string');
+      }
     }
     /*
       `toggleKeyboard` IS ACCEPTED TOO, 2026-10-22, AND BY THE SAME RULE -- stated rather than left

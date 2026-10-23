@@ -71,11 +71,27 @@ async function start(extra: string[] = []): Promise<{ url: string; token: string
  * carries text. A NEW kind with a required field and no entry here still gets sent bare, and that is
  * deliberate: the test then asserts the gateway answers a malformed action rather than dying on it,
  * which is a property worth having too.
+ *
+ * THAT LAST SENTENCE WAS PAID OUT ON 2026-10-23, and the two entries added then are why the rest of
+ * this docblock is worth trusting. `copy` and `paste` became accepted kinds; both carry a required
+ * field; and with no entries here the bare frames reached `extractText(cells, cols, undefined)` and
+ * `pasteString(..., undefined)`, which throw a TypeError and `text is not iterable` respectively --
+ * inside the socket handler, so the gateway PROCESS, not a failed assertion. `decodeClientMessage`
+ * now shape-checks both kinds, which is what makes "answers rather than dying" true for them.
+ *
+ * SO THESE ENTRIES ARE NOT WHAT MAKES THE GATEWAY SAFE; the decode checks are. They are here so
+ * the loop exercises the kinds' REAL PATHS -- an extraction that returns text, and a paste that
+ * types into the screen -- rather than only their refusal paths, which a bare frame would.
+ *
+ * `copy`'s rect is 2 ROWS BY 10 COLUMNS of the replayed screen rather than a 1x1, because
+ * `isEmptyRect` treats 1x1 as a click and the honest renderer never sends one.
  */
 const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   pf: { n: 1 },
   pa: { n: 1 },
   type: { text: 'a' },
+  copy: { rect: { top: 0, left: 0, bottom: 1, right: 9 } },
+  paste: { text: 'AB' },
 };
 
 /**
@@ -87,51 +103,54 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * THREE MEMBERS NOW: it was two when `transferForm` left on 2026-10-06, and `paste` joined on
- * 2026-10-23 with the kind itself -- see its own paragraph below.
- * It was refused because a browser-initiated transfer would have moved bytes between the host and
- * the GATEWAY's filesystem rather than the operator's machine -- and the bytes now cross the
- * WebSocket as `transferChunk` and `transferData`, so that reason is gone. It moved where this
- * docblock always said it would: OUT of this list and INTO an interception in `main.ts`, which
- * means it is a member of `SWALLOWED` below rather than merely deleted from here. It is still
- * reachable from a CLICK, not just a hand-built frame, because `KEYPAD_KEYS` carries an `Xfer`
- * button and `canvas/src/keys.ts` maps Ctrl-T.
+ * ONE MEMBER NOW, AND THE DOCBLOCK THAT STOOD HERE PREDICTED EXACTLY THAT: "when it lands, this
+ * list should be back to one member". It went three -> one on 2026-10-23, when `copy` and `paste`
+ * both left for `SWALLOWED`. The count was 2 (`quit`, `copy`) after `transferForm` left on
+ * 2026-10-06, then 3 when `paste` joined with the kind itself, and 1 since.
  *
- * `quit` would stop the gateway, and that reason does not expire.
+ * `quit` IS THE WHOLE LIST, and its reason is the one here that does not expire: it would stop the
+ * gateway, taking every connected operator's mainframe session with it, and no message travelling
+ * back to a browser changes whose process is being stopped.
  *
- * `copy` IS THE OTHER, added 2026-10-05 with the Electron GUI's clipboard, and it is refused for
- * the same shape of reason `transferForm` was: WHOSE MACHINE the result lands on. Electron's main
- * extracts the text and writes an OS clipboard the operator owns; the gateway's "main" is the
- * SERVER, so it would extract onto its own machine. The feature's spec claimed the gateway got copy
- * "free" because `sendAction` already crosses the socket -- THIS TEST IS WHAT DISPROVED IT, by
- * reporting `no reply to the copy action` over an uncaught `applyAction does not handle copy`.
- * Returning the text needs a server->client message that still does not exist: `ServerMessage`
- * gained three transfer members on 2026-10-06 and so is no longer `frame | error`, but none of them
- * carries clipboard text, and the bridge has no clipboard write either. It is reachable from a
- * gesture too, since the browser runs the same `renderer.ts`.
+ * `copy` AND `paste` LEFT FOR THE REASON `transferForm` DID, which is the third time this list has
+ * watched the same inversion. All three were refused over WHOSE MACHINE the result lands on, and
+ * all three were freed by making the socket carry the thing that had been stranded:
+ *   - `transferForm`: the bytes, as `transferChunk` and `transferData`.
+ *   - `copy`: THE TEXT, as the new `copyText` server message. The gateway extracting onto its own
+ *     clipboard was the objection; the extracted text going back to the operator's own browser is
+ *     what answers it. Only the gateway side CAN extract -- a `DrawCell` carries a CG-order atlas
+ *     glyph and no character, so the browser's renderer has nothing to read and sends the
+ *     RECTANGLE instead.
+ *   - `paste`: the text in the other direction, which the browser already holds. This was `copy`'s
+ *     reason read backwards, and it is answered by the sender simply sending it.
+ * The feature's spec claimed the gateway got copy "free" because `sendAction` already crosses the
+ * socket -- THIS TEST IS WHAT DISPROVED IT, by reporting `no reply to the copy action` over an
+ * uncaught `applyAction does not handle copy`. Transmitting the ACTION was indeed free; returning
+ * the TEXT needed a new `ServerMessage` member, and that is what this change added.
  *
- * `copy` LEAVES THIS LIST BEFORE PACKAGING -- the user committed to web copy/paste on 2026-10-05,
- * with its own spec. When it lands, this list should be back to one member. The transfer half of
- * that commitment is what this change was, and it is the worked example of how the move goes.
+ * AND THIS TEST DISPROVED A SECOND CLAIM ON THE WAY OUT, which is why the exit was not the
+ * one-line move it looked like. With the decode rejections deleted and `main.ts` interceptions
+ * added -- both branches of the rule, correctly -- this case reported `no reply to the copy
+ * action` ANYWAY: the hand-built frame below carries NO `rect`, and `extractText(cells, cols,
+ * undefined)` throws a TypeError in the same socket handler and with the same process-ending
+ * consequence as the `applyAction` throw the rule is about. Then, with `copy` parked in
+ * `SWALLOWED` to expose the other half, `no reply to a tab after copy` -- the session itself had
+ * gone. So the kinds are validated in `main.ts` before either helper is called, and THAT is what
+ * these two members' departure actually required. The two-branch rule is about keeping a kind away
+ * from a throwing `applyAction`; it does not say the interception cannot throw on its own.
  *
- * `paste` IS THE THIRD, added 2026-10-23 WITH THE KIND ITSELF, and it is here to close the
- * forbidden "neither" state rather than because the gateway must never paste. `applyAction` throws
- * on the new kind, and this case is what proved the hole was real: with the union member and the
- * guard in `frontend` and nothing here, it reported `no reply to the paste action` over an uncaught
- * `applyAction does not handle paste` -- the same signature `copy` and `toggleKeypad` produced. The
- * implementation plan put the gateway's half in a LATER task, which would have left the kind in the
- * state this docblock calls forbidden for the span of several commits; the rule is in the repo, so
- * the rejection landed with the kind.
- *
- * `paste` LEAVES THIS LIST THE WAY `transferForm` DID -- into `SWALLOWED`, with an interception in
- * `main.ts` in the same change -- when the browser grows its own paste listener. It is the one
- * member here whose exit is already specified.
+ * BOTH ARE REACHABLE FROM A GESTURE, not only from a hand-built frame like the ones below: the
+ * browser runs the same `renderer.ts`, so a drag plus the Copy accelerator raises `copy` there.
  *
  * THE MESSAGE CHECK BELOW IS `toContain(kind)` AND THAT IS ALL IT IS. It cannot tell the current
- * refusal from the superseded one, both of which name the kind; `protocol.test.ts` pins the REASON,
- * which is the half that went stale here.
+ * refusal from a superseded one, since both name the kind; `protocol.test.ts` pins the REASON,
+ * which is the half that went stale here when the transfer reason rotted.
+ *
+ * A ONE-MEMBER LIST IS STILL A LIST AND NOT AN `if`, deliberately: the shape is what makes the
+ * next refusal's arrival a one-word change beside the reasoning that justifies it, and this list
+ * has been 1, 2 and 3 members on three different dates.
  */
-const REFUSED: readonly string[] = ['quit', 'copy', 'paste'];
+const REFUSED: readonly string[] = ['quit'];
 
 /**
  * Kinds the gateway accepts and answers with SILENCE, which is a third category this loop needed.
@@ -174,6 +193,29 @@ const REFUSED: readonly string[] = ['quit', 'copy', 'paste'];
  * `applyAction` was never reached -- the throw would have taken the socket handler with it.
  */
 const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm', 'toggleKeyboard'];
+
+/**
+ * Kinds whose correct reply is a SERVER MESSAGE OTHER THAN A FRAME. Anything absent owes a frame.
+ *
+ * A FOURTH CATEGORY, ADDED 2026-10-23 WITH ONE MEMBER, and the loop below had three until then:
+ * refused with an `error`, answered with a `frame`, or answered with silence. `copy` is none of
+ * those -- it is answered with `copyText`, carrying the extracted text back to the operator's own
+ * browser, which is the entire reason the kind could stop being refused at all.
+ *
+ * `paste` IS DELIBERATELY NOT HERE, and that is the distinction this map exists to keep sharp: a
+ * paste types into the screen, which is a LOCAL action emitting no session event, so `main.ts`
+ * repaints and the reply is an ordinary `frame`. It needs no entry, and giving it one would have
+ * asserted the wrong thing about the one kind here whose interception has a visible effect on the
+ * screen. (Its `error` reply on a warning is a DIFFERENT path, reached only when a paste is
+ * truncated or the keyboard is locked; `pasteAction.test.ts` owns that, and this loop's two-row
+ * rect into a replayed screen does not trip it.)
+ *
+ * A MAP AND NOT A SECOND LIST because the thing that varies is the expected KIND, not membership:
+ * a list named `ANSWERS_COPYTEXT` would need a sibling for every future message, and the loop
+ * would grow a branch per sibling. The `?? 'frame'` default is what keeps the other 24 kinds
+ * unmentioned here.
+ */
+const ANSWERS: Readonly<Record<string, string>> = { copy: 'copyText' };
 
 /**
  * One socket, read as a queue: `next` takes messages in order, `settle` waits for the flow to stop
@@ -618,7 +660,12 @@ describe('the gateway end to end', () => {
         } else {
           // An `error` here means the gateway refused a kind nothing documents as refusable; a
           // timeout in `next` above means `applyAction` threw and took the handler with it.
-          expect(reply['kind'], `${kind} must be answered with a frame`).toBe('frame');
+          //
+          // `ANSWERS` IS CONSULTED FOR THE EXPECTED KIND, which was a bare `'frame'` until
+          // 2026-10-23: `copy` is answered with `copyText` and is the first kind here whose
+          // correct reply is neither a frame, nor an error, nor silence. See that map's own note.
+          const want = ANSWERS[kind] ?? 'frame';
+          expect(reply['kind'], `${kind} must be answered with a ${want}`).toBe(want);
         }
         await io.settle();
       }
