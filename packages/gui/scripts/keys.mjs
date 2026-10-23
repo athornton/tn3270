@@ -66,12 +66,15 @@ const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'
  *
  * Ctrl+] is deliberately absent: it quits, and would truncate the run. Every OTHER entry in
  * `keys.ts`'s CTRL table is here, so a chord dropped from that table cannot hide. THAT CLAIM IS
- * LOAD-BEARING and it is why Ctrl+D, Ctrl+F and Ctrl+K appear below: adding them to that table
- * and not to this one would have left the claim quietly false.
+ * LOAD-BEARING and it is why Ctrl+D, Ctrl+F, Ctrl+K and Ctrl+B appear below: adding them to that
+ * table and not to this one would have left the claim quietly false. Checked by hand 2026-10-23:
+ * that table's ten entries are c r u ] a d f k b t, and all of them but `]` are cases here.
  *
- * Ctrl+K is the one whose interception is in `main.ts` rather than in `applyAction`, so this run
- * also proves the log-then-intercept ORDER there -- log it after intercepting and this position
- * goes red. Alt+K, the canvas front ends' second spelling of it, is NOT here: two toggles in one
+ * Ctrl+K, Ctrl+T and Ctrl+B are the ones whose interception is in `main.ts` rather than in
+ * `applyAction`, so this run also proves the log-then-intercept ORDER there -- log it after
+ * intercepting and those positions go red. (This line said "Ctrl+K is the one" through two
+ * additions that each made it less true; the count is now stated instead of implied.)
+ * Alt+K, the canvas front ends' second spelling of it, is NOT here: two toggles in one
  * run would leave the keypad hidden again, which is fine, but the accelerator that reaches the
  * renderer for a letter-with-Alt is the part `keys.test.ts` already covers directly.
  */
@@ -84,6 +87,34 @@ const CASES = [
   { spec: 'Ctrl+D', action: { kind: 'dup' } },
   { spec: 'Ctrl+F', action: { kind: 'fieldMark' } },
   { spec: 'Ctrl+K', action: { kind: 'toggleKeypad' } },
+  /**
+   * Ctrl+B, the full keyboard -- added here 2026-10-23 to keep the LOAD-BEARING claim above true.
+   *
+   * THE PREMISE THIS WAS ADDED UNDER WAS WRONG, and the measurement is worth recording because
+   * the wrong version of it is in this branch's plan. `grep -c "Ctrl+B"` returns 0 in this file
+   * and in `browser-keys.mjs`, which looked like the chord having no witness anywhere -- the
+   * `Ctrl+T` shape exactly. It is not: `browser-clicks.mjs` spells it `Ctrl-B` with a HYPHEN and
+   * drives the real chord through CDP, so the grep missed its own answer.
+   *
+   * MEASURED, not inferred: deleting `b:` from `canvas/src/keys.ts`'s CTRL table reddens
+   * `browser-clicks.mjs`'s `keyboard` phase ("the full keyboard did not open") AND
+   * `canvas/test/keys.test.ts`'s `BINDING_INTENT` loop. So the chord was already covered twice,
+   * and this case is the THIRD witness rather than the first.
+   *
+   * It still belongs here, for the reason the paragraph above gives: the header claims every
+   * CTRL entry but `]` is a case in this list, and that claim would have been quietly false
+   * without it. What this position adds that the other two do not is the GUI's own
+   * renderer/IPC/`ipcMain` path -- `browser-clicks.mjs` proves the chord in a BROWSER against the
+   * gateway, and `keys.test.ts` calls `actionForKey` directly, so neither touches Electron.
+   *
+   * Like `Ctrl+K` and `Ctrl+T`, its interception is in `main.ts` rather than in `applyAction`
+   * (which THROWS on the kind -- `frontend/src/actions.ts:75-79`), so this position also proves
+   * the log-then-intercept order there.
+   *
+   * IT OPENS A SECOND WINDOW, which is harmless here for the reason the `Ctrl+T` note gives:
+   * `quitIfKeysOnly` calls `app.quit()`, which closes every window.
+   */
+  { spec: 'Ctrl+B', action: { kind: 'toggleKeyboard' } },
   { spec: 'Ctrl+R', action: { kind: 'reset' } },
   /**
    * Ctrl+T, which THIS LIST EXISTS TO HAVE CAUGHT and did not.
