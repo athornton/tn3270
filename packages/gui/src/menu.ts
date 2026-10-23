@@ -80,6 +80,8 @@ export interface MenuHandlers {
   readonly onPaste: () => void;
   /** Open the keypad window. OPEN, not toggle -- see the View menu below. */
   readonly onKeypad: () => void;
+  /** Open the full-keyboard window. OPEN, not toggle, for the same reason. */
+  readonly onKeyboard: () => void;
 }
 
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */
@@ -128,6 +130,23 @@ export function buildMenuTemplate(
    * window's own close button closes it. A checked menu item would promise a toggle and then
    * misreport the state the moment the operator closed the window instead.
    */
+  /*
+    THE FULL KEYBOARD IS THE SECOND VIEW ITEM, 2026-10-23, and everything the note above says
+    about discoverability applies to it MORE strongly: the keypad is 48 keys an operator might
+    guess at, and this is the entire 122-key 3279 layout behind a chord nothing announces.
+
+    `Ctrl+B` IS NOT PLATFORM-SPLIT, for the reason given above: the Copy/Paste split exists ONLY
+    because `Ctrl-C` is the Clear AID. `Ctrl-B` collides with nothing in the 3270 keyboard --
+    `canvas/src/keys.ts:85` is its only binding -- so `Cmd+B` on macOS would diverge from the
+    documented chord for no collision at all. `menu.test.ts` pins both halves of that.
+
+    "KEYBOARD" BESIDE "KEYPAD", AND THE TWO WORDS ARE CLOSE ENOUGH TO BE A HAZARD. They differ by
+    two letters and sit adjacent. That is tolerated rather than fixed with a longer label, because
+    these are the names the whole project already uses -- the README, both chords' documentation,
+    `KEYPAD_BLOCKS` and `KEYBOARD_3279` -- and inventing a third name for one surface in one menu
+    would be worse than the adjacency. The accelerators differ, the ids differ, and a test asserts
+    all three are distinct so a copy-paste that wires one to the other's handler fails.
+  */
   const view: MenuItemTemplate = {
     label: 'View',
     submenu: [
@@ -136,6 +155,12 @@ export function buildMenuTemplate(
         id: 'keypad',
         accelerator: 'Ctrl+K',
         ...(handlers !== undefined ? { click: handlers.onKeypad } : {}),
+      },
+      {
+        label: 'Keyboard',
+        id: 'keyboard',
+        accelerator: 'Ctrl+B',
+        ...(handlers !== undefined ? { click: handlers.onKeyboard } : {}),
       },
     ],
   };

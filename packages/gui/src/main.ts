@@ -567,6 +567,119 @@ app.whenReady().then(async () => {
   };
 
   /**
+   * The FULL-KEYBOARD window, `Ctrl-B`, a second surface beside the keypad.
+   *
+   * ## THE SAME SHAPE AS `openKeypadWindow` ABOVE, DELIBERATELY AND ALMOST LINE FOR LINE
+   *
+   * Read that one first: every structural decision here is its, for its reasons -- lazy, reused,
+   * a non-modal child of the terminal window, `closed` clearing the handle, a `console-message`
+   * forward, a `did-fail-load` forward, and a button-count probe after the load resolves. Only
+   * the differences are commented below, so that a reader can diff the two and find them.
+   *
+   * ## WHY A SECOND WINDOW RATHER THAN ONE SURFACE WITH TWO MODES
+   *
+   * The user asked for BOTH -- *"I like Ctrl-K for the quick special-keys overlay like we have
+   * now. Maybe Ctrl-B for the full keyboard?"* -- and may later keep only one. Two windows means
+   * dropping either is a deletion rather than an untangling, and neither depends on the other
+   * existing. The web gateway makes the same call for the same reason (`web/src/bridge.ts`).
+   *
+   * ## THE SIZE IS MEASURED IN A REAL WINDOW, AND MY ARITHMETIC WAS WRONG
+   *
+   * I first wrote 760x300 from `ui.css`'s own note that the lower band is 24 key units at a 28px
+   * pitch, so ~672px. **BOTH NUMBERS WERE WRONG**, and loading the document said so (2026-10-23,
+   * content widths swept 700..900 against the rendered boxes):
+   *
+   *   content 760 -> the numpad REFLOWS BELOW the main block; root is 732x350
+   *   content 780 -> the numpad sits BESIDE it;               root is 752x222
+   *
+   * THE REFLOW THRESHOLD IS BETWEEN 760 AND 780, so 760 opened the window in the narrow layout --
+   * the tall stacked one the container query exists to provide for a cramped browser tab, not the
+   * arrangement this keyboard is supposed to show. And the HEIGHT I picked was 300 against a real
+   * 350 for the layout I accidentally selected: too short for either.
+   *
+   * 820x280 IS THE SHIPPED PAIR, with ~40px of margin over the 780 threshold rather than sitting
+   * on it -- the threshold is a container query against THIS element's width, and the padding and
+   * scrollbar between the window and that element are exactly the kind of thing that differs by
+   * platform. 280 clears the measured 222 plus the `h1` and the page padding.
+   *
+   * `useContentSize` MAKES THESE THE CONTENT BOX rather than the frame, so the numbers mean what
+   * they say on every platform's window decorations. A window the operator then shrinks merely
+   * reflows and scrolls, which is correct -- this is a starting size, not a constraint.
+   *
+   * ## NOT RESIZED TO FIT AND NOT REMEMBERED, BOTH ON PURPOSE
+   *
+   * The keypad window's note settles persistence for this surface too, on the user's own words:
+   * reopening is one keystroke, and a window that reappears unbidden costs screen space to an
+   * operator who may not want it this session. Explicitly NOT on the list for a future
+   * preferences store.
+   */
+  let keyboardWin: BrowserWindow | undefined;
+  const openKeyboardWindow = async (): Promise<void> => {
+    // SHOW AND FOCUS AN EXISTING ONE rather than building a second, which is what makes `Ctrl-B`
+    // idempotent: the chord OPENS, it does not toggle, so pressing it twice must not stack two.
+    if (keyboardWin !== undefined && !keyboardWin.isDestroyed()) {
+      keyboardWin.show();
+      keyboardWin.focus();
+      return;
+    }
+    const kbw = new BrowserWindow({
+      width: 820,
+      height: 280,
+      useContentSize: true,
+      title: 'Keyboard',
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        // `.cjs`, compiled from keyboardPreload.cts: an ESM preload cannot load, and when it fails
+        // the bridge silently never appears -- a window whose 118 caps all do nothing.
+        preload: join(here, 'keyboardPreload.cjs'),
+      },
+    });
+    keyboardWin = kbw;
+    // THE DEPRECATED FIVE-ARGUMENT FORM, matching the other three windows rather than
+    // electron.d.ts's preferred shape -- see the keypad window's note. One spelling across all
+    // four windows, one upgrade to do when the level finally moves.
+    kbw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      process.stdout.write(`keyboard[${level}] ${sourceId}:${line} ${message}\n`);
+    });
+    kbw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      process.stdout.write(`keyboard window failed to load ${url}: ${code} ${desc}\n`);
+    });
+    kbw.on('closed', () => { keyboardWin = undefined; });
+    await kbw.loadFile(join(here, '..', 'keyboard.html'));
+    /**
+     * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
+     *
+     * THE ONLY THING THAT CAN SEE AN EMPTY KEYBOARD, and this surface has MORE ways to be empty
+     * than the keypad does: `loadFile` resolving means the document parsed, and says nothing
+     * about whether the import map answered all four specifiers, whether the preload installed
+     * its bridge, or whether `createKeyboardUi` ran. All of those produce the SAME window -- a
+     * title, a heading, and nothing else.
+     *
+     * `button[data-key]` AND NOT `button[data-label]`, which is the keypad's attribute:
+     * `keyboardUi.ts` sets `data-key` to the cap's NAME, because several caps' legends are glyphs
+     * and one is the spacebar whose label is empty. Counting the wrong attribute would report 0
+     * on a perfectly good window.
+     *
+     * UNGATED, like the keypad's: it carries a COUNT and no screen content, so it cannot leak
+     * what an operator typed.
+     *
+     * A THROW HERE WOULD BE A HANG, so it is caught -- this runs inside `app.whenReady()`'s
+     * promise chain, where an unhandled rejection means `quitIfKeysOnly` never fires and the
+     * client sits until the harness's timeout.
+     */
+    try {
+      const count = await kbw.webContents.executeJavaScript(
+        'document.querySelectorAll(\'button[data-key]\').length');
+      process.stdout.write(`keyboard: buttons=${String(count)}\n`);
+    } catch (err) {
+      process.stdout.write(`keyboard: PROBE FAILED ${explain(err)}\n`);
+    }
+  };
+
+  /**
    * The transfer window, created on first request and reused after that.
    *
    * LAZY because most sessions never transfer a file, and an Electron window costs a renderer
@@ -886,6 +999,19 @@ app.whenReady().then(async () => {
           process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
         });
       },
+      /**
+       * OPEN THE FULL KEYBOARD, and ungated on focus for the reason given just above: opening a
+       * window is the same harmless request from anywhere, unlike Copy and Paste which act on the
+       * SESSION and are gated so they cannot fire into the 3270 screen behind an HTML form.
+       *
+       * Rejection CAUGHT, not voided -- `void` on a rejecting promise is what creates an unhandled
+       * one, measured on the transfer window.
+       */
+      onKeyboard: () => {
+        openKeyboardWindow().catch((err: unknown) => {
+          process.stdout.write(`keyboard window failed to open: ${explain(err)}\n`);
+        });
+      },
       onCopy: () => {
         if (transferHasFocus()) return;
         // THROUGH THE RENDERER, because the SELECTION lives there -- main knows the screen but not
@@ -1028,6 +1154,38 @@ app.whenReady().then(async () => {
     if (action.kind === 'toggleKeypad') {
       openKeypadWindow().catch((err: unknown) => {
         process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
+      });
+      return;
+    }
+    /**
+     * `Ctrl-B`, THE FULL KEYBOARD, intercepted for exactly the reason `toggleKeypad` is:
+     * `applyAction` THROWS on it (`frontend/src/actions.ts:75-78`, "the front end owns its own
+     * display"), so a front end that forgot this arm would die on the keystroke rather than being
+     * silently inert -- which is the property that throw exists to give.
+     *
+     * OPEN, NOT TOGGLE, like the keypad's: the window's own close button closes it, and
+     * `openKeyboardWindow` shows-and-focuses an existing one so the chord cannot stack two.
+     *
+     * ## IT DOES NOT CLOSE THE KEYPAD, AND THAT IS A DELIBERATE DIVERGENCE FROM THE WEB GATEWAY
+     *
+     * `web/src/bridge.ts` makes opening one surface HIDE the other, and gives the reason: two
+     * overlapping OPAQUE overlays over one canvas would be unreadable. **That reason does not
+     * exist here.** These are two separate windows the operator can place side by side, and an
+     * operator who wants both -- the quick keypad for AIDs and the full keyboard for characters --
+     * should get both. Closing one because the other opened would be the MODAL behaviour this
+     * whole feature was built to remove, and the user's complaint about the old canvas keypad was
+     * precisely that.
+     *
+     * So the divergence is not an omission: the web rule is a constraint of its medium, and
+     * copying it into a medium without that constraint would be copying the symptom.
+     *
+     * THE REJECTION IS CAUGHT, NOT VOIDED. Measured on the transfer window: `void` on a rejecting
+     * promise is what CREATES an unhandled rejection, and there it buried the line that said what
+     * had actually gone wrong.
+     */
+    if (action.kind === 'toggleKeyboard') {
+      openKeyboardWindow().catch((err: unknown) => {
+        process.stdout.write(`keyboard window failed to open: ${explain(err)}\n`);
       });
       return;
     }

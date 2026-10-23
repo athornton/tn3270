@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Keyboard</title>
+<!--
+  THE IMPORT MAP, AND IT IS NOT `keypad.html`'s WITH A WORD CHANGED -- it needs FOUR entries where
+  that one needs two, for a reason worth stating before anyone tidies it.
+
+  A bare specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go
+  blank with no error in any console, which this repo has met five separate ways.
+
+  ## WHY `@tn3270/canvas` ALONE IS NOT ENOUGH HERE
+
+  `keyboardUi.js` does NOT import `@tn3270/frontend` bare. It imports
+  `@tn3270/frontend/dist/keyboard3279.js` by DEEP PATH, and that file's own header records why:
+  `web/static/index.html` already resolves the bare `@tn3270/frontend` to `keypadView.js`, ONE
+  SPECIFIER CANNOT NAME TWO FILES, and `keypadView.js` exports no `KEYBOARD_3279`. So the deep
+  path is forced -- and a deep path needs its OWN map entry, which the measured symptom makes
+  plain: `window.tn3270` never gets assigned and the console says
+  `Cannot read properties of undefined (reading 'onAtlas')`, naming the wrong file entirely.
+
+  `web/static/index.html` carries the same four addresses, pointing at its own served copies.
+  `keyboardModule.test.ts` WALKS this graph against `dist/` and fails on any specifier the map
+  does not answer, because a comment cannot notice a new import.
+
+  ## THE GRAPH, MEASURED 2026-10-23
+
+  `keyboardBoot.js` -> `@tn3270/canvas/dist/keyboardUi.js` -> `keyboard3279.js`, which has ZERO
+  runtime imports. There is also a TYPE-ONLY import of `keymap.js`, which erases.
+
+  ## THREE ENTRIES, AND THE BARE `@tn3270/canvas` IS DELIBERATELY NOT ONE OF THEM
+
+  I wrote it first, copying `keypad.html`, and it is UNUSED: `keyboardBoot.ts` imports the DEEP
+  path (`@tn3270/canvas/dist/keyboardUi.js`) and nothing else in the graph says the bare
+  specifier. Two independent checks agree -- pointing the bare entry at a nonexistent file left
+  `keyboardModule.test.ts` green, and REMOVING it leaves a real Electron window rendering all 118
+  caps (both maps measured in a loaded window, 2026-10-23).
+
+  Deleted rather than kept, because an entry nothing resolves cannot fail when it rots, and a map
+  line that looks like cover and is not is worse than an absent one.
+
+  `keymap.js` IS MAPPED THOUGH ITS IMPORT ERASES, which is the opposite call on a similar-looking
+  line, so the difference is worth stating: that one names a real file that a one-word edit
+  (dropping `type` from the import) would make load-bearing, and the failure would be a blank
+  window. An unused entry pointing at something real is cheap insurance; an unused entry nothing
+  can ever resolve is a lie.
+
+  A map address resolves against the DOCUMENT's base URL, not the importing module's, so
+  `../frontend/...` is relative to this file in `packages/gui/` even though the importer that says
+  `@tn3270/frontend/dist/...` lives a directory deeper in `packages/gui/dist/`.
+
+  Same cross-package reach as `keypad.html`, `transfer.html` and `index.html`, and the same
+  caveat: it assumes `gui`, `canvas` and `frontend` stay siblings on disk, which is true in the
+  workspace and false in an asar bundle. Packaging has to rewrite all four.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@tn3270/canvas/dist/keyboardUi.js": "../canvas/dist/keyboardUi.js",
+    "@tn3270/frontend/dist/keyboard3279.js": "../frontend/dist/keyboard3279.js",
+    "@tn3270/frontend/dist/keymap.js": "../frontend/dist/keymap.js"
+  }
+}
+</script>
+<!--
+  THE SHARED STYLESHEET, the same one `keypad.html` and `transfer.html` load. `uiAssets.test.ts`
+  checks this `href` resolves to a file that exists -- measured, because a 404'd stylesheet still
+  scores a full pass on an Xvfb harness: an unstyled window behaves exactly like a styled one.
+-->
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body class="ui-surface">
+  <h1>Keyboard</h1>
+  <!--
+    `class="keyboard-surface"` IS WHAT MAKES THIS A KEYBOARD RATHER THAN A PILE OF BUTTONS.
+
+    `ui.css` splits the keyboard's rules in two (2026-10-23): `.keyboard-surface` carries the
+    KEYBOARD -- `--kb-pitch`, the font, the regions, every cap's width calc -- and
+    `#keyboard-overlay` carries only the WEB PAGE's framing of it (fixed, bottom-docked, opaque,
+    scrolling), none of which a window wants. A window is already positioned and already opaque.
+
+    WITHOUT THE CLASS THIS DOCUMENT GETS NO PITCH, and the failure is not a blank window: the
+    `.ui-surface button` rule on `ui.css:98` still applies, so the caps render as ordinary buttons
+    at the wrong size and it looks like a keyboard that was merely styled badly. `uiAssets.test.ts`
+    pins the class on both surfaces for exactly that reason.
+
+    The ID is this document's own handle; `keyboardBoot.ts` is the only thing that looks it up, and
+    everything inside is built by `createKeyboardUi` from `KEYBOARD_3279` -- so the 118 caps are
+    never spelled in markup, which is what keeps this file from becoming a second, drifting copy of
+    the key table.
+  -->
+  <div id="keyboard-root" class="keyboard-surface"></div>
+  <script type="module" src="./dist/keyboardBoot.js"></script>
+</body></html>

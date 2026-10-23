@@ -119,7 +119,20 @@
   code as well -- either alone is removable by someone who sees the other, and the pair also
   covers a REATTACHING client, which must not inherit a previous session's display state.
 -->
-<div id="keyboard-overlay" hidden></div>
+<!--
+  `class="keyboard-surface"` AS WELL AS THE ID, 2026-10-23, AND IT IS NOT DECORATION.
+
+  `ui.css` splits the keyboard's rules in two: `.keyboard-surface` is the KEYBOARD (the pitch, the
+  font, the regions, every cap's geometry) and `#keyboard-overlay` is this page's FRAMING of it
+  (fixed, bottom-docked, opaque, scrolling). The Electron window carries the class on its own root
+  and none of the framing, which is the whole reason for the split -- see that file's header.
+
+  SO WITHOUT THIS CLASS THE CAPS LOSE `--kb-pitch` and every width calc resolves against an
+  undefined variable. Not a blank page: a visibly wrong keyboard, which is the harder failure to
+  read. `browser-clicks.mjs`'s keyboard phase measures the rendered geometry and is what catches
+  it.
+-->
+<div id="keyboard-overlay" class="keyboard-surface" hidden></div>
 <!--
   THE TRANSFER OVERLAY. Same two rules as the keypad's, next to it in document order: opaque and
   `position: fixed` in `ui.css`, so it paints over the canvas rather than sitting under it.

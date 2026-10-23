@@ -295,34 +295,38 @@ body.ui-surface {
 /* ---- The full 122-key keyboard ---- */
 
 /*
-  BOTTOM-DOCKED, BECAUSE THE GEOMETRY ALLOWS NOTHING ELSE.
+  ============================================================================================
+  THE FULL KEYBOARD, IN TWO HALVES: `.keyboard-surface` IS THE KEYBOARD, `#keyboard-overlay` IS
+  ONE PLACE TO PUT IT
+  ============================================================================================
 
-  The reference hardware is 2.6:1 and about 24 key units across, so at a readable pitch the
-  keyboard is as wide as a 24x80 screen itself. Corner-anchoring it -- the arrangement the user
-  was considering for the compact KEYPAD -- is simply not available to this surface.
+  ## WHY THIS IS SPLIT AT ALL, 2026-10-23
 
-  `position: fixed` LIKE THE OTHER TWO OVERLAYS, and load-bearing for the reason recorded further
-  up this file: the click path's `offsetX` arithmetic assumes the canvas sits at the viewport
-  origin, and a sibling in normal flow would push it down and break the OTHER front end's keypad
-  and selection clicks through the shared renderer.
+  Every one of these rules was scoped to `#keyboard-overlay` when the WEB gateway was the only
+  front end with a keyboard. The Electron window (`keyboard.html`) is a DOCUMENT, not an overlay
+  over a canvas, so under the old scoping it matched NONE of them -- and the failure is not a
+  blank window but something worse to diagnose: `.ui-surface button { padding: 3px 12px }` on line
+  98 still applies, so the caps render as ordinary buttons at the wrong size, in rows, looking
+  like a keyboard that has merely been styled badly. `uiAssets.test.ts` records the same shape for
+  a missing stylesheet: the whole thing works and looks like 1993.
 
-  OPAQUE, like the keypad, and that is also load-bearing: `keypadOverlay.ts` records that the TUI's
-  keypad once let host text bleed into its chord column. A 3270 screen behind 117 buttons is a
-  denser background still.
+  ## THE SPLIT FOLLOWS THE KEYPAD'S OWN PRECEDENT
 
-  `overflow: auto` rather than `hidden`, matching the web page's own rule: a short viewport must be
-  able to reach the bottom row rather than having it clipped away.
+  `.keypad-keys` (line 185) is the keypad's shared layout and `#keypad-overlay` (line 205) is its
+  web-only framing -- the same division, already in this file, for the same reason. So:
+
+   - `.keyboard-surface` CARRIES THE KEYBOARD: the pitch, the font, the regions, the rows, the cap
+     geometry. Both front ends put this class on whatever element holds the keyboard.
+   - `#keyboard-overlay` CARRIES THE OVERLAY: fixed positioning, the dock, the opaque background,
+     the scroll, and the `hidden` rule. The Electron window needs none of these -- a window IS
+     positioned and opaque by being a window.
+
+  THE PITCH AND FONT ARE ON THE CLASS, NOT THE ID, and that is the half most easily got wrong:
+  they look like framing and they are not. `--kb-pitch` is what every cap's width calc multiplies,
+  so on the id it would be absent in the window and every cap would compute from an undefined
+  variable.
 */
-#keyboard-overlay {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  max-height: 60vh;
-  overflow: auto;
-  background: Canvas;
-  color: CanvasText;
-  padding: 8px 10px;
+.keyboard-surface {
   /*
     ONE PITCH VARIABLE, which is the whole reason `KEYBOARD_3279` holds KEY UNITS rather than
     pixels: the table says a cap is 1 or 1.5 or 7 units wide, and this decides what a unit is. To
@@ -399,6 +403,42 @@ body.ui-surface {
   font-size: 8px;
 }
 
+/*
+  THE WEB OVERLAY'S OWN HALF: BOTTOM-DOCKED, BECAUSE THE GEOMETRY ALLOWS NOTHING ELSE.
+
+  The reference hardware is 2.6:1 and about 24 key units across, so at a readable pitch the
+  keyboard is as wide as a 24x80 screen itself. Corner-anchoring it -- the arrangement the user
+  was considering for the compact KEYPAD -- is simply not available to this surface.
+
+  `position: fixed` LIKE THE OTHER TWO OVERLAYS, and load-bearing for the reason recorded further
+  up this file: the click path's `offsetX` arithmetic assumes the canvas sits at the viewport
+  origin, and a sibling in normal flow would push it down and break the OTHER front end's keypad
+  and selection clicks through the shared renderer.
+
+  OPAQUE, like the keypad, and that is also load-bearing: `keypadOverlay.ts` records that the TUI's
+  keypad once let host text bleed into its chord column. A 3270 screen behind 117 buttons is a
+  denser background still.
+
+  `overflow: auto` rather than `hidden`, matching the web page's own rule: a short viewport must be
+  able to reach the bottom row rather than having it clipped away.
+
+  NONE OF THIS IS WANTED IN THE ELECTRON WINDOW, which is the reason the two halves are separate: a
+  window is already positioned, already opaque, and already scrolls. `max-height: 60vh` in
+  particular would be actively wrong there -- it exists to stop an overlay eating the screen it is
+  drawn over, and in a window there is nothing behind it to protect.
+*/
+#keyboard-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 60vh;
+  overflow: auto;
+  background: Canvas;
+  color: CanvasText;
+  padding: 8px 10px;
+}
+
 #keyboard-overlay[hidden] { display: none; }
 
 /*
@@ -421,9 +461,9 @@ body.ui-surface {
   `align-items: flex-start` so the shorter regions top-align with the main block rather than
   stretching to its height.
 */
-#keyboard-overlay .keyboard-bands { display: flex; flex-direction: column; gap: 10px; }
+.keyboard-surface .keyboard-bands { display: flex; flex-direction: column; gap: 10px; }
 
-#keyboard-overlay .keyboard-band {
+.keyboard-surface .keyboard-band {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -448,7 +488,7 @@ body.ui-surface {
   bar ~510px; the main block alone ~440px. Nothing here hard-codes those -- flexbox finds them --
   but they are written down so a future pitch change can be reasoned about.
 */
-#keyboard-overlay .keyboard-region { flex: 0 0 auto; }
+.keyboard-surface .keyboard-region { flex: 0 0 auto; }
 
 /*
   ORDER: THE LEFT SPECIAL BAR IS FIRST, BECAUSE IT IS ON THE FAR LEFT OF THE HARDWARE.
@@ -462,10 +502,10 @@ body.ui-surface {
   hardware left to right; what drops first when the window narrows is `flex-wrap`'s business, and
   the container queries below tighten the gaps before anything has to move at all.
 */
-#keyboard-overlay #keyboard-special-left { order: 0; }
-#keyboard-overlay #keyboard-main { order: 1; }
-#keyboard-overlay #keyboard-cursor { order: 2; }
-#keyboard-overlay #keyboard-numpad { order: 3; }
+.keyboard-surface #keyboard-special-left { order: 0; }
+.keyboard-surface #keyboard-main { order: 1; }
+.keyboard-surface #keyboard-cursor { order: 2; }
+.keyboard-surface #keyboard-numpad { order: 3; }
 
 /*
   PER-REGION FONT SIZES, WHICH IS WHAT THE REAL HARDWARE DOES.
@@ -495,7 +535,7 @@ body.ui-surface {
   Written as a `calc` on the pitch so it tracks a pitch change, and as `margin-left` rather than
   padding so it cannot interact with the band's own gap.
 */
-#keyboard-overlay #keyboard-pf {
+.keyboard-surface #keyboard-pf {
   margin-left: calc(2 * (var(--kb-pitch) + 2px) + 14px + 1.5 * (var(--kb-pitch) + 2px));
 }
 
@@ -513,25 +553,31 @@ body.ui-surface {
   is 0.61em, so 4 chars at 9px need ~22px of the 26px available. 10px would need ~24.4px and leave
   under 2px of slack, which is where the last three rounds of clipping lived.
 */
-#keyboard-overlay #keyboard-main { font-size: 11px; }
-#keyboard-overlay #keyboard-pf { font-size: 9px; }
-#keyboard-overlay #keyboard-cursor { font-size: 9px; }
-#keyboard-overlay #keyboard-special-left { font-size: 9px; }
-#keyboard-overlay #keyboard-numpad { font-size: 10px; }
+.keyboard-surface #keyboard-main { font-size: 11px; }
+.keyboard-surface #keyboard-pf { font-size: 9px; }
+.keyboard-surface #keyboard-cursor { font-size: 9px; }
+.keyboard-surface #keyboard-special-left { font-size: 9px; }
+.keyboard-surface #keyboard-numpad { font-size: 10px; }
 
 /*
   AND A CONTAINER QUERY FOR THE ONE THING FLEX CANNOT DO: at the narrowest widths the gaps between
   regions are wasted space, so they tighten before anything else has to move.
 
-  `@container` RATHER THAN `@media`, DELIBERATELY. The question is how wide THIS OVERLAY is, not
-  how wide the viewport is. They are the same today -- the surface is bottom-docked and full-width
-  -- but a media query would be measuring the wrong box the moment that changed, and this file's
-  own history has an example of a rule that was right for the wrong reason.
+  `@container` RATHER THAN `@media`, DELIBERATELY. The question is how wide THIS SURFACE is, not
+  how wide the viewport is. They were the same when the web overlay was the only surface -- it is
+  bottom-docked and full-width -- but a media query would be measuring the wrong box the moment
+  that changed, and the Electron window IS that moment: it is a window the operator can resize
+  independently of anything.
+
+  ON `.keyboard-surface` AND NOT ON `#keyboard-overlay`, 2026-10-23, for the reason the pitch is:
+  the container is the thing being queried, so naming the overlay would leave the window with no
+  container at all and these two blocks would silently never apply there. In the web page this
+  changes nothing -- the overlay element is the one carrying the class.
 */
-#keyboard-overlay { container-type: inline-size; container-name: keyboard; }
+.keyboard-surface { container-type: inline-size; container-name: keyboard; }
 
 @container keyboard (width < 760px) {
-  #keyboard-overlay .keyboard-band { gap: 8px; }
+  .keyboard-surface .keyboard-band { gap: 8px; }
 }
 
 @container keyboard (width < 620px) {
@@ -540,10 +586,10 @@ body.ui-surface {
     thing that benefits from tightening: 12 units plus padding is ~356px, so it still fits on one
     line well past this point, and keeping it there matters more than the gap.
   */
-  #keyboard-overlay .keyboard-band { gap: 6px; }
-  #keyboard-overlay .keyboard-bands { gap: 6px; }
+  .keyboard-surface .keyboard-band { gap: 6px; }
+  .keyboard-surface .keyboard-bands { gap: 6px; }
 }
-#keyboard-overlay .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
+.keyboard-surface .keyboard-row { display: flex; gap: 2px; margin-bottom: 2px; }
 
 /*
   A ROW-SPANNING CAP, WHICH IS WHAT MAKES THE MAIN BLOCK A RECTANGLE.
@@ -566,9 +612,9 @@ body.ui-surface {
   THE HEIGHT IS `n` CAPS PLUS THE `n-1` GAPS BETWEEN THEIR ROWS, the same arithmetic the width
   formula uses for units, with `margin-bottom: 2px` per row being the vertical gap.
 */
-#keyboard-overlay .keyboard-row { position: relative; }
+.keyboard-surface .keyboard-row { position: relative; }
 
-#keyboard-overlay .keyboard-row > button[style*='--kb-h'] {
+.keyboard-surface .keyboard-row > button[style*='--kb-h'] {
   position: absolute;
   right: 0;
   top: 0;
@@ -621,7 +667,7 @@ body.ui-surface {
   per button. `flex: 0 0 auto` stops flex from helpfully resizing caps and destroying the layout
   the table describes.
 */
-#keyboard-overlay .keyboard-row > button {
+.keyboard-surface .keyboard-row > button {
   flex: 0 0 auto;
   /*
     `border-box`, AND ITS ABSENCE WAS THE REAL BUG BEHIND THREE ROUNDS OF CLIPPED LABELS.
@@ -721,7 +767,7 @@ body.ui-surface {
   `disabled`, because it is a live control. An inert cap and an actionless-but-live cap look
   different on purpose.
 */
-#keyboard-overlay button[disabled] {
+.keyboard-surface button[disabled] {
   color: GrayText;
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
   border-style: inset;
@@ -735,7 +781,7 @@ body.ui-surface {
   whether the next character will be shifted. `keyboardUi.ts` sets `data-armed` on BOTH Shift caps
   together, since neither is distinguishable to us.
 */
-#keyboard-overlay button[data-armed='true'] {
+.keyboard-surface button[data-armed='true'] {
   background: Highlight;
   color: HighlightText;
   border-style: inset;

@@ -51,10 +51,12 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     let copied = 0;
     let pasted = 0;
     let keypad = 0;
+    let keyboard = 0;
     const t = buildMenuTemplate('linux', {
       onCopy: () => { copied++; },
       onPaste: () => { pasted++; },
       onKeypad: () => { keypad++; },
+      onKeyboard: () => { keyboard++; },
     });
     const items = (t.find((m) => m.label === 'Edit')!.submenu) as
       { label: string; click?: () => void }[];
@@ -65,7 +67,14 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     const viewItems = (t.find((m) => m.label === 'View')!.submenu) as
       { label: string; click?: () => void }[];
     viewItems.find((i) => i.label === 'Keypad')!.click!();
-    expect([copied, pasted, keypad]).toEqual([1, 1, 1]);
+    /*
+      AND THE KEYBOARD'S, which is the one most likely to be wired to the keypad's handler by a
+      copy-paste: the two items sit side by side and differ by one word. Each counter is separate
+      precisely so that mistake fails here -- `[1, 1, 1, 1]` cannot be reached by one handler
+      firing twice.
+    */
+    viewItems.find((i) => i.label === 'Keyboard')!.click!();
+    expect([copied, pasted, keypad, keyboard]).toEqual([1, 1, 1, 1]);
 
     const bare = (buildMenuTemplate('linux').find((m) => m.label === 'Edit')!.submenu) as
       readonly Record<string, unknown>[];
@@ -100,5 +109,41 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
       const flat = JSON.stringify(buildMenuTemplate(platform));
       expect(flat, `${platform} bound Cmd+K`).not.toContain('"Cmd+K"');
     }
+  });
+
+  it('offers the full KEYBOARD on the same View menu, on every platform', () => {
+    /**
+     * THE SECOND SURFACE, `Ctrl-B`, undiscoverable for the same reason the keypad is: nothing on
+     * screen says 118 caps exist behind a chord.
+     *
+     * `Ctrl+B` IS NOT PLATFORM-SPLIT EITHER, and the reason is the keypad's: the Copy/Paste split
+     * exists ONLY because `Ctrl-C` is the Clear AID. `Ctrl-B` collides with nothing in the 3270
+     * keyboard -- `canvas/src/keys.ts:85` is the only binding -- so `Cmd+B` on macOS would
+     * diverge from the chord the README documents for no collision at all.
+     */
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      const view = buildMenuTemplate(platform).find((m) => m.label === 'View');
+      expect(view, `${platform} has no View menu`).toBeDefined();
+      const items = view!.submenu as { label: string; accelerator?: string }[];
+      expect(items.find((i) => i.label === 'Keyboard')?.accelerator).toBe('Ctrl+B');
+      expect(JSON.stringify(buildMenuTemplate(platform)), `${platform} bound Cmd+B`)
+        .not.toContain('"Cmd+B"');
+    }
+  });
+
+  /**
+   * THE TWO ITEMS MUST BE DISTINGUISHABLE, which is a real hazard rather than a hypothetical one.
+   *
+   * "Keypad" and "Keyboard" differ by two letters and sit adjacent in one menu. An operator has to
+   * be able to tell which is which, and the `id`s have to differ or a future `getMenuItemById`
+   * would silently find the wrong one.
+   */
+  it('gives the two View items distinct labels, ids and accelerators', () => {
+    const items = buildMenuTemplate('linux').find((m) => m.label === 'View')!
+      .submenu as { label: string; id?: string; accelerator?: string }[];
+    expect(items.map((i) => i.label)).toEqual(['Keypad', 'Keyboard']);
+    expect(new Set(items.map((i) => i.id)).size, 'the two View items share an id').toBe(2);
+    expect(new Set(items.map((i) => i.accelerator)).size,
+      'the two View items share an accelerator').toBe(2);
   });
 });
