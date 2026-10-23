@@ -1,4 +1,5 @@
 import { createKeypadUi } from '@tn3270/canvas';
+import { forwardKeys } from '@tn3270/canvas/dist/forwardKeys.js';
 
 /**
  * The keypad window's entry point: the real DOM, handed to the testable view.
@@ -57,5 +58,17 @@ createKeypadUi({
   setTitle: (el, title) => { el.title = title; },
   setAttr: (el, name, value) => { el.setAttribute(name, value); },
   onClick: (el, fn) => { el.addEventListener('click', fn); },
+  sendAction: (action) => { bridge.sendAction(action); },
+});
+
+/**
+ * AND THE PHYSICAL KEYBOARD, for the reason `keyboardBoot.ts` gives at length.
+ *
+ * THIS WINDOW HAD THE IDENTICAL GAP and the user only named the keyboard one. Fixing a single
+ * window would leave the other broken the same way, with the same silent symptom, and the fix is
+ * the same two lines.
+ */
+forwardKeys({
+  on: (type, handler) => { window.addEventListener(type, handler as () => void); },
   sendAction: (action) => { bridge.sendAction(action); },
 });

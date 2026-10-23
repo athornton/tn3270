@@ -1,4 +1,5 @@
 import { createKeyboardUi } from '@tn3270/canvas/dist/keyboardUi.js';
+import { forwardKeys } from '@tn3270/canvas/dist/forwardKeys.js';
 
 /**
  * The full-keyboard window's entry point: the real DOM, handed to the testable view.
@@ -69,5 +70,22 @@ createKeyboardUi({
   setAttr: (el, name, value) => { el.setAttribute(name, value); },
   removeAttr: (el, name) => { el.removeAttribute(name); },
   onClick: (el, fn) => { el.addEventListener('click', fn); },
+  sendAction: (action) => { bridge.sendAction(action); },
+});
+
+/**
+ * AND THE PHYSICAL KEYBOARD, so this window is not deaf while it has focus.
+ *
+ * The user's requirement, 2026-10-23: *"typing should send keystrokes to the terminal emulator
+ * whether the keyboard window or the terminal window has focus."* Before this, the product's only
+ * `keydown` listener was `renderer.ts`'s, in the CANVAS window -- so with this window focused a
+ * physical key did nothing at all, which is a worse failure than a wrong action because nothing on
+ * screen explains it.
+ *
+ * THE SAME BRIDGE THE CAPS USE, so a typed key and a clicked cap take one path to the session:
+ * `ipcMain.on('action')` reads no sender, so main's existing interceptions answer both.
+ */
+forwardKeys({
+  on: (type, handler) => { window.addEventListener(type, handler as () => void); },
   sendAction: (action) => { bridge.sendAction(action); },
 });

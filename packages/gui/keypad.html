@@ -22,7 +22,7 @@
   bundle. Packaging has to rewrite all three.
 -->
 <!--
-  TWO ENTRIES, AND BOTH POINT AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL.
+  THREE ENTRIES, AND EVERY ONE POINTS AT A SINGLE MODULE RATHER THAN A PACKAGE BARREL.
 
   `@tn3270/canvas` -> `keypadUi.js`, which is where the DOM view lives. It is in `canvas` and not
   in `gui` because the WEB GATEWAY needs the same view, and `packages/web` neither depends on
@@ -30,13 +30,28 @@
 
   NOT `../canvas/dist/index.js`: the canvas BARREL reaches `drawlist.js`, which value-imports
   `@tn3270/core`, and the barrel's own docstring says so in capitals. `keypadUi.js` has exactly
-  one runtime import (`@tn3270/frontend`, resolved by the second entry), so naming the module
-  keeps the graph at two files.
+  one runtime import (`@tn3270/frontend`, resolved by the `frontend` entry), so naming the module
+  keeps that branch at two files.
+
+  A DEEP `@tn3270/canvas/dist/forwardKeys.js` SITS BESIDE THE BARE ENTRY, which looks redundant
+  and is not. `keypadBoot.ts` needs TWO modules out of `canvas` now -- the view, and the keystroke
+  forwarder that makes this window answer the PHYSICAL keyboard instead of only its own buttons --
+  and ONE SPECIFIER CANNOT NAME TWO FILES. The bare entry is already spent on `keypadUi.js` here,
+  while `keyboard.html` spells every `canvas` module by deep path, so the deep path is the only
+  spelling that resolves in BOTH documents. Deliberately not renaming the bare entry to a deep one
+  to match: `keypadUi.js` says `@tn3270/frontend` bare, `web/static/index.html` maps the bare
+  `@tn3270/canvas` the same way, and churning three files buys nothing.
+
+  The new branch closes at ONE file: `forwardKeys.js` value-imports only `./keys.js`, which has
+  ZERO runtime imports and resolves by relative path against an address already inside
+  `canvas/dist`, so it needs no entry of its own. `keypadModule.test.ts` fails on any specifier
+  this map does not answer, because a comment cannot notice a new import.
 -->
 <script type="importmap">
 {
   "imports": {
     "@tn3270/canvas": "../canvas/dist/keypadUi.js",
+    "@tn3270/canvas/dist/forwardKeys.js": "../canvas/dist/forwardKeys.js",
     "@tn3270/frontend": "../frontend/dist/keypadView.js"
   }
 }

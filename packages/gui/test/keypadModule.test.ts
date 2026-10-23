@@ -8,9 +8,9 @@ import { dirname, join } from 'node:path';
  *
  * ## THE FAILURE THIS CATCHES IS A BLANK WINDOW WITH NO ERROR
  *
- * `keypad.html` loads `dist/keypadBoot.js` as a module and carries an import map with exactly ONE
- * entry, `@tn3270/frontend` -> `../frontend/dist/keypadView.js`. So every bare specifier in this
- * window's graph must be that one string: a browser has no bundler, an unmapped bare specifier
+ * `keypad.html` loads `dist/keypadBoot.js` as a module and carries a SMALL import map -- three
+ * entries as of 2026-10-23, read from the document below rather than restated, so every specifier
+ * in this window's graph must be one of them: a browser has no bundler, an unmapped specifier
  * 404s, and the window comes up with a title and nothing else. This repo has met that shape five
  * separate ways, which is why it is a test and not a comment.
  *

@@ -2,7 +2,7 @@
 <html><head><meta charset="utf-8"><title>Keyboard</title>
 <!--
   THE IMPORT MAP, AND IT IS NOT `keypad.html`'s WITH A WORD CHANGED -- it needs FOUR entries where
-  that one needs two, for a reason worth stating before anyone tidies it.
+  that one needs three, for a reason worth stating before anyone tidies it.
 
   A bare specifier is unresolvable in a browser and there is NO BUNDLER here: the window would go
   blank with no error in any console, which this repo has met five separate ways.
@@ -17,7 +17,10 @@
   plain: `window.tn3270` never gets assigned and the console says
   `Cannot read properties of undefined (reading 'onAtlas')`, naming the wrong file entirely.
 
-  `web/static/index.html` carries the same four addresses, pointing at its own served copies.
+  `web/static/index.html` carries the three `keyboardUi`/`keyboard3279`/`keymap` addresses,
+  pointing at its own served copies. It does NOT carry the `forwardKeys.js` entry below and must
+  not gain one: that module exists for windows that are not the canvas, and the gateway's keyboard
+  is a `<div>` overlay IN the canvas page, where `renderer.ts`'s listener already covers it.
   `keyboardModule.test.ts` WALKS this graph against `dist/` and fails on any specifier the map
   does not answer, because a comment cannot notice a new import.
 
@@ -26,11 +29,23 @@
   `keyboardBoot.js` -> `@tn3270/canvas/dist/keyboardUi.js` -> `keyboard3279.js`, which has ZERO
   runtime imports. There is also a TYPE-ONLY import of `keymap.js`, which erases.
 
-  ## THREE ENTRIES, AND THE BARE `@tn3270/canvas` IS DELIBERATELY NOT ONE OF THEM
+  `keyboardBoot.js` -> `@tn3270/canvas/dist/forwardKeys.js` IS THE SECOND BRANCH OF THAT GRAPH,
+  and it is what makes this window answer the PHYSICAL keyboard rather than only its own caps.
+  Before it, the product's only `keydown` listener was `renderer.ts`'s, in the canvas window, so a
+  key pressed here did nothing at all. The branch closes at ONE file: `forwardKeys.js`
+  value-imports only `./keys.js`, which has ZERO runtime imports of its own and is reached by
+  relative path from an address already inside `canvas/dist`, so it needs no entry of its own.
 
-  I wrote it first, copying `keypad.html`, and it is UNUSED: `keyboardBoot.ts` imports the DEEP
-  path (`@tn3270/canvas/dist/keyboardUi.js`) and nothing else in the graph says the bare
-  specifier. Two independent checks agree -- pointing the bare entry at a nonexistent file left
+  THE DEEP PATH IS FORCED HERE TOO, for the reason `keypad.html` now records at its own map: that
+  document resolves the BARE `@tn3270/canvas` to `keypadUi.js`, one specifier cannot name two
+  files, and both windows must import the same module -- so the deep path is the only spelling
+  that works in both, and this document maps it like every other deep path it carries.
+
+  ## FOUR ENTRIES, AND THE BARE `@tn3270/canvas` IS DELIBERATELY NOT ONE OF THEM
+
+  I wrote it first, copying `keypad.html`, and it is UNUSED: `keyboardBoot.ts` imports DEEP paths
+  for both of its `canvas` modules (`keyboardUi.js` and `forwardKeys.js`) and nothing else in the
+  graph says the bare specifier. Two independent checks agree -- pointing the bare entry at a nonexistent file left
   `keyboardModule.test.ts` green, and REMOVING it leaves a real Electron window rendering all 118
   caps (both maps measured in a loaded window, 2026-10-23).
 
@@ -55,6 +70,7 @@
 {
   "imports": {
     "@tn3270/canvas/dist/keyboardUi.js": "../canvas/dist/keyboardUi.js",
+    "@tn3270/canvas/dist/forwardKeys.js": "../canvas/dist/forwardKeys.js",
     "@tn3270/frontend/dist/keyboard3279.js": "../frontend/dist/keyboard3279.js",
     "@tn3270/frontend/dist/keymap.js": "../frontend/dist/keymap.js"
   }
