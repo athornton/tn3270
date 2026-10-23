@@ -77,6 +77,31 @@ export function applyAction(session: Session, action: Action): void {
       'applyAction does not handle toggleKeyboard: the front end owns its own display',
     );
   }
+  /*
+    THE SIXTH OF THE SAME SHAPE, 2026-10-23, and outside the `try` for the reason the five above
+    give: a kind whose meaning depends on WHOSE MACHINE it lands on, so the front end owns it.
+    `copy` reads that machine's clipboard; `paste` writes from it.
+
+    IT COULD BE HANDLED HERE AND IS NOT, WHICH IS A POLICY CHOICE RATHER THAN A CONSTRAINT -- said
+    plainly because the spec for this feature first claimed the opposite. `pasteString` needs a
+    `Screen` as well as a `Keyboard`, and this function HAS both: `session` carries them, and
+    `gui/src/main.ts` already calls `pasteString(session.keyboard, session.screen, text)`. What
+    rules it out is the pattern -- `quit`, `toggleKeypad`, `toggleKeyboard`, `transferForm` and
+    `copy` all throw here for the same reason, and a front end that forgot the arm fails loudly
+    rather than being silently inert.
+
+    AND THERE IS A SECOND, CONCRETE REASON, which the policy one should not be allowed to hide:
+    `pasteString` RETURNS `{typed, dropped, reason?}`, and `applyAction` returns `void` inside a
+    `try` that swallows everything. Dispatching it here would discard the one report that says a
+    paste stopped early -- on a keyboard lock, or a wrap past the start -- which is the whole
+    reason that return type exists.
+
+    BOTH DOM FRONT ENDS THEN SHARE ONE HELPER (`pasteAction.ts`, Task 2), so the GUI's rules stop
+    being private to its menu handler and the browser is not a second copy of them.
+  */
+  if (action.kind === 'paste') {
+    throw new Error('applyAction does not handle paste: the front end owns its own clipboard');
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

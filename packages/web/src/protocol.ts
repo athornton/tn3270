@@ -229,6 +229,41 @@ export function decodeClientMessage(text: string): ClientMessage {
         + "machine, not yours");
     }
     /*
+      `paste` IS REJECTED FOR NOW, 2026-10-23, AND THIS IS THE HOLE-CLOSING BRANCH RATHER THAN A
+      JUDGEMENT THAT A BROWSER MUST NEVER PASTE.
+
+      The kind joined the `Action` union in this same commit and `applyAction` THROWS on it, so
+      this file's two-branch rule was owed one of its two branches immediately. This is the
+      cheaper one: the acceptance branch needs a browser `paste` listener and a shared helper that
+      do not exist yet, and leaving BOTH branches unbuilt is the one state the rule forbids.
+
+      NOT FEARED, MEASURED: with the union member and the `applyAction` guard in place and nothing
+      here, `integration.test.ts`'s every-Action-kind case reported `no reply to the paste action`
+      over an uncaught `applyAction does not handle paste`, which on a real gateway is the process
+      and every connected operator's session. The identical signature `copy`, `toggleKeypad` and
+      `transferForm` each produced on the way in.
+
+      THE IMPLEMENTATION PLAN FOR THIS FEATURE PUT THIS LINE IN A LATER TASK, which would have left
+      the kind in the forbidden "neither" state across several commits. Recorded because it is the
+      same mistake the plan for `transferForm` made and this docblock already warns about: a task
+      that only adds a refusal in `frontend` looks like a one-package change and is not one.
+
+      THE REASON IS WHOSE MACHINE THE TEXT COMES FROM, which is `copy`'s reason read backwards and
+      does not expire: the characters are on the OPERATOR's clipboard, and the gateway can no more
+      read that than it can write it. What removes this rejection is the browser sending the text
+      it already has -- at which point the kind moves to the OTHER branch, accepted here and
+      intercepted in `main.ts` in one change, exactly as `transferForm` did.
+
+      DELIBERATELY NOT WORDED AS "not implemented": `protocol.test.ts` asserts that, for the reason
+      it records -- a refusal that claims mere absence invites deletion the moment a paste listener
+      appears, which would restore the process-ending throw.
+    */
+    if (aKind === 'paste') {
+      throw new Error(
+        'paste is not accepted from a client yet: the text is on your machine, not the '
+        + "gateway's, so the browser must send it with its own helper");
+    }
+    /*
       `toggleKeyboard` IS ACCEPTED TOO, 2026-10-22, AND BY THE SAME RULE -- stated rather than left
       to the default, because "accepted because nothing refuses it" is how a kind ends up in
       NEITHER branch of this file's two-branch rule.

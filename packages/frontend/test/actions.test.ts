@@ -391,6 +391,21 @@ describe('the keypad-era actions', () => {
     expect(() => applyAction(session, { kind: 'copy', rect: { top: 0, left: 0, bottom: 1, right: 1 } }))
       .toThrow(/does not handle copy/);
   });
+
+  it('REFUSES paste, the clipboard being the front end s own too', () => {
+    // The SIXTH of the same shape, 2026-10-23. Same reasoning as `copy`, and the sharper half is
+    // that `paste` carries TEXT where `copy` carries a rectangle: the direction decides which end
+    // has the characters, and neither end is this function's.
+    //
+    // `/does not handle paste/` rather than `/paste/`, for the reason measured on the
+    // `toggleKeypad` twin above: the loose pattern also matches Node's own
+    // `TypeError: ...paste is not a function`, so it would pass against an accidental crash as
+    // well as against the deliberate refusal. `paste` is as bad a case for that as `copy` is,
+    // being a plausible method name on several objects in scope.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'paste', text: 'HELLO' }))
+      .toThrow(/does not handle paste/);
+  });
 });
 
 /**
@@ -579,6 +594,12 @@ const ROWS: readonly Row[] = [
   // business for exactly the reason `toggleKeypad` is -- with the sharper point that only two of
   // the four front ends have such a surface at all.
   { action: { kind: 'toggleKeyboard' }, throws: /does not handle toggleKeyboard/ },
+  // SIX now, 2026-10-23. `paste` is `copy`'s other direction, and the front end owns it for the
+  // same reason: the text comes from the OPERATOR's machine. The `text` is required by the union,
+  // so it is spelled even though the throw happens before anything reads it -- as `copy`'s `rect`
+  // is. THIS ROW IS NOT OPTIONAL BOOKKEEPING: the count assertion below reddened the moment the
+  // union member landed and before this row existed, which is the guard working as designed.
+  { action: { kind: 'paste', text: 'HELLO' }, throws: /does not handle paste/ },
 ];
 
 /**
@@ -658,9 +679,10 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 28 members, 23 switch cases plus the 5 guards --
-    // `toggleKeyboard` is the fifth, added 2026-10-22 with the full keyboard; `copy` was the
-    // fourth, with the GUI's clipboard; `transferForm` the third, with the TUI's transfer form.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(28);
+    // a decision someone has to write down. 29 members, 23 switch cases plus the 6 guards --
+    // `paste` is the sixth, added 2026-10-23 with web copy/paste; `toggleKeyboard` was the fifth,
+    // 2026-10-22 with the full keyboard; `copy` the fourth, with the GUI's clipboard;
+    // `transferForm` the third, with the TUI's transfer form.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(29);
   });
 });

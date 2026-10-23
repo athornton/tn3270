@@ -133,6 +133,45 @@ describe('decodeClientMessage', () => {
       .not.toThrow(/not implemented|unsupported/i);
   });
 
+  it('REFUSES paste too, because accepting it would END THE GATEWAY', () => {
+    /*
+      THIS IS A HOLE-CLOSING TEST AND IT IS TEMPORARY BY DESIGN, 2026-10-23.
+
+      `paste` joined the `Action` union in this commit and `applyAction` THROWS on it, which is
+      the state `protocol.ts`'s two-branch rule calls forbidden: a kind `applyAction` refuses must
+      grow EITHER a rejection here OR an interception in `main.ts`, in the SAME change, never
+      neither. `main.ts` calls `applyAction` outside any try inside a socket text handler, so
+      without this rejection the first `paste` frame from any client ends the gateway PROCESS and
+      every other operator's session with it.
+
+      MEASURED, NOT FEARED: adding the union member and the `applyAction` guard alone turned
+      `integration.test.ts`'s every-Action-kind case red with `no reply to the paste action` over
+      an uncaught `applyAction does not handle paste` -- the identical signature `copy`,
+      `toggleKeypad` and `transferForm` each produced. The plan for this feature assigned the
+      gateway's half to Task 3 and did not account for Task 1 leaving the kind in the forbidden
+      state in the meantime; the rule is in the repo and the repo wins.
+
+      `/machine/` AS WELL AS `/paste/`, for the reason the `copy` case above measures: a loose
+      pattern on the kind's name alone also passes against a refusal reworded to "no paste support
+      yet", which is how the `transferForm` reason rotted while every test stayed green. The
+      durable reason is WHOSE MACHINE the text comes from -- the operator's, not the gateway's.
+
+      IT MUST NOT CLAIM THE FEATURE IS MERELY ABSENT, same as `copy`: the user committed to web
+      copy/paste before packaging, and "not implemented" reads as an invitation to delete the
+      rejection the moment a browser paste listener appears -- which would restore the
+      process-ending throw this exists to prevent. WHEN TASK 3 LANDS the kind moves to the rule's
+      OTHER branch -- accepted here, intercepted in `main.ts`, and a member of
+      `integration.test.ts`'s `SWALLOWED` list -- and THIS TEST IS DELETED rather than reworded,
+      exactly as the `transferForm` case above was.
+    */
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
+      .toThrow(/paste/);
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
+      .toThrow(/machine/);
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"paste","text":"x"}}'))
+      .not.toThrow(/not implemented|unsupported/i);
+  });
+
   it('refuses malformed input rather than passing it on', () => {
     // `{"kind":"action","action":{}}` is here because the `typeof aKind !== 'string'` branch was
     // otherwise VACUOUS: mutating it to `if (false)` left every test passing.

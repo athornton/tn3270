@@ -87,7 +87,8 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * TWO MEMBERS NOW, since `transferForm` left on 2026-10-06 when socket-carried file I/O landed.
+ * THREE MEMBERS NOW: it was two when `transferForm` left on 2026-10-06, and `paste` joined on
+ * 2026-10-23 with the kind itself -- see its own paragraph below.
  * It was refused because a browser-initiated transfer would have moved bytes between the host and
  * the GATEWAY's filesystem rather than the operator's machine -- and the bytes now cross the
  * WebSocket as `transferChunk` and `transferData`, so that reason is gone. It moved where this
@@ -113,11 +114,24 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * with its own spec. When it lands, this list should be back to one member. The transfer half of
  * that commitment is what this change was, and it is the worked example of how the move goes.
  *
+ * `paste` IS THE THIRD, added 2026-10-23 WITH THE KIND ITSELF, and it is here to close the
+ * forbidden "neither" state rather than because the gateway must never paste. `applyAction` throws
+ * on the new kind, and this case is what proved the hole was real: with the union member and the
+ * guard in `frontend` and nothing here, it reported `no reply to the paste action` over an uncaught
+ * `applyAction does not handle paste` -- the same signature `copy` and `toggleKeypad` produced. The
+ * implementation plan put the gateway's half in a LATER task, which would have left the kind in the
+ * state this docblock calls forbidden for the span of several commits; the rule is in the repo, so
+ * the rejection landed with the kind.
+ *
+ * `paste` LEAVES THIS LIST THE WAY `transferForm` DID -- into `SWALLOWED`, with an interception in
+ * `main.ts` in the same change -- when the browser grows its own paste listener. It is the one
+ * member here whose exit is already specified.
+ *
  * THE MESSAGE CHECK BELOW IS `toContain(kind)` AND THAT IS ALL IT IS. It cannot tell the current
  * refusal from the superseded one, both of which name the kind; `protocol.test.ts` pins the REASON,
  * which is the half that went stale here.
  */
-const REFUSED: readonly string[] = ['quit', 'copy'];
+const REFUSED: readonly string[] = ['quit', 'copy', 'paste'];
 
 /**
  * Kinds the gateway accepts and answers with SILENCE, which is a third category this loop needed.

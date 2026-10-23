@@ -129,6 +129,35 @@ export type Action =
   // Do not "tidy" this into an import.
   | { kind: 'copy'; rect: { top: number; left: number; bottom: number; right: number } }
   | { kind: 'type'; text: string }
+  /**
+   * PASTE, 2026-10-23, AND IT IS DELIBERATELY NOT `type` -- BUT NOT FOR THE REASON THE PLAN GAVE.
+   *
+   * The plan for this feature said that carrying a paste as `type` would send every `\n` as
+   * **Enter, an AID that submits a half-filled panel to a live host** and every `\f` as **Clear,
+   * which wipes the screen**. THAT IS TRUE OF x3270 AND FALSE OF THIS CODE, and the difference was
+   * MEASURED rather than reasoned: `applyAction` dispatches `type` to `Keyboard.typeString`, which
+   * is a bare loop over `type(ch)`; `Keyboard` contains no reference to `AID` or `sendAID` at all,
+   * and `type` routes every character through `CodePage.fromUnicode`. Driven directly,
+   * `typeString('AB\nC\fD')` leaves cells `c1 c2 25 c3 0c c4` -- the `\n` and `\f` land as the
+   * EBCDIC bytes 0x25 and 0x0c IN THE BUFFER, and nothing reaches the wire.
+   *
+   * SO THE REAL DEFECT IS CORRUPTION, NOT SUBMISSION, and it is still a defect worth a separate
+   * kind. Those two control bytes are written into fields as though they were characters, the MDT
+   * is set on each field they touch, and the next AID the operator does send carries them to the
+   * host as field data. `pasteString` instead gives `\n` a newline (suppressed after a wrap), `\f`
+   * a SPACE, drops `\r` so CRLF text gains no stray character per line, aborts on a keyboard lock
+   * or a wrap past the start, and returns `{typed, dropped, reason?}` -- none of which `typeString`
+   * has. Those rules are measured from x3270's `Common/kybd.c`; the line numbers are tabulated in
+   * `paste.ts`'s header and are deliberately NOT repeated here, there being no second copy to keep
+   * in step and no reference checkout in this repo to re-verify them against.
+   *
+   * SO THE TEXT IS THE SAME AND THE SEMANTICS ARE NOT, which is what earns a separate kind.
+   *
+   * `applyAction` THROWS on this, like `copy` and the four before it: a clipboard belongs to the
+   * front end, and for `paste` the text comes from the OPERATOR's machine -- the OS clipboard in
+   * the GUI, a browser `paste` event at the far end of a socket in the gateway.
+   */
+  | { kind: 'paste'; text: string }
   | { kind: 'quit' };
 
 /**
