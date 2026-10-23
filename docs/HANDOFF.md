@@ -29,12 +29,17 @@ plan `docs/superpowers/plans/2026-10-23-child-window-keystrokes.md`. Verified by
 real `BrowserWindow`: Ctrl-A, a plain character and Enter all reach main's `ipcMain.on('action')`
 from both windows. Why no live-host run was needed is in `live-testing.md`'s newest entry.
 
-**THE KNOWN GAP, AND IT IS THE ONE `keys.mjs` EXISTS TO HAVE CAUGHT BEFORE:** `keys.mjs` drives 19
-chords and **`Ctrl+B` is not among them**, so the GUI's keyboard chord has no harness witness —
-exactly the shape of the `Ctrl+T` defect that list missed in 2026-10-01 (the chord was dead while
-the `Xfer` keypad button worked). Neither GUI harness has a keyboard-window phase at all; the WEB
-keyboard's layout phase in `browser-clicks.mjs` is extensive — see below. Adding a `Ctrl+B` case
-to `keys.mjs` is the cheapest next thing worth doing.
+**THAT GAP IS CLOSED, AND THE MEASUREMENT THAT FOUND IT WAS PARTLY WRONG** (2026-10-23).
+`keys.mjs` now drives **20 chords / 18 actions**, `Ctrl+B` among them.
+
+**THE CORRECTION IS WORTH MORE THAN THE FIX.** The gap was found by `grep -c "Ctrl+B"` returning 0
+in every harness — but `browser-clicks.mjs` spells it **`Ctrl-B`, with a hyphen**, and dispatches
+the real chord through CDP. So the WEB front end had cover all along and the "no witness anywhere"
+claim was false; what was genuinely missing was a **GUI** witness, which is a narrower and still
+real gap (the Electron renderer → IPC → `ipcMain` path, which no web harness touches).
+**A grep for one spelling of a chord is not a measurement of its cover.** Proved by mutation, not
+by reading: deleting `b:` from the `CTRL` table fails `keys.mjs`, `browser-clicks.mjs` AND
+`canvas/test/keys.test.ts` — three witnesses, where the premise said zero.
 
 **THE FULL GATE, 2026-10-23, after the child-window work:** build and typecheck clean, **2577 tests
 in 109 files**, GUI `keys` 19 chords/17 actions, `clicks` 9 buttons/10 actions, `select` 3/3, `shot`

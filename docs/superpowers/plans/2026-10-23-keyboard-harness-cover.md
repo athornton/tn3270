@@ -59,10 +59,21 @@ the check is decoration — say so rather than moving on.
 **Files:**
 - Modify: `packages/gui/scripts/keys.mjs`
 
-**WHY THIS IS FIRST.** Measured 2026-10-23: `grep -c "Ctrl+B"` is **0** in both
-`packages/gui/scripts/keys.mjs` and `packages/web/scripts/browser-keys.mjs`. So the chord that
-opens the full keyboard in the GUI has no witness anywhere, and a regression breaking it would
-pass build, typecheck, 2577 tests and every harness. That is not hypothetical: **this exact list
+**WHY THIS IS FIRST -- AND THE PREMISE WAS PARTLY WRONG, CORRECTED 2026-10-23 BY THE IMPLEMENTER.**
+
+What I wrote: `grep -c "Ctrl+B"` is 0 in every harness, so the chord has no witness anywhere and a
+regression would pass the whole gate. **The grep was the flaw.** `browser-clicks.mjs` spells it
+`Ctrl-B` WITH A HYPHEN and dispatches the real chord through CDP, so the WEB front end had cover
+all along. Proved by mutation rather than by reading: deleting `b:` from the `CTRL` table fails
+`keys.mjs`, `browser-clicks.mjs` AND `canvas/test/keys.test.ts` -- three witnesses where the
+premise claimed zero.
+
+**THE NARROWER GAP IS REAL AND THIS TASK STILL CLOSES IT:** no GUI harness witnessed the chord, and
+the GUI path is Electron renderer -> IPC -> `ipcMain`, which no web harness touches. That is worth
+a case on its own merits -- it is just the third witness, not the first.
+
+**A GREP FOR ONE SPELLING OF A CHORD IS NOT A MEASUREMENT OF ITS COVER.** Any later task in this
+plan that justifies itself by absence must mutate the thing and watch, not grep for a string. That is not hypothetical: **this exact list
 already missed `Ctrl+T` once**, and its own comment records it — the chord was dead in the GUI for
 a commit while the `Xfer` keypad button worked perfectly, because the click route goes through
 `KEYPAD_KEYS` and never through the `CTRL` table. `Ctrl+B` is the same shape.
@@ -199,6 +210,43 @@ unseen."*
   `PROBE_SOURCE` before any page script runs.
 - Caps are addressed by `button[data-key="<cap name>"]`, the cap's NAME — not its label, because
   several legends are glyphs and one (the spacebar) is empty.
+
+- [ ] **Step 0: RE-MEASURE THIS TASK'S PREMISE BEFORE BUILDING ON IT**
+
+Task 1's premise was wrong because it grepped for a string instead of mutating the thing. This task
+claims the keyboard phase *"never clicks a cap and never reads an action"*. **Verify that by
+mutation:** make every cap dead and see whether anything already fails.
+
+Write this to `/tmp/premise.py` (a FILE, not a nested heredoc -- nesting one inside a bash
+heredoc broke out and ran a harness once today):
+
+```python
+import io
+p = '/home/a/athor/git/tn3270/packages/canvas/src/keyboardUi.ts'
+s = io.open(p, encoding='utf-8').read()
+old = '          deps.sendAction(action);'
+assert s.count(old) == 1, 'target is not unique -- read the file and adapt'
+io.open(p, 'w', encoding='utf-8').write(s.replace(old, '          void action;', 1))
+```
+
+Then:
+
+```bash
+cd ~/git/tn3270
+cp packages/canvas/src/keyboardUi.ts /tmp/kui-premise.bak
+python3 /tmp/premise.py && npm run build >/dev/null 2>&1
+pkill -9 -f "node_modules/[e]lectron" >/dev/null 2>&1; sleep 3
+node packages/web/scripts/browser-clicks.mjs 2>&1 | tail -4
+pkill -9 -f "node_modules/[e]lectron" >/dev/null 2>&1; sleep 3
+cp /tmp/kui-premise.bak packages/canvas/src/keyboardUi.ts && npm run build >/dev/null 2>&1
+rm -f /tmp/kui-premise.bak /tmp/premise.py
+echo "restored"; git diff --stat packages/canvas/src/keyboardUi.ts
+```
+
+**If every check still passes, the premise holds** -- the cap actions are genuinely uncovered, so
+proceed. **If something already fails, report WHICH check** and narrow this task to what is
+actually missing. Either answer is useful; an unverified premise is not. The restored diff must be
+EMPTY.
 
 - [ ] **Step 1: Read the existing phase and the mechanism**
 
