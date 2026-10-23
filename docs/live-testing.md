@@ -9,6 +9,38 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **THE FULL KEYBOARD'S FUNCTIONAL COVER, 2026-10-23 — NO LIVE HOST RUN WAS NEEDED, AND THIS IS
+  WHY.**
+
+  Every action a cap raises is one an existing keypad button or chord already raises, through the
+  same `applyAction` — so nothing new reaches the wire and no host could tell a cap from a
+  keystroke.
+
+  **What is now proven in a real browser,** by `browser-clicks.mjs`'s keyboard phase: one cap from
+  EVERY region reaches the gateway as the right action, compared on the full action object; an
+  inert cap sends nothing; and the one-shot Shift arms, sends the shifted legend and is spent. Each
+  cap is asserted on TWO independent witnesses — what the page sent over the socket and the
+  gateway's own decoded log — because a mutation renaming the IPC frame kind satisfied the
+  browser-side probe alone. Plus `Ctrl+B` in `keys.mjs`, the GUI's own witness for the chord.
+
+  **Three things that cover proved about itself, each by mutation:** making every cap dead left all
+  TEN of the phase's layout properties green and the harness at 8/8, so layout cover said nothing
+  about function; a PF cap sending the wrong number passed a `kind`-only comparison, which is why
+  the full action object is compared; and **an inert cap made actionable passes the ENTIRE unit
+  suite** — `keyboard3279.test.ts:193` asserts only that MORE THAN THREE caps are inert and that
+  each inert cap's name says why, so it pins neither the count exactly nor which caps they are, and
+  the browser check is that cap's only witness.
+
+  **What is still NOT machine-checkable, stated rather than left to be inferred:** the LAYOUT'S
+  FIDELITY to the reference photograph. Every cap's legend, position and width was read from
+  photographs by eye, and no test can tell a correct keyboard from a plausible one. Two caps remain
+  deliberately ambiguous — the arrow cluster's centre diagonal (`↖`, inert as "diagonal arrow,
+  function unidentified", since `Home` already has a cap of its own) and `Ex Sel` (inert as "not
+  implemented: ambiguous function") — and three glyphs are approximations no Unicode point draws
+  correctly: the `a` under a caret for Insert (`⌃`), the `a` with a diagonal strike for Delete
+  (`↛`), and that strike doubled for its unimplemented shifted form (`↛↛`). An SVG is the someday
+  fix for all three.
+
 - **CHILD-WINDOW KEYSTROKES, 2026-10-23 — NO LIVE HOST RUN WAS NEEDED, AND THIS IS WHY.**
 
   The GUI's keypad and keyboard windows now forward the physical keyboard to the session. **Every

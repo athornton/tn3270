@@ -7,14 +7,20 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 ## START HERE — NEXT ACTION, 2026-10-23: THE KEYBOARD IS IN BOTH FRONT ENDS AND CHILD WINDOWS TYPE
 
 **`main` IS GREEN AND AHEAD OF `origin/main` — NOT PUSHED. 2577 tests in 109 files, and the full
-gate was re-run 2026-10-23 (see the end of this section).** The full 122-key 3279 keyboard works in the **web gateway** AND in the **Electron GUI**,
+gate was re-run 2026-10-23, every line, after the harness cover landed (see *THE FULL GATE*
+below).** The full 122-key 3279 keyboard works in the **web gateway** AND in the **Electron GUI**,
 both on `Ctrl-B`; `Ctrl-K` still gives the compact keypad. In the browser, opening either surface
 closes the other; in the GUI they are separate windows and can both be open. Spec
 `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`, plan
 `docs/superpowers/plans/2026-10-22-full-keyboard.md`.
 
 **ALL 7 TASKS OF THE KEYBOARD PLAN ARE DONE**, Task 6 (the GUI keyboard window) at `b7b3483` with
-a View menu item, Task 7's docs with it.
+a View menu item. **Task 7 — the harness cover — IS NOW DONE TOO, 2026-10-23**, and it was the one
+piece this heading claimed early: the docs landed with Task 6 but the harness witnesses did not, so
+Task 7 was re-planned as its own three tasks in
+`docs/superpowers/plans/2026-10-23-keyboard-harness-cover.md` (which supersedes and reorders it).
+`Ctrl+B` in `keys.mjs` at `c942ad2`, the web keyboard phase's three functional checks at `d4de4cf`,
+the gate and these docs last. **Nothing in the keyboard plan is outstanding.**
 
 **AND THE FOLLOW-ON IS DONE TOO — CHILD-WINDOW KEYSTROKES, 2026-10-23.** The user asked for it the
 day the keyboard window shipped: *"typing should send keystrokes to the terminal emulator whether
@@ -41,11 +47,17 @@ real gap (the Electron renderer → IPC → `ipcMain` path, which no web harness
 by reading: deleting `b:` from the `CTRL` table fails `keys.mjs`, `browser-clicks.mjs` AND
 `canvas/test/keys.test.ts` — three witnesses, where the premise said zero.
 
-**THE FULL GATE, 2026-10-23, after the child-window work:** build and typecheck clean, **2577 tests
-in 109 files**, GUI `keys` 19 chords/17 actions, `clicks` 9 buttons/10 actions, `select` 3/3, `shot`
-**2/2**, `transfer` 10/10, `browser-keys` 13 chords/10 actions, `browser-clicks` 9 buttons + the
-keyboard layout phase + transfer 8/8, `browser-shot` **1/1**, `pty-smoke` 12 PASS / 0 FAIL. Both
-golden harnesses matched, which is what says nothing leaked into the base page.
+**THE FULL GATE, 2026-10-23, after the keyboard's harness cover — EVERY LINE RE-RUN SERIALLY:**
+build and typecheck clean (exit 0, silent), **2577 tests in 109 files**, GUI `keys` **20
+chords/18 actions**, `clicks` 9 buttons/10 actions, `select` 3/3, `shot` **2/2**, `transfer` 10/10,
+`browser-keys` 13 chords/10 actions, `browser-clicks` 9 buttons + **11/11** phase-two checks (seven
+transfer, four keyboard), `browser-shot` **1/1**, `pty-smoke` 12 PASS / 0 FAIL. Both golden
+harnesses matched, which is what says nothing leaked into the base page — the keyboard is an
+overlay and neither golden contains one.
+
+**NOTE WHAT `browser-clicks` PRINTS.** Its summary line reads `transfer form: 11/11 checks` because
+all of phase two shares one `TRANSFER_CHECKS` array; four of those eleven are the keyboard's. The
+label is stale, not the count.
 
 ### THE KEYBOARD'S STATE, SO NOBODY RE-DERIVES IT
 
@@ -66,20 +78,34 @@ press, or when the surface closes.
 
 ### WHAT A HARNESS NOW PROVES, AND WHY IT MATTERS HERE
 
-`browser-clicks.mjs`'s `keyboard` phase resizes a real browser and measures **ten** properties:
-side-by-side layout, narrow reflow, the special bar on the left, the arrow diamond, the centred PF
-strip, numpad column alignment, the main block's rectangle, the `Z` stagger, the Return's shape
-(the gap below equals the row gap, the gap beside it is at least 3x it, and nothing is painted into
-it), and **no cap clipped** (`scrollWidth > clientWidth`, which is the browser saying a label did
-not fit).
+`browser-clicks.mjs`'s `keyboard` phase resizes a real browser and measures **ten LAYOUT
+properties**: side-by-side layout, narrow reflow, the special bar on the left, the arrow diamond,
+the centred PF strip, numpad column alignment, the main block's rectangle, the `Z` stagger, the
+Return's shape (the gap below equals the row gap, the gap beside it is at least 3x it, and nothing
+is painted into it), and **no cap clipped** (`scrollWidth > clientWidth`, which is the browser
+saying a label did not fit).
 
-**EVERY ONE OF THOSE EXISTS BECAUSE THE USER FOUND THE DEFECT ON A SCREENSHOT AND NO TEST COULD
+**AND, SINCE 2026-10-23, THREE FUNCTIONAL ONES BESIDE THEM** — `keyboardCaps`, `keyboardInert` and
+`keyboardShift`, each its own check in the phase's array. **They exist because the ten above
+measured NOT ONE ACTION**, which was established by mutation rather than argued: replacing the sole
+`deps.sendAction(action)` in `keyboardUi.ts` with `void action;` makes every cap dead and left all
+ten green with the harness reporting 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3,
+Enter, Cursor up, `7`, Attention) on the keypad phase's own rule, and compares the **full action
+object** — an off-by-one `n` on the PF row keeps every label and name correct, so a `kind`-only
+comparison passed a cap sending the wrong PF AID. `keyboardInert` asserts `Caps Lock` sends nothing
+at all. `keyboardShift` clicks `2` TWICE, since one click passes a latch. **Every cap is checked on
+TWO independent witnesses** — the browser-side `__tn3270Probe.sent` and the gateway's own
+`--log-actions` stdout — because misspelling the IPC frame kind in `bridgecore.ts` satisfied the
+probe for all five caps and was caught only at the far end of the socket.
+
+**EVERY ONE OF THE TEN EXISTS BECAUSE THE USER FOUND THE DEFECT ON A SCREENSHOT AND NO TEST COULD
 SEE IT.** vitest has no layout engine. If a keyboard change is made, run that phase.
 
-### FIVE VACUOUS ASSERTIONS WERE CAUGHT IN ONE DAY — READ THIS BEFORE WRITING A LAYOUT CHECK
+### SIX VACUOUS ASSERTIONS — READ THIS BEFORE WRITING A LAYOUT CHECK
 
-Each passed against the very defect it was written for, and each was found by MUTATING the thing
-it claimed to check:
+**The first five were caught in ONE DAY, 2026-10-22; the sixth came the next day and is the worst
+of them.** Each passed against the very defect it was written for, and each was found by MUTATING
+the thing it claimed to check:
 
 1. **A 2px tolerance** on numpad column alignment — and the defect was off by exactly 2px. Integer
    grid positions either match or do not; the tolerance hid a whole class of error.
@@ -92,9 +118,17 @@ it claimed to check:
    font has.
 5. **`w > 0`** for the same question — a near-blank fallback measures 2.3px, which is not zero. The
    fix was a RATIO against a glyph known to be present.
+6. **`keyboard3279.test.ts:193`'s inert-cap check, and this one is not a layout check at all —
+   it is in `npm test`** (2026-10-23). Giving `Caps Lock` an action **passed the ENTIRE unit suite:
+   109 files, 2577 tests, zero failures.** The check asserts `inert.length` is
+   `toBeGreaterThan(3)` and that each inert cap's NAME explains why it is inert — so it pins
+   neither the exact count nor WHICH caps are inert, and losing one off a population of many
+   changes nothing it looks at. `browser-clicks.mjs`'s `keyboardInert` is that cap's only witness.
+   **A property asserted over a filtered population says nothing about any member of it.**
 
 **THE RULE THAT CAME OUT OF IT:** assert the thing itself, not a proxy for it, and prove the
-assertion fails by breaking what it watches. Three of these were mine in a single afternoon.
+assertion fails by breaking what it watches. Three of the first five were mine in a single
+afternoon, and the sixth sat green in the fast gate for a day.
 
 ### THREE DESIGN RULES WORTH KEEPING
 
