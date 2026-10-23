@@ -381,6 +381,32 @@ const TRANSFER_CHECKS = [
     what: 'Ctrl-B opens the keyboard: regions side by side, reflow when narrow, main block a RECTANGLE, no cap clipped',
     mutant: "ui.css  .keyboard-band { display: block } -- the stacking defect the user's screenshots found",
   },
+  /*
+    AND THE FUNCTIONAL HALF OF THE KEYBOARD, WHICH NOTHING IN THIS FILE COVERED UNTIL 2026-10-23.
+
+    The `keyboard` entry above measures TEN LAYOUT PROPERTIES AND NOT ONE ACTION, and that is not a
+    reading of the code -- it is a MEASUREMENT. `keyboardUi.ts`'s `deps.sendAction(action)` was
+    replaced with `void action;`, making every cap dead, and the phase still reported 8/8 green.
+    A keyboard can be laid out perfectly and be entirely dead.
+  */
+  {
+    name: 'keyboardCaps',
+    kind: 'live',
+    what: 'one cap from EVERY region reaches the gateway as the right action',
+    mutant: 'keyboardUi.ts  `deps.sendAction(action)` -> `void action;`  (every cap dead)',
+  },
+  {
+    name: 'keyboardInert',
+    kind: 'live',
+    what: 'an INERT cap sends nothing at all, being disabled rather than merely silent',
+    mutant: 'keyboard3279.ts  give the Caps Lock cap an action',
+  },
+  {
+    name: 'keyboardShift',
+    kind: 'live',
+    what: 'the one-shot Shift sends the shifted legend, then is spent',
+    mutant: 'keyboardUi.ts  the `armed = false` in the consuming branch becomes `armed = true`',
+  },
 ];
 
 if (TRANSFER_CHECKS.length === 0) {
@@ -1587,6 +1613,198 @@ async function runTransferPhase(url) {
           + `Insert glyph: ${insertGlyph}; Return shape: ${returnShape} `
           + '(want the gap below EQUAL to the row gap, the gap to its left at least 3x it, '
           + 'and paint=none -- a plain rectangle, not an L). ' + metrics);
+      }
+
+      /*
+        AND NOW THE FUNCTIONAL HALF, WHICH NO CHECK IN THIS FILE COVERED UNTIL 2026-10-23.
+
+        EVERYTHING ABOVE MEASURES LAYOUT, and that is not a reading of the code -- it is a
+        MEASUREMENT. `keyboardUi.ts`'s sole `deps.sendAction(action)` was replaced with
+        `void action;`, which makes every cap dead, and this phase still reported 8/8 GREEN with
+        all ten layout properties satisfied. A keyboard can be laid out perfectly and be entirely
+        dead. The keypad phase's rule applies verbatim: sample one key from EVERY region, "so no
+        block can go dead unseen".
+
+        ASSERTED ON TWO INDEPENDENT WITNESSES, both of them real:
+
+         - `window.__tn3270Probe.sent`, the array of every string the page handed to
+           `WebSocket.send`, from the wrapper installed before any page script ran. This is the
+           BROWSER's side of the wire.
+         - THE GATEWAY'S OWN STDOUT. `--log-actions` is in `SERVER_ARGV`, and `web/src/main.ts`
+           prints `action: <json>` for every decoded `{kind:'action'}` frame. So the action is read
+           back from the process at the FAR END of the socket, after `decodeClientMessage`
+           validated it -- not from the page that sent it.
+
+        THE FULL ACTION OBJECT IS COMPARED, NOT ITS `kind`. Matching only `"pf"` would pass a cap
+        that sent `{kind:'pf', n:7}`, and a mis-wired cap sending its NEIGHBOUR's action is the
+        defect this check is most likely to meet. The expected JSON is written out here rather than
+        imported, deliberately: importing the table would make this harness agree with the table by
+        construction and assert nothing about what crosses the wire.
+
+        ## BOTH WITNESSES EARN THEIR KEEP, AND THAT IS MEASURED RATHER THAN ARGUED
+
+        Two further mutants were run to ask whether either half is decoration:
+
+         - `keyboard3279.ts` `pfRow`'s `n: first + i + 1` -- every cap keeps its own label and name,
+           so the keyboard still LOOKS right and `PF3` sends PF4's AID. `keyboardCaps` FAILED,
+           reporting `PF3 MISSED (sent {"kind":"pf","n":4})`. A `kind`-only comparison would have
+           passed it, which is why the whole object is compared.
+         - `bridgecore.ts` `kind: 'action'` -> `kind: 'actin'` in the socket send. The page still
+           hands the socket a string containing the right action JSON, so THE BROWSER-SIDE PROBE
+           WAS SATISFIED FOR ALL FIVE CAPS -- and the gateway logged nothing, because
+           `decodeClientMessage` dropped every frame. Only the far-end witness caught it.
+      */
+      const sentJson = () => cdp.eval('JSON.stringify(window.__tn3270Probe.sent)');
+      const capSelector = (name) => `#keyboard-overlay button[data-key=${JSON.stringify(name)}]`;
+      /**
+       * WHAT THE BROWSER FINDS AT A CAP'S CENTRE, which is what `clickCenter` will actually hit.
+       *
+       * `clickCenter` computes a point and lets Chromium hit-test it, so a cap covered by another
+       * fixed overlay is NOT clicked -- and the transfer form is still open at this point, fixed at
+       * the top left, while this overlay is docked at the bottom. If the two ever overlap, the
+       * click would land on the form and the cap would look dead. That failure mode must be
+       * REPORTED as a covered cap rather than counted as a missing action, so it is measured.
+       */
+      const coveredBy = (name) => cdp.eval(`(() => {
+        const el = document.querySelector(${JSON.stringify(capSelector(name))});
+        if (el === null) return 'NO SUCH CAP';
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+        if (hit === el) return '';
+        return hit === null
+          ? 'OUTSIDE THE VIEWPORT'
+          : ('COVERED BY ' + (hit.id !== '' ? '#' + hit.id : hit.tagName.toLowerCase()));
+      })()`);
+      /**
+       * Click a cap BY NAME and return only what the page sent as a result.
+       *
+       * BY NAME AND NOT BY LABEL, because several legends are glyphs, the spacebar's label is
+       * empty and two Shift caps share a legend -- `data-key` carries `cap.name`, which
+       * `keyboard3279.ts` keeps unique across all 118 caps.
+       */
+      const clickCap = async (name) => {
+        const before = JSON.parse(await sentJson()).length;
+        const covered = await coveredBy(name);
+        if (covered !== '') return { sent: [], covered };
+        await clickCenter(capSelector(name));
+        await new Promise((r) => { setTimeout(r, 150); });
+        return { sent: JSON.parse(await sentJson()).slice(before), covered: '' };
+      };
+
+      // ONE CAP PER REGION -- all five of them, so no region can go dead unseen. The `want` is the
+      // EXACT action JSON, as `bridgecore.ts` embeds it in `{"kind":"action","action":...}`.
+      const CAP_CASES = [
+        { name: 'PF3', want: '{"kind":"pf","n":3}' },                 // region: pf
+        { name: 'Enter', want: '{"kind":"enter"}' },                  // region: main
+        { name: 'Cursor up', want: '{"kind":"up"}' },                 // region: cursor
+        { name: '7', want: '{"kind":"type","text":"7"}' },            // region: numpad
+        { name: 'Attention', want: '{"kind":"attn"}' },               // region: special-left
+      ];
+      const capResults = [];
+      // The gateway's log so far, so only lines this block provokes are read back from it below.
+      const serverBefore = serverOut.length;
+      let capsSentOk = true;
+      for (const kase of CAP_CASES) {
+        const { sent, covered } = await clickCap(kase.name);
+        if (covered !== '') {
+          capsSentOk = false;
+          capResults.push(`${kase.name} ${covered}`);
+          continue;
+        }
+        const hit = sent.some((s) => s.includes(kase.want));
+        if (!hit) capsSentOk = false;
+        capResults.push(`${kase.name}${hit ? '' : ` MISSED (sent ${JSON.stringify(sent)})`}`);
+      }
+      /*
+        AND THE SAME FIVE READ BACK OFF THE GATEWAY'S STDOUT, which is the half the page cannot
+        fake. A browser-side probe proves the page tried; this proves the frame arrived, decoded
+        and was understood as that action at the other end of the socket.
+
+        WAITED FOR RATHER THAN READ STRAIGHT AWAY. `serverOut` is appended by a `'data'` handler on
+        a pipe from ANOTHER PROCESS, so the last cap's line may not have been delivered to this
+        one yet when the loop ends -- a flake that would read as a missing action. Bounded, and the
+        loop exits as soon as all five are present.
+      */
+      const loggedSince = () => serverOut.slice(serverBefore).split('\n')
+        .filter((l) => l.startsWith('action: '))
+        .map((l) => l.slice('action: '.length));
+      let loggedActions = loggedSince();
+      for (let waited = 0; waited < 4000; waited += 100) {
+        if (CAP_CASES.every((k) => loggedActions.includes(k.want))) break;
+        await new Promise((r) => { setTimeout(r, 100); });
+        loggedActions = loggedSince();
+      }
+      const notLogged = CAP_CASES
+        .filter((k) => !loggedActions.includes(k.want))
+        .map((k) => k.name);
+      const capsOk = capsSentOk && notLogged.length === 0;
+
+      /*
+        AN INERT CAP SENDS NOTHING. The inert caps are `disabled` with NO click handler at all --
+        deliberately, because `keyboardUi.ts` says a handler that returned early would be a second
+        place for the no-op to be wrong. So this asserts the `disabled` attribute is doing its job:
+        a cap that lost it would send an action this emulator cannot honour.
+
+        A UNIT TEST CANNOT ASK THIS, AND THE MEASUREMENT IS BLUNTER THAN THE ARGUMENT. Giving the
+        Caps Lock cap `action: { kind: 'attn' }` in `keyboard3279.ts` left THE WHOLE SUITE GREEN --
+        109 files, 2577 tests, not one failure -- while this check failed with `it sent
+        [{"kind":"action","action":{"kind":"attn"}}]`. The table's own test counts inert caps and
+        does not pin WHICH caps are inert, so a cap quietly becoming actionable has no unit witness
+        at all; whether `disabled` stops a real mouse event at a real cap's centre is a question
+        only a browser answers.
+      */
+      const inert = await clickCap('Caps Lock (not implemented: see the header)');
+      const inertOk = inert.covered === '' && inert.sent.length === 0;
+
+      /*
+        THE ONE-SHOT SHIFT, THROUGH THE REAL DOM, and it is here because a defect in exactly this
+        logic reached the user on 2026-10-23: Shift was STICKY for 40 of the 60 character caps,
+        because the consuming branch keyed off `shiftLabel !== undefined` -- false for every
+        letter, since `A` shifted is still `A`. Every unit test of the day passed.
+
+        THREE CLICKS AND THE THIRD IS THE ONE THAT MATTERS. Shift itself must send NOTHING (it is
+        pure surface state, which is why its table entry has no action at all); the `2` cap then
+        sends its SHIFTED legend `@`; and the same cap clicked again sends a plain `2`, because the
+        arm was spent. Without that third click a LATCH would pass.
+      */
+      const shiftArmed = await clickCap('Shift (left, one-shot)');
+      const shifted = await clickCap('@ 2');
+      const after = await clickCap('@ 2');
+      const shiftCovered = [shiftArmed, shifted, after].map((r) => r.covered).join('');
+      const shiftOk = shiftCovered === ''
+        && shiftArmed.sent.length === 0
+        && shifted.sent.some((s) => s.includes('{"kind":"type","text":"@"}'))
+        && after.sent.some((s) => s.includes('{"kind":"type","text":"2"}'));
+      const shiftStory = `Shift sent ${JSON.stringify(shiftArmed.sent)}, `
+        + `then ${JSON.stringify(shifted.sent)}, then ${JSON.stringify(after.sent)}`
+        + (shiftCovered === '' ? '' : ` [${shiftCovered}]`);
+
+      if (capsOk) {
+        ok(check('keyboardCaps'),
+          `one cap from every region reached the GATEWAY as its exact action: ${capResults.join(', ')} `
+          + `-- logged by the gateway itself as ${loggedActions.join(' ')}`);
+      } else {
+        no(check('keyboardCaps'), "a region's caps are not reaching the gateway",
+          `clicked ${capResults.join(', ')}; the gateway logged ${JSON.stringify(loggedActions)}, `
+          + `so these never arrived: ${notLogged.length === 0 ? 'none' : notLogged.join(', ')}`);
+      }
+
+      if (inertOk) {
+        ok(check('keyboardInert'),
+          'an inert cap (Caps Lock) sent nothing at all, as `disabled` must make it');
+      } else {
+        no(check('keyboardInert'), 'an INERT cap sent an action, so it is not really inert',
+          `it sent ${JSON.stringify(inert.sent)}`
+          + (inert.covered === '' ? '' : ` and the cap was not clickable: ${inert.covered}`));
+      }
+
+      if (shiftOk) {
+        ok(check('keyboardShift'),
+          `Shift sent nothing itself, then @ then 2 -- armed, spent, back to plain (${shiftStory})`);
+      } else {
+        no(check('keyboardShift'), 'the one-shot Shift did not arm-then-spend',
+          `${shiftStory} (want: nothing sent on Shift, then {"kind":"type","text":"@"}, `
+          + 'then {"kind":"type","text":"2"} -- a second @ would mean Shift LATCHED)');
       }
     }
 
