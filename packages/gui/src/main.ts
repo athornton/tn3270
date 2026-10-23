@@ -9,7 +9,7 @@ import {
   resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
 } from '@tn3270/core';
 import {
-  applyAction, defaultSession, describeTlsError, pasteString, resolveScheme, startTransfer,
+  applyAction, applyPaste, defaultSession, describeTlsError, resolveScheme, startTransfer,
   transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -1037,20 +1037,16 @@ app.whenReady().then(async () => {
         void (async (): Promise<void> => {
           const text = await clipboard.readText();
           if (text === '') return;
-          const r = pasteString(session.keyboard, session.screen, text);
           /**
-           * REPORTED TO THE OPERATOR, REMEDY FIRST, because the status line TRUNCATES and this
+           * THE SHARED HELPER, 2026-10-23: the wording and the thresholds now live in
+           * `frontend/src/pasteAction.ts` so the web gateway cannot drift from them. The rules
+           * themselves are unchanged -- remedy first, because the status line TRUNCATES and this
            * project has already shipped a message whose only actionable phrase fell past the cut.
            * A silently half-applied paste is the worst outcome available here: the operator cannot
            * see how much of a dataset name arrived, and a short one may be a VALID different name.
            */
-          if (r.reason !== undefined) {
-            win.webContents.send('error-message',
-              `paste stopped: ${r.reason} after ${r.typed} of ${r.typed + r.dropped} characters`);
-          } else if (r.dropped > 0) {
-            win.webContents.send('error-message',
-              `paste short: ${r.typed} of ${r.typed + r.dropped} characters (field full or protected)`);
-          }
+          const r = applyPaste(session, text);
+          if (r.warning !== undefined) win.webContents.send('error-message', r.warning);
           // UNCONDITIONALLY, whatever the outcome: a paste is a LOCAL action and emits no `screen`
           // event, so without this the window shows nothing until the host next speaks. Measured on
           // the same path for `tab` in the web gateway, where it cost a 5-second test timeout.

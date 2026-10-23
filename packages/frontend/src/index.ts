@@ -71,6 +71,14 @@ export { applyAction } from './actions.js';
 export { pasteString } from './paste.js';
 export type { PasteResult, PasteOptions } from './paste.js';
 
+// The POLICY on top of those semantics: which outcome warrants a warning, and in which words.
+// Separate from `paste.js` because that file answers "what does `\f` mean while pasting" while
+// this one answers "what do we tell the operator" -- and the second question is the one both DOM
+// front ends must answer identically. The GUI had these rules inline in its menu handler; the
+// wording is load-bearing because the status line truncates, so there is one copy of it.
+export { applyPaste } from './pasteAction.js';
+export type { PasteOutcome } from './pasteAction.js';
+
 // Which key means which action, in words. Documentation with a test rather than a code
 // generator: each front end satisfies it in its own encoding, and bindings.test.ts checks
 // the terminal keymap actually agrees.
