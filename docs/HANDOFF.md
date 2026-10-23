@@ -4,11 +4,89 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-23: THE KEYBOARD IS IN BOTH FRONT ENDS AND CHILD WINDOWS TYPE
+## START HERE — NEXT ACTION, MONDAY: WEB COPY/PASTE IS HALF BUILT, AND MY PLAN FOR IT IS UNRELIABLE
 
-**`main` IS GREEN AND AHEAD OF `origin/main` — NOT PUSHED. 2577 tests in 109 files, and the full
-gate was re-run 2026-10-23, every line, after the harness cover landed (see *THE FULL GATE*
-below).** The full 122-key 3279 keyboard works in the **web gateway** AND in the **Electron GUI**,
+**STOPPED 2026-10-23 AT THE USER'S REQUEST, mid-feature but at a clean boundary.** `main` is green
+and **PUSHED** at `b5e8a1d`: **2586 tests in 110 files.**
+
+### WHAT TO DO FIRST ON MONDAY
+
+**Roadmap item (0e), WEB COPY AND PASTE, is 3 of 7 tasks done.** Spec
+`docs/superpowers/specs/2026-10-23-web-copy-paste-design.md`, plan
+`docs/superpowers/plans/2026-10-23-web-copy-paste.md`.
+
+**DONE (safe to leave indefinitely — no user-visible half-feature):**
+- `a7995a4` — `{kind:'paste', text}` in the `Action` union; `applyAction` THROWS on it (sixth of
+  that shape). Also added a decode REJECTION for the kind, because the two-branch rule forbids
+  "neither".
+- `0c65c25` — `frontend/src/pasteAction.ts`'s `applyPaste(session, text)`, the shared paste path.
+  The Electron GUI is its first caller; its message strings moved VERBATIM (diffed mechanically).
+- `3eb562b` — the gateway accepts both kinds, answers `copy` with a new `copyText` message, and
+  **shape-checks both kinds' fields at decode**. `REFUSED` is now `['quit']` alone.
+
+**NOTHING IN THE BROWSER RAISES EITHER KIND YET**, which is why this is a clean stop: the gateway
+can answer them, no client sends them.
+
+**REMAINING: Tasks 4-7** — the bridge's clipboard write (`onCopyText` +
+`navigator.clipboard.writeText`), `renderer.ts`'s `paste` listener, real-browser harness cover,
+docs.
+
+### READ THIS BEFORE USING THAT PLAN — IT HAS A MEASURED ERROR RATE
+
+**THREE OF ITS CLAIMS WERE WRONG AND ONE WAS DANGEROUS.** Implementers found each by checking the
+repo instead of trusting the text, which is the only reason they were caught:
+
+1. **THE FEATURE'S WHOLE SAFETY RATIONALE WAS FALSE.** The spec and plan claimed a paste carried as
+   `{kind:'type'}` would send every `\n` as **Enter, submitting a half-filled panel to a live
+   host**, and every `\f` as **Clear**. Measured by driving the function:
+   `typeString('AB\nC\fD')` leaves six cells reading `A B \n C \f D`.
+   `core/src/keyboard.ts` has **zero** AID paths. The real hazard is **CORRUPTION, NOT
+   SUBMISSION** — the control characters land in the field as EBCDIC 0x25/0x0c with MDT set, so the
+   next AID carries them as field data. **The separate `paste` kind is still right** (it buys
+   `pasteString`'s newline-as-next-field, `\f`-as-space, `\r`-dropped semantics) but the win is
+   narrower than advertised.
+2. **THE PLAN'S OWN TASK 3 CODE WAS PROCESS-ENDING**, in the exact hazard the plan spends two
+   paragraphs warning about. `extractText(cells, cols, undefined)` throws
+   `TypeError: Cannot read properties of undefined (reading 'top')` and `pasteString` throws
+   `text is not iterable` — both called directly in the socket handler, outside any try. A
+   malformed frame from any client would have ended the gateway for every connected operator. Fixed
+   in `3eb562b` by shape-checking at decode.
+3. **Three invented APIs in its test code** — `defaultSession()`, `session.keyboard.lock()`, and a
+   wrong import path. None exist.
+
+**SO: RE-DERIVE TASKS 4-7 AGAINST THE REPO BEFORE DISPATCHING THEM.** The user was told this and
+agreed. The plan is a sketch of intent, not a source.
+
+### AND THE RULE THAT CAME OUT OF IT, WHICH IS WORTH MORE THAN THE FEATURE
+
+**THE TWO-BRANCH RULE IS NECESSARY BUT NOT SUFFICIENT.** A kind `applyAction` throws on needs a
+rejection or an interception — and if accepted, **its FIELDS must be shape-checked at decode too**
+(the `transferChunk`/`pf` precedent). An interception guards one failure mode and leaves another
+wide open. `protocol.ts` now carries this.
+
+**Also learned:** neither `copy` nor `paste` belongs in `integration.test.ts`'s `SWALLOWED` list,
+because both are ANSWERED — `copy` with `copyText`, `paste` with the frame from its repaint, where
+`SWALLOWED` means silence. That loop grew an `ANSWERS` map rather than a fourth hardcoded branch.
+
+### A LIVE PASS IS OWED ONCE TASKS 4-7 LAND
+
+The user has agreed to do it. No harness can read the OS clipboard, so it needs a human:
+
+- text copied in the browser actually appears in the operator's own clipboard;
+- a multi-line paste lands in the right fields **without submitting the panel**;
+- **Chromium AND Firefox both**, because `navigator.clipboard.writeText` is secure-context-only and
+  this gateway is often served over plain `http`;
+- and whether a plain-`http` LAN address has a clipboard at all.
+
+**A VISIBLE DIALOG DOES NOT IDENTIFY THE ROUTE** — the save-picker lesson, recorded in
+`live-testing.md`, where Firefox's own download preference was briefly mistaken for the picker.
+
+---
+
+## THE KEYBOARD, COMPLETE: BOTH FRONT ENDS, AND CHILD WINDOWS TYPE
+
+**The full 122-key keyboard was finished 2026-10-23.** The full gate was re-run, every line, after
+the harness cover landed (see *THE FULL GATE* below). The full 122-key 3279 keyboard works in the **web gateway** AND in the **Electron GUI**,
 both on `Ctrl-B`; `Ctrl-K` still gives the compact keypad. In the browser, opening either surface
 closes the other; in the GUI they are separate windows and can both be open. Spec
 `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`, plan
