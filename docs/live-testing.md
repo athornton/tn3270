@@ -9,10 +9,31 @@ and the Recording log says what happened when they were run.
 
 ## Executed so far
 
+- **CHILD-WINDOW KEYSTROKES, 2026-10-23 — NO LIVE HOST RUN WAS NEEDED, AND THIS IS WHY.**
+
+  The GUI's keypad and keyboard windows now forward the physical keyboard to the session. **Every
+  action a forwarded keystroke can raise is one an existing chord or cap already raises**, through
+  the same `actionForKey` table and the same `applyAction` — so there is no new wire format, no new
+  protocol message, and no path a host could tell apart from a keystroke in the terminal window.
+
+  **What IS proven, offline:** `forwardKeys.test.ts`'s 11 cases cover the table lookup, the
+  unclaimed-key drop, `preventDefault` in both directions and the form-control skip; and both
+  documents were LOADED in a real `BrowserWindow` where real input arrived at main's own
+  `ipcMain.on('action')` as `{kind:'attn'}` for Ctrl-A, `{kind:'type',text:'x'}` for a plain
+  character and `{kind:'enter'}` for Enter, in both windows.
+
+  **What is NOT verified:** whether a real operator's modifier habits feel right in a child window
+  — in particular that HELD PHYSICAL SHIFT does not arm the on-screen one-shot, which is out of
+  scope by the user's decision (*"if it feels weird we will revisit it later"*). Also unverified on
+  macOS and Windows, where `keys.ts` already records that Option/AltGr behave differently — both
+  report `AltGraph`, Windows reports AltGr as `ctrlKey+altKey`, and a Mac's left-Option may be
+  remapped to Command. That reasoning lives in `canvas/src/keys.ts`, which is the table
+  `forwardKeys` calls, so a child window inherits it unchanged — and inherits its platform gaps too.
+
 - **THE DIRECTION LABELS AND THE `send` DEFAULT ARE BUILT — AND THIS ONE NEEDED NO LIVE RUN,
-  2026-10-22.** Said first because the convention in this file is that an unqualified claim was
-  witnessed on a host: **the emitted keywords are byte-identical to before**, so there is nothing a
-  host could tell apart. `formKeywords` still emits `Direction=send`; only what is DRAWN changed.
+  2026-10-22.** Said in the heading because the convention in this file is that an unqualified
+  claim was witnessed on a host: **the emitted keywords are byte-identical to before**, so there is
+  nothing a host could tell apart. `formKeywords` still emits `Direction=send`; only what is DRAWN changed.
   Spec `docs/superpowers/specs/2026-10-22-direction-labels-design.md`, plan
   `docs/superpowers/plans/2026-10-22-direction-labels.md`.
 

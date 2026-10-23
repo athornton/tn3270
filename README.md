@@ -117,7 +117,7 @@ the clear**, which it says out loud on startup. Full flag list and the security 
 
 That the renderer is genuinely shared rather than merely similar is checked in pixels:
 `packages/web/scripts/browser-shot.mjs` compares the served page against the Electron app's
-own screenshot golden and requires them to be identical, with and without the keypad shown.
+own screenshot golden and requires them to be identical.
 
 **There is a keypad of 48 buttons, two of which had no other way to be pressed.** `Ctrl-K` opens
 it — PF1–PF24, PA1–PA3, and the special keys a PC keyboard has not got. In the **Electron GUI** it
@@ -260,6 +260,27 @@ it is explicitly not on the list of things a preferences store should bring.
 the TUI's keypad list reads. 22 of the 48 keys have no prose entry there and 15 more have an entry
 with no note, so the tooltip falls back to the key's short name — which means nothing is ever
 blank, and no description had to be invented for a PF key whose meaning is the host's business.
+
+### The keyboard
+
+**`Ctrl-B` opens the full 122-key keyboard window**, and **View → Keyboard** does it too. Where the
+keypad is 48 buttons of the keys a PC has not got, this is the whole 3279 typewriter — 118 caps,
+every one read off a photograph of real hardware rather than guessed. Like the keypad it OPENS
+rather than toggling, pressing the chord again brings the open window forward instead of stacking a
+second one, and it is not remembered between runs. The web gateway has the same keyboard on the
+same chord, as an opaque overlay rather than a window; opening either surface there closes the
+other.
+
+**The on-screen `Shift` is a one-shot.** Click it and the next character cap you click is sent
+shifted, which also re-letters every dual-glyph cap to its shifted legend; the arm survives a PF
+key, and is spent by that next character, by a second press of `Shift`, or by the surface closing.
+It is NOT a latch and it is not Caps Lock — `Caps Lock` is inert, because on a 3270 keyboard the
+letter caps send the same character either way.
+
+**Both windows accept the physical keyboard too.** Typing or pressing a chord while the keypad or
+keyboard window has focus reaches the session exactly as it would from the terminal window — you do
+not have to click back to the terminal first. The on-screen `Shift` is a separate one-shot from
+your physical Shift key: it arms on a click and is spent by the next character you click.
 
 ### Copy and paste
 
@@ -908,6 +929,11 @@ rather than translucent on purpose: the TUI's keypad overlay once let host text 
 its chord column, and reading 48 buttons over a 3270 screen is the same problem waiting to happen.
 A `Close` button dismisses it, and so does `Ctrl-K` again.
 
+**`Ctrl-B` gives the full 122-key keyboard here, as the same kind of overlay**, and **opening
+either surface closes the other** — two things claiming the page at once is a state the operator
+cannot read. Both toggles are intercepted CLIENT-SIDE and never reach the gateway, which holds no
+state for either.
+
 **Clicking a button is an ordinary action** — the same message a keystroke sends, so **nothing
 about the protocol changed** to add it. The keypad itself is now **entirely client-side**: the
 toggle never reaches the gateway, which holds no keypad state at all. It used to be a region of the
@@ -1486,15 +1512,16 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2253 tests, 89 files (measured 2026-10-01 on `gui-transfer-ui`) |
+| `npm test` | **pass** — 2577 tests, 109 files (measured 2026-10-23 on `main`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
-| `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **2 of 2 cases** pixel-identical, with and without the keypad, which is what says the renderer is shared and not merely similar |
-| `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 11 actions in order over a WebSocket, 2 asserted absences |
-| `keys.mjs` — real Chromium key events in Electron | **pass** — 19 chords, 17 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). The 19th is `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked |
+| `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **1 of 1 case** pixel-identical against the GUI's own golden, which is what says the renderer is shared and not merely similar. (It was 2 cases until 2026-10-06: the keypad case went when the keypad became HTML, since a window of system-font controls is not a pixel the canvas owns) |
+| `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 10 actions in order over a WebSocket, **3** asserted absences (`Ctrl+K`, `Ctrl+Z`, `F13`) — `Ctrl+K` because the keypad toggle is intercepted client-side and never reaches the gateway |
+| `keys.mjs` — real Chromium key events in Electron | **pass** — 19 chords, 17 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). The 19th is `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. **`Ctrl+B` is still not among the 19**, which is the same gap in the same place — the GUI's keyboard chord has no witness here |
 | `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
 | `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
+| `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, the transfer form's **8 of 8** checks, and the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow inverted-T, the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |
 | web gateway reattachment, live | **pass** — same session returned inside the grace window, a new one after it |
@@ -1509,7 +1536,7 @@ visible there.
 | TLS vs both hosts, live | **pass** — verified chain via `-cafile` through the in-repo proxy; default TLS at a plaintext host fails in 10 s naming `-insecure` rather than hanging |
 | model 4 (43×80) vs VM/370, live | **pass** — host sends `f5` (Erase/Write, 24×80) then `7e` (Erase/Write **Alternate**, 43×80); 41 fields, no program checks |
 | GUI vs VM/370 and MVS 3.8j, live | **pass** — renders both; ink compared row-by-row against the CLI's own view of the same host (42/43 and 24/24, the one difference being the cursor); typed input proved end to end through real key events |
-| GUI screenshot goldens under Xvfb | **pass** — **3 of 3 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. (An earlier version of this row said "1 case" and was already two behind: the cases are the default scheme, the `green` scheme, and the keypad shown.) The keypad golden was **read off the image** before it was committed, cell by cell against the baked atlas — a golden cannot validate the baseline it came from |
+| GUI screenshot goldens under Xvfb | **pass** — **2 of 2 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. The cases are the default scheme and the `green` scheme. (This row has twice been out of date in both directions: it said "1 case" while there were three, then "3 of 3" after the keypad case was **deleted** on 2026-10-06 — the keypad became HTML controls, and a capture of system fonts is not a pixel the canvas owns) |
 | Sys Req vs both hosts, live | **pass, classic path — 2026-09-21** — both predicted forms appeared, one per host: VM's unformatted screen sent the heading plus modified buffer data (`01 6c 61 02 / 11 5b 60`), TK5's formatted panel the heading alone, **no `f0` in either** and no ETX. **VM/370 acts on it** (`RUNNING` → `CP READ`, a second Read Partition, a repaint) where MVS ignores it. The TN3270E `IAC AO` path is still unwitnessed and unobtainable here. **The control run matters: a first attempt ended at 0.003s against the real run's 0.457s and would have credited Sys Req with a transition it could not have caused** |
 | Dup vs MVS 3.8j TK5, live | **partial — 2026-09-21** — `0x1c` reached the host with the MDT set (an unmodified field is not transmitted at all) and TSO answered `INPUT NOT RECOGNIZED`, i.e. it read the field and rejected it. **The TAB half is NOT witnessed**: that panel has one unprotected field, where plain `Tab` does not move either — measured in the same session, not assumed |
 | Field Mark, Newline vs a live host | **NOT DONE** — neither has been pressed at a host. On `docs/live-testing.md`'s next-run list |

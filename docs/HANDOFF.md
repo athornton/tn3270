@@ -1,29 +1,51 @@
-# Handoff — state as of 2026-10-22 (web transfer UI live-verified; direction labels fixed)
+# Handoff — state as of 2026-10-23 (the keyboard is in both front ends; child windows type)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, 2026-10-22 (end of day): THE KEYBOARD IS BUILT AND LIVE
+## START HERE — NEXT ACTION, 2026-10-23: THE KEYBOARD IS IN BOTH FRONT ENDS AND CHILD WINDOWS TYPE
 
-**`main` IS GREEN AND PUSHED at `eb08557`. 2552 tests in 107 files.** The full 122-key 3279
-keyboard works in the **web gateway** on `Ctrl-B`; `Ctrl-K` still gives the compact keypad, and
-opening either closes the other. Spec
+**`main` IS GREEN AND AHEAD OF `origin/main` — NOT PUSHED. 2577 tests in 109 files, and the full
+gate was re-run 2026-10-23 (see the end of this section).** The full 122-key 3279 keyboard works in the **web gateway** AND in the **Electron GUI**,
+both on `Ctrl-B`; `Ctrl-K` still gives the compact keypad. In the browser, opening either surface
+closes the other; in the GUI they are separate windows and can both be open. Spec
 `docs/superpowers/specs/2026-10-22-full-keyboard-design.md`, plan
 `docs/superpowers/plans/2026-10-22-full-keyboard.md`.
 
-**TASKS 1-5 OF 7 ARE DONE. TWO REMAIN:**
-- **Task 6 — the Electron GUI keyboard window.** Not started. The web surface is the only one.
-- **Task 7 — the GUI harness phase and the docs.** Not started. (The WEB harness phase exists and
-  is extensive — see below.)
+**ALL 7 TASKS OF THE KEYBOARD PLAN ARE DONE**, Task 6 (the GUI keyboard window) at `b7b3483` with
+a View menu item, Task 7's docs with it.
 
-**THE USER'S LAST KEYBOARD REQUEST IS DONE** (2026-10-23): the Return key is a plain two-row
-rectangle rather than an inverted L. Ask before starting Task 6.
+**AND THE FOLLOW-ON IS DONE TOO — CHILD-WINDOW KEYSTROKES, 2026-10-23.** The user asked for it the
+day the keyboard window shipped: *"typing should send keystrokes to the terminal emulator whether
+the keyboard window or the terminal window has focus."* `canvas/src/forwardKeys.ts` (11 unit
+tests) installs a `keydown` listener from injected deps, and both the keypad and keyboard boot
+files call it. **The product's only `keydown` listener used to be `renderer.ts`'s, in the canvas
+window, so a key pressed in a child window did nothing at all — silence, not a wrong action.**
+`isEditableTarget` is now shared between that module and `renderer.ts` rather than copied, and
+`forwardKeys.js` had to join `BROWSER_MODULES` in `canvas/src/assets.ts` because `renderer.js` is
+served to the gateway. Spec `docs/superpowers/specs/2026-10-23-child-window-keystrokes-design.md`,
+plan `docs/superpowers/plans/2026-10-23-child-window-keystrokes.md`. Verified by loading each document in a
+real `BrowserWindow`: Ctrl-A, a plain character and Enter all reach main's `ipcMain.on('action')`
+from both windows. Why no live-host run was needed is in `live-testing.md`'s newest entry.
+
+**THE KNOWN GAP, AND IT IS THE ONE `keys.mjs` EXISTS TO HAVE CAUGHT BEFORE:** `keys.mjs` drives 19
+chords and **`Ctrl+B` is not among them**, so the GUI's keyboard chord has no harness witness —
+exactly the shape of the `Ctrl+T` defect that list missed in 2026-10-01 (the chord was dead while
+the `Xfer` keypad button worked). Neither GUI harness has a keyboard-window phase at all; the WEB
+keyboard's layout phase in `browser-clicks.mjs` is extensive — see below. Adding a `Ctrl+B` case
+to `keys.mjs` is the cheapest next thing worth doing.
+
+**THE FULL GATE, 2026-10-23, after the child-window work:** build and typecheck clean, **2577 tests
+in 109 files**, GUI `keys` 19 chords/17 actions, `clicks` 9 buttons/10 actions, `select` 3/3, `shot`
+**2/2**, `transfer` 10/10, `browser-keys` 13 chords/10 actions, `browser-clicks` 9 buttons + the
+keyboard layout phase + transfer 8/8, `browser-shot` **1/1**, `pty-smoke` 12 PASS / 0 FAIL. Both
+golden harnesses matched, which is what says nothing leaked into the base page.
 
 ### THE KEYBOARD'S STATE, SO NOBODY RE-DERIVES IT
 
 **118 caps, every one read from a photograph, confirmed blank, or explicitly unidentified.** Zero
-guesses. Three reference images settled it, and the table's header carries the full audit:
+guesses. FOUR reference images settled it, and the table's header carries the full audit:
 the user's own 5271 (`~/s-l960.png`), an IBM 4978, an IBM 3270 PC, and finally a sharp 5271
 (`~/DSC08836-scaled.jpeg`) that corrected four caps I had misread as PC keys.
 
@@ -86,14 +108,14 @@ assertion fails by breaking what it watches. Three of these were mine in a singl
   a different one — including `U+21E7`, which is right-shaped and IS the Shift key, and `U+2041`,
   which is literally "insert here" and does not render.
 
-### STILL OPEN, BEYOND TASKS 6-7
+### STILL OPEN, NOW THAT ALL SEVEN TASKS ARE DONE
 
-- **HELD-SHIFT DETECTION.** Both front ends receive `shiftKey` on every key event, so it is
-  feasible in both — `canvas/src/keys.ts` already reads it for Tab→BackTab. **The asymmetry is
-  focus, not capability:** the GUI's keyboard will be a separate `BrowserWindow` and only gets key
-  events while IT is focused, so held-Shift would work when focused and silently not otherwise. And
-  if held and one-shot share one flag, releasing a physical Shift clears an arm set by clicking —
-  two states OR'd together avoids that.
+- **HELD-SHIFT DETECTION.** Still open, and now narrower: child windows DO receive keystrokes as of
+  2026-10-23 (`forwardKeys.ts`), so the focus objection is gone — what remains is the state
+  question. A physical Shift held down does NOT arm the on-screen one-shot, and if held and
+  one-shot share one flag, releasing a physical Shift clears an arm set by clicking. Two states
+  OR'd together avoids that. The user has seen the current behaviour and chose to live with it:
+  *"if it feels weird we will revisit it later."*
 - **TWO CAPS REMAIN AMBIGUOUS** rather than unread: the arrow cluster's centre diagonal (Home has
   its own cap, so it is something else) and `Ex Sel` (Erase Input on some units, a field-select on
   others). Both inert, both named with the ambiguity.
