@@ -17,8 +17,8 @@ opening either closes the other. Spec
 - **Task 7 — the GUI harness phase and the docs.** Not started. (The WEB harness phase exists and
   is extensive — see below.)
 
-**AND THE USER HAS ONE MORE KEYBOARD REQUEST COMING**, stated at the end of the session. Ask before
-starting Task 6.
+**THE USER'S LAST KEYBOARD REQUEST IS DONE** (2026-10-23): the Return key is a plain two-row
+rectangle rather than an inverted L. Ask before starting Task 6.
 
 ### THE KEYBOARD'S STATE, SO NOBODY RE-DERIVES IT
 
@@ -29,7 +29,9 @@ the user's own 5271 (`~/s-l960.png`), an IBM 4978, an IBM 3270 PC, and finally a
 
 **THE LAYOUT IS A TRUE RECTANGLE** — every main row exactly 15 key units, verified in a real
 browser as five equal row right edges. `Z` centres between `A` and `S`, which is the constraint
-that generates the stagger. The Return key spans two rows and is drawn L-shaped.
+that generates the stagger. The Return key spans two rows and is drawn as a plain RECTANGLE, with
+the 0.25-unit space beside it left as an oversized gap — the user's call, see the design rules
+below.
 
 **ONE-SHOT SHIFT WORKS AND RE-LETTERS THE CAPS.** Click Shift and every dual-glyph cap shows its
 shifted legend; the arm survives a PF key (3270 has no shifted PF3) and clears on use, on a second
@@ -39,8 +41,9 @@ press, or when the surface closes.
 
 `browser-clicks.mjs`'s `keyboard` phase resizes a real browser and measures **ten** properties:
 side-by-side layout, narrow reflow, the special bar on the left, the arrow diamond, the centred PF
-strip, numpad column alignment, the main block's rectangle, the `Z` stagger, the Return's gap and
-L-tab, and **no cap clipped** (`scrollWidth > clientWidth`, which is the browser saying a label did
+strip, numpad column alignment, the main block's rectangle, the `Z` stagger, the Return's shape
+(the gap below equals the row gap, the gap beside it is at least 3x it, and nothing is painted into
+it), and **no cap clipped** (`scrollWidth > clientWidth`, which is the browser saying a label did
 not fit).
 
 **EVERY ONE OF THOSE EXISTS BECAUSE THE USER FOUND THE DEFECT ON A SCREENSHOT AND NO TEST COULD
@@ -66,11 +69,18 @@ it claimed to check:
 **THE RULE THAT CAME OUT OF IT:** assert the thing itself, not a proxy for it, and prove the
 assertion fails by breaking what it watches. Three of these were mine in a single afternoon.
 
-### TWO DESIGN RULES WORTH KEEPING
+### THREE DESIGN RULES WORTH KEEPING
 
 - **A clip or margin that makes an overlap INVISIBLE is a lie; paint extending into space no other
-  key occupies is not.** The Return's L-tab is a `::before` for exactly this reason — a wider box
-  overlapped the `{` and the harness said so.
+  key occupies is not.** This is true and it was not sufficient — see the next rule.
+- **A SHAPE THAT CANNOT BE MADE CLICKABLE SHOULD NOT BE DRAWN AS A KEY**, which is the rule the
+  Return key took three rounds to reach (2026-10-23). The hardware key is an inverted L; a wider
+  box drew it and covered the `{`, and a `::before` drew it honestly — paint only, no hit area —
+  and the user still rejected it, naming two faults no measurement had: the overhang **looks like
+  a key but is dead**, and the element/pseudo-element join **draws a vertical bar** through one
+  cap. **It is now a plain two-row rectangle with an oversized gap beside it**, which reads as
+  deliberate where a dead half-key does not. The first rule is honesty to the LAYOUT; this one is
+  honesty to the PERSON, and it is the one that binds.
 - **A glyph has THREE properties and all matter:** what it looks like, what it already means
   elsewhere, and whether the font has it. The Insert cap went through four candidates, each failing
   a different one — including `U+21E7`, which is right-shaped and IS the Shift key, and `U+2041`,

@@ -439,6 +439,11 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     with a SEPARATE small `Enter` on the bottom row. Without the span, row 2 ends 1.25 units short
     and no amount of widening the punctuation keys looks right. `height: 2` is declared on its top
     row and the home row simply has no cap at that `x` -- see `KeyCap.height`.
+
+    IT IS DRAWN AS A RECTANGLE AND NOT AS THE INVERTED L THE HARDWARE HAS, which is the one place
+    this table knowingly departs from the photograph. The L's overhanging half cannot be made
+    clickable without covering the `{` below it, and the user's call (2026-10-23) was that a
+    key-shaped dead region is worse than an oversized gap. The cap's own comment has the detail.
   */
 
   // ROW 1: Tab, QWERTY, two punctuation caps, and the TALL Return.
@@ -461,20 +466,29 @@ export const KEYBOARD_3279: readonly KeyCap[] = Object.freeze([
     label: '↵',
     action: { kind: 'newline' },
     /*
-      x=13.75 AND 1.25 UNITS WIDE, WHICH IS GEOMETRY RATHER THAN DECORATION.
+      1.25 UNITS WIDE, WHICH IS THE GEOMETRY THAT KEEPS THE `{` CLICKABLE.
 
-      It was x=13.5, width 1.5 -- and that OVERLAPPED the `{` cap below it by 0.25 units, because
-      the home row's content runs further right than the QWERTY row's (13.75 against 13.5, Caps
-      being 1.75 where Tab is 1.5). The user saw the `{` lose its border.
+      It was width 1.5 -- and that OVERLAPPED the `{` cap below it by 0.25 units, because the home
+      row's content runs further right than the QWERTY row's (13.75 against 13.5, Caps being 1.75
+      where Tab is 1.5). The user saw the `{` lose its border.
 
       A `clip-path` notch in `ui.css` was the first fix and it was NOT ENOUGH: a clip changes what
       is PAINTED and not what the box covers, so the Return still sat on top of the `{`. The
       harness said `OVERLAPS by 6px` once it compared boxes instead of hit-testing.
 
-      STARTING AT 13.75 REMOVES THE OVERLAP AND KEEPS THE RECTANGLE: the home row is 13.75 + 1.25
-      = 15, and the QWERTY row is 13.5 of content, a 0.25-unit gap, then the same 1.25 = 15. That
-      gap is real on the hardware too -- the QWERTY row's punctuation does not reach as far right
-      as the home row's, which is exactly why the key is L-shaped.
+      1.25 UNITS REMOVES THE OVERLAP AND KEEPS THE RECTANGLE: the home row is 13.75 + 1.25 = 15,
+      and the QWERTY row is 13.5 of content, a 0.25-unit gap, then the same 1.25 = 15.
+
+      THE `x` IS NOT WHAT DOES THAT, AND SAYING SO HERE IS THE POINT -- this comment claimed it was
+      until a mutation (2026-10-23) showed otherwise. `ui.css` lifts a tall cap out of flow with
+      `position: absolute; right: 0`, so its `x` is NEVER READ and the WIDTH alone sets its left
+      edge. 13.75 is recorded because it is where the key really is on the hardware and because
+      `x` is how every other cap is placed; change the WIDTH if the left edge must move.
+
+      AND THE 0.25-UNIT GAP IS LEFT EMPTY, by the user's decision on 2026-10-23. The hardware key
+      is an inverted L that fills it; drawn here, the overhang is a region that looks like a key
+      and cannot be clicked -- the `{` needs the box to stay narrow. An oversized gap reads as
+      deliberate where a dead half-key does not. See `ui.css` for the full note.
     */
     region: 'main', row: 1, x: 13.75, width: 1.25, height: 2,
     name: 'Newline',

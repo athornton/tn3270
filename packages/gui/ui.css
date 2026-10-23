@@ -557,6 +557,12 @@ body.ui-surface {
   correct. The cap is positioned from the row's RIGHT edge, because the only tall cap on this
   keyboard is flush right -- stated as the limit it is, rather than pretending to be general.
 
+  AND `right: 0` MEANS THE TABLE'S `x` IS NEVER READ FOR THIS CAP, which a mutation found on
+  2026-10-23: changing the Return's `x` from 13.75 to 13.5 moved nothing, because its WIDTH alone
+  decides its left edge. `keyboard3279.ts` carried a long comment crediting the `x` with keeping
+  the `{` clickable; it is the width that does. A tall cap added elsewhere would need this rule
+  generalised before its `x` meant anything.
+
   THE HEIGHT IS `n` CAPS PLUS THE `n-1` GAPS BETWEEN THEIR ROWS, the same arithmetic the width
   formula uses for units, with `margin-bottom: 2px` per row being the vertical gap.
 */
@@ -578,72 +584,37 @@ body.ui-surface {
 }
 
 /*
-  THE RETURN KEY IS DRAWN L-SHAPED, AND THIS TIME A `clip-path` IS THE RIGHT TOOL.
+  THE RETURN KEY IS A PLAIN RECTANGLE, AND THE GAP BESIDE IT IS LEFT OVERSIZED ON PURPOSE.
 
-  The user's second note: the Return is vertically aligned with the backslash above it but does not
-  extend as far LEFT, so the gap between them is 9.5px where every other gap is 2px. The real key
-  is an L -- wider on its top half, where the QWERTY row's content stops 0.25 units short of the
-  home row's.
+  ## THE HISTORY, BECAUSE IT IS A THREE-ROUND LESSON AND THE THIRD ROUND IS THIS ONE
 
-  ## WHY A CLIP IS CORRECT HERE AND WAS WRONG BEFORE
+  The hardware's Return is an inverted L: its top half reaches further left than its bottom,
+  because the QWERTY row's punctuation stops 0.25 units short of the home row's. Drawing that
+  faithfully was attempted twice and BOTH attempts were wrong in the same way:
 
-  An earlier attempt used a clip to hide the Return OVERLAPPING the `{` cap, and that was a lie: a
-  clip changes what is PAINTED, not what the box covers, so the `{` was still underneath it and
-  `browser-clicks.mjs` said `OVERLAPS by 6px`. The fix there was geometric -- move the box.
+   - A WIDER BOX. It overlapped the `{` cap below -- the home row's content really does run to
+     13.75u -- and the user saw the `{` lose its border. `browser-clicks.mjs`: `OVERLAPS by 7px`.
+   - A `::before` PAINTING THE TAB. Geometrically honest (a pseudo-element is not in the layout
+     flow, so the `{` stayed clickable) and still WRONG FOR THE USER, who looked at the result and
+     named two faults no measurement had: the overhanging half LOOKS LIKE A KEY BUT IS DEAD, and
+     the join between the element and its pseudo-element draws a VERTICAL BAR through the middle
+     of what should be one cap.
 
-  THIS IS THE MIRROR CASE. The box must STAY at x=13.75 and 1.25 units, because widening it to
-  13.5 would overlap the `{` on the home row again -- measured, that row's content ends at 13.75u.
-  So the element is sized to the SMALLER, non-overlapping rectangle and `border-left` plus a
-  negative margin extend only the PAINT leftward on the top half. Nothing is hidden; a region that
-  covers no other key is added.
+  ## SO THE KEY IS RECTANGULAR AND THE SPACE IS JUST SPACE
 
-  `--kb-extend` IS THE 0.25-UNIT DIFFERENCE plus the 2px gap it closes, from the same arithmetic
-  the width formula uses.
+  THE CAP KEEPS THE GEOMETRY IT ALREADY HAD -- x=13.75, 1.25 units, two rows tall -- and nothing
+  is painted into the 0.25 units to its left. That space becomes a gap several times wider than
+  every other gap in the row, which is what the user asked for and reads as deliberate rather than
+  as a mistake: an oversized gap is obviously a gap, where a dead half-key is not obviously dead.
+
+  THE RULE THIS SETTLES: a shape that cannot be made clickable should not be drawn as a key. The
+  earlier rule -- paint may extend where no other key is, a clip may not hide an overlap -- was
+  about honesty to the LAYOUT, and it was right as far as it went. This is about honesty to the
+  PERSON: a cap-shaped region that does nothing is a lie told in pixels, however correct its box.
+
+  `browser-clicks.mjs` asserts all three clauses of this: the gap below equals the ordinary row
+  gap, the gap to its left is at least 3x it, and `::before`'s `content` is `none`.
 */
-#keyboard-overlay #keyboard-main .keyboard-row > button[style*='--kb-h'] {
-  --kb-extend: calc(0.25 * var(--kb-pitch) + 2px);
-  /*
-    `::before` RATHER THAN A WIDER BOX, AND THE DIFFERENCE IS THE WHOLE POINT.
-
-    Widening the element with a negative margin was the first attempt and it FAILED exactly as the
-    note above predicts: the harness reported `OVERLAPS by 7px`, because a margin moves the BOX
-    and the box is what covers the `{`. Measured, not reasoned -- I wrote the prediction and then
-    broke it in the same edit.
-
-    So the element keeps its correct, non-overlapping geometry and a pseudo-element paints the
-    upper tab leftward. A `::before` is not in the layout flow and cannot cover a sibling's hit
-    area, so the `{` stays reachable while the key LOOKS like the L it is.
-  */
-  overflow: visible;
-  /*
-    THE NOTCH: full width down to the top row's bottom edge, then inset by the extension for the
-    lower half. `calc` in a polygon, so a pitch change carries through -- the vertical split is at
-    one cap plus the row gap, which is where the two rows meet.
-  */
-}
-
-/*
-  THE UPPER TAB OF THE L, painted outside the button's own box.
-
-  It carries the same border and background as a cap so the two read as one key, and it is offset
-  LEFT by the extension and UP by the border width so the edges meet. `pointer-events: none` is
-  belt and braces -- a `::before` is not hit-tested as a separate target anyway, but saying so
-  documents that this adds no clickable region.
-*/
-#keyboard-overlay #keyboard-main .keyboard-row > button[style*='--kb-h']::before {
-  content: '';
-  position: absolute;
-  left: calc(-1 * var(--kb-extend) - 1px);
-  top: -1px;
-  width: var(--kb-extend);
-  height: var(--kb-pitch);
-  box-sizing: border-box;
-  border: 1px solid;
-  border-right: none;
-  border-color: inherit;
-  background: inherit;
-  pointer-events: none;
-}
 
 /*
   THE CAP WIDTH COMES FROM THE TABLE, through the `--kb-w` custom property `keyboardUi.ts` sets

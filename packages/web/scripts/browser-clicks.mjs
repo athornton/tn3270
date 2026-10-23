@@ -1294,19 +1294,42 @@ async function runTransferPhase(url) {
         from the DOM at all, which the note above this records after two vacuous attempts.
       */
       /*
-        THE RETURN KEY'S L-SHAPE AND ITS HEIGHT, both of which the user caught on a screenshot.
+        THE RETURN KEY IS A PLAIN TWO-ROW RECTANGLE WITH AN OVERSIZED GAP BESIDE IT.
 
-        TWO DEFECTS: the cap was 2px too tall, so it crowded the Shift row where every other key
-        leaves a clean 2px gap (I had used the horizontal gap doubled, a plausible number from the
-        wrong axis); and it did not extend left to meet the backslash above it, leaving a 9.5px
-        gap where every other gap is 2px.
+        THE USER'S DECISION, 2026-10-23, AFTER SEEING THE L ON A SCREENSHOT (`vkey10.png`): the
+        inverted-L is not wanted. It reads as a key with a vertical bar through it, and the half of
+        it that overhangs the backslash cannot be clicked -- the `{` below needs the box to stay
+        narrow, so the overhang was PAINT ONLY. "Something that looks like a key but is dead" is
+        worse than a wider gap, so the gap is the answer: the cap is a rectangle, and the 0.25-unit
+        space between it and the backslash is simply left empty and larger than every other gap.
 
-        THE HEIGHT IS CHECKED AGAINST THE ROW BELOW, which is what "leaves the same gap" means --
-        not against a number, since the arithmetic is exactly what was wrong.
+        THREE THINGS ARE MEASURED, and the first two are the user's words made into numbers:
 
-        THE TAB IS CHECKED ON THE `::before` BOX, because the element itself must NOT grow: a
-        wider box overlaps the `{` cap, which is the defect fixed earlier today and which a first
-        attempt at this reintroduced (`OVERLAPS by 7px`). The paint extends; the box does not.
+        1. THE GAP BELOW MATCHES THE ORDINARY ROW GAP. Checked against the SHIFT ROW rather than
+           against a constant, because the arithmetic -- 2 caps plus the 1 gap between their rows
+           -- is exactly what was once wrong (`4px`, the horizontal gap doubled).
+
+        2. THE GAP TO ITS LEFT IS OVERSIZED, compared against the row's OWN ordinary gap rather
+           than a literal. "Oversized compared to all the others" is a comparison, so the check
+           is one: the narrowest gap between any other pair of caps in that row is the baseline,
+           and the Return's must be several times it.
+
+        3. NOTHING IS PAINTED INTO THAT GAP. The L was a `::before`, so `content` must now be
+           `none`.
+
+        ## MUTATION-PROVED, ONE AT A TIME, EACH WITH THE BUILD CHECKED
+
+          `ui.css` height back to `* 4px`            `gap below=0px`   FAIL   (clause 1)
+          the `::before` restored                    `paint=""`        FAIL   (clause 3)
+          `keyboard3279.ts` Return `width: 1.5`      `gap left=2px`    FAIL   (clause 2)
+
+        AND ONE MUTANT SURVIVED, WHICH IS THE INTERESTING RESULT: moving the Return's table `x`
+        from 13.75 to 13.5 changed NOTHING -- `gap left` stayed 10px and every check still passed.
+        That is correct behaviour, not a hole: `ui.css` positions the tall cap `absolute; right: 0`,
+        so its `x` is never read and its WIDTH alone sets its left edge. Worth writing down because
+        the `x` is heavily commented in the table as the thing that stops the `{` overlap -- and it
+        is not: the width is. A future edit that "fixes" the `x` will do nothing, and the brace
+        check cannot see that `x` either.
       */
       const returnShape = await cdp.eval(`(() => {
         const tall = document.querySelector('#keyboard-main button[style*="--kb-h"]');
@@ -1316,13 +1339,35 @@ async function runTransferPhase(url) {
         const t = tall.getBoundingClientRect();
         const sh = shift.getBoundingClientRect();
         const gapBelow = Math.round(sh.top - t.bottom);
-        const tab = getComputedStyle(tall, '::before');
-        const tabW = parseFloat(tab.width);
-        return 'gap below=' + gapBelow + 'px tab=' + tabW.toFixed(1) + 'px';
+        /*
+          THE ROW'S OWN GAPS, so "oversized" is relative to the thing it is oversized against.
+          The Return is the last cap in its row and every other gap in that row is the ordinary
+          one, so the narrowest of those is the baseline a human would compare it to.
+        */
+        const row = tall.parentElement;
+        const caps = [...row.querySelectorAll('button')]
+          .map((b) => b.getBoundingClientRect())
+          .sort((a, b) => a.left - b.left);
+        let ordinary = Infinity;
+        for (let i = 1; i < caps.length - 1; i += 1) {
+          ordinary = Math.min(ordinary, Math.round(caps[i].left - caps[i - 1].right));
+        }
+        const last = caps.length - 1;
+        const gapLeft = Math.round(caps[last].left - caps[last - 1].right);
+        const paint = getComputedStyle(tall, '::before').content;
+        return 'gap below=' + gapBelow + 'px gap left=' + gapLeft
+          + 'px ordinary=' + ordinary + 'px paint=' + paint;
       })()`);
-      // The gap below must match the ordinary row gap, and the tab must be the 0.25-unit
-      // extension (7px at this pitch) plus the 2px it closes.
-      const returnOk = /gap below=2px tab=9\.0px/.test(returnShape);
+      /*
+        `>= 3 *` RATHER THAN `> `: an oversized gap the user would call oversized is not one pixel
+        wider than its neighbours. At this pitch the real numbers are 9px against 2px.
+      */
+      const returnMeasures = /^gap below=(\d+)px gap left=(\d+)px ordinary=(\d+)px paint=(.*)$/
+        .exec(returnShape);
+      const returnOk = returnMeasures !== null
+        && Number(returnMeasures[1]) === Number(returnMeasures[3])
+        && Number(returnMeasures[2]) >= 3 * Number(returnMeasures[3])
+        && returnMeasures[4] === 'none';
 
       const insertGlyph = await cdp.eval(`(() => {
         const el = document.querySelector('#keyboard-cursor button[data-key^="Insert"]');
@@ -1443,30 +1488,25 @@ async function runTransferPhase(url) {
         && Math.abs(cZ - (cA + cS) / 2) <= 2;
 
       /*
-        THE `{` CAP MUST BE CLICKABLE, which is what the Return key's notch buys.
+        THE `{` CAP MUST BE CLICKABLE, which is what the Return key's NARROW WIDTH buys.
 
         The user spotted that the two-row Return overlapped it: the home row's content runs 0.25
-        units further right than the QWERTY row's, so a rectangular tall cap covers 7px of `{`.
-        `clip-path` cuts the notch -- and a clip-path is INVISIBLE to a bounding-box measurement,
-        so this asks `elementFromPoint` instead: who does the browser say is at the `{`'s own
-        right-hand edge?
+        units further right than the QWERTY row's, so a tall cap wide enough to meet the backslash
+        above covers 7px of `{`. The Return is sized to the smaller, non-overlapping rectangle
+        instead -- see the Return-shape check above, and `keyboard3279.ts` on the geometry.
 
-        THAT IS THE SAME TECHNIQUE THE `viewport` PHASE USES for the transfer form's Start button,
-        and for the same reason: a box that merely EXISTS proves nothing about whether a click
-        lands on it.
-      */
-      /*
         GEOMETRY, NOT A HIT TEST -- AND THE HIT TEST WAS THE WRONG TOOL, MEASURED.
 
-        This check first used `elementFromPoint` at the brace cap's right edge, and a mutant that
-        removed the `clip-path` still PASSED: hit-testing HONOURS a clip-path for pointer events,
-        so the notched and un-notched cases both reported the brace. The check proved the clip
-        worked by assuming it worked -- which is the same shape of mistake as the 2px tolerance
-        that let the numpad defect through.
+        This check first used `elementFromPoint` at the brace cap's right edge, back when a
+        `clip-path` was cutting a notch, and a mutant that REMOVED the clip still PASSED:
+        hit-testing HONOURS a clip-path for pointer events, so the notched and un-notched cases
+        both reported the brace. The check proved the clip worked by assuming it worked -- the same
+        shape of mistake as the 2px tolerance that let the numpad defect through. The clip is long
+        gone; the lesson is why this compares boxes and is kept for that reason.
 
         SO THIS COMPARES BOXES: the tall Return's left edge must not come left of the brace cap's
-        right edge. That is exactly the overlap the user saw, it is true or false regardless of any
-        clip, and a clip-path cannot hide it. The notch then makes the VISIBLE key match.
+        right edge. That is exactly the overlap the user saw, and it is true or false regardless of
+        what any cap paints.
       */
       const braceHitTest = await cdp.eval(`(() => {
         const b = document.querySelector('#keyboard-overlay button[data-key="} {"]');
@@ -1525,8 +1565,9 @@ async function runTransferPhase(url) {
           + `${Math.round(wideMain.x + wideMain.w / 2)}); the numpad lines up `
           + `(. at ${xPeriod} under 3 at ${xThree}, Ent at ${xEnter} under - at ${xMinus}); `
           + `the main block is a RECTANGLE (row right edges ${edges.join(', ')}) with Z centred `
-          + `between A and S (${cZ} vs ${(cA + cS) / 2}); the notched Return leaves { clickable; `
-          + `NO cap is clipped; the Insert glyph ${insertGlyph}; the Return is L-shaped `
+          + `between A and S (${cZ} vs ${(cA + cS) / 2}); the Return leaves { clickable; `
+          + `NO cap is clipped; the Insert glyph ${insertGlyph}; the Return is a plain two-row `
+          + `RECTANGLE with an oversized gap beside it and nothing painted into it `
           + `(${returnShape})`);
       } else {
         no(check('keyboard'),
@@ -1544,7 +1585,8 @@ async function runTransferPhase(url) {
           + 'not the Return key), '
           + `CLIPPED CAPS: ${overflowing === '' ? 'none' : overflowing}; `
           + `Insert glyph: ${insertGlyph}; Return shape: ${returnShape} `
-          + '(want gap below=2px tab=9.0px). ' + metrics);
+          + '(want the gap below EQUAL to the row gap, the gap to its left at least 3x it, '
+          + 'and paint=none -- a plain rectangle, not an L). ' + metrics);
       }
     }
 
