@@ -322,7 +322,8 @@ window.addEventListener('keydown', (e) => {
 
   THE RULES AND THE SAFETY GATE ARE IN `forwardKeys.ts`, not here, and the gate is the reason this
   is a call rather than an inline `window.addEventListener('paste', ...)`. THIS FILE IS LOADED BY
-  TWO FRONT ENDS -- `gui/index.html:5` pulls this same `renderer.js` into the Electron GUI -- and
+  TWO FRONT ENDS -- `gui/index.html`'s `<script src="../canvas/dist/renderer.js">` tag pulls this
+  same file into the Electron GUI, cited by tag because that document is five lines long -- and
   an ungated listener would raise `{kind:'paste'}` there, where nothing intercepts it and
   `applyAction` throws: MEASURED to FREEZE the main process event loop, not merely log. The
   injected `protocol` is what confines it to the web gateway. Read `forwardPaste`'s docstring

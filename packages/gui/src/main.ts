@@ -1219,23 +1219,27 @@ app.whenReady().then(async () => {
       LIKE. 2026-10-26.
 
       `paste` is the ONE kind `applyAction` throws on that this front end does not intercept, so a
-      reader who has just read the five arms above will notice the gap and reach for a sixth.
-      What makes the gap survivable is that nothing in this app RAISES the kind: Paste is a menu
-      item (`menu.ts`) wired to `onPaste` -> `applyPaste` above, which never goes through here.
+      reader who has just read the four arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`,
+      `copy` -- will notice the gap and reach for a fifth. (`transferForm` is the fifth and it is
+      BELOW this comment, which is why the count here is four and not five.) What makes the gap
+      survivable is that nothing in this app RAISES the kind: Paste is a menu item (`menu.ts`)
+      wired to `onPaste` -> `applyPaste` above, which never goes through here.
 
       THE GAP IS GUARDED ON THE OTHER SIDE, by `forwardPaste` in `canvas/src/forwardKeys.ts`
-      refusing to install its `paste` listener on `file:` -- this window's own scheme. That file
-      carries the measurements; the two that matter here are that a real `paste` event DOES reach
-      an Electron page by five routes, and that the resulting throw in this very listener FREEZES
-      THE MAIN PROCESS EVENT LOOP rather than logging -- a real client had to be `kill -9`ed, with
-      no `uncaughtException` handler anywhere in this file to soften it.
+      refusing to install its `paste` listener on `file:` -- this window's own scheme. The one
+      consequence worth carrying here is the severity: the throw would land in THIS listener, and
+      it does not merely log -- it FREEZES THE MAIN PROCESS EVENT LOOP, with no
+      `uncaughtException` handler anywhere in this file to soften it.
 
-      AND AN ARM HERE WOULD NOT MERELY BE REDUNDANT, IT WOULD DOUBLE-PASTE: measured on Electron
-      44.3.0, `Ctrl+Shift+V` fires BOTH the page's `paste` event and this menu accelerator's
-      `click`, and `preventDefault()` in the page does not suppress the accelerator. So an arm
-      plus a widened gate applies one clipboard twice into a 3270 field. If you want the GUI's
-      native `Ctrl+V` to work, the accelerator and the event have to be reconciled first -- see
-      `pasteAccelerator`'s note, which is where that decision belongs.
+      AND AN ARM HERE WOULD NOT MERELY BE REDUNDANT, IT WOULD DOUBLE-PASTE, because the Paste
+      accelerator and the page's `paste` event both fire for one keystroke. If you want the GUI's
+      native `Ctrl+V` to work, the two have to be reconciled first -- see `pasteAccelerator` in
+      `menu.ts`, which is where that decision belongs.
+
+      **`forwardPaste`'S DOCSTRING IS THE SINGLE HOME FOR BOTH MEASUREMENTS** and for the Electron
+      version they were taken on. Cited rather than restated: they were briefly copied into this
+      comment and two others, which would have let one Electron upgrade falsify three files at
+      once -- the duplication `d4fce66` exists to stop.
     */
     // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
     // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own

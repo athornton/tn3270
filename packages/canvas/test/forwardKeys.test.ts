@@ -133,6 +133,13 @@ describe('forwardKeys', () => {
  * `clipboardData` IS NULLABLE ON THE REAL EVENT and a case below passes `null` for it, which is
  * not hypothetical tidiness: `lib.dom` types `ClipboardEvent.clipboardData` as
  * `DataTransfer | null`, so the `?.` in the implementation is load-bearing rather than defensive.
+ *
+ * `getData` HONORS ITS FORMAT ARGUMENT, and that is a FIX rather than fidelity for its own sake.
+ * It ignored the argument at first, and MEASURED: mutating the implementation's
+ * `getData('text/plain')` to `getData('text/html')` left all 22 tests GREEN. A real `DataTransfer`
+ * returns `''` for a format it does not hold, so that mutant is a paste that silently does
+ * nothing in production -- the exact class of defect this file's other cases exist to catch. A
+ * fake that ignores an argument cannot test the argument.
  */
 const pasteEv = (o: {
   text?: string | null; tag?: string; editable?: boolean;
@@ -140,7 +147,9 @@ const pasteEv = (o: {
   target: o.tag === undefined && o.editable === undefined
     ? null
     : { tagName: o.tag, isContentEditable: o.editable === true },
-  clipboardData: o.text === null ? null : { getData: () => o.text ?? '' },
+  clipboardData: o.text === null
+    ? null
+    : { getData: (fmt: string) => (fmt === 'text/plain' ? o.text ?? '' : '') },
 });
 
 /**

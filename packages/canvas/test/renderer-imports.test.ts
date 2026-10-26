@@ -69,6 +69,54 @@ describe('the renderer bundle', () => {
     expect(offenders, 'these run in the renderer and would blank the window').toEqual([]);
   });
 
+  /*
+    THE PASTE GATE'S CALL SITE, AND IT IS HERE BECAUSE NOTHING ELSE COULD SEE IT. 2026-10-26.
+
+    `forwardPaste` (`forwardKeys.ts`) will not install its `paste` listener unless the protocol it
+    is HANDED is the web gateway's, and 11 unit tests drive that gate directly. What no unit test
+    can reach is whether `renderer.ts` hands it the REAL one: the call site touches `location`, so
+    it cannot be imported under `environment: 'node'`.
+
+    MEASURED, which is why this exists at all: replacing `protocol: location.protocol` with a
+    literal `protocol: 'https:'` and rebuilding leaves THE WHOLE SUITE GREEN -- 110 files, 2602
+    tests. That mutant re-arms the hazard the gate was added for, since the Electron GUI's page is
+    `file:` and would then install a listener whose `paste` action freezes the main process.
+
+    A TEXT ASSERTION ON THE BUILT ARTIFACT, following the `selection.js` case below, which reads
+    `dist/` as text for its own reason. The alternative considered and REJECTED was a `Ctrl+v`
+    negative case in `gui/scripts/keys.mjs`, which looked closer to the original measurement and
+    is a worse test: MEASURED both ways, it depends on the X11 CLIPBOARD HAVING CONTENT. With an
+    empty clipboard the mutant passes it (`ok 21 chords`, because an empty paste is declined
+    before any action is sent); with a clipboard primed by a second live Electron it does catch
+    the mutant, but by HANGING -- the frozen client ignored SIGTERM and the harness died of
+    `ETIMEDOUT` rather than reporting. A check that needs an X selection owner and fails by
+    timeout is not one CI can rely on.
+
+    SCOPED TO THE CALL AND NOT TO THE FILE, deliberately, and VERIFIED in both directions rather
+    than eyeballed: `renderer.js`'s own comment block contains the words `location.protocol` as
+    PROSE, so a bare substring scan PASSES on the mutated call site -- checked, the mutant text
+    still matches `/location\.protocol/`. That is the precise mistake the `selection.js` case
+    below records under "MATCHED ON THE IMPORT FORM".
+
+    THE BOUND IS `{0,400}?` AND NOT `[^)]*`, which was the first attempt and was wrong: the
+    object's own `on:` member is an arrow taking `(type, handler)`, so a no-close-paren class
+    cannot reach `protocol:` at all and the assertion FAILED ON A CORRECT BUILD. A counted bound
+    keeps the match inside the `forwardPaste({...})` argument -- measured at 210 characters in the
+    current emit, so 400 is roughly double -- without caring what punctuation the members contain.
+    If a member is ever added that pushes the call past the bound, this goes red on a correct
+    build, which is the safe direction to fail in.
+  */
+  it('passes the DOCUMENT\'s protocol into the paste gate, not a literal', () => {
+    const text = readFileSync(join(distDir, 'renderer.js'), 'utf8');
+    expect(
+      /forwardPaste\(\{[\s\S]{0,400}?protocol:\s*location\.protocol/.test(text),
+      'renderer.js must pass `location.protocol` to forwardPaste: the gate that keeps a paste '
+      + 'action out of the Electron GUI (where it FREEZES the main process) is only real if the '
+      + 'renderer hands it the document\'s own protocol. A literal here re-arms that hazard and '
+      + 'no other test in the repo can see it.',
+    ).toBe(true);
+  });
+
   it('confirms drawlist.js is NOT in that graph, since it imports core and frontend', () => {
     // This is implied by the offender scan above, since drawlist.js's own @tn3270/core import
     // would already be caught if drawlist.js ever entered the graph. It earns its place anyway:

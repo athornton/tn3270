@@ -18,9 +18,15 @@ import type { Action } from '@tn3270/frontend';
  * physical keyboard did nothing at all -- not a dropped chord, silence. The user met it the day
  * the keyboard window shipped: a window full of keys is an invitation to type.
  *
- * **The web gateway never had this problem and needs nothing from this module.** Its surfaces are
- * `<div>` overlays in the canvas page, so one `window` listener already covers them. The
- * asymmetry is Electron's, and it is the GUI's alone.
+ * **The web gateway never had THIS KEYDOWN problem and needs `forwardKeys` itself for nothing.**
+ * Its surfaces are `<div>` overlays in the canvas page, so one `window` listener already covers
+ * them. That asymmetry is Electron's, and it is the GUI's alone.
+ *
+ * (SCOPED TO `forwardKeys`, 2026-10-26, because this line said the gateway "needs nothing from
+ * this module" and that became false while the diff that falsified it never touched it: the
+ * gateway already imported `isEditableTarget` from here, and now takes `forwardPaste` too. This
+ * is the summary-line-outlives-its-correction shape -- the heading five lines above was written
+ * in the same edit and contradicted this one.)
  *
  * ## INJECTED DEPS, LIKE `keypadUi.ts` AND `keyboardUi.ts`
  *
@@ -110,8 +116,19 @@ type PasteEventLike = {
 };
 
 export interface ForwardPasteDeps {
-  /** Register the listener. The real caller passes `window.addEventListener`. */
-  readonly on: (type: string, handler: (e: never) => void) => void;
+  /**
+   * Register the listener. The real caller passes `window.addEventListener`.
+   *
+   * THE HANDLER IS TYPED `PasteEventLike` AND NOT `never`, WHICH DIVERGES FROM `ForwardKeysDeps`
+   * ABOVE ON PURPOSE. `never` costs the listener body its type checking: every field read has to
+   * go through a `raw as unknown as ...` cast, and after that cast the compiler cannot tell
+   * `clipboardData` from a typo. Naming the shape instead means `tsc` checks the body, and it
+   * costs nothing elsewhere -- `PasteEventLike` is a local type that emits fine into the `.d.ts`,
+   * and this file still pulls in no DOM lib types. The renderer's own
+   * `handler as (e: Event) => void` is unavoidable either way (`TS2769` with `never`, `TS2345`
+   * with this), so the count of casts goes from two to one rather than to zero.
+   */
+  readonly on: (type: string, handler: (e: PasteEventLike) => void) => void;
   /** Deliver the action. The real caller passes its window's bridge. */
   readonly sendAction: (action: Action) => void;
   /**
@@ -156,7 +173,10 @@ const PASTE_HOSTS: ReadonlySet<string> = new Set(['http:', 'https:']);
  * ## IT IS INSTALLED ONLY ON THE WEB GATEWAY, AND THAT GATE IS NOT CAUTION -- IT IS A FIX
  *
  * `renderer.ts` IS LOADED BY TWO FRONT ENDS: `web/static/index.html` serves it to a browser, and
- * `gui/index.html:5` pulls the same `renderer.js` into the ELECTRON GUI. A `paste` action raised
+ * `gui/index.html`'s `<script type="module" src="../canvas/dist/renderer.js">` pulls the same
+ * file into the ELECTRON GUI. (BY TAG AND NOT BY LINE: that document is five lines long, so any
+ * comment added to it moves the line -- and `d4fce66` retired this feature's line citations for
+ * exactly that.) A `paste` action raised
  * in the GUI reaches `gui/src/main.ts`'s `ipcMain.on('action')`, which intercepts `quit`,
  * `toggleKeypad`, `toggleKeyboard`, `transferForm` and `copy` -- and NOT `paste` -- then falls
  * through to `applyAction`, which THROWS on it by design (`frontend/src/actions.ts`: the front
@@ -201,10 +221,27 @@ const PASTE_HOSTS: ReadonlySet<string> = new Set(['http:', 'https:']);
  * the user to decide on, since fixing it means reconciling the accelerator with the event rather
  * than adding a handler.
  *
- * **THE INVARIANT THE NEXT PERSON MUST NOT BREAK:** if `applyAction`'s `paste` throw is ever
- * removed, or `gui/src/main.ts` grows a `paste` arm, re-measure BOTH halves above before widening
- * `PASTE_HOSTS`. The gate is the only thing standing between a stray `paste` event and a frozen
- * main process.
+ * **THE INVARIANTS THE NEXT PERSON MUST NOT BREAK.** The gate is the only thing standing between
+ * a stray `paste` event and a frozen main process, and THREE separate things keep it sufficient:
+ *   1. `applyAction` still THROWS on `paste`. If that goes, re-measure before widening
+ *      `PASTE_HOSTS` -- the throw is what makes a missing arm loud instead of silent.
+ *   2. `gui/src/main.ts` still has no `paste` arm. If one is added, the double-paste measured
+ *      above applies and the accelerator has to be reconciled first.
+ *   3. **THE ELECTRON GUI'S `TN3270_GUI_URL` MODE STAYS A SEPARATE, EARLIER PATH.** This is the
+ *      one the gate does NOT cover and the easiest to break by accident, so it is named rather
+ *      than left to be rediscovered. That mode is an Electron window loading the gateway over
+ *      `http:` -- so it PASSES `PASTE_HOSTS` and does install this listener. VERIFIED 2026-10-26
+ *      that it is nonetheless safe, and safe for a reason that is nothing to do with the
+ *      protocol: the URL branch `return`s out of `app.whenReady()` BEFORE either
+ *      `Menu.setApplicationMenu` or `ipcMain.on('action')` is reached, so that window has no
+ *      action listener and no Paste accelerator at all, and its `window.tn3270` is the GATEWAY's
+ *      own socket bridge (the Electron preload is deliberately omitted in URL mode), whose
+ *      `sendAction` reaches the gateway's real `paste` arm. Correct -- but by STATEMENT ORDER in
+ *      another package.
+ *      SO: MOVING THE MENU OR THE `ipcMain.on('action')` REGISTRATION ABOVE THAT EARLY RETURN --
+ *      an ordinary-looking tidy-up, since both look like setup that belongs at the top -- would
+ *      re-arm the freeze for URL mode with this gate untouched and nothing red anywhere. If that
+ *      ordering changes, this mode needs its own answer, not a wider allowlist.
  *
  * ## IT MUST SKIP FORM CONTROLS, AND THAT IS MEASURED RATHER THAN CAUTIOUS
  *
@@ -221,18 +258,55 @@ const PASTE_HOSTS: ReadonlySet<string> = new Set(['http:', 'https:']);
  * the `paste` kind buys. (An earlier draft of this feature's plan said `\n` became ENTER and
  * submitted the panel. That is x3270's `kybd.c`, not this codebase -- `core/src/keyboard.ts` has
  * no AID path at all. Corruption, not submission.)
+ *
+ * ## A HUGE PASTE DROPS THE CONNECTION, AND IT IS WORTH KNOWING WHERE THAT COMES FROM
+ *
+ * There is NO LENGTH CHECK HERE and that is deliberate, but the consequence is not obvious from
+ * this file. MEASURED 2026-10-26: the JSON envelope around the text is 53 bytes, and
+ * `wsserver.ts`'s `MAX_MESSAGE_BYTES` is 8192 -- so a paste of up to 8139 ASCII characters is
+ * delivered, 8140 is 8193 bytes, and `parseFrame` throws on the cap. `Connection` answers that by
+ * CLOSING THE CLIENT rather than throwing (deliberately: a throw out of a `data` handler would
+ * end the gateway process and disconnect every other operator's session), so what the operator
+ * sees is "The connection to the gateway closed. Reload to reconnect." -- with nothing said about
+ * length, and no `error` frame, because the socket is already gone.
+ *
+ * SO A MYSTERY DISCONNECT AFTER A BIG PASTE IS THIS, NOT A GATEWAY BUG. The 3270 session itself
+ * survives -- the registry's grace window holds it and a reload reattaches -- so the outcome is
+ * handled, just by dropping the connection instead of refusing the paste.
+ *
+ * NO CLIENT-SIDE LENGTH CHECK IS ADDED, and the reason is that it would be a second copy of a
+ * limit this file cannot see: `MAX_MESSAGE_BYTES` lives in `packages/web`, the renderer has no
+ * import from there (by hard constraint -- see this file's header), and the real budget depends on
+ * UTF-8 byte length rather than character count. A threshold hardcoded here would drift from the
+ * server's the first time either moved, and would reject pastes the gateway would have accepted.
+ * If this is worth fixing it belongs at the GATEWAY, which knows its own cap and can answer with
+ * the `error` frame the protocol already has.
  */
 export function forwardPaste(deps: ForwardPasteDeps): void {
   // BEFORE `on`, so a host we do not serve gets NO LISTENER AT ALL rather than one that returns.
   // A registered-but-inert listener would be one edit away from being the hazard again, and this
   // way the absence is what the test asserts.
   if (!PASTE_HOSTS.has(deps.protocol)) return;
-  deps.on('paste', (raw: never) => {
-    const e = raw as unknown as PasteEventLike;
+  deps.on('paste', (e) => {
     if (isEditableTarget(e.target)) return;
     const text = e.clipboardData?.getData('text/plain') ?? '';
-    // AN EMPTY CLIPBOARD IS NOT A PASTE. It would type nothing and warn about nothing, so claiming
-    // it would only take the operator's selection away for no visible reason.
+    /*
+      AN EMPTY CLIPBOARD IS NOT A PASTE: it would type nothing and warn about nothing, so claiming
+      it would take the operator's selection away for no visible reason.
+
+      THE PREDICATE IS `text === ''` AND NOT "TEXT THAT WOULD TYPE NOTHING", which is a NEAR MISS
+      deliberately not chased. MEASURED 2026-10-26 against the real `pasteString`: a `'\r'`-only
+      or `'\r\r\r'` clipboard returns `{typed: 0, dropped: 0}` with no warning and the cursor
+      unmoved -- indistinguishable from empty, so it DOES cost the selection for no visible
+      effect, which is the thing the paragraph above says must not happen.
+
+      It is left alone because the obvious tightening is wrong: `'\n'` ALSO types nothing
+      (`{typed: 0, dropped: 0}`) and yet is a REAL paste -- measured, it moves the cursor to the
+      next unprotected field (0 -> 80 on a fresh 3278-2). So "would type nothing" does not
+      separate the two, and any trim that did would be a second copy of `pasteString`'s drop set
+      living in a DOM listener, free to drift from the one in `frontend/src/paste.ts`. A
+      CR-only clipboard costing a highlight is the cheaper defect.
+    */
     if (text === '') return;
     // `preventDefault` ONLY once we have claimed it, matching the `keydown` listeners' rule: a
     // paste we are not handling must keep its default behavior.

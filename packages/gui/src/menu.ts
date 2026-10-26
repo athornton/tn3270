@@ -76,16 +76,18 @@ export function copyAccelerator(platform: Platform): string {
  *
  * `canvas/src/forwardKeys.ts`'s `forwardPaste` raises `{kind:'paste'}` from a real `paste` EVENT,
  * and `renderer.ts` installs it -- but it refuses to install on `file:`, which is what this app's
- * own window is. The reason is measured there in full and the short version is: nothing in
- * `main.ts`'s `ipcMain.on('action')` answers `paste`, `applyAction` THROWS on it, and that throw
- * FREEZES THE MAIN PROCESS -- a real client under `Ctrl+V` had to be `kill -9`ed.
+ * own window is. So the menu item below is the whole of this front end's paste.
  *
- * SO DO NOT "FIX" THE GUI'S MISSING `Ctrl+V` BY ADDING A `paste` ARM AND WIDENING THAT GATE. The
- * two mechanisms OVERLAP rather than compose: MEASURED on Electron 44.3.0, a `Ctrl+Shift+V`
- * delivers the page a `paste` event AND fires this accelerator's `click`, and `preventDefault()`
- * in the page does NOT suppress the accelerator. An arm plus an ungated listener is therefore a
- * DOUBLE PASTE into a 3270 field, where a silently doubled dataset name can be a valid different
- * one -- which is the failure `frontend/src/pasteAction.ts` exists to prevent.
+ * SO DO NOT "FIX" THE GUI'S MISSING `Ctrl+V` BY ADDING A `paste` ARM AND WIDENING THAT GATE. This
+ * accelerator and the page's `paste` event OVERLAP rather than compose, so an arm plus a widened
+ * gate is a DOUBLE PASTE into a 3270 field -- where a silently doubled dataset name can be a
+ * valid different one, the failure `frontend/src/pasteAction.ts` exists to prevent.
+ *
+ * **`forwardPaste`'S DOCSTRING IS THE SINGLE HOME FOR THE MEASUREMENT** behind both of those
+ * claims, and the Electron version it was taken on. Cited rather than restated ON PURPOSE: the
+ * numbers were briefly copied into this comment and two others, which put one measurement in five
+ * files and would have let an Electron upgrade falsify three of them at once -- the shape
+ * `d4fce66` exists to stop. What belongs HERE is the instruction, not the evidence.
  *
  * A native `Ctrl+V` here is a real improvement and is deliberately NOT taken: it needs the
  * accelerator and the event reconciled (one of them has to stop firing), which is a decision
