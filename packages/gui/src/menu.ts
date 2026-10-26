@@ -71,6 +71,26 @@ export function copyAccelerator(platform: Platform): string {
   return platform === 'darwin' ? 'Cmd+C' : 'Ctrl+Shift+C';
 }
 
+/**
+ * ## THIS ACCELERATOR IS THE GUI'S ONLY PASTE, AND THAT IS NOW LOAD-BEARING. 2026-10-26.
+ *
+ * `canvas/src/forwardKeys.ts`'s `forwardPaste` raises `{kind:'paste'}` from a real `paste` EVENT,
+ * and `renderer.ts` installs it -- but it refuses to install on `file:`, which is what this app's
+ * own window is. The reason is measured there in full and the short version is: nothing in
+ * `main.ts`'s `ipcMain.on('action')` answers `paste`, `applyAction` THROWS on it, and that throw
+ * FREEZES THE MAIN PROCESS -- a real client under `Ctrl+V` had to be `kill -9`ed.
+ *
+ * SO DO NOT "FIX" THE GUI'S MISSING `Ctrl+V` BY ADDING A `paste` ARM AND WIDENING THAT GATE. The
+ * two mechanisms OVERLAP rather than compose: MEASURED on Electron 44.3.0, a `Ctrl+Shift+V`
+ * delivers the page a `paste` event AND fires this accelerator's `click`, and `preventDefault()`
+ * in the page does NOT suppress the accelerator. An arm plus an ungated listener is therefore a
+ * DOUBLE PASTE into a 3270 field, where a silently doubled dataset name can be a valid different
+ * one -- which is the failure `frontend/src/pasteAction.ts` exists to prevent.
+ *
+ * A native `Ctrl+V` here is a real improvement and is deliberately NOT taken: it needs the
+ * accelerator and the event reconciled (one of them has to stop firing), which is a decision
+ * about this menu rather than a handler somebody can add.
+ */
 export function pasteAccelerator(platform: Platform): string {
   return platform === 'darwin' ? 'Cmd+V' : 'Ctrl+Shift+V';
 }

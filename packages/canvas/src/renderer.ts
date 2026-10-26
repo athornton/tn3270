@@ -2,7 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry } from './geometry.js';
 import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
-import { isEditableTarget } from './forwardKeys.js';
+import { forwardPaste, isEditableTarget } from './forwardKeys.js';
 import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 // FROM THE MODULE AND NOT FROM THE BARREL (`./index.js`), which would be the natural reach and
 // would BLANK THIS WINDOW WITH NO ERROR: the barrel re-exports `drawlist.js`, which value-imports
@@ -315,6 +315,27 @@ window.addEventListener('keydown', (e) => {
   // lands here as an unclaimed key. Either way the selection must survive it.)
   clearSelection();
   window.tn3270.sendAction(action);
+});
+
+/*
+  THE BROWSER'S OWN `Ctrl-V`, 2026-10-26.
+
+  THE RULES AND THE SAFETY GATE ARE IN `forwardKeys.ts`, not here, and the gate is the reason this
+  is a call rather than an inline `window.addEventListener('paste', ...)`. THIS FILE IS LOADED BY
+  TWO FRONT ENDS -- `gui/index.html:5` pulls this same `renderer.js` into the Electron GUI -- and
+  an ungated listener would raise `{kind:'paste'}` there, where nothing intercepts it and
+  `applyAction` throws: MEASURED to FREEZE the main process event loop, not merely log. The
+  injected `protocol` is what confines it to the web gateway. Read `forwardPaste`'s docstring
+  before changing either side; it records what was measured and the invariant that keeps it true.
+
+  `location.protocol` IS READ HERE AND PASSED IN, because this is the file that owns real browser
+  globals -- the same division that keeps `forwardKeys.ts` testable under `environment: 'node'`.
+*/
+forwardPaste({
+  on: (type, handler) => { window.addEventListener(type, handler as (e: Event) => void); },
+  sendAction: (action) => { window.tn3270.sendAction(action); },
+  protocol: location.protocol,
+  clearSelection,
 });
 
 /**

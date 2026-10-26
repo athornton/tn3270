@@ -1214,6 +1214,29 @@ app.whenReady().then(async () => {
       process.stdout.write(`copy: ${text.length} chars\n`);
       return;
     }
+    /*
+      THERE IS DELIBERATELY NO `paste` ARM HERE, AND ADDING ONE IS NOT THE SAFE CHANGE IT LOOKS
+      LIKE. 2026-10-26.
+
+      `paste` is the ONE kind `applyAction` throws on that this front end does not intercept, so a
+      reader who has just read the five arms above will notice the gap and reach for a sixth.
+      What makes the gap survivable is that nothing in this app RAISES the kind: Paste is a menu
+      item (`menu.ts`) wired to `onPaste` -> `applyPaste` above, which never goes through here.
+
+      THE GAP IS GUARDED ON THE OTHER SIDE, by `forwardPaste` in `canvas/src/forwardKeys.ts`
+      refusing to install its `paste` listener on `file:` -- this window's own scheme. That file
+      carries the measurements; the two that matter here are that a real `paste` event DOES reach
+      an Electron page by five routes, and that the resulting throw in this very listener FREEZES
+      THE MAIN PROCESS EVENT LOOP rather than logging -- a real client had to be `kill -9`ed, with
+      no `uncaughtException` handler anywhere in this file to soften it.
+
+      AND AN ARM HERE WOULD NOT MERELY BE REDUNDANT, IT WOULD DOUBLE-PASTE: measured on Electron
+      44.3.0, `Ctrl+Shift+V` fires BOTH the page's `paste` event and this menu accelerator's
+      `click`, and `preventDefault()` in the page does not suppress the accelerator. So an arm
+      plus a widened gate applies one clipboard twice into a 3270 field. If you want the GUI's
+      native `Ctrl+V` to work, the accelerator and the event have to be reconciled first -- see
+      `pasteAccelerator`'s note, which is where that decision belongs.
+    */
     // INTERCEPTED HERE for the same reason as `quit` and `toggleKeypad`: `applyAction` THROWS on
     // it (`frontend/src/actions.ts:57-58`), because a transfer dialog is the front end's own
     // business. A front end that forgot this arm would die on the keystroke rather than being
