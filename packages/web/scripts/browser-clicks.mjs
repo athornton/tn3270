@@ -455,9 +455,15 @@ const TRANSFER_CHECKS = [
   {
     name: 'webPaste',
     kind: 'live',
-    what: 'a REAL Ctrl+V reaches the gateway as {kind:paste} and its text lands in the 3270 buffer',
-    mutant: "forwardKeys.ts  delete the `deps.on('paste', ...)` registration  OR  "
-      + 'renderer.ts  drop the `forwardPaste({...})` call',
+    what: 'a REAL Ctrl+V reaches the gateway as {kind:paste} and its text appears somewhere in the '
+      + '3270 buffer (the row is REPORTED, not predicted -- where it lands is pasteString\'s rule '
+      + 'and paste.test.ts pins it)',
+    mutant: "forwardKeys.ts  delete the `deps.on('paste', ...)` registration, OR renderer.ts drop "
+      + "the `forwardPaste({...})` call  (gateway logs nothing).  ALSO KILLS: forwardKeys.ts "
+      + "delete `if (text === '') return;` -- the empty clipboard then raises "
+      + '{"kind":"paste","text":""}.  COLLATERAL, NOT PROOF: it fails on bridge.ts '
+      + 'onCopyText: () => {} too, because its screen witness reads back through the COPY path; '
+      + 'the `action:` line is the half that isolates paste',
   },
 ];
 
@@ -1950,8 +1956,26 @@ async function runTransferPhase(url) {
          two-branch rule's hazard caught from the outside.
        - `forwardKeys.ts` with the `deps.on('paste', ...)` registration removed. `webPaste` failed
          with the gateway logging NOTHING and the payload nowhere on the screen; `webCopy` stayed
-         GREEN, which is what says the two checks are independent.
+         GREEN, which is what says the copy check does not depend on the paste one.
+       - `forwardKeys.ts` with `if (text === '') return;` deleted. `webPaste` failed at 12/13,
+         reporting `the page sent [{"kind":"paste","text":""}]` -- so the empty-clipboard control
+         below is a real kill and not decoration. `webCopy` stayed green.
        - `selection.ts`'s `hidden` handling dropped: SURVIVED at 13/13 here. See the table entry.
+
+      ## THE DEPENDENCE RUNS ONE WAY, AND THE COLLATERAL FAILURE IS NOT THE PROOF
+
+      This file's header states the rule for phase two's earlier mutants and it applies here:
+      `webPaste` ALSO FAILS on `bridge.ts onCopyText: () => {}` (measured: 11/13, not 12/13),
+      because its second witness reads the screen back through `copyCells` -- which is the COPY
+      path. The failure is honest about itself now (it names the clause, and the clause it names is
+      `the payload is NOT on the screen afterwards`), but a reader must not take it as evidence
+      about the paste listener: in that run the gateway logged
+      `action: {"kind":"paste","text":"TN3270-PASTE-PROBE"}` perfectly and the paste WORKED.
+
+      SO THE `action:` LINE IS THE HALF THAT ISOLATES PASTE, and the screen read-back is the half
+      that proves it did something. The reverse dependence does not exist -- `webCopy` survived
+      every paste-side mutation -- so a `webCopy`-only failure means the copy path, while a
+      `webPaste`-only failure means the paste path, and BOTH failing means the copy path.
     */
     {
       /*
@@ -2054,39 +2078,56 @@ async function runTransferPhase(url) {
        * empty copy -- so "the clipboard was not touched" is a real outcome of this product and has
        * to be told apart from a copy that worked.
        *
-       * `__tn3270Copy()` IS THE PAGE'S OWN GLOBAL and the only route to `copy` a browser has: the
-       * gateway's page binds no Copy gesture (the Electron GUI's menu is what calls this global
-       * there, through `executeJavaScript`). So this drives the real selection and the real
-       * `sendAction`, and only the human's keystroke is substituted.
+       * `__tn3270Copy()` IS THE PAGE'S OWN GLOBAL AND, AS OF 2026-10-26, THE ONLY ROUTE TO `copy`
+       * THE BROWSER HAS AT ALL -- which is a stronger and less comfortable statement than it looks,
+       * so it is spelled out rather than implied.
+       *
+       * The Electron GUI reaches this global from its Edit menu, through `executeJavaScript`. The
+       * gateway's page has NO equivalent: SEARCHED 2026-10-26 and each came back empty -- no `copy`
+       * entry in `canvas/src/keys.ts`, no `addEventListener('copy')` anywhere in `packages/`, no
+       * Copy cap in the keypad or the 3279 keyboard table, nothing in `web/static/index.html`, and
+       * no `contextmenu` handler. A browser has no Edit menu, and `README.md` documents the gesture
+       * as "copy from the Edit menu".
+       *
+       * SO THIS CHECK DRIVES THE REAL SELECTION, THE REAL `sendAction` AND THE REAL CLIPBOARD
+       * WRITE, BUT IT DOES NOT PROVE AN OPERATOR CAN GET HERE. What it substitutes is not merely a
+       * keystroke -- there may be no keystroke to substitute. Everything DOWNSTREAM of the trigger
+       * is covered end to end; the trigger itself is raised with the task, because whether the web
+       * front end is missing a gesture or the spec deliberately leaves copy to the browser's own
+       * selection is a product decision and not a harness one.
        */
       const SENTINEL = 'tn3270-harness-sentinel-not-a-copy';
       /** What `writeClipboard` said, if it said anything. Its only channel is `console.warn`. */
       const clipWarns = () => cdp.eval(
         "JSON.stringify(window.__tn3270Probe.warns.filter((w) => w.startsWith('copy: ')))");
+      /*
+        NO FOCUS EMULATION HERE, AND THE REMOVED LINE IS WORTH A NOTE BECAUSE OF WHY IT WAS ADDED.
+
+        An `Emulation.setFocusEmulationEnabled` call stood here for one commit, on the theory that
+        `navigator.clipboard.writeText` -- which rejects with `NotAllowedError: Document is not
+        focused` when the page lacks focus -- needed help under an Xvfb with no window manager.
+        IT WAS CARGO. REMOVED AND RE-MEASURED 2026-10-26: both checks still pass, `webCopy` on its
+        FIRST drag attempt with `writeClipboard` warning about nothing. So focus is not a problem
+        this harness has, and the call was prophylaxis against a failure that never happened here.
+
+        IT WAS ALSO ADDED ON A WRONG DIAGNOSIS, which is the durable half of this note. `webCopy`
+        had failed on a build whose copy path was untouched, and the focus call looked like the
+        cause because the symptom was a clipboard that did not change. It was not: `hasFocus()` was
+        already true, nothing had warned, a direct `writeText`/`readText` round trip worked, and the
+        page's inflated inbound frames showed `{"kind":"copyText","text":" MENU\n OPTION ===>"}`
+        ARRIVING with no clipboard write after it. The real cause was a STALE `dist/` -- this task's
+        mutation runner reverted `bridge.ts` by restoring a copy with an OLDER mtime, so
+        `tsc --build` saw nothing to do and `dist/bridge.js` still held `onCopyText: () => {}`.
+        That is this repo's recorded `tsc`-orphan shape met from the other direction, and the
+        staleness guard at the top of this file cannot catch it BECAUSE THE MTIME WENT BACKWARDS.
+        `npx tsc --build --force` is what cleared it.
+
+        AND NOT ADDING IT BACK IS THE MORE INFORMATIVE CHOICE, not merely the tidier one: a real
+        focus rejection now fails LOUDLY, because `copyWarnings.length === 0` is asserted and
+        `writeClipboard` reports exactly that case through the warn channel this probe captures.
+        A prophylactic call would hide the one failure it was supposed to guard against.
+      */
       const copyOnce = async (fromRow, fromCol, toRow, toCol) => {
-        /*
-          THE DOCUMENT IS FOCUSED FIRST, BECAUSE `writeText` REQUIRES IT -- AND THIS LINE IS NOT
-          WHAT FIXED THE FAILURE IT WAS ADDED FOR, WHICH IS WORTH RECORDING RATHER THAN QUIETLY
-          LEAVING IN.
-
-          `navigator.clipboard.writeText` rejects with `NotAllowedError: Document is not focused`
-          when the page lacks focus, and under Xvfb with no window manager that is not something a
-          harness can assume: CDP's `Emulation` overrides, the earlier checks' real file chooser and
-          `Input` events can all leave focus elsewhere. So the call is correct and stays.
-
-          BUT THE FAILURE IT WAS ADDED TO EXPLAIN WAS SOMETHING ELSE ENTIRELY, and the wrong
-          diagnosis stood here for one run. `webCopy` failed on a build whose copy path was
-          untouched, and `document.hasFocus()` was already `true`, nothing had warned, and a direct
-          `writeText`/`readText` round trip worked -- while the page's inflated inbound frames
-          showed `{"kind":"copyText","text":" MENU\\n OPTION ===>"}` arriving and NO clipboard write
-          following it. The cause was a STALE `dist/`: this task's mutation runner had reverted
-          `bridge.ts` by restoring a copy with an older mtime, so `tsc --build` saw nothing to do
-          and `dist/bridge.js` still held `onCopyText: () => {}`. That is this repo's recorded
-          `tsc`-orphan shape, met again from the other direction; `npx tsc --build --force` is what
-          cleared it, and the staleness guard at the top of this file cannot see it because the
-          mtime went BACKWARDS.
-        */
-        await cdp.cmd('Emulation.setFocusEmulationEnabled', { enabled: true });
         await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(SENTINEL)})
           .then(() => '').catch((e) => String(e))`);
         const dragged = await dragCells(fromRow, fromCol, toRow, toCol);
@@ -2123,9 +2164,26 @@ async function runTransferPhase(url) {
        * empty or wrong clipboard is NOT retried, so a genuinely broken copy still fails rather
        * than being slept over. The attempt count is reported either way.
        *
-       * A REAL OPERATOR MEETS THIS TOO and it is not a defect: they would press Copy after the
-       * screen settled, because they are selecting something they can see. A harness has no eyes,
-       * so it retries.
+       * AN OPERATOR MEETS THIS TOO, AND IT IS NOT HARMLESS FOR THEM -- a claim that it was stood
+       * here for one commit and is WITHDRAWN. It said an operator "would press Copy after the
+       * screen settled, because they are selecting something they can see", which does not follow:
+       * the clear fires on EVERY frame, not only on frames that touch the selected cells, and a
+       * live host sends frames nobody can anticipate (an unsolicited Write from a running job, a
+       * status-line update, a timed panel refresh). So the operator's sequence is drag, reach for
+       * Copy, a host frame arrives, and the selection is silently gone -- with `__tn3270Copy()`
+       * returning `false`, which `renderer.ts` deliberately treats as not worth a message. Silence,
+       * repeatedly, on a busy panel.
+       *
+       * THE RACE IS PRE-EXISTING AND NOT THIS FEATURE'S: the `clearSelection()` on every frame has
+       * been there since `07104cb`, 2026-10-05, and the Electron GUI has it identically. So it is
+       * not fixed or narrowed here -- that is a design question about the clear POLICY, not about
+       * this harness.
+       *
+       * THIS IS THE WRONG PLACE FOR THAT NOTE AND IT IS DELIBERATELY NOT THE ONLY PLACE. Nobody
+       * reading `renderer.ts`'s selection policy will look in a web harness's retry helper, so the
+       * operator-facing half belongs beside the clear itself and in `docs/live-testing.md`. RAISED
+       * with the task rather than written here, so it lands as one decision instead of a comment
+       * that only this file's readers ever see.
        */
       const copyCells = async (fromRow, fromCol, toRow, toCol) => {
         let last = { problem: 'never attempted' };
@@ -2222,7 +2280,7 @@ async function runTransferPhase(url) {
       // ===== webPaste ==========================================================================
       //
       // A REAL `Ctrl+V`, AND THAT IS THE LABEL IT EARNED. This task's plan allowed for a
-      // synthesized `ClipboardEvent` labelled `injected` if a real chord could not be driven, and
+      // synthesized `ClipboardEvent` labeled `injected` if a real chord could not be driven, and
       // listed `Input.insertText` as the thing that does not work. MEASURED 2026-10-26, in this
       // page: a plain `Input.dispatchKeyEvent` Ctrl+V pair DOES fire a `paste` event with
       // `isTrusted: true` carrying the real clipboard text, and the gateway logs the action. So
@@ -2256,19 +2314,23 @@ async function runTransferPhase(url) {
         repaint, a new frame over the socket, a new draw list, a fresh real drag, and the gateway's
         own `extractText` over its own screen.
 
-        THE WHOLE SCREEN IS COPIED AND NOT A PREDICTED ROW, and that correction is a measurement
-        rather than a preference. This was first written against row 1, because that is where the
-        fixture leaves the cursor on a fresh session -- and it FAILED here while the payload was
-        plainly on the screen. The cause is that this run SHARES ITS SESSION with everything above
-        it: `bridgecore.ts` sends `hello` with the stored session id, so the reload REATTACHES, and
-        the checks above have already typed into the buffer and moved the cursor (the keypad
-        phase's `7`, `@` and `2`, plus the `type` actions the transfer form's fields leak). A
-        harness that predicts the cursor is asserting on the order of the checks before it.
+        THE WHOLE SCREEN IS COPIED AND NOT A PREDICTED ROW, and the reason is a division of
+        labor rather than an unknown. The session IS fresh by the time this runs -- the reload
+        above drops `tn3270.sessionId`, so the page sends a bare `hello` and the gateway builds a
+        new replayed session, which is exactly what makes the fixture's screen deterministic again.
+        (An earlier draft of this paragraph said the opposite, blaming a SHARED session for an
+        unpredictable cursor. That described the state before the `sessionStorage` fix two comments
+        up, and it survived the fix -- the summary-line-outlives-its-correction shape this project
+        has recorded. Corrected 2026-10-26.)
 
-        SO CONTAINMENT ANYWHERE ON THE SCREEN, AND THE ROW IS REPORTED. The claim being made is
-        that the operator's clipboard reached the 3270 buffer -- WHERE it lands is `pasteString`'s
-        business and `paste.test.ts`'s, which pin the cursor rules on a known screen. The payload
-        is a distinctive string, so containment cannot be satisfied by anything the fixture paints.
+        SO: CONTAINMENT ANYWHERE ON THE SCREEN, AND THE ROW IS REPORTED RATHER THAN ASSERTED,
+        because WHERE a paste lands is `pasteString`'s rule and not this harness's claim.
+        `paste.test.ts` pins the cursor behavior on a screen it controls, which is where that
+        belongs; what cannot be tested there is whether a real browser's clipboard reaches the
+        buffer at all, and that is the only thing asserted here. The payload is a distinctive
+        string, so containment cannot be satisfied by anything the fixture paints -- and the row it
+        was found on is printed in the `ok` line, so a future change of cursor rules is VISIBLE
+        here without this check having to be rewritten to care.
       */
       const pasteCopy = await copyCells(0, 0, lastRow, lastCol);
       const landed = pasteCopy.problem === '' && typeof pasteCopy.clip === 'string'
@@ -2298,7 +2360,25 @@ async function runTransferPhase(url) {
       const loggedOnEmpty = logsSince(emptyMark).filter((l) => l.includes('"paste"'));
       const emptyQuiet = sentOnEmpty.length === 0 && loggedOnEmpty.length === 0;
 
-      const pasteOk = clipWrite === '' && pasteAction !== undefined && landed && emptyQuiet;
+      /*
+        WHICH CLAUSE FAILED, NAMED -- BECAUSE THE UNNAMED VERSION MISREPORTED A REAL KILL.
+
+        `pasteOk` is a conjunction of four independent things, and the failure message used to
+        print all four values and let the reader work it out. MEASURED while re-running the
+        mutations for review: with `forwardKeys.ts`'s `if (text === '') return;` guard deleted, the
+        message read `the screen after the paste reads "... TN3270-PASTE-PROBE ..." (want it to
+        contain "TN3270-PASTE-PROBE" somewhere)` -- quoting text that plainly DID contain it, while
+        the actual failure was the empty-clipboard clause four lines further on. A reader would have
+        chased the wrong half. This is the fixed-width/summary-line family: the remedy has to be
+        first, and the measured value is not a diagnosis.
+      */
+      const pasteWhy = [
+        clipWrite === '' ? '' : 'the harness could not even write the clipboard',
+        pasteAction === undefined ? 'the gateway never logged a paste action' : '',
+        landed ? '' : 'the payload is NOT on the screen afterwards',
+        emptyQuiet ? '' : 'an EMPTY clipboard still raised a paste, so the empty guard is gone',
+      ].filter((s) => s !== '');
+      const pasteOk = pasteWhy.length === 0;
       if (pasteOk) {
         ok(check('webPaste'),
           'a REAL Ctrl+V (isTrusted, nothing synthesized) reached the gateway as '
@@ -2309,7 +2389,7 @@ async function runTransferPhase(url) {
           + 'clipboard then raised nothing at all, which that positive control is what makes '
           + 'meaningful');
       } else {
-        no(check('webPaste'), 'a real Ctrl+V did not reach the gateway and land in the buffer',
+        no(check('webPaste'), `the browser's paste path is broken: ${pasteWhy.join('; ')}`,
           `clipboard write: ${clipWrite === '' ? 'ok' : clipWrite}, `
           + `the gateway logged ${JSON.stringify(pasteLogs)}, `
           + `the screen after the paste reads ${JSON.stringify(pasteCopy.clip ?? pasteCopy.problem)} `
