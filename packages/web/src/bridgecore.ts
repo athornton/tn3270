@@ -163,10 +163,20 @@ export interface BridgeDeps {
    * WRONG: `String()` is not total over JSON-reachable values. `{"text":{"toString":null}}` parses
    * fine -- `toString` is an ordinary own property and the prototype is untouched -- and coercing
    * it throws `TypeError: Cannot convert object to primitive value`, inside the un-awaited async
-   * IIFE below, which makes it an unhandled rejection rather than anything visible. (A literal
-   * `__proto__` key does NOT hijack this: `JSON.parse` leaves the prototype intact, so
-   * `{"text":{"__proto__":{"toString":null}}}` coerces to `"[object Object]"`. Every other shape
-   * -- `{}`, `[1,2]`, `null`, a number, a boolean, absent -- coerces without throwing.)
+   * IIFE below, which makes it an unhandled rejection rather than anything visible.
+   *
+   * THE RULE IS AN OWN `toString` THAT IS NOT CALLABLE, not that one specific literal:
+   * `{"toString":1}` throws identically, and so does `[{"toString":null}]` -- `Array.prototype
+   * .join` coerces each ELEMENT, so an array is only as safe as its contents, at any depth. A
+   * literal `__proto__` key does NOT hijack it, because `JSON.parse` leaves the prototype intact,
+   * so `{"text":{"__proto__":{"toString":null}}}` coerces to `"[object Object]"`.
+   *
+   * THE SHAPES CHECKED, and deliberately not "every other shape": `{}`, `[1,2]`, `[null,1,"a"]`,
+   * `[{}]`, `{"valueOf":null}`, `null`, a number, a boolean and an absent field all coerce without
+   * throwing. An enumeration is the evidence for "only this family throws", so a reader who tests
+   * it must not find a thrower it implied was safe -- which is what an unqualified "every other
+   * shape" did here, by inviting generalization from `[1,2]` to arrays.
+   *
    * NOT HARDENED HERE, because the thrower has to be the gateway and the gateway encodes this
    * field from a `string`; recorded so the next reader neither hardens it on a false premise nor
    * cites it as precedent for skipping a check on the inbound side, where the cost is the process.
@@ -251,12 +261,19 @@ export interface ClipboardWriter {
  * rather than read from `navigator` at the point of use, which is the whole reason this function
  * exists instead of an inline `if` in the entry point.
  *
- * **THE DOM LIB SAYS THE CHECK CANNOT FAIL, AND THE DOM LIB IS WRONG.** Measured against the
- * TypeScript this repo builds with: `lib.dom.d.ts` declares `readonly clipboard: Clipboard` on
- * `Navigator`, NOT `| undefined`. Inlined in `bridge.ts` that narrowed the guard's body to
- * `never`, so the branch most likely to run in production read as dead code to anyone cleaning
- * up. The `| undefined` in this signature is what makes it honest to the compiler as well as to
- * the runtime, and it is why `bridge.ts`'s call needs no cast.
+ * ## THE GUARD BELOW IS COMPILER-ENFORCED, NOT COMMENT-ENFORCED
+ *
+ * MEASURED 2026-10-26: deleting the `clip === undefined` branch FAILS THE BUILD with
+ * `TS18048: 'clip' is possibly 'undefined'`. So a reader who takes it for dead code finds out
+ * from `tsc` rather than from an operator whose copy silently did nothing, and that is the
+ * durable half of this note -- re-measure it rather than trusting this line if the signature
+ * ever changes.
+ *
+ * THE `| undefined` IN THE SIGNATURE IS WHAT BUYS THAT, and it is also why `bridge.ts`'s call
+ * needs no cast. `lib.dom.d.ts` declares `readonly clipboard: Clipboard` on `Navigator`, NOT
+ * `| undefined`, which is wrong about every non-secure context; inlined in `bridge.ts` that
+ * narrowed this guard's body to `never`, and the branch most likely to RUN in production read as
+ * dead code to anyone cleaning up. Injecting the capability is what inverted that.
  *
  * CAUGHT, NOT VOIDED. `void` on a rejecting promise is what CREATES an unhandled rejection --
  * measured on this project's transfer window, and the reason `gui/src/main.ts` wraps its own
@@ -340,9 +357,11 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
         // `httpstatic.ts` and `Buffer` does not exist here. The atlas branch above decodes its
-        // `coverage` the same way at `:233`, which is the one convention for bytes over this
-        // socket -- and `protocol.ts:64-68` records that an earlier comment there named `Buffer`
-        // for this very message and had to be corrected.
+        // `coverage` the same way, which is the one convention for bytes over this socket -- and
+        // `encodeServerMessage` in `protocol.ts` records that an earlier comment there named
+        // `Buffer` for this very message and had to be corrected. (Both of this sentence's line
+        // references were stale before this feature touched the file -- `:233` for the atlas and
+        // `protocol.ts:64-68` for that note -- which is why neither is a number any more.)
         //
         // ONLY `transferData` CARRIES BYTES. `transferProgress` and `transferDone` are passed
         // through untouched, and decoding a missing `bytes` field would turn `undefined` into the

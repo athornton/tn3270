@@ -213,7 +213,10 @@ describe('createBridge', () => {
      * throw, no log. So before this branch existed, `transferProgress`, `transferDone` and
      * `transferData` were silently discarded: the operator would watch a transfer form that never
      * updated and there would be no evidence anywhere -- the same shape as the other
-     * nothing-in-any-console traps recorded for this renderer (`bridgecore.ts:8-14` lists them).
+     * nothing-in-any-console traps recorded for this renderer, which `bridgecore.ts`'s header
+     * lists under *THE QUEUE IS NOT DEFENSIVE CODING*. BY NAME AND NOT BY LINE RANGE: the
+     * `:8-14` this cited was correct when written and was broken by an insertion ABOVE it one
+     * commit later, which is the second time a range in this file rotted that fast.
      */
     const socket = fakeSocket();
     const got: unknown[] = [];
@@ -328,7 +331,7 @@ describe('createBridge', () => {
      * `onmessage` chain that returns on each kind it knows and then falls off the end: no
      * `else`, no throw, no log. The operator would press copy, see the gateway log `copy: N chars`,
      * and find their clipboard unchanged with nothing in any console -- the shape of the traps
-     * `bridgecore.ts:8-14` lists.
+     * `bridgecore.ts`'s header lists under *THE QUEUE IS NOT DEFENSIVE CODING*.
      *
      * THE SECOND PAIR OF ASSERTIONS IS NOT CEREMONY: this kind must NOT go through `dispatch`, for
      * the reason `onTransfer` gives. Routing it through a renderer kind would hand `renderer.js` a
@@ -422,8 +425,15 @@ describe('writeClipboard, whose COMMON case is the browser having no clipboard a
    * Chrome-over-localhost always gets the API, so nothing but an injected `undefined` exercises
    * the other branch. It is worse than that here, because `lib.dom` types `Navigator.clipboard`
    * as non-optional: inlined in `bridge.ts` the guard's body narrowed to `never`, making the
-   * likeliest production path look like dead code to anyone cleaning up. These three cases are
-   * what stop it being deleted.
+   * likeliest production path look like dead code to anyone cleaning up.
+   *
+   * THESE CASES ARE THE SECOND LINE OF DEFENSE, NOT THE FIRST, AND THAT IS WORTH KNOWING WHEN
+   * READING THEM. Since the capability became a `ClipboardWriter | undefined` PARAMETER, the
+   * compiler owns the guard: measured 2026-10-26, deleting it fails the build with
+   * `TS18048: 'clip' is possibly 'undefined'`. So what the no-API case below adds is the
+   * BEHAVIOR -- that the absence warns, names the secure context, and does not throw -- which no
+   * compiler can check and which `vitest` alone would not catch either, since it does not
+   * typecheck.
    */
   it('writes the text when the browser has a clipboard', async () => {
     const wrote: string[] = [];
