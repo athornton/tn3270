@@ -319,6 +319,72 @@ describe('createBridge', () => {
     //    developer would plausibly write -- routing through an existing renderer kind.
   });
 
+  it("hands copyText to onCopyText, which is the operator's own clipboard", async () => {
+    /**
+     * THE RECEIVING HALF OF `copy`. The gateway intercepts the action, extracts the rectangle and
+     * replies with `copyText` (`web/src/main.ts:389-397`) -- only that side can extract, because a
+     * `DrawCell` carries an atlas glyph and no character. Without this branch the reply is dropped
+     * by an `onmessage` chain that returns on each kind it knows and then falls off the end: no
+     * `else`, no throw, no log. The operator would press copy, see the gateway log `copy: N chars`,
+     * and find their clipboard unchanged with nothing in any console -- the shape of the traps
+     * `bridgecore.ts:8-14` lists.
+     *
+     * THE SECOND PAIR OF ASSERTIONS IS NOT CEREMONY: this kind must NOT go through `dispatch`, for
+     * the reason `onTransfer` gives. Routing it through a renderer kind would hand `renderer.js` a
+     * payload it has no case for, and routing it under its own kind would park it in the private
+     * queue forever, since `onAtlas`/`onFrame`/`onError` are the only registrars.
+     */
+    const socket = fakeSocket();
+    const got: string[] = [];
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onCopyText: (t) => { got.push(t); },
+    });
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    api.onFrame((f) => frames.push(f));
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'copyText', text: 'ROW ONE\nROW TWO' });
+    await Promise.resolve();
+    // THE TEXT ITSELF, newlines intact: a copied rectangle is usually several rows, and the row
+    // separator is what makes it pasteable anywhere else.
+    expect(got).toEqual(['ROW ONE\nROW TWO']);
+    expect(frames).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('DROPS copyText when no handler is given, rather than throwing', async () => {
+    /**
+     * `onCopyText` is optional on the deps for exactly the reason `toggleKeypad` and `onTransfer`
+     * are: the gateway's own tests and any caller with no DOM must be able to construct a bridge
+     * without one. `integration.test.ts` builds no bridge at all, and a headless client would.
+     *
+     * THE REJECTION LISTENER IS WHY THIS TEST IS WORTH ANYTHING, and it is here because a mutation
+     * survived the `onTransfer` version of this case without one (recorded above at length). The
+     * throw a non-optional `deps.onCopyText(...)` would produce happens inside `onmessage`'s async
+     * IIFE, which nothing awaits, so it becomes an UNHANDLED REJECTION that vitest does not fail
+     * the test on -- and the assertions after it could not see it either, because nothing is sent
+     * and no error is reported on this path in the first place.
+     */
+    const seen: unknown[] = [];
+    const onRejection = (e: unknown): void => { seen.push(e); };
+    process.on('unhandledRejection', onRejection);
+    const socket = fakeSocket();
+    const errors: string[] = [];
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'copyText', text: 'HELLO' });
+    // A MACROTASK, not `await Promise.resolve()`: a rejection is reported at the end of the
+    // microtask queue, so the microtask tick the other cases use lands too early to see one.
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    process.off('unhandledRejection', onRejection);
+    expect(seen, 'an absent onCopyText must be inert, not a rejected promise').toEqual([]);
+    expect(errors).toEqual([]);
+    expect(socket.sent).toEqual([]);
+  });
+
   it('reports an unexpected close through onError, so the canvas is not silently frozen', () => {
     const socket = fakeSocket();
     const api = createBridge({ socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d) });

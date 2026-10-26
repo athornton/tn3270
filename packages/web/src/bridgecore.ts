@@ -113,6 +113,42 @@ export interface BridgeDeps {
    * measurement (`TS2379`) for the dep that is genuinely handed `undefined`.
    */
   readonly showTransfer?: (() => void) | undefined;
+  /**
+   * The operator's copied text, for THEIR clipboard. 2026-10-23.
+   *
+   * OPTIONAL, the same contract `toggleKeypad`, `toggleKeyboard` and `onTransfer` above have and
+   * for the same reason: the gateway's own tests and any caller with no DOM must be able to
+   * construct a bridge without one.
+   *
+   * EIGHTH MEMBER OF `BridgeDeps`, AND STILL NOT A BREACH OF THE FOUR-FUNCTION RULE, which is
+   * about `BridgeApi` below -- the surface `renderer.ts` consumes unmodified, and whose width is
+   * what lets that file be reused by Electron. See the note on `toggleKeypad`, which made this
+   * argument first. LAST IN THE INTERFACE DELIBERATELY: the three notes above number themselves
+   * FIFTH, SIXTH and SEVENTH, so inserting beside `onTransfer` -- where the plan for this task
+   * said to put it -- would have made `showTransfer`'s own ordinal wrong.
+   *
+   * THE GATEWAY IS THE ONLY SIDE THAT CAN EXTRACT, which is why a server->client message exists
+   * at all: a `DrawCell` carries a CG-order atlas glyph and NO character, so the renderer sends
+   * the RECTANGLE and the gateway sends the text back (`main.ts`'s `copy` intercept). Without
+   * this hook that reply is DROPPED -- the `onmessage` chain below returns on each kind it knows
+   * and then falls off the end, with no `else`, no throw and no log -- so the operator would press
+   * copy, the gateway would log `copy: N chars`, and their clipboard would be unchanged with
+   * nothing in any console. Same shape as the transfer kinds before `onTransfer` existed.
+   *
+   * NOT ROUTED THROUGH `dispatch`, for the reason `onTransfer` gives above: that queue exists
+   * because `renderer.js` registers its handlers when its module body runs, which races the atlas.
+   * This handler is injected by the SAME module that constructs the bridge (`bridge.ts`), so it
+   * cannot be late and there is nothing to queue -- while `dispatch`ing this kind would park it in
+   * that queue forever, since `onAtlas`/`onFrame`/`onError` are the only registrars and each
+   * hardcodes its kind.
+   *
+   * NO `| undefined` ANNOTATION, unlike `showTransfer` above. That annotation is what lets a
+   * caller inject the result of a condition under `exactOptionalPropertyTypes`; `bridge.ts` passes
+   * a real function here unconditionally, because the feature detection belongs INSIDE it --
+   * `navigator.clipboard`'s absence is a fact about the page's security context, not something the
+   * entry point computes once at load.
+   */
+  readonly onCopyText?: (text: string) => void;
 }
 
 export interface BridgeApi {
@@ -200,6 +236,12 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       }
       if (msg.kind === 'frame') { dispatch('frame', msg['list']); return; }
       if (msg.kind === 'error') { dispatch('error', String(msg['message'])); return; }
+      // THE RECEIVING HALF OF `copy`, 2026-10-23. NOT through `dispatch`, for the reason the
+      // transfer branch below gives: that queue is for handlers `renderer.js` registers in its
+      // module body, and this is not one of them -- `bridge.ts` injects it at construction, so it
+      // cannot be late, and a `dispatch`ed `copyText` would sit in the queue forever. Absent, the
+      // text is dropped, which is correct for a client with no clipboard to write.
+      if (msg.kind === 'copyText') { deps.onCopyText?.(String(msg['text'])); return; }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by

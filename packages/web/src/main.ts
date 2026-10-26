@@ -365,12 +365,13 @@ export function buildServer(args: WebArgs) {
         sending `''` would be exactly that wipe. Doing nothing is the lesser surprise, and it is
         the same rule Electron's main follows for the same reason -- `if (text !== '')` there too.
 
-        THAT CONSUMER DOES NOT EXIST YET, and saying so is the point rather than a caveat:
-        `bridgecore.ts` has no `copyText` branch and no `navigator.clipboard` call as of this
-        commit, so nothing a browser runs reacts to this message. It is a later task's half. The
-        gateway's half lands first because the two-branch rule made it urgent -- the kind is now
-        accepted at decode, so the interception above is owed TODAY, and a `copyText` nobody reads
-        yet is inert while an acceptance nobody intercepts is the gateway process.
+        THAT CONSUMER NOW EXISTS, 2026-10-26: `bridgecore.ts`'s `copyText` branch hands the text
+        to an optional `onCopyText` dep and `bridge.ts` writes `navigator.clipboard` from it. This
+        paragraph said the opposite for three commits, which was true and deliberately recorded
+        when the gateway half landed FIRST -- the two-branch rule made that half urgent, because
+        the kind was already accepted at decode, and a `copyText` nobody read was inert while an
+        acceptance nobody intercepted was the gateway process. Corrected here rather than left as
+        a sentence about a state that is gone.
 
         THE LENGTH IS LOGGED AND NEVER THE TEXT. The action log above is gated behind
         `--log-actions` precisely because a `type` action carries typed characters; this line is
