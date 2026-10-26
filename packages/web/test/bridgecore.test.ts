@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createBridge, socketUrl } from '../src/bridgecore.js';
+import { createBridge, socketUrl, writeClipboard } from '../src/bridgecore.js';
 
 /**
  * The bridge's LOGIC, with the browser injected.
@@ -322,9 +322,10 @@ describe('createBridge', () => {
   it("hands copyText to onCopyText, which is the operator's own clipboard", async () => {
     /**
      * THE RECEIVING HALF OF `copy`. The gateway intercepts the action, extracts the rectangle and
-     * replies with `copyText` (`web/src/main.ts:389-397`) -- only that side can extract, because a
-     * `DrawCell` carries an atlas glyph and no character. Without this branch the reply is dropped
-     * by an `onmessage` chain that returns on each kind it knows and then falls off the end: no
+     * replies with `copyText` -- see `main.ts`'s `copy` intercept, cited by name because a line
+     * range here went stale within one commit of being written, and `protocol.ts`'s `copyText`
+     * member for why only that side can extract. Without this branch the reply is dropped by an
+     * `onmessage` chain that returns on each kind it knows and then falls off the end: no
      * `else`, no throw, no log. The operator would press copy, see the gateway log `copy: N chars`,
      * and find their clipboard unchanged with nothing in any console -- the shape of the traps
      * `bridgecore.ts:8-14` lists.
@@ -409,6 +410,75 @@ describe('createBridge', () => {
  * (A `setTimeout` macrotask drain was measured too and catches the same mutations, so this is a
  * question of which is sufficient, not of which is correct.)
  */
+
+describe('writeClipboard, whose COMMON case is the browser having no clipboard at all', () => {
+  /**
+   * THE ROUTE AT RISK OF ROTTING IS THE ONE THAT RUNS IN PRODUCTION, which is why this function
+   * takes the clipboard as a parameter instead of reading `navigator` where it is used.
+   *
+   * `navigator.clipboard` is secure-context-only and a LAN gateway on plain `http` has no secure
+   * context, so `undefined` is the COMMON case here -- the same situation `transferBridge.ts`
+   * records for `showSaveFilePicker`, with the same structural lesson: a developer on
+   * Chrome-over-localhost always gets the API, so nothing but an injected `undefined` exercises
+   * the other branch. It is worse than that here, because `lib.dom` types `Navigator.clipboard`
+   * as non-optional: inlined in `bridge.ts` the guard's body narrowed to `never`, making the
+   * likeliest production path look like dead code to anyone cleaning up. These three cases are
+   * what stop it being deleted.
+   */
+  it('writes the text when the browser has a clipboard', async () => {
+    const wrote: string[] = [];
+    const warned: string[] = [];
+    writeClipboard({ writeText: async (t) => { wrote.push(t); } }, 'ROW ONE\nROW TWO',
+      (m) => { warned.push(m); });
+    await Promise.resolve();
+    expect(wrote).toEqual(['ROW ONE\nROW TWO']);
+    // Nothing is reported on the happy path: a warning here would train the operator to ignore
+    // the one that means their copy did not land.
+    expect(warned).toEqual([]);
+  });
+
+  it('WARNS rather than throwing when there is no clipboard API, naming the cause', () => {
+    // NOT a throw: this runs from the bridge's own socket message handler, inside an un-awaited
+    // async IIFE, so a throw here is an unhandled rejection the operator never sees. And the
+    // absence is EXPECTED on this gateway, so it must read as a cause and not as a bug.
+    const warned: string[] = [];
+    expect(() => { writeClipboard(undefined, 'TEXT', (m) => { warned.push(m); }); }).not.toThrow();
+    expect(warned).toHaveLength(1);
+    // THE REMEDY, NOT JUST THE SYMPTOM. "no clipboard API" alone sends the reader to the wrong
+    // place -- the browser, rather than the URL scheme that actually explains it.
+    expect(warned[0]).toMatch(/secure context/);
+  });
+
+  it('CATCHES a refused clipboard, so a rejection never escapes unhandled', async () => {
+    /**
+     * `void clip.writeText(...)` IS THE BREAK THIS CASE EXISTS FOR. `void` on a rejecting promise
+     * is what CREATES an unhandled rejection -- measured on this project's transfer window -- and
+     * the browser refuses this call routinely: permission denied, or a document that is not
+     * focused. The rejection is asserted ABSENT through a listener rather than inferred from the
+     * warning, because the `onTransfer` case above records a mutation that survived exactly that
+     * inference: a throw inside an un-awaited async chain is invisible to vitest's assertions.
+     */
+    const seen: unknown[] = [];
+    const onRejection = (e: unknown): void => { seen.push(e); };
+    process.on('unhandledRejection', onRejection);
+    const warned: string[] = [];
+    writeClipboard(
+      { writeText: async () => { throw new Error('NotAllowedError'); } },
+      'TEXT',
+      (m) => { warned.push(m); },
+    );
+    // A MACROTASK, for the reason the `onTransfer` absence case gives: a rejection is reported at
+    // the end of the microtask queue, so a single microtask tick lands too early to see one.
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    process.off('unhandledRejection', onRejection);
+    expect(seen, 'a refused clipboard must be reported, not left as a rejected promise').toEqual([]);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatch(/refused/);
+    // The error itself reaches the message, so a console reader can tell a permission denial from
+    // an unfocused document without guessing.
+    expect(warned[0]).toMatch(/NotAllowedError/);
+  });
+});
 
 describe('socketUrl, which a reverse proxy breaks if it is built from the host', () => {
   it('resolves relatively, so a path prefix survives', () => {

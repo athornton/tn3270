@@ -1,4 +1,4 @@
-import { createBridge, socketUrl, type BridgeApi } from './bridgecore.js';
+import { createBridge, socketUrl, writeClipboard, type BridgeApi } from './bridgecore.js';
 import { createKeypadOverlay } from './keypadOverlay.js';
 import { createKeyboardOverlay } from './keyboardOverlay.js';
 // FROM THE MODULE AND NOT FROM `@tn3270/canvas`'s BARREL, which would blank this page: the barrel
@@ -294,52 +294,21 @@ const bridge = createBridge({
   // narrow a parsed JSON object into a union it never validated, and says so.
   onTransfer: (msg) => { boot.onMessage(msg); },
   /**
-   * THE OPERATOR'S OWN CLIPBOARD, which is the entire point of routing the text back here.
+   * THE OPERATOR'S OWN CLIPBOARD, which is the entire point of routing the text back here: only
+   * the gateway can extract (`protocol.ts`'s `copyText` member says why), so the renderer sends
+   * the rectangle and this is where the answer lands.
    *
-   * Only the gateway can extract: a `DrawCell` carries an atlas glyph and no character, so the
-   * renderer sends the RECTANGLE and the text comes back as `copyText`. This is the line that
-   * makes the round trip worth anything -- without it the gateway logs `copy: N chars` and the
-   * operator's clipboard is unchanged, with nothing in any console.
+   * ONE LINE, AND THE TWO BROWSER GLOBALS ARE THE ONLY PART THAT BELONGS IN THIS FILE.
+   * `writeClipboard` holds the capability check, the caught rejection and the measurements behind
+   * both, in `bridgecore.ts` where a unit test can drive the NO-CLIPBOARD route -- which is the
+   * common case for a LAN gateway on plain `http` and would otherwise be the one route nothing
+   * covers, exactly as `transferBridge.ts` records for its save dialog.
    *
-   * ## `writeText` IS SECURE-CONTEXT-ONLY, AND THIS GATEWAY OFTEN HAS NO SECURE CONTEXT
-   *
-   * A LAN deployment on plain `http` fails that check, which is the same constraint the transfer
-   * feature already records for `showSaveFilePicker` ("`undefined` is the COMMON case for this
-   * gateway, not an edge one" -- `transferBridge.ts`). So the absence is EXPECTED and must not
-   * look like a bug: it is warned about in the operator's own console, naming the cause, and
-   * nothing throws.
-   *
-   * **THE DOM LIB SAYS THIS CHECK CANNOT FAIL, AND THE DOM LIB IS WRONG.** Measured against the
-   * TypeScript this repo builds with: `lib.dom.d.ts` declares `readonly clipboard: Clipboard` on
-   * `Navigator` -- NOT `| undefined` -- so the compiler narrows `clip` to `never` inside the
-   * branch below and a reader may well take it for dead code. It is not dead at runtime: outside
-   * a secure context the property is genuinely absent, and deleting the guard turns that into
-   * `Cannot read properties of undefined (reading 'writeText')` thrown out of the bridge's own
-   * message handler. The comparison itself compiles with no error, which was checked rather than
-   * assumed -- `npm run build` is clean with it in place.
-   *
-   * CAUGHT, NOT VOIDED. `void` on a rejecting promise is what CREATES an unhandled rejection --
-   * measured on this project's transfer window, and the same reason `gui/src/main.ts`'s clipboard
-   * read is wrapped. A clipboard the browser refuses (no permission, a document that is not
-   * focused) is reportable and recoverable, never fatal.
-   *
-   * NO `execCommand` FALLBACK, and that is a deliberate refusal to guess rather than an omission.
-   * `document.execCommand('copy')` would need a hidden textarea, a selection and transient user
-   * activation that this path -- a server message arriving asynchronously -- does not have. What a
-   * non-secure-context browser actually does here is NOT YET MEASURED; the real-browser task is
-   * where that belongs, and a speculative fallback would be untested code on the exact path whose
-   * failure mode is silent.
+   * `navigator.clipboard` IS PASSED, NOT READ DOWN THERE, for the reason that file's header gives
+   * about every browser capability: the tests run with `environment: 'node'` and have no
+   * `navigator` at all. `console.warn` rides along for the same reason.
    */
-  onCopyText: (text) => {
-    const clip = navigator.clipboard;
-    if (clip === undefined) {
-      console.warn('copy: this browser has no clipboard API (needs a secure context)');
-      return;
-    }
-    clip.writeText(text).catch((err: unknown) => {
-      console.warn(`copy: the browser refused the clipboard: ${String(err)}`);
-    });
-  },
+  onCopyText: (text) => { writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); }); },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

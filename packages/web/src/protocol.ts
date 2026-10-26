@@ -225,10 +225,18 @@ export function decodeClientMessage(text: string): ClientMessage {
     // is not, and nothing in that direction CARRIES IT. `ServerMessage` is no longer the
     // `frame | error` this comment used to cite -- it gained three transfer members on 2026-10-06
     // (see the union above) -- but not one of them carries clipboard text, so the objection is
-    // unchanged and only its evidence moved. `bridgecore.ts` still has no clipboard function among
-    // its four, and `static/` is one `index.html` with no clipboard code. The browser's own
-    // renderer cannot extract it either -- a `DrawCell` carries a CG-order atlas glyph and no
-    // character, which is the whole reason the Electron side extracts in main.
+    // unchanged and only its evidence moved. The second piece of evidence has now moved too, and
+    // in the direction that ANSWERS the objection rather than weakening it: as of 2026-10-26 the
+    // browser half is BUILT -- `bridgecore.ts` dispatches `copyText` to an optional `onCopyText`
+    // dep and `bridge.ts` writes the operator's own clipboard through `writeClipboard`. This
+    // paragraph used to read "`bridgecore.ts` still has no clipboard function among its four, and
+    // `static/` is one `index.html` with no clipboard code", which was true when written and is
+    // kept here because it is what made the objection concrete. `BridgeApi` IS STILL FOUR
+    // FUNCTIONS WIDE; the write is a `BridgeDeps` member and an exported helper, which is the
+    // distinction that let the half be built without touching the surface `renderer.ts` consumes.
+    // The browser's own renderer still cannot extract -- a `DrawCell` carries a CG-order atlas
+    // glyph and no character, which is the whole reason the Electron side extracts in main, and
+    // the reason the text has to travel back rather than being read locally.
     //
     // So web copy needed a new server->client message plus a `navigator.clipboard` write in the
     // bridge, which was its own spec -- exactly the conclusion already reached for the web transfer
