@@ -541,6 +541,14 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * IT DOES NOT CLEAR THE SELECTION, which is the contract the keydown arm depends on -- see that
  * arm's comment. A copy leaves the screen untouched, so the highlight it just read is still an
  * honest description of what is on it, and an operator who copies twice gets the same text twice.
+ *
+ * THAT LAST SENTENCE IS MACHINE-CHECKED AS OF 2026-10-27, and only in one place:
+ * `web/scripts/browser-clicks.mjs`'s `webCopy` presses the real chord TWICE over two different
+ * clipboard sentinels with no second drag. NO UNIT TEST CAN REACH IT -- this file touches `window`
+ * at module load, so nothing imports it -- and `test/renderer-imports.test.ts`'s order pin does
+ * NOT cover it either: adding a `clearSelection()` AFTER this call inside that arm keeps the
+ * pinned order intact. MEASURED on exactly that mutant: all 2614 unit tests passed and `webCopy`
+ * was the only failure.
  */
 function copySelection(): boolean {
   if (anchor === null || focus === null) return false;
@@ -557,11 +565,23 @@ function copySelection(): boolean {
  * means the renderer has stopped being shared between Electron and the browser, and both hosts get
  * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
  *
- * THREE CALL SITES DEPEND ON IT and none of them were touched: the menu's Copy item
- * (`gui/src/main.ts:1020`), the selection test seam (`:1747`, which is the route
- * `gui/scripts/select.mjs` drives -- not the menu), and `web/scripts/browser-clicks.mjs`, which
- * evaluates `window.__tn3270Copy()` in the page. It is a one-line delegation precisely so that the
- * extraction above cannot change what any of them observe; both harnesses were re-run.
+ * TWO CALL SITES DEPEND ON IT, BOTH IN ELECTRON, and it is a one-line delegation precisely so
+ * that the extraction above cannot change what either observes: the menu's Copy item
+ * (`gui/src/main.ts:1038`) and the `TN3270_GUI_SELECT` test seam (`:1861`, which is the route
+ * `gui/scripts/select.mjs` drives -- not the menu).
+ *
+ * IT WAS THREE UNTIL 2026-10-27, and the third leaving is the point rather than a tidy-up.
+ * `web/scripts/browser-clicks.mjs` used to evaluate this global, because the browser had no copy
+ * gesture to drive; its `webCopy` check now presses the real `Ctrl-Shift-C` instead, so it covers
+ * the keydown arm above and `actionForKey`'s branch as well as this body. (The line citations in
+ * the paragraph above were `:1020` and `:1747` when first written and had both drifted by ~20 and
+ * ~110 lines within days -- corrected here, and the reason this paragraph names the SEAM by its
+ * environment variable rather than only by line.)
+ *
+ * SO THIS GLOBAL'S ONLY HARNESS IS NOW `select.mjs`, which is adequate but is a narrower claim
+ * than it used to be: nothing in a BROWSER exercises it any more. That is correct -- a browser has
+ * no Edit menu to reach it from -- but it means a change to this line is covered by the Electron
+ * harness alone.
  */
 (window as unknown as { __tn3270Copy: () => boolean }).__tn3270Copy = (): boolean => copySelection();
 

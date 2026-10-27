@@ -124,8 +124,13 @@ describe('the renderer bundle', () => {
     changes the screen invalidates a highlight drawn over the old text. `requestCopy` is the one
     claimed kind that changes nothing, and it is the one kind that READS the selection -- so it
     must be intercepted BEFORE `clearSelection()`. Below that call it still compiles, still
-    typechecks, and copies an empty rectangle every time: `__tn3270Copy` would find
-    `anchor === null` and return false, so the gesture becomes silently inert.
+    typechecks, and copies nothing at all every time: `copySelection()` would find
+    `anchor === null` and return false WITHOUT SENDING A FRAME, so the gesture becomes silently
+    inert. (That is `copySelection()` and not `__tn3270Copy` -- the global is the Electron menu's
+    route and is not on the keydown path at all; both end at the same body, which is why the
+    distinction never changes the outcome, only who is to blame.) MEASURED from the outside
+    2026-10-27: `browser-clicks.mjs` reported the page sending `[]` and the gateway logging
+    nothing.
 
     A TEXT ASSERTION ON THE BUILT ARTIFACT, following the two cases above, and for the same reason:
     `renderer.ts` touches `window` at module load, so no unit test can import it and observe the
@@ -146,6 +151,16 @@ describe('the renderer bundle', () => {
 
     MATCHED ON THE COMPARISON AND NOT THE BARE WORD, so the thing being pinned is the ARM -- a
     dispatch on the kind -- and not any mention of it.
+
+    WHAT THIS TEST DOES NOT COVER, MEASURED 2026-10-27 RATHER THAN REASONED. It pins an ORDER, so
+    it is satisfied by any emit in which the arm precedes a `clearSelection()` -- INCLUDING one
+    whose arm is `copySelection(); clearSelection(); return;`. That mutant is a copy that succeeds
+    and then destroys the selection, breaking `copySelection`'s "an operator who copies twice gets
+    the same text twice" contract, and it left ALL 2614 TESTS IN 110 FILES GREEN, this one among
+    them. `web/scripts/browser-clicks.mjs`'s `webCopy` is the only thing that failed: it presses
+    the real chord twice over two different clipboard sentinels, which is the assertion an order
+    scan cannot make. Stated here so nobody reads this test as cover for selection SURVIVAL -- it
+    covers only that the arm is reachable with a selection still in hand.
   */
   it('intercepts requestCopy BEFORE clearSelection, or copy copies nothing', () => {
     const js = readFileSync(join(distDir, 'renderer.js'), 'utf8');

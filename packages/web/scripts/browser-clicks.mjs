@@ -294,13 +294,16 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
    - `liveRefusal` is REAL IN BOTH DIRECTIONS: the browser's own `transferStart` crosses the
      socket, the gateway's `startTransfer` refuses it, and the refusal comes back as a
      `transferDone {ok:false}` that this check reads off the status line.
-   - `webCopy` AND `webPaste` ARE ENTIRELY REAL TOO, in both directions, and the paste half is the
-     one a reader will doubt. A real Chromium `Ctrl+V` through `Input.dispatchKeyEvent` fires a
-     `paste` event with `isTrusted: true` carrying the real clipboard text (MEASURED 2026-10-26 in
-     this page); `webCopy` reads the text back off the REAL OS clipboard through
-     `navigator.clipboard.readText()`, over a sentinel it put there first. Nothing is synthesized
-     and nothing is instrumented -- the production `onCopyText` and `writeClipboard` run unmodified.
-     The checks' own block records what that does and does NOT cover.
+   - `webCopy` AND `webPaste` ARE ENTIRELY REAL TOO, in both directions, and BOTH are now driven
+     by a real chord. A real Chromium `Ctrl+V` through `Input.dispatchKeyEvent` fires a `paste`
+     event with `isTrusted: true` carrying the real clipboard text (MEASURED 2026-10-26 in this
+     page), and a real `Ctrl+Shift+C` through the same command reaches `actionForKey`'s copy branch
+     (MEASURED 2026-10-27; it used to call the page's `__tn3270Copy` global, because until that day
+     the page bound no copy gesture to substitute for). `webCopy` reads the text back off the REAL
+     OS clipboard through `navigator.clipboard.readText()`, over a sentinel it put there first.
+     Nothing is synthesized and nothing is instrumented -- the production `onCopyText` and
+     `writeClipboard` run unmodified. The checks' own block records what that does and does NOT
+     cover.
    - `progress` IS INJECTED, and this is the one place in this file where something is. Three
      server messages -- `transferProgress`, `transferData`, `transferDone {ok:true}` -- are
      encoded by the GATEWAY'S OWN `encodeServerMessage` and handed to the page's
@@ -446,11 +449,16 @@ const TRANSFER_CHECKS = [
   {
     name: 'webCopy',
     kind: 'live',
-    what: "a real drag-select then copy puts the screen's own text on the REAL OS clipboard",
+    what: "a real Ctrl+Shift+C over a real drag-select puts the screen's own text on the REAL OS "
+      + 'clipboard, TWICE over two different sentinels, so the selection is proved to survive',
     mutant: 'bridge.ts  onCopyText: () => {}  (2603 unit tests stay GREEN)  OR  '
       + 'main.ts  delete the `copy` arm, which also ENDS THE GATEWAY PROCESS on applyAction\'s '
-      + 'throw.  NOT caught here: selection.ts  `cell.hidden ? \' \' : cell.text` -> `cell.text` '
-      + '-- see the note above',
+      + 'throw.  AND, SINCE 2026-10-27, THE GESTURE ITSELF: keys.ts  move the `requestCopy` '
+      + 'branch BELOW the case-folded `CTRL[e.key.toLowerCase()]` lookup -- the chord then folds '
+      + 'to Clear and the clipboard keeps the sentinel; renderer.ts  move the '
+      + '`action.kind === \'requestCopy\'` arm BELOW `clearSelection()` -- the rect is destroyed a '
+      + 'moment before it is read, so no copy frame is sent at all.  NOT caught here: '
+      + 'selection.ts  `cell.hidden ? \' \' : cell.text` -> `cell.text` -- see the note above',
   },
   {
     name: 'webPaste',
@@ -473,22 +481,27 @@ if (TRANSFER_CHECKS.length === 0) {
 }
 
 /**
- * Ctrl as `Input.dispatchKeyEvent` spells it, and the keypad label that opens the form.
+ * Ctrl and Shift as `Input.dispatchKeyEvent` spells them, and the keypad label that opens the form.
  *
- * `CDP_CTRL = 2` IS CDP'S OWN BITMASK for the Control modifier (Alt 1, Ctrl 2, Meta 4, Shift 8),
- * which is a different encoding from the Electron `Accelerator` strings `TN3270_GUI_KEYS` takes.
- * The chord it builds is the same `Ctrl+K` phase one delivers, and it reaches
- * `canvas/src/keys.ts`'s `CTRL` table through the renderer's own `keydown` listener: verified by
- * this run, since the keypad opens and its buttons become clickable.
+ * `CDP_CTRL = 2` AND `CDP_SHIFT = 8` ARE CDP'S OWN BITMASK VALUES (Alt 1, Ctrl 2, Meta 4,
+ * Shift 8), which is a different encoding from the Electron `Accelerator` strings
+ * `TN3270_GUI_KEYS` takes. `CDP_CTRL` alone builds the same `Ctrl+K` phase one delivers, and it
+ * reaches `canvas/src/keys.ts`'s `CTRL` table through the renderer's own `keydown` listener:
+ * verified by this run, since the keypad opens and its buttons become clickable. The two ORed
+ * together are the Copy chord `webCopy` drives; `press` below is where the rest of the event's
+ * fields are justified.
  *
  * `Xfer` IS CLICKED RATHER THAN CHORDED, deliberately, and it is the harder of the two routes:
- * `canvas/src/keys.ts:97` maps Ctrl-T to `transferForm` too, so a chord would prove the key table
- * and the interception together. The BUTTON proves the key table is not involved at all -- the
- * press goes `keypadUi` click handler -> `bridge.sendAction` -> `bridgecore.ts`'s `transferForm`
- * branch -> `deps.showTransfer()`. That is the exact path the `showTransfer: () => {}` mutant
- * breaks, and `frontend/src/keypad.ts:145` is where the label comes from.
+ * `canvas/src/keys.ts`'s `CTRL` table maps Ctrl-T to `transferForm` too, so a chord would prove the
+ * key table and the interception together. The BUTTON proves the key table is not involved at all
+ * -- the press goes `keypadUi` click handler -> `bridge.sendAction` -> `bridgecore.ts`'s
+ * `transferForm` branch -> `deps.showTransfer()`. That is the exact path the
+ * `showTransfer: () => {}` mutant breaks, and `frontend/src/keypad.ts:145` is where the label comes
+ * from. (The `keys.ts:97` line citation this paragraph used to carry was stale -- that entry sits
+ * at `:154` today -- so it is cited by TABLE now, which cannot drift the same way.)
  */
 const CDP_CTRL = 2;
+const CDP_SHIFT = 8;
 const XFER_LABEL = 'Xfer';
 
 /** Bytes fed to the injected `transferData`. Content is arbitrary; its LENGTH is asserted. */
@@ -582,8 +595,31 @@ async function openCdp(port) {
  */
 const PROBE_SOURCE = `
 (() => {
-  const H = { sent: [], hold: false, sock: null, warns: [] };
+  const H = { sent: [], hold: false, sock: null, warns: [], keys: [] };
   window.__tn3270Probe = H;
+  /*
+    EVERY KEYDOWN AS IT ARRIVES, WHICH IS A DIAGNOSTIC AND DELIBERATELY NOT AN ASSERTION TARGET.
+
+    \`webCopy\` dispatches a CDP \`Ctrl+Shift+C\`, and the branch that claims it matches on
+    \`e.code === 'KeyC'\` with \`shiftKey\` -- four fields CDP will happily deliver EMPTY rather than
+    reject, which is the \`sendInputEvent\`-with-a-bad-keyCode shape this repo has recorded. So when
+    the chord fails, "the event the page received" and "the event the harness meant to send" have
+    to be separable, or the failure names the product for a harness bug.
+
+    CAPTURE PHASE, so this runs BEFORE \`renderer.ts\`'s own bubble-phase window listener and
+    records the event as it ARRIVED -- not as the renderer left it after \`preventDefault()\`.
+
+    IT PROVES NOTHING ABOUT THE PRODUCT ON ITS OWN and must never be the witness a check passes on:
+    it reports what the HARNESS INJECTED, which is the "do not assert on a value you injected" rule.
+    The real witnesses stay the gateway's own log line and the real OS clipboard. This is here so a
+    red run can be diagnosed, and \`webCopy\` prints it only in its FAILURE message.
+  */
+  window.addEventListener('keydown', (e) => {
+    H.keys.push({
+      key: e.key, code: e.code, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey, altKey: e.altKey, isTrusted: e.isTrusted,
+    });
+  }, true);
   /*
     THE PAGE'S OWN WARNINGS, KEPT BECAUSE THE CLIPBOARD'S FAILURES ARRIVE ONLY THAT WAY.
 
@@ -769,7 +805,24 @@ async function runTransferPhase(url) {
       return TRANSFER_CHECKS.length;
     }
 
-    /** One real keystroke pair, entering where `sendInputEvent` does. */
+    /**
+     * One real keystroke pair, entering where `sendInputEvent` does.
+     *
+     * `code` IS NOT DECORATION AND IS THE FIELD THE COPY CHORD TURNS ON. `actionForKey` matches
+     * `Ctrl-Shift-C` on `e.code === 'KeyC'` and not on `e.key`, deliberately -- `e.key` is the
+     * shifted, layout-dependent form, and caps lock inverts it -- so an event dispatched without a
+     * real `code` reaches the renderer with `code: ''` and the branch cannot fire. CDP is fussy
+     * enough about these four fields to deliver a USELESS event rather than an error, which this
+     * repo has recorded for `sendInputEvent` and an invalid `keyCode`; so `webCopy` REPORTS what
+     * the page's keydown listener actually received -- `PROBE_SOURCE`'s `keys` log, read by
+     * `chordCopy` and printed in the failure message -- rather than leaving a reader to assume
+     * this call built what it meant to.
+     *
+     * MEASURED 2026-10-27 with `key:'C'`, `code:'KeyC'`, `keyCode:67` and `CDP_CTRL | CDP_SHIFT`:
+     * the page's own capture-phase listener saw
+     * `{key:'C', code:'KeyC', shift:true, ctrl:true, meta:false, alt:false, isTrusted:true}` --
+     * so the chord arrives as a real, trusted event with the physical key the branch needs.
+     */
     const press = async (key, code, keyCode, modifiers = 0) => {
       for (const type of ['keyDown', 'keyUp']) {
         await cdp.cmd('Input.dispatchKeyEvent', {
@@ -1962,6 +2015,41 @@ async function runTransferPhase(url) {
          below is a real kill and not decoration. `webCopy` stayed green.
        - `selection.ts`'s `hidden` handling dropped: SURVIVED at 13/13 here. See the table entry.
 
+      ## AND THE THREE THE REAL CHORD ADDED, 2026-10-27, each applied, force-rebuilt and reverted
+
+      These are the mutations `__tn3270Copy()` could not reach, because they are in the GESTURE
+      rather than in the path behind it. Each was built with `npx tsc --build --force
+      packages/canvas` -- a restored backup has an OLDER mtime, so a plain `tsc --build` sees
+      nothing to do and `dist/` silently keeps the mutant, the trap recorded at the focus-emulation
+      note below.
+
+       - `keys.ts` with the `requestCopy` branch MOVED BELOW the case-folded
+         `CTRL[e.key.toLowerCase()]` lookup. `webCopy` failed at 11/13, reporting
+         `the CHORD raised no copy frame at all` with the page having sent
+         `{"kind":"action","action":{"kind":"clear"}}` and the gateway having logged
+         `action: {"kind":"clear"}` four times -- the fold doing exactly what `keys.ts` says it
+         does. The clipboard kept its sentinel.
+       - `renderer.ts` with the `action.kind === 'requestCopy'` arm MOVED BELOW
+         `clearSelection()`. `webCopy` failed at 11/13 with a DIFFERENT signature, which is what
+         makes the two distinguishable: the page sent `[]` -- NOTHING at all -- because
+         `copySelection()` found `anchor === null` and returned false. The gateway logged nothing.
+       - `renderer.ts` with the arm made `copySelection(); clearSelection(); return;` -- MY OWN
+         THIRD MUTATION, aimed at the survival assertion rather than at either plan-named one, and
+         the most informative of the three. It is a copy that FULLY SUCCEEDS and then destroys the
+         selection, so the first half of this check is entirely green: the right text on the
+         clipboard, `action: {"kind":"copy",...}` and `copy: 18 chars` both logged, one drag
+         attempt. ONLY the survival clause failed, at 12/13, reporting
+         `THE SECOND COPY sent [], left the clipboard reading "...-second"`. **ALL 2614 UNIT TESTS
+         IN 110 FILES PASSED ON IT**, `renderer-imports.test.ts`'s order pin INCLUDED -- that test
+         asserts `clearSelection()` appears after the arm, and here it does, twice. So this check
+         is the only witness in the repo for `copySelection`'s "an operator who copies twice gets
+         the same text twice" contract, and that is why the second press earns its place.
+
+      BOTH PLAN-NAMED MUTATIONS ALSO FAIL `webPaste`, COLLATERALLY AND NOT AS PROOF, for the reason
+      the next section gives: `webPaste`'s screen witness reads back through `copyCells`, which is
+      the COPY path and now goes through the chord. The third one does NOT -- `webPaste` stayed
+      green on it at 12/13 -- because a copy that works once is all that witness needs.
+
       ## THE DEPENDENCE RUNS ONE WAY, AND THE COLLATERAL FAILURE IS NOT THE PROOF
 
       This file's header states the rule for phase two's earlier mutants and it applies here:
@@ -1972,10 +2060,20 @@ async function runTransferPhase(url) {
       about the paste listener: in that run the gateway logged
       `action: {"kind":"paste","text":"TN3270-PASTE-PROBE"}` perfectly and the paste WORKED.
 
+      THAT DEPENDENCE GOT WIDER WHEN `copyCells` STARTED DRIVING THE CHORD, 2026-10-27, and it is
+      worth stating rather than leaving to be rediscovered: `webPaste`'s screen witness now needs
+      the COPY GESTURE to work as well as the copy path, so BOTH gesture mutations above redden it
+      too (measured: 11/13 on each, with `the payload is NOT on the screen afterwards` and a
+      perfect `action: {"kind":"paste",...}` line in the log). The alternative was to leave
+      `webPaste` calling `__tn3270Copy()` for its read-back, which would have kept the two checks
+      independent -- REJECTED, because it would mean this file read the screen back by a route no
+      operator has, and the `action:` line already isolates paste by itself.
+
       SO THE `action:` LINE IS THE HALF THAT ISOLATES PASTE, and the screen read-back is the half
       that proves it did something. The reverse dependence does not exist -- `webCopy` survived
-      every paste-side mutation -- so a `webCopy`-only failure means the copy path, while a
-      `webPaste`-only failure means the paste path, and BOTH failing means the copy path.
+      every paste-side mutation -- so a `webCopy`-only failure means the copy path or the copy
+      GESTURE, a `webPaste`-only failure means the paste path, and BOTH failing means one of the
+      copy ones. `webCopy`'s own clause list is what then says which.
     */
     {
       /*
@@ -2070,31 +2168,54 @@ async function runTransferPhase(url) {
       };
 
       /**
-       * Drag, fire the page's own Copy, and read the REAL clipboard back.
+       * Drag, press the REAL Copy chord, and read the REAL clipboard back.
        *
-       * A SENTINEL GOES ON THE CLIPBOARD FIRST, and it is what makes the read an assertion rather
-       * than a coincidence: an unchanged clipboard is indistinguishable from a successful write
-       * unless the prior value is known and different. `main.ts` deliberately sends NOTHING for an
-       * empty copy -- so "the clipboard was not touched" is a real outcome of this product and has
-       * to be told apart from a copy that worked.
+       * ## A SENTINEL GOES ON THE CLIPBOARD FIRST, AND EVERY COPY GETS ITS OWN
        *
-       * `__tn3270Copy()` IS THE PAGE'S OWN GLOBAL AND, AS OF 2026-10-26, THE ONLY ROUTE TO `copy`
-       * THE BROWSER HAS AT ALL -- which is a stronger and less comfortable statement than it looks,
-       * so it is spelled out rather than implied.
+       * It is what makes the read an assertion rather than a coincidence: an unchanged clipboard is
+       * indistinguishable from a successful write unless the prior value is known and different.
+       * `main.ts` deliberately sends NOTHING for an empty copy -- so "the clipboard was not
+       * touched" is a real outcome of this product and has to be told apart from a copy that
+       * worked. `sentinel` is a PARAMETER rather than one module constant precisely because the
+       * survival check below copies TWICE: a second copy that did nothing would be invisible if the
+       * clipboard still held the first copy's text.
        *
-       * The Electron GUI reaches this global from its Edit menu, through `executeJavaScript`. The
-       * gateway's page has NO equivalent: SEARCHED 2026-10-26 and each came back empty -- no `copy`
-       * entry in `canvas/src/keys.ts`, no `addEventListener('copy')` anywhere in `packages/`, no
-       * Copy cap in the keypad or the 3279 keyboard table, nothing in `web/static/index.html`, and
-       * no `contextmenu` handler. A browser has no Edit menu, and `README.md` documents the gesture
-       * as "copy from the Edit menu".
+       * ## THE REAL CHORD, NOT THE PAGE GLOBAL -- AND THAT IS NEW ON 2026-10-27
        *
-       * SO THIS CHECK DRIVES THE REAL SELECTION, THE REAL `sendAction` AND THE REAL CLIPBOARD
-       * WRITE, BUT IT DOES NOT PROVE AN OPERATOR CAN GET HERE. What it substitutes is not merely a
-       * keystroke -- there may be no keystroke to substitute. Everything DOWNSTREAM of the trigger
-       * is covered end to end; the trigger itself is raised with the task, because whether the web
-       * front end is missing a gesture or the spec deliberately leaves copy to the browser's own
-       * selection is a product decision and not a harness one.
+       * THIS USED TO CALL `window.__tn3270Copy()`, and its comment said -- correctly, at the time
+       * -- that the page bound no copy gesture at all, so only the human's keystroke was being
+       * substituted. **THAT IS NO LONGER TRUE.** `canvas/src/keys.ts` now claims `Ctrl-Shift-C`
+       * (and `Cmd-Shift-C`) as `{kind:'requestCopy'}`, `renderer.ts` intercepts that kind before
+       * `clearSelection()` and calls `copySelection()`, so there IS a keystroke to deliver and it
+       * is delivered: a plain `Input.dispatchKeyEvent` pair, the same command `webPaste` uses.
+       *
+       * STRICTLY STRONGER THAN THE GLOBAL, which is the whole reason to change it. The global
+       * entered BELOW the keymap and below the keydown listener, so it covered the rect building,
+       * `sendAction`, the socket, the gateway and the clipboard -- and NOTHING about whether an
+       * operator could reach any of it. The chord covers the BINDING as well: `actionForKey`'s
+       * branch ORDER (it must precede the case-folded `CTRL` lookup, or `Ctrl-Shift-C` folds to
+       * Clear) and `renderer.ts`'s arm order (it must precede `clearSelection()`, or the rect is
+       * destroyed a moment before it is read). Both of those mutations leave the build green, the
+       * types sound and 2614 unit tests passing; both are measured to fail HERE.
+       *
+       * THE GLOBAL IS NOW UNCOVERED BY THIS FILE, which is a real trade and is stated rather than
+       * glossed: `__tn3270Copy` is still the Electron menu's route, and `gui/scripts/select.mjs`
+       * is what drives it. `renderer.ts` keeps the global as a one-line delegation to the same
+       * `copySelection()` this chord reaches, so the two routes cannot diverge in the rect they
+       * build -- only in how they are triggered, and each trigger now has its own harness.
+       *
+       * ## WHAT A GREEN RUN HERE IS NOT EVIDENCE ABOUT
+       *
+       * THE ELECTRON COPY ACCELERATOR IS THE SAME CHORD ON LINUX (`gui/src/menu.ts`'s
+       * `copyAccelerator`), and this run says nothing about whether the two double-fire. Not
+       * because the question is uninteresting but because THIS HARNESS HAS NO MENU TO COLLIDE
+       * WITH: `main.ts` returns out of `app.whenReady()` at the end of its `TN3270_GUI_URL` branch,
+       * and `Menu.setApplicationMenu` is ~550 lines further down, in the branch that builds a
+       * Session. VERIFIED 2026-10-27 in the BUILT `gui/dist/main.js`: the URL-mode `return` is at
+       * `:396` and `setApplicationMenu` at `:968`. So the chord this check presses has exactly one
+       * claimant, which is why it is a clean test of the page binding -- and why the overlap
+       * remains what Task 4 of this feature recorded it as: unmeasurable from this repo, needing a
+       * human on a real desktop.
        */
       const SENTINEL = 'tn3270-harness-sentinel-not-a-copy';
       /** What `writeClipboard` said, if it said anything. Its only channel is `console.warn`. */
@@ -2127,22 +2248,63 @@ async function runTransferPhase(url) {
         `writeClipboard` reports exactly that case through the warn channel this probe captures.
         A prophylactic call would hide the one failure it was supposed to guard against.
       */
-      const copyOnce = async (fromRow, fromCol, toRow, toCol) => {
-        await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(SENTINEL)})
+      /**
+       * ONE PRESS OF THE REAL CHORD, over a fresh sentinel, WITHOUT TOUCHING THE SELECTION.
+       *
+       * SEPARATED FROM THE DRAG ON PURPOSE, and that separation is the survival assertion's whole
+       * mechanism: the second copy must press the chord against the selection the FIRST one read,
+       * so it cannot re-drag. A helper that dragged again would prove a new selection works and
+       * say nothing about whether the old one lived.
+       *
+       * `copied` IS THE PAGE'S OWN `copy` FRAME AND NOT A RETURN VALUE, which is forced rather
+       * than chosen: a keystroke returns nothing. `renderer.ts`'s arm DISCARDS `copySelection()`'s
+       * boolean deliberately (a keystroke has nobody to tell), so the observable that replaces it
+       * is the socket send `copySelection()` makes -- which is exactly the same condition the old
+       * boolean reported, since the function returns false precisely when it sends nothing. Read
+       * off the probe's `sent` log, which is the product's own `send` call and not something this
+       * harness manufactured.
+       *
+       * IT IS STILL NOT THE WITNESS THE CHECK PASSES ON. The gateway's log line and the real
+       * clipboard are, below; this one decides whether the documented repaint race needs a retry.
+       */
+      const chordCopy = async (sentinel) => {
+        const written = await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(sentinel)})
           .then(() => '').catch((e) => String(e))`);
-        const dragged = await dragCells(fromRow, fromCol, toRow, toCol);
-        if (dragged !== '') return { problem: dragged };
-        const copied = await cdp.eval('window.__tn3270Copy()');
-        if (copied !== true) return { problem: '', copied, clip: SENTINEL };
+        const sentBefore = await cdp.eval('window.__tn3270Probe.sent.length');
+        const keysBefore = await cdp.eval('window.__tn3270Probe.keys.length');
+        // THE CHORD. `KeyC` is the field the branch matches on; see `press`'s own note for why a
+        // missing `code` would deliver an event that cannot fire it.
+        await press('C', 'KeyC', 67, CDP_CTRL | CDP_SHIFT);
+        // Bounded, and it exits as soon as the frame appears: the keystroke, the keymap, the arm
+        // and `sendAction` are all synchronous, but the probe is read over CDP.
+        let frames = [];
+        for (let waited = 0; waited < 3000; waited += 100) {
+          frames = JSON.parse(await cdp.eval(
+            `JSON.stringify(window.__tn3270Probe.sent.slice(${sentBefore}))`));
+          if (frames.some((f) => f.includes('"kind":"copy"'))) break;
+          await new Promise((r) => { setTimeout(r, 100); });
+        }
+        // WHAT THE PAGE ACTUALLY RECEIVED, for the diagnosis `PROBE_SOURCE`'s note explains: it
+        // separates "the chord did not fire" from "the harness sent the wrong event".
+        const keys = JSON.parse(await cdp.eval(
+          `JSON.stringify(window.__tn3270Probe.keys.slice(${keysBefore}))`));
+        const copied = frames.some((f) => f.includes('"kind":"copy"'));
+        if (!copied) return { written, copied, clip: sentinel, frames, keys };
         // The write is a round trip to the gateway and back through a promise, so it is waited
         // for rather than slept past: bounded, and it exits as soon as the sentinel is gone.
-        let clip = SENTINEL;
-        for (let waited = 0; waited < 6000 && clip === SENTINEL; waited += 150) {
+        let clip = sentinel;
+        for (let waited = 0; waited < 6000 && clip === sentinel; waited += 150) {
           await new Promise((r) => { setTimeout(r, 150); });
           clip = await cdp.eval(
             "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
         }
-        return { problem: '', copied, clip };
+        return { written, copied, clip, frames, keys };
+      };
+
+      const copyOnce = async (sentinel, fromRow, fromCol, toRow, toCol) => {
+        const dragged = await dragCells(fromRow, fromCol, toRow, toCol);
+        if (dragged !== '') return { problem: dragged };
+        return { problem: '', ...(await chordCopy(sentinel)) };
       };
       /**
        * `copyOnce`, RETRIED WHEN A REPAINT CLEARED THE SELECTION UNDER THE DRAG.
@@ -2151,18 +2313,27 @@ async function runTransferPhase(url) {
        *
        * `renderer.ts`'s `onFrame` handler calls `clearSelection()` on EVERY frame, deliberately: a
        * highlight over text the host has just changed would offer a copy of something the operator
-       * never saw. So an inbound frame that lands between the `mouseup` and `__tn3270Copy()` wipes
-       * the selection, and the global correctly returns `false` -- nothing was selected by then.
+       * never saw. So an inbound frame that lands between the `mouseup` and the chord wipes the
+       * selection, and `copySelection()` correctly finds `anchor === null` and sends nothing --
+       * nothing was selected by then.
        *
        * MEASURED 2026-10-26: that is EXACTLY what happens to the drag after the paste, every time,
        * because the gateway's `paste` arm calls `repaint()` unconditionally and that frame is in
        * flight while this harness is dragging. The first attempt returned `copied=false` with the
        * sentinel untouched; a second attempt immediately after returned the screen WITH the
-       * payload on it.
+       * payload on it. (That run drove `__tn3270Copy()` rather than the chord, and the race is
+       * identical either way: both end at the same `copySelection()`, which is the single place
+       * that reads `anchor`. Re-measured through the chord on 2026-10-27 -- still 2 attempts for
+       * the post-paste drag, still 1 for the plain one.)
        *
-       * RETRIED ONLY ON `copied === false`, which is the narrow signal for this one cause -- an
-       * empty or wrong clipboard is NOT retried, so a genuinely broken copy still fails rather
-       * than being slept over. The attempt count is reported either way.
+       * RETRIED ONLY ON `copied === false` -- i.e. on NO `copy` FRAME HAVING BEEN SENT, which is
+       * the narrow signal for this one cause -- so an empty or wrong clipboard is NOT retried and
+       * a genuinely broken copy still fails rather than being slept over. The attempt count is
+       * reported either way.
+       *
+       * EACH ATTEMPT GETS A FRESH SENTINEL, and it has to: a retry that reused the last one would
+       * be unable to tell a successful write from a clipboard nobody touched -- the same reason the
+       * survival check below uses two.
        *
        * AN OPERATOR MEETS THIS TOO, AND IT IS NOT HARMLESS FOR THEM -- a claim that it was stood
        * here for one commit and is WITHDRAWN. It said an operator "would press Copy after the
@@ -2170,9 +2341,11 @@ async function runTransferPhase(url) {
        * the clear fires on EVERY frame, not only on frames that touch the selected cells, and a
        * live host sends frames nobody can anticipate (an unsolicited Write from a running job, a
        * status-line update, a timed panel refresh). So the operator's sequence is drag, reach for
-       * Copy, a host frame arrives, and the selection is silently gone -- with `__tn3270Copy()`
-       * returning `false`, which `renderer.ts` deliberately treats as not worth a message. Silence,
-       * repeatedly, on a busy panel.
+       * Copy, a host frame arrives, and the selection is silently gone -- with `copySelection()`
+       * returning `false`, which `renderer.ts`'s `requestCopy` arm deliberately treats as not worth
+       * a message. Silence, repeatedly, on a busy panel. The chord makes this WORSE rather than
+       * better for the operator, which is worth naming: the gesture is now reachable, so they will
+       * actually meet it.
        *
        * THE RACE IS PRE-EXISTING AND NOT THIS FEATURE'S: the `clearSelection()` on every frame has
        * been there since `07104cb`, 2026-10-05, and the Electron GUI has it identically. So it is
@@ -2188,8 +2361,9 @@ async function runTransferPhase(url) {
       const copyCells = async (fromRow, fromCol, toRow, toCol) => {
         let last = { problem: 'never attempted' };
         for (let attempt = 1; attempt <= 4; attempt += 1) {
-          last = await copyOnce(fromRow, fromCol, toRow, toCol);
+          last = await copyOnce(`${SENTINEL}-try${attempt}`, fromRow, fromCol, toRow, toCol);
           last.attempts = attempt;
+          last.sentinel = `${SENTINEL}-try${attempt}`;
           if (last.problem !== '' || last.copied === true) return last;
           // A frame cleared it. Let the next one arrive before trying again.
           await new Promise((r) => { setTimeout(r, 500); });
@@ -2240,39 +2414,150 @@ async function runTransferPhase(url) {
       // it is UNGATED in production precisely because it carries a COUNT and never the text.
       const copyAction = copyLogs.find((l) => l.startsWith('action: {"kind":"copy"'));
       const copyChars = copyLogs.find((l) => l.startsWith('copy: '));
+      /*
+        ===== AND THE SELECTION SURVIVED, PROVED BY COPYING A SECOND TIME WITHOUT RE-DRAGGING =====
+
+        THIS IS THE ONLY END-TO-END WITNESS FOR `renderer.ts`'s `clearSelection()` EXEMPTION, and
+        no unit test in this repo can reach it: `renderer.ts` touches `window` at module load, so
+        nothing imports it, and `renderer-imports.test.ts` can only pin the ORDER OF TWO LINES in
+        the built text. That test would still pass on an emit whose arm ran first and whose
+        `copySelection` had been broken some other way; this presses the real chord twice and reads
+        the real clipboard both times.
+
+        WHAT THE SECOND PRESS DISTINGUISHES, SPELLED OUT BECAUSE THE NAIVE VERSION PROVES NOTHING.
+        If `requestCopy` were intercepted BELOW `clearSelection()`, the first press would clear and
+        then copy an empty rect -- so the FIRST assertion already fails and this one is moot. The
+        case this one exists for is subtler: anything that clears the selection AS A SIDE EFFECT OF
+        A SUCCESSFUL COPY. `copySelection()` promises not to ("an operator who copies twice gets
+        the same text twice", its own docstring), and the GUI's menu route depends on the same
+        promise. A clear added there -- or an arm rewritten to `clearSelection(); copySelection();`
+        in the other order -- leaves press one green and press two sending nothing at all.
+
+        A FRESH SENTINEL BETWEEN THE TWO IS WHAT MAKES IT AN ASSERTION. With one sentinel, a second
+        copy that did nothing would leave the first copy's text on the clipboard and read as a
+        success -- the "unchanged clipboard is indistinguishable from a successful write" trap this
+        file already uses a sentinel for once. So `chordCopy` takes the sentinel as a parameter and
+        this call passes a different one.
+
+        NO SECOND DRAG, deliberately, and it is the entire point: re-dragging would build a NEW
+        selection and prove only that a second copy works, which is not the question.
+
+        NOT RETRIED, unlike the first copy. The repaint race `copyCells` documents would make a
+        retry here ambiguous -- "no frame sent" would mean either a cleared-by-us selection (the
+        defect) or a cleared-by-a-host-frame one (the race), and a retry cannot tell them apart
+        because a retry CANNOT re-drag. The first copy's own retry loop is what absorbs the race:
+        this runs immediately after a copy that just succeeded, with no `repaint()` provoked in
+        between (`main.ts`'s `copy` arm sends a `copyText` message and returns; it does not
+        repaint), so a frame in that window would have to be unsolicited -- which a REPLAY session
+        never sends, having no host. If this ever flakes on a live fixture, the fix is to assert the
+        pair atomically, not to retry.
+      */
+      const againMark = serverOut.length;
+      const copyAgain = copyRun.copied === true
+        ? await chordCopy(`${SENTINEL}-second`)
+        : { copied: false, clip: '(the first copy never happened)', frames: [], keys: [] };
+      const againLogs = copyRun.copied === true
+        ? await waitForLog(againMark, (l) => l.startsWith('copy: '))
+        : [];
+      const againChars = againLogs.find((l) => l.startsWith('copy: '));
+      /*
+        AND THE SENTINEL WRITE ITSELF IS ASSERTED, which was a gap in the first draft of this check.
+
+        `chordCopy` returns `written` -- `''` or the rejection string from
+        `navigator.clipboard.writeText`. Not asserting it would hand the survival check a FALSE PASS
+        in the one case the sentinel exists to rule out: if writing `...-second` failed, the
+        clipboard would still hold the FIRST copy's text, `clip === COPY_WANT` would be true, and a
+        second press that did absolutely nothing would read as a success. The sentinel only
+        discriminates if it actually landed. Asserted for BOTH presses, since the first one's
+        sentinel has the same job.
+
+        PROVED BY A CONTROL RUN RATHER THAN BY READING IT, 2026-10-27, because a guard nobody has
+        seen fail is a guard nobody has tested: the second sentinel's write was replaced with
+        `Promise.resolve('CONTROL: refused')`, which does not touch the clipboard. `webCopy` failed
+        at 12/13 -- AND ITS FIRST DRAFT BLAMED THE PRODUCT, reporting only
+        `the SELECTION DID NOT SURVIVE`. That is why the clause list below names the HARNESS fault
+        first and says the survival clause is MEASURELESS rather than failed; re-measured after the
+        split, the same control reports the harness's fault first. Control reverted.
+      */
+      const secondSentinelLanded = copyAgain.written === '';
+      const survived = copyAgain.copied === true
+        && secondSentinelLanded
+        && copyAgain.clip === COPY_WANT
+        && againChars === `copy: ${COPY_WANT.length} chars`;
       // AND `writeClipboard` MUST HAVE WARNED ABOUT NOTHING. Its two failure routes -- no API, and
       // a browser that refused -- are reported only through the injected `warn`, which `bridge.ts`
       // wires to `console.warn`. A clipboard holding the right text while that function complained
-      // would mean something other than the route under test put it there.
+      // would mean something other than the route under test put it there. READ AFTER BOTH COPIES,
+      // so a second press that warned cannot slip past.
       const copyWarnings = JSON.parse(await clipWarns());
-      const copyOk = copyRun.problem === ''
-        && copyRun.copied === true
-        && copyAction !== undefined
-        && copyChars === `copy: ${COPY_WANT.length} chars`
-        && copyRun.clip === COPY_WANT
-        && copyWarnings.length === 0
-        // ASSERTED AND NOT MERELY REPORTED: the clipboard write above went through
-        // `writeClipboard`'s `clip !== undefined` branch, and these two are what say so. Without
-        // them a future run on a host where `navigator.clipboard` were absent would fail with
-        // "the clipboard did not change", naming the wrong cause entirely.
-        && secure === true
-        && clipApi === 'object';
+      /*
+        WHICH CLAUSE FAILED, NAMED -- the correction `webPaste` below records against its own first
+        draft, applied here before it can cost anyone the same wrong diagnosis. This conjunction is
+        now a conjunction of several independent things over TWO presses of a chord -- NOT COUNTED
+        HERE ON PURPOSE, since a count in prose is the thing that goes stale when a clause is added
+        (it went stale once inside this very commit). The list below is its own inventory.
+
+        AND "the clipboard reads X" IS A MEASURED VALUE RATHER THAN A DIAGNOSIS: with the keys.ts
+        branch moved after the `CTRL` lookup the clipboard reads the SENTINEL and the gateway logs
+        `{"kind":"clear"}`, which names neither the chord nor the fold unless something says so.
+      */
+      const dragFailed = copyRun.problem !== undefined && copyRun.problem !== '';
+      // THE DRAG'S OWN FAILURE SHORT-CIRCUITS THE REST, rather than being listed alongside the
+      // consequences of it. A covered screen leaves `copied` undefined and the clipboard holding
+      // the sentinel, so every clause below would fire and the reader would have to work out which
+      // one was the cause -- the fixed-width/summary-line family again.
+      const copyWhy = dragFailed ? [copyRun.problem] : [
+        secure === true && clipApi === 'object' ? ''
+          : 'this page has NO clipboard API, so nothing below could have worked',
+        copyRun.written === '' ? ''
+          : 'the HARNESS could not even put its sentinel on the clipboard, so nothing below '
+            + `discriminates anything: ${String(copyRun.written)}`,
+        copyRun.copied === true ? ''
+          : 'the CHORD raised no copy frame at all -- either keys.ts does not claim '
+            + 'Ctrl-Shift-C (check it precedes the case-folded CTRL lookup) or renderer.ts does '
+            + 'not intercept requestCopy before clearSelection()',
+        copyAction !== undefined && copyChars === `copy: ${COPY_WANT.length} chars` ? ''
+          : 'the gateway did not log the copy it should have',
+        copyRun.clip === COPY_WANT ? '' : 'the clipboard does NOT hold the selected text',
+        // THE HARNESS'S OWN FAULT FIRST, AND NAMED AS SUCH -- MEASURED, not foreseen. A control run
+        // that made the SECOND sentinel write fail reported only `the SELECTION DID NOT SURVIVE`,
+        // blaming the product for a broken harness. The survival clause cannot mean anything if
+        // the sentinel it discriminates with never landed, so this clause precedes it and says
+        // whose fault it is.
+        secondSentinelLanded ? ''
+          : 'the HARNESS could not put its SECOND sentinel on the clipboard, so the survival '
+            + `clause below is meaningless rather than failed: ${String(copyAgain.written)}`,
+        survived && secondSentinelLanded ? ''
+          : 'the SELECTION DID NOT SURVIVE the first copy: a second chord over a '
+            + 'fresh sentinel did not copy the same text again',
+        copyWarnings.length === 0 ? '' : 'writeClipboard complained',
+      ].filter((s) => s !== '');
+      const copyOk = copyWhy.length === 0;
       if (copyOk) {
         ok(check('webCopy'),
-          `a real drag over cells (0,0)-(1,11) then __tn3270Copy() put ${JSON.stringify(copyRun.clip)} `
-          + `on the REAL OS clipboard, over the sentinel; the gateway logged ${JSON.stringify(copyAction)} `
-          + `and ${JSON.stringify(copyChars)}; isSecureContext=${secure}, `
+          'a REAL Ctrl+Shift+C (nothing synthesized, no page global called) over a real drag of '
+          + `cells (0,0)-(1,11) put ${JSON.stringify(copyRun.clip)} on the REAL OS clipboard, over `
+          + `${JSON.stringify(copyRun.sentinel)}; the gateway logged ${JSON.stringify(copyAction)} `
+          + `and ${JSON.stringify(copyChars)}. THE SELECTION SURVIVED: a second Ctrl+Shift+C with `
+          + `NO new drag, over ${JSON.stringify(`${SENTINEL}-second`)}, copied the same text again `
+          + `and the gateway logged ${JSON.stringify(againChars)}. isSecureContext=${secure}, `
           + `navigator.clipboard=${clipApi}, writeClipboard warned about nothing `
           + `(${copyRun.attempts} drag attempt(s))`);
       } else {
-        no(check('webCopy'), 'a real drag and copy did not put the screen text on the clipboard',
-          copyRun.problem !== '' ? copyRun.problem
-            : `__tn3270Copy() returned ${copyRun.copied} after ${copyRun.attempts} attempt(s), `
-              + 'the clipboard reads '
+        no(check('webCopy'), `the browser's copy path is broken: ${copyWhy.join('; ')}`,
+          dragFailed ? `${copyRun.problem}; ${extent}`
+            : `after ${copyRun.attempts} attempt(s) the chord sent `
+              + `${JSON.stringify(copyRun.frames)} (want a {"kind":"copy"...} frame) and the page's `
+              + `keydown listener saw ${JSON.stringify(copyRun.keys)} (want one event with `
+              + 'code:"KeyC", shiftKey:true and exactly one of ctrlKey/metaKey -- anything else '
+              + 'here is a HARNESS fault, not the product\'s); the clipboard reads '
               + `${JSON.stringify(copyRun.clip)} (want ${JSON.stringify(COPY_WANT)}; `
-              + `${JSON.stringify(SENTINEL)} means it was never written), the gateway logged `
-              + `${JSON.stringify(copyLogs)} (want an action: {"kind":"copy"...} line and `
-              + `"copy: ${COPY_WANT.length} chars"), isSecureContext=${secure}, `
+              + `${JSON.stringify(copyRun.sentinel)} means it was never written), the gateway `
+              + `logged ${JSON.stringify(copyLogs)} (want an action: {"kind":"copy"...} line and `
+              + `"copy: ${COPY_WANT.length} chars"). THE SECOND COPY sent `
+              + `${JSON.stringify(copyAgain.frames)}, left the clipboard reading `
+              + `${JSON.stringify(copyAgain.clip)} and the gateway logged `
+              + `${JSON.stringify(againLogs)}. isSecureContext=${secure}, `
               + `navigator.clipboard=${clipApi}; writeClipboard warned `
               + `${await clipWarns()}; ${extent}`);
       }
