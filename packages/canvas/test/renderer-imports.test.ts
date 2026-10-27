@@ -117,6 +117,62 @@ describe('the renderer bundle', () => {
     ).toBe(true);
   });
 
+  /*
+    THE ORDER OF TWO LINES IS THE WHOLE BEHAVIOR OF COPY, 2026-10-27.
+
+    `renderer.ts`'s keydown listener clears the selection on every CLAIMED key, because a key that
+    changes the screen invalidates a highlight drawn over the old text. `requestCopy` is the one
+    claimed kind that changes nothing, and it is the one kind that READS the selection -- so it
+    must be intercepted BEFORE `clearSelection()`. Below that call it still compiles, still
+    typechecks, and copies an empty rectangle every time: `__tn3270Copy` would find
+    `anchor === null` and return false, so the gesture becomes silently inert.
+
+    A TEXT ASSERTION ON THE BUILT ARTIFACT, following the two cases above, and for the same reason:
+    `renderer.ts` touches `window` at module load, so no unit test can import it and observe the
+    listener. The ordering is only visible in the emit.
+
+    COMMENTS ARE STRIPPED BEFORE THE SCAN, which is the correction this test's first draft needed.
+    The plan proposed a bare `js.indexOf('requestCopy')`, and the arm's OWN comment block explains
+    the hazard at length and therefore contains the word `requestCopy` as prose -- several times,
+    and ABOVE the code. A bare substring scan would have found that prose, measured its position
+    as the "arm", and passed on a build where the arm had been deleted outright. The same mistake
+    is recorded under "MATCHED ON THE IMPORT FORM" below and for `location.protocol` above; this is
+    its third appearance in this file, which is why the stripper is shared from here on.
+
+    Stripping is safe on THIS emit rather than in general: verified that no string or template
+    literal in `renderer.js` contains `//` or an opening block-comment marker, so there is nothing
+    for a naive stripper to mistake for a comment. `tsc` emits no minification and renames no
+    members, so `action.kind === 'requestCopy'` survives verbatim.
+
+    MATCHED ON THE COMPARISON AND NOT THE BARE WORD, so the thing being pinned is the ARM -- a
+    dispatch on the kind -- and not any mention of it.
+  */
+  it('intercepts requestCopy BEFORE clearSelection, or copy copies nothing', () => {
+    const js = readFileSync(join(distDir, 'renderer.js'), 'utf8');
+    // Block comments first, then line comments: the reverse order lets a `//` inside a block
+    // comment truncate that block's opening line and leave its body behind as "code".
+    const code = js
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+
+    const arm = code.search(/action\.kind\s*===\s*['"]requestCopy['"]/);
+    expect(
+      arm,
+      'renderer.js must dispatch on `action.kind === \'requestCopy\'` in the keydown listener: '
+      + 'the chord is claimed by actionForKey, applyAction THROWS on the kind (which freezes the '
+      + 'Electron main process) and the web gateway refuses it at decode, so a front end that '
+      + 'does not consume it here has a broken copy gesture at best.',
+    ).toBeGreaterThan(-1);
+
+    const clear = code.indexOf('clearSelection()', arm);
+    expect(
+      clear,
+      'and `clearSelection()` must come AFTER that arm. Below the arm the selection survives the '
+      + 'copy; above it the rectangle is destroyed a moment before it is read, and the gesture '
+      + 'copies nothing while every type check still passes.',
+    ).toBeGreaterThan(arm);
+  });
+
   it('confirms drawlist.js is NOT in that graph, since it imports core and frontend', () => {
     // This is implied by the offender scan above, since drawlist.js's own @tn3270/core import
     // would already be caught if drawlist.js ever entered the graph. It earns its place anyway:

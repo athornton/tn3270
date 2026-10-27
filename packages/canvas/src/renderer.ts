@@ -305,14 +305,42 @@ window.addEventListener('keydown', (e) => {
   // preventDefault only for keys we CLAIMED, so shortcuts we do not use keep working and
   // Tab does not move focus out of the canvas.
   e.preventDefault();
-  // ANY KEYSTROKE THAT DOES SOMETHING INVALIDATES THE SELECTION, because the screen is about to
-  // change under it and a highlight over changed text would offer a copy of something never seen.
+  /*
+    COPY IS INTERCEPTED HERE AND MUST NOT FALL THROUGH TO `clearSelection()`.
+
+    `requestCopy` is an INTENT and not a wire action: `actionForKey` raises it from
+    `Ctrl-Shift-C` / `Cmd-Shift-C` knowing only that keys were pressed, and this file is the only
+    place that knows WHICH CELLS are selected. `copySelection` turns it into the real
+    `{kind:'copy', rect}`, so the kind is consumed here and never reaches `sendAction`.
+
+    THE ORDER OF THESE LINES IS THE BEHAVIOR. Every other claimed key clears the selection, because
+    the screen is about to change and a highlight over changed text would offer a copy of something
+    never seen. A copy changes NOTHING and is the one claimed kind that READS the selection -- so
+    clearing first would destroy the rectangle a moment before building it, and `copySelection`
+    would find `anchor === null`, return false and copy nothing. Moving this arm below
+    `clearSelection()` STILL COMPILES AND STILL TYPECHECKS while silently breaking the gesture,
+    which is why `test/renderer-imports.test.ts` pins the order in the built artifact.
+
+    THE RETURN VALUE IS DISCARDED, unlike the global's. A false here means the operator pressed the
+    chord with nothing selected, which is not worth a message -- the menu item needs to tell that
+    from "copied" because a harness asserts on it; a keystroke has nobody to tell.
+
+    A FRONT END THAT FORGOT THIS ARM FAILS LOUDLY RATHER THAN BEING SILENTLY INERT, which is why
+    the kind has no handler downstream: `applyAction` THROWS on `requestCopy` and the web gateway
+    refuses it at decode with a per-client `error` frame. The two-step shape here is the one
+    `transferForm` already uses -- a renderer-side intent that becomes a different action -- and
+    NOT `toggleKeypad`, which is a single kind terminally intercepted in main.
+  */
+  if (action.kind === 'requestCopy') { copySelection(); return; }
+  // ANY OTHER KEYSTROKE THAT DOES SOMETHING INVALIDATES THE SELECTION, for the reason above.
   //
   // AFTER the `action === null` return above, so a key we did NOT claim leaves the selection alone:
   // the Copy accelerator itself arrives as a keystroke, and clearing on unclaimed keys would wipe
-  // the selection a moment before main asked for it. (On macOS the accelerator is consumed by the
-  // menu before the page sees it; on Linux `Ctrl+Shift+C` is not in `actionForKey`'s table, so it
-  // lands here as an unclaimed key. Either way the selection must survive it.)
+  // the selection a moment before main asked for it. On macOS the Electron menu consumes that
+  // accelerator before the page sees it, so it never reaches this listener at all; a browser has no
+  // menu, and there `Ctrl-Shift-C` is CLAIMED and handled by the arm above. (Before 2026-10-27 it
+  // was unclaimed on Linux and survived by not being in `actionForKey`'s table. It is in the table
+  // now, so the selection survives a copy by the explicit exemption above and not by accident.)
   clearSelection();
   window.tn3270.sendAction(action);
 });
@@ -491,9 +519,15 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
 /**
  * Copy the current selection, or do nothing and say so.
  *
- * A `window` GLOBAL, NOT A FIFTH BRIDGE FUNCTION -- `bridgecore.ts` records that a fifth function
- * means the renderer has stopped being shared between Electron and the browser, and both hosts get
- * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
+ * THE ONLY PLACE IN THIS FILE THAT BUILDS A COPY RECTANGLE, and it must stay that way. There are
+ * now TWO callers -- the `window.__tn3270Copy` global below and the keydown listener's
+ * `requestCopy` arm above -- and the empty-selection rule, the normalization and the action's shape
+ * are one decision each. A second copy of this body is a second place for them to drift.
+ *
+ * NAMED AND HOISTED rather than assigned to a `const`: the keydown listener's arm sits ~200 lines
+ * ABOVE this declaration, which a `const` arrow would put in its temporal dead zone at module
+ * load. Nothing calls it at load today, so the arrow would also work -- it is declared this way so
+ * that it keeps working, matching `clearSelection` above.
  *
  * IT SENDS THE RECTANGLE AND NOT THE TEXT, which is forced rather than chosen: this file only ever
  * sees a `DrawList`, whose cells carry a CG-order atlas glyph and NO character. Main holds
@@ -503,14 +537,33 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * rather than both looking like silence. Main's Copy handler calls this through
  * `executeJavaScript`; a false means the operator pressed Copy with no selection, which is not an
  * error worth a message.
+ *
+ * IT DOES NOT CLEAR THE SELECTION, which is the contract the keydown arm depends on -- see that
+ * arm's comment. A copy leaves the screen untouched, so the highlight it just read is still an
+ * honest description of what is on it, and an operator who copies twice gets the same text twice.
  */
-(window as unknown as { __tn3270Copy: () => boolean }).__tn3270Copy = (): boolean => {
+function copySelection(): boolean {
   if (anchor === null || focus === null) return false;
   const rect = normalizeRect(anchor, focus);
   if (isEmptyRect(rect)) return false;
   window.tn3270.sendAction({ kind: 'copy', rect });
   return true;
-};
+}
+
+/**
+ * The global, unchanged in NAME, SIGNATURE and BEHAVIOR.
+ *
+ * A `window` GLOBAL, NOT A FIFTH BRIDGE FUNCTION -- `bridgecore.ts` records that a fifth function
+ * means the renderer has stopped being shared between Electron and the browser, and both hosts get
+ * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
+ *
+ * THREE CALL SITES DEPEND ON IT and none of them were touched: the menu's Copy item
+ * (`gui/src/main.ts:1020`), the selection test seam (`:1747`, which is the route
+ * `gui/scripts/select.mjs` drives -- not the menu), and `web/scripts/browser-clicks.mjs`, which
+ * evaluates `window.__tn3270Copy()` in the page. It is a one-line delegation precisely so that the
+ * extraction above cannot change what any of them observe; both harnesses were re-run.
+ */
+(window as unknown as { __tn3270Copy: () => boolean }).__tn3270Copy = (): boolean => copySelection();
 
 /**
  * TEST SEAM: the viewport-pixel center of a SCREEN CELL, or `null`.
