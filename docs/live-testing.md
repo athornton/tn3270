@@ -329,11 +329,48 @@ and the Recording log says what happened when they were run.
   second live run** — `TN3270_GUI_REPLAY` plus the action log settled in one line what five live
   hypotheses could not, and it costs no userid.
 
-  **Not verified, stated rather than left to be inferred:** the live paste above; macOS, where the
-  accelerators differ (`Cmd-C`/`Cmd-V`) and no harness on this box can press them; and the **web
-  gateway, which refuses both copy and paste** — the gesture runs there (same renderer) but the
-  action is rejected at decode, because the gateway would extract onto its own machine. Both web
-  halves are committed before packaging.
+  **Not verified, stated rather than left to be inferred:** the live paste above; and macOS, where
+  the accelerators differ (`Cmd-C`/`Cmd-V`) and no harness on this box can press them.
+
+  **SUPERSEDED 2026-10-27 — the web gateway now has BOTH copy and paste**, so the sentence that
+  stood here ("the web gateway, which refuses both copy and paste ... the action is rejected at
+  decode") is false. Paste landed 2026-10-26 via the page's own `paste` event; copy's gesture
+  landed 2026-10-27 as `Ctrl-Shift-C` / `Cmd-Shift-C`.
+
+  **AND A CLAIM THIS DOCUMENT USED TO MAKE IS ALSO FALSE: the OS clipboard IS machine-checked**,
+  over loopback. `browser-clicks.mjs` drives the real chord through Chromium's input pipeline and
+  reads the actual OS clipboard back, over a sentinel. Measured on that run: `isSecureContext` is
+  **true** on `http://127.0.0.1`, `navigator.clipboard` is an object, and both clipboard
+  permissions are `granted` — Chromium treats loopback as secure even on plain `http`.
+
+  **What a human still owes on copy and paste, and only these:**
+
+  1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`
+     has no secure context, so `navigator.clipboard` is absent and `writeClipboard`'s warn path
+     runs. That branch is unreachable from any harness on this box and is the COMMON deployment,
+     not an edge one. Check it reports rather than silently failing.
+  2. **Chromium AND Firefox, and Safari is worth adding.** Safari has neither a harness witness nor
+     any prior measurement in this repo.
+  3. **The Electron accelerator overlap on Linux.** `Ctrl-Shift-C` is both the page's copy chord
+     and the GUI's Copy menu accelerator. Whether both fire — printing `copy: N chars` twice — is
+     **unmeasurable from this repo**: `webContents.sendInputEvent` does not trigger menu
+     accelerators at all (control-verified 2026-10-27, with the page listener disabled and the
+     click handler still never firing), and there is no `xdotool`/`xte` on this box. Treat a double
+     fire as LIKELY, since the `Ctrl+Shift+V` twin was measured to do exactly that. `menu.ts`'s
+     `copyAccelerator` carries the detail and the remedy.
+  4. **Whether a page can claim `Ctrl-L` on Linux or Windows.** Not about copy itself, but it
+     decides whether Clear could move off `Ctrl-C` entirely. A `keydown` listener calling
+     `preventDefault` on Ctrl-L: does the address bar still take focus? **The macOS result cannot
+     settle this** — there the address bar is `Cmd-L`, so `Ctrl-L` was never the browser's shortcut
+     and reaching the page proves nothing. If a page CAN claim it, c3270's `Ctrl<Key>l: Redraw()`
+     collision still stands against using it.
+
+  **A product race the human pass should expect**, because it looks like a bug: `renderer.ts`
+  clears the selection on EVERY frame, not only frames touching the selected cells. A host repaint
+  between the drag and the copy silently discards the selection, and the copy then does nothing and
+  reports nothing (`__tn3270Copy` returning `false` is deliberately not an error). Pre-existing
+  since 2026-10-05 and identical in the Electron GUI, but the copy gesture makes it reachable where
+  it previously needed the menu.
 
 - **THE `-ddm` DEFAULT FLIP IS LIVE-VERIFIED ON BOTH HOSTS, WITH NO FLAG ON EITHER COMMAND LINE —
   2026-09-29.** The point of the run is the *absent* flag: before the flip these exact command lines
