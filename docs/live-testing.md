@@ -4205,6 +4205,35 @@ That it then puts the right bytes on the wire is `TransferRun.cancel`'s own busi
 for the TUI by the VM/CMS run above; **a GUI transfer interrupted by closing the terminal window has
 not yet been watched against a real host.** That is the next live item for this window.
 
+## THE GUI TRANSFER WINDOW WORKS AGAINST MVS/TSO BY HAND, BOTH DIRECTIONS — 2026-10-27
+
+**Confirmed by the user driving the window themselves**, after the copy/paste work. Both
+directions, from TSO's `READY` prompt. This is a BY-HAND witness and is quoted that way: it is not
+`live-transfer.py tso`, which has its own scripted record below, and no `cmp` was reported — so it
+says the window drives a real MVS transfer, not that the bytes were byte-compared on this run.
+
+**IT TOOK TWO FALSE STARTS, AND BOTH WERE OPERATOR-FACING RATHER THAN CODE DEFECTS. Both are
+recorded because each produced a message that sent the diagnosis the wrong way:**
+
+1. **The transfer was started from inside ISPF.** TK5's `IND$FILE` is a plain TSO command run from
+   `READY`, so it never ran; the stall looked like a protocol failure. See the 2026-10-27 stall
+   entry above for what the message got wrong and how it was fixed.
+2. **The download omitted the single quotes.** TSO quoting is SEMANTIC: an unquoted name gets the
+   userid prepended, a quoted one is absolute. The upload created one name and the download asked
+   for another, so TSO could not find it and **IND$FILE exited `RC=12`** — the host's own message,
+   which the improved stall text now tells the operator to read. `LISTDS 'HERC01.NAME'` from
+   `READY` settles the real name in one line. Our own `dft-tso.txt` runs one quoted and one
+   unquoted transfer in a single session precisely so the form is never seen to normalize them.
+
+**THE REMAINING DEFECT IS OURS AND IS STILL OPEN.** When `IND$FILE` exits `RC=12` the host leaves
+transfer mode at once — but **we do not parse the host's `RC=` line at all** (verified by grep: that
+text came entirely from TSO). So we waited the full 30 s and then printed *"host may still be
+transferring"*, which was FALSE at that moment, in the one clause whose whole job is to say what
+state the host is in. Seeing `IND$FILE ended with RC=` should end the wait immediately and report
+the host's code. Two cares if it is implemented: do not over-match (a dataset whose CONTENT carries
+that text must not trigger it), and `cli/src/runner.ts` has its own copy of the message, so both
+must change or they diverge.
+
 ## The GUI transfer window — LIVE-VERIFIED ON BOTH HOSTS AND BOTH ENGINES, 2026-10-02
 
 **THE WINDOW HAS NOW DRIVEN A REAL TRANSFER, BOTH DIRECTIONS, AGAINST VM/370 CMS: 8 of 8 checks and
