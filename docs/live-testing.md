@@ -356,10 +356,18 @@ and the Recording log says what happened when they were run.
     `action: {"kind":"paste","text":"TN3270-PASTE-PROBE"}`, the text was verified on screen, and
     the phase stayed **13/13**. (Reverted; the committed harness still drives plain `Ctrl+V`.)
 
-  So the chord works wherever the BROWSER raises a `paste` event for it. A Chromium probe fires
-  `paste` with `isTrusted: true` for both chords; **Firefox on Linux raises nothing for the shifted
-  one** -- it reserves `Ctrl-Shift-V` for paste-as-plain-text in editable contexts, and a canvas
-  with nothing editable focused gives it nothing to act on.
+  So the chord works wherever the BROWSER raises a `paste` event for it.
+
+  **CONFIRMED BY THE USER IN BOTH REAL BROWSERS, 2026-10-27, which is what makes this a live
+  witness rather than a probe result: `Ctrl-Shift-V` PASTES IN CHROMIUM AND DOES NOT IN
+  FIREFOX/LINUX.** My own Electron-Chromium probe agreed (both chords fire `paste` with
+  `isTrusted: true`), but Electron is not a browser and could not have settled Firefox either way.
+  Firefox reserves `Ctrl-Shift-V` for paste-as-plain-text in editable contexts, and a canvas with
+  nothing editable focused gives it nothing to act on.
+
+  **So BOTH engines are now witnessed for paste**: plain `Ctrl-V` works in both, and the shifted
+  form is Chromium-only. No code is engine-conditional -- the difference is entirely in which
+  events the browser raises.
 
   **THIS IS NOT FIXABLE BY BINDING THE CHORD.** The only way to paste from an arbitrary keystroke
   is `navigator.clipboard.readText()`, which prompts for permission in Chromium and **does not

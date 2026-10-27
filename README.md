@@ -308,8 +308,8 @@ Paste is the opposite case and needs no chord: **`Ctrl-V` / `Cmd-V` work in the 
 the page's own `paste` event**, because the emulator never claims those chords and the browser
 delivers the text itself.
 
-**`Ctrl-Shift-V` pastes too — in Chromium, but not in Firefox on Linux**, and the difference is the
-browser's rather than ours. We claim neither chord and accept any `paste` event the browser raises,
+**`Ctrl-Shift-V` pastes too — in Chromium, but not in Firefox on Linux** (both confirmed in the
+real browsers), and the difference is the browser's rather than ours. We claim neither chord and accept any `paste` event the browser raises,
 so the shifted form works exactly where the browser raises one: Chromium does for both, while
 Firefox reserves `Ctrl-Shift-V` for paste-as-plain-text in editable contexts and a 3270 screen
 offers it nothing editable. This is not fixable by binding the chord — the only way to paste from an
