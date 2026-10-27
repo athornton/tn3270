@@ -128,6 +128,33 @@ export type Action =
   // structurally identical, so `extractText(cells, cols, action.rect)` typechecks without a cast.
   // Do not "tidy" this into an import.
   | { kind: 'copy'; rect: { top: number; left: number; bottom: number; right: number } }
+  /**
+   * THE OPERATOR ASKED TO COPY, CARRYING NO RECT. 2026-10-27, for the web copy gesture.
+   *
+   * SEPARATE FROM `copy` BECAUSE A KEY MAPPER CANNOT SEE A SELECTION. The spec for this feature
+   * first said the chord should raise `{kind:'copy', rect}` straight from `canvas/src/keys.ts`, and
+   * that is not implementable: `copy` above requires the four rect fields, while `actionForKey(e:
+   * KeyLike)` (`canvas/src/keys.ts:164`) is a pure function of one key event, and the selection
+   * lives in `canvas/src/renderer.ts`'s module-level `anchor`/`focus` (`:88-89`). So the keymap
+   * raises the INTENT and the renderer -- the one place that holds the rectangle -- turns it into a
+   * real `copy`. That conversion is a LATER TASK of this feature; this member is the vocabulary it
+   * needs, and nothing raises the kind yet.
+   *
+   * THE SAME SHAPE AS `toggleKeypad` AND THE FIVE OTHER GUARDS: `applyAction` THROWS on it, so the
+   * front end that raises it must own it, and a front end that forgot gets a loud failure instead
+   * of a chord that silently does nothing.
+   *
+   * IT MUST NEVER REACH A `Session`, AND THE GATEWAY REFUSES IT AT DECODE for a reason that does
+   * not expire the way `copy`'s and `paste`'s did (`web/src/protocol.ts`): the server does not know
+   * which cells the operator dragged, so there is no message it could send back that would make
+   * this kind actionable there. `copy` carries the rectangle and is answered with `copyText`; this
+   * carries nothing, and the browser is the only party that can supply what is missing. So it takes
+   * `quit`'s branch of that file's two-branch rule rather than `toggleKeypad`'s.
+   *
+   * NO FIELDS MEANS NOTHING TO SHAPE-CHECK, which is the one way it is easier than `copy`: the
+   * refusal is unconditional, so there is no malformed-field path to bound.
+   */
+  | { kind: 'requestCopy' }
   | { kind: 'type'; text: string }
   /**
    * PASTE, 2026-10-23, AND IT IS DELIBERATELY NOT `type` -- BUT NOT FOR THE REASON THE PLAN GAVE.

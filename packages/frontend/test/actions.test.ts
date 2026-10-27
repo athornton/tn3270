@@ -406,6 +406,22 @@ describe('the keypad-era actions', () => {
     expect(() => applyAction(session, { kind: 'paste', text: 'HELLO' }))
       .toThrow(/does not handle paste/);
   });
+
+  it('REFUSES requestCopy, only the renderer knowing the selection', () => {
+    // The SEVENTH of the same shape, 2026-10-27, and the first whose reason is not "whose
+    // machine": this kind carries NO rect, and the rectangle is the thing `applyAction` would
+    // need. The selection lives in `canvas/src/renderer.ts`'s module-level `anchor`/`focus`
+    // (`:88-89`), which neither a `Session` nor the pure `actionForKey` can see, so the one
+    // place that can turn this intent into a real `copy` is the renderer.
+    //
+    // `/does not handle requestCopy/` rather than `/requestCopy/`, for the reason measured on
+    // the `toggleKeypad` twin above: the loose pattern also matches Node's own
+    // `TypeError: ...requestCopy is not a function`, so it would pass against an accidental
+    // crash as well as against the deliberate refusal.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'requestCopy' }))
+      .toThrow(/does not handle requestCopy/);
+  });
 });
 
 /**
@@ -600,6 +616,12 @@ const ROWS: readonly Row[] = [
   // is. THIS ROW IS NOT OPTIONAL BOOKKEEPING: the count assertion below reddened the moment the
   // union member landed and before this row existed, which is the guard working as designed.
   { action: { kind: 'paste', text: 'HELLO' }, throws: /does not handle paste/ },
+  // SEVEN now, 2026-10-27. `requestCopy` is the copy GESTURE's intent, and it is the first guard
+  // here whose reason is not "the front end owns this thing": it carries no rect, and the rect is
+  // what a copy needs. Only `canvas/src/renderer.ts` holds the selection, so only the renderer can
+  // turn this into a `copy`. It needs no fields spelled, having none -- which is the one way this
+  // row is simpler than `copy`'s and `paste`'s above.
+  { action: { kind: 'requestCopy' }, throws: /does not handle requestCopy/ },
 ];
 
 /**
@@ -679,10 +701,11 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 29 members, 23 switch cases plus the 6 guards --
-    // `paste` is the sixth, added 2026-10-23 with web copy/paste; `toggleKeyboard` was the fifth,
-    // 2026-10-22 with the full keyboard; `copy` the fourth, with the GUI's clipboard;
-    // `transferForm` the third, with the TUI's transfer form.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(29);
+    // a decision someone has to write down. 30 members, 23 switch cases plus the 7 guards --
+    // `requestCopy` is the seventh, added 2026-10-27 with the web copy gesture; `paste` was the
+    // sixth, 2026-10-23 with web copy/paste; `toggleKeyboard` the fifth, 2026-10-22 with the full
+    // keyboard; `copy` the fourth, with the GUI's clipboard; `transferForm` the third, with the
+    // TUI's transfer form.
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(30);
   });
 });

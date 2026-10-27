@@ -102,6 +102,26 @@ export function applyAction(session: Session, action: Action): void {
   if (action.kind === 'paste') {
     throw new Error('applyAction does not handle paste: the front end owns its own clipboard');
   }
+  /*
+    THE SEVENTH OF THE SAME SHAPE, 2026-10-27, and outside the `try` for the reason the six above
+    give: the catch-all would swallow the throw and hand back the silent no-op it exists to prevent.
+
+    ITS REASON IS NOT "WHOSE MACHINE", WHICH IS WHAT MAKES IT A SEVENTH GUARD RATHER THAN A COPY OF
+    THE FIFTH AND SIXTH. `copy` and `paste` are the front end's because a clipboard belongs to the
+    operator; this kind is the front end's because the SELECTION does. It carries no rect at all,
+    and the rectangle is exactly what a copy needs: it lives in `canvas/src/renderer.ts`'s
+    module-level `anchor`/`focus`, which this function cannot reach and which `actionForKey` --
+    pure, given one key event -- cannot reach either. So the chord raises the intent and the
+    renderer converts it to a real `copy`.
+
+    SO THIS IS AN UNSATISFIABLE REQUEST HERE AND NOT MERELY AN UNWELCOME ONE, which is why it
+    throws rather than being handled: there is no argument this function could supply.
+  */
+  if (action.kind === 'requestCopy') {
+    throw new Error(
+      'applyAction does not handle requestCopy: only the renderer knows the selection',
+    );
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

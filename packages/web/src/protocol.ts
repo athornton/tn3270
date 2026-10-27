@@ -191,6 +191,37 @@ export function decodeClientMessage(text: string): ClientMessage {
     // own socket; this is the server half, because the bridge is served code and a client is not
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
+    /*
+      `requestCopy` IS REFUSED TOO, 2026-10-27, AND IS THE FIRST KIND WHOSE REFUSAL IS ABOUT WHAT
+      THE SERVER CANNOT KNOW rather than about whose machine a result lands on.
+
+      Every refusal this file has ever carried except `quit`'s was of the second shape --
+      `transferForm`, `copy` and `paste` were each freed by making the socket carry the thing that
+      had been stranded (the bytes, the text, the text back). THERE IS NO SUCH THING TO CARRY HERE.
+      `requestCopy` has NO FIELDS: the rectangle is the whole of what a copy needs, it lives in
+      `canvas/src/renderer.ts`'s module-level `anchor`/`focus`, and only the BROWSER holds it. A
+      gateway handed this kind could not extract anything, and no server->client message would
+      help, because the missing information is on the client.
+
+      SO IT NEVER LEGITIMATELY ARRIVES. The browser's renderer consumes the kind and sends `copy`
+      -- carrying the rect -- instead, so a `requestCopy` on the wire is either a hand-built frame
+      or a renderer defect, and an `error` naming the kind is the right answer to both.
+
+      THE OTHER BRANCH WOULD HAVE BEEN WRONG, not merely redundant: `applyAction` THROWS on this
+      kind (`frontend/src/actions.ts`), and `main.ts` calls it outside any try inside a socket text
+      handler, so the two-branch rule in the docstring above demands a rejection HERE or an
+      interception THERE. An interception would have to be a bare `return`, i.e. silence -- which
+      would tell a buggy client its copy had been honored when nothing was copied. `quit`'s branch
+      is the right one.
+
+      NO SHAPE CHECK FOLLOWS IT, AND THAT IS NOT THE OMISSION THE `copy` NOTE BELOW WARNS ABOUT:
+      the throw is unconditional and nothing downstream ever sees this kind, so there are no fields
+      for a malformed frame to under-fill. The "necessary but not sufficient" lesson recorded below
+      applies to kinds that are ACCEPTED while carrying fields.
+    */
+    if (aKind === 'requestCopy') {
+      throw new Error('requestCopy is not accepted from a client: the browser holds the selection');
+    }
     // `transferForm` IS NOW ACCEPTED, 2026-10-06. It was refused because a browser-initiated
     // transfer would have moved bytes between the host and the GATEWAY's filesystem rather than
     // the operator's -- and socket-carried file I/O is precisely what removes that reason. The
@@ -198,9 +229,10 @@ export function decodeClientMessage(text: string): ClientMessage {
     // means the operator's machine.
     //
     // `copy` HAS SINCE FOLLOWED IT, 2026-10-23, in exactly the way the sentences below predicted
-    // -- so only `quit` stays refused now. Those sentences are kept rather than deleted because
-    // they are the record of why the refusal existed and of what removed it; see the `copy` and
-    // `paste` acceptance note further down for what replaced them.
+    // -- leaving `quit` the only refusal, until `requestCopy` joined it on 2026-10-27 (see the
+    // note above it, whose reason is of a different kind from any of these). Those sentences are
+    // kept rather than deleted because they are the record of why the refusal existed and of what
+    // removed it; see the `copy` and `paste` acceptance note further down for what replaced them.
     //
     // AND ACCEPTING THIS KIND OWED `main.ts` AN INTERCEPTION, WHICH LANDED IN THE SAME CHANGE --
     // the other branch of this file's two-branch rule, taken rather than skipped. `applyAction`
@@ -262,10 +294,18 @@ export function decodeClientMessage(text: string): ClientMessage {
           and `frontend/src/pasteAction.ts`'s `applyPaste` -- the shared helper the refusal said
           did not exist yet -- is what both DOM front ends now call.
 
-      `quit` STAYS REFUSED and is now the whole of the refusal list. Its reason does not expire the
-      way these two did: it would stop the GATEWAY, ending every connected operator's session, and
-      no message travelling back to a browser changes whose process is being stopped. There is no
-      "the operator's own quit" to send back the way there is an operator's own clipboard.
+      `quit` STAYS REFUSED and was the whole of the refusal list until 2026-10-27. Its reason does
+      not expire the way these two did: it would stop the GATEWAY, ending every connected
+      operator's session, and no message travelling back to a browser changes whose process is
+      being stopped. There is no "the operator's own quit" to send back the way there is an
+      operator's own clipboard.
+
+      `requestCopy` IS THE SECOND MEMBER, added 2026-10-27, and its reason does not expire either
+      -- for a different reason again, which is why it is refused beside `quit` rather than
+      following `copy` out. See the note above its rejection: it carries no fields, so the server
+      lacks the rectangle and no message in either direction could supply one. The pattern these
+      two share is not "whose machine" but PERMANENCE: both refusals rest on something no new
+      message can move.
 
       BOTH KINDS NOW OWE `main.ts` AN INTERCEPTION, AND IT LANDS IN THIS SAME COMMIT, because
       `applyAction` THROWS on both (`frontend/src/actions.ts`) and `main.ts` calls it outside any
