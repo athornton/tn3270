@@ -143,6 +143,64 @@ const CASES = [
   { spec: 'F13', action: null },
   { spec: 'Insert', action: { kind: 'toggleInsert' } },
   { spec: 'Enter', action: { kind: 'enter' } },
+  /**
+   * `Ctrl+Shift+C` IN THE KEYBOARD WINDOW -- THE FREEZE THAT EVERY OTHER GATE MISSED.
+   *
+   * WHAT THIS PROVES THAT NOTHING ELSE CAN. The keyboard and keypad windows do NOT load
+   * `renderer.js`; they load `keyboardBoot.js` / `keypadBoot.js`, which install
+   * `canvas/src/forwardKeys.ts`'s `forwardKeys` -- and that function calls `actionForKey(e)` and
+   * forwards whatever comes back with NO kind filtering. So when `Ctrl-Shift-C` became a bound
+   * chord (9e14d86) it started arriving at `ipcMain.on('action')` as `requestCopy` from these two
+   * windows, where `applyAction` THROWS on it and the throw FREEZES THE MAIN PROCESS. The
+   * renderer's own interception does not cover them, because the renderer is not loaded there.
+   *
+   * MEASURED, red then green, rather than asserted: on 9a6e53e -- the commit that added the
+   * renderer interception and no `main.ts` arm -- this position reported
+   * `the client never ran to completion` with `ETIMEDOUT` after 120s, because the frozen main
+   * process never reached `quitIfKeysOnly` and never answered SIGTERM. With the `requestCopy` arm
+   * in `main.ts` the same run exits 0 and the `attn` below arrives.
+   *
+   * `kbd:` IS WHAT AIMS IT, and the prefix had to be added to the seam for this case: every
+   * `sendInputEvent` in `main.ts` went to the canvas window, so no harness could deliver a key to
+   * a child window at all. That gap is why the freeze was reachable with the whole suite green.
+   *
+   * IT EXPECTS THE ACTION AND NOT `null`, WHICH CORRECTED MY OWN FIRST DRAFT. I wrote this case
+   * as a negative, reasoning that `main.ts` drops the kind with a bare `return` -- and the run
+   * reported `expected (nothing) / actual [["kind","requestCopy"]]`. The action LOG sits at the TOP
+   * of `ipcMain.on('action')`, ABOVE every interception, exactly as this file's `Ctrl+K` and
+   * `Ctrl+T` notes already record for the same reason. So a dropped kind is still a LOGGED kind.
+   *
+   * That is the better assertion anyway, and the correction improved the case: a positive pins
+   * that the chord ARRIVED at `ipcMain` from the keyboard window -- the delivery this position
+   * exists to prove -- where a null would have passed equally on a chord that never left the
+   * window. What `main.ts` does with it afterwards is a bare `return`, because a child window
+   * holds no selection: the rectangle lives in the canvas renderer's module state.
+   *
+   * IT MUST FOLLOW A `Ctrl+B`, which is why it is last: the keyboard window has to exist before a
+   * `kbd:` step can target it, and `Ctrl+B` above is what opens it. A `kbd:` step with no such
+   * window prints `keys: NO KEYBOARD WINDOW` and is skipped -- deliberately not retargeted at the
+   * canvas, which would pass while proving nothing.
+   */
+  { spec: 'kbd:Ctrl+Shift+C', action: { kind: 'requestCopy' } },
+  /**
+   * THE LIVENESS PROBE, and it is the half that makes the case above mean anything.
+   *
+   * A FROZEN MAIN PROCESS AND A CORRECTLY-DROPPED CHORD BOTH PRODUCE NO `action:` LINE. Asserting
+   * only the absence above would therefore pass on the freeze -- the exact "pinning an absence"
+   * mistake this file's own header warns about. So the chord is followed by one that MUST still
+   * produce an action: if `attn` arrives, the event loop survived the `requestCopy` and kept
+   * servicing IPC.
+   *
+   * DELIVERED TO THE KEYBOARD WINDOW TOO, not the canvas, and that is deliberate: a probe sent to
+   * the canvas would prove the canvas window still works, which the twelve positions above already
+   * prove. The claim being made is that the CHILD WINDOW's path survived, so the probe has to
+   * travel it.
+   *
+   * `Ctrl+A` is the probe the previous feature used for this same purpose: it is in `keys.ts`'s
+   * CTRL table, `applyAction` handles it (so no interception is involved), and against a replayed
+   * trace it has no other observable consequence to perturb the run.
+   */
+  { spec: 'kbd:Ctrl+A', action: { kind: 'attn' } },
 ];
 
 /** Key order in JSON is an implementation detail; compare canonically. */
@@ -252,6 +310,22 @@ for (const pkg of ['gui', 'canvas']) {
 const result = spawnSync(electron, [main, ...ARGV, '127.0.0.1:1'], {
   encoding: 'utf8',
   timeout: 120000,
+  /**
+   * SIGKILL ON TIMEOUT, AND THE DEFAULT SIGTERM MADE THIS HARNESS HANG FOREVER RATHER THAN FAIL.
+   *
+   * MEASURED 2026-10-27 while proving the `kbd:Ctrl+Shift+C` case red: with the `requestCopy` arm
+   * removed from `main.ts`, the chord freezes the main process event loop -- and a process whose
+   * loop is frozen NEVER RUNS ITS SIGTERM HANDLER. `spawnSync`'s timeout fired, Electron ignored
+   * the signal, and the harness sat past 200s until an outer `timeout(1)` killed the whole thing:
+   * exit 124, NO output, no `FAIL` line. The freeze is the exact defect this case exists to catch,
+   * so catching it by hanging would make the guard useless to CI -- and `renderer-imports.test.ts`
+   * already records this same "fails by timeout" trap for the clipboard mutant.
+   *
+   * SIGKILL cannot be ignored or blocked, so the timeout now actually ends the child, `spawnSync`
+   * returns, and the `result.error` bail below reports ETIMEDOUT with the partial stdout -- which
+   * is what names the freeze instead of hiding it.
+   */
+  killSignal: 'SIGKILL',
   env: guiEnv({
     TN3270_GUI_REPLAY: trace,
     TN3270_GUI_KEYS: specs,

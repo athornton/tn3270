@@ -52,6 +52,41 @@ describe('the chord harness', () => {
     expect(keys).toMatch(/spec:\s*'F13',\s*action:\s*null/);
   });
 
+  /**
+   * THE CHILD-WINDOW FREEZE GUARD, AND ITS PROBE, WHICH IS USELESS WITHOUT THE OTHER HALF.
+   *
+   * `kbd:Ctrl+Shift+C` is the only case in the table that travels the KEYBOARD WINDOW's keydown
+   * path (`forwardKeys`, not `renderer.ts`), where a bound `requestCopy` reached `applyAction` and
+   * FROZE THE MAIN PROCESS. No other gate in the repo delivers a key to a child window at all.
+   *
+   * THE PROBE IS PINNED WITH IT, AND IN ORDER, because the chord's own assertion cannot detect the
+   * freeze on its own: a frozen client stops producing `action:` lines ALTOGETHER, so every
+   * position after the freeze reads as missing rather than as wrong. `kbd:Ctrl+A` is the position
+   * that must still arrive, and it is what turns "the chord was logged" into "the event loop
+   * survived it". Deleting the probe would leave a case that cannot fail for the reason it exists.
+   */
+  it('keeps the child-window copy chord AND its liveness probe, in that order', () => {
+    const chord = keys.search(/spec:\s*'kbd:Ctrl\+Shift\+C',\s*action:\s*\{\s*kind:\s*'requestCopy'\s*\}/);
+    expect(
+      chord,
+      'keys.mjs must keep `kbd:Ctrl+Shift+C` expecting `requestCopy`: it is the only case that '
+      + 'delivers a key to the KEYBOARD WINDOW, whose forwardKeys path sent that kind to '
+      + 'applyAction and FROZE the main process. No other gate in the repo reaches it.',
+    ).toBeGreaterThan(-1);
+
+    const probe = keys.search(/spec:\s*'kbd:Ctrl\+A',\s*action:\s*\{\s*kind:\s*'attn'\s*\}/);
+    expect(
+      probe,
+      'and it must keep the `kbd:Ctrl+A` liveness probe: a freeze stops the action log entirely, '
+      + 'so the chord above would read as merely missing rather than as a frozen process. The '
+      + 'probe is the position that must still arrive for the run to mean anything.',
+    ).toBeGreaterThan(-1);
+
+    // THE PROBE MUST COME AFTER, or it proves the loop was alive BEFORE the chord that might
+    // kill it -- which is not the claim.
+    expect(probe, 'the probe must follow the chord it is probing').toBeGreaterThan(chord);
+  });
+
   it('bails on error, then signal, then a bare exit status -- in that order', () => {
     // PROVED false pass: a fake client that printed the whole expected sequence plus
     // "keys: sent" and then `kill -SEGV $$` reports `status: null`, `signal: 'SIGSEGV'`,

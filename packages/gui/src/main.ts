@@ -250,6 +250,24 @@ const SEAM = Object.freeze({
 export const WAIT_PREFIX = 'wait:';
 
 /**
+ * The `kbd:` prefix: deliver this chord to the KEYBOARD WINDOW instead of the canvas.
+ *
+ * WHY THE SEAM NEEDED A SECOND TARGET AT ALL. Every `sendInputEvent` in this file went to the
+ * canvas `win`, so no harness could deliver a keystroke to a CHILD window -- and the child windows
+ * run a DIFFERENT keydown path: `canvas/src/forwardKeys.ts`'s `forwardKeys`, not `renderer.ts`'s
+ * listener. That gap is why `Ctrl-Shift-C` with the keyboard window focused could reach
+ * `applyAction` and freeze the main process with every test in the suite green. A guard for that
+ * freeze is only real if something can aim the chord where the freeze lives.
+ *
+ * A STEP PREFIX AND NOT A NEW ENVIRONMENT VARIABLE, following `wait:`: the ORDER matters here --
+ * the keyboard window has to be opened by a `Ctrl+B` earlier in the same list -- and two variables
+ * cannot express an interleaving. One list, read left to right, is the only shape that can.
+ *
+ * Exported for the test that pins it, exactly as `WAIT_PREFIX` is.
+ */
+export const KBD_PREFIX = 'kbd:';
+
+/**
  * How much of the screen a timed-out step prints.
  *
  * **1900, i.e. essentially the whole 24x80 buffer, because 240 WAS NOT ENOUGH AND THAT COST A
@@ -1215,6 +1233,43 @@ app.whenReady().then(async () => {
       return;
     }
     /*
+      `requestCopy` IS DROPPED HERE, AND THIS ARM IS REACHABLE -- DO NOT DELETE IT AS DEAD CODE.
+
+      WHO ACTUALLY SENDS IT. `canvas/src/renderer.ts` consumes the kind in its own keydown listener
+      and turns it into the `copy` above, so the CANVAS window never raises it. The senders are the
+      KEYBOARD AND KEYPAD WINDOWS: `canvas/src/forwardKeys.ts`'s `forwardKeys` calls
+      `actionForKey(e)` and forwards whatever comes back with NO kind filtering, and
+      `keyboardBoot.ts` / `keypadBoot.ts` install it with `sendAction` wired straight to
+      `ipcRenderer.send('action', ...)`. Those documents load `keyboardBoot.js` / `keypadBoot.js`
+      and NOT `renderer.js`, so the renderer's interception does not cover them. `Ctrl-Shift-C` with
+      either window focused reached `applyAction` before this arm existed, which THROWS on the kind
+      -- and a throw in this listener does not merely log, it FREEZES THE MAIN PROCESS EVENT LOOP,
+      with no `uncaughtException` handler anywhere in this file. Measured as a freeze in the
+      previous feature; see the `paste` note below, which carries the same severity for the same
+      reason.
+
+      A BARE `return` AND NOT A FORWARD TO THE CANVAS WINDOW'S `__tn3270Copy`. A child window holds
+      no selection -- the rectangle lives in the canvas renderer's module state -- so there is
+      nothing here to copy, and an arm that claimed to copy would be lying. Making the chord work
+      from a child window (as `Ctrl-B` self-focuses) is a FEATURE and not part of closing a freeze;
+      `web/src/protocol.ts:324` already records that this kind's interception can only be a bare
+      return.
+
+      THE KIND CANNOT BE SHAPE-CHECKED, which is why the two-branch rule is satisfied differently
+      here than for `copy` above: `requestCopy` carries NO FIELDS, so there is nothing to validate
+      and a malformed one is indistinguishable from a well-formed one. The two branches are per
+      FRONT END rather than per field -- this front end INTERCEPTS the kind, and the web gateway
+      REJECTS it at decode (`web/src/protocol.ts:232`) with a per-client `error` frame, because
+      there the sender is a remote browser rather than one of our own windows. Both DOM front ends
+      are covered, by different mechanisms chosen to suit who can send.
+
+      NOTHING IS LOGGED. The action log at the top of this listener already records the kind when
+      `--log-actions` is on, which is what the harness asserts against; a second unconditional line
+      would say nothing the operator can act on, since the chord's only honest effect in a child
+      window is nothing at all.
+    */
+    if (action.kind === 'requestCopy') return;
+    /*
       THERE IS DELIBERATELY NO `paste` ARM HERE, AND ADDING ONE IS NOT THE SAFE CHANGE IT LOOKS
       LIKE. 2026-10-26.
 
@@ -1304,7 +1359,10 @@ app.whenReady().then(async () => {
     // The session is passed so a `wait:` step works here too -- a replay paints synchronously, so
     // every wait in a replay run matches on its first poll. That is what makes the seam's own
     // guard test runnable without a host.
-    await maybeSendKeys(win, session);
+    //
+    // The keyboard-window getter is passed so a `kbd:` step can reach the child window opened by a
+    // `Ctrl+B` earlier in the same list -- the path `forwardKeys` runs, which no other seam reaches.
+    await maybeSendKeys(win, session, () => keyboardWin);
     // AFTER the keys, always: `clicks.mjs` shows the keypad with a real Ctrl+K, and there is no
     // keypad to click before that chord has been delivered and repainted.
     await maybeSendClicks(win, () => keypadWin);
@@ -1329,7 +1387,7 @@ app.whenReady().then(async () => {
 
   // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
   // real host is on, and the one `live-transfer.py` drives.
-  await maybeSendKeys(win, session);
+  await maybeSendKeys(win, session, () => keyboardWin);
   await maybeSendClicks(win, () => keypadWin);  // after the keys, for the reason the replay branch gives
   await maybeSelect(win);                // and after both, for the reason given there too
   await maybeOpenTransferWindow();
@@ -1417,7 +1475,19 @@ async function waitForScreen(session: Session, text: string): Promise<string | u
   }
 }
 
-async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<void> {
+async function maybeSendKeys(
+  win: BrowserWindow,
+  session?: Session,
+  /**
+   * WHICH WINDOW A `kbd:` STEP TARGETS, for the reason `KBD_PREFIX` and `maybeSendClicks` both
+   * give. A GETTER, because the window is opened by a chord earlier in the same list.
+   *
+   * DEFAULTS TO "NO SUCH WINDOW" rather than to `win`: in `TN3270_GUI_URL` mode there is no
+   * Electron keyboard window at all (the browser's keyboard is an overlay in the page), so a
+   * `kbd:` step there must report its absence rather than quietly become a canvas chord.
+   */
+  keyboardTarget: () => BrowserWindow | undefined = () => undefined,
+): Promise<void> {
   if (SEAM.keys === '') return;
   /**
    * EVERY spec is parsed before ANY key is delivered, and a refusal EXITS rather than throws.
@@ -1435,13 +1505,30 @@ async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<voi
    * wait with no session fails before any key goes in -- the whole point of parsing everything
    * first.
    */
+  /**
+   * A `kbd:` STEP IS A CHORD WITH A DIFFERENT TARGET, so it carries the same parsed `KeySpec` and
+   * is validated in this same up-front pass -- `kbd:Digit1` must be refused by name before any key
+   * is delivered, exactly as a bare `Digit1` is.
+   */
   type Step =
-    | { readonly kind: 'chord'; readonly spec: KeySpec }
+    | { readonly kind: 'chord'; readonly spec: KeySpec; readonly toKeyboard: boolean }
     | { readonly kind: 'wait'; readonly text: string };
   let steps: Step[];
   try {
     steps = SEAM.keys.split(',').map((spec): Step => {
-      if (!spec.startsWith(WAIT_PREFIX)) return { kind: 'chord', spec: parseKeySpec(spec) };
+      if (spec.startsWith(KBD_PREFIX)) {
+        const chord = spec.slice(KBD_PREFIX.length);
+        // REFUSED RATHER THAN TREATED AS A BARE `kbd:`, for the reason the empty wait is: a step
+        // that names no key cannot be anything but a typo, and silently sending nothing would make
+        // the run report a delivery it never made.
+        if (chord.trim() === '') {
+          throw new Error(`empty ${KBD_PREFIX} chord in ${JSON.stringify(spec)}`);
+        }
+        return { kind: 'chord', spec: parseKeySpec(chord), toKeyboard: true };
+      }
+      if (!spec.startsWith(WAIT_PREFIX)) {
+        return { kind: 'chord', spec: parseKeySpec(spec), toKeyboard: false };
+      }
       const text = spec.slice(WAIT_PREFIX.length);
       // AN EMPTY WAIT MATCHES EVERY SCREEN INCLUDING A BLANK ONE, so it is a typo rather than a
       // no-op and is refused the way `parseKeySpec` refuses an empty chord.
@@ -1522,14 +1609,41 @@ async function maybeSendKeys(win: BrowserWindow, session?: Session): Promise<voi
     // Spread conditionally: an empty `modifiers` array is not the same as absent under
     // exactOptionalPropertyTypes, and the rest of this file builds options the same way.
     const chord = { keyCode, ...(modifiers.length > 0 ? { modifiers: [...modifiers] } : {}) };
-    win.webContents.sendInputEvent({ type: 'keyDown', ...chord });
+    /**
+     * WHICH WINDOW THIS CHORD GOES TO, defaulting to the canvas.
+     *
+     * A `kbd:` step with NO KEYBOARD WINDOW is REPORTED AND SKIPPED rather than silently
+     * retargeted at the canvas, and that choice is the whole value of the step: the canvas runs a
+     * DIFFERENT keydown path, so a fallback would deliver the chord to the one place that already
+     * handles it and the run would pass while proving nothing about the child window. The line is
+     * the same shape as `clicks: NO KEYPAD WINDOW` above and exists for the same reason.
+     *
+     * THE GETTER IS EVALUATED HERE AND NOT AT CALL TIME, matching `maybeSendClicks`: the keyboard
+     * window is created by a `Ctrl+B` EARLIER IN THIS SAME LIST, so a window captured when the
+     * function was called would always be `undefined`.
+     */
+    let target = win;
+    if (step.toKeyboard) {
+      const kbw = keyboardTarget();
+      if (kbw === undefined || kbw.isDestroyed()) {
+        process.stdout.write(`keys: NO KEYBOARD WINDOW for ${KBD_PREFIX}${keyCode}\n`);
+        continue;
+      }
+      target = kbw;
+      // FOCUSED FIRST, because `forwardKeys` listens on that window's own `window` object: an
+      // unfocused window still receives `sendInputEvent` (it goes to the webContents, not through
+      // the OS), but focusing it makes the delivery match what an operator does and keeps the
+      // chord's own self-focus behavior honest.
+      kbw.focus();
+    }
+    target.webContents.sendInputEvent({ type: 'keyDown', ...chord });
     // `char` is the event that carries a TYPED CHARACTER, so it is sent for a bare key --
     // that is what a printable keystroke does, and `keys.ts` turns it into a `type` action.
     // A real Ctrl- or Alt-held keystroke produces NO char event, so sending one here would
     // simulate a keyboard that does not exist. Harmless today (the renderer listens on
     // `keydown` and the page has no editable node) and live the moment one appears.
-    if (modifiers.length === 0) win.webContents.sendInputEvent({ type: 'char', ...chord });
-    win.webContents.sendInputEvent({ type: 'keyUp', ...chord });
+    if (modifiers.length === 0) target.webContents.sendInputEvent({ type: 'char', ...chord });
+    target.webContents.sendInputEvent({ type: 'keyUp', ...chord });
     await new Promise((r) => setTimeout(r, 150));
   }
   process.stdout.write(`keys: sent ${SEAM.keys}\n`);
