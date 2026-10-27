@@ -84,10 +84,21 @@ Against it:
    not identify the mechanism.
 4. The proposal's macOS spelling, `Cmd-L`, is exactly the address bar on macOS.
 
-**Not closed, pending one measurement.** If a Linux or Windows page CAN swallow Ctrl-L, this
-is worth re-examining — the Redraw collision would still stand, but the reachability
-objection would fall. The test: a `keydown` listener calling `preventDefault` on Ctrl-L; see
-whether the address bar still takes focus.
+**CLOSED 2026-10-27, AND CLEAR-ON-`Ctrl-L` IS DEAD.** The user ran the test on a Linux desktop:
+**the browser grabs `Ctrl-L`.** A page cannot claim it, so Clear bound there would be
+UNREACHABLE in the web gateway on the two platforms most operators use — and silently, since
+the keystroke never arrives for the page to decline.
+
+That was the one objection whose answer could have revived the idea. The other two stand
+regardless and are worth keeping, because they are why this was never only about reachability:
+c3270 already binds `Ctrl<Key>l` to `Redraw()`, and the proposal's macOS spelling `Cmd-L` is
+exactly the address bar there.
+
+**So `Ctrl-C` stays Clear and the copy chord stays `Ctrl-Shift-C` / `Cmd-Shift-C`.** Note what
+the macOS run did NOT establish: `Ctrl-L` reached the page there only because the Mac address
+bar is `Cmd-L`, so that chord was never the browser's to begin with. One platform's result was
+the whole question — see [[user-visible-effects-do-not-identify-the-code-path]] for the same
+shape.
 
 ### Why not `Alt-C` (recommended, not taken)
 
@@ -233,6 +244,6 @@ whether the menu accelerator should simply be left to own the chord in Electron.
 
 ## Open, for the user
 
-- The Linux/Windows Ctrl-L measurement above.
+- ~~The Linux/Windows Ctrl-L measurement above.~~ **ANSWERED 2026-10-27: the browser grabs it; the idea is dead.**
 - Whether `Alt-C` should land as a Clear alias regardless, since both references bless it
   and it costs nothing.

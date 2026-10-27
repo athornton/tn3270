@@ -6,7 +6,9 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 
 ## START HERE — ROADMAP (0e) IS DONE; A LIVE PASS IS OWED AND THE USER HAS AGREED TO IT
 
-**Branch `web-copy-paste`, NOT yet merged to `main` and NOT pushed.** Build exit 0,
+**MERGED AND PUSHED.** `web-copy-paste` merged `--no-ff` as `cd2c8ce` (18 commits, branch deleted);
+`main` is the ONLY branch and `origin/main` is in sync at `cd2c8ce`, verified by a fresh `fetch`.
+The gate below was re-run ON THE MERGE COMMIT. Build exit 0,
 **2614 tests in 110 files**, `browser-clicks` 9 buttons + **13/13**, `browser-shot` 1/1,
 `select.mjs` 3/3, `keys.mjs` **22 chords / 20 actions**.
 
@@ -63,15 +65,19 @@ both permissions `granted`), so that is NOT owed. What is:
 3. **The Electron accelerator overlap on Linux** — `Ctrl-Shift-C` is also the GUI's Copy
    accelerator. **Unmeasurable from this repo: `sendInputEvent` does not trigger menu accelerators
    at all** (control-verified). Treat a double fire as LIKELY; the `Ctrl+Shift+V` twin does it.
-4. **Whether a page can claim `Ctrl-L` on Linux/Windows** — the user has a Linux desktop and offered
-   to check. It decides whether Clear could leave `Ctrl-C`. **The macOS result cannot settle it**:
-   the address bar is `Cmd-L` there, so `Ctrl-L` was never the browser's shortcut.
+4. ~~**Whether a page can claim `Ctrl-L` on Linux/Windows.**~~ **ANSWERED 2026-10-27: THE BROWSER
+   GRABS IT.** The user tested on a Linux desktop. So **Clear-on-`Ctrl-L` is dead** — bound there,
+   Clear would be unreachable in the gateway on the two platforms most operators use, and
+   unreachable silently, since the keystroke never reaches the page to be declined. `Ctrl-C` stays
+   Clear; copy stays `Ctrl-Shift-C` / `Cmd-Shift-C`. **The earlier macOS run looked like evidence
+   and was not**: the Mac address bar is `Cmd-L`, so `Ctrl-L` was never the browser's there and
+   reaching the page proved nothing. (c3270's `Ctrl<Key>l: Redraw()` collision stood either way.)
 
 ### OPEN QUESTIONS FOR THE USER
 
 - **`Alt-C` as a Clear alias.** Both c3270 (`fb-c3270:86-87`) and zti bind Clear there, and `Alt-C`
-  is free in our keymap. Costs nothing and needs no platform detection.
-- Whether to merge `web-copy-paste` to `main` before or after the live pass.
+  is free in our keymap. Costs nothing and needs no platform detection. **Now the only live
+  keybinding question**, since Ctrl-L is closed.
 
 ### THE PLANS ON THIS BRANCH HAVE A MEASURED ERROR RATE — RE-DERIVE, DO NOT DISPATCH
 

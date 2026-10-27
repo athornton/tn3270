@@ -358,12 +358,15 @@ and the Recording log says what happened when they were run.
      click handler still never firing), and there is no `xdotool`/`xte` on this box. Treat a double
      fire as LIKELY, since the `Ctrl+Shift+V` twin was measured to do exactly that. `menu.ts`'s
      `copyAccelerator` carries the detail and the remedy.
-  4. **Whether a page can claim `Ctrl-L` on Linux or Windows.** Not about copy itself, but it
-     decides whether Clear could move off `Ctrl-C` entirely. A `keydown` listener calling
-     `preventDefault` on Ctrl-L: does the address bar still take focus? **The macOS result cannot
-     settle this** — there the address bar is `Cmd-L`, so `Ctrl-L` was never the browser's shortcut
-     and reaching the page proves nothing. If a page CAN claim it, c3270's `Ctrl<Key>l: Redraw()`
-     collision still stands against using it.
+  4. ~~**Whether a page can claim `Ctrl-L` on Linux or Windows.**~~ **ANSWERED BY THE USER ON A
+     LINUX DESKTOP, 2026-10-27: THE BROWSER GRABS IT.** A page cannot claim `Ctrl-L` there, so
+     Clear bound to it would be unreachable in the gateway on the two platforms most operators
+     use — and unreachable *silently*, since the keystroke never arrives for the page to decline.
+     **Clear-on-`Ctrl-L` is dead**; `Ctrl-C` stays Clear and copy stays `Ctrl-Shift-C`.
+     Recorded because the reasoning generalizes: the user's earlier macOS run DID reach the page,
+     which looked like evidence and was not — the Mac address bar is `Cmd-L`, so `Ctrl-L` was
+     never the browser's shortcut there and there was nothing to win. One platform's answer was
+     the entire question. (c3270's `Ctrl<Key>l: Redraw()` collision stood against it either way.)
 
   **A product race the human pass should expect**, because it looks like a bug: `renderer.ts`
   clears the selection on EVERY frame, not only frames touching the selected cells. A host repaint
