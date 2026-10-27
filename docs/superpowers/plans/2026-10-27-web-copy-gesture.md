@@ -150,8 +150,13 @@ In `packages/frontend/src/keymap.ts`, beside the `copy` member at `:130`:
    * (`anchor`/`focus`) which a key mapper cannot see. So the keymap raises the INTENT and the
    * renderer — the one place that knows the rectangle — turns it into a real `copy`.
    *
-   * This is the split `toggleKeypad` already uses: a kind whose meaning is "do the front end's
-   * thing", intercepted before `applyAction`, which THROWS on it.
+   * This is the split `transferForm` already uses: a kind intercepted before `applyAction` --
+   * which THROWS on it -- that raises a DIFFERENT kind once the front end has what was missing.
+   *
+   * (This read "the split `toggleKeypad` already uses" and that was WRONG, corrected 2026-10-27
+   * from Task 1. `toggleKeypad` is terminally intercepted and converts to nothing; `transferForm`
+   * shows an overlay that later emits different messages, which is this kind's shape. The spec
+   * carried the same error and now carries the same correction.)
    *
    * IT NEVER REACHES THE WIRE. `renderer.ts` consumes it and sends `copy` instead, so the
    * gateway REFUSES it at decode rather than accepting a kind no server path handles.
@@ -210,7 +215,7 @@ git commit -m "feat(frontend): a requestCopy intent kind, which applyAction refu
 actionForKey is pure and the copy action carries a rect, so a key mapper cannot
 raise copy: the selection lives in renderer.ts's module state. The keymap raises
 the INTENT and the renderer turns it into a real copy, which is the split
-toggleKeypad already uses.
+transferForm already uses.
 
 Seventh kind of that shape, and REFUSED at the gateway's decode rather than
 merely unhandled -- the two-branch rule forbids neither, and this kind has no

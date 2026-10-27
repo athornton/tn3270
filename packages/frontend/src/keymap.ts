@@ -140,16 +140,26 @@ export type Action =
    * real `copy`. That conversion is a LATER TASK of this feature; this member is the vocabulary it
    * needs, and nothing raises the kind yet.
    *
-   * THE SAME SHAPE AS `toggleKeypad` AND THE FIVE OTHER GUARDS: `applyAction` THROWS on it, so the
-   * front end that raises it must own it, and a front end that forgot gets a loud failure instead
-   * of a chord that silently does nothing.
+   * THE SEVENTH KIND `applyAction` THROWS ON, so the front end that raises it must own it, and a
+   * front end that forgot gets a loud failure instead of a chord that silently does nothing.
+   *
+   * THAT IS THE ONLY RESPECT IN WHICH IT RESEMBLES `toggleKeypad`, and the distinction is worth
+   * drawing because the spec and the plan both got it wrong: the two-step CONVERSION above is
+   * `transferForm`'s shape, not `toggleKeypad`'s. `toggleKeypad` is terminally intercepted --
+   * `web/src/bridgecore.ts` calls `deps.toggleKeypad?.()` and returns, converting it to nothing --
+   * whereas `transferForm` opens an overlay that LATER emits different messages, which is exactly
+   * what `requestCopy` does in becoming a `copy`.
    *
    * IT MUST NEVER REACH A `Session`, AND THE GATEWAY REFUSES IT AT DECODE for a reason that does
    * not expire the way `copy`'s and `paste`'s did (`web/src/protocol.ts`): the server does not know
    * which cells the operator dragged, so there is no message it could send back that would make
    * this kind actionable there. `copy` carries the rectangle and is answered with `copyText`; this
    * carries nothing, and the browser is the only party that can supply what is missing. So it takes
-   * `quit`'s branch of that file's two-branch rule rather than `toggleKeypad`'s.
+   * `quit`'s branch of that file's two-branch rule -- a REJECTION -- rather than the interception
+   * branch. (`toggleKeypad` was itself rejected there once, in `c94979f`, before `2fb921c`
+   * replaced that stop-gap with the interception it has now; so "rejection" and "interception" are
+   * branches a kind can move between, not permanent labels. What makes this one permanent is that
+   * the server can never acquire the rectangle.)
    *
    * NO FIELDS MEANS NOTHING TO SHAPE-CHECK, which is the one way it is easier than `copy`: the
    * refusal is unconditional, so there is no malformed-field path to bound.

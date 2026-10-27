@@ -109,9 +109,15 @@ is a PURE function of a key event — the selection lives in `renderer.ts`'s mod
 
 So the mapping is two-step, and the plan adds a task for it that this spec did not have:
 `keys.ts` raises a new intent-only **`{kind:'requestCopy'}`**, and `renderer.ts` — the one place
-that knows the rectangle — converts it to a real `copy`. That is the split `toggleKeypad` already
-uses. Being a kind `applyAction` throws on, it also needs a decode REJECTION at the gateway, per
-the two-branch rule.
+that knows the rectangle — converts it to a real `copy`. Being a kind `applyAction` throws on, it
+also needs a decode REJECTION at the gateway, per the two-branch rule.
+
+**CORRECTION, 2026-10-27, from Task 1's implementation: that split is `transferForm`'s, NOT
+`toggleKeypad`'s.** This paragraph said "the split `toggleKeypad` already uses" and the plan
+repeated it twice. `toggleKeypad` is a SINGLE kind terminally intercepted — `bridgecore.ts`'s
+branch calls `deps.toggleKeypad?.()` and returns, and nothing converts it into a second kind.
+`transferForm` is the genuine two-step: its branch shows an overlay which LATER emits different
+messages. `requestCopy` → `copy` is `transferForm`'s shape.
 
 Read `docs/superpowers/plans/2026-10-27-web-copy-gesture.md` Task 1 for the shape. Everything
 else below stands as written.

@@ -103,16 +103,16 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * TWO MEMBERS NOW. The count was 2 (`quit`, `copy`) after `transferForm` left on 2026-10-06, then
- * 3 when `paste` joined with the kind itself, then 1 on 2026-10-23 when `copy` and `paste` both
- * left for `SWALLOWED` -- exactly as the docblock that stood here predicted ("when it lands, this
- * list should be back to one member") -- and 2 again on 2026-10-27 with `requestCopy`.
+ * TWO MEMBERS NOW, `requestCopy` having joined on 2026-10-27. The full size history is tabulated
+ * at the foot of this note rather than narrated here, which is what keeps it checkable; the one
+ * episode worth calling out in prose is that the docblock which stood here predicted the 2026-10-23
+ * drop to a single member in those words ("when it lands, this list should be back to one member").
  *
- * `quit`'s REASON IS THE FIRST HERE THAT DOES NOT EXPIRE: it would stop the gateway, taking every
- * connected operator's mainframe session with it, and no message travelling back to a browser
- * changes whose process is being stopped.
+ * `quit`'s REASON DOES NOT EXPIRE: it would stop the gateway, taking every connected operator's
+ * mainframe session with it, and no message travelling back to a browser changes whose process is
+ * being stopped.
  *
- * `requestCopy`'s IS THE SECOND, AND IT IS NOT THE SAME REASON -- which is the distinction that
+ * `requestCopy`'s DOES NOT EITHER, AND IT IS NOT THE SAME REASON -- which is the distinction that
  * earns it a place here rather than in `SWALLOWED` or `ANSWERS`. The copy GESTURE raises it
  * (2026-10-27) carrying NO rect, because `actionForKey` is pure and the selection lives in
  * `canvas/src/renderer.ts`'s module state; the renderer converts it to a real `copy` and that is
@@ -158,8 +158,19 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  *
  * A LIST AND NOT AN `if`, deliberately -- and it was worth keeping as one while it had a single
  * member: the shape is what made the next refusal's arrival a one-word change beside the reasoning
- * that justifies it, which is exactly what `requestCopy` then was. This list has been 1, 2 and 3
- * members on four different dates.
+ * that justifies it, which is exactly what `requestCopy` then was.
+ *
+ * THE SIZES, TRACED FROM THE LITERAL RATHER THAN COUNTED FROM MEMORY, because a bare tally of
+ * "dates" is ambiguous about whether it counts the day the list was created and about two changes
+ * landing on one day -- and both happened here, which is how the draft of this line got the number
+ * wrong:
+ *   2026-09-16 `b1fd951`  1  introduced, `['quit']`
+ *   2026-09-23 `a7d9743`  2  `transferForm` joins
+ *   2026-10-05 `fea689a`  3  `copy` joins
+ *   2026-10-06 `212df60`  2  `transferForm` leaves for `SWALLOWED`
+ *   2026-10-23 `a7995a4`  3  `paste` joins with the kind itself
+ *   2026-10-23 `3eb562b`  1  `copy` and `paste` both leave -- SAME DAY as the line above
+ *   2026-10-27 `7f2f52e`  2  `requestCopy` joins
  */
 const REFUSED: readonly string[] = ['quit', 'requestCopy'];
 

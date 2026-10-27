@@ -192,16 +192,26 @@ export function decodeClientMessage(text: string): ClientMessage {
     // obliged to run it.
     if (aKind === 'quit') throw new Error('quit is not accepted from a client');
     /*
-      `requestCopy` IS REFUSED TOO, 2026-10-27, AND IS THE FIRST KIND WHOSE REFUSAL IS ABOUT WHAT
-      THE SERVER CANNOT KNOW rather than about whose machine a result lands on.
+      `requestCopy` IS REFUSED TOO, 2026-10-27, AND ITS REFUSAL IS ABOUT WHAT THE SERVER CANNOT
+      KNOW rather than about whose machine a result lands on.
 
-      Every refusal this file has ever carried except `quit`'s was of the second shape --
-      `transferForm`, `copy` and `paste` were each freed by making the socket carry the thing that
-      had been stranded (the bytes, the text, the text back). THERE IS NO SUCH THING TO CARRY HERE.
-      `requestCopy` has NO FIELDS: the rectangle is the whole of what a copy needs, it lives in
-      `canvas/src/renderer.ts`'s module-level `anchor`/`focus`, and only the BROWSER holds it. A
-      gateway handed this kind could not extract anything, and no server->client message would
-      help, because the missing information is on the client.
+      NOT "THE FIRST OF ITS KIND", WHICH IS WHAT THIS NOTE CLAIMED WHEN IT WAS WRITTEN AND IS
+      CORRECTED HERE -- the correction being worth more than the claim was. The draft said every
+      refusal this file had ever carried except `quit`'s was freed by making the socket carry a
+      stranded payload, and named `transferForm`, `copy` and `paste`. THERE WERE FOUR, AND THE
+      FOURTH IS THIS FILE'S OWN MOST-CITED PRECEDENT: `toggleKeypad` was refused here too
+      (`c94979f`, "a toggleKeypad frame could end the gateway process", 2026-09-16), and it was
+      freed by neither a payload nor a reason expiring -- `2fb921c` replaced the rejection with an
+      INTERCEPTION in `main.ts`, the rule's other branch, and that commit calls the rejection it
+      removed "a stop-gap". So the refusal history here has two shapes, not one, and the kind this
+      file cites over and over for the forbidden "neither" state is the one the draft forgot.
+
+      WHAT IS TRUE WITHOUT A RANKING, which is the part that justifies the refusal: `requestCopy`
+      has NO FIELDS. The rectangle is the whole of what a copy needs, it lives in
+      `canvas/src/renderer.ts`'s module-level `anchor`/`focus`, and only the BROWSER holds it. So
+      `transferForm`, `copy` and `paste`'s escape route is unavailable -- there is no stranded thing
+      for a new message to carry, because the missing information is on the client -- and
+      `toggleKeypad`'s is unavailable too, for the reason given under the two-branch heading below.
 
       SO IT NEVER LEGITIMATELY ARRIVES. The browser's renderer consumes the kind and sends `copy`
       -- carrying the rect -- instead, so a `requestCopy` on the wire is either a hand-built frame
@@ -304,8 +314,15 @@ export function decodeClientMessage(text: string): ClientMessage {
       -- for a different reason again, which is why it is refused beside `quit` rather than
       following `copy` out. See the note above its rejection: it carries no fields, so the server
       lacks the rectangle and no message in either direction could supply one. The pattern these
-      two share is not "whose machine" but PERMANENCE: both refusals rest on something no new
-      message can move.
+      two share is not "whose machine" but PERMANENCE.
+
+      AND PERMANENCE HAS TO MEAN AGAINST BOTH BRANCHES, NOT JUST AGAINST A NEW MESSAGE, which is
+      what `toggleKeypad`'s history teaches: its refusal here was ended by an INTERCEPTION rather
+      than by any payload (`2fb921c`, which calls the rejection "a stop-gap"), so "no message can
+      free it" is only half a case for a permanent refusal. Both members clear the other half too.
+      `quit` would stop the gateway, so an interception that swallowed it would be a lie about
+      whether the operator had quit; `requestCopy`'s interception could only be a bare `return`,
+      which would tell a buggy client its copy had succeeded when nothing was copied.
 
       BOTH KINDS NOW OWE `main.ts` AN INTERCEPTION, AND IT LANDS IN THIS SAME COMMIT, because
       `applyAction` THROWS on both (`frontend/src/actions.ts`) and `main.ts` calls it outside any
