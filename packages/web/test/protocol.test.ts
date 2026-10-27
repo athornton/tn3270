@@ -116,6 +116,32 @@ describe('decodeClientMessage', () => {
       .toThrow(/quit/i);
   });
 
+  it('REFUSES requestCopy, whose rect only the browser has, and says so', () => {
+    /*
+      THE SECOND MEMBER OF THE REFUSAL LIST, 2026-10-27, and the REASON is what this case pins --
+      `integration.test.ts`'s loop can only assert that the message names the kind, which a
+      superseded refusal would do just as well.
+
+      ITS REASON IS NOT THE ONE THE THREE ACCEPTANCES BELOW OUTGREW. `transferForm`, `copy` and
+      `paste` were each refused over WHOSE MACHINE the result landed on, and each was freed by
+      making the socket carry the stranded thing. `requestCopy` carries NO FIELDS: the rectangle is
+      the whole of what a copy needs, it lives in `canvas/src/renderer.ts`'s module-level
+      `anchor`/`focus`, and only the browser holds it -- so there is nothing a future message could
+      carry here. The renderer converts this kind to a real `copy` and THAT is what crosses the
+      socket.
+
+      `/selection/` AND NOT `/requestCopy/`, AND THAT WAS MEASURED HERE RATHER THAN INHERITED FROM
+      THE SIBLING REFUSALS' NOTES. Replacing the throw with a call to a nonexistent method on the
+      action -- an accidental crash in place of the deliberate refusal -- makes this case report
+      `expected [Function] to throw error matching /selection/ but got 'action.requestCopy is not a
+      function'`. The loose pattern would have PASSED against that; this one does not. Note the
+      refusal message must still NAME the kind for `integration.test.ts`'s `REFUSED` loop, which
+      asserts `toContain(kind)` -- so the message carries both and each test pins its own half.
+    */
+    expect(() => decodeClientMessage('{"kind":"action","action":{"kind":"requestCopy"}}'))
+      .toThrow(/selection/);
+  });
+
   it('accepts copy and paste, both of which it refused until 2026-10-23', () => {
     /*
       THE DECODE HALF ONLY, AND SAYING SO IS THE POINT. `applyAction` THROWS on both of these

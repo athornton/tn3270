@@ -1,4 +1,4 @@
-import { createBridge, socketUrl, type BridgeApi } from './bridgecore.js';
+import { createBridge, socketUrl, writeClipboard, type BridgeApi } from './bridgecore.js';
 import { createKeypadOverlay } from './keypadOverlay.js';
 import { createKeyboardOverlay } from './keyboardOverlay.js';
 // FROM THE MODULE AND NOT FROM `@tn3270/canvas`'s BARREL, which would blank this page: the barrel
@@ -293,6 +293,22 @@ const bridge = createBridge({
   // The three gateway transfer kinds, narrowed by the boot module -- `bridgecore.ts` declines to
   // narrow a parsed JSON object into a union it never validated, and says so.
   onTransfer: (msg) => { boot.onMessage(msg); },
+  /**
+   * THE OPERATOR'S OWN CLIPBOARD, which is the entire point of routing the text back here: only
+   * the gateway can extract (`protocol.ts`'s `copyText` member says why), so the renderer sends
+   * the rectangle and this is where the answer lands.
+   *
+   * ONE LINE, AND THE TWO BROWSER GLOBALS ARE THE ONLY PART THAT BELONGS IN THIS FILE.
+   * `writeClipboard` holds the capability check, the caught rejection and the measurements behind
+   * both, in `bridgecore.ts` where a unit test can drive the NO-CLIPBOARD route -- which is the
+   * common case for a LAN gateway on plain `http` and would otherwise be the one route nothing
+   * covers, exactly as `transferBridge.ts` records for its save dialog.
+   *
+   * `navigator.clipboard` IS PASSED, NOT READ DOWN THERE, for the reason that file's header gives
+   * about every browser capability: the tests run with `environment: 'node'` and have no
+   * `navigator` at all. `console.warn` rides along for the same reason.
+   */
+  onCopyText: (text) => { writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); }); },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

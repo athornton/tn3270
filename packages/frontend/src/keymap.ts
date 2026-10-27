@@ -128,6 +128,57 @@ export type Action =
   // structurally identical, so `extractText(cells, cols, action.rect)` typechecks without a cast.
   // Do not "tidy" this into an import.
   | { kind: 'copy'; rect: { top: number; left: number; bottom: number; right: number } }
+  /**
+   * THE OPERATOR ASKED TO COPY, CARRYING NO RECT. 2026-10-27, for the web copy gesture.
+   *
+   * SEPARATE FROM `copy` BECAUSE A KEY MAPPER CANNOT SEE A SELECTION. The spec for this feature
+   * first said the chord should raise `{kind:'copy', rect}` straight from `canvas/src/keys.ts`, and
+   * that is not implementable: `copy` above requires the four rect fields, while `actionForKey(e:
+   * KeyLike)` (`canvas/src/keys.ts:164`) is a pure function of one key event, and the selection
+   * lives in `canvas/src/renderer.ts`'s module-level `anchor`/`focus` (`:88-89`). So the keymap
+   * raises the INTENT and the renderer -- the one place that holds the rectangle -- turns it into a
+   * real `copy`.
+   *
+   * BOTH HALVES NOW EXIST, and this paragraph used to say the opposite. Written in `7f2f52e` --
+   * which added this member, `applyAction`'s throw and the gateway's refusal, but NOTHING that
+   * produces the kind -- it read "That conversion is a LATER TASK of this feature; this member is
+   * the vocabulary it needs, and nothing raises the kind yet". True for exactly two commits.
+   * `9e14d86` made `actionForKey` RAISE it from `Ctrl-Shift-C` / `Cmd-Shift-C`
+   * (`canvas/src/keys.ts`, the branch above the case-folded `CTRL` lookup), and `9a6e53e` made
+   * `canvas/src/renderer.ts`'s keydown listener CONVERT it, intercepting the kind before
+   * `clearSelection()` and calling `copySelection()`. `4d56edb` then added the Electron GUI's
+   * `requestCopy` drop, which is what keeps the kind out of `applyAction` in a child window.
+   *
+   * CITED BY COMMIT AND BY NAME RATHER THAN BY LINE, because the line numbers in the paragraph
+   * above this one have already been falsified once on this branch -- see the note on
+   * `renderer.ts`'s `__tn3270Copy` global, where two citations drifted within one commit of being
+   * written. A "not yet" is the shape that rots fastest: nothing fails when it comes true.
+   *
+   * THE SEVENTH KIND `applyAction` THROWS ON, so the front end that raises it must own it, and a
+   * front end that forgot gets a loud failure instead of a chord that silently does nothing.
+   *
+   * THAT IS THE ONLY RESPECT IN WHICH IT RESEMBLES `toggleKeypad`, and the distinction is worth
+   * drawing because the spec and the plan both got it wrong: the two-step CONVERSION above is
+   * `transferForm`'s shape, not `toggleKeypad`'s. `toggleKeypad` is terminally intercepted --
+   * `web/src/bridgecore.ts` calls `deps.toggleKeypad?.()` and returns, converting it to nothing --
+   * whereas `transferForm` opens an overlay that LATER emits different messages, which is exactly
+   * what `requestCopy` does in becoming a `copy`.
+   *
+   * IT MUST NEVER REACH A `Session`, AND THE GATEWAY REFUSES IT AT DECODE for a reason that does
+   * not expire the way `copy`'s and `paste`'s did (`web/src/protocol.ts`): the server does not know
+   * which cells the operator dragged, so there is no message it could send back that would make
+   * this kind actionable there. `copy` carries the rectangle and is answered with `copyText`; this
+   * carries nothing, and the browser is the only party that can supply what is missing. So it takes
+   * `quit`'s branch of that file's two-branch rule -- a REJECTION -- rather than the interception
+   * branch. (`toggleKeypad` was itself rejected there once, in `c94979f`, before `2fb921c`
+   * replaced that stop-gap with the interception it has now; so "rejection" and "interception" are
+   * branches a kind can move between, not permanent labels. What makes this one permanent is that
+   * the server can never acquire the rectangle.)
+   *
+   * NO FIELDS MEANS NOTHING TO SHAPE-CHECK, which is the one way it is easier than `copy`: the
+   * refusal is unconditional, so there is no malformed-field path to bound.
+   */
+  | { kind: 'requestCopy' }
   | { kind: 'type'; text: string }
   /**
    * PASTE, 2026-10-23, AND IT IS DELIBERATELY NOT `type` -- BUT NOT FOR THE REASON THE PLAN GAVE.

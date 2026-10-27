@@ -2,8 +2,13 @@
  * The browser side of the bridge, with the browser injected.
  *
  * Supplies exactly what `preload.cts` supplies over IPC -- `onAtlas`, `onFrame`, `onError`,
- * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. If this file grows a fifth function, the
- * renderer has stopped being shared and something is wrong.
+ * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. If `BridgeApi` grows a fifth function,
+ * the renderer has stopped being shared and something is wrong.
+ *
+ * THAT RULE IS ABOUT `BridgeApi` AND NOT ABOUT THIS FILE'S EXPORTS, which is worth spelling out
+ * because the two have drifted: `socketUrl` and `writeClipboard` are exported plain functions
+ * nothing in the renderer can see, and `BridgeDeps` has grown several members. The renderer
+ * consumes `BridgeApi` alone, so that is the width that must not move.
  *
  * ## THE QUEUE IS NOT DEFENSIVE CODING
  *
@@ -113,6 +118,75 @@ export interface BridgeDeps {
    * measurement (`TS2379`) for the dep that is genuinely handed `undefined`.
    */
   readonly showTransfer?: (() => void) | undefined;
+  /**
+   * The operator's copied text, for THEIR clipboard. 2026-10-23.
+   *
+   * OPTIONAL, the same contract `toggleKeypad`, `toggleKeyboard` and `onTransfer` above have and
+   * for the same reason: the gateway's own tests and any caller with no DOM must be able to
+   * construct a bridge without one.
+   *
+   * STILL NOT A BREACH OF THE FOUR-FUNCTION RULE, which is about `BridgeApi` below -- the surface
+   * `renderer.ts` consumes unmodified, and whose width is what lets that file be reused by
+   * Electron. See the note on `toggleKeypad`, which made this argument first. LAST IN THE
+   * INTERFACE DELIBERATELY: `showTransfer` above states its own position in this list, so
+   * inserting beside `onTransfer` -- where the plan for this task said to put it -- would have
+   * falsified that sentence.
+   *
+   * WHY A SERVER->CLIENT MESSAGE EXISTS AT ALL is stated once in `protocol.ts`, on the `copyText`
+   * member: only the gateway can extract the text. Cited rather than restated, because it is a
+   * fact about `canvas/src/drawlist.ts`'s `DrawCell` and this rationale is already copied into
+   * enough files to drift independently.
+   *
+   * WITHOUT THIS HOOK THE REPLY IS DROPPED: the `onmessage` chain below returns on each kind it
+   * knows and then falls off the end, with no `else`, no throw and no log -- so the operator would
+   * press copy, the gateway would log `copy: N chars`, and their clipboard would be unchanged with
+   * nothing in any console. Same shape as the transfer kinds before `onTransfer` existed.
+   *
+   * NOT ROUTED THROUGH `dispatch`, for the reason `onTransfer` gives above: that queue exists
+   * because `renderer.js` registers its handlers when its module body runs, which races the atlas.
+   * This handler is injected by the SAME module that constructs the bridge (`bridge.ts`), so it
+   * cannot be late and there is nothing to queue -- while `dispatch`ing this kind would park it in
+   * that queue forever, since `onAtlas`/`onFrame`/`onError` are the only registrars and each
+   * hardcodes its kind.
+   *
+   * ## `String(msg['text'])` IS SUFFICIENT, AND THAT IS ABOUT DIRECTION RATHER THAN TRUST
+   *
+   * This repo's rule is that the two-branch rule is necessary but not sufficient -- a kind's
+   * FIELDS must be shape-checked at decode -- so the bare coercion below invites the question.
+   * `decodeClientMessage` is the boundary that rule governs: it guards CLIENT->server messages,
+   * where the sender is a client under nobody's control and the prior task measured the cost as
+   * the GATEWAY PROCESS and every other operator's session with it. `copyText` runs the other way.
+   * Its sender is the gateway whose own JS this browser is already executing, and the blast radius
+   * of a malformed one is one string on one operator's clipboard in one tab.
+   *
+   * MEASURED 2026-10-26 rather than reasoned about, and the convenient version of this claim is
+   * WRONG: `String()` is not total over JSON-reachable values. `{"text":{"toString":null}}` parses
+   * fine -- `toString` is an ordinary own property and the prototype is untouched -- and coercing
+   * it throws `TypeError: Cannot convert object to primitive value`, inside the un-awaited async
+   * IIFE below, which makes it an unhandled rejection rather than anything visible.
+   *
+   * THE RULE IS AN OWN `toString` THAT IS NOT CALLABLE, not that one specific literal:
+   * `{"toString":1}` throws identically, and so does `[{"toString":null}]` -- `Array.prototype
+   * .join` coerces each ELEMENT, so an array is only as safe as its contents, at any depth. A
+   * literal `__proto__` key does NOT hijack it, because `JSON.parse` leaves the prototype intact,
+   * so `{"text":{"__proto__":{"toString":null}}}` coerces to `"[object Object]"`.
+   *
+   * THE SHAPES CHECKED, and deliberately not "every other shape": `{}`, `[1,2]`, `[null,1,"a"]`,
+   * `[{}]`, `{"valueOf":null}`, `null`, a number, a boolean and an absent field all coerce without
+   * throwing. An enumeration is the evidence for "only this family throws", so a reader who tests
+   * it must not find a thrower it implied was safe -- which is what an unqualified "every other
+   * shape" did here, by inviting generalization from `[1,2]` to arrays.
+   *
+   * NOT HARDENED HERE, because the thrower has to be the gateway and the gateway encodes this
+   * field from a `string`; recorded so the next reader neither hardens it on a false premise nor
+   * cites it as precedent for skipping a check on the inbound side, where the cost is the process.
+   *
+   * NO `| undefined` ANNOTATION, unlike `showTransfer` above. That annotation is what lets a
+   * caller inject the result of a condition under `exactOptionalPropertyTypes`; `bridge.ts` passes
+   * a real function here unconditionally, and the capability detection lives one level down in
+   * `writeClipboard` below -- injected there, which is what gives the no-API route a test.
+   */
+  readonly onCopyText?: (text: string) => void;
 }
 
 export interface BridgeApi {
@@ -153,6 +227,79 @@ export function socketUrl(documentHref: string): string {
   const url = new URL('ws', documentHref);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.href;
+}
+
+/**
+ * A narrowing of `navigator.clipboard` to the one method this uses.
+ *
+ * Declared rather than taken from `lib.dom` so `writeClipboard` can be handed `undefined`, which
+ * `Navigator.clipboard`'s own type forbids -- see that function's note. The same shape and the
+ * same reason as `transferBridge.ts`'s `SaveSink`, which narrows a `FileSystemWritableFileStream`
+ * so a unit test can supply one.
+ */
+export interface ClipboardWriter {
+  writeText(text: string): Promise<void>;
+}
+
+/**
+ * Put the operator's copied text on their clipboard, or say why it could not be done.
+ *
+ * HERE RATHER THAN IN `bridge.ts` SO THE NO-API ROUTE CAN BE TESTED, which is the same split
+ * `socketUrl` above exists for and the same one `transferBridge.ts` makes for its save dialog.
+ * `bridge.ts` touches real browser globals at module load, so no unit test can import it; this
+ * takes the clipboard and the warn sink as PARAMETERS, so both routes are drivable with no DOM.
+ * It is an exported plain function and not a fifth member of `BridgeApi`, exactly as `socketUrl`
+ * is -- the four-function rule is about the surface `renderer.ts` consumes.
+ *
+ * ## `clip === undefined` IS THE COMMON CASE AND THE UNTESTED ROUTE IS THE ONE THAT ROTS
+ *
+ * `navigator.clipboard` is SECURE-CONTEXT-ONLY, and a LAN deployment of this gateway on plain
+ * `http` does not have one. `transferBridge.ts` records the identical situation for
+ * `showSaveFilePicker` -- "`undefined` is the COMMON case for this gateway, not an edge one" --
+ * and the structural lesson with it: "the fallback is the one at risk of rotting, because a
+ * developer on Chrome-over-localhost always gets the picker." So the capability is INJECTED here
+ * rather than read from `navigator` at the point of use, which is the whole reason this function
+ * exists instead of an inline `if` in the entry point.
+ *
+ * ## THE GUARD BELOW IS COMPILER-ENFORCED, NOT COMMENT-ENFORCED
+ *
+ * MEASURED 2026-10-26: deleting the `clip === undefined` branch FAILS THE BUILD with
+ * `TS18048: 'clip' is possibly 'undefined'`. So a reader who takes it for dead code finds out
+ * from `tsc` rather than from an operator whose copy silently did nothing, and that is the
+ * durable half of this note -- re-measure it rather than trusting this line if the signature
+ * ever changes.
+ *
+ * THE `| undefined` IN THE SIGNATURE IS WHAT BUYS THAT, and it is also why `bridge.ts`'s call
+ * needs no cast. `lib.dom.d.ts` declares `readonly clipboard: Clipboard` on `Navigator`, NOT
+ * `| undefined`, which is wrong about every non-secure context; inlined in `bridge.ts` that
+ * narrowed this guard's body to `never`, and the branch most likely to RUN in production read as
+ * dead code to anyone cleaning up. Injecting the capability is what inverted that.
+ *
+ * CAUGHT, NOT VOIDED. `void` on a rejecting promise is what CREATES an unhandled rejection --
+ * measured on this project's transfer window, and the reason `gui/src/main.ts` wraps its own
+ * clipboard call. A clipboard the browser refuses (permission denied, an unfocused document) is
+ * reportable and recoverable, never fatal: this returns `void` rather than the promise precisely
+ * so no caller can forget to handle it.
+ *
+ * NO `execCommand` FALLBACK, which is a refusal to guess rather than an omission.
+ * `document.execCommand('copy')` would need a hidden textarea, a selection and transient user
+ * activation that this path -- a server message arriving asynchronously -- does not have. What a
+ * non-secure-context browser actually does here is NOT YET MEASURED; the real-browser task is
+ * where that belongs, and a speculative fallback would be untested code on the exact path whose
+ * failure mode is already silent.
+ */
+export function writeClipboard(
+  clip: ClipboardWriter | undefined,
+  text: string,
+  warn: (message: string) => void,
+): void {
+  if (clip === undefined) {
+    warn('copy: this browser has no clipboard API (needs a secure context)');
+    return;
+  }
+  clip.writeText(text).catch((err: unknown) => {
+    warn(`copy: the browser refused the clipboard: ${String(err)}`);
+  });
 }
 
 const ID_KEY = 'tn3270.sessionId';
@@ -200,13 +347,21 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       }
       if (msg.kind === 'frame') { dispatch('frame', msg['list']); return; }
       if (msg.kind === 'error') { dispatch('error', String(msg['message'])); return; }
+      // THE RECEIVING HALF OF `copy`, 2026-10-23. NOT through `dispatch`, for the reason the
+      // transfer branch below gives: that queue is for handlers `renderer.js` registers in its
+      // module body, and this is not one of them -- `bridge.ts` injects it at construction, so it
+      // cannot be late, and a `dispatch`ed `copyText` would sit in the queue forever. Absent, the
+      // text is dropped, which is correct for a client with no clipboard to write.
+      if (msg.kind === 'copyText') { deps.onCopyText?.(String(msg['text'])); return; }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
         // `httpstatic.ts` and `Buffer` does not exist here. The atlas branch above decodes its
-        // `coverage` the same way at `:133`, which is the one convention for bytes over this
-        // socket -- and `protocol.ts:64-68` records that an earlier comment there named `Buffer`
-        // for this very message and had to be corrected.
+        // `coverage` the same way, which is the one convention for bytes over this socket -- and
+        // `encodeServerMessage` in `protocol.ts` records that an earlier comment there named
+        // `Buffer` for this very message and had to be corrected. (Both of this sentence's line
+        // references were stale before this feature touched the file -- `:233` for the atlas and
+        // `protocol.ts:64-68` for that note -- which is why neither is a number any more.)
         //
         // ONLY `transferData` CARRIES BYTES. `transferProgress` and `transferDone` are passed
         // through untouched, and decoding a missing `bytes` field would turn `undefined` into the

@@ -103,14 +103,24 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * business, like `toggleKeypad`, belongs in `main.ts` as an interception and must be answered here,
  * not added to this list.
  *
- * ONE MEMBER NOW, AND THE DOCBLOCK THAT STOOD HERE PREDICTED EXACTLY THAT: "when it lands, this
- * list should be back to one member". It went three -> one on 2026-10-23, when `copy` and `paste`
- * both left for `SWALLOWED`. The count was 2 (`quit`, `copy`) after `transferForm` left on
- * 2026-10-06, then 3 when `paste` joined with the kind itself, and 1 since.
+ * TWO MEMBERS NOW, `requestCopy` having joined on 2026-10-27. The full size history is tabulated
+ * at the foot of this note rather than narrated here, which is what keeps it checkable; the one
+ * episode worth calling out in prose is that the docblock which stood here predicted the 2026-10-23
+ * drop to a single member in those words ("when it lands, this list should be back to one member").
  *
- * `quit` IS THE WHOLE LIST, and its reason is the one here that does not expire: it would stop the
- * gateway, taking every connected operator's mainframe session with it, and no message travelling
- * back to a browser changes whose process is being stopped.
+ * `quit`'s REASON DOES NOT EXPIRE: it would stop the gateway, taking every connected operator's
+ * mainframe session with it, and no message travelling back to a browser changes whose process is
+ * being stopped.
+ *
+ * `requestCopy`'s DOES NOT EITHER, AND IT IS NOT THE SAME REASON -- which is the distinction that
+ * earns it a place here rather than in `SWALLOWED` or `ANSWERS`. The copy GESTURE raises it
+ * (2026-10-27) carrying NO rect, because `actionForKey` is pure and the selection lives in
+ * `canvas/src/renderer.ts`'s module state; the renderer converts it to a real `copy` and that is
+ * what crosses the socket. So the gateway never legitimately receives this kind, and it could do
+ * nothing with it if it did: the rectangle is the whole of what a copy needs and only the browser
+ * has it, so unlike the three below there is no message that could free this kind later. An
+ * interception in `main.ts` would be a bare `return`, i.e. telling a buggy client its copy had
+ * succeeded when nothing was copied -- so this takes `quit`'s branch of the two-branch rule.
  *
  * `copy` AND `paste` LEFT FOR THE REASON `transferForm` DID, which is the third time this list has
  * watched the same inversion. All three were refused over WHOSE MACHINE the result lands on, and
@@ -146,11 +156,23 @@ const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>>
  * refusal from a superseded one, since both name the kind; `protocol.test.ts` pins the REASON,
  * which is the half that went stale here when the transfer reason rotted.
  *
- * A ONE-MEMBER LIST IS STILL A LIST AND NOT AN `if`, deliberately: the shape is what makes the
- * next refusal's arrival a one-word change beside the reasoning that justifies it, and this list
- * has been 1, 2 and 3 members on three different dates.
+ * A LIST AND NOT AN `if`, deliberately -- and it was worth keeping as one while it had a single
+ * member: the shape is what made the next refusal's arrival a one-word change beside the reasoning
+ * that justifies it, which is exactly what `requestCopy` then was.
+ *
+ * THE SIZES, TRACED FROM THE LITERAL RATHER THAN COUNTED FROM MEMORY, because a bare tally of
+ * "dates" is ambiguous about whether it counts the day the list was created and about two changes
+ * landing on one day -- and both happened here, which is how the draft of this line got the number
+ * wrong:
+ *   2026-09-16 `b1fd951`  1  introduced, `['quit']`
+ *   2026-09-23 `a7d9743`  2  `transferForm` joins
+ *   2026-10-05 `fea689a`  3  `copy` joins
+ *   2026-10-06 `212df60`  2  `transferForm` leaves for `SWALLOWED`
+ *   2026-10-23 `a7995a4`  3  `paste` joins with the kind itself
+ *   2026-10-23 `3eb562b`  1  `copy` and `paste` both leave -- SAME DAY as the line above
+ *   2026-10-27 `7f2f52e`  2  `requestCopy` joins
  */
-const REFUSED: readonly string[] = ['quit'];
+const REFUSED: readonly string[] = ['quit', 'requestCopy'];
 
 /**
  * Kinds the gateway accepts and answers with SILENCE, which is a third category this loop needed.

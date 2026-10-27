@@ -90,8 +90,14 @@ const TRANSFER_BACKTAB = 0x5a;    // the `Z` of `\x1b[Z`
  *
  * CASE-FOLDED, so `K` moves up as well as `k`. This DIVERGES FROM VI, where `K` is a different
  * command from `k`; the reason is the same one the `CTRL` table in canvas/src/keys.ts case-folds
- * for (Ctrl-Shift-C is still Clear) -- caps lock, or a held shift, must not silently make the
+ * for (Ctrl-Shift-R is still Reset) -- caps lock, or a held shift, must not silently make the
  * list unnavigable. There is nothing for a shifted form to mean here, so nothing is given up.
+ *
+ * THE EXAMPLE USED TO BE Ctrl-Shift-C, and it stopped being true on 2026-10-27: that chord is now
+ * the canvas front ends' copy gesture, claimed by a branch AHEAD of the fold, so it is the one
+ * shifted chord there that is not its unshifted self. Reset is cited instead because it still is.
+ * Nothing about this file changed -- the overlay's fold is unaffected, since no shifted letter here
+ * has been given a meaning -- but the sentence that justified it had become false.
  */
 const OVERLAY_UP_LETTERS: ReadonlySet<number> = new Set(Array.from('kKwW', (c) => c.charCodeAt(0)));
 const OVERLAY_DOWN_LETTERS: ReadonlySet<number> = new Set(Array.from('jJsS', (c) => c.charCodeAt(0)));

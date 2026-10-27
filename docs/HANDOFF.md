@@ -1,87 +1,85 @@
-# Handoff — state as of 2026-10-23 (the keyboard is in both front ends; child windows type)
+# Handoff — state as of 2026-10-27 (web copy and paste are COMPLETE, gesture included)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT ACTION, MONDAY: WEB COPY/PASTE IS HALF BUILT, AND MY PLAN FOR IT IS UNRELIABLE
+## START HERE — ROADMAP (0e) IS DONE; A LIVE PASS IS OWED AND THE USER HAS AGREED TO IT
 
-**STOPPED 2026-10-23 AT THE USER'S REQUEST, mid-feature but at a clean boundary.** `main` is green
-and **PUSHED** at `b5e8a1d`: **2586 tests in 110 files.**
+**Branch `web-copy-paste`, NOT yet merged to `main` and NOT pushed.** Build exit 0,
+**2614 tests in 110 files**, `browser-clicks` 9 buttons + **13/13**, `browser-shot` 1/1,
+`select.mjs` 3/3, `keys.mjs` **22 chords / 20 actions**.
 
-### WHAT TO DO FIRST ON MONDAY
+### WHAT SHIPPED
 
-**Roadmap item (0e), WEB COPY AND PASTE, is 3 of 7 tasks done.** Spec
-`docs/superpowers/specs/2026-10-23-web-copy-paste-design.md`, plan
-`docs/superpowers/plans/2026-10-23-web-copy-paste.md`.
+**Web copy and paste both work in the browser, including a reachable copy gesture.**
 
-**DONE (safe to leave indefinitely — no user-visible half-feature):**
-- `a7995a4` — `{kind:'paste', text}` in the `Action` union; `applyAction` THROWS on it (sixth of
-  that shape). Also added a decode REJECTION for the kind, because the two-branch rule forbids
-  "neither".
-- `0c65c25` — `frontend/src/pasteAction.ts`'s `applyPaste(session, text)`, the shared paste path.
-  The Electron GUI is its first caller; its message strings moved VERBATIM (diffed mechanically).
-- `3eb562b` — the gateway accepts both kinds, answers `copy` with a new `copyText` message, and
-  **shape-checks both kinds' fields at decode**. `REFUSED` is now `['quit']` alone.
+- Paste (2026-10-26, tasks 1-7 of `2026-10-23-web-copy-paste.md`): the gateway accepts `copy` and
+  `paste`, answers `copy` with a `copyText` message, the bridge writes `navigator.clipboard` via
+  `writeClipboard`, and `forwardPaste` raises `{kind:'paste'}` from the page's own `paste` event.
+  **`Ctrl-V` works only because `keys.ts` never claimed it** — Chromium delivers the event itself.
+- The copy GESTURE (2026-10-27, `2026-10-27-web-copy-gesture.md`): **`Ctrl-Shift-C`, and
+  `Cmd-Shift-C` on macOS.** Until this landed, copy's entire server path shipped with no way for an
+  operator to invoke it — `__tn3270Copy` was reachable only from Electron's menu and the harnesses.
 
-**NOTHING IN THE BROWSER RAISES EITHER KIND YET**, which is why this is a clean stop: the gateway
-can answer them, no client sends them.
+**WHY NOT THE NATIVE GESTURE, measured and not chosen.** With no DOM selection — our real case,
+since the 3270 selection is `renderer.ts` module state — `Ctrl-C` fires a native `copy` event while
+**`Cmd-C` fires none.** So on Linux the native gesture IS the Clear AID, and on macOS the browser
+default copies nothing at all. A keymap that merely declined `Cmd-C` would leave macOS unable to
+copy. **A `null` from our keymap means "we declined it", not "the platform handles it."**
 
-**REMAINING: Tasks 4-7** — the bridge's clipboard write (`onCopyText` +
-`navigator.clipboard.writeText`), `renderer.ts`'s `paste` listener, real-browser harness cover,
-docs.
+**THE TWO-STEP SHAPE, and it is forced.** `actionForKey` is PURE and `{kind:'copy'}` carries a
+`rect`, so a key mapper cannot raise it. `keys.ts` raises `{kind:'requestCopy'}` and `renderer.ts`
+converts it. That is **`transferForm`'s** shape, NOT `toggleKeypad`'s — `toggleKeypad` is a single
+kind terminally intercepted, and the spec and plan both carried that wrong analogy until it was
+corrected.
 
-### READ THIS BEFORE USING THAT PLAN — IT HAS A MEASURED ERROR RATE
+### THREE THINGS THAT BIT, ALL WORTH CARRYING FORWARD
 
-**THREE OF ITS CLAIMS WERE WRONG AND ONE WAS DANGEROUS.** Implementers found each by checking the
-repo instead of trusting the text, which is the only reason they were caught:
+1. **`forwardKeys` FORWARDS ANY KIND, UNFILTERED**, and the keypad/keyboard child windows load
+   their own boot files rather than `renderer.js`. So `Ctrl-Shift-C` pressed in a child window
+   reached `applyAction`, which throws, **freezing the Electron main process** — `kill -9`, SIGTERM
+   ignored. Fixed by an arm at the `ipcMain.on('action')` funnel. **THE STRUCTURAL GAP IS STILL
+   OPEN: the next kind `applyAction` throws on reproduces this exact freeze from those windows.**
+   Seven kinds throw today.
+2. **No harness could deliver a keystroke to a child window at all**, which is precisely why that
+   freeze was reachable with a fully green suite. `TN3270_GUI_KEYS` now takes a **`kbd:`** prefix.
+   Its case is a chord plus an `attn` **liveness probe**, because a frozen client and a correctly
+   dropped chord both produce no `action:` line. `spawnSync`'s default SIGTERM means nothing to a
+   frozen event loop, so `killSignal: 'SIGKILL'` is what turns the freeze into a reported failure.
+3. **The selection must SURVIVE a copy**, and `renderer.ts` clears on every claimed action. The arm
+   sits BEFORE `clearSelection()` and the ordering is pinned on the built artifact — moving it below
+   still builds, still typechecks, and passes all 2614 unit tests. Only `browser-clicks.mjs` catches
+   a copy that succeeds and THEN clears.
 
-1. **THE FEATURE'S WHOLE SAFETY RATIONALE WAS FALSE.** The spec and plan claimed a paste carried as
-   `{kind:'type'}` would send every `\n` as **Enter, submitting a half-filled panel to a live
-   host**, and every `\f` as **Clear**. Measured by driving the function:
-   `typeString('AB\nC\fD')` leaves six cells reading `A B \n C \f D`.
-   `core/src/keyboard.ts` has **zero** AID paths. The real hazard is **CORRUPTION, NOT
-   SUBMISSION** — the control characters land in the field as EBCDIC 0x25/0x0c with MDT set, so the
-   next AID carries them as field data. **The separate `paste` kind is still right** (it buys
-   `pasteString`'s newline-as-next-field, `\f`-as-space, `\r`-dropped semantics) but the win is
-   narrower than advertised.
-2. **THE PLAN'S OWN TASK 3 CODE WAS PROCESS-ENDING**, in the exact hazard the plan spends two
-   paragraphs warning about. `extractText(cells, cols, undefined)` throws
-   `TypeError: Cannot read properties of undefined (reading 'top')` and `pasteString` throws
-   `text is not iterable` — both called directly in the socket handler, outside any try. A
-   malformed frame from any client would have ended the gateway for every connected operator. Fixed
-   in `3eb562b` by shape-checking at decode.
-3. **Three invented APIs in its test code** — `defaultSession()`, `session.keyboard.lock()`, and a
-   wrong import path. None exist.
+### THE LIVE PASS, and it is now SMALL — four items, listed in `docs/live-testing.md`
 
-**SO: RE-DERIVE TASKS 4-7 AGAINST THE REPO BEFORE DISPATCHING THEM.** The user was told this and
-agreed. The plan is a sketch of intent, not a source.
+The OS clipboard **is** machine-checked over loopback (`isSecureContext` true on `http://127.0.0.1`,
+both permissions `granted`), so that is NOT owed. What is:
 
-### AND THE RULE THAT CAME OUT OF IT, WHICH IS WORTH MORE THAN THE FEATURE
+1. **The LAN / non-secure-context branch** — `navigator.clipboard` absent, the warn path. The common
+   deployment, unreachable from any harness here.
+2. **Chromium and Firefox; Safari worth adding** (no witness or prior measurement in this repo).
+3. **The Electron accelerator overlap on Linux** — `Ctrl-Shift-C` is also the GUI's Copy
+   accelerator. **Unmeasurable from this repo: `sendInputEvent` does not trigger menu accelerators
+   at all** (control-verified). Treat a double fire as LIKELY; the `Ctrl+Shift+V` twin does it.
+4. **Whether a page can claim `Ctrl-L` on Linux/Windows** — the user has a Linux desktop and offered
+   to check. It decides whether Clear could leave `Ctrl-C`. **The macOS result cannot settle it**:
+   the address bar is `Cmd-L` there, so `Ctrl-L` was never the browser's shortcut.
 
-**THE TWO-BRANCH RULE IS NECESSARY BUT NOT SUFFICIENT.** A kind `applyAction` throws on needs a
-rejection or an interception — and if accepted, **its FIELDS must be shape-checked at decode too**
-(the `transferChunk`/`pf` precedent). An interception guards one failure mode and leaves another
-wide open. `protocol.ts` now carries this.
+### OPEN QUESTIONS FOR THE USER
 
-**Also learned:** neither `copy` nor `paste` belongs in `integration.test.ts`'s `SWALLOWED` list,
-because both are ANSWERED — `copy` with `copyText`, `paste` with the frame from its repaint, where
-`SWALLOWED` means silence. That loop grew an `ANSWERS` map rather than a fourth hardcoded branch.
+- **`Alt-C` as a Clear alias.** Both c3270 (`fb-c3270:86-87`) and zti bind Clear there, and `Alt-C`
+  is free in our keymap. Costs nothing and needs no platform detection.
+- Whether to merge `web-copy-paste` to `main` before or after the live pass.
 
-### A LIVE PASS IS OWED ONCE TASKS 4-7 LAND
+### THE PLANS ON THIS BRANCH HAVE A MEASURED ERROR RATE — RE-DERIVE, DO NOT DISPATCH
 
-The user has agreed to do it. No harness can read the OS clipboard, so it needs a human:
-
-- text copied in the browser actually appears in the operator's own clipboard;
-- a multi-line paste lands in the right fields **without submitting the panel**;
-- **Chromium AND Firefox both**, because `navigator.clipboard.writeText` is secure-context-only and
-  this gateway is often served over plain `http`;
-- and whether a plain-`http` LAN address has a clipboard at all.
-
-**A VISIBLE DIALOG DOES NOT IDENTIFY THE ROUTE** — the save-picker lesson, recorded in
-`live-testing.md`, where Firefox's own download preference was briefly mistaken for the picker.
-
----
+Every one of the four implementers found real defects in the plan text. Among them: a nonexistent
+test helper, **a test that would have PASSED ON A DELETED ARM** (matching the word `requestCopy` in
+a comment rather than the dispatch), a flatly wrong assertion (`{code:'KeyX'}` gives `clear`, not
+`null`), and a hazard analysis that missed the freeze above. **Tell implementers the SOURCE BEATS
+THE PLAN** — it is the only reason these were caught.
 
 ## THE KEYBOARD, COMPLETE: BOTH FRONT ENDS, AND CHILD WINDOWS TYPE
 
@@ -114,7 +112,8 @@ real `BrowserWindow`: Ctrl-A, a plain character and Enter all reach main's `ipcM
 from both windows. Why no live-host run was needed is in `live-testing.md`'s newest entry.
 
 **THAT GAP IS CLOSED, AND THE MEASUREMENT THAT FOUND IT WAS PARTLY WRONG** (2026-10-23).
-`keys.mjs` now drives **20 chords / 18 actions**, `Ctrl+B` among them.
+`keys.mjs` drove **20 chords / 18 actions** as of that date, `Ctrl+B` among them. **It is 22 / 20
+now** — two `kbd:` child-window cases joined 2026-10-27; see START HERE.
 
 **THE CORRECTION IS WORTH MORE THAN THE FIX.** The gap was found by `grep -c "Ctrl+B"` returning 0
 in every harness — but `browser-clicks.mjs` spells it **`Ctrl-B`, with a hyphen**, and dispatches
@@ -133,9 +132,10 @@ transfer, four keyboard), `browser-shot` **1/1**, `pty-smoke` 12 PASS / 0 FAIL. 
 harnesses matched, which is what says nothing leaked into the base page — the keyboard is an
 overlay and neither golden contains one.
 
-**NOTE WHAT `browser-clicks` PRINTS.** Its summary line reads `transfer form: 11/11 checks` because
-all of phase two shares one `TRANSFER_CHECKS` array; four of those eleven are the keyboard's. The
-label is stale, not the count.
+**NOTE WHAT `browser-clicks` PRINTS.** Its summary line says `transfer form: N checks` because all
+of phase two shares one `TRANSFER_CHECKS` array, and most of those checks are not the transfer
+form's. **The LABEL is stale, not the count.** It read `11/11` on 2026-10-23 (seven transfer, four
+keyboard) and reads **13/13** since 2026-10-27, the two new ones being copy and paste.
 
 ### THE KEYBOARD'S STATE, SO NOBODY RE-DERIVES IT
 
