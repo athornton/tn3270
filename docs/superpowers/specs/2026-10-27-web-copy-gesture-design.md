@@ -99,7 +99,24 @@ move off `Ctrl-C`, and because an `Alt-C` Clear alias is independent of this spe
 
 ## What ships
 
-### 1. `Ctrl-Shift-C` -> `{kind:'copy', rect}` in `canvas/src/keys.ts`
+### 0. CORRECTION, 2026-10-27: the chord CANNOT raise `copy`, and §1-§3 below understate this
+
+**Found while writing the plan, before any code was written.** The sections below say the chord
+maps to `{kind:'copy', rect}` in `keys.ts`. **That is not implementable.** `copy` carries
+`rect: {top,left,bottom,right}` (`frontend/src/keymap.ts:130`), and `actionForKey(e: KeyLike)`
+is a PURE function of a key event — the selection lives in `renderer.ts`'s module-level
+`anchor`/`focus` (`renderer.ts:88`), which a key mapper cannot see.
+
+So the mapping is two-step, and the plan adds a task for it that this spec did not have:
+`keys.ts` raises a new intent-only **`{kind:'requestCopy'}`**, and `renderer.ts` — the one place
+that knows the rectangle — converts it to a real `copy`. That is the split `toggleKeypad` already
+uses. Being a kind `applyAction` throws on, it also needs a decode REJECTION at the gateway, per
+the two-branch rule.
+
+Read `docs/superpowers/plans/2026-10-27-web-copy-gesture.md` Task 1 for the shape. Everything
+else below stands as written.
+
+### 1. `Ctrl-Shift-C` -> a copy request in `canvas/src/keys.ts`
 
 **THE OBSTACLE IS THAT THE `CTRL` LOOKUP IS CASE-FOLDED ON PURPOSE.** `keys.ts:167-170`:
 
