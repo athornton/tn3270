@@ -164,9 +164,78 @@ const PA_CODES: Readonly<Record<string, Action>> = Object.freeze({
 export function actionForKey(e: KeyLike): Action | null {
   if (MODIFIERS.has(e.key)) return null;
 
+  /**
+   * COPY, on `Ctrl-Shift-C` (Linux, Windows) and `Cmd-Shift-C` (macOS). 2026-10-27.
+   *
+   * ## BEFORE THE `CTRL` LOOKUP, AND THAT ORDER IS THE WHOLE TRICK
+   *
+   * That lookup is case-folded, so `Ctrl-Shift-C` used to mean Clear just as `Ctrl-C` does --
+   * DRIVEN, not assumed: both returned `{kind:'clear'}` before this branch existed. Taking the
+   * shifted form for copy therefore requires getting in first; a `copy` entry in `CTRL` could not
+   * work at all. Plain `Ctrl-C` is untouched and still Clear, which is the property the fold
+   * exists to protect, and the comment on the lookup now says which of the two jobs it still has.
+   *
+   * ## WHY NOT THE NATIVE `copy` EVENT, WHICH IS HOW PASTE WORKS
+   *
+   * MEASURED, Electron 44.3.0 under Xvfb, in a real Chromium window with NO text selected in the
+   * document -- our case, since the canvas selection is `renderer.ts`'s module-level
+   * `anchor`/`focus` (`:88-89`) and not a DOM Range; there is no `getSelection` or `createRange`
+   * call anywhere in `packages/canvas` or `packages/web`:
+   *
+   *     Ctrl-C        -> copy event FIRES, clipboardData present
+   *     Cmd-C         -> no copy event
+   *     Ctrl-Shift-C  -> no copy event
+   *
+   * So the native copy gesture on Linux is `Ctrl-C` -- the Clear AID -- and adopting it the way
+   * paste adopted the native `paste` event would collide with the one binding this project has
+   * decided must stay Clear on every platform. `menu.ts:56-72` records that decision AND records
+   * rejecting the conditional form, "Ctrl-C copies when a selection exists and Clears when it does
+   * not", because it makes a DESTRUCTIVE AID depend on invisible state. Paste got a free ride
+   * because `keys.ts` never claimed `Ctrl-V`; copy gets none, so it needs an explicit chord.
+   *
+   * The same measurement is why macOS needs a binding rather than the browser default: `Cmd-C`
+   * copies NOTHING from a canvas. A `null` from this mapper means "we declined it", never "the
+   * platform handles it" -- the reading that made an earlier claim in this feature wrong.
+   *
+   * ## `requestCopy`, NOT `copy`
+   *
+   * `copy` carries a rect and this function is a pure function of one key event, so it cannot
+   * see a selection -- the union member's own note in `frontend/src/keymap.ts` has the detail.
+   * The renderer, which holds the rectangle, is what turns the intent into a real `copy`.
+   *
+   * ## `e.code`, AND NEITHER SPELLING OF `e.key` WOULD DO
+   *
+   * `e.key.toLowerCase()` is the fold itself: it is what makes `Ctrl-Shift-C` indistinguishable
+   * from `Ctrl-C`, so the one chord whose discriminator IS Shift cannot be matched through it.
+   * Raw `e.key === 'C'` fails differently -- `e.key` is the shifted, LAYOUT-DEPENDENT form, the
+   * hazard `KeyLike.code`'s note records, and Shift inverts caps lock, so an operator with caps
+   * lock on reports `key: 'c'` with `shiftKey` set. Matching the physical key is what `Alt-K`
+   * above does, and for the same reason.
+   *
+   * ## THE MODIFIER GUARDS
+   *
+   * `!altKey` leaves `Ctrl-Alt-Shift-C` with the window manager, following this file's rule that
+   * an Alt or Meta chord is the OS's. It is also what keeps the Windows AltGr path intact: Windows
+   * reports AltGr as ctrlKey+altKey, so an AltGr chord over `KeyC` must fall through to
+   * `layoutCharacter` below rather than be eaten here.
+   *
+   * `ctrlKey !== e.metaKey` IS AN EXCLUSIVE OR AND NOT A LOOSE `(ctrlKey || metaKey)`, which is
+   * the form the plan for this task proposed. It demands EXACTLY ONE of the two, so it rejects
+   * both edges a disjunction would admit: `Ctrl-Cmd-Shift-C`, a chord belonging to the OS by the
+   * same rule the bail below states -- and NEITHER modifier, where a bare `Shift-C` must stay
+   * typed text. The Alt-K branch spells the same exclusion `!ctrlKey && !metaKey`, because no
+   * branch here may claim a chord another one half-matches.
+   */
+  if (e.shiftKey && !e.altKey && e.ctrlKey !== e.metaKey && e.code === 'KeyC') {
+    return { kind: 'requestCopy' };
+  }
+
   if (e.ctrlKey && !e.altKey && !e.metaKey) {
-    // Case-folded because Ctrl-Shift-C still means Clear, and browsers report the shifted
-    // letter. `?? null` is what drops Ctrl-Z rather than typing "z".
+    // Case-folded so that Ctrl-Shift-R, Ctrl-Shift-U and every other entry here reach their
+    // unshifted meaning -- caps lock, or a held shift, must not make a chord inert. `Ctrl-Shift-C`
+    // is now the ONE exception and is claimed by the copy branch above, which is why that branch
+    // has to run first; plain `Ctrl-C` is still Clear. `?? null` is what drops Ctrl-Z rather than
+    // typing "z".
     return CTRL[e.key.toLowerCase()] ?? null;
   }
   // The PA keys, on Alt+digit as x3270 and c3270 both have them (Common/fb-c3270:43-45).

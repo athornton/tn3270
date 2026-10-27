@@ -127,6 +127,20 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
       + 'needs arguments and each front end owns its own dialog',
   },
 
+  {
+    key: 'Ctrl-Shift-C', action: { kind: 'requestCopy' },
+    note: 'copies the selected cells. NO `terminal` sequence, and for a stronger reason than '
+      + 'Ctrl-B\'s: the TUI has neither a cell selection nor a clipboard of any kind -- no OSC '
+      + '52, no selection state over the screen -- so there is nothing for a sequence to do, '
+      + 'where Ctrl-B at least names a surface the TUI draws differently. A CANVAS-FRONT-END '
+      + 'binding, and Cmd-Shift-C is its macOS spelling: this table names ONE key per action, so '
+      + 'the pair is asserted directly in canvas/test/keys.test.ts. THE SHIFTED FORM IS '
+      + 'DELIBERATE -- plain Ctrl-C is the Clear AID and stays Clear on every platform, which is '
+      + 'why canvas/src/keys.ts matches this chord BEFORE its case-folded Ctrl table. NOT a 3270 '
+      + 'key -- `applyAction` throws on it, because only the renderer knows which cells were '
+      + 'dragged',
+  },
+
   // Sequence-less on purpose: two encodings each. See the header note on DECCKM.
   { key: 'Up', action: { kind: 'up' } },
   { key: 'Down', action: { kind: 'down' } },
