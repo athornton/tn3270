@@ -3764,6 +3764,41 @@ TN3270_PASSWORD=CUL8TR TN3270_USER=HERC01 python3 packages/tui/scripts/live-driv
 cmp /tmp/form-src.bin /tmp/form-back-tso.bin
 ```
 
+### A LIVE TSO STALL AT 0 BYTES, 2026-10-27 — AND THE ANSWER WAS THE SECTION BELOW
+
+The user drove a GUI transfer to TSO **from inside ISPF** and got:
+
+    press Attn or Clear: host may still be transferring. stalled: no CUT frame from the
+    host within 30s, 0 bytes (host may want 24x80; this session is 43x80)
+
+**They read it as "it is not doing DFT at all", which was the natural reading and was wrong.**
+`IND$FILE` typed into an ISPF command field never runs — ISPF paints a response, so
+`sawNonFrameScreen` is true and the geometry clause fires, while no CUT frame and no `0xd0` ever
+arrive and the byte count is a truthful zero. **The fix was to transfer from `READY`.**
+
+**THREE THINGS THE MESSAGE GOT WRONG, all fixed the same day:**
+
+1. **It only ever says "no CUT frame".** `armFrameTimer`'s text is CUT's, but BOTH engines re-arm
+   that timer — so on a DDM-advertised session it named a protocol the host may never have been
+   asked to speak. It now adds **`(we offered CUT or DFT)`**, from `session.ddmAdvertised`. It
+   deliberately does NOT claim which engine the host *chose*: `committed` is still `undefined` at
+   the timeout by construction.
+2. **The geometry clause led with a guess.** `sawNonFrameScreen` is a MEASUREMENT and geometry is
+   an inference, so the clause now leads with *the host ANSWERED but sent no transfer frame — read
+   its screen*, and offers both a misdirected command and a 24x80 demand as candidates. The host's
+   own screen says which; ours cannot.
+3. **`frontend/src/session.ts` said the `-ddm` default was OFF.** It flipped ON 2026-09-29 and the
+   comment went stale for a month. **It nearly supplied a false explanation** — that DDM had not
+   been advertised, so the host fell back to CUT. Both polarities are now pinned by a test, which
+   was mutation-verified in each direction.
+
+**The page that looked like an answer and was not.** `jaymoseley.com`'s IND$FILE page states
+*"Currently IND$FILE only supports CUT mode file transfers which limits the buffer size to that of
+the screen (24x80=~1900)"* — but it documents Rayborn's **v1.0.6**, and TK5 runs **FFTP 2.0.5** by
+the same author. Our own `0xd0` measurements stand. **A documented limitation can be a VERSION's
+limit rather than the program's**, which is [[support-matrices-document-clients]] with the client
+and the server swapped.
+
 ### `IND$FILE` ON TK5 IS A PLAIN TSO COMMAND, RUN FROM `READY`
 
 Confirmed by the user and borne out by the run: TK5's `IND$FILE` is **Mike Rayborn's Free

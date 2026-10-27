@@ -268,13 +268,33 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     // and the bare message when neither applies -- a 24x80 host painting non-frames has
     // ignored the command (wrong panel, IND$FILE absent), where naming the geometry would be
     // false and naming `-ddm` irrelevant.
+    //
+    // THE REASON NAMES THE ENGINE THAT WAS ACTUALLY OFFERED, 2026-10-27. `why` is built by
+    // `armFrameTimer` and says "no CUT frame", which is the CUT engine's deadline -- but that
+    // timer is re-armed by BOTH engines, so on a DDM-advertised session the sentence named a
+    // protocol the host may never have been asked to speak. **This misread a live TSO stall:
+    // the operator reasonably concluded "it is not doing DFT at all" from a message that only
+    // ever says CUT.** It cannot say WHICH engine the host chose -- `committed` is still
+    // `undefined` here by construction, and that is the whole point of the timeout -- so it
+    // states what we OFFERED, which is a fact we hold, instead of implying what arrived.
+    const offered = session.ddmAdvertised ? 'CUT or DFT' : 'CUT only';
     let extra = '';
     if (sawNonFrameScreen && session.screen.size !== CUT_SCREEN_SIZE) {
       // FALLBACK ONLY. Measured on VM/370: MECAFF answers `IND$FILE requires a MECAFF
       // connected 3270 terminal` and CMS recovers in about a second, so the HOST'S OWN TEXT
       // usually arrives and is better than ours. This row is for a host that goes quiet --
       // which is the case the deleted geometry gate used to pre-empt.
-      extra = ` (host may want 24x80; this session is ${session.screen.rows}x${session.screen.cols})`;
+      //
+      // IT NOW SAYS THE HOST ANSWERED, AND LEADS WITH THAT. 2026-10-27, after a live TSO stall
+      // where this clause was the whole message an operator had to reason from and it offered
+      // geometry as THE explanation. Geometry is a guess; `sawNonFrameScreen` is a MEASUREMENT,
+      // and it is the more useful half -- a host that painted a screen has usually said why, on
+      // that screen, in its own words. The real cause that day was `IND$FILE` typed into an
+      // ISPF command field instead of TSO's `READY` prompt, which this phrasing points at and
+      // the old one hid: TK5's IND$FILE is a plain TSO command and ISPF never runs it.
+      extra = ` (the host ANSWERED but sent no transfer frame -- read its screen, which usually`
+        + ` says why: a command run somewhere that cannot run it, or a host wanting 24x80 where`
+        + ` this session is ${session.screen.rows}x${session.screen.cols})`;
     } else if (!sawNonFrameScreen && !session.ddmAdvertised) {
       // EARNS ITS PLACE: forgetting `-ddm on` will be the commonest failure once DFT works,
       // because a host that speaks only DFT cannot CHOOSE DFT unless we advertised QCODE
@@ -289,7 +309,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
       // that zero was read as evidence of a dead protocol rather than a stalled one. See
       // `bytesMoved`.
       error: `press Attn or Clear: host may still be transferring. `
-        + `${why}, ${bytesMoved()} bytes${extra}`,
+        + `${why} (we offered ${offered}), ${bytesMoved()} bytes${extra}`,
     });
   };
 

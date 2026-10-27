@@ -41,8 +41,18 @@ export function defaultSession(
   devname?: string,
   /**
    * Advertise Query Reply (DDM), which lets a host choose DFT file transfer.
-   * Absent means the product default, which is OFF -- unlike every other flag
-   * here. `-ddm on` passes `true`. See `SessionOptions.ddm`.
+   *
+   * **ABSENT MEANS ON.** This said "the product default, which is OFF" until 2026-10-27, and
+   * that had been false since the default flipped on 2026-09-29. `Session` decides it with
+   * `this.opts.ddm !== false` in TWO places that must agree -- the capabilities build
+   * (`core/src/session.ts`, the Query Reply) and the `ddmAdvertised` getter a front end uses to
+   * tell the operator "DDM was not advertised" -- so `undefined` advertises and only an explicit
+   * `-ddm off` suppresses it.
+   *
+   * THE STALE VERSION COST REAL DIAGNOSIS TIME: a live TSO transfer stalled at 0 bytes, and this
+   * comment was read as evidence that DDM had not been offered, which would have made the host's
+   * fallback to CUT the explanation. The wire said otherwise. A default's polarity is exactly the
+   * kind of claim that outlives its flip, because nothing executes a comment.
    */
   ddm?: boolean,
 ): Session {

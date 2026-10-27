@@ -167,6 +167,39 @@ describe('startTransfer', () => {
     expect(aids).toEqual([AID.ENTER]);
   });
 
+  it('names the engines we OFFERED, because the deadline only ever says CUT', async () => {
+    // 2026-10-27, after a live TSO stall. `armFrameTimer`'s text is "no CUT frame", and BOTH
+    // engines re-arm that timer -- so on a DDM-advertised session the message named a protocol
+    // the host may never have been asked to speak, and the operator reasonably read it as "it
+    // is not doing DFT at all". It cannot say which engine the host CHOSE (`committed` is still
+    // undefined at the timeout, by construction), so it states what we offered instead.
+    //
+    // BOTH POLARITIES, because one of them is the whole point: a `ddm: false` session really is
+    // CUT-only and must not be told otherwise. `ddm` ABSENT means ON -- the default flipped
+    // 2026-09-29 and `frontend/src/session.ts` carried a comment saying OFF for a month, which
+    // cost real diagnosis time on that same stall.
+    vi.useFakeTimers();
+    try {
+      for (const [ddm, expected] of [[undefined, /offered CUT or DFT/], [false, /offered CUT only/]] as const) {
+        const conn: Connection = {
+          write: () => {}, close: () => {},
+          onData: undefined, onClose: undefined, onError: undefined,
+        };
+        const raw = new Session({ connect: () => conn, rows: 24, cols: 80, ...(ddm === false ? { ddm: false } : {}) });
+        const { session } = withSpy(withField(in3270(raw)));
+        let done: { ok: boolean; error?: string } | undefined;
+        startTransfer({
+          session, files: fakeFiles(), request: aReceive(), command: 'x',
+          onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+        });
+        await vi.advanceTimersByTimeAsync(1200);
+        expect(done?.error, `ddm=${String(ddm)}`).toMatch(expected);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('times out rather than hanging when no frame arrives', async () => {
     vi.useFakeTimers();
     try {
