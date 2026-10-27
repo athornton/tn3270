@@ -343,6 +343,30 @@ and the Recording log says what happened when they were run.
   **true** on `http://127.0.0.1`, `navigator.clipboard` is an object, and both clipboard
   permissions are `granted` — Chromium treats loopback as secure even on plain `http`.
 
+  **FIREFOX/LINUX DOES NOT PASTE ON `Ctrl-Shift-V`; CHROMIUM DOES. 2026-10-27, user-reported and
+  measured on our side.** The user asked for the chord on symmetry grounds -- `Ctrl-C` is Clear so
+  `Ctrl-Shift-C` is copy, therefore `Ctrl-Shift-V` should paste. **It already does, and no code
+  change was made or needed.** Measured three ways:
+
+  - `actionForKey` returns `null` for BOTH `Ctrl-V` and `Ctrl-Shift-V`, so the keymap claims
+    neither and neither is `preventDefault`ed away;
+  - `forwardPaste` accepts ANY `paste` event -- it has no modifier filtering at all;
+  - driven end to end against the real gateway by temporarily pointing `browser-clicks.mjs`'s
+    `webPaste` press at `CDP_CTRL | CDP_SHIFT`: the gateway logged
+    `action: {"kind":"paste","text":"TN3270-PASTE-PROBE"}`, the text was verified on screen, and
+    the phase stayed **13/13**. (Reverted; the committed harness still drives plain `Ctrl+V`.)
+
+  So the chord works wherever the BROWSER raises a `paste` event for it. A Chromium probe fires
+  `paste` with `isTrusted: true` for both chords; **Firefox on Linux raises nothing for the shifted
+  one** -- it reserves `Ctrl-Shift-V` for paste-as-plain-text in editable contexts, and a canvas
+  with nothing editable focused gives it nothing to act on.
+
+  **THIS IS NOT FIXABLE BY BINDING THE CHORD.** The only way to paste from an arbitrary keystroke
+  is `navigator.clipboard.readText()`, which prompts for permission in Chromium and **does not
+  exist in Firefox** -- the measurement that made this feature event-driven rather than
+  keymap-driven in the first place. Binding it in `keys.ts` would be strictly worse: the keymap
+  would then `preventDefault` the chord, which in Chromium would SUPPRESS the working paste.
+
   **What a human still owes on copy and paste, and only these:**
 
   1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`
