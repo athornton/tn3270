@@ -66,6 +66,29 @@ export interface MenuItemTemplate {
  * it does not." That makes a DESTRUCTIVE AID conditional on invisible state -- the
  * one-path-does-X-and-another-doesn't shape this project has been bitten by at least five times --
  * and its failure mode is a missed Clear on a locked `MORE...` screen.
+ *
+ * ## THIS ACCELERATOR NOW SHARES ITS CHORD WITH A PAGE BINDING, AND THE OVERLAP IS UNMEASURED
+ *
+ * 2026-10-27, with the web copy gesture: `canvas/src/keys.ts` claims `Ctrl-Shift-C` in the keydown
+ * listener, and on Linux/Windows that is this accelerator's chord. Both routes end at
+ * `__tn3270Copy`, so a double fire would copy the same rect to the same clipboard -- idempotent,
+ * but it would print `copy: N chars` TWICE, and `select.mjs` asserts on that line.
+ *
+ * **WHETHER THEY BOTH FIRE IS NOT KNOWN, AND THE HARNESSES HERE CANNOT ANSWER IT.** Measured
+ * 2026-10-27: `webContents.sendInputEvent` -- the only input route any harness in this repo has,
+ * all 20 call sites in `main.ts` -- **does not trigger menu accelerators at all.** The control run
+ * that proves it: with a real `Ctrl+Shift+C` accelerator installed and the page's own keydown
+ * listener disabled, the click handler still never fired, so nothing reached the menu. A probe
+ * built on that seam therefore reports "no double fire" on every build, whether one exists or not,
+ * which is worse than no probe. `xdotool`/`xte` are not on this box, so there is no real-key
+ * injector to settle it.
+ *
+ * The analogous `Ctrl+Shift+V` case WAS measured to fire both -- `forwardPaste`'s docstring in
+ * `canvas/src/forwardKeys.ts` is the single home for that measurement, cited here rather than
+ * restated for the reason `pasteAccelerator` below spells out. That run predates this finding
+ * about `sendInputEvent`, so treat a double fire as the LIKELY case rather than the disproven one. **It needs a human on a real desktop**, which the feature's
+ * live pass already owes. If it doubles, the fix is to gate the page branch off `file:` the way
+ * `forwardPaste` gates its listener, leaving this accelerator to own the chord in Electron.
  */
 export function copyAccelerator(platform: Platform): string {
   return platform === 'darwin' ? 'Cmd+C' : 'Ctrl+Shift+C';
