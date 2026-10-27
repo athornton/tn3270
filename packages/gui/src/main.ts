@@ -1274,11 +1274,21 @@ app.whenReady().then(async () => {
       LIKE. 2026-10-26.
 
       `paste` is the ONE kind `applyAction` throws on that this front end does not intercept, so a
-      reader who has just read the four arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`,
-      `copy` -- will notice the gap and reach for a fifth. (`transferForm` is the fifth and it is
-      BELOW this comment, which is why the count here is four and not five.) What makes the gap
-      survivable is that nothing in this app RAISES the kind: Paste is a menu item (`menu.ts`)
-      wired to `onPaste` -> `applyPaste` above, which never goes through here.
+      reader who has just read the arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`, `copy`
+      and `requestCopy` -- will notice the gap and reach for one more. (`transferForm` is the
+      remaining one and it is BELOW this comment, so a reader counting upward from here finds one
+      fewer than the listener has.)
+
+      THE ARMS ARE NAMED AND NOT COUNTED, deliberately, and the previous version of this paragraph
+      is why: it said "the FOUR arms above" and then defended the number -- "`transferForm` is the
+      fifth and it is BELOW this comment, which is why the count here is four and not five." Four
+      was right until `4d56edb` inserted the `requestCopy` arm directly above this comment, and a
+      self-justifying count is worse than a bare one, because a reader who counts five distrusts
+      the whole comment. The LIST goes stale loudly -- a missing name is visible -- where a numeral
+      goes stale silently.
+
+      What makes the gap survivable is that nothing in this app RAISES the kind: Paste is a menu
+      item (`menu.ts`) wired to `onPaste` -> `applyPaste` above, which never goes through here.
 
       THE GAP IS GUARDED ON THE OTHER SIDE, by `forwardPaste` in `canvas/src/forwardKeys.ts`
       refusing to install its `paste` listener on `file:` -- this window's own scheme. The one

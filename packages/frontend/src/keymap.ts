@@ -137,8 +137,22 @@ export type Action =
    * KeyLike)` (`canvas/src/keys.ts:164`) is a pure function of one key event, and the selection
    * lives in `canvas/src/renderer.ts`'s module-level `anchor`/`focus` (`:88-89`). So the keymap
    * raises the INTENT and the renderer -- the one place that holds the rectangle -- turns it into a
-   * real `copy`. That conversion is a LATER TASK of this feature; this member is the vocabulary it
-   * needs, and nothing raises the kind yet.
+   * real `copy`.
+   *
+   * BOTH HALVES NOW EXIST, and this paragraph used to say the opposite. Written in `7f2f52e` --
+   * which added this member, `applyAction`'s throw and the gateway's refusal, but NOTHING that
+   * produces the kind -- it read "That conversion is a LATER TASK of this feature; this member is
+   * the vocabulary it needs, and nothing raises the kind yet". True for exactly two commits.
+   * `9e14d86` made `actionForKey` RAISE it from `Ctrl-Shift-C` / `Cmd-Shift-C`
+   * (`canvas/src/keys.ts`, the branch above the case-folded `CTRL` lookup), and `9a6e53e` made
+   * `canvas/src/renderer.ts`'s keydown listener CONVERT it, intercepting the kind before
+   * `clearSelection()` and calling `copySelection()`. `4d56edb` then added the Electron GUI's
+   * `requestCopy` drop, which is what keeps the kind out of `applyAction` in a child window.
+   *
+   * CITED BY COMMIT AND BY NAME RATHER THAN BY LINE, because the line numbers in the paragraph
+   * above this one have already been falsified once on this branch -- see the note on
+   * `renderer.ts`'s `__tn3270Copy` global, where two citations drifted within one commit of being
+   * written. A "not yet" is the shape that rots fastest: nothing fails when it comes true.
    *
    * THE SEVENTH KIND `applyAction` THROWS ON, so the front end that raises it must own it, and a
    * front end that forgot gets a loud failure instead of a chord that silently does nothing.

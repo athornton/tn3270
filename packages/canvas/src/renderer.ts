@@ -566,17 +566,24 @@ function copySelection(): boolean {
  * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
  *
  * TWO CALL SITES DEPEND ON IT, BOTH IN ELECTRON, and it is a one-line delegation precisely so
- * that the extraction above cannot change what either observes: the menu's Copy item
- * (`gui/src/main.ts:1038`) and the `TN3270_GUI_SELECT` test seam (`:1861`, which is the route
- * `gui/scripts/select.mjs` drives -- not the menu).
+ * that the extraction above cannot change what either observes. CITED BY NAME AND NEVER BY LINE,
+ * for the reason `test/keys.test.ts` gives where it does the same ("Cited by its words and not by
+ * a line number, which the new branch above would have shifted anyway") -- and the reason is not
+ * hypothetical here, it is this file's own history: these two were written as `gui/src/main.ts:1020`
+ * and `:1747` in `9a6e53e`, and `4d56edb` -- the VERY NEXT COMMIT in the same series -- inserted 41
+ * lines above both and silently made them `:1038` and `:1861`. A citation that cannot survive its
+ * own feature branch should not be written as a number.
+ *
+ *  - `gui/src/main.ts`'s menu Copy handler, the `onCopy:` arm of its `buildMenuTemplate` call,
+ *    which invokes this through `executeJavaScript('window.__tn3270Copy && window.__tn3270Copy()')`.
+ *  - `gui/src/main.ts`'s `TN3270_GUI_SELECT` test seam, the `const copied = await
+ *    win.webContents.executeJavaScript('window.__tn3270Copy()')` line -- the route
+ *    `gui/scripts/select.mjs` drives, which is NOT the menu.
  *
  * IT WAS THREE UNTIL 2026-10-27, and the third leaving is the point rather than a tidy-up.
  * `web/scripts/browser-clicks.mjs` used to evaluate this global, because the browser had no copy
  * gesture to drive; its `webCopy` check now presses the real `Ctrl-Shift-C` instead, so it covers
- * the keydown arm above and `actionForKey`'s branch as well as this body. (The line citations in
- * the paragraph above were `:1020` and `:1747` when first written and had both drifted by ~20 and
- * ~110 lines within days -- corrected here, and the reason this paragraph names the SEAM by its
- * environment variable rather than only by line.)
+ * the keydown arm above and `actionForKey`'s branch as well as this body.
  *
  * SO THIS GLOBAL'S ONLY HARNESS IS NOW `select.mjs`, which is adequate but is a narrower claim
  * than it used to be: nothing in a BROWSER exercises it any more. That is correct -- a browser has

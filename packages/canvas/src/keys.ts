@@ -180,7 +180,8 @@ export function actionForKey(e: KeyLike): Action | null {
    * MEASURED, Electron 44.3.0 under Xvfb, in a real Chromium window with NO text selected in the
    * document -- our case, since the canvas selection is `renderer.ts`'s module-level
    * `anchor`/`focus` (`:88-89`) and not a DOM Range; there is no `getSelection` or `createRange`
-   * call anywhere in `packages/canvas` or `packages/web`:
+   * CALL anywhere in `packages/canvas` or `packages/web` -- a claim about calls and not about
+   * mentions, which matters because grepping for it finds only this sentence:
    *
    *     Ctrl-C        -> copy event FIRES, clipboardData present
    *     Cmd-C         -> no copy event

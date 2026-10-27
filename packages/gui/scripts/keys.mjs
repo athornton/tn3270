@@ -192,9 +192,17 @@ const CASES = [
    * servicing IPC.
    *
    * DELIVERED TO THE KEYBOARD WINDOW TOO, not the canvas, and that is deliberate: a probe sent to
-   * the canvas would prove the canvas window still works, which the twelve positions above already
-   * prove. The claim being made is that the CHILD WINDOW's path survived, so the probe has to
-   * travel it.
+   * the canvas would prove the canvas window still works, which EVERY CASE WITHOUT A `kbd:` PREFIX
+   * above already proves -- 20 of them as of 2026-10-27, which is all of `CASES` but this probe and
+   * the chord it follows. The claim being made is that the CHILD WINDOW's path survived, so the
+   * probe has to travel it.
+   *
+   * THE COUNT IS STATED AS A DERIVATION AND NOT AS A BARE NUMERAL, because the bare numeral was
+   * WRONG: this sentence read "the twelve positions above" when there were twenty, and the
+   * argument it supports is correct -- which is the worst case, a sound claim weakened by a
+   * checkable detail a reader can falsify in one count. `kbd:`-prefixed versus not is the property
+   * that actually matters, so that is what is named; the number follows from it and can be
+   * recounted from `CASES` rather than trusted.
    *
    * `Ctrl+A` is the probe the previous feature used for this same purpose: it is in `keys.ts`'s
    * CTRL table, `applyAction` handles it (so no interception is involved), and against a replayed

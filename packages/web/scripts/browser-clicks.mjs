@@ -457,7 +457,10 @@ const TRANSFER_CHECKS = [
       + 'branch BELOW the case-folded `CTRL[e.key.toLowerCase()]` lookup -- the chord then folds '
       + 'to Clear and the clipboard keeps the sentinel; renderer.ts  move the '
       + '`action.kind === \'requestCopy\'` arm BELOW `clearSelection()` -- the rect is destroyed a '
-      + 'moment before it is read, so no copy frame is sent at all.  NOT caught here: '
+      + 'moment before it is read, so no copy frame is sent at all; renderer.ts  that arm\'s body '
+      + 'as a bare `{ return; }`, KEEPING the dispatch and deleting the copy -- a mutant that was '
+      + 'green across the WHOLE REPO before this check drove the chord, since select.mjs calls '
+      + '__tn3270Copy directly and never runs the arm.  NOT caught here: '
       + 'selection.ts  `cell.hidden ? \' \' : cell.text` -> `cell.text` -- see the note above',
   },
   {
@@ -469,9 +472,14 @@ const TRANSFER_CHECKS = [
     mutant: "forwardKeys.ts  delete the `deps.on('paste', ...)` registration, OR renderer.ts drop "
       + "the `forwardPaste({...})` call  (gateway logs nothing).  ALSO KILLS: forwardKeys.ts "
       + "delete `if (text === '') return;` -- the empty clipboard then raises "
-      + '{"kind":"paste","text":""}.  COLLATERAL, NOT PROOF: it fails on bridge.ts '
-      + 'onCopyText: () => {} too, because its screen witness reads back through the COPY path; '
-      + 'the `action:` line is the half that isolates paste',
+      + '{"kind":"paste","text":""}.  COLLATERAL, NOT PROOF -- IF THIS FAILS ALONGSIDE webCopy, '
+      + 'SUSPECT ONE COPY-SIDE DEFECT AND NOT TWO: this check\'s screen witness reads the buffer '
+      + 'back BY COPYING IT, so it fails on bridge.ts onCopyText: () => {} and (since 2026-10-27, '
+      + 'when it started reading back through the real chord) on BOTH copy-GESTURE mutations too '
+      + '-- keys.ts\'s branch moved below the CTRL lookup and renderer.ts\'s arm moved below '
+      + 'clearSelection(). In every one of those runs the paste itself WORKED and the gateway '
+      + 'logged it perfectly. The `action:` line is the half that isolates paste; read it before '
+      + 'believing a double failure is two defects',
   },
 ];
 
@@ -2045,6 +2053,21 @@ async function runTransferPhase(url) {
          is the only witness in the repo for `copySelection`'s "an operator who copies twice gets
          the same text twice" contract, and that is why the second press earns its place.
 
+      AND A FOURTH, FOUND BY A REVIEWER OF TASKS 2-3 AS A SURVIVING MUTANT AND CLOSED BY THIS
+      CHANGE WITHOUT EITHER PARTY KNOWING, 2026-10-27. The arm body replaced with `{ return; }` --
+      KEEPING the dispatch, deleting the copy -- was green across the WHOLE REPOSITORY while the
+      chord did nothing at all. Both harnesses that touched copy called `window.__tn3270Copy()`
+      directly (`select.mjs` still does), so neither ever ran the arm that INVOKES it, and
+      `renderer-imports.test.ts` matches the dispatch rather than the body, by design. VERIFIED
+      HERE after the change: 2614 unit tests in 110 files still green on it, `webCopy` FAILS at
+      11/13. That is the clearest statement of what this check buys -- it is the only thing in the
+      repo that presses the real trigger, so it is the only thing that can tell a dispatch from a
+      dispatch that does its job.
+
+      THAT RUN ALSO FOUND A DEFECT IN THIS CHECK'S OWN FAILURE MESSAGE, now fixed: the skipped
+      second press left `written` undefined and the message accused the HARNESS of a failed sentinel
+      write on a run whose real cause it had already named. See the note on the `copyAgain` fallback.
+
       BOTH PLAN-NAMED MUTATIONS ALSO FAIL `webPaste`, COLLATERALLY AND NOT AS PROOF, for the reason
       the next section gives: `webPaste`'s screen witness reads back through `copyCells`, which is
       the COPY path and now goes through the chord. The third one does NOT -- `webPaste` stayed
@@ -2424,14 +2447,23 @@ async function runTransferPhase(url) {
         `copySelection` had been broken some other way; this presses the real chord twice and reads
         the real clipboard both times.
 
-        WHAT THE SECOND PRESS DISTINGUISHES, SPELLED OUT BECAUSE THE NAIVE VERSION PROVES NOTHING.
-        If `requestCopy` were intercepted BELOW `clearSelection()`, the first press would clear and
-        then copy an empty rect -- so the FIRST assertion already fails and this one is moot. The
-        case this one exists for is subtler: anything that clears the selection AS A SIDE EFFECT OF
-        A SUCCESSFUL COPY. `copySelection()` promises not to ("an operator who copies twice gets
-        the same text twice", its own docstring), and the GUI's menu route depends on the same
-        promise. A clear added there -- or an arm rewritten to `clearSelection(); copySelection();`
-        in the other order -- leaves press one green and press two sending nothing at all.
+        WHAT THE SECOND PRESS DISTINGUISHES, SPELLED OUT BECAUSE THE NAIVE VERSION PROVES NOTHING
+        AND BECAUSE THIS TASK'S PLAN GOT IT WRONG. The plan justified this assertion as the witness
+        for the Task 3 arm being below `clearSelection()`. IT IS NOT: with the arm below the clear,
+        the first press already copies an empty rect, so the FIRST assertion fails and this one is
+        moot. (Agreed and withdrawn by the plan's author, 2026-10-27.) The case this one actually
+        exists for is subtler -- anything that clears the selection AS A SIDE EFFECT OF A
+        SUCCESSFUL COPY. `copySelection()` promises not to ("an operator who copies twice gets the
+        same text twice", its own docstring), and the GUI's menu route depends on the same promise.
+        A clear added there -- or an arm rewritten to `copySelection(); clearSelection();` --
+        leaves press one entirely green and press two sending nothing at all.
+
+        MEASURED, NOT ARGUED: the arm as `copySelection(); clearSelection(); return;` scored 12/13
+        here, failing ONLY the survival clause, with the right text on the clipboard and both
+        gateway lines present for the first press. **ALL 2614 UNIT TESTS IN 110 FILES PASSED ON IT**
+        -- `canvas/test/renderer-imports.test.ts`'s ordering pin INCLUDED, because that test asserts
+        `clearSelection()` appears after the arm and in this mutant it does, twice. So these two
+        presses are the ONLY thing in the repository that can see this defect class.
 
         A FRESH SENTINEL BETWEEN THE TWO IS WHAT MAKES IT AN ASSERTION. With one sentinel, a second
         copy that did nothing would leave the first copy's text on the clipboard and read as a
@@ -2453,9 +2485,23 @@ async function runTransferPhase(url) {
         pair atomically, not to retry.
       */
       const againMark = serverOut.length;
+      /*
+        `written: ''` IN THE NOT-ATTEMPTED CASE, AND THAT FIELD IS NOT COSMETIC -- MEASURED.
+
+        When the FIRST copy never produced a frame there is nothing to re-press against, so the
+        second press is skipped and a synthetic result stands in. Its first draft omitted `written`,
+        and the `renderer.ts  { return; }` mutant below printed
+        `the HARNESS could not put its SECOND sentinel on the clipboard ...: undefined` -- a FALSE
+        ACCUSATION AGAINST THE HARNESS on a run whose real cause (no copy frame at all) was named
+        correctly two clauses earlier. Exactly the misdirection the split clause was added to
+        prevent, reintroduced by the fallback that was supposed to be inert. `''` says "the sentinel
+        step did not fail", which is true: it never ran.
+      */
       const copyAgain = copyRun.copied === true
         ? await chordCopy(`${SENTINEL}-second`)
-        : { copied: false, clip: '(the first copy never happened)', frames: [], keys: [] };
+        : {
+          copied: false, written: '', clip: '(the first copy never happened)', frames: [], keys: [],
+        };
       const againLogs = copyRun.copied === true
         ? await waitForLog(againMark, (l) => l.startsWith('copy: '))
         : [];
