@@ -375,6 +375,44 @@ and the Recording log says what happened when they were run.
   keymap-driven in the first place. Binding it in `keys.ts` would be strictly worse: the keymap
   would then `preventDefault` the chord, which in Chromium would SUPPRESS the working paste.
 
+  **THE LIVE PASS IS DONE, 2026-10-27/28 — FOUR BROWSERS, AND THE LAN GAP IS MEASURED.** Driven by
+  the user. Supersedes the owed-items list below, which is kept for its reasoning.
+
+  **Browsers:** Safari/Mac, Firefox/Mac, Firefox/Linux, Chromium. `Ctrl-Shift-C` copies in all of
+  them. Paste works in all, `Cmd-V` included. `Ctrl-Shift-V` is Chromium-only (browser behavior,
+  not ours). **`Cmd-C` does nothing anywhere** — Safari beeps, Firefox is silent — because there is
+  **no `copy` event listener in `packages/canvas` at all**; nothing is swallowing it, nothing is
+  listening. Fixable: a Chromium probe fires `copy` with `isTrusted: true` and a writable
+  `clipboardData` even with no DOM selection, so a listener need only be a second trigger for
+  `copySelection()`.
+
+  **THE LAN / NON-SECURE-CONTEXT CASE, which no harness here can reach — now witnessed.** Gateway
+  on `kamrui`, Hercules on `pi4`, Mac browser, plain `http` at a LAN address. The gateway logged
+  `copy: 28 chars` — extraction and protocol correct — **and nothing reached the pasteboard.**
+  Reproduced in a real non-secure context: `isSecureContext=false`,
+  `typeof navigator.clipboard === 'undefined'`. So `writeClipboard`'s `clip === undefined` branch is
+  the live path on a LAN deployment, and **`localhost` is secure even over `http` while a LAN
+  address is not**. Working LAN copy needs `--tls-cert`.
+
+  **TWO DEFECTS IT FOUND, both diagnostic, both unfixed as of 2026-10-28 (budget):**
+
+  1. **The refusal never reaches the operator.** `bridge.ts:311` warns to `console.warn` only, so
+     the copy silently does nothing while `copy: N chars` reads as success. It belongs on the
+     `error` frame, with the remedy named (`https` via `--tls-cert`, or `localhost`).
+  2. **The user saw NO console message at all**, which (1) does not explain. Suspect
+     `bridgecore.ts:334` — `onmessage` is `void (async () => {...})()` with no `catch`, so a throw
+     before the `copyText` branch disappears entirely. Unconfirmed; needs
+     `window.isSecureContext, typeof navigator.clipboard` from that console.
+
+  **AND A THIRD, FOUND ON THE WAY AND WORTH MORE THAN EITHER.** The gateway could not resolve
+  `pi4` — a plain DNS failure — and **printed nothing**. `web/src/main.ts:59` swallows the host
+  connect into `.catch(() => {})`, so the only symptom was `X Disconnected`, which is
+  `core/src/oia.ts:199`: **the 3270 OPERATOR STATUS LINE, not a gateway error.** Bind, origin, auth
+  and the WebSocket upgrade were all debugged first and all were fine. `curl` proved both the page
+  and the upgrade. **An unresolvable host is startup-shaped — it fails identically for every
+  browser that ever attaches — so it belongs on stderr beside the startup warnings.** Check the CLI
+  and Electron GUI for the same swallow; all three share `defaultSession`.
+
   **What a human still owes on copy and paste, and only these:**
 
   1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`

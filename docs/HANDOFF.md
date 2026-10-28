@@ -4,7 +4,86 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — ROADMAP (0e) IS DONE; A LIVE PASS IS OWED AND THE USER HAS AGREED TO IT
+## START HERE — NEXT WEEK: THREE MEASURED FIXES, ALL DIAGNOSTIC, NONE STARTED
+
+**STOPPED 2026-10-28 ON BUDGET ($11 from the cap), at a clean boundary.** `main` is green and
+PUSHED at `3a37914`; tree clean; nothing half-built. The live pass below is DONE and it found
+three defects, each already reproduced. **No code was written for them — this is the work.**
+
+### WHAT THE LIVE PASS ESTABLISHED (user, 2026-10-27/28)
+
+**Copy and paste work.** Safari/Mac, Firefox/Mac, Firefox/Linux, Chromium all drove the gateway.
+`Ctrl-Shift-C` copies in every browser tried. Paste works everywhere, including `Cmd-V` on Mac.
+`Ctrl-Shift-V` is Chromium-only and that is the browser's doing, not ours (see below).
+
+**AND THE LAN / NON-SECURE-CONTEXT GAP IS NOW MEASURED, which was the whole point of the pass.**
+Gateway on `kamrui`, Hercules on `pi4`, browser on a Mac, plain `http` at a LAN address:
+the gateway logs `copy: 28 chars` — the extraction and the protocol are fine — **and the text
+never reaches the operator's pasteboard.** Reproduced here in a real non-secure context:
+
+    isSecureContext=false
+    typeof navigator.clipboard=undefined
+
+`writeClipboard`'s `clip === undefined` warn path is correct and would fire. **`localhost` is a
+secure context even on `http`; a LAN address is not.** Working LAN copy needs `--tls-cert`.
+
+### THE THREE FIXES, in priority order
+
+1. **THE CLIPBOARD REFUSAL IS INVISIBLE TO THE OPERATOR.** `bridge.ts:311` sends the warning to
+   `console.warn` ONLY, so a copy that cannot write silently does nothing while the gateway's
+   `copy: N chars` reads as success. **Worst outcome available, and exactly what the pass was
+   looking for.** Route it through the **`error` frame**, which already paints operator-facing text
+   on the canvas (the paste warning's channel). **Reword it too:** "this browser has no clipboard
+   API" blames the browser when the cause is the ADDRESS — name the remedy, `https` via
+   `--tls-cert` or reach it on `localhost`, remedy-first because that line truncates.
+2. **THE USER SAW NO CONSOLE MESSAGE AT ALL, which fix 1 does not explain and which is its own
+   defect.** The warn path should have fired. Prime suspect: `bridgecore.ts:334`'s `onmessage` is
+   `void (async () => { ... })()` with **NO `catch`**, so anything throwing before the `copyText`
+   branch — `inflate`, `JSON.parse` — vanishes as an unhandled rejection with nothing anywhere.
+   Third instance of the `void`-on-a-rejecting-promise shape in this repo. **UNCONFIRMED:** ask the
+   user for `window.isSecureContext, typeof navigator.clipboard` in that console. If it is
+   `false, "undefined"`, fix 1's path was reached and something swallowed the warning.
+3. **A HOST CONNECT FAILURE IS SILENT, and it cost most of an evening.** `web/src/main.ts:59` is
+   `void session.connect(...).catch(() => { /* reported per-connection */ })`. The user's gateway
+   could not resolve `pi4` — a **DNS failure**, about as unambiguous as errors get — and the gateway
+   printed NOTHING. What the operator got was `X Disconnected`, which is `core/src/oia.ts:199`, the
+   3270 OPERATOR STATUS LINE, indistinguishable from a gateway fault. We debugged bind, origin,
+   auth and the WebSocket upgrade, all of which were fine. **Log it to stderr, beside the two
+   warnings the operator is already reading.** `ENOTFOUND` on the host name will fail identically
+   for every browser that ever attaches, so it is startup-shaped, not per-connection. **Check the
+   CLI and the Electron GUI for the same swallow** — all three share `defaultSession`.
+
+### A FOURTH ITEM, WANTED BY THE USER, LARGER AND OPTIONAL
+
+**The platform-native copy keys do not work: `Cmd-C` on Mac does nothing** (Safari beeps, Firefox is
+silent). The user asked for native copy/paste to work "consistently" and the asymmetry is real —
+native PASTE works everywhere, native COPY works nowhere.
+
+**IT IS FIXABLE AND I MEASURED THE MECHANISM.** There is **no `copy` event listener anywhere in
+`packages/canvas`** (grep: none) — so the native key is not being swallowed, nothing is listening. A
+Chromium probe fires `copy` with `isTrusted: true` AND a writable `clipboardData` even with no DOM
+selection. The listener need not write the clipboard itself: it only has to be a SECOND TRIGGER for
+`copySelection()`, exactly as `Ctrl-Shift-C` is, and the text still returns asynchronously as
+`copyText`. **Linux stays safe by a property measured this session: claiming `Ctrl-C` in the keydown
+listener and calling `preventDefault` SUPPRESSES the copy event entirely**, so `Ctrl-C` can never
+reach it and Clear keeps working. Gate it like `forwardPaste`.
+
+**`Ctrl-Shift-V` IS NOT FIXABLE and must not be attempted** — Firefox raises no event for it, the
+only alternative (`readText()`) prompts in Chromium and does not exist in Firefox, and CLAIMING the
+chord would `preventDefault` away the paste that currently works in Chromium.
+
+### STILL OPEN FROM BEFORE, UNCHANGED
+
+- **`forwardKeys` forwards any kind unfiltered** from the GUI child windows, so the next kind
+  `applyAction` throws on reproduces the main-process freeze. Seven throw today. The `kbd:` seam is
+  the tool to catch it; the structural gap is untouched.
+- **The host's `RC=` line is unparsed**, so an `IND$FILE` RC=12 waits the full 30 s and then says
+  "host may still be transferring" — false at that moment. The user said LEAVE IT.
+- **`Alt-C` as a Clear alias**: the user said LEAVE IT ALONE. It was never implemented; do not
+  re-propose it as something to try.
+- The Electron accelerator overlap on Linux stays **unmeasurable from this repo**.
+
+## SUPERSEDED — ROADMAP (0e) IS DONE; A LIVE PASS IS OWED AND THE USER HAS AGREED TO IT
 
 **MERGED AND PUSHED.** `web-copy-paste` merged `--no-ff` as `cd2c8ce` (18 commits, branch deleted);
 `main` is the ONLY branch and `origin/main` is in sync at `cd2c8ce`, verified by a fresh `fetch`.
