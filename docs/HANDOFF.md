@@ -40,9 +40,18 @@ secure context even on `http`; a LAN address is not.** Working LAN copy needs `-
    defect.** The warn path should have fired. Prime suspect: `bridgecore.ts:334`'s `onmessage` is
    `void (async () => { ... })()` with **NO `catch`**, so anything throwing before the `copyText`
    branch — `inflate`, `JSON.parse` — vanishes as an unhandled rejection with nothing anywhere.
-   Third instance of the `void`-on-a-rejecting-promise shape in this repo. **UNCONFIRMED:** ask the
-   user for `window.isSecureContext, typeof navigator.clipboard` in that console. If it is
-   `false, "undefined"`, fix 1's path was reached and something swallowed the warning.
+   Third instance of the `void`-on-a-rejecting-promise shape in this repo. **STILL UNCONFIRMED, and
+   do NOT spend a live run confirming it** — the fix is warranted either way, since an `onmessage`
+   that can swallow a throw is wrong independently of this symptom.
+
+   **A BOTCHED PROBE, recorded so it is not repeated.** I asked the user for
+   `window.isSecureContext, typeof navigator.clipboard` and called it "two values". That is a COMMA
+   EXPRESSION: JavaScript evaluates both halves and returns only the LAST, so it can never show
+   two. The answer came back "both undefined", which is uninterpretable — and `isSecureContext` is
+   a boolean in every browsing context and is NEVER `undefined`, so that reading cannot be the
+   page's state and is not evidence. **If it is ever worth asking again, ask for two SEPARATE
+   lines.** The LAN diagnosis does not depend on it: the same state was reproduced here directly
+   against a real non-secure origin.
 3. **A HOST CONNECT FAILURE IS SILENT, and it cost most of an evening.** `web/src/main.ts:59` is
    `void session.connect(...).catch(() => { /* reported per-connection */ })`. The user's gateway
    could not resolve `pi4` — a **DNS failure**, about as unambiguous as errors get — and the gateway
