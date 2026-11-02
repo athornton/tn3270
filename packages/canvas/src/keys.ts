@@ -198,6 +198,12 @@ export function actionForKey(e: KeyLike): Action | null {
    * copies NOTHING from a canvas. A `null` from this mapper means "we declined it", never "the
    * platform handles it" -- the reading that made an earlier claim in this feature wrong.
    *
+   * (2026-11-02: THAT `Cmd-C` ROW WAS MEASURED ON LINUX CHROMIUM, which binds no copy command to
+   * Meta+C. On macOS the Edit menu's Copy command does raise the event, and since 2026-11-02
+   * `forwardKeys.ts`'s `forwardCopy` listens for it. So `Cmd-C` now copies in the web gateway, but
+   * through the event and not through this mapper. `Ctrl-C` still cannot reach it: the Clear claim
+   * below cancels the keystroke, and that cancellation suppresses the copy event.)
+   *
    * ## `requestCopy`, NOT `copy`
    *
    * `copy` carries a rect and this function is a pure function of one key event, so it cannot

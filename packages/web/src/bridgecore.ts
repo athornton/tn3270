@@ -139,7 +139,7 @@ export interface BridgeDeps {
    *
    * WITHOUT THIS HOOK THE REPLY IS DROPPED: the `onmessage` chain below returns on each kind it
    * knows and then falls off the end, with no `else`, no throw and no log -- so the operator would
-   * press copy, the gateway would log `copy: N chars`, and their clipboard would be unchanged with
+   * press copy, the gateway would log that it sent the text, and their clipboard would be unchanged with
    * nothing in any console. Same shape as the transfer kinds before `onTransfer` existed.
    *
    * NOT ROUTED THROUGH `dispatch`, for the reason `onTransfer` gives above: that queue exists
@@ -163,7 +163,8 @@ export interface BridgeDeps {
    * WRONG: `String()` is not total over JSON-reachable values. `{"text":{"toString":null}}` parses
    * fine -- `toString` is an ordinary own property and the prototype is untouched -- and coercing
    * it throws `TypeError: Cannot convert object to primitive value`, inside the un-awaited async
-   * IIFE below, which makes it an unhandled rejection rather than anything visible.
+   * IIFE below. That was an unhandled rejection until 2026-11-02; the chain's `catch` now paints
+   * it on the canvas instead.
    *
    * THE RULE IS AN OWN `toString` THAT IS NOT CALLABLE, not that one specific literal:
    * `{"toString":1}` throws identically, and so does `[{"toString":null}]` -- `Array.prototype
@@ -185,8 +186,15 @@ export interface BridgeDeps {
    * caller inject the result of a condition under `exactOptionalPropertyTypes`; `bridge.ts` passes
    * a real function here unconditionally, and the capability detection lives one level down in
    * `writeClipboard` below -- injected there, which is what gives the no-API route a test.
+   *
+   * ## `report` PAINTS ON THE CANVAS, 2026-11-02
+   *
+   * The live pass of 2026-10-27 found a copy that wrote nothing and told only `console.warn` --
+   * while the gateway's `copy: N chars` read as success (it now says `sent N chars to the browser`). `report` is `dispatch('error', ...)`, the
+   * channel `renderer.ts` paints and the paste warning already uses. It stays up until the next
+   * frame, which the operator's next keystroke produces, since every action repaints.
    */
-  readonly onCopyText?: (text: string) => void;
+  readonly onCopyText?: (text: string, report: (message: string) => void) => void;
 }
 
 export interface BridgeApi {
@@ -294,11 +302,12 @@ export function writeClipboard(
   warn: (message: string) => void,
 ): void {
   if (clip === undefined) {
-    warn('copy: this browser has no clipboard API (needs a secure context)');
+    warn('copy failed: use https (--tls-cert) or localhost -- this address is not a secure '
+      + 'context, so the browser offers no clipboard');
     return;
   }
   clip.writeText(text).catch((err: unknown) => {
-    warn(`copy: the browser refused the clipboard: ${String(err)}`);
+    warn(`copy failed: the browser refused the clipboard: ${String(err)}`);
   });
 }
 
@@ -331,6 +340,12 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     dispatch('error', 'The connection to the gateway closed. Reload to reconnect.');
   };
 
+  /*
+    THE `catch` IS THE LOAD-BEARING PART, 2026-11-02. Nothing awaits this chain, so before it a throw
+    anywhere inside -- `inflate`, `JSON.parse`, the coercion `onCopyText`'s note measures -- was an
+    unhandled rejection: nothing on the canvas, and in the live pass nothing the operator saw in the
+    console either. Third instance in this repo of `void` on a promise that can reject.
+  */
   deps.socket.onmessage = (e) => {
     void (async () => {
       const text = await deps.inflate(e.data);
@@ -352,7 +367,10 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       // module body, and this is not one of them -- `bridge.ts` injects it at construction, so it
       // cannot be late, and a `dispatch`ed `copyText` would sit in the queue forever. Absent, the
       // text is dropped, which is correct for a client with no clipboard to write.
-      if (msg.kind === 'copyText') { deps.onCopyText?.(String(msg['text'])); return; }
+      if (msg.kind === 'copyText') {
+        deps.onCopyText?.(String(msg['text']), (m) => { dispatch('error', m); });
+        return;
+      }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
@@ -371,7 +389,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
           : msg);
         return;
       }
-    })();
+    })().catch((err: unknown) => {
+      dispatch('error', `gateway message could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    });
   };
 
   return {

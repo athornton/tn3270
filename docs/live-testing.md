@@ -394,6 +394,18 @@ and the Recording log says what happened when they were run.
   the live path on a LAN deployment, and **`localhost` is secure even over `http` while a LAN
   address is not**. Working LAN copy needs `--tls-cert`.
 
+  **ALL THREE DEFECTS BELOW ARE FIXED on branch `diagnostics`, 2026-11-02.** The copy refusal now
+  paints on the canvas, remedy-first (`copy failed: use https (--tls-cert) or localhost -- ...`);
+  `onmessage`'s chain has a `catch` that paints `gateway message could not be read: <cause>`; and
+  the gateway prints `host H:P unreachable: <cause>` on stderr. The TUI, CLI and Electron GUI were
+  each DRIVEN against `no-such-host.invalid` and already report it (`fatal: getaddrinfo ENOTFOUND`,
+  a `data:` line, and `TLS connection to ... failed (ENOTFOUND)` respectively), so only the gateway
+  swallowed it. **The LAN branch IS reachable from this box after all:** Electron's Chromium
+  pointed at the gateway on `http://192.168.70.115:<port>/` gets `isSecureContext: false` and no
+  `navigator.clipboard`. A real drag plus `Ctrl+Shift+C` there painted the new message, and the
+  same probe on unfixed `main` painted nothing while the gateway logged `copy: 21 chars`. That was
+  a one-off probe in `/tmp`, NOT a harness in the repo.
+
   **TWO DEFECTS IT FOUND, both diagnostic, both unfixed as of 2026-10-28 (budget):**
 
   1. **The refusal never reaches the operator.** `bridge.ts:311` warns to `console.warn` only, so
@@ -413,12 +425,40 @@ and the Recording log says what happened when they were run.
   browser that ever attaches — so it belongs on stderr beside the startup warnings.** Check the CLI
   and Electron GUI for the same swallow; all three share `defaultSession`.
 
+  **NATIVE `Cmd-C` WORKS ON A REAL MAC — WITNESSED BY THE USER 2026-11-02**, in Firefox, Chromium
+  and Safari, against the homelab gateway with Hercules elsewhere on the LAN. The same pass
+  confirmed fix 1 at a plain-`http` LAN address: the red `copy failed: use https ...` line appeared
+  and the pasteboard was unchanged, as it must be.
+
+  **AND IT FOUND ONE MORE MISLEADING LINE, NOW FIXED.** In that failing LAN case the gateway still
+  printed `copy: N chars`, which reads as success. The gateway cannot see the browser's clipboard;
+  all it knows is that it extracted the text and sent it. The line now reads
+  `copy: sent N chars to the browser`. The browser's write is reported on the canvas, where the
+  operator is looking.
+
+  **LINUX DESKTOP, user, 2026-11-02:** `Ctrl-C` Clears and leaves the clipboard alone,
+  `Ctrl-Shift-C` copies, and `Ctrl-V` pastes, all as expected.
+
+  **MENU COPY DOES NOT WORK, AND THAT IS A LIMIT OF THE DESIGN, NOT A REGRESSION.**
+  - **Edit > Copy in Firefox** fires `forwardCopy`, but the canvas painted `copy failed: the browser
+    refused the clipboard: NotAllowedError: Clipboard write was blocked due to lack of user
+    activation`. The text arrives from the gateway asynchronously, and `navigator.clipboard
+    .writeText` needs transient user activation. A keystroke in the page grants that; a choice from
+    the browser's own menu does not. So `Cmd-C` and `Ctrl-Shift-C` work and the menu item cannot.
+    Fix 1 reported the refusal correctly. Chromium's Edit menu was not tried.
+  - **Right-click in Firefox** offers only "Copy Image", because the screen is a canvas.
+  - The way to get menu copy would be to fetch the selection's text ahead of time, when the drag
+    ends, and write it synchronously in the `copy` event. That would also make copy work at a
+    plain-`http` LAN address. NOT BUILT; it is a redesign of a copy path that has just been
+    live-verified.
+
   **What a human still owes on copy and paste, and only these:**
 
   1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`
      has no secure context, so `navigator.clipboard` is absent and `writeClipboard`'s warn path
-     runs. That branch is unreachable from any harness on this box and is the COMMON deployment,
-     not an edge one. Check it reports rather than silently failing.
+     runs. It is the COMMON deployment, not an edge one. Check it reports rather than silently
+     failing. **Since 2026-11-02 it reports on the canvas, and that is witnessed in Electron's
+     Chromium at a LAN address (see above). Firefox and Safari at a LAN address are still owed.**
   2. **Chromium AND Firefox, and Safari is worth adding.** Safari has neither a harness witness nor
      any prior measurement in this repo.
   3. **The Electron accelerator overlap on Linux.** `Ctrl-Shift-C` is both the page's copy chord

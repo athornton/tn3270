@@ -463,6 +463,27 @@ const TRANSFER_CHECKS = [
       + '__tn3270Copy directly and never runs the arm.  NOT caught here: '
       + 'selection.ts  `cell.hidden ? \' \' : cell.text` -> `cell.text` -- see the note above',
   },
+  /*
+    THE BROWSER'S OWN COPY GESTURE, 2026-11-02 -- `forwardCopy`, the `copy` event listener.
+
+    INJECTED AND NOT LIVE, AND THE DIFFERENCE IS ONE FIELD. The keystroke is real CDP input and the
+    `copy` event it raises is `isTrusted`, but Linux Chromium binds no editing command to Meta+C, so
+    the harness names it with `commands: ['copy']`, which is what macOS's Cmd-C does via the Edit
+    menu. Whether a real Mac browser raises the event for Cmd-C is a live-pass question, not this one.
+
+    THE NEGATIVE HALF IS WHAT KEEPS CLEAR SAFE: a plain Ctrl+C must raise NO copy event, because
+    `renderer.ts` claims it as Clear and its `preventDefault` suppresses the browser's copy.
+  */
+  {
+    name: 'webNativeCopy',
+    kind: 'injected',
+    what: "the browser's copy command (Cmd-C on macOS) copies the canvas selection to the REAL OS "
+      + 'clipboard through the gateway, and a plain Ctrl+C raises no copy event and is sent as Clear',
+    mutant: 'renderer.ts  drop the `forwardCopy({...})` call (the clipboard keeps the sentinel).  '
+      + 'NOT caught here: forwardKeys.ts  preventDefault inside the copy listener -- MEASURED '
+      + '14/14, because Chromium does not blank the clipboard on a cancelled empty copy. '
+      + 'forwardKeys.test.ts is that rule\'s only cover',
+  },
   {
     name: 'webPaste',
     kind: 'live',
@@ -510,6 +531,7 @@ if (TRANSFER_CHECKS.length === 0) {
  */
 const CDP_CTRL = 2;
 const CDP_SHIFT = 8;
+const CDP_META = 4;
 const XFER_LABEL = 'Xfer';
 
 /** Bytes fed to the injected `transferData`. Content is arbitrary; its LENGTH is asserted. */
@@ -1970,7 +1992,7 @@ async function runTransferPhase(url) {
       well-formed `copy` frame however badly the gateway answered it.
 
        - THE GATEWAY'S OWN STDOUT, for both directions. `--log-actions` prints `action: <json>` for
-         every DECODED frame, and the `copy` arm additionally prints an UNGATED `copy: N chars`.
+         every DECODED frame, and the `copy` arm additionally prints an UNGATED `copy: sent N chars to the browser`.
        - For copy, THE REAL OS CLIPBOARD, read back through `navigator.clipboard.readText()`. This
          is the far end of the whole chain and the harness never wrote the value: a SENTINEL is put
          on the clipboard first, so "the clipboard still holds what we put there" is a failure and
@@ -2241,9 +2263,15 @@ async function runTransferPhase(url) {
        * human on a real desktop.
        */
       const SENTINEL = 'tn3270-harness-sentinel-not-a-copy';
-      /** What `writeClipboard` said, if it said anything. Its only channel is `console.warn`. */
+      /**
+       * What `writeClipboard` said, if it said anything. `console.warn` is one of its two channels.
+       *
+       * `'copy failed'` AND NOT `'copy: '`: both warnings were reworded remedy-first on
+       * 2026-11-02 and the old prefix then matched NOTHING, so `copyWarnings.length === 0` held
+       * whatever the page said. Found while rewording the gateway's log line, not by a red run.
+       */
       const clipWarns = () => cdp.eval(
-        "JSON.stringify(window.__tn3270Probe.warns.filter((w) => w.startsWith('copy: ')))");
+        "JSON.stringify(window.__tn3270Probe.warns.filter((w) => w.startsWith('copy failed')))");
       /*
         NO FOCUS EMULATION HERE, AND THE REMOVED LINE IS WORTH A NOTE BECAUSE OF WHY IT WAS ADDED.
 
@@ -2529,7 +2557,7 @@ async function runTransferPhase(url) {
       const survived = copyAgain.copied === true
         && secondSentinelLanded
         && copyAgain.clip === COPY_WANT
-        && againChars === `copy: ${COPY_WANT.length} chars`;
+        && againChars === `copy: sent ${COPY_WANT.length} chars to the browser`;
       // AND `writeClipboard` MUST HAVE WARNED ABOUT NOTHING. Its two failure routes -- no API, and
       // a browser that refused -- are reported only through the injected `warn`, which `bridge.ts`
       // wires to `console.warn`. A clipboard holding the right text while that function complained
@@ -2562,7 +2590,7 @@ async function runTransferPhase(url) {
           : 'the CHORD raised no copy frame at all -- either keys.ts does not claim '
             + 'Ctrl-Shift-C (check it precedes the case-folded CTRL lookup) or renderer.ts does '
             + 'not intercept requestCopy before clearSelection()',
-        copyAction !== undefined && copyChars === `copy: ${COPY_WANT.length} chars` ? ''
+        copyAction !== undefined && copyChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? ''
           : 'the gateway did not log the copy it should have',
         copyRun.clip === COPY_WANT ? '' : 'the clipboard does NOT hold the selected text',
         // THE HARNESS'S OWN FAULT FIRST, AND NAMED AS SUCH -- MEASURED, not foreseen. A control run
@@ -2600,12 +2628,83 @@ async function runTransferPhase(url) {
               + `${JSON.stringify(copyRun.clip)} (want ${JSON.stringify(COPY_WANT)}; `
               + `${JSON.stringify(copyRun.sentinel)} means it was never written), the gateway `
               + `logged ${JSON.stringify(copyLogs)} (want an action: {"kind":"copy"...} line and `
-              + `"copy: ${COPY_WANT.length} chars"). THE SECOND COPY sent `
+              + `"copy: sent ${COPY_WANT.length} chars to the browser"). THE SECOND COPY sent `
               + `${JSON.stringify(copyAgain.frames)}, left the clipboard reading `
               + `${JSON.stringify(copyAgain.clip)} and the gateway logged `
               + `${JSON.stringify(againLogs)}. isSecureContext=${secure}, `
               + `navigator.clipboard=${clipApi}; writeClipboard warned `
               + `${await clipWarns()}; ${extent}`);
+      }
+
+      // ===== webNativeCopy =====================================================================
+      //
+      // AGAINST THE SELECTION webCopy LEFT, which the survival clause above has just proved is
+      // still there: a copy never clears it. A third sentinel, so this copy cannot be confused with
+      // either of webCopy's. `copied` is the page's own `copy` frame, read off the probe as
+      // `chordCopy` reads it, and the clipboard and the gateway's log are the witnesses.
+      const NATIVE_SENTINEL = `${SENTINEL}-native`;
+      const nativeWritten = await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(NATIVE_SENTINEL)})
+        .then(() => '').catch((e) => String(e))`);
+      await cdp.eval("window.__tn3270CopyEvents = 0; window.addEventListener('copy', "
+        + '() => { window.__tn3270CopyEvents += 1; }, true); document.body.focus(); window.focus();');
+      const nativeMark = serverOut.length;
+      const sentBeforeNative = await cdp.eval('window.__tn3270Probe.sent.length');
+      for (const type of ['rawKeyDown', 'keyUp']) {
+        await cdp.cmd('Input.dispatchKeyEvent', {
+          type, key: 'c', code: 'KeyC', modifiers: CDP_META,
+          windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67,
+          ...(type === 'rawKeyDown' ? { commands: ['copy'] } : {}),
+        });
+      }
+      const nativeLogs = await waitForLog(nativeMark, (l) => l.startsWith('copy: '));
+      const nativeChars = nativeLogs.find((l) => l.startsWith('copy: '));
+      let nativeClip = NATIVE_SENTINEL;
+      for (let waited = 0; waited < 6000 && nativeClip === NATIVE_SENTINEL; waited += 150) {
+        await new Promise((r) => { setTimeout(r, 150); });
+        nativeClip = await cdp.eval(
+          "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
+      }
+      const nativeFrames = JSON.parse(await cdp.eval(
+        `JSON.stringify(window.__tn3270Probe.sent.slice(${sentBeforeNative}))`));
+      const nativeEvents = await cdp.eval('window.__tn3270CopyEvents');
+      // THE NEGATIVE: Ctrl+C. Last, because Clear changes the screen; webPaste below finds its
+      // payload anywhere on the screen, so a cleared one does not disturb it.
+      const CTRLC_SENTINEL = `${SENTINEL}-ctrl-c`;
+      await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(CTRLC_SENTINEL)})
+        .then(() => '').catch((e) => String(e))`);
+      await cdp.eval('window.__tn3270CopyEvents = 0;');
+      const ctrlcMark = serverOut.length;
+      await press('c', 'KeyC', 67, CDP_CTRL);
+      const ctrlcLogs = await waitForLog(ctrlcMark, (l) => l.startsWith('action: {"kind":"clear"'));
+      const ctrlcEvents = await cdp.eval('window.__tn3270CopyEvents');
+      const ctrlcClip = await cdp.eval(
+        "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
+      const nativeWhy = [
+        nativeWritten === '' ? '' : `the HARNESS could not put its sentinel on the clipboard: ${nativeWritten}`,
+        nativeEvents >= 1 ? '' : 'the copy command raised NO copy event in the page, so the harness '
+          + 'drove nothing and the rest is measureless',
+        nativeFrames.some((f) => f.includes('"kind":"copy"')) ? ''
+          : 'the copy event raised no copy frame -- is forwardCopy installed in renderer.ts?',
+        nativeChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? '' : 'the gateway did not log the copy',
+        nativeClip === COPY_WANT ? ''
+          : 'the clipboard does NOT hold the selected text',
+        ctrlcEvents === 0 ? '' : 'a plain Ctrl+C raised a copy event, so Clear is no longer claimed',
+        ctrlcLogs.some((l) => l.startsWith('action: {"kind":"clear"')) ? ''
+          : 'a plain Ctrl+C was not sent as Clear',
+        ctrlcClip === CTRLC_SENTINEL ? '' : 'a plain Ctrl+C changed the clipboard',
+      ].filter((w) => w !== '');
+      if (nativeWhy.length === 0) {
+        ok(check('webNativeCopy'),
+          `the browser's copy command (Meta+C with commands:['copy']) raised ${nativeEvents} copy `
+          + `event(s) and put ${JSON.stringify(nativeClip)} on the REAL OS clipboard over `
+          + `${JSON.stringify(NATIVE_SENTINEL)}; the gateway logged ${JSON.stringify(nativeChars)}. `
+          + 'A plain Ctrl+C raised NO copy event, left the clipboard alone, and was sent as Clear');
+      } else {
+        no(check('webNativeCopy'), `the native copy gesture is broken: ${nativeWhy.join('; ')}`,
+          `copy events ${nativeEvents}, the page sent ${JSON.stringify(nativeFrames)}, the clipboard `
+          + `reads ${JSON.stringify(nativeClip)}, the gateway logged ${JSON.stringify(nativeLogs)}; `
+          + `on Ctrl+C: ${ctrlcEvents} copy event(s), clipboard ${JSON.stringify(ctrlcClip)}, `
+          + `gateway ${JSON.stringify(ctrlcLogs)}; ${extent}`);
       }
 
       // ===== webPaste ==========================================================================

@@ -63,8 +63,8 @@ describe('actionForKey', () => {
     // and MEASURED is why Cmd gets a binding at all rather than being left to the browser:
     // in a real Chromium window with NO DOM selection (our case, since the canvas selection is
     // `renderer.ts` module state and not a Range), Ctrl-C fires a native `copy` event and Cmd-C
-    // fires NONE. So macOS copies nothing from a canvas without this. The measurement is
-    // recorded once, in the branch's own docstring in `keys.ts`.
+    // fires NONE -- on LINUX Chromium; see the 2026-11-02 note on that branch in `keys.ts`,
+    // where the measurement is recorded once, for what macOS's Edit-menu copy changes.
     //
     // `requestCopy` and NOT `copy`: `copy` carries a rect and this function is pure. See that
     // union member's own note.

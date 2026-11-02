@@ -2,7 +2,7 @@ import type { Rgb } from '@tn3270/core';
 import type { AtlasGeometry } from './geometry.js';
 import type { DrawList } from './drawlist.js';
 import { actionForKey } from './keys.js';
-import { forwardPaste, isEditableTarget } from './forwardKeys.js';
+import { forwardCopy, forwardPaste, isEditableTarget } from './forwardKeys.js';
 import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 // FROM THE MODULE AND NOT FROM THE BARREL (`./index.js`), which would be the natural reach and
 // would BLANK THIS WINDOW WITH NO ERROR: the barrel re-exports `drawlist.js`, which value-imports
@@ -365,6 +365,15 @@ forwardPaste({
   sendAction: (action) => { window.tn3270.sendAction(action); },
   protocol: location.protocol,
   clearSelection,
+});
+
+// THE BROWSER'S OWN COPY GESTURE, `Cmd-C` on macOS, 2026-11-02 -- a second trigger for the same
+// `copySelection` `Ctrl-Shift-C` reaches. Same gate as paste; `forwardCopy`'s docstring says why it
+// never cancels the event, and why `Ctrl-C` cannot reach it and so stays Clear.
+forwardCopy({
+  on: (type, handler) => { window.addEventListener(type, handler as (e: Event) => void); },
+  protocol: location.protocol,
+  copySelection,
 });
 
 /**

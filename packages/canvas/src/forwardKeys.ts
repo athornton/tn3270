@@ -319,3 +319,60 @@ export function forwardPaste(deps: ForwardPasteDeps): void {
     deps.sendAction({ kind: 'paste', text });
   });
 }
+
+/** The shape this module reads off a real `copy` `ClipboardEvent`. */
+type CopyEventLike = {
+  readonly target: { tagName?: unknown; isContentEditable?: unknown } | null;
+};
+
+export interface ForwardCopyDeps {
+  /** Register the listener. The real caller passes `window.addEventListener`. */
+  readonly on: (type: string, handler: (e: CopyEventLike) => void) => void;
+  /** `location.protocol`, gated on exactly as `ForwardPasteDeps.protocol` is. */
+  readonly protocol: string;
+  /** The renderer's own `copySelection`, the same function `Ctrl-Shift-C` reaches. */
+  readonly copySelection: () => boolean;
+}
+
+/**
+ * THE BROWSER'S OWN COPY GESTURE -- `Cmd-C` on macOS, Edit > Copy anywhere. 2026-11-02.
+ *
+ * A SECOND TRIGGER FOR `copySelection`, NOT A SECOND COPY PATH. The text still goes to the gateway
+ * as `{kind:'copy', rect}` and comes back as `copyText`, exactly as `Ctrl-Shift-C`'s does, because
+ * only the gateway can extract it. MEASURED 2026-10-27 in Chromium: the `copy` event fires
+ * `isTrusted` with no DOM selection, so it reaches the page even though nothing is selected in the
+ * document.
+ *
+ * ## `Ctrl-C` CANNOT REACH THIS, AND THAT IS WHAT KEEPS CLEAR WORKING
+ *
+ * `keys.ts` claims `Ctrl-C` as Clear and `renderer.ts` calls `preventDefault` on it. MEASURED
+ * 2026-10-27: that suppresses the `copy` event entirely, so on Linux and Windows the native copy key
+ * stays the Clear AID and only the menu route arrives here. `Cmd-C` is unclaimed, so it does arrive.
+ *
+ * ## NO `preventDefault`, EVER
+ *
+ * The paste listener cancels its event; this one must not copy that shape. Under the Clipboard
+ * API spec, cancelling a `copy` tells the browser to write the event's own `clipboardData`, which
+ * we leave empty because the text is still at the gateway. On a LAN page there is no clipboard API
+ * to overwrite it afterwards. MEASURED 2026-11-02 in Electron's Chromium: a cancelled, empty copy
+ * did NOT blank the clipboard. Firefox and Safari are UNMEASURED, so this is a precaution and not a
+ * fix for a known failure. The unit test pins it; the browser harness cannot, since Chromium
+ * behaves the same either way. Left alone, the default copies an empty DOM selection, which does
+ * nothing.
+ *
+ * ## THE GATE IS `PASTE_HOSTS`, FOR A WEAKER REASON THAN PASTE'S
+ *
+ * A stray `copy` action in the Electron GUI would not freeze main (`gui/src/main.ts` has a `copy`
+ * arm), but the GUI already copies through its menu accelerator, `Cmd+C` on macOS, so a listener
+ * there could only make one keystroke copy twice. The web gateway is the only host that needs it.
+ */
+export function forwardCopy(deps: ForwardCopyDeps): void {
+  if (!PASTE_HOSTS.has(deps.protocol)) return;
+  deps.on('copy', (e) => {
+    // The transfer form's text fields must copy their own selection, not the screen's.
+    if (isEditableTarget(e.target)) return;
+    // The return value is discarded, as the `requestCopy` keydown arm discards it: no selection
+    // means nothing to copy, and that is not worth a message.
+    deps.copySelection();
+  });
+}

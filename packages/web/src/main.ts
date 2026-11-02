@@ -56,7 +56,17 @@ export function buildServer(args: WebArgs) {
         // can reach a host or capture a credential.
         session.replay(readFileSync(args.replay, 'utf8'));
       } else {
-        void session.connect(args.host, args.port).catch(() => { /* reported per-connection */ });
+        /*
+          ON STDERR, 2026-11-02, beside the startup warnings the operator is already reading. The
+          live pass lost most of an evening to the empty `catch` this replaced: an unresolvable host
+          printed nothing, and the browser's only symptom was `X Disconnected` -- the 3270 status
+          line, indistinguishable from a gateway fault. Every attaching browser fails the same way,
+          so the cause belongs to whoever started the gateway, not to one tab.
+        */
+        void session.connect(args.host, args.port).catch((err: unknown) => {
+          process.stderr.write(`host ${args.host}:${args.port} unreachable: `
+            + `${err instanceof Error ? err.message : String(err)}\n`);
+        });
       }
       return { session, close: () => { session.disconnect(); } };
     },
@@ -393,7 +403,11 @@ export function buildServer(args: WebArgs) {
         if (text !== '') {
           conn.sendBinary(encodeServerMessage({ kind: 'copyText', text }));
         }
-        process.stdout.write(`copy: ${text.length} chars\n`);
+        // "SENT TO THE BROWSER", NOT "COPIED", 2026-11-02: the gateway cannot see the clipboard.
+        // On plain `http` at a LAN address the browser has no clipboard API, and the bare
+        // `copy: N chars` this used to print read as success on exactly that failure, twice in live
+        // passes. Whether the write landed is reported in the browser, on the canvas.
+        process.stdout.write(`copy: sent ${text.length} chars to the browser\n`);
         return;
       }
       /*

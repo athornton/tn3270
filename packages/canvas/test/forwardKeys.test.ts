@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  forwardKeys, forwardPaste, isEditableTarget,
-  type ForwardKeysDeps, type ForwardPasteDeps,
+  forwardKeys, forwardPaste, forwardCopy, isEditableTarget,
+  type ForwardKeysDeps, type ForwardPasteDeps, type ForwardCopyDeps,
 } from '../src/forwardKeys.js';
 import type { Action } from '@tn3270/frontend';
 
@@ -331,6 +331,103 @@ describe('forwardPaste', () => {
       const f = fakePaste(protocol);
       forwardPaste(f.deps);
       expect(f.types, `${protocol} must not raise a paste action`).toEqual([]);
+    }
+  });
+});
+
+/**
+ * A fake window for the copy half, the same shape as `fakePaste` and for the same reason.
+ *
+ * `hasSelection` is what the injected `copySelection` returns: the renderer's own function says
+ * whether a rectangle existed to copy, and that answer is all this module may act on.
+ */
+function fakeCopy(protocol = 'https:', hasSelection = true): {
+  deps: ForwardCopyDeps;
+  readonly copies: number[];
+  readonly prevented: unknown[];
+  readonly types: string[];
+  fire: (e: unknown) => void;
+} {
+  const copies: number[] = [];
+  const prevented: unknown[] = [];
+  const types: string[] = [];
+  let handler: ((e: unknown) => void) | undefined;
+  return {
+    copies,
+    prevented,
+    types,
+    fire: (e) => {
+      if (handler === undefined) throw new Error('forwardCopy registered no handler');
+      handler({ ...(e as object), preventDefault: () => { prevented.push(e); } });
+    },
+    deps: {
+      on: (type, fn) => { types.push(type); handler = fn as (e: unknown) => void; },
+      protocol,
+      copySelection: () => { copies.push(copies.length); return hasSelection; },
+    },
+  };
+}
+
+const copyEv = (o: { tag?: string; editable?: boolean } = {}): unknown => ({
+  target: o.tag === undefined && o.editable === undefined
+    ? null
+    : { tagName: o.tag, isContentEditable: o.editable === true },
+});
+
+describe('forwardCopy, the browser\'s own copy gesture (Cmd-C, Edit > Copy)', () => {
+  it('copies the canvas selection when the page raises a copy event', () => {
+    const f = fakeCopy();
+    forwardCopy(f.deps);
+    f.fire(copyEv());
+    expect(f.copies).toHaveLength(1);
+  });
+
+  /*
+    NO `preventDefault`, WITH OR WITHOUT A SELECTION, and this is the case most likely to be
+    "fixed" by someone copying the paste listener's shape. Cancelling a copy event tells the
+    browser to write the event's OWN `clipboardData`, which we leave empty. Chromium was MEASURED
+    not to blank the clipboard on that; Firefox and Safari were not measured, and this case is the
+    ONLY cover, because `browser-clicks.mjs` runs Chromium and stays green on the mutant.
+  */
+  it('never prevents the default, so it never asks the browser to write an empty clipboard', () => {
+    for (const hasSelection of [true, false]) {
+      const f = fakeCopy('https:', hasSelection);
+      forwardCopy(f.deps);
+      f.fire(copyEv());
+      expect(f.prevented, `hasSelection=${hasSelection}`).toEqual([]);
+    }
+  });
+
+  it('skips a copy aimed at a form control, so the transfer form copies its own text', () => {
+    for (const target of [{ tag: 'INPUT' }, { tag: 'TEXTAREA' }, { editable: true }]) {
+      const f = fakeCopy();
+      forwardCopy(f.deps);
+      f.fire(copyEv(target));
+      expect(f.copies, JSON.stringify(target)).toEqual([]);
+    }
+  });
+
+  it('listens for copy and nothing else', () => {
+    const f = fakeCopy();
+    forwardCopy(f.deps);
+    expect(f.types).toEqual(['copy']);
+  });
+
+  /*
+    THE SAME GATE AS PASTE, on the same allowlist. The Electron GUI already copies through its
+    menu accelerator (`Cmd+C` on macOS, `menu.ts`), so a listener there could only double-fire it.
+    Asserted as a MISSING listener, for the reason the paste gate's case gives.
+  */
+  it('installs on http: and https: only, never on file:, the Electron GUI', () => {
+    for (const protocol of ['http:', 'https:']) {
+      const f = fakeCopy(protocol);
+      forwardCopy(f.deps);
+      expect(f.types, protocol).toEqual(['copy']);
+    }
+    for (const protocol of ['file:', 'app:', 'chrome-extension:', 'data:', 'about:', '']) {
+      const f = fakeCopy(protocol);
+      forwardCopy(f.deps);
+      expect(f.types, `${protocol} must not install a copy listener`).toEqual([]);
     }
   });
 });

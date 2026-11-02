@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { inflateSync } from 'node:zlib';
-import { connect, type Socket } from 'node:net';
+import { connect, createServer, type Socket } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildServer } from '../src/main.js';
@@ -805,6 +805,53 @@ describe('the gateway end to end', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('a host the gateway cannot reach', () => {
+  it('SAYS SO ON STDERR, naming the host and the cause', async () => {
+    /*
+      THE LIVE PASS OF 2026-10-27 LOST MOST OF AN EVENING TO THIS. The gateway could not resolve
+      its host -- `ENOTFOUND`, as unambiguous as errors get -- and printed NOTHING, because the
+      factory's `connect` ended in `.catch(() => {})`. The browser showed `X Disconnected`, which is
+      the 3270 OPERATOR STATUS LINE and indistinguishable from a gateway fault, so bind, origin,
+      auth and the upgrade were all debugged first and all were fine.
+
+      A REFUSED PORT, NOT AN UNRESOLVABLE NAME: both reject the same promise, and a refused
+      loopback port fails in milliseconds with no resolver involved. The port is one the kernel
+      just handed out and then took back, so nothing is listening on it.
+    */
+    const probe = createServer();
+    await new Promise<void>((r) => { probe.listen(0, '127.0.0.1', r); });
+    const dead = (probe.address() as { port: number }).port;
+    await new Promise<void>((r) => { probe.close(() => { r(); }); });
+
+    const written: string[] = [];
+    const through = process.stderr.write.bind(process.stderr);
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+        written.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return (through as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stderr.write);
+    try {
+      const args = parseWebArgs(['--listen', '0', '-insecure', `127.0.0.1:${dead}`]);
+      const { server, registry } = buildServer(args);
+      await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+      const port = (server.address() as { port: number }).port;
+      stop = () => { registry.closeAll(); server.close(); };
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+      ws.send(JSON.stringify({ kind: 'hello' }));
+      for (let waited = 0; waited < 80 && !written.join('').includes('ECONNREFUSED'); waited += 1) {
+        await new Promise((r) => { setTimeout(r, 25); });
+      }
+      ws.close();
+    } finally {
+      spy.mockRestore();
+    }
+    const line = written.find((w) => w.includes('ECONNREFUSED'));
+    expect(line, 'a refused host must be reported on stderr').toBeDefined();
+    expect(line).toContain(`127.0.0.1:${dead}`);
   });
 });
 
