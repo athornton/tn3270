@@ -93,6 +93,11 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
   // (`showTransfer`, `onTransfer`, a deleted `oncancel`). A RENDERER IMPORT IS A WEB-GATEWAY
   // CHANGE: run the whole suite, not this package's.
   'forwardKeys.js',
+  // `copyCache.js` joins 2026-11-02, the renderer's fifth relative import and, like `forwardKeys.js`,
+  // inside its graph: the prefetched selection text `renderer.ts` hands a `copy` event. Safe to
+  // serve: its only import is `import type { CellRect }`, which erases. The same guard catches its
+  // absence -- `httpstatic.test.ts`'s graph closure, in `web` -- verified by removing this line.
+  'copyCache.js',
 ]);
 
 /**

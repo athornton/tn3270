@@ -82,7 +82,9 @@ describe('resolveAsset', () => {
     // naming a module other than the one that 404'd. THE GRAPH-CLOSURE CASE BELOW DID CATCH IT,
     // unlike the 2026-10-22 miss it describes -- what hid it for a while was running only
     // `vitest run packages/canvas`, which cannot reach this file.
-    expect(BROWSER_MODULES.length).toBe(8);
+    // NINE since `copyCache.js` joined on 2026-11-02, the renderer's prefetched selection text --
+    // a renderer-graph entry like `forwardKeys.js`, and the closure case below caught its removal.
+    expect(BROWSER_MODULES.length).toBe(9);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 

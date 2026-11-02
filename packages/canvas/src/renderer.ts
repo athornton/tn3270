@@ -9,7 +9,10 @@ import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 // `@tn3270/core`, and a browser has no bundler to resolve a bare specifier.
 // `renderer-imports.test.ts` walks this file's built graph to catch exactly that. `selection.ts`
 // itself is safe here -- its only workspace import is an `import type`, which erases.
-import { normalizeRect, isEmptyRect, type CellAddr } from './selection.js';
+import { normalizeRect, isEmptyRect, type CellAddr, type CellRect } from './selection.js';
+// The same rule as `selection.js` above, and served from `BROWSER_MODULES` for the same reason.
+// `copyCache.ts`'s only import is `import type { CellRect }`, which erases.
+import { createCopyCache } from './copyCache.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -21,9 +24,9 @@ import { normalizeRect, isEmptyRect, type CellAddr } from './selection.js';
  * assumed: an earlier version imported `drawList` and died with "Failed to resolve module
  * specifier", leaving a blank window and no clue anywhere. So the draw list arrives finished
  * over IPC, the atlas arrives as bytes over IPC, and the only runtime imports are
- * `./blit.js`, `./keys.js`, `./selection.js` and `./forwardKeys.js`, whose own imports are
- * either `import type` and thus erased or (for `forwardKeys.js`) `./keys.js`, already here.
- * EACH ONE IS ALSO LISTED IN `BROWSER_MODULES` (`assets.ts`), without which the web front end
+ * `./blit.js`, `./keys.js`, `./selection.js`, `./forwardKeys.js` and `./copyCache.js`, whose own
+ * imports are either `import type` and thus erased or (for `forwardKeys.js`) `./keys.js`, already
+ * here. EACH ONE IS ALSO LISTED IN `BROWSER_MODULES` (`assets.ts`), without which the web front end
  * serves a 404 for it and the canvas goes black instead -- measured twice now, for
  * `selection.js` and again for `forwardKeys.js` on 2026-10-23. ADDING AN IMPORT HERE IS A CHANGE
  * TO THE WEB GATEWAY, and the test that fails on the omission lives in `web`, so run the whole
@@ -47,6 +50,8 @@ declare global {
       onFrame(fn: (list: DrawList) => void): void;
       onError(fn: (message: string) => void): void;
       sendAction(action: unknown): void;
+      /** OPTIONAL: the gateway's bridge has it, Electron's preload does not. See bridgecore.ts. */
+      fetchSelection?(rect: CellRect): Promise<string>;
     };
   }
 }
@@ -88,6 +93,24 @@ let last: DrawList | undefined;
 let anchor: CellAddr | null = null;
 let focus: CellAddr | null = null;
 let dragging = false;
+/**
+ * The selection's prefetched text, 2026-11-02 -- see `copyCache.ts`. Invalidated exactly where the
+ * selection dies, which is `clearSelection()` below and a new press on the screen, so a frame from
+ * the host (whose `onFrame` calls `clearSelection()`) can never leave text for a vanished screen.
+ *
+ * ONLY EVER FILLED ON THE WEB GATEWAY: `prefetchSelection` returns at once when the bridge has no
+ * `fetchSelection`, which is the Electron GUI's case, so there it stays empty and every copy
+ * gesture takes the path it took before this existed.
+ */
+const copyCache = createCopyCache();
+/**
+ * Set by `forwardCopy`'s `onHandled` whenever its listener took a copy event. Read only by
+ * `copyByChord`, to learn whether its `execCommand('copy')` reached that listener.
+ *
+ * DECLARED HERE, ABOVE EVERY CLOSURE THAT TOUCHES IT, so it has no temporal dead zone to reason
+ * about: a `let` does not hoist the way the function declarations that read it do.
+ */
+let copyHandled = false;
 
 /**
  * Forget the selection. One function and not two assignments at four call sites, so a later edit
@@ -99,6 +122,7 @@ function clearSelection(): void {
   anchor = null;
   focus = null;
   dragging = false;
+  copyCache.invalidate();
 }
 /**
  * True while the canvas holds an ERROR MESSAGE rather than a screen.
@@ -310,19 +334,23 @@ window.addEventListener('keydown', (e) => {
 
     `requestCopy` is an INTENT and not a wire action: `actionForKey` raises it from
     `Ctrl-Shift-C` / `Cmd-Shift-C` knowing only that keys were pressed, and this file is the only
-    place that knows WHICH CELLS are selected. `copySelection` turns it into the real
-    `{kind:'copy', rect}`, so the kind is consumed here and never reaches `sendAction`.
+    place that knows WHICH CELLS are selected. `copyByChord` consumes it, so the kind never reaches
+    `sendAction`: with the selection's text prefetched it raises the browser's own `copy` event and
+    `forwardCopy` sets the text synchronously (2026-11-02), and otherwise it falls back to
+    `copySelection`, which turns it into the real `{kind:'copy', rect}` as before.
 
     THE ORDER OF THESE LINES IS THE BEHAVIOR. Every other claimed key clears the selection, because
     the screen is about to change and a highlight over changed text would offer a copy of something
     never seen. A copy changes NOTHING and is the one claimed kind that READS the selection -- so
-    clearing first would destroy the rectangle a moment before building it, and `copySelection`
-    would find `anchor === null`, return false and copy nothing. Moving this arm below
+    clearing first would destroy the rectangle a moment before building it, and the prefetched
+    text with it (`clearSelection()` invalidates the cache). `copyByChord` would find nothing
+    cached, and `copySelection` would find `anchor === null`, return false and copy nothing.
+    Both paths read the selection, so the argument is unchanged by the cache. Moving this arm below
     `clearSelection()` STILL COMPILES AND STILL TYPECHECKS while silently breaking the gesture,
     which is why `test/renderer-imports.test.ts` pins the order in the built artifact.
 
-    THE RETURN VALUE IS DISCARDED, unlike the global's. A false here means the operator pressed the
-    chord with nothing selected, which is not worth a message -- the menu item needs to tell that
+    NO RESULT IS KEPT, unlike the global's boolean: `copyByChord` returns nothing. A chord pressed
+    with nothing selected is not worth a message -- the menu item needs to tell that
     from "copied" because a harness asserts on it; a keystroke has nobody to tell.
 
     A FRONT END THAT FORGOT THIS ARM FAILS LOUDLY RATHER THAN BEING SILENTLY INERT, which is why
@@ -331,7 +359,7 @@ window.addEventListener('keydown', (e) => {
     `transferForm` already uses -- a renderer-side intent that becomes a different action -- and
     NOT `toggleKeypad`, which is a single kind terminally intercepted in main.
   */
-  if (action.kind === 'requestCopy') { copySelection(); return; }
+  if (action.kind === 'requestCopy') { copyByChord(); return; }
   // ANY OTHER KEYSTROKE THAT DOES SOMETHING INVALIDATES THE SELECTION, for the reason above.
   //
   // AFTER the `action === null` return above, so a key we did NOT claim leaves the selection alone:
@@ -367,13 +395,18 @@ forwardPaste({
   clearSelection,
 });
 
-// THE BROWSER'S OWN COPY GESTURE, `Cmd-C` on macOS, 2026-11-02 -- a second trigger for the same
-// `copySelection` `Ctrl-Shift-C` reaches. Same gate as paste; `forwardCopy`'s docstring says why it
-// never cancels the event, and why `Ctrl-C` cannot reach it and so stays Clear.
+// THE BROWSER'S OWN COPY EVENT, `Cmd-C` on macOS, Edit > Copy, and `copyByChord`'s
+// `execCommand('copy')`, 2026-11-02. It sets the prefetched text when there is some and falls back
+// to `copySelection` when not. Same gate as paste; `forwardCopy`'s docstring says why it cancels
+// the event only when text was set, and why `Ctrl-C` cannot reach it and so stays Clear.
+// `cachedSelection` and `copySelection` are function declarations further down, and hoist;
+// `copyHandled` is declared above, beside the selection, so nothing here touches a TDZ.
 forwardCopy({
   on: (type, handler) => { window.addEventListener(type, handler as (e: Event) => void); },
   protocol: location.protocol,
+  cached: cachedSelection,
   copySelection,
+  onHandled: () => { copyHandled = true; },
 });
 
 /**
@@ -471,6 +504,9 @@ canvas.addEventListener('mousedown', (e) => {
   // 2026-10-06. Nothing to send, so nothing to do.
   const cell = cellAt(e.offsetX, e.offsetY, list);
   if (cell === null) return;
+  // A NEW PRESS ON THE SCREEN REPLACES THE SELECTION, so its prefetched text dies with it. After
+  // the `cell === null` return, matching the selection: a press on the OIA leaves both alone.
+  copyCache.invalidate();
   anchor = cell;
   focus = cell;
   dragging = true;
@@ -498,7 +534,39 @@ function release(): void {
   dragging = false;
 }
 
-window.addEventListener('mouseup', release);
+/**
+ * A drag that ENDED ON A REAL RECTANGLE asks the gateway for its text, so a later copy event can
+ * set it synchronously. 2026-11-02. Only on `mouseup`: `blur` also releases, but nobody selected
+ * anything by switching windows, and a drag cut short that way just leaves the cache empty -- every
+ * gesture then falls back. A plain click (an empty rect) asks for nothing.
+ *
+ * RETURNS AT ONCE WHERE THE BRIDGE HAS NO `fetchSelection`, which is the Electron GUI: its preload
+ * supplies only the four required functions, so there nothing is ever asked for or cached.
+ *
+ * THE `catch` IS LOAD-BEARING. `fetchSelection` rejects when the socket closes and when a newer
+ * request supersedes it, and an unhandled rejection is this repo's most-recorded silent failure.
+ * A failed prefetch leaves the cache empty, and every gesture then falls back -- so nothing is
+ * painted here.
+ */
+function prefetchSelection(): void {
+  const fetchSelection = window.tn3270.fetchSelection;
+  if (fetchSelection === undefined || anchor === null || focus === null) return;
+  const rect = normalizeRect(anchor, focus);
+  if (isEmptyRect(rect)) return;
+  const gen = copyCache.begin(rect);
+  fetchSelection.call(window.tn3270, rect)
+    .then((text) => { copyCache.accept(gen, text); })
+    .catch(() => { /* the cache stays empty; every gesture falls back */ });
+}
+
+// `dragging` IS READ BEFORE `release()` CLEARS IT, so only a release that ends a drag THIS PAGE
+// started prefetches. A press off the screen region, on an overlay or outside the window never set
+// it, and a stray `mouseup` after a `blur` already ended the drag finds it false.
+window.addEventListener('mouseup', () => {
+  const ended = dragging;
+  release();
+  if (ended) prefetchSelection();
+});
 window.addEventListener('blur', release);
 
 /**
@@ -565,6 +633,41 @@ function copySelection(): boolean {
   if (isEmptyRect(rect)) return false;
   window.tn3270.sendAction({ kind: 'copy', rect });
   return true;
+}
+
+/** The prefetched text for the CURRENT selection, or `undefined`. */
+function cachedSelection(): string | undefined {
+  if (anchor === null || focus === null) return undefined;
+  return copyCache.take(normalizeRect(anchor, focus));
+}
+
+/**
+ * `Ctrl-Shift-C` / `Cmd-Shift-C`. 2026-11-02.
+ *
+ * WITH TEXT CACHED, raise the browser's own `copy` event with `execCommand('copy')`, inside this
+ * keystroke's activation, so `forwardCopy` can set the text synchronously -- which is what makes
+ * the chord work at a plain-`http` LAN address. MEASURED in a non-secure Chromium page (Electron
+ * 44): the event fires `isTrusted` and its data lands on the OS clipboard; without a user gesture
+ * `execCommand('copy')` returns false and nothing happens. `execCommand` is deprecated but has no
+ * replacement for raising a copy event from script.
+ *
+ * FALLS BACK to `copySelection()` -- the async path -- when nothing is cached, when `execCommand`
+ * throws or is ignored, or when the event never reached `forwardCopy`'s listener. So a browser
+ * that ignores the call still copies, exactly as it did before this. THE SIGNAL IS `copyHandled`,
+ * NOT `execCommand`'s RETURN VALUE: that says whether a copy command ran, not whether our listener
+ * took it.
+ *
+ * ONLY WITH TEXT CACHED, and that is not an optimization. The cache is filled only where the bridge
+ * has `fetchSelection` (the web gateway), so in the Electron GUI this never calls `execCommand` at
+ * all, and the page's default copy of an empty DOM selection never runs there.
+ */
+function copyByChord(): void {
+  if (cachedSelection() !== undefined) {
+    copyHandled = false;
+    try { document.execCommand('copy'); } catch { /* fall through to the fallback */ }
+    if (copyHandled) return;
+  }
+  copySelection();
 }
 
 /**

@@ -323,6 +323,8 @@ export function forwardPaste(deps: ForwardPasteDeps): void {
 /** The shape this module reads off a real `copy` `ClipboardEvent`. */
 type CopyEventLike = {
   readonly target: { tagName?: unknown; isContentEditable?: unknown } | null;
+  readonly clipboardData?: { setData: (format: string, data: string) => void } | null;
+  readonly preventDefault: () => void;
 };
 
 export interface ForwardCopyDeps {
@@ -330,18 +332,32 @@ export interface ForwardCopyDeps {
   readonly on: (type: string, handler: (e: CopyEventLike) => void) => void;
   /** `location.protocol`, gated on exactly as `ForwardPasteDeps.protocol` is. */
   readonly protocol: string;
-  /** The renderer's own `copySelection`, the same function `Ctrl-Shift-C` reaches. */
+  /** The prefetched text for the CURRENT selection, or `undefined`. See `copyCache.ts`. */
+  readonly cached: () => string | undefined;
+  /** The renderer's own `copySelection`: the async fallback, which `Ctrl-Shift-C` also reaches. */
   readonly copySelection: () => boolean;
+  /**
+   * Called once for every copy this listener took responsibility for, by either path. The
+   * `Ctrl-Shift-C` arm reads it to know whether its `execCommand('copy')` reached here, and falls
+   * back itself if not -- a browser that silently ignores `execCommand` still copies.
+   */
+  readonly onHandled: () => void;
 }
 
 /**
- * THE BROWSER'S OWN COPY GESTURE -- `Cmd-C` on macOS, Edit > Copy anywhere. 2026-11-02.
+ * THE BROWSER'S OWN COPY EVENT -- `Cmd-C` on macOS, Edit > Copy anywhere, and since 2026-11-02 the
+ * `execCommand('copy')` that `renderer.ts`'s `Ctrl-Shift-C` arm raises. 2026-11-02.
  *
- * A SECOND TRIGGER FOR `copySelection`, NOT A SECOND COPY PATH. The text still goes to the gateway
- * as `{kind:'copy', rect}` and comes back as `copyText`, exactly as `Ctrl-Shift-C`'s does, because
- * only the gateway can extract it. MEASURED 2026-10-27 in Chromium: the `copy` event fires
- * `isTrusted` with no DOM selection, so it reaches the page even though nothing is selected in the
- * document.
+ * TWO PATHS, CHOSEN BY WHETHER THE TEXT IS ALREADY HERE. The text lives at the gateway, because
+ * only the gateway can extract it, so the renderer PREFETCHES it when a drag ends (`copyCache.ts`).
+ *   - CACHED: the text is set on the event's own `clipboardData`, synchronously, inside the event.
+ *     That needs no secure context and no activation window, which is what makes copy work at a
+ *     plain-`http` LAN address, where `navigator.clipboard` does not exist.
+ *   - NOT CACHED (the prefetch has not answered, failed, or this host has no `fetchSelection`):
+ *     a second trigger for `copySelection`, the async path. The text goes to the gateway as
+ *     `{kind:'copy', rect}` and comes back as `copyText`, exactly as before.
+ * MEASURED 2026-10-27 in Chromium: the `copy` event fires `isTrusted` with no DOM selection, so it
+ * reaches the page even though nothing is selected in the document.
  *
  * ## `Ctrl-C` CANNOT REACH THIS, AND THAT IS WHAT KEEPS CLEAR WORKING
  *
@@ -349,16 +365,18 @@ export interface ForwardCopyDeps {
  * 2026-10-27: that suppresses the `copy` event entirely, so on Linux and Windows the native copy key
  * stays the Clear AID and only the menu route arrives here. `Cmd-C` is unclaimed, so it does arrive.
  *
- * ## NO `preventDefault`, EVER
+ * ## `preventDefault` ONLY WHEN TEXT WAS SET
  *
- * The paste listener cancels its event; this one must not copy that shape. Under the Clipboard
- * API spec, cancelling a `copy` tells the browser to write the event's own `clipboardData`, which
- * we leave empty because the text is still at the gateway. On a LAN page there is no clipboard API
- * to overwrite it afterwards. MEASURED 2026-11-02 in Electron's Chromium: a cancelled, empty copy
- * did NOT blank the clipboard. Firefox and Safari are UNMEASURED, so this is a precaution and not a
- * fix for a known failure. The unit test pins it; the browser harness cannot, since Chromium
- * behaves the same either way. Left alone, the default copies an empty DOM selection, which does
- * nothing.
+ * Under the Clipboard API spec, cancelling a `copy` tells the browser to write the event's own
+ * `clipboardData`. On the cached path that is the point: the data was just set, and without the
+ * cancel the browser would ignore it and copy the (empty) DOM selection instead. On the fallback
+ * path it must NOT happen, and the paste listener's shape must not be copied there: `clipboardData`
+ * is empty because the text is still at the gateway, and on a LAN page there is no clipboard API to
+ * overwrite it afterwards. MEASURED 2026-11-02 in Electron's Chromium: a cancelled, empty copy did
+ * NOT blank the clipboard. Firefox and Safari are UNMEASURED, so the fallback rule is a precaution
+ * and not a fix for a known failure. The unit test pins it; the browser harness cannot, since
+ * Chromium behaves the same either way. Left alone, the default copies an empty DOM selection,
+ * which does nothing.
  *
  * ## THE GATE IS `PASTE_HOSTS`, FOR A WEAKER REASON THAN PASTE'S
  *
@@ -371,8 +389,18 @@ export function forwardCopy(deps: ForwardCopyDeps): void {
   deps.on('copy', (e) => {
     // The transfer form's text fields must copy their own selection, not the screen's.
     if (isEditableTarget(e.target)) return;
-    // The return value is discarded, as the `requestCopy` keydown arm discards it: no selection
-    // means nothing to copy, and that is not worth a message.
+    deps.onHandled();
+    const text = deps.cached();
+    if (text !== undefined && e.clipboardData) {
+      // THE SYNCHRONOUS PATH: no secure context needed, no activation window. `preventDefault` is
+      // what makes the browser write the data just set -- correct here, and only here.
+      e.clipboardData.setData('text/plain', text);
+      e.preventDefault();
+      return;
+    }
+    // Nothing prefetched yet: the async path. NO `preventDefault`, for the reason in the
+    // docstring. The return value is discarded, as the `requestCopy` keydown arm discards it: no
+    // selection means nothing to copy, and that is not worth a message.
     deps.copySelection();
   });
 }

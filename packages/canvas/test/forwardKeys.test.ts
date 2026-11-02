@@ -338,22 +338,26 @@ describe('forwardPaste', () => {
 /**
  * A fake window for the copy half, the same shape as `fakePaste` and for the same reason.
  *
- * `hasSelection` is what the injected `copySelection` returns: the renderer's own function says
- * whether a rectangle existed to copy, and that answer is all this module may act on.
+ * `cached` is what the renderer's cache holds for the current selection (`undefined`: nothing
+ * prefetched). `fallbacks` counts calls to the async `copySelection`, and `handled` counts
+ * `onHandled` calls -- the signal `copyByChord` reads to know its `execCommand` arrived.
  */
-function fakeCopy(protocol = 'https:', hasSelection = true): {
+function fakeCopy(protocol = 'https:', cached: string | undefined = undefined): {
   deps: ForwardCopyDeps;
-  readonly copies: number[];
+  readonly fallbacks: number[];
+  readonly handled: number[];
   readonly prevented: unknown[];
   readonly types: string[];
   fire: (e: unknown) => void;
 } {
-  const copies: number[] = [];
+  const fallbacks: number[] = [];
+  const handled: number[] = [];
   const prevented: unknown[] = [];
   const types: string[] = [];
   let handler: ((e: unknown) => void) | undefined;
   return {
-    copies,
+    fallbacks,
+    handled,
     prevented,
     types,
     fire: (e) => {
@@ -363,47 +367,79 @@ function fakeCopy(protocol = 'https:', hasSelection = true): {
     deps: {
       on: (type, fn) => { types.push(type); handler = fn as (e: unknown) => void; },
       protocol,
-      copySelection: () => { copies.push(copies.length); return hasSelection; },
+      cached: () => cached,
+      copySelection: () => { fallbacks.push(fallbacks.length); return true; },
+      onHandled: () => { handled.push(handled.length); },
     },
   };
 }
 
-const copyEv = (o: { tag?: string; editable?: boolean } = {}): unknown => ({
+/** A `copy` event. `set` records what the listener put on `clipboardData`. */
+const copyEv = (o: {
+  tag?: string; editable?: boolean; noData?: boolean; set?: Array<[string, string]>;
+} = {}): unknown => ({
   target: o.tag === undefined && o.editable === undefined
     ? null
     : { tagName: o.tag, isContentEditable: o.editable === true },
+  clipboardData: o.noData === true ? null : {
+    setData: (format: string, data: string) => { o.set?.push([format, data]); },
+  },
 });
 
 describe('forwardCopy, the browser\'s own copy gesture (Cmd-C, Edit > Copy)', () => {
-  it('copies the canvas selection when the page raises a copy event', () => {
-    const f = fakeCopy();
+  /*
+    THE CACHED PATH, 2026-11-02, and the reason it works where the async one cannot: the text is
+    set on the event's own `clipboardData` INSIDE the event, which needs no secure context and no
+    activation window. `preventDefault` is what makes the browser write that data, and it is
+    correct here because real data was set.
+  */
+  it('sets the cached text on the event and cancels its default', () => {
+    const f = fakeCopy('https:', ' MENU\n OPTION ===>');
     forwardCopy(f.deps);
-    f.fire(copyEv());
-    expect(f.copies).toHaveLength(1);
+    const set: Array<[string, string]> = [];
+    f.fire(copyEv({ set }));
+    expect(set).toEqual([['text/plain', ' MENU\n OPTION ===>']]);
+    expect(f.prevented).toHaveLength(1);
+    expect(f.fallbacks).toEqual([]);
+    expect(f.handled).toHaveLength(1);
   });
 
   /*
-    NO `preventDefault`, WITH OR WITHOUT A SELECTION, and this is the case most likely to be
-    "fixed" by someone copying the paste listener's shape. Cancelling a copy event tells the
-    browser to write the event's OWN `clipboardData`, which we leave empty. Chromium was MEASURED
-    not to blank the clipboard on that; Firefox and Safari were not measured, and this case is the
-    ONLY cover, because `browser-clicks.mjs` runs Chromium and stays green on the mutant.
+    NO CACHED TEXT: THE ASYNC FALLBACK, AND NO `preventDefault`. Cancelling with nothing set asks
+    the browser to write an EMPTY `clipboardData`. Chromium was MEASURED not to blank the clipboard
+    on that; Firefox and Safari were not, so the rule stands as a precaution and this case is its
+    only cover -- `browser-clicks.mjs` runs Chromium and stays green on the mutant.
   */
-  it('never prevents the default, so it never asks the browser to write an empty clipboard', () => {
-    for (const hasSelection of [true, false]) {
-      const f = fakeCopy('https:', hasSelection);
-      forwardCopy(f.deps);
-      f.fire(copyEv());
-      expect(f.prevented, `hasSelection=${hasSelection}`).toEqual([]);
-    }
+  it('falls back to the async copy with nothing cached, and never cancels then', () => {
+    const f = fakeCopy('https:', undefined);
+    forwardCopy(f.deps);
+    const set: Array<[string, string]> = [];
+    f.fire(copyEv({ set }));
+    expect(set).toEqual([]);
+    expect(f.prevented).toEqual([]);
+    expect(f.fallbacks).toHaveLength(1);
+    expect(f.handled).toHaveLength(1);
+  });
+
+  it('falls back when the event carries no clipboardData', () => {
+    const f = fakeCopy('https:', 'TEXT');
+    forwardCopy(f.deps);
+    f.fire(copyEv({ noData: true }));
+    expect(f.prevented).toEqual([]);
+    expect(f.fallbacks).toHaveLength(1);
   });
 
   it('skips a copy aimed at a form control, so the transfer form copies its own text', () => {
     for (const target of [{ tag: 'INPUT' }, { tag: 'TEXTAREA' }, { editable: true }]) {
-      const f = fakeCopy();
+      const f = fakeCopy('https:', 'TEXT');
       forwardCopy(f.deps);
-      f.fire(copyEv(target));
-      expect(f.copies, JSON.stringify(target)).toEqual([]);
+      const set: Array<[string, string]> = [];
+      f.fire(copyEv({ ...target, set }));
+      expect(set, JSON.stringify(target)).toEqual([]);
+      expect(f.prevented, JSON.stringify(target)).toEqual([]);
+      expect(f.fallbacks, JSON.stringify(target)).toEqual([]);
+      // NOT HANDLED: the chord arm must then fall back itself, rather than believe it copied.
+      expect(f.handled, JSON.stringify(target)).toEqual([]);
     }
   });
 
