@@ -13,7 +13,10 @@ import type { CellRect } from './selection.js';
  *
  * THE GENERATION, NOT TIMING, IS WHAT KEEPS A STALE ANSWER OUT. `invalidate()` and every `begin()`
  * bump it, and `accept` drops any answer whose generation is not current -- including one for the
- * same rect over a screen that has since changed.
+ * same rect over a screen that has since changed. In `invalidate()`, the gen bump, clearing
+ * `asked`, and clearing `text` are each independently sufficient to block a stale accept and to
+ * make `take` answer undefined -- this is defence in depth, not one mechanism relying on the
+ * others.
  */
 export interface CopyCache {
   /** A drag ended on `rect`. Returns the generation its answer must carry. */
@@ -40,7 +43,10 @@ export function createCopyCache(): CopyCache {
       return gen;
     },
     accept(g, t) {
-      // EMPTY IS NOT CACHED: see the test. An all-blank copy then falls back, which sends nothing.
+      // EMPTY ('') IS NOT CACHED: see the test. Only a one-row all-blank rect extracts '';
+      // `extractText` joins rows with '\n', so a blank multi-row rect extracts '\n', which IS
+      // cached here, matching the old path (`web/src/main.ts`'s `copy` arm sends when
+      // `text !== ''`). An uncached '' copy falls back, which sends nothing.
       if (g !== gen || t === '') return;
       text = t;
     },
