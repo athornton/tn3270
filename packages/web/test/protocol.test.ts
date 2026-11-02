@@ -83,6 +83,12 @@ describe('encodeServerMessage', () => {
     expect(raw.length / enc.length).toBeGreaterThan(20);
   });
 
+  it('round-trips selectionText, the prefetched answer to a selection', () => {
+    const msg: ServerMessage = { kind: 'selectionText', seq: 7, text: ' MENU\n OPTION ===>' };
+    const back = JSON.parse(inflateSync(encodeServerMessage(msg)).toString());
+    expect(back).toEqual({ kind: 'selectionText', seq: 7, text: ' MENU\n OPTION ===>' });
+  });
+
   it('sends the atlas coverage as base64, since JSON cannot hold bytes', () => {
     const enc = encodeServerMessage({
       kind: 'atlas',
@@ -223,6 +229,39 @@ describe('decodeClientMessage', () => {
     expect(decodeClientMessage(JSON.stringify({
       kind: 'action', action: { kind: 'copy', rect: { top: 0, left: 0, bottom: 1e9, right: 1e9 } },
     })).kind).toBe('action');
+  });
+
+  it('accepts a selection, a top-level message and not an action', () => {
+    const rect = { top: 0, left: 0, bottom: 1, right: 11 };
+    expect(decodeClientMessage(JSON.stringify({ kind: 'selection', seq: 3, rect })))
+      .toEqual({ kind: 'selection', seq: 3, rect });
+    // ONLY THE FOUR FIELDS SURVIVE, so nothing a client adds rides into extractText.
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'selection', seq: 3, rect: { ...rect, extra: 'x' },
+    }))).toEqual({ kind: 'selection', seq: 3, rect });
+  });
+
+  /*
+    THE SAME FIELD RULE AS `copy`, for the same measured reason: this is answered in the socket
+    handler, where a throw from `extractText(cells, cols, undefined)` ends the gateway process and
+    every operator's session. The seq is checked too, because the browser matches the answer on it.
+  */
+  it('REFUSES a selection whose fields would throw or mismatch in the socket handler', () => {
+    const rect = { top: 0, left: 0, bottom: 1, right: 11 };
+    const bad: readonly unknown[] = [
+      { kind: 'selection', rect },                              // no seq
+      { kind: 'selection', seq: -1, rect },
+      { kind: 'selection', seq: 1.5, rect },
+      { kind: 'selection', seq: '1', rect },
+      { kind: 'selection', seq: 1 },                            // no rect
+      { kind: 'selection', seq: 1, rect: null },
+      { kind: 'selection', seq: 1, rect: { top: 0, left: 0, bottom: 1 } },
+      { kind: 'selection', seq: 1, rect: { top: 0, left: 0, bottom: 1.5, right: 9 } },
+    ];
+    for (const m of bad) {
+      expect(() => decodeClientMessage(JSON.stringify(m)), JSON.stringify(m))
+        .toThrow(/selection (seq|needs a rect|rect )/);
+    }
   });
 
   it('REFUSES a paste whose text would make pasteString throw IN THE SOCKET HANDLER', () => {
@@ -457,3 +496,5 @@ describe('transferDone narrows', () => {
     expect(good.bytes).toBe(249);
   });
 });
+
+

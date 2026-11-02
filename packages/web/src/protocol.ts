@@ -58,6 +58,13 @@ export type ServerMessage =
     apply to it in either direction.
   */
   | { kind: 'copyText'; text: string }
+  /*
+    THE PREFETCHED TEXT OF A SELECTION, 2026-11-02 -- the answer to the client's `selection`. Same
+    extraction as `copyText` (hidden fields become spaces), sent when a drag ends rather than when a
+    copy is requested, so the browser can hand it to its own `copy` event synchronously. `seq`
+    echoes the request's, which is how the bridge matches the answer to its promise.
+  */
+  | { kind: 'selectionText'; seq: number; text: string }
   // TWO ARMS, SO `error` NARROWS. `{ ok: boolean; error?: string }` was the first shape and it is
   // the exact one `transferChunk.ts`'s `AcceptResult` replaced ONE COMMIT EARLIER, for the reason
   // recorded there: inside `if (!msg.ok)` the message a caller just branched on is still
@@ -74,7 +81,12 @@ export type ClientMessage =
   | { kind: 'action'; action: Action }
   | { kind: 'transferChunk'; seq: number; total: number; bytes: Uint8Array }
   | { kind: 'transferStart'; keywords: readonly string[] }
-  | { kind: 'transferCancel' };
+  | { kind: 'transferCancel' }
+  /*
+    A PREFETCH, NOT AN ACTION, 2026-11-02: a top-level kind beside the transfer ones because the
+    operator did nothing to the session. Answered with `selectionText`; changes no screen.
+  */
+  | { kind: 'selection'; seq: number; rect: { top: number; left: number; bottom: number; right: number } };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
@@ -103,6 +115,38 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
       ? { ...msg, bytes: Buffer.from(msg.bytes).toString('base64') }
       : msg;
   return deflateSync(Buffer.from(JSON.stringify(wire)));
+}
+
+/**
+ * THE FOUR RECT FIELDS, CHECKED ONCE FOR BOTH KINDS THAT CARRY ONE. `copy` and `selection` both
+ * reach `extractText` in the socket handler, so both need the rule the `copy` note below records:
+ * a missing rect throws there, and a FRACTIONAL one silently extracts nothing. `what` keeps each
+ * kind's error naming itself, which is what `integration.test.ts`'s per-kind error matching needs.
+ *
+ * `typeof r[k] !== 'number'` is redundant AT RUNTIME next to `Number.isInteger` -- the same
+ * redundancy `transferChunk` above documents -- but it is not removable for narrowing reasons: TS
+ * narrows `r[k]` to `number` only past the `typeof` test, so `Number.isInteger` alone would leave
+ * it `unknown` and the function could not return the typed object below.
+ *
+ * Returns a fresh object with only the four fields, so nothing a client adds (`copy`'s own rect
+ * never carried this risk because it is handed straight to `extractText` as `unknown`, but
+ * `selection` is stored on `ClientMessage` and compared with `toEqual` in tests, where a stray
+ * extra field would be visible).
+ */
+function checkRect(rect: unknown, what: string): {
+  top: number; left: number; bottom: number; right: number;
+} {
+  if (typeof rect !== 'object' || rect === null) throw new Error(`${what} needs a rect object`);
+  const r = rect as Record<string, unknown>;
+  for (const k of ['top', 'left', 'bottom', 'right']) {
+    if (typeof r[k] !== 'number' || !Number.isInteger(r[k])) {
+      throw new Error(`${what} rect ${k} must be an integer`);
+    }
+  }
+  return {
+    top: r['top'] as number, left: r['left'] as number,
+    bottom: r['bottom'] as number, right: r['right'] as number,
+  };
 }
 
 /**
@@ -375,19 +419,7 @@ export function decodeClientMessage(text: string): ClientMessage {
       an error, and `Number.isInteger` rejects NaN and the string "0" in the same stroke.
     */
     if (aKind === 'copy') {
-      const rect = (action as { rect?: unknown }).rect;
-      if (typeof rect !== 'object' || rect === null) {
-        throw new Error('copy needs a rect object');
-      }
-      // THE FOUR FIELDS BY NAME. `typeof r[k] !== 'number'` is redundant AT RUNTIME next to
-      // `Number.isInteger` -- the same redundancy `transferChunk` above documents -- but it is not
-      // removable there for narrowing reasons and is simply the clearer phrasing here.
-      const r = rect as Record<string, unknown>;
-      for (const k of ['top', 'left', 'bottom', 'right']) {
-        if (typeof r[k] !== 'number' || !Number.isInteger(r[k])) {
-          throw new Error(`copy rect ${k} must be an integer`);
-        }
-      }
+      checkRect((action as { rect?: unknown }).rect, 'copy');
     }
     if (aKind === 'paste') {
       // `pasteString` does `[...text]`, which throws `text is not iterable` on anything else --
@@ -516,6 +548,21 @@ export function decodeClientMessage(text: string): ClientMessage {
     return { kind: 'transferStart', keywords };
   }
   if (kind === 'transferCancel') return { kind: 'transferCancel' };
+
+  /*
+    THE SELECTION PREFETCH, 2026-11-02. A top-level kind, not an `action`, because the operator did
+    nothing to the session -- it is answered with `selectionText` and changes no screen. It reaches
+    `extractText` in the SAME socket handler `copy` does, so it owns the same two checks: `seq` is
+    needed because the browser matches the answer to its own pending promise by that number, and the
+    rect gets the identical `checkRect` `copy` uses, for the identical reason.
+  */
+  if (kind === 'selection') {
+    const { seq, rect } = raw as { seq?: unknown; rect?: unknown };
+    if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
+      throw new Error('selection seq must be a non-negative integer');
+    }
+    return { kind: 'selection', seq, rect: checkRect(rect, 'selection') };
+  }
 
   throw new Error(`unknown client message kind ${String(kind)}`);
 }
