@@ -809,12 +809,13 @@ describe('the gateway end to end', () => {
 });
 
 /**
- * THE SELECTION PREFETCH, 2026-11-02 -- `selection` in, `selectionText` out, and the point of the
- * first case is what does NOT arrive with it. `copy`'s own case above already covers the
- * extraction itself (`ANSWERS`'s `copyText` entry, same fixture rect shape); what is new here is
- * the kind's two differences from `copy`: it answers through a different message, and it must
- * repaint NOTHING, because a prefetch changes no screen -- see `main.ts`'s comment at the arm this
- * exercises.
+ * THE SELECTION PREFETCH, 2026-11-02 -- `selection` in, `selectionText` out. `copy`'s own case
+ * above already covers the extraction itself (`ANSWERS`'s `copyText` entry, same fixture rect
+ * shape); what is new here is where `selection` DIFFERS from `copy`, which is two things and not
+ * one: it must repaint NOTHING, because a prefetch changes no screen, and it must ALWAYS reply,
+ * even on an empty selection, because the browser is awaiting this `seq` by promise and `copy`'s
+ * habit of sending nothing on `''` would leave that promise pending forever. See `main.ts`'s
+ * comment on the arm these cases exercise for both.
  */
 describe('the selection prefetch', () => {
   /** Handshake, then every message after it, so "nothing else was sent" is checkable. */
@@ -833,19 +834,69 @@ describe('the selection prefetch', () => {
   }
 
   it('answers with the extracted text and the request seq, and repaints NOTHING', async () => {
+    /*
+      STDOUT IS SPIED THE SAME WAY `--log-actions`'s test above does it -- calling through, and
+      `mockRestore` in a `finally` -- because this is the one place that could leak a screen's text
+      into the gateway's own log. `selection`'s log line is UNGATED (`main.ts`'s note on the `copy`
+      arm gives the reason: an operator's own text, not typed characters), so the length is all it
+      may ever print.
+    */
+    const written: string[] = [];
+    const through = process.stdout.write.bind(process.stdout);
+    const spy = vi.spyOn(process.stdout, 'write')
+      .mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+        written.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return (through as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stdout.write);
+    try {
+      const { ws, after } = await attached();
+      ws.send(JSON.stringify({
+        kind: 'selection', seq: 41, rect: { top: 0, left: 0, bottom: 1, right: 11 },
+      }));
+      for (let waited = 0; waited < 40 && after.length === 0; waited += 1) {
+        await new Promise((r) => { setTimeout(r, 25); });
+      }
+      // A FURTHER WINDOW, because a repaint after the answer is the defect and it would land late.
+      await new Promise((r) => { setTimeout(r, 250); });
+      ws.close();
+      expect(after).toEqual([{ kind: 'selectionText', seq: 41, text: ' MENU\n OPTION ===>' }]);
+      expect(written.join('')).toContain('selection: sent 18 chars to the browser');
+      // THE SCREEN TEXT MUST NEVER REACH THE LOG -- kills a mutant that logged `${text}` instead
+      // of `${text.length}`, which `toContain` above cannot: a line containing the right byte
+      // count could still ALSO contain the text if the format string grew a second interpolation.
+      expect(written.some((w) => w.includes('OPTION ===>'))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /*
+    A BLANK SELECTION STILL GETS A REPLY, AND THAT IS THE WHOLE POINT OF THIS CASE -- see the note
+    on the `main.ts` arm this exercises: the browser is awaiting this `seq` by promise, and a
+    skipped reply (the `copy` arm's `if (text !== '')` habit) would leave it pending forever. Row
+    23 of the fixture is blank -- verified against the trace with `extractText`, not assumed from
+    the other rows' visible text -- so a 1-row, full-width rect there is the shortest honest way to
+    produce an empty extraction without faking one.
+  */
+  it('answers a blank selection with an empty string, never with silence', async () => {
     const { ws, after } = await attached();
     ws.send(JSON.stringify({
-      kind: 'selection', seq: 41, rect: { top: 0, left: 0, bottom: 1, right: 11 },
+      kind: 'selection', seq: 7, rect: { top: 23, left: 0, bottom: 23, right: 79 },
     }));
     for (let waited = 0; waited < 40 && after.length === 0; waited += 1) {
       await new Promise((r) => { setTimeout(r, 25); });
     }
-    // A FURTHER WINDOW, because a repaint after the answer is the defect and it would land late.
-    await new Promise((r) => { setTimeout(r, 250); });
     ws.close();
-    expect(after).toEqual([{ kind: 'selectionText', seq: 41, text: ' MENU\n OPTION ===>' }]);
+    expect(after).toEqual([{ kind: 'selectionText', seq: 7, text: '' }]);
   });
 
+  /*
+    THIS EXERCISES THE DECODE PATH, NOT THIS ARM -- the refusal comes from `protocol.ts`'s
+    `checkRect` (Task 2), reached before `main.ts` ever sees a `{kind:'selection'}` value. What
+    this case PINS is the gateway's survival of a malformed frame: a `selection` with no `rect` at
+    all must answer with `error` and keep serving the connection, the same property every other
+    malformed client message in this file is held to.
+  */
   it('refuses a malformed selection with an error frame, and keeps serving', async () => {
     const { ws, after } = await attached();
     ws.send(JSON.stringify({ kind: 'selection', seq: 1 }));

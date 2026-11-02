@@ -267,23 +267,45 @@ export function buildServer(args: WebArgs) {
       /*
         THE SELECTION PREFETCH, 2026-11-02, AND IT MUST SIT ABOVE THE GUARD BELOW for the identical
         reason the three transfer kinds above do: `msg` here is `ClientMessage` minus `hello` by
-        elimination, so a branch written after `if (msg.kind !== 'action') return;` is dead code
-        and every `selection` frame would fall through it unanswered -- which is exactly what the
-        first commit of `integration.test.ts`'s "selection prefetch" case measured, before this
-        arm existed: `after` came back `[]`.
+        elimination, so a branch written after `if (msg.kind !== 'action') return;` would not
+        compile -- `tsc` reports `TS2367` on the `msg.kind === 'selection'` comparison plus a
+        `TS2339` for each of `rect` and `seq`, the same shape the transfer kinds' own note above
+        measures. It is dead code only under `vitest`, which does not typecheck; `npm run build` is
+        what actually catches a branch planted below that guard. MEASURED test-first, 2026-11-02:
+        `integration.test.ts`'s "selection prefetch" case was written and run BEFORE this arm
+        existed, and reported `after` equal to `[]` -- the frame fell through the guard unanswered,
+        which is the failure a branch below it would still produce at runtime even though `tsc`
+        would refuse to build it there at all.
 
         THE BROWSER ASKS WHEN A DRAG ENDS, so its own `copy` event can set `clipboardData`
         synchronously later -- see `canvas/src/copyCache.ts` for the cache this fills on the other
-        side of the socket. THE SAME EXTRACTION AS `copy`, two arms down: `resolve(snapshot)` feeds
-        `extractText` the identical way, so a hidden field still contributes spaces rather than the
-        typed password underneath it -- see that arm's note for why this matters at all.
+        side of the socket. THE SAME EXTRACTION AS the `copy` intercept below: `resolve(snapshot)`
+        feeds `extractText` the identical way, so a hidden field still contributes spaces rather
+        than the typed password underneath it -- see that arm's note for why this matters at all.
 
-        NO REPAINT, AND THAT IS THE ONE WAY THIS DIFFERS FROM `copy`'s ARM: nothing on the screen
-        changed, a prefetch is not an edit, and the spec's ordering argument for the cache depends
-        on frames arriving only for real screen changes -- an unasked-for `frame` here would be
-        exactly the kind of spurious repaint `copy`'s own arm goes out of its way not to produce.
-        MUTATION-CHECKED by adding `repaint?.();` after the reply and re-running the first case:
-        it fails, seeing a `frame` after the `selectionText` the test does not expect one.
+        THIS ARM ALWAYS REPLIES, EVEN WHEN `text` IS `''`, AND THAT IS NOT AN OVERSIGHT TO
+        "HARMONISE" WITH `copy`'s `if (text !== '')` BELOW. The browser matches this reply to a
+        PENDING PROMISE by `seq` (`packages/canvas/src/copyCache.ts`); `copy` has no such promise,
+        only a clipboard write it is free to skip. Skip the reply here on an empty selection and
+        that promise never resolves -- a leaked, permanently-pending prefetch on every blank-region
+        drag, not merely a missed optimization. `copyCache.ts`'s `accept` already treats an empty
+        string as nothing cached, so replying with `''` is harmless on the far side; it is the
+        SILENCE that would be the defect.
+
+        NO REPAINT. Nothing on the screen changed, so no `frame` is owed on its own account -- but
+        unlike `copy`, which has no repaint call either, this arm's silence matters for a second
+        reason: `canvas/src/renderer.ts:252`'s `onFrame` handler calls `clearSelection()` on EVERY
+        frame it is handed, so a frame sent here (e.g. by a reflexive `repaint?.()`) would
+        invalidate the very selection the operator just finished dragging and silently disable the
+        cache on every drag, not just this one. The real ordering requirement is that a frame for a
+        GENUINE screen change still arrives before this reply, not after it -- host output racing a
+        drag's prefetch must not let a stale `selectionText` answer win. MUTATION-CHECKED by adding
+        `repaint?.();` after the reply and re-running the first case: it fails, seeing a `frame`
+        follow the `selectionText` the test does not expect one after.
+
+        A `selection` ARRIVING BEFORE `hello` GETS NO REPLY AT ALL, same as every other kind here:
+        the shared `if (session === undefined) return;` above swallows it, which a real browser
+        never triggers because it only prefetches from an attached session.
 
         THE LOG LINE SAYS "selection", NOT "copy", deliberately: a prefetch is not a copy and the
         operator may never raise one; on the cached path -- the whole point of this feature -- a
