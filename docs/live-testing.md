@@ -425,6 +425,13 @@ and the Recording log says what happened when they were run.
   browser that ever attaches — so it belongs on stderr beside the startup warnings.** Check the CLI
   and Electron GUI for the same swallow; all three share `defaultSession`.
 
+  **NATIVE `Cmd-C` IS IMPLEMENTED (branch `native-copy`, 2026-11-02) AND OWES A MAC.** On macOS,
+  drag a rectangle in Safari, Firefox and Chrome, press `Cmd-C`, and paste somewhere else. Expect the
+  selected text, and the gateway logging `copy: N chars`. Also check Edit > Copy from the menu bar.
+  The harness proves only the Chromium event path, with the command injected. On Linux,
+  `Ctrl-C` must still Clear and copy nothing. That is machine-checked, but it costs nothing to see
+  it once.
+
   **What a human still owes on copy and paste, and only these:**
 
   1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`

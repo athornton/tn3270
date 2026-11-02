@@ -4,7 +4,32 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — THE THREE DIAGNOSTIC FIXES ARE DONE ON `diagnostics`; NATIVE `Cmd-C` IS NEXT
+## START HERE — FIXES 1-3 ON `diagnostics`, NATIVE `Cmd-C` ON `native-copy` (STACKED); NEITHER MERGED
+
+**2026-11-02, `native-copy` (branched from `diagnostics`, so merging it brings both).** The web
+gateway now listens for the browser's own `copy` event (`forwardCopy` in `canvas/src/forwardKeys.ts`,
+installed by `renderer.ts`, gated on `PASTE_HOSTS` like paste). It is a second trigger for
+`copySelection`, so the text still makes the gateway round trip. It **never calls
+`preventDefault`**: under the spec a cancelled copy writes the event's empty `clipboardData`.
+Chromium was MEASURED not to blank the clipboard on that; Firefox and Safari were not, so the rule
+is a precaution, and its only cover is the unit test.
+
+**Measured in Electron's Chromium:** Meta+C with the `copy` editing command raises one `copy`
+event and puts the selection on the OS clipboard (unchanged `main`: clipboard keeps the sentinel,
+gateway logs nothing). A plain `Ctrl+C` raises **no** copy event and is sent as `{"kind":"clear"}`.
+Both are now `browser-clicks`' 14th check, `webNativeCopy`. It is labelled **injected** because
+Linux Chromium binds no command to Meta+C, so the harness names `commands: ['copy']`, which is
+what the macOS Edit menu does. Mutation-proved: dropping the `forwardCopy` call fails it 13/14.
+
+**OWED, A LIVE PASS ON A REAL MAC:** `Cmd-C` in Safari, Firefox and Chrome against the gateway,
+after a drag. That is the whole claim the injected check cannot make.
+
+**Gate on `native-copy`:** build/typecheck exit 0, **2623 tests in 110 files**, `browser-clicks`
+**14/14**, `browser-keys` 13 chords, `browser-shot` 1/1, GUI `keys` 22/20, `clicks`, `select` 3/3,
+`shot` 2/2, `transfer` 10/10, `pty-smoke` 12 PASS.
+
+## FIXES 1-3, ON `diagnostics`
+
 
 **2026-11-02.** All three fixes below are implemented test-first on branch `diagnostics`. Each new
 test failed first, and the `catch` was mutation-checked: removing it reddens its test.
