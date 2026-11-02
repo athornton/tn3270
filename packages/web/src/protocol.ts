@@ -121,17 +121,18 @@ export function encodeServerMessage(msg: ServerMessage): Buffer {
  * THE FOUR RECT FIELDS, CHECKED ONCE FOR BOTH KINDS THAT CARRY ONE. `copy` and `selection` both
  * reach `extractText` in the socket handler, so both need the rule the `copy` note below records:
  * a missing rect throws there, and a FRACTIONAL one silently extracts nothing. `what` keeps each
- * kind's error naming itself, which is what `integration.test.ts`'s per-kind error matching needs.
+ * kind's error naming itself, which is what `protocol.test.ts`'s `/copy (needs a rect|rect )/` and
+ * `/selection (...)/` patterns need -- `integration.test.ts` never matches a rect error by kind.
  *
- * `typeof r[k] !== 'number'` is redundant AT RUNTIME next to `Number.isInteger` -- the same
- * redundancy `transferChunk` above documents -- but it is not removable for narrowing reasons: TS
- * narrows `r[k]` to `number` only past the `typeof` test, so `Number.isInteger` alone would leave
- * it `unknown` and the function could not return the typed object below.
+ * `typeof r[k] !== 'number'` is redundant both AT RUNTIME, next to `Number.isInteger`, and for
+ * TYPES: TS does not narrow `r[k]` through a `for...of` loop variable, so deleting the `typeof`
+ * clause still compiles -- the `as number` casts in the return below are what type it, not this
+ * check. It is kept only as the clearer phrasing, same as the `copy` comment it replaces said.
  *
- * Returns a fresh object with only the four fields, so nothing a client adds (`copy`'s own rect
- * never carried this risk because it is handed straight to `extractText` as `unknown`, but
- * `selection` is stored on `ClientMessage` and compared with `toEqual` in tests, where a stray
- * extra field would be visible).
+ * Returns a fresh object with only the four fields. `copy` discards this return and passes the
+ * client's own rect object through unchanged, which stays safe because `extractText` reads only
+ * the four named fields off it. `selection` returns the rebuilt object, because it is stored on
+ * `ClientMessage` and compared with `toEqual` in tests, where a stray extra field would be visible.
  */
 function checkRect(rect: unknown, what: string): {
   top: number; left: number; bottom: number; right: number;
@@ -555,11 +556,15 @@ export function decodeClientMessage(text: string): ClientMessage {
     `extractText` in the SAME socket handler `copy` does, so it owns the same two checks: `seq` is
     needed because the browser matches the answer to its own pending promise by that number, and the
     rect gets the identical `checkRect` `copy` uses, for the identical reason.
+
+    `Number.isSafeInteger`, NOT `Number.isInteger`, for `seq`: a value past
+    `Number.MAX_SAFE_INTEGER` cannot be echoed back exactly through a JSON round-trip in either
+    direction, so the bridge's match on `selectionText`'s `seq` could silently fail.
   */
   if (kind === 'selection') {
     const { seq, rect } = raw as { seq?: unknown; rect?: unknown };
-    if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
-      throw new Error('selection seq must be a non-negative integer');
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) {
+      throw new Error('selection seq must be a non-negative safe integer');
     }
     return { kind: 'selection', seq, rect: checkRect(rect, 'selection') };
   }

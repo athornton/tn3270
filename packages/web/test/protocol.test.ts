@@ -215,6 +215,8 @@ describe('decodeClientMessage', () => {
       null,
       'x',                                              // a string has no `top`
       {},                                               // every field missing
+      { left: 0, bottom: 1, right: 9 },                 // no top
+      { top: 0, bottom: 1, right: 9 },                  // no left
       { top: 0, left: 0, bottom: 1 },                   // one field missing
       { top: 0, left: 0, bottom: 1.5, right: 9 },        // fractional: extracts nothing, silently
       { top: 0, left: 0, bottom: NaN, right: 9 },
@@ -232,13 +234,23 @@ describe('decodeClientMessage', () => {
   });
 
   it('accepts a selection, a top-level message and not an action', () => {
-    const rect = { top: 0, left: 0, bottom: 1, right: 11 };
+    // DISTINCT, NON-ZERO FIELDS: a rebuilt object that swapped top/left, or zeroed either one,
+    // must fail this, which a `{top:0,left:0,...}` fixture could not have caught.
+    const rect = { top: 2, left: 3, bottom: 5, right: 11 };
     expect(decodeClientMessage(JSON.stringify({ kind: 'selection', seq: 3, rect })))
       .toEqual({ kind: 'selection', seq: 3, rect });
-    // ONLY THE FOUR FIELDS SURVIVE, so nothing a client adds rides into extractText.
+    // `seq: 0` IS VALID, the same way a non-negative-integer check must accept the smallest one.
+    expect(decodeClientMessage(JSON.stringify({ kind: 'selection', seq: 0, rect })))
+      .toEqual({ kind: 'selection', seq: 0, rect });
+    // ONLY THE FOUR FIELDS SURVIVE: the decoded message carries exactly `top`/`left`/`bottom`/
+    // `right`, not whatever else a client's object happened to include.
     expect(decodeClientMessage(JSON.stringify({
       kind: 'selection', seq: 3, rect: { ...rect, extra: 'x' },
     }))).toEqual({ kind: 'selection', seq: 3, rect });
+    // A HUGE RECT IS ACCEPTED, mirroring `copy`'s case above: clamping is `extractText`'s job.
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'selection', seq: 1, rect: { top: 0, left: 0, bottom: 1e9, right: 1e9 },
+    })).kind).toBe('selection');
   });
 
   /*
@@ -253,8 +265,14 @@ describe('decodeClientMessage', () => {
       { kind: 'selection', seq: -1, rect },
       { kind: 'selection', seq: 1.5, rect },
       { kind: 'selection', seq: '1', rect },
+      // AN UNSAFE INTEGER CANNOT BE ECHOED EXACTLY: the browser matches `selectionText`'s `seq`
+      // against the number it sent, and a value past `Number.MAX_SAFE_INTEGER` can lose precision
+      // in either direction's JSON round-trip.
+      { kind: 'selection', seq: 9007199254740993, rect },
       { kind: 'selection', seq: 1 },                            // no rect
       { kind: 'selection', seq: 1, rect: null },
+      { kind: 'selection', seq: 1, rect: { left: 0, bottom: 1, right: 9 } },   // no top
+      { kind: 'selection', seq: 1, rect: { top: 0, bottom: 1, right: 9 } },    // no left
       { kind: 'selection', seq: 1, rect: { top: 0, left: 0, bottom: 1 } },
       { kind: 'selection', seq: 1, rect: { top: 0, left: 0, bottom: 1.5, right: 9 } },
     ];
@@ -496,5 +514,3 @@ describe('transferDone narrows', () => {
     expect(good.bytes).toBe(249);
   });
 });
-
-
