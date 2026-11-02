@@ -394,6 +394,18 @@ and the Recording log says what happened when they were run.
   the live path on a LAN deployment, and **`localhost` is secure even over `http` while a LAN
   address is not**. Working LAN copy needs `--tls-cert`.
 
+  **ALL THREE DEFECTS BELOW ARE FIXED on branch `diagnostics`, 2026-11-02.** The copy refusal now
+  paints on the canvas, remedy-first (`copy failed: use https (--tls-cert) or localhost -- ...`);
+  `onmessage`'s chain has a `catch` that paints `gateway message could not be read: <cause>`; and
+  the gateway prints `host H:P unreachable: <cause>` on stderr. The TUI, CLI and Electron GUI were
+  each DRIVEN against `no-such-host.invalid` and already report it (`fatal: getaddrinfo ENOTFOUND`,
+  a `data:` line, and `TLS connection to ... failed (ENOTFOUND)` respectively), so only the gateway
+  swallowed it. **The LAN branch IS reachable from this box after all:** Electron's Chromium
+  pointed at the gateway on `http://192.168.70.115:<port>/` gets `isSecureContext: false` and no
+  `navigator.clipboard`. A real drag plus `Ctrl+Shift+C` there painted the new message, and the
+  same probe on unfixed `main` painted nothing while the gateway logged `copy: 21 chars`. That was
+  a one-off probe in `/tmp`, NOT a harness in the repo.
+
   **TWO DEFECTS IT FOUND, both diagnostic, both unfixed as of 2026-10-28 (budget):**
 
   1. **The refusal never reaches the operator.** `bridge.ts:311` warns to `console.warn` only, so
@@ -417,8 +429,9 @@ and the Recording log says what happened when they were run.
 
   1. **The LAN / non-secure-context branch.** A gateway reached at a LAN address over plain `http`
      has no secure context, so `navigator.clipboard` is absent and `writeClipboard`'s warn path
-     runs. That branch is unreachable from any harness on this box and is the COMMON deployment,
-     not an edge one. Check it reports rather than silently failing.
+     runs. It is the COMMON deployment, not an edge one. Check it reports rather than silently
+     failing. **Since 2026-11-02 it reports on the canvas, and that is witnessed in Electron's
+     Chromium at a LAN address (see above). Firefox and Safari at a LAN address are still owed.**
   2. **Chromium AND Firefox, and Safari is worth adding.** Safari has neither a harness witness nor
      any prior measurement in this repo.
   3. **The Electron accelerator overlap on Linux.** `Ctrl-Shift-C` is both the page's copy chord

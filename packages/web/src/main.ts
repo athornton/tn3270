@@ -56,7 +56,17 @@ export function buildServer(args: WebArgs) {
         // can reach a host or capture a credential.
         session.replay(readFileSync(args.replay, 'utf8'));
       } else {
-        void session.connect(args.host, args.port).catch(() => { /* reported per-connection */ });
+        /*
+          ON STDERR, 2026-11-02, beside the startup warnings the operator is already reading. The
+          live pass lost most of an evening to the empty `catch` this replaced: an unresolvable host
+          printed nothing, and the browser's only symptom was `X Disconnected` -- the 3270 status
+          line, indistinguishable from a gateway fault. Every attaching browser fails the same way,
+          so the cause belongs to whoever started the gateway, not to one tab.
+        */
+        void session.connect(args.host, args.port).catch((err: unknown) => {
+          process.stderr.write(`host ${args.host}:${args.port} unreachable: `
+            + `${err instanceof Error ? err.message : String(err)}\n`);
+        });
       }
       return { session, close: () => { session.disconnect(); } };
     },

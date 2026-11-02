@@ -4,7 +4,28 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — NEXT WEEK: THREE MEASURED FIXES, ALL DIAGNOSTIC, NONE STARTED
+## START HERE — THE THREE DIAGNOSTIC FIXES ARE DONE ON `diagnostics`; NATIVE `Cmd-C` IS NEXT
+
+**2026-11-02.** All three fixes below are implemented test-first on branch `diagnostics`. Each new
+test failed first, and the `catch` was mutation-checked: removing it reddens its test.
+- **(1)** `onCopyText` now takes a `report` that is `dispatch('error', ...)`, so the clipboard
+  refusal paints on the canvas as well as the console. Its wording is remedy-first: `copy failed:
+  use https (--tls-cert) or localhost -- this address is not a secure context, ...`.
+- **(2)** `onmessage`'s async chain has a `catch` that paints `gateway message could not be read:
+  <cause>`.
+- **(3)** The gateway prints `host H:P unreachable: <cause>` on stderr. The TUI, CLI and GUI were
+  DRIVEN against an unresolvable host and already report it, so no change was needed there.
+
+**Witnessed in a real non-secure browser context**: Electron's Chromium at
+`http://192.168.70.115:<port>/` (isSecureContext false, no clipboard API) painted the new message
+after a real drag and `Ctrl+Shift+C`. Unfixed `main` painted nothing under the same probe.
+
+**Gate on the branch:** build and typecheck exit 0, **2618 tests in 110 files**, `browser-clicks`
+13/13, `browser-keys` 13 chords, `browser-shot` 1/1, GUI `keys` 22/20, `clicks`, `select` 3/3,
+`shot` 2/2, `transfer` 10/10, `pty-smoke` 12 PASS.
+
+### THE HISTORY BELOW IS NOW SUPERSEDED FOR ITEMS 1-3; THE FOURTH ITEM IS STILL OPEN
+
 
 **STOPPED 2026-10-28 ON BUDGET ($11 from the cap), at a clean boundary.** `main` is green and
 PUSHED at `3a37914`; tree clean; nothing half-built. The live pass below is DONE and it found

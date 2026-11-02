@@ -259,6 +259,10 @@ describe('createBridge', () => {
      * In the browser the same break is an uncaught promise rejection in the console and a form
      * that never updates -- i.e. invisible in exactly the way this repo's recorded traps are. So
      * the rejection is captured explicitly rather than assumed absent.
+     *
+     * SINCE 2026-11-02 THE `errors` ASSERTION CATCHES IT FIRST: `onmessage`'s chain now has a
+     * `catch` that reports through `onError`, so that mutant reddens `errors` rather than escaping.
+     * The listener stays, because deleting that `catch` would put this case back where it was.
      */
     const seen: unknown[] = [];
     const onRejection = (e: unknown): void => { seen.push(e); };
@@ -366,9 +370,9 @@ describe('createBridge', () => {
      * THE REJECTION LISTENER IS WHY THIS TEST IS WORTH ANYTHING, and it is here because a mutation
      * survived the `onTransfer` version of this case without one (recorded above at length). The
      * throw a non-optional `deps.onCopyText(...)` would produce happens inside `onmessage`'s async
-     * IIFE, which nothing awaits, so it becomes an UNHANDLED REJECTION that vitest does not fail
-     * the test on -- and the assertions after it could not see it either, because nothing is sent
-     * and no error is reported on this path in the first place.
+     * IIFE, which nothing awaits, so it became an UNHANDLED REJECTION that vitest does not fail
+     * the test on. Since 2026-11-02 that chain's `catch` reports it through `onError`, so `errors`
+     * catches it too; the listener stays for the day that `catch` is removed.
      */
     const seen: unknown[] = [];
     const onRejection = (e: unknown): void => { seen.push(e); };
@@ -387,6 +391,52 @@ describe('createBridge', () => {
     expect(seen, 'an absent onCopyText must be inert, not a rejected promise').toEqual([]);
     expect(errors).toEqual([]);
     expect(socket.sent).toEqual([]);
+  });
+
+  it('hands onCopyText a REPORT that paints on the canvas, so a failed copy is not silent', async () => {
+    /**
+     * THE LIVE PASS OF 2026-10-27 FOUND THIS. On a LAN address over plain `http` the browser has
+     * no clipboard API, `writeClipboard` warned to `console.warn` alone, and the gateway's own
+     * `copy: 28 chars` read as success -- so the operator's copy did nothing, visibly to nobody.
+     * The report is the `error` channel `renderer.ts` already paints, the one the paste warning
+     * uses, so the reason reaches the screen the operator is looking at.
+     */
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onCopyText: (_t, report) => { report('copy failed: because'); },
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'copyText', text: 'HELLO' });
+    await Promise.resolve();
+    expect(errors).toEqual(['copy failed: because']);
+  });
+
+  it('REPORTS a message it cannot read, rather than dropping it as an unhandled rejection', async () => {
+    /**
+     * `onmessage` runs an async chain nothing awaits, so before 2026-11-02 a throw anywhere in it
+     * -- `inflate`, `JSON.parse`, a coercion -- became an unhandled rejection: nothing on the
+     * canvas and, as the live pass found, nothing the operator noticed in the console either.
+     * Asserted through the rejection listener, for the reason the copyText absence case gives.
+     */
+    const seen: unknown[] = [];
+    const onRejection = (e: unknown): void => { seen.push(e); };
+    process.on('unhandledRejection', onRejection);
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never,
+      inflate: async () => { throw new Error('bad deflate stream'); },
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    socket.onmessage?.({ data: 'whatever' });
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    process.off('unhandledRejection', onRejection);
+    expect(seen, 'a failed message must be reported, not left as a rejected promise').toEqual([]);
+    expect(errors).toHaveLength(1);
+    // The cause itself, so the line on the canvas says WHAT broke and not merely that something did.
+    expect(errors[0]).toMatch(/bad deflate stream/);
   });
 
   it('reports an unexpected close through onError, so the canvas is not silently frozen', () => {
@@ -448,14 +498,17 @@ describe('writeClipboard, whose COMMON case is the browser having no clipboard a
   });
 
   it('WARNS rather than throwing when there is no clipboard API, naming the cause', () => {
-    // NOT a throw: this runs from the bridge's own socket message handler, inside an un-awaited
-    // async IIFE, so a throw here is an unhandled rejection the operator never sees. And the
-    // absence is EXPECTED on this gateway, so it must read as a cause and not as a bug.
+    // NOT a throw: this runs from the bridge's own socket message handler, whose `catch` would
+    // report it as an unreadable gateway message -- the wrong diagnosis. And the absence is
+    // EXPECTED on a LAN gateway, so it must read as a cause and not as a bug.
     const warned: string[] = [];
     expect(() => { writeClipboard(undefined, 'TEXT', (m) => { warned.push(m); }); }).not.toThrow();
     expect(warned).toHaveLength(1);
-    // THE REMEDY, NOT JUST THE SYMPTOM. "no clipboard API" alone sends the reader to the wrong
-    // place -- the browser, rather than the URL scheme that actually explains it.
+    // THE REMEDY, NOT JUST THE SYMPTOM, AND FIRST. "no clipboard API" alone sent the reader to the
+    // wrong place -- the browser, rather than the ADDRESS that actually explains it: `localhost` is a
+    // secure context even over `http`, a LAN address is not. Remedy-first because this is now
+    // painted on the canvas, where the start of a message is the part that is read.
+    expect(warned[0]).toMatch(/^copy failed: use https \(--tls-cert\) or localhost/);
     expect(warned[0]).toMatch(/secure context/);
   });
 

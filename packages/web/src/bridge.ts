@@ -307,8 +307,12 @@ const bridge = createBridge({
    * `navigator.clipboard` IS PASSED, NOT READ DOWN THERE, for the reason that file's header gives
    * about every browser capability: the tests run with `environment: 'node'` and have no
    * `navigator` at all. `console.warn` rides along for the same reason.
+   *
+   * BOTH THE CONSOLE AND THE CANVAS, 2026-11-02: the console alone was invisible in the live pass.
    */
-  onCopyText: (text) => { writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); }); },
+  onCopyText: (text, report) => {
+    writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); report(m); });
+  },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;
