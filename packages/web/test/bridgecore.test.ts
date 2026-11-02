@@ -439,6 +439,102 @@ describe('createBridge', () => {
     expect(errors[0]).toMatch(/bad deflate stream/);
   });
 
+  it('fetchSelection sends the rect with a seq and resolves on the matching answer', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const rect = { top: 0, left: 0, bottom: 1, right: 11 };
+    const got = api.fetchSelection!(rect);
+    const sent = JSON.parse(socket.sent[0]!) as { kind: string; seq: number; rect: unknown };
+    expect(sent.kind).toBe('selection');
+    expect(sent.rect).toEqual(rect);
+    // What `decodeClientMessage` demands, or the gateway answers `error` and this never settles.
+    expect(Number.isSafeInteger(sent.seq) && sent.seq >= 0).toBe(true);
+    deliver(socket, { kind: 'selectionText', seq: sent.seq, text: 'HELLO' });
+    await expect(got).resolves.toBe('HELLO');
+  });
+
+  it('matches answers by seq, so two in flight cannot swap', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const a = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
+    const b = api.fetchSelection!({ top: 1, left: 0, bottom: 1, right: 1 });
+    const [sa, sb] = socket.sent.map((s) => (JSON.parse(s) as { seq: number }).seq);
+    expect(sa).not.toBe(sb);
+    deliver(socket, { kind: 'selectionText', seq: sb, text: 'B' });
+    deliver(socket, { kind: 'selectionText', seq: sa, text: 'A' });
+    await expect(a).resolves.toBe('A');
+    await expect(b).resolves.toBe('B');
+  });
+
+  it('drops an answer nobody asked for, and sends it to no renderer handler', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    const frames: unknown[] = [];
+    api.onError((m) => errors.push(m));
+    api.onFrame((f) => frames.push(f));
+    deliver(socket, { kind: 'selectionText', seq: 999, text: 'NOBODY' });
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    expect(errors).toEqual([]);
+    expect(frames).toEqual([]);
+  });
+
+  // A MALFORMED ANSWER TO A REAL WAITER REJECTS IT rather than being dropped: dropping would leave
+  // that promise pending for the life of the page, the one outcome the cache cannot recover from.
+  it('rejects, rather than strands, a waiter whose answer has no string text', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const got = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
+    const { seq } = JSON.parse(socket.sent[0]!) as { seq: number };
+    deliver(socket, { kind: 'selectionText', seq, text: 42 });
+    await expect(got).rejects.toThrow(/text/);
+  });
+
+  // A CLOSE REJECTS WHAT IS PENDING, so a prefetch never waits forever on a dead socket. The
+  // caller (`renderer.ts`) catches, and the cache stays empty, so every gesture falls back.
+  it('rejects pending fetches when the socket closes', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const got = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
+    socket.onclose?.();
+    await expect(got).rejects.toThrow(/closed/);
+  });
+
+  // A real `WebSocket.send` SILENTLY DISCARDS after close, so a fetch sent then would be answered by
+  // nobody, and the close that rejects pending fetches has already run.
+  it('rejects a fetch made AFTER the socket closed, which nothing would ever answer', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    socket.onclose?.();
+    await expect(api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 })).rejects.toThrow(/closed/);
+    expect(socket.sent).toEqual([]);
+  });
+
+  // ...and THROWS `InvalidStateError` while CONNECTING. That must arrive as a rejection the caller's
+  // `.catch` sees, not as a synchronous throw out of a mouseup handler.
+  it('turns a send that throws (a socket still CONNECTING) into a rejection', async () => {
+    const socket = fakeSocket();
+    socket.send = () => { throw new Error('InvalidStateError: still CONNECTING'); };
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    let got: Promise<string> | undefined;
+    expect(() => { got = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 }); }).not.toThrow();
+    await expect(got).rejects.toThrow(/CONNECTING/);
+  });
+
   it('reports an unexpected close through onError, so the canvas is not silently frozen', () => {
     const socket = fakeSocket();
     const api = createBridge({ socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d) });

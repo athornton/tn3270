@@ -2,13 +2,18 @@
  * The browser side of the bridge, with the browser injected.
  *
  * Supplies exactly what `preload.cts` supplies over IPC -- `onAtlas`, `onFrame`, `onError`,
- * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. If `BridgeApi` grows a fifth function,
- * the renderer has stopped being shared and something is wrong.
+ * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. Those four are the REQUIRED width, and
+ * that is what this file's "four-function rule" means wherever it is cited below.
+ * `BridgeApi` grew a fifth member on 2026-11-02, `fetchSelection`, and it is OPTIONAL for exactly
+ * this reason: `preload.cts` does not implement it, the renderer tests for it, and so the renderer
+ * is still shared unmodified. A fifth REQUIRED member would mean it had stopped being shared.
  *
  * THAT RULE IS ABOUT `BridgeApi` AND NOT ABOUT THIS FILE'S EXPORTS, which is worth spelling out
  * because the two have drifted: `socketUrl` and `writeClipboard` are exported plain functions
  * nothing in the renderer can see, and `BridgeDeps` has grown several members. The renderer
- * consumes `BridgeApi` alone, so that is the width that must not move.
+ * consumes `BridgeApi` alone, so its REQUIRED width is what must not move; an optional member,
+ * which Electron's bridge may leave out, can be added only when the renderer is written to manage
+ * without it.
  *
  * ## THE QUEUE IS NOT DEFENSIVE CODING
  *
@@ -202,6 +207,27 @@ export interface BridgeApi {
   onFrame(fn: (frame: unknown) => void): void;
   onError(fn: (message: string) => void): void;
   sendAction(action: unknown): void;
+  /**
+   * Ask the gateway for the text under `rect`, ahead of any copy. 2026-11-02.
+   *
+   * OPTIONAL, AND THAT IS WHAT KEEPS `renderer.ts` SHARED: Electron's `preload.cts` does not
+   * provide it, so the renderer tests for it and prefetches only where it exists. An unhandled
+   * `ipcMain` kind freezes Electron's main process (measured 2026-10-26), so Electron must never be
+   * sent a `selection`.
+   *
+   * THE RECT IS SPELLED INLINE, not imported as `CellRect`, because this module is served to the
+   * browser unbundled and must not grow a bare-specifier import -- even a type-only one is one
+   * careless edit from a runtime one.
+   *
+   * THE PROMISE ALWAYS SETTLES, and that is the contract the cache depends on: a prefetch that
+   * hangs forever is the one outcome it cannot recover from. It resolves on the gateway's answer
+   * (which `main.ts` always sends, even for `''`), and REJECTS on a close, on a call after the
+   * close, on a `send` that throws, and on an answer whose `text` is not a string. The routes left
+   * are a gateway that never answers an open socket, which would be a gateway bug, and a
+   * `selection` sent before `hello`, which `main.ts` swallows unanswered -- unreachable from the
+   * renderer, which can only drag over a screen the attached session has painted.
+   */
+  fetchSelection?(rect: { top: number; left: number; bottom: number; right: number }): Promise<string>;
 }
 
 /**
@@ -317,6 +343,17 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   const handlers = new Map<string, (payload: unknown) => void>();
   const queue: Array<{ kind: string; payload: unknown }> = [];
 
+  // THE PREFETCHES IN FLIGHT, by seq. Answers arrive in order on one socket, but matching on the
+  // seq rather than on arrival order is what makes that an observation instead of an assumption.
+  // `seq` starts at 1 and only grows, inside the non-negative safe integers `decodeClientMessage`
+  // insists on -- a page would need 2^53 drags to leave them.
+  let nextSeq = 0;
+  const waiting = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
+  // SET BY `onclose`, AND NOT READ FROM `readyState`, which `BridgeDeps.socket` does not expose. A
+  // real `WebSocket.send` after close DISCARDS SILENTLY, so without this a late fetch would be sent
+  // into nothing and wait forever, the close that rejects pending fetches having already run.
+  let closed = false;
+
   const dispatch = (kind: string, payload: unknown): void => {
     const fn = handlers.get(kind);
     if (fn === undefined) { queue.push({ kind, payload }); return; }
@@ -337,6 +374,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   };
 
   deps.socket.onclose = () => {
+    closed = true;
+    for (const w of waiting.values()) w.reject(new Error('the gateway connection closed'));
+    waiting.clear();
     dispatch('error', 'The connection to the gateway closed. Reload to reconnect.');
   };
 
@@ -369,6 +409,21 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       // text is dropped, which is correct for a client with no clipboard to write.
       if (msg.kind === 'copyText') {
         deps.onCopyText?.(String(msg['text']), (m) => { dispatch('error', m); });
+        return;
+      }
+      // THE PREFETCH ANSWER, 2026-11-02. NOT through `dispatch`, for `copyText`'s reason above. An
+      // answer with no waiter is dropped. One WITH a waiter but a non-string `text` -- which only a
+      // broken gateway sends -- REJECTS that waiter rather than dropping it, since dropping would
+      // strand the promise; either way the cache stays empty and a copy falls back.
+      if (msg.kind === 'selectionText') {
+        const seq = msg['seq'];
+        if (typeof seq !== 'number') return;
+        const w = waiting.get(seq);
+        if (w === undefined) return;
+        waiting.delete(seq);
+        const t = msg['text'];
+        if (typeof t === 'string') w.resolve(t);
+        else w.reject(new Error(`selectionText ${seq} carried no string text`));
         return;
       }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
@@ -486,5 +541,17 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       }
       deps.socket.send(JSON.stringify({ kind: 'action', action }));
     },
+    fetchSelection: (rect) => new Promise<string>((resolve, reject) => {
+      if (closed) { reject(new Error('the gateway connection closed')); return; }
+      nextSeq += 1;
+      // SENT BEFORE THE WAITER IS REGISTERED, and the order is the whole guard. A real
+      // `WebSocket.send` THROWS `InvalidStateError` while CONNECTING; thrown here, the executor turns
+      // it into this promise's rejection and the map never held an entry for it. The answer cannot
+      // overtake the registration, because `onmessage` cannot run until this turn ends. (`sendAction`
+      // has no guard and needs none: the renderer acts only after an atlas, which only an OPEN socket
+      // delivers, and a selection is a drag over a painted screen.)
+      deps.socket.send(JSON.stringify({ kind: 'selection', seq: nextSeq, rect }));
+      waiting.set(nextSeq, { resolve, reject });
+    }),
   };
 }
