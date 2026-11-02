@@ -264,6 +264,39 @@ export function buildServer(args: WebArgs) {
       if (msg.kind === 'transferChunk') { transfer.chunk(msg.seq, msg.total, msg.bytes); return; }
       if (msg.kind === 'transferStart') { transfer.start(msg.keywords, session); return; }
       if (msg.kind === 'transferCancel') { transfer.cancel(); return; }
+      /*
+        THE SELECTION PREFETCH, 2026-11-02, AND IT MUST SIT ABOVE THE GUARD BELOW for the identical
+        reason the three transfer kinds above do: `msg` here is `ClientMessage` minus `hello` by
+        elimination, so a branch written after `if (msg.kind !== 'action') return;` is dead code
+        and every `selection` frame would fall through it unanswered -- which is exactly what the
+        first commit of `integration.test.ts`'s "selection prefetch" case measured, before this
+        arm existed: `after` came back `[]`.
+
+        THE BROWSER ASKS WHEN A DRAG ENDS, so its own `copy` event can set `clipboardData`
+        synchronously later -- see `canvas/src/copyCache.ts` for the cache this fills on the other
+        side of the socket. THE SAME EXTRACTION AS `copy`, two arms down: `resolve(snapshot)` feeds
+        `extractText` the identical way, so a hidden field still contributes spaces rather than the
+        typed password underneath it -- see that arm's note for why this matters at all.
+
+        NO REPAINT, AND THAT IS THE ONE WAY THIS DIFFERS FROM `copy`'s ARM: nothing on the screen
+        changed, a prefetch is not an edit, and the spec's ordering argument for the cache depends
+        on frames arriving only for real screen changes -- an unasked-for `frame` here would be
+        exactly the kind of spurious repaint `copy`'s own arm goes out of its way not to produce.
+        MUTATION-CHECKED by adding `repaint?.();` after the reply and re-running the first case:
+        it fails, seeing a `frame` after the `selectionText` the test does not expect one.
+
+        THE LOG LINE SAYS "selection", NOT "copy", deliberately: a prefetch is not a copy and the
+        operator may never raise one; on the cached path -- the whole point of this feature -- a
+        copy never reaches this process at all, so logging it as one would overstate what happened
+        here.
+      */
+      if (msg.kind === 'selection') {
+        const snapshot = session.screen.snapshot();
+        const text = extractText(resolve(snapshot), snapshot.cols, msg.rect);
+        conn.sendBinary(encodeServerMessage({ kind: 'selectionText', seq: msg.seq, text }));
+        process.stdout.write(`selection: sent ${text.length} chars to the browser\n`);
+        return;
+      }
       if (msg.kind !== 'action') return;
       // Gated on `--log-actions`, which `parseWebArgs` refuses without `--replay`. The action
       // carries typed text, so on a live gateway this line would be a password in a log file.

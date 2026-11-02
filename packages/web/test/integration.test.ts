@@ -808,6 +808,57 @@ describe('the gateway end to end', () => {
   });
 });
 
+/**
+ * THE SELECTION PREFETCH, 2026-11-02 -- `selection` in, `selectionText` out, and the point of the
+ * first case is what does NOT arrive with it. `copy`'s own case above already covers the
+ * extraction itself (`ANSWERS`'s `copyText` entry, same fixture rect shape); what is new here is
+ * the kind's two differences from `copy`: it answers through a different message, and it must
+ * repaint NOTHING, because a prefetch changes no screen -- see `main.ts`'s comment at the arm this
+ * exercises.
+ */
+describe('the selection prefetch', () => {
+  /** Handshake, then every message after it, so "nothing else was sent" is checkable. */
+  async function attached(): Promise<{ ws: WebSocket; after: Array<Record<string, unknown>> }> {
+    const { url } = await start();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 3);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    await first;
+    const after: Array<Record<string, unknown>> = [];
+    ws.addEventListener('message', (e) => {
+      after.push(JSON.parse(inflateSync(Buffer.from(e.data as ArrayBuffer)).toString()) as Record<string, unknown>);
+    });
+    return { ws, after };
+  }
+
+  it('answers with the extracted text and the request seq, and repaints NOTHING', async () => {
+    const { ws, after } = await attached();
+    ws.send(JSON.stringify({
+      kind: 'selection', seq: 41, rect: { top: 0, left: 0, bottom: 1, right: 11 },
+    }));
+    for (let waited = 0; waited < 40 && after.length === 0; waited += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    // A FURTHER WINDOW, because a repaint after the answer is the defect and it would land late.
+    await new Promise((r) => { setTimeout(r, 250); });
+    ws.close();
+    expect(after).toEqual([{ kind: 'selectionText', seq: 41, text: ' MENU\n OPTION ===>' }]);
+  });
+
+  it('refuses a malformed selection with an error frame, and keeps serving', async () => {
+    const { ws, after } = await attached();
+    ws.send(JSON.stringify({ kind: 'selection', seq: 1 }));
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    for (let waited = 0; waited < 80 && after.length < 2; waited += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    ws.close();
+    expect(after.map((m) => m['kind'])).toEqual(['error', 'frame']);
+    expect(String(after[0]!['message'])).toMatch(/selection needs a rect/);
+  });
+});
+
 describe('a host the gateway cannot reach', () => {
   it('SAYS SO ON STDERR, naming the host and the cause', async () => {
     /*
