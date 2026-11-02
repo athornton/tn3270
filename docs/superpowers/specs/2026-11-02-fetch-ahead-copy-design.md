@@ -143,6 +143,14 @@ and every action ends in an unconditional `repaint`. Node runs one handler at a 
 change can slip between the extraction and its reply. If frames are ever debounced or batched,
 this argument has to be re-made.
 
+The BROWSER half needs the same order, and before 2026-11-02 it was not guaranteed: `bridgecore.ts`
+started an independent async chain per inbound message, so messages were handled in the order their
+`inflate` finished, not the order they arrived. Measured with the bridge's own `inflate`: Electron
+44's Chromium never let a small message overtake a large one (0/200 at 6 KB and at 120 KB), but
+Node's `DecompressionStream` did (183/200 and 200/200), and Firefox and Safari are unmeasured. The
+bridge now chains every message onto the one before it, so it handles them STRICTLY IN ARRIVAL
+ORDER, and a `frame` is always handled before the `selectionText` sent after it.
+
 ## Error handling
 
 - `fetchSelection` rejects or never answers: the cache stays empty and every gesture falls back.

@@ -38,6 +38,13 @@ const deliver = (socket: ReturnType<typeof fakeSocket>, msg: unknown) => {
   socket.onmessage?.({ data: JSON.stringify(msg) });
 };
 
+/**
+ * DRAIN EVERY MESSAGE DELIVERED SO FAR: one macrotask, after which the chained `onmessage` has
+ * handled them all. See the note at the end of this file for why a single microtask stopped being
+ * enough on 2026-11-02.
+ */
+const settle = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0); });
+
 describe('createBridge', () => {
   it('sends hello on open, with no id the first time', () => {
     const socket = fakeSocket();
@@ -58,7 +65,7 @@ describe('createBridge', () => {
     const storage = fakeStorage();
     createBridge({ socket: socket as never, storage: storage as never, inflate: async (d) => String(d) });
     deliver(socket, { kind: 'session', id: 'new-id' });
-    await Promise.resolve();
+    await settle();
     expect(storage.map.get('tn3270.sessionId')).toBe('new-id');
   });
 
@@ -72,13 +79,13 @@ describe('createBridge', () => {
     deliver(socket, { kind: 'atlas', geometry: { cols: 16 }, coverage: 'AQID', blank: [1] });
     deliver(socket, { kind: 'frame', list: { width: 1, height: 1, cells: [] } });
     deliver(socket, { kind: 'frame', list: { width: 2, height: 2, cells: [] } });
-    await Promise.resolve();
+    await settle();
 
     const atlases: unknown[] = [];
     const frames: unknown[] = [];
     api.onAtlas((a) => atlases.push(a));
     api.onFrame((f) => frames.push(f));
-    await Promise.resolve();
+    await settle();
 
     expect(atlases).toHaveLength(1);
     expect(frames).toHaveLength(2);
@@ -94,7 +101,7 @@ describe('createBridge', () => {
     let got: { coverage: Uint8Array } | undefined;
     api.onAtlas((a) => { got = a as { coverage: Uint8Array }; });
     deliver(socket, { kind: 'atlas', geometry: {}, coverage: 'AQID', blank: [] });
-    await Promise.resolve();
+    await settle();
     expect(got!.coverage).toBeInstanceOf(Uint8Array);
     expect([...got!.coverage]).toEqual([1, 2, 3]);
   });
@@ -227,7 +234,7 @@ describe('createBridge', () => {
     deliver(socket, { kind: 'transferProgress', text: '512 bytes' });
     deliver(socket, { kind: 'transferDone', ok: true, bytes: 3 });
     deliver(socket, { kind: 'transferData', seq: 0, total: 3, bytes: 'AQID' });
-    await Promise.resolve();
+    await settle();
     expect(got).toHaveLength(3);
     // The first two pass through untouched -- there is nothing in them to decode.
     expect(got[0]).toEqual({ kind: 'transferProgress', text: '512 bytes' });
@@ -309,7 +316,7 @@ describe('createBridge', () => {
     api.onError((m) => errors.push(m));
     deliver(socket, { kind: 'transferProgress', text: 'x' });
     deliver(socket, { kind: 'transferDone', ok: false, error: 'host refused' });
-    await Promise.resolve();
+    await settle();
     // 1. Nothing leaked into a renderer kind. MEASURED: `dispatch('frame', msg)` and
     //    `dispatch('error', msg)` each redden this.
     expect(frames).toEqual([]);
@@ -353,7 +360,7 @@ describe('createBridge', () => {
     api.onFrame((f) => frames.push(f));
     api.onError((m) => errors.push(m));
     deliver(socket, { kind: 'copyText', text: 'ROW ONE\nROW TWO' });
-    await Promise.resolve();
+    await settle();
     // THE TEXT ITSELF, newlines intact: a copied rectangle is usually several rows, and the row
     // separator is what makes it pasteable anywhere else.
     expect(got).toEqual(['ROW ONE\nROW TWO']);
@@ -409,7 +416,7 @@ describe('createBridge', () => {
     const errors: string[] = [];
     api.onError((m) => errors.push(m));
     deliver(socket, { kind: 'copyText', text: 'HELLO' });
-    await Promise.resolve();
+    await settle();
     expect(errors).toEqual(['copy failed: because']);
   });
 
@@ -551,6 +558,50 @@ describe('createBridge', () => {
     await expect(got).rejects.toThrow(/CONNECTING/);
   });
 
+  // INBOUND MESSAGES ARE HANDLED IN ARRIVAL ORDER, however long each takes to inflate. Without that,
+  // a slow `frame` could be painted after a fast `selectionText` that followed it -- which is the
+  // order the fetch-ahead design's stale-answer argument depends on -- or an older screen last.
+  it('handles messages in ARRIVAL order even when the first inflates slower', async () => {
+    let releaseFirst!: () => void;
+    const firstDone = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let calls = 0;
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never,
+      inflate: async (d) => {
+        calls += 1;
+        if (calls === 1) await firstDone;
+        return String(d);
+      },
+    });
+    const order: string[] = [];
+    api.onFrame(() => order.push('frame'));
+    const got = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
+    void got.then(() => order.push('answer'));
+    const { seq } = JSON.parse(socket.sent[0]!) as { seq: number };
+    deliver(socket, { kind: 'frame', list: { width: 1, height: 1, cells: [] } });
+    deliver(socket, { kind: 'selectionText', seq, text: 'X' });
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    releaseFirst();
+    await got;
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    expect(order).toEqual(['frame', 'answer']);
+  });
+
+  it('keeps handling messages after one that cannot be read', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({ socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d) });
+    const errors: string[] = [];
+    const frames: unknown[] = [];
+    api.onError((m) => errors.push(m));
+    api.onFrame((f) => frames.push(f));
+    socket.onmessage?.({ data: 'not json' });
+    deliver(socket, { kind: 'frame', list: { width: 1, height: 1, cells: [] } });
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    expect(errors).toHaveLength(1);
+    expect(frames).toHaveLength(1);
+  });
+
   it('reports an unexpected close through onError, so the canvas is not silently frozen', () => {
     const socket = fakeSocket();
     const api = createBridge({ socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d) });
@@ -562,18 +613,20 @@ describe('createBridge', () => {
 });
 
 /**
- * ONE `await Promise.resolve()` IS ENOUGH HERE, AND IT WAS CHECKED RATHER THAN ASSUMED.
+ * `settle()` IS A MACROTASK, AND A SINGLE MICROTASK STOPPED BEING ENOUGH ON 2026-11-02.
  *
- * `onmessage` starts an async chain (`await inflate(...)`), so a message is not dispatched in the
- * turn that delivered it, and a single microtask tick looks too thin to settle three of them. It is
- * sufficient, because these tests' `inflate` returns an already-resolved promise.
+ * Until then each message started its own async chain, and one `await Promise.resolve()` settled
+ * it because these tests' `inflate` returns an already-resolved promise. Since messages became ONE
+ * chain (each `.then` on the one before, so they are handled in arrival order), every message costs
+ * extra ticks for its link, so six of these tests reddened with nothing else changed. The
+ * `setTimeout` drain was measured alongside the single tick when it was chosen and caught the
+ * same mutations, so this is a switch to the other sufficient wait, not a new one.
  *
  * The evidence is not that the assertions pass. They would pass either way: a message dispatched
  * LATE still reaches a handler registered EARLY, and the totals come out the same. It is that the
  * mutations are CAUGHT -- dropping unclaimed messages and reversing the flush order each redden the
- * queueing test -- which is what proves the tick lands between arrival and registration.
- * (A `setTimeout` macrotask drain was measured too and catches the same mutations, so this is a
- * question of which is sufficient, not of which is correct.)
+ * queueing test -- which is what proves the drain lands between arrival and registration.
+ * Re-measured with `settle()` on 2026-11-02.
  */
 
 describe('writeClipboard, whose COMMON case is the browser having no clipboard at all', () => {

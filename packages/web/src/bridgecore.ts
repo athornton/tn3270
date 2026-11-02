@@ -398,10 +398,23 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     THE `catch` IS THE LOAD-BEARING PART, 2026-11-02. Nothing awaits this chain, so before it a throw
     anywhere inside -- `inflate`, `JSON.parse`, the coercion `onCopyText`'s note measures -- was an
     unhandled rejection: nothing on the canvas, and in the live pass nothing the operator saw in the
-    console either. Third instance in this repo of `void` on a promise that can reject.
+    console either. Third instance in this repo of `void` on a promise that can reject. It also
+    keeps `inbound` below from ever rejecting, so one bad message neither breaks the chain nor goes
+    unpainted.
+
+    ONE CHAIN, NOT ONE PER MESSAGE, 2026-11-02. Until then each message started its own async
+    chain, so messages were HANDLED in the order their `inflate` finished, not the order they
+    arrived. MEASURED with this bridge's own `inflate`: in Electron 44's Chromium a small message
+    never overtook a large one (0/200, at 6 KB and at 120 KB), but under Node's
+    `DecompressionStream` it did (183/200 and 200/200). No spec promises the order, and Firefox
+    and Safari are unmeasured. Two things depend on it: out-of-order FRAMES would paint an older
+    screen last, and the fetch-ahead design's stale-answer argument needs a `frame` handled before
+    the `selectionText` sent after it (`docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
+    "Ordering"). So each message waits for the one before it.
   */
+  let inbound: Promise<void> = Promise.resolve();
   deps.socket.onmessage = (e) => {
-    void (async () => {
+    inbound = inbound.then(async () => {
       const text = await deps.inflate(e.data);
       const msg = JSON.parse(text) as { kind: string } & Record<string, unknown>;
       if (msg.kind === 'session') {
@@ -458,7 +471,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
           : msg);
         return;
       }
-    })().catch((err: unknown) => {
+    }).catch((err: unknown) => {
       dispatch('error', `gateway message could not be read: ${err instanceof Error ? err.message : String(err)}`);
     });
   };
