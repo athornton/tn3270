@@ -436,8 +436,21 @@ and the Recording log says what happened when they were run.
   `copy: sent N chars to the browser`. The browser's write is reported on the canvas, where the
   operator is looking.
 
-  **NOT REPORTED, SO NOT CLAIMED:** Edit > Copy from the menu bar, and `Ctrl-C` staying Clear on a
-  Linux desktop. The `Ctrl-C` property is machine-checked by `webNativeCopy`.
+  **LINUX DESKTOP, user, 2026-11-02:** `Ctrl-C` Clears and leaves the clipboard alone,
+  `Ctrl-Shift-C` copies, and `Ctrl-V` pastes, all as expected.
+
+  **MENU COPY DOES NOT WORK, AND THAT IS A LIMIT OF THE DESIGN, NOT A REGRESSION.**
+  - **Edit > Copy in Firefox** fires `forwardCopy`, but the canvas painted `copy failed: the browser
+    refused the clipboard: NotAllowedError: Clipboard write was blocked due to lack of user
+    activation`. The text arrives from the gateway asynchronously, and `navigator.clipboard
+    .writeText` needs transient user activation. A keystroke in the page grants that; a choice from
+    the browser's own menu does not. So `Cmd-C` and `Ctrl-Shift-C` work and the menu item cannot.
+    Fix 1 reported the refusal correctly. Chromium's Edit menu was not tried.
+  - **Right-click in Firefox** offers only "Copy Image", because the screen is a canvas.
+  - The way to get menu copy would be to fetch the selection's text ahead of time, when the drag
+    ends, and write it synchronously in the `copy` event. That would also make copy work at a
+    plain-`http` LAN address. NOT BUILT; it is a redesign of a copy path that has just been
+    live-verified.
 
   **What a human still owes on copy and paste, and only these:**
 

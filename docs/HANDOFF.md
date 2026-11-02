@@ -24,7 +24,13 @@ what the macOS Edit menu does. Mutation-proved: dropping the `forwardCopy` call 
 **THE MAC PASS IS DONE (user, 2026-11-02): `Cmd-C` copies in Firefox, Chromium and Safari.** At
 a plain-`http` LAN address the red refusal appeared and the pasteboard was unchanged, as expected.
 That pass also found the gateway's `copy: N chars` reading as success in the failing case. It now
-prints `copy: sent N chars to the browser`. Edit > Copy was not reported.
+prints `copy: sent N chars to the browser`.
+
+**LINUX DESKTOP PASS (user, 2026-11-02):** `Ctrl-C` Clears and leaves the clipboard alone,
+`Ctrl-Shift-C` copies, `Ctrl-V` pastes. **Menu copy does not work:** Firefox's Edit > Copy is
+refused (`NotAllowedError ... lack of user activation`, because the text arrives asynchronously),
+and right-click offers only "Copy Image". See `docs/live-testing.md` for the fetch-ahead design that
+would fix both this and plain-LAN copy. Not built, pending the user's decision.
 
 **Gate on `native-copy`:** build/typecheck exit 0, **2623 tests in 110 files**, `browser-clicks`
 **14/14**, `browser-keys` 13 chords, `browser-shot` 1/1, GUI `keys` 22/20, `clicks`, `select` 3/3,
