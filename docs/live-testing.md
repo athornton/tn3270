@@ -425,12 +425,19 @@ and the Recording log says what happened when they were run.
   browser that ever attaches — so it belongs on stderr beside the startup warnings.** Check the CLI
   and Electron GUI for the same swallow; all three share `defaultSession`.
 
-  **NATIVE `Cmd-C` IS IMPLEMENTED (branch `native-copy`, 2026-11-02) AND OWES A MAC.** On macOS,
-  drag a rectangle in Safari, Firefox and Chrome, press `Cmd-C`, and paste somewhere else. Expect the
-  selected text, and the gateway logging `copy: N chars`. Also check Edit > Copy from the menu bar.
-  The harness proves only the Chromium event path, with the command injected. On Linux,
-  `Ctrl-C` must still Clear and copy nothing. That is machine-checked, but it costs nothing to see
-  it once.
+  **NATIVE `Cmd-C` WORKS ON A REAL MAC — WITNESSED BY THE USER 2026-11-02**, in Firefox, Chromium
+  and Safari, against the homelab gateway with Hercules elsewhere on the LAN. The same pass
+  confirmed fix 1 at a plain-`http` LAN address: the red `copy failed: use https ...` line appeared
+  and the pasteboard was unchanged, as it must be.
+
+  **AND IT FOUND ONE MORE MISLEADING LINE, NOW FIXED.** In that failing LAN case the gateway still
+  printed `copy: N chars`, which reads as success. The gateway cannot see the browser's clipboard;
+  all it knows is that it extracted the text and sent it. The line now reads
+  `copy: sent N chars to the browser`. The browser's write is reported on the canvas, where the
+  operator is looking.
+
+  **NOT REPORTED, SO NOT CLAIMED:** Edit > Copy from the menu bar, and `Ctrl-C` staying Clear on a
+  Linux desktop. The `Ctrl-C` property is machine-checked by `webNativeCopy`.
 
   **What a human still owes on copy and paste, and only these:**
 

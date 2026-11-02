@@ -139,7 +139,7 @@ export interface BridgeDeps {
    *
    * WITHOUT THIS HOOK THE REPLY IS DROPPED: the `onmessage` chain below returns on each kind it
    * knows and then falls off the end, with no `else`, no throw and no log -- so the operator would
-   * press copy, the gateway would log `copy: N chars`, and their clipboard would be unchanged with
+   * press copy, the gateway would log that it sent the text, and their clipboard would be unchanged with
    * nothing in any console. Same shape as the transfer kinds before `onTransfer` existed.
    *
    * NOT ROUTED THROUGH `dispatch`, for the reason `onTransfer` gives above: that queue exists
@@ -190,7 +190,7 @@ export interface BridgeDeps {
    * ## `report` PAINTS ON THE CANVAS, 2026-11-02
    *
    * The live pass of 2026-10-27 found a copy that wrote nothing and told only `console.warn` --
-   * while the gateway's `copy: N chars` read as success. `report` is `dispatch('error', ...)`, the
+   * while the gateway's `copy: N chars` read as success (it now says `sent N chars to the browser`). `report` is `dispatch('error', ...)`, the
    * channel `renderer.ts` paints and the paste warning already uses. It stays up until the next
    * frame, which the operator's next keystroke produces, since every action repaints.
    */

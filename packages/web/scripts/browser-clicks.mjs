@@ -1992,7 +1992,7 @@ async function runTransferPhase(url) {
       well-formed `copy` frame however badly the gateway answered it.
 
        - THE GATEWAY'S OWN STDOUT, for both directions. `--log-actions` prints `action: <json>` for
-         every DECODED frame, and the `copy` arm additionally prints an UNGATED `copy: N chars`.
+         every DECODED frame, and the `copy` arm additionally prints an UNGATED `copy: sent N chars to the browser`.
        - For copy, THE REAL OS CLIPBOARD, read back through `navigator.clipboard.readText()`. This
          is the far end of the whole chain and the harness never wrote the value: a SENTINEL is put
          on the clipboard first, so "the clipboard still holds what we put there" is a failure and
@@ -2263,9 +2263,15 @@ async function runTransferPhase(url) {
        * human on a real desktop.
        */
       const SENTINEL = 'tn3270-harness-sentinel-not-a-copy';
-      /** What `writeClipboard` said, if it said anything. Its only channel is `console.warn`. */
+      /**
+       * What `writeClipboard` said, if it said anything. `console.warn` is one of its two channels.
+       *
+       * `'copy failed'` AND NOT `'copy: '`: both warnings were reworded remedy-first on
+       * 2026-11-02 and the old prefix then matched NOTHING, so `copyWarnings.length === 0` held
+       * whatever the page said. Found while rewording the gateway's log line, not by a red run.
+       */
       const clipWarns = () => cdp.eval(
-        "JSON.stringify(window.__tn3270Probe.warns.filter((w) => w.startsWith('copy: ')))");
+        "JSON.stringify(window.__tn3270Probe.warns.filter((w) => w.startsWith('copy failed')))");
       /*
         NO FOCUS EMULATION HERE, AND THE REMOVED LINE IS WORTH A NOTE BECAUSE OF WHY IT WAS ADDED.
 
@@ -2551,7 +2557,7 @@ async function runTransferPhase(url) {
       const survived = copyAgain.copied === true
         && secondSentinelLanded
         && copyAgain.clip === COPY_WANT
-        && againChars === `copy: ${COPY_WANT.length} chars`;
+        && againChars === `copy: sent ${COPY_WANT.length} chars to the browser`;
       // AND `writeClipboard` MUST HAVE WARNED ABOUT NOTHING. Its two failure routes -- no API, and
       // a browser that refused -- are reported only through the injected `warn`, which `bridge.ts`
       // wires to `console.warn`. A clipboard holding the right text while that function complained
@@ -2584,7 +2590,7 @@ async function runTransferPhase(url) {
           : 'the CHORD raised no copy frame at all -- either keys.ts does not claim '
             + 'Ctrl-Shift-C (check it precedes the case-folded CTRL lookup) or renderer.ts does '
             + 'not intercept requestCopy before clearSelection()',
-        copyAction !== undefined && copyChars === `copy: ${COPY_WANT.length} chars` ? ''
+        copyAction !== undefined && copyChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? ''
           : 'the gateway did not log the copy it should have',
         copyRun.clip === COPY_WANT ? '' : 'the clipboard does NOT hold the selected text',
         // THE HARNESS'S OWN FAULT FIRST, AND NAMED AS SUCH -- MEASURED, not foreseen. A control run
@@ -2622,7 +2628,7 @@ async function runTransferPhase(url) {
               + `${JSON.stringify(copyRun.clip)} (want ${JSON.stringify(COPY_WANT)}; `
               + `${JSON.stringify(copyRun.sentinel)} means it was never written), the gateway `
               + `logged ${JSON.stringify(copyLogs)} (want an action: {"kind":"copy"...} line and `
-              + `"copy: ${COPY_WANT.length} chars"). THE SECOND COPY sent `
+              + `"copy: sent ${COPY_WANT.length} chars to the browser"). THE SECOND COPY sent `
               + `${JSON.stringify(copyAgain.frames)}, left the clipboard reading `
               + `${JSON.stringify(copyAgain.clip)} and the gateway logged `
               + `${JSON.stringify(againLogs)}. isSecureContext=${secure}, `
@@ -2679,7 +2685,7 @@ async function runTransferPhase(url) {
           + 'drove nothing and the rest is measureless',
         nativeFrames.some((f) => f.includes('"kind":"copy"')) ? ''
           : 'the copy event raised no copy frame -- is forwardCopy installed in renderer.ts?',
-        nativeChars === `copy: ${COPY_WANT.length} chars` ? '' : 'the gateway did not log the copy',
+        nativeChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? '' : 'the gateway did not log the copy',
         nativeClip === COPY_WANT ? ''
           : 'the clipboard does NOT hold the selected text',
         ctrlcEvents === 0 ? '' : 'a plain Ctrl+C raised a copy event, so Clear is no longer claimed',

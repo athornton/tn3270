@@ -333,7 +333,7 @@ describe('createBridge', () => {
      * range here went stale within one commit of being written, and `protocol.ts`'s `copyText`
      * member for why only that side can extract. Without this branch the reply is dropped by an
      * `onmessage` chain that returns on each kind it knows and then falls off the end: no
-     * `else`, no throw, no log. The operator would press copy, see the gateway log `copy: N chars`,
+     * `else`, no throw, no log. The operator would press copy, see the gateway log that it sent the text,
      * and find their clipboard unchanged with nothing in any console -- the shape of the traps
      * `bridgecore.ts`'s header lists under *THE QUEUE IS NOT DEFENSIVE CODING*.
      *

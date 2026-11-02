@@ -403,7 +403,11 @@ export function buildServer(args: WebArgs) {
         if (text !== '') {
           conn.sendBinary(encodeServerMessage({ kind: 'copyText', text }));
         }
-        process.stdout.write(`copy: ${text.length} chars\n`);
+        // "SENT TO THE BROWSER", NOT "COPIED", 2026-11-02: the gateway cannot see the clipboard.
+        // On plain `http` at a LAN address the browser has no clipboard API, and the bare
+        // `copy: N chars` this used to print read as success on exactly that failure, twice in live
+        // passes. Whether the write landed is reported in the browser, on the canvas.
+        process.stdout.write(`copy: sent ${text.length} chars to the browser\n`);
         return;
       }
       /*

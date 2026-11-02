@@ -4,7 +4,7 @@ Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — FIXES 1-3 ON `diagnostics`, NATIVE `Cmd-C` ON `native-copy` (STACKED); NEITHER MERGED
+## START HERE — FIXES 1-3 AND NATIVE `Cmd-C` ON `native-copy` (STACKED ON `diagnostics`), LIVE-VERIFIED, NOT MERGED
 
 **2026-11-02, `native-copy` (branched from `diagnostics`, so merging it brings both).** The web
 gateway now listens for the browser's own `copy` event (`forwardCopy` in `canvas/src/forwardKeys.ts`,
@@ -21,8 +21,10 @@ Both are now `browser-clicks`' 14th check, `webNativeCopy`. It is labelled **inj
 Linux Chromium binds no command to Meta+C, so the harness names `commands: ['copy']`, which is
 what the macOS Edit menu does. Mutation-proved: dropping the `forwardCopy` call fails it 13/14.
 
-**OWED, A LIVE PASS ON A REAL MAC:** `Cmd-C` in Safari, Firefox and Chrome against the gateway,
-after a drag. That is the whole claim the injected check cannot make.
+**THE MAC PASS IS DONE (user, 2026-11-02): `Cmd-C` copies in Firefox, Chromium and Safari.** At
+a plain-`http` LAN address the red refusal appeared and the pasteboard was unchanged, as expected.
+That pass also found the gateway's `copy: N chars` reading as success in the failing case. It now
+prints `copy: sent N chars to the browser`. Edit > Copy was not reported.
 
 **Gate on `native-copy`:** build/typecheck exit 0, **2623 tests in 110 files**, `browser-clicks`
 **14/14**, `browser-keys` 13 chords, `browser-shot` 1/1, GUI `keys` 22/20, `clicks`, `select` 3/3,
