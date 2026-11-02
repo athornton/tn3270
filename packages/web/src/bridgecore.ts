@@ -5,8 +5,9 @@
  * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. Those four are the REQUIRED width, and
  * that is what this file's "four-function rule" means wherever it is cited below.
  * `BridgeApi` grew a fifth member on 2026-11-02, `fetchSelection`, and it is OPTIONAL for exactly
- * this reason: `preload.cts` does not implement it, the renderer tests for it, and so the renderer
- * is still shared unmodified. A fifth REQUIRED member would mean it had stopped being shared.
+ * this reason: `preload.cts` does not implement it, so `renderer.ts` -- which WILL be modified to
+ * call it -- will test for it first, and the one renderer stays shared between both clients. A
+ * fifth REQUIRED member would mean it had stopped being shared.
  *
  * THAT RULE IS ABOUT `BridgeApi` AND NOT ABOUT THIS FILE'S EXPORTS, which is worth spelling out
  * because the two have drifted: `socketUrl` and `writeClipboard` are exported plain functions
@@ -210,22 +211,35 @@ export interface BridgeApi {
   /**
    * Ask the gateway for the text under `rect`, ahead of any copy. 2026-11-02.
    *
-   * OPTIONAL, AND THAT IS WHAT KEEPS `renderer.ts` SHARED: Electron's `preload.cts` does not
-   * provide it, so the renderer tests for it and prefetches only where it exists. An unhandled
-   * `ipcMain` kind freezes Electron's main process (measured 2026-10-26), so Electron must never be
-   * sent a `selection`.
+   * OPTIONAL, AND THAT IS WHAT KEEPS `renderer.ts` SHARED BETWEEN BOTH CLIENTS: Electron's
+   * `preload.cts` does not expose it, and the GUI's main process has no reply path that could
+   * answer one, so the renderer WILL test for it and prefetch only where it exists. (Not "an
+   * unknown IPC kind freezes main", which an earlier draft said: what was measured, recorded on
+   * `forwardPaste` in `canvas/src/forwardKeys.ts`, is an uncaught THROW inside an `ipcMain.on`
+   * listener.)
    *
    * THE RECT IS SPELLED INLINE, not imported as `CellRect`, because this module is served to the
    * browser unbundled and must not grow a bare-specifier import -- even a type-only one is one
    * careless edit from a runtime one.
    *
-   * THE PROMISE ALWAYS SETTLES, and that is the contract the cache depends on: a prefetch that
-   * hangs forever is the one outcome it cannot recover from. It resolves on the gateway's answer
-   * (which `main.ts` always sends, even for `''`), and REJECTS on a close, on a call after the
-   * close, on a `send` that throws, and on an answer whose `text` is not a string. The routes left
-   * are a gateway that never answers an open socket, which would be a gateway bug, and a
-   * `selection` sent before `hello`, which `main.ts` swallows unanswered -- unreachable from the
-   * renderer, which can only drag over a screen the attached session has painted.
+   * A NEWER CALL SUPERSEDES AN OLDER ONE: starting a request rejects every older waiter with
+   * `superseded`, before sending. The cache only wants the newest drag's answer, and the renderer
+   * catches rejections, so nothing is lost -- and it bounds the waiters to ONE, which is what turns
+   * every route below that strands a waiter into a single entry living until the next drag.
+   *
+   * IT RESOLVES on the gateway's answer, which `main.ts` sends even for `''`. IT REJECTS on a
+   * close, on a call after the close, on a `send` that throws, on an answer whose `text` is not a
+   * string, and on being superseded.
+   *
+   * THE ROUTES THAT STRAND A WAITER until the next drag or a close -- answered by nothing here,
+   * because nothing here can tell which request they belong to:
+   *   - the gateway REFUSES the frame with an `error`, which carries no `seq` (and is painted);
+   *   - the answer fails to decode -- `inflate` or `JSON.parse` throws -- which the chain's `catch`
+   *     paints;
+   *   - the answer's `seq` is not a number, so it matches nobody and is dropped;
+   *   - a gateway that never answers an open socket, which would be a gateway bug.
+   * `selection` BEFORE `hello` is unreachable by construction: `onopen` sends `hello` in the same
+   * task the socket opens, so it is first on the wire. And a RELOAD discards all of this anyway.
    */
   fetchSelection?(rect: { top: number; left: number; bottom: number; right: number }): Promise<string>;
 }
@@ -343,8 +357,8 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   const handlers = new Map<string, (payload: unknown) => void>();
   const queue: Array<{ kind: string; payload: unknown }> = [];
 
-  // THE PREFETCHES IN FLIGHT, by seq. Answers arrive in order on one socket, but matching on the
-  // seq rather than on arrival order is what makes that an observation instead of an assumption.
+  // THE PREFETCH IN FLIGHT, by seq -- at most one, since a new request supersedes the old. Matching
+  // on the seq is what keeps a superseded request's late answer from resolving the newer one.
   // `seq` starts at 1 and only grows, inside the non-negative safe integers `decodeClientMessage`
   // insists on -- a page would need 2^53 drags to leave them.
   let nextSeq = 0;
@@ -544,12 +558,16 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     fetchSelection: (rect) => new Promise<string>((resolve, reject) => {
       if (closed) { reject(new Error('the gateway connection closed')); return; }
       nextSeq += 1;
-      // SENT BEFORE THE WAITER IS REGISTERED, and the order is the whole guard. A real
-      // `WebSocket.send` THROWS `InvalidStateError` while CONNECTING; thrown here, the executor turns
-      // it into this promise's rejection and the map never held an entry for it. The answer cannot
-      // overtake the registration, because `onmessage` cannot run until this turn ends. (`sendAction`
-      // has no guard and needs none: the renderer acts only after an atlas, which only an OPEN socket
-      // delivers, and a selection is a drag over a painted screen.)
+      // SUPERSEDE FIRST, so at most one waiter ever exists -- see the docstring on `BridgeApi`.
+      for (const w of waiting.values()) w.reject(new Error('superseded by a newer selection'));
+      waiting.clear();
+      // SENT BEFORE THE WAITER IS REGISTERED. A real `WebSocket.send` THROWS `InvalidStateError`
+      // while CONNECTING; the executor turns that into this promise's rejection whichever order
+      // these two lines are in, so the order only spares the map one dead entry -- it is not what
+      // makes the promise settle. The answer cannot overtake the registration, because `onmessage`
+      // cannot run until this turn ends. (`sendAction` has no such guard: a keystroke while
+      // CONNECTING throws `InvalidStateError` out of `renderer.ts`'s keydown handler, which costs a
+      // console error and nothing else.)
       deps.socket.send(JSON.stringify({ kind: 'selection', seq: nextSeq, rect }));
       waiting.set(nextSeq, { resolve, reject });
     }),

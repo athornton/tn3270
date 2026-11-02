@@ -455,19 +455,26 @@ describe('createBridge', () => {
     await expect(got).resolves.toBe('HELLO');
   });
 
-  it('matches answers by seq, so two in flight cannot swap', async () => {
+  // A NEWER REQUEST SUPERSEDES AN OLDER ONE, so two are never live at once. The seq match is what
+  // still matters: the OLD request's answer, arriving first, must not resolve the new one.
+  it('supersedes an older fetch, and its late answer cannot resolve the newer one', async () => {
     const socket = fakeSocket();
     const api = createBridge({
       socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
     });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
     const a = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
     const b = api.fetchSelection!({ top: 1, left: 0, bottom: 1, right: 1 });
+    await expect(a).rejects.toThrow(/superseded/);
     const [sa, sb] = socket.sent.map((s) => (JSON.parse(s) as { seq: number }).seq);
     expect(sa).not.toBe(sb);
-    deliver(socket, { kind: 'selectionText', seq: sb, text: 'B' });
     deliver(socket, { kind: 'selectionText', seq: sa, text: 'A' });
-    await expect(a).resolves.toBe('A');
+    deliver(socket, { kind: 'selectionText', seq: sb, text: 'B' });
     await expect(b).resolves.toBe('B');
+    // The late 'A' was dropped harmlessly: nothing painted, nothing thrown into the chain.
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    expect(errors).toEqual([]);
   });
 
   it('drops an answer nobody asked for, and sends it to no renderer handler', async () => {
@@ -492,10 +499,14 @@ describe('createBridge', () => {
     const api = createBridge({
       socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
     });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
     const got = api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 });
     const { seq } = JSON.parse(socket.sent[0]!) as { seq: number };
     deliver(socket, { kind: 'selectionText', seq, text: 42 });
     await expect(got).rejects.toThrow(/text/);
+    // A failed PREFETCH never paints over the 3270 screen; the copy's fallback does its own reporting.
+    expect(errors).toEqual([]);
   });
 
   // A CLOSE REJECTS WHAT IS PENDING, so a prefetch never waits forever on a dead socket. The
@@ -517,9 +528,14 @@ describe('createBridge', () => {
     const api = createBridge({
       socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
     });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
     socket.onclose?.();
+    errors.length = 0;   // the CLOSE itself is reported, and is the next test's business
     await expect(api.fetchSelection!({ top: 0, left: 0, bottom: 0, right: 1 })).rejects.toThrow(/closed/);
     expect(socket.sent).toEqual([]);
+    // A failed PREFETCH never paints over the 3270 screen.
+    expect(errors).toEqual([]);
   });
 
   // ...and THROWS `InvalidStateError` while CONNECTING. That must arrive as a rejection the caller's
