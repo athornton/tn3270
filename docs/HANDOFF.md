@@ -64,7 +64,8 @@ actions; `clicks` 9 buttons; `select` 3/3; `shot` 2/2; `transfer` 10/10; `pty-sm
 RE-MEASURED after `febeb6b` (copy failures as notices): build and typecheck exit 0; **2652 tests in
 111 files**; `browser-clicks` **16/16** (new `webCopyRetry`); `browser-lan-copy` 2/2;
 `browser-keys` 13 chords/10 actions; `browser-shot` 1/1; GUI `select` 3/3 and `keys` 22 chords/20
-actions; 0 leaks after each. GUI `clicks`, `shot`, `transfer` and `pty-smoke` were not re-run.
+actions; GUI `clicks` 9 buttons, `shot` 2/2, `transfer` 10/10, `pty-smoke` 12 PASS / 0 FAIL --
+the FULL gate, re-run on `78b4dd8`; 0 leaked Electron processes after every harness.
 
 ### MUTANTS THAT SURVIVE, AND WHY
 
