@@ -27,12 +27,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, copyFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { guiEnv } from './xvfb.mjs';
+import { electron, guiEnv } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
 const goldenDir = join(here, '..', 'test', 'golden');
-const electron = join(repo, 'node_modules', '.bin', 'electron');
 const main = join(here, '..', 'dist', 'main.js');
 
 /**

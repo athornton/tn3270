@@ -1,17 +1,32 @@
 /**
- * Xvfb startup and the GL-less Electron environment this box needs.
+ * Xvfb startup, the GL-less Electron environment this box needs, and the Electron binary.
  *
- * Shared by shot.mjs and keys.mjs so the two copies cannot drift -- and because the traps
+ * Shared by every GUI and browser harness so the copies cannot drift -- and because the traps
  * below each cost a run to find and would be re-learned independently otherwise.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
 /** The userspace GUI stack: static micromamba env, no root, no system X. */
 const GUI_ENV = join(process.env.HOME ?? '', 'micromamba', 'envs', 'gui');
 
 const SOCKET = '/tmp/.X11-unix/X99';
+
+/**
+ * THE REAL ELECTRON BINARY, NEVER `node_modules/.bin/electron`.
+ *
+ * That `.bin` entry is `electron/cli.js`, a Node wrapper that spawns this binary and forwards
+ * only SIGINT, SIGTERM and SIGUSR2. A harness's SIGKILL therefore killed the wrapper and
+ * orphaned Electron to PID 1, six processes a time: `browser-clicks.mjs` leaked six on EVERY
+ * run. 60 of them, some ~10 hours old, exhausted the box until pages failed with
+ * `net::ERR_INSUFFICIENT_RESOURCES`, which read as a product bug. MEASURED: a SIGKILL to this
+ * binary's main process takes its zygote, GPU, network and renderer children with it.
+ *
+ * `require('electron')` returns this path in Node, so it follows the package, not a guess.
+ */
+export const electron = createRequire(import.meta.url)('electron');
 
 /** Start Xvfb if there is no display, and PROVE it came up before trusting DISPLAY. */
 export function ensureDisplay() {

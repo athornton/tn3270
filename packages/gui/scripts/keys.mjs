@@ -34,11 +34,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { guiEnv } from './xvfb.mjs';
+import { electron, guiEnv } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
-const electron = join(repo, 'node_modules', '.bin', 'electron');
 const main = join(here, '..', 'dist', 'main.js');
 const trace = join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
 
@@ -332,6 +331,11 @@ const result = spawnSync(electron, [main, ...ARGV, '127.0.0.1:1'], {
    * SIGKILL cannot be ignored or blocked, so the timeout now actually ends the child, `spawnSync`
    * returns, and the `result.error` bail below reports ETIMEDOUT with the partial stdout -- which
    * is what names the freeze instead of hiding it.
+   *
+   * The hang is Electron's, NOT the `.bin/electron` wrapper's: RE-MEASURED 2026-11-03 against the
+   * real binary with a main process spinning in `for (;;)`, SIGTERM still never ended it. What the
+   * wrapper did add was a leak -- this SIGKILL killed only the wrapper and orphaned all six
+   * Electron processes -- which is why `electron` now comes from `xvfb.mjs`.
    */
   killSignal: 'SIGKILL',
   env: guiEnv({

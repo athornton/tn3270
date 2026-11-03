@@ -37,11 +37,10 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { guiEnv } from '../../gui/scripts/xvfb.mjs';
+import { electron, guiEnv } from '../../gui/scripts/xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
-const electron = join(repo, 'node_modules', '.bin', 'electron');
 const guiMain = join(repo, 'packages', 'gui', 'dist', 'main.js');
 const webMain = join(repo, 'packages', 'web', 'dist', 'main.js');
 const trace = join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
