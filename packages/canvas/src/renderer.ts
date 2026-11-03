@@ -637,9 +637,10 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * `clearSelection()` AFTER this call inside the arm: all 2614 unit tests passed and `webCopy` was
  * the only failure. IT NO LONGER EXERCISES THIS FUNCTION: with the text prefetched, both presses
  * take `copyByChord`'s synchronous path and never call `copySelection()`, so what `webCopy` now
- * checks is that the CACHED path keeps the selection. Task 7's planned `webCopyFallback` check is
- * meant to cover the async path here; until it exists and has been run against that mutant,
- * nothing does. NO UNIT TEST CAN REACH IT -- this file touches `window` at module load, so nothing
+ * checks is that the CACHED path keeps the selection. `webCopyFallback` covers THIS function: it
+ * holds the prefetch so the cache is empty and presses the chord twice with no re-drag. MEASURED
+ * 2026-11-03 on a `clearSelection()` added after the `sendAction` below: `webCopyFallback` fails
+ * on its second press, and it is the only check that does. NO UNIT TEST CAN REACH IT -- this file touches `window` at module load, so nothing
  * imports it -- and `test/renderer-imports.test.ts`'s order pin does not cover it either.
  */
 function copySelection(): boolean {
