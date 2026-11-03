@@ -1,10 +1,91 @@
-# Handoff — state as of 2026-10-27 (web copy and paste are COMPLETE, gesture included)
+# Handoff — state as of 2026-11-03 (web copy works on every gesture at every address, on an UNMERGED branch)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — FIXES 1-3 AND NATIVE `Cmd-C` ON `native-copy` (STACKED ON `diagnostics`), LIVE-VERIFIED, NOT MERGED
+## START HERE — FETCH-AHEAD COPY ON `fetch-ahead-copy`, GATE GREEN, NOT MERGED; THE LIVE PASS GATES THE MERGE
+
+**2026-11-03, branch `fetch-ahead-copy`, from `main` at `cab6ef8` (which has `diagnostics` and
+`native-copy` merged, `583a731`). NOT MERGED and NOT PUSHED. The owed live pass below gates the
+merge — do not merge until the user reports it.** Spec and plan:
+`docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
+`docs/superpowers/plans/2026-11-02-fetch-ahead-copy.md` (Task 10 Step 3 is the live pass).
+
+### WHAT SHIPPED
+
+- **Web copy works on every gesture at every address.** At drag end the page prefetches the
+  selection's text (`{kind:'selection'}` -> `{kind:'selectionText'}`; gateway logs
+  `selection: sent N chars to the browser`) into `canvas/src/copyCache.ts`. A DOM `copy` event
+  (`Cmd-C`, Edit > Copy) sets it with `clipboardData.setData` + `preventDefault` in `forwardCopy`,
+  which needs NO secure context and no activation. `Ctrl-Shift-C`/`Cmd-Shift-C` raises the same
+  event via `document.execCommand('copy')` inside the keystroke (`copyByChord`).
+- **Fallback, unchanged:** nothing cached (a copy faster than the prefetch, or a blank selection)
+  -> the old async path, `{kind:'copy'}`, gateway `copy: sent N chars`,
+  `navigator.clipboard.writeText`. On plain-`http` LAN that paints `copy failed: use https
+  (--tls-cert) or localhost ...`; pressing again works.
+- Unchanged: `Ctrl-C` is Clear; right-click offers only "Copy Image"; **the Electron GUI** — its
+  preload has no `fetchSelection` (an OPTIONAL fifth `BridgeApi` member), so it never caches and
+  always uses its menu/IPC copy. GUI `select` 3/3 is the witness.
+- **The bridge processes inbound messages strictly in arrival order.** MEASURED: they could complete
+  out of order under Node's `DecompressionStream` (183/200), never in Electron 44's Chromium
+  (0/200). Firefox and Safari unmeasured.
+- An error painted over the screen now clears the selection and its cached text.
+- A newer prefetch supersedes an older pending one.
+- New harness `packages/web/scripts/browser-lan-copy.mjs`: gateway at the machine's LAN address
+  (`isSecureContext === false`, no `navigator.clipboard`), copies by `Ctrl+Shift+C` (`lanChord`)
+  and Meta+C with the `copy` command (`lanCommand`), reads the OS clipboard from a separate Electron
+  (`read-clipboard.cjs`). **Exits 77 = SKIPPED (not a pass) with no LAN IPv4.**
+
+### THE HARNESS PROCESS LEAK, FIXED (`944dacb`), AND WHY IT MATTERS
+
+Every harness spawned `node_modules/.bin/electron`, a Node wrapper that does NOT forward SIGKILL, so
+killing it orphaned the real Electron. `browser-clicks` leaked 6 per run; **60 had accumulated, some
+~10 h old**, and pages failed with `net::ERR_INSUFFICIENT_RESOURCES` and `Cannot read properties of
+undefined (reading 'onAtlas')` — which LOOKS LIKE A PRODUCT BUG, and probably explains the user's
+"gateway crashed". The harnesses now spawn the real binary, exported once as `electron` from
+`packages/gui/scripts/xvfb.mjs`; `b35b81d` makes `browser-clicks` wait for its killed browser before
+reporting. **0 leaked Electron processes after every harness** in the gate below. Still pkill
+between runs if a harness was interrupted.
+
+### THE GATE, MEASURED 2026-11-03 ON THIS BRANCH
+
+build and typecheck exit 0; **2651 tests in 111 files**; `browser-clicks` **15/15** (new
+`webCopyFallback`; `webCopy`/`webNativeCopy` now witness the cached path); `browser-keys` 13
+chords/10 actions; `browser-shot` 1/1; **`browser-lan-copy` 2/2**; GUI `keys` 22 chords/20
+actions; `clicks` 9 buttons; `select` 3/3; `shot` 2/2; `transfer` 10/10; `pty-smoke` 12 PASS /
+0 FAIL; 0 leaked Electron processes after every harness.
+
+### MUTANTS THAT SURVIVE, AND WHY
+
+- `clearSelection` without `copyCache.invalidate()`: **EQUIVALENT.** `take` is gated by
+  `anchor === null`, and the only place `anchor` is set (mousedown) invalidates first. Kept as
+  defence in depth.
+- `copyCache.invalidate()` keeping only `asked = undefined`: survives all 11 copyCache tests,
+  because clearing `asked` alone is sufficient for both stale-text cases (measured). The code
+  clears all three fields.
+- In `bridgecore.ts`, not deleting from `waiting` on resolve, and registering before send:
+  unobservable through the API.
+
+### OPEN
+
+- **Test files are never typechecked** in this repo (pre-existing, found by an implementer, NOT
+  fixed): every package's `tsconfig.json` includes only `src/`. vitest strips types, so a type error
+  in a test passes. Worth its own small branch.
+- `copyByChord`'s residual risk (see its docstring): a browser that dispatches `copy` but refuses
+  the data it set loses that copy SILENTLY. Only the live pass can show it.
+
+### THE OWED LIVE PASS — GATES THE MERGE
+
+In **Firefox, Safari and Chromium**, at a **plain-`http` LAN address AND over `localhost`**: try
+`Ctrl-Shift-C`/`Cmd-Shift-C`, `Cmd-C`, and Edit > Copy; each should paste the selected text
+elsewhere. Gateway logs `selection: sent N chars` at drag end and, on the cached path, **NO
+`copy:` line**. **Firefox and Safari on a plain-`http` LAN address are the item that matters**:
+only Chromium is machine-checked there. The earlier Mac `Cmd-C` witness predates this branch's
+`preventDefault` and does not carry over. Full list: `docs/live-testing.md`, *OWED BEFORE
+`fetch-ahead-copy` MERGES*.
+
+## SUPERSEDED BY THE ABOVE — FIXES 1-3 AND NATIVE `Cmd-C` ON `native-copy` (STACKED ON `diagnostics`), LIVE-VERIFIED, MERGED AT `583a731`
 
 **2026-11-02, `native-copy` (branched from `diagnostics`, so merging it brings both).** The web
 gateway now listens for the browser's own `copy` event (`forwardCopy` in `canvas/src/forwardKeys.ts`,
@@ -30,7 +111,8 @@ prints `copy: sent N chars to the browser`.
 `Ctrl-Shift-C` copies, `Ctrl-V` pastes. **Menu copy does not work:** Firefox's Edit > Copy is
 refused (`NotAllowedError ... lack of user activation`, because the text arrives asynchronously),
 and right-click offers only "Copy Image". See `docs/live-testing.md` for the fetch-ahead design that
-would fix both this and plain-LAN copy. Not built, pending the user's decision.
+would fix both this and plain-LAN copy. Not built, pending the user's decision. **(Built
+2026-11-03 on `fetch-ahead-copy`; see START HERE.)**
 
 **Gate on `native-copy`:** build/typecheck exit 0, **2623 tests in 110 files**, `browser-clicks`
 **14/14**, `browser-keys` 13 chords, `browser-shot` 1/1, GUI `keys` 22/20, `clicks`, `select` 3/3,

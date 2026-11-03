@@ -33,8 +33,9 @@ being a divergence.
 **NOTHING ABOUT THE PROTOCOL CHANGED TO ADD IT, and that is the whole design.** A click is hit-
 tested in the browser against rectangles the server already sent, and a hit sends the *ordinary*
 `{"kind":"action"}` message the equivalent keystroke sends — the same `sendAction` the bridge has
-always had. There is no new message kind, no new bridge function (a fifth would mean the renderer
-had stopped being shared) and nothing new for `protocol.ts` to bound: `toggleKeypad` carries no
+always had. There is no new message kind, no new bridge function (the bridge's four REQUIRED
+functions are what keep the renderer shared, and a fifth required one would mean it had stopped
+being shared) and nothing new for `protocol.ts` to bound: `toggleKeypad` carries no
 numeric field. The press highlight is drawn locally and never leaves the renderer, because a round
 trip for it would visibly lag behind the finger over a WebSocket.
 
@@ -138,11 +139,15 @@ when written and is not now — the keypad work added the keypad blit, the click
 seam to this file. What is still checked, and is the claim worth making, is that the served page and
 the Electron app produce **identical pixels**, keypad and all.)
 It already spoke to a four-function bridge — `onAtlas`, `onFrame`, `onError`, `sendAction` — and
-imported only relative modules. Hit-testing lives in `canvas/src/hittest.ts`, which is import-free
+imported only relative modules. Those four are still the bridge's REQUIRED width. Since 2026-11-02
+it has a fifth, OPTIONAL member, `fetchSelection`, which prefetches a selection's text when a drag
+ends so the browser's copy can write it synchronously; it is optional precisely because Electron's
+`preload.cts` does not implement it, and `renderer.ts` tests for it before calling it, so the one
+renderer stays shared. Hit-testing lives in `canvas/src/hittest.ts`, which is import-free
 for exactly that reason: a runtime import of a workspace package here blanks the window with no
 error anywhere.
 Electron supplies that bridge over IPC from `preload.cts`; here `bridge.js` supplies the same four
-functions over a WebSocket. Nothing above the transport knows the difference, and
+functions, plus `fetchSelection`, over a WebSocket. Nothing above the transport knows the difference, and
 `browser-shot.mjs` proves it in pixels by comparing the served page against the Electron app's own
 golden.
 

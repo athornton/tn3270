@@ -439,7 +439,18 @@ and the Recording log says what happened when they were run.
   **LINUX DESKTOP, user, 2026-11-02:** `Ctrl-C` Clears and leaves the clipboard alone,
   `Ctrl-Shift-C` copies, and `Ctrl-V` pastes, all as expected.
 
-  **MENU COPY DOES NOT WORK, AND THAT IS A LIMIT OF THE DESIGN, NOT A REGRESSION.**
+  **SUPERSEDED 2026-11-03 BY BRANCH `fetch-ahead-copy` (NOT YET MERGED, NOT YET LIVE-PASSED): the
+  limit below was the old design's, and the fetch-ahead design it names IS NOW BUILT.** The page
+  prefetches the selection's text when the drag ends (`{kind:'selection'}` ->
+  `{kind:'selectionText'}`), and the `copy` event writes it synchronously with
+  `clipboardData.setData` + `preventDefault`, which needs neither user activation nor a secure
+  context. `Ctrl-Shift-C` raises the same event via `execCommand('copy')`. With nothing cached the
+  old async path still runs as the fallback. Machine-checked in Chromium only: `browser-clicks`
+  15/15 over loopback, `browser-lan-copy` 2/2 at a plain-`http` LAN address. The record below is
+  kept as the measurement that motivated it.
+
+  **MENU COPY DOES NOT WORK, AND THAT IS A LIMIT OF THE DESIGN, NOT A REGRESSION.** *(Superseded,
+  above.)*
   - **Edit > Copy in Firefox** fires `forwardCopy`, but the canvas painted `copy failed: the browser
     refused the clipboard: NotAllowedError: Clipboard write was blocked due to lack of user
     activation`. The text arrives from the gateway asynchronously, and `navigator.clipboard
@@ -450,7 +461,24 @@ and the Recording log says what happened when they were run.
   - The way to get menu copy would be to fetch the selection's text ahead of time, when the drag
     ends, and write it synchronously in the `copy` event. That would also make copy work at a
     plain-`http` LAN address. NOT BUILT; it is a redesign of a copy path that has just been
-    live-verified.
+    live-verified. *(BUILT 2026-11-03 on `fetch-ahead-copy`; see the superseding note above.)*
+
+  **OWED BEFORE `fetch-ahead-copy` MERGES — THE LIVE PASS THAT GATES IT, 2026-11-03.** In
+  **Firefox, Safari and Chromium**, each **at a plain-`http` LAN address AND over `localhost`**:
+  drag a selection, then try **`Ctrl-Shift-C` / `Cmd-Shift-C`**, **`Cmd-C`** (Mac) and **Edit >
+  Copy**, and paste each somewhere else. Every one should paste the selected text. Watch the
+  gateway's stderr: a drag end logs `selection: sent N chars to the browser`, and **a copy served
+  from the cache logs NO `copy:` line**. A `copy: sent N chars` line means the fallback ran; on a
+  plain-`http` LAN page that fallback should paint `copy failed: use https (--tls-cert) or
+  localhost ...`, and pressing again should then work. Also confirm on Linux that `Ctrl-C` still
+  Clears and leaves the clipboard alone, and that right-click still offers only "Copy Image".
+  - **THE ONE ITEM NO HARNESS HERE CAN SETTLE: Firefox and Safari BOTH on a plain-`http` LAN
+    address.** Only Chromium is machine-checked there (`browser-lan-copy` 2/2). The residual risk is
+    named in `renderer.ts` above `copyByChord`: a browser that DISPATCHES the `copy` event but
+    refuses the data it set would lose that copy SILENTLY, with no fallback, because the event did
+    reach our listener. If either browser does that, the fix belongs in `copyByChord`.
+  - **The 2026-11-02 Mac `Cmd-C` witness predates this branch**, which changed `forwardCopy`'s
+    cached branch to call `preventDefault`. It must be re-witnessed, not inherited.
 
   **What a human still owes on copy and paste, and only these:**
 
@@ -459,6 +487,8 @@ and the Recording log says what happened when they were run.
      runs. It is the COMMON deployment, not an edge one. Check it reports rather than silently
      failing. **Since 2026-11-02 it reports on the canvas, and that is witnessed in Electron's
      Chromium at a LAN address (see above). Firefox and Safari at a LAN address are still owed.**
+     **Since 2026-11-03 (`fetch-ahead-copy`) that branch is only the FALLBACK; a normal LAN copy is
+     served from the prefetch and should succeed. Folded into the owed pass above.**
   2. **Chromium AND Firefox, and Safari is worth adding.** Safari has neither a harness witness nor
      any prior measurement in this repo.
   3. **The Electron accelerator overlap on Linux.** `Ctrl-Shift-C` is both the page's copy chord

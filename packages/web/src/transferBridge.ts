@@ -5,9 +5,11 @@ import { MAX_TRANSFER_BYTES, ChunkReassembler, chunkBytes } from './transferChun
  *
  * ## BESIDE `bridgecore.ts` AND NOT INSIDE IT
  *
- * That module's header states the rule: *"If this file grows a fifth function, the renderer has
- * stopped being shared."* `onAtlas`/`onFrame`/`onError`/`sendAction` is `BridgeApi`, the whole of
- * what `renderer.ts` consumes, and `renderer.ts` is reused UNMODIFIED by the Electron GUI.
+ * That module's header states the rule: `onAtlas`/`onFrame`/`onError`/`sendAction` are
+ * `BridgeApi`'s REQUIRED width, the part of it `renderer.ts` relies on, and `renderer.ts` is reused
+ * UNMODIFIED by the Electron GUI. A fifth REQUIRED member would mean the renderer had stopped being
+ * shared. `BridgeApi` did grow a fifth member on 2026-11-02, `fetchSelection`, and it is OPTIONAL
+ * for exactly that reason: `preload.cts` does not implement it, and the renderer tests for it first.
  * Transfer plumbing is a separate object with its own dependencies, exactly as `keypadOverlay.ts`
  * sits beside it.
  *

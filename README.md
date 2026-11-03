@@ -284,8 +284,8 @@ your physical Shift key: it arms on a click and is spent by the next character y
 
 ### Copy and paste
 
-**Drag across the screen to select, then copy — from the Edit menu in the app, or with the
-keyboard in either front end.** The accelerators are **platform-split, and that is forced rather
+**Drag across the screen to select, then copy — from the Edit menu (the app's, or the browser's
+in the web gateway), or with the keyboard in either front end.** The accelerators are **platform-split, and that is forced rather
 than stylistic: `Ctrl-C` is the Clear AID** and stays Clear everywhere. So it is **`Cmd-C` /
 `Cmd-V` on macOS**, where `Cmd` is free, and **`Ctrl-Shift-C` / `Ctrl-Shift-V` on Linux and
 Windows** — the convention gnome-terminal and VS Code's terminal adopted for exactly this
@@ -293,16 +293,26 @@ collision. "Ctrl-C copies when something is selected" was considered and rejecte
 destructive AID conditional on invisible state, and its failure mode is a missed Clear on a locked
 `MORE...` screen.
 
-**IN THE BROWSER THE COPY CHORD IS `Ctrl-Shift-C`, AND `Cmd-Shift-C` ON A MAC — not `Cmd-C`.**
-That asymmetry with the app is measured rather than chosen. A browser page cannot adopt the
-platform's native copy gesture here, for two separate reasons:
+**IN THE BROWSER EVERY COPY GESTURE WORKS: `Cmd-C` on a Mac, the browser's Edit > Copy, and the
+chord `Ctrl-Shift-C` (`Cmd-Shift-C` on a Mac).** `Ctrl-C` is still Clear there too, so on Linux and
+Windows the keyboard route is the shifted chord. The browser once had the chord alone, and the
+history is measured: the 3270 selection is the emulator's own state rather than a DOM text
+selection, so with no `copy` listener `Cmd-C` copied nothing in any browser tried (2026-10-28),
+and once a listener existed Firefox's Edit > Copy was still refused for want of a keystroke's user
+activation (2026-11-02), until the fetch below made the menu work (2026-11-03).
 
-- On Linux the native gesture **is `Ctrl-C`**, which is the Clear AID. Claiming it would collide
-  with the one binding that must stay Clear everywhere.
-- On macOS `Cmd-C` **copies nothing at all** from this screen. The 3270 selection is the
-  emulator's own state, not a DOM text selection, so the browser's built-in copy has nothing to
-  act on and fires no `copy` event. A keymap that merely declined the chord would leave macOS with
-  no way to copy.
+- **The text is fetched when the drag ends**, so by the time you copy it is already in the page,
+  and the copy writes it synchronously. That is what makes the browser's menu work, and it is
+  also why **copy works over plain `http` at a LAN address**, which has no secure context and no
+  clipboard API.
+- **A copy pressed faster than that fetch** falls back to asking the gateway for the text, which
+  needs a secure context. On a plain-`http` LAN page it then paints
+  `copy failed: use https (--tls-cert) or localhost ...` instead of copying; press it again and it
+  works, because the fetch has landed by then.
+- **Right-click offers only "Copy Image"**, because the screen is a canvas.
+
+The Chromium half of this is machine-checked at a real plain-`http` LAN address, on the OS
+clipboard; the menu and `Cmd-C` in Firefox and Safari await a live pass.
 
 Paste is the opposite case and needs no chord: **`Ctrl-V` / `Cmd-V` work in the browser through
 the page's own `paste` event**, because the emulator never claims those chords and the browser
@@ -335,8 +345,8 @@ wipe the screen; a carriage return is dropped, so CRLF text does not gain a stra
 line. If a field fills up or refuses a character the paste stops and the status line says how much
 got in.
 
-**The selection is cleared by any keystroke that does something, and by every repaint from the
-host** — a highlight over changed text would offer you a copy of something that is no longer
+**The selection is cleared by any keystroke that does something, by every repaint from the
+host, and by an error message painted over the screen** — a highlight over changed text would offer you a copy of something that is no longer
 there. **The copy chord is the one exception**, for the obvious reason: clearing on it would
 destroy the rectangle it is about to send, so copying would reliably copy nothing. You can copy the
 same selection twice.
@@ -352,14 +362,14 @@ since it offers a copy of something you never saw.
 **The web gateway has BOTH copy and paste** (2026-10-27). It did not for a long time, and the
 reason is worth keeping: a copy has to extract the text on the gateway's machine, where the screen
 buffer lives, and then get it back to *your* clipboard — which needed a protocol message that did
-not exist. It exists now, so the copied text travels back over the WebSocket and the page writes
-your own clipboard.
+not exist. It exists now, so the selected text travels back over the WebSocket when the drag ends,
+and the page writes your own clipboard when you copy.
 
-**One honest limit**, because it is the common deployment rather than an edge case: writing your
-clipboard requires a **secure context**. A gateway on `localhost` has one even over plain `http`,
-but a gateway reached at a LAN address over `http` does not, and there the copy reports that the
-browser refused rather than silently failing. Serve it over `https` — the gateway has `--tls-cert`
-— or reach it on loopback.
+**The one limit left on a plain-`http` LAN address is the fast copy above.** Writing a clipboard
+asynchronously requires a **secure context**: `localhost` has one even over plain `http`, a LAN
+address over `http` does not. Only the fallback writes asynchronously, so it is the only thing
+that can be refused, and it says so on the screen rather than failing silently. Serving over
+`https` (the gateway has `--tls-cert`) or reaching it on loopback removes even that.
 
 **Clicking a keypad button and selecting text are the only things the mouse does**; the light pen
 is not implemented, and text selection is deliberately not built on it (see *Remaining* for why
@@ -1185,7 +1195,7 @@ bridge has no clipboard function, and the browser's renderer holds a draw list w
 atlas glyph and no character — so the gateway would extract the text onto its own machine rather than
 the operator's. Until that lands the gateway **refuses** `copy` at decode, and the refusal is
 load-bearing: without it the first browser copy would end the gateway process and every session on
-it.
+it. **(Web copy and paste LANDED 2026-10-27; see *Copy and paste*.)**
 
 **REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
 after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
@@ -1420,9 +1430,9 @@ worse than one that says which quarter is missing.
   handler only reacted to options the *host* does. Both now route through one teardown, and
   the second has a recorded-host witness in `wont-tn3270e.trc`.
 - **On the CANVAS the mouse does TEXT SELECTION and nothing else.** A press on the screen starts a
-  rectangular selection for copy (**GUI only** — the web gateway runs the same renderer, so the
-  gesture works there, but the gateway refuses the `copy` action because it would extract onto its
-  own machine rather than yours). A press off the screen region — the status line, past the last
+  rectangular selection for copy, in the GUI and in the web gateway alike (the gateway used to
+  refuse `copy`, because it would have extracted onto its own machine rather than yours; since
+  2026-10-27 the text travels back to the browser — see *Copy and paste*). A press off the screen region — the status line, past the last
   column — is ignored, and the right and middle buttons do nothing at all (deliberately: a
   right-click that sent `Clear` to a live host while a context menu opened would be a misfire
   nobody asked for). **Keypad buttons are no longer on the canvas**: since 2026-10-06 they are real
@@ -1566,7 +1576,8 @@ visible there.
 | `keys.mjs` — real Chromium key events in Electron | **pass** — 22 chords, 20 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). **Two of those chords go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. The pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |
 | `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
 | `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
-| `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, plus **13 of 13** phase-two checks: seven on the transfer form, **four on the keyboard**, and **two on copy and paste**. The copy one drives the REAL `Ctrl-Shift-C` through Chromium's input pipeline rather than calling the page's copy global, so it covers the BINDING as well as the path behind it, and it asserts the real OS clipboard over a sentinel — then presses the chord a SECOND time over a fresh sentinel to prove the selection SURVIVED, which is the only end-to-end witness that a copy does not destroy the rectangle it just sent. Mutation-measured: an arm that copies and then clears passes every one of the 2614 unit tests and the built-artifact ordering pin, and fails only here. One of those four is the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow cluster's diamond (up and down sharing a column), the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it. **The other three are FUNCTIONAL, added 2026-10-23, and the ten above measured NOT ONE ACTION before them** — proved by mutation, since making every cap dead left all ten green at 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3, Enter, Cursor up, `7`, Attention) and compares the **full action object**, not just its kind — an off-by-one `n` on the PF row keeps every label right and would pass a kind-only check; `keyboardInert` asserts an inert cap (`Caps Lock`) sends nothing at all; `keyboardShift` arms the one-shot, gets `@`, and gets a plain `2` on the next click, because a latch bug in exactly that logic reached the user with every unit test green. **Each cap is asserted on TWO independent witnesses** — what the page sent over the socket and the gateway's own `--log-actions` output after decoding — because a mutation renaming the IPC frame kind in `bridgecore.ts` satisfied the browser-side probe for all five caps and was caught **only** by the gateway's log |
+| `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, plus **15 of 15** phase-two checks (measured 2026-11-03): seven on the transfer form, **four on the keyboard**, and **four on copy and paste**. The copy one drives the REAL `Ctrl-Shift-C` through Chromium's input pipeline rather than calling the page's copy global, so it covers the BINDING as well as the path behind it, and it asserts the real OS clipboard over a sentinel — then presses the chord a SECOND time over a fresh sentinel to prove the selection SURVIVED, which is the only end-to-end witness that a copy does not destroy the rectangle it just sent. Since 2026-11-03 it and `webNativeCopy` (the browser's own copy command) witness the text prefetched at drag end, with no copy frame sent, and `webCopyFallback` holds the prefetch back to witness the older asynchronous path, which a correct run otherwise never reaches. Mutation-measured: an arm that copies and then clears passes every one of the 2614 unit tests and the built-artifact ordering pin, and fails only here. One of those four is the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow cluster's diamond (up and down sharing a column), the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it. **The other three are FUNCTIONAL, added 2026-10-23, and the ten above measured NOT ONE ACTION before them** — proved by mutation, since making every cap dead left all ten green at 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3, Enter, Cursor up, `7`, Attention) and compares the **full action object**, not just its kind — an off-by-one `n` on the PF row keeps every label right and would pass a kind-only check; `keyboardInert` asserts an inert cap (`Caps Lock`) sends nothing at all; `keyboardShift` arms the one-shot, gets `@`, and gets a plain `2` on the next click, because a latch bug in exactly that logic reached the user with every unit test green. **Each cap is asserted on TWO independent witnesses** — what the page sent over the socket and the gateway's own `--log-actions` output after decoding — because a mutation renaming the IPC frame kind in `bridgecore.ts` satisfied the browser-side probe for all five caps and was caught **only** by the gateway's log |
+| `browser-lan-copy.mjs` — copy at a plain-`http` LAN address | **pass** — **2 of 2** (measured 2026-11-03): the page is loaded at the machine's own LAN address, where `isSecureContext` is false and there is no `navigator.clipboard`, and a drag then `Ctrl+Shift+C`, and a drag then Meta+C with the `copy` command, each put the text on the OS clipboard, read back from a separate Electron. Chromium only; Firefox and Safari there are a live-pass item. With no LAN IPv4 it exits 77, **SKIPPED, which is not a pass** |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |
 | web gateway reattachment, live | **pass** — same session returned inside the grace window, a new one after it |
