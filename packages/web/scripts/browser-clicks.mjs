@@ -530,6 +530,22 @@ const TRANSFER_CHECKS = [
     `renderer.ts` claims it as Clear and its `preventDefault` suppresses the browser's copy.
   */
   {
+    name: 'webCopyRetry',
+    kind: 'live',
+    what: 'a copy pressed BEFORE the prefetch answered -- whose async write the browser refuses -- '
+      + 'paints a "copy failed" notice that KEEPS the selection; once the prefetch answers, a '
+      + 'second Ctrl+Shift+C with NO re-drag copies the selected text to the REAL clipboard from '
+      + 'the cache and repaints the screen over the notice',
+    mutant: 'EACH MEASURED 2026-11-03: bridgecore.ts  the copyText report back on its old route, '
+      + '`dispatch(\'error\', m)` whatever is registered (15/16 with webNativeCopy also failing, '
+      + 'this check on the SECOND PRESS: the clipboard keeps its sentinel and nothing is sent, '
+      + 'because onError cleared the selection and the notice then blocks webNativeCopy\'s drag)  '
+      + 'OR  renderer.ts  copiedFromCache without its `paint(last)` (15/16, this check only: the '
+      + 'copy works and the notice stays up).  NOT CAUGHT HERE: the mousedown and '
+      + 'prefetchSelection guards reverted to a bare `errored` -- this check never clicks under a '
+      + 'notice',
+  },
+  {
     name: 'webNativeCopy',
     kind: 'injected',
     what: "the browser's copy command (Cmd-C on macOS) copies the canvas selection to the REAL OS "
@@ -687,8 +703,24 @@ async function openCdp(port) {
  */
 const PROBE_SOURCE = `
 (() => {
-  const H = { sent: [], hold: false, holdSelection: false, sock: null, warns: [], keys: [] };
+  const H = {
+    sent: [], hold: false, holdSelection: false, stashSelection: false, stashed: [], sock: null,
+    warns: [], keys: [], texts: [], drawsSinceText: 0,
+  };
   window.__tn3270Probe = H;
+  /*
+    WHAT THE RENDERER PAINTS AS TEXT, AND WHETHER THE SCREEN HAS BEEN REDRAWN SINCE, for
+    \`webCopyRetry\` only. \`renderer.ts\`'s message painter is the page's ONLY \`fillText\` caller
+    (the 3270 screen is atlas glyphs, \`drawImage\` per cell through \`blit\`), so \`texts\` is exactly
+    the messages painted, and \`drawsSinceText > 0\` means \`paint\` -- which clears the whole canvas
+    first -- has run since the last one: the message is GONE. Counted on the prototype, so the
+    real drawing still happens.
+  */
+  const P2D = CanvasRenderingContext2D.prototype;
+  const realFillText = P2D.fillText;
+  P2D.fillText = function (...a) { H.texts.push(String(a[0])); H.drawsSinceText = 0; return realFillText.apply(this, a); };
+  const realDrawImage = P2D.drawImage;
+  P2D.drawImage = function (...a) { H.drawsSinceText += 1; return realDrawImage.apply(this, a); };
   /*
     EVERY KEYDOWN AS IT ARRIVES, WHICH IS A DIAGNOSTIC AND DELIBERATELY NOT AN ASSERTION TARGET.
 
@@ -735,7 +767,16 @@ const PROBE_SOURCE = `
       H.sent.push(text);
       if (H.hold && text.includes('"transferStart"')) return;
       if (H.holdSelection && text.includes('"kind":"selection"')) return;
+      // \`webCopyRetry\`: KEPT, not dropped, so the SAME frame -- same seq, same rect, the waiter
+      // the page registered for it -- can be sent late by \`releaseSelection\`.
+      if (H.stashSelection && text.includes('"kind":"selection"')) { H.stashed.push(data); return; }
       realSend(data);
+    };
+    H.releaseSelection = () => {
+      H.stashSelection = false;
+      const out = H.stashed.splice(0);
+      for (const d of out) realSend(d);
+      return out.length;
     };
     return s;
   };
@@ -2906,6 +2947,144 @@ async function runTransferPhase(url) {
               + `sent ${JSON.stringify(fbAgain.frames)} and left the clipboard reading `
               + `${JSON.stringify(fbAgain.clip)}; writeClipboard warned ${await clipWarns()}; `
               + `${extent}`);
+      }
+
+      // ===== webCopyRetry ======================================================================
+      //
+      // THE DOCUMENTED REMEDY, DRIVEN: press copy before the prefetch has answered, see it fail,
+      // press AGAIN on the SAME selection once it has, and get the text. 2026-11-03. Until then the
+      // failure went to `onError`, whose `clearSelection()` also invalidated the cache, so the
+      // second press found no selection and did nothing.
+      //
+      // ONE DRAG FOR BOTH PRESSES, AND THAT IS THE WHOLE POINT: the operator's complaint is that
+      // pressing again must work WITHOUT re-dragging. So the prefetch cannot be dropped (the page
+      // sends `selection` once, at mouseup, and never again) and cannot be re-provoked by a drag.
+      // It is STASHED instead -- `PROBE_SOURCE`'s `stashSelection` keeps the outbound frame -- and
+      // SENT LATE by `releaseSelection()`: the gateway then answers the same seq, the page's own
+      // waiter resolves, and the cache fills for the rectangle still selected. On the old route the
+      // first notice had already bumped the cache's generation, so that late answer is discarded.
+      //
+      // THE FIRST WRITE FAILS DETERMINISTICALLY: `navigator.clipboard.writeText` is replaced, AFTER
+      // the harness's sentinel is written, by a function that rejects ONCE with `NotAllowedError`
+      // and restores the real one on that call -- the refusal Firefox gives an Edit > Copy made
+      // before the prefetch lands. A secure `localhost` page has the API, so this is how the LAN
+      // failure is reached here; `browser-lan-copy` covers the real plain-`http` page.
+      //
+      // THE NOTICE IS WITNESSED ON THE CANVAS, NOT THE CONSOLE: `texts` is what the renderer's
+      // message painter drew, and `drawsSinceText` counts screen redraws since -- zero while the
+      // notice is up, positive once a repaint has replaced it.
+      const RETRY_WANT = COPY_WANT;
+      const retrySentinel1 = `${SENTINEL}-retry-first`;
+      const retrySentinel2 = `${SENTINEL}-retry-second`;
+      const retryMark = serverOut.length;
+      let retry = { problem: '' };
+      try {
+        await cdp.eval('window.__tn3270Probe.stashSelection = true; window.__tn3270Probe.stashed = [];');
+        const dragged = await dragCells(0, 0, 1, 11);
+        if (dragged !== '') {
+          retry = { problem: dragged };
+        } else {
+          const written = await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(retrySentinel1)})
+            .then(() => '').catch((e) => String(e))`);
+          await cdp.eval(`(() => {
+            const clip = navigator.clipboard;
+            const realWrite = clip.writeText.bind(clip);
+            window.__tn3270RealWriteText = realWrite;
+            clip.writeText = () => {
+              clip.writeText = realWrite;
+              return Promise.reject(new DOMException('refused once by the harness', 'NotAllowedError'));
+            };
+          })()`);
+          const textsBefore = await cdp.eval('window.__tn3270Probe.texts.length');
+          const warnsBefore = await cdp.eval('window.__tn3270Probe.warns.length');
+          const sentBefore = await cdp.eval('window.__tn3270Probe.sent.length');
+          await press('C', 'KeyC', 67, CDP_CTRL | CDP_SHIFT);
+          let texts = [];
+          for (let waited = 0; waited < 6000; waited += 150) {
+            texts = JSON.parse(await cdp.eval(
+              `JSON.stringify(window.__tn3270Probe.texts.slice(${textsBefore}))`));
+            if (texts.length > 0) break;
+            await new Promise((r) => { setTimeout(r, 150); });
+          }
+          const firstFrames = JSON.parse(await cdp.eval(
+            `JSON.stringify(window.__tn3270Probe.sent.slice(${sentBefore}))`));
+          const firstWarns = JSON.parse(await cdp.eval(
+            `JSON.stringify(window.__tn3270Probe.warns.slice(${warnsBefore}))`));
+          const firstClip = await cdp.eval(
+            "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
+          const stubSpent = await cdp.eval(
+            'navigator.clipboard.writeText === window.__tn3270RealWriteText');
+          // THE PREFETCH ANSWERS NOW, for the rectangle still selected.
+          const releaseMark = serverOut.length;
+          const released = await cdp.eval('window.__tn3270Probe.releaseSelection()');
+          const releaseLogs = await waitForLog(releaseMark, (l) => l.startsWith('selection: '), 3000);
+          await new Promise((r) => { setTimeout(r, 150); });
+          const drawsWhileUp = await cdp.eval('window.__tn3270Probe.drawsSinceText');
+          const secondMark = serverOut.length;
+          const second = await chordCopy(retrySentinel2);
+          await new Promise((r) => { setTimeout(r, 300); });
+          const secondCopyLines = logsSince(secondMark).filter((l) => l.startsWith('copy: '));
+          const drawsAfter = await cdp.eval('window.__tn3270Probe.drawsSinceText');
+          retry = {
+            problem: '', written, texts, firstFrames, firstWarns, firstClip, stubSpent, released,
+            releaseLogs, drawsWhileUp, second, secondCopyLines, drawsAfter,
+          };
+        }
+      } finally {
+        // EVERY HOLD AND STUB UNDONE whatever happened, so no later check runs on a doctored page.
+        await cdp.eval(`(() => {
+          const H = window.__tn3270Probe;
+          if (H.stashSelection || H.stashed.length > 0) H.releaseSelection();
+          if (window.__tn3270RealWriteText !== undefined) {
+            navigator.clipboard.writeText = window.__tn3270RealWriteText;
+          }
+        })()`);
+      }
+      const retryLogs = logsSince(retryMark);
+      const retryWhy = retry.problem !== '' ? [retry.problem] : [
+        retry.written === '' ? ''
+          : `the HARNESS could not put its first sentinel on the clipboard: ${String(retry.written)}`,
+        retry.firstFrames.some((f) => f.includes('"kind":"copy"')) ? ''
+          : 'the first press sent no {kind:copy} frame, so it did not take the async path this '
+            + 'check needs -- was the prefetch stashed? (PROBE_SOURCE stashSelection)',
+        retry.stubSpent === true ? ''
+          : 'the harness\'s one-shot refusing writeText was never called, so the async write did not '
+            + 'run and nothing was refused -- check bridge.ts onCopyText',
+        retry.texts.some((t) => t.startsWith('copy failed')) ? ''
+          : `the refused copy painted no "copy failed" notice (painted ${JSON.stringify(retry.texts)})`,
+        retry.firstClip === retrySentinel1 ? ''
+          : `the refused copy changed the clipboard anyway, to ${JSON.stringify(retry.firstClip)}`,
+        retry.released === 1 && retry.releaseLogs.some((l) => l.startsWith('selection: ')) ? ''
+          : `the stashed prefetch was not answered (released ${retry.released} frame(s)) -- a `
+            + 'HARNESS fault, or the mouseup no longer prefetches',
+        retry.drawsWhileUp === 0 ? ''
+          : 'the notice was painted over BEFORE the second press, so its removal proves nothing',
+        retry.second.written === '' ? ''
+          : `the HARNESS could not put its second sentinel on the clipboard: ${String(retry.second.written)}`,
+        retry.second.clip === RETRY_WANT && retry.second.viaFallback === false
+          && retry.secondCopyLines.length === 0 ? ''
+          : 'THE SECOND PRESS, NO RE-DRAG, DID NOT COPY FROM THE CACHE: the clipboard reads '
+            + `${JSON.stringify(retry.second.clip)} (want ${JSON.stringify(RETRY_WANT)}), the page sent `
+            + `${JSON.stringify(retry.second.frames)} -- check that renderer.ts's onCopyFailed keeps `
+            + 'the selection and that bridgecore.ts routes the report there, not to onError',
+        // ONLY WHEN THE SECOND COPY WORKED: otherwise the clause above is the diagnosis, and a
+        // notice still up is its consequence rather than a second defect.
+        retry.drawsAfter > 0 || retry.second.clip !== RETRY_WANT ? ''
+          : 'the second copy worked but the "copy failed" notice is STILL UP -- check renderer.ts '
+            + 'repaints `last` when a cached copy succeeds under a notice',
+      ].filter((w) => w !== '');
+      if (retryWhy.length === 0) {
+        ok(check('webCopyRetry'), 'with the prefetch stashed, the first Ctrl+Shift+C took the async '
+          + `path, its refused write painted ${JSON.stringify(retry.texts.find((t) => t.startsWith('copy failed')))}, `
+          + 'and the clipboard kept its sentinel; once the SAME prefetch frame was released and '
+          + `answered (${JSON.stringify(retry.releaseLogs.find((l) => l.startsWith('selection: ')))}), a `
+          + 'second press with NO re-drag copied from the cache -- no copy frame -- putting '
+          + `${JSON.stringify(retry.second.clip)} on the clipboard over ${JSON.stringify(retrySentinel2)}, `
+          + `and the screen was redrawn over the notice (${retry.drawsAfter} glyph draws)`);
+      } else {
+        no(check('webCopyRetry'), `a copy after a failed copy is broken: ${retryWhy.join('; ')}`,
+          `the gateway logged ${JSON.stringify(retryLogs)}; the page warned `
+          + `${JSON.stringify(retry.firstWarns ?? [])}; ${extent}`);
       }
 
       // ===== webNativeCopy =====================================================================

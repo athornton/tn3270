@@ -400,13 +400,38 @@ describe('createBridge', () => {
     expect(socket.sent).toEqual([]);
   });
 
-  it('hands onCopyText a REPORT that paints on the canvas, so a failed copy is not silent', async () => {
+  it('hands onCopyText a REPORT that goes to onCopyFailed, NOT onError, so the selection survives', async () => {
     /**
-     * THE LIVE PASS OF 2026-10-27 FOUND THIS. On a LAN address over plain `http` the browser has
-     * no clipboard API, `writeClipboard` warned to `console.warn` alone, and the gateway's own
+     * THE LIVE PASS OF 2026-10-27 FOUND THE SILENCE. On a LAN address over plain `http` the browser
+     * has no clipboard API, `writeClipboard` warned to `console.warn` alone, and the gateway's own
      * `copy: 28 chars` read as success -- so the operator's copy did nothing, visibly to nobody.
-     * The report is the `error` channel `renderer.ts` already paints, the one the paste warning
-     * uses, so the reason reaches the screen the operator is looking at.
+     *
+     * AND 2026-11-03 FOUND THE CHANNEL WAS WRONG. The report used to be `dispatch('error')`, and
+     * `renderer.ts`'s `onError` clears the selection and its prefetched text -- so the documented
+     * remedy, pressing copy again once the prefetch has answered, found nothing selected. It now
+     * goes to `onCopyFailed`, which the renderer paints as a notice that keeps the selection. The
+     * negative half is the point: an `onError` that also saw it would still clear the selection.
+     */
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onCopyText: (_t, report) => { report('copy failed: because'); },
+    });
+    const errors: string[] = [];
+    const notices: string[] = [];
+    api.onError((m) => errors.push(m));
+    api.onCopyFailed?.((m) => notices.push(m));
+    deliver(socket, { kind: 'copyText', text: 'HELLO' });
+    await settle();
+    expect(notices).toEqual(['copy failed: because']);
+    expect(errors, 'a copy report must not reach onError, which clears the selection').toEqual([]);
+  });
+
+  it('falls back to onError when no onCopyFailed is registered, so the report is never lost', async () => {
+    /**
+     * A RENDERER THAT NEVER REGISTERS `onCopyFailed` -- an older build, any third client -- must
+     * still see the failure painted. `error` is queued, so even an `onError` registered after the
+     * report arrives receives it; registered here before, which is the renderer's real order.
      */
     const socket = fakeSocket();
     const api = createBridge({

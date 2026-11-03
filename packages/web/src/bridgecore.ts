@@ -193,12 +193,16 @@ export interface BridgeDeps {
    * a real function here unconditionally, and the capability detection lives one level down in
    * `writeClipboard` below -- injected there, which is what gives the no-API route a test.
    *
-   * ## `report` PAINTS ON THE CANVAS, 2026-11-02
+   * ## `report` PAINTS ON THE CANVAS, 2026-11-02, AS A NOTICE SINCE 2026-11-03
    *
    * The live pass of 2026-10-27 found a copy that wrote nothing and told only `console.warn` --
-   * while the gateway's `copy: N chars` read as success (it now says `sent N chars to the browser`). `report` is `dispatch('error', ...)`, the
-   * channel `renderer.ts` paints and the paste warning already uses. It stays up until the next
-   * frame, which the operator's next keystroke produces, since every action repaints.
+   * while the gateway's `copy: N chars` read as success (it now says `sent N chars to the
+   * browser`). So `report` reaches the canvas. Until 2026-11-03 it was `dispatch('error', ...)`,
+   * and that was a defect: `renderer.ts`'s `onError` clears the selection and its prefetched text,
+   * so the documented remedy -- press copy again once the prefetch has answered -- found nothing
+   * selected and did nothing. It now goes to `BridgeApi.onCopyFailed`, which paints the same
+   * message and KEEPS the selection; see that member. Absent a registered `onCopyFailed` it still
+   * falls back to `dispatch('error', ...)`, so the message is never lost.
    */
   readonly onCopyText?: (text: string, report: (message: string) => void) => void;
 }
@@ -242,6 +246,27 @@ export interface BridgeApi {
    * task the socket opens, so it is first on the wire. And a RELOAD discards all of this anyway.
    */
   fetchSelection?(rect: { top: number; left: number; bottom: number; right: number }): Promise<string>;
+  /**
+   * A failed clipboard write, reported as a NOTICE and not as a screen failure. 2026-11-03.
+   *
+   * OPTIONAL FOR `fetchSelection`'s REASON: `preload.cts` does not implement it, and need not --
+   * Electron copies through IPC and `clipboard.writeText` in main, and never reports this way. The
+   * renderer registers it only where it exists, so the four REQUIRED functions stay the width.
+   *
+   * WHY A SEPARATE CHANNEL AND NOT `onError`: an error means the screen the operator was looking
+   * at is gone, so the renderer's `onError` clears the selection and its prefetched text. A copy
+   * that the browser refused changed nothing on the screen, and the remedy the docs give -- press
+   * copy again once the prefetch has answered -- needs that selection and that text to survive.
+   * Routed through `onError` it found neither, and the second press did nothing.
+   *
+   * NOT QUEUED, unlike `error`, and deliberately: the only sender is `onCopyText`'s `report`, which
+   * runs in reply to a `copy` the renderer itself sent -- so the renderer's module body has already
+   * run, and registered this, before any report can exist. A renderer that never registers one
+   * (an older build, any third client) gets the old route instead: the report falls back to
+   * `dispatch('error', ...)`, which IS queued, so the message is never lost. A queue here would
+   * park every report forever in a client that never registers.
+   */
+  onCopyFailed?(fn: (message: string) => void): void;
 }
 
 /**
@@ -367,6 +392,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   // real `WebSocket.send` after close DISCARDS SILENTLY, so without this a late fetch would be sent
   // into nothing and wait forever, the close that rejects pending fetches having already run.
   let closed = false;
+  // THE RENDERER'S `onCopyFailed`, if it registered one. Not in `handlers`, because it is not
+  // queued -- see that member's docstring.
+  let copyFailed: ((message: string) => void) | undefined;
 
   const dispatch = (kind: string, payload: unknown): void => {
     const fn = handlers.get(kind);
@@ -435,7 +463,11 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       // cannot be late, and a `dispatch`ed `copyText` would sit in the queue forever. Absent, the
       // text is dropped, which is correct for a client with no clipboard to write.
       if (msg.kind === 'copyText') {
-        deps.onCopyText?.(String(msg['text']), (m) => { dispatch('error', m); });
+        // A NOTICE WHERE THE RENDERER TAKES ONE, keeping the selection; an error otherwise.
+        deps.onCopyText?.(String(msg['text']), (m) => {
+          if (copyFailed !== undefined) copyFailed(m);
+          else dispatch('error', m);
+        });
         return;
       }
       // THE PREFETCH ANSWER, 2026-11-02. NOT through `dispatch`, for `copyText`'s reason above. An
@@ -480,6 +512,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     onAtlas: (fn) => { register('atlas', fn as (p: unknown) => void); },
     onFrame: (fn) => { register('frame', fn as (p: unknown) => void); },
     onError: (fn) => { register('error', (p) => { fn(String(p)); }); },
+    onCopyFailed: (fn) => { copyFailed = fn; },
     sendAction: (action) => {
       // `quit` never goes to the server: a browser must not be able to stop the gateway. But the
       // renderer binds Ctrl-] and a dead key is worse than either alternative, so it means

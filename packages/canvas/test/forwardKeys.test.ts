@@ -346,18 +346,21 @@ function fakeCopy(protocol = 'https:', cached: string | undefined = undefined): 
   deps: ForwardCopyDeps;
   readonly fallbacks: number[];
   readonly handled: number[];
+  readonly copied: number[];
   readonly prevented: unknown[];
   readonly types: string[];
   fire: (e: unknown) => void;
 } {
   const fallbacks: number[] = [];
   const handled: number[] = [];
+  const copied: number[] = [];
   const prevented: unknown[] = [];
   const types: string[] = [];
   let handler: ((e: unknown) => void) | undefined;
   return {
     fallbacks,
     handled,
+    copied,
     prevented,
     types,
     fire: (e) => {
@@ -370,6 +373,7 @@ function fakeCopy(protocol = 'https:', cached: string | undefined = undefined): 
       cached: () => cached,
       copySelection: () => { fallbacks.push(fallbacks.length); return true; },
       onHandled: () => { handled.push(handled.length); },
+      onCopied: () => { copied.push(copied.length); },
     },
   };
 }
@@ -402,6 +406,9 @@ describe('forwardCopy, the browser\'s own copy gesture (Cmd-C, Edit > Copy)', ()
     expect(f.prevented).toHaveLength(1);
     expect(f.fallbacks).toEqual([]);
     expect(f.handled).toHaveLength(1);
+    // `onCopied` says the copy SUCCEEDED, which only this path knows -- `renderer.ts` takes a
+    // "copy failed" notice down on it.
+    expect(f.copied).toHaveLength(1);
   });
 
   /*
@@ -419,6 +426,8 @@ describe('forwardCopy, the browser\'s own copy gesture (Cmd-C, Edit > Copy)', ()
     expect(f.prevented).toEqual([]);
     expect(f.fallbacks).toHaveLength(1);
     expect(f.handled).toHaveLength(1);
+    // NOT COPIED YET: the text is still at the gateway, so a notice must stay up.
+    expect(f.copied).toEqual([]);
   });
 
   it('falls back when the event carries no clipboardData', () => {

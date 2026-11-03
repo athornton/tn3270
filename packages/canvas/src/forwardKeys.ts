@@ -342,6 +342,13 @@ export interface ForwardCopyDeps {
    * back itself if not -- a browser that silently ignores `execCommand` still copies.
    */
   readonly onHandled: () => void;
+  /**
+   * Called after the CACHED path set its text and cancelled the event -- the one route on which
+   * this listener knows the copy succeeded. OPTIONAL. 2026-11-03: `renderer.ts` uses it to take
+   * down a "copy failed" notice, so the operator sees the retry worked. Not `onHandled`, which
+   * fires on the fallback too, where nothing has been copied yet.
+   */
+  readonly onCopied?: () => void;
 }
 
 /**
@@ -400,6 +407,7 @@ export function forwardCopy(deps: ForwardCopyDeps): void {
       // what makes the browser write the data just set -- correct here, and only here.
       e.clipboardData.setData('text/plain', text);
       e.preventDefault();
+      deps.onCopied?.();
       return;
     }
     // Nothing cached for this selection, or no `clipboardData` to set it on: the async path. NO

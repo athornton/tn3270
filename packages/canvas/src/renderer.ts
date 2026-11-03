@@ -52,6 +52,8 @@ declare global {
       sendAction(action: unknown): void;
       /** OPTIONAL: the gateway's bridge has it, Electron's preload does not. See bridgecore.ts. */
       fetchSelection?(rect: CellRect): Promise<string>;
+      /** OPTIONAL, the same way: a failed clipboard write, painted as a notice. See bridgecore.ts. */
+      onCopyFailed?(fn: (message: string) => void): void;
     };
   }
 }
@@ -137,6 +139,17 @@ function clearSelection(): void {
  * from -- the same argument `onError` itself is written on.
  */
 let errored = false;
+/**
+ * True while what `errored` covers is only a COPY NOTICE (`onCopyFailed`), not a real error.
+ * 2026-11-03.
+ *
+ * A notice keeps the selection and its cached text -- nothing on the screen changed -- so three
+ * things may lift it that must never lift a real error: a later copy that succeeds repaints the
+ * screen with its highlight, a press on the canvas dismisses it and starts a drag, and a drag's
+ * prefetch is not refused. A real error (`onError`) always sets this false, so a socket-closed
+ * message is never painted over by a copy or a click.
+ */
+let noticeOnly = false;
 
 const tints = new Map<string, ImageBitmap>();
 const building = new Set<string>();
@@ -267,7 +280,7 @@ window.tn3270.onAtlas((message) => {
   blank = new Set(message.blank);
   // This repaint also PAINTS OVER an error message, so the click guard lifts with it -- inside the
   // `if`, because with no frame yet there is nothing to paint and the message stays up.
-  if (last !== undefined) { errored = false; paint(last); }
+  if (last !== undefined) { errored = false; noticeOnly = false; paint(last); }
 });
 
 // A frame means the session is drawing again, so whatever `onError` put up is both gone and stale.
@@ -276,20 +289,22 @@ window.tn3270.onAtlas((message) => {
 // now hold different text. Keeping the highlight across a repaint would offer the operator a copy
 // of text that is no longer there -- and main extracts from the CURRENT snapshot, so the rectangle
 // would silently pick up whatever replaced it.
-window.tn3270.onFrame((list) => { errored = false; clearSelection(); paint(list); });
+window.tn3270.onFrame((list) => { errored = false; noticeOnly = false; clearSelection(); paint(list); });
 
-window.tn3270.onError((message) => {
-  // Failures must be VISIBLE: someone who double-clicked a .app has no console. This is the
-  // one place canvas text is used, deliberately -- an error message is our own chrome, is
-  // never compared against a golden, and must stay readable at any window size.
+/**
+ * Paint `message` in red over the whole canvas. The ONE painter for both `onError` and
+ * `onCopyFailed`, so the two cannot drift in how a message looks.
+ *
+ * Failures must be VISIBLE: someone who double-clicked a .app has no console. This is the
+ * one place canvas text is used, deliberately -- an error message is our own chrome, is
+ * never compared against a golden, and must stay readable at any window size.
+ *
+ * Sets `errored`, so stray clicks cannot act on a screen the operator cannot see; the caller
+ * decides `noticeOnly` and the selection.
+ */
+function paintMessage(message: string): void {
   if (canvas === null || real === null) return;
   errored = true;
-  // THE SELECTION DIES WITH THE SCREEN IT DESCRIBED, and its prefetched text with it. The message
-  // paints over the whole canvas, so the highlight is no longer visible -- yet without this, Cmd-C
-  // or the chord after a socket close or a "copy failed" message would copy cached text from a
-  // screen the operator can no longer see. Nothing needs the selection to survive: the mousedown
-  // guard refuses new drags while `errored`, and the next frame would clear it anyway.
-  clearSelection();
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   real.fillStyle = '#000';
@@ -301,6 +316,46 @@ window.tn3270.onError((message) => {
     real.fillText(line, 20, y);
     y += 21;
   }
+}
+
+window.tn3270.onError((message) => {
+  // A REAL ERROR: the screen the operator was looking at is gone or failing.
+  noticeOnly = false;
+  // THE SELECTION DIES WITH THE SCREEN IT DESCRIBED, and its prefetched text with it (`941949d`).
+  // The message paints over the whole canvas, so the highlight is no longer visible -- yet without
+  // this, Cmd-C or the chord after a socket close would copy cached text from a screen the
+  // operator can no longer see. Nothing needs the selection to survive: the mousedown guard
+  // refuses new drags while a real error is up, and the next frame would clear it anyway.
+  //
+  // THIS RUNS IN THE ELECTRON GUI TOO, which registers `onError` through `preload.cts` and paints
+  // its own failures here; there it clears a selection that `__tn3270Copy` (the Edit menu) could
+  // otherwise still read. UNCHANGED for real errors by 2026-11-03's fix, which moved only the
+  // web gateway's "copy failed" reports off this path, onto `onCopyFailed` below.
+  clearSelection();
+  paintMessage(message);
+});
+
+/*
+  A FAILED COPY IS A NOTICE, NOT A SCREEN FAILURE, 2026-11-03. Only the web gateway's bridge has
+  this (`bridgecore.ts`'s `onCopyFailed`); Electron copies through IPC and never reports this way.
+
+  IT KEEPS THE SELECTION AND ITS CACHED TEXT, and that is the fix. A copy pressed before the
+  prefetch answered takes the async fallback, which on a plain-`http` LAN page has no clipboard
+  API -- and Firefox's Edit > Copy made then is refused with `NotAllowedError` the same way. The
+  remedy is to press copy again once the prefetch has landed, when the cached path needs no secure
+  context. Through `onError` the second press found `clearSelection()` had run: no selection, no
+  text, nothing copied, and a re-drag refused while `errored`.
+
+  WHAT STILL INVALIDATES THE SELECTION is everything that really changes the screen, none of
+  which is touched here: every frame (`onFrame`), every claimed key, a paste, a new press.
+*/
+window.tn3270.onCopyFailed?.((message) => {
+  // AN ERROR ALREADY UP STAYS THE STORY: a copy notice must not downgrade a socket-closed message
+  // into something a click dismisses. Unreachable today (a closed socket answers no copy), kept so
+  // the invariant does not rest on that.
+  if (errored && !noticeOnly) return;
+  noticeOnly = true;
+  paintMessage(message);
 });
 
 window.addEventListener('keydown', (e) => {
@@ -416,7 +471,27 @@ forwardCopy({
   cached: cachedSelection,
   copySelection,
   onHandled: () => { copyHandled = true; },
+  onCopied: copiedFromCache,
 });
+
+/**
+ * A copy just succeeded from the cache. If only a copy NOTICE is up, take it down and repaint the
+ * screen -- the selection is still set, so its highlight draws -- so the operator can SEE that this
+ * press worked where the last one failed. 2026-11-03. A real error is never painted over.
+ *
+ * CALLED INSIDE THE `copy` EVENT, after `setData` and `preventDefault`, and painting there is safe:
+ * `paint` is plain synchronous canvas drawing that touches neither the event nor the selection
+ * nor the cache, so the clipboard write the browser performs after the handler returns is
+ * unaffected by it. Synchronous enough, too: the canvas commits at the next rendering
+ * opportunity like any other paint. A glyph whose tint is not built yet is repainted by
+ * `tintOf`'s own callback, but every tint was built when the screen was first drawn.
+ */
+function copiedFromCache(): void {
+  if (!errored || !noticeOnly || last === undefined) return;
+  errored = false;
+  noticeOnly = false;
+  paint(last);
+}
 
 /**
  * A click on a keypad button.
@@ -502,7 +577,11 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   // Read the module state ONCE: everything below must agree about which frame was clicked.
   const list = last;
-  if (errored || list === undefined) return;
+  // A COPY NOTICE DOES NOT BLOCK A PRESS, A REAL ERROR DOES: the notice changed nothing on the
+  // screen, so a press on it dismisses it and starts a drag as normal (`paint(list)` below, or the
+  // returns, which leave the notice up only for a press off the screen region); a real error
+  // still refuses, so the click cannot act on a session that is failing or gone.
+  if ((errored && !noticeOnly) || list === undefined) return;
   // A SELECTION DRAG STARTS WHEN THE PRESS IS ON THE SCREEN. The keypad gets first refusal below,
   // so a press on a button is a button press and not the start of a selection -- and this cannot
   // be a separate listener for exactly that reason: two listeners would both act on one press.
@@ -519,6 +598,8 @@ canvas.addEventListener('mousedown', (e) => {
   anchor = cell;
   focus = cell;
   dragging = true;
+  errored = false;
+  noticeOnly = false;
   paint(list);
 });
 
@@ -559,8 +640,10 @@ function release(): void {
  */
 function prefetchSelection(): void {
   const fetchSelection = window.tn3270.fetchSelection;
-  // NOT WHILE AN ERROR IS UP: `onError` cleared the selection, and nothing on screen to copy.
-  if (errored || fetchSelection === undefined || anchor === null || focus === null) return;
+  // NOT WHILE A REAL ERROR IS UP: `onError` cleared the selection, and nothing on screen to copy.
+  // A copy NOTICE does not block it -- it keeps the selection, and the mousedown that began this
+  // drag has already dismissed it.
+  if ((errored && !noticeOnly) || fetchSelection === undefined || anchor === null || focus === null) return;
   const rect = normalizeRect(anchor, focus);
   if (isEmptyRect(rect)) return;
   const gen = copyCache.begin(rect);
