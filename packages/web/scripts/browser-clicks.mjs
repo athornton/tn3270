@@ -332,6 +332,14 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
   the flag again and the injected progress line would land on a form that had already gone idle.
   Holding the start message leaves the form armed with no host involved -- which is honest for a
   check whose frames are injected anyway.
+
+  AND A SECOND, `holdSelection`, 2026-11-03, FOR `webCopyFallback` ONLY: it drops the page's
+  outgoing `{kind:'selection'}` prefetch, so the gateway never answers it and the renderer's copy
+  cache stays EMPTY. That is the only way to reach the async `copy` -> `copyText` ->
+  `writeClipboard` path in the real product without editing it, because every drag that ends on a
+  rectangle prefetches. The held request's promise simply never settles; the next drag's
+  `fetchSelection` supersedes it, which is the product's own rule. Cleared straight after the one
+  copy that needs it.
 */
 
 /**
@@ -450,10 +458,21 @@ const TRANSFER_CHECKS = [
     name: 'webCopy',
     kind: 'live',
     what: "a real Ctrl+Shift+C over a real drag-select puts the screen's own text on the REAL OS "
-      + 'clipboard, TWICE over two different sentinels, so the selection is proved to survive',
-    mutant: 'bridge.ts  onCopyText: () => {}  (2603 unit tests stay GREEN)  OR  '
-      + 'main.ts  delete the `copy` arm, which also ENDS THE GATEWAY PROCESS on applyAction\'s '
-      + 'throw.  AND, SINCE 2026-10-27, THE GESTURE ITSELF: keys.ts  move the `requestCopy` '
+      + 'clipboard FROM THE PREFETCH (the gateway logs selection: at drag end, and no copy frame '
+      + 'is sent), TWICE over two different sentinels, so the selection is proved to survive',
+    mutant: 'SINCE 2026-11-03, THE CACHED PATH, EACH MEASURED: renderer.ts  delete '
+      + '`if (ended) prefetchSelection();` in the mouseup listener (13/15: this and webNativeCopy '
+      + 'fail, the copy itself WORKS by the fallback)  OR  renderer.ts  copyByChord without its '
+      + 'execCommand line (14/15, the fallback clause only)  OR  forwardKeys.ts  forwardCopy\'s '
+      + 'cached branch without `e.preventDefault()` (12/15: the default copy of an empty DOM '
+      + 'selection wins, the clipboard keeps the sentinel, and webNativeCopy and webPaste fail '
+      + 'too)  OR  renderer.ts  the requestCopy arm as `copyByChord(); clearSelection();` (14/15, '
+      + 'the survival clause only).  bridge.ts  onCopyText: () => {} MOVED TO webCopyFallback: '
+      + 'the cached path never reaches it, and this check stays GREEN on it (measured).  '
+      + 'NOT CAUGHT, MEASURED 15/15: renderer.ts  clearSelection() without '
+      + '`copyCache.invalidate()` -- the replay screen never changes between drags, so a stale '
+      + 'cache holds the right text; copyCache.test.ts is its cover.  '
+      + 'AND, SINCE 2026-10-27, THE GESTURE ITSELF: keys.ts  move the `requestCopy` '
       + 'branch BELOW the case-folded `CTRL[e.key.toLowerCase()]` lookup -- the chord then folds '
       + 'to Clear and the clipboard keeps the sentinel; renderer.ts  move the '
       + '`action.kind === \'requestCopy\'` arm BELOW `clearSelection()` -- the rect is destroyed a '
@@ -462,6 +481,36 @@ const TRANSFER_CHECKS = [
       + 'green across the WHOLE REPO before this check drove the chord, since select.mjs calls '
       + '__tn3270Copy directly and never runs the arm.  NOT caught here: '
       + 'selection.ts  `cell.hidden ? \' \' : cell.text` -> `cell.text` -- see the note above',
+  },
+  /*
+    THE ASYNC FALLBACK, 2026-11-03, WHICH THE PREFETCH OTHERWISE HIDES FROM EVERY CHECK HERE.
+
+    Before the prefetch, `webCopy` drove `copySelection` -> `{kind:'copy'}` -> `copyText` ->
+    `writeClipboard` on every run. After it, a correct run reaches none of that: both of `webCopy`'s
+    presses and `webNativeCopy`'s event are served from the cache. So `bridge.ts`'s
+    `onCopyText: () => {}` -- the mutant `webCopy` was written for -- would leave the whole file
+    green while every copy with an empty cache (a press before the prefetch lands, a failed
+    prefetch, an all-blank one-row rect) silently did nothing. This holds the page's `selection`
+    frame (`PROBE_SOURCE`'s `holdSelection`) so the cache stays empty, and copies.
+
+    LIVE, NOT INJECTED: the hold drops an outbound frame and feeds nothing in, so every byte the
+    check passes on comes from the real gateway and the real clipboard.
+
+    RUNS BETWEEN webCopy AND webNativeCopy, and the position is load-bearing: webNativeCopy ends
+    with a Ctrl+C that sends Clear and blanks the screen, after which this row-0 copy would extract
+    '' and the gateway would answer with nothing.
+  */
+  {
+    name: 'webCopyFallback',
+    kind: 'live',
+    what: 'with the prefetch HELD so the cache is empty, Ctrl+Shift+C still copies by the async '
+      + 'path: a {kind:copy} frame, the gateway\'s copy: line, and the text on the REAL clipboard',
+    mutant: 'bridge.ts  onCopyText: () => {}  (14/15, this check only: the clipboard clause)  '
+      + 'OR  renderer.ts  copyByChord without its trailing copySelection() (14/15, this check '
+      + 'only: no copy frame).  NOT CAUGHT, MEASURED 15/15: renderer.ts  copySelection() with a '
+      + 'clearSelection() after its send -- the survival-across-two-copies rule webCopy used to '
+      + 'prove for this function. This check copies ONCE; webCopy\'s two presses are both cached '
+      + 'and never call it. Nothing in the repo covers that rule on the fallback path now',
   },
   /*
     THE BROWSER'S OWN COPY GESTURE, 2026-11-02 -- `forwardCopy`, the `copy` event listener.
@@ -478,10 +527,14 @@ const TRANSFER_CHECKS = [
     name: 'webNativeCopy',
     kind: 'injected',
     what: "the browser's copy command (Cmd-C on macOS) copies the canvas selection to the REAL OS "
-      + 'clipboard through the gateway, and a plain Ctrl+C raises no copy event and is sent as Clear',
+      + 'clipboard from the PREFETCH, sending no copy frame, and a plain Ctrl+C raises no copy event '
+      + 'and is sent as Clear',
     mutant: 'renderer.ts  drop the `forwardCopy({...})` call (the clipboard keeps the sentinel).  '
-      + 'NOT caught here: forwardKeys.ts  preventDefault inside the copy listener -- MEASURED '
-      + '14/14, because Chromium does not blank the clipboard on a cancelled empty copy. '
+      + 'SINCE 2026-11-03: renderer.ts  delete `if (ended) prefetchSelection();` (the async-'
+      + 'fallback clause; measured)  AND  forwardKeys.ts  forwardCopy\'s CACHED branch without '
+      + '`e.preventDefault()` (measured: the clipboard keeps the sentinel).  NOT caught here: a '
+      + 'preventDefault on forwardCopy\'s FALLBACK branch -- MEASURED 14/14 before the prefetch, '
+      + 'because Chromium does not blank the clipboard on a cancelled empty copy. '
       + 'forwardKeys.test.ts is that rule\'s only cover',
   },
   {
@@ -495,7 +548,10 @@ const TRANSFER_CHECKS = [
       + "delete `if (text === '') return;` -- the empty clipboard then raises "
       + '{"kind":"paste","text":""}.  COLLATERAL, NOT PROOF -- IF THIS FAILS ALONGSIDE webCopy, '
       + 'SUSPECT ONE COPY-SIDE DEFECT AND NOT TWO: this check\'s screen witness reads the buffer '
-      + 'back BY COPYING IT, so it fails on bridge.ts onCopyText: () => {} and (since 2026-10-27, '
+      + 'back BY COPYING IT -- on the PREFETCHED path since 2026-11-03, measured, after a retry '
+      + 'for the paste\'s repaint -- so it now fails on forwardCopy\'s cached preventDefault '
+      + 'deleted (measured) and NO LONGER on bridge.ts onCopyText: () => {} (measured green), '
+      + 'which it did before; and (since 2026-10-27, '
       + 'when it started reading back through the real chord) on BOTH copy-GESTURE mutations too '
       + '-- keys.ts\'s branch moved below the CTRL lookup and renderer.ts\'s arm moved below '
       + 'clearSelection(). In every one of those runs the paste itself WORKED and the gateway '
@@ -614,8 +670,8 @@ async function openCdp(port) {
  *
  * NOT A STUB AND NOT A FAKE SOCKET. `bridgecore.test.ts` injects a fake one and that is right for
  * a unit test; the whole value of THIS harness is that everything is real, so this keeps the real
- * constructor and wraps only `send`. The `hold` flag is the single exception and the comment block
- * above says exactly when it is set and why.
+ * constructor and wraps only `send`. The `hold` and `holdSelection` flags are the only exceptions,
+ * and the comment block above says exactly when each is set and why.
  *
  * `feed` IS NOT A PRODUCTION HOOK: it calls the page's own `onmessage` with an `ArrayBuffer`,
  * which is precisely what Chromium hands that handler for a binary frame (`bridge.ts` sets
@@ -625,7 +681,7 @@ async function openCdp(port) {
  */
 const PROBE_SOURCE = `
 (() => {
-  const H = { sent: [], hold: false, sock: null, warns: [], keys: [] };
+  const H = { sent: [], hold: false, holdSelection: false, sock: null, warns: [], keys: [] };
   window.__tn3270Probe = H;
   /*
     EVERY KEYDOWN AS IT ARRIVES, WHICH IS A DIAGNOSTIC AND DELIBERATELY NOT AN ASSERTION TARGET.
@@ -672,6 +728,7 @@ const PROBE_SOURCE = `
       const text = typeof data === 'string' ? data : '<binary>';
       H.sent.push(text);
       if (H.hold && text.includes('"transferStart"')) return;
+      if (H.holdSelection && text.includes('"kind":"selection"')) return;
       realSend(data);
     };
     return s;
@@ -2307,16 +2364,25 @@ async function runTransferPhase(url) {
        * so it cannot re-drag. A helper that dragged again would prove a new selection works and
        * say nothing about whether the old one lived.
        *
-       * `copied` IS THE PAGE'S OWN `copy` FRAME AND NOT A RETURN VALUE, which is forced rather
-       * than chosen: a keystroke returns nothing. `renderer.ts`'s arm DISCARDS `copySelection()`'s
-       * boolean deliberately (a keystroke has nobody to tell), so the observable that replaces it
-       * is the socket send `copySelection()` makes -- which is exactly the same condition the old
-       * boolean reported, since the function returns false precisely when it sends nothing. Read
-       * off the probe's `sent` log, which is the product's own `send` call and not something this
-       * harness manufactured.
+       * `copied` IS THE CLIPBOARD LEAVING THE SENTINEL, BY EITHER PATH, AND NOT A RETURN VALUE,
+       * which is forced rather than chosen: a keystroke returns nothing, and `copyByChord` returns
+       * nothing deliberately (a keystroke has nobody to tell). UNTIL 2026-11-03 IT WAS THE PAGE'S
+       * OWN `copy` FRAME, read off the probe's `sent` log -- the socket send `copySelection()`
+       * makes. That stopped being a signal of anything when the prefetch landed: with the text
+       * cached, `copyByChord` raises the browser's `copy` event with `execCommand('copy')`,
+       * `forwardCopy` sets the cached text, and NO FRAME IS SENT AT ALL. A frame-based `copied` then
+       * read false on every correct cached copy, and `copyCells` retried a working copy four times.
        *
-       * IT IS STILL NOT THE WITNESS THE CHECK PASSES ON. The gateway's log line and the real
-       * clipboard are, below; this one decides whether the documented repaint race needs a retry.
+       * SO THE SIGNAL IS MEASURED ON THE PRODUCT'S EFFECT, NOT ON ONE PATH'S WIRE TRAFFIC, and it is
+       * still exactly as narrow as the retry needs: a repaint that cleared the selection under the
+       * drag leaves the cache empty AND `anchor` null, so neither path writes and the clipboard
+       * keeps the sentinel. `viaFallback` -- a `copy` frame WAS sent -- is returned beside it, so a
+       * check can say WHICH path ran; `webCopy` requires the cached one, `webCopyFallback` the other.
+       *
+       * IT IS STILL NOT THE WITNESS THE CHECK PASSES ON. The gateway's log line and the exact
+       * clipboard text are, below; this one decides whether the documented repaint race needs a
+       * retry. A `REJECTED ...` read counts as copied, deliberately: a refused read is not the
+       * race, and retrying would sleep over it rather than report it.
        */
       const chordCopy = async (sentinel) => {
         const written = await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(sentinel)})
@@ -2326,35 +2392,67 @@ async function runTransferPhase(url) {
         // THE CHORD. `KeyC` is the field the branch matches on; see `press`'s own note for why a
         // missing `code` would deliver an event that cannot fire it.
         await press('C', 'KeyC', 67, CDP_CTRL | CDP_SHIFT);
-        // Bounded, and it exits as soon as the frame appears: the keystroke, the keymap, the arm
-        // and `sendAction` are all synchronous, but the probe is read over CDP.
+        // ONE BOUNDED LOOP FOR BOTH PATHS, exiting as soon as the sentinel is gone. The cached path
+        // writes inside the keystroke, so it exits on the first read; the fallback is a round trip
+        // to the gateway and back through a promise, which is what the 6 s bound is for. The frames
+        // are re-read on every pass so the last read is the one returned.
         let frames = [];
-        for (let waited = 0; waited < 3000; waited += 100) {
+        let clip = sentinel;
+        for (let waited = 0; waited < 6000; waited += 150) {
           frames = JSON.parse(await cdp.eval(
             `JSON.stringify(window.__tn3270Probe.sent.slice(${sentBefore}))`));
-          if (frames.some((f) => f.includes('"kind":"copy"'))) break;
-          await new Promise((r) => { setTimeout(r, 100); });
+          clip = await cdp.eval(
+            "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
+          if (clip !== sentinel) break;
+          await new Promise((r) => { setTimeout(r, 150); });
         }
         // WHAT THE PAGE ACTUALLY RECEIVED, for the diagnosis `PROBE_SOURCE`'s note explains: it
         // separates "the chord did not fire" from "the harness sent the wrong event".
         const keys = JSON.parse(await cdp.eval(
           `JSON.stringify(window.__tn3270Probe.keys.slice(${keysBefore}))`));
-        const copied = frames.some((f) => f.includes('"kind":"copy"'));
-        if (!copied) return { written, copied, clip: sentinel, frames, keys };
-        // The write is a round trip to the gateway and back through a promise, so it is waited
-        // for rather than slept past: bounded, and it exits as soon as the sentinel is gone.
-        let clip = sentinel;
-        for (let waited = 0; waited < 6000 && clip === sentinel; waited += 150) {
-          await new Promise((r) => { setTimeout(r, 150); });
-          clip = await cdp.eval(
-            "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
+        // WHICH PATH RAN: a `copy` frame is `copySelection()`'s send, which only the fallback makes.
+        const viaFallback = frames.some((f) => f.includes('"kind":"copy"'));
+        // COPIED means the clipboard left the sentinel, by EITHER path. A frame that cleared the
+        // selection under the drag leaves it untouched and sends nothing, which is what the retry
+        // in `copyCells` is for -- the same narrow signal as before, measured on the product's
+        // effect rather than on one path's wire traffic.
+        const copied = clip !== sentinel;
+        return { written, copied, clip, frames, keys, viaFallback };
+      };
+
+      /** Every `action:` line the gateway has logged since a mark, and the `copy:` lines too. */
+      const logsSince = (mark) => serverOut.slice(mark).split('\n').filter((l) => l !== '');
+      /**
+       * Wait for a line the gateway should have printed, bounded.
+       *
+       * `serverOut` is filled by a `'data'` handler on a pipe from ANOTHER PROCESS, so a read
+       * taken the instant after an action is sent can legitimately see nothing -- the flake the
+       * keyboard phase documents and waits out for the same reason.
+       *
+       * DECLARED ABOVE `copyOnce`, WHICH CALLS IT, since 2026-11-03. Both are `const` arrows and so
+       * in their TDZ until this line runs; `copyOnce` is only CALLED below both, so the old order
+       * worked, but only by the call site's position. Now nothing depends on it.
+       */
+      const waitForLog = async (mark, matches, ms = 6000) => {
+        for (let waited = 0; waited < ms; waited += 100) {
+          if (logsSince(mark).some(matches)) break;
+          await new Promise((r) => { setTimeout(r, 100); });
         }
-        return { written, copied, clip, frames, keys };
+        return logsSince(mark);
       };
 
       const copyOnce = async (sentinel, fromRow, fromCol, toRow, toCol) => {
+        const mark = serverOut.length;
         const dragged = await dragCells(fromRow, fromCol, toRow, toCol);
         if (dragged !== '') return { problem: dragged };
+        // THE PREFETCH MUST LAND FIRST, or the chord takes the fallback and the cached path is not
+        // what got measured. `dragCells`' 250 ms after the release guarantees nothing about the
+        // `selectionText` round trip. Bounded, and a timeout is not a failure: with the prefetch
+        // HELD (webCopyFallback) the line never comes, which is that check's whole setup.
+        await waitForLog(mark, (l) => l.startsWith('selection: '), 2000);
+        // AND ITS ANSWER MUST BE IN THE PAGE: the log line is written just after the answer is sent,
+        // so it can precede the page's decode by one inflate. One short beat covers it.
+        await new Promise((r) => { setTimeout(r, 100); });
         return { problem: '', ...(await chordCopy(sentinel)) };
       };
       /**
@@ -2377,10 +2475,16 @@ async function runTransferPhase(url) {
        * that reads `anchor`. Re-measured through the chord on 2026-10-27 -- still 2 attempts for
        * the post-paste drag, still 1 for the plain one.)
        *
-       * RETRIED ONLY ON `copied === false` -- i.e. on NO `copy` FRAME HAVING BEEN SENT, which is
-       * the narrow signal for this one cause -- so an empty or wrong clipboard is NOT retried and
-       * a genuinely broken copy still fails rather than being slept over. The attempt count is
-       * reported either way.
+       * RETRIED ONLY ON `copied === false` -- i.e. on THE CLIPBOARD STILL HOLDING THE SENTINEL,
+       * which is the narrow signal for this one cause: a cleared selection writes nothing by
+       * either path -- so a wrong clipboard is NOT retried and a genuinely broken copy still fails
+       * rather than being slept over. The attempt count is reported either way. (UNTIL 2026-11-03
+       * the signal was "no `copy` FRAME was sent"; the prefetched path sends none on success, so
+       * that signal would have retried every correct cached copy. `chordCopy` says why.)
+       *
+       * A BROKEN COPY THAT WRITES NOTHING IS NOW RETRIED, which the frame signal did not do -- a
+       * cost of the change, stated: four attempts of ~6 s each before it fails. It still FAILS,
+       * since no attempt can make a broken path write; it just fails slower.
        *
        * EACH ATTEMPT GETS A FRESH SENTINEL, and it has to: a retry that reused the last one would
        * be unable to tell a successful write from a clipboard nobody touched -- the same reason the
@@ -2422,22 +2526,6 @@ async function runTransferPhase(url) {
         return last;
       };
 
-      /** Every `action:` line the gateway has logged since a mark, and the `copy:` lines too. */
-      const logsSince = (mark) => serverOut.slice(mark).split('\n').filter((l) => l !== '');
-      /**
-       * Wait for a line the gateway should have printed, bounded.
-       *
-       * `serverOut` is filled by a `'data'` handler on a pipe from ANOTHER PROCESS, so a read
-       * taken the instant after an action is sent can legitimately see nothing -- the flake the
-       * keyboard phase documents and waits out for the same reason.
-       */
-      const waitForLog = async (mark, matches, ms = 6000) => {
-        for (let waited = 0; waited < ms; waited += 100) {
-          if (logsSince(mark).some(matches)) break;
-          await new Promise((r) => { setTimeout(r, 100); });
-        }
-        return logsSince(mark);
-      };
 
       // ===== webCopy ===========================================================================
       //
@@ -2457,14 +2545,15 @@ async function runTransferPhase(url) {
       const copyMark = serverOut.length;
       const copyRun = await copyCells(0, 0, 1, 11);
       const copyLogs = copyRun.problem === ''
-        ? await waitForLog(copyMark, (l) => l.startsWith('copy: '))
+        ? await waitForLog(copyMark, (l) => l.startsWith('selection: '))
         : [];
-      // BOTH GATEWAY LINES, and they say different things. The `action:` line is the frame as
-      // `decodeClientMessage` understood it -- the rect, which is the browser's half. The `copy:`
-      // line is the gateway's own account of what `extractText` produced from its OWN screen, and
-      // it is UNGATED in production precisely because it carries a COUNT and never the text.
-      const copyAction = copyLogs.find((l) => l.startsWith('action: {"kind":"copy"'));
-      const copyChars = copyLogs.find((l) => l.startsWith('copy: '));
+      // THE GATEWAY'S WITNESS IS NOW THE PREFETCH LINE, logged at DRAG END, 2026-11-03. It is the
+      // gateway's own account of what `extractText` produced from its OWN screen for the rect the
+      // drag asked about, and UNGATED in production because it carries a COUNT and never the text.
+      // The `action: {"kind":"copy"...}` and `copy:` lines this used to require are GONE on a
+      // correct run: the cached copy never reaches the gateway, which is the feature. Those lines
+      // are `webCopyFallback`'s witnesses now.
+      const copyChars = copyLogs.find((l) => l.startsWith('selection: '));
       /*
         ===== AND THE SELECTION SURVIVED, PROVED BY COPYING A SECOND TIME WITHOUT RE-DRAGGING =====
 
@@ -2503,12 +2592,12 @@ async function runTransferPhase(url) {
         selection and prove only that a second copy works, which is not the question.
 
         NOT RETRIED, unlike the first copy. The repaint race `copyCells` documents would make a
-        retry here ambiguous -- "no frame sent" would mean either a cleared-by-us selection (the
+        retry here ambiguous -- "nothing written" would mean either a cleared-by-us selection (the
         defect) or a cleared-by-a-host-frame one (the race), and a retry cannot tell them apart
         because a retry CANNOT re-drag. The first copy's own retry loop is what absorbs the race:
         this runs immediately after a copy that just succeeded, with no `repaint()` provoked in
-        between (`main.ts`'s `copy` arm sends a `copyText` message and returns; it does not
-        repaint), so a frame in that window would have to be unsolicited -- which a REPLAY session
+        between (the cached copy never reaches the gateway at all, and neither `main.ts`'s
+        `selection` nor its `copy` arm repaints), so a frame in that window would have to be unsolicited -- which a REPLAY session
         never sends, having no host. If this ever flakes on a live fixture, the fix is to assert the
         pair atomically, not to retry.
       */
@@ -2530,10 +2619,10 @@ async function runTransferPhase(url) {
         : {
           copied: false, written: '', clip: '(the first copy never happened)', frames: [], keys: [],
         };
-      const againLogs = copyRun.copied === true
-        ? await waitForLog(againMark, (l) => l.startsWith('copy: '))
-        : [];
-      const againChars = againLogs.find((l) => l.startsWith('copy: '));
+      // NO GATEWAY LINE IS WAITED FOR: the second press is cached too, so it sends nothing and the
+      // gateway logs nothing. What it DID log is still read, for the failure message -- a `copy:`
+      // line here means the second press took the fallback, which a clause below names.
+      const againLogs = logsSince(againMark);
       /*
         AND THE SENTINEL WRITE ITSELF IS ASSERTED, which was a gap in the first draft of this check.
 
@@ -2554,10 +2643,12 @@ async function runTransferPhase(url) {
         split, the same control reports the harness's fault first. Control reverted.
       */
       const secondSentinelLanded = copyAgain.written === '';
+      // `againChars` -- the gateway's `copy:` line for the second press -- WAS A TERM HERE UNTIL
+      // 2026-11-03 and is deleted: the cached second press logs nothing. `copyAgain.clip` over a
+      // fresh sentinel is the witness, which it always was; the line only corroborated it.
       const survived = copyAgain.copied === true
         && secondSentinelLanded
-        && copyAgain.clip === COPY_WANT
-        && againChars === `copy: sent ${COPY_WANT.length} chars to the browser`;
+        && copyAgain.clip === COPY_WANT;
       // AND `writeClipboard` MUST HAVE WARNED ABOUT NOTHING. Its two failure routes -- no API, and
       // a browser that refused -- are reported only through the injected `warn`, which `bridge.ts`
       // wires to `console.warn`. A clipboard holding the right text while that function complained
@@ -2587,11 +2678,14 @@ async function runTransferPhase(url) {
           : 'the HARNESS could not even put its sentinel on the clipboard, so nothing below '
             + `discriminates anything: ${String(copyRun.written)}`,
         copyRun.copied === true ? ''
-          : 'the CHORD raised no copy frame at all -- either keys.ts does not claim '
+          : 'the CHORD copied nothing at all, by either path -- either keys.ts does not claim '
             + 'Ctrl-Shift-C (check it precedes the case-folded CTRL lookup) or renderer.ts does '
             + 'not intercept requestCopy before clearSelection()',
-        copyAction !== undefined && copyChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? ''
-          : 'the gateway did not log the copy it should have',
+        copyChars === `selection: sent ${COPY_WANT.length} chars to the browser` ? ''
+          : 'the gateway did not log the selection prefetch for the drag',
+        copyRun.viaFallback !== true && copyAgain.viaFallback !== true ? ''
+          : 'a copy took the ASYNC FALLBACK, so the prefetched text was not used -- check '
+            + 'renderer.ts prefetchSelection and copyByChord',
         copyRun.clip === COPY_WANT ? '' : 'the clipboard does NOT hold the selected text',
         // THE HARNESS'S OWN FAULT FIRST, AND NAMED AS SUCH -- MEASURED, not foreseen. A control run
         // that made the SECOND sentinel write fail reported only `the SELECTION DID NOT SURVIVE`,
@@ -2611,24 +2705,25 @@ async function runTransferPhase(url) {
         ok(check('webCopy'),
           'a REAL Ctrl+Shift+C (nothing synthesized, no page global called) over a real drag of '
           + `cells (0,0)-(1,11) put ${JSON.stringify(copyRun.clip)} on the REAL OS clipboard, over `
-          + `${JSON.stringify(copyRun.sentinel)}; the gateway logged ${JSON.stringify(copyAction)} `
-          + `and ${JSON.stringify(copyChars)}. THE SELECTION SURVIVED: a second Ctrl+Shift+C with `
-          + `NO new drag, over ${JSON.stringify(`${SENTINEL}-second`)}, copied the same text again `
-          + `and the gateway logged ${JSON.stringify(againChars)}. isSecureContext=${secure}, `
+          + `${JSON.stringify(copyRun.sentinel)} FROM THE PREFETCH, with no copy frame sent; the `
+          + `gateway logged ${JSON.stringify(copyChars)} at drag end. THE SELECTION SURVIVED: a `
+          + `second Ctrl+Shift+C with NO new drag, over ${JSON.stringify(`${SENTINEL}-second`)}, `
+          + `copied the same text again, cached too. isSecureContext=${secure}, `
           + `navigator.clipboard=${clipApi}, writeClipboard warned about nothing `
           + `(${copyRun.attempts} drag attempt(s))`);
       } else {
         no(check('webCopy'), `the browser's copy path is broken: ${copyWhy.join('; ')}`,
           dragFailed ? `${copyRun.problem}; ${extent}`
             : `after ${copyRun.attempts} attempt(s) the chord sent `
-              + `${JSON.stringify(copyRun.frames)} (want a {"kind":"copy"...} frame) and the page's `
+              + `${JSON.stringify(copyRun.frames)} (want NO {"kind":"copy"...} frame: that is the `
+              + `fallback) and the page's `
               + `keydown listener saw ${JSON.stringify(copyRun.keys)} (want one event with `
               + 'code:"KeyC", shiftKey:true and exactly one of ctrlKey/metaKey -- anything else '
               + 'here is a HARNESS fault, not the product\'s); the clipboard reads '
               + `${JSON.stringify(copyRun.clip)} (want ${JSON.stringify(COPY_WANT)}; `
               + `${JSON.stringify(copyRun.sentinel)} means it was never written), the gateway `
-              + `logged ${JSON.stringify(copyLogs)} (want an action: {"kind":"copy"...} line and `
-              + `"copy: sent ${COPY_WANT.length} chars to the browser"). THE SECOND COPY sent `
+              + `logged ${JSON.stringify(copyLogs)} (want "selection: sent ${COPY_WANT.length} `
+              + 'chars to the browser" and no copy: line). THE SECOND COPY sent '
               + `${JSON.stringify(copyAgain.frames)}, left the clipboard reading `
               + `${JSON.stringify(copyAgain.clip)} and the gateway logged `
               + `${JSON.stringify(againLogs)}. isSecureContext=${secure}, `
@@ -2636,12 +2731,81 @@ async function runTransferPhase(url) {
               + `${await clipWarns()}; ${extent}`);
       }
 
+      // ===== webCopyFallback ==================================================================
+      //
+      // THE ASYNC PATH, WHICH THE CACHED ONE NOW HIDES. Every copy above was served from the
+      // prefetch, so `copySelection` -> `copy` -> `copyText` -> `writeClipboard` ran nowhere. This
+      // holds the page's `selection` frame so the cache stays empty, then copies a DIFFERENT
+      // rectangle (row 0 only) so nothing cached from webCopy could answer for it.
+      //
+      // HERE, BEFORE webNativeCopy, AND NOT BEFORE webPaste: webNativeCopy's Ctrl+C negative sends
+      // Clear, which blanks the screen, and this row-0 copy would then extract ''. The cost runs
+      // the other way -- this REPLACES webCopy's selection -- so webNativeCopy re-drags.
+      await cdp.eval('window.__tn3270Probe.holdSelection = true;');
+      const fbMark = serverOut.length;
+      const fbRun = await copyCells(0, 0, 0, 11);
+      await cdp.eval('window.__tn3270Probe.holdSelection = false;');
+      const fbLogs = fbRun.problem === ''
+        ? await waitForLog(fbMark, (l) => l.startsWith('copy: '))
+        : [];
+      // ROW 0 OF COPY_WANT, which is the fixture's own text: cells (0,0)-(0,11) are " MENU" and
+      // seven blanks, and `extractText` trims trailing blanks per line.
+      const FB_WANT = ' MENU';
+      // THE HOLD IS ONLY A SETUP IF IT HELD, so its own clause comes first: a `selection:` line in
+      // this window means the cache may have been filled after all, and every clause after it would
+      // be measuring the wrong path. `frames` still records the held frame, since the probe logs a
+      // send before deciding to drop it -- so the gateway's log is the witness, not the probe's.
+      const fbLeaked = logsSince(fbMark).some((l) => l.startsWith('selection: '));
+      const fbWhy = fbRun.problem !== '' ? [fbRun.problem] : [
+        fbLeaked ? 'the HELD prefetch reached the gateway anyway, so the cache may not have been '
+          + 'empty and this proves nothing -- a HARNESS fault: check PROBE_SOURCE\'s holdSelection' : '',
+        fbRun.written === '' ? ''
+          : `the HARNESS could not put its sentinel on the clipboard: ${String(fbRun.written)}`,
+        fbRun.viaFallback === true ? ''
+          : 'no {kind:copy} frame was sent, so the fallback did not run -- check renderer.ts '
+            + 'copyByChord still ends in copySelection()',
+        fbLogs.some((l) => l === `copy: sent ${FB_WANT.length} chars to the browser`) ? ''
+          : 'the gateway did not log the fallback copy',
+        // THE REMEDY ONLY WHEN IT FOLLOWS: measured on `copyByChord` without its fallback, an
+        // unconditional "with a copy frame sent" here contradicted the clause two lines up.
+        fbRun.clip === FB_WANT ? '' : 'the clipboard does NOT hold the selected text'
+          + (fbRun.viaFallback === true
+            ? ' -- a copy frame WAS sent, so suspect bridge.ts onCopyText or writeClipboard' : ''),
+      ].filter((w) => w !== '');
+      if (fbWhy.length === 0) {
+        ok(check('webCopyFallback'), 'with the prefetch held, Ctrl+Shift+C sent a copy frame, the '
+          + `gateway logged copy: sent ${FB_WANT.length} chars, and the clipboard reads `
+          + `${JSON.stringify(fbRun.clip)} over ${JSON.stringify(fbRun.sentinel)} `
+          + `(${fbRun.attempts} drag attempt(s))`);
+      } else {
+        no(check('webCopyFallback'), `the async copy fallback is broken: ${fbWhy.join('; ')}`,
+          fbRun.problem !== '' ? `${fbRun.problem}; ${extent}`
+            : `after ${fbRun.attempts} attempt(s) the page sent ${JSON.stringify(fbRun.frames)}, `
+              + `the clipboard reads ${JSON.stringify(fbRun.clip)} (want ${JSON.stringify(FB_WANT)}; `
+              + `${JSON.stringify(fbRun.sentinel)} means it was never written), the gateway logged `
+              + `${JSON.stringify(logsSince(fbMark))}; writeClipboard warned ${await clipWarns()}; `
+              + `${extent}`);
+      }
+
       // ===== webNativeCopy =====================================================================
       //
-      // AGAINST THE SELECTION webCopy LEFT, which the survival clause above has just proved is
-      // still there: a copy never clears it. A third sentinel, so this copy cannot be confused with
-      // either of webCopy's. `copied` is the page's own `copy` frame, read off the probe as
-      // `chordCopy` reads it, and the clipboard and the gateway's log are the witnesses.
+      // ITS OWN FRESH DRAG OF webCopy's RECTANGLE, since 2026-11-03. It used to run against the
+      // selection webCopy left, but webCopyFallback above has REPLACED that with row 0, so without
+      // this it would copy " MENU" and fail on COPY_WANT. Then the same `selection:` wait
+      // `copyOnce` makes, so the copy event finds the text cached -- and it must: the clause below
+      // requires that no copy frame is sent. A third sentinel, so this copy cannot be confused with
+      // either of webCopy's, and the clipboard is the witness.
+      //
+      // NOT RETRIED, unlike `copyCells`: a REPLAY session sends no unsolicited frame, and nothing
+      // here provokes a repaint between the drag and the keystroke. If the drag's selection were
+      // cleared, the clipboard clause would fail and say so.
+      const nativeDragMark = serverOut.length;
+      const nativeDragged = await dragCells(0, 0, 1, 11);
+      const nativeDragLogs = nativeDragged === ''
+        ? await waitForLog(nativeDragMark, (l) => l.startsWith('selection: '), 2000)
+        : [];
+      await new Promise((r) => { setTimeout(r, 100); });
+      const nativePrefetch = nativeDragLogs.find((l) => l.startsWith('selection: '));
       const NATIVE_SENTINEL = `${SENTINEL}-native`;
       const nativeWritten = await cdp.eval(`navigator.clipboard.writeText(${JSON.stringify(NATIVE_SENTINEL)})
         .then(() => '').catch((e) => String(e))`);
@@ -2656,8 +2820,6 @@ async function runTransferPhase(url) {
           ...(type === 'rawKeyDown' ? { commands: ['copy'] } : {}),
         });
       }
-      const nativeLogs = await waitForLog(nativeMark, (l) => l.startsWith('copy: '));
-      const nativeChars = nativeLogs.find((l) => l.startsWith('copy: '));
       let nativeClip = NATIVE_SENTINEL;
       for (let waited = 0; waited < 6000 && nativeClip === NATIVE_SENTINEL; waited += 150) {
         await new Promise((r) => { setTimeout(r, 150); });
@@ -2679,13 +2841,16 @@ async function runTransferPhase(url) {
       const ctrlcEvents = await cdp.eval('window.__tn3270CopyEvents');
       const ctrlcClip = await cdp.eval(
         "navigator.clipboard.readText().then((t) => t).catch((e) => 'REJECTED ' + String(e))");
-      const nativeWhy = [
+      // READ AFTER THE CLIPBOARD SETTLED, so a fallback's `copy:` line would have had time to come.
+      const nativeLogs = logsSince(nativeMark);
+      const nativeWhy = nativeDragged !== '' ? [nativeDragged] : [
         nativeWritten === '' ? '' : `the HARNESS could not put its sentinel on the clipboard: ${nativeWritten}`,
+        nativePrefetch === `selection: sent ${COPY_WANT.length} chars to the browser` ? ''
+          : 'the gateway did not log the selection prefetch for the fresh drag',
         nativeEvents >= 1 ? '' : 'the copy command raised NO copy event in the page, so the harness '
           + 'drove nothing and the rest is measureless',
-        nativeFrames.some((f) => f.includes('"kind":"copy"')) ? ''
-          : 'the copy event raised no copy frame -- is forwardCopy installed in renderer.ts?',
-        nativeChars === `copy: sent ${COPY_WANT.length} chars to the browser` ? '' : 'the gateway did not log the copy',
+        !nativeFrames.some((f) => f.includes('"kind":"copy"')) ? ''
+          : 'the native copy took the async fallback, not the prefetched text',
         nativeClip === COPY_WANT ? ''
           : 'the clipboard does NOT hold the selected text',
         ctrlcEvents === 0 ? '' : 'a plain Ctrl+C raised a copy event, so Clear is no longer claimed',
@@ -2697,11 +2862,14 @@ async function runTransferPhase(url) {
         ok(check('webNativeCopy'),
           `the browser's copy command (Meta+C with commands:['copy']) raised ${nativeEvents} copy `
           + `event(s) and put ${JSON.stringify(nativeClip)} on the REAL OS clipboard over `
-          + `${JSON.stringify(NATIVE_SENTINEL)}; the gateway logged ${JSON.stringify(nativeChars)}. `
+          + `${JSON.stringify(NATIVE_SENTINEL)} FROM THE PREFETCH, sending no copy frame, after a `
+          + `fresh drag the gateway answered with ${JSON.stringify(nativePrefetch)}. `
           + 'A plain Ctrl+C raised NO copy event, left the clipboard alone, and was sent as Clear');
       } else {
         no(check('webNativeCopy'), `the native copy gesture is broken: ${nativeWhy.join('; ')}`,
-          `copy events ${nativeEvents}, the page sent ${JSON.stringify(nativeFrames)}, the clipboard `
+          nativeDragged !== '' ? `${nativeDragged}; ${extent}`
+            : `the drag's prefetch logged ${JSON.stringify(nativeDragLogs)}, `
+          + `copy events ${nativeEvents}, the page sent ${JSON.stringify(nativeFrames)}, the clipboard `
           + `reads ${JSON.stringify(nativeClip)}, the gateway logged ${JSON.stringify(nativeLogs)}; `
           + `on Ctrl+C: ${ctrlcEvents} copy event(s), clipboard ${JSON.stringify(ctrlcClip)}, `
           + `gateway ${JSON.stringify(ctrlcLogs)}; ${extent}`);
@@ -2815,7 +2983,8 @@ async function runTransferPhase(url) {
           + `${JSON.stringify(pasteAction)}, and the text is ON THE SCREEN afterwards -- copying `
           + `the whole screen back finds ${JSON.stringify(PASTE_PAYLOAD)} on row ${landedRow}, `
           + `which reads ${JSON.stringify(pasteCopy.clip.split('\n')[landedRow])} `
-          + `(${pasteCopy.attempts} drag attempt(s)); an EMPTY `
+          + `(${pasteCopy.attempts} drag attempt(s), read back by the `
+          + `${pasteCopy.viaFallback === true ? 'ASYNC FALLBACK' : 'PREFETCHED'} path); an EMPTY `
           + 'clipboard then raised nothing at all, which that positive control is what makes '
           + 'meaningful');
       } else {
