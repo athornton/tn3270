@@ -3152,6 +3152,13 @@ async function runTransferPhase(url) {
   } finally {
     cdp?.close();
     child?.kill('SIGKILL');
+    // WAITED FOR, bounded, as `browser-lan-copy.mjs`'s cleanup is. MEASURED 2026-11-03: a leak
+    // count taken right after this harness exited still saw 2 `electron` processes on their way
+    // out, gone a moment later. Waiting for `close` makes "nothing left" true when the totals print,
+    // and stops the browser writing into `profile` after it is removed.
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+      await new Promise((r) => { child.once('close', r); setTimeout(r, 5000); });
+    }
     rmSync(profile, { recursive: true, force: true });
   }
 
