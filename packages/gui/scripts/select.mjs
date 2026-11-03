@@ -60,8 +60,8 @@ const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'
  * real screen and not only in a unit test's synthetic grid.
  *
  * THE TWO-ROW CASE IS THE ONE THAT MATTERS MOST. A single row passes against a renderer whose
- * `mousemove` never fires -- the anchor alone would be a 1x1 rectangle, which `isEmptyRect` rejects,
- * so a one-row drag at least proves the move happened. But only a MULTI-row case proves the
+ * `mousemove` never fires -- the anchor alone would be a press that never moved, which the renderer
+ * calls a click (`movedPastThreshold`), so a one-row drag at least proves the move happened. But only a MULTI-row case proves the
  * rectangle is normalized and joined in the right order, and it is the case where a row/column
  * transposition in `cellAt` stops being invisible.
  */
@@ -80,6 +80,22 @@ const CASES = [
     label: 'a column out of the middle of a row',
     select: '1,1,1,6',
     want: 'OPTION',
+  },
+  /*
+    ONE CHARACTER, 2026-11-03: press and release on the SAME cell, with a move of 5 px down inside
+    it (`dx,dy` = `0,5`, the seam's optional fifth and sixth fields). The renderer calls a press a
+    drag once the pointer has moved 4 px (`movedPastThreshold`), so this is a selection of exactly
+    that cell. Until then it was refused as a 1x1 "click" (`isEmptyRect`), and the minimum
+    selection was two cells. Cell (0,1) is the fixture's "M": row 0 is " MENU", column 0 holding the
+    field attribute. A cell is 14 px tall at scale 1 (`FONTBOUNDINGBOX 9 14`), so 5 px from its
+    centre stays inside it. The copy-NOTHING half of this rule -- a 2 px move -- is
+    `browser-clicks.mjs`'s `webClickNoCopy`, since this seam's line says `copied=false` for it and
+    that check can also prove the clipboard was not touched.
+  */
+  {
+    label: 'one cell, a 5 px move inside it',
+    select: '0,1,0,1,0,5',
+    want: 'M',
   },
 ];
 

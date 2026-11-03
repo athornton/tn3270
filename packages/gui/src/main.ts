@@ -1801,6 +1801,7 @@ async function maybeSendClicks(
 
 /**
  * AN EIGHTH TEST SEAM: `TN3270_GUI_SELECT='0,0,0,9'` drags across cells and copies.
+ * `'0,1,0,1,0,5'` adds a pixel offset `dx,dy` to the move and release, for a drag inside one cell.
  *
  * ## WHAT IT COVERS THAT NOTHING ELSE CAN
  *
@@ -1820,7 +1821,8 @@ async function maybeSendClicks(
  *
  * A press and a release at two points is NOT a drag: `mousemove` is what advances `focus`, so
  * without it this would pass against a renderer that never tracked the drag at all and selected
- * only the anchor cell -- which `isEmptyRect` then rejects, making the whole feature inert. The
+ * only the anchor cell -- a press that never moved, which the renderer calls a click (its 4 px
+ * drag threshold, `movedPastThreshold`), making the whole feature inert. The
  * `mouseMove` carries `button: 'left'` because a move with no button held is not a drag either.
  *
  * REPORTS THE CLIPBOARD ITSELF, read back through Electron, which is the only honest end of this
@@ -1832,13 +1834,19 @@ async function maybeSelect(win: BrowserWindow): Promise<void> {
   // painted before the renderer has a `last` to measure cells against.
   await new Promise((r) => setTimeout(r, SEAM.keysMs));
   const parts = SEAM.select.split(',').map((n) => Number(n));
-  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n))) {
+  if ((parts.length !== 4 && parts.length !== 6) || parts.some((n) => !Number.isInteger(n))) {
     // REPORTED, not ignored, the same way `clicks: NO BUTTON` is: a typo'd seam value must not
     // read as a failure of the path under test.
     process.stdout.write(`select: BAD SPEC ${SEAM.select}\n`);
     return;
   }
   const [top, left, bottom, right] = parts as [number, number, number, number];
+  // AN OPTIONAL PIXEL OFFSET for the move and the release, from the end cell's centre, 2026-11-03.
+  // It is what lets a ONE-CELL case drag at all: with `0,1,0,1` the move would land on the press
+  // point, which is a click and selects nothing -- correctly. `0,1,0,1,0,5` moves 5 px down,
+  // inside the cell, past the renderer's 4 px drag threshold.
+  const dx = parts[4] ?? 0;
+  const dy = parts[5] ?? 0;
   let from: { x: number; y: number } | null;
   let to: { x: number; y: number } | null;
   try {
@@ -1864,9 +1872,9 @@ async function maybeSelect(win: BrowserWindow): Promise<void> {
   win.webContents.sendInputEvent(
     { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1 });
   win.webContents.sendInputEvent(
-    { type: 'mouseMove', x: to.x, y: to.y, button: 'left' });
+    { type: 'mouseMove', x: to.x + dx, y: to.y + dy, button: 'left' });
   win.webContents.sendInputEvent(
-    { type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 });
+    { type: 'mouseUp', x: to.x + dx, y: to.y + dy, button: 'left', clickCount: 1 });
   await new Promise((r) => setTimeout(r, 200));
   const copied = await win.webContents.executeJavaScript('window.__tn3270Copy()') as boolean;
   // The copy crosses IPC to main, which extracts and writes the clipboard, so the read below must

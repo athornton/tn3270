@@ -70,8 +70,8 @@ describe('the selection harness', () => {
   });
 
   it('keeps a MULTI-ROW case, which is the one a single row cannot replace', () => {
-    // A one-row drag proves the move happened at all (the anchor alone is a 1x1 rectangle, which
-    // `isEmptyRect` rejects). Only a multi-row case proves the rectangle is normalized and the lines
+    // A one-row drag proves the move happened at all (the anchor alone is a press that never
+    // moved, which the renderer's drag threshold calls a click). Only a multi-row case proves the rectangle is normalized and the lines
     // joined in order, and it is where a row/column transposition in `cellAt` stops being invisible.
     // Pinned by the NEWLINE in an expected string, which is what a multi-row copy produces.
     expect(select).toMatch(/want:\s*'[^']*\\n[^']*'/);
@@ -96,7 +96,8 @@ describe('the selection harness', () => {
     /**
      * A press and a release at two points is NOT a drag: `mousemove` is what advances `focus`, so
      * without it the harness would pass against a renderer that never tracked the drag -- the
-     * anchor alone, which `isEmptyRect` then rejects, leaving the feature inert.
+     * anchor alone, a press that never moved -- a click by the renderer's 4 px drag threshold --
+     * leaving the feature inert.
      *
      * ASSERTED AGAINST `main.ts` AND NOT `select.mjs`, which is where the plan for this task
      * pointed it. The `sendInputEvent` calls live in main's `maybeSelect`; the harness only sets an

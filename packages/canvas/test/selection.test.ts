@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeRect, isEmptyRect, extractText, type CellRect } from '../src/selection.js';
+import {
+  normalizeRect, movedPastThreshold, DRAG_THRESHOLD_PX, extractText, type CellRect,
+} from '../src/selection.js';
 import type { ResolvedCell } from '@tn3270/core';
 
 describe('normalizeRect', () => {
@@ -22,15 +24,35 @@ describe('normalizeRect', () => {
   });
 });
 
-describe('isEmptyRect', () => {
-  it('calls a 1x1 rectangle EMPTY, so a stray click is not a selection', () => {
-    // A click with no drag must not arm a one-character copy.
-    expect(isEmptyRect({ top: 3, left: 3, bottom: 3, right: 3 })).toBe(true);
+describe('movedPastThreshold', () => {
+  // A PRESS BECOMES A DRAG BY MOVING, NOT BY CROSSING A CELL. 2026-11-03: the rule it replaced
+  // (`isEmptyRect`, "a 1x1 rectangle is a click") made a single character unselectable.
+  const press = { x: 100, y: 200 };
+
+  it('is 4 CSS px, Chromium\'s own drag threshold off macOS', () => {
+    expect(DRAG_THRESHOLD_PX).toBe(4);
   });
 
-  it('calls a wider or taller rectangle non-empty', () => {
-    expect(isEmptyRect({ top: 3, left: 3, bottom: 3, right: 4 })).toBe(false);
-    expect(isEmptyRect({ top: 3, left: 3, bottom: 4, right: 3 })).toBe(false);
+  it('a pointer that has not moved is a CLICK, so a stray click selects nothing', () => {
+    expect(movedPastThreshold(press, press)).toBe(false);
+  });
+
+  it('ordinary jitter under the threshold, on either axis and in either direction, is still a click', () => {
+    expect(movedPastThreshold(press, { x: 103, y: 200 })).toBe(false);
+    expect(movedPastThreshold(press, { x: 97, y: 200 })).toBe(false);
+    expect(movedPastThreshold(press, { x: 100, y: 203 })).toBe(false);
+    expect(movedPastThreshold(press, { x: 100, y: 197 })).toBe(false);
+    // PER AXIS, as Chromium measures it: 3 and 3 is a Euclidean 4.24 and still a click.
+    expect(movedPastThreshold(press, { x: 103, y: 203 })).toBe(false);
+    expect(movedPastThreshold(press, { x: 103.9, y: 196.1 })).toBe(false);
+  });
+
+  it('a move OF the threshold on either axis, in either direction, is a drag', () => {
+    expect(movedPastThreshold(press, { x: 104, y: 200 })).toBe(true);
+    expect(movedPastThreshold(press, { x: 96, y: 200 })).toBe(true);
+    expect(movedPastThreshold(press, { x: 100, y: 204 })).toBe(true);
+    expect(movedPastThreshold(press, { x: 100, y: 196 })).toBe(true);
+    expect(movedPastThreshold(press, { x: 140, y: 260 })).toBe(true);
   });
 });
 

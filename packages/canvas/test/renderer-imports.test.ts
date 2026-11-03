@@ -207,7 +207,7 @@ describe('the renderer bundle', () => {
       It therefore lived in its own module whose only import was an erasing `import type`.
 
       `selection.js` is in exactly that position now: the renderer needs `normalizeRect` and
-      `isEmptyRect`, its only import is `import type { ResolvedCell }`, and taking them from the
+      `movedPastThreshold`, its only import is `import type { ResolvedCell }`, and taking them from the
       barrel instead would blank the window. The point of pinning it HERE rather than trusting the
       offender scan above is that the scan reports a generic list, where this names the module --
       and that it fails as a RED TEST rather than as a blank window.

@@ -83,8 +83,9 @@ async function start(extra: string[] = []): Promise<{ url: string; token: string
  * the loop exercises the kinds' REAL PATHS -- an extraction that returns text, and a paste that
  * types into the screen -- rather than only their refusal paths, which a bare frame would.
  *
- * `copy`'s rect is 2 ROWS BY 10 COLUMNS of the replayed screen rather than a 1x1, because
- * `isEmptyRect` treats 1x1 as a click and the honest renderer never sends one.
+ * `copy`'s rect is 2 ROWS BY 10 COLUMNS of the replayed screen, so the extraction joins lines.
+ * (It once had to avoid 1x1, which the renderer then refused as a click; since 2026-11-03 a
+ * one-cell drag is a real selection and the renderer sends 1x1 rects too.)
  */
 const ACTION_FIELDS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   pf: { n: 1 },

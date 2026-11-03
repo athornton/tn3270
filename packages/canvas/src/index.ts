@@ -45,7 +45,7 @@ export { parseBdf } from './bdf.js';
 // only the side holding `resolve(snapshot)` can turn a rectangle into text. `renderer.ts` imports
 // the two geometry functions from the MODULE rather than from this barrel -- importing them from
 // here would pull `drawlist.js` and `@tn3270/core` into its graph and blank the window.
-export { normalizeRect, isEmptyRect, extractText } from './selection.js';
+export { normalizeRect, movedPastThreshold, DRAG_THRESHOLD_PX, extractText } from './selection.js';
 export type { CellAddr, CellRect } from './selection.js';
 // The keypad's DOM view, shared by the Electron keypad WINDOW and the web gateway's in-pane
 // OVERLAY. It is here rather than in `packages/gui` because `packages/web` needs it and cannot

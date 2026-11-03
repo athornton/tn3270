@@ -9,7 +9,7 @@ import { blit, bestScale, center, tintKey, type Ctx2D } from './blit.js';
 // `@tn3270/core`, and a browser has no bundler to resolve a bare specifier.
 // `renderer-imports.test.ts` walks this file's built graph to catch exactly that. `selection.ts`
 // itself is safe here -- its only workspace import is an `import type`, which erases.
-import { normalizeRect, isEmptyRect, type CellAddr, type CellRect } from './selection.js';
+import { normalizeRect, movedPastThreshold, type CellAddr, type CellRect } from './selection.js';
 // The same rule as `selection.js` above, and served from `BROWSER_MODULES` for the same reason.
 // `copyCache.ts`'s only import is `import type { CellRect }`, which erases.
 import { createCopyCache } from './copyCache.js';
@@ -91,10 +91,17 @@ let last: DrawList | undefined;
  * `dragging` is separate from "has a selection" ON PURPOSE: the mouse release ends the drag but
  * must KEEP the selection, because the operator presses Copy afterwards. Clearing on release would
  * make every copy impossible.
+ *
+ * `pressAt` AND `moved` DECIDE CLICK OR DRAG, 2026-11-03. `pressAt` is where the button went down,
+ * in `clientX`/`clientY`; `moved` latches true once the pointer has gone `movedPastThreshold` from
+ * it, and only then is there a selection -- see `selectedRect()`. Before this the rule was the
+ * rectangle's SIZE (`isEmptyRect`: 1x1 is a click), which made a single character unselectable.
  */
 let anchor: CellAddr | null = null;
 let focus: CellAddr | null = null;
 let dragging = false;
+let pressAt: { x: number; y: number } | null = null;
+let moved = false;
 /**
  * The selection's prefetched text, 2026-11-02 -- see `copyCache.ts`. Invalidated exactly where the
  * selection dies, which is `clearSelection()` below and a new press on the screen, so a frame from
@@ -127,7 +134,27 @@ function clearSelection(): void {
   anchor = null;
   focus = null;
   dragging = false;
+  pressAt = null;
+  moved = false;
   copyCache.invalidate();
+}
+
+/**
+ * The current selection's rectangle, or `null` when there is none.
+ *
+ * THE ONE PREDICATE FOR "IS THERE A SELECTION", read by the highlight in `paint`, by
+ * `prefetchSelection`, by `copySelection` and by `cachedSelection`, so the four can never disagree
+ * -- a highlight with nothing to copy, or a copy of a rectangle nobody can see. Until 2026-11-03
+ * three of them each called `isEmptyRect` on their own `normalizeRect`, and `cachedSelection` did
+ * not, which was harmless only because the cache is never filled for an empty rect.
+ *
+ * `moved` IS PART OF IT, and that is the whole fix: a press that has not left the threshold is a
+ * click, whatever the rectangle, and a press that has is a selection even when it never left its
+ * cell. A function and not a cached value, so it cannot go stale against the three variables.
+ */
+function selectedRect(): CellRect | null {
+  if (anchor === null || focus === null || !moved) return null;
+  return normalizeRect(anchor, focus);
 }
 /**
  * True while the canvas holds an ERROR MESSAGE rather than a screen.
@@ -246,8 +273,9 @@ function paint(list: DrawList): void {
    * inverse table to keep in step with `palette.ts`. Drawn as an OVERLAY and not by re-blitting the
    * glyphs, so a selection can never change which character is on screen.
    *
-   * GATED ON `isEmptyRect`, so a plain click -- which sets anchor and focus to the same cell -- draws
-   * nothing. Without that every click would flash a one-cell block.
+   * GATED ON `selectedRect()`, so a plain click -- a press the pointer did not move past
+   * `movedPastThreshold` -- draws nothing. Without that every click would flash a one-cell block.
+   * A drag that moved but stayed in one cell DOES draw its cell: that is a one-character selection.
    *
    * THE GOLDENS MUST NOT MOVE because of this. `shot.mjs`'s three cases have no selection, so this
    * block cannot execute in them; if a golden does move, that is a real failure meaning the
@@ -257,21 +285,19 @@ function paint(list: DrawList): void {
    * among those: it sits over what it marks. It cannot stray onto the keypad or the OIA anyway --
    * `cellAt` bounds every cell it returns to the screen region.
    */
-  if (anchor !== null && focus !== null) {
-    const rect = normalizeRect(anchor, focus);
-    if (!isEmptyRect(rect) && atlas !== undefined) {
-      const g = atlas.geometry;
-      ctx.save();
-      ctx.globalCompositeOperation = 'difference';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(
-        at.x + rect.left * g.cellWidth * scale,
-        at.y + rect.top * g.cellHeight * scale,
-        (rect.right - rect.left + 1) * g.cellWidth * scale,
-        (rect.bottom - rect.top + 1) * g.cellHeight * scale,
-      );
-      ctx.restore();
-    }
+  const rect = selectedRect();
+  if (rect !== null && atlas !== undefined) {
+    const g = atlas.geometry;
+    ctx.save();
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(
+      at.x + rect.left * g.cellWidth * scale,
+      at.y + rect.top * g.cellHeight * scale,
+      (rect.right - rect.left + 1) * g.cellWidth * scale,
+      (rect.bottom - rect.top + 1) * g.cellHeight * scale,
+    );
+    ctx.restore();
   }
 }
 
@@ -598,6 +624,15 @@ canvas.addEventListener('mousedown', (e) => {
   anchor = cell;
   focus = cell;
   dragging = true;
+  // CLIENT COORDINATES FOR THE THRESHOLD, NOT `offsetX`, and the asymmetry with `cellAt` above is
+  // deliberate. `offsetX` is relative to the EVENT'S TARGET, and the `mousemove` that compares
+  // against this point is on the WINDOW: over the canvas its target is the canvas, but over an
+  // overlay or the page margin it is that element, and the two `offsetX`s would be from different
+  // origins. `clientX`/`clientY` are viewport-relative whatever the target, so the press and every
+  // move are measured from one origin. (A scroll mid-drag would shift them by the scroll; a drag of
+  // a few pixels does not scroll the page, and a drag long enough to is past the threshold anyway.)
+  pressAt = { x: e.clientX, y: e.clientY };
+  moved = false;
   errored = false;
   noticeOnly = false;
   paint(list);
@@ -628,7 +663,8 @@ function release(): void {
  * A drag that ENDED ON A REAL RECTANGLE asks the gateway for its text, so a later copy event can
  * set it synchronously. 2026-11-02. Only on `mouseup`: `blur` also releases, but nobody selected
  * anything by switching windows, and a drag cut short that way just leaves the cache empty -- every
- * gesture then falls back. A plain click (an empty rect) asks for nothing.
+ * gesture then falls back. A plain click (a press that never passed the drag threshold) asks for
+ * nothing; a drag within one cell asks for that one character.
  *
  * RETURNS AT ONCE WHERE THE BRIDGE HAS NO `fetchSelection`, which is the Electron GUI: its preload
  * supplies only the four required functions, so there nothing is ever asked for or cached.
@@ -643,9 +679,9 @@ function prefetchSelection(): void {
   // NOT WHILE A REAL ERROR IS UP: `onError` cleared the selection, and nothing on screen to copy.
   // A copy NOTICE does not block it -- it keeps the selection, and the mousedown that began this
   // drag has already dismissed it.
-  if ((errored && !noticeOnly) || fetchSelection === undefined || anchor === null || focus === null) return;
-  const rect = normalizeRect(anchor, focus);
-  if (isEmptyRect(rect)) return;
+  if ((errored && !noticeOnly) || fetchSelection === undefined) return;
+  const rect = selectedRect();
+  if (rect === null) return;
   const gen = copyCache.begin(rect);
   fetchSelection.call(window.tn3270, rect)
     .then((text) => { copyCache.accept(gen, text); })
@@ -675,11 +711,22 @@ window.addEventListener('mousemove', (e) => {
   if (!dragging) return;
   const list = last;
   if (list === undefined) return;
+  // THE THRESHOLD FIRST, BEFORE EITHER RETURN BELOW, because both would skip it: the same-cell
+  // return is exactly the case a one-character drag lives in, and the off-screen one is a drag
+  // that has plainly moved. Latched -- moving back to the press point does not undo a drag, as it
+  // does not in a browser's own text selection. `clientX`/`clientY`, matching `pressAt`.
+  let crossed = false;
+  if (!moved && pressAt !== null && movedPastThreshold(pressAt, { x: e.clientX, y: e.clientY })) {
+    moved = true;
+    crossed = true;
+  }
   const cell = cellAt(e.offsetX, e.offsetY, list);
-  if (cell === null) return;
-  // Repaint ONLY when the cell actually changed. A mousemove fires per pixel, and repainting the
-  // whole canvas 14 times per cell crossed is work the highlight cannot show.
-  if (focus !== null && focus.row === cell.row && focus.col === cell.col) return;
+  if (cell === null) { if (crossed) paint(list); return; }
+  // Repaint ONLY when the cell actually changed -- or when this move is the one that turned the
+  // press into a drag, which is what makes a one-cell selection's highlight appear. A mousemove
+  // fires per pixel, and repainting the whole canvas 14 times per cell crossed is work the
+  // highlight cannot show.
+  if (!crossed && focus !== null && focus.row === cell.row && focus.col === cell.col) return;
   focus = cell;
   paint(list);
 });
@@ -727,17 +774,16 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * imports it -- and `test/renderer-imports.test.ts`'s order pin does not cover it either.
  */
 function copySelection(): boolean {
-  if (anchor === null || focus === null) return false;
-  const rect = normalizeRect(anchor, focus);
-  if (isEmptyRect(rect)) return false;
+  const rect = selectedRect();
+  if (rect === null) return false;
   window.tn3270.sendAction({ kind: 'copy', rect });
   return true;
 }
 
 /** The prefetched text for the CURRENT selection, or `undefined`. */
 function cachedSelection(): string | undefined {
-  if (anchor === null || focus === null) return undefined;
-  return copyCache.take(normalizeRect(anchor, focus));
+  const rect = selectedRect();
+  return rect === null ? undefined : copyCache.take(rect);
 }
 
 /**

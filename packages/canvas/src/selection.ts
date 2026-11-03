@@ -10,7 +10,7 @@
  *
  * ## THIS FILE IS REACHED BY THE RENDERER, SO IT MUST STAY VALUE-IMPORT-FREE OF WORKSPACE PACKAGES
  *
- * `renderer.ts` imports `normalizeRect` and `isEmptyRect`, and a browser cannot resolve a bare
+ * `renderer.ts` imports `normalizeRect` and `movedPastThreshold`, and a browser cannot resolve a bare
  * specifier like `@tn3270/core` -- the window goes BLANK WITH NO ERROR, which
  * `renderer-imports.test.ts` exists to catch. The `ResolvedCell` import below is therefore an
  * `import type`, which erases at compile time; `extractText` itself runs in MAIN, never in the
@@ -49,13 +49,37 @@ export function normalizeRect(anchor: CellAddr, focus: CellAddr): CellRect {
 }
 
 /**
- * Is this rectangle too small to be a selection?
- *
- * A 1x1 rectangle is a CLICK, not a drag, and treating it as a selection would arm a
- * one-character copy on every stray click -- including the clicks that place the cursor.
+ * How far, in CSS pixels on EITHER axis, the pointer must move from the press before a press is a
+ * drag. Chromium's own drag threshold off macOS (`kDragThresholdX/Y` in Blink's
+ * `mouse_event_manager.cc`: 4, and 3 on macOS), so a press here turns into a selection at about the
+ * distance a press on ordinary page text starts one.
  */
-export function isEmptyRect(rect: CellRect): boolean {
-  return rect.top === rect.bottom && rect.left === rect.right;
+export const DRAG_THRESHOLD_PX = 4;
+
+/**
+ * Has the pointer moved far enough from the press to make it a DRAG rather than a click?
+ *
+ * ## CLICK OR DRAG IS DECIDED BY MOVEMENT, NOT BY THE RECTANGLE'S SIZE
+ *
+ * The rule this replaced, `isEmptyRect` (2026-10-05 to 2026-11-03), called every 1x1 rectangle a
+ * click, so that a stray click -- including the clicks that place the cursor -- would not arm a
+ * one-character copy. It did that, and it ALSO made a single character impossible to select: the
+ * minimum selection was two cells, found by the user in Firefox and Safari on 2026-11-03. Movement
+ * keeps the first property and drops the second: a click with ordinary jitter stays under the
+ * threshold and selects nothing, and a drag that starts and ends on one character selects it.
+ *
+ * PER AXIS AND `>=`, exactly as Blink's `DragThresholdExceeded` measures it, rather than a
+ * Euclidean distance: the point is to agree with what the browser itself calls a drag.
+ *
+ * The two points must be in the SAME coordinate space; `renderer.ts` uses `clientX`/`clientY` for
+ * both, and says why.
+ */
+export function movedPastThreshold(
+  press: { readonly x: number; readonly y: number },
+  now: { readonly x: number; readonly y: number },
+): boolean {
+  return Math.abs(now.x - press.x) >= DRAG_THRESHOLD_PX
+    || Math.abs(now.y - press.y) >= DRAG_THRESHOLD_PX;
 }
 
 /**

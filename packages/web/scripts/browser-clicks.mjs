@@ -545,6 +545,32 @@ const TRANSFER_CHECKS = [
       + 'prefetchSelection guards reverted to a bare `errored` -- this check never clicks under a '
       + 'notice',
   },
+  /*
+    ONE CHARACTER, AND A CLICK THAT IS NOT A SELECTION, 2026-11-03.
+
+    Until then a 1x1 rectangle was a click by definition (`selection.ts`'s `isEmptyRect`), so the
+    minimum selection was TWO cells -- found by the user in Firefox and Safari, not by any check
+    here, because every drag in this file spanned several cells. The rule is now MOVEMENT: a press
+    is a drag once the pointer has moved 4 CSS px from it (`movedPastThreshold`), within one cell
+    or not. These two pin both halves of that rule in the page that shares the renderer with the GUI.
+  */
+  {
+    name: 'webSingleCell',
+    kind: 'live',
+    what: 'a press and release on ONE cell, with a 5 px move inside it, selects and copies exactly '
+      + 'that one character (the fixture\'s "M" at row 0, column 1) to the REAL OS clipboard',
+    mutant: 'renderer.ts  selectedRect() gated on the old `isEmptyRect(rect)` again (a 1x1 '
+      + 'rectangle is refused, nothing is prefetched, and the clipboard keeps its sentinel)',
+  },
+  {
+    name: 'webClickNoCopy',
+    kind: 'live',
+    what: 'a press and release on one cell with a 2 px move -- ordinary click jitter, under the '
+      + '4 px threshold -- selects NOTHING: no prefetch, no copy frame, and the chord leaves the '
+      + 'clipboard holding its sentinel',
+    mutant: 'selection.ts  DRAG_THRESHOLD_PX = 0  OR  renderer.ts  selectedRect() without its '
+      + '`!moved` term (either way the click selects "M" and the chord copies it)',
+  },
   {
     name: 'webNativeCopy',
     kind: 'injected',
@@ -2304,10 +2330,12 @@ async function runTransferPhase(url) {
        * holds no copy of the geometry -- the same argument `select.mjs` makes for the GUI and this
        * file's header makes for the keypad's labels. The intermediate `mouseMoved` is not padding:
        * `mousedown` sets anchor AND focus to the same cell, so without a move the rectangle would
-       * be 1x1 and `isEmptyRect` would refuse it -- a drag that never moved would look like a
-       * selection that was never made.
+       * never leave the press point, which the renderer calls a CLICK (its 4 px drag threshold,
+       * `movedPastThreshold`) -- a drag that never moved would look like a selection that was never
+       * made. `end` offsets the last move and the release from the end cell's centre, in CSS px:
+       * it is how a press and release on ONE cell still moves, by more or less than the threshold.
        */
-      const dragCells = async (fromRow, fromCol, toRow, toCol) => {
+      const dragCells = async (fromRow, fromCol, toRow, toCol, end = { dx: 0, dy: 0 }) => {
         const a = JSON.parse(await cdp.eval(
           `JSON.stringify(window.__tn3270CellCenter(${fromRow}, ${fromCol}))`));
         const b = JSON.parse(await cdp.eval(
@@ -2327,9 +2355,10 @@ async function runTransferPhase(url) {
         await cdp.cmd('Input.dispatchMouseEvent',
           { type: 'mouseMoved', x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, button: 'left', buttons: 1 });
         await cdp.cmd('Input.dispatchMouseEvent',
-          { type: 'mouseMoved', x: b.x, y: b.y, button: 'left', buttons: 1 });
+          { type: 'mouseMoved', x: b.x + end.dx, y: b.y + end.dy, button: 'left', buttons: 1 });
         await cdp.cmd('Input.dispatchMouseEvent',
-          { type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1, buttons: 0 });
+          { type: 'mouseReleased', x: b.x + end.dx, y: b.y + end.dy, button: 'left', clickCount: 1,
+            buttons: 0 });
         await new Promise((r) => { setTimeout(r, 250); });
         return '';
       };
@@ -2541,9 +2570,9 @@ async function runTransferPhase(url) {
         return logsSince(mark);
       };
 
-      const copyOnce = async (sentinel, fromRow, fromCol, toRow, toCol) => {
+      const copyOnce = async (sentinel, fromRow, fromCol, toRow, toCol, end = undefined) => {
         const mark = serverOut.length;
-        const dragged = await dragCells(fromRow, fromCol, toRow, toCol);
+        const dragged = await dragCells(fromRow, fromCol, toRow, toCol, end);
         if (dragged !== '') return { problem: dragged };
         // THE PREFETCH MUST LAND FIRST, or the chord takes the fallback and the cached path is not
         // what got measured. `dragCells`' 250 ms after the release guarantees nothing about the
@@ -2618,11 +2647,11 @@ async function runTransferPhase(url) {
        * with the task rather than written here, so it lands as one decision instead of a comment
        * that only this file's readers ever see.
        */
-      const copyCells = async (fromRow, fromCol, toRow, toCol) => {
+      const copyCells = async (fromRow, fromCol, toRow, toCol, end = undefined) => {
         const started = Date.now();
         let last = { problem: 'never attempted' };
         for (let attempt = 1; attempt <= 4; attempt += 1) {
-          last = await copyOnce(`${SENTINEL}-try${attempt}`, fromRow, fromCol, toRow, toCol);
+          last = await copyOnce(`${SENTINEL}-try${attempt}`, fromRow, fromCol, toRow, toCol, end);
           last.attempts = attempt;
           last.sentinel = `${SENTINEL}-try${attempt}`;
           // WALL TIME OVER EVERY ATTEMPT, so the retry's cost is a measured number in the failure
@@ -3085,6 +3114,106 @@ async function runTransferPhase(url) {
         no(check('webCopyRetry'), `a copy after a failed copy is broken: ${retryWhy.join('; ')}`,
           `the gateway logged ${JSON.stringify(retryLogs)}; the page warned `
           + `${JSON.stringify(retry.firstWarns ?? [])}; ${extent}`);
+      }
+
+      // ===== webSingleCell =====================================================================
+      //
+      // ONE CELL, PRESSED AND RELEASED IN IT, WITH A 5 PX MOVE BETWEEN: a drag by the renderer's
+      // rule (4 px), though anchor and focus are the same cell. Cell (0,1) is the fixture's "M" --
+      // `synthetic-ispf-like.trace` puts a field attribute at address 0 and " MENU" from there, and
+      // `fixtures/screens/synthetic-ispf-like.txt` shows row 0 as " MENU". 5 px DOWN stays inside
+      // the cell: the press is at its centre and a cell is 14 px tall at scale 1 (the BDF's
+      // `FONTBOUNDINGBOX 9 14`), and taller at any larger scale.
+      //
+      // BEFORE webNativeCopy, AND HERE THE POSITION IS LOAD-BEARING -- MEASURED. Placed after it,
+      // this needed 2 drag attempts: webNativeCopy ends on a plain Ctrl+C, i.e. Clear, and the
+      // gateway's action handler repaints UNCONDITIONALLY after `applyAction`, so that frame lands
+      // during the next drag and `onFrame`'s `clearSelection()` drops it -- `copyCells`' documented
+      // race, provoked by the previous check. Nothing between webCopyRetry and here repaints.
+      //
+      // Through `copyCells`, so it is the same drag, prefetch wait and real chord `webCopy` uses,
+      // and it must take the CACHED path: the prefetch for a one-cell drag is the half that the old
+      // `isEmptyRect` gate refused first.
+      const SINGLE_WANT = 'M';
+      const singleMark = serverOut.length;
+      const singleRun = await copyCells(0, 1, 0, 1, { dx: 0, dy: 5 });
+      const singleLogs = logsSince(singleMark);
+      const singlePrefetch = singleLogs.find((l) => l.startsWith('selection: '));
+      const singleWhy = singleRun.problem !== '' ? [singleRun.problem] : [
+        singleRun.written === '' ? ''
+          : `the HARNESS could not put its sentinel on the clipboard: ${String(singleRun.written)}`,
+        singlePrefetch === `selection: sent ${SINGLE_WANT.length} chars to the browser` ? ''
+          : 'the gateway did not log a one-character prefetch, so the drag was not taken as a '
+            + 'selection -- check renderer.ts selectedRect() and the mousemove threshold',
+        singleRun.clip === SINGLE_WANT ? '' : 'the clipboard does NOT hold the one selected character',
+        singleRun.viaFallback !== true ? ''
+          : 'the copy took the ASYNC FALLBACK, so the prefetched text was not used',
+        singleRun.copied !== true || singleRun.attempts === 1 ? ''
+          : `the copy needed ${singleRun.attempts} drag attempts where a replay needs exactly one`,
+      ].filter((w) => w !== '');
+      if (singleWhy.length === 0) {
+        ok(check('webSingleCell'), 'a press and release on cell (0,1) with a 5 px move inside it '
+          + `put ${JSON.stringify(singleRun.clip)} on the REAL OS clipboard over `
+          + `${JSON.stringify(singleRun.sentinel)}, from the prefetch the gateway logged as `
+          + `${JSON.stringify(singlePrefetch)}`);
+      } else {
+        no(check('webSingleCell'), `a one-character selection is broken: ${singleWhy.join('; ')}`,
+          singleRun.problem !== '' ? `${singleRun.problem}; ${extent}`
+            : `after ${singleRun.attempts} attempt(s) the clipboard reads `
+              + `${JSON.stringify(singleRun.clip)} (want ${JSON.stringify(SINGLE_WANT)}; `
+              + `${JSON.stringify(singleRun.sentinel)} means it was never written), the page sent `
+              + `${JSON.stringify(singleRun.frames)}, the gateway logged ${JSON.stringify(singleLogs)}; `
+              + `${extent}`);
+      }
+
+      // ===== webClickNoCopy ====================================================================
+      //
+      // THE SAME CELL WITH A 2 PX MOVE, UNDER THE THRESHOLD: a click with ordinary jitter, which
+      // must select nothing. The clipboard keeping its sentinel is the witness, and so is the
+      // gateway logging no `selection:` line, which means the release asked for nothing.
+      //
+      // IMMEDIATELY AFTER webSingleCell, AND THAT ORDER IS WHAT KEEPS THIS FROM PASSING VACUOUSLY.
+      // That check leaves "M" selected (a copy keeps the selection), so a press that never reached
+      // the canvas would leave it in place and the chord would copy "M" -- a failure here, not a
+      // silent pass. Only a press that REPLACED the selection with nothing keeps the sentinel.
+      // NOT RETRIED: a replay sends no unsolicited frame, and a retry could not distinguish a
+      // working click from a broken one anyway, since both outcomes are "nothing".
+      const clickMark = serverOut.length;
+      const clicked = await dragCells(0, 1, 0, 1, { dx: 0, dy: 2 });
+      // Long enough for a prefetch that SHOULD NOT come to arrive if it is coming at all; the
+      // positive checks above see theirs well inside this.
+      const clickDragLogs = clicked === ''
+        ? await waitForLog(clickMark, (l) => l.startsWith('selection: '), 1500)
+        : [];
+      const clickRun = clicked === '' ? await chordCopy(`${SENTINEL}-click`) : undefined;
+      // READ AFTER chordCopy's full wait, so a fallback's `copy:` line would have had time to land.
+      const clickLogs = logsSince(clickMark);
+      const clickWhy = clicked !== '' ? [clicked] : [
+        clickRun.written === '' ? ''
+          : `the HARNESS could not put its sentinel on the clipboard: ${String(clickRun.written)}`,
+        !clickDragLogs.some((l) => l.startsWith('selection: ')) ? ''
+          : 'the gateway logged a selection prefetch, so the 2 px click was taken as a DRAG -- '
+            + 'check selection.ts DRAG_THRESHOLD_PX and renderer.ts selectedRect()\'s `moved` term',
+        clickRun.clip === `${SENTINEL}-click` ? ''
+          : `the chord after a CLICK changed the clipboard to ${JSON.stringify(clickRun.clip)}, so `
+            + 'the click selected something'
+            + (clickRun.clip === SINGLE_WANT ? ' (or the press never reached the canvas and '
+              + 'webSingleCell\'s selection survived it)' : ''),
+        !clickRun.frames.some((f) => f.includes('"kind":"copy"')) ? ''
+          : 'the chord after a click sent a copy frame, so copySelection() found a selection',
+        !clickLogs.some((l) => l.startsWith('copy: ')) ? ''
+          : 'the gateway logged a copy: line after a click',
+      ].filter((w) => w !== '');
+      if (clickWhy.length === 0) {
+        ok(check('webClickNoCopy'), 'a press and release on cell (0,1) with a 2 px move selected '
+          + 'nothing: no prefetch was asked for, the chord sent no copy frame, and the clipboard '
+          + `kept ${JSON.stringify(`${SENTINEL}-click`)} -- replacing webSingleCell's "M"`);
+      } else {
+        no(check('webClickNoCopy'), `a click is being taken as a selection: ${clickWhy.join('; ')}`,
+          clicked !== '' ? `${clicked}; ${extent}`
+            : `the clipboard reads ${JSON.stringify(clickRun.clip)}, the page sent `
+              + `${JSON.stringify(clickRun.frames)}, the gateway logged ${JSON.stringify(clickLogs)}; `
+              + `${extent}`);
       }
 
       // ===== webNativeCopy =====================================================================
