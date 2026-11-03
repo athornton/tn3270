@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-03 (web copy works on every gesture at every address, on an UNMERGED branch)
+# Handoff — state as of 2026-11-03 (web copy works on every gesture at every address, and one character is selectable, on an UNMERGED branch)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -11,6 +11,31 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 merge — do not merge until the user reports it.** Spec and plan:
 `docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
 `docs/superpowers/plans/2026-11-02-fetch-ahead-copy.md` (Task 10 Step 3 is the live pass).
+
+### LATEST, 2026-11-03: THE MAC PASS CAME BACK, AND IT FOUND A SINGLE CHARACTER UNSELECTABLE — FIXED
+
+- **The user's Mac pass:** `Cmd-C` copies correctly in **Safari and Firefox**, at a plain LAN
+  address and over a localhost tunnel. Edit > Copy, `Cmd-Shift-C` and Mac Chromium were not
+  reported. One **unreproduced** Firefox glitch (the first `Cmd-C` after load missed the pasteboard
+  though `selection: sent N chars` was logged) is recorded in `docs/live-testing.md` with what to
+  note if it recurs.
+- **The defect it found:** the smallest selection was two cells, because `isEmptyRect` called any
+  1x1 rectangle a click. **Fixed in `f48b4c6`:** click-or-drag is now decided by MOVEMENT. A press
+  becomes a drag once the pointer moves 4 CSS px (`selection.ts`'s `movedPastThreshold`, Chromium's
+  threshold), even within one cell. The renderer records the press in `clientX/clientY` and a
+  latched `moved` flag (reset by `clearSelection()`), and ONE predicate, `selectedRect()`, gates the
+  highlight, the prefetch, `copySelection` and `cachedSelection`. `isEmptyRect` is deleted. The
+  Electron GUI shares the renderer and changed the same way, on purpose.
+- **Gate on `f48b4c6`:** build and typecheck exit 0; **2654 tests in 111 files**; `browser-clicks`
+  **18/18** (new `webSingleCell`, `webClickNoCopy`); `browser-keys` 13 chords/10 actions;
+  `browser-shot` 1/1; `browser-lan-copy` 2/2; GUI `keys` 22 chords/20 actions, `clicks` 9 buttons,
+  **`select` 4/4** (new one-cell case), `shot` 2/2 (goldens unmoved), `transfer` 10/10; 0 leaked
+  Electron processes after every harness. `pty-smoke` was not re-run (no TUI change).
+- **Mutation-checked:** `DRAG_THRESHOLD_PX = 0`, and `selectedRect()` without `moved`, each fail
+  only `webClickNoCopy` (17/18); the old 1x1 gate fails `webSingleCell` (17/18) and `select`'s new
+  case (3/4); the threshold check moved below mousemove's same-cell return fails `select` 3/4.
+- **Still owed live:** select one character in Safari and Firefox; confirm a plain click still
+  selects nothing; and the rest of the owed pass below.
 
 ### WHAT SHIPPED
 
@@ -30,7 +55,7 @@ merge — do not merge until the user reports it.** Spec and plan:
   emptied the cache, and the second press did nothing.
 - Unchanged: `Ctrl-C` is Clear; right-click offers only "Copy Image"; **the Electron GUI** — its
   preload has no `fetchSelection` (an OPTIONAL fifth `BridgeApi` member), so it never caches and
-  always uses its menu/IPC copy. GUI `select` 3/3 is the witness.
+  always uses its menu/IPC copy. GUI `select` 3/3 is the witness (4/4 since `f48b4c6`).
 - **The bridge processes inbound messages strictly in arrival order.** MEASURED: they could complete
   out of order under Node's `DecompressionStream` (183/200), never in Electron 44's Chromium
   (0/200). Firefox and Safari unmeasured.

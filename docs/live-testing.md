@@ -298,12 +298,13 @@ and the Recording log says what happened when they were run.
   `sendAction`, the IPC hop, main's `extractText` over `resolve(snapshot)`, `clipboard.writeText`,
   and then the OS clipboard **read back through Electron**. **3/3 cases, asserting the EXACT text**
   against the replayed fixture's screen: one row with trailing blanks trimmed (`" MENU"`), two rows
-  joined by a newline, and a column out of the middle of a row. Nothing short of the read-back is
+  joined by a newline, and a column out of the middle of a row. *(4/4 since 2026-11-03: a fourth
+  case drags inside ONE cell and copies `"M"`.)* Nothing short of the read-back is
   honest — every earlier step can pass while the text never reaches the clipboard.
 
   ```bash
   npm run build && npx tsc --build --force packages/gui packages/web
-  node packages/gui/scripts/select.mjs        # 3/3 selection cases passed
+  node packages/gui/scripts/select.mjs        # 4/4 selection cases passed (3/3 before 2026-11-03)
   ```
 
   **The mutation that makes that number mean something.** Put `if (Date.now() > 0) return;` at the
@@ -480,6 +481,34 @@ and the Recording log says what happened when they were run.
     reach our listener. If either browser does that, the fix belongs in `copyByChord`.
   - **The 2026-11-02 Mac `Cmd-C` witness predates this branch**, which changed `forwardCopy`'s
     cached branch to call `preventDefault`. It must be re-witnessed, not inherited.
+
+  **THE MAC PASS ON `fetch-ahead-copy`, BY THE USER, 2026-11-03 — `Cmd-C` COPIES IN SAFARI AND
+  FIREFOX.** Both browsers copied the selected text correctly by `Cmd-C`, both at a **plain LAN
+  address** and **over a localhost tunnel**. That re-witnesses, on this branch's `preventDefault`,
+  the 2026-11-02 `Cmd-C` result the owed list said must not be inherited, and it answers the LAN
+  half of "the one item no harness here can settle" for `Cmd-C` in both browsers. Not covered by
+  this report: Edit > Copy and `Cmd-Shift-C` in each, and Chromium on the Mac.
+
+  - **AN UNREPRODUCED OBSERVATION, RECORDED SO IT IS NOT LOST.** Once, in **Firefox on the Mac**,
+    the **first `Cmd-C` after page load** did not reach the pasteboard, although the gateway had
+    logged `selection: sent N chars to the browser` for the drag; later copies in the same page
+    worked. It could not be reproduced, and the user wrote it off as possible operator error. It
+    is also the exact shape `copyByChord`'s docstring names as the residual risk (an event that
+    reaches our listener while the browser drops its data), so **if it recurs, note: which gesture
+    (`Cmd-C`, `Cmd-Shift-C` or Edit > Copy); whether the gateway printed a `copy:` line for it (one
+    means the fallback ran, none means the cached path ran); and whether it is only the FIRST copy
+    after a page load, or the first copy after EVERY drag.**
+  - **THE SAME PASS FOUND THAT A SINGLE CHARACTER COULD NOT BE SELECTED**, in both browsers: the
+    smallest selection was two cells. The cause was `canvas/src/selection.ts`'s `isEmptyRect`
+    (`5edaff5`, 2026-10-05), which called every 1x1 rectangle a click so a stray click would not
+    arm a one-character copy. **FIXED the same day on this branch:** a press is now a drag once
+    the pointer has moved 4 CSS px from it (`movedPastThreshold`, Chromium's own drag threshold off
+    macOS), even inside one cell, so a plain click still selects nothing and a nudge on one
+    character selects it. This is the shared renderer, so the Electron GUI changed the same way.
+    Machine-checked: GUI `select.mjs` 4/4 (new: one cell, 5 px move, copies `"M"`) and
+    `browser-clicks` 18/18 (new `webSingleCell`, and `webClickNoCopy`: a 2 px move leaves the
+    clipboard holding its sentinel). **Owed live: select one character in Safari and Firefox, and
+    confirm a plain click on the screen still selects and highlights nothing.**
 
   **What a human still owes on copy and paste, and only these:**
 
