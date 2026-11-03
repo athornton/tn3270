@@ -353,8 +353,9 @@ export interface ForwardCopyDeps {
  *   - CACHED: the text is set on the event's own `clipboardData`, synchronously, inside the event.
  *     That needs no secure context and no activation window, which is what makes copy work at a
  *     plain-`http` LAN address, where `navigator.clipboard` does not exist.
- *   - NOT CACHED (the prefetch has not answered, failed, or this host has no `fetchSelection`):
- *     a second trigger for `copySelection`, the async path. The text goes to the gateway as
+ *   - NOT CACHED -- the prefetch has not answered yet, or failed; the selection changed or was
+ *     cleared before its answer landed; or the event carries no `clipboardData` -- a second
+ *     trigger for `copySelection`, the async path. The text goes to the gateway as
  *     `{kind:'copy', rect}` and comes back as `copyText`, exactly as before.
  * MEASURED 2026-10-27 in Chromium: the `copy` event fires `isTrusted` with no DOM selection, so it
  * reaches the page even though nothing is selected in the document.
@@ -363,7 +364,8 @@ export interface ForwardCopyDeps {
  *
  * `keys.ts` claims `Ctrl-C` as Clear and `renderer.ts` calls `preventDefault` on it. MEASURED
  * 2026-10-27: that suppresses the `copy` event entirely, so on Linux and Windows the native copy key
- * stays the Clear AID and only the menu route arrives here. `Cmd-C` is unclaimed, so it does arrive.
+ * stays the Clear AID: only the menu route and `Ctrl-Shift-C`'s own `execCommand('copy')` (raised
+ * by `renderer.ts`'s `copyByChord`) arrive here. `Cmd-C` is unclaimed, so it does arrive.
  *
  * ## `preventDefault` ONLY WHEN TEXT WAS SET
  *
@@ -391,16 +393,18 @@ export function forwardCopy(deps: ForwardCopyDeps): void {
     if (isEditableTarget(e.target)) return;
     deps.onHandled();
     const text = deps.cached();
-    if (text !== undefined && e.clipboardData) {
+    // `''` FALLS BACK TOO: set and cancelled, it would write an EMPTY clipboard. `copyCache` never
+    // holds one, but this module does not lean on that.
+    if (text !== undefined && text !== '' && e.clipboardData) {
       // THE SYNCHRONOUS PATH: no secure context needed, no activation window. `preventDefault` is
       // what makes the browser write the data just set -- correct here, and only here.
       e.clipboardData.setData('text/plain', text);
       e.preventDefault();
       return;
     }
-    // Nothing prefetched yet: the async path. NO `preventDefault`, for the reason in the
-    // docstring. The return value is discarded, as the `requestCopy` keydown arm discards it: no
-    // selection means nothing to copy, and that is not worth a message.
+    // Nothing cached for this selection, or no `clipboardData` to set it on: the async path. NO
+    // `preventDefault`, for the reason in the docstring. The return value is discarded, as
+    // `copyByChord` discards it: no selection means nothing to copy, not worth a message.
     deps.copySelection();
   });
 }

@@ -427,6 +427,26 @@ describe('forwardCopy, the browser\'s own copy gesture (Cmd-C, Edit > Copy)', ()
     f.fire(copyEv({ noData: true }));
     expect(f.prevented).toEqual([]);
     expect(f.fallbacks).toHaveLength(1);
+    // HANDLED, though it fell back: otherwise `copyByChord` would fall back AGAIN and the gateway
+    // would get `{kind:'copy'}` twice for one keystroke.
+    expect(f.handled).toHaveLength(1);
+  });
+
+  /*
+    AN EMPTY STRING IS NOT CACHED TEXT. `copyCache` never stores '', but `cached` is a dep and this
+    module must not lean on that: setting '' and cancelling would write an EMPTY clipboard, the very
+    thing the fallback's no-`preventDefault` rule exists to avoid. MEASURED 2026-11-03: the first
+    version tested `text !== undefined` alone, and this case failed on it.
+  */
+  it('falls back on an empty cached string rather than setting it', () => {
+    const f = fakeCopy('https:', '');
+    forwardCopy(f.deps);
+    const set: Array<[string, string]> = [];
+    f.fire(copyEv({ set }));
+    expect(set).toEqual([]);
+    expect(f.prevented).toEqual([]);
+    expect(f.fallbacks).toHaveLength(1);
+    expect(f.handled).toHaveLength(1);
   });
 
   it('skips a copy aimed at a form control, so the transfer form copies its own text', () => {

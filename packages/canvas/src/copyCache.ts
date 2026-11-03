@@ -13,10 +13,17 @@ import type { CellRect } from './selection.js';
  *
  * THE GENERATION, NOT TIMING, IS WHAT KEEPS A STALE ANSWER OUT. `invalidate()` and every `begin()`
  * bump it, and `accept` drops any answer whose generation is not current -- including one for the
- * same rect over a screen that has since changed. In `invalidate()`, the gen bump, clearing
- * `asked`, and clearing `text` are each independently sufficient to block a stale accept and to
- * make `take` answer undefined -- this is defence in depth, not one mechanism relying on the
- * others.
+ * same rect over a screen that has since changed.
+ *
+ * IN `invalidate()` THE THREE LINES ARE NOT EQUIVALENT, MEASURED 2026-11-03 by keeping each one
+ * alone against two probes (text accepted BEFORE the invalidate; an answer accepted AFTER it):
+ *   - the gen bump alone leaves already-accepted text readable -- `take` never looks at `gen`;
+ *   - clearing `text` alone lets a late `accept` for the old gen repopulate it, and `take` then
+ *     returns it, because `asked` still names the rect;
+ *   - clearing `asked` alone passes both, since `take` refuses without it -- the one line that
+ *     suffices by itself.
+ * The other two are kept anyway: the gen bump is what stops a late answer landing in `text` at all,
+ * which keeps the state honest for whoever reads it next, and clearing `text` drops the string.
  */
 export interface CopyCache {
   /** A drag ended on `rect`. Returns the generation its answer must carry. */

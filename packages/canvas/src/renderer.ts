@@ -98,9 +98,12 @@ let dragging = false;
  * selection dies, which is `clearSelection()` below and a new press on the screen, so a frame from
  * the host (whose `onFrame` calls `clearSelection()`) can never leave text for a vanished screen.
  *
- * ONLY EVER FILLED ON THE WEB GATEWAY: `prefetchSelection` returns at once when the bridge has no
- * `fetchSelection`, which is the Electron GUI's case, so there it stays empty and every copy
- * gesture takes the path it took before this existed.
+ * ONLY EVER FILLED ON THE GATEWAY'S PAGE: `prefetchSelection` returns at once when the bridge has
+ * no `fetchSelection`, which is the Electron GUI's normal `file:` window, so there it stays empty
+ * and every copy gesture takes the path it took before this existed. Electron's `TN3270_GUI_URL`
+ * mode is NOT that case: it loads the gateway's page with the gateway's bridge (no preload), so
+ * the cache fills and `copyByChord` runs `execCommand` there. That is web behaviour by design --
+ * the window is a browser on the gateway, and its copy reaches the gateway's `selection` arm.
  */
 const copyCache = createCopyCache();
 /**
@@ -281,6 +284,12 @@ window.tn3270.onError((message) => {
   // never compared against a golden, and must stay readable at any window size.
   if (canvas === null || real === null) return;
   errored = true;
+  // THE SELECTION DIES WITH THE SCREEN IT DESCRIBED, and its prefetched text with it. The message
+  // paints over the whole canvas, so the highlight is no longer visible -- yet without this, Cmd-C
+  // or the chord after a socket close or a "copy failed" message would copy cached text from a
+  // screen the operator can no longer see. Nothing needs the selection to survive: the mousedown
+  // guard refuses new drags while `errored`, and the next frame would clear it anyway.
+  clearSelection();
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   real.fillStyle = '#000';
@@ -550,7 +559,8 @@ function release(): void {
  */
 function prefetchSelection(): void {
   const fetchSelection = window.tn3270.fetchSelection;
-  if (fetchSelection === undefined || anchor === null || focus === null) return;
+  // NOT WHILE AN ERROR IS UP: `onError` cleared the selection, and nothing on screen to copy.
+  if (errored || fetchSelection === undefined || anchor === null || focus === null) return;
   const rect = normalizeRect(anchor, focus);
   if (isEmptyRect(rect)) return;
   const gen = copyCache.begin(rect);
@@ -596,10 +606,12 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
 /**
  * Copy the current selection, or do nothing and say so.
  *
- * THE ONLY PLACE IN THIS FILE THAT BUILDS A COPY RECTANGLE, and it must stay that way. There are
- * now TWO callers -- the `window.__tn3270Copy` global below and the keydown listener's
- * `requestCopy` arm above -- and the empty-selection rule, the normalization and the action's shape
- * are one decision each. A second copy of this body is a second place for them to drift.
+ * THE ONLY PLACE IN THIS FILE THAT BUILDS A COPY ACTION'S RECTANGLE, and it must stay that way.
+ * There are now THREE callers -- the `window.__tn3270Copy` global below, `copyByChord` (the keydown
+ * listener's `requestCopy` arm, as its fallback) and `forwardCopy`'s `copy` listener (also as its
+ * fallback) -- and the empty-selection rule, the normalization and the action's shape are one
+ * decision each. (`prefetchSelection` and `cachedSelection` normalize too, but to key the cache,
+ * not to send a copy.) A second copy of this body is a second place for them to drift.
  *
  * NAMED AND HOISTED rather than assigned to a `const`: the keydown listener's arm sits ~200 lines
  * ABOVE this declaration, which a `const` arrow would put in its temporal dead zone at module
@@ -619,13 +631,16 @@ window.addEventListener('resize', () => { if (last !== undefined) paint(last); }
  * arm's comment. A copy leaves the screen untouched, so the highlight it just read is still an
  * honest description of what is on it, and an operator who copies twice gets the same text twice.
  *
- * THAT LAST SENTENCE IS MACHINE-CHECKED AS OF 2026-10-27, and only in one place:
+ * THAT LAST SENTENCE WAS MACHINE-CHECKED FROM 2026-10-27 UNTIL THE PREFETCH LANDED, 2026-11-02:
  * `web/scripts/browser-clicks.mjs`'s `webCopy` presses the real chord TWICE over two different
- * clipboard sentinels with no second drag. NO UNIT TEST CAN REACH IT -- this file touches `window`
- * at module load, so nothing imports it -- and `test/renderer-imports.test.ts`'s order pin does
- * NOT cover it either: adding a `clearSelection()` AFTER this call inside that arm keeps the
- * pinned order intact. MEASURED on exactly that mutant: all 2614 unit tests passed and `webCopy`
- * was the only failure.
+ * clipboard sentinels with no second drag. MEASURED then on the mutant that adds a
+ * `clearSelection()` AFTER this call inside the arm: all 2614 unit tests passed and `webCopy` was
+ * the only failure. IT NO LONGER EXERCISES THIS FUNCTION: with the text prefetched, both presses
+ * take `copyByChord`'s synchronous path and never call `copySelection()`, so what `webCopy` now
+ * checks is that the CACHED path keeps the selection. Task 7's planned `webCopyFallback` check is
+ * meant to cover the async path here; until it exists and has been run against that mutant,
+ * nothing does. NO UNIT TEST CAN REACH IT -- this file touches `window` at module load, so nothing
+ * imports it -- and `test/renderer-imports.test.ts`'s order pin does not cover it either.
  */
 function copySelection(): boolean {
   if (anchor === null || focus === null) return false;
@@ -660,6 +675,12 @@ function cachedSelection(): string | undefined {
  * ONLY WITH TEXT CACHED, and that is not an optimization. The cache is filled only where the bridge
  * has `fetchSelection` (the web gateway), so in the Electron GUI this never calls `execCommand` at
  * all, and the page's default copy of an empty DOM selection never runs there.
+ *
+ * THE RESIDUAL RISK, NOT YET MEASURED. `copyHandled` says the `copy` EVENT reached our listener,
+ * not that the browser then honoured the data it set. A browser that dispatches the event but
+ * refuses the clipboard write -- Firefox and Safari are unmeasured -- leaves `copyHandled` true, so
+ * this returns without falling back and that copy is lost SILENTLY. The live pass is what will
+ * tell; if it happens, the fix belongs here, not in `forwardCopy`.
  */
 function copyByChord(): void {
   if (cachedSelection() !== undefined) {
