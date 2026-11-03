@@ -25,8 +25,11 @@
  * ## SKIPPED IS NOT A PASS
  *
  * With no non-loopback IPv4 there is no address at which the page is non-secure, so the run prints
- * `SKIPPED` and exits 0. That exit status means "could not check", NOT "copy works": a SKIPPED run
- * proves nothing about the feature, and must not be read as green.
+ * `SKIPPED` and EXITS 77, automake's skip status, and never 0: a wrapper that reads only the exit
+ * status must not be able to score it green. A SKIPPED run means "could not check", NOT "copy
+ * works", and proves nothing about the feature.
+ *
+ * AN IPv6-ONLY HOST IS SKIPPED TOO, though one could reach a non-secure page: only IPv4 is looked for.
  *
  * Not in `npm test`; run it by hand, like its neighbours:
  *
@@ -92,7 +95,8 @@ const REBUILD = 'run: npm run build';
 for (const entry of [guiMain, webMain]) {
   if (!existsSync(entry)) refuse(`there is no ${entry} to run`, REBUILD);
 }
-for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
+// `core` TOO: the gateway's text extraction, which every expected string here depends on, imports it.
+for (const pkg of ['core', 'gui', 'canvas', 'web', 'frontend']) {
   const root = join(repo, 'packages', pkg);
   if (!existsSync(join(root, 'dist'))) {
     refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`, REBUILD);
@@ -110,7 +114,7 @@ const lan = Object.values(networkInterfaces()).flat()
 if (lan === undefined) {
   console.log('SKIPPED  no non-loopback IPv4 address, so a non-secure context cannot be reached from here');
   console.log('         (SKIPPED is NOT a pass: copy at a LAN address was not checked)');
-  process.exit(0);
+  process.exit(77);
 }
 
 /**
@@ -125,9 +129,15 @@ if (lan === undefined) {
 async function openCdp(port) {
   // The page target, polled rather than slept for: Electron answers `/json/list` before the
   // renderer has a target to list.
+  //
+  // EACH FETCH IS BOUNDED, AND THE LOOP BY THE CLOCK -- a departure from `browser-clicks.mjs`'s
+  // copy, whose fetch has no timeout: a DevTools port that accepts and never answers would hang
+  // that loop forever. With a per-fetch timeout a step-counted loop could overrun its 20s by the
+  // timeout times the step count, so the deadline is wall-clock.
   let target;
-  for (let waited = 0; waited < 20000 && target === undefined; waited += 200) {
-    const list = await fetch(`http://127.0.0.1:${port}/json/list`)
+  for (const deadline = Date.now() + 20000; Date.now() < deadline && target === undefined;) {
+    const list = await fetch(`http://127.0.0.1:${port}/json/list`,
+      { signal: AbortSignal.timeout(2000) })
       .then((r) => r.json()).catch(() => []);
     target = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl !== undefined);
     if (target === undefined) await new Promise((r) => { setTimeout(r, 200); });
@@ -153,9 +163,9 @@ async function openCdp(port) {
 
   const cmd = (method, params = {}) => new Promise((resolveP, rejectP) => {
     const id = ++nextId;
-    // BOUNDED. A mistyped domain never answers at all, and an unbounded await here would hang
-    // the whole run until the 120s kill -- which reads as a broken browser rather than a broken
-    // harness. Every other wait in this file is bounded for the same reason.
+    // BOUNDED. A mistyped domain never answers at all, and this file has no global kill, so an
+    // unbounded await here would hang the run forever -- which reads as a broken browser rather
+    // than a broken harness. The `/json/list` fetch above is bounded for the same reason.
     const timer = setTimeout(() => {
       pending.delete(id);
       rejectP(new Error(`${method} did not answer within 20s`));
@@ -194,10 +204,14 @@ const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
  * env as the browser, so it reads the SAME X display. Bounded and SIGKILLed on timeout: the real
  * binary, so the kill takes its children with it (see `xvfb.mjs`).
  */
+let readerChild;
+let readerProfile;
 const readClipboard = () => new Promise((resolveP) => {
   const profile = mkdtempSync(join(tmpdir(), 'tn3270-read-clipboard-'));
   const r = spawn(electron, [reader, ...ELECTRON_ARGV, `--user-data-dir=${profile}`],
     { env: guiEnv() });
+  readerChild = r;
+  readerProfile = profile;
   let out = '';
   r.stdout.setEncoding('utf8');
   r.stderr.setEncoding('utf8');
@@ -206,6 +220,8 @@ const readClipboard = () => new Promise((resolveP) => {
   const timer = setTimeout(() => { r.kill('SIGKILL'); }, 15000);
   const finish = (why) => {
     clearTimeout(timer);
+    readerChild = undefined;
+    readerProfile = undefined;
     rmSync(profile, { recursive: true, force: true });
     const m = /^CLIP=(.*)$/m.exec(out);
     resolveP(m !== null ? JSON.parse(m[1]) : `READER FAILED (${why}): ${out.trim()}`);
@@ -242,11 +258,15 @@ const waitForLog = async (mark, matches, ms = 6000) => {
   return logsSince(mark);
 };
 
+/** Set by a signal: the kills it makes then fail whatever was running, and that is not news. */
+let interrupted = false;
+
 const CHECKS = ['lanChord', 'lanCommand'];
 let passed = 0;
 const done = new Set();
-const ok = (name, detail) => { passed += 1; done.add(name); console.log(`ok       ${name}: ${detail}`); };
+const ok = (name, detail) => { if (interrupted) return; passed += 1; done.add(name); console.log(`ok       ${name}: ${detail}`); };
 const no = (name, why, detail = '') => {
+  if (interrupted) return;
   done.add(name);
   console.log(`FAIL     ${name}: ${why}`);
   if (detail !== '') console.log(`         ${detail}`);
@@ -257,6 +277,43 @@ let child;
 let childOut = '';
 let cdp;
 let fatal = false;
+
+/**
+ * Every process and directory this run made, killed and removed. The `finally` below and the
+ * signal handlers share it.
+ *
+ * AND WAITED FOR, bounded: MEASURED on this file's first run, a leak count taken the instant this
+ * process exited still saw six `electron` processes on their way out. Waiting for `close` makes
+ * "nothing left running" true when the total prints, not a moment later -- and lets the browser
+ * stop writing into `profile` before it is removed.
+ */
+const cleanup = async () => {
+  cdp?.close();
+  const closed = (p) => (p === undefined || p.exitCode !== null || p.signalCode !== null
+    ? Promise.resolve()
+    : new Promise((r) => { p.on('close', r); setTimeout(r, 5000); }));
+  const procs = [child, server, readerChild];
+  for (const p of procs) p?.kill('SIGKILL');
+  await Promise.all(procs.map(closed));
+  for (const dir of [profile, readerProfile]) {
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+/**
+ * Ctrl-C AND `kill`, WHICH SKIP THE `finally`. Without these an interrupted run left its
+ * `tn3270-browser-lan-copy-*` profile in `/tmp`, and its Electron and gateway running until the
+ * terminal closed. `browser-clicks.mjs` has no handlers, so there is no precedent to match; the
+ * exit statuses are the shell's own `128 + signal`.
+ */
+for (const [sig, status] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(sig, () => {
+    interrupted = true;
+    console.log(`\nINTERRUPTED by ${sig}: killing the browser and the gateway; this run proves nothing`);
+    void cleanup().finally(() => { process.exit(status); });
+  });
+}
+
 try {
   // The PORT off the `serving ... at http://YOUR-HOST:PORT/` line: with `--bind 0.0.0.0` the
   // gateway prints a placeholder host, not an address, so only the port is taken from it.
@@ -301,7 +358,8 @@ try {
   await cdp.cmd('Runtime.enable');
 
   // `window.tn3270` is the last thing `bridge.js` assigns, and a non-null cell centre means the
-  // renderer has a frame to select from. No reload and no probe: nothing here wraps the socket.
+  // renderer has a frame to select from. NO PROBE IS INSTALLED, so unlike `browser-clicks.mjs` no
+  // reload is needed before the first read; `copyCase` reloads before each case for its own reason.
   // A throw mid-reload ("the page threw", or a context destroyed under the evaluate) is retried,
   // not reported: only the deadline is a failure.
   const waitReady = async () => {
@@ -369,7 +427,7 @@ try {
    * makes the CACHED path the one measured; a `copy:` line after the gesture means the async
    * fallback ran instead, which cannot write anything here and is named if it shows up.
    */
-  const copyCase = async (name, rect, want, gesture, describe) => {
+  const copyCase = async (name, rect, want, gesture, describe, byCommand = false) => {
     /*
       A FRESH DOCUMENT PER CASE, SO NEITHER CASE'S RESULT DEPENDS ON THE OTHER'S -- MEASURED while
       mutation-proving this file. With `copyByChord`'s `execCommand` deleted, `lanChord` fell back,
@@ -379,6 +437,25 @@ try {
     */
     await cdp.cmd('Page.reload');
     await waitReady();
+    /*
+      EVERY `copy` EVENT, AND WHETHER IT FIRED INSIDE A KEYDOWN DISPATCH -- installed AFTER the
+      reload, so on the document under test. A count alone cannot tell the browser's copy COMMAND
+      from `copyByChord`: its `execCommand('copy')` raises the same event. The difference is WHEN.
+      `execCommand` runs inside the renderer's keydown listener, so its event fires DURING the
+      dispatch; the command runs after the keydown is done. The capture-phase keydown listener
+      opens that window and a bubble-phase one closes it, registered after the renderer's
+      listener on the same target and so run after it.
+    */
+    await cdp.eval(`(() => {
+      const C = { events: 0, duringKeydown: 0, inKeydown: false };
+      window.__tn3270LanCopy = C;
+      window.addEventListener('keydown', () => { C.inKeydown = true; }, true);
+      window.addEventListener('keydown', () => { C.inKeydown = false; });
+      window.addEventListener('copy', () => {
+        C.events += 1;
+        if (C.inKeydown) C.duringKeydown += 1;
+      }, true);
+    })()`);
     const mark = serverOut.length;
     const dragged = await dragCells(...rect);
     if (dragged !== '') { no(name, dragged); return; }
@@ -397,7 +474,13 @@ try {
     await gesture();
     const clip = await pollClipboard(want);
     const after = logsSince(gestureMark);
+    const ev = await cdp.eval('JSON.stringify(window.__tn3270LanCopy)').then(JSON.parse);
+    const route = `${ev.events} copy event(s), ${ev.duringKeydown} inside the keydown dispatch`;
     const why = [
+      ev.events >= 1 ? '' : 'the gesture raised NO copy event in the page, so nothing set clipboardData',
+      !byCommand || ev.events === 0 || ev.duringKeydown === 0 ? ''
+        : 'a copy event fired INSIDE the keydown, so the CHORD path (execCommand) served this, '
+          + 'not the browser\'s copy command -- check that keys.ts does not claim Meta+C',
       prefetch === `selection: sent ${want.length} chars to the browser` ? ''
         : `the gateway did not log the prefetch (want "selection: sent ${want.length} chars to the `
           + `browser", logged ${JSON.stringify(dragLogs)})`,
@@ -407,11 +490,11 @@ try {
       clip === want ? '' : `the OS clipboard reads ${JSON.stringify(clip)}, want ${JSON.stringify(want)}`,
     ].filter((w) => w !== '');
     if (why.length === 0) {
-      ok(name, `${describe} put ${JSON.stringify(clip)} on the OS clipboard over `
+      ok(name, `${describe} raised ${route} and put ${JSON.stringify(clip)} on the OS clipboard over `
         + `${JSON.stringify(prior)}, in a page with isSecureContext=${secure} and no `
         + `navigator.clipboard; the gateway logged ${JSON.stringify(prefetch)} at drag end`);
     } else {
-      no(name, why.join('; '), `gateway after the gesture: ${JSON.stringify(after)}`);
+      no(name, why.join('; '), `${route}; gateway after the gesture: ${JSON.stringify(after)}`);
     }
   };
 
@@ -434,8 +517,9 @@ try {
         ...(type === 'rawKeyDown' ? { commands: ['copy'] } : {}),
       });
     }
-  }, "Meta+C with commands:['copy'] over a drag of (0,0)-(0,11)");
+  }, "Meta+C with commands:['copy'] over a drag of (0,0)-(0,11)", true);
 } catch (err) {
+  if (interrupted) await new Promise(() => {}); // the handler exits; print nothing it caused
   console.log(`FAIL     ${fatal ? '' : 'the check could not be driven: '}${err.message}`);
   if (!fatal) {
     process.stdout.write(childOut);
@@ -444,20 +528,13 @@ try {
   }
 } finally {
   /** 8. Both processes, always. The REAL Electron binary, so SIGKILL takes its children too. */
-  // AND WAITED FOR, bounded: MEASURED on this file's first run, a leak count taken the instant this
-  // process exited still saw six `electron` processes on their way out. Waiting for `close` makes
-  // "nothing left running" true when the total prints, not a moment later.
-  cdp?.close();
-  const closed = (p) => (p === undefined || p.exitCode !== null || p.signalCode !== null
-    ? Promise.resolve()
-    : new Promise((r) => { p.on('close', r); setTimeout(r, 5000); }));
-  child?.kill('SIGKILL');
-  server.kill('SIGKILL');
-  await Promise.all([closed(child), closed(server)]);
-  rmSync(profile, { recursive: true, force: true });
+  await cleanup();
 }
 
-// A check that never reported is a failure, not an absence: a throw above skips both.
+if (interrupted) await new Promise(() => {}); // the signal handler owns the exit
+
+// A check that never reported is a failure, not an absence: a throw in setup skips both, and a throw
+// inside `lanChord` skips `lanCommand` too, since the cases run in sequence in one `try`.
 for (const name of CHECKS) {
   if (!done.has(name)) console.log(`FAIL     ${name}: never ran, so it proves nothing`);
 }
