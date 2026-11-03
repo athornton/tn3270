@@ -446,7 +446,7 @@ and the Recording log says what happened when they were run.
   `clipboardData.setData` + `preventDefault`, which needs neither user activation nor a secure
   context. `Ctrl-Shift-C` raises the same event via `execCommand('copy')`. With nothing cached the
   old async path still runs as the fallback. Machine-checked in Chromium only: `browser-clicks`
-  15/15 over loopback, `browser-lan-copy` 2/2 at a plain-`http` LAN address. The record below is
+  16/16 over loopback, `browser-lan-copy` 2/2 at a plain-`http` LAN address. The record below is
   kept as the measurement that motivated it.
 
   **MENU COPY DOES NOT WORK, AND THAT IS A LIMIT OF THE DESIGN, NOT A REGRESSION.** *(Superseded,
@@ -467,10 +467,11 @@ and the Recording log says what happened when they were run.
   **Firefox, Safari and Chromium**, each **at a plain-`http` LAN address AND over `localhost`**:
   drag a selection, then try **`Ctrl-Shift-C` / `Cmd-Shift-C`**, **`Cmd-C`** (Mac) and **Edit >
   Copy**, and paste each somewhere else. Every one should paste the selected text. Watch the
-  gateway's stderr: a drag end logs `selection: sent N chars to the browser`, and **a copy served
+  gateway's stdout: a drag end logs `selection: sent N chars to the browser`, and **a copy served
   from the cache logs NO `copy:` line**. A `copy: sent N chars` line means the fallback ran; on a
   plain-`http` LAN page that fallback should paint `copy failed: use https (--tls-cert) or
-  localhost ...`, and pressing again should then work. Also confirm on Linux that `Ctrl-C` still
+  localhost ...` as a notice that keeps the selection; pressing again, with no re-drag, should then
+  copy once the drag's `selection:` line has appeared, and bring the screen back with the highlight. Also confirm on Linux that `Ctrl-C` still
   Clears and leaves the clipboard alone, and that right-click still offers only "Copy Image".
   - **THE ONE ITEM NO HARNESS HERE CAN SETTLE: Firefox and Safari BOTH on a plain-`http` LAN
     address.** Only Chromium is machine-checked there (`browser-lan-copy` 2/2). The residual risk is

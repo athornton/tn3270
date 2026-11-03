@@ -285,7 +285,8 @@ export function buildServer(args: WebArgs) {
 
         THIS ARM ALWAYS REPLIES, EVEN WHEN `text` IS `''`, AND THAT IS NOT AN OVERSIGHT TO
         "HARMONISE" WITH `copy`'s `if (text !== '')` BELOW. The browser matches this reply to a
-        PENDING PROMISE by `seq` (`packages/canvas/src/copyCache.ts`); `copy` has no such promise,
+        PENDING PROMISE by `seq` (`fetchSelection` in `packages/web/src/bridgecore.ts`; `copyCache.ts` then
+        keys the answer by a generation counter, not the seq); `copy` has no such promise,
         only a clipboard write it is free to skip. Skip the reply here on an empty selection and
         that promise never resolves -- a leaked, permanently-pending prefetch on every blank-region
         drag, not merely a missed optimization. `copyCache.ts`'s `accept` already treats an empty
@@ -294,7 +295,7 @@ export function buildServer(args: WebArgs) {
 
         NO REPAINT. Nothing on the screen changed, so no `frame` is owed on its own account -- but
         unlike `copy`, which has no repaint call either, this arm's silence matters for a second
-        reason: `canvas/src/renderer.ts:252`'s `onFrame` handler calls `clearSelection()` on EVERY
+        reason: `canvas/src/renderer.ts`'s `onFrame` handler calls `clearSelection()` on EVERY
         frame it is handed, so a frame sent here (e.g. by a reflexive `repaint?.()`) would
         invalidate the very selection the operator just finished dragging and silently disable the
         cache on every drag, not just this one. The real ordering requirement is that a frame for a

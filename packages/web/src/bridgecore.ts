@@ -2,12 +2,13 @@
  * The browser side of the bridge, with the browser injected.
  *
  * Supplies exactly what `preload.cts` supplies over IPC -- `onAtlas`, `onFrame`, `onError`,
- * `sendAction` -- so `renderer.ts` is reused UNMODIFIED. Those four are the REQUIRED width, and
+ * `sendAction` -- so ONE `renderer.ts` serves both clients. Those four are the REQUIRED width, and
  * that is what this file's "four-function rule" means wherever it is cited below.
- * `BridgeApi` grew a fifth member on 2026-11-02, `fetchSelection`, and it is OPTIONAL for exactly
- * this reason: `preload.cts` does not implement it, so `renderer.ts` -- which WILL be modified to
- * call it -- will test for it first, and the one renderer stays shared between both clients. A
- * fifth REQUIRED member would mean it had stopped being shared.
+ * `BridgeApi` grew a fifth member on 2026-11-02, `fetchSelection`, and a sixth on 2026-11-03,
+ * `onCopyFailed`, and both are OPTIONAL for exactly this reason: `preload.cts` implements neither,
+ * so `renderer.ts` -- which was modified to use them -- tests for each before calling it, and the
+ * one renderer stays shared between both clients. A REQUIRED member beyond the four would mean it
+ * had stopped being shared.
  *
  * THAT RULE IS ABOUT `BridgeApi` AND NOT ABOUT THIS FILE'S EXPORTS, which is worth spelling out
  * because the two have drifted: `socketUrl` and `writeClipboard` are exported plain functions
@@ -217,7 +218,7 @@ export interface BridgeApi {
    *
    * OPTIONAL, AND THAT IS WHAT KEEPS `renderer.ts` SHARED BETWEEN BOTH CLIENTS: Electron's
    * `preload.cts` does not expose it, and the GUI's main process has no reply path that could
-   * answer one, so the renderer WILL test for it and prefetch only where it exists. (Not "an
+   * answer one, so the renderer tests for it and prefetches only where it exists. (Not "an
    * unknown IPC kind freezes main", which an earlier draft said: what was measured, recorded on
    * `forwardPaste` in `canvas/src/forwardKeys.ts`, is an uncaught THROW inside an `ipcMain.on`
    * listener.)

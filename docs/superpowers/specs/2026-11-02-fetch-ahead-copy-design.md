@@ -84,8 +84,10 @@ fetchSelection?(rect: Rect): Promise<string>;
 `bridgecore.ts` implements it with an internal `seq`, sends
 `{kind:'selection', seq, rect}`, and resolves on `{kind:'selectionText', seq, text}`. Answers
 that come back out of order or after a close are dropped. `preload.cts` (Electron) does NOT
-provide it, so the renderer never prefetches there — which matters because an unhandled
-`ipcMain` kind FREEZES Electron's main process (measured 2026-10-26, `forwardPaste`'s docstring).
+provide it, so the renderer never prefetches there — which matters because an uncaught THROW
+inside an `ipcMain.on` listener FREEZES Electron's main process (measured 2026-10-26, `forwardPaste`'s
+docstring). *(Corrected 2026-11-03: this sentence said "an unhandled `ipcMain` kind", which is not
+what was measured.)*
 
 **This widens `BridgeApi`, which `bridgecore.ts`'s header says must not move.** It is an OPTIONAL
 member, so `preload.cts` and `renderer.ts`'s shared contract still compile unchanged, and the
@@ -191,3 +193,18 @@ ORDER, and a `frame` is always handled before the `selectionText` sent after it.
 - The Electron GUI, which copies through its own menu and `clipboard.writeText` in main.
 - Removing the async fallback. It is what makes a gesture faster than the round trip still work
   on a secure page, and it is the path four browsers have already verified.
+
+## Amendments, 2026-11-03
+
+- **Inbound messages are handled in arrival order.** `bridgecore.ts` chains every message onto the
+  one before it, which the stale-answer argument above needs; recorded under *Ordering*.
+- **A failed copy is a notice, not a screen failure.** The fallback's `report` went to
+  `dispatch('error')`, and `renderer.ts`'s `onError` clears the selection and its cache, so a copy
+  pressed before the prefetch answered (refused on a plain-`http` LAN page, or with
+  `NotAllowedError`) could not be retried: the second press found nothing selected. The report now
+  goes to a new OPTIONAL `BridgeApi.onCopyFailed`, falling back to `dispatch('error')` where none is
+  registered. The renderer paints it as `onError` does but keeps the selection and its cached text;
+  a cached copy that then succeeds repaints the screen over the notice, a press on the canvas
+  dismisses it and starts a drag, and the prefetch is not refused while it is up. Real errors are
+  unchanged. Electron's preload does not implement it and need not. Witnessed by
+  `browser-clicks.mjs`'s `webCopyRetry`.

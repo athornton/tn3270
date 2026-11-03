@@ -23,14 +23,19 @@ merge — do not merge until the user reports it.** Spec and plan:
 - **Fallback, unchanged:** nothing cached (a copy faster than the prefetch, or a blank selection)
   -> the old async path, `{kind:'copy'}`, gateway `copy: sent N chars`,
   `navigator.clipboard.writeText`. On plain-`http` LAN that paints `copy failed: use https
-  (--tls-cert) or localhost ...`; pressing again works.
+  (--tls-cert) or localhost ...`. Since `febeb6b` that is a NOTICE (`BridgeApi.onCopyFailed`, optional,
+  not `onError`): it keeps the selection and its cache, so pressing again with no re-drag works once
+  the prefetch has answered, and repaints the screen over the notice. `browser-clicks`'s
+  `webCopyRetry` drives it. Before `febeb6b` the report went to `onError`, whose `clearSelection()`
+  emptied the cache, and the second press did nothing.
 - Unchanged: `Ctrl-C` is Clear; right-click offers only "Copy Image"; **the Electron GUI** — its
   preload has no `fetchSelection` (an OPTIONAL fifth `BridgeApi` member), so it never caches and
   always uses its menu/IPC copy. GUI `select` 3/3 is the witness.
 - **The bridge processes inbound messages strictly in arrival order.** MEASURED: they could complete
   out of order under Node's `DecompressionStream` (183/200), never in Electron 44's Chromium
   (0/200). Firefox and Safari unmeasured.
-- An error painted over the screen now clears the selection and its cached text.
+- An error painted over the screen now clears the selection and its cached text (in the Electron
+  GUI too). A copy-failure NOTICE does not; see above.
 - A newer prefetch supersedes an older pending one.
 - New harness `packages/web/scripts/browser-lan-copy.mjs`: gateway at the machine's LAN address
   (`isSecureContext === false`, no `navigator.clipboard`), copies by `Ctrl+Shift+C` (`lanChord`)
@@ -55,6 +60,11 @@ build and typecheck exit 0; **2651 tests in 111 files**; `browser-clicks` **15/1
 chords/10 actions; `browser-shot` 1/1; **`browser-lan-copy` 2/2**; GUI `keys` 22 chords/20
 actions; `clicks` 9 buttons; `select` 3/3; `shot` 2/2; `transfer` 10/10; `pty-smoke` 12 PASS /
 0 FAIL; 0 leaked Electron processes after every harness.
+
+RE-MEASURED after `febeb6b` (copy failures as notices): build and typecheck exit 0; **2652 tests in
+111 files**; `browser-clicks` **16/16** (new `webCopyRetry`); `browser-lan-copy` 2/2;
+`browser-keys` 13 chords/10 actions; `browser-shot` 1/1; GUI `select` 3/3 and `keys` 22 chords/20
+actions; 0 leaks after each. GUI `clicks`, `shot`, `transfer` and `pty-smoke` were not re-run.
 
 ### MUTANTS THAT SURVIVE, AND WHY
 
