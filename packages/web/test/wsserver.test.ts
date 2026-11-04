@@ -44,7 +44,7 @@ class FakeSocket extends EventEmitter {
 function clientFrame(opcode: number, payload: Buffer): Buffer {
   const key = Buffer.from([9, 8, 7, 6]);
   const masked = Buffer.from(payload);
-  for (let i = 0; i < masked.length; i += 1) masked[i] ^= key[i % 4]!;
+  for (let i = 0; i < masked.length; i += 1) masked[i] = masked[i]! ^ key[i % 4]!;
   const head = payload.length < 126
     ? Buffer.from([0x80 | opcode, 0x80 | payload.length])
     : (() => {

@@ -12,7 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/core packages/frontend packages/node-files packages/canvas packages/cli packages/tui packages/gui packages/web"
+    "typecheck": "tsc --build packages/core packages/frontend packages/node-files packages/canvas packages/cli packages/tui packages/gui packages/web && npm run typecheck:tests",
+    "typecheck:tests": "tsc -p packages/core/tsconfig.test.json && tsc -p packages/frontend/tsconfig.test.json && tsc -p packages/node-files/tsconfig.test.json && tsc -p packages/canvas/tsconfig.test.json && tsc -p packages/cli/tsconfig.test.json && tsc -p packages/tui/tsconfig.test.json && tsc -p packages/gui/tsconfig.test.json && tsc -p packages/web/tsconfig.test.json"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

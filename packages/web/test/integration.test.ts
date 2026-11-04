@@ -352,7 +352,7 @@ function maskedTextFrame(text: string): Buffer {
   const payload = Buffer.from(text);
   const key = Buffer.from([1, 2, 3, 4]);
   const masked = Buffer.from(payload);
-  for (let i = 0; i < masked.length; i += 1) masked[i] ^= key[i % 4]!;
+  for (let i = 0; i < masked.length; i += 1) masked[i] = masked[i]! ^ key[i % 4]!;
   const head = Buffer.from([0x81, 0x80 | payload.length]);   // FIN + TEXT, masked, short length
   return Buffer.concat([head, key, masked]);
 }

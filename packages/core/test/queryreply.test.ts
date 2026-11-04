@@ -888,7 +888,7 @@ describe('the DDM advertisement, QCODE 0x95', () => {
     // 0x0040 = 64 -- a plausible-looking small number, which is why both bytes are
     // asserted rather than the pair being trusted.
     const ddm = withDdm(DEFAULT_CAPABILITIES, 16384).find((c) => c.qcode === 0x95)!;
-    const body = ddm.params();
+    const body = ddm.params(GEOMETRY, []);
     expect(body).toContain(0x40);
     const at = body.indexOf(0x40);
     expect([body[at], body[at + 1]]).toEqual([0x40, 0x00]);
@@ -903,9 +903,9 @@ describe('the DDM advertisement, QCODE 0x95', () => {
   });
 
   it('defaults the size when withDdm is given no explicit one', () => {
-    const a = withDdm(DEFAULT_CAPABILITIES).find((c) => c.qcode === 0x95)!.params();
+    const a = withDdm(DEFAULT_CAPABILITIES).find((c) => c.qcode === 0x95)!.params(GEOMETRY, []);
     const b = withDdm(DEFAULT_CAPABILITIES, DFT_BUF_DEFAULT).find((c) => c.qcode === 0x95)!
-      .params();
+      .params(GEOMETRY, []);
     expect(a).toEqual(b);
   });
 });

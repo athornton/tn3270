@@ -8,9 +8,7 @@ import { parseArgs, UsageError } from '../src/main.js';
 import { parseArgs as parseTuiArgs, UsageError as TuiUsageError } from '../../tui/src/main.js';
 import { Runner } from '../src/runner.js';
 import { tcpConnect } from '@tn3270/frontend';
-// @ts-expect-error -- .mjs harness, deliberately untyped; tests are outside the tsc build
 import { startTlsProxy } from '../scripts/tls-proxy.mjs';
-// @ts-expect-error -- see above
 import { generateCerts, haveOpenssl } from '../scripts/gen-test-certs.mjs';
 
 /**
