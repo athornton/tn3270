@@ -23,9 +23,11 @@ of a model name. This follows x3270:
   `IBM-DYNAMIC`, and the TN3270E device type is too (`tn3270e_request` calls the same function).
 - `model.c:343`: the value is written **`<cols>x<rows>`**. `160x62` is 160 columns by 62 rows.
 
-**The `<cols>x<rows>` order is kept for compatibility with x3270**, and it is the opposite of
-how this project's messages write sizes (`24x80` is rows by columns). So every NEW message that
-names a size says it in words, `62 rows by 160 columns`, and never as a bare `AxB`.
+**The `<cols>x<rows>` order is kept for compatibility with x3270.** This project's existing
+messages are already inconsistent: `core`'s write rows by columns (`bind.ts:278`,
+`stream/execute.ts:732`), the TUI's write columns by rows (`tui/src/app.ts:343`, `:451`). So every
+NEW message that names a size says it in words, `62 rows by 160 columns`, and never as a bare
+`AxB`.
 
 ## The setting
 
@@ -161,7 +163,14 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 - **Web:** the same menu in the page; the choice goes to the gateway, which owns the session.
   The new message kind gets its own shape check in `web/src/protocol.ts`, beside `hello`,
   `action`, `transferStart` and the rest, which already validate every inbound field.
-- **TUI:** nothing in this spec. It has no menu and uses the startup flags.
+- **TUI: a terminal resize is the switch, for size.** The TUI already handles `SIGWINCH`
+  (`tui/src/app.ts:368`, `onResize`). Under `-oversize auto` the next connect or reconnect
+  measures again, so resizing the terminal and reconnecting is how a TUI operator changes size,
+  with no new control. What is new: when a resize WHILE CONNECTED changes what `auto` would
+  resolve, the status line says so, e.g. `window now fits 50 rows by 132 columns; applies at the
+  next reconnect`, because otherwise the resize appears to do nothing. A resize smaller than the
+  current screen still suspends with `terminal too small`, unchanged. Changing the MODEL stays
+  flag-only in the TUI: it has no menu, and a resize cannot express a model.
 
 ## Testing
 
@@ -173,7 +182,8 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 - **Conformance:** s3270 `-oversize 160x62` and our session with `-oversize 160x62` against the
   same scripted host; the `IBM-DYNAMIC` negotiation and the Query Reply bytes compared.
 - **Harnesses:** each `auto` measure in a real environment: the TUI under the pty harness at a
-  fixed terminal size, the web page in the browser harness at a fixed viewport, the GUI under Xvfb
+  fixed terminal size, and a pty resize while connected producing the `applies at the next
+  reconnect` line and then the new size on reconnect, the web page in the browser harness at a fixed viewport, the GUI under Xvfb
   at a known display size.
 - **Live:**
   - **VM/370** with `-oversize 160x62`: log on and run a full-screen application that uses
@@ -187,7 +197,7 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 
 ## Out of scope
 
-- A TUI switching UI.
+- A TUI control for changing the model (size changes come from resizing; see Step 2).
 - Re-reporting the size mid-session (the protocol has no way).
 - A queued model change applied at disconnect.
 - A connect dialog (roadmapped separately in `gui/src/menu.ts`).
