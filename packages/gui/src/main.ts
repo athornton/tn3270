@@ -6,7 +6,8 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
-  resolve, OversizeError, TerminalTypeError, type GeometrySetting, type Session, type Size,
+  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS,
+  type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
   applyAction, applyPaste, describeTlsError, resolveScheme, startTransfer,
@@ -17,7 +18,9 @@ import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
 import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
-import { buildMenuTemplate } from './menu.js';
+import {
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, applyGeometryChoice, type GeometryMenu,
+} from './menu.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -1013,8 +1016,70 @@ app.whenReady().then(async () => {
   // Electron's 40-name union at all -- TypeScript refuses even an `as` between them -- so the
   // alternative was an `as unknown as` double cast right here, which would have switched off
   // checking on the whole template to paper over one field.
+  /**
+   * THE MODEL MENU'S INPUTS, read off the session every time rather than cached: the setting
+   * changes on every accepted choice and `connected` on every connect and disconnect.
+   *
+   * UNDEFINED FOR A LEGACY SESSION (`--terminal-type`), which therefore gets NO Model menu at all:
+   * its terminal type was fixed at construction, `setGeometry` refuses it outright, and a menu of
+   * eight models that all refuse would be eight controls that cannot work. `geometrySetting` is
+   * the test, the same one the CLI's `Set()` makes.
+   *
+   * `startupFixed` is the `-oversize <cols>x<rows>` from argv, if that is what was given: the
+   * only fixed size the menu can offer, because its choices are picked, never typed (the spec).
+   */
+  const startupOversize = args.oversize;
+  const startupFixed: Size | undefined = startupOversize?.kind === 'fixed'
+    ? { rows: startupOversize.rows, cols: startupOversize.cols } : undefined;
+  const geometryMenu = (): GeometryMenu | undefined => {
+    const current = session.geometrySetting;
+    if (current === undefined) return undefined;
+    return {
+      models: Object.keys(KNOWN_MODELS), current, connected: session.isConnected(),
+      ...(startupFixed !== undefined ? { startupFixed } : {}),
+    };
+  };
+  /**
+   * THE MENU IS MUTATED BY ID, NEVER REBUILT. `MenuItem.checked` and `.enabled` are writable
+   * ("This property can be dynamically changed", electron.d.ts), and rebuilding the application
+   * menu to change two booleans would re-create the macOS app menu and every accelerator in it.
+   *
+   * CALLED AFTER EVERY CLICK, ACCEPTED OR REFUSED: Electron checks a clicked radio item itself,
+   * before our handler runs, so a refused choice would otherwise be left looking chosen. Every
+   * item is written, so the menu cannot drift from the session -- `modelMenuStates` is the same
+   * function the template was built from. `applyChoiceStates` (menu.ts) records why a radio
+   * item's `checked` is only ever set to `true`: measured, assigning `false` CHECKS it.
+   */
+  const refreshModelMenu = (): void => {
+    const g = geometryMenu();
+    const menu = Menu.getApplicationMenu();
+    if (g === undefined || menu === null) return;
+    applyChoiceStates(modelMenuStates(g), (id) => menu.getMenuItemById(id));
+  };
+  session.on('connect', refreshModelMenu);
+  session.on('disconnect', refreshModelMenu);
   Menu.setApplicationMenu(Menu.buildFromTemplate(
     [...buildMenuTemplate(process.platform, {
+      /**
+       * ONE MODEL-MENU CHOICE, applied at the next connect. NOT gated on focus: it changes a
+       * setting, not the screen, so it is the same harmless request from any window.
+       *
+       * `applyGeometryChoice` (menu.ts) owns the order-dependence rule -- a model the current
+       * oversize refuses is applied with oversize None, and the returned notice says so. Every
+       * other refusal (`disconnect first`, during a reconnect still in flight; an oversize below
+       * the model) throws, and goes where every other failure in this window goes.
+       */
+      onGeometry: (choice) => {
+        const current = session.geometrySetting;
+        if (current === undefined) return;
+        try {
+          const notice = applyGeometryChoice(current, choice, (next) => { session.setGeometry(next); });
+          if (notice !== undefined) fail(notice);
+        } catch (err) {
+          fail(explain(err));
+        }
+        refreshModelMenu();
+      },
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *
@@ -1092,7 +1157,7 @@ app.whenReady().then(async () => {
           process.stdout.write(`paste failed: ${String(err)}\n`);
         });
       },
-    })],
+    }, geometryMenu())],
   ));
   /**
    * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
@@ -1237,11 +1302,25 @@ app.whenReady().then(async () => {
       Model menu is the APPLICATION's, so popping it from the keypad window is as correct as from
       the canvas, and the sender is not consulted.
 
-      A BARE `return` FOR NOW: the Model menu does not exist yet, and its task makes this arm pop
-      it up. Nothing is logged -- the action log at the top of this listener already records the
-      kind for the harness, and a line saying "not yet" would tell the operator nothing to act on.
+      IT POPS UP THE MODEL MENU'S SUBMENU (Task 13), RELATIVE TO THE MAIN WINDOW `win` and never
+      the sender: a popup over the keypad window would be a menu about the session drawn over a
+      window that is not the session. `getMenuItemById('model')` finds nothing for a legacy
+      (`--terminal-type`) session, which has no Model menu, so the chord does nothing there --
+      silently, because there is no remedy to offer short of a restart, and the menu's absence is
+      already the statement. Still a `return` before `applyAction` either way.
     */
-    if (action.kind === 'geometryMenu') return;
+    if (action.kind === 'geometryMenu') {
+      const model = Menu.getApplicationMenu()?.getMenuItemById('model')?.submenu;
+      if (model !== undefined && !win.isDestroyed()) {
+        model.popup({ window: win });
+        // FOR `keys.mjs`, under the action log's own gate: the logged kind above proves the chord
+        // ARRIVED, not that a menu opened, and without this line deleting the popup passes every
+        // gate. `popup` returns at once on Linux (measured: the next chord's action is logged
+        // while the menu is still up), so this line is not a promise that it was dismissed.
+        if (logActions) process.stdout.write('menu: popup model\n');
+      }
+      return;
+    }
     /**
      * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
      * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the

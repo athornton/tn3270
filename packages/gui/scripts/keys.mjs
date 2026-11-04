@@ -153,7 +153,12 @@ const CASES = [
    * missing -- the run would end in ETIMEDOUT, not in a mismatch here. `Ctrl+B` above is asserted
    * the same way and proves the same log-then-intercept order.
    *
-   * NO MENU OPENS YET: the arm in `main.ts` is a bare `return` until the Model menu lands.
+   * THE MODEL MENU POPS UP NOW (Task 13), and the run asserts it: `main.ts` prints
+   * `menu: popup model` under the action log's gate, and the count check below wants one per
+   * `Alt+M` case. The popup does NOT eat the next chord: these chords arrive through
+   * `sendInputEvent` into the page, not through X, so the menu's keyboard grab never sees them --
+   * measured, the following positions all arrive in order with the menu still open. A REAL
+   * keystroke under Xvfb or on a desktop would go to the open menu, which is the point of it.
    */
   { spec: 'Alt+M', action: { kind: 'geometryMenu' } },
   /**
@@ -450,6 +455,18 @@ if (rendererErrors.length > 0) bail(`the renderer threw:\n${rendererErrors.join(
 
 let failed = 0;
 
+/**
+ * ONE MODEL-MENU POPUP PER `Alt+M` CASE. The action log above proves only that the chord reached
+ * `main.ts`'s funnel; this line is printed after `popup()` itself, so a funnel arm that went back
+ * to a bare `return` (or a Model menu that stopped being built) fails here rather than passing.
+ */
+const popupsWanted = CASES.filter((c) => c.action?.kind === 'geometryMenu').length;
+const popups = stdout.split('\n').filter((l) => l === 'menu: popup model').length;
+if (popups !== popupsWanted) {
+  failed += 1;
+  console.log(`FAIL the Model menu popped up ${popups} times, not ${popupsWanted} (once per Alt+M)`);
+}
+
 for (let i = 0; i < Math.max(expected.length, actual.length); i += 1) {
   if (expected[i] === actual[i]) continue;
   failed += 1;
@@ -459,7 +476,8 @@ for (let i = 0; i < Math.max(expected.length, actual.length); i += 1) {
 }
 
 if (failed === 0) {
-  console.log(`ok       ${CASES.length} chords, ${expected.length} actions in order`);
+  console.log(`ok       ${CASES.length} chords, ${expected.length} actions in order, ` +
+    `${popups} Model menu popups`);
   console.log(`         negatives asserted: ${CASES.filter((c) => c.action === null).map((c) => c.spec).join(', ')}`);
 } else {
   console.log(`\nthe whole sequence, for context:`);

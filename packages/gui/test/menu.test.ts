@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildMenuTemplate } from '../src/menu.js';
+import {
+  KNOWN_MODELS, TERMINAL_TYPE, describeSize, OversizeError, resolveGeometry,
+  type GeometrySetting, type Oversize,
+} from '@tn3270/core';
+import {
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, applyGeometryChoice, type GeometryChoice,
+  type MutableChoice,
+} from '../src/menu.js';
 
 describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
   it('uses Cmd-C / Cmd-V on macOS, where Cmd is free', () => {
@@ -143,5 +150,297 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     expect(new Set(items.map((i) => i.id)).size, 'the two View items share an id').toBe(2);
     expect(new Set(items.map((i) => i.accelerator)).size,
       'the two View items share an accelerator').toBe(2);
+  });
+});
+
+/**
+ * THE MODEL MENU, 2026-11-04: model and oversize picked from lists while disconnected, applied at
+ * the next connect (the spec's "Step 2"). The template is still pure, so all of it is asserted
+ * here with no Electron runtime; `main.ts` only builds it and mutates `checked`/`enabled` by id.
+ */
+describe('the Model menu', () => {
+  type Item = {
+    label?: string; id?: string; type?: string; checked?: boolean; enabled?: boolean;
+    click?: () => void; submenu?: Item[];
+  };
+  const MODELS = Object.keys(KNOWN_MODELS);
+  const base = { models: MODELS, connected: false } as const;
+  const none: Oversize = { kind: 'none' };
+  const modelMenu = (t: readonly unknown[]): Item =>
+    (t as Item[]).find((m) => m.id === 'model')!;
+  const choices = (m: Item): Item[] => {
+    const own = m.submenu!.filter((i) => i.type === 'radio');
+    const os = m.submenu!.find((i) => i.id === 'oversize')!;
+    return [...own, ...os.submenu!];
+  };
+
+  it('is absent without a geometry, so the template is exactly the old one', () => {
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      expect(JSON.stringify(buildMenuTemplate(platform, undefined, undefined)))
+        .toBe(JSON.stringify(buildMenuTemplate(platform)));
+      expect(modelMenu(buildMenuTemplate(platform))).toBeUndefined();
+    }
+  });
+
+  it('lists the eight models, a separator, then an Oversize submenu of None and Auto', () => {
+    const m = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
+    expect(m.label).toBe('Model');
+    const sub = m.submenu!;
+    expect(sub.slice(0, 8).map((i) => [i.type, i.label, i.id])).toEqual(
+      MODELS.map((k) => ['radio', `${k} (${describeSize(KNOWN_MODELS[k]!.alternate)})`, `model:${k}`]));
+    expect(sub[6]!.label).toBe('3278-5 (27 rows by 132 columns)');
+    expect(MODELS).toHaveLength(8);
+    expect(sub[8]!.type).toBe('separator');
+    expect(sub[9]!.label).toBe('Oversize');
+    expect(sub[9]!.id).toBe('oversize');
+    expect(sub).toHaveLength(10);
+    expect(sub[9]!.submenu!.map((i) => [i.type, i.label, i.id])).toEqual([
+      ['radio', 'None', 'oversize:none'],
+      ['radio', 'Auto', 'oversize:auto'],
+    ]);
+  });
+
+  it('comes after Edit and View, on every platform', () => {
+    expect(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } })
+      .map((m) => m.label)).toEqual(['Edit', 'View', 'Model']);
+    expect(buildMenuTemplate('darwin', undefined, { ...base, current: { oversize: none } })
+      .map((m) => m.role ?? m.label)).toEqual(['appMenu', 'Edit', 'View', 'Model']);
+  });
+
+  it('offers the startup fixed size third, labelled cols x rows and then in words', () => {
+    const m = modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { oversize: none }, startupFixed: { rows: 62, cols: 160 },
+    }));
+    const os = m.submenu!.find((i) => i.id === 'oversize')!.submenu!;
+    expect(os.map((i) => [i.label, i.id])).toEqual([
+      ['None', 'oversize:none'],
+      ['Auto', 'oversize:auto'],
+      ['160x62 (62 rows by 160 columns)', 'oversize:fixed'],
+    ]);
+  });
+
+  it('checks the current model and oversize, and only those', () => {
+    const m = modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { model: '3278-4-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } },
+      startupFixed: { rows: 62, cols: 160 },
+    }));
+    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id))
+      .toEqual(['model:3278-4-E', 'oversize:fixed']);
+    const auto = modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { model: '3278-3', oversize: { kind: 'auto' } },
+    }));
+    expect(choices(auto).filter((i) => i.checked === true).map((i) => i.id))
+      .toEqual(['model:3278-3', 'oversize:auto']);
+  });
+
+  it('does not check the startup size for a different fixed oversize', () => {
+    // Only reachable from outside this menu (the menu can only set the startup size), but a
+    // checked "160x62" while the session holds 100x30 would be a menu that lies.
+    const m = modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { oversize: { kind: 'fixed', rows: 30, cols: 100 } },
+      startupFixed: { rows: 62, cols: 160 },
+    }));
+    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id)).toEqual(['model:3278-2-E']);
+  });
+
+  it('checks the product default, 3278-2-E, when no model was named', () => {
+    // From core's TERMINAL_TYPE, not a literal in menu.ts.
+    expect(TERMINAL_TYPE).toBe('IBM-3278-2-E');
+    const m = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
+    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id))
+      .toEqual(['model:3278-2-E', 'oversize:none']);
+  });
+
+  it('checks a model given in another spelling, as core would resolve it', () => {
+    const m = modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { model: 'ibm-3278-5-e', oversize: none },
+    }));
+    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id))
+      .toEqual(['model:3278-5-E', 'oversize:none']);
+  });
+
+  it('enables every choice while disconnected and disables every one while connected', () => {
+    const geom = { ...base, current: { oversize: none }, startupFixed: { rows: 62, cols: 160 } };
+    const off = choices(modelMenu(buildMenuTemplate('linux', undefined, geom)));
+    expect(off).toHaveLength(11);
+    expect(off.every((i) => i.enabled === true)).toBe(true);
+    const on = choices(modelMenu(buildMenuTemplate('linux', undefined, { ...geom, connected: true })));
+    expect(on).toHaveLength(11);
+    expect(on.every((i) => i.enabled === false)).toBe(true);
+  });
+
+  it('gives every item in the whole template a unique id', () => {
+    const ids: string[] = [];
+    const walk = (items: readonly Item[]): void => {
+      for (const i of items) {
+        if (i.id !== undefined) ids.push(i.id);
+        if (i.submenu !== undefined) walk(i.submenu);
+      }
+    };
+    walk(buildMenuTemplate('darwin', undefined, {
+      ...base, current: { oversize: none }, startupFixed: { rows: 30, cols: 100 },
+    }) as Item[]);
+    expect(ids.length).toBeGreaterThan(11);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('hands the handler the choice each item names, and omits click with no handler', () => {
+    const got: GeometryChoice[] = [];
+    const t = buildMenuTemplate('linux', {
+      onCopy: () => {}, onPaste: () => {}, onKeypad: () => {}, onKeyboard: () => {},
+      onGeometry: (c) => { got.push(c); },
+    }, { ...base, current: { oversize: none }, startupFixed: { rows: 62, cols: 160 } });
+    for (const i of choices(modelMenu(t))) i.click!();
+    expect(got).toEqual([
+      ...MODELS.map((model) => ({ model })),
+      { oversize: { kind: 'none' } },
+      { oversize: { kind: 'auto' } },
+      { oversize: { kind: 'fixed', rows: 62, cols: 160 } },
+    ]);
+    const bare = choices(modelMenu(buildMenuTemplate('linux', undefined, {
+      ...base, current: { oversize: none },
+    })));
+    expect(bare.some((i) => Object.prototype.hasOwnProperty.call(i, 'click'))).toBe(false);
+  });
+
+  it('reports the same states through modelMenuStates, which main.ts mutates by id', () => {
+    const geom = {
+      ...base, connected: true, startupFixed: { rows: 62, cols: 160 },
+      current: { model: '3278-4-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } } as const,
+    };
+    const fromTemplate = choices(modelMenu(buildMenuTemplate('linux', undefined, geom)))
+      .map((i) => ({ id: i.id, checked: i.checked, enabled: i.enabled }));
+    expect(modelMenuStates(geom)).toEqual(fromTemplate);
+  });
+});
+
+/**
+ * THE BUILT MENU IS MUTATED, and Electron's radio items do not behave like booleans: MEASURED on
+ * 44.3.0, ANY assignment to a radio item's `checked`, `false` included, selects it and clears its
+ * group. The fake below models exactly that, so a loop that writes `checked = false` fails here.
+ */
+describe('applyChoiceStates', () => {
+  const electronLikeRadios = (groups: string[][]): Map<string, MutableChoice> => {
+    const items = new Map<string, MutableChoice>();
+    for (const group of groups) {
+      for (const id of group) {
+        let checked = false;
+        const item: MutableChoice = {
+          enabled: true,
+          get checked() { return checked; },
+          set checked(_v: boolean) {
+            for (const other of group) (items.get(other) as unknown as { _clear(): void })._clear();
+            checked = true;
+          },
+        };
+        Object.defineProperty(item, '_clear', { value: () => { checked = false; } });
+        items.set(id, item);
+      }
+    }
+    return items;
+  };
+
+  it('leaves exactly the session\'s choices checked, on radios where false means select', () => {
+    const geom = {
+      models: Object.keys(KNOWN_MODELS), connected: false, startupFixed: { rows: 62, cols: 160 },
+      current: { model: '3278-2-E', oversize: { kind: 'none' } } as const,
+    };
+    const states = modelMenuStates(geom);
+    const modelIds = states.filter((s) => s.id.startsWith('model:')).map((s) => s.id);
+    const osIds = states.filter((s) => s.id.startsWith('oversize:')).map((s) => s.id);
+    const items = electronLikeRadios([modelIds, osIds]);
+    items.get('model:3278-5-E')!.checked = true;   // what a click on 3278-5-E leaves behind
+    items.get('oversize:fixed')!.checked = true;
+    applyChoiceStates(states, (id) => items.get(id) ?? null);
+    expect([...items].filter(([, i]) => i.checked).map(([id]) => id))
+      .toEqual(['model:3278-2-E', 'oversize:none']);
+  });
+
+  it('writes enabled onto every item, and skips an id the menu does not have', () => {
+    const a: MutableChoice = { checked: false, enabled: true };
+    const b: MutableChoice = { checked: false, enabled: true };
+    applyChoiceStates([
+      { id: 'a', checked: false, enabled: false },
+      { id: 'gone', checked: true, enabled: false },
+      { id: 'b', checked: false, enabled: false },
+    ], (id) => (id === 'a' ? a : id === 'b' ? b : null));
+    expect([a.enabled, b.enabled]).toEqual([false, false]);
+  });
+});
+
+/**
+ * THE ORDER-DEPENDENCE RULE. A menu changes ONE thing per click, and `resolveGeometry` validates
+ * model and oversize together -- the CLI's `Set()` found that some single steps are refused
+ * (commit 1a4713e). A model choice is the operator's latest explicit intent, so when the current
+ * oversize is what refuses it, the model wins and the oversize drops to None, and they are told.
+ */
+describe('applyGeometryChoice', () => {
+  const real = (): { set: (g: GeometrySetting) => void; calls: GeometrySetting[] } => {
+    const calls: GeometrySetting[] = [];
+    return { calls, set: (g) => { calls.push(g); resolveGeometry(g, () => undefined); } };
+  };
+
+  it('applies a model with the current oversize when that fits, and says nothing', () => {
+    const r = real();
+    const current: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } };
+    expect(applyGeometryChoice(current, { model: '3278-5-E' }, r.set)).toBeUndefined();
+    expect(r.calls).toEqual([{ model: '3278-5-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } }]);
+  });
+
+  it('drops a fixed oversize below the new model to None, and says so action first', () => {
+    const r = real();
+    const current: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } };
+    const notice = applyGeometryChoice(current, { model: '3278-5-E' }, r.set);
+    expect(r.calls).toEqual([
+      { model: '3278-5-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } },
+      { model: '3278-5-E', oversize: { kind: 'none' } },
+    ]);
+    expect(notice).toMatch(/^oversize is now None for model 3278-5-E; pick Oversize again/);
+    // The reason, from core, so it cannot drift from what a connect would have said.
+    expect(notice).toContain('use at least 132x27');
+  });
+
+  it('drops Auto to None when the new model has no extended data stream', () => {
+    const r = real();
+    const notice = applyGeometryChoice({ oversize: { kind: 'auto' } }, { model: '3278-4' }, r.set);
+    expect(r.calls.at(-1)).toEqual({ model: '3278-4', oversize: { kind: 'none' } });
+    expect(notice).toMatch(/^oversize is now None for model 3278-4/);
+  });
+
+  it('passes an oversize choice through, and its refusal unchanged', () => {
+    const r = real();
+    expect(applyGeometryChoice({ model: '3278-3-E', oversize: { kind: 'none' } },
+      { oversize: { kind: 'auto' } }, r.set)).toBeUndefined();
+    expect(r.calls).toEqual([{ model: '3278-3-E', oversize: { kind: 'auto' } }]);
+    // A fixed size below the model is refused, NOT fixed up by changing the model behind it.
+    expect(() => applyGeometryChoice({ model: '3278-5-E', oversize: { kind: 'none' } },
+      { oversize: { kind: 'fixed', rows: 30, cols: 100 } }, r.set)).toThrow(/use at least 132x27/);
+    expect(r.calls).toHaveLength(2);
+  });
+
+  it('does not retry a refusal that is not about the oversize', () => {
+    const calls: GeometrySetting[] = [];
+    const refuse = (g: GeometrySetting): void => {
+      calls.push(g);
+      throw new Error('disconnect first; model and oversize apply at the next connect');
+    };
+    expect(() => applyGeometryChoice({ model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } },
+      { model: '3278-5-E' }, refuse)).toThrow(/^disconnect first/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not retry when the oversize is already None', () => {
+    const calls: GeometrySetting[] = [];
+    const refuse = (g: GeometrySetting): void => { calls.push(g); throw new OversizeError('nope'); };
+    expect(() => applyGeometryChoice({ oversize: { kind: 'none' } }, { model: '3278-5-E' }, refuse))
+      .toThrow('nope');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reports the RETRY\'s refusal when None is refused too, not the first one', () => {
+    let n = 0;
+    const refuse = (): void => { n += 1; throw new OversizeError(`refusal ${n}`); };
+    expect(() => applyGeometryChoice({ oversize: { kind: 'auto' } }, { model: '3278-5-E' }, refuse))
+      .toThrow('refusal 2');
   });
 });

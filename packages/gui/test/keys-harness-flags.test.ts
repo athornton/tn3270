@@ -161,4 +161,15 @@ describe('the chord harness', () => {
     // A renderer exception produces a window that receives keys and does nothing.
     expect(keys).toMatch(/renderer\[3\]/);
   });
+
+  it('counts one Model menu popup per Alt+M, and main.ts prints the line it counts', () => {
+    // The logged `geometryMenu` kind proves only that the chord reached the funnel. This count is
+    // what fails when the arm goes back to a bare `return` -- measured, `FAIL the Model menu
+    // popped up 0 times, not 2`. Both halves pinned: the count here, the line in main.ts.
+    expect(keys).toMatch(/c\.action\?\.kind === 'geometryMenu'/);
+    expect(keys).toContain("l === 'menu: popup model'");
+    expect(keys).toMatch(/if \(popups !== popupsWanted\)/);
+    const main = readFileSync(join(guiDir, 'src', 'main.ts'), 'utf8');
+    expect(main).toContain("if (logActions) process.stdout.write('menu: popup model\\n');");
+  });
 });

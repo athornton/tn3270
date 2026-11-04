@@ -26,7 +26,8 @@ gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 **It is not yet something you can hand to someone else.** There is no packaging, so no
 `.app` to download; the GUI has no connect dialog and no preferences, and takes its host on the
 command line like the other front ends. It does now have a menu bar — Edit for copy and paste,
-View for the keypad. The mouse presses keypad buttons and selects text for copying, and nothing
+View for the keypad and keyboard, and Model for the model and oversize (picked while
+disconnected, applied at the next connect; `Alt-M` pops it up). The mouse presses keypad buttons and selects text for copying, and nothing
 else: no click-to-place-cursor and no light pen. See *What is not implemented* below, which is
 the honest part of this file.
 
@@ -419,7 +420,8 @@ byte (`packages/gui/scripts/shot.mjs`).
 
 **What it does not have yet:** no connect dialog, no preferences, and no packaging — so the host
 goes on the command line and there is no `.app` to double-click. It does have a menu bar (Edit for
-copy and paste, View for the keypad). **On the 3270 canvas the mouse does one thing: dragging selects
+copy and paste, View for the keypad and keyboard, Model for the model and oversize -- disabled while
+connected, applied at the next connect, and popped up by `Alt-M`). **On the 3270 canvas the mouse does one thing: dragging selects
 a rectangle of text for copying** (see *Copy and paste*). Clicking the screen does not place the
 cursor and there is no light pen. The keypad is not on the canvas at all: it is real HTML buttons, in
 its own window in the GUI and an overlay in the browser, so the mouse works on it normally, as it does
