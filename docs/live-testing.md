@@ -4819,3 +4819,183 @@ Chromium key event.
    indistinguishable strings by the time they reach the DOM — `transfer.html` says why there is no
    error styling). Worth one deliberate look, since a progress report that silently stops is the
    failure this window would hide best.
+
+## Oversize conformance against real s3270 — 2026-11-04
+
+**What this is, stated exactly so it is not read for more than it shows.** This is a scripted
+host, `packages/cli/scripts/e-server.py`, not a real one — it proves our Query Reply bytes agree
+with s3270's on the fields a host would use to learn the screen size, not that any real host
+accepts an `IBM-DYNAMIC` terminal type or an oversize screen. See the design doc's Testing
+section, `docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md`.
+
+**The order was not interchangeable.** Per this project's standing rule for this harness
+(`e-server.py`'s docstring, ~:11-17), the harness was pointed at real s3270 first, and only after
+that produced the expected `IBM-DYNAMIC` negotiation and a Query Reply was it pointed at our
+client.
+
+### What changed in `e-server.py`
+
+`--query` is new: after `after_negotiation`'s existing Erase/Write (and any BIND), it sends one
+more 3270-DATA record carrying a Write Structured Field, Read Partition (Query):
+
+```
+f3 00 05 01 ff 02
+```
+
+checked byte-by-byte against `packages/fixtures/x3270/tso-query-reply.txt` (which explains the
+same six bytes against GA23-0059, `~/3270/ref/pages.txt:6345-6356`, the Read Partition format `L
+L SFID PID TYPE`): `f3` Write Structured Field, `00 05` length 5 (covering `00 05 01 ff 02`), `01`
+SFID Read Partition, `ff` PID X'FF' (the QUERY partition id — the byte that must come back
+doubled on the wire), `02` TYPE Query. `send_record`'s existing `double_iac` runs over the whole
+header+payload, so the `0xff` doubles automatically; confirmed on the wire below (`...0501ffff02...`,
+the doubled pair sitting where the single `ff` was written). Without `--query`, behavior is
+unchanged. `--device-name IBM-DYNAMIC` already existed, so `DEVICE-TYPE IS` echoes it back.
+
+### Commands run
+
+Three throwaway ports (14942 s3270, 14943-14945 scratch, 14945 the recorded client run), killed
+by PID, nothing left listening afterward.
+
+```bash
+npm run build
+python3 packages/cli/scripts/e-server.py --port 14942 --query --device-name IBM-DYNAMIC \
+  --timeout 10 &
+S=~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270
+printf 'Wait(8,3270Mode)\nWait(4,InputField)\nWait(1,Seconds)\nQuit\n' \
+  | $S -oversize 160x62 C:127.0.0.1:14942
+```
+
+```bash
+python3 packages/cli/scripts/e-server.py --port 14945 --query --device-name IBM-DYNAMIC \
+  --timeout 10 &
+printf 'Connect(127.0.0.1:14945)\nWait(3270Mode,8)\nWait(Output,5)\nWait(Output,5)\nQuit\n' \
+  | node packages/cli/dist/main.js -insecure -oversize 160x62
+```
+
+(s3270's `Wait` syntax takes the timeout FIRST, `Wait(seconds,keyword)` — checked against
+`~/src/suite3270-4.5/Common/task.c:3581-3592` (`Wait_action` picks off a leading numeric argument
+before matching the keyword) — where our `Runner.wait` takes it second,
+`Wait(keyword,seconds)` (`packages/cli/src/runner.ts:789-791`). Two `Wait(Output,5)` were needed
+for our client because the harness's Erase/Write and its Query Reply are two separate 3270-DATA
+records, each one `screen` emission; one `Wait(Output)` only caught the first.)
+
+**No adjustment was needed to reach s3270's `IBM-DYNAMIC` request or its reply.** The design doc's
+worry — x3270 silently drops oversize without the extended data stream (`Common/model.c:203-205`,
+`:333-335`) — did not apply: s3270's own default is `appres.extended_data_stream = true`
+(`~/src/suite3270-4.5/Common/glue.c:497`), confirmed by checking that file rather than assuming it,
+so `-oversize 160x62` with no explicit `-E` model still asked for `IBM-DYNAMIC` and sent a full
+reply on the first run.
+
+### Device-type log lines
+
+```
+s3270: ** client asked for device-type 'IBM-DYNAMIC' lu=None
+ours:  ** client asked for device-type 'IBM-DYNAMIC' lu=None
+```
+
+Identical.
+
+### Full inbound Query Reply, as logged (IAC-doubled wire bytes stripped of the 5-byte TN3270E
+header; the payload begins at the AID `88`)
+
+s3270, 180 bytes:
+
+```
+88000e81808081848586878895a1a600178181010000a0003e01000a02e50002006f090c26c000
+0881840026c000001b81858200090c000000000700100002b900250100f103c301360026818600
+1000f4f1f1f2f2f3f3f4f4f5f5f6f6f7f7f8f8f9f9fafafbfbfcfcfdfdfefeffff000f81870500
+f0f1f1f2f2f4f4f8f800078188000102000c81950000400040000101001281a10000000000000
+00006a7f3f2f7f0001181a600000b01000050001800a0003e
+```
+
+ours, 116 bytes:
+
+```
+88000a81808081868795a600178181010000a0003e01000a02e50002006f090c26c0002681860
+01000f4f1f1f2f2f3f3f4f4f5f5f6f6f7f7f8f8f9f9fafafbfbfcfcfdfdfefeffff000f8187050
+0f0f1f1f2f2f4f4f8f8000c81950000400040000101001181a600000b01000050001800a0003e
+```
+
+### Units each client sends — expected to differ, not a failure
+
+Split after the AID into length-prefixed units (`L L SFID QCODE ...`), per
+`packages/core/src/queryreply.ts`'s own framing (`buildQueryReply`, which this project's reply
+builder already matches byte for byte):
+
+| QCODE | unit | s3270 | ours |
+|---|---|---|---|
+| 0x80 | Summary | yes | yes |
+| 0x81 | Usable Area | yes | yes |
+| 0x84 | Alphanumeric Partitions (`QR_ALPHA_PART`, `~/src/suite3270-4.5/include/3270ds.h:140`) | yes | no |
+| 0x85 | Character Sets (`QR_CHARSETS`, `:141`) | yes | no |
+| 0x86 | Color | yes | yes |
+| 0x87 | Highlighting | yes | yes |
+| 0x88 | Reply Modes (`QR_REPLY_MODES`, `:144`) | yes | no |
+| 0x95 | Distributed Data Management | yes | yes |
+| 0xa1 | RPQ Names (`QR_RPQNAMES`, `:165`) | yes | no |
+| 0xa6 | Implicit Partition | yes | yes |
+
+x3270 sends ten units against our six — exactly what `queryreply.ts`'s own module comment says
+("x3270 sends ten units; we still send five[, now six with DDM]"), and is a documented, deliberate
+scope choice, not a defect: Summary's own list (QCODE 0x80's params) is required to name only what
+each device supports, and the manual imposes no ordering or completeness requirement on which
+Query-returnable units a device carries beyond that. The two units compared below (Usable Area,
+Implicit Partition) are present on both sides, which is what conformance on oversize actually
+needs.
+
+### Per-field comparison
+
+Both Usable Area and Implicit Partition parameter bytes, byte for byte, are **identical** between
+s3270 and our client — compared with a throwaway parser in `/tmp` (not committed), which split
+each reply after the AID into `L L SFID QCODE params` units and diffed the two units' param bytes
+directly:
+
+- **Usable Area (QCODE 0x81), params `010000a0003e01000a02e50002006f090c26c0`, identical on both
+  sides.** Decoded against `packages/core/src/queryreply.ts`'s own byte commentary and GA23-0059 p.
+  6-101 (`pages.txt:11601` FLAGS byte 4, `:11612-11614` byte 5 CELLUNITS, `:11619-11634` UNITS
+  through AH):
+  - FLAGS bytes 4-5: `0x01 0x00` on both — ADDR=X'1' (12/14-bit addressing allowed), VCP=0,
+    CHAR=0, CELLUNITS=0 (cells, not pels). Identical.
+  - W/H (bytes 6-9): `00a0 003e` = 160 x 62 on both — the MAXIMUM, i.e. the oversize alternate,
+    which both clients report identically.
+  - BUFFSZ (bytes 21-22, `26c0` = 9920 = 160*62): identical on both, and matches W*H.
+  - **Units/Xr/Yr/AW/AH (bytes 10-20, `01 000a02e5 00 02006f 09 0c`) are also byte-identical
+    between the two clients**, and this is EXPECTED rather than a coincidence worth re-deriving:
+    both x3270 and our client hardcode these as dimensional constants of a 3279-2 display
+    (`queryreply.ts`'s comment on `usableArea`, citing `Common/sf.c:711-732`), independent of
+    screen size — a *model* claim (cell pitch, physical units), not a *geometry* claim (how many
+    cells). So they do not vary with oversize on either side and their agreement here says nothing
+    new about the oversize path; it is inherited from both clients claiming the same reference
+    device (`Common/sf.c:54-57`, `Xr_3279_2`/`Yr_3279_2`/`SW_3279_2`/`SH_3279_2`). Does it matter?
+    No: nothing in this comparison depends on it, and `queryreply.ts`'s own comment already flags
+    the UNITS/Xr/Yr inconsistency (millimeters claimed, inches-scaled fractions) as inherited from
+    x3270 rather than a defect.
+
+- **Implicit Partition (QCODE 0xa6), params `00000b01000050001800a0003e`, identical on both
+  sides.** Decoded against GA23-0059 p. 6-71/6-72 (`pages.txt:10528`, base FLAGS;
+  `:10558-10566`, the Sizes-for-Display SDP) and `queryreply.ts`'s `implicitPartition`:
+  - base FLAGS (bytes 4-5): `0000` on both — reserved.
+  - SDP: `L=0x0b SDPID=0x01 flags=0x00`, then `WD HD WA HA` = `0050 0018 00a0 003e` = 80 x 24 x
+    160 x 62 on both. WD/HD is the model's own DEFAULT size (80 columns x 24 rows), WA/HA is the
+    oversize ALTERNATE (160 x 62) — identical on both sides, in both the default and the oversize
+    fields.
+
+**No field differed.** Nothing was adjusted on either side to force agreement; this is the result
+of the first run of each client against the first run of the harness that produced a Query Reply.
+
+### Verdict
+
+Conformant on the fields that matter for oversize: both s3270 4.5 and our client, each run with
+`-oversize 160x62` against the same scripted TN3270E host with `--query`, ask for TN3270E device
+type `IBM-DYNAMIC` and answer a Read Partition (Query) with a Usable Area and an Implicit
+Partition unit whose geometry fields (W/H, BUFFSZ, WD/HD/WA/HA) are byte-identical: 160 columns by
+62 rows as the maximum/alternate, 80x24 preserved as the model default. The unit-count difference
+(ten units vs. six) is x3270 sending more capabilities than we claim, which the design's own
+testing section anticipated and which does not affect the oversize fields compared here.
+
+**What this does NOT show:** that any real host accepts `IBM-DYNAMIC` or acts on this reply —
+`e-server.py` is a hand-written counterparty built because TK5 and VM/370 never speak TN3270E at
+all (see "TN3270E harness validation" above), not a stand-in for a host that implements Read
+Partition (Query) the way a modern VTAM host would. The live witness for that remains the item in
+the design doc's Testing section: a real z/VM or z/OS host, expected within a couple of weeks of
+2026-11-04 per the user.
