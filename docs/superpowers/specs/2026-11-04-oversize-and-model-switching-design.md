@@ -125,9 +125,13 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
 
 1. Resolve the geometry (above). A refusal stops here.
 2. Resize the `Screen` in place, reset `modelAlternate`, emit `geometry`. The session writes any
-   notice to the trace. The TUI puts it on its status line; the GUI and the gateway print it on
-   stderr, as the gateway's `host unreachable` line is printed, because their only on-canvas
-   painter is the red error painter and the next frame wipes it.
+   notice to the trace, and EVERY front end prints it on stderr, as the gateway's `host
+   unreachable` line is printed. No front end can hold it on screen: the GUI's and the page's only
+   on-canvas painter is the red error painter, which the next frame wipes, and the TUI under
+   `auto` has no spare row (the screen fills all but the status line) while its one-line
+   `showMessage` is wiped by the next paint. The TUI's stderr line lands in the normal screen
+   buffer, so it is there on quitting and in scrollback; the TUI also flashes it once with
+   `showMessage`.
 3. Negotiate. With an oversize in effect the terminal type is `IBM-DYNAMIC`, and so is the TN3270E
    device type, whether or not the model is `-E` (as x3270). Otherwise the model's own name,
    unchanged from today.
@@ -163,8 +167,8 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
 
 - **Bad fixed oversize** (too small, over 16383 cells, zero, bad syntax): refused before any
   socket, remedy first, shown where each front end shows connect failures.
-- **`auto` fallback:** a one-line notice (TUI status line; GUI and gateway stderr; the trace in
-  all), then the connect proceeds.
+- **`auto` fallback:** a one-line notice (stderr and the trace in every front end; the TUI also
+  flashes it), then the connect proceeds.
 - **`auto` clamp:** trace only.
 - **Switching while connected:** refused with the message above; the GUI and web menus are
   disabled while connected, so the refusal is the CLI's and a defence for the others.
@@ -197,7 +201,7 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
   (`tui/src/app.ts:368`, `onResize`). Under `-oversize auto` the next connect or reconnect
   measures again, so resizing the terminal and reconnecting is how a TUI operator changes size,
   with no new control. What is new: when a resize WHILE CONNECTED changes what `auto` would
-  resolve, the status line says so, e.g. `window now fits 50 rows by 132 columns; applies at the
+  resolve, a one-line `showMessage` says so, e.g. `window now fits 50 rows by 132 columns; applies at the
   next reconnect`, because otherwise the resize appears to do nothing. A resize smaller than the
   current screen still suspends with `terminal too small`, unchanged. Changing the MODEL stays
   flag-only in the TUI: it has no menu, and a resize cannot express a model.
