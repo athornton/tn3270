@@ -13,9 +13,9 @@ import {
   transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
-import { drawList, blankColumns, bestScale, extractText, readAtlas } from '@tn3270/canvas';
+import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
 import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
-import { measureAuto } from './measure.js';
+import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate } from './menu.js';
 import { createTransferController } from './transferWindow.js';
@@ -954,20 +954,16 @@ app.whenReady().then(async () => {
    * CAN resize, so it does -- and the scale follows the design's rule: the largest integer
    * multiple whose screen fits within 80% of the display work area, minimum 1.
    *
-   * `measure.ts` MIRRORS THIS RULE for `-oversize auto` -- the 0.8, the floor, `bestScale` -- so
-   * that an auto-sized screen is drawn at the scale the model would have been. Change one, change
-   * both; `measure.test.ts` checks that an oversize it produces gets that same scale here.
+   * The rule itself is `windowScale` in measure.ts, which `-oversize auto`'s `measureDisplay` also
+   * calls, so an auto-sized screen is drawn at the scale the model would have been; there is one
+   * copy of the 0.8, and `measure.test.ts` tests it.
    */
   let sized = '';
   const fit = (list: { width: number; height: number }): void => {
     const key = `${list.width}x${list.height}`;
     if (key === sized) return;                       // most frames change nothing
     sized = key;
-    const area = screen.getPrimaryDisplay().workAreaSize;
-    const scale = bestScale(list, {
-      width: Math.floor(area.width * 0.8),
-      height: Math.floor(area.height * 0.8),
-    });
+    const scale = windowScale(list, screen.getPrimaryDisplay().workAreaSize);
     win.setContentSize(list.width * scale, list.height * scale);
   };
 
@@ -1384,6 +1380,8 @@ app.whenReady().then(async () => {
    * the trace CHOSEN matters as much as the mechanism.
    */
   if (SEAM.replay !== '') {
+    // NO GEOMETRY IS RESOLVED HERE: only `connect()` resolves it, so `-oversize` (and `auto`'s
+    // measure) does not apply under TN3270_GUI_REPLAY -- the session keeps the model's sizes.
     session.replay(readFileSync(SEAM.replay, 'utf8'));
     send();
     // The session is passed so a `wait:` step works here too -- a replay paints synchronously, so

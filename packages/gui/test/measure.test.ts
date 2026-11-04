@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { bestScale } from '@tn3270/canvas';
 import { resolveGeometry } from '@tn3270/core';
-import { measureAuto, measureDisplay } from '../src/measure.js';
+import { measureAuto, measureDisplay, windowArea, windowScale } from '../src/measure.js';
 
 const CELL = { width: 9, height: 14 };          // 3270.bdf's FONTBOUNDINGBOX 9 14
 const MODEL2 = { rows: 24, cols: 80 };
@@ -11,6 +10,27 @@ const MODEL2 = { rows: 24, cols: 80 };
  * The arithmetic is checked by hand here, because a test that recomputed it with the same
  * expressions would only prove the code agrees with itself.
  */
+/** `fit()`'s own rule -- main.ts calls `windowScale` -- pinned by hand-worked numbers. */
+describe('windowScale', () => {
+  it('uses 80% of the work area, rounded down', () => {
+    expect(windowArea({ width: 1920, height: 1080 })).toEqual({ width: 1536, height: 864 });
+    expect(windowArea({ width: 1280, height: 1024 })).toEqual({ width: 1024, height: 819 });
+  });
+
+  it('is the largest whole scale that fits that 80%', () => {
+    // Model 2 with its OIA row is 720x350. 1920x1080 -> 1536x864: min(2, 2) = 2.
+    expect(windowScale({ width: 720, height: 350 }, { width: 1920, height: 1080 })).toBe(2);
+    // 2700x1320 -> 2160x1056: min(floor(3.0), floor(3.02)) = 3; at 70% (1890x924) it would be 2.
+    expect(windowScale({ width: 720, height: 350 }, { width: 2700, height: 1320 })).toBe(3);
+    // 1800x880 -> 1440x704: min(2, floor(2.01)) = 2; at 79% (1422x695) floor(1422/720) = 1.
+    expect(windowScale({ width: 720, height: 350 }, { width: 1800, height: 880 })).toBe(2);
+  });
+
+  it('never goes below 1, however small the display', () => {
+    expect(windowScale({ width: 720, height: 350 }, { width: 100, height: 100 })).toBe(1);
+  });
+});
+
 describe('measureDisplay', () => {
   it('1920x1080: scale 2, so 85 columns by 29 rows', () => {
     // within = floor(1920*0.8) x floor(1080*0.8) = 1536 x 864.
@@ -73,15 +93,17 @@ describe('measureDisplay', () => {
       const alt = resolveGeometry({ ...setting, oversize: { kind: 'none' } }).alternate;
       for (let w = 640; w <= 5120; w += 37) {
         for (let h = 480; h <= 5120; h += 41) {
-          const within = { width: Math.floor(w * 0.8), height: Math.floor(h * 0.8) };
-          const g = resolveGeometry(setting, () => measureAuto(setting, { width: w, height: h }, CELL));
+          const area = { width: w, height: h };
+          const g = resolveGeometry(setting, () => measureAuto(setting, area, CELL));
           if (!g.dynamic) continue;                   // fell back to the model: fit() is unchanged
           if (g.clamp !== undefined) clamped++;
-          const modelScale = bestScale(
-            { width: alt.cols * CELL.width, height: (alt.rows + 1) * CELL.height }, within);
-          const oversizeScale = bestScale(
+          // windowScale IS fit()'s scale: what the window would pick for the model, and what it
+          // picks for the oversize screen once the host draws it.
+          const modelScale = windowScale(
+            { width: alt.cols * CELL.width, height: (alt.rows + 1) * CELL.height }, area);
+          const oversizeScale = windowScale(
             { width: g.alternate.cols * CELL.width, height: (g.alternate.rows + 1) * CELL.height },
-            within);
+            area);
           expect(oversizeScale, `${w}x${h} model ${model}`).toBe(modelScale);
           checked++;
         }

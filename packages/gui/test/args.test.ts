@@ -183,11 +183,6 @@ describe('buildSession', () => {
     expect(buildSession(parseGuiArgs(['vm']), none).geometrySetting).toEqual({ oversize: { kind: 'none' } });
   });
 
-  it('legacy mode with --terminal-type: no setting, the type string as given', () => {
-    const session = buildSession(parseGuiArgs(['--terminal-type', 'IBM-3278-4-E@MOD4', 'vm']), none);
-    expect(session.geometrySetting).toBeUndefined();
-  });
-
   describe('against a local socket', () => {
     let server: Server | undefined;
     const sockets: Socket[] = [];
@@ -201,6 +196,41 @@ describe('buildSession', () => {
       await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
       return (server.address() as AddressInfo).port;
     };
+
+    it('legacy mode with --terminal-type: no setting, and the type string as given on the wire', async () => {
+      // The server asks for TERMINAL-TYPE (IAC DO TTYPE, then IAC SB TTYPE SEND IAC SE) and the
+      // test reads the IS reply, so what is checked is what the host would be told.
+      const received: number[] = [];
+      let gotIs!: () => void;
+      const isDone = new Promise<void>((r) => { gotIs = r; });
+      server = createServer((s) => {
+        sockets.push(s);
+        s.write(Uint8Array.from([0xff, 0xfd, 0x18, 0xff, 0xfa, 0x18, 0x01, 0xff, 0xf0]));
+        s.on('data', (d: Buffer) => {
+          received.push(...d);
+          if (Buffer.from(received).includes(Buffer.from([0xff, 0xf0]))) gotIs();
+        });
+      });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const session = buildSession(
+        parseGuiArgs(['-model', '3278-4-E', '--terminal-type', 'IBM-3278-4-E@MOD4', '-insecure', 'h']),
+        none);
+      expect(session.geometrySetting).toBeUndefined();
+      // 24x80, NOT the model's 43x80: `resolveAlternateSize` declines to guess a geometry from a
+      // raw terminal-type string (core/src/geometry.ts), exactly as the GUI's code did before
+      // geometry mode -- legacy behaviour, unchanged.
+      expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+      await session.connect('127.0.0.1', port);
+      await isDone;
+      const bytes = Buffer.from(received);
+      const sb = bytes.indexOf(Buffer.from([0xff, 0xfa, 0x18, 0x00]));
+      expect(sb).toBeGreaterThanOrEqual(0);
+      const name = bytes.subarray(sb + 4, bytes.indexOf(Buffer.from([0xff, 0xf0]), sb)).toString('latin1');
+      expect(name).toBe('IBM-3278-4-E@MOD4');
+      expect(session.resolvedGeometry).toBeUndefined();
+      session.disconnect();
+    });
 
     it('auto is measured when connect() runs, with the setting the session holds THEN', async () => {
       const port = await listen();
