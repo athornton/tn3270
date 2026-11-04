@@ -17,7 +17,7 @@
 
 import { sgrFor, type Depth } from './colors.js';
 import { type Scheme } from '@tn3270/frontend';
-import type { ResolvedCell } from '@tn3270/core';
+import type { ResolvedCell, Size } from '@tn3270/core';
 
 export interface Geometry { rows: number; cols: number; }
 
@@ -55,6 +55,27 @@ export function tooSmall(terminal: Geometry, screen: Geometry): boolean {
  */
 export function statusRowFor(terminal: Geometry, screen: Geometry): number | undefined {
   return terminal.rows >= screen.rows + 1 ? screen.rows + 1 : undefined;
+}
+
+/**
+ * The 3270 screen `-oversize auto` may ask for in this terminal, or `undefined` if the terminal
+ * reports no usable size (not a TTY: Node gives `0x0`, or `undefined` which the caller maps to 0).
+ *
+ * The spec's "the terminal's rows less the status line, by its columns" (what zti does), and
+ * DELIBERATELY NOT `tooSmall`'s bound. `tooSmall` lets a screen as tall as the terminal through
+ * and drops the OIA, which is right for a size the HOST chose and the terminal happens to be
+ * short for; it would be wrong for a size WE ask for, because asking for every row would build
+ * a session with no status line on purpose. One row less is exactly `statusRowFor`'s condition,
+ * so the OIA always has its row -- `render.test.ts` pins the three against each other.
+ *
+ * Here rather than in app.ts because it is the same decision as the pair above -- how a
+ * terminal is apportioned -- and because main.ts needs it before any `App` exists.
+ */
+export function measureTerminal(terminal: Geometry): Size | undefined {
+  const rows = terminal.rows - 1;
+  const cols = terminal.cols;
+  if (!(rows > 0 && cols > 0)) return undefined;
+  return { rows, cols };
 }
 
 export interface BorderSides {

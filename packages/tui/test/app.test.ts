@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AckAid, AID, resolve, Session, type Connection } from '@tn3270/core';
+import { AckAid, AID, resolve, Session, type Connection, type GeometrySetting } from '@tn3270/core';
 import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
+import { measureTerminal } from '../src/render.js';
 import { overlayLines } from '../src/keypadOverlay.js';
 
 /**
@@ -1398,5 +1399,229 @@ describe('the transfer form: submitting', () => {
     fillAndSubmit(h);
     vi.advanceTimersByTime(700_000);
     expect(h.stdout.all).toMatch(/Attn or Clear/);
+  });
+});
+
+describe('-oversize auto: a resize says when it applies', () => {
+  // A geometry-mode session whose measure reads the FAKE terminal at call time, exactly as
+  // main.ts's reads process.stdout -- so a connect here measures what the test resized to.
+  function geometryHarness(setting: GeometrySetting, rows = 25, cols = 80): Harness {
+    const conn: Connection = {
+      write: () => {}, close: () => {},
+      onData: undefined, onClose: undefined, onError: undefined,
+    };
+    const stdout = new FakeStdout(rows, cols);
+    const session = new Session({
+      connect: () => conn,
+      geometry: setting,
+      measure: () => measureTerminal({ rows: stdout.rows, cols: stdout.columns }),
+    });
+    const stdin = new FakeStdin();
+    const host = new FakeHost();
+    const app = new App({ session, stdin, stdout, host, depth: 0 });
+    return { app, session, stdin, stdout, host };
+  }
+  const AUTO: GeometrySetting = { oversize: { kind: 'auto' } };
+  const APPLIES = /applies at the next reconnect/g;
+  function announcements(h: Harness): string[] {
+    return h.stdout.all.match(APPLIES) ?? [];
+  }
+  function resize(h: Harness, rows: number, cols: number): void {
+    h.stdout.resize(rows, cols);
+    h.host.fire('SIGWINCH');
+  }
+
+  it('connected under auto: a resize to a new fit says so, naming the size', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    expect(h.session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+    h.app.start();
+    resize(h, 51, 132);
+    expect(h.stdout.all).toContain('window now fits 50 rows by 132 columns; applies at the next reconnect');
+    expect(announcements(h)).toHaveLength(1);
+    resize(h, 63, 160);
+    expect(h.stdout.all).toContain('window now fits 62 rows by 160 columns');
+    expect(announcements(h)).toHaveLength(2);
+  });
+
+  it('a spurious SIGWINCH does not say it again', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 51, 132);
+    h.host.fire('SIGWINCH');
+    h.host.fire('SIGWINCH');
+    expect(announcements(h)).toHaveLength(1);
+  });
+
+  it('a different window that resolves to the SAME size is not announced twice', async () => {
+    // The 14-bit clamp: 40x600 and 41x600 both resolve to 27 rows by 600 columns (16383 / 600),
+    // so the second resize changes nothing a reconnect would do. The no-change guard in
+    // onResize cannot catch this -- the terminal DID change size -- only the last-announced
+    // check can.
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 41, 600);
+    expect(h.stdout.all).toContain('window now fits 27 rows by 600 columns');
+    resize(h, 42, 600);
+    expect(announcements(h)).toHaveLength(1);
+  });
+
+  it('a resize back to what is in effect says nothing, and leaving it again is announced again', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 30, 90);          // fits 29x90: announced
+    expect(announcements(h)).toHaveLength(1);
+    resize(h, 25, 80);          // back to 24x80, the alternate in effect: nothing to apply
+    expect(announcements(h)).toHaveLength(1);
+    // The first message was painted over long ago, so leaving again is news again.
+    resize(h, 30, 90);
+    expect(announcements(h)).toHaveLength(2);
+  });
+
+  it('a window smaller than the model is announced as the model a reconnect falls back to', async () => {
+    const h = geometryHarness({ model: '3278-2-E', oversize: { kind: 'auto' } }, 30, 100);
+    await h.session.connect('h', 23);
+    expect(h.session.screen.alternateSize).toEqual({ rows: 29, cols: 100 });
+    h.app.start();
+    // Fits 23x80: less than the model, so a reconnect gives the model's 24x80 -- a change from
+    // 29x100, announced as what the reconnect will DO, not as the 23 rows that do not apply.
+    resize(h, 24, 80);
+    expect(announcements(h)).toHaveLength(1);
+    expect(h.stdout.all).toContain(
+      'window no longer fits an oversize; the model\'s 24 rows by 80 columns applies at the next reconnect');
+    expect(h.stdout.all).not.toContain('23 rows');
+  });
+
+  it('never under none or a fixed size', async () => {
+    for (const oversize of [{ kind: 'none' }, { kind: 'fixed', rows: 30, cols: 90 }] as const) {
+      const h = geometryHarness({ oversize });
+      await h.session.connect('h', 23);
+      h.app.start();
+      resize(h, 51, 132);
+      expect(announcements(h), oversize.kind).toHaveLength(0);
+    }
+  });
+
+  it('never in legacy mode', async () => {
+    const h = harness();
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 51, 132);
+    expect(announcements(h)).toHaveLength(0);
+  });
+
+  it('never while disconnected: the next connect measures anyway', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.session.disconnect();
+    h.app.start();
+    resize(h, 51, 132);
+    expect(announcements(h)).toHaveLength(0);
+  });
+
+  it('never when the terminal became too small for the current screen: that message stands', async () => {
+    const h = geometryHarness(AUTO, 51, 132);
+    await h.session.connect('h', 23);
+    h.session.screen.useAlternateSize();      // the host's Erase/Write Alternate: 50x132
+    h.app.start();
+    resize(h, 30, 100);                       // too small for 50x132, and a new fit
+    expect(h.stdout.all).toContain('terminal too small');
+    expect(announcements(h)).toHaveLength(0);
+    expect(h.stdout.all.endsWith('Resize to continue.')).toBe(true);
+  });
+
+  it('a reconnect that applied the size forgets the announcement', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 51, 132);
+    await h.session.connect('h', 23);         // applies 50x132
+    expect(h.session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+    resize(h, 25, 80);                        // now 24x80 is the change
+    expect(h.stdout.all).toContain('window now fits 24 rows by 80 columns');
+    expect(announcements(h)).toHaveLength(2);
+  });
+
+  it('a reconnect forgets the announcement even when it applied a DIFFERENT size', async () => {
+    // Resizes while disconnected announce nothing and record nothing, so the reconnect below
+    // applies 29x90 with 50x132 still remembered as announced. Without the reset on 'geometry',
+    // growing back to 51x132 would be taken for a repeat and the operator told nothing.
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 51, 132);                       // announces 50x132
+    h.session.disconnect();
+    resize(h, 30, 90);                        // disconnected: silent
+    await h.session.connect('h', 23);         // applies 29x90
+    expect(h.session.screen.alternateSize).toEqual({ rows: 29, cols: 90 });
+    resize(h, 51, 132);
+    expect(announcements(h)).toHaveLength(2);
+  });
+
+  it('a fit swallowed while suspended is announced once the screen is back', async () => {
+    // The screen is 24x100. 24x99 cannot hold it (suspended) and resolves to the model's 24x80;
+    // 24x100 holds it again and resolves to the same 24x80. The first was never SHOWN -- the
+    // too-small message owns row 1 -- so it must not count as announced.
+    const h = geometryHarness(AUTO, 25, 100);
+    await h.session.connect('h', 23);
+    h.session.screen.useAlternateSize();      // the host's Erase/Write Alternate: 24x100
+    h.app.start();
+    resize(h, 24, 99);
+    expect(h.stdout.all).toContain('terminal too small');
+    expect(announcements(h)).toHaveLength(0);
+    resize(h, 24, 100);
+    expect(announcements(h)).toHaveLength(1);
+    expect(h.stdout.all).toContain("the model's 24 rows by 80 columns applies at the next reconnect");
+  });
+
+  it('a reconnect whose auto fell back writes the notice to stderr and flashes it once', async () => {
+    const h = geometryHarness({ model: '3278-4-E', oversize: { kind: 'auto' } }, 51, 132);
+    await h.session.connect('h', 23);
+    expect(h.session.lastGeometryNotice).toBeUndefined();
+    h.app.start();
+    expect(h.host.errors).toEqual([]);        // the first connect's notice is main.ts's to print
+    h.stdout.resize(30, 132);                 // fits 29x132: less than model 4's 43 rows
+    await h.session.connect('h', 23);
+    const notice = h.session.lastGeometryNotice!;
+    expect(notice).toMatch(/less than model 3278-4-E's 43 rows by 80 columns; using the model/);
+    expect(h.stdout.all.split(notice)).toHaveLength(2);          // flashed once, on screen
+    // HELD until the terminal is handed back: stderr is the same tty, so written now it would
+    // land on the alternate screen over the 3270 cells, and vanish with that buffer on quit.
+    expect(h.host.errors).toEqual([]);
+    h.app.restore();
+    expect(h.host.errors).toEqual([`${notice}\n`]);
+    const out = h.stdout.all;
+    expect(out.lastIndexOf(ALT_OFF)).toBeGreaterThan(out.lastIndexOf(notice));
+    h.app.restore();                                            // idempotent: not written twice
+    expect(h.host.errors).toHaveLength(1);
+  });
+
+  it('a notice the screen cannot show (suspended) still reaches stderr on quitting', async () => {
+    // A reconnect that changes the geometry resets the screen to the 24x80 default, so the only
+    // way to be suspended when its notice arrives is a terminal shorter than 24 rows -- which is
+    // also exactly a window that makes `auto` fall back.
+    const h = geometryHarness({ model: '3278-2-E', oversize: { kind: 'auto' } }, 51, 132);
+    await h.session.connect('h', 23);
+    h.app.start();
+    resize(h, 23, 80);                        // too small even for 24x80: suspended
+    expect(h.stdout.all).toContain('terminal too small');
+    await h.session.connect('h', 23);         // fits 22x80: falls back to the model
+    const notice = h.session.lastGeometryNotice!;
+    expect(notice).toMatch(/using the model/);
+    expect(h.stdout.all).not.toContain(notice);
+    expect(h.stdout.all.endsWith('Resize to continue.')).toBe(true);
+    h.app.restore();
+    expect(h.host.errors).toEqual([`${notice}\n`]);
+  });
+
+  it('a reconnect with no notice writes nothing to stderr', async () => {
+    const h = geometryHarness(AUTO);
+    await h.session.connect('h', 23);
+    h.app.start();
+    await h.session.connect('h', 23);
+    expect(h.host.errors).toEqual([]);
   });
 });

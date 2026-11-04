@@ -6,14 +6,17 @@
  * docs/superpowers/specs/2026-08-19-tui-and-color-design.md.
  */
 
-import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
 import {
-  defaultSession, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, resolveTls,
-  TLS_USAGE, type Scheme, type TlsFlags, type TlsOptions,
+  resolveTerminalType, resolveAlternateSize, resolveGeometry, OversizeError, TerminalTypeError,
+  type Oversize, type Session,
+} from '@tn3270/core';
+import {
+  defaultSession, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, takeOversizeFlag,
+  resolveTls, OVERSIZE_USAGE, TLS_USAGE, type Scheme, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
-import { layout } from './render.js';
+import { layout, measureTerminal, type Geometry } from './render.js';
 import type { Depth } from './colors.js';
 
 export class UsageError extends Error {
@@ -55,6 +58,13 @@ export interface TuiArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /**
+   * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
+   * Unlike the CLI's, `auto` is allowed -- there is a terminal to measure, at every connect and
+   * reconnect (see `buildSession`). A combination `resolveGeometry` would refuse at connect is
+   * refused at parse time instead; see `parseArgs`'s check after the flag loop.
+   */
+  oversize?: Oversize;
 }
 
 /**
@@ -91,6 +101,11 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
     const eaten = takeTlsFlag(tlsFlags, flag, value, (m) => new UsageError(m));
     if (eaten !== undefined) {
       i += eaten;
+      continue;
+    }
+    const oversizeEaten = takeOversizeFlag(args, flag, value, (m) => new UsageError(m));
+    if (oversizeEaten !== undefined) {
+      i += oversizeEaten;
       continue;
     }
     switch (flag) {
@@ -188,6 +203,23 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         break;
     }
   }
+  // Refuse at PARSE time whatever `resolveGeometry` would refuse at connect: an oversize with
+  // --terminal-type, or on a model that cannot carry it. One call, as in the CLI, because those
+  // are exactly the checks it makes. The measure is a STAND-IN reporting no window, so `auto`
+  // passes every rule it can break and then takes geometry.ts's "no window size known" fallback
+  // without the real terminal being read -- that happens at connect, not here.
+  if (args.oversize !== undefined) {
+    try {
+      resolveGeometry({
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
+        oversize: args.oversize,
+      }, () => undefined);
+    } catch (e) {
+      if (e instanceof OversizeError) throw new UsageError(e.message);
+      throw e;
+    }
+  }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
 
   if (args.host !== undefined) {
@@ -240,26 +272,58 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
  */
 export const BANNER = 'tn3270: Ctrl-] quits, Ctrl-C is Clear, Ctrl-R is Reset';
 
+/** The real terminal's size, read when called -- never captured. 0 for an unknown dimension. */
+function processTerminal(): Geometry {
+  return { rows: process.stdout.rows ?? 0, cols: process.stdout.columns ?? 0 };
+}
+
+/**
+ * Builds the session `run()` connects, from a parsed `TuiArgs` -- the CLI's `buildSession`,
+ * extracted for the same reason: so a test drives this code rather than a copy of it.
+ *
+ * Geometry mode unless `--terminal-type` was given (a raw string `resolveGeometry` cannot
+ * interpret as a model). The `auto` measure reads the terminal AT CALL TIME, through
+ * `terminal`, which `Session` calls at every connect and reconnect: a resize between them is
+ * what the next connect sees. `terminal` is injected only so a test can resize a terminal that
+ * is not the test runner's.
+ */
+export function buildSession(args: TuiArgs, terminal: () => Geometry = processTerminal): Session {
+  if (args.terminalType !== undefined) {
+    // Built once and passed to both resolvers, so the ttype string and the geometry
+    // can never come from different readings of the same arguments.
+    const typeOpts = {
+      ...(args.model !== undefined ? { model: args.model } : {}),
+      terminalType: args.terminalType,
+    };
+    return defaultSession(
+      resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
+      args.tn3270e, args.bindImage, args.bindLimit, args.devname, args.ddm,
+    );
+  }
+  return defaultSession(
+    undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
+    args.devname, args.ddm,
+    {
+      setting: {
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        oversize: args.oversize ?? { kind: 'none' },
+      },
+      measure: () => measureTerminal(terminal()),
+    },
+  );
+}
+
 export async function run(argv: readonly string[], host: HostProcess): Promise<number> {
   const args = parseArgs(argv);
   if (args.host === undefined) {
     throw new UsageError(
       `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
       + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-      + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
+      + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
     );
   }
 
-  // Built once and passed to both resolvers, so the ttype string and the geometry
-  // can never come from different readings of the same arguments.
-  const typeOpts = {
-    ...(args.model !== undefined ? { model: args.model } : {}),
-    ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
-  };
-  const session = defaultSession(
-    resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
-    args.tn3270e, args.bindImage, args.bindLimit, args.devname, args.ddm,
-  );
+  const session = buildSession(args);
 
   // The LU list travels with the CONNECTION, not the session: it came from the host
   // argument, and `ConnectOptions` is where a per-host setting belongs. `tn3270e` went
@@ -267,6 +331,14 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
   // one host for its lifetime, so the two routes cannot disagree.
   await session.connect(args.host, args.port ?? 23,
     args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
+
+  // An `auto` that fell back to the model, said on stderr BEFORE the alternate screen opens, so
+  // it stays in the normal buffer -- there on quitting and in scrollback. The App's own
+  // 'geometry' listener, registered in `start()` below and so not yet, handles every later
+  // reconnect; this first connect's notice is this function's to print.
+  if (session.lastGeometryNotice !== undefined) {
+    host.stderr.write(`${session.lastGeometryNotice}\n`);
+  }
 
   // Printed here ONLY when the persistent hint has nowhere to go. The transient
   // line exists because the message used to vanish the instant the alternate

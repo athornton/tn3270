@@ -21,10 +21,10 @@
  * to spawn a real TTY to check it would not get written.
  */
 
-import { resolve, type Session } from '@tn3270/core';
+import { describeSize, resolve, resolveGeometry, type Session, type Size } from '@tn3270/core';
 import { detectDepth, type Depth } from './colors.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
-import { layout, TerminalRenderer, tooSmall } from './render.js';
+import { layout, measureTerminal, TerminalRenderer, tooSmall } from './render.js';
 import { transferFits, transferLines, type TransferPhase } from './transferOverlay.js';
 import { startTransfer, type TransferRun } from '@tn3270/frontend';
 import {
@@ -290,6 +290,21 @@ export class App {
   /** The transfer in flight, so closing the form can ABORT it rather than abandon it. */
   private transferRun: TransferRun | undefined;
   private readonly files: TransferFiles | undefined;
+  /**
+   * The size the last `applies at the next reconnect` line named, so a spurious SIGWINCH, or a
+   * second window that resolves to the same size, does not say it again. Cleared when the
+   * terminal comes back to the size in effect (leaving it again is news again) and on every
+   * 'geometry' event (a reconnect applied a size, so what was announced is no longer pending).
+   */
+  private announcedFit: Size | undefined;
+  /**
+   * `lastGeometryNotice` lines from reconnects, HELD for stderr until `restore()`. stderr is the
+   * same tty as stdout here, so written at once a line would land on the alternate screen over
+   * the 3270 cells and vanish with that buffer on quit -- the opposite of what the spec wants
+   * from it ("lands in the normal screen buffer, so it is there on quitting and in scrollback").
+   * The screen gets its copy at once, from `showMessage`.
+   */
+  private pendingNotices: string[] = [];
 
   /** Public for tests, like `onInput`: a test should not have to infer this from bytes. */
   get overlayOpen(): boolean { return this.overlayShown; }
@@ -372,6 +387,10 @@ export class App {
     // a model 2 it can never fire at all.
     this.session.on('screen', () => { this.onScreenResize(); this.draw(); });
     this.session.on('disconnect', () => { this.draw(); });
+    // After 'screen' on purpose: `applyGeometry` emits that first when the size changed, so the
+    // repaint (or the suspension) has happened and this message is not painted over by it. Only
+    // reconnects reach here -- main.ts prints the FIRST connect's notice itself, before start().
+    this.session.on('geometry', () => this.onGeometry());
     this.stdin.on('data', (b: Uint8Array) => this.onInput(b));
     this.renderer.invalidate();
     this.draw();
@@ -404,6 +423,58 @@ export class App {
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);
     this.stdin.pause();
+    // Only now, on the normal screen -- see `pendingNotices`.
+    for (const notice of this.pendingNotices) this.host.stderr.write(`${notice}\n`);
+    this.pendingNotices = [];
+  }
+
+  /**
+   * A (re)connect resolved its geometry. Whatever a resize announced is now either applied or
+   * superseded, so forget it; and an `auto` that fell back to the model says so, once on screen
+   * and once on stderr at quit.
+   *
+   * WHILE SUSPENDED THE SCREEN COPY IS LOST, and that is `showMessage`'s guard doing its job: the
+   * too-small notice is the one instruction that gets the user out of that state and must not be
+   * overwritten. The stderr copy is not lost, so the notice still reaches the operator.
+   */
+  private onGeometry(): void {
+    this.announcedFit = undefined;
+    const notice = this.session.lastGeometryNotice;
+    if (notice === undefined) return;
+    this.pendingNotices.push(notice);
+    this.showMessage(notice);
+  }
+
+  /**
+   * Under `-oversize auto`, say when a resize changed what the next reconnect would resolve --
+   * otherwise the resize appears to do nothing, since a live session cannot change size (the host
+   * learned it from the Query Reply). See the spec's "TUI: a terminal resize is the switch".
+   *
+   * RESOLVED, not merely measured: what is announced is what a reconnect would actually do, so a
+   * window past the 14-bit limit names the clamped size, and one smaller than the model names the
+   * model it falls back to. Two windows that resolve alike are one announcement.
+   */
+  private announceFit(term: { rows: number; cols: number }): void {
+    // Not while suspended: the too-small message stands, and `showMessage` would refuse anyway --
+    // checked here so a fit that was never shown is not recorded as announced.
+    if (this.suspended) return;
+    const setting = this.session.geometrySetting;
+    if (setting === undefined || setting.oversize.kind !== 'auto') return;
+    // Disconnected, the next connect measures anyway; there is nothing pending to explain.
+    if (!this.session.isConnected()) return;
+    const next = resolveGeometry(setting, () => measureTerminal(term));
+    const fit = next.alternate;
+    const now = this.session.screen.alternateSize;
+    if (fit.rows === now.rows && fit.cols === now.cols) {
+      this.announcedFit = undefined;
+      return;
+    }
+    const last = this.announcedFit;
+    if (last !== undefined && last.rows === fit.rows && last.cols === fit.cols) return;
+    this.announcedFit = { rows: fit.rows, cols: fit.cols };
+    this.showMessage(next.dynamic
+      ? `window now fits ${describeSize(fit)}; applies at the next reconnect`
+      : `window no longer fits an oversize; the model's ${describeSize(fit)} applies at the next reconnect`);
   }
 
   /**
@@ -422,6 +493,10 @@ export class App {
     this.termRows = term.rows;
     this.termCols = term.cols;
     this.replace(term);
+    // AFTER `replace`, so the repaint it does cannot wipe the line, and so `suspended` is
+    // already true when this terminal is too small for the current screen -- the two messages
+    // both sit at 1;1 and must not fight; `announceFit` stands down for the too-small one.
+    this.announceFit(term);
   }
 
   /**

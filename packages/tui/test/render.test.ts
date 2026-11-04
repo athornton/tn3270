@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Color, type ResolvedCell } from '@tn3270/core';
 import { resolveScheme } from '@tn3270/frontend';
-import { layout, statusRowFor, TerminalRenderer, tooSmall, type Layout } from '../src/render.js';
+import {
+  layout, measureTerminal, statusRowFor, TerminalRenderer, tooSmall, type Layout,
+} from '../src/render.js';
 
 /** A 2x3 grid of plain green cells, with `text` from a string. */
 function grid(text: string, rows = 2, cols = 3): ResolvedCell[] {
@@ -61,6 +63,34 @@ describe('statusRowFor', () => {
       expect(tooSmall(term, screen), `rows ${rows}`).toBe(false);
       const sr = statusRowFor(term, screen);
       if (sr !== undefined) expect(sr, `rows ${rows}`).toBeLessThanOrEqual(rows);
+    }
+  });
+});
+
+describe('measureTerminal: what -oversize auto may ask for', () => {
+  // The spec's "the terminal's rows less the status line, by its columns". NOT `tooSmall`'s
+  // bound: that accepts a screen as tall as the terminal and drops the OIA, which is right for
+  // a host-chosen size the terminal happens to be short for and wrong for a size WE ask for --
+  // asking for every row would hand the operator a session with no status line on purpose.
+  it('leaves one row for the status line and takes every column', () => {
+    expect(measureTerminal({ rows: 51, cols: 132 })).toEqual({ rows: 50, cols: 132 });
+    expect(measureTerminal({ rows: 25, cols: 80 })).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('measures nothing for a terminal that reports no size (not a TTY)', () => {
+    expect(measureTerminal({ rows: 0, cols: 0 })).toBeUndefined();
+    expect(measureTerminal({ rows: 1, cols: 80 })).toBeUndefined();   // no row left for a screen
+    expect(measureTerminal({ rows: 25, cols: 0 })).toBeUndefined();
+  });
+
+  it('measures a screen that fits WITH its status line, by the renderer\'s own rules', () => {
+    // Pinned against the pair that apportions a tight terminal, so the measure cannot drift
+    // from what `layout` will actually draw.
+    for (const term of [{ rows: 25, cols: 80 }, { rows: 51, cols: 132 }, { rows: 63, cols: 160 }]) {
+      const fit = measureTerminal(term)!;
+      expect(tooSmall(term, fit)).toBe(false);
+      expect(statusRowFor(term, fit)).toBe(fit.rows + 1);
+      expect(layout(term, fit).statusRow).toBe(term.rows);
     }
   });
 });
