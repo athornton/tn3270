@@ -265,6 +265,12 @@ export function actionForKey(e: KeyLike): Action | null {
     //
     // Checked BEFORE PA_CODES so a future Alt entry in that table cannot shadow it silently.
     if (e.code === 'KeyK') return { kind: 'toggleKeypad' };
+    // Alt-M, the model/oversize chooser, 2026-11-04 -- `e.code` for the reason Alt-K gives just
+    // above: Option-M on macOS reports `key === 'µ'`, so a `key` test would pass on Linux and fail
+    // on a Mac. Shadows nothing: `KeyM` is in no other Alt entry, PA_CODES holds only digits, and
+    // the Ctrl and Meta branches never reach here. The cost is that Option-M no longer types `µ`,
+    // the trade Option-K already makes. Not `Ctrl-Shift-M`, which both browsers keep for themselves.
+    if (e.code === 'KeyM') return { kind: 'geometryMenu' };
     // `??` and not `return ... ?? null`: a key no PA entry claims may still be a layout
     // character. This is the macOS Option path -- Option-1 matched `Digit1` above and never
     // reaches here, while Option-8 on a German Mac has no binding and types `{`.

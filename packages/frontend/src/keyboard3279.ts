@@ -116,9 +116,10 @@ import type { Action } from './keymap.js';
  *
  * ## WHAT IS DELIBERATELY NOT HERE
  *
- * No `toggleKeypad`, `toggleKeyboard` or `quit` on any cap: `applyAction` throws on all three, so
- * a drawn button would be a button whose only effect is to throw -- and `toggleKeyboard`'s would
- * toggle the surface it is drawn on. Pinned by this table's own test.
+ * No `toggleKeypad`, `toggleKeyboard`, `geometryMenu` or `quit` on any cap: `applyAction` throws
+ * on all four, so a drawn button would be a button whose only effect is to throw -- and
+ * `toggleKeyboard`'s would toggle the surface it is drawn on. (`geometryMenu` is not a 3279 key at
+ * all: a terminal's model was its hardware.) Pinned by this table's own test.
  */
 
 export const KEYBOARD_REGIONS = [

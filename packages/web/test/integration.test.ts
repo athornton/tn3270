@@ -215,7 +215,10 @@ const REFUSED: readonly string[] = ['quit', 'requestCopy'];
  * `tab` sent after every kind must still come back as a frame, and that is the assertion that
  * `applyAction` was never reached -- the throw would have taken the socket handler with it.
  */
-const SWALLOWED: readonly string[] = ['toggleKeypad', 'transferForm', 'toggleKeyboard'];
+// `geometryMenu` JOINED 2026-11-04, by the `toggleKeyboard` rule: the picker is the browser's own
+// overlay, the choice travels later as its own message, and `main.ts` returns before `applyAction`.
+const SWALLOWED: readonly string[] =
+  ['toggleKeypad', 'transferForm', 'toggleKeyboard', 'geometryMenu'];
 
 /**
  * Kinds whose correct reply is a SERVER MESSAGE OTHER THAN A FRAME. Anything absent owes a frame.

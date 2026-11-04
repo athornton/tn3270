@@ -120,6 +120,16 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
       + 'since a button for it would toggle the surface it is drawn on',
   },
   {
+    key: 'Alt-M', action: { kind: 'geometryMenu' },
+    note: 'opens the MODEL/OVERSIZE chooser -- the GUI\'s Model menu, the browser\'s picker overlay '
+      + '-- whose choice applies at the next connect. THE CANVAS FRONT ENDS ONLY, which is why this '
+      + 'row gives NO `terminal` sequence, as Ctrl-B\'s does not: the TUI changes size by being '
+      + 'RESIZED and model only by flag, so there is no chooser for a sequence to open, and Alt-M '
+      + 'would be ESC m there besides. Matched on e.code (KeyM), NOT e.key: on macOS Option-M '
+      + 'reports key "µ", the Alt-K trap again. NOT c3270\'s: it binds no such key. NOT a 3270 key '
+      + '-- `applyAction` throws on it and each front end owns its own display',
+  },
+  {
     key: 'Ctrl-T', action: { kind: 'transferForm' }, terminal: '\x14',
     note: 'opens the IND$FILE transfer form (TUI). NOT c3270\'s -- it binds NO transfer key at '
       + 'all, in either half of Common/fb-c3270, so there is no reference spelling to match and '

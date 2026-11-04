@@ -1219,6 +1219,29 @@ app.whenReady().then(async () => {
       });
       return;
     }
+    /*
+      `Alt-M`, THE MODEL/OVERSIZE CHOOSER, 2026-11-04 -- INTERCEPTED NOW, BEFORE IT DOES ANYTHING,
+      AND THE ORDER OF THOSE TWO IS THE POINT.
+
+      `applyAction` THROWS on `geometryMenu` (the eighth guard in `frontend/src/actions.ts`), and a
+      throw in this listener FREEZES THE MAIN PROCESS -- the `requestCopy` note below has the
+      measurement. And the kind can arrive from windows this file does not draw the canvas in:
+      `canvas/src/forwardKeys.ts`'s `forwardKeys` forwards whatever `actionForKey` returns from the
+      KEYPAD AND KEYBOARD WINDOWS with no kind filtering, and `actionForKey` raises this on `Alt-M`
+      the moment `keys.ts` binds it. So the arm had to land in the same commit as the binding, and
+      `keys.mjs`'s `kbd:Alt+M` case followed by its liveness probe is the witness for that path.
+
+      EVERY WINDOW GETS THE SAME ANSWER, deliberately not `requestCopy`'s child-window drop. That
+      kind is dropped because a child window holds no selection; a menu needs nothing a child
+      window lacks, and `forwardKeys` records the user's rule that ALL CHORDS WORK EVERYWHERE. The
+      Model menu is the APPLICATION's, so popping it from the keypad window is as correct as from
+      the canvas, and the sender is not consulted.
+
+      A BARE `return` FOR NOW: the Model menu does not exist yet, and its task makes this arm pop
+      it up. Nothing is logged -- the action log at the top of this listener already records the
+      kind for the harness, and a line saying "not yet" would tell the operator nothing to act on.
+    */
+    if (action.kind === 'geometryMenu') return;
     /**
      * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
      * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the
@@ -1290,8 +1313,8 @@ app.whenReady().then(async () => {
       LIKE. 2026-10-26.
 
       `paste` is the ONE kind `applyAction` throws on that this front end does not intercept, so a
-      reader who has just read the arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`, `copy`
-      and `requestCopy` -- will notice the gap and reach for one more. (`transferForm` is the
+      reader who has just read the arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`,
+      `geometryMenu`, `copy` and `requestCopy` -- will notice the gap and reach for one more. (`transferForm` is the
       remaining one and it is BELOW this comment, so a reader counting upward from here finds one
       fewer than the listener has.)
 

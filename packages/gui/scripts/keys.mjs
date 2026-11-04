@@ -69,8 +69,8 @@ const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'
  * table and not to this one would have left the claim quietly false. Checked by hand 2026-10-23:
  * that table's ten entries are c r u ] a d f k b t, and all of them but `]` are cases here.
  *
- * Ctrl+K, Ctrl+T and Ctrl+B are the ones whose interception is in `main.ts` rather than in
- * `applyAction`, so this run also proves the log-then-intercept ORDER there -- log it after
+ * Ctrl+K, Ctrl+T, Ctrl+B and Alt+M are the ones whose interception is in `main.ts` rather than
+ * in `applyAction`, so this run also proves the log-then-intercept ORDER there -- log it after
  * intercepting and those positions go red. (This line said "Ctrl+K is the one" through two
  * additions that each made it less true; the count is now stated instead of implied.)
  * Alt+K, the canvas front ends' second spelling of it, is NOT here: two toggles in one
@@ -143,6 +143,20 @@ const CASES = [
   { spec: 'Insert', action: { kind: 'toggleInsert' } },
   { spec: 'Enter', action: { kind: 'enter' } },
   /**
+   * Alt+M, the model/oversize chooser, 2026-11-04 -- `geometryMenu`, which `applyAction` THROWS on.
+   *
+   * EXPECTED AS AN ACTION AND NOT AS `null`, for the reason the `kbd:Ctrl+Shift+C` note below
+   * records from its own first draft: the action log sits at the TOP of `ipcMain.on('action')`,
+   * above every interception, so an intercepted kind is still a LOGGED kind. What makes this
+   * position "reaches no session" is the rest of the run: had the kind fallen through to
+   * `applyAction`, the throw would have frozen the main process and every later position would be
+   * missing -- the run would end in ETIMEDOUT, not in a mismatch here. `Ctrl+B` above is asserted
+   * the same way and proves the same log-then-intercept order.
+   *
+   * NO MENU OPENS YET: the arm in `main.ts` is a bare `return` until the Model menu lands.
+   */
+  { spec: 'Alt+M', action: { kind: 'geometryMenu' } },
+  /**
    * `Ctrl+Shift+C` IN THE KEYBOARD WINDOW -- THE FREEZE THAT EVERY OTHER GATE MISSED.
    *
    * WHAT THIS PROVES THAT NOTHING ELSE CAN. The keyboard and keypad windows do NOT load
@@ -175,7 +189,7 @@ const CASES = [
    * window. What `main.ts` does with it afterwards is a bare `return`, because a child window
    * holds no selection: the rectangle lives in the canvas renderer's module state.
    *
-   * IT MUST FOLLOW A `Ctrl+B`, which is why it is last: the keyboard window has to exist before a
+   * IT MUST FOLLOW A `Ctrl+B`, which is why the `kbd:` cases are last: the keyboard window has to exist before a
    * `kbd:` step can target it, and `Ctrl+B` above is what opens it. A `kbd:` step with no such
    * window prints `keys: NO KEYBOARD WINDOW` and is skipped -- deliberately not retargeted at the
    * canvas, which would pass while proving nothing.
@@ -192,8 +206,7 @@ const CASES = [
    *
    * DELIVERED TO THE KEYBOARD WINDOW TOO, not the canvas, and that is deliberate: a probe sent to
    * the canvas would prove the canvas window still works, which EVERY CASE WITHOUT A `kbd:` PREFIX
-   * above already proves -- 20 of them as of 2026-10-27, which is all of `CASES` but this probe and
-   * the chord it follows. The claim being made is that the CHILD WINDOW's path survived, so the
+   * already proves -- all of `CASES` but the `kbd:` chords and their probes. The claim being made is that the CHILD WINDOW's path survived, so the
    * probe has to travel it.
    *
    * THE COUNT IS STATED AS A DERIVATION AND NOT AS A BARE NUMERAL, because the bare numeral was
@@ -207,6 +220,27 @@ const CASES = [
    * CTRL table, `applyAction` handles it (so no interception is involved), and against a replayed
    * trace it has no other observable consequence to perturb the run.
    */
+  { spec: 'kbd:Ctrl+A', action: { kind: 'attn' } },
+  /**
+   * `Alt+M` IN THE KEYBOARD WINDOW, 2026-11-04 -- THE SAME TRAP AS `kbd:Ctrl+Shift+C` ABOVE, ARMED
+   * BY A NEW BINDING.
+   *
+   * `forwardKeys` forwards `geometryMenu` from this window unfiltered, and `applyAction` THROWS on
+   * it, so without `main.ts`'s `geometryMenu` arm this chord would freeze the main process exactly
+   * as `requestCopy` once did. The arm treats every window alike -- the Model menu is the
+   * application's, and `forwardKeys` records that all chords work everywhere -- so this is a
+   * positive, logged at the top of the listener like every intercepted kind.
+   *
+   * MEASURED RED, 2026-11-04, by deleting that arm and rebuilding: with this case alone left (the
+   * canvas `Alt+M` above removed too), the log stopped at `{"kind":"geometryMenu"}`, the probe below
+   * never arrived, and the run ended `the client never ran to completion` / `ETIMEDOUT` after
+   * 120s, SIGKILLed with no Electron left behind. With the canvas case present, IT froze first.
+   *
+   * FOLLOWED BY ITS OWN LIVENESS PROBE, for the reason the probe above gives: a freeze and a
+   * correctly handled chord can look alike from the log alone, and only an `attn` arriving AFTER
+   * this chord, along the same child-window path, says the event loop survived it.
+   */
+  { spec: 'kbd:Alt+M', action: { kind: 'geometryMenu' } },
   { spec: 'kbd:Ctrl+A', action: { kind: 'attn' } },
 ];
 

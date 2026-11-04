@@ -76,6 +76,15 @@ export interface BridgeDeps {
    */
   readonly toggleKeyboard?: () => void;
   /**
+   * Show or hide the MODEL/OVERSIZE PICKER, `Alt-M`. 2026-11-04.
+   *
+   * Here for exactly the reason `toggleKeyboard` above is: the picker is a DOM overlay in this
+   * front end, so opening it is a local display decision, and `geometryMenu` is intercepted in
+   * `sendAction` below rather than sent. OPTIONAL for the same reason too -- and absent today:
+   * `bridge.ts` passes nothing until the overlay exists, so the chord is DROPPED, never sent.
+   */
+  readonly toggleGeometry?: () => void;
+  /**
    * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
    * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
    * tests and any caller with no DOM must not need one.
@@ -627,6 +636,22 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
        */
       if ((action as { kind?: unknown }).kind === 'toggleKeyboard') {
         deps.toggleKeyboard?.();
+        return;
+      }
+      /**
+       * `geometryMenu` IS CLIENT-SIDE TOO, 2026-11-04, by the `toggleKeyboard` argument above.
+       *
+       * The model/oversize picker is a DOM overlay drawn in the browser; what the operator picks
+       * travels later as its own message, so this action itself has nothing for the server to do.
+       * `main.ts` keeps its OWN return regardless -- the two-branch rule, because a client need not
+       * run served code and `applyAction` throws on this kind outside any try in the socket
+       * handler.
+       *
+       * Absent `deps.toggleGeometry` -- which is every caller until the overlay lands -- the action
+       * is DROPPED rather than falling through to the socket, the keypad branch's bargain.
+       */
+      if ((action as { kind?: unknown }).kind === 'geometryMenu') {
+        deps.toggleGeometry?.();
         return;
       }
       /**

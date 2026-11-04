@@ -168,6 +168,40 @@ describe('createBridge', () => {
     expect(socket.sent.filter((s) => s.includes('toggleKeypad'))).toHaveLength(0);
   });
 
+  it('INTERCEPTS geometryMenu: calls the local handler, never sends it', () => {
+    // `Alt-M`, 2026-11-04. The model/oversize picker is a DOM overlay in this front end, so opening
+    // it is a local display decision -- and the choice it makes travels later as its own message,
+    // not as this action. Both halves asserted, the second being the one that matters: `applyAction`
+    // THROWS on this kind outside any try in the gateway's socket handler.
+    const socket = fakeSocket();
+    let opened = 0;
+    const api = createBridge({
+      socket: socket as never,
+      storage: fakeStorage() as never,
+      inflate: async (d) => String(d),
+      toggleGeometry: () => { opened += 1; },
+    });
+    socket.onopen?.();
+    const before = socket.sent.length;
+    api.sendAction({ kind: 'geometryMenu' });
+    expect(opened).toBe(1);
+    expect(socket.sent.slice(before)).toHaveLength(0);
+    expect(socket.sent.filter((s) => s.includes('geometryMenu'))).toHaveLength(0);
+  });
+
+  it('DROPS geometryMenu when no handler is given, rather than sending it', () => {
+    // The same bargain `toggleKeypad` makes: a caller with no DOM has no picker to show, and falling
+    // through to the socket would hand the gateway an action `applyAction` throws on.
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    socket.onopen?.();
+    const before = socket.sent.length;
+    api.sendAction({ kind: 'geometryMenu' });
+    expect(socket.sent.slice(before)).toHaveLength(0);
+  });
+
   it('INTERCEPTS transferForm: shows the local overlay, never sends it', () => {
     /**
      * THE TRANSFER FORM IS A DOM OVERLAY IN THIS FRONT END TOO (2026-10-07), so opening it is a

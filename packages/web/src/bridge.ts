@@ -286,6 +286,10 @@ const bridge = createBridge({
     overlay.hide();
     keyboardOverlay.toggle();
   },
+  // NO `toggleGeometry` YET, deliberately, 2026-11-04: the model/oversize picker overlay does not
+  // exist, so `Alt-M` is DROPPED in `bridgecore.ts` -- never sent, and so never near the gateway's
+  // `applyAction`. Passing a no-op instead would say the same thing less honestly. The overlay's
+  // own task wires it here.
   // THE SAME BARGAIN FOR THE TRANSFER FORM, which is a DOM overlay here too. `main.ts:314` keeps
   // its own intercept, for the reason `bridgecore.ts` sets out at length: `applyAction` THROWS on
   // this kind outside any try in a socket handler, and a client is not obliged to run served code.

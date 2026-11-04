@@ -496,6 +496,16 @@ export function decodeClientMessage(text: string): ClientMessage {
       `Ctrl-B` from a browser would have ended the gateway process -- and it did, under
       `integration.test.ts`, before the line was added.
     */
+    /*
+      `geometryMenu` IS ACCEPTED TOO, 2026-11-04, by the `toggleKeyboard` reasoning above, stated
+      here so the kind is visibly in a branch of the two-branch rule rather than accepted by default.
+
+      It opens the SENDER's own model/oversize picker and reaches no `Session`, so there is nothing
+      here to bound -- it carries no fields. `applyAction` throws on it, so the interception branch
+      was owed and landed in the same commit: `main.ts` returns before `applyAction` for this kind.
+      Without that return `integration.test.ts` reported `no reply to a tab after geometryMenu`.
+      The CHOICE the picker makes is a separate client message with its own shape check, not this.
+    */
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
     // already threw on it and nothing in `main.ts` intercepted it; now `main.ts` handles it and

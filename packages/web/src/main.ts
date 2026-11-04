@@ -399,6 +399,20 @@ export function buildServer(args: WebArgs) {
       */
       if (msg.action.kind === 'toggleKeyboard') return;
       /*
+        THE MODEL/OVERSIZE CHOOSER, `Alt-M`, 2026-11-04 -- the `toggleKeyboard` line above, again,
+        and NOT OPTIONAL for the same reason: `applyAction` THROWS on `geometryMenu` (the eighth
+        guard of that shape in `frontend/src/actions.ts`) and this call is outside any try in a
+        socket 'data' handler. MEASURED on the way in: `integration.test.ts` reported
+        `no reply to a tab after geometryMenu` over an uncaught
+        `applyAction does not handle geometryMenu` before this line existed.
+
+        The picker is the browser's own overlay, so `bridgecore.ts` intercepts the kind client-side
+        and it should never arrive; this is the server half of `protocol.ts`'s two-branch rule,
+        because a client is not obliged to run served code. What the operator CHOOSES arrives as
+        its own message, not as this action -- so there is nothing for this side to do but return.
+      */
+      if (msg.action.kind === 'geometryMenu') return;
+      /*
         `transferForm` NOW NEEDS AN INTERCEPTION HERE, AND THIS LINE IS IT -- 2026-10-06. The note
         that stood here said the kind "NEEDS NO INTERCEPTION" because `protocol.ts` rejected it at
         decode. That rejection is gone, since socket-carried file I/O removed the reason for it, so

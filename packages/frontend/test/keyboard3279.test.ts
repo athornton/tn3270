@@ -27,13 +27,15 @@ describe('KEYBOARD_3279', () => {
     expect(pf.filter((k) => k.row === 1)[0]?.label).toBe('PF1');
   });
 
-  it('NEVER carries toggleKeypad, toggleKeyboard or quit', () => {
-    // applyAction throws on all three, so a drawn button for any would be a button whose only
+  it('NEVER carries toggleKeypad, toggleKeyboard, geometryMenu or quit', () => {
+    // applyAction throws on all four, so a drawn button for any would be a button whose only
     // effect is to throw -- and toggleKeyboard's would toggle the surface it is drawn on.
+    // geometryMenu joined 2026-11-04: a 3279 has no model key, and the chooser is the front end's.
     for (const cap of KEYBOARD_3279) {
       const kind = cap.action?.kind;
       if (kind === undefined) continue;
-      expect(['toggleKeypad', 'toggleKeyboard', 'quit'], cap.name).not.toContain(kind);
+      expect(['toggleKeypad', 'toggleKeyboard', 'geometryMenu', 'quit'], cap.name)
+        .not.toContain(kind);
     }
   });
 
