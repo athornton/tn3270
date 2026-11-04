@@ -6,15 +6,16 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
-  resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
+  resolve, OversizeError, TerminalTypeError, type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  applyAction, applyPaste, defaultSession, describeTlsError, resolveScheme, startTransfer,
+  applyAction, applyPaste, describeTlsError, resolveScheme, startTransfer,
   transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, bestScale, extractText, readAtlas } from '@tn3270/canvas';
-import { parseGuiArgs, UsageError } from './args.js';
+import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
+import { measureAuto } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate } from './menu.js';
 import { createTransferController } from './transferWindow.js';
@@ -101,7 +102,7 @@ const SEAM = Object.freeze({
    * WHY IT SKIPS EVERYTHING ELSE: in this mode the PAGE's bridge owns the protocol. A `Session`
    * here would be a second, unrelated 3270 connection whose frames nothing displays, and the
    * atlas would be sent over an IPC channel the served page does not listen on. So this returns
-   * before argv parsing, before `defaultSession` and before `readAtlas` -- and takes no host
+   * before argv parsing, before `buildSession` and before `readAtlas` -- and takes no host
    * argument, which is also what keeps it unable to dial anything.
    */
   url: process.env['TN3270_GUI_URL'] ?? '',
@@ -324,6 +325,7 @@ let shuttingDown = false;
 function explain(err: unknown, host?: string, port?: number): string {
   if (err instanceof UsageError) return err.message;
   if (err instanceof TerminalTypeError) return err.message;
+  if (err instanceof OversizeError) return err.message;
   if (err instanceof Error) {
     // Node attaches a `code` to socket and TLS failures; describeTlsError maps the ones
     // worth explaining and names the flag that fixes each.
@@ -432,23 +434,38 @@ app.whenReady().then(async () => {
   // string lookup in the paint path.
   const scheme = args.scheme ?? resolveScheme();
 
-  // Built once and passed to both resolvers, so the terminal-type string and the geometry
-  // can never come from different readings of the same arguments.
-  const typeOpts = {
-    ...(args.model !== undefined ? { model: args.model } : {}),
-    ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
+  /**
+   * `-oversize auto`'s measure, which the session calls at EVERY connect and never before
+   * (`buildSession`, args.ts): the display's work area at the scale `fit()` below would pick for
+   * the model (`measure.ts`). Both inputs are read when called. The atlas is read further down,
+   * after the session exists (the spec's "Why auto is measured at connect"), and before the
+   * connect at the end of this function -- a failed read returns from here first -- but the
+   * measure does not rely on that ordering: no atlas, or a display Electron cannot report, is
+   * no measurement, which `resolveGeometry` turns into the model and a notice. Never a throw,
+   * which would fail the connect over a window size.
+   */
+  let atlas: ReturnType<typeof readAtlas> | undefined;
+  const measure = (setting: GeometrySetting | undefined): Size | undefined => {
+    let area;
+    try {
+      area = screen.getPrimaryDisplay().workAreaSize;
+    } catch {
+      area = undefined;
+    }
+    return measureAuto(setting, area, atlas === undefined
+      ? undefined
+      : { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight });
   };
 
   let session;
   try {
-    session = defaultSession(
-      resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm,
-    );
+    session = buildSession(args, measure);
   } catch (err) {
     fail(explain(err));
     return;
   }
+  // Before any connect, so the first connect's notice is printed too -- see the function.
+  printGeometryNotices(session, process.stderr);
 
   /**
    * The atlas is read HERE and shipped over IPC, not fetched by the renderer.
@@ -468,7 +485,6 @@ app.whenReady().then(async () => {
    * diagnosis, which is exactly what the rule at the top of this file forbids. A scoped
    * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
    */
-  let atlas;
   try {
     atlas = readAtlas();
   } catch (err) {
@@ -937,6 +953,10 @@ app.whenReady().then(async () => {
    * The TUI refuses to draw rather than clip, because it cannot resize a terminal. A window
    * CAN resize, so it does -- and the scale follows the design's rule: the largest integer
    * multiple whose screen fits within 80% of the display work area, minimum 1.
+   *
+   * `measure.ts` MIRRORS THIS RULE for `-oversize auto` -- the 0.8, the floor, `bestScale` -- so
+   * that an auto-sized screen is drawn at the scale the model would have been. Change one, change
+   * both; `measure.test.ts` checks that an oversize it produces gets that same scale here.
    */
   let sized = '';
   const fit = (list: { width: number; height: number }): void => {

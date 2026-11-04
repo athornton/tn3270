@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { SCHEMES } from '@tn3270/frontend';
-import { parseGuiArgs, UsageError } from '../src/args.js';
+import type { GeometrySetting } from '@tn3270/core';
+import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from '../src/args.js';
 
 /**
  * The flags must be the TUI's, and the way that is guaranteed is by parsing with the same
@@ -127,5 +129,116 @@ describe('-bind-limit', () => {
 
   it('without a value is a usage error', () => {
     expect(() => parseGuiArgs(['-bind-limit'])).toThrow(UsageError);
+  });
+});
+
+describe('-oversize', () => {
+  it('parses a fixed size and auto', () => {
+    expect(parseGuiArgs(['-oversize', '160x62', 'vm']).oversize)
+      .toEqual({ kind: 'fixed', rows: 62, cols: 160 });
+    expect(parseGuiArgs(['-oversize', 'auto', 'vm']).oversize).toEqual({ kind: 'auto' });
+    expect(parseGuiArgs(['-oversize', 'none', 'vm']).oversize).toEqual({ kind: 'none' });
+    expect(parseGuiArgs(['vm']).oversize).toBeUndefined();
+  });
+
+  it('refuses it with --terminal-type, at parse time, as a UsageError naming both', () => {
+    expect(() => parseGuiArgs(['-oversize', 'auto', '--terminal-type', 'IBM-DYNAMIC', 'vm']))
+      .toThrow(UsageError);
+    expect(() => parseGuiArgs(['-oversize', '160x62', '--terminal-type', 'IBM-DYNAMIC', 'vm']))
+      .toThrow(/-oversize and --terminal-type/);
+  });
+
+  it('refuses it on a model without -E, naming the -E model', () => {
+    expect(() => parseGuiArgs(['-model', '3278-2', '-oversize', 'auto', 'vm']))
+      .toThrow(UsageError);
+    expect(() => parseGuiArgs(['-model', '3278-2', '-oversize', 'auto', 'vm']))
+      .toThrow(/use -model 3278-2-E/);
+  });
+
+  it('refuses a fixed size smaller than the model at parse time', () => {
+    expect(() => parseGuiArgs(['-model', '3278-4-E', '-oversize', '80x30', 'vm']))
+      .toThrow(/use at least 80x43/);
+  });
+
+  it('is in the usage line', () => {
+    expect(() => parseGuiArgs([])).toThrow(/-oversize <cols>x<rows>\|auto\|none/);
+  });
+});
+
+/**
+ * `buildSession` is what main.ts constructs, driven here rather than copied (the CLI's lesson:
+ * a test of a copied expression passed a mutant that hardcoded the model).
+ */
+describe('buildSession', () => {
+  const none = (): undefined => undefined;
+
+  it('geometry mode by default, with the model and the oversize from argv', () => {
+    const session = buildSession(parseGuiArgs(['-model', '3278-4-E', '-oversize', '160x62', 'vm']), none);
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } });
+    // Before a connect the session holds the MODEL's geometry, never the oversize's.
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('no flags: geometry mode with no model and oversize none', () => {
+    expect(buildSession(parseGuiArgs(['vm']), none).geometrySetting).toEqual({ oversize: { kind: 'none' } });
+  });
+
+  it('legacy mode with --terminal-type: no setting, the type string as given', () => {
+    const session = buildSession(parseGuiArgs(['--terminal-type', 'IBM-3278-4-E@MOD4', 'vm']), none);
+    expect(session.geometrySetting).toBeUndefined();
+  });
+
+  describe('against a local socket', () => {
+    let server: Server | undefined;
+    const sockets: Socket[] = [];
+    afterEach(async () => {
+      for (const s of sockets.splice(0)) s.destroy();
+      await new Promise<void>((r) => { if (server) server.close(() => r()); else r(); });
+      server = undefined;
+    });
+    const listen = async (): Promise<number> => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      return (server.address() as AddressInfo).port;
+    };
+
+    it('auto is measured when connect() runs, with the setting the session holds THEN', async () => {
+      const port = await listen();
+      const seen: (GeometrySetting | undefined)[] = [];
+      let fits = { rows: 50, cols: 132 };
+      const session = buildSession(parseGuiArgs(['-oversize', 'auto', '-insecure', 'h']),
+        (setting) => { seen.push(setting); return fits; });
+      expect(seen).toEqual([]);                       // never at construction
+      await session.connect('127.0.0.1', port);
+      expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+      expect(seen).toEqual([{ oversize: { kind: 'auto' } }]);
+      session.disconnect();
+      session.setGeometry({ model: '3278-4-E', oversize: { kind: 'auto' } });
+      fits = { rows: 62, cols: 160 };
+      await session.connect('127.0.0.1', port);
+      expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
+      expect(seen[1]).toEqual({ model: '3278-4-E', oversize: { kind: 'auto' } });
+      session.disconnect();
+    });
+
+    it('printGeometryNotices: the first connect\'s notice and every later one, on stderr', async () => {
+      const port = await listen();
+      const errors: string[] = [];
+      let fits: { rows: number; cols: number } | undefined = { rows: 20, cols: 80 };
+      const session = buildSession(
+        parseGuiArgs(['-oversize', 'auto', '-insecure', 'h']), () => fits);
+      printGeometryNotices(session, { write: (t) => { errors.push(t); } });
+      await session.connect('127.0.0.1', port);
+      expect(errors).toEqual([
+        "oversize auto: window fits 20 rows by 80 columns, less than model 3278-2-E's 24 rows by 80 columns; using the model\n",
+      ]);
+      fits = { rows: 50, cols: 132 };                  // a fit: no notice, nothing printed
+      await session.connect('127.0.0.1', port);
+      expect(errors).toHaveLength(1);
+      fits = undefined;
+      await session.connect('127.0.0.1', port);
+      expect(errors[1]).toBe('oversize auto: no window size known; using the model\n');
+      session.disconnect();
+    });
   });
 });
