@@ -332,6 +332,8 @@ export class Session {
   private ttype: string | undefined;
   /** See `lastGeometryNotice`. */
   private geometryNotice: string | undefined;
+  /** See `resolvedGeometry`. */
+  private resolved: ResolvedGeometry | undefined;
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
   private per: ConnectOptions = {};
   /**
@@ -447,10 +449,19 @@ export class Session {
   /**
    * The last connect's operator notice -- an `auto` that fell back to the model -- or
    * `undefined` when that connect had none (or in legacy mode, or before any connect). Every
-   * front end prints it on stderr on the `geometry` event; see the spec's "Data flow on a
-   * connect" for why none can hold it on screen.
+   * front end prints it on stderr, though not necessarily on the `geometry` event itself -- the
+   * TUI holds a reconnect's until it has left the alternate screen; see the spec's "Data flow on
+   * a connect" for why none can hold it on screen.
    */
   get lastGeometryNotice(): string | undefined { return this.geometryNotice; }
+
+  /**
+   * What the last connect RESOLVED -- terminal type and both sizes -- or `undefined` in legacy
+   * mode or before any connect. Not `screen.alternateSize`, which a BIND rewrites mid-session:
+   * this is what the host was told, so a front end can compare a fresh `resolveGeometry` against
+   * it to say whether a reconnect would change anything.
+   */
+  get resolvedGeometry(): ResolvedGeometry | undefined { return this.resolved; }
 
   /**
    * Replace the model and oversize, to take effect at the NEXT connect.
@@ -534,6 +545,7 @@ export class Session {
     if (g.notice !== undefined) this.trace.note(g.notice);
     if (g.clamp !== undefined) this.trace.note(g.clamp);
     this.geometryNotice = g.notice;
+    this.resolved = g;
     if (changed) this.emit('screen');
     this.emit('geometry');
   }

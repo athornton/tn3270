@@ -364,6 +364,45 @@ describe('Session geometry: review fixes', () => {
  * `modelAlternate` are in place. These tests DRIVE that claim rather than read it off
  * the spec -- see the project's "plan claims need driving, not reading" note.
  */
+describe('Session.resolvedGeometry: what the last connect resolved', () => {
+  // For a front end that must say what a reconnect would CHANGE: `screen.alternateSize` is not
+  // that, because a BIND rewrites it mid-session, and it says nothing about the terminal type.
+  it('is undefined before any connect, and in legacy mode', async () => {
+    expect(newSession(FIXED_62x160).session.resolvedGeometry).toBeUndefined();
+    const legacy = new Session({ connect: () => new FakeConnection() });
+    await legacy.connect('h', 23);
+    expect(legacy.resolvedGeometry).toBeUndefined();
+  });
+
+  it('is the connect\'s resolution, and a narrowing BIND does not touch it', async () => {
+    const { session, last } = newSession(FIXED_62x160);
+    await session.connect('h', 23);
+    expect(session.resolvedGeometry).toEqual({
+      terminalType: 'IBM-DYNAMIC', default: { rows: 24, cols: 80 },
+      alternate: { rows: 62, cols: 160 }, dynamic: true,
+    });
+    last().negotiateE(GRANT_BIND_IMAGE);
+    last().host(...bindRecord(bindBody(0x7f, 24, 80, 50, 132)));
+    expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });   // premise
+    expect(session.resolvedGeometry?.alternate).toEqual({ rows: 62, cols: 160 });
+  });
+
+  it('follows every reconnect, including one that falls back to the plain model', async () => {
+    let size: Size = { rows: 40, cols: 100 };
+    const { session, last } = newSession({ model: '3278-2-E', oversize: { kind: 'auto' } },
+      { measure: () => size });
+    await session.connect('h', 23);
+    expect(session.resolvedGeometry?.terminalType).toBe('IBM-DYNAMIC');
+    last().close();
+    size = { rows: 20, cols: 80 };
+    await session.reconnect();
+    expect(session.resolvedGeometry).toMatchObject({
+      terminalType: 'IBM-3278-2-E', alternate: { rows: 24, cols: 80 }, dynamic: false,
+    });
+    expect(session.resolvedGeometry?.notice).toBe(session.lastGeometryNotice);
+  });
+});
+
 describe('Session wire: TN3270E device type', () => {
   it('DEVICE-TYPE REQUEST carries IBM-DYNAMIC for a fixed oversize', async () => {
     const { session, last } = newSession(FIXED_62x160);

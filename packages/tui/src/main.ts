@@ -313,6 +313,32 @@ export function buildSession(args: TuiArgs, terminal: () => Geometry = processTe
   );
 }
 
+/**
+ * Build the session and make the FIRST connect, saying any geometry notice on `stderr` -- split
+ * out of `run()` so a test can see that write happen, with an injected stream, rather than trust
+ * it. Requires `args.host`.
+ *
+ * The notice (an `auto` that fell back to the model) is written HERE, before `App.start()` opens
+ * the alternate screen, so it stays in the normal buffer -- there on quitting and in scrollback.
+ * The App flashes it on screen too, and handles every later reconnect's itself.
+ */
+export async function connectFirst(
+  args: TuiArgs, stderr: { write(text: string): unknown }, terminal: () => Geometry = processTerminal,
+): Promise<Session> {
+  if (args.host === undefined) throw new UsageError('connectFirst needs a host');
+  const session = buildSession(args, terminal);
+  // The LU list travels with the CONNECTION, not the session: it came from the host
+  // argument, and `ConnectOptions` is where a per-host setting belongs. `tn3270e` went
+  // to the constructor because it is a process-wide flag here — the TUI takes
+  // one host for its lifetime, so the two routes cannot disagree.
+  await session.connect(args.host, args.port ?? 23,
+    args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
+  if (session.lastGeometryNotice !== undefined) {
+    stderr.write(`${session.lastGeometryNotice}\n`);
+  }
+  return session;
+}
+
 export async function run(argv: readonly string[], host: HostProcess): Promise<number> {
   const args = parseArgs(argv);
   if (args.host === undefined) {
@@ -323,22 +349,7 @@ export async function run(argv: readonly string[], host: HostProcess): Promise<n
     );
   }
 
-  const session = buildSession(args);
-
-  // The LU list travels with the CONNECTION, not the session: it came from the host
-  // argument, and `ConnectOptions` is where a per-host setting belongs. `tn3270e` went
-  // to the constructor above because it is a process-wide flag here — the TUI takes
-  // one host for its lifetime, so the two routes cannot disagree.
-  await session.connect(args.host, args.port ?? 23,
-    args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
-
-  // An `auto` that fell back to the model, said on stderr BEFORE the alternate screen opens, so
-  // it stays in the normal buffer -- there on quitting and in scrollback. The App's own
-  // 'geometry' listener, registered in `start()` below and so not yet, handles every later
-  // reconnect; this first connect's notice is this function's to print.
-  if (session.lastGeometryNotice !== undefined) {
-    host.stderr.write(`${session.lastGeometryNotice}\n`);
-  }
+  const session = await connectFirst(args, host.stderr);
 
   // Printed here ONLY when the persistent hint has nowhere to go. The transient
   // line exists because the message used to vanish the instant the alternate

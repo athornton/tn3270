@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AckAid, AID, resolve, Session, type Connection, type GeometrySetting } from '@tn3270/core';
+import {
+  AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, TelnetCmd as T, TelnetOpt as O, Tn3270eDataType,
+  Tn3270eFunc, Tn3270eOp, type Connection, type GeometrySetting,
+} from '@tn3270/core';
 import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { measureTerminal } from '../src/render.js';
@@ -1405,12 +1408,24 @@ describe('the transfer form: submitting', () => {
 describe('-oversize auto: a resize says when it applies', () => {
   // A geometry-mode session whose measure reads the FAKE terminal at call time, exactly as
   // main.ts's reads process.stdout -- so a connect here measures what the test resized to.
-  function geometryHarness(setting: GeometrySetting, rows = 25, cols = 80): Harness {
+  interface GeometryHarness extends Harness {
+    /** stdout AND stderr, in the order written, so "stderr after leaving the alternate screen" is checkable. */
+    log: string[];
+    /** Feed the session bytes as the host, on the current connection. */
+    hostSends(...bytes: number[]): void;
+    /** Negotiate TN3270E with BIND-IMAGE granted, so a BIND is accepted. */
+    negotiateBindImage(): void;
+  }
+  function geometryHarness(setting: GeometrySetting, rows = 25, cols = 80): GeometryHarness {
+    const sent: number[] = [];
     const conn: Connection = {
-      write: () => {}, close: () => {},
+      write: (b) => { sent.push(...b); }, close: () => {},
       onData: undefined, onClose: undefined, onError: undefined,
     };
+    const log: string[] = [];
     const stdout = new FakeStdout(rows, cols);
+    const write = stdout.write.bind(stdout);
+    stdout.write = (text: string): void => { log.push(text); write(text); };
     const session = new Session({
       connect: () => conn,
       geometry: setting,
@@ -1418,12 +1433,39 @@ describe('-oversize auto: a resize says when it applies', () => {
     });
     const stdin = new FakeStdin();
     const host = new FakeHost();
+    host.stderr = { write: (text: string) => { log.push(text); host.errors.push(text); } };
     const app = new App({ session, stdin, stdout, host, depth: 0 });
-    return { app, session, stdin, stdout, host };
+    const hostSends = (...bytes: number[]): void => { conn.onData?.(Uint8Array.from(bytes)); };
+    const sb = (...body: number[]): void => { hostSends(T.IAC, T.SB, O.TN3270E, ...body, T.IAC, T.SE); };
+    // The TN3270E exchange from core's oversize-session.test.ts, reading back the device type
+    // the session requested rather than guessing it.
+    const negotiateBindImage = (): void => {
+      const reqStart = sent.length;
+      hostSends(T.IAC, T.DO, O.TN3270E);
+      sb(Tn3270eOp.SEND, Tn3270eOp.DEVICE_TYPE);
+      const reqIdx = sent.findIndex((b, i) =>
+        i >= reqStart && b === Tn3270eOp.DEVICE_TYPE && sent[i + 1] === Tn3270eOp.REQUEST);
+      const seStart = sent.indexOf(T.SE, reqIdx);
+      const ttype = Array.from(sent.slice(reqIdx + 2, seStart - 1), (c) => c);
+      sb(Tn3270eOp.DEVICE_TYPE, Tn3270eOp.IS, ...ttype, Tn3270eOp.CONNECT,
+        ...Array.from('TESTLU01', (c) => c.charCodeAt(0)));
+      sb(Tn3270eOp.FUNCTIONS, Tn3270eOp.IS, Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES);
+    };
+    return { app, session, stdin, stdout, host, log, hostSends, negotiateBindImage };
   }
+  /** A BIND-IMAGE record with a 0x7f (explicit) screen size. From core's oversize-session.test.ts. */
+  function bind7f(rd: number, cd: number, ra: number, ca: number): number[] {
+    const b = new Uint8Array(28);
+    b[0] = BIND_RU;
+    b[BIND_OFF.RD] = rd; b[BIND_OFF.CD] = cd; b[BIND_OFF.RA] = ra; b[BIND_OFF.CA] = ca;
+    b[BIND_OFF.SSIZE] = 0x7f;
+    return [Tn3270eDataType.BIND_IMAGE, 0, 0, 0, 0, ...b, T.IAC, T.EOR];
+  }
+  /** Let a reconnect's promise chain settle. */
+  const settle = (): Promise<void> => new Promise((r) => { setTimeout(r, 0); });
   const AUTO: GeometrySetting = { oversize: { kind: 'auto' } };
   const APPLIES = /applies at the next reconnect/g;
-  function announcements(h: Harness): string[] {
+  function announcements(h: Harness | GeometryHarness): string[] {
     return h.stdout.all.match(APPLIES) ?? [];
   }
   function resize(h: Harness, rows: number, cols: number): void {
@@ -1593,8 +1635,9 @@ describe('-oversize auto: a resize says when it applies', () => {
     expect(h.host.errors).toEqual([]);
     h.app.restore();
     expect(h.host.errors).toEqual([`${notice}\n`]);
-    const out = h.stdout.all;
-    expect(out.lastIndexOf(ALT_OFF)).toBeGreaterThan(out.lastIndexOf(notice));
+    // ONE ordered log of both streams: the stderr line must come AFTER leaving the alternate
+    // buffer, or it lands on the 3270 screen and vanishes with it.
+    expect(h.log.indexOf(`${notice}\n`)).toBeGreaterThan(h.log.lastIndexOf(ALT_OFF));
     h.app.restore();                                            // idempotent: not written twice
     expect(h.host.errors).toHaveLength(1);
   });
@@ -1615,6 +1658,90 @@ describe('-oversize auto: a resize says when it applies', () => {
     expect(h.stdout.all.endsWith('Resize to continue.')).toBe(true);
     h.app.restore();
     expect(h.host.errors).toEqual([`${notice}\n`]);
+  });
+
+  it('a BIND that narrows the alternate does not fool it: compared with what the CONNECT resolved', async () => {
+    // auto 62x160, then a BIND narrowing `screen.alternateSize` to 50x132. A reconnect resolves
+    // from the window, not the BIND, so 63x160 changes nothing and 51x132 changes 62x160 -> 50x132.
+    const h = geometryHarness(AUTO, 63, 160);
+    await h.session.connect('h', 23);
+    h.negotiateBindImage();
+    h.hostSends(...bind7f(24, 80, 50, 132));
+    expect(h.session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });   // premise
+    h.app.start();
+    resize(h, 51, 132);
+    expect(h.stdout.all).toContain('window now fits 50 rows by 132 columns; applies at the next reconnect');
+    expect(announcements(h)).toHaveLength(1);
+    resize(h, 63, 160);
+    expect(announcements(h)).toHaveLength(1);
+  });
+
+  it('a change of terminal type alone is a change: IBM-DYNAMIC 24x80 to the plain model 24x80', async () => {
+    const h = geometryHarness({ model: '3278-2-E', oversize: { kind: 'auto' } }, 25, 80);
+    await h.session.connect('h', 23);
+    expect(h.session.resolvedGeometry?.terminalType).toBe('IBM-DYNAMIC');   // premise: fits 24x80
+    h.app.start();
+    resize(h, 24, 80);                        // fits 23x80: the plain model, same 24x80
+    expect(h.stdout.all).toContain(
+      'window no longer fits an oversize; the model\'s 24 rows by 80 columns applies at the next reconnect');
+  });
+
+  it('the first connect\'s notice is flashed by start(), and not queued for stderr again', async () => {
+    const h = geometryHarness({ model: '3278-4-E', oversize: { kind: 'auto' } }, 25, 80);
+    await h.session.connect('h', 23);
+    const notice = h.session.lastGeometryNotice!;
+    expect(notice).toMatch(/using the model/);
+    h.app.start();
+    expect(h.stdout.all.split(notice)).toHaveLength(2);
+    h.app.restore();
+    expect(h.host.errors).toEqual([]);        // main.ts wrote it; writing again would double it
+  });
+
+  it('two reconnects with notices: both reach stderr, in order', async () => {
+    const h = geometryHarness({ model: '3278-4-E', oversize: { kind: 'auto' } }, 51, 132);
+    await h.session.connect('h', 23);
+    h.app.start();
+    h.stdout.resize(30, 132);
+    await h.session.connect('h', 23);
+    const first = h.session.lastGeometryNotice!;
+    h.stdout.resize(25, 80);
+    await h.session.connect('h', 23);
+    const second = h.session.lastGeometryNotice!;
+    expect(first).not.toBe(second);
+    h.app.restore();
+    expect(h.host.errors).toEqual([`${first}\n`, `${second}\n`]);
+  });
+
+  it('the reconnect keystroke\'s flash survives that keystroke\'s own repaint (25x80, screen on row 1)', async () => {
+    // Enter on a disconnected session reconnects, and connect() resolves the geometry
+    // SYNCHRONOUSLY inside the keystroke -- so a flash shown from the 'geometry' event was painted
+    // over by the draw `apply()` does next.
+    const h = geometryHarness({ model: '3278-4-E', oversize: { kind: 'auto' } }, 25, 80);
+    await h.session.connect('h', 23);
+    h.app.start();
+    h.session.disconnect();
+    const before = h.stdout.written.length;
+    h.app.onInput(enc('\r'));
+    await settle();
+    expect(h.session.isConnected()).toBe(true);                 // premise: Enter reconnected
+    const notice = h.session.lastGeometryNotice!;
+    const after = h.stdout.written.slice(before).join('');
+    const at = after.lastIndexOf(`\x1b[1;1H\x1b[0m\x1b[K${notice}`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(after.indexOf('\x1b[1;', at + 1)).toBe(-1);         // nothing wrote row 1 after it
+  });
+
+  it('a notice that arrives after the terminal was handed back goes straight to stderr', async () => {
+    const h = geometryHarness({ model: '3278-4-E', oversize: { kind: 'auto' } }, 51, 132);
+    await h.session.connect('h', 23);
+    h.app.start();
+    h.app.restore();
+    const written = h.stdout.written.length;
+    h.stdout.resize(25, 80);
+    await h.session.connect('h', 23);
+    const notice = h.session.lastGeometryNotice!;
+    expect(h.host.errors).toEqual([`${notice}\n`]);
+    expect(h.stdout.written.length).toBe(written);              // nothing painted on the shell
   });
 
   it('a reconnect with no notice writes nothing to stderr', async () => {

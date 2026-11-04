@@ -1,7 +1,7 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SCHEMES } from '@tn3270/frontend';
-import { BANNER, buildSession, parseArgs, run, UsageError } from '../src/main.js';
+import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
 import type { HostProcess } from '../src/app.js';
 
 // Importing this module is safe: the entry point is behind an
@@ -308,6 +308,33 @@ describe('buildSession: what run() actually constructs', () => {
       term.rows = 63; term.cols = 160;
       await session.connect('127.0.0.1', port);
       expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
+      session.disconnect();
+    });
+
+    it('connectFirst: an auto that fell back says so on stderr, once, before the App exists', async () => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const errors: string[] = [];
+      const args = parseArgs(['-model', '3278-4-E', '-oversize', 'auto', '-insecure', `127.0.0.1:${port}`]);
+      const session = await connectFirst(args, { write: (t) => { errors.push(t); } },
+        () => ({ rows: 25, cols: 80 }));
+      expect(session.isConnected()).toBe(true);
+      expect(session.lastGeometryNotice).toMatch(/less than model 3278-4-E's/);
+      expect(errors).toEqual([`${session.lastGeometryNotice}\n`]);
+      session.disconnect();
+    });
+
+    it('connectFirst: no notice, nothing on stderr', async () => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const errors: string[] = [];
+      const args = parseArgs(['-oversize', 'auto', '-insecure', `127.0.0.1:${port}`]);
+      const session = await connectFirst(args, { write: (t) => { errors.push(t); } },
+        () => ({ rows: 51, cols: 132 }));
+      expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+      expect(errors).toEqual([]);
       session.disconnect();
     });
   });

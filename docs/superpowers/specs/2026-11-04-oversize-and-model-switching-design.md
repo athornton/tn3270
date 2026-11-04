@@ -210,7 +210,11 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
   measures again, so resizing the terminal and reconnecting is how a TUI operator changes size,
   with no new control. What is new: when a resize WHILE CONNECTED changes what `auto` would
   resolve, a one-line `showMessage` says so, e.g. `window now fits 50 rows by 132 columns; applies at the
-  next reconnect`, because otherwise the resize appears to do nothing. A resize smaller than the
+  next reconnect`, because otherwise the resize appears to do nothing. "What `auto` would
+  resolve" is compared with what the last connect resolved -- terminal type and alternate, not
+  the screen's current alternate, which a BIND can narrow -- and a window that would make `auto`
+  fall back says `window no longer fits an oversize; the model's 24 rows by 80 columns applies at
+  the next reconnect`, naming the model's size rather than the window's. A resize smaller than the
   current screen still suspends with `terminal too small`, unchanged. Changing the MODEL stays
   flag-only in the TUI: it has no menu, and a resize cannot express a model.
 

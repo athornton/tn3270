@@ -21,7 +21,9 @@
  * to spawn a real TTY to check it would not get written.
  */
 
-import { describeSize, resolve, resolveGeometry, type Session, type Size } from '@tn3270/core';
+import {
+  describeSize, resolve, resolveGeometry, type ResolvedGeometry, type Session,
+} from '@tn3270/core';
 import { detectDepth, type Depth } from './colors.js';
 import { moveSelection, overlayFits, overlayLines, selectedAction } from './keypadOverlay.js';
 import { layout, measureTerminal, TerminalRenderer, tooSmall } from './render.js';
@@ -34,6 +36,12 @@ import {
   type Action, type Scheme, type TransferFiles, type TransferFormState, type TransferRequest,
   type TransferValues,
 } from '@tn3270/frontend';
+
+/** Whether two resolutions would negotiate alike: terminal type and alternate size. */
+function sameGeometry(a: ResolvedGeometry, b: ResolvedGeometry): boolean {
+  return a.terminalType === b.terminalType
+    && a.alternate.rows === b.alternate.rows && a.alternate.cols === b.alternate.cols;
+}
 
 /** The byte a lone Escape keypress sends; also the first byte of every function key. */
 const ESC = 0x1b;
@@ -291,18 +299,18 @@ export class App {
   private transferRun: TransferRun | undefined;
   private readonly files: TransferFiles | undefined;
   /**
-   * The size the last `applies at the next reconnect` line named, so a spurious SIGWINCH, or a
-   * second window that resolves to the same size, does not say it again. Cleared when the
-   * terminal comes back to the size in effect (leaving it again is news again) and on every
-   * 'geometry' event (a reconnect applied a size, so what was announced is no longer pending).
+   * The geometry the last `applies at the next reconnect` line named, so a spurious SIGWINCH, or
+   * a second window that resolves to the same geometry, does not say it again. Cleared when the
+   * terminal comes back to what is in effect (leaving it again is news again) and on every
+   * 'geometry' event (a reconnect applied one, so what was announced is no longer pending).
    */
-  private announcedFit: Size | undefined;
+  private announcedFit: ResolvedGeometry | undefined;
   /**
-   * `lastGeometryNotice` lines from reconnects, HELD for stderr until `restore()`. stderr is the
-   * same tty as stdout here, so written at once a line would land on the alternate screen over
-   * the 3270 cells and vanish with that buffer on quit -- the opposite of what the spec wants
-   * from it ("lands in the normal screen buffer, so it is there on quitting and in scrollback").
-   * The screen gets its copy at once, from `showMessage`.
+   * `lastGeometryNotice` lines from reconnects, HELD for stderr until `restore()`. stderr is
+   * usually the same tty as stdout, so written at once a line would land on the alternate screen
+   * over the 3270 cells and vanish with that buffer on quit -- the opposite of what the spec
+   * wants from it ("lands in the normal screen buffer, so it is there on quitting and in
+   * scrollback"). The screen gets its copy from `showMessage`; see `onGeometry`.
    */
   private pendingNotices: string[] = [];
 
@@ -394,6 +402,10 @@ export class App {
     this.stdin.on('data', (b: Uint8Array) => this.onInput(b));
     this.renderer.invalidate();
     this.draw();
+    // The FIRST connect's notice, which happened before the listener above existed. Screen only:
+    // main.ts has already written it to stderr, before the alternate screen opened.
+    const notice = this.session.lastGeometryNotice;
+    if (notice !== undefined) this.showMessage(notice);
   }
 
   /** Restore the terminal. Safe to call any number of times. */
@@ -430,19 +442,35 @@ export class App {
 
   /**
    * A (re)connect resolved its geometry. Whatever a resize announced is now either applied or
-   * superseded, so forget it; and an `auto` that fell back to the model says so, once on screen
-   * and once on stderr at quit.
+   * superseded, so forget it; and an `auto` that fell back to the model says so: flashed on
+   * screen with `showMessage` (until the next paint, as every flash is), and on stderr once the
+   * terminal is handed back.
+   *
+   * THE FLASH IS DEFERRED TO A MICROTASK, because the commonest reconnect is a KEYSTROKE: Enter
+   * or Clear on a disconnected session calls `reconnect()`, whose `connect()` resolves and
+   * applies the geometry SYNCHRONOUSLY, before its first await -- so this runs inside `apply()`,
+   * whose next line is `draw()`. `showMessage` invalidates the renderer, so that draw repainted
+   * row 1 and the notice was gone in the keystroke that caused it. A microtask runs after the
+   * whole synchronous input batch, every draw in it included. The guards are `showMessage`'s own,
+   * checked when it runs.
    *
    * WHILE SUSPENDED THE SCREEN COPY IS LOST, and that is `showMessage`'s guard doing its job: the
    * too-small notice is the one instruction that gets the user out of that state and must not be
    * overwritten. The stderr copy is not lost, so the notice still reaches the operator.
+   *
+   * AFTER `restore()` the terminal is the shell's again, so stderr is written at once and
+   * nothing is painted.
    */
   private onGeometry(): void {
     this.announcedFit = undefined;
     const notice = this.session.lastGeometryNotice;
     if (notice === undefined) return;
+    if (this.restored) {
+      this.host.stderr.write(`${notice}\n`);
+      return;
+    }
     this.pendingNotices.push(notice);
-    this.showMessage(notice);
+    queueMicrotask(() => this.showMessage(notice));
   }
 
   /**
@@ -453,6 +481,13 @@ export class App {
    * RESOLVED, not merely measured: what is announced is what a reconnect would actually do, so a
    * window past the 14-bit limit names the clamped size, and one smaller than the model names the
    * model it falls back to. Two windows that resolve alike are one announcement.
+   *
+   * COMPARED WITH WHAT THE LAST CONNECT RESOLVED (`Session.resolvedGeometry`), terminal type and
+   * alternate both -- NOT `screen.alternateSize`, which a BIND rewrites mid-session. Against that,
+   * a BIND narrowing 62x160 to 50x132 made a resize back to 62x160 claim a change that a reconnect
+   * would not make, and a resize to 50x132 claim none when a reconnect would make one. The type
+   * matters on its own: `3278-2-E` at 24x80 is IBM-DYNAMIC from a 25-row terminal and the plain
+   * model from a 24-row one, at the same size.
    */
   private announceFit(term: { rows: number; cols: number }): void {
     // Not while suspended: the too-small message stands, and `showMessage` would refuse anyway --
@@ -462,16 +497,17 @@ export class App {
     if (setting === undefined || setting.oversize.kind !== 'auto') return;
     // Disconnected, the next connect measures anyway; there is nothing pending to explain.
     if (!this.session.isConnected()) return;
+    const now = this.session.resolvedGeometry;
+    if (now === undefined) return;
     const next = resolveGeometry(setting, () => measureTerminal(term));
     const fit = next.alternate;
-    const now = this.session.screen.alternateSize;
-    if (fit.rows === now.rows && fit.cols === now.cols) {
+    if (sameGeometry(next, now)) {
       this.announcedFit = undefined;
       return;
     }
     const last = this.announcedFit;
-    if (last !== undefined && last.rows === fit.rows && last.cols === fit.cols) return;
-    this.announcedFit = { rows: fit.rows, cols: fit.cols };
+    if (last !== undefined && sameGeometry(next, last)) return;
+    this.announcedFit = next;
     this.showMessage(next.dynamic
       ? `window now fits ${describeSize(fit)}; applies at the next reconnect`
       : `window no longer fits an oversize; the model's ${describeSize(fit)} applies at the next reconnect`);
