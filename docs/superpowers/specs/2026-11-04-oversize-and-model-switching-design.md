@@ -63,18 +63,31 @@ At each connect the session asks it:
 **What each front end measures:**
 
 - **TUI:** the terminal's rows less the status line, by its columns (what zti does).
-- **Web:** the browser viewport at the current font scale. The page sends it to the gateway when
-  it loads, and again before each reconnect.
+- **Web:** the browser viewport, in CSS pixels, converted to cells by the GATEWAY at scale 1 (the
+  page does not know the cell size until the gateway's `atlas` reply, which follows `hello`). The
+  page sends it in `hello` and again, debounced, whenever the window resizes; the gateway keeps the
+  latest per session, so a reconnect measures the window as it is then.
 - **GUI:** the display's work area at the scale the window would pick anyway (the user's choice,
   over scale 1, which gives very large screens, and over refusing `auto` in the GUI). The GUI
   sizes its window to the host's screen, so there is no window to measure before connecting.
+
+### Combinations that are refused
+
+- **`-oversize` with `--terminal-type`**: an oversize means the terminal type IS `IBM-DYNAMIC`, so
+  the two cannot both hold. Refused at startup, naming both flags.
+- **`auto` where there is no window** (the CLI, or any session built without a measure function):
+  refused, asking for a fixed size.
+- **A window that cannot be measured yet** (a web client that sent no viewport): `auto` falls back
+  to the model, with the notice `oversize auto: no window size known; using the model`.
 
 ### Why `auto` is measured at connect, and only then
 
 A 3270 terminal states its size only when the host sends Read Partition (Query); no message lets
 the terminal announce that its size changed. And the terminal type, which depends on the
 fallback decision, goes out during telnet negotiation, before any Query. So `auto` is measured
-at every `connect()` and `reconnect()`. A window resized mid-session changes only how the screen
+at every `connect()` and `reconnect()`, and NEVER at construction: before a connect the session
+holds the model's geometry. (The GUI's font atlas, which its measure needs, is read after the
+session is built.) A window resized mid-session changes only how the screen
 is drawn (the GUI rescales, the web page fits); the host gets the new size at the next
 reconnect. x3270 refuses to change model or oversize while connected for the same reason.
 
@@ -170,10 +183,14 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
   `-oversize` or the CLI's `Set(oversize,...)`.
 - **GUI:** a Model menu in `gui/src/menu.ts`: the models and an Oversize submenu, all radio
   items, the current choice checked, the whole menu disabled while connected.
-- **Web:** an overlay on `Ctrl-Shift-M` (`Cmd-Shift-M` on macOS), built like the transfer form's,
-  listing the same choices, inert while connected. Chosen because `Ctrl-G`, `Ctrl-E` and `Ctrl-O`
-  each belong to the browser in Firefox or Chromium, and `Ctrl-Shift-C` already set the pattern;
-  the browser harness checks the chord reaches the page. The choice goes to the gateway, which
+- **Web:** an overlay on **`Alt-M`**, matched on the physical key (`e.code === 'KeyM'`) exactly as
+  `Alt-K` opens the keypad, built like the transfer form's, listing the same choices, inert while
+  connected. NOT `Ctrl-Shift-M`, which was proposed first and is the browser's in both Firefox
+  (Responsive Design Mode) and Chromium (the profile menu) -- from memory, not re-checked. `Alt`
+  menu access keys in Firefox and Chromium use F, E, V, S, B, T and H, not M. The cost: Option-M
+  on a Mac no longer types `µ` in the page, the same trade `Option-K` already makes. The browser
+  harness checks the chord reaches the page in Chromium; Firefox and Safari are a live-pass item.
+  The GUI honours the same chord by popping up its Model menu; the TUI has no sequence for it. The choice goes to the gateway, which
   owns the session, as a new `geometry` client message with its own shape check in
   `web/src/protocol.ts`, beside `hello`, `action`, `transferStart` and the rest.
 - **TUI: a terminal resize is the switch, for size.** The TUI already handles `SIGWINCH`
