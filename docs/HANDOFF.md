@@ -1,14 +1,26 @@
-# Handoff — state as of 2026-11-03 (web copy works on every gesture at every address, and one character is selectable, on an UNMERGED branch)
+# Handoff — state as of 2026-11-04 (fetch-ahead copy MERGED to `main` and pushed; roadmap (0a)-(0e) complete, (a) oversize + `IBM-DYNAMIC` is next)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — FETCH-AHEAD COPY ON `fetch-ahead-copy`, GATE GREEN, NOT MERGED; THE LIVE PASS GATES THE MERGE
+## START HERE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT IS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
 
-**2026-11-03, branch `fetch-ahead-copy`, from `main` at `cab6ef8` (which has `diagnostics` and
-`native-copy` merged, `583a731`). NOT MERGED and NOT PUSHED. The owed live pass below gates the
-merge — do not merge until the user reports it.** Spec and plan:
+**2026-11-04: the user merged `fetch-ahead-copy` into `main` (a fast-forward, so there is no merge
+commit), pushed it, and deleted the branch. `main` == `origin/main` at `c05f533`, checked with a
+fresh `fetch --prune`. `main` is the only branch.** The gate below was measured on `f48b4c6`;
+`c05f533` changes only docs. Not reported back from the live pass: Edit > Copy and
+`Cmd-Shift-C` in each browser, Mac Chromium, and the one-character selection / plain-click check
+on Safari and Firefox. They are no longer merge gates, but no one has confirmed them.
+
+**NEXT:** the web gateway now matches the GUI on copy and transfer, so the pre-packaging UI items
+(0a)-(0e) are all done. That leaves the agreed order, unchanged: **(a) oversize + `IBM-DYNAMIC`**,
+then (b) local model-switching (both drive `Screen.resize()`; see the roadmap entry under item 5
+below, and its honest testability limit), (c) packaging for macOS, Linux and Windows, (d) PS + VMGIF,
+(e) GOCA, (f) printer sessions. A small side branch is also waiting: **test files are never
+typechecked** (see OPEN).
+
+The rest of this section is the branch's history as of 2026-11-03. Spec and plan:
 `docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
 `docs/superpowers/plans/2026-11-02-fetch-ahead-copy.md` (Task 10 Step 3 is the live pass).
 
@@ -111,7 +123,7 @@ the FULL gate, re-run on `78b4dd8`; 0 leaked Electron processes after every harn
 - `copyByChord`'s residual risk (see its docstring): a browser that dispatches `copy` but refuses
   the data it set loses that copy SILENTLY. Only the live pass can show it.
 
-### THE OWED LIVE PASS — GATES THE MERGE
+### THE OWED LIVE PASS — WAS THE MERGE GATE; THE USER MERGED 2026-11-04
 
 In **Firefox, Safari and Chromium**, at a **plain-`http` LAN address AND over `localhost`**: try
 `Ctrl-Shift-C`/`Cmd-Shift-C`, `Cmd-C`, and Edit > Copy; each should paste the selected text

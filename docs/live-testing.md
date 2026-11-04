@@ -440,7 +440,7 @@ and the Recording log says what happened when they were run.
   **LINUX DESKTOP, user, 2026-11-02:** `Ctrl-C` Clears and leaves the clipboard alone,
   `Ctrl-Shift-C` copies, and `Ctrl-V` pastes, all as expected.
 
-  **SUPERSEDED 2026-11-03 BY BRANCH `fetch-ahead-copy` (NOT YET MERGED, NOT YET LIVE-PASSED): the
+  **SUPERSEDED 2026-11-03 BY BRANCH `fetch-ahead-copy` (MERGED TO `main` 2026-11-04; `Cmd-C` LIVE-PASSED IN SAFARI AND FIREFOX): the
   limit below was the old design's, and the fetch-ahead design it names IS NOW BUILT.** The page
   prefetches the selection's text when the drag ends (`{kind:'selection'}` ->
   `{kind:'selectionText'}`), and the `copy` event writes it synchronously with
@@ -464,7 +464,7 @@ and the Recording log says what happened when they were run.
     plain-`http` LAN address. NOT BUILT; it is a redesign of a copy path that has just been
     live-verified. *(BUILT 2026-11-03 on `fetch-ahead-copy`; see the superseding note above.)*
 
-  **OWED BEFORE `fetch-ahead-copy` MERGES — THE LIVE PASS THAT GATES IT, 2026-11-03.** In
+  **OWED BEFORE `fetch-ahead-copy` MERGED — THE LIVE PASS THAT GATED IT, 2026-11-03 (MERGED 2026-11-04; the items the Mac pass below did not report are still unconfirmed).** In
   **Firefox, Safari and Chromium**, each **at a plain-`http` LAN address AND over `localhost`**:
   drag a selection, then try **`Ctrl-Shift-C` / `Cmd-Shift-C`**, **`Cmd-C`** (Mac) and **Edit >
   Copy**, and paste each somewhere else. Every one should paste the selected text. Watch the

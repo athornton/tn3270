@@ -1584,7 +1584,7 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2651 tests, 111 files (measured 2026-11-03 on `fetch-ahead-copy`) |
+| `npm test` | **pass** — 2654 tests, 111 files (re-measured 2026-11-04 on `main` at `c05f533`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
