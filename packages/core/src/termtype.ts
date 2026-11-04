@@ -38,10 +38,10 @@ export interface Model {
  * one is a promise to the host that it may do exactly that.
  *
  * NOT here: `IBM-DYNAMIC`, which is not a model but "ask me via Query Reply", and
- * which x3270 sends only for oversize (`telnet.c:2101`). Oversize itself is an
- * emulator extension rather than 3270 architecture -- no 3278 ever had a 160x62
- * screen -- and it is the one case that crosses 4096 cells into 14-bit
- * addressing. Both are deliberately out of scope here.
+ * which x3270 sends only for oversize (`telnet.c:2100`, `create_3270_termtype`).
+ * Oversize and IBM-DYNAMIC now live in `geometry.ts`, which builds on this table
+ * rather than duplicating it (see `resolveGeometry`, which calls `resolveTerminalType`
+ * and `resolveAlternateSize` below); this table stays the models only.
  *
  * Keys are uppercase because lookups are case-folded; see resolveTerminalType.
  */
