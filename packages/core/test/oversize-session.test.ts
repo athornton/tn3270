@@ -7,7 +7,6 @@ import {
 import { OversizeError, type GeometrySetting, type Size } from '../src/geometry.js';
 import { TerminalTypeError } from '../src/termtype.js';
 import { BIND_RU, BIND_OFF } from '../src/bind.js';
-import { encodeAddress } from '../src/address.js';
 
 /**
  * Session-level oversize: the geometry setting resolved at every connect (Task 2 of the
@@ -90,16 +89,15 @@ const bindBody = (ssize: number, rd = 0, cd = 0, ra = 0, ca = 0): number[] => {
 const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
 
 /**
- * The 3270 record the session sent, unwrapped from telnet framing and (when TN3270E
- * is negotiated) the 5-byte header. From session.test.ts's `lastRecord`, extended to
- * strip the TN3270E header when present -- the oversize tests negotiate TN3270E, so
- * every outbound record here carries one.
+ * The 3270 record the session sent, unwrapped from telnet framing. From
+ * session.test.ts's `lastRecord`. Every call site here is on a connection that is
+ * NOT in TN3270E mode (classic `negotiate()`), so there is no 5-byte header to strip
+ * -- unlike tn3270e-session.test.ts's own helpers, which do need that.
  */
-function lastRecord(conn: FakeConnection, tn3270e = false): number[] {
+function lastRecord(conn: FakeConnection): number[] {
   const end = conn.sent.length - 2; // drop the trailing IAC EOR
   expect(conn.sent.slice(end)).toEqual([T.IAC, T.EOR]);
-  const record = conn.sent.slice(0, end);
-  return tn3270e ? record.slice(5) : record;
+  return conn.sent.slice(0, end);
 }
 
 /** WSF carrying Read Partition: L=5 SFID=01 PID=ff TYPE=02. From session.test.ts; see its comment on IAC doubling. */
@@ -404,14 +402,23 @@ describe('Session wire: Query Reply reports the oversize', () => {
       if (framed[j] === T.IAC && framed[j + 1] === T.IAC) j++;
     }
 
+    // AID 0x88 precedes the whole set (pages.txt:8648-8649, p. 6-22). `AID.SF`, not
+    // `AID.QREPLY` (0x61) -- see queryreply.ts's own note on that exact confusion.
+    expect(reply[0]).toBe(AID.SF);
+
     // Walk the length-prefixed units exactly as queryreply.test.ts's `units` helper
-    // does (that file ~:15-30), starting after the AID byte.
+    // does (that file ~:15-30), starting after the AID byte. Throws on a bogus
+    // length rather than looping forever on a desynchronized stream -- same guard
+    // as that helper's, and the walk must land EXACTLY on the end of the record,
+    // not merely terminate: see the project's "check what a comparison covers" note.
     const units: number[][] = [];
     for (let i = 1; i < reply.length; ) {
       const len = (reply[i]! << 8) | reply[i + 1]!;
+      if (len < 4) throw new Error(`bogus unit length ${len} at offset ${i}`);
       units.push(reply.slice(i, i + len));
       i += len;
     }
+    expect(units.reduce((sum, u) => sum + u.length, 1)).toBe(reply.length);
 
     // Usable Area (QCODE 0x81): W H are bytes 6-9 of the unit (after L L SFID
     // QCODE FLAGS FLAGS), BUFFSZ is bytes 21-22 -- queryreply.ts:216-220 and :267-268,
@@ -434,7 +441,7 @@ describe('Session wire: Query Reply reports the oversize', () => {
 });
 
 describe('Session wire: 14-bit addressing above 4096 cells', () => {
-  it('a cursor at 5000 on a 62x160 oversize encodes 14-bit; one at 100 on a model 2 encodes 12-bit', async () => {
+  it('a cursor at 5000 on a 62x160 oversize encodes 14-bit', async () => {
     const { session, last } = newSession(FIXED_62x160);
     await session.connect('h', 23);
     last().negotiate();
@@ -447,33 +454,74 @@ describe('Session wire: 14-bit addressing above 4096 cells', () => {
     // aid, then the two cursor-address bytes (inbound.ts:62, address.ts:50-51).
     expect(reply[0]).toBe(AID.ENTER);
     expect([reply[1], reply[2]]).toEqual([(5000 >> 8) & 0x3f, 5000 & 0xff]);
-    expect(Array.from(encodeAddress(5000, session.screen.size))).toEqual([reply[1], reply[2]]);
+  });
 
-    // The discriminating half: a model-2 session (4096 cells, exactly AT the
-    // threshold, so still 12-bit per address.ts:45's `> 0x1000`) must NOT produce
-    // the same shape of reply for a comparable cursor.
+  it('a cursor at 100 on a model 2 (1920 cells) encodes 12-bit, with the literal ADDRESS_CODE_TABLE bytes', async () => {
+    // Model 2 is 1920 cells (24x80), well under the 4096 threshold -- NOT "exactly
+    // at" it; the boundary itself is pinned by the two tests below. ADDRESS_CODE_TABLE
+    // (constants.ts ~:720-729) maps (addr>>6)&0x3f and addr&0x3f to 0xc1 and 0xe4 for
+    // addr=100: (100>>6)&0x3f = 1 -> table[1] = 0xc1; 100&0x3f = 36 -> table[36] = 0xe4.
     const { session: model2, last: last2 } = newSession({ model: '3278-2-E', oversize: { kind: 'none' } });
     await model2.connect('h', 23);
     last2().negotiate();
+    expect(model2.screen.size).toBe(1920);
     model2.screen.cursor = 100;
     last2().sent = [];
     model2.sendAID(AID.ENTER);
     const reply2 = lastRecord(last2());
-    expect(Array.from(encodeAddress(100, model2.screen.size))).toEqual([reply2[1], reply2[2]]);
-    // 12-bit coded form never has either byte's top two bits both zero AND nonzero
-    // high-order payload bits in the 14-bit sense; concretely, byte 1 of the 14-bit
-    // form above is 0x13 (0001 0011) while every ADDRESS_CODE_TABLE entry has its
-    // top two bits forced to 01 or 11 -- so the two encodings are distinguishable,
-    // and this assertion pins that byte 1 here is NOT the 14-bit form's 0x13.
-    expect(reply2[1]).not.toBe((100 >> 8) & 0x3f);
+    expect([reply2[1], reply2[2]]).toEqual([0xc1, 0xe4]);
+  });
+
+  // The `> 0x1000` BOUNDARY ITSELF (address.ts:45), pinned directly rather than
+  // inferred from a model: a fixed oversize of exactly 4096 cells (32x128) still uses
+  // the 12-bit form, and one cell more (33x128, 4224) switches to 14-bit. Both are
+  // valid fixed oversizes on 3278-2-E: at or above the model-2 floor (24x80) and under
+  // the 16383-cell ceiling.
+  const FIXED_32x128: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 32, cols: 128 } };
+  const FIXED_33x128: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 33, cols: 128 } };
+
+  it('a screen of exactly 4096 cells (32x128) still encodes 12-bit', async () => {
+    const { session, last } = newSession(FIXED_32x128);
+    await session.connect('h', 23);
+    last().negotiate();
+    last().host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect(session.screen.size).toBe(4096); // NOT > 0x1000 -- the 12-bit boundary itself
+    session.screen.cursor = 4000;
+    last().sent = [];
+    session.sendAID(AID.ENTER);
+    const reply = lastRecord(last());
+    expect(reply[0]).toBe(AID.ENTER);
+    // 12-bit coded form: (4000>>6)&0x3f = 62 -> table[62] = 0x7e; 4000&0x3f = 32 -> table[32] = 0x60.
+    expect([reply[1], reply[2]]).toEqual([0x7e, 0x60]);
+  });
+
+  it('one cell more, 4224 (33x128), switches to 14-bit', async () => {
+    const { session, last } = newSession(FIXED_33x128);
+    await session.connect('h', 23);
+    last().negotiate();
+    last().host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect(session.screen.size).toBe(4224); // > 0x1000 -- one cell past the boundary
+    session.screen.cursor = 4000;
+    last().sent = [];
+    session.sendAID(AID.ENTER);
+    const reply = lastRecord(last());
+    expect(reply[0]).toBe(AID.ENTER);
+    expect([reply[1], reply[2]]).toEqual([(4000 >> 8) & 0x3f, 4000 & 0xff]);
   });
 });
 
 describe('Session wire: BIND 0x03 gives the oversize', () => {
   it('a 0x03 BIND (RFC 2355\'s prescription for IBM-DYNAMIC) gives the resolved oversize', async () => {
+    // NARROW FIRST, with an ordinary 0x7f BIND, so the screen is NOT already at
+    // 62x160 when 0x03 arrives. Without this, alternateSize is 62x160 straight out of
+    // connect() -- its RESTING value -- and a 0x03 that does NOTHING, or one that
+    // reads screen.alternateSize back on itself instead of modelSize(), would leave
+    // it at 62x160 too and this test would pass for the wrong reason.
     const { session, last } = newSession(FIXED_62x160);
     await session.connect('h', 23);
     last().negotiateE(GRANT_BIND_IMAGE);
+    last().host(...bindRecord(bindBody(0x7f, 24, 80, 50, 132)));
+    expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 }); // premise: narrowed
     last().host(...bindRecord(bindBody(0x03)));
     expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
   });
@@ -490,13 +538,18 @@ describe('Session wire: BIND range-checked against the oversize', () => {
     last().host(...bindRecord(bindBody(0x7f, 24, 80, 50, 132)));
     expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
 
+    // Exactly at the ceiling: 62x160 itself must be accepted, not refused -- the
+    // bound in acceptBindDims is `>`, not `>=`.
+    last().host(...bindRecord(bindBody(0x7f, 24, 80, 62, 160)));
+    expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
+
     // One row past the oversize ceiling: refused, with acceptBindDims' exact wording
     // (bind.ts ~:269-294) naming the oversize as the model, and the geometry
     // unchanged from the BIND just accepted above.
     last().host(...bindRecord(bindBody(0x7f, 24, 80, 63, 160)));
     expect(session.trace.toText())
       .toContain('BIND alternate 63x160 exceeds model 62x160; keeping our geometry');
-    expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+    expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
   });
 });
 
@@ -541,7 +594,7 @@ describe('Session wire: a resolve that throws mid-connect leaves a live connecti
       if (size === undefined) throw new Error('font atlas not loaded');
       return size;
     };
-    const { session, last } = newSession({ oversize: { kind: 'auto' } }, { measure });
+    const { session, connect, last } = newSession({ oversize: { kind: 'auto' } }, { measure });
     await session.connect('h', 23);
     expect(session.isConnected()).toBe(true);
     const firstConn = last();
@@ -554,5 +607,14 @@ describe('Session wire: a resolve that throws mid-connect leaves a live connecti
     expect(session.isConnected()).toBe(true);
     expect(firstConn.closed).toBe(false);
     expect(last()).toBe(firstConn);
+
+    // The REMEMBERED TARGET is unchanged too: the failed connect('other', 24) must
+    // not have overwritten it, since `connect()` records `target` only after the
+    // teardown it never reached. A later reconnect() replays the ORIGINAL host and
+    // port, 'h'/23, not 'other'/24 -- fixed, now that the font atlas works again.
+    firstConn.close();
+    size = { rows: 40, cols: 100 };
+    await session.reconnect();
+    expect(connect).toHaveBeenLastCalledWith('h', 23);
   });
 });
