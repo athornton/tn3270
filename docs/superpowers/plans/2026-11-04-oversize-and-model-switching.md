@@ -57,6 +57,11 @@ shape; translate them.**
 
 Read `packages/core/src/geometry.ts` itself before starting any task; it is the source.
 
+**AMENDED AFTER TASK 6:** never compare a fresh measurement against `session.screen.alternateSize`
+-- a BIND rewrites it mid-session (measured: announced a change that would not happen, and missed
+one that would). Compare against `session.resolvedGeometry` (what the last connect resolved; terminal
+type AND alternate), added to `Session` during Task 6's fixes.
+
 ## File map
 
 | File | Change |
