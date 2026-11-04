@@ -202,7 +202,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 2651 tests, 111 files
+npm test           # 2844 tests, 117 files
 npm run typecheck
 ```
 
@@ -218,8 +218,9 @@ npm run build
 ./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
 
-The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
-set, and the full `[prefix:][LU,LU@]host[:port]` shape. That is not a coincidence or a
+The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`,
+the TLS set, and the full `[prefix:][LU,LU@]host[:port]` shape. (`-oversize auto` measures the
+display here; see *Oversize*.) That is not a coincidence or a
 promise to keep them in step: all three front ends parse them with the same code in
 `packages/frontend`. `-scheme` is the one flag that is not shared with the CLI, since a
 script-driven client has nothing to render; see *Using the TUI* for what it picks between.
@@ -540,8 +541,8 @@ line against real byte counts.
 ## Using the TUI
 
 ```sh
-node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
-    [-insecure] [-noverifycert] [-cafile FILE] host[:port]
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [-oversize <cols>x<rows>|auto|none] \
+    [--colors N] [-scheme S] [-insecure] [-noverifycert] [-cafile FILE] host[:port]
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
@@ -667,7 +668,64 @@ The TUI re-places and repaints when the host resizes the screen, and suspends wi
 message if your window can no longer hold it, exactly as it does for a terminal resize.
 A `--terminal-type` string is sent verbatim and does **not** set a geometry — we cannot
 know what an arbitrary string implies, so use `-model` if you want the buffer to match
-what you claim.
+what you claim. Past the model's size, see *Oversize* below.
+
+## Oversize (`-oversize`)
+
+**`-oversize <cols>x<rows>|auto|none`**, in every front end, after x3270's flag of the same name.
+**The order is x3270's, columns first** (`Common/model.c:343`): `-oversize 160x62` is **62 rows
+by 160 columns**. Our own messages say a size in words ("62 rows by 160 columns") rather than
+repeat that order. Absent, or `none`, means the model's own alternate size, as before.
+
+```sh
+node packages/tui/dist/main.js -insecure -model 3278-4-E -oversize 160x62 HOST:PORT
+node packages/tui/dist/main.js -insecure -oversize auto HOST:PORT
+```
+
+**Any oversize is advertised as `IBM-DYNAMIC`**, as TERMINAL-TYPE and as the TN3270E device type,
+and the size itself goes to the host in the Query Reply (Usable Area and Implicit Partition).
+The default size stays 24x80; the oversize is the ALTERNATE, so a host still reaches it with
+Erase/Write Alternate. **It needs an extended (`-E`) model**, since a Query Reply is part of the
+extended data stream. The default with no `-model` is `3278-2-E`, which already is one.
+`-bind-limit on` then bounds a BIND by the oversize rather than by the model.
+
+**`auto` measures the window, at each connect and reconnect only:**
+
+| front end | what `auto` measures |
+|---|---|
+| TUI | the terminal, less one row for the status line: a 41x100 terminal asks for 40 rows by 100 columns |
+| GUI | the display's work area, at the scale the window would pick anyway (80% of the work area, the model's scale), less the OIA row |
+| web gateway | the browser's viewport at scale 1, less the OIA row, sent by the page in `hello` and kept up to date by later resizes |
+| CLI | **refused**: there is no window to measure. Give `<cols>x<rows>` |
+
+**A resize mid-session does NOT change the live screen.** The host learned the size from the
+Query Reply and will not ask again, so the new size applies at the NEXT reconnect. The TUI says
+so on its message line (`window now fits 50 rows by 132 columns; applies at the next reconnect`).
+The GUI and the gateway apply it silently at the next connect.
+
+**When `auto` cannot apply, the session falls back to the model and says so on stderr.** That
+covers a window smaller than the model, no window size known, or a window too wide to keep the
+model's rows inside 16383 cells. The gateway prefixes each line with the first 8 characters of
+the session id. A window that is merely too TALL for 16383 cells is not refused: it is cut to
+fewer rows, which is noted in the trace only, not on stderr.
+
+**Refused before anything connects**, with a usage error:
+
+- `-oversize` together with `--terminal-type`, since an oversize is advertised as `IBM-DYNAMIC`;
+- a non-`-E` model (`use -model 3278-4-E`). x3270 drops the oversize silently here; we refuse;
+- a fixed size below the model's alternate (`160x20` on any model; `100x40` on a model 4, which
+  is 43 rows);
+- more than 16383 cells, the 14-bit address limit;
+- `auto` in the CLI.
+
+**`--replay` (the gateway) and `TN3270_GUI_REPLAY` (the GUI) ignore it**, because a replay never
+connects, and only a connect resolves the geometry.
+
+**What has been checked:** our Query Reply against real s3270 4.5 run with the same
+`-oversize 160x62`. The Usable Area and Implicit Partition bytes are identical (see
+`docs/live-testing.md`, "Oversize conformance against real s3270"). The TUI's `auto` has been run
+in a real pty (`pty-smoke.py --oversize-auto`), and the GUI's under Xvfb. **No live host has seen
+it yet.** That pass is owed, and `docs/live-testing.md` lists it.
 
 ## Connecting over TLS
 
@@ -769,9 +827,9 @@ configured model, the lower bound is 24x80 (model 2). **On a model-2 session tho
 bounds are the same number**, so a BIND asking for anything other than exactly 24x80 is
 refused and our own geometry stands. **This is a safety rail, not a missing feature**:
 with the limit on, BIND can only ever *narrow* a larger model toward 24x80, never grow
-one past what `-model` configured — growing past the model is a separate, unbuilt
-feature (`-oversize`)'s job, and letting BIND do it here would silently turn this
-feature into that one. A user who sees a refused BIND while running `-model 3278-2`
+one past what `-model` configured. Growing past the model is `-oversize`'s job (see
+*Oversize*; with an oversize, the upper bound is the oversize), and letting BIND do it here
+would silently turn this feature into that one. A user who sees a refused BIND while running `-model 3278-2`
 has not found a bug; `-bind-limit off` honors the BIND's geometry anyway. UNBIND
 reverts the screen to the model's own geometry, not to whatever the previous BIND left
 it at.
@@ -866,6 +924,9 @@ node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 
 `Connect()` routes through the same TLS decision as the command line, so the flag goes
 on the invocation and cannot be written into the script.
+
+`-oversize <cols>x<rows>` works here as in the other front ends; **`-oversize auto` is refused**
+with a usage error, since a script has no window to measure. See *Oversize*.
 
 **Commands.** `Connect` `Disconnect` `Reconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
@@ -1026,7 +1087,8 @@ reconnect it to the same place.
 
 Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
 `--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
-`-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-scheme`). **`--scheme` is refused as an
+`-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-oversize`, `-scheme`). `-oversize auto`
+measures each browser's viewport, separately for each session; see *Oversize*. **`--scheme` is refused as an
 unknown flag** — that asymmetry is deliberate, since those flags mean the same thing in every
 front end.
 
@@ -1294,7 +1356,8 @@ printers** — and the 3270 binding is what diverges from it. Doing printers fir
 an SCS/3287 path and then revisiting it once GOCA lands; doing graphics first means the printer work
 can reuse whatever the drawing layer turns out to be. **Cheap is not the same as first.**
 
-11. **Oversize + `IBM-DYNAMIC`.** Really oversize — the advertisement is a by-product. See the
+11. **Oversize + `IBM-DYNAMIC`.** **Step 1 (the `-oversize` flag) is done on branch `oversize`,
+   2026-11-04; see *Oversize*.** Really oversize — the advertisement is a by-product. See the
    out-of-scope section of the bind-image spec for the measurements.
 12. **Local model-switching**, immediately after it and before packaging. The two belong together:
    both let the *user* do unpredictable things with their window, and in the code both drive the one
@@ -1553,11 +1616,9 @@ worse than one that says which quarter is missing.
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
   you find out if that changes.
-- **No `IBM-DYNAMIC` and no oversize.** Models 2 through 5 work (see *Screen models*),
-  but `IBM-DYNAMIC` — "ask me my size via Query Reply" — and x3270's arbitrary
-  `-oversize` are not offered. Oversize is an emulator extension rather than 3270
-  architecture, and it is the only case that crosses 4096 cells into 14-bit addressing,
-  which `address.ts` already handles.
+- **Oversize cannot be changed while running, and no live host has seen it.** `-oversize` and
+  `IBM-DYNAMIC` shipped on 2026-11-04 (see *Oversize*). Choosing a model or an oversize from a
+  menu without restarting is step 2 of that work and is not built. A live pass is owed.
 - **No mouse support** in the TUI. `Ctrl-K`'s special-keys list is the keyboard substitute for
   the canvas front ends' clickable keypad, not a step towards one.
 
@@ -1584,10 +1645,12 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2654 tests, 111 files (re-measured 2026-11-04 on `main` at `c05f533`) |
+| `npm test` | **pass** — 2844 tests, 117 files (measured 2026-11-04 on branch `oversize` at `dc4b1af`) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
+| `pty-smoke.py --oversize-auto` | **pass** — 7/7 (2026-11-04): in a 41x100 pty the host is told `IBM-DYNAMIC`, an Erase/Write Alternate puts the OIA on row 41, so 40 rows by 100 columns was measured, and a resize to 51x132 says `applies at the next reconnect` naming 50 rows by 132 columns. Mutation-checked (measuring 2 rows or 0 rows short fails it). The Query Reply is NOT read here (its fake host sends no Read Partition), and no reconnect is driven |
+| oversize Query Reply vs real s3270 4.5 | **pass, NOT a live host** — with `-oversize 160x62` both ask for `IBM-DYNAMIC`, and the Usable Area and Implicit Partition bytes are identical (`e-server.py --query`) |
 | `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **1 of 1 case** pixel-identical against the GUI's own golden, which is what says the renderer is shared and not merely similar. (It was 2 cases until 2026-10-06: the keypad case went when the keypad became HTML, since a window of system-font controls is not a pixel the canvas owns) |
 | `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 10 actions in order over a WebSocket, **3** asserted absences (`Ctrl+K`, `Ctrl+Z`, `F13`) — `Ctrl+K` because the keypad toggle is intercepted client-side and never reaches the gateway |
 | `keys.mjs` — real Chromium key events in Electron | **pass** — 22 chords, 20 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). **Two of those chords go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. The pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |

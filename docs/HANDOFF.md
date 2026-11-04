@@ -1,10 +1,116 @@
-# Handoff — state as of 2026-11-04 (fetch-ahead copy MERGED to `main` and pushed; roadmap (0a)-(0e) complete, (a) oversize + `IBM-DYNAMIC` is next)
+# Handoff — state as of 2026-11-04 (branch `oversize`: step 1, the `-oversize` flag and `IBM-DYNAMIC`, DONE and gated at 2844 tests; live pass OWED; step 2, model switching, is next)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT IS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
+## START HERE — BRANCH `oversize`: STEP 1 (`-oversize`, `IBM-DYNAMIC`) DONE, 2844 TESTS GREEN; LIVE PASS OWED; STEP 2 NEXT
+
+**2026-11-04. Branch `oversize`, not merged, not pushed.** It branches from `main` at `bb097af`
+(still `main`'s tip) and merged `typecheck-tests` in (`1c7d412`), so merging `oversize` brings
+the typechecked tests too. Spec: `docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md`.
+Plan: `docs/superpowers/plans/2026-11-04-oversize-and-model-switching.md`, 15 tasks in two steps.
+**Tasks 1-10 (step 1) are done.** The plan says to stop here and report to the user before step 2,
+because step 1 can ship alone and its live pass can happen now.
+
+### WHAT STEP 1 SHIPPED, BY LAYER
+
+`-oversize <cols>x<rows>|auto|none`, x3270's flag and x3270's order (**columns first**: `160x62`
+is 62 rows by 160 columns). The README's *Oversize* section is the user-facing description.
+
+- **core:** `geometry.ts`'s `resolveGeometry` turns a model plus an oversize into a terminal type
+  and two sizes. Any oversize is `IBM-DYNAMIC` and needs an `-E` model. It is refused with
+  `--terminal-type`, below the model, or over 16383 cells. `auto` falls back to the model with a
+  notice (no size known, a window smaller than the model, too wide), and is cut to fewer rows at
+  the 14-bit limit. `Session` resolves at EVERY connect and reconnect, never in between, and keeps
+  what it resolved (`resolvedGeometry`). On the wire: TN3270E device type `IBM-DYNAMIC`, the oversize in
+  the Query Reply's Usable Area and Implicit Partition, 14-bit addressing, `-bind-limit` bounded by
+  the oversize, BIND size code 0x03 giving the oversize, and UNBIND back to it.
+- **frontend:** one `-oversize` parser for every front end (`oversizeFlag.ts`); `defaultSession`
+  takes a geometry setting.
+- **CLI:** `-oversize <cols>x<rows>`. `auto` is refused at startup (no window), and so is every
+  other combination `resolveGeometry` would refuse at connect.
+- **TUI:** `auto` measures the terminal less the status row (`measureTerminal`). A resize
+  mid-session says `window now fits R rows by C columns; applies at the next reconnect` (or that
+  the model applies), compared against what the last connect RESOLVED, not the BIND-mutable
+  screen. Notices go to stderr after quit, so they survive the alternate screen.
+- **GUI:** `auto` measures the display's work area at the window's own scale (`measure.ts`,
+  `measureDisplay`; `fit()` and `auto` share `windowScale`). Notices go to stderr.
+- **Web gateway:** `auto` measures each browser's viewport at scale 1, less the OIA row
+  (`viewport.ts`). The page sends CSS pixels in `hello` and in a `viewport` message on resize,
+  and a reattach replaces it. Notices go to stderr, prefixed with 8 characters of the session id.
+  An unknown `-model` is a usage error.
+- **`e-server.py --query`:** sends a Read Partition (Query), for the s3270 comparison below.
+- **`pty-smoke.py --oversize-auto`** (`dc4b1af`): the TUI's `auto` in a real pty, below.
+
+### THE STEP-1 GATE, MEASURED 2026-11-04 ON `dc4b1af`
+
+| check | result | Electron after |
+|---|---|---|
+| `npm run build` | exit 0 | — |
+| `npm run typecheck` | exit 0 | — |
+| `npm test` | **2844 tests in 117 files**, all pass | — |
+| `pty-smoke.py` | 12 PASS / 0 FAIL | — |
+| `pty-smoke.py --oversize-auto` | **7 PASS / 0 FAIL** | — |
+| `browser-clicks.mjs` | 9 buttons; transfer form **18/18** checks | 0 |
+| `browser-keys.mjs` | 13 chords, 10 actions; negatives Ctrl+K, Ctrl+Z, F13 | 0 |
+| `browser-shot.mjs` | 1/1 | 0 |
+| `browser-lan-copy.mjs` | **2/2** (ran, not SKIPPED) | 0 |
+| GUI `keys.mjs` | 22 chords, 20 actions; negatives Ctrl+Z, F13 | 0 |
+| GUI `clicks.mjs` | 9 buttons, 10 actions | 0 |
+| GUI `select.mjs` | 4/4 | 0 |
+| GUI `shot.mjs` | 2/2 goldens | 0 |
+| GUI `transfer.mjs` | 10/10 | 0 |
+
+**The browser harnesses first REFUSED a stale `dist`** (`packages/gui/dist is OLDER than
+packages/gui/src`; core's for `browser-lan-copy`), right after a clean `npm run build`. Only a
+timestamp had moved. `npx tsc --build --force` on every package fixed it, after which the whole
+gate above was re-run from `npm test` on, against that rebuild. Expect it again after a merge or
+checkout.
+
+**`--oversize-auto`, what it shows:** in a 41x100 pty with `-oversize auto`, the host is told
+`IBM-DYNAMIC`; after the host's Erase/Write Alternate the OIA is drawn at `ESC[41;1H ESC[0m` and not
+at 40;1, which only a 40-row by 100-column screen in that terminal gives; and resizing to 51x132
+prints `window now fits 50 rows by 132 columns; applies at the next reconnect` within 2 s.
+Mutation-checked against `dist`: `measureTerminal` at rows-2 and at rows-0 each fail the OIA
+check and the named-size check, and a plain Erase/Write fails the OIA check. (An earlier draft
+matched only `ESC[41;1H` and the rows-2 mutant passed, because the bottom border lands there.)
+**Not shown:** the Query Reply, since the fake host sends no Read Partition, and a reconnect, since
+the fake host accepts once (Session's unit tests cover re-measuring).
+
+### WHAT IS VERIFIED, AND WHAT IS NOT
+
+- **Against real s3270 4.5** (`docs/live-testing.md`, *Oversize conformance against real s3270 —
+  2026-11-04*): both clients with `-oversize 160x62` against `e-server.py --query` ask for
+  `IBM-DYNAMIC`. Their Usable Area and Implicit Partition bytes are **identical** (160x62
+  alternate, 80x24 default, BUFFSZ 9920). x3270 sends ten Query Reply units to our six; that is by
+  design. This is a scripted host, not a real one.
+- **The GUI's `auto` end to end under Xvfb (Task 7):** Electron reported a 1280x1024 work area;
+  the GUI negotiated `IBM-DYNAMIC` at 57 rows by 113 columns, matching `measureDisplay`; 0
+  Electron processes left.
+- **The web viewport's `auto` is unit-tested only**, with the integration `hello` test. The browser
+  harnesses all run `--replay` gateways, and a replay never connects, so it never measures.
+- **No live host has seen any of this.**
+
+### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
+
+1. **VM/370, `-oversize 160x62`:** log on, run a full-screen app that uses Erase/Write
+   Alternate (FLIST, or MECAFF's `EE`), and report the geometry VM draws. VM/370 takes a
+   display's geometry from DMKRIO (see *Screen models* in the README), so drawing at the
+   DMKRIO size rather than 62x160 is a plausible finding, not necessarily a defect.
+2. **TK5 TSO:** does its Read Partition get our oversize, and does ISPF draw at it?
+3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
+4. **Firefox and Safari:** the web viewport, i.e. that `-oversize auto` sizes the session to the
+   browser window, and that a resize applies at the next reconnect.
+
+### NEXT: STEP 2, TASKS 11-15 — CHANGING MODEL AND OVERSIZE WHILE DISCONNECTED
+
+Per the plan: (11) CLI `Set(model,...)` / `Set(oversize,...)`; (12) the `geometryMenu` action
+kind on `Alt-M`; (13) the GUI Model menu; (14) the web picker overlay; (15) the full gate, docs, and
+step 2's owed live pass. Every choice applies at the next connect. **Re-derive each task against
+the repo before dispatch**: the plan's literal code has had a measured defect rate.
+
+## SUPERSEDED BY THE ABOVE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT WAS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
 
 **2026-11-04: the user merged `fetch-ahead-copy` into `main` (a fast-forward, so there is no merge
 commit), pushed it, and deleted the branch. `main` == `origin/main` at `c05f533`, checked with a

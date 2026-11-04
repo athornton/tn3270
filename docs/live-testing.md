@@ -4999,3 +4999,26 @@ all (see "TN3270E harness validation" above), not a stand-in for a host that imp
 Partition (Query) the way a modern VTAM host would. The live witness for that remains the item in
 the design doc's Testing section: a real z/VM or z/OS host, expected within a couple of weeks of
 2026-11-04 per the user.
+
+## OWED: oversize live pass — step 1 of branch `oversize`, 2026-11-04
+
+**Nothing below has been run.** The conformance record above shows our Query Reply matches
+s3270's against a scripted host. These items show what a REAL host does with it. Each needs the
+user's systems or browsers. Build from branch `oversize`, and run `npm run build` first.
+
+1. **VM/370, `-oversize 160x62`** (TUI or GUI, `-insecure -model 3278-2-E -oversize 160x62`):
+   log on, then run a full-screen application that issues Erase/Write Alternate (FLIST, or
+   MECAFF's `EE`). **Report the geometry VM actually draws.** VM/370 takes a display's geometry from
+   DMKRIO (see *Screen models* in the README), so VM drawing its configured size rather than 62x160
+   would be a finding about VM, not necessarily a client defect. Note which it was.
+2. **TK5 TSO, `-oversize 160x62`** (the GUI): TSO issues a Read Partition to any `-E` client.
+   Does it get our oversize (the trace shows the Query Reply sent), and does ISPF draw at 62 rows
+   by 160 columns?
+3. **A modern z/VM or z/OS host, when the user has one:** the TN3270E path. The device type is
+   `IBM-DYNAMIC`, and a BIND with screen-size code 0x03 should give the oversize. This is the path
+   a modern VTAM host takes, and the only one neither Hercules system can exercise.
+4. **Firefox and Safari, web gateway with `-oversize auto`:** the session is sized to the browser
+   window (stderr names any fallback, prefixed with 8 characters of the session id), and resizing
+   the window mid-session applies at the next reconnect, not at once. **Only unit tests cover the
+   viewport path**: the browser harnesses run `--replay` gateways, which never connect and so never
+   measure.

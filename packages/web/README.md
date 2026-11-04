@@ -105,7 +105,29 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 | `-noverifycert` | — | make the TLS connection without verifying the host |
 | `-verifycert` | — | verify (the default; explicit for symmetry with s3270) |
 | `-model NAME` | `IBM-3278-2-E` | screen model, e.g. `3278-4-E` |
+| `-oversize <cols>x<rows>\|auto\|none` | `none` | a screen past the model, advertised as `IBM-DYNAMIC`; needs a `-E` model. **Columns first**, x3270's order: `160x62` is 62 rows by 160 columns. See below |
 | `-scheme NAME` | `default` | color scheme: `default`, `3279`, `x3270`, `green` |
+
+### `-oversize`
+
+`-oversize 160x62` gives every session 62 rows by 160 columns as its alternate size. The host is
+told `IBM-DYNAMIC`, and learns the size from the Query Reply. It is refused at startup with
+`--terminal-type` (which the gateway does not take anyway), on a non-`-E` model, below the
+model's own alternate size, or over 16383 cells (the 14-bit address limit).
+
+`-oversize auto` measures **each browser's viewport, per session**, at scale 1, in whole cells,
+less one row for the OIA. The page sends its viewport in CSS pixels in `hello` and again whenever
+the window resizes, and the gateway turns that into cells with the atlas cell. **It is measured at
+each connect and reconnect only.** Resizing the window mid-session does not change the live
+screen, since the host already has its Query Reply. The new size applies the next time the
+session reconnects (for example, `Enter` on a disconnected session). A reattaching tab's viewport
+replaces the old one.
+
+When `auto` cannot apply (no viewport sent, a viewport smaller than the model, or one too wide to keep the model's rows inside 16383 cells), the session
+uses the model, and the gateway says so on stderr, prefixed with the first 8 characters of the
+session id. **`--replay` ignores `-oversize`**: a replay never connects, and only a connect
+resolves the geometry. That is also why the browser harnesses, which all run replay gateways, do
+not exercise `auto` end to end. Its unit tests and the integration `hello` test are the cover.
 
 ## The host argument, and what this gateway will NOT take
 
