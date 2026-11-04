@@ -542,7 +542,7 @@ describe('the DDM advertisement through a Session', () => {
     // ddmCapability rather than on a Query reply, because the DDM unit is announced
     // in the summary and sent when the host ASKS for 0x95 -- so the plain-Query reply
     // above is the wrong place to look for its bytes.
-    const size = (n: number): number[] => ddmCapability(n).params();
+    const size = (n: number): number[] => ddmCapability(n).params({ rows: 24, cols: 80 }, []);
     // 512 = 0x0200 as LIMIN and LIMOUT, after 2 reserved FLAGS bytes.
     expect(size(512)).toEqual([0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x01, 0x01]);
     // 10 clamps up to DFT_MIN_BUF 256 = 0x0100; 99999 clamps down to 32767 = 0x7fff.

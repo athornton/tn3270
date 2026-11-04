@@ -28,6 +28,9 @@ function recorder() {
   let smoothing = true;
   const ctx: Ctx2D = {
     fillStyle: '',
+    globalCompositeOperation: 'source-over',
+    save() {},
+    restore() {},
     get imageSmoothingEnabled() { return smoothing; },
     set imageSmoothingEnabled(v: boolean) { smoothing = v; },
     fillRect(x, y, w, h) { fills.push({ x, y, w, h, style: this.fillStyle }); },

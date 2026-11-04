@@ -17,8 +17,8 @@ on Safari and Firefox. They are no longer merge gates, but no one has confirmed 
 (0a)-(0e) are all done. That leaves the agreed order, unchanged: **(a) oversize + `IBM-DYNAMIC`**,
 then (b) local model-switching (both drive `Screen.resize()`; see the roadmap entry under item 5
 below, and its honest testability limit), (c) packaging for macOS, Linux and Windows, (d) PS + VMGIF,
-(e) GOCA, (f) printer sessions. A small side branch is also waiting: **test files are never
-typechecked** (see OPEN).
+(e) GOCA, (f) printer sessions. The side branch **`typecheck-tests`** makes the tests typechecked
+(see OPEN).
 
 The rest of this section is the branch's history as of 2026-11-03. Spec and plan:
 `docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
@@ -117,9 +117,13 @@ the FULL gate, re-run on `78b4dd8`; 0 leaked Electron processes after every harn
 
 ### OPEN
 
-- **Test files are never typechecked** in this repo (pre-existing, found by an implementer, NOT
-  fixed): every package's `tsconfig.json` includes only `src/`. vitest strips types, so a type error
-  in a test passes. Worth its own small branch.
+- **Test files are now typechecked (branch `typecheck-tests`, 2026-11-04).** Each package has a
+  `tsconfig.test.json` (src + test, no emit); `npm run typecheck` runs them after the build check.
+  Measured before: 52 errors in 6 packages. Most were stale fixtures (a missing `scheme`, `hintRow`,
+  `save`/`restore`, `params` args), but one was a real hole: the 24x80 width test in
+  `transferOverlay.test.ts` iterated a phase `'form'` that does not exist, so `running`, `done` and
+  `failed` were never width-checked. The `.mjs` test harnesses got `.d.mts` files instead of
+  `@ts-expect-error`. Mutation-checked: a type error in a test makes `typecheck` exit 1.
 - `copyByChord`'s residual risk (see its docstring): a browser that dispatches `copy` but refuses
   the data it set loses that copy SILENTLY. Only the live pass can show it.
 

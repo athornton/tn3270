@@ -486,7 +486,7 @@ describe('transfer messages', () => {
     // see its `round-trips a frame message` case. There is no decode helper and none is wanted.
     const prog = { kind: 'transferProgress' as const, text: '512 bytes' };
     expect(JSON.parse(inflateSync(encodeServerMessage(prog)).toString())).toEqual(prog);
-    const done = { kind: 'transferDone' as const, ok: true, bytes: 249 };
+    const done = { kind: 'transferDone' as const, ok: true as const, bytes: 249 };
     expect(JSON.parse(inflateSync(encodeServerMessage(done)).toString())).toEqual(done);
   });
 

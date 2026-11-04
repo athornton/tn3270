@@ -76,11 +76,9 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     viewItems.find((i) => i.label === 'Keyboard')!.click!();
     expect([copied, pasted, keypad, keyboard]).toEqual([1, 1, 1, 1]);
 
-    const bare = (buildMenuTemplate('linux').find((m) => m.label === 'Edit')!.submenu) as
-      readonly Record<string, unknown>[];
+    const bare = (buildMenuTemplate('linux').find((m) => m.label === 'Edit')!.submenu)!;
     expect(Object.prototype.hasOwnProperty.call(bare[0]!, 'click')).toBe(false);
-    const bareView = (buildMenuTemplate('linux').find((m) => m.label === 'View')!.submenu) as
-      readonly Record<string, unknown>[];
+    const bareView = (buildMenuTemplate('linux').find((m) => m.label === 'View')!.submenu)!;
     expect(Object.prototype.hasOwnProperty.call(bareView[0]!, 'click')).toBe(false);
   });
 

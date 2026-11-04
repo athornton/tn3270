@@ -202,7 +202,7 @@ describe('setScreenSize: the screen itself changed shape', () => {
   // rows/cols bound the cell loop and give every row its start column, so a stale
   // pair would clip the new screen and address every row after the first wrongly.
   it('repaints at the new shape, clearing the old drawing', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     r.paint(grid('ABCDEF'), 0, 's');
     r.setScreenSize(3, 3);
     const out = r.paint(grid('ABCDEFGHI', 3, 3), 0, 's');
@@ -211,12 +211,12 @@ describe('setScreenSize: the screen itself changed shape', () => {
   });
 
   it('clips to the OLD size until it is told, which is why it must be told', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     expect(r.paint(grid('ABCDEFGHI', 3, 3), 0, 's')).not.toContain('GHI');
   });
 
   it('does nothing when the size is unchanged', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     r.paint(grid('ABCDEF'), 0, 's');
     r.setScreenSize(2, 3);
     // No invalidate, so an identical screen still diffs to nothing.
@@ -234,13 +234,13 @@ describe('the key-binding hint', () => {
   });
 
   it('draws the hint at hintRow, aligned to the screen not to column 1', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: HINT });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place(), hint: HINT });
     // colOffset 4 -> column 5, which is the screen's left edge, matching the OIA.
     expect(r.paint(grid('ABCDEF'), 0, 's')).toContain(`\x1b[1;5H`);
   });
 
   it('draws it DIM and leaves no SGR behind', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: 'hi' });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place(), hint: 'hi' });
     const out = r.paint(grid('ABCDEF'), 0, 's');
     // Opens with a reset so it inherits nothing, closes with one so the border and
     // the first cell cannot come out dim.
@@ -248,7 +248,7 @@ describe('the key-binding hint', () => {
   });
 
   it('truncates to the screen width rather than running over the right border', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: HINT });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place(), hint: HINT });
     const out = r.paint(grid('ABCDEF'), 0, 's');
     expect(out).toContain(HINT.slice(0, 3));
     expect(out).not.toContain(HINT.slice(0, 4));
@@ -256,18 +256,18 @@ describe('the key-binding hint', () => {
 
   it('draws nothing when the terminal has no row for it', () => {
     const r = new TerminalRenderer({
-      rows: 2, cols: 3, depth: 0, layout: place({ hintRow: undefined }), hint: HINT,
+      rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place({ hintRow: undefined }), hint: HINT,
     });
     expect(r.paint(grid('ABCDEF'), 0, 's')).not.toContain('tn3270');
   });
 
   it('draws nothing when there is no hint to draw', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place() });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place() });
     expect(r.paint(grid('ABCDEF'), 0, 's')).not.toContain('\x1b[0;2m');
   });
 
   it('is redrawn after a resize, since a full repaint clears the screen', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: place(), hint: 'hi' });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: place(), hint: 'hi' });
     r.paint(grid('ABCDEF'), 0, 's');
     const second = r.paint(grid('ABCDEF'), 0, 's');
     expect(second).not.toContain('hi');          // no full repaint, no redraw
@@ -278,7 +278,7 @@ describe('the key-binding hint', () => {
 
 describe('TerminalRenderer', () => {
   it('emits the text of every cell on the first paint', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const out = r.paint(grid('ABCDEF'), 0, 'status');
     expect(out).toContain('ABC');
     expect(out).toContain('DEF');
@@ -287,7 +287,7 @@ describe('TerminalRenderer', () => {
   it('emits nothing for an unchanged repaint', () => {
     // The whole point of diffing: a host that rewrites an identical screen must
     // not make the terminal flicker.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 'status');
     const second = r.paint(cells, 0, 'status');
@@ -295,7 +295,7 @@ describe('TerminalRenderer', () => {
   });
 
   it('emits only the changed cell on a small change', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     r.paint(grid('ABCDEF'), 0, 'status');
     const out = r.paint(grid('ABCDEX'), 0, 'status');
     expect(out).toContain('X');
@@ -303,14 +303,14 @@ describe('TerminalRenderer', () => {
   });
 
   it('repaints when the cursor moves, even with identical cells', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 'status');
     expect(r.paint(cells, 4, 'status')).not.toBe('');
   });
 
   it('repaints when the status line changes', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 'X Wait');
     expect(r.paint(cells, 0, 'ok')).toContain('ok');
@@ -323,7 +323,7 @@ describe('TerminalRenderer', () => {
     // terminal this renderer just declared big enough. The row number and
     // tooSmall's allowance are one decision and must be pinned together.
     for (const rows of [2, 24, 27]) {
-      const r = new TerminalRenderer({ rows, cols: 3, depth: 0 });
+      const r = new TerminalRenderer({ rows, cols: 3, depth: 0, scheme: resolveScheme() });
       const out = r.paint(grid('ABCDEF', rows), 0, 'MYSTATUS');
       expect(out).toContain(`\x1b[${rows + 1};1H`);
       expect(out).not.toContain(`\x1b[${rows + 2};1H`);
@@ -334,7 +334,7 @@ describe('TerminalRenderer', () => {
 
   it('draws NO status line when told there is no room for one', () => {
     // The 80x24 case. The screen must still be drawn in full; only the OIA goes.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, hintRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
     const out = r.paint(grid('ABCDEF'), 0, 'MYSTATUS');
     expect(out).toContain('ABC');
     expect(out).toContain('DEF');
@@ -346,7 +346,7 @@ describe('TerminalRenderer', () => {
     // The status line is what forces a write when it changes; with none, an
     // unchanged screen must still produce zero bytes rather than falling back to a
     // full repaint every time.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, hintRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 'one');
     expect(r.paint(cells, 0, 'two')).toBe('');   // status changed, but there is nowhere to put it
@@ -356,24 +356,24 @@ describe('TerminalRenderer', () => {
     // What a terminal resize does. Growing must produce the OIA; shrinking must
     // stop producing it, and each transition repaints in full because every cursor
     // address the diff remembers was computed for the old layout.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: { rowOffset: 0, colOffset: 0, statusRow: undefined, hintRow: undefined, border: { top: false, bottom: false, left: false, right: false } } });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 'ok');
-    r.setLayout({ rowOffset: 0, colOffset: 0, statusRow: 3, border: { top: false, bottom: false, left: false, right: false } });
+    r.setLayout({ rowOffset: 0, colOffset: 0, statusRow: 3, hintRow: undefined, border: { top: false, bottom: false, left: false, right: false } });
     const grown = r.paint(cells, 0, 'ok');
     // 'ok' not 'HELLO': the status is TRUNCATED to the screen width, so a 5-character
     // status cannot appear in full on a 3-column screen. Truncation is deliberate --
     // overrunning the width would overwrite the right-hand border.
     expect(grown).toContain('ok');
     expect(grown).toContain('ABC');             // full repaint, not just the status
-    r.setLayout({ rowOffset: 0, colOffset: 0, statusRow: undefined, border: { top: false, bottom: false, left: false, right: false } });
+    r.setLayout({ rowOffset: 0, colOffset: 0, statusRow: undefined, hintRow: undefined, border: { top: false, bottom: false, left: false, right: false } });
     const shrunk = r.paint(cells, 0, 'ok');
     expect(shrunk).not.toContain('ok');
     expect(shrunk).toContain('ABC');
   });
 
   it('emits no color escapes at all when monochrome', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     cells[0]!.fg = Color.RED;
     const out = r.paint(cells, 0, 'status');
@@ -418,7 +418,7 @@ describe('TerminalRenderer', () => {
 
   it('renders a hidden cell as blank without emitting its text', () => {
     // A password field must not be readable from the terminal scrollback.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0 });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme() });
     const cells = grid('ABCDEF');
     cells[0]!.hidden = true;
     const out = r.paint(cells, 0, 'status');
@@ -474,11 +474,11 @@ describe('TerminalRenderer', () => {
 describe('TerminalRenderer placement: offsets and border', () => {
   const NONE = { top: false, bottom: false, left: false, right: false };
   const lay = (over: Partial<Layout> = {}): Layout => ({
-    rowOffset: 0, colOffset: 0, statusRow: 3, border: NONE, ...over,
+    rowOffset: 0, colOffset: 0, statusRow: 3, hintRow: undefined, border: NONE, ...over,
   });
 
   it('offsets every cell write by the layout', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay({ rowOffset: 5, colOffset: 10 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay({ rowOffset: 5, colOffset: 10 }) });
     const out = r.paint(grid('ABCDEF'), 0, 's');
     expect(out).toContain('\x1b[6;11H');      // screen cell 0 -> terminal row 6, col 11
     expect(out).not.toContain('\x1b[1;1H');
@@ -487,7 +487,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
   it('offsets the second row correctly, not just the first', () => {
     // The bug a single-cell test would miss: an offset applied to the row but not
     // recomputed per row, or added to the address rather than to row/col.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay({ rowOffset: 5, colOffset: 10 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay({ rowOffset: 5, colOffset: 10 }) });
     r.paint(grid('ABCDEF'), 0, 's');
     const out = r.paint(grid('ABCDEX'), 0, 's');   // only cell 5 changed: row 2, col 3
     expect(out).toContain('\x1b[7;13H');
@@ -501,20 +501,20 @@ describe('TerminalRenderer placement: offsets and border', () => {
     // at column 90 instead of 85, so every row after the first was misplaced --
     // caught by looking at a real 90x30 pty, where only rows 3 and 27 began at the
     // screen's left edge.
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay({ rowOffset: 5, colOffset: 10 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay({ rowOffset: 5, colOffset: 10 }) });
     const out = r.paint(grid('ABCDEF'), 0, 's');
     expect(out).toContain('\x1b[6;11H');   // row 1 of the screen
     expect(out).toContain('\x1b[7;11H');   // row 2 must be positioned too
   });
 
   it('offsets the cursor', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay({ rowOffset: 5, colOffset: 10 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay({ rowOffset: 5, colOffset: 10 }) });
     const out = r.paint(grid('ABCDEF'), 4, 's');
     expect(out.endsWith('\x1b[7;12H')).toBe(true);   // cell 4 = row 2, col 2
   });
 
   it('aligns the status line with the screen, not with column 1', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay({ rowOffset: 5, colOffset: 10, statusRow: 9 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay({ rowOffset: 5, colOffset: 10, statusRow: 9 }) });
     const out = r.paint(grid('ABCDEF'), 0, 'ok');
     expect(out).toContain('\x1b[9;11H\x1b[0mok');
   });
@@ -522,7 +522,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
   it('pads the status line to the screen width instead of erasing to end of line', () => {
     // With a right-hand border, `\x1b[K` would erase it on the status row. Padding
     // to exactly the screen width clears the old text without touching the border.
-    const r = new TerminalRenderer({ rows: 2, cols: 6, depth: 0, layout: lay({ statusRow: 3 }) });
+    const r = new TerminalRenderer({ rows: 2, cols: 6, depth: 0, scheme: resolveScheme(), layout: lay({ statusRow: 3 }) });
     const out = r.paint(grid('ABCDEF', 1, 6), 0, 'ok');
     expect(out).toContain('ok    ');           // padded to 6
     expect(out).not.toContain('\x1b[K');
@@ -530,7 +530,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
 
   it('draws a full border on the first paint', () => {
     const r = new TerminalRenderer({
-      rows: 2, cols: 3, depth: 0,
+      rows: 2, cols: 3, depth: 0, scheme: resolveScheme(),
       layout: lay({ rowOffset: 2, colOffset: 2, statusRow: 4, border: { top: true, bottom: true, left: true, right: true } }),
     });
     const out = r.paint(grid('ABCDEF'), 0, 's');
@@ -541,7 +541,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
 
   it('draws only the sides the layout allows', () => {
     const r = new TerminalRenderer({
-      rows: 2, cols: 3, depth: 0,
+      rows: 2, cols: 3, depth: 0, scheme: resolveScheme(),
       layout: lay({ colOffset: 1, border: { top: false, bottom: true, left: true, right: false } }),
     });
     const out = r.paint(grid('ABCDEF'), 0, 's');
@@ -555,7 +555,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
   it('does NOT redraw the border on an incremental repaint', () => {
     // It would be a lot of bytes per keystroke, and the border never changes.
     const r = new TerminalRenderer({
-      rows: 2, cols: 3, depth: 0,
+      rows: 2, cols: 3, depth: 0, scheme: resolveScheme(),
       layout: lay({ rowOffset: 2, colOffset: 2, border: { top: true, bottom: true, left: true, right: true } }),
     });
     r.paint(grid('ABCDEF'), 0, 's');
@@ -566,7 +566,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
   });
 
   it('redraws the border after setLayout, and clears the old position', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay() });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay() });
     r.paint(grid('ABCDEF'), 0, 's');
     const moved = r.paint.bind(r);
     r.setLayout(lay({ rowOffset: 4, colOffset: 4, border: { top: true, bottom: true, left: true, right: true } }));
@@ -577,7 +577,7 @@ describe('TerminalRenderer placement: offsets and border', () => {
   });
 
   it('does not clear or invalidate when setLayout is given the same layout', () => {
-    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, layout: lay() });
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 0, scheme: resolveScheme(), layout: lay() });
     const cells = grid('ABCDEF');
     r.paint(cells, 0, 's');
     r.setLayout(lay());
