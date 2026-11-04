@@ -1,4 +1,4 @@
-import { Session } from '@tn3270/core';
+import { Session, type GeometrySetting, type Size } from '@tn3270/core';
 import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
 
 /**
@@ -55,6 +55,13 @@ export function defaultSession(
    * kind of claim that outlives its flip, because nothing executes a comment.
    */
   ddm?: boolean,
+  /**
+   * Geometry mode (Task 2's `SessionOptions.geometry`): the setting to resolve at every
+   * connect, and the `auto` measure to resolve it with. When given, `terminalType` and
+   * `alternate` above MUST be undefined -- `Session`'s constructor throws otherwise,
+   * geometry being one source of truth or none (see its "ONE SOURCE OF GEOMETRY" comment).
+   */
+  geometry?: { readonly setting: GeometrySetting; readonly measure?: () => Size | undefined },
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, tls),
@@ -67,5 +74,7 @@ export function defaultSession(
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
     ...(ddm === undefined ? {} : { ddm }),
+    ...(geometry !== undefined ? { geometry: geometry.setting } : {}),
+    ...(geometry?.measure !== undefined ? { measure: geometry.measure } : {}),
   });
 }

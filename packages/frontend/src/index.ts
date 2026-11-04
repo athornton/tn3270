@@ -29,6 +29,9 @@ export {
 } from './tls.js';
 export type { TlsFlags, TlsOptions } from './tls.js';
 
+// `-oversize`, the same way: one parser so the front ends cannot drift on it either.
+export { takeOversizeFlag, OVERSIZE_USAGE } from './oversizeFlag.js';
+
 // The session factory. It wraps the TCP/TLS `Connection` adapter, which is the one
 // transport every front end needs -- and it defaults to VERIFIED TLS, so it must not be
 // reimplemented per front end where one copy could quietly default to plaintext.
