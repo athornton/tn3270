@@ -94,10 +94,11 @@ the fake host accepts once (Session's unit tests cover re-measuring).
 
 ### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
 
-1. **VM/370, `-oversize 160x62`:** log on, run a full-screen app that uses Erase/Write
-   Alternate (FLIST, or MECAFF's `EE`), and report the geometry VM draws. VM/370 takes a
-   display's geometry from DMKRIO (see *Screen models* in the README), so drawing at the
-   DMKRIO size rather than 62x160 is a plausible finding, not necessarily a defect.
+1. **VM/370, `-oversize 80x50` then `-oversize 160x62`, in MECAFF's `EE`:** EE fills the
+   screen and keeps its status and command lines at the bottom, so 160x62 tests 14-bit
+   addressing; 80x50 (4000 cells, 12-bit) first separates "VM ignores our size" from "VM
+   cannot address past 4095". Steps and a results table: `docs/live-testing.md`, *OWED:
+   oversize live pass*. (Not FLIST: unconfirmed on VM/370, like XEDIT.)
 2. **TK5 TSO:** does its Read Partition get our oversize, and does ISPF draw at it?
 3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
 4. **Firefox and Safari:** the web viewport, i.e. that `-oversize auto` sizes the session to the

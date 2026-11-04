@@ -974,8 +974,8 @@ keypad and the keyboard, and they close it (`bridge.ts:277-288`'s rule).
 - [ ] **Step 2:** README: `Set(...)`, the GUI Model menu, the web `Alt-M` picker, and that every
   choice applies at the next connect. `BINDING_INTENT` already carries `Alt-M` from Task 12.
 - [ ] **Step 3:** `docs/live-testing.md`: an *OWED* list —
-  - VM/370 `-oversize 160x62`: log on, run a full-screen app that issues EWA (FLIST or the MECAFF
-    `EE` editor), report the geometry VM actually draws.
+  - VM/370: already listed by Task 10 (`-oversize 80x50`, then `160x62`, in MECAFF's `EE`, with
+    its results table). Keep it; do not re-add FLIST, which is unconfirmed on VM/370.
   - TK5 TSO: `-oversize 160x62` in the GUI; does TSO's Read Partition get our oversize, and does
     ISPF draw at it?
   - A modern z/VM or z/OS host, when the user has one: the `0x03` BIND path.

@@ -5006,11 +5006,32 @@ the design doc's Testing section: a real z/VM or z/OS host, expected within a co
 s3270's against a scripted host. These items show what a REAL host does with it. Each needs the
 user's systems or browsers. Build from branch `oversize`, and run `npm run build` first.
 
-1. **VM/370, `-oversize 160x62`** (TUI or GUI, `-insecure -model 3278-2-E -oversize 160x62`):
-   log on, then run a full-screen application that issues Erase/Write Alternate (FLIST, or
-   MECAFF's `EE`). **Report the geometry VM actually draws.** VM/370 takes a display's geometry from
-   DMKRIO (see *Screen models* in the README), so VM drawing its configured size rather than 62x160
-   would be a finding about VM, not necessarily a client defect. Note which it was.
+1. **VM/370, two runs, smaller first** (TUI or GUI, `-insecure -model 3278-2-E -oversize ...`).
+   Log on and open a file in MECAFF's **`EE`**, then (optionally) `FSLIST`. EE is the right probe:
+   it fills the whole screen and keeps its status and command lines at the BOTTOM, so at 62x160 it
+   must address cells past 4095, which only 14-bit addressing reaches. (Not FLIST, which an earlier
+   draft of this list named: VM/CE's readme lists MECAFF's full-screen tools as FSLIST, FSHELP and
+   EE (`readme-1_3.txt:9-10`), and FLIST is unconfirmed on VM/370, like XEDIT.)
+   1. **`-oversize 80x50`** (50 rows by 80 columns, 4000 cells): an oversize that stays inside
+      12-bit addressing.
+   2. **`-oversize 160x62`** (62 rows by 160 columns, 9920 cells): needs 14-bit addressing.
+
+   Why two: VM/CE 1.3's DMKRIO terminals "auto negotiate screen size" (`readme-1_3.txt:19-20`,
+   DIAG58 V3), and VM has sent our client Read Partition Queries before (*VM's result is a
+   measurement* above), so VM is expected to learn our size from the Query Reply. A failure at
+   160x62 alone cannot say whether VM ignored the size or accepted it and cannot address past 4095;
+   the 80x50 run separates the two:
+
+   | 80x50 | 160x62 | means |
+   |---|---|---|
+   | full size | full size | done: VM honours the oversize, 14-bit included |
+   | full size | broken or VM's size | VM honours the size but not 14-bit addressing: a VM/MECAFF limit |
+   | VM's size | VM's size | VM does not use our Query Reply for geometry (DMKRIO wins) |
+
+   **Report, for each run:** whether the screen is full width and height; whether EE's bottom
+   status and command lines sit on the last rows (at 62x160, misplaced or wrapped bottom lines are
+   the 14-bit symptom); the OIA, where `X PROG755` means the host addressed past our buffer; and,
+   with the trace on, the Query Reply we sent and the address bytes in the EWA.
 2. **TK5 TSO, `-oversize 160x62`** (the GUI): TSO issues a Read Partition to any `-E` client.
    Does it get our oversize (the trace shows the Query Reply sent), and does ISPF draw at 62 rows
    by 160 columns?
