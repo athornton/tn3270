@@ -660,10 +660,10 @@ describe('Quit', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * `Set(model,...)` and `Set(oversize,...)` -- x3270's own `Set` action (`AnSet`,
- * include/names.h:132; `Set_action`, Common/toggles.c:638), restricted to the two names this
- * CLI actually has: `model` and `oversize`. Applied at the next connect, via
- * `Session.setGeometry`.
+ * `Set(name,value[,name,value])` -- x3270's own `Set` action (`AnSet`, include/names.h:132;
+ * `Set_action`, Common/toggles.c:637-641), restricted to the two names this CLI actually has:
+ * `model` and `oversize`. Applied at the next connect, via `Session.setGeometry`, called ONCE
+ * with the merged setting -- see runner.ts's own comment on why one or two pairs, not one.
  *
  * `newRunner()`/`spyingRunner()` above build a LEGACY session (`new Session({ connect })`, no
  * `geometry` option) -- the CLI's own `buildSession` only does that for `--terminal-type`, but
@@ -672,9 +672,15 @@ describe('Quit', () => {
  * below builds one the way `buildSession` does for every other flag combination.
  */
 
-/** A runner whose session is in geometry mode, the way `buildSession` builds one without
- * `--terminal-type`. A fresh `FakeConnection` per connect, so a terminal type negotiated on one
- * connect can be read back after a `Reconnect()` opens a new one. */
+/**
+ * A runner whose session is in geometry mode with NO measure function, the way `buildSession`
+ * builds one for every flag combination except `--terminal-type` -- the CLI has no window to
+ * measure, so it never passes `measure` to `new Session(...)`. That absence is exactly what
+ * makes `Set(oversize,auto)` refuse rather than resolve; see `main.test.ts`'s own assertion of
+ * the same fact against the real `buildSession`. A fresh `FakeConnection` per connect, so a
+ * terminal type negotiated on one connect can be read back after a `Reconnect()` opens a new
+ * one.
+ */
 function geometryRunner(setting: GeometrySetting = { oversize: { kind: 'none' } }) {
   const conns: FakeConnection[] = [];
   const connect = vi.fn(() => { const c = new FakeConnection(); conns.push(c); return c; });
@@ -726,7 +732,7 @@ describe('Set(name,value)', () => {
   });
 
   it('Set(oversize,160x62) applies at the next Reconnect(), negotiating IBM-DYNAMIC; '
-    + 'Set(oversize,none) then reverts it', async () => {
+    + 'Set(oversize,none) then a further Reconnect() negotiates IBM-3278-2-E again', async () => {
     const { runner, session, last } = geometryRunner({ model: '3278-2-E', oversize: { kind: 'none' } });
     await runner.run('Connect(h:23)');
     await runner.run('Disconnect()');
@@ -742,22 +748,41 @@ describe('Set(name,value)', () => {
 
     expect((await runner.run('Set(oversize,none)')).split('\n').pop()).toBe('ok');
     expect(session.geometrySetting).toEqual({ model: '3278-2-E', oversize: { kind: 'none' } });
+
+    await runner.run('Reconnect()');
+    negotiateTerminalType(last());
+    expect(negotiatedTerminalType(last())).toBe('IBM-3278-2-E');
   });
 
-  it('Set(oversize,auto) gives the no-window-to-measure error, unchanged', async () => {
-    const { runner } = geometryRunner();
+  it('a fresh Connect() (not Reconnect()) also picks up a Set() made while disconnected', async () => {
+    const { runner, session, last } = geometryRunner();
+    const reply = await runner.run('Set(model,3278-4-E)');
+    expect(reply.split('\n').pop()).toBe('ok');
+
+    await runner.run('Connect(h:23)');
+    negotiateTerminalType(last());
+    expect(negotiatedTerminalType(last())).toBe('IBM-3278-4-E');
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'none' } });
+  });
+
+  it('Set(oversize,auto) gives the no-window-to-measure error, and leaves the setting unchanged', async () => {
+    const { runner, session } = geometryRunner();
+    const before = session.geometrySetting;
     const reply = await runner.run('Set(oversize,auto)');
     expect(reply.split('\n').pop()).toBe('error');
     expect(reply).toContain('data: oversize auto needs a window to measure; '
       + 'give -oversize <cols>x<rows> instead');
+    expect(session.geometrySetting).toEqual(before);
   });
 
-  it('refuses while connected, with setGeometry\'s own message', async () => {
-    const { runner } = geometryRunner();
+  it('refuses while connected, with setGeometry\'s own message, and leaves the setting unchanged', async () => {
+    const { runner, session } = geometryRunner();
+    const before = session.geometrySetting;
     await runner.run('Connect(h:23)');
     const reply = await runner.run('Set(model,3278-4-E)');
     expect(reply.split('\n').pop()).toBe('error');
     expect(reply).toContain('data: disconnect first; model and oversize apply at the next connect');
+    expect(session.geometrySetting).toEqual(before);
   });
 
   it('rejects an unknown name, a missing value and no arguments at all', async () => {
@@ -766,13 +791,38 @@ describe('Set(name,value)', () => {
     expect(unknown.split('\n').pop()).toBe('error');
     expect(unknown).toContain('data: Set() knows model and oversize, not colour');
 
-    const oneArg = await runner.run('Set(model)');
-    expect(oneArg.split('\n').pop()).toBe('error');
-    expect(oneArg).toContain('data: Set() needs two arguments: a name and a value');
-
     const noArgs = await runner.run('Set()');
     expect(noArgs.split('\n').pop()).toBe('error');
-    expect(noArgs).toContain('data: Set() needs two arguments: a name and a value');
+    expect(noArgs).toContain('data: Set() takes name,value pairs: model and/or oversize');
+  });
+
+  it('rejects an odd argument count above one, e.g. Set(model,X,extra)', async () => {
+    const { runner } = geometryRunner();
+    const reply = await runner.run('Set(model,3278-4-E,extra)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Set() takes name,value pairs: model and/or oversize');
+  });
+
+  it('rejects a bad oversize value and leaves the setting unchanged', async () => {
+    const { runner, session } = geometryRunner();
+    const before = session.geometrySetting;
+    const reply = await runner.run('Set(oversize,bogus)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(session.geometrySetting).toEqual(before);
+  });
+
+  it('x3270\'s name=value syntax is refused with a comma-specific message', async () => {
+    const { runner } = geometryRunner();
+    const reply = await runner.run('Set(model=3278-4-E)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Set() takes name,value with a comma, not name=value');
+  });
+
+  it('a lone name (x3270\'s query form) is refused: this CLI has no value to show', async () => {
+    const { runner } = geometryRunner();
+    const reply = await runner.run('Set(model)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Set() cannot show a value; give name,value');
   });
 
   it('refuses a session started with --terminal-type, the CLI\'s own message', async () => {
@@ -806,6 +856,57 @@ describe('Set(name,value)', () => {
     await runner.run('Set(model,3278-2-E)');
     expect(session.geometrySetting).toEqual({
       model: '3278-2-E', oversize: { kind: 'fixed', rows: 62, cols: 160 },
+    });
+  });
+
+  it('a repeated name in one call is an error, e.g. Set(model,A,model,B)', async () => {
+    const { runner, session } = geometryRunner();
+    const before = session.geometrySetting;
+    const reply = await runner.run('Set(model,3278-3-E,model,3278-4-E)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Set() was given model twice');
+    expect(session.geometrySetting).toEqual(before);
+  });
+
+  it('accepts two pairs in one call to reach a destination refused step by step: '
+    + 'Set(model,3278-5-E,oversize,160x62) from a 3278-2-E oversized to 100x30', async () => {
+    const { runner, session } = geometryRunner({
+      model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 },
+    });
+    // Reproduction: the model alone is refused against the OLD (too-small-for-model-5)
+    // oversize, since model 5's own floor is 132x27.
+    const modelAlone = await runner.run('Set(model,3278-5-E)');
+    expect(modelAlone.split('\n').pop()).toBe('error');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 },
+    });
+
+    const reply = await runner.run('Set(model,3278-5-E,oversize,160x62)');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-5-E', oversize: { kind: 'fixed', rows: 62, cols: 160 },
+    });
+  });
+
+  it('accepts two pairs in one call even when EITHER single-step order would be refused: '
+    + '3278-5-E at 140x30 to 3278-4-E at 80x45', async () => {
+    const { runner, session } = geometryRunner({
+      model: '3278-5-E', oversize: { kind: 'fixed', rows: 30, cols: 140 },
+    });
+    // Model first: refused against the old (too-wide-for-model-4) oversize.
+    const modelFirst = await runner.run('Set(model,3278-4-E)');
+    expect(modelFirst.split('\n').pop()).toBe('error');
+    // Oversize first: refused against the old model's (132x27) floor.
+    const oversizeFirst = await runner.run('Set(oversize,80x45)');
+    expect(oversizeFirst.split('\n').pop()).toBe('error');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-5-E', oversize: { kind: 'fixed', rows: 30, cols: 140 },
+    });
+
+    const reply = await runner.run('Set(model,3278-4-E,oversize,80x45)');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-4-E', oversize: { kind: 'fixed', rows: 45, cols: 80 },
     });
   });
 });

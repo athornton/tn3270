@@ -185,8 +185,11 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
 All four call `setGeometry`, and the change applies at the next connect or reconnect (Enter or
 Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 
-- **CLI:** `Set(model,3278-4-E)` and `Set(oversize,160x62|auto|none)`. x3270 names this action
-  `Set` (`toggles.c:804`, `names.h:132`). Added to `COMMAND_NAMES` in `cli/src/commands.ts`.
+- **CLI:** `Set(model,3278-4-E)`, `Set(oversize,160x62|auto|none)`, or both as one call,
+  `Set(model,3278-4-E,oversize,160x62)` -- one call because the model and the oversize are
+  validated together, and some destinations are refused by every single-step order yet
+  reachable in one `Set`. x3270 names this action `Set` (`Set_action`, `toggles.c:637-641`;
+  `AnSet`, `names.h:132`). Added to `COMMAND_NAMES` in `cli/src/commands.ts`.
 - **PICKED FROM LISTS, NOTHING TYPED (user's choice, 2026-11-04).** Electron has no text-input
   dialog and the web page has no menu at all, so a typed size would cost a new window in one and
   a first menu bar in the other. The choices are the eight models, then oversize `None`, `Auto`,

@@ -936,12 +936,21 @@ with a usage error, since a script has no window to measure. See *Oversize*.
 `ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
 · `Wait` · `Set`
 
-**`Set(model,<model>)` and `Set(oversize,<spec>)`** change the model or the oversize while
-running, applied at the next `Connect()`/`Reconnect()` — x3270's `Set` action (`Common/toggles.c`),
-narrowed to the two names this CLI has. The name is case-insensitive; the value is validated
-eagerly, the same way `-model`/`-oversize` are, so a bad model, a non-`-E` model under an
-oversize, or `Set(oversize,auto)` (no window here to measure) is refused immediately rather than
-at the next connect. `Set(...)` is refused while connected (`disconnect first; ...`) and on a
+**`Set(model,<model>)`, `Set(oversize,<spec>)`, or both as one call,
+`Set(model,<model>,oversize,<spec>)`** change the model and/or the oversize while running,
+applied at the next `Connect()`/`Reconnect()` — x3270's `Set` action (`Common/toggles.c:637-641`),
+narrowed to the two names this CLI has, and to one or two pairs: there is no third name to chain
+on, and no `name=value` or query (`Set(name)`) form the way x3270's `Toggle`/`Set` also support,
+and no `-defer`. **Both names in one call matters, not just convenience:** the model and the
+oversize are validated TOGETHER (an oversize must fit the model, and needs an extended, `-E`,
+model), so some destinations are refused by every single-step path yet reachable in one `Set`
+call — e.g. going from model 5 oversized to 140x30 to model 4 at 80x45, where `Set(model,...)`
+alone is refused against the old oversize and `Set(oversize,...)` alone is refused against the
+old model's floor. The name is case-insensitive; the value is validated eagerly, the same way
+`-model`/`-oversize` are, so a bad model, a non-`-E` model under an oversize, or
+`Set(oversize,auto)` (no window here to measure) is refused immediately rather than at the next
+connect, and the setting is left unchanged. `Set(...)` is refused while connected
+(`disconnect first; ...`) and on a
 session started with `--terminal-type`, which has no model or oversize to change.
 
 **`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route

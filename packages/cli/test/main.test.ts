@@ -179,6 +179,21 @@ describe('buildSession: what main() actually constructs', () => {
     expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
   });
 
+  it('no measure function: Set(oversize,auto) -- via setGeometry, which validates the same '
+    + 'way -- is refused for "no window to measure", which only holds absent one', () => {
+    // `Session` exposes no getter for its `measure` option (deliberately -- see
+    // `SessionOptions.measure`'s own comment, "a SESSION option ... kept for the session's
+    // lifetime"), so this is checked through its effect rather than directly: `setGeometry`
+    // runs the identical validation `Set(oversize,...)` runs in `runner.ts` (`resolveGeometry`
+    // against a stand-in that reports "no window" when a REAL measure function was given, and
+    // geometry.ts's own refusal when none was). The CLI's `buildSession` never passes
+    // `measure` -- it has no window to measure -- so this is the test that would catch it
+    // starting to.
+    const session = buildSession(parseArgs([]));
+    expect(() => session.setGeometry({ oversize: { kind: 'auto' } }))
+      .toThrow(/oversize auto needs a window to measure/);
+  });
+
   it('--terminal-type: legacy mode, no geometry setting at all', () => {
     const session = buildSession(parseArgs(['--terminal-type', 'IBM-DYNAMIC']));
     expect(session.geometrySetting).toBeUndefined();
