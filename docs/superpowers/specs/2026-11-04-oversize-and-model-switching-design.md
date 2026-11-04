@@ -96,10 +96,12 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
   (`session.ts:342`). The constructor's existing options keep working and become the initial
   setting.
 - `connect()` and `reconnect()` call `resolveGeometry` first. On a refusal, `connect()` rejects
-  and opens no socket. Otherwise the session rebuilds its `Screen` at the default size with the
-  resolved alternate, resets `modelAlternate` (what UNBIND reverts to), and emits a new
-  `geometry` event carrying the resolved sizes and any notice. Rebuilding is safe because nothing
-  is on the screen before a connect.
+  and opens no socket. Otherwise the session resizes its `Screen` IN PLACE -- `setSizes` to 24x80
+  and the resolved alternate, then `useDefaultSize()` and `clear()`, the path UNBIND already uses
+  -- because `Keyboard` holds a reference to the `Screen` and a new object would orphan it. It
+  then resets `modelAlternate` (what UNBIND reverts to) and emits a new `geometry` event carrying
+  the resolved sizes and any notice. Clearing is safe because nothing is on the screen before a
+  connect.
 - `setGeometry(setting)` changes the setting. It throws while connected, with `disconnect first;
   model and oversize apply at the next connect`. No queued "apply at disconnect" (x3270 has
   one, `XN_DEFER`); a pending change the operator cannot see is a surprise.
@@ -109,8 +111,10 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
 ## Data flow on a connect
 
 1. Resolve the geometry (above). A refusal stops here.
-2. Rebuild the `Screen`, reset `modelAlternate`, emit `geometry`. The front end puts any notice
-   on its status line; the session also writes it to the trace.
+2. Resize the `Screen` in place, reset `modelAlternate`, emit `geometry`. The session writes any
+   notice to the trace. The TUI puts it on its status line; the GUI and the gateway print it on
+   stderr, as the gateway's `host unreachable` line is printed, because their only on-canvas
+   painter is the red error painter and the next frame wipes it.
 3. Negotiate. With an oversize in effect the terminal type is `IBM-DYNAMIC`, and so is the TN3270E
    device type, whether or not the model is `-E` (as x3270). Otherwise the model's own name,
    unchanged from today.
@@ -146,10 +150,11 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
 
 - **Bad fixed oversize** (too small, over 16383 cells, zero, bad syntax): refused before any
   socket, remedy first, shown where each front end shows connect failures.
-- **`auto` fallback:** a one-line notice, then the connect proceeds.
+- **`auto` fallback:** a one-line notice (TUI status line; GUI and gateway stderr; the trace in
+  all), then the connect proceeds.
 - **`auto` clamp:** trace only.
 - **Switching while connected:** refused with the message above; the GUI and web menus are
-  greyed out while connected, so the refusal is the CLI's and a defence for the others.
+  disabled while connected, so the refusal is the CLI's and a defence for the others.
 
 ## Step 2: switching while the program runs
 
@@ -158,11 +163,19 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 
 - **CLI:** `Set(model,3278-4-E)` and `Set(oversize,160x62|auto|none)`. x3270 names this action
   `Set` (`toggles.c:804`, `names.h:132`). Added to `COMMAND_NAMES` in `cli/src/commands.ts`.
-- **GUI:** a Model menu in `gui/src/menu.ts`: the eight models and `Oversize...`, the current
-  choice ticked, greyed out while connected.
-- **Web:** the same menu in the page; the choice goes to the gateway, which owns the session.
-  The new message kind gets its own shape check in `web/src/protocol.ts`, beside `hello`,
-  `action`, `transferStart` and the rest, which already validate every inbound field.
+- **PICKED FROM LISTS, NOTHING TYPED (user's choice, 2026-11-04).** Electron has no text-input
+  dialog and the web page has no menu at all, so a typed size would cost a new window in one and
+  a first menu bar in the other. The choices are the eight models, then oversize `None`, `Auto`,
+  and the fixed size given at startup when there was one. A new fixed size is typed only as
+  `-oversize` or the CLI's `Set(oversize,...)`.
+- **GUI:** a Model menu in `gui/src/menu.ts`: the models and an Oversize submenu, all radio
+  items, the current choice checked, the whole menu disabled while connected.
+- **Web:** an overlay on `Ctrl-Shift-M` (`Cmd-Shift-M` on macOS), built like the transfer form's,
+  listing the same choices, inert while connected. Chosen because `Ctrl-G`, `Ctrl-E` and `Ctrl-O`
+  each belong to the browser in Firefox or Chromium, and `Ctrl-Shift-C` already set the pattern;
+  the browser harness checks the chord reaches the page. The choice goes to the gateway, which
+  owns the session, as a new `geometry` client message with its own shape check in
+  `web/src/protocol.ts`, beside `hello`, `action`, `transferStart` and the rest.
 - **TUI: a terminal resize is the switch, for size.** The TUI already handles `SIGWINCH`
   (`tui/src/app.ts:368`, `onResize`). Under `-oversize auto` the next connect or reconnect
   measures again, so resizing the terminal and reconnecting is how a TUI operator changes size,
@@ -201,3 +214,4 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
 - Re-reporting the size mid-session (the protocol has no way).
 - A queued model change applied at disconnect.
 - A connect dialog (roadmapped separately in `gui/src/menu.ts`).
+- Typing a new fixed oversize in the GUI or the web page (see Step 2).
