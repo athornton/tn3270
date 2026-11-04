@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  Session, type Connection, SnaCmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
+  Session, type Connection, type GeometrySetting, SnaCmd, Cmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
   encodeAddress, cp037, checksum, from6, to6, hostToLocal, localToHost,
   EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode, Color,
   O_CC_FRAME_SEQ, O_CC_MESSAGE, O_CC_STATUS_CODE, O_DR_FRAME_SEQ, O_DR_SF,
@@ -652,6 +652,161 @@ describe('Quit', () => {
     const { runner } = newRunner();
     await runner.run('Quit');
     expect(runner.shouldQuit).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Set(name,value)
+// ---------------------------------------------------------------------------
+
+/**
+ * `Set(model,...)` and `Set(oversize,...)` -- x3270's own `Set` action (`AnSet`,
+ * include/names.h:132; `Set_action`, Common/toggles.c:638), restricted to the two names this
+ * CLI actually has: `model` and `oversize`. Applied at the next connect, via
+ * `Session.setGeometry`.
+ *
+ * `newRunner()`/`spyingRunner()` above build a LEGACY session (`new Session({ connect })`, no
+ * `geometry` option) -- the CLI's own `buildSession` only does that for `--terminal-type`, but
+ * the fixture is useful here precisely because it is legacy: it is what drives the
+ * --terminal-type refusal. Everything else needs a GEOMETRY-MODE session, so `geometryRunner`
+ * below builds one the way `buildSession` does for every other flag combination.
+ */
+
+/** A runner whose session is in geometry mode, the way `buildSession` builds one without
+ * `--terminal-type`. A fresh `FakeConnection` per connect, so a terminal type negotiated on one
+ * connect can be read back after a `Reconnect()` opens a new one. */
+function geometryRunner(setting: GeometrySetting = { oversize: { kind: 'none' } }) {
+  const conns: FakeConnection[] = [];
+  const connect = vi.fn(() => { const c = new FakeConnection(); conns.push(c); return c; });
+  const session = new Session({ connect, geometry: setting });
+  const runner = new Runner(session, { clock: () => 0 });
+  const last = (): FakeConnection => conns[conns.length - 1]!;
+  return { runner, session, last };
+}
+
+/** The ASCII terminal type the session advertised on its TERMINAL-TYPE IS subnegotiation. */
+function negotiatedTerminalType(conn: FakeConnection): string {
+  const start = conn.sent.findIndex((b, i) =>
+    b === T.IAC && conn.sent[i + 1] === T.SB
+    && conn.sent[i + 2] === O.TERMINAL_TYPE && conn.sent[i + 3] === 0 /* IS */);
+  expect(start, 'no TERMINAL-TYPE IS was sent').toBeGreaterThanOrEqual(0);
+  const nameStart = start + 4;
+  const end = conn.sent.indexOf(T.IAC, nameStart);
+  return String.fromCharCode(...conn.sent.slice(nameStart, end));
+}
+
+/**
+ * Negotiate into 3270 mode AND ask for TERMINAL-TYPE, so `negotiatedTerminalType` can read back
+ * what the session resolved. Like `FakeConnection.negotiate()` plus the TERMINAL-TYPE round
+ * trip -- a reconnect's `FakeConnection` is otherwise never asked for its terminal type at all,
+ * since the default fixture only needs EOR/BINARY to reach 3270 mode.
+ */
+function negotiateTerminalType(conn: FakeConnection): void {
+  conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+  conn.host(T.IAC, T.SB, O.TERMINAL_TYPE, 1 /* SEND */, T.IAC, T.SE);
+  conn.host(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+  conn.host(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+}
+
+describe('Set(name,value)', () => {
+  it('Set(model,...) while disconnected applies at the next Reconnect()', async () => {
+    const { runner, session, last } = geometryRunner();
+    await runner.run('Connect(h:23)');
+    await runner.run('Disconnect()');
+    const setReply = await runner.run('Set(model,3278-4-E)');
+    expect(setReply.split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'none' } });
+
+    const reply = await runner.run('Reconnect()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    negotiateTerminalType(last());
+    expect(negotiatedTerminalType(last())).toBe('IBM-3278-4-E');
+    last().host(Cmd.EWA, 0x00, T.IAC, T.EOR);
+    expect({ rows: session.screen.rows, cols: session.screen.cols }).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('Set(oversize,160x62) applies at the next Reconnect(), negotiating IBM-DYNAMIC; '
+    + 'Set(oversize,none) then reverts it', async () => {
+    const { runner, session, last } = geometryRunner({ model: '3278-2-E', oversize: { kind: 'none' } });
+    await runner.run('Connect(h:23)');
+    await runner.run('Disconnect()');
+    expect((await runner.run('Set(oversize,160x62)')).split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-2-E', oversize: { kind: 'fixed', rows: 62, cols: 160 },
+    });
+
+    await runner.run('Reconnect()');
+    negotiateTerminalType(last());
+    expect(negotiatedTerminalType(last())).toBe('IBM-DYNAMIC');
+    await runner.run('Disconnect()');
+
+    expect((await runner.run('Set(oversize,none)')).split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({ model: '3278-2-E', oversize: { kind: 'none' } });
+  });
+
+  it('Set(oversize,auto) gives the no-window-to-measure error, unchanged', async () => {
+    const { runner } = geometryRunner();
+    const reply = await runner.run('Set(oversize,auto)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: oversize auto needs a window to measure; '
+      + 'give -oversize <cols>x<rows> instead');
+  });
+
+  it('refuses while connected, with setGeometry\'s own message', async () => {
+    const { runner } = geometryRunner();
+    await runner.run('Connect(h:23)');
+    const reply = await runner.run('Set(model,3278-4-E)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: disconnect first; model and oversize apply at the next connect');
+  });
+
+  it('rejects an unknown name, a missing value and no arguments at all', async () => {
+    const { runner } = geometryRunner();
+    const unknown = await runner.run('Set(colour,x)');
+    expect(unknown.split('\n').pop()).toBe('error');
+    expect(unknown).toContain('data: Set() knows model and oversize, not colour');
+
+    const oneArg = await runner.run('Set(model)');
+    expect(oneArg.split('\n').pop()).toBe('error');
+    expect(oneArg).toContain('data: Set() needs two arguments: a name and a value');
+
+    const noArgs = await runner.run('Set()');
+    expect(noArgs.split('\n').pop()).toBe('error');
+    expect(noArgs).toContain('data: Set() needs two arguments: a name and a value');
+  });
+
+  it('refuses a session started with --terminal-type, the CLI\'s own message', async () => {
+    const { runner } = newRunner(); // legacy session: new Session({ connect }), no geometry
+    const reply = await runner.run('Set(model,3278-4-E)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Set() cannot change a session started with --terminal-type; '
+      + 'restart without it');
+  });
+
+  it('refuses an extended-model demotion under an oversize, leaving the setting unchanged', async () => {
+    const { runner, session } = geometryRunner({ oversize: { kind: 'fixed', rows: 62, cols: 160 } });
+    const before = session.geometrySetting;
+    const reply = await runner.run('Set(model,3278-2)');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('oversize needs an extended model');
+    expect(session.geometrySetting).toEqual(before);
+  });
+
+  it('is case-insensitive on the name', async () => {
+    const { runner, session } = geometryRunner();
+    const reply = await runner.run('Set(MODEL,3278-3-E)');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.geometrySetting).toEqual({ model: '3278-3-E', oversize: { kind: 'none' } });
+  });
+
+  it('spreads the existing setting rather than replacing it, so oversize then model '
+    + 'both persist', async () => {
+    const { runner, session } = geometryRunner();
+    await runner.run('Set(oversize,160x62)');
+    await runner.run('Set(model,3278-2-E)');
+    expect(session.geometrySetting).toEqual({
+      model: '3278-2-E', oversize: { kind: 'fixed', rows: 62, cols: 160 },
+    });
   });
 });
 

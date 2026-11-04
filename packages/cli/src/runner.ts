@@ -1,6 +1,7 @@
 import {
   Session, AID, PF_AIDS, PA_AIDS, pfAID, paAID, KeyboardState,
   CutTransfer, DftTransfer, looksLikeCutFrame, type TransferResult, resolve,
+  parseOversize,
 } from '@tn3270/core';
 import {
   tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand,
@@ -226,6 +227,45 @@ export class Runner {
       case 'Quit':
         this.shouldQuit = true;
         return;
+
+      /**
+       * `Set(name,value)` -- x3270's action of the same name (`AnSet`, include/names.h:132;
+       * `Set_action`, Common/toggles.c:638), which takes name/value pairs. This CLI only has
+       * two names to offer, model and oversize, so only one pair is accepted at a time rather
+       * than x3270's `Set(n1,v1,n2,v2,...)` chain -- there is no second toggle here to chain
+       * onto, and accepting a chain that only ever has one real pair would invite scripts to
+       * depend on a generality this CLI does not have.
+       *
+       * BOTH NAMES REPLACE `s.geometrySetting` WHOLESALE, via the spread `{ ...s.geometrySetting,
+       * <field>: <new value> }` -- never a bare `{ model }` or `{ oversize }` literal, which
+       * would silently drop whichever field this call did not name. `Session.setGeometry`
+       * itself replaces wholesale (see its own comment), so the spread has to happen here, once
+       * per call, or a `Set(oversize,...)` followed later by `Set(model,...)` would lose the
+       * oversize the operator just set.
+       *
+       * THE LEGACY CHECK RUNS BEFORE `setGeometry`, deliberately: `setGeometry` throws its own
+       * "setGeometry needs a session built with the geometry option" message, written for a
+       * library caller, not an operator typing a command. Checking `s.geometrySetting ===
+       * undefined` here first lets this `case` report the CLI's own words instead.
+       */
+      case 'Set': {
+        if (args.length !== 2) throw new Error('Set() needs two arguments: a name and a value');
+        const [rawName, value] = args as [string, string];
+        const name = rawName.toLowerCase();
+        if (name !== 'model' && name !== 'oversize') {
+          throw new Error(`Set() knows model and oversize, not ${rawName}`);
+        }
+        if (s.geometrySetting === undefined) {
+          throw new Error('Set() cannot change a session started with --terminal-type; '
+            + 'restart without it');
+        }
+        if (name === 'model') {
+          s.setGeometry({ ...s.geometrySetting, model: value });
+        } else {
+          s.setGeometry({ ...s.geometrySetting, oversize: parseOversize(value) });
+        }
+        return;
+      }
 
       case 'String':
         if (!k.typeString(args[0] ?? '')) throw new Error('input inhibited');
