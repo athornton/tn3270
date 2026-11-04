@@ -21,11 +21,26 @@ export interface SessionHandle {
   readonly session: Session;
   /** Ends the 3270 connection. Called on grace expiry and on shutdown. */
   close(): void;
+  /**
+   * Replace the browser viewport this session's `-oversize auto` measure reads, 2026-11-04.
+   * `undefined` means "no window size known". OPTIONAL: a handle with no use for it (the
+   * registry's own lifecycle tests) leaves it out, and the registry then has nothing to tell.
+   */
+  setViewport?(viewport: Viewport | undefined): void;
 }
 
+/** A browser viewport in CSS pixels. Spelled here, not imported, so this file needs no protocol. */
+export interface Viewport { readonly width: number; readonly height: number }
+
 export interface RegistryOptions {
-  /** Builds a live 3270 session. Injected so tests need no host and no socket. */
-  readonly factory: (id: string) => SessionHandle;
+  /**
+   * Builds a live 3270 session. Injected so tests need no host and no socket.
+   *
+   * `viewport` is the creating hello's, and it is an ARGUMENT, not a later `setViewport`, because
+   * the gateway's factory CONNECTS before returning: `connect()` resolves `-oversize auto` on the
+   * spot, so the measure must already hold the window by then.
+   */
+  readonly factory: (id: string, viewport: Viewport | undefined) => SessionHandle;
   readonly graceMs: number;
   readonly maxSessions: number;
 }
@@ -41,6 +56,11 @@ export interface AttachResult {
   readonly session: Session;
   /** True when this is a NEW session, so the caller knows to send a fresh id. */
   readonly created: boolean;
+  /**
+   * Replace THIS session's viewport -- for the `viewport` message, a resize of the tab that
+   * attached. Bound to the entry, so it cannot reach a session the caller did not attach to.
+   */
+  setViewport(viewport: Viewport | undefined): void;
 }
 
 export class SessionRegistry {
@@ -51,8 +71,14 @@ export class SessionRegistry {
   /**
    * Attach a client. An unknown or absent id yields a NEW session: a stale `sessionStorage` id
    * after a server restart is ordinary, and erroring would strand the browser with no way back.
+   *
+   * `viewport` is the attaching tab's window, for `-oversize auto` (2026-11-04). The measure must
+   * read the window of the tab attached NOW, so a REATTACH REPLACES the session's viewport --
+   * with `undefined` too, when the new tab sent none: the old tab's window is not this one's. It
+   * is written only AFTER the anti-hijack check below has handed the entry over, so a leaked id
+   * aimed at an attached session cannot even change what that session will measure.
    */
-  attach(sessionId: string | undefined): AttachResult {
+  attach(sessionId: string | undefined, viewport?: Viewport): AttachResult {
     if (sessionId !== undefined) {
       const found = this.entries.get(sessionId);
       // Only a DETACHED entry is reattachable. An id naming a session someone is currently using
@@ -63,7 +89,11 @@ export class SessionRegistry {
         // successful reconnect, which reads as a host problem rather than as ours.
         this.disarm(found);
         found.attached = true;
-        return { id: sessionId, session: found.handle.session, created: false };
+        found.handle.setViewport?.(viewport);
+        return {
+          id: sessionId, session: found.handle.session, created: false,
+          setViewport: (v) => { found.handle.setViewport?.(v); },
+        };
       }
     }
 
@@ -72,9 +102,12 @@ export class SessionRegistry {
     }
 
     const id = randomUUID();
-    const handle = this.opts.factory(id);
+    const handle = this.opts.factory(id, viewport);
     this.entries.set(id, { handle, attached: true });
-    return { id, session: handle.session, created: true };
+    return {
+      id, session: handle.session, created: true,
+      setViewport: (v) => { handle.setViewport?.(v); },
+    };
   }
 
   /**

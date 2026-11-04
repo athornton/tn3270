@@ -313,6 +313,13 @@ const bridge = createBridge({
   onCopyText: (text, report) => {
     writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); report(m); });
   },
+  /*
+    `-oversize auto`'s window, 2026-11-04: CSS pixels, which is what `innerWidth`/`innerHeight`
+    already are -- the gateway turns them into cells at scale 1. In `hello`, and again 250 ms after
+    a resize settles (`bridgecore.ts` owns the debounce and the closed-socket rule).
+  */
+  viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+  onResize: (fn) => { window.addEventListener('resize', fn); },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

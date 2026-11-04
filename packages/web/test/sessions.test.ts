@@ -191,4 +191,79 @@ describe('SessionRegistry', () => {
     expect(b.id).not.toBe(a.id);
     expect(created).toHaveLength(2);
   });
+  /**
+   * THE BROWSER VIEWPORT, for `-oversize auto` (2026-11-04). The session's measure reads whatever
+   * the handle was last told, so the registry must tell it about the tab CURRENTLY attached: a
+   * new session gets hello's viewport at construction (it connects inside the factory), a
+   * reattaching tab REPLACES it, and a hijack attempt -- which falls through to a new session --
+   * must not touch the session it failed to take.
+   */
+  describe('the viewport', () => {
+    const makeViewportFactory = () => {
+      const made: Array<{ id: string; initial: unknown; viewports: unknown[] }> = [];
+      const factory = (id: string, viewport: unknown) => {
+        const m = { id, initial: viewport, viewports: [] as unknown[] };
+        made.push(m);
+        return {
+          session: m as never,
+          close: () => {},
+          setViewport: (v: unknown) => { m.viewports.push(v); },
+        };
+      };
+      return { factory, made };
+    };
+
+    it('hands a NEW session hello\'s viewport at construction, before it can connect', () => {
+      const { factory, made } = makeViewportFactory();
+      const reg = new SessionRegistry({ factory: factory as never, graceMs: 60_000, maxSessions: 16 });
+      reg.attach(undefined, { width: 1350, height: 980 });
+      expect(made[0]!.initial).toEqual({ width: 1350, height: 980 });
+      reg.attach(undefined);
+      expect(made[1]!.initial).toBeUndefined();
+    });
+
+    it('REPLACES the viewport when a tab reattaches, with whatever that tab sent', () => {
+      const { factory, made } = makeViewportFactory();
+      const reg = new SessionRegistry({ factory: factory as never, graceMs: 60_000, maxSessions: 16 });
+      const a = reg.attach(undefined, { width: 1350, height: 980 });
+      reg.detach(a.id);
+      reg.attach(a.id, { width: 900, height: 700 });
+      expect(made[0]!.viewports).toEqual([{ width: 900, height: 700 }]);
+      // A reattaching tab that sent none leaves the session with none: the measure must not read
+      // a window that is no longer attached.
+      reg.detach(a.id);
+      reg.attach(a.id);
+      expect(made[0]!.viewports).toEqual([{ width: 900, height: 700 }, undefined]);
+    });
+
+    it('does NOT touch the viewport of a session another tab holds', () => {
+      const { factory, made } = makeViewportFactory();
+      const reg = new SessionRegistry({ factory: factory as never, graceMs: 60_000, maxSessions: 16 });
+      const a = reg.attach(undefined, { width: 1350, height: 980 });
+      const b = reg.attach(a.id, { width: 100, height: 100 });
+      expect(b.created).toBe(true);
+      expect(made[0]!.viewports).toEqual([]);
+      expect(made[1]!.initial).toEqual({ width: 100, height: 100 });
+    });
+
+    it('gives the attacher a setViewport for its OWN session, for the resize message', () => {
+      const { factory, made } = makeViewportFactory();
+      const reg = new SessionRegistry({ factory: factory as never, graceMs: 60_000, maxSessions: 16 });
+      const a = reg.attach(undefined);
+      const b = reg.attach(undefined);
+      b.setViewport({ width: 640, height: 480 });
+      a.setViewport({ width: 320, height: 240 });
+      expect(made[0]!.viewports).toEqual([{ width: 320, height: 240 }]);
+      expect(made[1]!.viewports).toEqual([{ width: 640, height: 480 }]);
+    });
+
+    it('tolerates a handle with no setViewport, which is what the lifecycle fakes above are', () => {
+      const { factory } = makeFactory();
+      const reg = new SessionRegistry({ factory, graceMs: 60_000, maxSessions: 16 });
+      const a = reg.attach(undefined, { width: 1, height: 1 });
+      expect(() => { a.setViewport({ width: 2, height: 2 }); }).not.toThrow();
+      reg.detach(a.id);
+      expect(() => reg.attach(a.id, { width: 3, height: 3 })).not.toThrow();
+    });
+  });
 });

@@ -1358,3 +1358,161 @@ describe('socket-carried file transfer', () => {
     expect(discard).toBeLessThan(lineOf('if (id !== undefined) registry.detach(id);', 'the detach'));
   });
 });
+
+/**
+ * `-oversize auto`, MEASURED FROM THE BROWSER VIEWPORT (2026-11-04).
+ *
+ * A REAL LISTENER STANDS IN FOR THE HOST, because the measure runs only inside `Session.connect()`
+ * -- `--replay` never connects, so it never measures. The listener says nothing; geometry is
+ * resolved and applied before the socket opens, so `resolvedGeometry` is what the host WOULD be
+ * told, which is what each case reads. The atlas cell is 9x14 (`measureViewport`'s own test), so
+ * 1350x980 is 150 columns by 69 rows and 900x700 is 100 by 49.
+ */
+describe('-oversize auto, from the browser viewport', () => {
+  const hosts: Array<{ close(): void }> = [];
+  const peers: Socket[] = [];
+  afterEach(() => {
+    for (const p of peers.splice(0)) p.destroy();
+    for (const h of hosts.splice(0)) h.close();
+  });
+
+  async function gateway(extra: string[] = []) {
+    const host = createServer((s) => { peers.push(s); });
+    await new Promise<void>((r) => { host.listen(0, '127.0.0.1', r); });
+    hosts.push(host);
+    const hostPort = (host.address() as { port: number }).port;
+    const args = parseWebArgs(['--listen', '0', '-insecure', '-oversize', 'auto', ...extra,
+      `127.0.0.1:${hostPort}`]);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+    return { url: `ws://127.0.0.1:${port}/ws`, registry };
+  }
+
+  /** Open a tab, say hello, and return its socket and the session id it ended up with. */
+  async function tab(url: string, hello: Record<string, unknown>) {
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 'sessionId' in hello ? 2 : 3);
+    ws.send(JSON.stringify({ kind: 'hello', ...hello }));
+    const got = await first;
+    return { ws, got };
+  }
+
+  const until = async (ok: () => boolean): Promise<void> => {
+    for (let waited = 0; waited < 80 && !ok(); waited += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+  };
+
+  it('measures a NEW session from hello\'s viewport, at its first connect', async () => {
+    const { url, registry } = await gateway();
+    const { ws, got } = await tab(url, { viewport: { width: 1350, height: 980 } });
+    const id = got[0]!['id'] as string;
+    const session = registry.peek(id)!;
+    await until(() => session.resolvedGeometry !== undefined);
+    expect(session.resolvedGeometry?.terminalType).toBe('IBM-DYNAMIC');
+    expect(session.resolvedGeometry?.alternate).toEqual({ rows: 69, cols: 150 });
+    ws.close();
+  });
+
+  it('a REATTACHING tab replaces the viewport the session measures at its next reconnect', async () => {
+    const { url, registry } = await gateway();
+    const a = await tab(url, { viewport: { width: 1350, height: 980 } });
+    const id = a.got[0]!['id'] as string;
+    const session = registry.peek(id)!;
+    await until(() => session.resolvedGeometry !== undefined);
+    a.ws.close();
+    await new Promise((r) => { setTimeout(r, 50); });   // let the gateway see the close and detach
+
+    const b = await tab(url, { sessionId: id, viewport: { width: 900, height: 700 } });
+    // The SAME session, reattached -- no fresh `session` message.
+    expect(b.got.map((m) => m['kind'])).toEqual(['atlas', 'frame']);
+    expect(registry.peek(id)).toBe(session);
+    session.disconnect();
+    await session.reconnect();
+    expect(session.resolvedGeometry?.alternate).toEqual({ rows: 49, cols: 100 });
+    b.ws.close();
+  });
+
+  it('a viewport message replaces it too, for the next reconnect, with no reply', async () => {
+    const { url, registry } = await gateway();
+    const { ws, got } = await tab(url, { viewport: { width: 1350, height: 980 } });
+    const id = got[0]!['id'] as string;
+    const session = registry.peek(id)!;
+    await until(() => session.resolvedGeometry !== undefined);
+    const after: unknown[] = [];
+    ws.addEventListener('message', (e) => { after.push(e.data); });
+    ws.send(JSON.stringify({ kind: 'viewport', width: 900, height: 700 }));
+    await new Promise((r) => { setTimeout(r, 100); });
+    session.disconnect();
+    await session.reconnect();
+    expect(session.resolvedGeometry?.alternate).toEqual({ rows: 49, cols: 100 });
+    // Only the disconnect/reconnect repaints, never a reply to the viewport message itself --
+    // checked by sending it again once the reconnect's own frames have drained.
+    await new Promise((r) => { setTimeout(r, 150); });
+    after.length = 0;
+    ws.send(JSON.stringify({ kind: 'viewport', width: 800, height: 600 }));
+    await new Promise((r) => { setTimeout(r, 100); });
+    expect(after).toEqual([]);
+    ws.close();
+  });
+
+  it('a client that sent no viewport falls back to the model, and stderr says so with the id', async () => {
+    const written: string[] = [];
+    const through = process.stderr.write.bind(process.stderr);
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+        written.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return (through as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stderr.write);
+    try {
+      const { url, registry } = await gateway();
+      const { ws, got } = await tab(url, {});
+      const id = got[0]!['id'] as string;
+      const session = registry.peek(id)!;
+      await until(() => session.resolvedGeometry !== undefined);
+      expect(session.resolvedGeometry?.terminalType).toBe('IBM-3278-2-E');
+      expect(session.resolvedGeometry?.alternate).toEqual({ rows: 24, cols: 80 });
+      const line = written.find((w) => w.includes('no window size known'));
+      expect(line, 'the auto fallback must be reported on stderr').toBeDefined();
+      expect(line!.startsWith(`${id.slice(0, 8)}: oversize auto: no window size known`)).toBe(true);
+      ws.close();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('a viewport message BEFORE hello is swallowed, and changes nothing', async () => {
+    const { url, registry } = await gateway();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 3);
+    ws.send(JSON.stringify({ kind: 'viewport', width: 1350, height: 980 }));
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const got = await first;
+    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    const session = registry.peek(got[0]!['id'] as string)!;
+    await until(() => session.resolvedGeometry !== undefined);
+    expect(session.resolvedGeometry?.alternate).toEqual({ rows: 24, cols: 80 });
+    ws.close();
+  });
+
+  it('a --replay gateway with -oversize auto accepts a viewport in hello and a viewport message', async () => {
+    // REPLAY NEVER CONNECTS, SO IT NEVER MEASURES: geometry is resolved only by `connect()`, and
+    // the replayed screen keeps the model's sizes. This proves only that both messages are
+    // accepted and the session keeps serving.
+    const { url } = await start(['-oversize', 'auto']);
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 3);
+    ws.send(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } }));
+    expect((await first).map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    const next = collect(ws, 1);
+    ws.send(JSON.stringify({ kind: 'viewport', width: 900, height: 700 }));
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await next)[0]!['kind']).toBe('frame');      // not an error: the viewport was accepted
+    ws.close();
+  });
+});

@@ -76,8 +76,17 @@ export type ServerMessage =
   // A receive's bytes, chunked the same way an upload's are, then terminated by `transferDone`.
   | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array };
 
+/** A browser viewport in CSS pixels, for `-oversize auto`. See `checkViewport`. */
+export interface Viewport { readonly width: number; readonly height: number }
+
 export type ClientMessage =
-  | { kind: 'hello'; sessionId?: string }
+  /*
+    `viewport` IN `hello`, 2026-11-04: the browser's window in CSS pixels, which the gateway turns
+    into cells at scale 1 for `-oversize auto` (`viewport.ts`). In `hello` and not only in its own
+    message because a NEW session connects inside `registry.attach`, before any later message
+    could arrive -- so the size its first connect measures has to travel with the hello itself.
+  */
+  | { kind: 'hello'; sessionId?: string; viewport?: Viewport }
   | { kind: 'action'; action: Action }
   | { kind: 'transferChunk'; seq: number; total: number; bytes: Uint8Array }
   | { kind: 'transferStart'; keywords: readonly string[] }
@@ -86,7 +95,14 @@ export type ClientMessage =
     A PREFETCH, NOT AN ACTION, 2026-11-02: a top-level kind beside the transfer ones because the
     operator did nothing to the session. Answered with `selectionText`; changes no screen.
   */
-  | { kind: 'selection'; seq: number; rect: { top: number; left: number; bottom: number; right: number } };
+  | { kind: 'selection'; seq: number; rect: { top: number; left: number; bottom: number; right: number } }
+  /*
+    THE WINDOW RESIZED, 2026-11-04: sent by the page, debounced, so the gateway keeps the latest
+    viewport per session for `-oversize auto`'s next reconnect. A top-level kind like `selection`,
+    not an `Action`: the operator did nothing to the session. `main.ts` intercepts it ABOVE the
+    action guard and never replies -- a resize changes no screen until the next connect.
+  */
+  | { kind: 'viewport'; width: number; height: number };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
@@ -150,6 +166,32 @@ function checkRect(rect: unknown, what: string): {
   };
 }
 
+/** The largest viewport side accepted, in CSS pixels: far past any display, small enough to be sane. */
+const MAX_VIEWPORT = 100_000;
+
+/**
+ * A VIEWPORT'S TWO FIELDS, CHECKED ONCE FOR BOTH PLACES ONE TRAVELS -- `hello.viewport` and the
+ * `viewport` kind. Integers in 1..100000, each. The value reaches `measureViewport` inside
+ * `Session.connect()`, where `Math.floor` would turn a string into NaN and a fraction or a huge
+ * number into a size nobody has: `resolveGeometry` would then fall back or clamp on input that is
+ * simply malformed. Refused here like every other bad field, so the sender hears about it.
+ *
+ * Returns a fresh object with only the two fields, as `checkRect` does for the same reason.
+ */
+function checkViewport(raw: unknown): Viewport {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('viewport needs a width and a height');
+  }
+  const v = raw as Record<string, unknown>;
+  for (const k of ['width', 'height']) {
+    const n = v[k];
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_VIEWPORT) {
+      throw new Error(`viewport ${k} must be an integer in 1..${MAX_VIEWPORT}`);
+    }
+  }
+  return { width: v['width'] as number, height: v['height'] as number };
+}
+
 /**
  * Parse and VALIDATE one client message. Throws on anything unexpected.
  *
@@ -204,6 +246,15 @@ function checkRect(rect: unknown, what: string): {
  * quoted `no reply to the transferForm action`, which is what the message would be only if the
  * kind were absent from `SWALLOWED` too. Re-measured 2026-10-06.)
  *
+ * ## `viewport`, AND `hello.viewport`, 2026-11-04: NOT ACTIONS, SO OUTSIDE THE RULE ABOVE
+ *
+ * `-oversize auto` measures the browser window. The page sends its viewport in CSS pixels in
+ * `hello` and again, debounced, as a top-level `viewport` kind whenever the window resizes. Neither
+ * is an `Action`, so neither can reach `applyAction`: `hello` has its own branch in `main.ts`, and
+ * `viewport` is intercepted ABOVE the action guard there, beside `selection`, and answered with
+ * nothing. The FIELD rule still applies in full -- both are shape-checked by `checkViewport`,
+ * integers in 1..100000 -- because the value is read inside `Session.connect()` by the measure.
+ *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
  * `Keyboard.typeString` loops char by char, and on an UNFORMATTED screen `advanceAfterType` has no
@@ -221,10 +272,13 @@ export function decodeClientMessage(text: string): ClientMessage {
   const kind = (raw as { kind?: unknown }).kind;
 
   if (kind === 'hello') {
-    const id = (raw as { sessionId?: unknown }).sessionId;
-    if (id === undefined) return { kind: 'hello' };
-    if (typeof id !== 'string') throw new Error('sessionId must be a string');
-    return { kind: 'hello', sessionId: id };
+    const { sessionId: id, viewport } = raw as { sessionId?: unknown; viewport?: unknown };
+    if (id !== undefined && typeof id !== 'string') throw new Error('sessionId must be a string');
+    return {
+      kind: 'hello',
+      ...(id !== undefined ? { sessionId: id } : {}),
+      ...(viewport !== undefined ? { viewport: checkViewport(viewport) } : {}),
+    };
   }
 
   if (kind === 'action') {
@@ -567,6 +621,13 @@ export function decodeClientMessage(text: string): ClientMessage {
       throw new Error('selection seq must be a non-negative safe integer');
     }
     return { kind: 'selection', seq, rect: checkRect(rect, 'selection') };
+  }
+
+  // THE RESIZE, 2026-11-04. Above the catch-all for the reason the transfer kinds' note gives.
+  // Both fields through `checkViewport`, as `hello.viewport` is; see that function.
+  if (kind === 'viewport') {
+    const { width, height } = checkViewport(raw);
+    return { kind: 'viewport', width, height };
   }
 
   throw new Error(`unknown client message kind ${String(kind)}`);

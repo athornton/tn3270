@@ -216,3 +216,28 @@ describe('parseWebArgs', () => {
     });
   });
 });
+
+describe('-oversize', () => {
+  it('parses each form, and is absent by default', () => {
+    expect(parseWebArgs(['-oversize', '160x62', 'vm:3270']).oversize)
+      .toEqual({ kind: 'fixed', rows: 62, cols: 160 });
+    expect(parseWebArgs(['-oversize', 'auto', 'vm:3270']).oversize).toEqual({ kind: 'auto' });
+    expect(parseWebArgs(['-oversize', 'none', 'vm:3270']).oversize).toEqual({ kind: 'none' });
+    expect(parseWebArgs(['vm:3270']).oversize).toBeUndefined();
+  });
+
+  it('refuses at parse time what a connect would refuse, as a UsageError', () => {
+    expect(() => parseWebArgs(['-model', '3278-2', '-oversize', 'auto', 'vm:3270'])).toThrow(UsageError);
+    expect(() => parseWebArgs(['-model', '3278-2', '-oversize', 'auto', 'vm:3270']))
+      .toThrow(/use -model 3278-2-E/);
+    expect(() => parseWebArgs(['-model', '3278-4-E', '-oversize', '80x30', 'vm:3270']))
+      .toThrow(/use at least 80x43/);
+    expect(() => parseWebArgs(['-oversize', '200x200', 'vm:3270'])).toThrow(/at most 16383 cells/);
+    expect(() => parseWebArgs(['-oversize', 'big', 'vm:3270'])).toThrow(UsageError);
+    expect(() => parseWebArgs(['-oversize'])).toThrow(/-oversize needs a value/);
+  });
+
+  it('ACCEPTS auto, because the gateway has a window to measure: the browser\'s', () => {
+    expect(() => parseWebArgs(['-model', '3278-4-E', '-oversize', 'auto', 'vm:3270'])).not.toThrow();
+  });
+});

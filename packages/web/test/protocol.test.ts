@@ -382,6 +382,42 @@ describe('decodeClientMessage', () => {
   it('refuses a sessionId that is not a string', () => {
     expect(() => decodeClientMessage('{"kind":"hello","sessionId":42}')).toThrow();
   });
+
+  /*
+    THE BROWSER VIEWPORT, 2026-11-04, for `-oversize auto`: CSS pixels the GATEWAY turns into cells
+    at scale 1 (`viewport.ts`). Shape-checked here because the measure that reads it runs inside
+    `Session.connect`, and a NaN or a string reaching `Math.floor` would quietly become a size.
+  */
+  it('accepts a hello carrying a viewport, and a viewport message', () => {
+    expect(decodeClientMessage(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } })))
+      .toEqual({ kind: 'hello', viewport: { width: 1350, height: 980 } });
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'hello', sessionId: 'abc', viewport: { width: 1, height: 100000, extra: 'x' },
+    }))).toEqual({ kind: 'hello', sessionId: 'abc', viewport: { width: 1, height: 100000 } });
+    expect(decodeClientMessage(JSON.stringify({ kind: 'viewport', width: 800, height: 600 })))
+      .toEqual({ kind: 'viewport', width: 800, height: 600 });
+  });
+
+  it('REFUSES a viewport that is not two integers in 1..100000, in hello and on its own', () => {
+    const bad: Array<Record<string, unknown>> = [
+      { width: -1, height: 600 },
+      { width: 0, height: 600 },
+      { width: 1.5, height: 600 },
+      { width: '800', height: 600 },
+      { width: 200000, height: 600 },
+      { width: 800 },                         // no height
+      { width: 800, height: 0 },
+      { width: 800, height: null },
+    ];
+    for (const v of bad) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'hello', viewport: v })),
+        JSON.stringify(v)).toThrow(/viewport (width|height) must be an integer in 1\.\.100000/);
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'viewport', ...v })),
+        JSON.stringify(v)).toThrow(/viewport (width|height) must be an integer in 1\.\.100000/);
+    }
+    expect(() => decodeClientMessage('{"kind":"hello","viewport":null}')).toThrow(/viewport/);
+    expect(() => decodeClientMessage('{"kind":"hello","viewport":[800,600]}')).toThrow(/viewport/);
+  });
 });
 
 describe('transfer messages', () => {

@@ -765,3 +765,130 @@ describe('socketUrl, which a reverse proxy breaks if it is built from the host',
     expect(socketUrl('http://127.0.0.1:9999/x/')).toBe('ws://127.0.0.1:9999/x/ws');
   });
 });
+
+/**
+ * `-oversize auto`'s half in the browser (2026-11-04): the viewport, in CSS pixels, rides in
+ * `hello` and again, debounced, on every resize -- the gateway converts it to cells and keeps the
+ * latest per session, so a reconnect measures the window as it is then.
+ */
+describe('the viewport, for -oversize auto', () => {
+  const resizable = () => {
+    let fire: (() => void) | undefined;
+    return { onResize: (fn: () => void) => { fire = fn; }, resize: () => { fire?.(); } };
+  };
+
+  it('puts the viewport in hello when the client has one', () => {
+    const socket = fakeSocket();
+    createBridge({
+      socket: socket as never, storage: fakeStorage('kept-id') as never, inflate: async (d) => String(d),
+      viewport: () => ({ width: 1350, height: 980 }),
+    });
+    socket.onopen?.();
+    expect(JSON.parse(socket.sent[0]!))
+      .toEqual({ kind: 'hello', sessionId: 'kept-id', viewport: { width: 1350, height: 980 } });
+  });
+
+  it('reads the viewport WHEN the socket opens, not when the bridge is built', () => {
+    const socket = fakeSocket();
+    let size = { width: 100, height: 100 };
+    createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      viewport: () => size,
+    });
+    size = { width: 1350, height: 980 };
+    socket.onopen?.();
+    expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello', viewport: { width: 1350, height: 980 } });
+  });
+
+  it('sends ONE viewport message per burst of resizes, 250 ms after the last', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      let size = { width: 1350, height: 980 };
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => size, onResize: r.onResize,
+      });
+      socket.onopen?.();
+      socket.sent.length = 0;
+      r.resize();
+      vi.advanceTimersByTime(200);
+      size = { width: 900, height: 700 };
+      r.resize();
+      vi.advanceTimersByTime(249);
+      expect(socket.sent).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(socket.sent.map((t) => JSON.parse(t)))
+        .toEqual([{ kind: 'viewport', width: 900, height: 700 }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends nothing for a resize before the socket opened or after it closed', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => ({ width: 800, height: 600 }), onResize: r.onResize,
+      });
+      // Before open: a real `WebSocket.send` THROWS while CONNECTING, and `hello` will carry the
+      // size read at open anyway.
+      r.resize();
+      vi.advanceTimersByTime(250);
+      expect(socket.sent).toEqual([]);
+      socket.onopen?.();
+      socket.sent.length = 0;
+      // A resize whose timer is still pending when the socket closes, and one after it.
+      r.resize();
+      socket.onclose?.();
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('LEAVES OUT a viewport the gateway would refuse, rather than lose the whole hello', () => {
+    // `checkViewport` refuses 0, and a refused hello gets an error and no session at all.
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => ({ width: 0, height: 0 }), onResize: r.onResize,
+      });
+      socket.onopen?.();
+      expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello' });
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('with no viewport dep: hello is unchanged and a resize sends nothing', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        onResize: r.onResize,
+      });
+      socket.onopen?.();
+      expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello' });
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -206,6 +206,37 @@ export interface BridgeDeps {
    * falls back to `dispatch('error', ...)`, so the message is never lost.
    */
   readonly onCopyText?: (text: string, report: (message: string) => void) => void;
+  /**
+   * The browser viewport in CSS pixels, for the gateway's `-oversize auto`. 2026-11-04.
+   *
+   * OPTIONAL, and absent means `hello` carries no `viewport` field at all -- so every existing
+   * caller and test is unchanged, and the gateway takes its "no window size known" fallback.
+   * Read WHEN CALLED: at `onopen` for `hello`, and when a resize settles. Not the cell count --
+   * the page has no cell size until the `atlas` reply, which follows `hello`; the gateway divides.
+   */
+  readonly viewport?: () => { width: number; height: number };
+  /**
+   * Subscribe to window resizes. OPTIONAL; with `viewport` present, each burst of resizes sends
+   * ONE `{kind:'viewport'}` message 250 ms after the last, so the gateway keeps the latest size
+   * per session for the next reconnect. Injected, like every browser capability here, so the
+   * debounce is testable with no `window`.
+   */
+  readonly onResize?: (fn: () => void) => void;
+}
+
+/** How long a burst of resizes must go quiet before its viewport is sent. */
+export const VIEWPORT_DEBOUNCE_MS = 250;
+
+/**
+ * A viewport the gateway will ACCEPT, or `undefined`. `protocol.ts`'s `checkViewport` refuses
+ * anything but integers in 1..100000, and a refused `hello` gets an `error` and NO SESSION -- so a
+ * window reporting 0x0 (a hidden iframe, a minimized headless page) would cost the operator the
+ * whole page over a measurement. Omitted instead, which the gateway reads as "no window size
+ * known" and falls back to the model.
+ */
+function sendable(vp: { width: number; height: number }): { width: number; height: number } | undefined {
+  const ok = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= 100_000;
+  return ok(vp.width) && ok(vp.height) ? { width: vp.width, height: vp.height } : undefined;
 }
 
 export interface BridgeApi {
@@ -411,13 +442,42 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     for (const m of mine) fn(m.payload);
   };
 
+  // SET BY `onopen`. A resize before it sends nothing: a real `WebSocket.send` THROWS while
+  // CONNECTING, and `hello` reads the viewport at open anyway, so nothing is lost.
+  let opened = false;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+
   deps.socket.onopen = () => {
+    opened = true;
     const id = deps.storage.getItem(ID_KEY);
-    deps.socket.send(JSON.stringify(id === null ? { kind: 'hello' } : { kind: 'hello', sessionId: id }));
+    const read = deps.viewport?.();
+    const vp = read === undefined ? undefined : sendable(read);
+    deps.socket.send(JSON.stringify({
+      kind: 'hello',
+      ...(id === null ? {} : { sessionId: id }),
+      ...(vp === undefined ? {} : { viewport: vp }),
+    }));
   };
+
+  // THE RESIZE, debounced. Sent only between open and close -- after close a real `send` is
+  // DISCARDED silently, and the closed-socket rule above (`closed`) is the one this obeys.
+  const viewport = deps.viewport;
+  if (viewport !== undefined) {
+    deps.onResize?.(() => {
+      if (resizeTimer !== undefined) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = undefined;
+        if (!opened || closed) return;
+        const vp = sendable(viewport());
+        if (vp === undefined) return;
+        deps.socket.send(JSON.stringify({ kind: 'viewport', width: vp.width, height: vp.height }));
+      }, VIEWPORT_DEBOUNCE_MS);
+    });
+  }
 
   deps.socket.onclose = () => {
     closed = true;
+    if (resizeTimer !== undefined) { clearTimeout(resizeTimer); resizeTimer = undefined; }
     for (const w of waiting.values()) w.reject(new Error('the gateway connection closed'));
     waiting.clear();
     dispatch('error', 'The connection to the gateway closed. Reload to reconnect.');

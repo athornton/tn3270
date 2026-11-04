@@ -3,11 +3,13 @@ import { createServer as createHttps } from 'node:https';
 import { createReadStream, readFileSync } from 'node:fs';
 import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
-import { resolve, resolveTerminalType, resolveAlternateSize } from '@tn3270/core';
+import { resolve } from '@tn3270/core';
 import {
-  applyAction, applyPaste, defaultSession, resolveScheme, resolveTls, startTransfer,
+  applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
-import { parseWebArgs, UsageError, type WebArgs } from './args.js';
+import {
+  buildSession, parseWebArgs, printGeometryNotices, UsageError, type WebArgs,
+} from './args.js';
 import { resolveAsset, tokenCookie, parseCookies } from './httpstatic.js';
 import { checkUpgrade, tokenMatches } from './handshake.js';
 import { Connection } from './wsserver.js';
@@ -33,7 +35,8 @@ export function buildServer(args: WebArgs) {
   const blank = [...blankColumns(atlas.coverage, atlas.geometry)];
   // `resolveScheme` already treats `undefined` as "the default", so no conditional is needed.
   const scheme = resolveScheme(args.scheme);
-  const typeOpts = { ...(args.model !== undefined ? { model: args.model } : {}) };
+  // The atlas cell, which `-oversize auto` divides each browser's viewport by (scale 1).
+  const cell = { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight };
   const secure = args.tls !== undefined;
 
   // `parseWebArgs` yields RAW `TlsFlags`; `defaultSession` needs resolved `TlsOptions`, exactly as
@@ -46,14 +49,19 @@ export function buildServer(args: WebArgs) {
   const registry = new SessionRegistry({
     graceMs: args.graceMs,
     maxSessions: args.maxSessions,
-    factory: () => {
-      const session = defaultSession(
-        resolveTerminalType(typeOpts), hostTls, resolveAlternateSize(typeOpts), undefined,
-        args.bindImage, args.bindLimit, args.devname, args.ddm,
-      );
+    /*
+      `viewport` IS THE CREATING HELLO'S, and it is in the box BEFORE the connect below, which is
+      where `-oversize auto` is measured. A reattach replaces it through the handle's `setViewport`
+      (`SessionRegistry.attach`), so a reconnect measures the tab attached THEN.
+    */
+    factory: (id, viewport) => {
+      const { session, setViewport } = buildSession(args, hostTls, cell, viewport);
+      // Before the connect, so the first connect's notice is printed too.
+      printGeometryNotices(session, id, process.stderr);
       if (args.replay !== undefined) {
         // The hostless test seam: paint a recorded trace and open no socket at all, so no test
-        // can reach a host or capture a credential.
+        // can reach a host or capture a credential. NO GEOMETRY IS RESOLVED HERE: only `connect()`
+        // resolves it, so `-oversize` (and `auto`'s measure) does not apply under `--replay`.
         session.replay(readFileSync(args.replay, 'utf8'));
       } else {
         /*
@@ -68,7 +76,7 @@ export function buildServer(args: WebArgs) {
             + `${err instanceof Error ? err.message : String(err)}\n`);
         });
       }
-      return { session, close: () => { session.disconnect(); } };
+      return { session, close: () => { session.disconnect(); }, setViewport };
     },
   });
 
@@ -143,6 +151,9 @@ export function buildServer(args: WebArgs) {
      * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
      */
     let stopListening: (() => void) | undefined;
+    // Set on `hello`: replaces the viewport of THE SESSION THIS SOCKET ATTACHED TO, for the
+    // `viewport` message. Bound by the registry to that entry, so it cannot reach another one.
+    let setViewport: ((v: { width: number; height: number }) => void) | undefined;
     /**
      * File transfer's staging and its live run -- PER CONNECTION, and that is the whole reason it
      * is built here rather than once per process.
@@ -192,13 +203,14 @@ export function buildServer(args: WebArgs) {
       }
       if (msg.kind === 'hello') {
         let attached;
-        try { attached = registry.attach(msg.sessionId); } catch (err) {
+        try { attached = registry.attach(msg.sessionId, msg.viewport); } catch (err) {
           conn.sendBinary(encodeServerMessage({ kind: 'error', message: String(err) }));
           conn.close();
           return;
         }
         id = attached.id;
         session = attached.session;
+        setViewport = attached.setViewport;
         const mine = attached.session;
         if (attached.created) {
           conn.sendBinary(encodeServerMessage({ kind: 'session', id: attached.id }));
@@ -313,6 +325,17 @@ export function buildServer(args: WebArgs) {
         copy never reaches this process at all, so logging it as one would overstate what happened
         here.
       */
+      /*
+        THE WINDOW RESIZED, 2026-11-04: keep it for `-oversize auto`'s NEXT connect. ABOVE THE
+        GUARD BELOW for the reason the `selection` arm gives. NO REPLY AND NO REPAINT: nothing on
+        the screen changed, and the host learns a new size only at a reconnect (the spec's "Why
+        auto is measured at connect, and only then"). Fields already checked by `checkViewport`.
+        Before `hello` it never gets here -- `if (session === undefined) return;` above.
+      */
+      if (msg.kind === 'viewport') {
+        setViewport?.({ width: msg.width, height: msg.height });
+        return;
+      }
       if (msg.kind === 'selection') {
         const snapshot = session.screen.snapshot();
         const text = extractText(resolve(snapshot), snapshot.cols, msg.rect);
