@@ -237,6 +237,14 @@ describe('-oversize', () => {
     expect(() => parseWebArgs(['-oversize'])).toThrow(/-oversize needs a value/);
   });
 
+  it('reports an unknown model with -oversize as a UsageError, so run() prints the message alone', () => {
+    // `resolveGeometry` throws TerminalTypeError for the model before any oversize rule; unmapped,
+    // `run()` would print `TerminalTypeError: ...` instead of the message, exit 2.
+    expect(() => parseWebArgs(['-model', 'bogus', '-oversize', 'auto', 'vm:3270'])).toThrow(UsageError);
+    expect(() => parseWebArgs(['-model', 'bogus', '-oversize', 'auto', 'vm:3270']))
+      .toThrow(/unknown model "bogus"/);
+  });
+
   it('ACCEPTS auto, because the gateway has a window to measure: the browser\'s', () => {
     expect(() => parseWebArgs(['-model', '3278-4-E', '-oversize', 'auto', 'vm:3270'])).not.toThrow();
   });

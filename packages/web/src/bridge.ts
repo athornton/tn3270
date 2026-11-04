@@ -314,11 +314,20 @@ const bridge = createBridge({
     writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); report(m); });
   },
   /*
-    `-oversize auto`'s window, 2026-11-04: CSS pixels, which is what `innerWidth`/`innerHeight`
-    already are -- the gateway turns them into cells at scale 1. In `hello`, and again 250 ms after
-    a resize settles (`bridgecore.ts` owns the debounce and the closed-socket rule).
+    `-oversize auto`'s window, 2026-11-04: CSS pixels, which the gateway turns into cells at scale
+    1. In `hello`, and again 250 ms after a resize settles (`bridgecore.ts` owns the debounce and
+    the closed-socket rule).
+
+    `documentElement.clientWidth/clientHeight`, NOT `window.innerWidth/innerHeight`: the inner
+    sizes INCLUDE the scrollbars, which the page grows (`overflow:auto`) once the canvas overflows.
+    MEASURED by the Task 8 review in Chromium: with the canvas overflowing, `innerWidth` stayed 800
+    while `clientWidth` was 785, so the next reconnect sized the host 1-2 columns too big for the
+    area actually drawable -- and the scrollbars never went away. The client sizes are the area
+    the canvas can use.
   */
-  viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+  viewport: () => ({
+    width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
+  }),
   onResize: (fn) => { window.addEventListener('resize', fn); },
 });
 

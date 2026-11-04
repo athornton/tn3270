@@ -172,9 +172,9 @@ const MAX_VIEWPORT = 100_000;
 /**
  * A VIEWPORT'S TWO FIELDS, CHECKED ONCE FOR BOTH PLACES ONE TRAVELS -- `hello.viewport` and the
  * `viewport` kind. Integers in 1..100000, each. The value reaches `measureViewport` inside
- * `Session.connect()`, where `Math.floor` would turn a string into NaN and a fraction or a huge
- * number into a size nobody has: `resolveGeometry` would then fall back or clamp on input that is
- * simply malformed. Refused here like every other bad field, so the sender hears about it.
+ * `Session.connect()`, where the division would COERCE a string (`'800' / 9` is a number) and
+ * `Math.floor` would turn a fraction or a huge number into a size nobody has: `resolveGeometry`
+ * would then size the host, fall back or clamp on input that is simply malformed. Refused here like every other bad field, so the sender hears about it.
  *
  * Returns a fresh object with only the two fields, as `checkRect` does for the same reason.
  */

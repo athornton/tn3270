@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { resolveGeometry, OversizeError, type Oversize, type Session } from '@tn3270/core';
+import {
+  resolveGeometry, OversizeError, TerminalTypeError, type Oversize, type Session,
+} from '@tn3270/core';
 import {
   defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
@@ -244,7 +246,9 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     try {
       resolveGeometry({ ...(model !== undefined ? { model } : {}), oversize }, () => undefined);
     } catch (e) {
-      if (e instanceof OversizeError) throw new UsageError(e.message);
+      // An unknown `-model` is refused here too, before any oversize rule, as TerminalTypeError --
+      // mapped like OversizeError, so `run()` prints the message alone and exits 2.
+      if (e instanceof OversizeError || e instanceof TerminalTypeError) throw new UsageError(e.message);
       throw e;
     }
   }
