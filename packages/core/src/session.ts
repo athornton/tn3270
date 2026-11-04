@@ -20,7 +20,7 @@ import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
-import { resolveGeometry, type GeometrySetting, type Size } from './geometry.js';
+import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size } from './geometry.js';
 
 /**
  * A single TN3270 session: socket, telnet layer, screen, keyboard.
@@ -307,7 +307,7 @@ export class Session {
    * tn3270e-session.test.ts pinning exactly this.
    *
    * IN GEOMETRY MODE (`SessionOptions.geometry`) IT IS THE RESOLVED ALTERNATE FOR THE CURRENT
-   * CONNECTION, written by `applyGeometry()` at the top of every `connect()` -- hence no longer
+   * CONNECTION, written by `applyGeometry()` early in every `connect()` -- hence no longer
    * `readonly`. Still the fixed point the paragraph above describes, just fixed per connection
    * rather than per session: no BIND writes it, only a connect. This mirrors x3270 making an
    * oversize the model's maximum (`ctlr.c:334`, `ov_cols = maxCOLS = ovc`), so BIND's limit
@@ -403,14 +403,16 @@ export class Session {
       if (legacy.length > 0) {
         throw new Error(`geometry replaces ${legacy.join(', ')}: give one or the other, not both`);
       }
+      // Validated as `setGeometry` validates, so a setting that every connect would refuse --
+      // a fixed oversize below the model, `-oversize` on a non-`-E` model -- is refused here,
+      // to whoever built the session, and not at the first connect.
+      this.validateGeometry(opts.geometry);
       this.setting = opts.geometry;
       // THE MODEL'S GEOMETRY, NOT THE OVERSIZE'S: `auto` must not be measured here (the GUI's
       // font atlas, which its measure reads, does not exist yet -- see the spec's "Why auto is
       // measured at connect, and only then"), so the oversize is dropped for this one call and
       // the real resolve waits for `connect()`. A fixed oversize therefore also starts at the
-      // model's sizes, which is harmless: nothing is on the screen before a connect. An unknown
-      // model still throws from here, as it would in legacy mode from the front end's
-      // `resolveTerminalType`.
+      // model's sizes, which is harmless: nothing is on the screen before a connect.
       const g = resolveGeometry({ ...opts.geometry, oversize: { kind: 'none' } });
       this.screen = new Screen({
         rows: g.default.rows,
@@ -461,12 +463,8 @@ export class Session {
    * (`XN_DEFER`), which this deliberately does not: a pending change the operator cannot see
    * is a surprise.
    *
-   * VALIDATED NOW, so a bad model or a fixed oversize breaking a rule is refused to the
-   * operator who typed it rather than at some later connect. `auto` is validated with its
-   * oversize dropped, because resolving it for real would CALL `measure` -- the window may
-   * change before the connect, and measuring is the connect's job. Its one set-time rule, that
-   * there is something to measure, is checked first and throws geometry.ts's own refusal (by
-   * resolving with no measure function, which can only fail that way once the model passed).
+   * VALIDATED NOW, by `validateGeometry`, so a bad setting is refused to the operator who
+   * typed it rather than at some later connect.
    *
    * Does not touch the screen; `connect()` does that.
    */
@@ -478,33 +476,51 @@ export class Session {
     if (this.conn !== undefined || this.reconnecting) {
       throw new Error('disconnect first; model and oversize apply at the next connect');
     }
-    if (next.oversize.kind === 'auto') {
-      resolveGeometry({ ...next, oversize: { kind: 'none' } });
-      if (this.opts.measure === undefined) resolveGeometry(next);
-    } else {
-      resolveGeometry(next);
-    }
+    this.validateGeometry(next);
     this.setting = next;
   }
 
   /**
-   * Resolve the setting for the connect about to happen, and apply it.
+   * Throw whatever `resolveGeometry` would throw for `setting` at a connect, WITHOUT measuring.
    *
-   * CALLED FIRST IN `connect()`, before the teardown and before `target` is recorded, so a
-   * refusal opens no socket, disturbs no live connection and leaves `reconnect()` exactly as
-   * it was -- a first connect refused here still has "No previous host".
+   * `auto` is resolved against a STAND-IN measure that reports no window, never the real one:
+   * measuring is the connect's job, and the window may change before then. The stand-in takes
+   * geometry.ts's "no window size known" fallback, but only after every rule `auto` can break
+   * has run -- the terminal-type conflict and the `-E` requirement both precede the
+   * `measure()` call there (`resolveGeometry`, geometry.ts) -- so it refuses exactly what a
+   * connect would. With no measure option at all, `undefined` is passed through and geometry.ts
+   * gives its own "auto needs a window to measure" refusal.
+   *
+   * An earlier version validated `auto` with its oversize swapped to `none`, which returns
+   * before either rule: `{ model: '3278-2', oversize: auto }` was accepted here and refused only
+   * at the next connect.
+   */
+  private validateGeometry(setting: GeometrySetting): void {
+    resolveGeometry(setting, this.opts.measure !== undefined ? () => undefined : undefined);
+  }
+
+  /**
+   * Apply a geometry `connect()` has already resolved.
+   *
+   * TWO HALVES, AND `connect()` RUNS THE TEARDOWN BETWEEN THEM. The RESOLVE comes first, before
+   * the teardown and before `target` is recorded, so a refusal opens no socket, disturbs no live
+   * connection and leaves `reconnect()` exactly as it was -- a first connect refused there still
+   * has "No previous host". THIS half comes after the teardown, because it erases the screen and
+   * emits: run before it, a connect while connected would clear the OLD host's screen with its
+   * connection still up, and announce 'screen' and 'geometry' while `isConnected()` was still
+   * true, ahead of that connection's own 'disconnect'.
    *
    * THE SCREEN IS RESIZED AND CLEARED ONLY WHEN THE GEOMETRY CHANGED. Every front end runs in
    * geometry mode, so this runs on every reconnect, and a reconnect to the same model must
    * leave the operator's last screen exactly where legacy mode leaves it -- on it. When it did
    * change, the path is UNBIND's (`handleUnbind`): `setSizes`, `useDefaultSize`, then an
-   * explicit `clear()` because `useDefaultSize` alone skips the erase when the default size is
-   * unchanged, which it always is (24x80). IN PLACE, never a new `Screen`: `Keyboard` holds a
+   * explicit `clear()` because `useDefaultSize` alone skips the erase when the screen is already
+   * at the default size -- the usual case, though not a certain one, since a BIND can have set
+   * another. IN PLACE, never a new `Screen`: `Keyboard` holds a
    * reference to this one. And, like UNBIND, a 'screen' event announces the erase, since a
    * front end repaints only on 'screen'.
    */
-  private applyGeometry(setting: GeometrySetting): void {
-    const g = resolveGeometry(setting, this.opts.measure);
+  private applyGeometry(g: ResolvedGeometry): void {
     const alt = this.modelAlternate;
     const changed = g.terminalType !== this.ttype
       || g.alternate.rows !== alt.rows || g.alternate.cols !== alt.cols;
@@ -735,16 +751,20 @@ export class Session {
   }
 
   async connect(host: string, port: number, per: ConnectOptions = {}): Promise<void> {
-    // FIRST, before anything below can touch the live connection or the remembered target:
-    // see `applyGeometry`. `reconnect()` comes through here too, so `auto` is re-measured on
-    // every reconnect -- the only moment the host can learn a new size.
-    if (this.setting !== undefined) this.applyGeometry(this.setting);
+    // RESOLVED FIRST, before anything below can touch the live connection or the remembered
+    // target; APPLIED after the teardown. See `applyGeometry` for why it is split around it.
+    // `reconnect()` comes through here too, so `auto` is re-measured on every reconnect -- the
+    // only moment the host can learn a new size.
+    const geometry = this.setting !== undefined
+      ? resolveGeometry(this.setting, this.opts.measure)
+      : undefined;
 
     // Tear down any live connection first. Without this the old Connection is
     // dropped without close(), and its onClose/onError closures still capture
     // `this` — so when the stale socket eventually closes it calls
     // handleClose() and tears down the NEW session.
     if (this.conn !== undefined) this.disconnect();
+    if (geometry !== undefined) this.applyGeometry(geometry);
 
     // AFTER the teardown, which clears the previous connection's overrides — set it
     // before and disconnect() would wipe the ones just passed in.
@@ -1376,7 +1396,8 @@ export class Session {
    * `altROWS`/`altCOLS` back to `maxROWS`/`maxCOLS` (the MODEL's fixed maximum, not
    * whatever a BIND last set it to), then `ctlr_erase(false)`.
    *
-   * Reverts to `modelSize()` -- captured at construction -- and NOT to
+   * Reverts to `modelSize()` -- fixed at construction in legacy mode, and at each connect in
+   * geometry mode, never by a BIND -- and NOT to
    * `this.screen.alternateSize`: see that field's own comment for why deriving it
    * from the screen would revert to the wrong geometry after two BINDs in a row.
    */

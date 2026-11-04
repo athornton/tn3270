@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Session, type Connection, type SessionOptions } from '../src/session.js';
+import { Session, type Connection, type SessionEvent, type SessionOptions } from '../src/session.js';
 import { TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, Cmd, SnaCmd } from '../src/constants.js';
-import type { GeometrySetting, Size } from '../src/geometry.js';
+import { OversizeError, type GeometrySetting, type Size } from '../src/geometry.js';
 import { TerminalTypeError } from '../src/termtype.js';
 
 /**
@@ -74,9 +74,13 @@ describe('Session geometry: a fixed oversize', () => {
     expect(() => session.screen.setChar(9000, 0xc1)).not.toThrow();
   });
 
-  it('a too-small oversize refuses connect() before any socket, and leaves no target', async () => {
-    const { session, connect } = newSession({ model: '3278-4-E', oversize: { kind: 'fixed', rows: 30, cols: 80 } });
-    await expect(session.connect('h', 23)).rejects.toThrow(/use at least 80x43/);
+  it('a resolve that throws at connect() opens no socket and leaves no target', async () => {
+    // Since the constructor and setGeometry both validate, a FIXED setting can no longer reach
+    // connect() invalid; the throw left at connect time is the front end's own measure.
+    const { session, connect } = newSession({ oversize: { kind: 'auto' } }, {
+      measure: () => { throw new Error('font atlas not loaded'); },
+    });
+    await expect(session.connect('h', 23)).rejects.toThrow(/font atlas not loaded/);
     expect(connect).not.toHaveBeenCalled();
     await expect(session.reconnect()).rejects.toThrow(/No previous host/);
   });
@@ -179,5 +183,108 @@ describe('Session construction in geometry mode', () => {
   it('throws TerminalTypeError for an unknown model', () => {
     expect(() => new Session({ connect: () => new FakeConnection(), geometry: { model: '3278-9', oversize: { kind: 'none' } } }))
       .toThrow(TerminalTypeError);
+  });
+});
+
+describe('Session geometry: review fixes', () => {
+  it('setGeometry refuses auto on a non-extended model at set time, without measuring', () => {
+    const measure = vi.fn(() => ({ rows: 40, cols: 100 }));
+    const { session } = newSession(FIXED_62x160, { measure });
+    expect(() => session.setGeometry({ model: '3278-2', oversize: { kind: 'auto' } }))
+      .toThrow(/oversize needs an extended model/);
+    expect(measure).not.toHaveBeenCalled();
+    expect(session.geometrySetting).toBe(FIXED_62x160);
+  });
+
+  it('setGeometry refuses auto with a raw terminalType at set time, without measuring', () => {
+    const measure = vi.fn(() => ({ rows: 40, cols: 100 }));
+    const { session } = newSession(FIXED_62x160, { measure });
+    expect(() => session.setGeometry({ terminalType: 'IBM-3278-2-E', oversize: { kind: 'auto' } }))
+      .toThrow(/cannot both be given/);
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it('connect() while connected tears the old connection down BEFORE the geometry changes', async () => {
+    let size: Size = { rows: 40, cols: 100 };
+    const { session } = newSession({ oversize: { kind: 'auto' } }, { measure: () => size });
+    await session.connect('h', 23);
+    const seen: string[] = [];
+    for (const ev of ['disconnect', 'screen', 'geometry', 'connect'] as SessionEvent[]) {
+      session.on(ev, () => seen.push(`${ev}:${session.isConnected()}`));
+    }
+    size = { rows: 50, cols: 132 };
+    await session.connect('h', 23);
+    expect(seen).toEqual(['disconnect:false', 'screen:false', 'geometry:false', 'connect:true']);
+  });
+
+  it('a change of terminal type alone, at the same alternate, still counts as a change', async () => {
+    const { session, last } = newSession({ model: '3278-2-E', oversize: { kind: 'none' } });
+    await session.connect('h', 23);
+    last().close();
+    // 24x80 on a model 2 is legal (equal to the model) and is still advertised as IBM-DYNAMIC.
+    session.setGeometry({ model: '3278-2-E', oversize: { kind: 'fixed', rows: 24, cols: 80 } });
+    await session.reconnect();
+    last().negotiate();
+    expect(negotiatedName(last())).toBe('IBM-DYNAMIC');
+  });
+
+  it('setGeometry is refused while a reconnect() is in flight', async () => {
+    let release: ((c: Connection) => void) | undefined;
+    let deferred = false;
+    const session = new Session({
+      connect: () => deferred
+        ? new Promise<Connection>((r) => { release = r; })
+        : new FakeConnection(),
+      geometry: FIXED_62x160,
+    });
+    await session.connect('h', 23);
+    session.disconnect();
+    deferred = true;
+    const pending = session.reconnect();
+    expect(() => session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } }))
+      .toThrow(/^disconnect first/);
+    release!(new FakeConnection());
+    await pending;
+  });
+
+  it('a later connect with no notice clears lastGeometryNotice', async () => {
+    let size: Size = { rows: 20, cols: 80 };
+    const { session, last } = newSession({ oversize: { kind: 'auto' } }, { measure: () => size });
+    await session.connect('h', 23);
+    expect(session.lastGeometryNotice).toMatch(/using the model/);
+    last().close();
+    size = { rows: 40, cols: 100 };
+    await session.reconnect();
+    expect(session.lastGeometryNotice).toBeUndefined();
+  });
+
+  it("emits 'screen' at connect when the geometry changed, and not when it did not", async () => {
+    const { session, last } = newSession(FIXED_62x160);
+    const onScreen = vi.fn();
+    session.on('screen', onScreen);
+    await session.connect('h', 23); // model 2 at construction -> 62x160: changed
+    expect(onScreen).toHaveBeenCalledTimes(1);
+    last().close();
+    await session.reconnect(); // unchanged
+    expect(onScreen).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes an auto clamp to the trace', async () => {
+    const { session } = newSession({ oversize: { kind: 'auto' } }, { measure: () => ({ rows: 100, cols: 200 }) });
+    session.trace.setEnabled(true);
+    await session.connect('h', 23);
+    expect(session.trace.toText()).toContain('the 14-bit address limit');
+    expect(session.screen.alternateSize).toEqual({ rows: 81, cols: 200 });
+  });
+
+  it('the constructor refuses an invalid fixed oversize at construction', () => {
+    expect(() => new Session({
+      connect: () => new FakeConnection(),
+      geometry: { model: '3278-4-E', oversize: { kind: 'fixed', rows: 30, cols: 80 } },
+    })).toThrow(OversizeError);
+    expect(() => new Session({
+      connect: () => new FakeConnection(),
+      geometry: { model: '3278-4-E', oversize: { kind: 'fixed', rows: 30, cols: 80 } },
+    })).toThrow(/use at least 80x43/);
   });
 });
