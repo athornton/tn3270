@@ -37,6 +37,26 @@
 7. **Size order:** the FLAG is `<cols>x<rows>` (x3270's order, `model.c:343`). New MESSAGES name
    sizes in words, `62 rows by 160 columns`. Internally everything is `{ rows, cols }`.
 
+## AMENDED AFTER TASK 1 (2026-11-04) -- READ BEFORE TASKS 2-15
+
+Task 1's review changed `geometry.ts`'s API. **The code blocks in Tasks 2-15 still show the old
+shape; translate them.**
+
+- `measure` is NOT a field of `GeometrySetting`. It is `resolveGeometry(setting, measure?)`'s second
+  argument. `GeometrySetting` is plain data (`model`, `terminalType`, `oversize`) so that
+  `setGeometry(next)` and the web `setGeometry` message cannot drop it. **So `Session` takes the
+  measure function as its own option, `SessionOptions.measure`, kept for the session's lifetime,
+  and `defaultSession`'s geometry options object carries `{ setting, measure }`.**
+- `ResolvedGeometry.oversize` (boolean) is renamed **`dynamic`**.
+- An oversize on a model WITHOUT `-E` is REFUSED (`OversizeError`). Wherever a task below shows
+  `-model 3278-2` with an oversize, use `3278-2-E`.
+- Messages: parse refusal is `-oversize takes <cols>x<rows>, auto or none, not "..."`; the cell
+  limit is `oversize CxR refused: use at most 16383 cells -- that is N`.
+- `measure()` output is validated in `geometry.ts` (positive integers, else "no window size
+  known"), so front-end measures need not clamp, but must still return integers.
+
+Read `packages/core/src/geometry.ts` itself before starting any task; it is the source.
+
 ## File map
 
 | File | Change |

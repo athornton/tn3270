@@ -73,6 +73,13 @@ At each connect the session asks it:
 
 ### Combinations that are refused
 
+- **An oversize on a model without `-E`** (`-model 3278-2 -oversize ...`). x3270 silently DROPS
+  oversize when the extended data stream is off (`model.c:203-205`, `oversize_init`; `:333-335`,
+  "Without extended, no oversize"), because Query Reply belongs to the extended data stream. We
+  REFUSE instead, naming the `-E` model to use: a flag that silently does nothing is the outcome
+  this project avoids. (The spec first said the reverse, "as x3270"; the Task 1 code review found
+  it false against the source, 2026-11-04.)
+
 - **`-oversize` with `--terminal-type`**: an oversize means the terminal type IS `IBM-DYNAMIC`, so
   the two cannot both hold. Refused at startup, naming both flags.
 - **`auto` where there is no window** (the CLI, or any session built without a measure function):
@@ -133,7 +140,7 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
    buffer, so it is there on quitting and in scrollback; the TUI also flashes it once with
    `showMessage`.
 3. Negotiate. With an oversize in effect the terminal type is `IBM-DYNAMIC`, and so is the TN3270E
-   device type, whether or not the model is `-E` (as x3270). Otherwise the model's own name,
+   device type. Otherwise the model's own name,
    unchanged from today.
 4. Read Partition (Query): the existing reply code reads `screen.alternateSize`
    (`session.ts:1475-1478`), so Usable Area and Implicit Partition report the oversize with no
