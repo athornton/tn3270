@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { resolveGeometry } from '@tn3270/core';
-import { parseArgs, UsageError } from '../src/main.js';
+import { TerminalTypeError } from '@tn3270/core';
+import { parseArgs, buildSession, UsageError } from '../src/main.js';
 
 /**
  * TLS is ON by default, so every parse carries it. Spelled out in each
@@ -124,36 +124,64 @@ describe('-oversize', () => {
     expect(() => parseArgs(['-model', '3278-2-E', '-oversize', '100x20']))
       .toThrow(/use at least/);
   });
-});
 
-describe('-model 3278-2 still negotiates the bare terminal type (conformance-vm.txt)', () => {
-  // conformance-vm.txt (packages/cli/scripts/) requires `-model 3278-2` on our line to match
-  // s3270's own `-model 3278-2` byte for byte, i.e. IBM-3278-2 and NOT IBM-3278-2-E. `main()`
-  // now builds every session (without --terminal-type) through geometry mode, so the thing to
-  // prove is that geometry mode's resolve -- not just the legacy path it replaced -- still
-  // answers IBM-3278-2 for a bare `-model 3278-2`.
-  //
-  // CHOSEN LEVEL: `resolveGeometry` directly (geometry.ts's own contract), plus `main()`'s
-  // literal setting-construction expression fed `parseArgs`' real output -- not a spawned
-  // process reading a real socket, which `main()` cannot be driven through in a unit test. This
-  // proves the wire name geometry mode would negotiate for this exact argv; it does not run the
-  // process. The conformance script itself is the one thing that proves the running binary.
-
-  it('resolveGeometry(model 3278-2, no oversize) answers IBM-3278-2, not -E', () => {
-    expect(resolveGeometry({ model: '3278-2', oversize: { kind: 'none' } }).terminalType)
-      .toBe('IBM-3278-2');
+  it('refuses a fixed oversize past the 14-bit cell limit, at parse time', () => {
+    expect(() => parseArgs(['-oversize', '200x100'])).toThrow(/use at most 16383/);
   });
 
-  it('the setting main() builds from "-model 3278-2" resolves to IBM-3278-2', () => {
-    const args = parseArgs(['-model', '3278-2']);
-    // Confirms geometry mode is in fact the path taken: no --terminal-type was given.
-    expect(args.terminalType).toBeUndefined();
-    // main()'s own construction, verbatim (packages/cli/src/main.ts).
-    const setting = {
-      ...(args.model !== undefined ? { model: args.model } : {}),
-      oversize: args.oversize ?? { kind: 'none' as const },
-    };
-    expect(resolveGeometry(setting).terminalType).toBe('IBM-3278-2');
+  it('an unknown model with -oversize is the model error, not an oversize one', () => {
+    expect(() => parseArgs(['-model', '9999-X', '-oversize', '160x62']))
+      .toThrow(TerminalTypeError);
+  });
+
+  it('-oversize none is accepted alongside --terminal-type, unlike a real oversize', () => {
+    expect(parseArgs(['--terminal-type', 'X', '-oversize', 'none']))
+      .toEqual({ terminalType: 'X', oversize: { kind: 'none' }, tls: TLS });
+  });
+});
+
+describe('buildSession: what main() actually constructs', () => {
+  // conformance-vm.txt (packages/cli/scripts/) requires `-model 3278-2` on our line to match
+  // s3270's own `-model 3278-2` byte for byte, i.e. IBM-3278-2 and NOT IBM-3278-2-E. These
+  // tests drive `buildSession` -- the function `main()` itself calls, not a copy of its
+  // expression or a call to `resolveGeometry` beside it -- so a change to `buildSession`
+  // that breaks this is caught here directly, with no separate copy to fall out of step.
+  //
+  // CHOSEN LEVEL: `buildSession`'s returned `Session`, inspected via `geometrySetting` and
+  // `screen.alternateSize` without connecting -- `Session`'s constructor alone resolves both.
+  // This proves what the session negotiates for a given argv; it does not spawn the real
+  // process or open a socket. Only `conformance-vm.txt`, run against a live host, proves that.
+
+  it('no flags: geometry mode, no model, model-2 alternate (IBM-3278-2-E)', () => {
+    const session = buildSession(parseArgs([]));
+    expect(session.geometrySetting).toEqual({ oversize: { kind: 'none' } });
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('-model 3278-2: geometry mode, bare model, no -E implied', () => {
+    const session = buildSession(parseArgs(['-model', '3278-2']));
+    expect(session.geometrySetting).toEqual({ model: '3278-2', oversize: { kind: 'none' } });
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('-model 3278-4-E: geometry mode, model 4\'s 43x80 alternate', () => {
+    const session = buildSession(parseArgs(['-model', '3278-4-E']));
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'none' } });
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('-oversize 160x62: geometry mode, the oversize carried in the setting for the next connect', () => {
+    const session = buildSession(parseArgs(['-oversize', '160x62']));
+    expect(session.geometrySetting).toEqual({ oversize: { kind: 'fixed', rows: 62, cols: 160 } });
+    // NOT yet 62x160: the oversize is resolved at connect(), not at construction -- see
+    // `Session`'s constructor comment ("THE MODEL'S GEOMETRY, NOT THE OVERSIZE'S"). Before
+    // any connect the screen starts at the bare model's own alternate, model 2's 24x80 here.
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('--terminal-type: legacy mode, no geometry setting at all', () => {
+    const session = buildSession(parseArgs(['--terminal-type', 'IBM-DYNAMIC']));
+    expect(session.geometrySetting).toBeUndefined();
   });
 });
 

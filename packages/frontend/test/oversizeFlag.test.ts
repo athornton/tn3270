@@ -31,8 +31,6 @@ describe('takeOversizeFlag', () => {
 
   it('turns a bad value into the caller\'s error class, carrying parseOversize\'s message', () => {
     const out: { oversize?: Oversize } = {};
-    expect(() => takeOversizeFlag(out, '-oversize', 'nonsense', (m) => new RangeError(m)))
-      .toThrow(RangeError);
     try {
       takeOversizeFlag(out, '-oversize', 'nonsense', (m) => new RangeError(m));
       expect.unreachable();

@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import {
   resolveTerminalType, resolveAlternateSize, resolveGeometry, OversizeError, TerminalTypeError,
-  type Oversize,
+  type Oversize, type Session,
 } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
@@ -165,6 +165,40 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 }
 
 /**
+ * Builds the session `main()` runs, from a parsed `CliArgs`. Pulled out of `main()` so it
+ * can be unit-tested without `main()`'s stdin loop or a real connect -- `Session`'s
+ * constructor alone resolves `geometrySetting` and `screen.alternateSize`, which is
+ * everything a test needs to see.
+ *
+ * Geometry mode is the normal path: UNLESS `--terminal-type` was given (a raw string
+ * `resolveGeometry` cannot interpret as a model), the session resolves its terminal type
+ * and alternate size at every connect rather than once here, which is what lets the
+ * step-2 `Set(model,...)` command (Task 6) change them after connect. `-model` alone --
+ * by far the common case -- goes through geometry mode too, with `oversize: none`
+ * resolving to exactly the model's own alternate size, so this is not a behavior change
+ * for that case; `main.test.ts`'s "buildSession: what main() actually constructs" tests
+ * drive THIS function, not a copy of its expression, to keep that true.
+ */
+export function buildSession(args: CliArgs): Session {
+  if (args.terminalType !== undefined) {
+    return defaultSession(
+      resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
+      args.bindImage, args.bindLimit, args.devname, args.ddm,
+    );
+  }
+  return defaultSession(
+    undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
+    args.devname, args.ddm,
+    {
+      setting: {
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        oversize: args.oversize ?? { kind: 'none' },
+      },
+    },
+  );
+}
+
+/**
  * s3270-compatible line protocol over stdin/stdout. Deliberately thin: all
  * command semantics live in runner.ts, which is unit-tested.
  */
@@ -178,33 +212,12 @@ async function main(): Promise<void> {
     throw err;
   });
 
-  // Resolved unconditionally, so there is exactly one path from argv to the
-  // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2-E
-  // the telnet layer would have defaulted to on its own.
+  // Parsed once, unconditionally, so there is exactly one path from argv to the wire. With
+  // no flags, `buildSession` below takes the geometry-mode branch with no model and no
+  // oversize, which resolves to the same IBM-3278-2-E the telnet layer would have defaulted
+  // to before geometry mode existed -- see `main.test.ts`'s `buildSession` tests.
   const args = parseArgs(process.argv.slice(2));
-  // Geometry mode is now the normal path: UNLESS --terminal-type was given (a raw string
-  // `resolveGeometry` cannot interpret as a model), the session resolves its terminal type
-  // and alternate size at every connect rather than once here, which is what lets the
-  // step-2 `Set(model,...)` command (Task 6) change them after connect. `-model` alone --
-  // by far the common case -- goes through geometry mode too, with `oversize: none`
-  // resolving to exactly the model's own alternate size, so this is not a behavior change
-  // for that case; the conformance script proves it (see `resolveGeometry` in `parseArgs`'s
-  // test file, and this file's own comment below).
-  const session = args.terminalType !== undefined
-    ? defaultSession(
-        resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-        args.bindImage, args.bindLimit, args.devname, args.ddm,
-      )
-    : defaultSession(
-        undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
-        args.devname, args.ddm,
-        {
-          setting: {
-            ...(args.model !== undefined ? { model: args.model } : {}),
-            oversize: args.oversize ?? { kind: 'none' },
-          },
-        },
-      );
+  const session = buildSession(args);
   const runner = new Runner(session, {
     files: nodeTransferFiles,
     tlsEnabled: args.tls?.kind !== 'plaintext',
