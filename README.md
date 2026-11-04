@@ -724,8 +724,10 @@ connects, and only a connect resolves the geometry.
 **What has been checked:** our Query Reply against real s3270 4.5 run with the same
 `-oversize 160x62`. The Usable Area and Implicit Partition bytes are identical (see
 `docs/live-testing.md`, "Oversize conformance against real s3270"). The TUI's `auto` has been run
-in a real pty (`pty-smoke.py --oversize-auto`), and the GUI's under Xvfb. **No live host has seen
-it yet.** That pass is owed, and `docs/live-testing.md` lists it.
+in a real pty (`pty-smoke.py --oversize-auto`), and the GUI's under Xvfb. **Live: VM/370 (VM/CE)
+honours it** -- with `-oversize 160x62`, MECAFF's `EE` switches the screen to 160x62 and leaving it
+returns to 80x24 (2026-11-04). TSO, a modern host and the web viewport in Firefox and Safari are
+still owed; `docs/live-testing.md` lists them.
 
 ## Connecting over TLS
 
@@ -1616,9 +1618,10 @@ worse than one that says which quarter is missing.
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
   you find out if that changes.
-- **Oversize cannot be changed while running, and no live host has seen it.** `-oversize` and
-  `IBM-DYNAMIC` shipped on 2026-11-04 (see *Oversize*). Choosing a model or an oversize from a
-  menu without restarting is step 2 of that work and is not built. A live pass is owed.
+- **Oversize cannot be changed while running.** `-oversize` and `IBM-DYNAMIC` shipped on
+  2026-11-04 (see *Oversize*), and VM/370 honours it live. Choosing a model or an oversize from a
+  menu without restarting is step 2 of that work and is not built. TSO and a modern host are
+  still owed.
 - **No mouse support** in the TUI. `Ctrl-K`'s special-keys list is the keyboard substitute for
   the canvas front ends' clickable keypad, not a step towards one.
 

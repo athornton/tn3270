@@ -1,10 +1,10 @@
-# Handoff — state as of 2026-11-04 (branch `oversize`: step 1, the `-oversize` flag and `IBM-DYNAMIC`, DONE and gated at 2844 tests; live pass OWED; step 2, model switching, is next)
+# Handoff — state as of 2026-11-04 (branch `oversize`: step 1, the `-oversize` flag and `IBM-DYNAMIC`, DONE and gated at 2844 tests; VM/370 honours 160x62 live; rest of live pass OWED; step 2, model switching, is next)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — BRANCH `oversize`: STEP 1 (`-oversize`, `IBM-DYNAMIC`) DONE, 2844 TESTS GREEN; LIVE PASS OWED; STEP 2 NEXT
+## START HERE — BRANCH `oversize`: STEP 1 (`-oversize`, `IBM-DYNAMIC`) DONE, 2844 TESTS GREEN; VM/370 HONOURS 160x62 LIVE; REST OF LIVE PASS OWED; STEP 2 NEXT
 
 **2026-11-04. Branch `oversize`, not merged, not pushed.** It branches from `main` at `bb097af`
 (still `main`'s tip) and merged `typecheck-tests` in (`1c7d412`), so merging `oversize` brings
@@ -90,7 +90,11 @@ the fake host accepts once (Session's unit tests cover re-measuring).
   Electron processes left.
 - **The web viewport's `auto` is unit-tested only**, with the integration `hello` test. The browser
   harnesses all run `--replay` gateways, and a replay never connects, so it never measures.
-- **No live host has seen any of this.**
+- **ONE LIVE HOST HAS: VM/370 (VM/CE), 2026-11-04, by the user.** With `-oversize 160x62`, `EE`
+  switches the screen to 160x62 and leaving it returns to 80x24: VM takes the size from our Query
+  Reply. Not yet reported: the 80x50 run, and whether EE's bottom lines sat on rows 61-62 (the
+  14-bit check). Details: `docs/live-testing.md`, *OWED: oversize live pass*. TK5, a modern host
+  and the web viewport in Firefox/Safari have not been run.
 
 ### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
 
