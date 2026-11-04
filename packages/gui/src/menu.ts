@@ -19,13 +19,14 @@
  * the result to `Menu.buildFromTemplate`. That is the same split the transfer window used to stay
  * testable. `@tn3270/core` IS imported, by the Model menu below: it is plain data and pure
  * functions, and the model list and the size wording must come from the one place a connect
- * reads them, not from a copy here.
+ * reads them, not from a copy here. `@tn3270/frontend` only for a type.
  */
 
 import {
-  KNOWN_MODELS, OversizeError, describeSize, resolveTerminalType,
+  KNOWN_MODELS, describeSize, resolveTerminalType,
   type GeometrySetting, type Oversize, type Size,
 } from '@tn3270/core';
+import type { GeometryChoice } from '@tn3270/frontend';
 
 /** The platform strings this file distinguishes. `process.platform`'s type. */
 export type Platform = 'darwin' | 'linux' | 'win32' | string;
@@ -145,8 +146,11 @@ export interface MenuHandlers {
   readonly onGeometry?: (choice: GeometryChoice) => void;
 }
 
-/** What one Model-menu item asks for: ONE field, because one click changes one thing. */
-export type GeometryChoice = { readonly model: string } | { readonly oversize: Oversize };
+/**
+ * What one Model-menu item asks for. The type and the rule that applies it
+ * (`applyGeometryChoice`) live in `@tn3270/frontend`, so the web gateway's list uses the same one.
+ */
+export type { GeometryChoice };
 
 /**
  * What the Model menu is built from. `main.ts` reads it off the session each time.
@@ -160,7 +164,10 @@ export interface GeometryMenu {
   readonly models: readonly string[];
   readonly current: GeometrySetting;
   readonly startupFixed?: Size;
-  /** Every choice is disabled while true: `setGeometry` refuses a change while connected. */
+  /**
+   * Every choice is disabled while true. CONNECTED OR CONNECTING: `setGeometry` refuses both, and
+   * an attempt in flight has already resolved the setting it will advertise.
+   */
   readonly connected: boolean;
 }
 
@@ -285,51 +292,6 @@ function modelMenu(g: GeometryMenu, onGeometry: ((c: GeometryChoice) => void) | 
       },
     ],
   };
-}
-
-/**
- * Apply one menu choice through `setGeometry`, and THE ORDER-DEPENDENCE RULE.
- *
- * A menu changes one thing per click, and core validates model and oversize TOGETHER -- the
- * CLI's `Set()` found that some single steps are refused (commit `1a4713e`): from a fixed 100x30,
- * model 3278-5-E alone is "use at least 132x27". The CLI's answer, both in one call, is not
- * available to a radio item. So: A MODEL CHOICE WINS. If the CURRENT oversize is what refuses it
- * (an `OversizeError`, and an oversize other than None to blame), the model is applied with
- * oversize None instead and the returned notice says so, outcome first so a truncated status line
- * still carries it, then core's own reason. Picking Oversize again afterwards is then a single,
- * valid-or-honestly-refused step.
- *
- * WHY THE MODEL WINS AND NOT THE OVERSIZE: the alternative is refusing, which leaves an operator
- * who wants 3278-5-E at 160x62 from 3278-2-E at 100x30 with no route at all -- the 160x62 they
- * want is not on the menu unless it was the startup size, and the model they want is refused.
- * Dropping to None always succeeds for a known model (None has no rule to break), so this rule
- * can always reach any model.
- *
- * AN OVERSIZE CHOICE IS NEVER FIXED UP by changing the model behind it: that would change the
- * thing the operator did not touch. Its refusal, and every refusal that is not the oversize's
- * fault (`disconnect first`, an unknown model), is thrown unchanged for the caller's `fail()`.
- *
- * `setGeometry` is a parameter so this is testable with no session and no Electron.
- */
-export function applyGeometryChoice(
-  current: GeometrySetting, choice: GeometryChoice, setGeometry: (next: GeometrySetting) => void,
-): string | undefined {
-  if (!('model' in choice)) {
-    setGeometry({ ...current, oversize: choice.oversize });
-    return undefined;
-  }
-  const next: GeometrySetting = { ...current, model: choice.model };
-  try {
-    setGeometry(next);
-    return undefined;
-  } catch (err) {
-    if (!(err instanceof OversizeError) || current.oversize.kind === 'none') throw err;
-    // The retry's own refusal, if any, is the one thrown: it describes the state that was tried
-    // last, and None failing would mean something other than the oversize is wrong.
-    setGeometry({ ...next, oversize: { kind: 'none' } });
-    return `oversize is now None for model ${choice.model}; pick Oversize again to change it `
-      + `(${err.message})`;
-  }
 }
 
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */

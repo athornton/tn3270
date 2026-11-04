@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  KNOWN_MODELS, TERMINAL_TYPE, describeSize, OversizeError, resolveGeometry,
-  type GeometrySetting, type Oversize,
+  KNOWN_MODELS, TERMINAL_TYPE, describeSize, type Oversize,
 } from '@tn3270/core';
+import type { GeometryChoice } from '@tn3270/frontend';
 import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, applyGeometryChoice, type GeometryChoice,
-  type MutableChoice,
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, type MutableChoice,
 } from '../src/menu.js';
 
 describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
@@ -175,11 +174,21 @@ describe('the Model menu', () => {
   };
 
   it('is absent without a geometry, so the template is exactly the old one', () => {
-    for (const platform of ['darwin', 'linux', 'win32'] as const) {
-      expect(JSON.stringify(buildMenuTemplate(platform, undefined, undefined)))
-        .toBe(JSON.stringify(buildMenuTemplate(platform)));
-      expect(modelMenu(buildMenuTemplate(platform))).toBeUndefined();
-    }
+    // A LITERAL of the pre-Model-menu template, not buildMenuTemplate compared with itself.
+    const edit = { label: 'Edit', submenu: [
+      { label: 'Copy', id: 'copy', accelerator: 'Ctrl+Shift+C' },
+      { label: 'Paste', id: 'paste', accelerator: 'Ctrl+Shift+V' },
+    ] };
+    const view = { label: 'View', submenu: [
+      { label: 'Keypad', id: 'keypad', accelerator: 'Ctrl+K' },
+      { label: 'Keyboard', id: 'keyboard', accelerator: 'Ctrl+B' },
+    ] };
+    expect(buildMenuTemplate('linux')).toEqual([edit, view]);
+    expect(buildMenuTemplate('win32', undefined, undefined)).toEqual([edit, view]);
+    const mac = (a: string): string => a.replace('Ctrl+Shift+', 'Cmd+');
+    expect(buildMenuTemplate('darwin')).toEqual([{ role: 'appMenu' },
+      { ...edit, submenu: edit.submenu.map((i) => ({ ...i, accelerator: mac(i.accelerator) })) },
+      view]);
   });
 
   it('lists the eight models, a separator, then an Oversize submenu of None and Auto', () => {
@@ -365,82 +374,5 @@ describe('applyChoiceStates', () => {
       { id: 'b', checked: false, enabled: false },
     ], (id) => (id === 'a' ? a : id === 'b' ? b : null));
     expect([a.enabled, b.enabled]).toEqual([false, false]);
-  });
-});
-
-/**
- * THE ORDER-DEPENDENCE RULE. A menu changes ONE thing per click, and `resolveGeometry` validates
- * model and oversize together -- the CLI's `Set()` found that some single steps are refused
- * (commit 1a4713e). A model choice is the operator's latest explicit intent, so when the current
- * oversize is what refuses it, the model wins and the oversize drops to None, and they are told.
- */
-describe('applyGeometryChoice', () => {
-  const real = (): { set: (g: GeometrySetting) => void; calls: GeometrySetting[] } => {
-    const calls: GeometrySetting[] = [];
-    return { calls, set: (g) => { calls.push(g); resolveGeometry(g, () => undefined); } };
-  };
-
-  it('applies a model with the current oversize when that fits, and says nothing', () => {
-    const r = real();
-    const current: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } };
-    expect(applyGeometryChoice(current, { model: '3278-5-E' }, r.set)).toBeUndefined();
-    expect(r.calls).toEqual([{ model: '3278-5-E', oversize: { kind: 'fixed', rows: 62, cols: 160 } }]);
-  });
-
-  it('drops a fixed oversize below the new model to None, and says so action first', () => {
-    const r = real();
-    const current: GeometrySetting = { model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } };
-    const notice = applyGeometryChoice(current, { model: '3278-5-E' }, r.set);
-    expect(r.calls).toEqual([
-      { model: '3278-5-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } },
-      { model: '3278-5-E', oversize: { kind: 'none' } },
-    ]);
-    expect(notice).toMatch(/^oversize is now None for model 3278-5-E; pick Oversize again/);
-    // The reason, from core, so it cannot drift from what a connect would have said.
-    expect(notice).toContain('use at least 132x27');
-  });
-
-  it('drops Auto to None when the new model has no extended data stream', () => {
-    const r = real();
-    const notice = applyGeometryChoice({ oversize: { kind: 'auto' } }, { model: '3278-4' }, r.set);
-    expect(r.calls.at(-1)).toEqual({ model: '3278-4', oversize: { kind: 'none' } });
-    expect(notice).toMatch(/^oversize is now None for model 3278-4/);
-  });
-
-  it('passes an oversize choice through, and its refusal unchanged', () => {
-    const r = real();
-    expect(applyGeometryChoice({ model: '3278-3-E', oversize: { kind: 'none' } },
-      { oversize: { kind: 'auto' } }, r.set)).toBeUndefined();
-    expect(r.calls).toEqual([{ model: '3278-3-E', oversize: { kind: 'auto' } }]);
-    // A fixed size below the model is refused, NOT fixed up by changing the model behind it.
-    expect(() => applyGeometryChoice({ model: '3278-5-E', oversize: { kind: 'none' } },
-      { oversize: { kind: 'fixed', rows: 30, cols: 100 } }, r.set)).toThrow(/use at least 132x27/);
-    expect(r.calls).toHaveLength(2);
-  });
-
-  it('does not retry a refusal that is not about the oversize', () => {
-    const calls: GeometrySetting[] = [];
-    const refuse = (g: GeometrySetting): void => {
-      calls.push(g);
-      throw new Error('disconnect first; model and oversize apply at the next connect');
-    };
-    expect(() => applyGeometryChoice({ model: '3278-2-E', oversize: { kind: 'fixed', rows: 30, cols: 100 } },
-      { model: '3278-5-E' }, refuse)).toThrow(/^disconnect first/);
-    expect(calls).toHaveLength(1);
-  });
-
-  it('does not retry when the oversize is already None', () => {
-    const calls: GeometrySetting[] = [];
-    const refuse = (g: GeometrySetting): void => { calls.push(g); throw new OversizeError('nope'); };
-    expect(() => applyGeometryChoice({ oversize: { kind: 'none' } }, { model: '3278-5-E' }, refuse))
-      .toThrow('nope');
-    expect(calls).toHaveLength(1);
-  });
-
-  it('reports the RETRY\'s refusal when None is refused too, not the first one', () => {
-    let n = 0;
-    const refuse = (): void => { n += 1; throw new OversizeError(`refusal ${n}`); };
-    expect(() => applyGeometryChoice({ oversize: { kind: 'auto' } }, { model: '3278-5-E' }, refuse))
-      .toThrow('refusal 2');
   });
 });

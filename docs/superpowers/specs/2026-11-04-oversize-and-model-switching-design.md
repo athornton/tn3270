@@ -123,7 +123,9 @@ reconnect. x3270 refuses to change model or oversize while connected for the sam
   the resolved sizes and any notice. Clearing is safe because nothing is on the screen before a
   connect.
 - `setGeometry(setting)` changes the setting. It throws while connected, with `disconnect first;
-  model and oversize apply at the next connect`. No queued "apply at disconnect" (x3270 has
+  model and oversize apply at the next connect`, and while a connection attempt is still in
+  flight (which has already resolved the old setting), with `wait for the connection attempt to
+  finish; model and oversize apply at the next connect`. No queued "apply at disconnect" (x3270 has
   one, `XN_DEFER`); a pending change the operator cannot see is a surprise.
 - One `Session` per front end, as now. A new `Session` per connection was rejected because the
   session is wired into the transfer, copy, OIA and keypad listeners in every front end.

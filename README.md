@@ -27,8 +27,9 @@ gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 `.app` to download; the GUI has no connect dialog and no preferences, and takes its host on the
 command line like the other front ends. It does now have a menu bar — Edit for copy and paste,
 View for the keypad and keyboard, and Model for the model and oversize (picked while
-disconnected, applied at the next connect; `Alt-M` pops it up). The mouse presses keypad buttons and selects text for copying, and nothing
-else: no click-to-place-cursor and no light pen. See *What is not implemented* below, which is
+disconnected, applied at the next connect; `Alt-M` pops it up). The mouse presses keypad
+buttons and selects text for copying, and nothing else: no click-to-place-cursor and no light
+pen. See *What is not implemented* below, which is
 the honest part of this file.
 
 ## What works today
@@ -421,7 +422,12 @@ byte (`packages/gui/scripts/shot.mjs`).
 **What it does not have yet:** no connect dialog, no preferences, and no packaging — so the host
 goes on the command line and there is no `.app` to double-click. It does have a menu bar (Edit for
 copy and paste, View for the keypad and keyboard, Model for the model and oversize -- disabled while
-connected, applied at the next connect, and popped up by `Alt-M`). **On the 3270 canvas the mouse does one thing: dragging selects
+connected or connecting, applied at the next connect, and popped up by `Alt-M`). The Model menu
+offers the eight models, then oversize None, Auto and the `-oversize` size given at startup, if
+any. **A model choice can reset the oversize to None** when the oversize cannot go with that model
+(a non-`-E` model, or a fixed size smaller than the model), and the window says so; pick a model
+the size fits and then the size again to get it back. **A `--terminal-type` session has no Model
+menu**: its terminal type is fixed, so there is nothing to choose. **On the 3270 canvas the mouse does one thing: dragging selects
 a rectangle of text for copying** (see *Copy and paste*). Clicking the screen does not place the
 cursor and there is no light pen. The keypad is not on the canvas at all: it is real HTML buttons, in
 its own window in the GUI and an overlay in the browser, so the mouse works on it normally, as it does
@@ -952,7 +958,8 @@ old model's floor. The name is case-insensitive; the value is validated eagerly,
 `-model`/`-oversize` are, so a bad model, a non-`-E` model under an oversize, or
 `Set(oversize,auto)` (no window here to measure) is refused immediately rather than at the next
 connect, and the setting is left unchanged. `Set(...)` is refused while connected
-(`disconnect first; ...`) and on a
+(`disconnect first; ...`), while a connection attempt is still in flight (`wait for the
+connection attempt to finish; ...`), and on a
 session started with `--terminal-type`, which has no model or oversize to change.
 
 **`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route

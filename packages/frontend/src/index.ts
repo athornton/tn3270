@@ -32,6 +32,11 @@ export type { TlsFlags, TlsOptions } from './tls.js';
 // `-oversize`, the same way: one parser so the front ends cannot drift on it either.
 export { takeOversizeFlag, OVERSIZE_USAGE } from './oversizeFlag.js';
 
+// A model or oversize PICKED FROM A LIST (the GUI's Model menu, the web's Alt-M overlay): one
+// rule for what a click does, including the reset to None when the old oversize refuses the model.
+export { applyGeometryChoice } from './geometryChoice.js';
+export type { GeometryChoice } from './geometryChoice.js';
+
 // The session factory. It wraps the TCP/TLS `Connection` adapter, which is the one
 // transport every front end needs -- and it defaults to VERIFIED TLS, so it must not be
 // reimplemented per front end where one copy could quietly default to plaintext.

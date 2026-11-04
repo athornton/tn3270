@@ -311,10 +311,98 @@ describe('Session geometry: review fixes', () => {
     session.disconnect();
     deferred = true;
     const pending = session.reconnect();
+    // NOT `disconnect first`: there is nothing to disconnect yet, so that remedy would be false.
     expect(() => session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } }))
-      .toThrow(/^disconnect first/);
+      .toThrow(/^wait for the connection attempt to finish; model and oversize apply at the next connect$/);
     release!(new FakeConnection());
     await pending;
+    expect(() => session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } }))
+      .toThrow(/^disconnect first/);
+  });
+
+  /**
+   * A FIRST CONNECT STILL IN FLIGHT (TCP or TLS setup) has ALREADY RESOLVED the setting it will
+   * advertise, so a change accepted now would be shown by a front end and never told to the host.
+   */
+  it('setGeometry is refused while a FIRST connect() is in flight, and allowed once it fails', async () => {
+    let release: ((c: Connection) => void) | undefined;
+    let reject: ((e: Error) => void) | undefined;
+    const session = new Session({
+      connect: () => new Promise<Connection>((res, rej) => { release = res; reject = rej; }),
+      geometry: FIXED_62x160,
+    });
+    expect(session.isConnecting()).toBe(false);
+    const pending = session.connect('h', 23);
+    expect(session.isConnecting()).toBe(true);
+    expect(session.isConnected()).toBe(false);
+    expect(() => session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } }))
+      .toThrow(/^wait for the connection attempt to finish; model and oversize apply at the next connect$/);
+    expect(session.geometrySetting).toEqual(FIXED_62x160);
+    reject!(new Error('refused'));
+    await expect(pending).rejects.toThrow('refused');
+    expect(session.isConnecting()).toBe(false);
+    session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } });
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'none' } });
+    const second = session.connect('h', 23);
+    release!(new FakeConnection());
+    await second;
+    expect(session.isConnecting()).toBe(false);
+  });
+
+  it('isConnecting is already true when the geometry event fires inside connect()', async () => {
+    let release: ((c: Connection) => void) | undefined;
+    const session = new Session({
+      connect: () => new Promise<Connection>((res) => { release = res; }),
+      geometry: FIXED_62x160,
+    });
+    const seen: boolean[] = [];
+    session.on('geometry', () => { seen.push(session.isConnecting()); });
+    const pending = session.connect('h', 23);
+    expect(seen).toEqual([true]);
+    release!(new FakeConnection());
+    await pending;
+  });
+
+  /**
+   * 'connectSettled' fires ONCE when the last attempt in flight ends, success or failure, with
+   * `isConnecting()` already false. A failed attempt emits nothing else ('disconnect' needs a
+   * connection), so without it a front end that disabled its geometry controls when an attempt
+   * started could never enable them again.
+   */
+  it('emits connectSettled once per attempt, after isConnecting has gone false', async () => {
+    let fail = false;
+    const session = new Session({
+      connect: () => fail ? Promise.reject(new Error('refused')) : new FakeConnection(),
+      geometry: FIXED_62x160,
+    });
+    const seen: string[] = [];
+    for (const ev of ['connect', 'disconnect', 'connectSettled'] as const) {
+      session.on(ev, () => { seen.push(`${ev}:${session.isConnecting()}`); });
+    }
+    await session.connect('h', 23);
+    expect(seen).toEqual(['connect:true', 'connectSettled:false']);
+    session.disconnect();
+    seen.length = 0;
+    fail = true;
+    // A RECONNECT is two nested attempts (reconnect -> connect); still one settle, at the end.
+    await expect(session.reconnect()).rejects.toThrow('refused');
+    expect(seen).toEqual(['connectSettled:false']);
+    seen.length = 0;
+    await expect(session.connect('h', 23)).rejects.toThrow('refused');
+    expect(seen).toEqual(['connectSettled:false']);
+  });
+
+  it('a connect that throws while resolving its geometry leaves isConnecting false', async () => {
+    // `setGeometry` validates with a stand-in measure, so a measure that throws reaches the real
+    // resolve inside connect() -- before its first await, the path a `finally` must still cover.
+    const session = new Session({
+      connect: () => new FakeConnection(),
+      geometry: { model: '3278-2-E', oversize: { kind: 'auto' } },
+      measure: () => { throw new Error('no display'); },
+    });
+    await expect(session.connect('h', 23)).rejects.toThrow('no display');
+    expect(session.isConnecting()).toBe(false);
+    session.setGeometry({ model: '3278-4-E', oversize: { kind: 'none' } });
   });
 
   it('a later connect with no notice clears lastGeometryNotice', async () => {

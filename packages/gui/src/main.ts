@@ -10,7 +10,7 @@ import {
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  applyAction, applyPaste, describeTlsError, resolveScheme, startTransfer,
+  applyAction, applyGeometryChoice, applyPaste, describeTlsError, resolveScheme, startTransfer,
   transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -18,9 +18,7 @@ import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
 import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
-import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, applyGeometryChoice, type GeometryMenu,
-} from './menu.js';
+import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -1035,7 +1033,10 @@ app.whenReady().then(async () => {
     const current = session.geometrySetting;
     if (current === undefined) return undefined;
     return {
-      models: Object.keys(KNOWN_MODELS), current, connected: session.isConnected(),
+      // CONNECTING TOO: `setGeometry` refuses during an attempt in flight (`isConnecting`), which
+      // has already resolved the setting it will advertise.
+      models: Object.keys(KNOWN_MODELS), current,
+      connected: session.isConnected() || session.isConnecting(),
       ...(startupFixed !== undefined ? { startupFixed } : {}),
     };
   };
@@ -1045,10 +1046,16 @@ app.whenReady().then(async () => {
    * menu to change two booleans would re-create the macOS app menu and every accelerator in it.
    *
    * CALLED AFTER EVERY CLICK, ACCEPTED OR REFUSED: Electron checks a clicked radio item itself,
-   * before our handler runs, so a refused choice would otherwise be left looking chosen. Every
-   * item is written, so the menu cannot drift from the session -- `modelMenuStates` is the same
-   * function the template was built from. `applyChoiceStates` (menu.ts) records why a radio
-   * item's `checked` is only ever set to `true`: measured, assigning `false` CHECKS it.
+   * before our handler runs, so a refused choice would otherwise be left looking chosen.
+   * `enabled` is written on EVERY item; `checked` only on the one true item of each group, which
+   * clears the rest -- `applyChoiceStates` (menu.ts) records the measurement: assigning `false`
+   * to a radio item's `checked` CHECKS it. `modelMenuStates` is the same function the template
+   * was built from, so the menu cannot drift from the session.
+   *
+   * ON FOUR EVENTS. 'geometry' is the first thing `connect()` emits, before its socket opens and
+   * with `isConnecting()` already true, so it disables the items for an attempt in flight;
+   * 'connectSettled' re-enables them when an attempt FAILS, which emits nothing else; 'connect'
+   * and 'disconnect' cover the rest.
    */
   const refreshModelMenu = (): void => {
     const g = geometryMenu();
@@ -1056,18 +1063,26 @@ app.whenReady().then(async () => {
     if (g === undefined || menu === null) return;
     applyChoiceStates(modelMenuStates(g), (id) => menu.getMenuItemById(id));
   };
-  session.on('connect', refreshModelMenu);
-  session.on('disconnect', refreshModelMenu);
+  for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
+    session.on(ev, refreshModelMenu);
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate(
     [...buildMenuTemplate(process.platform, {
       /**
        * ONE MODEL-MENU CHOICE, applied at the next connect. NOT gated on focus: it changes a
        * setting, not the screen, so it is the same harmless request from any window.
        *
-       * `applyGeometryChoice` (menu.ts) owns the order-dependence rule -- a model the current
-       * oversize refuses is applied with oversize None, and the returned notice says so. Every
-       * other refusal (`disconnect first`, during a reconnect still in flight; an oversize below
-       * the model) throws, and goes where every other failure in this window goes.
+       * `applyGeometryChoice` (`@tn3270/frontend`, shared with the web gateway) owns the
+       * order-dependence rule -- a model the current oversize refuses is applied with oversize
+       * None, and the returned notice says so. Every other refusal (`disconnect first`; `wait for
+       * the connection attempt to finish`; an oversize below the model) throws, and goes where
+       * every other failure in this window goes.
+       *
+       * THE RESET NOTICE IS NOT A FAILURE, AND STILL GOES THROUGH `fail()`: this window has no
+       * other channel. `error-message` is the only one the preload exposes (`preload.cts`); the
+       * renderer's softer notice painter is `onCopyFailed`, which only the web bridge provides.
+       * Adding a notice channel is a preload, renderer and bridge change for one line of text;
+       * the red painter at least shows it, and the next frame wipes it like any message.
        */
       onGeometry: (choice) => {
         const current = session.geometrySetting;

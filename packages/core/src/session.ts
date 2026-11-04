@@ -183,12 +183,16 @@ export interface ConnectOptions {
  * front end can print `lastGeometryNotice` (an `auto` that fell back to the model) before
  * anything the host sends. Never in legacy mode, where nothing is resolved.
  *
+ * `connectSettled` fires once when the last connection attempt in flight ENDS, succeeded or
+ * failed, with `isConnecting()` already false -- the counterpart of 'geometry' for a front end
+ * that disables controls while an attempt is in flight. A failed attempt emits nothing else.
+ *
  * Not exported from `index.ts` and referenced only by `on`/`off`/`listenerCount`/
  * `emit`, so widening it has no blast radius (checked 2026-09-25, re-checked 2026-10-02).
  */
 export type SessionEvent =
   | 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd' | 'transferProgress'
-  | 'geometry';
+  | 'geometry' | 'connectSettled';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
@@ -366,6 +370,17 @@ export class Session {
    */
   private reconnecting = false;
   /**
+   * How many `connect()` calls are between their start and their end -- the FIRST connect's
+   * equivalent of `reconnecting`, which covers only `reconnect()`. A COUNT and not a flag, because
+   * two overlapping `connect()` calls are legal and the first to finish must not clear the
+   * second's.
+   *
+   * WHY `setGeometry` NEEDS IT: `connect()` resolves the setting BEFORE its first await, so a
+   * change accepted while the socket or TLS handshake is still in flight would never reach the
+   * host -- and a front end would show it as the current geometry all the same.
+   */
+  private connecting = 0;
+  /**
    * THE PENDING AID: which key the operator last pressed, for the host to learn about on
    * its own schedule rather than ours.
    *
@@ -484,8 +499,14 @@ export class Session {
       throw new Error('setGeometry needs a session built with the geometry option; '
         + 'this one fixed its terminal type at construction');
     }
-    if (this.conn !== undefined || this.reconnecting) {
+    if (this.conn !== undefined) {
       throw new Error('disconnect first; model and oversize apply at the next connect');
+    }
+    // NOT `disconnect first` here: there is no connection to disconnect yet, and the one being
+    // made has already resolved the setting it will advertise. See `connecting`.
+    if (this.reconnecting || this.connecting > 0) {
+      throw new Error('wait for the connection attempt to finish; '
+        + 'model and oversize apply at the next connect');
     }
     this.validateGeometry(next);
     this.setting = next;
@@ -762,7 +783,30 @@ export class Session {
     };
   }
 
+  /**
+   * True while a `connect()` -- a first connect or a reconnect's -- has started and not finished:
+   * TCP or TLS setup, before `isConnected()`. True already when 'geometry' fires inside it, so a
+   * front end can disable its geometry controls from that event.
+   */
+  isConnecting(): boolean {
+    return this.connecting > 0 || this.reconnecting;
+  }
+
   async connect(host: string, port: number, per: ConnectOptions = {}): Promise<void> {
+    // COUNTED BEFORE ANYTHING ELSE, so 'geometry' (emitted by `applyGeometry` below) already sees
+    // it, and cleared in `finally` on every exit -- a refused geometry, a refused socket, success.
+    this.connecting += 1;
+    try {
+      await this.connectNow(host, port, per);
+    } finally {
+      this.connecting -= 1;
+      // Inside a `reconnect()`, `reconnecting` is still true here: that method's own `finally`
+      // emits instead, so one attempt settles once.
+      if (!this.isConnecting()) this.emit('connectSettled');
+    }
+  }
+
+  private async connectNow(host: string, port: number, per: ConnectOptions): Promise<void> {
     // RESOLVED FIRST, before anything below can touch the live connection or the remembered
     // target; APPLIED after the teardown. See `applyGeometry` for why it is split around it.
     // `reconnect()` comes through here too, so `auto` is re-measured on every reconnect -- the
@@ -930,6 +974,7 @@ export class Session {
       throw err;
     } finally {
       this.reconnecting = false;
+      if (!this.isConnecting()) this.emit('connectSettled');
     }
   }
 
