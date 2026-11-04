@@ -195,7 +195,8 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
   on a Mac no longer types `µ` in the page, the same trade `Option-K` already makes. The browser
   harness checks the chord reaches the page in Chromium; Firefox and Safari are a live-pass item.
   The GUI honours the same chord by popping up its Model menu; the TUI has no sequence for it. The choice goes to the gateway, which
-  owns the session, as a new `geometry` client message with its own shape check in
+  owns the session, as a new `setGeometry` client message (naming a model and one of `none`,
+  `auto` or `startup`, never a size) with its own shape check in
   `web/src/protocol.ts`, beside `hello`, `action`, `transferStart` and the rest.
 - **TUI: a terminal resize is the switch, for size.** The TUI already handles `SIGWINCH`
   (`tui/src/app.ts:368`, `onResize`). Under `-oversize auto` the next connect or reconnect
