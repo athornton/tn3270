@@ -31,7 +31,7 @@ executable through `$PATH`. Building alone does not count.
 
 ### npm packages
 
-Ten workspaces, all `@tn3270/*`, versioned **in lockstep** (all `0.1.0` now; first publish is
+Nine workspaces (eight published, all `@tn3270/*`), versioned **in lockstep** (all `0.1.0` now; first publish is
 `0.1.0`; one script bumps every manifest and every internal dependency together). Internal
 dependencies stay exact versions, so a mixed set cannot resolve.
 
