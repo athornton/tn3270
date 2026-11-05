@@ -143,7 +143,14 @@ export type ClientMessage =
     is one. `model` is case-folded to its `KNOWN_MODELS` key here.
   */
   | { kind: 'setGeometry'; model: string }
-  | { kind: 'setGeometry'; oversize: OversizeName };
+  | { kind: 'setGeometry'; oversize: OversizeName }
+  /*
+    THE PICKER'S DISCONNECT BUTTON, 2026-11-05: drop THIS SOCKET'S host session, so the choices
+    can be used without waiting for the host to drop the line (LOGOFF). A top-level kind like
+    `setGeometry`, NOT an `Action`: no keymap binds it, and the operator's 3270 keys never send it.
+    No fields -- there is no session to name, the socket already has exactly one.
+  */
+  | { kind: 'disconnect' };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
@@ -720,6 +727,19 @@ export function decodeClientMessage(text: string): ClientMessage {
       throw new Error('setGeometry oversize must be none, auto or startup');
     }
     return { kind: 'setGeometry', oversize };
+  }
+
+  /*
+    THE PICKER'S DISCONNECT, 2026-11-05. Above the catch-all for the reason the transfer kinds'
+    note gives, and outside the two-branch rule's subject because it is not an `Action` -- but
+    still ACCEPTED HERE AND HANDLED in `main.ts` (`session.disconnect()` on the socket's own
+    session, swallowed before `hello`), never one without the other. CLOSED SHAPE: `kind` alone.
+    A `sessionId` beside it would read as "disconnect that one", which this gateway never does
+    for a socket -- a hand-built frame, refused like one.
+  */
+  if (kind === 'disconnect') {
+    if (Object.keys(raw).some((k) => k !== 'kind')) throw new Error('disconnect takes no fields');
+    return { kind: 'disconnect' };
   }
 
   throw new Error(`unknown client message kind ${String(kind)}`);

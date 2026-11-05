@@ -361,7 +361,8 @@ const TRANSFER_CHECKS = [
     kind: 'live',
     what: 'Alt+M opens the picker over a closed keypad; clicking 3278-4-E sends setGeometry and the '
       + "gateway's reply checks it (a replay gateway is disconnected, so it is accepted); an arrow "
-      + 'key sends NOTHING, Enter then picks; Alt+M closes it with a radio focused',
+      + 'key sends NOTHING, Enter then picks; Alt+M closes it with a radio focused; the Disconnect '
+      + 'button is first and disabled (a replay gateway never connects)',
     mutant: 'bridge.ts  onGeometryChoices: () => {} (no radios ever drawn); geometryOverlay.ts  a '
       + 'keyboard click counted as a pick (arrowing applies every radio passed)',
   },
@@ -1151,6 +1152,11 @@ async function runTransferPhase(url) {
       await press('m', 'KeyM', 77, CDP_ALT);
       await new Promise((r) => { setTimeout(r, 300); });
       const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
+      // THE DISCONNECT BUTTON (2026-11-05), first in the picker and DISABLED here: a replay gateway
+      // never connects, and the button is enabled only while connected (geometryOverlay.test.ts).
+      const disconnectBtn = await cdp.eval('(() => { const b = document.querySelector('
+        + '"#geometry-choices > button.geometry-disconnect"); return b === null ? null : '
+        + '{ text: b.textContent, disabled: b.disabled, first: b === b.parentElement.firstElementChild }; })()');
       const before = await cdp.eval(
         'document.querySelector("#geometry-choices input[value=\'3278-2-E\']")?.checked ?? null');
       const sentBefore = await sentCount();
@@ -1203,11 +1209,12 @@ async function runTransferPhase(url) {
       if (pickerShown && keypadHidden && toggledShut && radios === 10 && before === true
         && frame.length === 1 && frame[0] === want && after === '3278-4-E' && status === ''
         && arrowed === '3278-5' && arrowSent.length === 0
-        && enterSent.length === 1 && enterSent[0] === wantEnter && focusOnRadio && closed) {
+        && enterSent.length === 1 && enterSent[0] === wantEnter && focusOnRadio && closed
+        && disconnectBtn?.text === 'Disconnect' && disconnectBtn.disabled === true && disconnectBtn.first === true) {
         ok(check('picker'), `Alt+M showed ${radios} radios with 3278-2-E checked and closed the keypad, `
           + `and Alt+M shut it; the click sent ${frame[0]}, the gateway's reply checked 3278-4-E with `
           + `no notice; ArrowDown moved to 3278-5 and sent nothing, Enter sent ${enterSent[0]}, and `
-          + 'Alt+M closed it with the radio focused');
+          + 'Alt+M closed it with the radio focused; Disconnect sat first, disabled (never connected)');
       } else {
         no(check('picker'), 'the picker did not open, send, or reflect the gateway\'s answer',
           `shown: ${pickerShown}, keypad hidden: ${keypadHidden}, Alt+M shut it: ${toggledShut}, `
@@ -1216,7 +1223,8 @@ async function runTransferPhase(url) {
           + `checked after: ${JSON.stringify(after)}, status: ${JSON.stringify(status)}, `
           + `arrowed to: ${JSON.stringify(arrowed)} (want "3278-5"), arrow sent: `
           + `${JSON.stringify(arrowSent)} (want []), Enter sent: ${JSON.stringify(enterSent)} `
-          + `(want [${wantEnter}]), focus on a radio: ${focusOnRadio}, closed by Alt+M: ${closed}`);
+          + `(want [${wantEnter}]), focus on a radio: ${focusOnRadio}, closed by Alt+M: ${closed}, `
+          + `Disconnect button: ${JSON.stringify(disconnectBtn)} (want first, disabled)`);
       }
     }
 
@@ -3577,15 +3585,18 @@ async function runTransferPhase(url) {
       const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
       const disabled = await cdp.eval(
         'document.querySelectorAll("#geometry-choices input[type=radio]:disabled").length');
+      const btnDisabled = await cdp.eval(
+        'document.querySelector("#geometry-choices > button.geometry-disconnect")?.disabled ?? null');
       const want = 'The connection to the gateway closed; reload to reconnect.';
-      if (shown && closedNow && line === want && radios === 10 && disabled === 10) {
+      if (shown && closedNow && line === want && radios === 10 && disabled === 10 && btnDisabled === true) {
         ok(check('pickerClosed'), `the gateway closed the socket and the open picker's line went from `
           + `${JSON.stringify(lineBefore)} to ${JSON.stringify(line)}, with all ${radios} radios disabled`);
       } else {
         no(check('pickerClosed'), 'the picker did not say the gateway closed, or left a choice enabled',
           `picker shown: ${shown}, socket closed: ${closedNow}, line before: `
           + `${JSON.stringify(lineBefore)}, line after: ${JSON.stringify(line)} (want `
-          + `${JSON.stringify(want)}), radios: ${radios} (want 10), disabled: ${disabled} (want 10)`);
+          + `${JSON.stringify(want)}), radios: ${radios} (want 10), disabled: ${disabled} (want 10), `
+          + `Disconnect disabled: ${btnDisabled} (want true)`);
       }
     }
 

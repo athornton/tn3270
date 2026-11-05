@@ -67,12 +67,20 @@ function rig(start: { hidden: boolean } = { hidden: true }) {
     walk(root);
     return out;
   };
+  /** The Disconnect button, if built: the one `button` in the root. */
+  const button = (): Fake | undefined => {
+    const out: Fake[] = [];
+    const walk = (f: Fake): void => { if (f.tag === 'button') out.push(f); f.children.forEach(walk); };
+    walk(root);
+    if (out.length > 1) throw new Error(`${out.length} buttons in the picker`);
+    return out[0];
+  };
   const input = (name: string, value: string): Fake => {
     const found = inputs().find((i) => i.attrs['name'] === name && i.attrs['value'] === value);
     if (found === undefined) throw new Error(`no ${name}=${value} input`);
     return found;
   };
-  return { o, element, root, status, sent, inputs, input };
+  return { o, element, root, status, sent, inputs, input, button };
 }
 
 const MODELS = ['3278-2', '3278-2-E', '3278-3', '3278-3-E', '3278-4', '3278-4-E', '3278-5', '3278-5-E'];
@@ -246,6 +254,118 @@ describe('createGeometryOverlay', () => {
     expect(r.inputs().filter((i) => i.checked).map((i) => i.attrs['value'])).toEqual(['3278-4-E', 'auto']);
     click(r.input('geometry-model', '3278-2'));
     expect(r.sent).toEqual([]);
+  });
+
+  /*
+    THE DISCONNECT BUTTON, 2026-11-05 (user-approved): before it the picker could be used only after
+    the HOST dropped the line. Enabled ONLY while actually connected -- not while connecting, since
+    `Session.disconnect()` does nothing to an attempt in flight (a known core limitation) -- and not
+    when free or once the gateway socket has closed.
+  */
+  it('puts a Disconnect button FIRST, before the two groups, built once', () => {
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    const b = r.button()!;
+    expect(b).toBeDefined();
+    expect(b.text).toBe('Disconnect');
+    expect(b.attrs['type']).toBe('button');
+    expect(r.root.children[0]).toBe(b);
+    expect(r.root.children.slice(1).map((c) => c.tag)).toEqual(['fieldset', 'fieldset']);
+    r.o.update(choices());
+    r.o.toggle(); r.o.toggle();
+    expect(r.root.children).toHaveLength(3);
+  });
+
+  it('enables Disconnect ONLY while connected: not connecting, not free, not after the gateway closed', () => {
+    const r = rig();
+    r.o.update(choices());
+    r.o.toggle();
+    const b = r.button()!;
+    expect(b.disabled, 'free').toBe(true);
+    r.o.update(choices({ connected: true, connecting: true }));
+    expect(b.disabled, 'connecting').toBe(true);
+    expect(r.status.text, 'connecting keeps its own line').toBe(CONNECTING_LINE);
+    r.o.update(choices({ connected: true }));
+    expect(b.disabled, 'connected').toBe(false);
+    expect(r.status.text).toBe(CONNECTED_LINE);
+    r.o.update(choices());
+    expect(b.disabled, 'free again').toBe(true);
+    r.o.update(choices({ connected: true }));
+    r.o.markGatewayClosed();
+    expect(b.disabled, 'gateway closed').toBe(true);
+  });
+
+  it('a pointer click on Disconnect sends {kind:disconnect}, and only while connected', () => {
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    click(r.button()!);
+    expect(r.sent.map((t) => JSON.parse(t))).toEqual([{ kind: 'disconnect' }]);
+    // A click the disabled button would not deliver must still send nothing, in every other state.
+    for (const over of [{}, { connected: true, connecting: true }] as const) {
+      r.sent.length = 0;
+      r.o.update(choices(over));
+      click(r.button()!);
+      expect(r.sent, JSON.stringify(over)).toEqual([]);
+    }
+    r.o.update(choices({ connected: true }));
+    r.o.markGatewayClosed();
+    click(r.button()!);
+    expect(r.sent).toEqual([]);
+  });
+
+  it('Enter or Space on Disconnect sends ONCE and stops there, so the host never gets the Enter', () => {
+    // `renderer.ts`'s window keydown skips INPUTs but NOT buttons (`isEditableTarget`), so an Enter
+    // that bubbled would also go to the host as an Enter AID. The button's own keydown claims both
+    // keys -- preventDefault, so no native keyboard click follows, and stopPropagation -- and the
+    // keyboard click a browser might still synthesise carries `detail` 0 and is ignored.
+    for (const key of ['Enter', ' ']) {
+      const r = rig();
+      r.o.update(choices({ connected: true }));
+      r.o.toggle();
+      const e = ev({ type: 'keydown', key, code: key === ' ' ? 'Space' : 'Enter' });
+      fire(r.button()!, e);
+      fire(r.button()!, ev({ type: 'click', detail: 0 }));
+      expect(r.sent.map((t) => JSON.parse(t)), JSON.stringify(key)).toEqual([{ kind: 'disconnect' }]);
+      expect(e.prevented && e.stopped, JSON.stringify(key)).toBe(true);
+    }
+  });
+
+  it('arrow keys and other keys on Disconnect send nothing and are left alone', () => {
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    for (const key of ['ArrowDown', 'ArrowUp', 'Tab', 'a']) {
+      const e = ev({ type: 'keydown', key, code: key });
+      fire(r.button()!, e);
+      expect(e.prevented || e.stopped, key).toBeFalsy();
+    }
+    expect(r.sent).toEqual([]);
+  });
+
+  it('Escape still closes the picker with Disconnect focused', () => {
+    // The overlay's own keydown is on the ELEMENT, which a button's keydown bubbles to.
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    const e = ev({ type: 'keydown', key: 'Escape', code: 'Escape' });
+    fire(r.button()!, e);
+    fire(r.element, e);
+    expect(r.element.hidden).toBe(true);
+    expect(r.sent).toEqual([]);
+  });
+
+  it('while FREE the line stays empty: Enter reconnects, and the OIA is what says so honestly', () => {
+    // DECIDED 2026-11-05: no "Press Enter to reconnect" here. The picker cannot tell a session
+    // that WAS connected (Enter reconnects: `reconnectInstead`) from one that never was (`--replay`,
+    // where Enter does nothing), and the OIA's own `X Disconnected -- press Enter to reconnect`
+    // already offers the key only when it works (`Oia.reconnectable`).
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    r.o.update(choices());
+    expect(r.status.text).toBe('');
   });
 
   it('shows a notice the gateway sent with its reply, in the picker beside the radio it moved', () => {

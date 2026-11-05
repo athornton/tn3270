@@ -5098,10 +5098,15 @@ menu is open**. And no harness renegotiates against a host after a choice.
      disabled, on purpose).
    - **A hung connect attempt cannot be cancelled from here:** `Session.disconnect()` only calls
      `conn?.close()` (pre-existing), and during a first connect still dialling there is no `conn`
-     yet to close — so the GUI's menu and the web picker both stay disabled, with no button that
-     stops the attempt, until the TCP or TLS handshake itself times out. Worth observing on a real
+     yet to close — so the GUI's menu and the web picker both stay disabled, and their
+     **Disconnect** (added 2026-11-05) is disabled too, until the TCP or TLS handshake itself
+     times out. Worth observing on a real
      host: start a connect against one that will hang (e.g. a plaintext host under TLS-by-default)
      and confirm nothing in either front end shortens the wait.
+   - **Disconnect (added 2026-11-05), the menu's first item:** enabled only while connected.
+     Choosing it against VM should show `X Disconnected -- press Enter to reconnect` and enable
+     the choices; pick `3278-4-E`, press `Enter`, and VM should come back at 43x80. Check it is
+     greyed during a connect attempt and after the host drops the line.
    - **`Alt-M`:** where the popup appears (it should be over the main window, even when pressed
      in the keypad or keyboard window); whether `Escape` dismisses it; and whether a real arrow
      key or `Enter` goes to the menu and not to the 3270 screen. On macOS, `Option-M` is the chord
@@ -5117,6 +5122,14 @@ menu is open**. And no harness renegotiates against a host after a choice.
      and `Escape` or `Alt-M` closes the picker.
    - **A pick, then a reconnect, renegotiates:** pick `3278-4-E` while disconnected, reconnect,
      and check for 43x80 from VM, as in item 5.
+   - **The Disconnect button (added 2026-11-05):** first in the picker, enabled only while
+     connected. Clicking it (and `Enter`/`Space` on it) should disconnect THIS tab only -- a
+     second tab on the same gateway stays connected -- show `X Disconnected -- press Enter to
+     reconnect`, and enable the choices, without `Enter` also reaching the host. Then pick and
+     reconnect as above.
+   - **The gateway going away (fixed 2026-11-05):** stop the gateway with the picker open; it
+     should say `The connection to the gateway closed; reload to reconnect.` with everything
+     disabled, not the stale `Disconnect first`.
 7. **The CLI's `Set()` against VM:** `Set(model,3278-4-E)` then `Reconnect()`, and `ScreenText`
    after EE or any full-screen panel should show 43 rows, from VM's Erase/Write Alternate. A
    two-pair call, e.g. `Set(model,3278-5-E,oversize,160x62)`, should then reach 160x62 the same

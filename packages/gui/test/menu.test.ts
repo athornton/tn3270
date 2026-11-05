@@ -4,7 +4,7 @@ import {
 } from '@tn3270/core';
 import type { GeometryChoice } from '@tn3270/frontend';
 import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, type MutableChoice,
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, type MutableChoice, type GeometryMenu,
 } from '../src/menu.js';
 
 describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
@@ -194,7 +194,8 @@ describe('the Model menu', () => {
   it('lists the eight models, a separator, then an Oversize submenu of None and Auto', () => {
     const m = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
     expect(m.label).toBe('Model');
-    const sub = m.submenu!;
+    // AFTER Disconnect and its separator (2026-11-05), pinned in their own case below.
+    const sub = m.submenu!.slice(2);
     expect(sub.slice(0, 8).map((i) => [i.type, i.label, i.id])).toEqual(
       MODELS.map((k) => ['radio', `${k} (${describeSize(KNOWN_MODELS[k]!.alternate)})`, `model:${k}`]));
     expect(sub[6]!.label).toBe('3278-5 (27 rows by 132 columns)');
@@ -312,6 +313,50 @@ describe('the Model menu', () => {
     expect(bare.some((i) => Object.prototype.hasOwnProperty.call(i, 'click'))).toBe(false);
   });
 
+  /*
+    THE DISCONNECT ITEM, 2026-11-05 (user-approved): before it the Model menu could be used only
+    after the HOST dropped the line. A NORMAL item, not a radio, so Electron 44's radio quirk
+    (`applyChoiceStates`) does not touch it -- only `enabled` is ever written.
+  */
+  it('puts a Disconnect item FIRST, then a separator, then the models', () => {
+    const sub = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } })).submenu!;
+    expect(sub[0]!.label).toBe('Disconnect');
+    expect(sub[0]!.id).toBe('model-disconnect');
+    expect(sub[0]!.type).toBeUndefined();
+    expect('checked' in sub[0]!).toBe(false);
+    expect(sub[1]!.type).toBe('separator');
+    expect(sub[2]!.id).toBe('model:3278-2');
+  });
+
+  it('enables Disconnect ONLY while actually connected: not connecting, not free', () => {
+    const at = (g: Partial<GeometryMenu>): boolean | undefined =>
+      modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none }, ...g }))
+        .submenu![0]!.enabled;
+    expect(at({ connected: false })).toBe(false);
+    expect(at({ connected: true })).toBe(true);
+    expect(at({ connected: true, connecting: true })).toBe(false);
+  });
+
+  it('calls onDisconnect from the item, and omits click with no handler', () => {
+    let n = 0;
+    const t = buildMenuTemplate('linux', {
+      onCopy: () => {}, onPaste: () => {}, onKeypad: () => {}, onKeyboard: () => {},
+      onDisconnect: () => { n += 1; },
+    }, { ...base, connected: true, current: { oversize: none } });
+    modelMenu(t).submenu![0]!.click!();
+    expect(n).toBe(1);
+    const bare = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
+    expect('click' in bare.submenu![0]!).toBe(false);
+  });
+
+  it('reports Disconnect\'s state through modelMenuStates too, enabled only, never checked', () => {
+    const states = (g: Partial<GeometryMenu>) =>
+      modelMenuStates({ ...base, current: { oversize: none }, ...g });
+    expect(states({ connected: true })[0]).toEqual({ id: 'model-disconnect', enabled: true });
+    expect(states({ connected: true, connecting: true })[0]).toEqual({ id: 'model-disconnect', enabled: false });
+    expect(states({})[0]).toEqual({ id: 'model-disconnect', enabled: false });
+  });
+
   it('reports the same states through modelMenuStates, which main.ts mutates by id', () => {
     const geom = {
       ...base, connected: true, startupFixed: { rows: 62, cols: 160 },
@@ -319,7 +364,7 @@ describe('the Model menu', () => {
     };
     const fromTemplate = choices(modelMenu(buildMenuTemplate('linux', undefined, geom)))
       .map((i) => ({ id: i.id, checked: i.checked, enabled: i.enabled }));
-    expect(modelMenuStates(geom)).toEqual(fromTemplate);
+    expect(modelMenuStates(geom).filter((st) => st.id !== 'model-disconnect')).toEqual(fromTemplate);
   });
 });
 
@@ -363,6 +408,22 @@ describe('applyChoiceStates', () => {
     applyChoiceStates(states, (id) => items.get(id) ?? null);
     expect([...items].filter(([, i]) => i.checked).map(([id]) => id))
       .toEqual(['model:3278-2-E', 'oversize:none']);
+  });
+
+  it('never writes checked on the Disconnect item, which is a normal item', () => {
+    // A write would be harmless on a normal item today, but the state carries no `checked` at all,
+    // so nothing can turn it into a radio-quirk write later by accident.
+    const writes: string[] = [];
+    const item = {
+      enabled: false,
+      get checked() { return false; },
+      set checked(_v: boolean) { writes.push('checked'); },
+    };
+    applyChoiceStates(modelMenuStates({
+      models: Object.keys(KNOWN_MODELS), connected: true, current: { oversize: { kind: 'none' } },
+    }), (id) => (id === 'model-disconnect' ? item : null));
+    expect(writes).toEqual([]);
+    expect(item.enabled).toBe(true);
   });
 
   it('writes enabled onto every item, and skips an id the menu does not have', () => {

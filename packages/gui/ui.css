@@ -320,7 +320,10 @@ body.ui-surface {
 #geometry-overlay button { font: inherit; padding: 3px 12px; }
 #geometry-overlay button:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 #geometry-overlay .geometry-help { margin: 0 0 8px; color: GrayText; }
-#geometry-choices { display: flex; gap: 12px; align-items: flex-start; }
+/* A GRID, not the flex row it was: the Disconnect button (2026-11-05) is the root's first child and
+   takes a whole row of its own, at its own width, above the two groups side by side. */
+#geometry-choices { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 12px; align-items: start; }
+#geometry-choices > .geometry-disconnect { grid-column: 1 / -1; justify-self: start; }
 #geometry-choices fieldset { border: 1px solid GrayText; margin: 0; padding: 4px 10px 6px; }
 #geometry-choices legend { color: GrayText; }
 #geometry-choices label { display: block; white-space: nowrap; padding: 1px 0; }

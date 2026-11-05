@@ -1037,6 +1037,9 @@ app.whenReady().then(async () => {
       // has already resolved the setting it will advertise.
       models: Object.keys(KNOWN_MODELS), current,
       connected: session.isConnected() || session.isConnecting(),
+      // For the Disconnect item only, and the web gateway's spelling for its reason: `isConnecting()`
+      // is still true during the 'connect' event itself (`web/src/geometryChoices.ts`).
+      connecting: session.isConnecting() && !session.isConnected(),
       ...(startupFixed !== undefined ? { startupFixed } : {}),
     };
   };
@@ -1095,6 +1098,15 @@ app.whenReady().then(async () => {
         }
         refreshModelMenu();
       },
+      /**
+       * THE MODEL MENU'S DISCONNECT, 2026-11-05: drop the host session so the choices free up,
+       * rather than waiting for the host to drop the line. Enabled only while connected (menu.ts);
+       * the 'disconnect' it emits runs `refreshModelMenu` and repaints, like a host-side close.
+       * Enter or Clear then reconnects with the new choice (`reconnectInstead`). A
+       * `--terminal-type` session has no Model menu and so no Disconnect item: accepted, since it
+       * has no choices to free.
+       */
+      onDisconnect: () => { session.disconnect(); },
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *

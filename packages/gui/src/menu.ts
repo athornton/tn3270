@@ -144,6 +144,13 @@ export interface MenuHandlers {
    * has a Model menu; the other handlers predate it and a caller without it is still complete.
    */
   readonly onGeometry?: (choice: GeometryChoice) => void;
+  /**
+   * The Model menu's Disconnect item, 2026-11-05: `session.disconnect()`. Optional, as
+   * `onGeometry` is, because only a geometry-mode session has a Model menu -- so a
+   * `--terminal-type` session has no Disconnect item either, which is accepted: it has no choices
+   * that a disconnect would free.
+   */
+  readonly onDisconnect?: () => void;
 }
 
 /**
@@ -169,12 +176,23 @@ export interface GeometryMenu {
    * an attempt in flight has already resolved the setting it will advertise.
    */
   readonly connected: boolean;
+  /**
+   * CONNECTING, NOT YET CONNECTED -- `isConnecting() && !isConnected()`, the web gateway's rule
+   * (`web/src/geometryChoices.ts` says why the `!isConnected()` is needed on 'connect' itself).
+   * Read only by the Disconnect item: `Session.disconnect()` does nothing to an attempt in
+   * flight (a known core limitation), so the item is disabled then. Absent is false.
+   */
+  readonly connecting?: boolean;
 }
+
+/** The Disconnect item's id: NOT `model:...`, which names a model radio. */
+export const DISCONNECT_ID = 'model-disconnect';
 
 /** One choice item's mutable state. `main.ts` applies these by id; see `modelMenuStates`. */
 export interface ChoiceState {
   readonly id: string;
-  readonly checked: boolean;
+  /** ABSENT on the Disconnect item, a normal item with nothing to check -- see `applyChoiceStates`. */
+  readonly checked?: boolean;
   readonly enabled: boolean;
 }
 
@@ -211,6 +229,8 @@ export function modelMenuStates(g: GeometryMenu): ChoiceState[] {
   const model = currentModel(g.current);
   const o = g.current.oversize;
   return [
+    // FIRST, as in the menu. Enabled only while ACTUALLY connected -- see `GeometryMenu.connecting`.
+    { id: DISCONNECT_ID, enabled: g.connected && g.connecting !== true },
     ...g.models.map((m) => ({ id: `model:${m}`, checked: m === model, enabled })),
     { id: 'oversize:none', checked: o.kind === 'none', enabled },
     { id: 'oversize:auto', checked: o.kind === 'auto', enabled },
@@ -243,25 +263,29 @@ export function applyChoiceStates(
   for (const st of states) {
     const item = get(st.id);
     if (item === null) continue;
-    if (st.checked) item.checked = true;
+    if (st.checked === true) item.checked = true;
     item.enabled = st.enabled;
   }
 }
 
 /**
- * The Model menu: the models as one radio group, a separator, and an Oversize submenu.
+ * The Model menu: Disconnect and a separator, the models as one radio group, a separator, and an
+ * Oversize submenu.
  *
  * EACH CHOICE IS DISABLED, NOT THE MENU. The spec says "the whole menu disabled while connected";
  * disabling every item gets that everywhere, where disabling the top-level item is a per-platform
  * question (on macOS a disabled top-level menu cannot even be opened to see what is current), and
  * `Alt-M` pops the SUBMENU up directly, past any parent item, so only per-item state reaches it.
  */
-function modelMenu(g: GeometryMenu, onGeometry: ((c: GeometryChoice) => void) | undefined): MenuItemTemplate {
+function modelMenu(
+  g: GeometryMenu, onGeometry: ((c: GeometryChoice) => void) | undefined,
+  onDisconnect: (() => void) | undefined,
+): MenuItemTemplate {
   const states = new Map(modelMenuStates(g).map((s) => [s.id, s]));
   const item = (id: string, label: string, choice: GeometryChoice): MenuItemTemplate => {
     const s = states.get(id)!;
     return {
-      label, id, type: 'radio', checked: s.checked, enabled: s.enabled,
+      label, id, type: 'radio', checked: s.checked === true, enabled: s.enabled,
       ...(onGeometry !== undefined ? { click: () => { onGeometry(choice); } } : {}),
     };
   };
@@ -270,6 +294,17 @@ function modelMenu(g: GeometryMenu, onGeometry: ((c: GeometryChoice) => void) | 
     label: 'Model',
     id: 'model',
     submenu: [
+      /*
+        DISCONNECT FIRST, 2026-11-05: before it this menu could be used only after the HOST dropped
+        the line. A NORMAL ITEM, NOT A RADIO, so Electron 44's radio quirk (`applyChoiceStates`)
+        cannot touch it: its state carries no `checked`. The four-event refresh in `main.ts`
+        enables it on 'connect' and disables it on 'geometry' (an attempt starting) and 'disconnect'.
+      */
+      {
+        label: 'Disconnect', id: DISCONNECT_ID, enabled: states.get(DISCONNECT_ID)!.enabled,
+        ...(onDisconnect !== undefined ? { click: onDisconnect } : {}),
+      },
+      { type: 'separator' },
       // The size in words beside each name, the spec's rule for every new message naming a size:
       // the names alone do not say that 3278-4 is the tall one.
       ...g.models.map((m) => {
@@ -379,6 +414,6 @@ export function buildMenuTemplate(
   //
   // THE MODEL MENU ONLY WITH A GEOMETRY, so a caller that passes none gets exactly the old
   // template. `main.ts` passes none for a `--terminal-type` session, which has no model to switch.
-  const menus = geometry !== undefined ? [edit, view, modelMenu(geometry, handlers?.onGeometry)] : [edit, view];
+  const menus = geometry !== undefined ? [edit, view, modelMenu(geometry, handlers?.onGeometry, handlers?.onDisconnect)] : [edit, view];
   return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : menus;
 }

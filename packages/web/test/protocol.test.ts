@@ -461,6 +461,19 @@ describe('setGeometry', () => {
     }
   });
 
+  it('accepts disconnect, the picker\'s Disconnect button, with no other field', () => {
+    // A TOP-LEVEL KIND, NOT AN `Action` (2026-11-05): the operator asks the gateway to drop the
+    // host session, which `main.ts` does with `session.disconnect()` for this socket's own session.
+    expect(decodeClientMessage('{"kind":"disconnect"}')).toEqual({ kind: 'disconnect' });
+  });
+
+  it('REFUSES disconnect with any other key, at decode', () => {
+    for (const extra of [{ x: 1 }, { sessionId: 'someone-else' }, { action: { kind: 'enter' } }]) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'disconnect', ...extra })),
+        JSON.stringify(extra)).toThrow(/disconnect takes no fields/);
+    }
+  });
+
   it('encodes geometryChoices as plain JSON', () => {
     const msg: ServerMessage = {
       kind: 'geometryChoices',

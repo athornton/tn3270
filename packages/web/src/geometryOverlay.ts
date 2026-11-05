@@ -48,6 +48,19 @@
  * Alt and no Ctrl or Meta, so Option-M's `µ` counts -- and stops the event there, so the window
  * listener cannot toggle it straight back open when the focus is not on an input.
  *
+ * ## A DISCONNECT BUTTON FIRST, ENABLED ONLY WHILE CONNECTED, 2026-11-05
+ *
+ * Before it the picker could be used only after the HOST dropped the line (a LOGOFF): nothing in
+ * the browser could disconnect. It sends `{kind:'disconnect'}`, and the gateway's resulting
+ * 'disconnect' event refreshes this picker. ENABLED ONLY WHILE CONNECTED: not while connecting,
+ * because `Session.disconnect()` does nothing to an attempt in flight (a known core limitation),
+ * so `CONNECTING_LINE` stays the honest remedy; not when free (nothing to drop); not once the
+ * gateway socket closed. A BUTTON, so arrows do nothing to it: a pointer click (`detail >= 1`) or
+ * Enter/Space activate it, claimed on its own `keydown` and STOPPED THERE -- `renderer.ts` skips
+ * keydowns aimed at INPUTs but not at buttons, so a bubbling Enter would also reach the host as
+ * an Enter AID. While free the line stays empty: Enter or Clear reconnects (`reconnectInstead`),
+ * and the OIA's `X Disconnected -- press Enter to reconnect` already says so, and only when true.
+ *
  * ## A CHOICE IS ONE FIELD
  *
  * `{kind:'setGeometry', model}` or `{kind:'setGeometry', oversize}`, never both: one click changes
@@ -186,7 +199,7 @@ export interface GeometryOverlayDeps<E, V extends OverlayEvent = OverlayEvent> {
   readonly element: E;
   readonly setHidden: (el: E, hidden: boolean) => void;
   readonly isHidden: (el: E) => boolean;
-  /** Where the two radio groups are built. */
+  /** Where the Disconnect button and the two radio groups are built. */
   readonly root: E;
   /** The one-line status: the connected line, or a notice. */
   readonly status: E;
@@ -225,6 +238,8 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
 ): GeometryOverlay {
   let latest: GeometryChoices | undefined;
   let radios: Array<{ el: E; group: 'model' | 'oversize'; name: string }> | undefined;
+  // The Disconnect button, built with the radios and first in the root.
+  let disconnectButton: E | undefined;
   // SET BY `markGatewayClosed`, NEVER CLEARED: a closed socket does not reopen, a reload is a new page.
   let gatewayClosed = false;
   deps.setHidden(deps.element, true);
@@ -245,6 +260,14 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
     deps.send(JSON.stringify(which === 'model'
       ? { kind: 'setGeometry', model: name }
       : { kind: 'setGeometry', oversize: name }));
+  };
+
+  /** Disconnect is usable only while ACTUALLY connected -- see the header. */
+  const canDisconnect = (): boolean =>
+    latest !== undefined && latest.connected && !latest.connecting && !gatewayClosed;
+  const disconnect = (): void => {
+    if (!canDisconnect()) return;
+    deps.send(JSON.stringify({ kind: 'disconnect' }));
   };
 
   const group = (legend: string, which: 'model' | 'oversize', items: readonly Choice[]): void => {
@@ -286,6 +309,25 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
   const ensureBuilt = (): void => {
     if (radios !== undefined || latest === undefined || deps.isHidden(deps.element)) return;
     radios = [];
+    const b = deps.create('button');
+    deps.setAttr(b, 'type', 'button');
+    deps.setAttr(b, 'class', 'geometry-disconnect');
+    deps.setText(b, 'Disconnect');
+    deps.listen(b, ['click', 'keydown'], (e) => {
+      if (e.type === 'click') {
+        if ((e.detail ?? 0) >= 1) disconnect();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        // Claimed and STOPPED: no native keyboard click follows, and the page's own keydown
+        // listener -- which would send Enter to the host -- never sees it. See the header.
+        e.preventDefault();
+        e.stopPropagation();
+        disconnect();
+      }
+    });
+    deps.append(deps.root, b);
+    disconnectButton = b;
     group('Model', 'model', latest.models);
     group('Oversize', 'oversize', latest.oversizes);
   };
@@ -305,6 +347,7 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
       deps.setChecked(r.el, r.name === on);
       deps.setDisabled(r.el, latest.connected || gatewayClosed);
     }
+    if (disconnectButton !== undefined) deps.setDisabled(disconnectButton, !canDisconnect());
   };
 
   return {

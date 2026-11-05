@@ -417,6 +417,23 @@ export function buildServer(args: WebArgs) {
         sendGeometryChoices?.(outcome.notice);
         return;
       }
+      /*
+        THE PICKER'S DISCONNECT BUTTON, 2026-11-05, ABOVE THE GUARD BELOW for the `selection` arm's
+        reason. THE SOCKET'S OWN SESSION ONLY -- `session`, the one `hello` attached -- and before
+        `hello` it never gets here (`if (session === undefined) return;` above), so it is swallowed.
+
+        NO REPLY OF ITS OWN: `disconnect()` emits 'disconnect' when there was a connection, and the
+        listeners above already repaint (the OIA's `X Disconnected`) and refresh the choices
+        (connected:false). With no connection there is nothing to change and nothing is sent.
+
+        A CONNECT IN FLIGHT IS NOT CANCELLED: `Session.disconnect()` closes `this.conn`, which an
+        attempt has not set yet -- a known limitation in core, so the picker disables its button
+        while connecting rather than offer one that does nothing.
+      */
+      if (msg.kind === 'disconnect') {
+        session.disconnect();
+        return;
+      }
       if (msg.kind === 'selection') {
         const snapshot = session.screen.snapshot();
         const text = extractText(resolve(snapshot), snapshot.cols, msg.rect);

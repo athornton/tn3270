@@ -137,7 +137,14 @@ gateway was started with, if any. Nothing is typed; a new size is a new `-oversi
 applies at the next connect** (for example, `Enter` on a disconnected session). While the session is
 connected or connecting every choice is disabled, and the picker says which: `Disconnect first`
 once the session is actually connected, or `Wait for the connection attempt to finish` while a
-connect -- first or reconnect -- is still in flight and there is nothing yet to disconnect. The
+connect -- first or reconnect -- is still in flight and there is nothing yet to disconnect.
+**The picker's first control is a Disconnect button**, enabled only while the session is actually
+connected: it sends a `disconnect` message, the gateway drops this tab's host session (never
+another tab's), the status line shows `X Disconnected -- press Enter to reconnect`, and the
+choices free up; `Enter` or `Clear` then reconnects with the new choice. It is disabled while a
+connect is in flight (`Session.disconnect()` cannot cancel an attempt that has no connection yet)
+and while disconnected. If the page's own connection to the gateway closes, the picker says `The
+connection to the gateway closed; reload to reconnect.` and disables everything. The
 gateway owns the session, so the list comes from it and a click goes back to it as a `setGeometry`
 message. **A model choice can reset the oversize to None** when the oversize cannot go with that
 model (a non-`-E` model, or a fixed size smaller than the model), by the same rule as the GUI; the
@@ -230,7 +237,7 @@ Not in `npm test` — they need Xvfb and a real browser. Run them like `packages
 ```bash
 node packages/web/scripts/browser-keys.mjs       # 14 chords, 10 actions in order, 4 absences (Ctrl+K, Alt+M, Ctrl+Z, F13)
 node packages/web/scripts/browser-shot.mjs       # 1 case of served pixels vs the GUI's own golden
-node packages/web/scripts/browser-clicks.mjs     # keypad clicks, then 19 checks incl. the Alt-M picker
+node packages/web/scripts/browser-clicks.mjs     # keypad clicks, then 20 checks incl. the Alt-M picker
 node packages/web/scripts/browser-lan-copy.mjs   # 2 copy checks at a plain-http LAN address
 ```
 

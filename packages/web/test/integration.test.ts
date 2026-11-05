@@ -1620,6 +1620,90 @@ describe('-oversize auto, from the browser viewport', () => {
     }
   });
 
+  /**
+   * THE PICKER'S DISCONNECT BUTTON, 2026-11-05: `{kind:'disconnect'}` drops THIS SOCKET'S host
+   * session. Before it the picker could be used only after the HOST dropped the line (LOGOFF).
+   * The witnesses are what the browser sees: fresh choices saying connected:false, and a frame
+   * whose OIA says `X Disconnected`.
+   */
+  async function connectedTab(url: string) {
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    let id = '';
+    let connected = false;
+    for (let i = 0; i < 40 && !connected; i += 1) {
+      const m = await io.next('the connect');
+      if (m['kind'] === 'session') id = String(m['id']);
+      if (m['kind'] === 'geometryChoices' && m['connected'] === true && m['connecting'] === false) {
+        connected = true;
+      }
+    }
+    expect(connected, 'the tab must reach a settled connect first').toBe(true);
+    await io.settle();
+    return { ws, io, id };
+  }
+
+  it('a disconnect message drops the host session: choices say free, the OIA says Disconnected', async () => {
+    const { url, registry } = await gateway();
+    const { ws, io, id } = await connectedTab(url);
+    const session = registry.peek(id)!;
+    expect(session.isConnected()).toBe(true);
+    ws.send(JSON.stringify({ kind: 'disconnect' }));
+    let freed: Record<string, unknown> | undefined;
+    let frame: Record<string, unknown> | undefined;
+    for (let i = 0; i < 10 && (freed === undefined || frame === undefined); i += 1) {
+      const m = await io.next('the disconnect');
+      if (m['kind'] === 'geometryChoices' && m['connected'] === false) freed = m;
+      if (m['kind'] === 'frame') frame = m;
+    }
+    expect(freed, 'a disconnect must send choices with connected:false').toBeDefined();
+    expect(freed!['connecting']).toBe(false);
+    const oia = (frame?.['list'] as { oia?: { text: string } } | undefined)?.oia?.text;
+    expect(oia, 'the frame after a disconnect must show the disconnected OIA').toMatch(/^X Disconnected/);
+    expect(session.isConnected()).toBe(false);
+    // AND THE SOCKET IS STILL SERVED: a pick now goes through.
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
+    expect((await io.next('a pick after the disconnect'))['current'])
+      .toEqual({ model: '3278-4-E', oversize: 'auto' });
+    ws.close();
+  });
+
+  it('a disconnect BEFORE hello is swallowed: no reply, and the session it then opens connects', async () => {
+    const { url, registry } = await gateway();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const first = collect(ws, 4);
+    ws.send(JSON.stringify({ kind: 'disconnect' }));
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const got = await first;
+    // No `error` and nothing else ahead of the handshake: swallowed, like every kind before hello.
+    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
+    const session = registry.peek(got[0]!['id'] as string)!;
+    await until(() => session.isConnected());
+    expect(session.isConnected()).toBe(true);
+    ws.close();
+  });
+
+  it('a disconnect affects ONLY the socket\'s own session, never another tab\'s', async () => {
+    const { url, registry } = await gateway();
+    const a = await connectedTab(url);
+    const b = await connectedTab(url);
+    expect(a.id).not.toBe(b.id);
+    const sa = registry.peek(a.id)!;
+    const sb = registry.peek(b.id)!;
+    a.ws.send(JSON.stringify({ kind: 'disconnect' }));
+    await until(() => !sa.isConnected());
+    expect(sa.isConnected()).toBe(false);
+    // Long enough for a wrong-session disconnect to have landed too.
+    await new Promise((r) => { setTimeout(r, 100); });
+    expect(sb.isConnected(), 'the other tab\'s session must stay up').toBe(true);
+    a.ws.close();
+    b.ws.close();
+  });
+
   it('a viewport message BEFORE hello is swallowed, and changes nothing', async () => {
     const { url, registry } = await gateway();
     const ws = new WebSocket(url);

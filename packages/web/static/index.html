@@ -194,7 +194,8 @@
   Same rules as the overlays above: opaque and `position: fixed` in `ui.css`, `hidden` here AND in
   `createGeometryOverlay`, ids prefixed `geometry-` because it shares this document with the others.
 
-  EMPTY OF RADIOS: `geometryOverlay.ts` builds them from the gateway's `geometryChoices` the first
+  EMPTY OF RADIOS (and of the Disconnect button that heads them, 2026-11-05):
+  `geometryOverlay.ts` builds them from the gateway's `geometryChoices` the first
   time the picker is shown, so this document never spells the model list -- the gateway sends it
   from core's `KNOWN_MODELS`, which is the one a connect reads. `#geometry-status` carries the
   "Disconnect first" line while connected, a reset or refusal notice after a pick, and the
