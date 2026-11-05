@@ -215,19 +215,27 @@ running 3270 session instead of dropping it and logging on again. The browser re
 `sessionStorage`. An id naming a session someone is **currently** attached to is refused a
 handover, so a leaked id cannot become a way into another operator's logged-on session.
 
+**One `hello` per socket** (2026-11-05). A second `hello` on the same socket is answered with an
+`error` (`this socket already said hello; open a new connection for another session`) and changes
+nothing. Before this, a second `hello` built a second session and orphaned the first, which stayed
+attached forever, holding a host connection and a `--max-sessions` slot. So one page repeating
+`hello` could use up the gateway. The served page sends `hello` once, when the socket opens.
+
 ## By-hand harnesses
 
 Not in `npm test` — they need Xvfb and a real browser. Run them like `packages/gui/scripts/keys.mjs`:
 
 ```bash
-node packages/web/scripts/browser-keys.mjs   # 13 chords, 11 actions in order over a WebSocket
-node packages/web/scripts/browser-shot.mjs   # 2 cases of served pixels vs the GUI's own goldens
+node packages/web/scripts/browser-keys.mjs       # 14 chords, 10 actions in order, 4 absences (Ctrl+K, Alt+M, Ctrl+Z, F13)
+node packages/web/scripts/browser-shot.mjs       # 1 case of served pixels vs the GUI's own golden
+node packages/web/scripts/browser-clicks.mjs     # keypad clicks, then 19 checks incl. the Alt-M picker
+node packages/web/scripts/browser-lan-copy.mjs   # 2 copy checks at a plain-http LAN address
 ```
 
-`browser-shot.mjs` runs **two** cases, not one: the plain screen and the same screen with the keypad
-shown, each sized from its own golden's PNG header. The second is the one that matters — it says the
-keypad the browser draws is the same keypad Electron draws, which is what makes this one
-implementation with two front ends rather than two implementations that agree today.
+(Counts measured 2026-11-05 at `eabe45b`.) `browser-shot.mjs` runs **one** case, the plain screen.
+It was two until 2026-10-06, when the keypad became HTML buttons: a window of system-font controls
+is not a pixel the canvas owns, so the keypad case went. The case that is left still says the
+renderer is shared: the served page is pixel-identical to the GUI's own golden.
 
 Both need `--no-proxy-server`, which they pass: with `HTTP_PROXY` set, Chromium routes even a
 loopback request through the proxy and the failure is completely silent.

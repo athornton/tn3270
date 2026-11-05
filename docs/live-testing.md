@@ -5000,7 +5000,7 @@ Partition (Query) the way a modern VTAM host would. The live witness for that re
 the design doc's Testing section: a real z/VM or z/OS host, expected within a couple of weeks of
 2026-11-04 per the user.
 
-## OWED: oversize live pass — step 1 of branch `oversize`, 2026-11-04 (VM/370 160x62 witnessed)
+## OWED: oversize live pass — steps 1 and 2 of branch `oversize`, 2026-11-04/05 (VM/370 160x62 witnessed; step-2 items 5-7 not run)
 
 **Item 1 has a first live result (below); items 2-4 have not been run.** The conformance record
 above shows our Query Reply matches s3270's against a scripted host. These items show what a REAL
@@ -5055,3 +5055,38 @@ user's systems or browsers. Build from branch `oversize`, and run `npm run build
    the window mid-session applies at the next reconnect, not at once. **Only unit tests cover the
    viewport path**: the browser harnesses run `--replay` gateways, which never connect and so never
    measure.
+
+**Step 2 (changing the model and oversize while running, applied at the next connect), added
+2026-11-05 at `eabe45b`. None of items 5-7 has been run.** The gate covers each one offline only:
+`keys.mjs` checks that `Alt+M` pops the Model menu up (2 popups), and `browser-clicks.mjs`'s
+`picker` drives the web overlay. But under Xvfb the harness's keystrokes go in through
+`sendInputEvent`, not through X, so **no harness shows what a real keystroke does while the GUI
+menu is open**. And no harness renegotiates against a host after a choice.
+
+5. **The GUI's Model menu on a real desktop: Linux, and macOS (not yet run on macOS at all).**
+   - **Radio rendering:** the eight models are one radio group, each with its size in words, and
+     the Oversize submenu (None, Auto, and the `-oversize` size if one was given) is another. Is
+     exactly one item checked in each?
+   - **Disabled while connected or connecting:** every choice is greyed out while connected and
+     during a connect attempt, and comes back after a disconnect and after a failed connect. On
+     macOS, check that the top-level Model menu still OPENS while connected (only the items are
+     disabled, on purpose).
+   - **`Alt-M`:** where the popup appears (it should be over the main window, even when pressed
+     in the keypad or keyboard window); whether `Escape` dismisses it; and whether a real arrow
+     key or `Enter` goes to the menu and not to the 3270 screen. On macOS, `Option-M` is the chord
+     (matched on the key code, since its `key` is `µ`).
+   - **A model choice, then a reconnect, actually renegotiates:** e.g. pick `3278-4-E` while
+     disconnected, press `Enter` to reconnect, and check that VM sends a 43x80 Erase/Write
+     Alternate. Also check the reset: with `-oversize 160x62`, picking a non-`-E` model (e.g.
+     `3278-2`) resets the oversize to None, and the window says so. (No model is larger than
+     160x62, so that size never triggers the too-small reset; `-oversize 100x30` then `3278-5-E`,
+     27x132, does.)
+6. **The web picker, Firefox and Safari** (gateway, not `--replay`):
+   - **`Alt-M` reaches the page** and is not taken by the browser (`Option-M` on macOS Safari),
+     and `Escape` or `Alt-M` closes the picker.
+   - **A pick, then a reconnect, renegotiates:** pick `3278-4-E` while disconnected, reconnect,
+     and check for 43x80 from VM, as in item 5.
+7. **The CLI's `Set()` against VM:** `Set(model,3278-4-E)` then `Reconnect()`, and `ScreenText`
+   after EE or any full-screen panel should show 43 rows, from VM's Erase/Write Alternate. A
+   two-pair call, e.g. `Set(model,3278-5-E,oversize,160x62)`, should then reach 160x62 the same
+   way as item 1.
