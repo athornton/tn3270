@@ -21,6 +21,7 @@ executable through `$PATH`. Building alone does not count.
 | Distribution of non-GUI front ends | npm packages, not standalone binaries | User preference; `npm install` + an executable on `$PATH` |
 | npm names | `@tn3270/*` (org secured by the user 2026-11-05) | Already the workspace names; no import renames. Unscoped `tn3270` is taken on npm |
 | GUI distribution | Both npm and native artifacts | npm route is nearly free once the pipeline exists |
+| macOS architecture | Universal, one app | The usual pattern; keeps older Intel Macs usable. Both slices smoke-tested |
 | Signing | None this milestone | No Apple Developer ID yet (user is getting one); signing joins milestone B |
 | GUI self-containment | esbuild bundle in `packages/gui/app/` | The pages load `../canvas/dist/...` by monorepo layout, which breaks under npm and inside an asar; electron-builder also mishandles workspaces |
 | Where builds run | GitHub Actions matrix + one local `npm run package` | Repo is public, runners free; local script for iteration here |
@@ -76,9 +77,15 @@ re-raises its signal). Electron is the gui package's one runtime `dependency` (m
 
 | OS | Arch | Artifacts |
 |---|---|---|
-| macOS | x64, arm64 (separate builds, not universal) | `.dmg`, `.zip` |
+| macOS | universal (x64 + arm64 in one app) | `.dmg`, `.zip` |
 | Linux | x64, arm64 | AppImage, `.deb` |
 | Windows | x64 | NSIS installer |
+
+macOS is **universal**, the usual pattern, because Intel Macs stay in service longer as hardware
+prices rise and the app uses no OS-specific features. It costs a roughly doubled download (Electron
+twice), merged by electron-builder via `@electron/universal`, which our zero native modules make
+straightforward. **The oldest macOS supported is Electron 44's floor, not ours**; the plan reads
+that floor from Electron's own release notes and states it in the README rather than guessing.
 
 Input is `packages/gui/app/` plus a pinned Electron version; **no `node_modules`** goes into the
 app, because the bundle needs none. Command-line arguments work as from npm. The user tests
@@ -156,6 +163,13 @@ recent hosts; auto-update; Homebrew, winget and other package managers; tag-trig
   host, writes a screenshot through the existing `TN3270_GUI_SHOT` seam to a **fresh path per
   run**, and the image must be non-blank. Per memory note *harness-passes-on-stale-artifacts*, a
   fixed output path would let a GUI that never started pass.
+- **macOS universal artifact, both slices:** the packaged app is launched natively (arm64) and
+  again as `arch -x86_64` under Rosetta, each producing its own non-blank screenshot, so the x64
+  half is proven to start and not merely present. If GitHub still offers an Intel macOS runner
+  when the plan is written, the plan adds it and the native x64 run replaces the Rosetta one.
+  **Rosetta's lifetime is finite** (macOS 27 is said to be the last release with it); when the
+  runner image loses it, the x64 check moves to an Intel runner or to the user's Intel hardware,
+  and is never silently dropped.
 - Each check fails if its executable does not run; none passes merely because an artifact
   exists.
 
@@ -173,8 +187,7 @@ Triggers: push to `main`, pull requests, `workflow_dispatch`. Matrix:
 |---|---|
 | `ubuntu-latest` | Linux x64 npm smoke, bundle parity, AppImage + `.deb` x64 |
 | `ubuntu-24.04-arm` | Linux arm64 smoke, AppImage + `.deb` arm64 |
-| `macos-latest` (arm64) | macOS arm64 smoke, `.dmg` + `.zip` |
-| `macos-13` (x64) | macOS x64 smoke, `.dmg` + `.zip` |
+| `macos-latest` (arm64) | macOS smoke on both slices, universal `.dmg` + `.zip` |
 | `windows-latest` | Windows smoke, NSIS installer |
 
 Each job: `npm ci`, build, typecheck, vitest, bundle, pack, install smoke, package:gui, upload
@@ -188,16 +201,16 @@ The full suite has never run on macOS or Windows. Tests assuming POSIX paths, pt
 may fail there (the Python pty harnesses certainly would, and are Linux-only harnesses, not
 vitest). On those runners the job runs vitest and the install smoke; any vitest test found
 POSIX-only is marked skipped on that platform **with a stated reason**, never deleted or
-retried until green. The plan's first CI task is to run the unchanged suite on all five runners
+retried until green. The plan's first CI task is to run the unchanged suite on all four runners
 and record the exact failures before changing anything (memory note
 *measure-a-change-before-planning-it*).
 
 ## Success criteria
 
-1. All five CI jobs green, each having installed from tarballs and run all four executables
+1. All four CI jobs green, each having installed from tarballs and run all four executables
    through `$PATH`.
 2. Bundle parity: the GUI goldens match byte for byte from `app/`.
-3. Artifacts for all five OS/arch pairs uploaded by CI.
+3. Artifacts uploaded by CI: Linux x64 and arm64, macOS universal, Windows x64.
 4. A double-clicked GUI shows the connect dialog and connects (harness on Linux; by the user on
    macOS, Windows and a Pi).
 5. `docs/releasing.md` lets the user publish 0.1.0 by hand.
