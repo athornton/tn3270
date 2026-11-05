@@ -533,6 +533,44 @@ describe('the gateway end to end', () => {
     }
   });
 
+  it('REFUSES a second hello on the same socket, and leaks no session', async () => {
+    /*
+      THE LEAK THIS PINS, found in review 2026-11-05: a second `hello` built a NEW session and
+      overwrote `id` and `stopListening` without running the old one, so the first session stayed
+      ATTACHED for ever -- never detached, never reaped, holding a host connection and a
+      `--max-sessions` slot. One page repeating `hello` could exhaust every slot. `--grace 1` so
+      the reap after close is observable inside the test.
+    */
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '--grace', '1', '127.0.0.1:3270']);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const first = await io.next('hello');
+    expect(first['kind']).toBe('session');
+    const id = String(first['id']);
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const reply = await io.next('the second hello');
+    expect(reply['kind']).toBe('error');
+    expect(String(reply['message'])).toMatch(/already said hello/);
+    await io.settle();
+    expect(registry.size(), 'a second hello must not build a second session').toBe(1);
+    // The FIRST session is still this socket's, and still serves.
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await io.next('a tab after the second hello'))['kind']).toBe('frame');
+    ws.close();
+    for (let waited = 0; waited < 100 && registry.peek(id) !== undefined; waited += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    expect(registry.peek(id), 'the session must be detached and reaped after the grace').toBeUndefined();
+    expect(registry.size()).toBe(0);
+  });
+
   it('accepts a proxied browser Origin ONLY when --allow-origin names it', async () => {
     // Pins Task 4b's flag all the way through `main.ts`. Without the wiring, `checkUpgrade` is
     // called with an empty list and every browser behind a Host-rewriting proxy is refused -- which
@@ -1502,15 +1540,27 @@ describe('-oversize auto, from the browser viewport', () => {
     ws.send(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } }));
     const seen: Array<Record<string, unknown>> = [];
     let id = '';
-    for (let i = 0; i < 40 && !seen.some((m) => m['connected'] === true); i += 1) {
+    // MORE THAN THE HELLO'S OWN `geometryChoices`: the factory's connect emits 'geometry'
+    // synchronously inside `attach`, so the hello's already says connected:true and a deleted
+    // refresh would pass a "some connected" check (measured in review, 2026-11-05). The 'connect'
+    // event fires later, when the socket opens, and only the refresh sends a second one.
+    for (let i = 0; i < 40 && seen.length < 2; i += 1) {
       const m = await io.next('the connect');
       if (m['kind'] === 'session') id = String(m['id']);
       if (m['kind'] === 'geometryChoices') seen.push(m);
     }
-    expect(seen.some((m) => m['connected'] === true), 'a connect must refresh the choices').toBe(true);
+    expect(seen.length, 'a connect must refresh the choices AFTER the hello\'s').toBeGreaterThanOrEqual(2);
+    expect(seen[1]!['connected']).toBe(true);
     await io.settle();
+    const written: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(((c: string | Uint8Array) => {
+      written.push(String(c)); return true;
+    }) as typeof process.stderr.write);
     ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
     const refused = await io.next('the setGeometry while connected');
+    errSpy.mockRestore();
+    // ONE TAB'S TIMING, NOT THE GATEWAY OPERATOR'S PROBLEM: not logged (review, 2026-11-05).
+    expect(written.filter((w) => w.includes('disconnect first'))).toEqual([]);
     expect(refused['kind']).toBe('geometryChoices');
     expect(String(refused['notice'])).toMatch(/^disconnect first; /);
     expect(refused['current']).toEqual({ model: '3278-2-E', oversize: 'auto' });
@@ -1527,6 +1577,38 @@ describe('-oversize auto, from the browser viewport', () => {
     expect((await io.next('the setGeometry after disconnect'))['current'])
       .toEqual({ model: '3278-4-E', oversize: 'auto' });
     ws.close();
+  });
+
+  it('a FAILED connect re-enables the picker: connectSettled alone sends connected:false', async () => {
+    // A REFUSED PORT: the attempt ends with no 'connect' and no 'disconnect', so 'connectSettled'
+    // is the only event that can tell the browser the choices are usable again.
+    const closed = createServer();
+    await new Promise<void>((r) => { closed.listen(0, '127.0.0.1', r); });
+    const deadPort = (closed.address() as { port: number }).port;
+    await new Promise<void>((r) => { closed.close(() => { r(); }); });
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const args = parseWebArgs(['--listen', '0', '-insecure', `127.0.0.1:${deadPort}`]);
+      const { server, registry } = buildServer(args);
+      await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+      const port = (server.address() as { port: number }).port;
+      stop = () => { registry.closeAll(); server.close(); };
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+      const io = reader(ws);
+      ws.send(JSON.stringify({ kind: 'hello' }));
+      const choices: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < 40 && !(choices.length >= 2 && choices.at(-1)!['connected'] === false); i += 1) {
+        const m = await io.next('the failed connect');
+        if (m['kind'] === 'geometryChoices') choices.push(m);
+      }
+      expect(choices[0]!['connected'], 'the hello\'s choices are sent mid-attempt').toBe(true);
+      expect(choices.length).toBeGreaterThanOrEqual(2);
+      expect(choices.at(-1)!['connected'], 'the settled attempt must re-enable the picker').toBe(false);
+      ws.close();
+    } finally {
+      err.mockRestore();
+    }
   });
 
   it('a viewport message BEFORE hello is swallowed, and changes nothing', async () => {

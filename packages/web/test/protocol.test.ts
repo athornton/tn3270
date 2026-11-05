@@ -441,7 +441,7 @@ describe('setGeometry', () => {
     const bad: Array<[Record<string, unknown>, RegExp]> = [
       [{ model: '3278-4-E', oversize: 'none' }, /exactly one of model or oversize/],
       [{}, /exactly one of model or oversize/],
-      [{ choice: { model: '3278-4-E' } }, /exactly one of model or oversize/],   // extra nesting
+      [{ choice: { model: '3278-4-E' } }, /setGeometry takes only kind and one of model or oversize/],   // extra nesting
       [{ model: { name: '3278-4-E' } }, /model must be a string/],               // extra nesting
       [{ model: null }, /model must be a string/],
       [{ model: 42 }, /model must be a string/],
@@ -452,6 +452,8 @@ describe('setGeometry', () => {
       [{ oversize: 160 }, /oversize must be none, auto or startup/],
       [{ oversize: { kind: 'auto' } }, /oversize must be none, auto or startup/],
       [{ oversize: 'AUTO' }, /oversize must be none, auto or startup/],
+      [{ model: '3278-4-E', foo: 1 }, /setGeometry takes only kind and one of model or oversize/],
+      [{ oversize: 'auto', model2: 'x' }, /setGeometry takes only kind and one of model or oversize/],
     ];
     for (const [fields, want] of bad) {
       expect(() => decodeClientMessage(JSON.stringify({ kind: 'setGeometry', ...fields })),

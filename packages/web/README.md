@@ -139,11 +139,19 @@ connected or connecting every choice is disabled and the picker says `Disconnect
 gateway owns the session, so the list comes from it and a click goes back to it as a `setGeometry`
 message. **A model choice can reset the oversize to None** when the oversize cannot go with that
 model (a non-`-E` model, or a fixed size smaller than the model), by the same rule as the GUI; the
-picker says so, and the gateway prints it on stderr with the session id's first 8 characters. Pick
+picker says so. Pick
 a model the size fits and then the size again to get it back. Opening the picker closes the keypad,
-the keyboard and the transfer form, and opening any of those closes it. After clicking a choice,
-close it with its `Close` button: focus is then on the radio button, and the terminal's keys
-(including `Alt-M`) are not taken from a form control.
+the keyboard and the transfer form, and opening any of those closes it. A choice is made by
+clicking it, or by `Enter` or `Space` on the focused one; the arrow keys only move between
+choices and apply nothing. `Escape`, `Alt-M` or `Close` shuts the picker. The gateway prints a
+reset, and a refused return to the startup size, on stderr with the session id's first 8
+characters; a choice refused because the session is connected is only shown in the picker.
+
+**"Picked, never typed" is a rule about the page, not a security boundary.** Any client that can
+open the socket can send `setGeometry` for any of the eight models and any oversize the list
+names, and through the viewport it reports, `-oversize auto` can come to any size up to 16383
+cells. That is the same reach the operator already has; restrict the gateway with `--auth`, not
+with the picker.
 
 ## The host argument, and what this gateway will NOT take
 

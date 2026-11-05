@@ -127,6 +127,11 @@ export class SessionRegistry {
     return this.entries.get(id)?.handle.session;
   }
 
+  /** How many sessions exist, attached or in their grace window. Observes only, like `peek`. */
+  size(): number {
+    return this.entries.size;
+  }
+
   /**
    * The socket closed. Keep the 3270 session alive briefly in case they come back.
    *

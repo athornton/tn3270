@@ -277,8 +277,10 @@ if (geometryEl === null || geometryChoicesEl === null || geometryStatusEl === nu
   throw new Error('bridge: #geometry-overlay, #geometry-choices, #geometry-status or '
     + '#geometry-close is missing from index.html');
 }
-const geometryOverlay = createGeometryOverlay<HTMLElement>({
+const geometryOverlay = createGeometryOverlay<HTMLElement, Event & Partial<KeyboardEvent & MouseEvent>>({
   element: geometryEl,
+  setHidden: (el, hidden) => { el.hidden = hidden; },
+  isHidden: (el) => el.hidden === true,
   root: geometryChoicesEl,
   status: geometryStatusEl,
   create: (tag) => document.createElement(tag),
@@ -287,7 +289,9 @@ const geometryOverlay = createGeometryOverlay<HTMLElement>({
   setAttr: (el, name, value) => { el.setAttribute(name, value); },
   setChecked: (el, on) => { (el as HTMLInputElement).checked = on; },
   setDisabled: (el, on) => { (el as HTMLInputElement).disabled = on; },
-  onChange: (el, fn) => { el.addEventListener('change', fn); },
+  listen: (el, types, fn) => {
+    for (const t of types) el.addEventListener(t, fn as (e: Event) => void);
+  },
   send: (text) => { socket.send(text); },
 });
 // `hide()`, not a toggle, for the keypad Close button's reason: a double-click must not re-show.

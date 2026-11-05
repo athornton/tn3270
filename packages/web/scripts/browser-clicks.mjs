@@ -360,8 +360,10 @@ const TRANSFER_CHECKS = [
     name: 'picker',
     kind: 'live',
     what: 'Alt+M opens the picker over a closed keypad; clicking 3278-4-E sends setGeometry and the '
-      + "gateway's reply checks it -- a replay gateway is disconnected, so the choice is accepted",
-    mutant: 'bridge.ts  onGeometryChoices: () => {} (no radios ever drawn), or toggleGeometry dropped',
+      + "gateway's reply checks it (a replay gateway is disconnected, so it is accepted); an arrow "
+      + 'key sends NOTHING, Enter then picks; Alt+M closes it with a radio focused',
+    mutant: 'bridge.ts  onGeometryChoices: () => {} (no radios ever drawn); geometryOverlay.ts  a '
+      + 'keyboard click counted as a pick (arrowing applies every radio passed)',
   },
   {
     name: 'overlay',
@@ -1154,29 +1156,53 @@ async function runTransferPhase(url) {
       // AND THE STATUS LINE IS EMPTY: a refusal or reset would have put its notice there.
       const status = await cdp.eval('document.getElementById("geometry-status").textContent');
       /*
-        CLOSED BY ITS BUTTON, NOT BY Alt+M, AND THAT IS A MEASURED LIMIT, NOT A PREFERENCE. After
-        the click, focus is ON THE RADIO, and `renderer.ts` ignores every keydown aimed at an INPUT
-        (`isEditableTarget`, the fix for typed letters reaching the host from the transfer form) --
-        so a second Alt+M here does nothing (measured 2026-11-04: `closed again: false`). Close, or
-        a click elsewhere first, is the way out.
+        AN ARROW KEY IS MOVEMENT, NOT A PICK (review, 2026-11-05): Chromium moves the check and
+        fires `change` and a keyboard click on 3278-5, and none of that may send. Enter then does.
+        The focus is on the clicked radio, so these go to it.
       */
-      await clickCenter('#geometry-close');
+      const sentBeforeArrow = await sentCount();
+      await press('ArrowDown', 'ArrowDown', 40);
+      await new Promise((r) => { setTimeout(r, 500); });
+      const arrowed = await cdp.eval('document.activeElement?.value ?? null');
+      const arrowSent = await cdp.eval(
+        `window.__tn3270Probe.sent.slice(${sentBeforeArrow}).filter((t) => t.includes('setGeometry'))`);
+      await press('Enter', 'Enter', 13);
+      let enterSent = [];
+      for (let waited = 0; waited < 3000 && enterSent.length === 0; waited += 100) {
+        enterSent = await cdp.eval(
+          `window.__tn3270Probe.sent.slice(${sentBeforeArrow}).filter((t) => t.includes('setGeometry'))`);
+        if (enterSent.length === 0) await new Promise((r) => { setTimeout(r, 100); });
+      }
+      await new Promise((r) => { setTimeout(r, 300); });
+      /*
+        Alt+M WITH THE RADIO STILL FOCUSED CLOSES IT. `renderer.ts` ignores keydowns aimed at an
+        INPUT, so before the overlay's own listener this did nothing (measured 2026-11-04:
+        `closed again: false`).
+      */
+      const focusOnRadio = await cdp.eval('document.activeElement?.type === "radio"');
+      await press('m', 'KeyM', 77, CDP_ALT);
       await new Promise((r) => { setTimeout(r, 300); });
       const closed = !(await pickerUp());
       const want = '{"kind":"setGeometry","model":"3278-4-E"}';
+      const wantEnter = '{"kind":"setGeometry","model":"3278-5"}';
       // TEN RADIOS: eight models, None and Auto -- this gateway has no `-oversize`, so no startup.
       if (pickerShown && keypadHidden && toggledShut && radios === 10 && before === true
-        && frame.length === 1 && frame[0] === want && after === '3278-4-E' && status === '' && closed) {
+        && frame.length === 1 && frame[0] === want && after === '3278-4-E' && status === ''
+        && arrowed === '3278-5' && arrowSent.length === 0
+        && enterSent.length === 1 && enterSent[0] === wantEnter && focusOnRadio && closed) {
         ok(check('picker'), `Alt+M showed ${radios} radios with 3278-2-E checked and closed the keypad, `
           + `and Alt+M shut it; the click sent ${frame[0]}, the gateway's reply checked 3278-4-E with `
-          + 'no notice, and Close shut it');
+          + `no notice; ArrowDown moved to 3278-5 and sent nothing, Enter sent ${enterSent[0]}, and `
+          + 'Alt+M closed it with the radio focused');
       } else {
         no(check('picker'), 'the picker did not open, send, or reflect the gateway\'s answer',
           `shown: ${pickerShown}, keypad hidden: ${keypadHidden}, Alt+M shut it: ${toggledShut}, `
           + `radios: ${radios} (want 10), `
           + `3278-2-E checked first: ${before}, sent: ${JSON.stringify(frame)} (want [${want}]), `
           + `checked after: ${JSON.stringify(after)}, status: ${JSON.stringify(status)}, `
-          + `closed again: ${closed}`);
+          + `arrowed to: ${JSON.stringify(arrowed)} (want "3278-5"), arrow sent: `
+          + `${JSON.stringify(arrowSent)} (want []), Enter sent: ${JSON.stringify(enterSent)} `
+          + `(want [${wantEnter}]), focus on a radio: ${focusOnRadio}, closed by Alt+M: ${closed}`);
       }
     }
 

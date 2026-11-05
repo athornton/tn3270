@@ -684,9 +684,13 @@ export function decodeClientMessage(text: string): ClientMessage {
   /*
     THE PICKER'S CHOICE, 2026-11-04. Above the catch-all for the reason the transfer kinds' note
     gives. NOT AN `Action`, so outside the two-branch rule's subject -- but the field rule applies in
-    full: `main.ts` hands `model` to `Session.setGeometry`, and a bad one there would be a refusal
-    at best and, for a value `resolveTerminalType` cannot even fold (a number), a TypeError in the
-    socket handler. So the shape is closed here: exactly one field; a model that is a
+    full. NOT BECAUSE A BAD FIELD WOULD END THE PROCESS: `applyPick` runs the choice inside a try,
+    so even a number that `resolveTerminalType` cannot fold would come back as a notice (an earlier
+    draft of this note said "a TypeError in the socket handler", which the try makes false). It is
+    because the boundary is where a malformed frame gets its `error` naming the problem, like every
+    other kind, rather than a notice phrased for an operator who picked from a list. So the shape is
+    closed here: `kind` and exactly one other field, and nothing else (an unknown key is a
+    hand-built frame, refused like one); a model that is a
     `KNOWN_MODELS` key under case-folding (`Object.hasOwn`, so `constructor` is not a model, the
     lookup rule `termtype.ts` records); an oversize that is one of the three names. `IBM-3278-4-E`
     is refused even though core would accept it: the picker sends keys, and anything else is a
@@ -694,6 +698,9 @@ export function decodeClientMessage(text: string): ClientMessage {
   */
   if (kind === 'setGeometry') {
     const r = raw as Record<string, unknown>;
+    if (Object.keys(r).some((k) => k !== 'kind' && k !== 'model' && k !== 'oversize')) {
+      throw new Error('setGeometry takes only kind and one of model or oversize');
+    }
     const hasModel = Object.hasOwn(r, 'model');
     const hasOversize = Object.hasOwn(r, 'oversize');
     if (hasModel === hasOversize) {

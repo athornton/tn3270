@@ -207,9 +207,15 @@ Clear on a disconnected session already reconnects, `frontend/src/actions.ts`).
   on a Mac no longer types `µ` in the page, the same trade `Option-K` already makes. The browser
   harness checks the chord reaches the page in Chromium; Firefox and Safari are a live-pass item.
   The GUI honours the same chord by popping up its Model menu; the TUI has no sequence for it. The choice goes to the gateway, which
-  owns the session, as a new `setGeometry` client message (naming a model and one of `none`,
-  `auto` or `startup`, never a size) with its own shape check in
-  `web/src/protocol.ts`, beside `hello`, `action`, `transferStart` and the rest.
+  owns the session, as a new `setGeometry` client message carrying EXACTLY ONE of `model` (a
+  `KNOWN_MODELS` name) or `oversize` (`none`, `auto` or `startup`, never a size) -- one click
+  changes one thing, applied through the same `applyGeometryChoice` the GUI's menu uses -- with
+  its own shape check in `web/src/protocol.ts`, beside `hello`, `action`, `transferStart` and the
+  rest. (This bullet first said "a model and one of none, auto or startup"; the one-field shape
+  replaced it at implementation, 2026-11-04, so the web and the GUI share one rule.) The gateway
+  answers every pick, and every connect and disconnect, with `geometryChoices`.
+  "Picked, never typed" is a UI rule, not a security boundary: any client can choose any of the
+  eight models, and through its viewport any `auto` size within 16383 cells.
 - **TUI: a terminal resize is the switch, for size.** The TUI already handles `SIGWINCH`
   (`tui/src/app.ts:368`, `onResize`). Under `-oversize auto` the next connect or reconnect
   measures again, so resizing the terminal and reconnecting is how a TUI operator changes size,

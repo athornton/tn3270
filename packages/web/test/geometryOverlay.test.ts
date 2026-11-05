@@ -8,6 +8,19 @@ import {
  * and jsdom is not a dependency. Every element the overlay builds is one of these, so a test can
  * walk the tree, read `checked`/`disabled` and fire a `change` the way a click would.
  */
+/** What the overlay reads off a real event. `detail` is a click's count: 0 for a keyboard click. */
+interface Ev {
+  type: string; detail?: number; key?: string; code?: string;
+  altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean;
+  prevented?: boolean; stopped?: boolean;
+  preventDefault(): void; stopPropagation(): void;
+}
+const ev = (fields: Partial<Ev> & { type: string }): Ev => ({
+  ...fields,
+  preventDefault() { this.prevented = true; },
+  stopPropagation() { this.stopped = true; },
+});
+
 interface Fake {
   tag: string;
   attrs: Record<string, string>;
@@ -15,26 +28,36 @@ interface Fake {
   checked: boolean;
   disabled: boolean;
   children: Fake[];
-  change?: () => void;
+  /** Every event the overlay subscribed to on this element, by the injected `listen`. */
+  on: Array<{ types: readonly string[]; fn: (e: Ev) => void }>;
 }
+
+/** Fire `e` at whatever the overlay subscribed to on `el`. */
+const fire = (el: Fake, e: Ev): void => {
+  for (const l of el.on) if (l.types.includes(e.type)) l.fn(e);
+};
+/** A pointer click: `detail` 1, which no keyboard-induced click carries. */
+const click = (el: Fake): void => { fire(el, ev({ type: 'click', detail: 1 })); };
 const fake = (tag: string): Fake => ({
-  tag, attrs: {}, text: '', checked: false, disabled: false, children: [],
+  tag, attrs: {}, text: '', checked: false, disabled: false, children: [], on: [],
 });
 
 function rig(start: { hidden: boolean } = { hidden: true }) {
-  const element = start;
+  const element = { ...fake('div'), ...start };
   const root = fake('div');
   const status = fake('p');
   const sent: string[] = [];
-  const o = createGeometryOverlay<Fake>({
-    element: element as unknown as HTMLElement, root, status,
+  const o = createGeometryOverlay<Fake, Ev>({
+    element, root, status,
+    setHidden: (el, h) => { (el as Fake & { hidden: boolean }).hidden = h; },
+    isHidden: (el) => (el as Fake & { hidden: boolean }).hidden,
     create: (tag) => fake(tag),
     append: (p, c) => { p.children.push(c); },
     setText: (el, t) => { el.text = t; },
     setAttr: (el, n, v) => { el.attrs[n] = v; },
     setChecked: (el, on) => { el.checked = on; },
     setDisabled: (el, on) => { el.disabled = on; },
-    onChange: (el, fn) => { el.change = fn; },
+    listen: (el, types, fn) => { el.on.push({ types, fn }); },
     send: (t) => { sent.push(t); },
   });
   const inputs = (): Fake[] => {
@@ -155,14 +178,89 @@ describe('createGeometryOverlay', () => {
     const r = rig();
     r.o.update(choices());
     r.o.toggle();
-    r.input('geometry-model', '3278-4-E').change!();
-    r.input('geometry-oversize', 'auto').change!();
-    r.input('geometry-oversize', 'startup').change!();
+    click(r.input('geometry-model', '3278-4-E'));
+    click(r.input('geometry-oversize', 'auto'));
+    click(r.input('geometry-oversize', 'startup'));
     expect(r.sent.map((s) => JSON.parse(s))).toEqual([
       { kind: 'setGeometry', model: '3278-4-E' },
       { kind: 'setGeometry', oversize: 'auto' },
       { kind: 'setGeometry', oversize: 'startup' },
     ]);
+  });
+
+  it('ARROWING through a group sends NOTHING: change and keyboard clicks are not a pick', () => {
+    /*
+      THE DEFECT, found in review 2026-11-05: listening on `change` applied every radio an arrow
+      key passed over -- and a model passed on the way can reset the oversize to None. Arrow keys in
+      a radio group fire `change` AND a `click`, both with `detail` 0 (a keyboard click), so neither
+      may count. A pick is a POINTER click (`detail` >= 1) or Enter/Space on the focused radio.
+    */
+    const r = rig();
+    r.o.update(choices());
+    r.o.toggle();
+    const radio = r.input('geometry-model', '3278-3');
+    fire(radio, ev({ type: 'change' }));
+    fire(radio, ev({ type: 'click', detail: 0 }));
+    fire(radio, ev({ type: 'keydown', key: 'ArrowDown', code: 'ArrowDown' }));
+    expect(r.sent).toEqual([]);
+    click(radio);
+    expect(r.sent.map((t) => JSON.parse(t))).toEqual([{ kind: 'setGeometry', model: '3278-3' }]);
+  });
+
+  it('Enter or Space on the focused radio is the keyboard pick, sent ONCE', () => {
+    // Space's own default checks the radio and fires a keyboard click (`detail` 0) after the
+    // keydown; that click is ignored, so Space sends once, not twice.
+    const r = rig();
+    r.o.update(choices());
+    r.o.toggle();
+    const radio = r.input('geometry-oversize', 'auto');
+    fire(radio, ev({ type: 'keydown', key: ' ', code: 'Space' }));
+    fire(radio, ev({ type: 'click', detail: 0 }));
+    const enter = ev({ type: 'keydown', key: 'Enter', code: 'Enter' });
+    fire(radio, enter);
+    expect(r.sent.map((t) => JSON.parse(t))).toEqual([
+      { kind: 'setGeometry', oversize: 'auto' }, { kind: 'setGeometry', oversize: 'auto' },
+    ]);
+    // Enter's default is nothing useful here, and must not reach the page as a keystroke.
+    expect(enter.prevented).toBe(true);
+  });
+
+  it('Escape and Alt+M CLOSE it from inside, even with a radio focused, and stop there', () => {
+    /*
+      `renderer.ts` ignores every keydown aimed at an INPUT -- the fix that keeps typed letters out
+      of the host -- so with a radio focused the page-level Alt+M never ran and the picker could
+      only be shut by its button (measured 2026-11-04). The overlay listens itself. `stopPropagation`
+      so the window listener does not ALSO toggle it back open when focus is not on an input.
+    */
+    for (const e of [
+      ev({ type: 'keydown', key: 'Escape', code: 'Escape' }),
+      ev({ type: 'keydown', key: 'm', code: 'KeyM', altKey: true }),
+      ev({ type: 'keydown', key: 'µ', code: 'KeyM', altKey: true }),   // Option-M on a Mac
+    ]) {
+      const r = rig();
+      r.o.update(choices());
+      r.o.toggle();
+      expect(r.element.hidden).toBe(false);
+      fire(r.element, e);
+      expect(r.element.hidden, `${e.key} must close it`).toBe(true);
+      expect(e.prevented && e.stopped, `${e.key} must stop at the overlay`).toBe(true);
+    }
+  });
+
+  it('leaves every OTHER key alone, including Ctrl+Alt+M and plain m', () => {
+    for (const e of [
+      ev({ type: 'keydown', key: 'm', code: 'KeyM' }),
+      ev({ type: 'keydown', key: 'm', code: 'KeyM', altKey: true, ctrlKey: true }),
+      ev({ type: 'keydown', key: 'm', code: 'KeyM', altKey: true, metaKey: true }),
+      ev({ type: 'keydown', key: 'Tab', code: 'Tab' }),
+    ]) {
+      const r = rig();
+      r.o.update(choices());
+      r.o.toggle();
+      fire(r.element, e);
+      expect(r.element.hidden, JSON.stringify(e)).toBe(false);
+      expect(e.prevented || e.stopped, JSON.stringify(e)).toBeFalsy();
+    }
   });
 });
 

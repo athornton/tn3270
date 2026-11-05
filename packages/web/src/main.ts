@@ -210,6 +210,28 @@ export function buildServer(args: WebArgs) {
         return;
       }
       if (msg.kind === 'hello') {
+        /*
+          ONE HELLO PER SOCKET, 2026-11-05 -- a leak the picker's review measured, older than the
+          picker. A second `hello` used to run the whole branch below again: `registry.attach`
+          built a SECOND session, and `id`, `session` and `stopListening` were overwritten without
+          the old `stopListening` ever running -- so the first session stayed ATTACHED for good,
+          never detached and so never reaped, holding a host connection and a `--max-sessions`
+          slot. One page repeating `hello` exhausted the gateway. Measured: two registry entries,
+          the first keeping every listener after the socket closed.
+
+          REFUSED, AND NOTHING ELSE CHANGES, rather than "switch this socket to the new session":
+          a switch would have to tear down listeners, the transfer staging and the viewport binding
+          in the right order, and every one of those is a place to get the leak back. The served
+          bridge sends `hello` exactly once, at `onopen`, so the only sender of a second one is a
+          client this file must already distrust. An `error` and not a close, like every other bad
+          frame: the socket and its session stay as they were.
+        */
+        if (session !== undefined) {
+          conn.sendBinary(encodeServerMessage({
+            kind: 'error', message: 'this socket already said hello; open a new connection for another session',
+          }));
+          return;
+        }
         let attached;
         try { attached = registry.attach(msg.sessionId, msg.viewport); } catch (err) {
           conn.sendBinary(encodeServerMessage({ kind: 'error', message: String(err) }));
@@ -385,7 +407,11 @@ export function buildServer(args: WebArgs) {
       if (msg.kind === 'setGeometry') {
         const outcome = applyPick(session, startupFixed,
           'model' in msg ? { model: msg.model } : { oversize: msg.oversize });
-        if (outcome.notice !== undefined && id !== undefined) {
+        // ONLY THE TWO THE GATEWAY'S OPERATOR CAN ACT ON go to stderr: a reset (their `-oversize`
+        // did not fit the model picked) and a `startup` this gateway was started without. Every
+        // other refusal -- `disconnect first`, `wait for the connection attempt` -- is one tab's
+        // timing, and logging each click would bury the lines that matter.
+        if (outcome.notice !== undefined && id !== undefined && outcome.log) {
           process.stderr.write(`${id.slice(0, 8)}: ${outcome.notice}\n`);
         }
         sendGeometryChoices?.(outcome.notice);

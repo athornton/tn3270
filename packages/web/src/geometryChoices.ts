@@ -59,10 +59,14 @@ export function geometryChoices(
   };
 }
 
-/** What `applyPick` did: a notice for the operator if there is one, and whether it was refused. */
+/**
+ * What `applyPick` did: a notice for the operator if there is one, whether it was refused, and
+ * whether the GATEWAY's operator should see it on stderr (`log`) -- true only for a reset and for
+ * a `startup` this gateway does not have; see `main.ts`'s `setGeometry` arm.
+ */
 export type PickOutcome =
-  | { readonly refused: false; readonly notice?: string }
-  | { readonly refused: true; readonly notice: string };
+  | { readonly refused: false; readonly notice?: string; readonly log: boolean }
+  | { readonly refused: true; readonly notice: string; readonly log: boolean };
 
 /** The refusal for `startup` on a gateway that was given no fixed size. Remedy first. */
 export const NO_STARTUP_SIZE =
@@ -82,21 +86,21 @@ export function applyPick(
 ): PickOutcome {
   const current = session.geometrySetting;
   if (current === undefined) {
-    return { refused: true, notice: 'this session has no model to choose: its terminal type is fixed' };
+    return { refused: true, notice: 'this session has no model to choose: its terminal type is fixed', log: false };
   }
   let choice: GeometryChoice;
   if ('model' in pick) {
     choice = { model: pick.model };
   } else if (pick.oversize === 'startup') {
-    if (startupFixed === undefined) return { refused: true, notice: NO_STARTUP_SIZE };
+    if (startupFixed === undefined) return { refused: true, notice: NO_STARTUP_SIZE, log: true };
     choice = { oversize: { kind: 'fixed', rows: startupFixed.rows, cols: startupFixed.cols } };
   } else {
     choice = { oversize: { kind: pick.oversize } };
   }
   try {
     const notice = applyGeometryChoice(current, choice, (next) => { session.setGeometry(next); });
-    return notice !== undefined ? { refused: false, notice } : { refused: false };
+    return notice !== undefined ? { refused: false, notice, log: true } : { refused: false, log: false };
   } catch (err) {
-    return { refused: true, notice: err instanceof Error ? err.message : String(err) };
+    return { refused: true, notice: err instanceof Error ? err.message : String(err), log: false };
   }
 }

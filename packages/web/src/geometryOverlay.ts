@@ -25,7 +25,25 @@
  *
  * `Session.setGeometry` refuses both (the terminal type is already on the wire, or an attempt in
  * flight has already resolved what it will advertise), so every radio is disabled and the status
- * line reads `CONNECTED_LINE`. A disabled radio fires no `change`, so nothing is sent.
+ * line reads `CONNECTED_LINE`. A disabled radio is neither clickable nor focusable, and `pick`
+ * checks `connected` again besides, so nothing is sent.
+ *
+ * ## A PICK IS A POINTER CLICK, OR ENTER/SPACE -- NEVER `change`, 2026-11-05
+ *
+ * Listening on `change` was the first version, and review found it APPLIED EVERY RADIO AN ARROW KEY
+ * PASSED: arrows in a radio group move the check, firing `change` and a click on each one -- and a
+ * model passed on the way can reset the oversize to None. So arrowing is free movement, and a pick
+ * is a click with `detail >= 1` (a real pointer; the clicks arrows and Space synthesise carry
+ * `detail` 0) or Enter/Space on the focused radio, handled on `keydown` -- which also covers
+ * Space, whose own synthetic click is then ignored, so it sends once.
+ *
+ * ## ESCAPE AND Alt+M CLOSE IT FROM INSIDE, 2026-11-05
+ *
+ * `renderer.ts` ignores every keydown aimed at an INPUT (the fix that keeps typed letters out of
+ * the host), so with a radio focused the page's own Alt+M never ran and only the Close button
+ * worked. The overlay listens itself, matching Alt+M as `keys.ts` does -- `e.code === 'KeyM'` with
+ * Alt and no Ctrl or Meta, so Option-M's `µ` counts -- and stops the event there, so the window
+ * listener cannot toggle it straight back open when the focus is not on an input.
  *
  * ## A CHOICE IS ONE FIELD
  *
@@ -112,13 +130,29 @@ export function parseGeometryChoices(msg: Record<string, unknown>): GeometryChoi
   };
 }
 
-export interface GeometryOverlayDeps<E> {
+/** The fields of a DOM event the overlay reads. `detail` is a click's count: 0 from the keyboard. */
+export interface OverlayEvent {
+  readonly type: string;
+  readonly detail?: number;
+  readonly key?: string;
+  readonly code?: string;
+  readonly altKey?: boolean;
+  readonly ctrlKey?: boolean;
+  readonly metaKey?: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+}
+
+export interface GeometryOverlayDeps<E, V extends OverlayEvent = OverlayEvent> {
   /**
-   * The panel itself. Only `hidden` is touched. `HTMLElement` like the sibling overlays: a narrower
-   * `{ hidden: boolean }` is REJECTED for a real element, because lib.dom types `hidden` as
-   * `boolean | "until-found"` (measured: TS2322 at `bridge.ts`). The tests pass a fake through a cast.
+   * The panel itself, an `E` like every other element here: `hidden` is touched through
+   * `setHidden` and its `keydown` is listened to. NOT `{hidden: boolean}` on the element type,
+   * which a real element is REJECTED as -- lib.dom types `hidden` as `boolean | "until-found"`
+   * (measured: TS2322 at `bridge.ts`, twice, for both spellings).
    */
-  readonly element: HTMLElement;
+  readonly element: E;
+  readonly setHidden: (el: E, hidden: boolean) => void;
+  readonly isHidden: (el: E) => boolean;
   /** Where the two radio groups are built. */
   readonly root: E;
   /** The one-line status: the connected line, or a notice. */
@@ -129,8 +163,8 @@ export interface GeometryOverlayDeps<E> {
   readonly setAttr: (el: E, name: string, value: string) => void;
   readonly setChecked: (el: E, on: boolean) => void;
   readonly setDisabled: (el: E, on: boolean) => void;
-  /** A radio became checked by the operator. Disabled radios never fire it. */
-  readonly onChange: (el: E, fn: () => void) => void;
+  /** Subscribe `fn` to `types` on `el` -- `addEventListener` in the page, a fake in the tests. */
+  readonly listen: (el: E, types: readonly string[], fn: (e: V) => void) => void;
   /** One JSON text frame to the gateway, on the page's own socket. */
   readonly send: (text: string) => void;
 }
@@ -146,10 +180,30 @@ export interface GeometryOverlay {
   update(choices: GeometryChoices): void;
 }
 
-export function createGeometryOverlay<E>(deps: GeometryOverlayDeps<E>): GeometryOverlay {
+export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
+  deps: GeometryOverlayDeps<E, V>,
+): GeometryOverlay {
   let latest: GeometryChoices | undefined;
   let radios: Array<{ el: E; group: 'model' | 'oversize'; name: string }> | undefined;
-  deps.element.hidden = true;
+  deps.setHidden(deps.element, true);
+
+  const hide = (): void => { deps.setHidden(deps.element, true); };
+  // Escape, or Alt+M from inside -- see the header. Registered at construction: it costs one
+  // listener and needs no radios.
+  deps.listen(deps.element, ['keydown'], (e) => {
+    const altM = e.code === 'KeyM' && e.altKey === true && e.ctrlKey !== true && e.metaKey !== true;
+    if (e.key !== 'Escape' && !altM) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hide();
+  });
+
+  const pick = (which: 'model' | 'oversize', name: string): void => {
+    if (latest === undefined || latest.connected) return;
+    deps.send(JSON.stringify(which === 'model'
+      ? { kind: 'setGeometry', model: name }
+      : { kind: 'setGeometry', oversize: name }));
+  };
 
   const group = (legend: string, which: 'model' | 'oversize', items: readonly Choice[]): void => {
     const set = deps.create('fieldset');
@@ -167,10 +221,19 @@ export function createGeometryOverlay<E>(deps: GeometryOverlayDeps<E>): Geometry
       deps.append(label, input);
       deps.append(label, text);
       deps.append(set, label);
-      deps.onChange(input, () => {
-        deps.send(JSON.stringify(which === 'model'
-          ? { kind: 'setGeometry', model: item.name }
-          : { kind: 'setGeometry', oversize: item.name }));
+      // A POINTER click only (`detail >= 1`), or Enter/Space -- never `change`; see the header.
+      deps.listen(input, ['click', 'keydown'], (e) => {
+        if (e.type === 'click') {
+          if ((e.detail ?? 0) >= 1) pick(which, item.name);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ') {
+          // Enter: nothing else wants it, and it must not reach the page. Space: its own default
+          // still checks the radio; the keyboard click that follows carries `detail` 0 and is
+          // ignored above, so the pick is sent once.
+          if (e.key === 'Enter') e.preventDefault();
+          pick(which, item.name);
+        }
       });
       radios!.push({ el: input, group: which, name: item.name });
     }
@@ -179,7 +242,7 @@ export function createGeometryOverlay<E>(deps: GeometryOverlayDeps<E>): Geometry
 
   /** Build the radios from `latest`, once, and only while shown -- see the header. */
   const ensureBuilt = (): void => {
-    if (radios !== undefined || latest === undefined || deps.element.hidden) return;
+    if (radios !== undefined || latest === undefined || deps.isHidden(deps.element)) return;
     radios = [];
     group('Model', 'model', latest.models);
     group('Oversize', 'oversize', latest.oversizes);
@@ -198,11 +261,11 @@ export function createGeometryOverlay<E>(deps: GeometryOverlayDeps<E>): Geometry
 
   return {
     toggle: () => {
-      deps.element.hidden = !deps.element.hidden;
+      deps.setHidden(deps.element, !deps.isHidden(deps.element));
       render();
     },
-    hide: () => { deps.element.hidden = true; },
-    visible: () => !deps.element.hidden,
+    hide,
+    visible: () => !deps.isHidden(deps.element),
     update: (choices) => {
       latest = choices;
       render();
