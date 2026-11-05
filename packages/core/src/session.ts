@@ -20,6 +20,7 @@ import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
 import { cp037, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
+import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size } from './geometry.js';
 
 /**
  * A single TN3270 session: socket, telnet layer, screen, keyboard.
@@ -119,6 +120,27 @@ export interface SessionOptions {
    * to discover in a trace.
    */
   user?: string;
+  /**
+   * The model and oversize, as one setting resolved at EVERY connect -- GEOMETRY MODE.
+   *
+   * Absent means legacy mode: `terminalType`, `rows`/`cols` and `alternateRows`/`alternateCols`
+   * fix the session's geometry at construction, exactly as before this option existed. Given,
+   * it replaces all of them, and the constructor refuses it alongside any of them: two sources
+   * for one terminal type would leave a reader of the call site unable to tell which one the
+   * host saw. See `Session.setGeometry`, and the spec,
+   * docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md.
+   */
+  geometry?: GeometrySetting;
+  /**
+   * Measure the window for `oversize: { kind: 'auto' }`, called once per connect and never at
+   * construction (see the spec's "Why auto is measured at connect, and only then").
+   *
+   * A SESSION option rather than a field of `geometry`, and kept for the session's lifetime:
+   * `setGeometry` REPLACES the setting wholesale, and a function riding inside it would be
+   * dropped by the first replacement that did not happen to repeat it -- the reason
+   * `GeometrySetting` is plain data (geometry.ts).
+   */
+  measure?: () => Size | undefined;
 }
 
 /**
@@ -156,11 +178,21 @@ export interface ConnectOptions {
  * It also gives DFT the progress display it never had, which is the same fact seen from the
  * operator's side.
  *
+ * `geometry` fires on every connect in geometry mode (`SessionOptions.geometry`), once the
+ * setting has been resolved and the screen resized, and BEFORE the socket is opened -- so a
+ * front end can print `lastGeometryNotice` (an `auto` that fell back to the model) before
+ * anything the host sends. Never in legacy mode, where nothing is resolved.
+ *
+ * `connectSettled` fires once when the last connection attempt in flight ENDS, succeeded or
+ * failed, with `isConnecting()` already false -- the counterpart of 'geometry' for a front end
+ * that disables controls while an attempt is in flight. A failed attempt emits nothing else.
+ *
  * Not exported from `index.ts` and referenced only by `on`/`off`/`listenerCount`/
  * `emit`, so widening it has no blast radius (checked 2026-09-25, re-checked 2026-10-02).
  */
 export type SessionEvent =
-  | 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd' | 'transferProgress';
+  | 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd' | 'transferProgress'
+  | 'geometry' | 'connectSettled';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
@@ -277,8 +309,35 @@ export class Session {
    * would revert an UNBIND to the PREVIOUS BIND's geometry rather than the model's -- wrong,
    * and it looks completely correct while doing so. See the mutation test in
    * tn3270e-session.test.ts pinning exactly this.
+   *
+   * IN GEOMETRY MODE (`SessionOptions.geometry`) IT IS THE RESOLVED ALTERNATE FOR THE CURRENT
+   * CONNECTION, written by `applyGeometry()` early in every `connect()` -- hence no longer
+   * `readonly`. Still the fixed point the paragraph above describes, just fixed per connection
+   * rather than per session: no BIND writes it, only a connect. This mirrors x3270 making an
+   * oversize the model's maximum (`ctlr.c:334`, `ov_cols = maxCOLS = ovc`), so BIND's limit
+   * (`acceptBindDims(dims, model)` in `handleBind`), BIND's screen-size byte 0x03 (`'caller'`)
+   * and UNBIND's revert all read the oversize from here with no change of their own.
    */
-  private readonly modelAlternate: { readonly rows: number; readonly cols: number };
+  private modelAlternate: { readonly rows: number; readonly cols: number };
+  /**
+   * The model and oversize to resolve at the next connect, or `undefined` for LEGACY MODE, in
+   * which the constructor's `terminalType`/alternate options are fixed for the session's
+   * lifetime and nothing below is resolved. See `SessionOptions.geometry`.
+   *
+   * A property of the session's configuration, like `target`, so `handleClose` leaves it alone.
+   */
+  private setting: GeometrySetting | undefined;
+  /**
+   * The terminal type this CONNECTION advertises, resolved from `setting` at connect; read
+   * instead of `opts.terminalType` by the TelnetLayer build and by TN3270E's DEVICE-TYPE
+   * REQUEST, so the two can never disagree. `undefined` in legacy mode, where both fall back to
+   * `opts.terminalType` exactly as before.
+   */
+  private ttype: string | undefined;
+  /** See `lastGeometryNotice`. */
+  private geometryNotice: string | undefined;
+  /** See `resolvedGeometry`. */
+  private resolved: ResolvedGeometry | undefined;
   /** This connection's overrides. Empty between connections. See ConnectOptions. */
   private per: ConnectOptions = {};
   /**
@@ -311,6 +370,17 @@ export class Session {
    */
   private reconnecting = false;
   /**
+   * How many `connect()` calls are between their start and their end -- the FIRST connect's
+   * equivalent of `reconnecting`, which covers only `reconnect()`. A COUNT and not a flag, because
+   * two overlapping `connect()` calls are legal and the first to finish must not clear the
+   * second's.
+   *
+   * WHY `setGeometry` NEEDS IT: `connect()` resolves the setting BEFORE its first await, so a
+   * change accepted while the socket or TLS handshake is still in flight would never reach the
+   * host -- and a front end would show it as the current geometry all the same.
+   */
+  private connecting = 0;
+  /**
    * THE PENDING AID: which key the operator last pressed, for the host to learn about on
    * its own schedule rather than ours.
    *
@@ -341,21 +411,164 @@ export class Session {
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
-    this.screen = new Screen({
-      rows: opts.rows ?? MODEL_2.rows,
-      cols: opts.cols ?? MODEL_2.cols,
-      ...(opts.alternateRows !== undefined ? { alternateRows: opts.alternateRows } : {}),
-      ...(opts.alternateCols !== undefined ? { alternateCols: opts.alternateCols } : {}),
-      ...(opts.codePage ? { codePage: opts.codePage } : {}),
-    });
-    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
     this.bindLimit = opts.bindLimit ?? true;
-    // Captured from OPTIONS, not from `this.screen.alternateSize` -- see the field's own
-    // comment for why reading it back off the screen would be the trap.
-    this.modelAlternate = {
-      rows: opts.alternateRows ?? opts.rows ?? MODEL_2.rows,
-      cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
-    };
+    if (opts.geometry !== undefined) {
+      // ONE SOURCE OF GEOMETRY, refused rather than merged: with both, a reader of the call
+      // site could not tell which terminal type the host saw.
+      const legacy = (['terminalType', 'rows', 'cols', 'alternateRows', 'alternateCols'] as const)
+        .filter((k) => opts[k] !== undefined);
+      if (legacy.length > 0) {
+        throw new Error(`geometry replaces ${legacy.join(', ')}: give one or the other, not both`);
+      }
+      // Validated as `setGeometry` validates, so a setting that every connect would refuse --
+      // a fixed oversize below the model, `-oversize` on a non-`-E` model -- is refused here,
+      // to whoever built the session, and not at the first connect.
+      this.validateGeometry(opts.geometry);
+      this.setting = opts.geometry;
+      // THE MODEL'S GEOMETRY, NOT THE OVERSIZE'S: `auto` must not be measured here (the GUI's
+      // font atlas, which its measure reads, does not exist yet -- see the spec's "Why auto is
+      // measured at connect, and only then"), so the oversize is dropped for this one call and
+      // the real resolve waits for `connect()`. A fixed oversize therefore also starts at the
+      // model's sizes, which is harmless: nothing is on the screen before a connect.
+      const g = resolveGeometry({ ...opts.geometry, oversize: { kind: 'none' } });
+      this.screen = new Screen({
+        rows: g.default.rows,
+        cols: g.default.cols,
+        alternateRows: g.alternate.rows,
+        alternateCols: g.alternate.cols,
+        ...(opts.codePage ? { codePage: opts.codePage } : {}),
+      });
+      this.modelAlternate = g.alternate;
+      this.ttype = g.terminalType;
+    } else {
+      this.screen = new Screen({
+        rows: opts.rows ?? MODEL_2.rows,
+        cols: opts.cols ?? MODEL_2.cols,
+        ...(opts.alternateRows !== undefined ? { alternateRows: opts.alternateRows } : {}),
+        ...(opts.alternateCols !== undefined ? { alternateCols: opts.alternateCols } : {}),
+        ...(opts.codePage ? { codePage: opts.codePage } : {}),
+      });
+      // Captured from OPTIONS, not from `this.screen.alternateSize` -- see the field's own
+      // comment for why reading it back off the screen would be the trap.
+      this.modelAlternate = {
+        rows: opts.alternateRows ?? opts.rows ?? MODEL_2.rows,
+        cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
+      };
+    }
+    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
+  }
+
+  /** The setting the next connect will resolve, or `undefined` in legacy mode. */
+  get geometrySetting(): GeometrySetting | undefined { return this.setting; }
+
+  /**
+   * The last connect's operator notice -- an `auto` that fell back to the model -- or
+   * `undefined` when that connect had none (or in legacy mode, or before any connect). Every
+   * front end prints it on stderr, though not necessarily on the `geometry` event itself -- the
+   * TUI holds a reconnect's until it has left the alternate screen; see the spec's "Data flow on
+   * a connect" for why none can hold it on screen.
+   */
+  get lastGeometryNotice(): string | undefined { return this.geometryNotice; }
+
+  /**
+   * What the last connect RESOLVED -- terminal type and both sizes -- or `undefined` in legacy
+   * mode or before any connect. Not `screen.alternateSize`, which a BIND rewrites mid-session:
+   * this is what the host was told, so a front end can compare a fresh `resolveGeometry` against
+   * it to say whether a reconnect would change anything.
+   */
+  get resolvedGeometry(): ResolvedGeometry | undefined { return this.resolved; }
+
+  /**
+   * Replace the model and oversize, to take effect at the NEXT connect.
+   *
+   * REFUSED WHILE CONNECTED, and while a `reconnect()` is between its call and its socket
+   * (`reconnecting` is the half of x3270's `PCONNECTED` that `conn` does not cover -- see that
+   * field). The terminal type has already gone out in telnet negotiation and no 3270 message
+   * lets a terminal announce a new size, so a mid-session change could only be a lie to the
+   * host. x3270 refuses the same way; it can also queue the change for the disconnect
+   * (`XN_DEFER`), which this deliberately does not: a pending change the operator cannot see
+   * is a surprise.
+   *
+   * VALIDATED NOW, by `validateGeometry`, so a bad setting is refused to the operator who
+   * typed it rather than at some later connect.
+   *
+   * Does not touch the screen; `connect()` does that.
+   */
+  setGeometry(next: GeometrySetting): void {
+    if (this.setting === undefined) {
+      throw new Error('setGeometry needs a session built with the geometry option; '
+        + 'this one fixed its terminal type at construction');
+    }
+    if (this.conn !== undefined) {
+      throw new Error('disconnect first; model and oversize apply at the next connect');
+    }
+    // NOT `disconnect first` here: there is no connection to disconnect yet, and the one being
+    // made has already resolved the setting it will advertise. See `connecting`.
+    if (this.reconnecting || this.connecting > 0) {
+      throw new Error('wait for the connection attempt to finish; '
+        + 'model and oversize apply at the next connect');
+    }
+    this.validateGeometry(next);
+    this.setting = next;
+  }
+
+  /**
+   * Throw whatever `resolveGeometry` would throw for `setting` at a connect, WITHOUT measuring.
+   *
+   * `auto` is resolved against a STAND-IN measure that reports no window, never the real one:
+   * measuring is the connect's job, and the window may change before then. The stand-in takes
+   * geometry.ts's "no window size known" fallback, but only after every rule `auto` can break
+   * has run -- the terminal-type conflict and the `-E` requirement both precede the
+   * `measure()` call there (`resolveGeometry`, geometry.ts) -- so it refuses exactly what a
+   * connect would. With no measure option at all, `undefined` is passed through and geometry.ts
+   * gives its own "auto needs a window to measure" refusal.
+   *
+   * An earlier version validated `auto` with its oversize swapped to `none`, which returns
+   * before either rule: `{ model: '3278-2', oversize: auto }` was accepted here and refused only
+   * at the next connect.
+   */
+  private validateGeometry(setting: GeometrySetting): void {
+    resolveGeometry(setting, this.opts.measure !== undefined ? () => undefined : undefined);
+  }
+
+  /**
+   * Apply a geometry `connect()` has already resolved.
+   *
+   * TWO HALVES, AND `connect()` RUNS THE TEARDOWN BETWEEN THEM. The RESOLVE comes first, before
+   * the teardown and before `target` is recorded, so a refusal opens no socket, disturbs no live
+   * connection and leaves `reconnect()` exactly as it was -- a first connect refused there still
+   * has "No previous host". THIS half comes after the teardown, because it erases the screen and
+   * emits: run before it, a connect while connected would clear the OLD host's screen with its
+   * connection still up, and announce 'screen' and 'geometry' while `isConnected()` was still
+   * true, ahead of that connection's own 'disconnect'.
+   *
+   * THE SCREEN IS RESIZED AND CLEARED ONLY WHEN THE GEOMETRY CHANGED. Every front end runs in
+   * geometry mode, so this runs on every reconnect, and a reconnect to the same model must
+   * leave the operator's last screen exactly where legacy mode leaves it -- on it. When it did
+   * change, the path is UNBIND's (`handleUnbind`): `setSizes`, `useDefaultSize`, then an
+   * explicit `clear()` because `useDefaultSize` alone skips the erase when the screen is already
+   * at the default size -- the usual case, though not a certain one, since a BIND can have set
+   * another. IN PLACE, never a new `Screen`: `Keyboard` holds a
+   * reference to this one. And, like UNBIND, a 'screen' event announces the erase, since a
+   * front end repaints only on 'screen'.
+   */
+  private applyGeometry(g: ResolvedGeometry): void {
+    const alt = this.modelAlternate;
+    const changed = g.terminalType !== this.ttype
+      || g.alternate.rows !== alt.rows || g.alternate.cols !== alt.cols;
+    if (changed) {
+      this.screen.setSizes(g.default, g.alternate);
+      this.screen.useDefaultSize();
+      this.screen.clear();
+      this.modelAlternate = g.alternate;
+      this.ttype = g.terminalType;
+    }
+    if (g.notice !== undefined) this.trace.note(g.notice);
+    if (g.clamp !== undefined) this.trace.note(g.clamp);
+    this.geometryNotice = g.notice;
+    this.resolved = g;
+    if (changed) this.emit('screen');
+    this.emit('geometry');
   }
 
   /** The model's alternate geometry -- see `modelAlternate`'s field comment. */
@@ -570,12 +783,44 @@ export class Session {
     };
   }
 
+  /**
+   * True while a `connect()` -- a first connect or a reconnect's -- has started and not finished:
+   * TCP or TLS setup, before `isConnected()`. True already when 'geometry' fires inside it, so a
+   * front end can disable its geometry controls from that event.
+   */
+  isConnecting(): boolean {
+    return this.connecting > 0 || this.reconnecting;
+  }
+
   async connect(host: string, port: number, per: ConnectOptions = {}): Promise<void> {
+    // COUNTED BEFORE ANYTHING ELSE, so 'geometry' (emitted by `applyGeometry` below) already sees
+    // it, and cleared in `finally` on every exit -- a refused geometry, a refused socket, success.
+    this.connecting += 1;
+    try {
+      await this.connectNow(host, port, per);
+    } finally {
+      this.connecting -= 1;
+      // Inside a `reconnect()`, `reconnecting` is still true here: that method's own `finally`
+      // emits instead, so one attempt settles once.
+      if (!this.isConnecting()) this.emit('connectSettled');
+    }
+  }
+
+  private async connectNow(host: string, port: number, per: ConnectOptions): Promise<void> {
+    // RESOLVED FIRST, before anything below can touch the live connection or the remembered
+    // target; APPLIED after the teardown. See `applyGeometry` for why it is split around it.
+    // `reconnect()` comes through here too, so `auto` is re-measured on every reconnect -- the
+    // only moment the host can learn a new size.
+    const geometry = this.setting !== undefined
+      ? resolveGeometry(this.setting, this.opts.measure)
+      : undefined;
+
     // Tear down any live connection first. Without this the old Connection is
     // dropped without close(), and its onClose/onError closures still capture
     // `this` — so when the stale socket eventually closes it calls
     // handleClose() and tears down the NEW session.
     if (this.conn !== undefined) this.disconnect();
+    if (geometry !== undefined) this.applyGeometry(geometry);
 
     // AFTER the teardown, which clears the previous connection's overrides — set it
     // before and disconnect() would wipe the ones just passed in.
@@ -609,6 +854,9 @@ export class Session {
     // `DeviceName` (and thus a different starting counter) than the one the presence
     // check just examined.
     const environ = this.buildEnviron();
+    // The resolved terminal type in geometry mode; `undefined` in legacy mode, where
+    // `opts.terminalType` is read exactly as before.
+    const terminalType = this.ttype ?? this.opts.terminalType;
     this.telnet = new TelnetLayer({
       write: (b) => conn.write(b),
       onRecord: (r) => this.handleRecord(r),
@@ -617,7 +865,7 @@ export class Session {
       // `terminalType: undefined` is a type error, and passing it would also
       // bypass the layer's own `?? TERMINAL_TYPE` default if that guard ever
       // became a truthiness check.
-      ...(this.opts.terminalType ? { terminalType: this.opts.terminalType } : {}),
+      ...(terminalType ? { terminalType } : {}),
       tn3270eEnabled: this.per.tn3270e ?? this.opts.tn3270e ?? true,
       onTn3270eSubneg: (body) => { this.handleTn3270eSubneg(body, this.telnet); },
       onTn3270eDisabled: () => { this.tn3270eDisabled(); },
@@ -692,11 +940,23 @@ export class Session {
    * `Connect()`, so a script written for s3270 reads the same text from us.
    *
    * `PCONNECTED` in x3270 is "connected OR half-connected", which is why the first check also
-   * covers a reconnect ALREADY IN FLIGHT and not just `this.conn`. Our `isConnected()` sees only
-   * the completed case, and this method is reachable from a KEY: two quick presses would
-   * otherwise start two connects, both of which passed `connect()`'s teardown check while
-   * `this.conn` was still undefined, so the first socket would be replaced without being closed
-   * and left open on the mainframe forever — an LU leaked per impatient keypress.
+   * covers a connect attempt ALREADY IN FLIGHT and not just `this.conn` -- a RECONNECT's (via
+   * `reconnecting`) AND A FIRST `connect()`'s (via `isConnecting()`, which also covers
+   * `connecting`). Our `isConnected()` sees only the completed case, and this method is reachable
+   * from a KEY: two quick presses would otherwise start two connects, both of which passed
+   * `connect()`'s teardown check while `this.conn` was still undefined, so the first socket would
+   * be replaced without being closed and left open on the mainframe forever — an LU leaked per
+   * impatient keypress. A FIRST connect counts too, and not only a second `reconnect()`:
+   * `connectNow` records `this.target` and sets `oia.reconnectable` BEFORE its own first await, so
+   * a first connect still dialling (TLS setup against a plaintext host hangs rather than refusing)
+   * already looks, from here, like a session with somewhere to go back to. Checking only
+   * `this.conn !== undefined || this.reconnecting` missed exactly that case: `this.conn` is still
+   * undefined and `reconnecting` is the reconnect flag, not the first-connect one, so the guard let
+   * `reconnect()` through, which tore down `this.conn` (a no-op, since it was undefined) and opened
+   * a SECOND socket while the first was still outstanding -- never closed, because nothing but the
+   * now-overwritten `this.conn` could reach it. `isConnecting()` is the one check that already
+   * covers both halves (`connecting > 0` for a first connect, `reconnecting` for a reconnect), so
+   * the guard here uses it instead of naming `reconnecting` on its own.
    *
    * ## `async`, BECAUSE `connect` IS
    *
@@ -709,8 +969,17 @@ export class Session {
    * end that can only swallow it still leaves the reason somewhere findable.
    */
   async reconnect(): Promise<void> {
-    if (this.conn !== undefined || this.reconnecting) {
+    if (this.conn !== undefined) {
       throw new Error('Reconnect(): Already connected');
+    }
+    // COVERS A RECONNECT ALREADY IN FLIGHT (`reconnecting`) AND A FIRST CONNECT STILL DIALLING
+    // (`connecting`), both of `isConnecting()`'s halves -- see the doc comment above for why a
+    // first connect counts too. A DIFFERENT MESSAGE from the one above: `this.conn !== undefined`
+    // is a genuinely live connection, which is what x3270's wording describes; this is a connection
+    // attempt still in the air, which is not "already connected" by any honest reading, and a
+    // script or an operator reading the refusal deserves the true one.
+    if (this.isConnecting()) {
+      throw new Error('Reconnect(): a connection attempt is already in progress');
     }
     const target = this.target;
     if (target === undefined) throw new Error('Reconnect(): No previous host to connect to');
@@ -726,6 +995,7 @@ export class Session {
       throw err;
     } finally {
       this.reconnecting = false;
+      if (!this.isConnecting()) this.emit('connectSettled');
     }
   }
 
@@ -1004,7 +1274,11 @@ export class Session {
    */
   private handleTn3270eSubneg(body: Uint8Array, layer: TelnetLayer | undefined): void {
     this.e ??= initialState({
-      terminalType: this.opts.terminalType ?? TERMINAL_TYPE,
+      // The resolved type in geometry mode, so DEVICE-TYPE REQUEST names what TERMINAL-TYPE
+      // IS named -- IBM-DYNAMIC under an oversize, as x3270 sends: its `tn3270e_request`
+      // (`telnet.c:2122`) calls the same `create_3270_termtype` that returns IBM-DYNAMIC
+      // whenever an oversize is set (`:2100-2101`).
+      terminalType: this.ttype ?? this.opts.terminalType ?? TERMINAL_TYPE,
       lus: this.per.lus ?? this.opts.lus ?? [],
       bindImage: this.opts.bindImage ?? true,
     });
@@ -1200,7 +1474,8 @@ export class Session {
    * `altROWS`/`altCOLS` back to `maxROWS`/`maxCOLS` (the MODEL's fixed maximum, not
    * whatever a BIND last set it to), then `ctlr_erase(false)`.
    *
-   * Reverts to `modelSize()` -- captured at construction -- and NOT to
+   * Reverts to `modelSize()` -- fixed at construction in legacy mode, and at each connect in
+   * geometry mode, never by a BIND -- and NOT to
    * `this.screen.alternateSize`: see that field's own comment for why deriving it
    * from the screen would revert to the wrong geometry after two BINDs in a row.
    */

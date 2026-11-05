@@ -106,6 +106,11 @@ const CASES = [
   // A NEGATIVE as of 2026-10-06: intercepted client-side, so the gateway never sees it. See the
   // note above -- this asserts the new behaviour rather than abandoning the old assertion.
   { spec: 'Ctrl+K', action: null },
+  // A NEGATIVE BY THE SAME RULE, 2026-11-04: `geometryMenu` is intercepted client-side and opens
+  // the picker overlay, so the gateway must never log it. Appearing here would mean the
+  // interception broke and the kind crossed the socket toward an `applyAction` that throws on it.
+  // What the picker SENDS is `setGeometry`, not an action; `browser-clicks.mjs`'s `picker` drives it.
+  { spec: 'Alt+M', action: null },
   { spec: 'Ctrl+Z', action: null },
   { spec: 'Shift+Tab', action: { kind: 'backTab' } },
   { spec: 'Tab', action: { kind: 'tab' } },

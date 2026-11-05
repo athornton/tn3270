@@ -382,6 +382,109 @@ describe('decodeClientMessage', () => {
   it('refuses a sessionId that is not a string', () => {
     expect(() => decodeClientMessage('{"kind":"hello","sessionId":42}')).toThrow();
   });
+
+  /*
+    THE BROWSER VIEWPORT, 2026-11-04, for `-oversize auto`: CSS pixels the GATEWAY turns into cells
+    at scale 1 (`viewport.ts`). Shape-checked here because the measure that reads it runs inside
+    `Session.connect`, and a NaN or a string reaching `Math.floor` would quietly become a size.
+  */
+  it('accepts a hello carrying a viewport, and a viewport message', () => {
+    expect(decodeClientMessage(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } })))
+      .toEqual({ kind: 'hello', viewport: { width: 1350, height: 980 } });
+    expect(decodeClientMessage(JSON.stringify({
+      kind: 'hello', sessionId: 'abc', viewport: { width: 1, height: 100000, extra: 'x' },
+    }))).toEqual({ kind: 'hello', sessionId: 'abc', viewport: { width: 1, height: 100000 } });
+    expect(decodeClientMessage(JSON.stringify({ kind: 'viewport', width: 800, height: 600 })))
+      .toEqual({ kind: 'viewport', width: 800, height: 600 });
+  });
+
+  it('REFUSES a viewport that is not two integers in 1..100000, in hello and on its own', () => {
+    const bad: Array<Record<string, unknown>> = [
+      { width: -1, height: 600 },
+      { width: 0, height: 600 },
+      { width: 1.5, height: 600 },
+      { width: '800', height: 600 },
+      { width: 200000, height: 600 },
+      { width: 800 },                         // no height
+      { width: 800, height: 0 },
+      { width: 800, height: null },
+    ];
+    for (const v of bad) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'hello', viewport: v })),
+        JSON.stringify(v)).toThrow(/viewport (width|height) must be an integer in 1\.\.100000/);
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'viewport', ...v })),
+        JSON.stringify(v)).toThrow(/viewport (width|height) must be an integer in 1\.\.100000/);
+    }
+    expect(() => decodeClientMessage('{"kind":"hello","viewport":null}')).toThrow(/viewport/);
+    expect(() => decodeClientMessage('{"kind":"hello","viewport":[800,600]}')).toThrow(/viewport/);
+  });
+});
+
+/**
+ * THE PICKER'S CHOICE, 2026-11-04: ONE FIELD, because one click changes one thing and
+ * `applyGeometryChoice` (`@tn3270/frontend`) is the rule that applies one field -- shared with the
+ * GUI's Model menu, so a two-field message would need a combination rule of its own.
+ */
+describe('setGeometry', () => {
+  it('accepts a model, case-folded to its KNOWN_MODELS key, and each oversize name', () => {
+    expect(decodeClientMessage('{"kind":"setGeometry","model":"3278-4-E"}'))
+      .toEqual({ kind: 'setGeometry', model: '3278-4-E' });
+    expect(decodeClientMessage('{"kind":"setGeometry","model":"3278-5-e"}'))
+      .toEqual({ kind: 'setGeometry', model: '3278-5-E' });
+    for (const o of ['none', 'auto', 'startup']) {
+      expect(decodeClientMessage(JSON.stringify({ kind: 'setGeometry', oversize: o })))
+        .toEqual({ kind: 'setGeometry', oversize: o });
+    }
+  });
+
+  it('REFUSES every malformed form at decode, so none reaches the socket handler', () => {
+    const bad: Array<[Record<string, unknown>, RegExp]> = [
+      [{ model: '3278-4-E', oversize: 'none' }, /exactly one of model or oversize/],
+      [{}, /exactly one of model or oversize/],
+      [{ choice: { model: '3278-4-E' } }, /setGeometry takes only kind and one of model or oversize/],   // extra nesting
+      [{ model: { name: '3278-4-E' } }, /model must be a string/],               // extra nesting
+      [{ model: null }, /model must be a string/],
+      [{ model: 42 }, /model must be a string/],
+      [{ model: '3278-9' }, /model must be one of 3278-2, /],
+      [{ model: 'IBM-3278-4-E' }, /model must be one of /],
+      [{ model: 'constructor' }, /model must be one of /],
+      [{ oversize: '160x62' }, /oversize must be none, auto or startup/],
+      [{ oversize: 160 }, /oversize must be none, auto or startup/],
+      [{ oversize: { kind: 'auto' } }, /oversize must be none, auto or startup/],
+      [{ oversize: 'AUTO' }, /oversize must be none, auto or startup/],
+      [{ model: '3278-4-E', foo: 1 }, /setGeometry takes only kind and one of model or oversize/],
+      [{ oversize: 'auto', model2: 'x' }, /setGeometry takes only kind and one of model or oversize/],
+    ];
+    for (const [fields, want] of bad) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'setGeometry', ...fields })),
+        JSON.stringify(fields)).toThrow(want);
+    }
+  });
+
+  it('accepts disconnect, the picker\'s Disconnect button, with no other field', () => {
+    // A TOP-LEVEL KIND, NOT AN `Action` (2026-11-05): the operator asks the gateway to drop the
+    // host session, which `main.ts` does with `session.disconnect()` for this socket's own session.
+    expect(decodeClientMessage('{"kind":"disconnect"}')).toEqual({ kind: 'disconnect' });
+  });
+
+  it('REFUSES disconnect with any other key, at decode', () => {
+    for (const extra of [{ x: 1 }, { sessionId: 'someone-else' }, { action: { kind: 'enter' } }]) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'disconnect', ...extra })),
+        JSON.stringify(extra)).toThrow(/disconnect takes no fields/);
+    }
+  });
+
+  it('encodes geometryChoices as plain JSON', () => {
+    const msg: ServerMessage = {
+      kind: 'geometryChoices',
+      models: [{ name: '3278-2-E', label: '3278-2-E (24 rows by 80 columns)' }],
+      oversizes: [{ name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' }],
+      current: { model: '3278-2-E', oversize: 'none' },
+      connected: false,
+      connecting: false,
+    };
+    expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
+  });
 });
 
 describe('transfer messages', () => {
@@ -486,7 +589,7 @@ describe('transfer messages', () => {
     // see its `round-trips a frame message` case. There is no decode helper and none is wanted.
     const prog = { kind: 'transferProgress' as const, text: '512 bytes' };
     expect(JSON.parse(inflateSync(encodeServerMessage(prog)).toString())).toEqual(prog);
-    const done = { kind: 'transferDone' as const, ok: true, bytes: 249 };
+    const done = { kind: 'transferDone' as const, ok: true as const, bytes: 249 };
     expect(JSON.parse(inflateSync(encodeServerMessage(done)).toString())).toEqual(done);
   });
 

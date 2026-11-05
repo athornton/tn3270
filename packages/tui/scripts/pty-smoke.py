@@ -25,6 +25,19 @@ keystrokes and cleans up.
 
 Run: python3 packages/tui/scripts/pty-smoke.py
 Exit status 0 means every assertion held; failures are printed.
+
+## --oversize-auto
+
+    python3 packages/tui/scripts/pty-smoke.py --oversize-auto
+
+A separate run (the default one above is untouched): the TUI with `-oversize auto` in a 41x100
+pty. It asserts the host was told `IBM-DYNAMIC`; that the size measured was 40 rows by 100
+columns (the terminal less the status row) -- seen by the host writing with Erase/Write
+ALTERNATE, which puts the client on its alternate size, and the OIA then landing on row 41
+column 1 (by its own `ESC[0m` prefix, not a border), which only a 40x100 screen in a 41x100 terminal gives; and that a resize to 51x132
+says `applies at the next reconnect` within 2 s. FakeHost sends no Read Partition Query, so the
+Query Reply the size really travels in is NOT read here; geometry.test/session tests cover it.
+No reconnect either: FakeHost accepts once, and Session's unit tests cover re-measuring.
 """
 
 import os
@@ -64,10 +77,13 @@ def addr12(a):
     return bytes([ord(hi[(a >> 6) & 0x3F]), ord(hi[a & 0x3F])])
 
 
-def screen_record():
-    """Erase/Write with two fields: a plain one and a red one."""
+def screen_record(alternate=False):
+    """Erase/Write with two fields: a plain one and a red one.
+
+    `alternate` sends Erase/Write ALTERNATE (0x7E) instead, for --oversize-auto: the client then
+    switches to its alternate size, which is the one `-oversize auto` measured."""
     out = bytearray()
-    out += b"\xf5\xc3"                      # EW, WCC = reset + restore keyboard
+    out += b"\x7e\xc3" if alternate else b"\xf5\xc3"  # EW/EWA, WCC = reset + restore keyboard
     out += b"\x11" + addr12(0)              # SBA row 1 col 1
     out += b"\x1d\xf0"                      # SF, protected/intensified-ish
     out += ebcdic("HELLO TN3270")
@@ -87,8 +103,9 @@ def screen_record():
 class FakeHost(threading.Thread):
     daemon = True
 
-    def __init__(self):
+    def __init__(self, alternate=False):
         super().__init__()
+        self.alternate = alternate
         self.sock = socket.socket()
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind(("127.0.0.1", 0))
@@ -122,7 +139,7 @@ class FakeHost(threading.Thread):
                         conn.sendall(bytes([IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR,
                                             IAC, DO, OPT_BINARY, IAC, WILL, OPT_BINARY]))
                         time.sleep(0.3)
-                        conn.sendall(screen_record() + bytes([IAC, EOR_CMD]))
+                        conn.sendall(screen_record(self.alternate) + bytes([IAC, EOR_CMD]))
                         sent_screen = True
         try:
             conn.close()
@@ -286,5 +303,109 @@ def main():
     return 0 if ok else 1
 
 
+def oversize_auto():
+    """The --oversize-auto run; see the module docstring. Same fork/TIOCSCTTY/drain shape as
+    main(), kept separate so the default run stays exactly what it was."""
+    import fcntl
+    host = FakeHost(alternate=True)
+    host.start()
+
+    main_fd, child_fd = pty.openpty()
+    # 41x100 BEFORE exec: `auto` measures at the first connect, from the child's first
+    # stdout.rows/columns, so a size set after the fork would race the measurement.
+    fcntl.ioctl(child_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 41, 100, 0, 0))
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
+    # -insecure is mandatory for the same reason as in main(): FakeHost speaks plaintext.
+    argv = ["node", os.path.join(repo, "packages/tui/dist/main.js"),
+            "-insecure", "-oversize", "auto", "--colors", "256", f"127.0.0.1:{host.port}"]
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()
+        # TIOCSCTTY or no SIGWINCH reaches the child, and the resize check fails against a client
+        # that was never told; see main().
+        fcntl.ioctl(child_fd, termios.TIOCSCTTY, 0)
+        os.dup2(child_fd, 0)
+        os.dup2(child_fd, 1)
+        os.dup2(child_fd, 2)
+        os.close(main_fd)
+        os.close(child_fd)
+        env = dict(os.environ, TERM="xterm-256color", COLORTERM="")
+        os.execvpe("node", argv, env)
+        os._exit(127)
+    os.close(child_fd)
+
+    def sip(seconds, until=None):
+        got = bytearray()
+        end = time.time() + seconds
+        while time.time() < end:
+            r, _, _ = select.select([main_fd], [], [], 0.3)
+            if not r:
+                continue
+            try:
+                d = os.read(main_fd, 65536)
+            except OSError:
+                break
+            if not d:
+                break
+            got += d
+            if until is not None and until in bytes(got):
+                break
+        return bytes(got)
+
+    # Wait for the host's EWA to be DRAWN, not merely received; the deadline loop, as in main().
+    captured = bytearray(sip(12, until=b"HELLO TN3270"))
+    drew = b"HELLO TN3270" in captured
+    if drew:
+        captured += sip(0.8)               # let the OIA paint after the screen
+    # `ESC[41;1H ESC[0m`, the OIA's own prefix (render.ts), not merely `ESC[41;1H`: a 39-row
+    # screen here puts its BOTTOM BORDER on 41;1, and a bare position check passed that mutant.
+    oia_41_1 = b"\x1b[41;1H\x1b[0m" in bytes(captured)
+    no_oia_40 = b"\x1b[40;1H\x1b[0m" not in bytes(captured)
+
+    # The resize BEFORE the quit, for the reason main() gives: after it, the client is dead.
+    resize_msg = b""
+    if drew:
+        fcntl.ioctl(main_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 51, 132, 0, 0))
+        resize_msg = sip(2.0, until=b"applies at the next reconnect")
+        captured += resize_msg
+
+    os.write(main_fd, b"\x1d")               # Ctrl-] quits
+    captured += sip(2.0)
+    time.sleep(0.3)
+    os.waitpid(pid, os.WNOHANG)
+    after = termios.tcgetattr(main_fd)
+    out = bytes(captured)
+    m = re.search(rb"window now fits ([^;]*); applies at the next reconnect", resize_msg)
+
+    checks = [
+        ("host was told IBM-DYNAMIC", host.ttype == "IBM-DYNAMIC"),
+        ("drew the host's EWA screen", drew),
+        ("OIA on 41;1 (and not 40;1): the alternate measured as 40 rows by 100 columns",
+         oia_41_1 and no_oia_40),
+        ("a resize to 51x132 said 'applies at the next reconnect' within 2 s",
+         b"applies at the next reconnect" in resize_msg),
+        ("and named 50 rows by 132 columns", m is not None and m.group(1) == b"50 rows by 132 columns"),
+        ("left the alternate screen buffer on quit", b"\x1b[?1049l" in out),
+        ("ECHO is restored after exit", bool(after[3] & termios.ECHO)),
+    ]
+    print(f"terminal type the host saw: {host.ttype!r}")
+    print(f"bytes captured from the pty: {len(out)}")
+    print(f"resize message: {m.group(0).decode() if m else None!r}")
+    ok = True
+    for name, passed in checks:
+        print(f"  {'PASS' if passed else 'FAIL'}  {name}")
+        ok = ok and passed
+    if not ok:
+        print("\n--- captured output (repr, first 3000 bytes) ---")
+        print(repr(out[:3000]))
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--oversize-auto"]:
+        sys.exit(oversize_auto())
+    if sys.argv[1:]:
+        print("usage: pty-smoke.py [--oversize-auto]", file=sys.stderr)
+        sys.exit(2)
     sys.exit(main())

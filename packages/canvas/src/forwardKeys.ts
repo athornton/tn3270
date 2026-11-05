@@ -178,7 +178,8 @@ const PASTE_HOSTS: ReadonlySet<string> = new Set(['http:', 'https:']);
  * comment added to it moves the line -- and `d4fce66` retired this feature's line citations for
  * exactly that.) A `paste` action raised
  * in the GUI reaches `gui/src/main.ts`'s `ipcMain.on('action')`, which intercepts `quit`,
- * `toggleKeypad`, `toggleKeyboard`, `transferForm` and `copy` -- and NOT `paste` -- then falls
+ * `toggleKeypad`, `toggleKeyboard`, `geometryMenu`, `transferForm`, `copy` and `requestCopy` --
+ * and NOT `paste` -- then falls
  * through to `applyAction`, which THROWS on it by design (`frontend/src/actions.ts`: the front
  * end owns its own clipboard).
  *

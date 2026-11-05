@@ -168,6 +168,129 @@ describe('createBridge', () => {
     expect(socket.sent.filter((s) => s.includes('toggleKeypad'))).toHaveLength(0);
   });
 
+  it('INTERCEPTS geometryMenu: calls the local handler, never sends it', () => {
+    // `Alt-M`, 2026-11-04. The model/oversize picker is a DOM overlay in this front end, so opening
+    // it is a local display decision -- and the choice it makes travels later as its own message,
+    // not as this action. Both halves asserted, the second being the one that matters: `applyAction`
+    // THROWS on this kind outside any try in the gateway's socket handler.
+    const socket = fakeSocket();
+    let opened = 0;
+    const api = createBridge({
+      socket: socket as never,
+      storage: fakeStorage() as never,
+      inflate: async (d) => String(d),
+      toggleGeometry: () => { opened += 1; },
+    });
+    socket.onopen?.();
+    const before = socket.sent.length;
+    api.sendAction({ kind: 'geometryMenu' });
+    expect(opened).toBe(1);
+    expect(socket.sent.slice(before)).toHaveLength(0);
+    expect(socket.sent.filter((s) => s.includes('geometryMenu'))).toHaveLength(0);
+  });
+
+  it('DROPS geometryMenu when no handler is given, rather than sending it', () => {
+    // The same bargain `toggleKeypad` makes: a caller with no DOM has no picker to show, and falling
+    // through to the socket would hand the gateway an action `applyAction` throws on.
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    socket.onopen?.();
+    const before = socket.sent.length;
+    api.sendAction({ kind: 'geometryMenu' });
+    expect(socket.sent.slice(before)).toHaveLength(0);
+  });
+
+  it('hands geometryChoices to onGeometryChoices, and to no renderer handler', async () => {
+    // The picker's inbound half, 2026-11-04. NOT through `dispatch`, for `onTransfer`'s reason: the
+    // handler is injected at construction by `bridge.ts`, so it cannot be late, and a dispatched
+    // kind no renderer registers for would sit in the queue forever.
+    const socket = fakeSocket();
+    const got: Array<Record<string, unknown>> = [];
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGeometryChoices: (m) => { got.push(m); },
+    });
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    api.onFrame((f) => frames.push(f));
+    api.onError((m) => errors.push(m));
+    const msg = { kind: 'geometryChoices', models: [], oversizes: [], current: { model: 'x', oversize: 'none' }, connected: true };
+    deliver(socket, msg);
+    await settle();
+    expect(got).toEqual([msg]);
+    expect(frames).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('DROPS geometryChoices when no handler is given, rather than throwing or queueing it', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'geometryChoices', connected: false });
+    await settle();
+    expect(errors).toEqual([]);
+  });
+
+  it('PAINTS a geometryChoices its handler cannot read, through the chain\'s catch', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGeometryChoices: () => { throw new Error('geometryChoices models must be an array'); },
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'geometryChoices' });
+    await settle();
+    expect(errors).toEqual(['gateway message could not be read: geometryChoices models must be an array']);
+  });
+
+  it('tells the picker when the GATEWAY socket closes, so it stops saying "disconnect first"', () => {
+    // THE STALE PICKER, reported live 2026-11-05: the page said the gateway connection closed and
+    // the picker still showed the last `geometryChoices` (connected) forever, since no message can
+    // arrive on a closed socket. `onclose` is the only place that knows.
+    const socket = fakeSocket();
+    let closed = 0;
+    createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGatewayClosed: () => { closed += 1; },
+    });
+    expect(closed).toBe(0);
+    socket.onclose?.();
+    expect(closed).toBe(1);
+  });
+
+  it('tells the picker on quit too, without waiting for the socket\'s own close event', () => {
+    // A real `WebSocket.close()` fires `close` LATER, after the closing handshake; the test fake's
+    // `close` is a spy that fires nothing. Calling it here as well makes the quit path independent
+    // of either -- `markGatewayClosed` is idempotent, so the browser's later `onclose` is harmless.
+    const socket = fakeSocket();
+    let closed = 0;
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGatewayClosed: () => { closed += 1; },
+    });
+    socket.onopen?.();
+    api.sendAction({ kind: 'quit' });
+    expect(socket.close).toHaveBeenCalled();
+    expect(closed).toBe(1);
+  });
+
+  it('closes quietly with no onGatewayClosed, still painting the close', () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    socket.onclose?.();
+    expect(errors).toEqual(['The connection to the gateway closed. Reload to reconnect.']);
+  });
+
   it('INTERCEPTS transferForm: shows the local overlay, never sends it', () => {
     /**
      * THE TRANSFER FORM IS A DOM OVERLAY IN THIS FRONT END TOO (2026-10-07), so opening it is a
@@ -763,5 +886,132 @@ describe('socketUrl, which a reverse proxy breaks if it is built from the host',
 
   it('keeps a non-default port, which a prefixed deployment usually has', () => {
     expect(socketUrl('http://127.0.0.1:9999/x/')).toBe('ws://127.0.0.1:9999/x/ws');
+  });
+});
+
+/**
+ * `-oversize auto`'s half in the browser (2026-11-04): the viewport, in CSS pixels, rides in
+ * `hello` and again, debounced, on every resize -- the gateway converts it to cells and keeps the
+ * latest per session, so a reconnect measures the window as it is then.
+ */
+describe('the viewport, for -oversize auto', () => {
+  const resizable = () => {
+    let fire: (() => void) | undefined;
+    return { onResize: (fn: () => void) => { fire = fn; }, resize: () => { fire?.(); } };
+  };
+
+  it('puts the viewport in hello when the client has one', () => {
+    const socket = fakeSocket();
+    createBridge({
+      socket: socket as never, storage: fakeStorage('kept-id') as never, inflate: async (d) => String(d),
+      viewport: () => ({ width: 1350, height: 980 }),
+    });
+    socket.onopen?.();
+    expect(JSON.parse(socket.sent[0]!))
+      .toEqual({ kind: 'hello', sessionId: 'kept-id', viewport: { width: 1350, height: 980 } });
+  });
+
+  it('reads the viewport WHEN the socket opens, not when the bridge is built', () => {
+    const socket = fakeSocket();
+    let size = { width: 100, height: 100 };
+    createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      viewport: () => size,
+    });
+    size = { width: 1350, height: 980 };
+    socket.onopen?.();
+    expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello', viewport: { width: 1350, height: 980 } });
+  });
+
+  it('sends ONE viewport message per burst of resizes, 250 ms after the last', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      let size = { width: 1350, height: 980 };
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => size, onResize: r.onResize,
+      });
+      socket.onopen?.();
+      socket.sent.length = 0;
+      r.resize();
+      vi.advanceTimersByTime(200);
+      size = { width: 900, height: 700 };
+      r.resize();
+      vi.advanceTimersByTime(249);
+      expect(socket.sent).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(socket.sent.map((t) => JSON.parse(t)))
+        .toEqual([{ kind: 'viewport', width: 900, height: 700 }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends nothing for a resize before the socket opened or after it closed', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => ({ width: 800, height: 600 }), onResize: r.onResize,
+      });
+      // Before open: a real `WebSocket.send` THROWS while CONNECTING, and `hello` will carry the
+      // size read at open anyway.
+      r.resize();
+      vi.advanceTimersByTime(250);
+      expect(socket.sent).toEqual([]);
+      socket.onopen?.();
+      socket.sent.length = 0;
+      // A resize whose timer is still pending when the socket closes, and one after it.
+      r.resize();
+      socket.onclose?.();
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('LEAVES OUT a viewport the gateway would refuse, rather than lose the whole hello', () => {
+    // `checkViewport` refuses 0, and a refused hello gets an error and no session at all.
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        viewport: () => ({ width: 0, height: 0 }), onResize: r.onResize,
+      });
+      socket.onopen?.();
+      expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello' });
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('with no viewport dep: hello is unchanged and a resize sends nothing', () => {
+    vi.useFakeTimers();
+    try {
+      const socket = fakeSocket();
+      const r = resizable();
+      createBridge({
+        socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+        onResize: r.onResize,
+      });
+      socket.onopen?.();
+      expect(JSON.parse(socket.sent[0]!)).toEqual({ kind: 'hello' });
+      r.resize();
+      vi.advanceTimersByTime(1000);
+      expect(socket.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

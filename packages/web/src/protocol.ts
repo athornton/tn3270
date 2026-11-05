@@ -1,7 +1,8 @@
 import { deflateSync } from 'node:zlib';
-import { PA_AIDS, PF_AIDS } from '@tn3270/core';
+import { KNOWN_MODELS, PA_AIDS, PF_AIDS } from '@tn3270/core';
 import type { AtlasGeometry, DrawList } from '@tn3270/canvas';
 import type { Action } from '@tn3270/frontend';
+import type { GeometryChoices, OversizeName } from './geometryOverlay.js';
 
 /**
  * What crosses the socket, in both directions.
@@ -74,10 +75,42 @@ export type ServerMessage =
   | { kind: 'transferDone'; ok: true; bytes?: number }
   | { kind: 'transferDone'; ok: false; error: string }
   // A receive's bytes, chunked the same way an upload's are, then terminated by `transferDone`.
-  | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array };
+  | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array }
+  /*
+    THE PICKER'S CHOICES, 2026-11-04 -- what the `Alt-M` overlay draws. Sent after `atlas` on
+    `hello`, on the session's 'geometry', 'connect', 'connectSettled' and 'disconnect', and as the
+    reply to every `setGeometry`. The shape is `GeometryChoices` in `geometryOverlay.ts`, the
+    browser module that consumes it, so the two halves share one declaration.
+
+    LABELS TRAVEL WITH THE NAMES, where a bare `models: string[]` would have been smaller: the
+    overlay is served unbundled and cannot import `@tn3270/core`, so `KNOWN_MODELS`' sizes and
+    `describeSize`'s wording would otherwise be a second copy in the browser. The gateway builds
+    them exactly as the GUI's Model menu does (`geometryChoices.ts`).
+
+    `current.oversize` IS `null` FOR A FIXED SIZE OTHER THAN THE STARTUP ONE, and that is
+    unreachable from the web: the setting starts as `-oversize`, and the only fixed size any
+    `setGeometry` can name is `startup`. So `null` checks nothing rather than inventing an item.
+
+    `notice` RIDES ONLY ON THE REPLY TO A `setGeometry`: `applyGeometryChoice`'s reset text, or the
+    refusal. HERE AND NOT AS AN `error`, because `error` paints the CANVAS -- underneath the open
+    picker -- and stays there until the next frame, which a replayed or idle session never sends.
+    The picker is where the operator clicked, and the reply has to come anyway to put the radios
+    back where the session is. A MALFORMED `setGeometry` is still an `error`: it is refused at
+    decode, below, like every other bad frame.
+  */
+  | ({ kind: 'geometryChoices' } & GeometryChoices);
+
+/** A browser viewport in CSS pixels, for `-oversize auto`. See `checkViewport`. */
+export interface Viewport { readonly width: number; readonly height: number }
 
 export type ClientMessage =
-  | { kind: 'hello'; sessionId?: string }
+  /*
+    `viewport` IN `hello`, 2026-11-04: the browser's window in CSS pixels, which the gateway turns
+    into cells at scale 1 for `-oversize auto` (`viewport.ts`). In `hello` and not only in its own
+    message because a NEW session connects inside `registry.attach`, before any later message
+    could arrive -- so the size its first connect measures has to travel with the hello itself.
+  */
+  | { kind: 'hello'; sessionId?: string; viewport?: Viewport }
   | { kind: 'action'; action: Action }
   | { kind: 'transferChunk'; seq: number; total: number; bytes: Uint8Array }
   | { kind: 'transferStart'; keywords: readonly string[] }
@@ -86,7 +119,38 @@ export type ClientMessage =
     A PREFETCH, NOT AN ACTION, 2026-11-02: a top-level kind beside the transfer ones because the
     operator did nothing to the session. Answered with `selectionText`; changes no screen.
   */
-  | { kind: 'selection'; seq: number; rect: { top: number; left: number; bottom: number; right: number } };
+  | { kind: 'selection'; seq: number; rect: { top: number; left: number; bottom: number; right: number } }
+  /*
+    THE WINDOW RESIZED, 2026-11-04: sent by the page, debounced, so the gateway keeps the latest
+    viewport per session for `-oversize auto`'s next reconnect. A top-level kind like `selection`,
+    not an `Action`: the operator did nothing to the session. `main.ts` intercepts it ABOVE the
+    action guard and never replies -- a resize changes no screen until the next connect.
+  */
+  | { kind: 'viewport'; width: number; height: number }
+  /*
+    THE PICKER'S CHOICE, 2026-11-04: EXACTLY ONE FIELD, a model or an oversize, never both.
+
+    ONE FIELD BECAUSE ONE CLICK CHANGES ONE THING, and because the rule for applying one is already
+    written and shared: `applyGeometryChoice` (`@tn3270/frontend`) takes `{model}` OR `{oversize}`,
+    and a model the current oversize refuses is applied with oversize None and a notice. The GUI's
+    Model menu goes through it unchanged; so does this. A two-field message (the spec's first
+    wording, "naming a model and one of none, auto or startup") would need a SECOND rule for which
+    field wins when the pair is refused, and the web would then answer a click differently from
+    the GUI -- the drift the shared rule exists to stop.
+
+    `oversize` IS A NAME, NEVER A SIZE: picked from lists, nothing typed (the spec). `startup` is
+    the gateway's `-oversize <cols>x<rows>`, mapped in `main.ts`, which alone knows whether there
+    is one. `model` is case-folded to its `KNOWN_MODELS` key here.
+  */
+  | { kind: 'setGeometry'; model: string }
+  | { kind: 'setGeometry'; oversize: OversizeName }
+  /*
+    THE PICKER'S DISCONNECT BUTTON, 2026-11-05: drop THIS SOCKET'S host session, so the choices
+    can be used without waiting for the host to drop the line (LOGOFF). A top-level kind like
+    `setGeometry`, NOT an `Action`: no keymap binds it, and the operator's 3270 keys never send it.
+    No fields -- there is no session to name, the socket already has exactly one.
+  */
+  | { kind: 'disconnect' };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
@@ -150,6 +214,32 @@ function checkRect(rect: unknown, what: string): {
   };
 }
 
+/** The largest viewport side accepted, in CSS pixels: far past any display, small enough to be sane. */
+const MAX_VIEWPORT = 100_000;
+
+/**
+ * A VIEWPORT'S TWO FIELDS, CHECKED ONCE FOR BOTH PLACES ONE TRAVELS -- `hello.viewport` and the
+ * `viewport` kind. Integers in 1..100000, each. The value reaches `measureViewport` inside
+ * `Session.connect()`, where the division would COERCE a string (`'800' / 9` is a number) and
+ * `Math.floor` would turn a fraction or a huge number into a size nobody has: `resolveGeometry`
+ * would then size the host, fall back or clamp on input that is simply malformed. Refused here like every other bad field, so the sender hears about it.
+ *
+ * Returns a fresh object with only the two fields, as `checkRect` does for the same reason.
+ */
+function checkViewport(raw: unknown): Viewport {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('viewport needs a width and a height');
+  }
+  const v = raw as Record<string, unknown>;
+  for (const k of ['width', 'height']) {
+    const n = v[k];
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_VIEWPORT) {
+      throw new Error(`viewport ${k} must be an integer in 1..${MAX_VIEWPORT}`);
+    }
+  }
+  return { width: v['width'] as number, height: v['height'] as number };
+}
+
 /**
  * Parse and VALIDATE one client message. Throws on anything unexpected.
  *
@@ -204,6 +294,15 @@ function checkRect(rect: unknown, what: string): {
  * quoted `no reply to the transferForm action`, which is what the message would be only if the
  * kind were absent from `SWALLOWED` too. Re-measured 2026-10-06.)
  *
+ * ## `viewport`, AND `hello.viewport`, 2026-11-04: NOT ACTIONS, SO OUTSIDE THE RULE ABOVE
+ *
+ * `-oversize auto` measures the browser window. The page sends its viewport in CSS pixels in
+ * `hello` and again, debounced, as a top-level `viewport` kind whenever the window resizes. Neither
+ * is an `Action`, so neither can reach `applyAction`: `hello` has its own branch in `main.ts`, and
+ * `viewport` is intercepted ABOVE the action guard there, beside `selection`, and answered with
+ * nothing. The FIELD rule still applies in full -- both are shape-checked by `checkViewport`,
+ * integers in 1..100000 -- because the value is read inside `Session.connect()` by the measure.
+ *
  * ## `type`'s PAYLOAD IS NOT BOUNDED HERE
  *
  * `Keyboard.typeString` loops char by char, and on an UNFORMATTED screen `advanceAfterType` has no
@@ -221,10 +320,13 @@ export function decodeClientMessage(text: string): ClientMessage {
   const kind = (raw as { kind?: unknown }).kind;
 
   if (kind === 'hello') {
-    const id = (raw as { sessionId?: unknown }).sessionId;
-    if (id === undefined) return { kind: 'hello' };
-    if (typeof id !== 'string') throw new Error('sessionId must be a string');
-    return { kind: 'hello', sessionId: id };
+    const { sessionId: id, viewport } = raw as { sessionId?: unknown; viewport?: unknown };
+    if (id !== undefined && typeof id !== 'string') throw new Error('sessionId must be a string');
+    return {
+      kind: 'hello',
+      ...(id !== undefined ? { sessionId: id } : {}),
+      ...(viewport !== undefined ? { viewport: checkViewport(viewport) } : {}),
+    };
   }
 
   if (kind === 'action') {
@@ -442,6 +544,16 @@ export function decodeClientMessage(text: string): ClientMessage {
       `Ctrl-B` from a browser would have ended the gateway process -- and it did, under
       `integration.test.ts`, before the line was added.
     */
+    /*
+      `geometryMenu` IS ACCEPTED TOO, 2026-11-04, by the `toggleKeyboard` reasoning above, stated
+      here so the kind is visibly in a branch of the two-branch rule rather than accepted by default.
+
+      It opens the SENDER's own model/oversize picker and reaches no `Session`, so there is nothing
+      here to bound -- it carries no fields. `applyAction` throws on it, so the interception branch
+      was owed and landed in the same commit: `main.ts` returns before `applyAction` for this kind.
+      Without that return `integration.test.ts` reported `no reply to a tab after geometryMenu`.
+      The CHOICE the picker makes is a separate client message with its own shape check, not this.
+    */
     // `toggleKeypad` IS ACCEPTED, AND DELIBERATELY SO -- see the second rule in the docstring for
     // why that is not a contradiction. It stood rejected here for one commit, while `applyAction`
     // already threw on it and nothing in `main.ts` intercepted it; now `main.ts` handles it and
@@ -567,6 +679,67 @@ export function decodeClientMessage(text: string): ClientMessage {
       throw new Error('selection seq must be a non-negative safe integer');
     }
     return { kind: 'selection', seq, rect: checkRect(rect, 'selection') };
+  }
+
+  // THE RESIZE, 2026-11-04. Above the catch-all for the reason the transfer kinds' note gives.
+  // Both fields through `checkViewport`, as `hello.viewport` is; see that function.
+  if (kind === 'viewport') {
+    const { width, height } = checkViewport(raw);
+    return { kind: 'viewport', width, height };
+  }
+
+  /*
+    THE PICKER'S CHOICE, 2026-11-04. Above the catch-all for the reason the transfer kinds' note
+    gives. NOT AN `Action`, so outside the two-branch rule's subject -- but the field rule applies in
+    full. NOT BECAUSE A BAD FIELD WOULD END THE PROCESS: `applyPick` runs the choice inside a try,
+    so even a number that `resolveTerminalType` cannot fold would come back as a notice (an earlier
+    draft of this note said "a TypeError in the socket handler", which the try makes false). It is
+    because the boundary is where a malformed frame gets its `error` naming the problem, like every
+    other kind, rather than a notice phrased for an operator who picked from a list. So the shape is
+    closed here: `kind` and exactly one other field, and nothing else (an unknown key is a
+    hand-built frame, refused like one); a model that is a
+    `KNOWN_MODELS` key under case-folding (`Object.hasOwn`, so `constructor` is not a model, the
+    lookup rule `termtype.ts` records); an oversize that is one of the three names. `IBM-3278-4-E`
+    is refused even though core would accept it: the picker sends keys, and anything else is a
+    hand-built frame.
+  */
+  if (kind === 'setGeometry') {
+    const r = raw as Record<string, unknown>;
+    if (Object.keys(r).some((k) => k !== 'kind' && k !== 'model' && k !== 'oversize')) {
+      throw new Error('setGeometry takes only kind and one of model or oversize');
+    }
+    const hasModel = Object.hasOwn(r, 'model');
+    const hasOversize = Object.hasOwn(r, 'oversize');
+    if (hasModel === hasOversize) {
+      throw new Error('setGeometry needs exactly one of model or oversize');
+    }
+    if (hasModel) {
+      const model = r['model'];
+      if (typeof model !== 'string') throw new Error('setGeometry model must be a string');
+      const key = model.toUpperCase();
+      if (!Object.hasOwn(KNOWN_MODELS, key)) {
+        throw new Error(`setGeometry model must be one of ${Object.keys(KNOWN_MODELS).join(', ')}`);
+      }
+      return { kind: 'setGeometry', model: key };
+    }
+    const oversize = r['oversize'];
+    if (oversize !== 'none' && oversize !== 'auto' && oversize !== 'startup') {
+      throw new Error('setGeometry oversize must be none, auto or startup');
+    }
+    return { kind: 'setGeometry', oversize };
+  }
+
+  /*
+    THE PICKER'S DISCONNECT, 2026-11-05. Above the catch-all for the reason the transfer kinds'
+    note gives, and outside the two-branch rule's subject because it is not an `Action` -- but
+    still ACCEPTED HERE AND HANDLED in `main.ts` (`session.disconnect()` on the socket's own
+    session, swallowed before `hello`), never one without the other. CLOSED SHAPE: `kind` alone.
+    A `sessionId` beside it would read as "disconnect that one", which this gateway never does
+    for a socket -- a hand-built frame, refused like one.
+  */
+  if (kind === 'disconnect') {
+    if (Object.keys(raw).some((k) => k !== 'kind')) throw new Error('disconnect takes no fields');
+    return { kind: 'disconnect' };
   }
 
   throw new Error(`unknown client message kind ${String(kind)}`);

@@ -231,7 +231,7 @@ describe('the direction is drawn with both endpoints named', () => {
     // session -- which would make the form refuse a terminal the session itself accepted.
     expect(TRANSFER_MIN.cols).toBeLessThanOrEqual(80);
     expect(TRANSFER_MIN.rows).toBeLessThanOrEqual(24);
-    for (const phase of ['idle', 'form'] as const) {
+    for (const phase of ['idle', 'running', 'done', 'failed'] as const) {
       for (const line of transferLines(newTransferForm(), phase, undefined)) {
         expect(line.length).toBeLessThanOrEqual(80);
       }

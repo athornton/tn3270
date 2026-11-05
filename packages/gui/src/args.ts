@@ -1,6 +1,10 @@
 import {
-  resolveHostSpec, takeTlsFlag, resolveTls, resolveScheme, SCHEME_NAMES, TLS_USAGE,
-  type TlsFlags, type TlsOptions, type Scheme,
+  resolveGeometry, resolveTerminalType, resolveAlternateSize, OversizeError,
+  type GeometrySetting, type Oversize, type Session, type Size,
+} from '@tn3270/core';
+import {
+  defaultSession, resolveHostSpec, takeTlsFlag, takeOversizeFlag, resolveTls, resolveScheme, SCHEME_NAMES,
+  OVERSIZE_USAGE, TLS_USAGE, type TlsFlags, type TlsOptions, type Scheme,
 } from '@tn3270/frontend';
 
 /**
@@ -52,12 +56,18 @@ export interface GuiArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /**
+   * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
+   * `auto` is allowed, as in the TUI: the display is measured at every connect (`measure.ts`).
+   * A combination `resolveGeometry` would refuse at connect is refused here instead.
+   */
+  oversize?: Oversize;
 }
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
   + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-  + `${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+  + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
   const args: GuiArgs = {};
@@ -69,6 +79,11 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
     const eaten = takeTlsFlag(tlsFlags, flag, value, (m) => new UsageError(m));
     if (eaten !== undefined) {
       i += eaten;
+      continue;
+    }
+    const oversizeEaten = takeOversizeFlag(args, flag, value, (m) => new UsageError(m));
+    if (oversizeEaten !== undefined) {
+      i += oversizeEaten;
       continue;
     }
     switch (flag) {
@@ -152,6 +167,23 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
     }
   }
 
+  // Refuse at PARSE time whatever `resolveGeometry` would refuse at connect -- the TUI's and the
+  // CLI's check, one call, because those are exactly the checks it makes. The measure is a
+  // STAND-IN reporting no window, so `auto` passes every rule it can break and then takes the
+  // "no window size known" fallback without the display being read: there is no atlas yet, and
+  // the real measure belongs to connect (spec, "Why auto is measured at connect").
+  if (args.oversize !== undefined) {
+    try {
+      resolveGeometry({
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
+        oversize: args.oversize,
+      }, () => undefined);
+    } catch (e) {
+      if (e instanceof OversizeError) throw new UsageError(e.message);
+      throw e;
+    }
+  }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
 
   if (args.host === undefined) throw new UsageError(USAGE);
@@ -176,4 +208,65 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
     args.tn3270e = false;
   }
   return args;
+}
+
+/**
+ * Builds the session main.ts connects, from a parsed `GuiArgs` -- the CLI's and the TUI's
+ * `buildSession`, and HERE rather than in main.ts for the reason theirs were extracted: main.ts
+ * imports `electron`, which vitest cannot load, so a session built there could only be tested by
+ * copying its expression -- the copy the CLI's review caught passing a hardcoded-model mutant.
+ * This file already imports `@tn3270/frontend`, and `defaultSession` touches no socket until
+ * `connect()`.
+ *
+ * Geometry mode unless `--terminal-type` was given (a raw string `resolveGeometry` cannot
+ * interpret as a model). `measure` is called by the session AT EVERY CONNECT, never here, and is
+ * handed the setting the session holds at that moment -- so a model changed between connects is
+ * the one measured against. It is required, not defaulted: a GUI session without the display's
+ * measure would make `auto` fall back silently, which is exactly the bug it would hide.
+ */
+export function buildSession(
+  args: GuiArgs, measure: (setting: GeometrySetting | undefined) => Size | undefined,
+): Session {
+  if (args.terminalType !== undefined) {
+    // Built once and passed to both resolvers, so the terminal-type string and the geometry
+    // can never come from different readings of the same arguments.
+    const typeOpts = {
+      ...(args.model !== undefined ? { model: args.model } : {}),
+      terminalType: args.terminalType,
+    };
+    return defaultSession(
+      resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
+      args.bindImage, args.bindLimit, args.devname, args.ddm,
+    );
+  }
+  // `session` is read only when connect() calls the measure, by which time it is assigned.
+  const session: Session = defaultSession(
+    undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
+    args.devname, args.ddm,
+    {
+      setting: {
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        oversize: args.oversize ?? { kind: 'none' },
+      },
+      measure: () => measure(session.geometrySetting),
+    },
+  );
+  return session;
+}
+
+/**
+ * Every `lastGeometryNotice` -- an `auto` that fell back to the model -- on stderr, the first
+ * connect's and every reconnect's, as the spec's "Data flow on a connect" item 2 asks. Written
+ * AT ONCE, unlike the TUI's: the GUI's stderr is a terminal or a log, not the alternate screen
+ * the TUI has to wait to leave. Nothing on the canvas: the GUI's only on-canvas painter is the
+ * red error painter, which the next frame wipes.
+ *
+ * On the 'geometry' event, which `connect()` emits after resolving and before any socket I/O, so
+ * one listener registered before the first connect covers that connect too.
+ */
+export function printGeometryNotices(session: Session, stderr: { write(text: string): unknown }): void {
+  session.on('geometry', () => {
+    const notice = session.lastGeometryNotice;
+    if (notice !== undefined) stderr.write(`${notice}\n`);
+  });
 }

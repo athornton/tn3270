@@ -23,6 +23,7 @@ import { createKeyboardUi, type KeyboardUi } from '@tn3270/canvas/dist/keyboardU
 // the map's two deep keys.
 import { bootTransfer } from './transferBoot.js';
 import { createTransferOverlay } from './transferOverlay.js';
+import { createGeometryOverlay, parseGeometryChoices } from './geometryOverlay.js';
 
 /**
  * The few lines that touch real browser globals. Everything testable is in `bridgecore.ts`.
@@ -258,6 +259,44 @@ const transferOverlay = createTransferOverlay({
  */
 transferClose.addEventListener('click', () => { transferOverlay.hide(); });
 
+/**
+ * THE MODEL/OVERSIZE PICKER, `Alt-M`, 2026-11-04 -- the browser's counterpart of the GUI's Model
+ * menu. Its choices come from the gateway (`geometryChoices`), and a pick goes back as
+ * `setGeometry` on this same socket, as raw text like the transfer messages: it is not an `Action`.
+ *
+ * A HARD FAILURE on a missing element, for the keypad's reason: every `Alt-M` would otherwise
+ * silently do nothing. BUILT BEFORE THE BRIDGE for the keypad's TDZ reason: `createBridge` takes
+ * its `toggle` and `update` as deps.
+ */
+const geometryEl = document.getElementById('geometry-overlay');
+const geometryChoicesEl = document.getElementById('geometry-choices');
+const geometryStatusEl = document.getElementById('geometry-status');
+const geometryClose = document.getElementById('geometry-close');
+if (geometryEl === null || geometryChoicesEl === null || geometryStatusEl === null
+  || geometryClose === null) {
+  throw new Error('bridge: #geometry-overlay, #geometry-choices, #geometry-status or '
+    + '#geometry-close is missing from index.html');
+}
+const geometryOverlay = createGeometryOverlay<HTMLElement, Event & Partial<KeyboardEvent & MouseEvent>>({
+  element: geometryEl,
+  setHidden: (el, hidden) => { el.hidden = hidden; },
+  isHidden: (el) => el.hidden === true,
+  root: geometryChoicesEl,
+  status: geometryStatusEl,
+  create: (tag) => document.createElement(tag),
+  append: (parent, child) => { parent.appendChild(child); },
+  setText: (el, text) => { el.textContent = text; },
+  setAttr: (el, name, value) => { el.setAttribute(name, value); },
+  setChecked: (el, on) => { (el as HTMLInputElement).checked = on; },
+  setDisabled: (el, on) => { (el as HTMLInputElement).disabled = on; },
+  listen: (el, types, fn) => {
+    for (const t of types) el.addEventListener(t, fn as (e: Event) => void);
+  },
+  send: (text) => { socket.send(text); },
+});
+// `hide()`, not a toggle, for the keypad Close button's reason: a double-click must not re-show.
+geometryClose.addEventListener('click', () => { geometryOverlay.hide(); });
+
 const bridge = createBridge({
   socket,
   storage: sessionStorage,
@@ -274,8 +313,14 @@ const bridge = createBridge({
     The close happens BEFORE the toggle, so opening a surface that is already open still closes the
     other rather than leaving both up for one frame.
   */
+  /*
+    AND THE PICKER IS A THIRD SURFACE IN THE SAME RULE, 2026-11-04: opening it hides the keypad,
+    the keyboard and the transfer form; opening any of those hides it. The transfer form's
+    `hide()` keeps its unsaved-file prompt, so a completed receive is never lost to an `Alt-M`.
+  */
   toggleKeypad: () => {
     keyboardOverlay.hide();
+    geometryOverlay.hide();
     overlay.toggle();
   },
   // `Ctrl-B`. INTERCEPTED CLIENT-SIDE, exactly as `toggleKeypad` is: this surface is the browser's
@@ -284,12 +329,29 @@ const bridge = createBridge({
   // process, since a client is not obliged to run the code we served it.
   toggleKeyboard: () => {
     overlay.hide();
+    geometryOverlay.hide();
     keyboardOverlay.toggle();
   },
+  // `Alt-M`, INTERCEPTED CLIENT-SIDE like the two above; the gateway keeps its own return anyway.
+  // Opening it hides the other three. If the transfer form refuses to close (an unsaved receive
+  // the operator kept), the picker still opens -- over it, both opaque, the picker on top in
+  // document order; closing the picker gives the form back unchanged.
+  toggleGeometry: () => {
+    overlay.hide();
+    keyboardOverlay.hide();
+    if (!geometryOverlay.visible()) transferOverlay.hide();
+    geometryOverlay.toggle();
+  },
+  // The gateway's choices, narrowed here: a malformed one throws into the bridge's message chain,
+  // whose `catch` paints it on the canvas.
+  onGeometryChoices: (msg) => { geometryOverlay.update(parseGeometryChoices(msg)); },
+  // The socket closed: the picker says so and disables everything, rather than keeping the last
+  // reply's "Disconnect first" forever (reported live, 2026-11-05).
+  onGatewayClosed: () => { geometryOverlay.markGatewayClosed(); },
   // THE SAME BARGAIN FOR THE TRANSFER FORM, which is a DOM overlay here too. `main.ts:314` keeps
   // its own intercept, for the reason `bridgecore.ts` sets out at length: `applyAction` THROWS on
   // this kind outside any try in a socket handler, and a client is not obliged to run served code.
-  showTransfer: () => { transferOverlay.show(); },
+  showTransfer: () => { geometryOverlay.hide(); transferOverlay.show(); },
   // The three gateway transfer kinds, narrowed by the boot module -- `bridgecore.ts` declines to
   // narrow a parsed JSON object into a union it never validated, and says so.
   onTransfer: (msg) => { boot.onMessage(msg); },
@@ -313,6 +375,22 @@ const bridge = createBridge({
   onCopyText: (text, report) => {
     writeClipboard(navigator.clipboard, text, (m) => { console.warn(m); report(m); });
   },
+  /*
+    `-oversize auto`'s window, 2026-11-04: CSS pixels, which the gateway turns into cells at scale
+    1. In `hello`, and again 250 ms after a resize settles (`bridgecore.ts` owns the debounce and
+    the closed-socket rule).
+
+    `documentElement.clientWidth/clientHeight`, NOT `window.innerWidth/innerHeight`: the inner
+    sizes INCLUDE the scrollbars, which the page grows (`overflow:auto`) once the canvas overflows.
+    MEASURED by the Task 8 review in Chromium: with the canvas overflowing, `innerWidth` stayed 800
+    while `clientWidth` was 785, so the next reconnect sized the host 1-2 columns too big for the
+    area actually drawable -- and the scrollbars never went away. The client sizes are the area
+    the canvas can use.
+  */
+  viewport: () => ({
+    width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
+  }),
+  onResize: (fn) => { window.addEventListener('resize', fn); },
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

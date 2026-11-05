@@ -99,6 +99,23 @@ export type Action =
   // `toggleKeypad` gives: a drawn button for this would be a button that toggles the surface it is
   // drawn on. Both tables' tests pin that.
   | { kind: 'toggleKeyboard' }
+  // The front end's MODEL/OVERSIZE CHOOSER, `Alt-M`, added 2026-11-04: the GUI's Model menu and the
+  // web page's picker overlay, each choosing the geometry the NEXT connect uses. `applyAction`
+  // throws on it exactly as it does on `toggleKeyboard`: what a menu or an overlay looks like is the
+  // front end's business. It lives in this union so the chord, both DOM front ends and the GUI's
+  // child-window funnel can name it the way every other action is named.
+  //
+  // THE CHOICE DOES NOT TRAVEL AS THIS ACTION. This only OPENS the chooser; what the operator picks
+  // is a separate message per front end (the web page's `setGeometry`), because a model is not a
+  // keystroke and this union carries no field for one.
+  //
+  // TWO OF THE FOUR FRONT ENDS IMPLEMENT IT, as with `toggleKeyboard`, and for a different reason:
+  // the TUI changes SIZE by being resized and changes MODEL only by flag, so it has no chooser and
+  // `buildTable` below maps no sequence to this kind. The CLI has `Set(model,...)` instead.
+  //
+  // NEITHER `KEYPAD_KEYS` NOR `KEYBOARD_3279` MAY CONTAIN IT: a 3279 had no model key, and a button
+  // for it would be a button whose only effect is to throw.
+  | { kind: 'geometryMenu' }
   // Opens the front end's file-transfer dialog, and `applyAction` throws on it for the same
   // reason it throws on `toggleKeypad`: what a dialog looks like is the front end's business.
   //

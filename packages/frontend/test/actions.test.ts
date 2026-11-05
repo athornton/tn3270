@@ -361,6 +361,19 @@ describe('the keypad-era actions', () => {
       .toThrow(/does not handle toggleKeyboard/);
   });
 
+  it('REFUSES geometryMenu, the model/oversize chooser being the front end s own surface', () => {
+    // The EIGHTH of the same shape, 2026-11-04. `Alt-M` opens a chooser -- the GUI's Model menu, the
+    // web page's picker overlay -- and what that looks like is the front end's business exactly as
+    // the keypad's is. A front end that bound the chord and forgot to intercept it must get an
+    // error rather than a dead chord, since the switch treats an unrecognized kind as a no-op.
+    //
+    // `/does not handle geometryMenu/` and not `/geometryMenu/`, for the reason MEASURED on the
+    // `toggleKeypad` twin above: the loose pattern also matches an accidental TypeError.
+    const { session } = newSession();
+    expect(() => applyAction(session, { kind: 'geometryMenu' }))
+      .toThrow(/does not handle geometryMenu: the front end owns its own display/);
+  });
+
   it('REFUSES transferForm, because a dialog is the front end s own business', () => {
     // The third of the same shape, and the first that opens a DIALOG rather than toggling a
     // display: a transfer needs a local path, a direction and a host file name, so unlike
@@ -622,6 +635,10 @@ const ROWS: readonly Row[] = [
   // turn this into a `copy`. It needs no fields spelled, having none -- which is the one way this
   // row is simpler than `copy`'s and `paste`'s above.
   { action: { kind: 'requestCopy' }, throws: /does not handle requestCopy/ },
+  // EIGHT now, 2026-11-04. `geometryMenu` opens the model/oversize chooser, `Alt-M`, and it is the
+  // front end's for the reason `toggleKeyboard` is: a menu or an overlay is a surface, and which
+  // one is each front end's own. The TUI has neither -- it changes size by being resized.
+  { action: { kind: 'geometryMenu' }, throws: /does not handle geometryMenu/ },
 ];
 
 /**
@@ -701,11 +718,12 @@ describe('applyAction: the dispatch table, one falsifiable row per case', () => 
     expect([...rows].sort(), 'the table and the Action union disagree').toEqual([...kinds].sort());
     // AND AN EXACT COUNT, which the equality above does not give: deleting a member AND its row
     // together satisfies both sets while quietly shrinking what is pinned, and the count makes that
-    // a decision someone has to write down. 30 members, 23 switch cases plus the 7 guards --
-    // `requestCopy` is the seventh, added 2026-10-27 with the web copy gesture; `paste` was the
+    // a decision someone has to write down. 31 members, 23 switch cases plus the 8 guards --
+    // `geometryMenu` is the eighth, added 2026-11-04 with model switching; `requestCopy` the
+    // seventh, added 2026-10-27 with the web copy gesture; `paste` was the
     // sixth, 2026-10-23 with web copy/paste; `toggleKeyboard` the fifth, 2026-10-22 with the full
     // keyboard; `copy` the fourth, with the GUI's clipboard; `transferForm` the third, with the
     // TUI's transfer form.
-    expect(ROWS.length, 'the number of pinned cases changed').toBe(30);
+    expect(ROWS.length, 'the number of pinned cases changed').toBe(31);
   });
 });

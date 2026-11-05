@@ -1,10 +1,232 @@
-# Handoff — state as of 2026-11-04 (fetch-ahead copy MERGED to `main` and pushed; roadmap (0a)-(0e) complete, (a) oversize + `IBM-DYNAMIC` is next)
+# Handoff — state as of 2026-11-05 (branch `oversize`: BOTH steps DONE -- `-oversize`/`IBM-DYNAMIC`, and changing model and oversize while running -- gated at 2932 tests; VM/370 honours 160x62 live; step-2 live pass OWED; merge is the user's decision)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT IS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
+## START HERE — BRANCH `oversize`: STEPS 1 AND 2 DONE, 2932 TESTS GREEN; VM/370 HONOURS 160x62 LIVE; STEP-2 LIVE PASS OWED; MERGE IS THE USER'S CALL
+
+**2026-11-05. Branch `oversize`, not merged, not pushed.** It branches from `main` at `bb097af`
+(still `main`'s tip) and merged `typecheck-tests` in (`1c7d412`), so merging `oversize` brings
+the typechecked tests too. Spec: `docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md`.
+Plan: `docs/superpowers/plans/2026-11-04-oversize-and-model-switching.md`, 15 tasks in two steps.
+**All 15 tasks are done.** Step 1 (Tasks 1-10) is described further down. Step 2 (Tasks 11-15) is
+the commits `65bec0f..HEAD`.
+
+### WHAT STEP 2 SHIPPED: CHANGING MODEL AND OVERSIZE WHILE RUNNING, APPLIED AT THE NEXT CONNECT
+
+- **core:** `setGeometry` is refused while connected AND while a connect is in flight. New:
+  `isConnecting()`, and a `connectSettled` event, which fires when an attempt ends either way (a
+  failed attempt emits nothing else).
+- **CLI:** `Set(model,X)`, `Set(oversize,Y)`, or both as one call, `Set(model,X,oversize,Y)`
+  (`1d2708a`, `1a4713e`). The model and oversize are validated TOGETHER, so some destinations can
+  only be reached in one call. It is refused while connected, while connecting, with
+  `--terminal-type`, and for `Set(oversize,auto)` (no window).
+- **frontend:** `geometryMenu` (`Alt-M`, matched on `e.code`), the eighth kind the front end owns.
+  `applyAction` throws on it (`ab1aa39`). `geometryChoice.ts` holds the one rule shared by the GUI
+  menu and the web picker: **a model choice wins**. If the current oversize refuses the new model,
+  the model is applied with oversize None, and a notice says so truthfully.
+- **GUI:** a Model menu (`111d02b`, `4bb724f`) with the eight models and their sizes, then
+  Oversize None, Auto, and the startup `-oversize` size. Every item is disabled while connected or
+  connecting, and the items are mutated by id rather than rebuilt. `--terminal-type` gets no Model
+  menu. `Alt-M` pops the submenu up over the main window from any window, including through the
+  Electron funnel from the keypad and keyboard windows.
+- **Web gateway:** an `Alt-M` picker overlay (`0d11d22`, `eabe45b`). Its choices come from the
+  gateway (`geometryChoices`), and a pick goes back as `setGeometry`. `Escape` and `Alt-M` close
+  it; the arrow keys move focus and apply nothing; a pick is a click, or `Enter`/`Space`. Opening
+  it closes the keypad, keyboard and transfer form. "Picked, never typed" is a rule about the
+  page, NOT a security boundary.
+- **TUI:** unchanged on purpose. It changes size by being resized and then reconnected, and its
+  model only by `-model`.
+
+**A PRE-EXISTING LEAK, FOUND AND FIXED IN STEP 2 (`eabe45b`): A SECOND `hello` ON ONE SOCKET.** It
+used to build a second session and orphan the first, which stayed attached forever, holding a host
+connection and a `--max-sessions` slot. So one page repeating `hello` could use up the gateway.
+Measured: two registry entries, the first keeping every listener after the socket closed. Now a
+second `hello` gets an `error` and changes nothing. It is older than the picker; the picker's
+review is what found it.
+
+**A SECOND PRE-EXISTING LEAK, FOUND AND FIXED IN THE FINAL REVIEW: `reconnect()` DURING A FIRST
+CONNECT STILL IN FLIGHT.** `reconnect()`'s guard was `this.conn !== undefined || this.reconnecting`,
+which missed a FIRST `connect()` that had not yet resolved: `connectNow` records `this.target`
+before its own first await, so a session still dialling already looked, from `reconnect()`, like
+one with somewhere to go back to. Pressing Enter/Clear (`frontend/src/actions.ts`
+`reconnectInstead`) while that first connect hung (a plaintext host against TLS-by-default hangs
+rather than refusing) opened a SECOND socket without closing the first — measured: two sockets
+dialled, both eventually resolved, `close()` called zero times, an LU leaked on the host per
+impatient keypress. Fixed by routing the guard through `isConnecting()` (`session.ts`
+`reconnect()`), which already covers both halves (`connecting` for a first connect, `reconnecting`
+for a second), and by giving the in-flight refusal its own truthful message, `Reconnect(): a
+connection attempt is already in progress`, instead of reusing `Already connected`.
+
+### THE FINAL GATE, MEASURED 2026-11-05 ON `eabe45b`
+
+| check | result | Electron after |
+|---|---|---|
+| `npm run build` | exit 0 | 0 |
+| `npm run typecheck` | exit 0 | 0 |
+| `npm test` | **2932 tests in 119 files**, all pass | 0 |
+| `pty-smoke.py` | 12 PASS / 0 FAIL | 0 |
+| `pty-smoke.py --oversize-auto` | 7 PASS / 0 FAIL | 0 |
+| `browser-clicks.mjs` | 9 buttons, 9 actions; **19/19** checks, incl. the new `picker` | 0 |
+| `browser-keys.mjs` | **14 chords**, 10 actions; negatives Ctrl+K, **Alt+M**, Ctrl+Z, F13 | 0 |
+| `browser-shot.mjs` | 1/1 | 0 |
+| `browser-lan-copy.mjs` | 2/2, **after** `npx tsc --build --force` (below) | 0 |
+| GUI `keys.mjs` | **25 chords, 23 actions, 2 Model menu popups**; negatives Ctrl+Z, F13 | 0 |
+| GUI `clicks.mjs` | 9 buttons, 10 actions | 1, then 0 by the next check (a slow exit, not a leak) |
+| GUI `select.mjs` | 4/4 | 0 |
+| GUI `shot.mjs` | 2/2 goldens | 0 |
+| GUI `transfer.mjs` | 10/10 | 0 |
+
+**`browser-lan-copy.mjs` REFUSED a stale `dist` again** (`packages/core/dist is OLDER than
+packages/core/src`) right after a clean `npm run build` with a clean tree:
+`core/src/session.ts` was 75 s newer than `core/dist`, and `tsc --build` saw nothing to do. Root
+`npx tsc --build --force` fails (there is no root `tsconfig.json`), so I ran
+`npx tsc --build --force packages/<each>`, after which it passed 2/2. This is the third time; see
+the concerns below.
+
+### LIVE RESULTS, AND WHAT IS OWED (`docs/live-testing.md`, *OWED: oversize live pass*)
+
+- **VM/370 (VM/CE) honours 160x62, 2026-11-04, by the user:** with `-oversize 160x62`, MECAFF's
+  `EE` switches the screen to 160x62, and leaving it returns to 80x24. VM takes the size from our
+  Query Reply. **EE's status line is correct (user, 2026-11-05)**, so 14-bit addressing works end
+  to end: the bottom rows of a 62x160 screen are reachable only by 14-bit addresses. 80x50 (4000
+  cells, 12-bit) is also correct, so both sides of the 4096-cell boundary are witnessed live.
+- **Owed from step 1:** TK5 TSO; a modern z/VM or z/OS host
+  (BIND size code 0x03); (all web oversize checks are done: a FIXED 160x62 through the gateway works in Firefox
+  and Safari on a Mac, and `-oversize auto` through the gateway brought EE up about 180 columns
+  wide under VM, and a resize applies at the next reconnect; user, 2026-11-05.)
+- **Owed from step 2 (items 5-7 there, none run):** the GUI Model menu on a real desktop, on Linux
+  and on macOS (radio rendering, disabled items while connected, where the `Alt-M` popup appears
+  and whether `Escape` dismisses it, a model choice then a reconnect actually renegotiating); the
+  web picker in Firefox and Safari (`Alt-M` reaches the page, and a pick then a reconnect
+  renegotiates); the CLI's `Set(model,3278-4-E)` + `Reconnect()` against VM, expecting 43x80 from
+  its Erase/Write Alternate.
+
+### CONCERNS CARRIED FORWARD
+
+- **The GUI menu popup under Xvfb cannot show what a real keystroke does while it is open.**
+  `keys.mjs` delivers chords through `sendInputEvent`, past the menu's X keyboard grab, so it
+  proves that the popup is called and that the main process survives, not how the open menu
+  behaves. Only a desktop run (live item 5) can show that.
+- **macOS is untested for the Model menu**: radio rendering, the disabled items, `Option-M`, and
+  the popup position.
+- **`forwardKeys` still forwards every kind unfiltered** from the child windows. `geometryMenu`
+  needed its own arm in `main.ts`'s funnel, as `requestCopy` and `copy` did before it, and
+  `keys.mjs` has a `kbd:Alt+M` with a liveness probe that was measured red without that arm. Each
+  new kind the front end owns needs its own funnel arm, or it freezes the main process. The gap
+  is still open (see the memory note *forwardKeys forwards any kind*).
+- **The stale-`dist` refusal fires after timestamp-only changes**, three times now. It is correct
+  to refuse, but its suggested remedy (`npx tsc --build --force packages/core`) is the one that
+  works. A root `--force` does not (no root `tsconfig.json`).
+
+### NEXT
+
+**The merge decision is the user's.** Then roadmap item (c), **packaging** for macOS, Linux and
+Windows (README *Remaining*, item 13).
+
+## STEP 1 OF BRANCH `oversize` (2026-11-04), KEPT FOR ITS DETAIL
+
+**Tasks 1-10 (step 1) were done on 2026-11-04.** The plan said to stop there and report to the
+user before step 2, because step 1 could ship alone and its live pass could happen at once.
+
+### WHAT STEP 1 SHIPPED, BY LAYER
+
+`-oversize <cols>x<rows>|auto|none`, x3270's flag and x3270's order (**columns first**: `160x62`
+is 62 rows by 160 columns). The README's *Oversize* section is the user-facing description.
+
+- **core:** `geometry.ts`'s `resolveGeometry` turns a model plus an oversize into a terminal type
+  and two sizes. Any oversize is `IBM-DYNAMIC` and needs an `-E` model. It is refused with
+  `--terminal-type`, below the model, or over 16383 cells. `auto` falls back to the model with a
+  notice (no size known, a window smaller than the model, too wide), and is cut to fewer rows at
+  the 14-bit limit. `Session` resolves at EVERY connect and reconnect, never in between, and keeps
+  what it resolved (`resolvedGeometry`). On the wire: TN3270E device type `IBM-DYNAMIC`, the oversize in
+  the Query Reply's Usable Area and Implicit Partition, 14-bit addressing, `-bind-limit` bounded by
+  the oversize, BIND size code 0x03 giving the oversize, and UNBIND back to it.
+- **frontend:** one `-oversize` parser for every front end (`oversizeFlag.ts`); `defaultSession`
+  takes a geometry setting.
+- **CLI:** `-oversize <cols>x<rows>`. `auto` is refused at startup (no window), and so is every
+  other combination `resolveGeometry` would refuse at connect.
+- **TUI:** `auto` measures the terminal less the status row (`measureTerminal`). A resize
+  mid-session says `window now fits R rows by C columns; applies at the next reconnect` (or that
+  the model applies), compared against what the last connect RESOLVED, not the BIND-mutable
+  screen. Notices go to stderr after quit, so they survive the alternate screen.
+- **GUI:** `auto` measures the display's work area at the window's own scale (`measure.ts`,
+  `measureDisplay`; `fit()` and `auto` share `windowScale`). Notices go to stderr.
+- **Web gateway:** `auto` measures each browser's viewport at scale 1, less the OIA row
+  (`viewport.ts`). The page sends CSS pixels in `hello` and in a `viewport` message on resize,
+  and a reattach replaces it. Notices go to stderr, prefixed with 8 characters of the session id.
+  An unknown `-model` is a usage error.
+- **`e-server.py --query`:** sends a Read Partition (Query), for the s3270 comparison below.
+- **`pty-smoke.py --oversize-auto`** (`dc4b1af`): the TUI's `auto` in a real pty, below.
+
+### THE STEP-1 GATE, MEASURED 2026-11-04 ON `dc4b1af` (SUPERSEDED BY THE FINAL GATE ABOVE)
+
+| check | result | Electron after |
+|---|---|---|
+| `npm run build` | exit 0 | — |
+| `npm run typecheck` | exit 0 | — |
+| `npm test` | **2844 tests in 117 files**, all pass | — |
+| `pty-smoke.py` | 12 PASS / 0 FAIL | — |
+| `pty-smoke.py --oversize-auto` | **7 PASS / 0 FAIL** | — |
+| `browser-clicks.mjs` | 9 buttons; transfer form **18/18** checks | 0 |
+| `browser-keys.mjs` | 13 chords, 10 actions; negatives Ctrl+K, Ctrl+Z, F13 | 0 |
+| `browser-shot.mjs` | 1/1 | 0 |
+| `browser-lan-copy.mjs` | **2/2** (ran, not SKIPPED) | 0 |
+| GUI `keys.mjs` | 22 chords, 20 actions; negatives Ctrl+Z, F13 | 0 |
+| GUI `clicks.mjs` | 9 buttons, 10 actions | 0 |
+| GUI `select.mjs` | 4/4 | 0 |
+| GUI `shot.mjs` | 2/2 goldens | 0 |
+| GUI `transfer.mjs` | 10/10 | 0 |
+
+**The browser harnesses first REFUSED a stale `dist`** (`packages/gui/dist is OLDER than
+packages/gui/src`; core's for `browser-lan-copy`), right after a clean `npm run build`. Only a
+timestamp had moved. `npx tsc --build --force` on every package fixed it, after which the whole
+gate above was re-run from `npm test` on, against that rebuild. Expect it again after a merge or
+checkout.
+
+**`--oversize-auto`, what it shows:** in a 41x100 pty with `-oversize auto`, the host is told
+`IBM-DYNAMIC`; after the host's Erase/Write Alternate the OIA is drawn at `ESC[41;1H ESC[0m` and not
+at 40;1, which only a 40-row by 100-column screen in that terminal gives; and resizing to 51x132
+prints `window now fits 50 rows by 132 columns; applies at the next reconnect` within 2 s.
+Mutation-checked against `dist`: `measureTerminal` at rows-2 and at rows-0 each fail the OIA
+check and the named-size check, and a plain Erase/Write fails the OIA check. (An earlier draft
+matched only `ESC[41;1H` and the rows-2 mutant passed, because the bottom border lands there.)
+**Not shown:** the Query Reply, since the fake host sends no Read Partition, and a reconnect, since
+the fake host accepts once (Session's unit tests cover re-measuring).
+
+### WHAT IS VERIFIED, AND WHAT IS NOT
+
+- **Against real s3270 4.5** (`docs/live-testing.md`, *Oversize conformance against real s3270 —
+  2026-11-04*): both clients with `-oversize 160x62` against `e-server.py --query` ask for
+  `IBM-DYNAMIC`. Their Usable Area and Implicit Partition bytes are **identical** (160x62
+  alternate, 80x24 default, BUFFSZ 9920). x3270 sends ten Query Reply units to our six; that is by
+  design. This is a scripted host, not a real one.
+- **The GUI's `auto` end to end under Xvfb (Task 7):** Electron reported a 1280x1024 work area;
+  the GUI negotiated `IBM-DYNAMIC` at 57 rows by 113 columns, matching `measureDisplay`; 0
+  Electron processes left.
+- **The web viewport's `auto` is unit-tested only**, with the integration `hello` test. The browser
+  harnesses all run `--replay` gateways, and a replay never connects, so it never measures.
+- **ONE LIVE HOST HAS: VM/370 (VM/CE), 2026-11-04, by the user.** With `-oversize 160x62`, `EE`
+  switches the screen to 160x62 and leaving it returns to 80x24: VM takes the size from our Query
+  Reply, and EE's status line is correct (2026-11-05), so 14-bit addressing works end to end.
+  Details: `docs/live-testing.md`, *OWED: oversize live pass*. TK5 and a modern host
+  have not been run. The web gateway works live at a fixed 160x62 in Firefox and Safari on a Mac,
+  and with `-oversize auto` (EE about 180 columns wide), 2026-11-05.
+
+### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
+
+1. ~~**VM/370 in MECAFF's `EE`**~~ **DONE (user, 2026-11-04/05):** at `-oversize 160x62` EE
+   draws 160x62, returns to 80x24 on exit, and its bottom status line is correct, so the size
+   AND 14-bit addressing both work live. `-oversize 80x50` (12-bit) is
+   also correct, so both sides of the 4096-cell boundary are live-witnessed.
+2. **TK5 TSO:** does its Read Partition get our oversize, and does ISPF draw at it?
+3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
+4. **Firefox and Safari:** a FIXED `-oversize 160x62` through the gateway WORKS in both on a Mac
+   (user, 2026-11-05), and `-oversize auto` sized the session from the browser window (EE about
+   180 columns wide under VM), and a resize applies at the next reconnect, as designed. DONE.
+
+## SUPERSEDED BY THE ABOVE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT WAS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
 
 **2026-11-04: the user merged `fetch-ahead-copy` into `main` (a fast-forward, so there is no merge
 commit), pushed it, and deleted the branch. `main` == `origin/main` at `c05f533`, checked with a
@@ -17,8 +239,8 @@ on Safari and Firefox. They are no longer merge gates, but no one has confirmed 
 (0a)-(0e) are all done. That leaves the agreed order, unchanged: **(a) oversize + `IBM-DYNAMIC`**,
 then (b) local model-switching (both drive `Screen.resize()`; see the roadmap entry under item 5
 below, and its honest testability limit), (c) packaging for macOS, Linux and Windows, (d) PS + VMGIF,
-(e) GOCA, (f) printer sessions. A small side branch is also waiting: **test files are never
-typechecked** (see OPEN).
+(e) GOCA, (f) printer sessions. The side branch **`typecheck-tests`** makes the tests typechecked
+(see OPEN).
 
 The rest of this section is the branch's history as of 2026-11-03. Spec and plan:
 `docs/superpowers/specs/2026-11-02-fetch-ahead-copy-design.md`,
@@ -117,9 +339,13 @@ the FULL gate, re-run on `78b4dd8`; 0 leaked Electron processes after every harn
 
 ### OPEN
 
-- **Test files are never typechecked** in this repo (pre-existing, found by an implementer, NOT
-  fixed): every package's `tsconfig.json` includes only `src/`. vitest strips types, so a type error
-  in a test passes. Worth its own small branch.
+- **Test files are now typechecked (branch `typecheck-tests`, 2026-11-04).** Each package has a
+  `tsconfig.test.json` (src + test, no emit); `npm run typecheck` runs them after the build check.
+  Measured before: 52 errors in 6 packages. Most were stale fixtures (a missing `scheme`, `hintRow`,
+  `save`/`restore`, `params` args), but one was a real hole: the 24x80 width test in
+  `transferOverlay.test.ts` iterated a phase `'form'` that does not exist, so `running`, `done` and
+  `failed` were never width-checked. The `.mjs` test harnesses got `.d.mts` files instead of
+  `@ts-expect-error`. Mutation-checked: a type error in a test makes `typecheck` exit 1.
 - `copyByChord`'s residual risk (see its docstring): a browser that dispatches `copy` but refuses
   the data it set loses that copy SILENTLY. Only the live pass can show it.
 

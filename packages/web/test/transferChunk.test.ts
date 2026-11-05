@@ -54,23 +54,20 @@ describe('ChunkReassembler', () => {
     const r = new ChunkReassembler(5);
     r.accept(0, new Uint8Array([1, 2, 3]));
     const out = r.accept(5, new Uint8Array([4, 5]));
-    expect(out.ok).toBe(false);
-    expect(out.error).toMatch(/out of sequence/);
+    expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/out of sequence/) });
   });
 
   it('rejects a duplicate sequence number', () => {
     const r = new ChunkReassembler(5);
     r.accept(0, new Uint8Array([1, 2, 3]));
     const out = r.accept(0, new Uint8Array([9, 9, 9]));
-    expect(out.ok).toBe(false);
-    expect(out.error).toMatch(/out of sequence/);
+    expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/out of sequence/) });
   });
 
   it('rejects bytes exceeding the declared total', () => {
     const r = new ChunkReassembler(4);
     const out = r.accept(0, new Uint8Array([1, 2, 3, 4, 5]));
-    expect(out.ok).toBe(false);
-    expect(out.error).toMatch(/exceeds declared/);
+    expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/exceeds declared/) });
   });
 
   it('refuses a declared total over the 10 MB cap, naming both numbers', () => {

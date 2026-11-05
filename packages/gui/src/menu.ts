@@ -4,7 +4,7 @@
  *
  * ## DELIBERATELY NOT THE FINAL MENU STRUCTURE
  *
- * Edit only. The keypad window's toolbar icon and a connect dialog are both roadmapped and will
+ * Edit, View and (geometry sessions only) Model. A connect dialog is roadmapped and will
  * want menus too; guessing their shape now would be a second copy of a decision nobody has taken.
  *
  * ## THE TEMPLATE IS A PURE FUNCTION OF THE PLATFORM, WHICH IS WHY IT IS TESTABLE
@@ -17,8 +17,16 @@
  *
  * A plain data template, so vitest can call it with no Electron runtime at all. `main.ts` passes
  * the result to `Menu.buildFromTemplate`. That is the same split the transfer window used to stay
- * testable.
+ * testable. `@tn3270/core` IS imported, by the Model menu below: it is plain data and pure
+ * functions, and the model list and the size wording must come from the one place a connect
+ * reads them, not from a copy here. `@tn3270/frontend` only for a type.
  */
+
+import {
+  KNOWN_MODELS, describeSize, resolveTerminalType,
+  type GeometrySetting, type Oversize, type Size,
+} from '@tn3270/core';
+import type { GeometryChoice } from '@tn3270/frontend';
 
 /** The platform strings this file distinguishes. `process.platform`'s type. */
 export type Platform = 'darwin' | 'linux' | 'win32' | string;
@@ -40,6 +48,10 @@ export interface MenuItemTemplate {
   readonly role?: MenuRole;
   readonly accelerator?: string;
   readonly id?: string;
+  /** A literal union, for the reason `MenuRole` gives. Absent is Electron's `normal`. */
+  readonly type?: 'radio' | 'separator';
+  readonly checked?: boolean;
+  readonly enabled?: boolean;
   readonly click?: () => void;
   /**
    * MUTABLE, UNLIKE EVERY FIELD BESIDE IT, and that asymmetry is deliberate rather than an
@@ -127,11 +139,199 @@ export interface MenuHandlers {
   readonly onKeypad: () => void;
   /** Open the full-keyboard window. OPEN, not toggle, for the same reason. */
   readonly onKeyboard: () => void;
+  /**
+   * One Model-menu choice. Optional, unlike the four above, because only a geometry-mode session
+   * has a Model menu; the other handlers predate it and a caller without it is still complete.
+   */
+  readonly onGeometry?: (choice: GeometryChoice) => void;
+  /**
+   * The Model menu's Disconnect item, 2026-11-05: `session.disconnect()`. Optional, as
+   * `onGeometry` is, because only a geometry-mode session has a Model menu -- so a
+   * `--terminal-type` session has no Disconnect item either, which is accepted: it has no choices
+   * that a disconnect would free.
+   */
+  readonly onDisconnect?: () => void;
+}
+
+/**
+ * What one Model-menu item asks for. The type and the rule that applies it
+ * (`applyGeometryChoice`) live in `@tn3270/frontend`, so the web gateway's list uses the same one.
+ */
+export type { GeometryChoice };
+
+/**
+ * What the Model menu is built from. `main.ts` reads it off the session each time.
+ *
+ * `startupFixed` is the `-oversize <cols>x<rows>` given at startup, if any: the spec's choices are
+ * PICKED FROM LISTS, NOTHING TYPED (the user's decision, 2026-11-04), so the only fixed size the
+ * menu can offer is the one already typed on the command line. A new size is `-oversize` or the
+ * CLI's `Set(oversize,...)`.
+ */
+export interface GeometryMenu {
+  readonly models: readonly string[];
+  readonly current: GeometrySetting;
+  readonly startupFixed?: Size;
+  /**
+   * Every choice is disabled while true. CONNECTED OR CONNECTING: `setGeometry` refuses both, and
+   * an attempt in flight has already resolved the setting it will advertise.
+   */
+  readonly connected: boolean;
+  /**
+   * CONNECTING, NOT YET CONNECTED -- `isConnecting() && !isConnected()`, the web gateway's rule
+   * (`web/src/geometryChoices.ts` says why the `!isConnected()` is needed on 'connect' itself).
+   * Read only by the Disconnect item: `Session.disconnect()` does nothing to an attempt in
+   * flight (a known core limitation), so the item is disabled then. Absent is false.
+   */
+  readonly connecting?: boolean;
+}
+
+/** The Disconnect item's id: NOT `model:...`, which names a model radio. */
+export const DISCONNECT_ID = 'model-disconnect';
+
+/** One choice item's mutable state. `main.ts` applies these by id; see `modelMenuStates`. */
+export interface ChoiceState {
+  readonly id: string;
+  /** ABSENT on the Disconnect item, a normal item with nothing to check -- see `applyChoiceStates`. */
+  readonly checked?: boolean;
+  readonly enabled: boolean;
+}
+
+/** The model a setting resolves to, as a `KNOWN_MODELS` key: `IBM-` stripped, core's casing. */
+function currentModel(setting: GeometrySetting): string | undefined {
+  try {
+    // Core's own resolution, so an absent model is the product default (TERMINAL_TYPE, today
+    // 3278-2-E) and `ibm-3278-5-e` is 3278-5-E -- exactly what a connect would advertise.
+    return resolveTerminalType({ ...(setting.model !== undefined ? { model: setting.model } : {}) })
+      .replace(/^IBM-/, '');
+  } catch {
+    return undefined; // a model core refuses checks nothing rather than guessing one
+  }
+}
+
+/** Whether a fixed oversize is the startup one: only then is that item honestly checked. */
+function isStartupFixed(o: Oversize, startup: Size | undefined): boolean {
+  return o.kind === 'fixed' && startup !== undefined
+    && o.rows === startup.rows && o.cols === startup.cols;
+}
+
+/**
+ * Every choice item's `checked` and `enabled`, models first, then the oversize items, in menu
+ * order.
+ *
+ * THE ONE SOURCE OF BOTH THE TEMPLATE AND `main.ts`'S UPDATES. After a click or a connect,
+ * `main.ts` MUTATES the built items by id rather than rebuilding the application menu (a rebuild
+ * re-creates the macOS app menu and every accelerator to change two booleans) -- and it must,
+ * after EVERY click, refused or not: Electron checks a clicked radio item itself, before the
+ * handler runs, so a refused choice would otherwise be left showing as chosen.
+ */
+export function modelMenuStates(g: GeometryMenu): ChoiceState[] {
+  const enabled = !g.connected;
+  const model = currentModel(g.current);
+  const o = g.current.oversize;
+  return [
+    // FIRST, as in the menu. Enabled only while ACTUALLY connected -- see `GeometryMenu.connecting`.
+    { id: DISCONNECT_ID, enabled: g.connected && g.connecting !== true },
+    ...g.models.map((m) => ({ id: `model:${m}`, checked: m === model, enabled })),
+    { id: 'oversize:none', checked: o.kind === 'none', enabled },
+    { id: 'oversize:auto', checked: o.kind === 'auto', enabled },
+    ...(g.startupFixed !== undefined
+      ? [{ id: 'oversize:fixed', checked: isStartupFixed(o, g.startupFixed), enabled }]
+      : []),
+  ];
+}
+
+/** The two writable fields of a built Electron `MenuItem` this file touches. */
+export interface MutableChoice { checked: boolean; enabled: boolean }
+
+/**
+ * Write `states` onto the BUILT menu, looking each item up with `get` (main.ts passes
+ * `menu.getMenuItemById`). Pure in the same sense as the template: no Electron import, so the
+ * radio rule below is pinned by a test.
+ *
+ * ONLY `checked = true` IS EVER WRITTEN, BECAUSE WRITING `false` CHECKS THE ITEM. MEASURED on
+ * Electron 44.3.0 under Xvfb: in a radio group a/b/c with `a` checked, `c.checked = false` left
+ * `c` CHECKED and `a` cleared, and `a.checked = false` on the checked `a` changed nothing -- any
+ * assignment to a radio item's `checked` selects it. The first version of this loop wrote every
+ * item's boolean and so left the LAST item of each group checked after every refresh, whatever
+ * the session held. Selecting the one true item clears the rest of its group, which is all that is
+ * needed. (A group with no true item does not arise: `setGeometry` refuses an unknown model, and
+ * the only fixed size the menu can set is the startup one, which it offers.)
+ */
+export function applyChoiceStates(
+  states: readonly ChoiceState[], get: (id: string) => MutableChoice | null,
+): void {
+  for (const st of states) {
+    const item = get(st.id);
+    if (item === null) continue;
+    if (st.checked === true) item.checked = true;
+    item.enabled = st.enabled;
+  }
+}
+
+/**
+ * The Model menu: Disconnect and a separator, the models as one radio group, a separator, and an
+ * Oversize submenu.
+ *
+ * EACH CHOICE IS DISABLED, NOT THE MENU. The spec says "the whole menu disabled while connected";
+ * disabling every item gets that everywhere, where disabling the top-level item is a per-platform
+ * question (on macOS a disabled top-level menu cannot even be opened to see what is current), and
+ * `Alt-M` pops the SUBMENU up directly, past any parent item, so only per-item state reaches it.
+ */
+function modelMenu(
+  g: GeometryMenu, onGeometry: ((c: GeometryChoice) => void) | undefined,
+  onDisconnect: (() => void) | undefined,
+): MenuItemTemplate {
+  const states = new Map(modelMenuStates(g).map((s) => [s.id, s]));
+  const item = (id: string, label: string, choice: GeometryChoice): MenuItemTemplate => {
+    const s = states.get(id)!;
+    return {
+      label, id, type: 'radio', checked: s.checked === true, enabled: s.enabled,
+      ...(onGeometry !== undefined ? { click: () => { onGeometry(choice); } } : {}),
+    };
+  };
+  const fixed = g.startupFixed;
+  return {
+    label: 'Model',
+    id: 'model',
+    submenu: [
+      /*
+        DISCONNECT FIRST, 2026-11-05: before it this menu could be used only after the HOST dropped
+        the line. A NORMAL ITEM, NOT A RADIO, so Electron 44's radio quirk (`applyChoiceStates`)
+        cannot touch it: its state carries no `checked`. The four-event refresh in `main.ts`
+        enables it on 'connect' and disables it on 'geometry' (an attempt starting) and 'disconnect'.
+      */
+      {
+        label: 'Disconnect', id: DISCONNECT_ID, enabled: states.get(DISCONNECT_ID)!.enabled,
+        ...(onDisconnect !== undefined ? { click: onDisconnect } : {}),
+      },
+      { type: 'separator' },
+      // The size in words beside each name, the spec's rule for every new message naming a size:
+      // the names alone do not say that 3278-4 is the tall one.
+      ...g.models.map((m) => {
+        const alt = KNOWN_MODELS[m]?.alternate;
+        return item(`model:${m}`, alt !== undefined ? `${m} (${describeSize(alt)})` : m, { model: m });
+      }),
+      { type: 'separator' },
+      {
+        label: 'Oversize',
+        id: 'oversize',
+        submenu: [
+          item('oversize:none', 'None', { oversize: { kind: 'none' } }),
+          item('oversize:auto', 'Auto', { oversize: { kind: 'auto' } }),
+          // `<cols>x<rows>` as typed on `-oversize` (x3270's order), then the size in words.
+          ...(fixed !== undefined
+            ? [item('oversize:fixed', `${fixed.cols}x${fixed.rows} (${describeSize(fixed)})`,
+              { oversize: { kind: 'fixed', rows: fixed.rows, cols: fixed.cols } })]
+            : []),
+        ],
+      },
+    ],
+  };
 }
 
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */
 export function buildMenuTemplate(
-  platform: Platform, handlers?: MenuHandlers,
+  platform: Platform, handlers?: MenuHandlers, geometry?: GeometryMenu,
 ): readonly MenuItemTemplate[] {
   const edit: MenuItemTemplate = {
     label: 'Edit',
@@ -211,5 +411,9 @@ export function buildMenuTemplate(
   };
   // AN APP MENU IS MANDATORY ON macOS: without one the window gets NO menu bar at all, which is a
   // behavioral difference rather than a cosmetic one.
-  return platform === 'darwin' ? [{ role: 'appMenu' }, edit, view] : [edit, view];
+  //
+  // THE MODEL MENU ONLY WITH A GEOMETRY, so a caller that passes none gets exactly the old
+  // template. `main.ts` passes none for a `--terminal-type` session, which has no model to switch.
+  const menus = geometry !== undefined ? [edit, view, modelMenu(geometry, handlers?.onGeometry, handlers?.onDisconnect)] : [edit, view];
+  return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : menus;
 }

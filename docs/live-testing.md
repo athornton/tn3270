@@ -4819,3 +4819,328 @@ Chromium key event.
    indistinguishable strings by the time they reach the DOM — `transfer.html` says why there is no
    error styling). Worth one deliberate look, since a progress report that silently stops is the
    failure this window would hide best.
+
+## Oversize conformance against real s3270 — 2026-11-04
+
+**What this is, stated exactly so it is not read for more than it shows.** This is a scripted
+host, `packages/cli/scripts/e-server.py`, not a real one — it proves our Query Reply bytes agree
+with s3270's on the fields a host would use to learn the screen size, not that any real host
+accepts an `IBM-DYNAMIC` terminal type or an oversize screen. See the design doc's Testing
+section, `docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md`.
+
+**The order was not interchangeable.** Per this project's standing rule for this harness
+(`e-server.py`'s docstring, ~:11-17), the harness was pointed at real s3270 first, and only after
+that produced the expected `IBM-DYNAMIC` negotiation and a Query Reply was it pointed at our
+client.
+
+### What changed in `e-server.py`
+
+`--query` is new: after `after_negotiation`'s existing Erase/Write (and any BIND), it sends one
+more 3270-DATA record carrying a Write Structured Field, Read Partition (Query):
+
+```
+f3 00 05 01 ff 02
+```
+
+checked byte-by-byte against `packages/fixtures/x3270/tso-query-reply.txt` (which explains the
+same six bytes against GA23-0059, `~/3270/ref/pages.txt:6345-6356`, the Read Partition format `L
+L SFID PID TYPE`): `f3` Write Structured Field, `00 05` length 5 (covering `00 05 01 ff 02`), `01`
+SFID Read Partition, `ff` PID X'FF' (the QUERY partition id — the byte that must come back
+doubled on the wire), `02` TYPE Query. `send_record`'s existing `double_iac` runs over the whole
+header+payload, so the `0xff` doubles automatically; confirmed on the wire below (`...0501ffff02...`,
+the doubled pair sitting where the single `ff` was written). Without `--query`, behavior is
+unchanged. `--device-name IBM-DYNAMIC` already existed, so `DEVICE-TYPE IS` echoes it back.
+
+### Commands run
+
+Three throwaway ports (14942 s3270, 14943-14945 scratch, 14945 the recorded client run), killed
+by PID, nothing left listening afterward.
+
+```bash
+npm run build
+python3 packages/cli/scripts/e-server.py --port 14942 --query --device-name IBM-DYNAMIC \
+  --timeout 10 &
+S=~/src/suite3270-4.5/obj/x86_64-conda-linux-gnu/s3270/s3270
+printf 'Wait(8,3270Mode)\nWait(4,InputField)\nWait(1,Seconds)\nQuit\n' \
+  | $S -oversize 160x62 C:127.0.0.1:14942
+```
+
+```bash
+python3 packages/cli/scripts/e-server.py --port 14945 --query --device-name IBM-DYNAMIC \
+  --timeout 10 &
+printf 'Connect(127.0.0.1:14945)\nWait(3270Mode,8)\nWait(Output,5)\nWait(Output,5)\nQuit\n' \
+  | node packages/cli/dist/main.js -insecure -oversize 160x62
+```
+
+(s3270's `Wait` syntax takes the timeout FIRST, `Wait(seconds,keyword)` — checked against
+`~/src/suite3270-4.5/Common/task.c:3581-3592` (`Wait_action` picks off a leading numeric argument
+before matching the keyword) — where our `Runner.wait` takes it second,
+`Wait(keyword,seconds)` (`packages/cli/src/runner.ts:789-791`). Two `Wait(Output,5)` were needed
+for our client because the harness's Erase/Write and its Query Reply are two separate 3270-DATA
+records, each one `screen` emission; one `Wait(Output)` only caught the first.)
+
+**No adjustment was needed to reach s3270's `IBM-DYNAMIC` request or its reply.** The design doc's
+worry — x3270 silently drops oversize without the extended data stream (`Common/model.c:203-205`,
+`:333-335`) — did not apply: s3270's own default is `appres.extended_data_stream = true`
+(`~/src/suite3270-4.5/Common/glue.c:497`), confirmed by checking that file rather than assuming it,
+so `-oversize 160x62` with no explicit `-E` model still asked for `IBM-DYNAMIC` and sent a full
+reply on the first run.
+
+### Device-type log lines
+
+```
+s3270: ** client asked for device-type 'IBM-DYNAMIC' lu=None
+ours:  ** client asked for device-type 'IBM-DYNAMIC' lu=None
+```
+
+Identical.
+
+### Full inbound Query Reply, as logged (IAC-doubled wire bytes stripped of the 5-byte TN3270E
+header; the payload begins at the AID `88`)
+
+s3270, 180 bytes:
+
+```
+88000e81808081848586878895a1a600178181010000a0003e01000a02e50002006f090c26c000
+0881840026c000001b81858200090c000000000700100002b900250100f103c301360026818600
+1000f4f1f1f2f2f3f3f4f4f5f5f6f6f7f7f8f8f9f9fafafbfbfcfcfdfdfefeffff000f81870500
+f0f1f1f2f2f4f4f8f800078188000102000c81950000400040000101001281a10000000000000
+00006a7f3f2f7f0001181a600000b01000050001800a0003e
+```
+
+ours, 116 bytes:
+
+```
+88000a81808081868795a600178181010000a0003e01000a02e50002006f090c26c0002681860
+01000f4f1f1f2f2f3f3f4f4f5f5f6f6f7f7f8f8f9f9fafafbfbfcfcfdfdfefeffff000f8187050
+0f0f1f1f2f2f4f4f8f8000c81950000400040000101001181a600000b01000050001800a0003e
+```
+
+### Units each client sends — expected to differ, not a failure
+
+Split after the AID into length-prefixed units (`L L SFID QCODE ...`), per
+`packages/core/src/queryreply.ts`'s own framing (`buildQueryReply`, which this project's reply
+builder already matches byte for byte):
+
+| QCODE | unit | s3270 | ours |
+|---|---|---|---|
+| 0x80 | Summary | yes | yes |
+| 0x81 | Usable Area | yes | yes |
+| 0x84 | Alphanumeric Partitions (`QR_ALPHA_PART`, `~/src/suite3270-4.5/include/3270ds.h:140`) | yes | no |
+| 0x85 | Character Sets (`QR_CHARSETS`, `:141`) | yes | no |
+| 0x86 | Color | yes | yes |
+| 0x87 | Highlighting | yes | yes |
+| 0x88 | Reply Modes (`QR_REPLY_MODES`, `:144`) | yes | no |
+| 0x95 | Distributed Data Management | yes | yes |
+| 0xa1 | RPQ Names (`QR_RPQNAMES`, `:165`) | yes | no |
+| 0xa6 | Implicit Partition | yes | yes |
+
+x3270 sends ten units against our six — exactly what `queryreply.ts`'s own module comment says
+("x3270 sends ten units; we still send five[, now six with DDM]"), and is a documented, deliberate
+scope choice, not a defect: Summary's own list (QCODE 0x80's params) is required to name only what
+each device supports, and the manual imposes no ordering or completeness requirement on which
+Query-returnable units a device carries beyond that. The two units compared below (Usable Area,
+Implicit Partition) are present on both sides, which is what conformance on oversize actually
+needs.
+
+### Per-field comparison
+
+Both Usable Area and Implicit Partition parameter bytes, byte for byte, are **identical** between
+s3270 and our client — compared with a throwaway parser in `/tmp` (not committed), which split
+each reply after the AID into `L L SFID QCODE params` units and diffed the two units' param bytes
+directly:
+
+- **Usable Area (QCODE 0x81), params `010000a0003e01000a02e50002006f090c26c0`, identical on both
+  sides.** Decoded against `packages/core/src/queryreply.ts`'s own byte commentary and GA23-0059 p.
+  6-101 (`pages.txt:11601` FLAGS byte 4, `:11612-11614` byte 5 CELLUNITS, `:11619-11634` UNITS
+  through AH):
+  - FLAGS bytes 4-5: `0x01 0x00` on both — ADDR=X'1' (12/14-bit addressing allowed), VCP=0,
+    CHAR=0, CELLUNITS=0 (cells, not pels). Identical.
+  - W/H (bytes 6-9): `00a0 003e` = 160 x 62 on both — the MAXIMUM, i.e. the oversize alternate,
+    which both clients report identically.
+  - BUFFSZ (bytes 21-22, `26c0` = 9920 = 160*62): identical on both, and matches W*H.
+  - **Units/Xr/Yr/AW/AH (bytes 10-20, `01 000a02e5 00 02006f 09 0c`) are also byte-identical
+    between the two clients**, and this is EXPECTED rather than a coincidence worth re-deriving:
+    both x3270 and our client hardcode these as dimensional constants of a 3279-2 display
+    (`queryreply.ts`'s comment on `usableArea`, citing `Common/sf.c:711-732`), independent of
+    screen size — a *model* claim (cell pitch, physical units), not a *geometry* claim (how many
+    cells). So they do not vary with oversize on either side and their agreement here says nothing
+    new about the oversize path; it is inherited from both clients claiming the same reference
+    device (`Common/sf.c:54-57`, `Xr_3279_2`/`Yr_3279_2`/`SW_3279_2`/`SH_3279_2`). Does it matter?
+    No: nothing in this comparison depends on it, and `queryreply.ts`'s own comment already flags
+    the UNITS/Xr/Yr inconsistency (millimeters claimed, inches-scaled fractions) as inherited from
+    x3270 rather than a defect.
+
+- **Implicit Partition (QCODE 0xa6), params `00000b01000050001800a0003e`, identical on both
+  sides.** Decoded against GA23-0059 p. 6-71/6-72 (`pages.txt:10528`, base FLAGS;
+  `:10558-10566`, the Sizes-for-Display SDP) and `queryreply.ts`'s `implicitPartition`:
+  - base FLAGS (bytes 4-5): `0000` on both — reserved.
+  - SDP: `L=0x0b SDPID=0x01 flags=0x00`, then `WD HD WA HA` = `0050 0018 00a0 003e` = 80 x 24 x
+    160 x 62 on both. WD/HD is the model's own DEFAULT size (80 columns x 24 rows), WA/HA is the
+    oversize ALTERNATE (160 x 62) — identical on both sides, in both the default and the oversize
+    fields.
+
+**No field differed.** Nothing was adjusted on either side to force agreement; this is the result
+of the first run of each client against the first run of the harness that produced a Query Reply.
+
+### Verdict
+
+Conformant on the fields that matter for oversize: both s3270 4.5 and our client, each run with
+`-oversize 160x62` against the same scripted TN3270E host with `--query`, ask for TN3270E device
+type `IBM-DYNAMIC` and answer a Read Partition (Query) with a Usable Area and an Implicit
+Partition unit whose geometry fields (W/H, BUFFSZ, WD/HD/WA/HA) are byte-identical: 160 columns by
+62 rows as the maximum/alternate, 80x24 preserved as the model default. The unit-count difference
+(ten units vs. six) is x3270 sending more capabilities than we claim, which the design's own
+testing section anticipated and which does not affect the oversize fields compared here.
+
+**What this does NOT show:** that any real host accepts `IBM-DYNAMIC` or acts on this reply —
+`e-server.py` is a hand-written counterparty built because TK5 and VM/370 never speak TN3270E at
+all (see "TN3270E harness validation" above), not a stand-in for a host that implements Read
+Partition (Query) the way a modern VTAM host would. The live witness for that remains the item in
+the design doc's Testing section: a real z/VM or z/OS host, expected within a couple of weeks of
+2026-11-04 per the user.
+
+## OWED: oversize live pass — steps 1 and 2 of branch `oversize`, 2026-11-04/05 (VM/370 160x62 witnessed, 14-bit included; step-2 items 5-7 not run)
+
+**Item 1 has a first live result (below); items 2-4 have not been run.** The conformance record
+above shows our Query Reply matches s3270's against a scripted host. These items show what a REAL
+host does with it.
+
+**RESULT, VM/370 (VM/CE), 2026-11-04, by the user, on their own machine from branch `oversize` at
+`8f09c20`: with `-oversize 160x62`, running `EE` switches the screen to 160x62, and leaving `EE`
+returns it to 80x24.** That is VM honouring the size from our Query Reply: EE's full-screen write
+is an Erase/Write Alternate at 62 rows by 160 columns, and the CMS screen after it is a plain
+Erase/Write at the model's default 24x80, exactly the default/alternate split the design specifies.
+It is the first live host to act on a geometry we reported, and it rules out the bottom row of the
+table below ("DMKRIO wins") for 160x62.
+
+**AND 14-BIT ADDRESSING WORKS END TO END (user, 2026-11-05): EE's status line is correct at
+160x62.** EE keeps its status line at the bottom of the screen, and at 62 rows by 160 columns
+every cell past 4095 (from row 26 on) is reachable ONLY by a 14-bit address. So VM/MECAFF wrote
+14-bit addresses, our client decoded them, and the line landed where it belongs. That is the top
+row of the table below: VM honours the oversize, 14-bit included. The 80x50 run was no longer
+needed to tell the failure rows apart, **but the user ran it anyway and it is correct too
+(2026-11-05)**: an oversize inside 12-bit addressing (50 rows by 80 columns, 4000 cells) is also
+honoured. So both sides of the 4096-cell boundary are witnessed live. Not reported, so not claimed:
+the OIA during EE, and a trace.
+
+Items 2-7 still need the user's systems or browsers. Build from branch `oversize`, and run
+`npm run build` first.
+
+1. **VM/370, two runs, smaller first** (TUI or GUI, `-insecure -model 3278-2-E -oversize ...`).
+   Log on and open a file in MECAFF's **`EE`**, then (optionally) `FSLIST`. EE is the right probe:
+   it fills the whole screen and keeps its status and command lines at the BOTTOM, so at 62x160 it
+   must address cells past 4095, which only 14-bit addressing reaches. (Not FLIST, which an earlier
+   draft of this list named: VM/CE's readme lists MECAFF's full-screen tools as FSLIST, FSHELP and
+   EE (`readme-1_3.txt:9-10`), and FLIST is unconfirmed on VM/370, like XEDIT.)
+   1. **`-oversize 80x50`** (50 rows by 80 columns, 4000 cells): an oversize that stays inside
+      12-bit addressing.
+   2. **`-oversize 160x62`** (62 rows by 160 columns, 9920 cells): needs 14-bit addressing.
+
+   Why two: VM/CE 1.3's DMKRIO terminals "auto negotiate screen size" (`readme-1_3.txt:19-20`,
+   DIAG58 V3), and VM has sent our client Read Partition Queries before (*VM's result is a
+   measurement* above), so VM is expected to learn our size from the Query Reply. A failure at
+   160x62 alone cannot say whether VM ignored the size or accepted it and cannot address past 4095;
+   the 80x50 run separates the two:
+
+   | 80x50 | 160x62 | means |
+   |---|---|---|
+   | full size | full size | done: VM honours the oversize, 14-bit included |
+   | full size | broken or VM's size | VM honours the size but not 14-bit addressing: a VM/MECAFF limit |
+   | VM's size | VM's size | VM does not use our Query Reply for geometry (DMKRIO wins) |
+
+   **Report, for each run:** whether the screen is full width and height; whether EE's bottom
+   status and command lines sit on the last rows (at 62x160, misplaced or wrapped bottom lines are
+   the 14-bit symptom); the OIA, where `X PROG755` means the host addressed past our buffer; and,
+   with the trace on, the Query Reply we sent and the address bytes in the EWA.
+2. **TK5 TSO, `-oversize 160x62`** (the GUI): TSO issues a Read Partition to any `-E` client.
+   Does it get our oversize (the trace shows the Query Reply sent), and does ISPF draw at 62 rows
+   by 160 columns?
+3. **A modern z/VM or z/OS host, when the user has one:** the TN3270E path. The device type is
+   `IBM-DYNAMIC`, and a BIND with screen-size code 0x03 should give the oversize. This is the path
+   a modern VTAM host takes, and the only one neither Hercules system can exercise.
+4. **RESULT, web gateway at a FIXED `-oversize 160x62`, Firefox and Safari on a Mac (user,
+   2026-11-05): works correctly in both.** The gateway's session negotiated the oversize and both
+   browsers drew the 62x160 screen; the page sizes its canvas to the drawing, so this is the
+   rendering half. NOT covered by that run, and still owed: `-oversize auto`, below, which is
+   the path that measures the BROWSER'S VIEWPORT.
+
+   **RESULT, `-oversize auto` through the web gateway (user, 2026-11-05): EE under VM came up
+   about 180 columns wide ("180-something"),** so the gateway measured the browser's viewport,
+   resolved an oversize from it, and VM drew EE at that size. That is the viewport path working
+   end to end, which no harness can drive (the browser harnesses run `--replay` gateways). ~180
+   columns is the 9-pixel cell into a viewport of roughly 1620-1700 CSS px, so the measure is
+   plausible. The browser was not named and is recorded as the user's Mac browser from the run
+   above. **And the resize-then-reconnect half "runs as expected" (user, 2026-11-05):** a
+   browser resize changes the size at the next reconnect, not at once. Not reported, so not
+   claimed: the exact rows and columns, and a stderr fallback line.
+
+   **Firefox and Safari, web gateway with `-oversize auto`:** the session is sized to the browser
+   window (stderr names any fallback, prefixed with 8 characters of the session id), and resizing
+   the window mid-session applies at the next reconnect, not at once. **Only unit tests cover the
+   viewport path**: the browser harnesses run `--replay` gateways, which never connect and so never
+   measure.
+
+**Step 2 (changing the model and oversize while running, applied at the next connect), added
+2026-11-05 at `eabe45b`. None of items 5-7 has been run.** The gate covers each one offline only:
+`keys.mjs` checks that `Alt+M` pops the Model menu up (2 popups), and `browser-clicks.mjs`'s
+`picker` drives the web overlay. But under Xvfb the harness's keystrokes go in through
+`sendInputEvent`, not through X, so **no harness shows what a real keystroke does while the GUI
+menu is open**. And no harness renegotiates against a host after a choice.
+
+5. **The GUI's Model menu on a real desktop: Linux, and macOS (not yet run on macOS at all).**
+   - **Radio rendering:** the eight models are one radio group, each with its size in words, and
+     the Oversize submenu (None, Auto, and the `-oversize` size if one was given) is another. Is
+     exactly one item checked in each?
+   - **Disabled while connected or connecting:** every choice is greyed out while connected and
+     during a connect attempt, and comes back after a disconnect and after a failed connect. On
+     macOS, check that the top-level Model menu still OPENS while connected (only the items are
+     disabled, on purpose).
+   - **A hung connect attempt cannot be cancelled from here:** `Session.disconnect()` only calls
+     `conn?.close()` (pre-existing), and during a first connect still dialling there is no `conn`
+     yet to close — so the GUI's menu and the web picker both stay disabled, and their
+     **Disconnect** (added 2026-11-05) is disabled too, until the TCP or TLS handshake itself
+     times out. Worth observing on a real
+     host: start a connect against one that will hang (e.g. a plaintext host under TLS-by-default)
+     and confirm nothing in either front end shortens the wait.
+   - **Disconnect (added 2026-11-05), the menu's first item:** enabled only while connected.
+     Choosing it against VM should show `X Disconnected -- press Enter to reconnect` and enable
+     the choices; pick `3278-4-E`, press `Enter`, and VM should come back at 43x80. Check it is
+     greyed during a connect attempt and after the host drops the line.
+   - **`Alt-M`:** where the popup appears (it should be over the main window, even when pressed
+     in the keypad or keyboard window); whether `Escape` dismisses it; and whether a real arrow
+     key or `Enter` goes to the menu and not to the 3270 screen. On macOS, `Option-M` is the chord
+     (matched on the key code, since its `key` is `µ`).
+   - **A model choice, then a reconnect, actually renegotiates:** e.g. pick `3278-4-E` while
+     disconnected, press `Enter` to reconnect, and check that VM sends a 43x80 Erase/Write
+     Alternate. Also check the reset: with `-oversize 160x62`, picking a non-`-E` model (e.g.
+     `3278-2`) resets the oversize to None, and the window says so. (No model is larger than
+     160x62, so that size never triggers the too-small reset; `-oversize 100x30` then `3278-5-E`,
+     27x132, does.)
+6. **The web picker, Firefox and Safari** (gateway, not `--replay`):
+   **RESULT, 2026-11-05, by the user on a Mac:** `Alt-M` opens the picker; **Disconnect** is
+   there, drops the session, and the model choices then become enabled; changing the model works;
+   and picking a model without `-E` while an oversize was set gave the reset notice "... pick
+   3278-x-E for an oversize". **AN EARLIER RUN REPORTED EVERY CHOICE GREYED OUT WHILE
+   DISCONNECTED, AND IT WAS A STALE PAGE:** that browser was running a cached copy from before the
+   picker's fixes (no Disconnect button). The current code could not be made to show it (real
+   Chromium against a host that drops the line: 0 of 10 enabled while connected, 10 of 10 the
+   moment the line dropped). The gateway sent no cache headers at the time; it now sends `Cache-Control: no-cache` on every asset.
+   Not reported, so not claimed: the browser, the reconnect geometry after the pick, the
+   second-tab check, and `Escape`.
+   - **`Alt-M` reaches the page** and is not taken by the browser (`Option-M` on macOS Safari),
+     and `Escape` or `Alt-M` closes the picker.
+   - **A pick, then a reconnect, renegotiates:** pick `3278-4-E` while disconnected, reconnect,
+     and check for 43x80 from VM, as in item 5.
+   - **The Disconnect button (added 2026-11-05):** first in the picker, enabled only while
+     connected. Clicking it (and `Enter`/`Space` on it) should disconnect THIS tab only -- a
+     second tab on the same gateway stays connected -- show `X Disconnected -- press Enter to
+     reconnect`, and enable the choices, without `Enter` also reaching the host. Then pick and
+     reconnect as above.
+   - **The gateway going away (fixed 2026-11-05):** stop the gateway with the picker open; it
+     should say `The connection to the gateway closed; reload to reconnect.` with everything
+     disabled, not the stale `Disconnect first`.
+7. **The CLI's `Set()` against VM:** `Set(model,3278-4-E)` then `Reconnect()`, and `ScreenText`
+   after EE or any full-screen panel should show 43 rows, from VM's Erase/Write Alternate. A
+   two-pair call, e.g. `Set(model,3278-5-E,oversize,160x62)`, should then reach 160x62 the same
+   way as item 1.

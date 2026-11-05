@@ -351,6 +351,21 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
  * header -- so a later reader can redo the proof rather than trust the word "covered".
  */
 const TRANSFER_CHECKS = [
+  /*
+    THE `Alt-M` PICKER, 2026-11-04 -- in this table because this is the phase with CDP and the
+    socket probe, and FIRST because it must run before `progress` leaves an unsaved receive in the
+    transfer form: opening the picker hides that form, and an unsaved one would raise a `confirm`.
+  */
+  {
+    name: 'picker',
+    kind: 'live',
+    what: 'Alt+M opens the picker over a closed keypad; clicking 3278-4-E sends setGeometry and the '
+      + "gateway's reply checks it (a replay gateway is disconnected, so it is accepted); an arrow "
+      + 'key sends NOTHING, Enter then picks; Alt+M closes it with a radio focused; the Disconnect '
+      + 'button is first and disabled (a replay gateway never connects)',
+    mutant: 'bridge.ts  onGeometryChoices: () => {} (no radios ever drawn); geometryOverlay.ts  a '
+      + 'keyboard click counted as a pick (arrowing applies every radio passed)',
+  },
   {
     name: 'overlay',
     kind: 'live',
@@ -605,6 +620,20 @@ const TRANSFER_CHECKS = [
       + 'clearSelection(). In every one of those runs the paste itself WORKED and the gateway '
       + 'logged it perfectly. The `action:` line is the half that isolates paste; read it before '
       + 'believing a double failure is two defects',
+  },
+  /*
+    THE PICKER AFTER THE GATEWAY CLOSES THE SOCKET, 2026-11-05 -- LAST IN THE TABLE because nothing
+    can be driven over the socket after it. Reported live: the page said the gateway connection
+    closed and the picker kept saying "Disconnect first" with every choice disabled, forever.
+  */
+  {
+    name: 'pickerClosed',
+    kind: 'live',
+    what: 'when the GATEWAY closes the socket (an over-cap frame, which wsserver.ts answers with '
+      + 'CLOSE), the open picker says "The connection to the gateway closed; reload to reconnect." '
+      + 'and every radio is disabled',
+    mutant: 'bridge.ts  onGatewayClosed: () => {} (the picker keeps its last line, empty here, '
+      + 'and its radios enabled)',
   },
 ];
 
@@ -1098,6 +1127,106 @@ async function runTransferPhase(url) {
       }
       return last;
     };
+
+    // ===== picker: Alt+M, a click, and the gateway's answer ====================================
+    //
+    // THE KEYPAD FIRST, so "opening the picker closes the others" is observed rather than assumed:
+    // Ctrl+K opens it, Alt+M must hide it. `CDP_ALT` is CDP's own Alt bit (Alt 1, Ctrl 2, Meta 4,
+    // Shift 8). The WITNESS for the round trip is the PAGE'S OWN STATE AFTER THE REPLY -- the
+    // radio is checked and no longer by the browser alone, since `sent` must hold the frame and
+    // the gateway's `geometryChoices` is what writes `checked` back. An unwired `onGeometryChoices`
+    // draws NO radios at all, so the click cannot even be attempted.
+    {
+      const CDP_ALT = 1;
+      await press('k', 'KeyK', 75, CDP_CTRL);
+      await new Promise((r) => { setTimeout(r, 400); });
+      const pickerUp = () => cdp.eval('document.getElementById("geometry-overlay").hidden === false');
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 600); });
+      const pickerShown = await pickerUp();
+      const keypadHidden = await cdp.eval('document.getElementById("keypad-overlay").hidden === true');
+      // Alt+M TOGGLES: closed by the chord, then opened again for the click.
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 300); });
+      const toggledShut = !(await pickerUp());
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 300); });
+      const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
+      // THE DISCONNECT BUTTON (2026-11-05), first in the picker and DISABLED here: a replay gateway
+      // never connects, and the button is enabled only while connected (geometryOverlay.test.ts).
+      const disconnectBtn = await cdp.eval('(() => { const b = document.querySelector('
+        + '"#geometry-choices > button.geometry-disconnect"); return b === null ? null : '
+        + '{ text: b.textContent, disabled: b.disabled, first: b === b.parentElement.firstElementChild }; })()');
+      const before = await cdp.eval(
+        'document.querySelector("#geometry-choices input[value=\'3278-2-E\']")?.checked ?? null');
+      const sentBefore = await sentCount();
+      let after = null;
+      let frame = [];
+      if (radios > 0) {
+        await clickCenter('#geometry-choices input[value="3278-4-E"]');
+        for (let waited = 0; waited < 4000; waited += 100) {
+          frame = await cdp.eval(
+            `window.__tn3270Probe.sent.slice(${sentBefore}).filter((t) => t.includes('setGeometry'))`);
+          after = await cdp.eval('(() => { const c = document.querySelector('
+            + '"#geometry-choices input:checked[name=geometry-model]"); return c === null ? null : c.value; })()');
+          if (frame.length > 0 && after === '3278-4-E') break;
+          await new Promise((r) => { setTimeout(r, 100); });
+        }
+      }
+      // AND THE STATUS LINE IS EMPTY: a refusal or reset would have put its notice there.
+      const status = await cdp.eval('document.getElementById("geometry-status").textContent');
+      /*
+        AN ARROW KEY IS MOVEMENT, NOT A PICK (review, 2026-11-05): Chromium moves the check and
+        fires `change` and a keyboard click on 3278-5, and none of that may send. Enter then does.
+        The focus is on the clicked radio, so these go to it.
+      */
+      const sentBeforeArrow = await sentCount();
+      await press('ArrowDown', 'ArrowDown', 40);
+      await new Promise((r) => { setTimeout(r, 500); });
+      const arrowed = await cdp.eval('document.activeElement?.value ?? null');
+      const arrowSent = await cdp.eval(
+        `window.__tn3270Probe.sent.slice(${sentBeforeArrow}).filter((t) => t.includes('setGeometry'))`);
+      await press('Enter', 'Enter', 13);
+      let enterSent = [];
+      for (let waited = 0; waited < 3000 && enterSent.length === 0; waited += 100) {
+        enterSent = await cdp.eval(
+          `window.__tn3270Probe.sent.slice(${sentBeforeArrow}).filter((t) => t.includes('setGeometry'))`);
+        if (enterSent.length === 0) await new Promise((r) => { setTimeout(r, 100); });
+      }
+      await new Promise((r) => { setTimeout(r, 300); });
+      /*
+        Alt+M WITH THE RADIO STILL FOCUSED CLOSES IT. `renderer.ts` ignores keydowns aimed at an
+        INPUT, so before the overlay's own listener this did nothing (measured 2026-11-04:
+        `closed again: false`).
+      */
+      const focusOnRadio = await cdp.eval('document.activeElement?.type === "radio"');
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 300); });
+      const closed = !(await pickerUp());
+      const want = '{"kind":"setGeometry","model":"3278-4-E"}';
+      const wantEnter = '{"kind":"setGeometry","model":"3278-5"}';
+      // TEN RADIOS: eight models, None and Auto -- this gateway has no `-oversize`, so no startup.
+      if (pickerShown && keypadHidden && toggledShut && radios === 10 && before === true
+        && frame.length === 1 && frame[0] === want && after === '3278-4-E' && status === ''
+        && arrowed === '3278-5' && arrowSent.length === 0
+        && enterSent.length === 1 && enterSent[0] === wantEnter && focusOnRadio && closed
+        && disconnectBtn?.text === 'Disconnect' && disconnectBtn.disabled === true && disconnectBtn.first === true) {
+        ok(check('picker'), `Alt+M showed ${radios} radios with 3278-2-E checked and closed the keypad, `
+          + `and Alt+M shut it; the click sent ${frame[0]}, the gateway's reply checked 3278-4-E with `
+          + `no notice; ArrowDown moved to 3278-5 and sent nothing, Enter sent ${enterSent[0]}, and `
+          + 'Alt+M closed it with the radio focused; Disconnect sat first, disabled (never connected)');
+      } else {
+        no(check('picker'), 'the picker did not open, send, or reflect the gateway\'s answer',
+          `shown: ${pickerShown}, keypad hidden: ${keypadHidden}, Alt+M shut it: ${toggledShut}, `
+          + `radios: ${radios} (want 10), `
+          + `3278-2-E checked first: ${before}, sent: ${JSON.stringify(frame)} (want [${want}]), `
+          + `checked after: ${JSON.stringify(after)}, status: ${JSON.stringify(status)}, `
+          + `arrowed to: ${JSON.stringify(arrowed)} (want "3278-5"), arrow sent: `
+          + `${JSON.stringify(arrowSent)} (want []), Enter sent: ${JSON.stringify(enterSent)} `
+          + `(want [${wantEnter}]), focus on a radio: ${focusOnRadio}, closed by Alt+M: ${closed}, `
+          + `Disconnect button: ${JSON.stringify(disconnectBtn)} (want first, disabled)`);
+      }
+    }
 
     // ===== overlay: the Xfer BUTTON opens the form ============================================
     //
@@ -3427,6 +3556,47 @@ async function runTransferPhase(url) {
           + `(want it to contain ${JSON.stringify(PASTE_PAYLOAD)} somewhere), `
           + `and on an EMPTY clipboard the page sent ${JSON.stringify(sentOnEmpty)} with the `
           + `gateway logging ${JSON.stringify(loggedOnEmpty)} (want both empty); ${extent}`);
+      }
+    }
+
+    // ===== pickerClosed: the GATEWAY closes the socket under an open picker ====================
+    //
+    // LAST, because the socket is gone afterwards. THE GATEWAY SIDE CLOSES, not the page: a text
+    // frame over `MAX_MESSAGE_BYTES` (8192, wsserver.ts) is a frame the gateway refuses by sending
+    // CLOSE and ending the TCP connection, so the browser's `onclose` runs exactly as it would on a
+    // gateway that went away. The witness is the picker's own DOM: its line and its radios.
+    {
+      const CDP_ALT = 1;
+      const pickerUp = () => cdp.eval('document.getElementById("geometry-overlay").hidden === false');
+      if (!(await pickerUp())) {
+        await press('m', 'KeyM', 77, CDP_ALT);
+        await new Promise((r) => { setTimeout(r, 400); });
+      }
+      const shown = await pickerUp();
+      const lineBefore = await cdp.eval('document.getElementById("geometry-status").textContent');
+      const sockClosed = () => cdp.eval('window.__tn3270Probe.sock.readyState === 3');
+      await cdp.eval("window.__tn3270Probe.sock.send('x'.repeat(9000))");
+      for (let waited = 0; waited < 4000 && !(await sockClosed()); waited += 100) {
+        await new Promise((r) => { setTimeout(r, 100); });
+      }
+      await new Promise((r) => { setTimeout(r, 300); });
+      const closedNow = await sockClosed();
+      const line = await cdp.eval('document.getElementById("geometry-status").textContent');
+      const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
+      const disabled = await cdp.eval(
+        'document.querySelectorAll("#geometry-choices input[type=radio]:disabled").length');
+      const btnDisabled = await cdp.eval(
+        'document.querySelector("#geometry-choices > button.geometry-disconnect")?.disabled ?? null');
+      const want = 'The connection to the gateway closed; reload to reconnect.';
+      if (shown && closedNow && line === want && radios === 10 && disabled === 10 && btnDisabled === true) {
+        ok(check('pickerClosed'), `the gateway closed the socket and the open picker's line went from `
+          + `${JSON.stringify(lineBefore)} to ${JSON.stringify(line)}, with all ${radios} radios disabled`);
+      } else {
+        no(check('pickerClosed'), 'the picker did not say the gateway closed, or left a choice enabled',
+          `picker shown: ${shown}, socket closed: ${closedNow}, line before: `
+          + `${JSON.stringify(lineBefore)}, line after: ${JSON.stringify(line)} (want `
+          + `${JSON.stringify(want)}), radios: ${radios} (want 10), disabled: ${disabled} (want 10), `
+          + `Disconnect disabled: ${btnDisabled} (want true)`);
       }
     }
 

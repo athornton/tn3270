@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
 import { SCHEMES } from '@tn3270/frontend';
-import { BANNER, parseArgs, UsageError } from '../src/main.js';
+import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
+import type { HostProcess } from '../src/app.js';
 
 // Importing this module is safe: the entry point is behind an
 // `import.meta.url === file://${process.argv[1]}` guard, so requiring it from a
@@ -219,5 +221,121 @@ describe('the host argument', () => {
   it('refuses a prefix it does not implement', () => {
     expect(() => parseArgs(['P:host'])).toThrow(UsageError);
     expect(() => parseArgs(['Y:host'])).toThrow(/-noverifycert/);
+  });
+});
+
+describe('-oversize', () => {
+  it('parses auto and a fixed size; the TUI has a window, so auto is allowed', () => {
+    expect(parseArgs(['-oversize', 'auto', 'h']).oversize).toEqual({ kind: 'auto' });
+    expect(parseArgs(['-oversize', '160x62', 'h']).oversize)
+      .toEqual({ kind: 'fixed', rows: 62, cols: 160 });
+    expect(parseArgs(['-oversize', 'none', 'h']).oversize).toEqual({ kind: 'none' });
+    expect(parseArgs(['h']).oversize).toBeUndefined();
+  });
+
+  it('refuses --terminal-type with it, at parse time', () => {
+    expect(() => parseArgs(['--terminal-type', 'X', '-oversize', 'auto', 'h']))
+      .toThrow(UsageError);
+    expect(() => parseArgs(['--terminal-type', 'X', '-oversize', 'auto', 'h']))
+      .toThrow(/cannot both be given/);
+  });
+
+  it('refuses a model without -E, at parse time, auto included', () => {
+    expect(() => parseArgs(['-model', '3278-2', '-oversize', 'auto', 'h'])).toThrow(UsageError);
+    expect(() => parseArgs(['-model', '3278-2', '-oversize', 'auto', 'h']))
+      .toThrow(/extended model/);
+    expect(() => parseArgs(['-model', '3278-2', '-oversize', '160x62', 'h']))
+      .toThrow(/extended model/);
+  });
+
+  it('refuses a fixed size smaller than the model, and a bad value', () => {
+    expect(() => parseArgs(['-model', '3278-4-E', '-oversize', '80x30', 'h'])).toThrow(UsageError);
+    expect(() => parseArgs(['-oversize', 'huge', 'h'])).toThrow(UsageError);
+    expect(() => parseArgs(['-oversize'])).toThrow(UsageError);
+  });
+
+  it('is in the usage line', async () => {
+    const host: HostProcess = { on: () => {}, exit: () => {}, stderr: { write: () => {} } };
+    await expect(run([], host)).rejects.toThrow(/\[-oversize <cols>x<rows>\|auto\|none\]/);
+  });
+});
+
+describe('buildSession: what run() actually constructs', () => {
+  // Driven through the function `run()` calls, as the CLI's are -- see the CLI's own
+  // `buildSession` tests for why a copy of the expression would not do.
+  it('no flags: geometry mode, no model, oversize none', () => {
+    const session = buildSession(parseArgs(['h']));
+    expect(session.geometrySetting).toEqual({ oversize: { kind: 'none' } });
+    expect(session.screen.alternateSize).toEqual({ rows: 24, cols: 80 });
+  });
+
+  it('-model with -oversize: geometry mode, both carried in the setting', () => {
+    const session = buildSession(parseArgs(['-model', '3278-4-E', '-oversize', 'auto', 'h']));
+    expect(session.geometrySetting).toEqual({ model: '3278-4-E', oversize: { kind: 'auto' } });
+    expect(session.screen.alternateSize).toEqual({ rows: 43, cols: 80 });
+  });
+
+  it('--terminal-type: legacy mode, no geometry setting at all', () => {
+    const session = buildSession(parseArgs(['--terminal-type', 'IBM-DYNAMIC', 'h']));
+    expect(session.geometrySetting).toBeUndefined();
+  });
+
+  describe('auto reads the terminal at each connect, not at startup', () => {
+    // A REAL connect, to a local socket that says nothing: `Session` does not expose its
+    // measure, so the only honest observation is what a connect resolved. `-insecure` keeps
+    // it plain TCP.
+    // Every accepted socket is destroyed in cleanup: a failed assertion skips the test's own
+    // `disconnect()`, and `server.close` would then wait on that socket until the test timed out.
+    let server: Server | undefined;
+    const sockets: Socket[] = [];
+    afterEach(async () => {
+      for (const s of sockets.splice(0)) s.destroy();
+      await new Promise<void>((r) => { if (server) server.close(() => r()); else r(); });
+      server = undefined;
+    });
+
+    it('measures the terminal as it is when connect() runs, again on a reconnect', async () => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const term = { rows: 25, cols: 80 };
+      const session = buildSession(
+        parseArgs(['-oversize', 'auto', '-insecure', 'h']), () => ({ ...term }),
+      );
+      term.rows = 51; term.cols = 132;        // resized AFTER construction
+      await session.connect('127.0.0.1', port);
+      expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+      term.rows = 63; term.cols = 160;
+      await session.connect('127.0.0.1', port);
+      expect(session.screen.alternateSize).toEqual({ rows: 62, cols: 160 });
+      session.disconnect();
+    });
+
+    it('connectFirst: an auto that fell back says so on stderr, once, before the App exists', async () => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const errors: string[] = [];
+      const args = parseArgs(['-model', '3278-4-E', '-oversize', 'auto', '-insecure', `127.0.0.1:${port}`]);
+      const session = await connectFirst(args, { write: (t) => { errors.push(t); } },
+        () => ({ rows: 25, cols: 80 }));
+      expect(session.isConnected()).toBe(true);
+      expect(session.lastGeometryNotice).toMatch(/less than model 3278-4-E's/);
+      expect(errors).toEqual([`${session.lastGeometryNotice}\n`]);
+      session.disconnect();
+    });
+
+    it('connectFirst: no notice, nothing on stderr', async () => {
+      server = createServer((s) => { sockets.push(s); });
+      await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+      const port = (server.address() as AddressInfo).port;
+      const errors: string[] = [];
+      const args = parseArgs(['-oversize', 'auto', '-insecure', `127.0.0.1:${port}`]);
+      const session = await connectFirst(args, { write: (t) => { errors.push(t); } },
+        () => ({ rows: 51, cols: 132 }));
+      expect(session.screen.alternateSize).toEqual({ rows: 50, cols: 132 });
+      expect(errors).toEqual([]);
+      session.disconnect();
+    });
   });
 });

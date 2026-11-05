@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
-import { resolveTerminalType, resolveAlternateSize, TerminalTypeError } from '@tn3270/core';
+import {
+  resolveTerminalType, resolveAlternateSize, resolveGeometry, OversizeError, TerminalTypeError,
+  type Oversize, type Session,
+} from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
-  takeTlsFlag, resolveTls, defaultSession,
+  takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -39,6 +42,14 @@ export interface CliArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /**
+   * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate
+   * size, exactly as before this flag existed. A combination `resolveGeometry` would
+   * refuse at connect -- `auto` (no window to measure here), `--terminal-type` together
+   * with it, or a model that cannot carry it -- is refused at parse time instead; see
+   * `parseArgs`'s check after the flag loop.
+   */
+  oversize?: Oversize;
 }
 
 /**
@@ -63,6 +74,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     const eaten = takeTlsFlag(tlsFlags, flag, value, (m) => new UsageError(m));
     if (eaten !== undefined) {
       i += eaten;
+      continue;
+    }
+    const oversizeEaten = takeOversizeFlag(args, flag, value, (m) => new UsageError(m));
+    if (oversizeEaten !== undefined) {
+      i += oversizeEaten;
       continue;
     }
     switch (flag) {
@@ -126,8 +142,60 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         throw new UsageError(`unrecognized argument ${JSON.stringify(flag)}`);
     }
   }
+  // Refuse at PARSE time whatever `resolveGeometry` would refuse at connect time: an
+  // oversize with --terminal-type, an oversize on a model that cannot carry it (too small,
+  // too many cells, or not `-E`), and `-oversize auto` (the CLI has no window to measure --
+  // see geometry.ts's own message). One call covers all three, because they are exactly
+  // the checks `resolveGeometry` already makes; this only moves WHEN the operator hears
+  // about them, from "after main() builds the session" to "before anything connects".
+  if (args.oversize !== undefined) {
+    try {
+      resolveGeometry({
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
+        oversize: args.oversize,
+      });
+    } catch (e) {
+      if (e instanceof OversizeError) throw new UsageError(e.message);
+      throw e;
+    }
+  }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
   return args;
+}
+
+/**
+ * Builds the session `main()` runs, from a parsed `CliArgs`. Pulled out of `main()` so it
+ * can be unit-tested without `main()`'s stdin loop or a real connect -- `Session`'s
+ * constructor alone resolves `geometrySetting` and `screen.alternateSize`, which is
+ * everything a test needs to see.
+ *
+ * Geometry mode is the normal path: UNLESS `--terminal-type` was given (a raw string
+ * `resolveGeometry` cannot interpret as a model), the session resolves its terminal type
+ * and alternate size at every connect rather than once here, which is what lets the
+ * step-2 `Set(model,...)` command (Task 6) change them after connect. `-model` alone --
+ * by far the common case -- goes through geometry mode too, with `oversize: none`
+ * resolving to exactly the model's own alternate size, so this is not a behavior change
+ * for that case; `main.test.ts`'s "buildSession: what main() actually constructs" tests
+ * drive THIS function, not a copy of its expression, to keep that true.
+ */
+export function buildSession(args: CliArgs): Session {
+  if (args.terminalType !== undefined) {
+    return defaultSession(
+      resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
+      args.bindImage, args.bindLimit, args.devname, args.ddm,
+    );
+  }
+  return defaultSession(
+    undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
+    args.devname, args.ddm,
+    {
+      setting: {
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        oversize: args.oversize ?? { kind: 'none' },
+      },
+    },
+  );
 }
 
 /**
@@ -144,14 +212,12 @@ async function main(): Promise<void> {
     throw err;
   });
 
-  // Resolved unconditionally, so there is exactly one path from argv to the
-  // wire. With no flags this returns TERMINAL_TYPE, i.e. the same IBM-3278-2-E
-  // the telnet layer would have defaulted to on its own.
+  // Parsed once, unconditionally, so there is exactly one path from argv to the wire. With
+  // no flags, `buildSession` below takes the geometry-mode branch with no model and no
+  // oversize, which resolves to the same IBM-3278-2-E the telnet layer would have defaulted
+  // to before geometry mode existed -- see `main.test.ts`'s `buildSession` tests.
   const args = parseArgs(process.argv.slice(2));
-  const session = defaultSession(
-    resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-    args.bindImage, args.bindLimit, args.devname, args.ddm,
-  );
+  const session = buildSession(args);
   const runner = new Runner(session, {
     files: nodeTransferFiles,
     tlsEnabled: args.tls?.kind !== 'plaintext',

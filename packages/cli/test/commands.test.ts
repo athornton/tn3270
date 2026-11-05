@@ -63,4 +63,9 @@ describe('parseCommand', () => {
       expect(parseCommand(n)!.name).toBe(n);
     }
   });
+
+  it('parses Set(name,value) as two arguments, named after x3270\'s Set action', () => {
+    expect(parseCommand('Set(model,3278-4-E)'))
+      .toEqual({ name: 'Set', args: ['model', '3278-4-E'] });
+  });
 });

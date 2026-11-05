@@ -1,6 +1,7 @@
 import {
   Session, AID, PF_AIDS, PA_AIDS, pfAID, paAID, KeyboardState,
   CutTransfer, DftTransfer, looksLikeCutFrame, type TransferResult, resolve,
+  parseOversize, type GeometrySetting,
 } from '@tn3270/core';
 import {
   tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand,
@@ -203,10 +204,14 @@ export class Runner {
        * silently open a socket to a mainframe. This is the deliberate spelling.
        *
        * `check_argc(AnReconnect, argc, 0, 0)` is s3270's own rule, with check_argc's wording
-       * as `Connect` above uses it. Both REFUSALS come from `Session.reconnect()` and are
+       * as `Connect` above uses it. All THREE refusals come from `Session.reconnect()` and are
        * passed straight through: "Reconnect(): Already connected" and "Reconnect(): No
-       * previous host to connect to" are x3270's messages verbatim, which is why core spells
-       * them with the action's capital R.
+       * previous host to connect to" are x3270's two messages verbatim, which is why core spells
+       * them with the action's capital R; "Reconnect(): a connection attempt is already in
+       * progress" is core's own third one, for a connect (first or reconnect) still in flight --
+       * x3270's `PCONNECTED` covers that case under the SAME message as a live connection, but
+       * nothing here is actually connected yet, so it earns its own wording instead of borrowing
+       * x3270's inaccurate one.
        *
        * `this.host` is restored for the status line's field 4 -- `C(<host>)`, hostname only,
        * as `Connect` sets it. Set AFTER the await, so a failed reconnect reports the
@@ -226,6 +231,85 @@ export class Runner {
       case 'Quit':
         this.shouldQuit = true;
         return;
+
+      /**
+       * `Set(name,value[,name,value])` -- x3270's own action (`AnSet`, include/names.h:132;
+       * `Set_action`, Common/toggles.c:637-641), restricted to the two names this CLI has:
+       * model and oversize.
+       *
+       * ONE OR TWO PAIRS, NOT ONE, because a model and an oversize sometimes only FIT
+       * together. x3270 registers both toggles under the same `done` callback
+       * (`register_extended_toggle(..., toggle_model_done, ...)`, twice, Common/model.c:
+       * 502-507) and validates them AS A PAIR for exactly this reason: `resolveGeometry` here
+       * checks the oversize against the model's floor and the model's `-E` suffix together, so
+       * taking one step at a time can refuse a perfectly good destination. From a `3278-2-E`
+       * session oversized to 100x30, `Set(model,3278-5-E)` alone is refused ("use at least
+       * 132x27", model 5's own floor) even though `Set(model,3278-5-E,oversize,160x62)` in one
+       * call is fine -- and a model/oversize pair can be refused in BOTH single-step orders at
+       * once: model first fails on the old oversize, oversize first fails on the old model,
+       * while the pair together is valid. So every name in the call is collected, merged onto
+       * the CURRENT setting, and handed to `setGeometry` in a SINGLE call: one validation of
+       * the whole destination, not two validations of its invalid halves.
+       *
+       * A repeated name (`Set(model,A,model,B)`) is refused by name rather than letting the
+       * second silently win -- there is no reason a script would mean that, and x3270's own
+       * `toggle_common` has the identical rule for a repeated name within one call
+       * (`Common/toggles.c`, `toggle_common`'s loop over the pairs). Anything that is not 2 or
+       * 4 arguments gets the shape refusal; a lone argument gets its own two messages below,
+       * because x3270 would read `Set(name=value)` as a value-less toggle NAME (using `=` is
+       * this CLI's doing, not x3270's -- x3270 takes the value as a separate, comma-separated
+       * argument) and a lone `Set(name)` as a QUERY -- x3270's `Set(toggleName)` sets a
+       * boolean toggle `true` and reports its CURRENT value with no argument at all, and this
+       * CLI has neither a boolean toggle nor a value to show.
+       *
+       * EVERY PAIR REPLACES `s.geometrySetting` WHOLESALE, via a spread onto the setting built
+       * so far -- never a bare `{ model }` or `{ oversize }` literal, which would silently drop
+       * whichever field no pair in THIS call named. `Session.setGeometry` itself replaces
+       * wholesale (see its own comment), which is why the merge happens here, once per call.
+       *
+       * THE LEGACY CHECK RUNS BEFORE `setGeometry`, deliberately: `setGeometry` throws its own
+       * "setGeometry needs a session built with the geometry option" message, written for a
+       * library caller, not an operator typing a command. Checking `s.geometrySetting ===
+       * undefined` here first lets this `case` report the CLI's own words instead.
+       */
+      case 'Set': {
+        if (args.length === 1) {
+          const only = args[0]!;
+          if (only.includes('=')) {
+            throw new Error('Set() takes name,value with a comma, not name=value');
+          }
+          throw new Error('Set() cannot show a value; give name,value');
+        }
+        if (args.length !== 2 && args.length !== 4) {
+          throw new Error('Set() takes name,value pairs: model and/or oversize');
+        }
+        const seen = new Set<'model' | 'oversize'>();
+        const pairs: Array<['model' | 'oversize', string]> = [];
+        for (let i = 0; i < args.length; i += 2) {
+          const rawName = args[i]!;
+          const value = args[i + 1]!;
+          const name = rawName.toLowerCase();
+          if (name !== 'model' && name !== 'oversize') {
+            throw new Error(`Set() knows model and oversize, not ${rawName}`);
+          }
+          if (seen.has(name)) throw new Error(`Set() was given ${name} twice`);
+          seen.add(name);
+          pairs.push([name, value]);
+        }
+        const current = s.geometrySetting;
+        if (current === undefined) {
+          throw new Error('Set() cannot change a session started with --terminal-type; '
+            + 'restart without it');
+        }
+        let next: GeometrySetting = current;
+        for (const [name, value] of pairs) {
+          next = name === 'model'
+            ? { ...next, model: value }
+            : { ...next, oversize: parseOversize(value) };
+        }
+        s.setGeometry(next);
+        return;
+      }
 
       case 'String':
         if (!k.typeString(args[0] ?? '')) throw new Error('input inhibited');

@@ -4,9 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import tls from 'node:tls';
 import net from 'node:net';
-// @ts-expect-error -- .mjs harness, deliberately untyped; tests are outside the tsc build
 import { startTlsProxy } from '../scripts/tls-proxy.mjs';
-// @ts-expect-error -- see above
 import { generateCerts, haveOpenssl } from '../scripts/gen-test-certs.mjs';
 
 /**

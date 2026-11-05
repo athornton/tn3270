@@ -236,6 +236,9 @@ describe('reconnect() replays the remembered target', () => {
     // case. Without the pending half, two presses of the reconnect key both pass `connect()`'s
     // teardown check while `this.conn` is undefined, so the first socket is replaced WITHOUT being
     // closed -- an LU left open on the mainframe per impatient keypress, and invisible from here.
+    //
+    // THE IN-FLIGHT MESSAGE, not `Already connected`: nothing is actually connected yet, only
+    // attempting to be, and `reconnect()` now says so truthfully (see its own doc comment).
     const conns: FakeConnection[] = [];
     let release: (() => void) | undefined;
     const session = new Session({
@@ -253,11 +256,53 @@ describe('reconnect() replays the remembered target', () => {
 
     const pending = session.reconnect();
     expect(conns, 'the first reconnect did not dial').toHaveLength(2);
-    await expect(session.reconnect()).rejects.toThrow('Reconnect(): Already connected');
+    await expect(session.reconnect())
+      .rejects.toThrow('Reconnect(): a connection attempt is already in progress');
     expect(conns, 'the refused reconnect opened a socket anyway').toHaveLength(2);
     release!();
     await pending;
     expect(session.isConnected()).toBe(true);
+  });
+
+  it('REFUSES reconnect() while a FIRST connect() is still in flight', async () => {
+    // `connectNow` records `this.target` (and sets `oia.reconnectable`) BEFORE its first await, so
+    // a FIRST connect that is still dialling already looks like a session with somewhere to go
+    // back to. `reconnect()`'s guard was `this.conn !== undefined || this.reconnecting`, which
+    // tests neither `this.connecting` nor `isConnecting()` -- so a first connect hanging in TLS
+    // setup (a plaintext host against a client that defaults to TLS, which hangs rather than
+    // refusing) left the guard blind: pressing Enter/Clear while it hung (`frontend/src/actions.ts`
+    // `reconnectInstead`) opened a SECOND socket, through `reconnect()`'s own `connect()`, which
+    // tears down `this.conn` -- still `undefined` -- and never closes the first. Two sockets
+    // dialled, both eventually resolved, `close()` called zero times: an LU leaked on the host per
+    // impatient keypress against a hanging host, the one case `reconnect()` exists to catch.
+    const conns: FakeConnection[] = [];
+    const releases: Array<(c: FakeConnection) => void> = [];
+    const session = new Session({
+      connect: async () => {
+        const conn = new FakeConnection();
+        conns.push(conn);
+        return new Promise<FakeConnection>((r) => { releases.push(r); });
+      },
+    });
+
+    const first = session.connect('vm.example', 3270);
+    expect(session.isConnecting()).toBe(true);
+    expect(conns, 'the first connect did not dial').toHaveLength(1);
+
+    // NOT awaited yet: `reconnect()`'s guard must refuse BEFORE its own first await, the same way
+    // the sibling test above checks the second-reconnect case synchronously. If the guard lets this
+    // through, the call chain runs synchronously down into a SECOND `opts.connect`, which pushes a
+    // second entry to `conns` before this line returns -- so the length check below is the whole
+    // assertion, not the rejection.
+    const pending = session.reconnect();
+    expect(conns, 'reconnect() dialled a SECOND socket while the first was still in flight')
+      .toHaveLength(1);
+    await expect(pending).rejects.toThrow(/connection attempt is already in progress/);
+
+    releases[0]!(conns[0]!);
+    await first;
+    expect(session.isConnected()).toBe(true);
+    expect(conns, 'the first connect still dialled only once').toHaveLength(1);
   });
 
   it('records a failed reconnect in lastError and the trace, and rethrows it', async () => {

@@ -255,6 +255,9 @@ describe('resolveAsset', () => {
     // documented limit: this catches a DELETED entry, not an invented one.
     expect(resolveAsset('/transferBoot.js')!.file).toMatch(/[/\\]transferBoot\.js$/);
     expect(existsSync(join(pkgDir, 'dist', 'transferBoot.js'))).toBe(true);
+    // `geometryOverlay.js`, 2026-11-04, the `Alt-M` picker `bridge.js` imports: same two lines.
+    expect(resolveAsset('/geometryOverlay.js')!.file).toMatch(/[/\\]geometryOverlay\.js$/);
+    expect(existsSync(join(pkgDir, 'dist', 'geometryOverlay.js'))).toBe(true);
   });
 });
 

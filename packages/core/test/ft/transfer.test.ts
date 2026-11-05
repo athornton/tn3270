@@ -1081,14 +1081,14 @@ describe('cancel, the operator-initiated abort', () => {
     // what every other abort in this file is. Telling the host a transmission error
     // occurred when the operator simply changed their mind misreports the cause in the
     // host's own log.
-    expect(step.done?.status).toBe(StatusCode.ABORT_FILE);
+    expect(step.done).toMatchObject({ status: StatusCode.ABORT_FILE });
   });
 
   it("uses x3270's own ftUserCancel text, so the message is not invented", () => {
     // `x3270.message.ftUserCancel: Transfer canceled by user` (Common/fb-common:35),
     // matching how MSG already carries ftHostCancel and ftCutRetransmit verbatim.
     const transfer = new CutTransfer({ direction: 'receive' });
-    expect(transfer.cancel(cutScreen()).done?.error).toBe('Transfer canceled by user');
+    expect(transfer.cancel(cutScreen()).done).toMatchObject({ error: 'Transfer canceled by user' });
   });
 
   it('writes the response into the RESPONSE AREA, where the host reads it', () => {
@@ -1152,6 +1152,6 @@ describe('cancel, the operator-initiated abort', () => {
     const transfer = new CutTransfer({ direction: 'receive' });
     transfer.cancel(cutScreen());
     expect(transfer.complete).toBe(true);
-    expect(transfer.result?.status).toBe(StatusCode.ABORT_FILE);
+    expect(transfer.result).toMatchObject({ status: StatusCode.ABORT_FILE });
   });
 });

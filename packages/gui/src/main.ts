@@ -6,17 +6,19 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
-  resolveTerminalType, resolveAlternateSize, resolve, TerminalTypeError, type Session,
+  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS,
+  type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  applyAction, applyPaste, defaultSession, describeTlsError, resolveScheme, startTransfer,
+  applyAction, applyGeometryChoice, applyPaste, describeTlsError, resolveScheme, startTransfer,
   transferCommand, type Action,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
-import { drawList, blankColumns, bestScale, extractText, readAtlas } from '@tn3270/canvas';
-import { parseGuiArgs, UsageError } from './args.js';
+import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
+import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
+import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
-import { buildMenuTemplate } from './menu.js';
+import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController } from './transferWindow.js';
 
 /**
@@ -101,7 +103,7 @@ const SEAM = Object.freeze({
    * WHY IT SKIPS EVERYTHING ELSE: in this mode the PAGE's bridge owns the protocol. A `Session`
    * here would be a second, unrelated 3270 connection whose frames nothing displays, and the
    * atlas would be sent over an IPC channel the served page does not listen on. So this returns
-   * before argv parsing, before `defaultSession` and before `readAtlas` -- and takes no host
+   * before argv parsing, before `buildSession` and before `readAtlas` -- and takes no host
    * argument, which is also what keeps it unable to dial anything.
    */
   url: process.env['TN3270_GUI_URL'] ?? '',
@@ -324,6 +326,7 @@ let shuttingDown = false;
 function explain(err: unknown, host?: string, port?: number): string {
   if (err instanceof UsageError) return err.message;
   if (err instanceof TerminalTypeError) return err.message;
+  if (err instanceof OversizeError) return err.message;
   if (err instanceof Error) {
     // Node attaches a `code` to socket and TLS failures; describeTlsError maps the ones
     // worth explaining and names the flag that fixes each.
@@ -432,23 +435,38 @@ app.whenReady().then(async () => {
   // string lookup in the paint path.
   const scheme = args.scheme ?? resolveScheme();
 
-  // Built once and passed to both resolvers, so the terminal-type string and the geometry
-  // can never come from different readings of the same arguments.
-  const typeOpts = {
-    ...(args.model !== undefined ? { model: args.model } : {}),
-    ...(args.terminalType !== undefined ? { terminalType: args.terminalType } : {}),
+  /**
+   * `-oversize auto`'s measure, which the session calls at EVERY connect and never before
+   * (`buildSession`, args.ts): the display's work area at the scale `fit()` below would pick for
+   * the model (`measure.ts`). Both inputs are read when called. The atlas is read further down,
+   * after the session exists (the spec's "Why auto is measured at connect"), and before the
+   * connect at the end of this function -- a failed read returns from here first -- but the
+   * measure does not rely on that ordering: no atlas, or a display Electron cannot report, is
+   * no measurement, which `resolveGeometry` turns into the model and a notice. Never a throw,
+   * which would fail the connect over a window size.
+   */
+  let atlas: ReturnType<typeof readAtlas> | undefined;
+  const measure = (setting: GeometrySetting | undefined): Size | undefined => {
+    let area;
+    try {
+      area = screen.getPrimaryDisplay().workAreaSize;
+    } catch {
+      area = undefined;
+    }
+    return measureAuto(setting, area, atlas === undefined
+      ? undefined
+      : { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight });
   };
 
   let session;
   try {
-    session = defaultSession(
-      resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm,
-    );
+    session = buildSession(args, measure);
   } catch (err) {
     fail(explain(err));
     return;
   }
+  // Before any connect, so the first connect's notice is printed too -- see the function.
+  printGeometryNotices(session, process.stderr);
 
   /**
    * The atlas is read HERE and shipped over IPC, not fetched by the renderer.
@@ -468,7 +486,6 @@ app.whenReady().then(async () => {
    * diagnosis, which is exactly what the rule at the top of this file forbids. A scoped
    * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
    */
-  let atlas;
   try {
     atlas = readAtlas();
   } catch (err) {
@@ -937,17 +954,17 @@ app.whenReady().then(async () => {
    * The TUI refuses to draw rather than clip, because it cannot resize a terminal. A window
    * CAN resize, so it does -- and the scale follows the design's rule: the largest integer
    * multiple whose screen fits within 80% of the display work area, minimum 1.
+   *
+   * The rule itself is `windowScale` in measure.ts, which `-oversize auto`'s `measureDisplay` also
+   * calls, so an auto-sized screen is drawn at the scale the model would have been; there is one
+   * copy of the 0.8, and `measure.test.ts` tests it.
    */
   let sized = '';
   const fit = (list: { width: number; height: number }): void => {
     const key = `${list.width}x${list.height}`;
     if (key === sized) return;                       // most frames change nothing
     sized = key;
-    const area = screen.getPrimaryDisplay().workAreaSize;
-    const scale = bestScale(list, {
-      width: Math.floor(area.width * 0.8),
-      height: Math.floor(area.height * 0.8),
-    });
+    const scale = windowScale(list, screen.getPrimaryDisplay().workAreaSize);
     win.setContentSize(list.width * scale, list.height * scale);
   };
 
@@ -997,8 +1014,99 @@ app.whenReady().then(async () => {
   // Electron's 40-name union at all -- TypeScript refuses even an `as` between them -- so the
   // alternative was an `as unknown as` double cast right here, which would have switched off
   // checking on the whole template to paper over one field.
+  /**
+   * THE MODEL MENU'S INPUTS, read off the session every time rather than cached: the setting
+   * changes on every accepted choice and `connected` on every connect and disconnect.
+   *
+   * UNDEFINED FOR A LEGACY SESSION (`--terminal-type`), which therefore gets NO Model menu at all:
+   * its terminal type was fixed at construction, `setGeometry` refuses it outright, and a menu of
+   * eight models that all refuse would be eight controls that cannot work. `geometrySetting` is
+   * the test, the same one the CLI's `Set()` makes.
+   *
+   * `startupFixed` is the `-oversize <cols>x<rows>` from argv, if that is what was given: the
+   * only fixed size the menu can offer, because its choices are picked, never typed (the spec).
+   */
+  const startupOversize = args.oversize;
+  const startupFixed: Size | undefined = startupOversize?.kind === 'fixed'
+    ? { rows: startupOversize.rows, cols: startupOversize.cols } : undefined;
+  const geometryMenu = (): GeometryMenu | undefined => {
+    const current = session.geometrySetting;
+    if (current === undefined) return undefined;
+    return {
+      // CONNECTING TOO: `setGeometry` refuses during an attempt in flight (`isConnecting`), which
+      // has already resolved the setting it will advertise.
+      models: Object.keys(KNOWN_MODELS), current,
+      connected: session.isConnected() || session.isConnecting(),
+      // For the Disconnect item only, and the web gateway's spelling for its reason: `isConnecting()`
+      // is still true during the 'connect' event itself (`web/src/geometryChoices.ts`).
+      connecting: session.isConnecting() && !session.isConnected(),
+      ...(startupFixed !== undefined ? { startupFixed } : {}),
+    };
+  };
+  /**
+   * THE MENU IS MUTATED BY ID, NEVER REBUILT. `MenuItem.checked` and `.enabled` are writable
+   * ("This property can be dynamically changed", electron.d.ts), and rebuilding the application
+   * menu to change two booleans would re-create the macOS app menu and every accelerator in it.
+   *
+   * CALLED AFTER EVERY CLICK, ACCEPTED OR REFUSED: Electron checks a clicked radio item itself,
+   * before our handler runs, so a refused choice would otherwise be left looking chosen.
+   * `enabled` is written on EVERY item; `checked` only on the one true item of each group, which
+   * clears the rest -- `applyChoiceStates` (menu.ts) records the measurement: assigning `false`
+   * to a radio item's `checked` CHECKS it. `modelMenuStates` is the same function the template
+   * was built from, so the menu cannot drift from the session.
+   *
+   * ON FOUR EVENTS. 'geometry' is the first thing `connect()` emits, before its socket opens and
+   * with `isConnecting()` already true, so it disables the items for an attempt in flight;
+   * 'connectSettled' re-enables them when an attempt FAILS, which emits nothing else; 'connect'
+   * and 'disconnect' cover the rest.
+   */
+  const refreshModelMenu = (): void => {
+    const g = geometryMenu();
+    const menu = Menu.getApplicationMenu();
+    if (g === undefined || menu === null) return;
+    applyChoiceStates(modelMenuStates(g), (id) => menu.getMenuItemById(id));
+  };
+  for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
+    session.on(ev, refreshModelMenu);
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate(
     [...buildMenuTemplate(process.platform, {
+      /**
+       * ONE MODEL-MENU CHOICE, applied at the next connect. NOT gated on focus: it changes a
+       * setting, not the screen, so it is the same harmless request from any window.
+       *
+       * `applyGeometryChoice` (`@tn3270/frontend`, shared with the web gateway) owns the
+       * order-dependence rule -- a model the current oversize refuses is applied with oversize
+       * None, and the returned notice says so. Every other refusal (`disconnect first`; `wait for
+       * the connection attempt to finish`; an oversize below the model) throws, and goes where
+       * every other failure in this window goes.
+       *
+       * THE RESET NOTICE IS NOT A FAILURE, AND STILL GOES THROUGH `fail()`: this window has no
+       * other channel. `error-message` is the only one the preload exposes (`preload.cts`); the
+       * renderer's softer notice painter is `onCopyFailed`, which only the web bridge provides.
+       * Adding a notice channel is a preload, renderer and bridge change for one line of text;
+       * the red painter at least shows it, and the next frame wipes it like any message.
+       */
+      onGeometry: (choice) => {
+        const current = session.geometrySetting;
+        if (current === undefined) return;
+        try {
+          const notice = applyGeometryChoice(current, choice, (next) => { session.setGeometry(next); });
+          if (notice !== undefined) fail(notice);
+        } catch (err) {
+          fail(explain(err));
+        }
+        refreshModelMenu();
+      },
+      /**
+       * THE MODEL MENU'S DISCONNECT, 2026-11-05: drop the host session so the choices free up,
+       * rather than waiting for the host to drop the line. Enabled only while connected (menu.ts);
+       * the 'disconnect' it emits runs `refreshModelMenu` and repaints, like a host-side close.
+       * Enter or Clear then reconnects with the new choice (`reconnectInstead`). A
+       * `--terminal-type` session has no Model menu and so no Disconnect item: accepted, since it
+       * has no choices to free.
+       */
+      onDisconnect: () => { session.disconnect(); },
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *
@@ -1076,7 +1184,7 @@ app.whenReady().then(async () => {
           process.stdout.write(`paste failed: ${String(err)}\n`);
         });
       },
-    })],
+    }, geometryMenu())],
   ));
   /**
    * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
@@ -1203,6 +1311,43 @@ app.whenReady().then(async () => {
       });
       return;
     }
+    /*
+      `Alt-M`, THE MODEL/OVERSIZE CHOOSER, 2026-11-04 -- INTERCEPTED NOW, BEFORE IT DOES ANYTHING,
+      AND THE ORDER OF THOSE TWO IS THE POINT.
+
+      `applyAction` THROWS on `geometryMenu` (the eighth guard in `frontend/src/actions.ts`), and a
+      throw in this listener FREEZES THE MAIN PROCESS -- the `requestCopy` note below has the
+      measurement. And the kind can arrive from windows this file does not draw the canvas in:
+      `canvas/src/forwardKeys.ts`'s `forwardKeys` forwards whatever `actionForKey` returns from the
+      KEYPAD AND KEYBOARD WINDOWS with no kind filtering, and `actionForKey` raises this on `Alt-M`
+      the moment `keys.ts` binds it. So the arm had to land in the same commit as the binding, and
+      `keys.mjs`'s `kbd:Alt+M` case followed by its liveness probe is the witness for that path.
+
+      EVERY WINDOW GETS THE SAME ANSWER, deliberately not `requestCopy`'s child-window drop. That
+      kind is dropped because a child window holds no selection; a menu needs nothing a child
+      window lacks, and `forwardKeys` records the user's rule that ALL CHORDS WORK EVERYWHERE. The
+      Model menu is the APPLICATION's, so popping it from the keypad window is as correct as from
+      the canvas, and the sender is not consulted.
+
+      IT POPS UP THE MODEL MENU'S SUBMENU (Task 13), RELATIVE TO THE MAIN WINDOW `win` and never
+      the sender: a popup over the keypad window would be a menu about the session drawn over a
+      window that is not the session. `getMenuItemById('model')` finds nothing for a legacy
+      (`--terminal-type`) session, which has no Model menu, so the chord does nothing there --
+      silently, because there is no remedy to offer short of a restart, and the menu's absence is
+      already the statement. Still a `return` before `applyAction` either way.
+    */
+    if (action.kind === 'geometryMenu') {
+      const model = Menu.getApplicationMenu()?.getMenuItemById('model')?.submenu;
+      if (model !== undefined && !win.isDestroyed()) {
+        model.popup({ window: win });
+        // FOR `keys.mjs`, under the action log's own gate: the logged kind above proves the chord
+        // ARRIVED, not that a menu opened, and without this line deleting the popup passes every
+        // gate. `popup` returns at once on Linux (measured: the next chord's action is logged
+        // while the menu is still up), so this line is not a promise that it was dismissed.
+        if (logActions) process.stdout.write('menu: popup model\n');
+      }
+      return;
+    }
     /**
      * INTERCEPTED HERE for the same reason as the three above: `applyAction` THROWS on `copy`,
      * because what a clipboard IS belongs to the front end. This one has an OS clipboard; the
@@ -1274,8 +1419,8 @@ app.whenReady().then(async () => {
       LIKE. 2026-10-26.
 
       `paste` is the ONE kind `applyAction` throws on that this front end does not intercept, so a
-      reader who has just read the arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`, `copy`
-      and `requestCopy` -- will notice the gap and reach for one more. (`transferForm` is the
+      reader who has just read the arms above -- `quit`, `toggleKeypad`, `toggleKeyboard`,
+      `geometryMenu`, `copy` and `requestCopy` -- will notice the gap and reach for one more. (`transferForm` is the
       remaining one and it is BELOW this comment, so a reader counting upward from here finds one
       fewer than the listener has.)
 
@@ -1364,6 +1509,8 @@ app.whenReady().then(async () => {
    * the trace CHOSEN matters as much as the mechanism.
    */
   if (SEAM.replay !== '') {
+    // NO GEOMETRY IS RESOLVED HERE: only `connect()` resolves it, so `-oversize` (and `auto`'s
+    // measure) does not apply under TN3270_GUI_REPLAY -- the session keeps the model's sizes.
     session.replay(readFileSync(SEAM.replay, 'utf8'));
     send();
     // The session is passed so a `wait:` step works here too -- a replay paints synchronously, so

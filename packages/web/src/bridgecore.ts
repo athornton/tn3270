@@ -76,6 +76,34 @@ export interface BridgeDeps {
    */
   readonly toggleKeyboard?: () => void;
   /**
+   * Show or hide the MODEL/OVERSIZE PICKER, `Alt-M`. 2026-11-04.
+   *
+   * Here for exactly the reason `toggleKeyboard` above is: the picker is a DOM overlay in this
+   * front end, so opening it is a local display decision, and `geometryMenu` is intercepted in
+   * `sendAction` below rather than sent. OPTIONAL for the same reason too: absent, the chord is
+   * DROPPED, never sent. `bridge.ts` wires it to `geometryOverlay.ts` since the overlay landed.
+   */
+  readonly toggleGeometry?: () => void;
+  /**
+   * The gateway's `geometryChoices`, for the picker. 2026-11-04. OPTIONAL, and absent means "this
+   * client has no picker": the message is dropped.
+   *
+   * NOT ROUTED THROUGH `dispatch`, for `onTransfer`'s reason below: injected by the module that
+   * builds the bridge, so it cannot be late, while a dispatched kind no renderer registers for
+   * would sit in that queue forever. TYPED LOOSELY for `onTransfer`'s reason too: this file
+   * validates nothing it receives, and `geometryOverlay.ts`'s `parseGeometryChoices` is the
+   * narrowing -- a throw there reaches the chain's `catch` and is painted.
+   */
+  readonly onGeometryChoices?: (msg: { kind: string } & Record<string, unknown>) => void;
+  /**
+   * The GATEWAY socket closed, or `quit` closed it. 2026-11-05. OPTIONAL, absent means nothing is
+   * told. The picker's, so it stops showing its last reply's "Disconnect first" forever: no
+   * further `geometryChoices` can arrive on a closed socket (reported live). Called from
+   * `onclose` AND from the `quit` intercept, which does not wait for the browser's own `close`
+   * event; the receiver must be idempotent (`markGatewayClosed` is).
+   */
+  readonly onGatewayClosed?: () => void;
+  /**
    * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
    * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
    * tests and any caller with no DOM must not need one.
@@ -206,6 +234,37 @@ export interface BridgeDeps {
    * falls back to `dispatch('error', ...)`, so the message is never lost.
    */
   readonly onCopyText?: (text: string, report: (message: string) => void) => void;
+  /**
+   * The browser viewport in CSS pixels, for the gateway's `-oversize auto`. 2026-11-04.
+   *
+   * OPTIONAL, and absent means `hello` carries no `viewport` field at all -- so every existing
+   * caller and test is unchanged, and the gateway takes its "no window size known" fallback.
+   * Read WHEN CALLED: at `onopen` for `hello`, and when a resize settles. Not the cell count --
+   * the page has no cell size until the `atlas` reply, which follows `hello`; the gateway divides.
+   */
+  readonly viewport?: () => { width: number; height: number };
+  /**
+   * Subscribe to window resizes. OPTIONAL; with `viewport` present, each burst of resizes sends
+   * ONE `{kind:'viewport'}` message 250 ms after the last, so the gateway keeps the latest size
+   * per session for the next reconnect. Injected, like every browser capability here, so the
+   * debounce is testable with no `window`.
+   */
+  readonly onResize?: (fn: () => void) => void;
+}
+
+/** How long a burst of resizes must go quiet before its viewport is sent. */
+export const VIEWPORT_DEBOUNCE_MS = 250;
+
+/**
+ * A viewport the gateway will ACCEPT, or `undefined`. `protocol.ts`'s `checkViewport` refuses
+ * anything but integers in 1..100000, and a refused `hello` gets an `error` and NO SESSION -- so a
+ * window reporting 0x0 (a hidden iframe, a minimized headless page) would cost the operator the
+ * whole page over a measurement. Omitted instead, which the gateway reads as "no window size
+ * known" and falls back to the model.
+ */
+function sendable(vp: { width: number; height: number }): { width: number; height: number } | undefined {
+  const ok = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= 100_000;
+  return ok(vp.width) && ok(vp.height) ? { width: vp.width, height: vp.height } : undefined;
 }
 
 export interface BridgeApi {
@@ -411,15 +470,45 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     for (const m of mine) fn(m.payload);
   };
 
+  // SET BY `onopen`. A resize before it sends nothing: a real `WebSocket.send` THROWS while
+  // CONNECTING, and `hello` reads the viewport at open anyway, so nothing is lost.
+  let opened = false;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+
   deps.socket.onopen = () => {
+    opened = true;
     const id = deps.storage.getItem(ID_KEY);
-    deps.socket.send(JSON.stringify(id === null ? { kind: 'hello' } : { kind: 'hello', sessionId: id }));
+    const read = deps.viewport?.();
+    const vp = read === undefined ? undefined : sendable(read);
+    deps.socket.send(JSON.stringify({
+      kind: 'hello',
+      ...(id === null ? {} : { sessionId: id }),
+      ...(vp === undefined ? {} : { viewport: vp }),
+    }));
   };
+
+  // THE RESIZE, debounced. Sent only between open and close -- after close a real `send` is
+  // DISCARDED silently, and the closed-socket rule above (`closed`) is the one this obeys.
+  const viewport = deps.viewport;
+  if (viewport !== undefined) {
+    deps.onResize?.(() => {
+      if (resizeTimer !== undefined) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = undefined;
+        if (!opened || closed) return;
+        const vp = sendable(viewport());
+        if (vp === undefined) return;
+        deps.socket.send(JSON.stringify({ kind: 'viewport', width: vp.width, height: vp.height }));
+      }, VIEWPORT_DEBOUNCE_MS);
+    });
+  }
 
   deps.socket.onclose = () => {
     closed = true;
+    if (resizeTimer !== undefined) { clearTimeout(resizeTimer); resizeTimer = undefined; }
     for (const w of waiting.values()) w.reject(new Error('the gateway connection closed'));
     waiting.clear();
+    deps.onGatewayClosed?.();
     dispatch('error', 'The connection to the gateway closed. Reload to reconnect.');
   };
 
@@ -486,6 +575,8 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
         else w.reject(new Error(`selectionText ${seq} carried no string text`));
         return;
       }
+      // THE PICKER'S CHOICES, 2026-11-04. Not through `dispatch`; see `onGeometryChoices`.
+      if (msg.kind === 'geometryChoices') { deps.onGeometryChoices?.(msg); return; }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
@@ -520,6 +611,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       // "disconnect this session" -- which, after the grace window, is exactly what it says.
       if ((action as { kind?: unknown }).kind === 'quit') {
         deps.socket.close();
+        // NOT LEFT TO `onclose`: a real `close()` fires it only after the closing handshake (and
+        // the test fake's `close` fires nothing), so the picker is told now. See `onGatewayClosed`.
+        deps.onGatewayClosed?.();
         dispatch('error', 'Disconnected. Reload to start a new session.');
         return;
       }
@@ -567,6 +661,22 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
        */
       if ((action as { kind?: unknown }).kind === 'toggleKeyboard') {
         deps.toggleKeyboard?.();
+        return;
+      }
+      /**
+       * `geometryMenu` IS CLIENT-SIDE TOO, 2026-11-04, by the `toggleKeyboard` argument above.
+       *
+       * The model/oversize picker is a DOM overlay drawn in the browser; what the operator picks
+       * travels later as its own message, so this action itself has nothing for the server to do.
+       * `main.ts` keeps its OWN return regardless -- the two-branch rule, because a client need not
+       * run served code and `applyAction` throws on this kind outside any try in the socket
+       * handler.
+       *
+       * Absent `deps.toggleGeometry` -- the gateway's own tests, any caller with no DOM -- the
+       * action is DROPPED rather than falling through to the socket, the keypad branch's bargain.
+       */
+      if ((action as { kind?: unknown }).kind === 'geometryMenu') {
+        deps.toggleGeometry?.();
         return;
       }
       /**

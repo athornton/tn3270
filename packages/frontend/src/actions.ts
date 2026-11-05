@@ -122,6 +122,20 @@ export function applyAction(session: Session, action: Action): void {
       'applyAction does not handle requestCopy: only the renderer knows the selection',
     );
   }
+  /*
+    THE EIGHTH OF THE SAME SHAPE, 2026-11-04, and outside the `try` for the reason the seven above
+    give: the catch-all would swallow the throw and hand back the silent no-op it exists to prevent.
+
+    ITS REASON IS `toggleKeyboard`'S: the model/oversize chooser is a SURFACE -- a native menu in the
+    Electron GUI, a DOM overlay in the browser -- and which surface is the front end's business. The
+    TUI and CLI have none (one resizes, the other has `Set(model,...)`), so no `Session` ever needs
+    to see the kind. What the operator then CHOOSES is not this action at all.
+  */
+  if (action.kind === 'geometryMenu') {
+    throw new Error(
+      'applyAction does not handle geometryMenu: the front end owns its own display',
+    );
+  }
   const k = session.keyboard;
   try {
     switch (action.kind) {

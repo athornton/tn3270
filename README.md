@@ -26,8 +26,11 @@ gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 **It is not yet something you can hand to someone else.** There is no packaging, so no
 `.app` to download; the GUI has no connect dialog and no preferences, and takes its host on the
 command line like the other front ends. It does now have a menu bar — Edit for copy and paste,
-View for the keypad. The mouse presses keypad buttons and selects text for copying, and nothing
-else: no click-to-place-cursor and no light pen. See *What is not implemented* below, which is
+View for the keypad and keyboard, and Model for the model and oversize (picked while
+disconnected, applied at the next connect; `Alt-M` pops it up; its first item, Disconnect,
+drops the host session so the choices free up). The mouse presses keypad
+buttons and selects text for copying, and nothing else: no click-to-place-cursor and no light
+pen. See *What is not implemented* below, which is
 the honest part of this file.
 
 ## What works today
@@ -202,7 +205,7 @@ graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`
 npm install        # pulls Electron, which is ~230 MB of binary
 npm run build      # NOT `npm run build --workspaces`, which fails on the
                    # data-only fixtures package
-npm test           # 2651 tests, 111 files
+npm test           # 2959 tests, 119 files
 npm run typecheck
 ```
 
@@ -218,8 +221,9 @@ npm run build
 ./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
 
-The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-tn3270e on|off`, the TLS
-set, and the full `[prefix:][LU,LU@]host[:port]` shape. That is not a coincidence or a
+The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`,
+the TLS set, and the full `[prefix:][LU,LU@]host[:port]` shape. (`-oversize auto` measures the
+display here; see *Oversize*.) That is not a coincidence or a
 promise to keep them in step: all three front ends parse them with the same code in
 `packages/frontend`. `-scheme` is the one flag that is not shared with the CLI, since a
 script-driven client has nothing to render; see *Using the TUI* for what it picks between.
@@ -418,11 +422,24 @@ byte (`packages/gui/scripts/shot.mjs`).
 
 **What it does not have yet:** no connect dialog, no preferences, and no packaging — so the host
 goes on the command line and there is no `.app` to double-click. It does have a menu bar (Edit for
-copy and paste, View for the keypad). **On the 3270 canvas the mouse does one thing: dragging selects
+copy and paste, View for the keypad and keyboard, Model for the model and oversize -- disabled while
+connected or connecting, applied at the next connect, and popped up by `Alt-M`). The Model menu
+starts with **Disconnect**, enabled only while connected, which drops the host session so a choice
+can be made without waiting for the host to drop the line (`Enter` or `Clear` then reconnects with
+it; a connect attempt still in flight cannot be cancelled, so the item stays disabled until it
+settles). Then it offers the eight models, then oversize None, Auto and the `-oversize` size given at startup, if
+any. **A model choice can reset the oversize to None** when the oversize cannot go with that model
+(a non-`-E` model, or a fixed size smaller than the model), and the window says so; pick a model
+the size fits and then the size again to get it back. **A `--terminal-type` session has no Model
+menu**: its terminal type is fixed, so there is nothing to choose. **On the 3270 canvas the mouse does one thing: dragging selects
 a rectangle of text for copying** (see *Copy and paste*). Clicking the screen does not place the
 cursor and there is no light pen. The keypad is not on the canvas at all: it is real HTML buttons, in
 its own window in the GUI and an overlay in the browser, so the mouse works on it normally, as it does
-in the *transfer* window. **What is implemented
+in the *transfer* window. **The browser has the Model menu too, as an overlay: `Alt-M`** opens a
+picker with the same choices from the gateway, disabled while connected or connecting, and a
+choice applies at the next connect; its **Disconnect** button, like the menu's item, drops the
+host session while connected. The same model-resets-oversize rule applies, and the picker
+says so (see `packages/web/README.md`). **What is implemented
 but not yet verified against a live host:** the PF and
 Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
 the `Ctrl-]` quit, the in-window error message for a failed connection, and **the whole transfer
@@ -540,8 +557,8 @@ line against real byte counts.
 ## Using the TUI
 
 ```sh
-node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
-    [-insecure] [-noverifycert] [-cafile FILE] host[:port]
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [-oversize <cols>x<rows>|auto|none] \
+    [--colors N] [-scheme S] [-insecure] [-noverifycert] [-cafile FILE] host[:port]
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
@@ -667,7 +684,73 @@ The TUI re-places and repaints when the host resizes the screen, and suspends wi
 message if your window can no longer hold it, exactly as it does for a terminal resize.
 A `--terminal-type` string is sent verbatim and does **not** set a geometry — we cannot
 know what an arbitrary string implies, so use `-model` if you want the buffer to match
-what you claim.
+what you claim. Past the model's size, see *Oversize* below.
+
+## Oversize (`-oversize`)
+
+**`-oversize <cols>x<rows>|auto|none`**, in every front end, after x3270's flag of the same name.
+**The order is x3270's, columns first** (`Common/model.c:343`): `-oversize 160x62` is **62 rows
+by 160 columns**. Our own messages say a size in words ("62 rows by 160 columns") rather than
+repeat that order. Absent, or `none`, means the model's own alternate size, as before.
+
+```sh
+node packages/tui/dist/main.js -insecure -model 3278-4-E -oversize 160x62 HOST:PORT
+node packages/tui/dist/main.js -insecure -oversize auto HOST:PORT
+```
+
+**Any oversize is advertised as `IBM-DYNAMIC`**, as TERMINAL-TYPE and as the TN3270E device type,
+and the size itself goes to the host in the Query Reply (Usable Area and Implicit Partition).
+The default size stays 24x80; the oversize is the ALTERNATE, so a host still reaches it with
+Erase/Write Alternate. **It needs an extended (`-E`) model**, since a Query Reply is part of the
+extended data stream. The default with no `-model` is `3278-2-E`, which already is one.
+`-bind-limit on` then bounds a BIND by the oversize rather than by the model.
+
+**`auto` measures the window, at each connect and reconnect only:**
+
+| front end | what `auto` measures |
+|---|---|
+| TUI | the terminal, less one row for the status line: a 41x100 terminal asks for 40 rows by 100 columns |
+| GUI | the display's work area, at the scale the window would pick anyway (80% of the work area, the model's scale), less the OIA row |
+| web gateway | the browser's viewport at scale 1, less the OIA row, sent by the page in `hello` and kept up to date by later resizes |
+| CLI | **refused**: there is no window to measure. Give `<cols>x<rows>` |
+
+**A resize mid-session does NOT change the live screen.** The host learned the size from the
+Query Reply and will not ask again, so the new size applies at the NEXT reconnect. The TUI says
+so on its message line (`window now fits 50 rows by 132 columns; applies at the next reconnect`).
+The GUI and the gateway apply it silently at the next connect. **In the TUI, resizing and then
+reconnecting is how you change size while running**: it has no Model menu and no key for one, and
+its model is set by `-model` only. The other front ends can also change model and oversize while
+disconnected: the GUI's Model menu and the browser's `Alt-M` picker (see *Using the GUI*, and
+`packages/web/README.md`), and the CLI's `Set()` (see *Using the CLI*). The menu and the picker
+each have a **Disconnect** to get there without the host's help.
+
+**When `auto` cannot apply, the session falls back to the model and says so on stderr.** That
+covers a window smaller than the model, no window size known, or a window too wide to keep the
+model's rows inside 16383 cells. The gateway prefixes each line with the first 8 characters of
+the session id. A window that is merely too TALL for 16383 cells is not refused: it is cut to
+fewer rows, which is noted in the trace only, not on stderr.
+
+**Refused before anything connects**, with a usage error:
+
+- `-oversize` together with `--terminal-type`, since an oversize is advertised as `IBM-DYNAMIC`;
+- a non-`-E` model (`use -model 3278-4-E`). x3270 drops the oversize silently here; we refuse;
+- a fixed size below the model's alternate (`160x20` on any model; `100x40` on a model 4, which
+  is 43 rows);
+- more than 16383 cells, the 14-bit address limit;
+- `auto` in the CLI.
+
+**`--replay` (the gateway) and `TN3270_GUI_REPLAY` (the GUI) ignore it**, because a replay never
+connects, and only a connect resolves the geometry.
+
+**What has been checked:** our Query Reply against real s3270 4.5 run with the same
+`-oversize 160x62`. The Usable Area and Implicit Partition bytes are identical (see
+`docs/live-testing.md`, "Oversize conformance against real s3270"). The TUI's `auto` has been run
+in a real pty (`pty-smoke.py --oversize-auto`), and the GUI's under Xvfb. **Live: VM/370 (VM/CE)
+honours it** -- with `-oversize 160x62`, MECAFF's `EE` switches the screen to 160x62 and leaving it
+returns to 80x24 (2026-11-04). The web gateway at a fixed 160x62 works in Firefox and Safari on a Mac
+(2026-11-05), and `-oversize auto` sizes the session from the browser window (EE came up about
+180 columns wide). TSO and a modern host are
+still owed; `docs/live-testing.md` lists them.
 
 ## Connecting over TLS
 
@@ -769,9 +852,9 @@ configured model, the lower bound is 24x80 (model 2). **On a model-2 session tho
 bounds are the same number**, so a BIND asking for anything other than exactly 24x80 is
 refused and our own geometry stands. **This is a safety rail, not a missing feature**:
 with the limit on, BIND can only ever *narrow* a larger model toward 24x80, never grow
-one past what `-model` configured — growing past the model is a separate, unbuilt
-feature (`-oversize`)'s job, and letting BIND do it here would silently turn this
-feature into that one. A user who sees a refused BIND while running `-model 3278-2`
+one past what `-model` configured. Growing past the model is `-oversize`'s job (see
+*Oversize*; with an oversize, the upper bound is the oversize), and letting BIND do it here
+would silently turn this feature into that one. A user who sees a refused BIND while running `-model 3278-2`
 has not found a bug; `-bind-limit off` honors the BIND's geometry anyway. UNBIND
 reverts the screen to the model's own geometry, not to whatever the previous BIND left
 it at.
@@ -867,11 +950,37 @@ node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 `Connect()` routes through the same TLS decision as the command line, so the flag goes
 on the invocation and cannot be written into the script.
 
+`-oversize <cols>x<rows>` works here as in the other front ends; **`-oversize auto` is refused**
+with a usage error, since a script has no window to measure. See *Oversize*.
+
 **Commands.** `Connect` `Disconnect` `Reconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
 `MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` `Dup` `FieldMark` ·
 `ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
-· `Wait`
+· `Wait` · `Set`
+
+**`Set(model,<model>)`, `Set(oversize,<spec>)`, or both as one call,
+`Set(model,<model>,oversize,<spec>)`** change the model and/or the oversize while running,
+applied at the next `Connect()`/`Reconnect()` — x3270's `Set` action (`Common/toggles.c:637-641`),
+narrowed to the two names this CLI has, and to one or two pairs: there is no third name to chain
+on, and no `name=value` or query (`Set(name)`) form the way x3270's `Toggle`/`Set` also support,
+and no `-defer`. **Both names in one call matters, not just convenience:** the model and the
+oversize are validated TOGETHER (an oversize must fit the model, and needs an extended, `-E`,
+model), so some destinations are refused by every single-step path yet reachable in one `Set`
+call — e.g. going from model 5 oversized to 140x30 to model 4 at 80x45, where `Set(model,...)`
+alone is refused against the old oversize and `Set(oversize,...)` alone is refused against the
+old model's floor. The name is case-insensitive; the value is validated eagerly, the same way
+`-model`/`-oversize` are, so a bad model, a non-`-E` model under an oversize, or
+`Set(oversize,auto)` (no window here to measure) is refused immediately rather than at the next
+connect, and the setting is left unchanged. `Set(...)` is refused while connected
+(`disconnect first; ...`), while a connection attempt is still in flight (`wait for the
+connection attempt to finish; ...`), and on a
+session started with `--terminal-type`, which has no model or oversize to change.
+**Unlike the GUI's Model menu and the web picker, `Set(model,...)` alone never resets the
+oversize** to make the pair fit: those two front ends apply `applyGeometryChoice`'s reset rule
+for a one-field pick, but `Set()`'s own model-and-oversize validation (above) means a model given
+without its oversize is checked against whatever oversize is already set and refused outright if
+the pair does not fit — give both in one call instead, e.g. `Set(model,3278-5-E,oversize,none)`.
 
 **`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route
 to that: **`Enter()` here does NOT reconnect**, unlike the interactive front ends' Enter key,
@@ -1026,7 +1135,8 @@ reconnect it to the same place.
 
 Its own options are double-dashed (`--listen`, `--bind`, `--grace`, `--allow-origin`,
 `--tls-cert`); the client options it inherits keep s3270's single dash (`-insecure`,
-`-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-scheme`). **`--scheme` is refused as an
+`-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-oversize`, `-scheme`). `-oversize auto`
+measures each browser's viewport, separately for each session; see *Oversize*. **`--scheme` is refused as an
 unknown flag** — that asymmetry is deliberate, since those flags mean the same thing in every
 front end.
 
@@ -1294,9 +1404,14 @@ printers** — and the 3270 binding is what diverges from it. Doing printers fir
 an SCS/3287 path and then revisiting it once GOCA lands; doing graphics first means the printer work
 can reuse whatever the drawing layer turns out to be. **Cheap is not the same as first.**
 
-11. **Oversize + `IBM-DYNAMIC`.** Really oversize — the advertisement is a by-product. See the
+11. **Oversize + `IBM-DYNAMIC`.** **Step 1 (the `-oversize` flag) is done on branch `oversize`,
+   2026-11-04; see *Oversize*.** **Step 2, changing the model and oversize while running (applied at
+   the next connect), is done on the same branch, 2026-11-05: the CLI's `Set()`, the GUI's Model
+   menu and the browser's `Alt-M` picker.** Really oversize — the advertisement is a by-product. See the
    out-of-scope section of the bind-image spec for the measurements.
-12. **Local model-switching**, immediately after it and before packaging. The two belong together:
+12. **Local model-switching** -- **DONE as item 11's step 2, 2026-11-05**: a choice applies at the next
+   connect, never to a live screen, so it adds no client-driven mid-session resize; what follows is
+   the reasoning that scheduled it, kept for the record. Immediately after it and before packaging. The two belong together:
    both let the *user* do unpredictable things with their window, and in the code both drive the one
    `Screen.resize()` path — which today has four callers, all in `core` and all HOST-driven (EW/EWA
    and BIND/UNBIND). These two add the first CLIENT-driven resizing, so they meet the same questions
@@ -1553,11 +1668,13 @@ worse than one that says which quarter is missing.
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
   you find out if that changes.
-- **No `IBM-DYNAMIC` and no oversize.** Models 2 through 5 work (see *Screen models*),
-  but `IBM-DYNAMIC` — "ask me my size via Query Reply" — and x3270's arbitrary
-  `-oversize` are not offered. Oversize is an emulator extension rather than 3270
-  architecture, and it is the only case that crosses 4096 cells into 14-bit addressing,
-  which `address.ts` already handles.
+- **A model or oversize change applies at the next connect, never to the live screen.** The GUI's
+  Model menu, the browser's `Alt-M` picker and the CLI's `Set()` all refuse while connected or
+  connecting (see *Oversize*). The menus offer only fixed choices: a new size is a new `-oversize`
+  (or `Set(oversize,...)` in the CLI). The TUI has no chooser at all; it changes size by being
+  resized and reconnected, and its model only by `-model`. VM/370 honours an oversize live; TSO, a
+  modern host, and a menu or picker choice renegotiating against a live host are still owed
+  (`docs/live-testing.md`).
 - **No mouse support** in the TUI. `Ctrl-K`'s special-keys list is the keyboard substitute for
   the canvas front ends' clickable keypad, not a step towards one.
 
@@ -1584,16 +1701,18 @@ visible there.
 
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2654 tests, 111 files (re-measured 2026-11-04 on `main` at `c05f533`) |
+| `npm test` | **pass** — 2959 tests, 119 files (measured 2026-11-05 on branch `oversize`, with the picker's Disconnect) |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
+| `pty-smoke.py --oversize-auto` | **pass** — 7/7 (2026-11-04): in a 41x100 pty the host is told `IBM-DYNAMIC`, an Erase/Write Alternate puts the OIA on row 41, so 40 rows by 100 columns was measured, and a resize to 51x132 says `applies at the next reconnect` naming 50 rows by 132 columns. Mutation-checked (measuring 2 rows or 0 rows short fails it). The Query Reply is NOT read here (its fake host sends no Read Partition), and no reconnect is driven |
+| oversize Query Reply vs real s3270 4.5 | **pass, NOT a live host** — with `-oversize 160x62` both ask for `IBM-DYNAMIC`, and the Usable Area and Implicit Partition bytes are identical (`e-server.py --query`) |
 | `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **1 of 1 case** pixel-identical against the GUI's own golden, which is what says the renderer is shared and not merely similar. (It was 2 cases until 2026-10-06: the keypad case went when the keypad became HTML, since a window of system-font controls is not a pixel the canvas owns) |
-| `browser-keys.mjs` — real chords through a real browser | **pass** — 13 chords, 10 actions in order over a WebSocket, **3** asserted absences (`Ctrl+K`, `Ctrl+Z`, `F13`) — `Ctrl+K` because the keypad toggle is intercepted client-side and never reaches the gateway |
-| `keys.mjs` — real Chromium key events in Electron | **pass** — 22 chords, 20 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`). **Two of those chords go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. The pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |
-| `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 6 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
+| `browser-keys.mjs` — real chords through a real browser | **pass** — 14 chords, 10 actions in order over a WebSocket, **4** asserted absences (`Ctrl+K`, `Alt+M`, `Ctrl+Z`, `F13`) — `Ctrl+K` and `Alt+M` because the keypad toggle and the model picker are intercepted client-side and never reach the gateway (measured 2026-11-05) |
+| `keys.mjs` — real Chromium key events in Electron | **pass** — 25 chords, 23 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`), and **2 Model menu popups**, one per `Alt+M` (measured 2026-11-05). One `Alt+M` is on the canvas and one in the keyboard window with its own liveness probe, since `forwardKeys` forwards `geometryMenu` unfiltered and `applyAction` throws on it. **Two of those chords go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. The pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |
+| `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 7 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
 | `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
-| `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, plus **18 of 18** phase-two checks (measured 2026-11-03): seven on the transfer form, **four on the keyboard**, and **seven on copy and paste**. The copy one drives the REAL `Ctrl-Shift-C` through Chromium's input pipeline rather than calling the page's copy global, so it covers the BINDING as well as the path behind it, and it asserts the real OS clipboard over a sentinel — then presses the chord a SECOND time over a fresh sentinel to prove the selection SURVIVED, which is the only end-to-end witness that a copy does not destroy the rectangle it just sent. Since 2026-11-03 it and `webNativeCopy` (the browser's own copy command) witness the text prefetched at drag end, with no copy frame sent, and `webCopyFallback` holds the prefetch back to witness the older asynchronous path, which a correct run otherwise never reaches; `webCopyRetry` makes that path's write fail, then proves a second press on the same selection copies once the prefetch answers. `webSingleCell` drags inside ONE cell and copies that one character, and `webClickNoCopy` proves a click that moved under 4 px copies nothing. Mutation-measured (2026-10-27): an arm that copies and then clears passed every one of the then 2614 unit tests and the built-artifact ordering pin, and fails only here. One of those four is the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow cluster's diamond (up and down sharing a column), the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it. **The other three are FUNCTIONAL, added 2026-10-23, and the ten above measured NOT ONE ACTION before them** — proved by mutation, since making every cap dead left all ten green at 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3, Enter, Cursor up, `7`, Attention) and compares the **full action object**, not just its kind — an off-by-one `n` on the PF row keeps every label right and would pass a kind-only check; `keyboardInert` asserts an inert cap (`Caps Lock`) sends nothing at all; `keyboardShift` arms the one-shot, gets `@`, and gets a plain `2` on the next click, because a latch bug in exactly that logic reached the user with every unit test green. **Each cap is asserted on TWO independent witnesses** — what the page sent over the socket and the gateway's own `--log-actions` output after decoding — because a mutation renaming the IPC frame kind in `bridgecore.ts` satisfied the browser-side probe for all five caps and was caught **only** by the gateway's log |
+| `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, plus **20 of 20** phase-two checks (measured 2026-11-05): **two on the `Alt-M` model picker** (`picker`: it opens with the current model checked and closes the keypad, `Alt+M` shuts it, a click sends `setGeometry` and the gateway's reply checks the new model, an arrow key moves focus and sends nothing, `Enter` applies, `Alt+M` closes it with a radio focused, and its Disconnect button sits first, disabled on a never-connected replay session; `pickerClosed`, last: the gateway closes the socket under the open picker, which then says so and disables everything), seven on the transfer form, **four on the keyboard**, and **seven on copy and paste**. The copy one drives the REAL `Ctrl-Shift-C` through Chromium's input pipeline rather than calling the page's copy global, so it covers the BINDING as well as the path behind it, and it asserts the real OS clipboard over a sentinel — then presses the chord a SECOND time over a fresh sentinel to prove the selection SURVIVED, which is the only end-to-end witness that a copy does not destroy the rectangle it just sent. Since 2026-11-03 it and `webNativeCopy` (the browser's own copy command) witness the text prefetched at drag end, with no copy frame sent, and `webCopyFallback` holds the prefetch back to witness the older asynchronous path, which a correct run otherwise never reaches; `webCopyRetry` makes that path's write fail, then proves a second press on the same selection copies once the prefetch answers. `webSingleCell` drags inside ONE cell and copies that one character, and `webClickNoCopy` proves a click that moved under 4 px copies nothing. Mutation-measured (2026-10-27): an arm that copies and then clears passed every one of the then 2614 unit tests and the built-artifact ordering pin, and fails only here. One of those four is the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow cluster's diamond (up and down sharing a column), the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it. **The other three are FUNCTIONAL, added 2026-10-23, and the ten above measured NOT ONE ACTION before them** — proved by mutation, since making every cap dead left all ten green at 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3, Enter, Cursor up, `7`, Attention) and compares the **full action object**, not just its kind — an off-by-one `n` on the PF row keeps every label right and would pass a kind-only check; `keyboardInert` asserts an inert cap (`Caps Lock`) sends nothing at all; `keyboardShift` arms the one-shot, gets `@`, and gets a plain `2` on the next click, because a latch bug in exactly that logic reached the user with every unit test green. **Each cap is asserted on TWO independent witnesses** — what the page sent over the socket and the gateway's own `--log-actions` output after decoding — because a mutation renaming the IPC frame kind in `bridgecore.ts` satisfied the browser-side probe for all five caps and was caught **only** by the gateway's log |
 | `browser-lan-copy.mjs` — copy at a plain-`http` LAN address | **pass** — **2 of 2** (measured 2026-11-03): the page is loaded at the machine's own LAN address, where `isSecureContext` is false and there is no `navigator.clipboard`, and a drag then `Ctrl+Shift+C`, and a drag then Meta+C with the `copy` command, each put the text on the OS clipboard, read back from a separate Electron. Chromium only; Firefox and Safari there are a live-pass item. With no LAN IPv4 it exits 77, **SKIPPED, which is not a pass** |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
 | web gateway vs MVS 3.8j TK5, live | **pass** — 24 of 24 rows agree |

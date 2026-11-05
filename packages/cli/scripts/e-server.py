@@ -202,6 +202,24 @@ class EServer:
         # Erase/Write, WCC reset+unlock, SBA(0,0), unprotected field, Insert Cursor.
         payload = bytes([0xf5, 0xc3, 0x11, 0x40, 0x40, 0x1d, 0x40, 0x13])
         self.send_record(0x00, payload, response_flag=self.args.response_flag)
+        if self.args.query:
+            time.sleep(0.3)
+            # Write Structured Field carrying Read Partition (Query), as a
+            # 3270-DATA record -- the oversize conformance check (Task 9).
+            #
+            # Bytes checked against packages/fixtures/x3270/tso-query-reply.txt,
+            # which explains each one against GA23-0059 (~/3270/ref/pages.txt:
+            # 6345-6356, the Read Partition format L L SFID PID TYPE), and against
+            # that fixture's own captured record `f3 00 05 01 ff ff 02`, un-doubled:
+            #   f3      command: Write Structured Field
+            #   00 05   L: length 5, covering 00 05 01 ff 02
+            #   01      SFID: Read Partition
+            #   ff      PID: X'FF', the partition identifier for QUERY. THIS is the
+            #           byte that must come back doubled on the wire (ff ff) --
+            #           send_record's double_iac handles it below, since it is
+            #           applied to the whole header+payload, not just the header.
+            #   02      TYPE: X'02' = Query
+            self.send_record(0x00, bytes([0xf3, 0x00, 0x05, 0x01, 0xff, 0x02]))
 
     # ---- receiving -----------------------------------------------------------
 
@@ -387,6 +405,10 @@ def main():
                    help='RESPONSE-FLAG on the 3270-DATA record: 0 none, 1 error, 2 always')
     p.add_argument('--device-name', default='IBM-3278-2-E')
     p.add_argument('--lu', default='TESTLU01')
+    p.add_argument('--query', action='store_true',
+                   help='after the initial Erase/Write, also send a Write Structured '
+                        'Field carrying Read Partition (Query) as a 3270-DATA record, '
+                        'and log the inbound Query Reply -- see Task 9')
     p.add_argument('--timeout', type=float, default=10.0)
     args = p.parse_args()
     return EServer(args).run()

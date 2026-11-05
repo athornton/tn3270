@@ -1,5 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { resolveHostSpec, takeTlsFlag, type TlsFlags } from '@tn3270/frontend';
+import {
+  resolveGeometry, OversizeError, TerminalTypeError, type Oversize, type Session,
+} from '@tn3270/core';
+import {
+  defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, type TlsFlags, type TlsOptions,
+} from '@tn3270/frontend';
+import { measureViewport } from './viewport.js';
 
 /**
  * The gateway's arguments.
@@ -90,6 +96,12 @@ export interface WebArgs {
    * not one of the gateway's own (`--bind`, `--listen`, ...).
    */
   readonly devname?: string;
+  /**
+   * `-oversize <cols>x<rows>|auto|none`. Absent means `none`. `auto` is allowed: the gateway's
+   * window is each BROWSER's viewport, sent in `hello` and on every resize and measured at scale 1
+   * at each connect (`viewport.ts`). A combination a connect would refuse is refused at parse time.
+   */
+  readonly oversize?: Oversize;
 }
 
 /** One flag that takes a value, or throw naming the flag rather than the index. */
@@ -141,6 +153,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let ddm: boolean | undefined;
   let bindLimit: boolean | undefined;
   let devname: string | undefined;
+  const geometry: { oversize?: Oversize } = {};
 
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
@@ -151,6 +164,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     // `undefined` means "not one of mine", so the switch below still gets a turn.
     const eaten = takeTlsFlag(hostTls, a, args[i + 1], (m) => new UsageError(m));
     if (eaten !== undefined) { i += eaten; continue; }
+    const oversizeEaten = takeOversizeFlag(geometry, a, args[i + 1], (m) => new UsageError(m));
+    if (oversizeEaten !== undefined) { i += oversizeEaten; continue; }
     switch (a) {
       case '--bind': bind = value(args, i, a); i += 1; continue;
       case '--listen': listen = nonNegativeInt(value(args, i, a), a); i += 1; continue;
@@ -221,6 +236,23 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
 
   const resolved = resolveHostSpec(rest[0]!, (m) => new UsageError(m));
 
+  // Refuse at PARSE time whatever `resolveGeometry` would refuse at connect -- the CLI's, TUI's
+  // and GUI's check, one call. The measure is a STAND-IN reporting no window, so `auto` passes
+  // every rule it can break and then takes the "no window size known" fallback without any browser
+  // having said anything. Without this, a bad `-oversize` would surface only on the first
+  // browser's `hello`, as a failed session, rather than to the operator who typed it.
+  const oversize = geometry.oversize;
+  if (oversize !== undefined) {
+    try {
+      resolveGeometry({ ...(model !== undefined ? { model } : {}), oversize }, () => undefined);
+    } catch (e) {
+      // An unknown `-model` is refused here too, before any oversize rule, as TerminalTypeError --
+      // mapped like OversizeError, so `run()` prints the message alone and exits 2.
+      if (e instanceof OversizeError || e instanceof TerminalTypeError) throw new UsageError(e.message);
+      throw e;
+    }
+  }
+
   /**
    * WHAT THIS GATEWAY CANNOT HONOR IN A HOST ARGUMENT, REFUSED BY NAME.
    *
@@ -272,5 +304,62 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(ddm === undefined ? {} : { ddm }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
+    ...(oversize === undefined ? {} : { oversize }),
   };
+}
+
+/** What one gateway session needs beyond its `Session`: the box its `auto` measure reads. */
+export interface GatewaySession {
+  readonly session: Session;
+  /** Replace the browser viewport the next connect measures. `undefined`: no window size known. */
+  setViewport(viewport: { readonly width: number; readonly height: number } | undefined): void;
+}
+
+/**
+ * Builds one gateway session, from the parsed arguments -- the other front ends' `buildSession`,
+ * HERE rather than inline in `main.ts`'s factory so a test drives this code and not a copy of it.
+ *
+ * ALWAYS GEOMETRY MODE: the gateway has no `--terminal-type`, so the model and the oversize are the
+ * whole setting, and `-model` alone with `oversize: none` resolves to exactly the model's own
+ * terminal type and alternate, as `resolveTerminalType`/`resolveAlternateSize` gave before.
+ *
+ * THE VIEWPORT IS A PER-SESSION MUTABLE BOX, captured by the measure and replaced through
+ * `setViewport`. The measure reads it WHEN `connect()` CALLS IT -- every connect and reconnect --
+ * so whatever the tab attached at that moment last said is what the host is sized from. `initial`
+ * is the creating hello's, set before this returns and so before the factory's connect.
+ */
+export function buildSession(
+  args: WebArgs,
+  hostTls: TlsOptions,
+  cell: { readonly width: number; readonly height: number },
+  initial: { readonly width: number; readonly height: number } | undefined,
+): GatewaySession {
+  let viewport = initial;
+  const session = defaultSession(
+    undefined, hostTls, undefined, undefined, args.bindImage, args.bindLimit, args.devname, args.ddm,
+    {
+      setting: {
+        ...(args.model !== undefined ? { model: args.model } : {}),
+        oversize: args.oversize ?? { kind: 'none' },
+      },
+      measure: () => measureViewport(viewport, cell),
+    },
+  );
+  return { session, setViewport: (v) => { viewport = v; } };
+}
+
+/**
+ * Every `lastGeometryNotice` -- an `auto` that fell back to the model -- on stderr, beside the
+ * `host ... unreachable` line, as the spec's "Data flow on a connect" item 2 asks. PREFIXED WITH
+ * THE SESSION ID'S FIRST 8 CHARACTERS, because one gateway serves many sessions and each falls back
+ * on its own browser's window. Registered before the first connect; `connect()` emits 'geometry'
+ * after resolving and before any socket I/O, so that first connect is covered too.
+ */
+export function printGeometryNotices(
+  session: Session, id: string, stderr: { write(text: string): unknown },
+): void {
+  session.on('geometry', () => {
+    const notice = session.lastGeometryNotice;
+    if (notice !== undefined) stderr.write(`${id.slice(0, 8)}: ${notice}\n`);
+  });
 }

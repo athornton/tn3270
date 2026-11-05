@@ -105,7 +105,62 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 | `-noverifycert` | — | make the TLS connection without verifying the host |
 | `-verifycert` | — | verify (the default; explicit for symmetry with s3270) |
 | `-model NAME` | `IBM-3278-2-E` | screen model, e.g. `3278-4-E` |
+| `-oversize <cols>x<rows>\|auto\|none` | `none` | a screen past the model, advertised as `IBM-DYNAMIC`; needs a `-E` model. **Columns first**, x3270's order: `160x62` is 62 rows by 160 columns. See below |
 | `-scheme NAME` | `default` | color scheme: `default`, `3279`, `x3270`, `green` |
+
+### `-oversize`
+
+`-oversize 160x62` gives every session 62 rows by 160 columns as its alternate size. The host is
+told `IBM-DYNAMIC`, and learns the size from the Query Reply. It is refused at startup with
+`--terminal-type` (which the gateway does not take anyway), on a non-`-E` model, below the
+model's own alternate size, or over 16383 cells (the 14-bit address limit).
+
+`-oversize auto` measures **each browser's viewport, per session**, at scale 1, in whole cells,
+less one row for the OIA. The page sends its viewport in CSS pixels in `hello` and again whenever
+the window resizes, and the gateway turns that into cells with the atlas cell. **It is measured at
+each connect and reconnect only.** Resizing the window mid-session does not change the live
+screen, since the host already has its Query Reply. The new size applies the next time the
+session reconnects (for example, `Enter` on a disconnected session). A reattaching tab's viewport
+replaces the old one.
+
+When `auto` cannot apply (no viewport sent, a viewport smaller than the model, or one too wide to keep the model's rows inside 16383 cells), the session
+uses the model, and the gateway says so on stderr, prefixed with the first 8 characters of the
+session id. **`--replay` ignores `-oversize`**: a replay never connects, and only a connect
+resolves the geometry. That is also why the browser harnesses, which all run replay gateways, do
+not exercise `auto` end to end. Its unit tests and the integration `hello` test are the cover.
+
+### Choosing the model and oversize: `Alt-M`
+
+`Alt-M` opens a picker over the screen, the browser's counterpart of the GUI's Model menu: the
+eight models (each with its size in words), then oversize None, Auto, and the `-oversize` size the
+gateway was started with, if any. Nothing is typed; a new size is a new `-oversize`. **The choice
+applies at the next connect** (for example, `Enter` on a disconnected session). While the session is
+connected or connecting every choice is disabled, and the picker says which: `Disconnect first`
+once the session is actually connected, or `Wait for the connection attempt to finish` while a
+connect -- first or reconnect -- is still in flight and there is nothing yet to disconnect.
+**The picker's first control is a Disconnect button**, enabled only while the session is actually
+connected: it sends a `disconnect` message, the gateway drops this tab's host session (never
+another tab's), the status line shows `X Disconnected -- press Enter to reconnect`, and the
+choices free up; `Enter` or `Clear` then reconnects with the new choice. It is disabled while a
+connect is in flight (`Session.disconnect()` cannot cancel an attempt that has no connection yet)
+and while disconnected. If the page's own connection to the gateway closes, the picker says `The
+connection to the gateway closed; reload to reconnect.` and disables everything. The
+gateway owns the session, so the list comes from it and a click goes back to it as a `setGeometry`
+message. **A model choice can reset the oversize to None** when the oversize cannot go with that
+model (a non-`-E` model, or a fixed size smaller than the model), by the same rule as the GUI; the
+picker says so. Pick
+a model the size fits and then the size again to get it back. Opening the picker closes the keypad,
+the keyboard and the transfer form, and opening any of those closes it. A choice is made by
+clicking it, or by `Enter` or `Space` on the focused one; the arrow keys only move between
+choices and apply nothing. `Escape`, `Alt-M` or `Close` shuts the picker. The gateway prints a
+reset, and a refused return to the startup size, on stderr with the session id's first 8
+characters; a choice refused because the session is connected is only shown in the picker.
+
+**"Picked, never typed" is a rule about the page, not a security boundary.** Any client that can
+open the socket can send `setGeometry` for any of the eight models and any oversize the list
+names, and through the viewport it reports, `-oversize auto` can come to any size up to 16383
+cells. That is the same reach the operator already has; restrict the gateway with `--auth`, not
+with the picker.
 
 ## The host argument, and what this gateway will NOT take
 
@@ -169,19 +224,27 @@ running 3270 session instead of dropping it and logging on again. The browser re
 `sessionStorage`. An id naming a session someone is **currently** attached to is refused a
 handover, so a leaked id cannot become a way into another operator's logged-on session.
 
+**One `hello` per socket** (2026-11-05). A second `hello` on the same socket is answered with an
+`error` (`this socket already said hello; open a new connection for another session`) and changes
+nothing. Before this, a second `hello` built a second session and orphaned the first, which stayed
+attached forever, holding a host connection and a `--max-sessions` slot. So one page repeating
+`hello` could use up the gateway. The served page sends `hello` once, when the socket opens.
+
 ## By-hand harnesses
 
 Not in `npm test` — they need Xvfb and a real browser. Run them like `packages/gui/scripts/keys.mjs`:
 
 ```bash
-node packages/web/scripts/browser-keys.mjs   # 13 chords, 11 actions in order over a WebSocket
-node packages/web/scripts/browser-shot.mjs   # 2 cases of served pixels vs the GUI's own goldens
+node packages/web/scripts/browser-keys.mjs       # 14 chords, 10 actions in order, 4 absences (Ctrl+K, Alt+M, Ctrl+Z, F13)
+node packages/web/scripts/browser-shot.mjs       # 1 case of served pixels vs the GUI's own golden
+node packages/web/scripts/browser-clicks.mjs     # keypad clicks, then 20 checks incl. the Alt-M picker
+node packages/web/scripts/browser-lan-copy.mjs   # 2 copy checks at a plain-http LAN address
 ```
 
-`browser-shot.mjs` runs **two** cases, not one: the plain screen and the same screen with the keypad
-shown, each sized from its own golden's PNG header. The second is the one that matters — it says the
-keypad the browser draws is the same keypad Electron draws, which is what makes this one
-implementation with two front ends rather than two implementations that agree today.
+(Counts measured 2026-11-05 at `eabe45b`.) `browser-shot.mjs` runs **one** case, the plain screen.
+It was two until 2026-10-06, when the keypad became HTML buttons: a window of system-font controls
+is not a pixel the canvas owns, so the keypad case went. The case that is left still says the
+renderer is shared: the served page is pixel-identical to the GUI's own golden.
 
 Both need `--no-proxy-server`, which they pass: with `HTTP_PROXY` set, Chromium routes even a
 loopback request through the proxy and the failure is completely silent.

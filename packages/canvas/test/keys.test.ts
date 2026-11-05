@@ -216,6 +216,10 @@ describe('actionForKey', () => {
       // this loop cannot express -- the table names one key per action -- and is asserted in
       // 'maps Ctrl-Shift-C and Cmd-Shift-C to a copy REQUEST', exactly as Alt-K is.
       'Ctrl-Shift-C': ev({ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true }),
+      // Alt-M, the model/oversize chooser, 2026-11-04. Like Ctrl-B its row gives NO `terminal`
+      // sequence -- the TUI changes size by being resized -- and like Ctrl-B this canvas mapper
+      // must name it, which is what this loop checks.
+      'Alt-M': ev({ key: 'm', code: 'KeyM', altKey: true }),
     };
     // key -> why the GUI cannot express it. A RECORD, not a list, so an exemption without a
     // written reason does not type-check. The hole this replaced was exactly an unexamined
@@ -419,5 +423,39 @@ describe('the keypad toggle', () => {
       .toEqual({ kind: 'dup' });
     expect(actionForKey({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false }))
       .toEqual({ kind: 'fieldMark' });
+  });
+});
+
+describe('the model/oversize chooser, Alt-M', () => {
+  // `geometryMenu`, 2026-11-04: the GUI's Model menu and the web page's picker overlay. On the
+  // PHYSICAL key, as Alt-K is, and for the same trap: Option-M on a Mac reports `key === 'µ'`.
+  it('is Alt-M, and Alt-Shift-M', () => {
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM', altKey: true })))
+      .toEqual({ kind: 'geometryMenu' });
+    expect(actionForKey(ev({ key: 'M', code: 'KeyM', altKey: true, shiftKey: true })))
+      .toEqual({ kind: 'geometryMenu' });
+  });
+
+  it('matches on e.code, because macOS Option-M reports key "µ"', () => {
+    expect(actionForKey(ev({ key: 'µ', code: 'KeyM', altKey: true })))
+      .toEqual({ kind: 'geometryMenu' });
+  });
+
+  it('leaves Ctrl-Alt-M and Cmd-Alt-M to the window, as Alt-K does', () => {
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM', altKey: true, ctrlKey: true })))
+      .not.toEqual({ kind: 'geometryMenu' });
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM', altKey: true, metaKey: true })))
+      .not.toEqual({ kind: 'geometryMenu' });
+  });
+
+  it('is not raised by a plain m, Ctrl-M or Cmd-M', () => {
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM' }))).toEqual({ kind: 'type', text: 'm' });
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM', ctrlKey: true }))).toBeNull();
+    expect(actionForKey(ev({ key: 'm', code: 'KeyM', metaKey: true }))).toBeNull();
+  });
+
+  it('does not shadow the Alt keys already bound', () => {
+    expect(actionForKey(ev({ key: 'k', code: 'KeyK', altKey: true }))).toEqual({ kind: 'toggleKeypad' });
+    expect(actionForKey(ev({ key: '1', code: 'Digit1', altKey: true }))).toEqual({ kind: 'pa', n: 1 });
   });
 });

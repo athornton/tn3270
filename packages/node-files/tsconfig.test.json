@@ -1,0 +1,14 @@
+{
+  // Typechecks the tests, which tsconfig.json leaves out because it builds src/ alone. vitest strips
+  // types without checking them, so without this a type error in a test passes. `rootDir` widens
+  // because some tests import another package's src/ by path; nothing is emitted.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "incremental": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.cts", "test/**/*.ts"]
+}

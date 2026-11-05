@@ -292,6 +292,45 @@ body.ui-surface {
 
 #transfer-buttons { display: flex; gap: 8px; }
 
+/*
+  THE WEB MODEL/OVERSIZE PICKER, Alt-M, 2026-11-04 -- the GUI's Model menu as an overlay, since a
+  browser tab has no menu bar. The transfer overlay's rules, for that overlay's measured reasons:
+  `position: fixed` so it is in the viewport whatever the page has scrolled to; `background:
+  Canvas`, OPAQUE, so the 3270 screen does not show through the labels; a top-left panel with its
+  own scrollbar rather than `inset: 0`, because eleven radios do not need the whole screen; and
+  visibility through the `hidden` attribute, never `style.display`, which would beat this rule by
+  specificity. The Electron GUI does not use it: there the picker IS the Model menu.
+*/
+#geometry-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-height: 100%;
+  overflow: auto;
+  background: Canvas;
+  color: CanvasText;
+  padding: 12px 14px;
+  border: 1px solid GrayText;
+  font: 13px system-ui, sans-serif;
+}
+
+#geometry-overlay[hidden] { display: none; }
+#geometry-overlay h1 { font-size: 13px; font-weight: 600; margin: 0 4.5em 4px 0; }
+#geometry-overlay > .geometry-close { position: absolute; top: 8px; right: 10px; }
+#geometry-overlay button { font: inherit; padding: 3px 12px; }
+#geometry-overlay button:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+#geometry-overlay .geometry-help { margin: 0 0 8px; color: GrayText; }
+/* A GRID, not the flex row it was: the Disconnect button (2026-11-05) is the root's first child and
+   takes a whole row of its own, at its own width, above the two groups side by side. */
+#geometry-choices { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 12px; align-items: start; }
+#geometry-choices > .geometry-disconnect { grid-column: 1 / -1; justify-self: start; }
+#geometry-choices fieldset { border: 1px solid GrayText; margin: 0; padding: 4px 10px 6px; }
+#geometry-choices legend { color: GrayText; }
+#geometry-choices label { display: block; white-space: nowrap; padding: 1px 0; }
+#geometry-choices input[disabled] + span { opacity: 0.5; }
+/* Mirrors `#transfer-status`, including the `min-height` that stops the panel resizing per message. */
+#geometry-status { margin: 8px 0 0; min-height: 2.4em; max-width: 40em; white-space: pre-wrap; color: GrayText; }
+
 /* ---- The full 122-key keyboard ---- */
 
 /*

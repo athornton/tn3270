@@ -3,17 +3,20 @@ import { createServer as createHttps } from 'node:https';
 import { createReadStream, readFileSync } from 'node:fs';
 import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
-import { resolve, resolveTerminalType, resolveAlternateSize } from '@tn3270/core';
+import { resolve } from '@tn3270/core';
 import {
-  applyAction, applyPaste, defaultSession, resolveScheme, resolveTls, startTransfer,
+  applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
-import { parseWebArgs, UsageError, type WebArgs } from './args.js';
+import {
+  buildSession, parseWebArgs, printGeometryNotices, UsageError, type WebArgs,
+} from './args.js';
 import { resolveAsset, tokenCookie, parseCookies } from './httpstatic.js';
 import { checkUpgrade, tokenMatches } from './handshake.js';
 import { Connection } from './wsserver.js';
 import { SessionRegistry } from './sessions.js';
 import { encodeServerMessage, decodeClientMessage } from './protocol.js';
 import { createGatewayTransfer } from './transferGateway.js';
+import { applyPick, geometryChoices } from './geometryChoices.js';
 
 /**
  * The gateway: an HTTP(S) server, a WebSocket per client, and one 3270 Session each.
@@ -33,8 +36,14 @@ export function buildServer(args: WebArgs) {
   const blank = [...blankColumns(atlas.coverage, atlas.geometry)];
   // `resolveScheme` already treats `undefined` as "the default", so no conditional is needed.
   const scheme = resolveScheme(args.scheme);
-  const typeOpts = { ...(args.model !== undefined ? { model: args.model } : {}) };
+  // The atlas cell, which `-oversize auto` divides each browser's viewport by (scale 1).
+  const cell = { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight };
   const secure = args.tls !== undefined;
+  // THE `-oversize <cols>x<rows>` GIVEN AT STARTUP, if that is what was given: the only fixed size
+  // the `Alt-M` picker can offer, because its choices are picked, never typed (the spec). It is
+  // what `setGeometry {oversize:'startup'}` maps to, and the GUI reads its own argv the same way.
+  const startupFixed = args.oversize?.kind === 'fixed'
+    ? { rows: args.oversize.rows, cols: args.oversize.cols } : undefined;
 
   // `parseWebArgs` yields RAW `TlsFlags`; `defaultSession` needs resolved `TlsOptions`, exactly as
   // the CLI and TUI do it (`main.ts:81` and `:143`). Resolved ONCE, here, and deliberately not
@@ -46,14 +55,19 @@ export function buildServer(args: WebArgs) {
   const registry = new SessionRegistry({
     graceMs: args.graceMs,
     maxSessions: args.maxSessions,
-    factory: () => {
-      const session = defaultSession(
-        resolveTerminalType(typeOpts), hostTls, resolveAlternateSize(typeOpts), undefined,
-        args.bindImage, args.bindLimit, args.devname, args.ddm,
-      );
+    /*
+      `viewport` IS THE CREATING HELLO'S, and it is in the box BEFORE the connect below, which is
+      where `-oversize auto` is measured. A reattach replaces it through the handle's `setViewport`
+      (`SessionRegistry.attach`), so a reconnect measures the tab attached THEN.
+    */
+    factory: (id, viewport) => {
+      const { session, setViewport } = buildSession(args, hostTls, cell, viewport);
+      // Before the connect, so the first connect's notice is printed too.
+      printGeometryNotices(session, id, process.stderr);
       if (args.replay !== undefined) {
         // The hostless test seam: paint a recorded trace and open no socket at all, so no test
-        // can reach a host or capture a credential.
+        // can reach a host or capture a credential. NO GEOMETRY IS RESOLVED HERE: only `connect()`
+        // resolves it, so `-oversize` (and `auto`'s measure) does not apply under `--replay`.
         session.replay(readFileSync(args.replay, 'utf8'));
       } else {
         /*
@@ -68,7 +82,7 @@ export function buildServer(args: WebArgs) {
             + `${err instanceof Error ? err.message : String(err)}\n`);
         });
       }
-      return { session, close: () => { session.disconnect(); } };
+      return { session, close: () => { session.disconnect(); }, setViewport };
     },
   });
 
@@ -89,7 +103,10 @@ export function buildServer(args: WebArgs) {
         res.setHeader('Set-Cookie', tokenCookie(args.token, secure));
       }
     }
-    res.writeHead(200, { 'content-type': asset.type });
+    // `no-cache`: a browser may store these, but must revalidate before every use. Without any
+    // header it reused its cached bridge after a rebuild, and a stale page was reported as a picker
+    // defect (2026-11-05; see the integration test). The files are small and local.
+    res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-cache' });
     createReadStream(asset.file).pipe(res);
   };
 
@@ -143,6 +160,11 @@ export function buildServer(args: WebArgs) {
      * is why no guard is needed inside `send` any more: after this runs, nothing can call it.
      */
     let stopListening: (() => void) | undefined;
+    // Set on `hello`: replaces the viewport of THE SESSION THIS SOCKET ATTACHED TO, for the
+    // `viewport` message. Bound by the registry to that entry, so it cannot reach another one.
+    let setViewport: ((v: { width: number; height: number }) => void) | undefined;
+    // Set on `hello`: this socket's `geometryChoices` sender, for the `setGeometry` reply.
+    let sendGeometryChoices: ((notice?: string) => void) | undefined;
     /**
      * File transfer's staging and its live run -- PER CONNECTION, and that is the whole reason it
      * is built here rather than once per process.
@@ -191,14 +213,37 @@ export function buildServer(args: WebArgs) {
         return;
       }
       if (msg.kind === 'hello') {
+        /*
+          ONE HELLO PER SOCKET, 2026-11-05 -- a leak the picker's review measured, older than the
+          picker. A second `hello` used to run the whole branch below again: `registry.attach`
+          built a SECOND session, and `id`, `session` and `stopListening` were overwritten without
+          the old `stopListening` ever running -- so the first session stayed ATTACHED for good,
+          never detached and so never reaped, holding a host connection and a `--max-sessions`
+          slot. One page repeating `hello` exhausted the gateway. Measured: two registry entries,
+          the first keeping every listener after the socket closed.
+
+          REFUSED, AND NOTHING ELSE CHANGES, rather than "switch this socket to the new session":
+          a switch would have to tear down listeners, the transfer staging and the viewport binding
+          in the right order, and every one of those is a place to get the leak back. The served
+          bridge sends `hello` exactly once, at `onopen`, so the only sender of a second one is a
+          client this file must already distrust. An `error` and not a close, like every other bad
+          frame: the socket and its session stay as they were.
+        */
+        if (session !== undefined) {
+          conn.sendBinary(encodeServerMessage({
+            kind: 'error', message: 'this socket already said hello; open a new connection for another session',
+          }));
+          return;
+        }
         let attached;
-        try { attached = registry.attach(msg.sessionId); } catch (err) {
+        try { attached = registry.attach(msg.sessionId, msg.viewport); } catch (err) {
           conn.sendBinary(encodeServerMessage({ kind: 'error', message: String(err) }));
           conn.close();
           return;
         }
         id = attached.id;
         session = attached.session;
+        setViewport = attached.setViewport;
         const mine = attached.session;
         if (attached.created) {
           conn.sendBinary(encodeServerMessage({ kind: 'session', id: attached.id }));
@@ -206,6 +251,19 @@ export function buildServer(args: WebArgs) {
         conn.sendBinary(encodeServerMessage({
           kind: 'atlas', geometry: atlas.geometry, coverage: atlas.coverage, blank,
         }));
+        /*
+          THE PICKER'S CHOICES, AFTER `atlas` AND BEFORE THE FIRST FRAME, and again on every event
+          that can change what they say: 'geometry' (a connect has started, so `isConnecting()` is
+          already true), 'connect', 'connectSettled' (a failed attempt, which emits nothing else)
+          and 'disconnect'. The GUI's Model menu refreshes on the same four. `notice` is passed
+          only by the `setGeometry` reply below. A session with no geometry setting sends none.
+        */
+        const sendChoices = (notice?: string): void => {
+          const c = geometryChoices(mine, startupFixed, notice);
+          if (c !== undefined) conn.sendBinary(encodeServerMessage({ kind: 'geometryChoices', ...c }));
+        };
+        const refreshChoices = (): void => { sendChoices(); };
+        sendChoices();
         const send = (): void => {
           const snapshot = mine.screen.snapshot();
           const oia = mine.oia.toText();
@@ -221,14 +279,18 @@ export function buildServer(args: WebArgs) {
         mine.on('screen', send);
         mine.on('connect', send);
         mine.on('disconnect', send);
-        // Paired with the three lines above, in one place, so a fourth event cannot be added to one
+        const choiceEvents = ['geometry', 'connect', 'connectSettled', 'disconnect'] as const;
+        for (const ev of choiceEvents) mine.on(ev, refreshChoices);
+        // Paired with the lines above, in one place, so another event cannot be added to one
         // list and forgotten in the other.
         stopListening = () => {
           mine.off('screen', send);
           mine.off('connect', send);
           mine.off('disconnect', send);
+          for (const ev of choiceEvents) mine.off(ev, refreshChoices);
         };
         repaint = send;
+        sendGeometryChoices = sendChoices;
         send();                                     // repaint immediately, which is what makes
         return;                                     // a reattach show the CURRENT screen
       }
@@ -313,6 +375,68 @@ export function buildServer(args: WebArgs) {
         copy never reaches this process at all, so logging it as one would overstate what happened
         here.
       */
+      /*
+        THE WINDOW RESIZED, 2026-11-04: keep it for `-oversize auto`'s NEXT connect. ABOVE THE
+        GUARD BELOW for the reason the `selection` arm gives. NO REPLY AND NO REPAINT: nothing on
+        the screen changed, and the host learns a new size only at a reconnect (the spec's "Why
+        auto is measured at connect, and only then"). Fields already checked by `checkViewport`.
+        Before `hello` it never gets here -- `if (session === undefined) return;` above.
+      */
+      if (msg.kind === 'viewport') {
+        setViewport?.({ width: msg.width, height: msg.height });
+        return;
+      }
+      /*
+        THE PICKER'S CHOICE, 2026-11-04, ABOVE THE GUARD BELOW for the `selection` arm's reason --
+        and it is not an `Action`, so it never comes near `applyAction`. Before `hello` it never
+        gets here (`if (session === undefined) return;` above), like every other kind.
+
+        `applyPick` NEVER THROWS: it runs `applyGeometryChoice` -- the GUI's rule, unchanged --
+        inside a try, and turns every refusal (`disconnect first`, `wait for the connection
+        attempt`, a `startup` this gateway was not given) into a notice. A throw here would end the
+        process and every other operator's session, which is the whole of `protocol.ts`'s rule.
+
+        ALWAYS ANSWERED WITH FRESH CHOICES, accepted or not: the browser checks a clicked radio
+        itself before this reply, so a refused or reset choice would otherwise be left looking
+        chosen -- the GUI's "refresh after every click" for the same reason. The notice rides on
+        that reply, shown in the picker, NOT as an `error`: `error` paints the canvas underneath
+        the open picker and stays until a frame, which an idle session never sends. See
+        `protocol.ts`'s `geometryChoices`.
+
+        A RESET OR A REFUSAL ALSO GOES TO STDERR, prefixed with the session id's first 8
+        characters like `printGeometryNotices`' lines, because the operator who started the gateway
+        is the one who chose its `-oversize`, and one gateway serves many sessions.
+      */
+      if (msg.kind === 'setGeometry') {
+        const outcome = applyPick(session, startupFixed,
+          'model' in msg ? { model: msg.model } : { oversize: msg.oversize });
+        // ONLY THE TWO THE GATEWAY'S OPERATOR CAN ACT ON go to stderr: a reset (their `-oversize`
+        // did not fit the model picked) and a `startup` this gateway was started without. Every
+        // other refusal -- `disconnect first`, `wait for the connection attempt` -- is one tab's
+        // timing, and logging each click would bury the lines that matter.
+        if (outcome.notice !== undefined && id !== undefined && outcome.log) {
+          process.stderr.write(`${id.slice(0, 8)}: ${outcome.notice}\n`);
+        }
+        sendGeometryChoices?.(outcome.notice);
+        return;
+      }
+      /*
+        THE PICKER'S DISCONNECT BUTTON, 2026-11-05, ABOVE THE GUARD BELOW for the `selection` arm's
+        reason. THE SOCKET'S OWN SESSION ONLY -- `session`, the one `hello` attached -- and before
+        `hello` it never gets here (`if (session === undefined) return;` above), so it is swallowed.
+
+        NO REPLY OF ITS OWN: `disconnect()` emits 'disconnect' when there was a connection, and the
+        listeners above already repaint (the OIA's `X Disconnected`) and refresh the choices
+        (connected:false). With no connection there is nothing to change and nothing is sent.
+
+        A CONNECT IN FLIGHT IS NOT CANCELLED: `Session.disconnect()` closes `this.conn`, which an
+        attempt has not set yet -- a known limitation in core, so the picker disables its button
+        while connecting rather than offer one that does nothing.
+      */
+      if (msg.kind === 'disconnect') {
+        session.disconnect();
+        return;
+      }
       if (msg.kind === 'selection') {
         const snapshot = session.screen.snapshot();
         const text = extractText(resolve(snapshot), snapshot.cols, msg.rect);
@@ -375,6 +499,20 @@ export function buildServer(args: WebArgs) {
         mean the client-side interception had broken.
       */
       if (msg.action.kind === 'toggleKeyboard') return;
+      /*
+        THE MODEL/OVERSIZE CHOOSER, `Alt-M`, 2026-11-04 -- the `toggleKeyboard` line above, again,
+        and NOT OPTIONAL for the same reason: `applyAction` THROWS on `geometryMenu` (the eighth
+        guard of that shape in `frontend/src/actions.ts`) and this call is outside any try in a
+        socket 'data' handler. MEASURED on the way in: `integration.test.ts` reported
+        `no reply to a tab after geometryMenu` over an uncaught
+        `applyAction does not handle geometryMenu` before this line existed.
+
+        The picker is the browser's own overlay, so `bridgecore.ts` intercepts the kind client-side
+        and it should never arrive; this is the server half of `protocol.ts`'s two-branch rule,
+        because a client is not obliged to run served code. What the operator CHOOSES arrives as
+        its own message, not as this action -- so there is nothing for this side to do but return.
+      */
+      if (msg.action.kind === 'geometryMenu') return;
       /*
         `transferForm` NOW NEEDS AN INTERCEPTION HERE, AND THIS LINE IS IT -- 2026-10-06. The note
         that stood here said the kind "NEEDS NO INTERCEPTION" because `protocol.ts` rejected it at
