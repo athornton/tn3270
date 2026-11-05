@@ -1,12 +1,16 @@
-# Handoff — state as of 2026-11-05 (branch `oversize`: BOTH steps DONE -- `-oversize`/`IBM-DYNAMIC`, and changing model and oversize while running -- gated at 2932 tests; VM/370 honours 160x62 live; step-2 live pass OWED; merge is the user's decision)
+# Handoff — state as of 2026-11-05 (oversize and model switching MERGED to `main` as `17129ce`, 2960 tests; VM/370 and the web gateway live-verified; next is roadmap (c), packaging)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log).
 
-## START HERE — BRANCH `oversize`: STEPS 1 AND 2 DONE, 2932 TESTS GREEN; VM/370 HONOURS 160x62 LIVE; STEP-2 LIVE PASS OWED; MERGE IS THE USER'S CALL
+## START HERE — OVERSIZE AND MODEL SWITCHING ARE MERGED (`17129ce`), 2960 TESTS GREEN; LIVE ON VM/370 AND THE WEB GATEWAY; NEXT IS PACKAGING
 
-**2026-11-05. Branch `oversize`, not merged, not pushed.** It branches from `main` at `bb097af`
+**2026-11-05: MERGED.** The user approved after their live passes, and `oversize` was merged
+`--no-ff` into `main` as `17129ce` (48 commits; gate re-run on the merge commit: build and
+typecheck 0, 2960 tests in 119 files). The local `oversize` and `typecheck-tests` branches are
+deleted; `origin/oversize` still exists on GitHub until the user removes it. The text below is
+the branch's state as of the merge. **Before the merge:** branch `oversize`. It branches from `main` at `bb097af`
 (still `main`'s tip) and merged `typecheck-tests` in (`1c7d412`), so merging `oversize` brings
 the typechecked tests too. Spec: `docs/superpowers/specs/2026-11-04-oversize-and-model-switching-design.md`.
 Plan: `docs/superpowers/plans/2026-11-04-oversize-and-model-switching.md`, 15 tasks in two steps.
@@ -96,11 +100,12 @@ the concerns below.
   (BIND size code 0x03); (all web oversize checks are done: a FIXED 160x62 through the gateway works in Firefox
   and Safari on a Mac, and `-oversize auto` through the gateway brought EE up about 180 columns
   wide under VM, and a resize applies at the next reconnect; user, 2026-11-05.)
-- **Owed from step 2 (items 5-7 there, none run):** the GUI Model menu on a real desktop, on Linux
-  and on macOS (radio rendering, disabled items while connected, where the `Alt-M` popup appears
-  and whether `Escape` dismisses it, a model choice then a reconnect actually renegotiating); the
-  web picker in Firefox and Safari (`Alt-M` reaches the page, and a pick then a reconnect
-  renegotiates); the CLI's `Set(model,3278-4-E)` + `Reconnect()` against VM, expecting 43x80 from
+- **Step 2:** the web picker is DONE live (user, 2026-11-05: Alt-M opens it, Disconnect works,
+  a model change is accepted, and the `-E` reset notice appears; an earlier "all greyed out" was a
+  stale cached page, and every asset is now served `Cache-Control: no-cache`). **Still owed:** the
+  GUI Model menu on a real desktop, on Linux and on macOS (radio rendering, disabled items while
+  connected, where the `Alt-M` popup appears and whether `Escape` dismisses it, a model choice then
+  a reconnect actually renegotiating); the CLI's `Set(model,3278-4-E)` + `Reconnect()` against VM, expecting 43x80 from
   its Erase/Write Alternate.
 
 ### CONCERNS CARRIED FORWARD
@@ -122,8 +127,9 @@ the concerns below.
 
 ### NEXT
 
-**The merge decision is the user's.** Then roadmap item (c), **packaging** for macOS, Linux and
-Windows (README *Remaining*, item 13).
+**MERGED (`17129ce`).** Next: roadmap item (c), **packaging** for macOS, Linux and Windows
+(README *Remaining*, item 13). The owed live items above (MVS, a modern host, the GUI menu on a
+real desktop, CLI `Set()` against VM) can be run against `main` whenever the user has the hosts.
 
 ## STEP 1 OF BRANCH `oversize` (2026-11-04), KEPT FOR ITS DETAIL
 
