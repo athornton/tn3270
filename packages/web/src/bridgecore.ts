@@ -96,6 +96,14 @@ export interface BridgeDeps {
    */
   readonly onGeometryChoices?: (msg: { kind: string } & Record<string, unknown>) => void;
   /**
+   * The GATEWAY socket closed, or `quit` closed it. 2026-11-05. OPTIONAL, absent means nothing is
+   * told. The picker's, so it stops showing its last reply's "Disconnect first" forever: no
+   * further `geometryChoices` can arrive on a closed socket (reported live). Called from
+   * `onclose` AND from the `quit` intercept, which does not wait for the browser's own `close`
+   * event; the receiver must be idempotent (`markGatewayClosed` is).
+   */
+  readonly onGatewayClosed?: () => void;
+  /**
    * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
    * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
    * tests and any caller with no DOM must not need one.
@@ -500,6 +508,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     if (resizeTimer !== undefined) { clearTimeout(resizeTimer); resizeTimer = undefined; }
     for (const w of waiting.values()) w.reject(new Error('the gateway connection closed'));
     waiting.clear();
+    deps.onGatewayClosed?.();
     dispatch('error', 'The connection to the gateway closed. Reload to reconnect.');
   };
 
@@ -602,6 +611,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       // "disconnect this session" -- which, after the grace window, is exactly what it says.
       if ((action as { kind?: unknown }).kind === 'quit') {
         deps.socket.close();
+        // NOT LEFT TO `onclose`: a real `close()` fires it only after the closing handshake (and
+        // the test fake's `close` fires nothing), so the picker is told now. See `onGatewayClosed`.
+        deps.onGatewayClosed?.();
         dispatch('error', 'Disconnected. Reload to start a new session.');
         return;
       }

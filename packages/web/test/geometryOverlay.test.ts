@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createGeometryOverlay, parseGeometryChoices, CONNECTED_LINE, CONNECTING_LINE,
+  createGeometryOverlay, parseGeometryChoices, CONNECTED_LINE, CONNECTING_LINE, GATEWAY_CLOSED_LINE,
   type GeometryChoices,
 } from '../src/geometryOverlay.js';
 
@@ -188,6 +188,64 @@ describe('createGeometryOverlay', () => {
     // And fully free once disconnected.
     r.o.update(choices({ connected: false, connecting: false }));
     expect(r.inputs().some((i) => i.disabled)).toBe(false);
+  });
+
+  it('after markGatewayClosed says the GATEWAY closed and disables everything, from every state', () => {
+    // THE STALE PICKER, reported live 2026-11-05: after the gateway socket closed, the picker kept
+    // its last `geometryChoices` and said "Disconnect first" -- a remedy that cannot work, since a
+    // pick can no longer be sent. From connected, connecting AND free, the line must change.
+    for (const [state, over] of [
+      ['connected', { connected: true }],
+      ['connecting', { connected: true, connecting: true }],
+      ['free', {}],
+      ['free with a notice', { notice: 'oversize is now None: something' }],
+    ] as const) {
+      const r = rig();
+      r.o.update(choices(over));
+      r.o.toggle();
+      r.o.markGatewayClosed();
+      expect(r.status.text, state).toBe(GATEWAY_CLOSED_LINE);
+      expect(r.status.text, state).toBe('The connection to the gateway closed; reload to reconnect.');
+      expect(r.inputs(), state).toHaveLength(11);
+      expect(r.inputs().every((i) => i.disabled), state).toBe(true);
+      // And nothing can be sent, even by a click the disabled radio would not deliver.
+      click(r.input('geometry-model', '3278-4-E'));
+      expect(r.sent, state).toEqual([]);
+    }
+  });
+
+  it('closed BEFORE it is ever shown, it builds disabled with the closed line', () => {
+    const r = rig();
+    r.o.update(choices());
+    r.o.markGatewayClosed();
+    r.o.toggle();
+    expect(r.status.text).toBe(GATEWAY_CLOSED_LINE);
+    expect(r.inputs()).toHaveLength(11);
+    expect(r.inputs().every((i) => i.disabled)).toBe(true);
+  });
+
+  it('closed before ANY choices arrived, it still says the gateway closed when shown', () => {
+    const r = rig();
+    r.o.markGatewayClosed();
+    r.o.toggle();
+    expect(r.status.text).toBe(GATEWAY_CLOSED_LINE);
+    expect(r.inputs()).toHaveLength(0);
+  });
+
+  it('an update AFTER the close cannot resurrect a stale line or re-enable a choice', () => {
+    // Unreachable on a real page (nothing arrives on a closed socket), so the decision is the
+    // safe one: closed is final. A late `free` update must not re-enable radios whose picks
+    // would be sent into a dead socket; its `current` IS still written, so the checks are true.
+    const r = rig();
+    r.o.update(choices({ connected: true }));
+    r.o.toggle();
+    r.o.markGatewayClosed();
+    r.o.update(choices({ current: { model: '3278-4-E', oversize: 'auto' } }));
+    expect(r.status.text).toBe(GATEWAY_CLOSED_LINE);
+    expect(r.inputs().every((i) => i.disabled)).toBe(true);
+    expect(r.inputs().filter((i) => i.checked).map((i) => i.attrs['value'])).toEqual(['3278-4-E', 'auto']);
+    click(r.input('geometry-model', '3278-2'));
+    expect(r.sent).toEqual([]);
   });
 
   it('shows a notice the gateway sent with its reply, in the picker beside the radio it moved', () => {

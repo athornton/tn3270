@@ -620,6 +620,20 @@ const TRANSFER_CHECKS = [
       + 'logged it perfectly. The `action:` line is the half that isolates paste; read it before '
       + 'believing a double failure is two defects',
   },
+  /*
+    THE PICKER AFTER THE GATEWAY CLOSES THE SOCKET, 2026-11-05 -- LAST IN THE TABLE because nothing
+    can be driven over the socket after it. Reported live: the page said the gateway connection
+    closed and the picker kept saying "Disconnect first" with every choice disabled, forever.
+  */
+  {
+    name: 'pickerClosed',
+    kind: 'live',
+    what: 'when the GATEWAY closes the socket (an over-cap frame, which wsserver.ts answers with '
+      + 'CLOSE), the open picker says "The connection to the gateway closed; reload to reconnect." '
+      + 'and every radio is disabled',
+    mutant: 'bridge.ts  onGatewayClosed: () => {} (the picker keeps its last line, empty here, '
+      + 'and its radios enabled)',
+  },
 ];
 
 if (TRANSFER_CHECKS.length === 0) {
@@ -3534,6 +3548,44 @@ async function runTransferPhase(url) {
           + `(want it to contain ${JSON.stringify(PASTE_PAYLOAD)} somewhere), `
           + `and on an EMPTY clipboard the page sent ${JSON.stringify(sentOnEmpty)} with the `
           + `gateway logging ${JSON.stringify(loggedOnEmpty)} (want both empty); ${extent}`);
+      }
+    }
+
+    // ===== pickerClosed: the GATEWAY closes the socket under an open picker ====================
+    //
+    // LAST, because the socket is gone afterwards. THE GATEWAY SIDE CLOSES, not the page: a text
+    // frame over `MAX_MESSAGE_BYTES` (8192, wsserver.ts) is a frame the gateway refuses by sending
+    // CLOSE and ending the TCP connection, so the browser's `onclose` runs exactly as it would on a
+    // gateway that went away. The witness is the picker's own DOM: its line and its radios.
+    {
+      const CDP_ALT = 1;
+      const pickerUp = () => cdp.eval('document.getElementById("geometry-overlay").hidden === false');
+      if (!(await pickerUp())) {
+        await press('m', 'KeyM', 77, CDP_ALT);
+        await new Promise((r) => { setTimeout(r, 400); });
+      }
+      const shown = await pickerUp();
+      const lineBefore = await cdp.eval('document.getElementById("geometry-status").textContent');
+      const sockClosed = () => cdp.eval('window.__tn3270Probe.sock.readyState === 3');
+      await cdp.eval("window.__tn3270Probe.sock.send('x'.repeat(9000))");
+      for (let waited = 0; waited < 4000 && !(await sockClosed()); waited += 100) {
+        await new Promise((r) => { setTimeout(r, 100); });
+      }
+      await new Promise((r) => { setTimeout(r, 300); });
+      const closedNow = await sockClosed();
+      const line = await cdp.eval('document.getElementById("geometry-status").textContent');
+      const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
+      const disabled = await cdp.eval(
+        'document.querySelectorAll("#geometry-choices input[type=radio]:disabled").length');
+      const want = 'The connection to the gateway closed; reload to reconnect.';
+      if (shown && closedNow && line === want && radios === 10 && disabled === 10) {
+        ok(check('pickerClosed'), `the gateway closed the socket and the open picker's line went from `
+          + `${JSON.stringify(lineBefore)} to ${JSON.stringify(line)}, with all ${radios} radios disabled`);
+      } else {
+        no(check('pickerClosed'), 'the picker did not say the gateway closed, or left a choice enabled',
+          `picker shown: ${shown}, socket closed: ${closedNow}, line before: `
+          + `${JSON.stringify(lineBefore)}, line after: ${JSON.stringify(line)} (want `
+          + `${JSON.stringify(want)}), radios: ${radios} (want 10), disabled: ${disabled} (want 10)`);
       }
     }
 

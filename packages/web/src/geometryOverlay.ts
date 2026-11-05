@@ -28,6 +28,9 @@
  * line reads `CONNECTED_LINE`. A disabled radio is neither clickable nor focusable, and `pick`
  * checks `connected` again besides, so nothing is sent.
  *
+ * AND DISABLED FOR GOOD ONCE THE GATEWAY SOCKET CLOSES, 2026-11-05 -- `markGatewayClosed`, with
+ * `GATEWAY_CLOSED_LINE`. Before it the picker kept its last reply's "Disconnect first" forever.
+ *
  * ## A PICK IS A POINTER CLICK, OR ENTER/SPACE -- NEVER `change`, 2026-11-05
  *
  * Listening on `change` was the first version, and review found it APPLIED EVERY RADIO AN ARROW KEY
@@ -103,6 +106,16 @@ export const CONNECTED_LINE = 'Disconnect first; the choice applies at the next 
  */
 export const CONNECTING_LINE = 'Wait for the connection attempt to finish; '
   + 'the choice applies at the next connect.';
+
+/**
+ * The status line once the GATEWAY socket has closed -- `markGatewayClosed`. 2026-11-05.
+ *
+ * THE STALE PICKER, reported live: the page said "The connection to the gateway closed. Reload to
+ * reconnect." while the picker still showed the last `geometryChoices` it had -- connected, so
+ * "Disconnect first" -- forever, since no message can arrive on a closed socket. Disconnecting
+ * would not help: a pick cannot be SENT any more. Reloading is the only remedy, so this says it.
+ */
+export const GATEWAY_CLOSED_LINE = 'The connection to the gateway closed; reload to reconnect.';
 
 const OVERSIZE_NAMES: readonly string[] = ['none', 'auto', 'startup'];
 
@@ -198,6 +211,13 @@ export interface GeometryOverlay {
   visible(): boolean;
   /** The gateway's latest `geometryChoices`. */
   update(choices: GeometryChoices): void;
+  /**
+   * The gateway socket closed (`bridgecore.ts`'s `onGatewayClosed`): every choice disabled and
+   * `GATEWAY_CLOSED_LINE` shown, FOR GOOD. Idempotent. A later `update` -- unreachable on a real
+   * page, since nothing arrives on a closed socket -- still writes the checks but can neither
+   * re-enable a choice nor replace the line: a pick would be sent into a dead socket.
+   */
+  markGatewayClosed(): void;
 }
 
 export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
@@ -205,6 +225,8 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
 ): GeometryOverlay {
   let latest: GeometryChoices | undefined;
   let radios: Array<{ el: E; group: 'model' | 'oversize'; name: string }> | undefined;
+  // SET BY `markGatewayClosed`, NEVER CLEARED: a closed socket does not reopen, a reload is a new page.
+  let gatewayClosed = false;
   deps.setHidden(deps.element, true);
 
   const hide = (): void => { deps.setHidden(deps.element, true); };
@@ -219,7 +241,7 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
   });
 
   const pick = (which: 'model' | 'oversize', name: string): void => {
-    if (latest === undefined || latest.connected) return;
+    if (latest === undefined || latest.connected || gatewayClosed) return;
     deps.send(JSON.stringify(which === 'model'
       ? { kind: 'setGeometry', model: name }
       : { kind: 'setGeometry', oversize: name }));
@@ -269,14 +291,19 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
   };
 
   const render = (): void => {
+    // THE CLOSED LINE WINS OVER EVERYTHING, a notice included: whatever the last reply said, the
+    // only thing the operator can do now is reload.
+    if (gatewayClosed) deps.setText(deps.status, GATEWAY_CLOSED_LINE);
     if (latest === undefined) return;
-    deps.setText(deps.status, latest.notice
-      ?? (latest.connecting ? CONNECTING_LINE : latest.connected ? CONNECTED_LINE : ''));
+    if (!gatewayClosed) {
+      deps.setText(deps.status, latest.notice
+        ?? (latest.connecting ? CONNECTING_LINE : latest.connected ? CONNECTED_LINE : ''));
+    }
     ensureBuilt();
     for (const r of radios ?? []) {
       const on = r.group === 'model' ? latest.current.model : latest.current.oversize;
       deps.setChecked(r.el, r.name === on);
-      deps.setDisabled(r.el, latest.connected);
+      deps.setDisabled(r.el, latest.connected || gatewayClosed);
     }
   };
 
@@ -289,6 +316,10 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
     visible: () => !deps.isHidden(deps.element),
     update: (choices) => {
       latest = choices;
+      render();
+    },
+    markGatewayClosed: () => {
+      gatewayClosed = true;
       render();
     },
   };

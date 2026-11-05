@@ -197,7 +197,8 @@
   EMPTY OF RADIOS: `geometryOverlay.ts` builds them from the gateway's `geometryChoices` the first
   time the picker is shown, so this document never spells the model list -- the gateway sends it
   from core's `KNOWN_MODELS`, which is the one a connect reads. `#geometry-status` carries the
-  "Disconnect first" line while connected, and a reset or refusal notice after a pick.
+  "Disconnect first" line while connected, a reset or refusal notice after a pick, and the
+  gateway-closed line once the socket has closed (`markGatewayClosed`).
 
   LAST BEFORE THE SCRIPTS, so when an unsaved transfer keeps its form open under it, the picker is
   the one on top.

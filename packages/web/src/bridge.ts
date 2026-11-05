@@ -345,6 +345,9 @@ const bridge = createBridge({
   // The gateway's choices, narrowed here: a malformed one throws into the bridge's message chain,
   // whose `catch` paints it on the canvas.
   onGeometryChoices: (msg) => { geometryOverlay.update(parseGeometryChoices(msg)); },
+  // The socket closed: the picker says so and disables everything, rather than keeping the last
+  // reply's "Disconnect first" forever (reported live, 2026-11-05).
+  onGatewayClosed: () => { geometryOverlay.markGatewayClosed(); },
   // THE SAME BARGAIN FOR THE TRANSFER FORM, which is a DOM overlay here too. `main.ts:314` keeps
   // its own intercept, for the reason `bridgecore.ts` sets out at length: `applyAction` THROWS on
   // this kind outside any try in a socket handler, and a client is not obliged to run served code.

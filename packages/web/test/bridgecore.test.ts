@@ -249,6 +249,48 @@ describe('createBridge', () => {
     expect(errors).toEqual(['gateway message could not be read: geometryChoices models must be an array']);
   });
 
+  it('tells the picker when the GATEWAY socket closes, so it stops saying "disconnect first"', () => {
+    // THE STALE PICKER, reported live 2026-11-05: the page said the gateway connection closed and
+    // the picker still showed the last `geometryChoices` (connected) forever, since no message can
+    // arrive on a closed socket. `onclose` is the only place that knows.
+    const socket = fakeSocket();
+    let closed = 0;
+    createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGatewayClosed: () => { closed += 1; },
+    });
+    expect(closed).toBe(0);
+    socket.onclose?.();
+    expect(closed).toBe(1);
+  });
+
+  it('tells the picker on quit too, without waiting for the socket\'s own close event', () => {
+    // A real `WebSocket.close()` fires `close` LATER, after the closing handshake; the test fake's
+    // `close` is a spy that fires nothing. Calling it here as well makes the quit path independent
+    // of either -- `markGatewayClosed` is idempotent, so the browser's later `onclose` is harmless.
+    const socket = fakeSocket();
+    let closed = 0;
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGatewayClosed: () => { closed += 1; },
+    });
+    socket.onopen?.();
+    api.sendAction({ kind: 'quit' });
+    expect(socket.close).toHaveBeenCalled();
+    expect(closed).toBe(1);
+  });
+
+  it('closes quietly with no onGatewayClosed, still painting the close', () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    socket.onclose?.();
+    expect(errors).toEqual(['The connection to the gateway closed. Reload to reconnect.']);
+  });
+
   it('INTERCEPTS transferForm: shows the local overlay, never sends it', () => {
     /**
      * THE TRANSFER FORM IS A DOM OVERLAY IN THIS FRONT END TOO (2026-10-07), so opening it is a
