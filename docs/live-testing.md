@@ -5125,7 +5125,7 @@ menu is open**. And no harness renegotiates against a host after a choice.
    DISCONNECTED, AND IT WAS A STALE PAGE:** that browser was running a cached copy from before the
    picker's fixes (no Disconnect button). The current code could not be made to show it (real
    Chromium against a host that drops the line: 0 of 10 enabled while connected, 10 of 10 the
-   moment the line dropped). The gateway sent no cache headers at the time; see the next commit.
+   moment the line dropped). The gateway sent no cache headers at the time; it now sends `Cache-Control: no-cache` on every asset.
    Not reported, so not claimed: the browser, the reconnect geometry after the pick, the
    second-tab check, and `Escape`.
    - **`Alt-M` reaches the page** and is not taken by the browser (`Option-M` on macOS Safari),

@@ -863,6 +863,38 @@ describe('the gateway end to end', () => {
  * habit of sending nothing on `''` would leave that promise pending forever. See `main.ts`'s
  * comment on the arm these cases exercise for both.
  */
+describe('served assets are revalidated, never reused stale', () => {
+  /*
+    MEASURED LIVE, 2026-11-05: after a pull, rebuild and gateway restart, a browser kept running its
+    CACHED bridge and overlay, from before the picker's fixes. The page showed every choice greyed
+    out while disconnected, and that was reported as a defect -- the second time on this project
+    that stale code was mistaken for a regression. The gateway sent no cache headers at all, which
+    lets a browser reuse a file heuristically without asking. `no-cache` means: store it, but
+    revalidate before every use. The files are small and local, so the cost is nil.
+  */
+  async function headersOf(port: number, token: string, path: string): Promise<Headers> {
+    // `connection: close`, or the keep-alive socket fetch leaves open holds the server's
+    // `close()` in `afterEach`, and the test times out after passing.
+    const res = await fetch(`http://127.0.0.1:${port}${path}?t=${token}`,
+      { headers: { connection: 'close' } });
+    expect(res.status, path).toBe(200);
+    await res.arrayBuffer();
+    return res.headers;
+  }
+
+  // THE PAGE ONLY, AND NOT THE MODULES, because under vitest `buildServer` comes from `src/`, and
+  // `resolveAsset` finds the browser modules beside itself -- in `src/`, where no `.js` exists --
+  // so fetching one here hangs on a failed read. Every asset goes through the one `writeHead` in
+  // `main.ts`, so the page's header is the modules' header; the built gateway's `bridge.js` was
+  // checked by hand with curl on 2026-11-05.
+  it('sends Cache-Control: no-cache on the page', async () => {
+    const { port, token } = await start();
+    for (const path of ['/', '/index.html']) {
+      expect((await headersOf(port, token, path)).get('cache-control'), path).toBe('no-cache');
+    }
+  });
+});
+
 describe('the selection prefetch', () => {
   /** Handshake, then every message after it, so "nothing else was sent" is checkable. */
   async function attached(): Promise<{ ws: WebSocket; after: Array<Record<string, unknown>> }> {

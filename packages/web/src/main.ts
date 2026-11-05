@@ -103,7 +103,10 @@ export function buildServer(args: WebArgs) {
         res.setHeader('Set-Cookie', tokenCookie(args.token, secure));
       }
     }
-    res.writeHead(200, { 'content-type': asset.type });
+    // `no-cache`: a browser may store these, but must revalidate before every use. Without any
+    // header it reused its cached bridge after a rebuild, and a stale page was reported as a picker
+    // defect (2026-11-05; see the integration test). The files are small and local.
+    res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-cache' });
     createReadStream(asset.file).pipe(res);
   };
 
