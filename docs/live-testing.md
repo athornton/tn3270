@@ -5118,6 +5118,16 @@ menu is open**. And no harness renegotiates against a host after a choice.
      160x62, so that size never triggers the too-small reset; `-oversize 100x30` then `3278-5-E`,
      27x132, does.)
 6. **The web picker, Firefox and Safari** (gateway, not `--replay`):
+   **RESULT, 2026-11-05, by the user on a Mac:** `Alt-M` opens the picker; **Disconnect** is
+   there, drops the session, and the model choices then become enabled; changing the model works;
+   and picking a model without `-E` while an oversize was set gave the reset notice "... pick
+   3278-x-E for an oversize". **AN EARLIER RUN REPORTED EVERY CHOICE GREYED OUT WHILE
+   DISCONNECTED, AND IT WAS A STALE PAGE:** that browser was running a cached copy from before the
+   picker's fixes (no Disconnect button). The current code could not be made to show it (real
+   Chromium against a host that drops the line: 0 of 10 enabled while connected, 10 of 10 the
+   moment the line dropped). The gateway sent no cache headers at the time; see the next commit.
+   Not reported, so not claimed: the browser, the reconnect geometry after the pick, the
+   second-tab check, and `Escape`.
    - **`Alt-M` reaches the page** and is not taken by the browser (`Option-M` on macOS Safari),
      and `Escape` or `Alt-M` closes the picker.
    - **A pick, then a reconnect, renegotiates:** pick `3278-4-E` while disconnected, reconnect,
