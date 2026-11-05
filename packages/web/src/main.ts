@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
 import { createReadStream, readFileSync } from 'node:fs';
@@ -7,6 +8,7 @@ import { resolve } from '@tn3270/core';
 import {
   applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
+import { isMain } from '@tn3270/node-files';
 import {
   buildSession, parseWebArgs, printGeometryNotices, UsageError, type WebArgs,
 } from './args.js';
@@ -723,9 +725,12 @@ export function run(argv: readonly string[]): void {
   });
 }
 
-// The same self-invoking guard the TUI uses (`tui/src/main.ts`), so this file is both the module the
-// tests import and the program `node packages/web/dist/main.js` runs. Without it there is no way to
-// start the gateway at all, and `browser-keys.mjs` has nothing to spawn.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// The same `isMain` guard the TUI uses (`tui/src/main.ts`), so this file is both the module the
+// tests import and the program `node packages/web/dist/main.js` (or, installed, `tn3270-web`)
+// runs. It replaced `import.meta.url === \`file://${process.argv[1]}\`` here too (packaging
+// milestone, 2026-11-05): that comparison is false through npm's installed symlink, so the
+// gateway would exit 0 having done nothing with no way to start it at all, and
+// `browser-keys.mjs` would have nothing to spawn. `isMain` compares real paths instead.
+if (isMain(import.meta.url)) {
   run(process.argv.slice(2));
 }

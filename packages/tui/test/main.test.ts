@@ -4,11 +4,12 @@ import { SCHEMES } from '@tn3270/frontend';
 import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
 import type { HostProcess } from '../src/app.js';
 
-// Importing this module is safe: the entry point is behind an
-// `import.meta.url === file://${process.argv[1]}` guard, so requiring it from a
-// test does not start a session. (The CLI's main.ts has no such guard and DOES
-// run on import, which is why the TUI is wired this way and why cli/src/index.ts
-// deliberately does not re-export it.)
+// Importing this module is safe: the entry point is behind an `isMain(import.meta.url)` guard
+// (packaging milestone, 2026-11-05 -- replaced the old `import.meta.url ===
+// file://${process.argv[1]}` comparison, which was false through npm's installed symlink and
+// never ran at all), so requiring it from a test does not start a session. (The CLI's main.ts
+// has no such guard and DOES run on import, which is why the TUI is wired this way and why
+// cli/src/index.ts deliberately does not re-export it.)
 
 /** TLS is ON by default, so every parse carries it. See the CLI's own test. */
 const TLS = { kind: 'tls', verify: true } as const;

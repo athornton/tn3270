@@ -17,6 +17,12 @@
  * default is that nothing in the path decodes them. `readFileSync` with no encoding returns
  * a Buffer, which IS a Uint8Array, but a fresh view is constructed so nothing downstream
  * can be surprised by Buffer's extra methods or by its pooled backing store.
+ *
+ * This package also holds `isMain` (packaging milestone, 2026-11-05), a second Node-only
+ * helper with nothing to do with files. It lives here rather than in `frontend` or its own
+ * package for the same reason `nodeTransferFiles` does: it needs `node:fs` (`realpathSync`),
+ * so it must never reach a browser bundle, and `node-files` is already the one place `tui`
+ * and (now) `web` share for exactly that kind of helper.
  */
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
@@ -28,3 +34,5 @@ export const nodeTransferFiles: TransferFiles = {
   write: (path, bytes) => { writeFileSync(path, bytes); },
   append: (path, bytes) => { appendFileSync(path, bytes); },
 };
+
+export { isMain } from './isMain.js';
