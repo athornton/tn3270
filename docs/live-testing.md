@@ -5018,8 +5018,10 @@ table below ("DMKRIO wins") for 160x62.
 160x62.** EE keeps its status line at the bottom of the screen, and at 62 rows by 160 columns
 every cell past 4095 (from row 26 on) is reachable ONLY by a 14-bit address. So VM/MECAFF wrote
 14-bit addresses, our client decoded them, and the line landed where it belongs. That is the top
-row of the table below: VM honours the oversize, 14-bit included. **The 80x50 run is therefore no
-longer needed**: it existed only to tell the two failure rows apart. Not reported, so not claimed:
+row of the table below: VM honours the oversize, 14-bit included. The 80x50 run was no longer
+needed to tell the failure rows apart, **but the user ran it anyway and it is correct too
+(2026-11-05)**: an oversize inside 12-bit addressing (50 rows by 80 columns, 4000 cells) is also
+honoured. So both sides of the 4096-cell boundary are witnessed live. Not reported, so not claimed:
 the OIA during EE, and a trace.
 
 Items 2-7 still need the user's systems or browsers. Build from branch `oversize`, and run
