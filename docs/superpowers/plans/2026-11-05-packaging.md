@@ -1169,7 +1169,7 @@ both layouts; mutation; gate; commit `gui: connect.mjs harness for the startup d
 
 ### Task 12: Native artifacts with electron-builder
 
-**Files:** Create `packages/gui/electron-builder.yml`, `packages/gui/build/icon.png` (see below); Modify root `package.json` (`package:gui`, devDependency `electron-builder@^26.18.0`)
+**Files:** Create `packages/gui/electron-builder.yml` (no icon this milestone; see below); Modify root `package.json` (`package:gui`, devDependency `electron-builder@^26.18.0`)
 
 ```yaml
 # packages/gui/electron-builder.yml
@@ -1206,10 +1206,11 @@ is required then); the `universal` arch spelling; `identity: null` vs `CSC_IDENT
 The `app/package.json` will need `version` (copy from the gui manifest in `bundle.mjs`) and
 `description`/`author` for the `.deb`.
 
-**Icon:** none exists. Generate a simple 1024×1024 PNG at build time from the atlas — e.g. the
-glyphs `3270` in green on black via `canvas` atlas blitting into a PNG with `zlib` — or ask the
-user for one. **Ask the user**; until then, electron-builder's default icon is acceptable and the
-summary must say so.
+**Icon (user, 2026-11-05):** none exists. **Use electron-builder's default icon in this
+milestone**; do not create `build/icon.png`. A stylized 3279 terminal icon is a separate follow-up
+after milestone A: draw it as SVG, show the user a rendering for approval before generating the
+platform sizes (`.icns`, `.ico`, PNGs). The README's *Installing* section says the icon is a
+placeholder.
 
 Root scripts:
 `"package:gui": "npm run bundle:gui && cd packages/gui && electron-builder --publish never"`;
