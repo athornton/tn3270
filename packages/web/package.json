@@ -15,6 +15,6 @@
     "@tn3270/node-files": "0.1.0"
   },
   "scripts": {
-    "build": "tsc --build"
+    "build": "tsc --build && node scripts/copy-ui-css.mjs"
   }
 }
