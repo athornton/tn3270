@@ -93,7 +93,8 @@ the concerns below.
   to end: the bottom rows of a 62x160 screen are reachable only by 14-bit addresses. 80x50 (4000
   cells, 12-bit) is also correct, so both sides of the 4096-cell boundary are witnessed live.
 - **Owed from step 1:** TK5 TSO; a modern z/VM or z/OS host
-  (BIND size code 0x03); Firefox and Safari with `-oversize auto`.
+  (BIND size code 0x03); Firefox and Safari with `-oversize auto` (a FIXED 160x62 through the
+  gateway works in both on a Mac, user, 2026-11-05; `auto` measures the viewport and is untried).
 - **Owed from step 2 (items 5-7 there, none run):** the GUI Model menu on a real desktop, on Linux
   and on macOS (radio rendering, disabled items while connected, where the `Alt-M` popup appears
   and whether `Escape` dismisses it, a model choice then a reconnect actually renegotiating); the
@@ -209,7 +210,8 @@ the fake host accepts once (Session's unit tests cover re-measuring).
   switches the screen to 160x62 and leaving it returns to 80x24: VM takes the size from our Query
   Reply, and EE's status line is correct (2026-11-05), so 14-bit addressing works end to end.
   Details: `docs/live-testing.md`, *OWED: oversize live pass*. TK5, a modern host
-  and the web viewport in Firefox/Safari have not been run.
+  and the web viewport (`auto`) in Firefox/Safari have not been run; a fixed 160x62 through the
+  gateway works in Firefox and Safari on a Mac (2026-11-05).
 
 ### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
 
@@ -219,8 +221,9 @@ the fake host accepts once (Session's unit tests cover re-measuring).
    also correct, so both sides of the 4096-cell boundary are live-witnessed.
 2. **TK5 TSO:** does its Read Partition get our oversize, and does ISPF draw at it?
 3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
-4. **Firefox and Safari:** the web viewport, i.e. that `-oversize auto` sizes the session to the
-   browser window, and that a resize applies at the next reconnect.
+4. **Firefox and Safari:** a FIXED `-oversize 160x62` through the gateway WORKS in both on a Mac
+   (user, 2026-11-05). Still owed: the web viewport, i.e. that `-oversize auto` sizes the session
+   to the browser window, and that a resize applies at the next reconnect.
 
 ## SUPERSEDED BY THE ABOVE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT WAS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
 

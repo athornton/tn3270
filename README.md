@@ -741,7 +741,8 @@ connects, and only a connect resolves the geometry.
 `docs/live-testing.md`, "Oversize conformance against real s3270"). The TUI's `auto` has been run
 in a real pty (`pty-smoke.py --oversize-auto`), and the GUI's under Xvfb. **Live: VM/370 (VM/CE)
 honours it** -- with `-oversize 160x62`, MECAFF's `EE` switches the screen to 160x62 and leaving it
-returns to 80x24 (2026-11-04). TSO, a modern host and the web viewport in Firefox and Safari are
+returns to 80x24 (2026-11-04). The web gateway at a fixed 160x62 works in Firefox and Safari on a Mac
+(2026-11-05). TSO, a modern host and `auto`'s viewport measure in Firefox and Safari are
 still owed; `docs/live-testing.md` lists them.
 
 ## Connecting over TLS

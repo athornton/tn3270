@@ -5059,7 +5059,13 @@ Items 2-7 still need the user's systems or browsers. Build from branch `oversize
 3. **A modern z/VM or z/OS host, when the user has one:** the TN3270E path. The device type is
    `IBM-DYNAMIC`, and a BIND with screen-size code 0x03 should give the oversize. This is the path
    a modern VTAM host takes, and the only one neither Hercules system can exercise.
-4. **Firefox and Safari, web gateway with `-oversize auto`:** the session is sized to the browser
+4. **RESULT, web gateway at a FIXED `-oversize 160x62`, Firefox and Safari on a Mac (user,
+   2026-11-05): works correctly in both.** The gateway's session negotiated the oversize and both
+   browsers drew the 62x160 screen; the page sizes its canvas to the drawing, so this is the
+   rendering half. NOT covered by that run, and still owed: `-oversize auto`, below, which is
+   the path that measures the BROWSER'S VIEWPORT.
+
+   **Firefox and Safari, web gateway with `-oversize auto`:** the session is sized to the browser
    window (stderr names any fallback, prefixed with 8 characters of the session id), and resizing
    the window mid-session applies at the next reconnect, not at once. **Only unit tests cover the
    viewport path**: the browser harnesses run `--replay` gateways, which never connect and so never
