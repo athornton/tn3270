@@ -80,10 +80,21 @@ export interface BridgeDeps {
    *
    * Here for exactly the reason `toggleKeyboard` above is: the picker is a DOM overlay in this
    * front end, so opening it is a local display decision, and `geometryMenu` is intercepted in
-   * `sendAction` below rather than sent. OPTIONAL for the same reason too -- and absent today:
-   * `bridge.ts` passes nothing until the overlay exists, so the chord is DROPPED, never sent.
+   * `sendAction` below rather than sent. OPTIONAL for the same reason too: absent, the chord is
+   * DROPPED, never sent. `bridge.ts` wires it to `geometryOverlay.ts` since the overlay landed.
    */
   readonly toggleGeometry?: () => void;
+  /**
+   * The gateway's `geometryChoices`, for the picker. 2026-11-04. OPTIONAL, and absent means "this
+   * client has no picker": the message is dropped.
+   *
+   * NOT ROUTED THROUGH `dispatch`, for `onTransfer`'s reason below: injected by the module that
+   * builds the bridge, so it cannot be late, while a dispatched kind no renderer registers for
+   * would sit in that queue forever. TYPED LOOSELY for `onTransfer`'s reason too: this file
+   * validates nothing it receives, and `geometryOverlay.ts`'s `parseGeometryChoices` is the
+   * narrowing -- a throw there reaches the chain's `catch` and is painted.
+   */
+  readonly onGeometryChoices?: (msg: { kind: string } & Record<string, unknown>) => void;
   /**
    * Transfer messages from the gateway. OPTIONAL, and absent means "this client has no transfer
    * form" -- the same contract `toggleKeypad` above has, for the same reason: the gateway's own
@@ -555,6 +566,8 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
         else w.reject(new Error(`selectionText ${seq} carried no string text`));
         return;
       }
+      // THE PICKER'S CHOICES, 2026-11-04. Not through `dispatch`; see `onGeometryChoices`.
+      if (msg.kind === 'geometryChoices') { deps.onGeometryChoices?.(msg); return; }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
@@ -647,8 +660,8 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
        * run served code and `applyAction` throws on this kind outside any try in the socket
        * handler.
        *
-       * Absent `deps.toggleGeometry` -- which is every caller until the overlay lands -- the action
-       * is DROPPED rather than falling through to the socket, the keypad branch's bargain.
+       * Absent `deps.toggleGeometry` -- the gateway's own tests, any caller with no DOM -- the
+       * action is DROPPED rather than falling through to the socket, the keypad branch's bargain.
        */
       if ((action as { kind?: unknown }).kind === 'geometryMenu') {
         deps.toggleGeometry?.();

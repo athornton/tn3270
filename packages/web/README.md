@@ -129,6 +129,22 @@ session id. **`--replay` ignores `-oversize`**: a replay never connects, and onl
 resolves the geometry. That is also why the browser harnesses, which all run replay gateways, do
 not exercise `auto` end to end. Its unit tests and the integration `hello` test are the cover.
 
+### Choosing the model and oversize: `Alt-M`
+
+`Alt-M` opens a picker over the screen, the browser's counterpart of the GUI's Model menu: the
+eight models (each with its size in words), then oversize None, Auto, and the `-oversize` size the
+gateway was started with, if any. Nothing is typed; a new size is a new `-oversize`. **The choice
+applies at the next connect** (for example, `Enter` on a disconnected session). While the session is
+connected or connecting every choice is disabled and the picker says `Disconnect first`. The
+gateway owns the session, so the list comes from it and a click goes back to it as a `setGeometry`
+message. **A model choice can reset the oversize to None** when the oversize cannot go with that
+model (a non-`-E` model, or a fixed size smaller than the model), by the same rule as the GUI; the
+picker says so, and the gateway prints it on stderr with the session id's first 8 characters. Pick
+a model the size fits and then the size again to get it back. Opening the picker closes the keypad,
+the keyboard and the transfer form, and opening any of those closes it. After clicking a choice,
+close it with its `Close` button: focus is then on the radio button, and the terminal's keys
+(including `Alt-M`) are not taken from a form control.
+
 ## The host argument, and what this gateway will NOT take
 
 `HOST:PORT`, and of the full `[prefix:][LU,LU@]host[:port]` shape the other front ends accept, only

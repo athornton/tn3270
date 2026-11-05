@@ -431,7 +431,10 @@ menu**: its terminal type is fixed, so there is nothing to choose. **On the 3270
 a rectangle of text for copying** (see *Copy and paste*). Clicking the screen does not place the
 cursor and there is no light pen. The keypad is not on the canvas at all: it is real HTML buttons, in
 its own window in the GUI and an overlay in the browser, so the mouse works on it normally, as it does
-in the *transfer* window. **What is implemented
+in the *transfer* window. **The browser has the Model menu too, as an overlay: `Alt-M`** opens a
+picker with the same choices from the gateway, disabled while connected or connecting, and a
+choice applies at the next connect. The same model-resets-oversize rule applies, and the picker
+says so (see `packages/web/README.md`). **What is implemented
 but not yet verified against a live host:** the PF and
 Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
 the `Ctrl-]` quit, the in-window error message for a failed connection, and **the whole transfer

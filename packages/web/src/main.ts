@@ -16,6 +16,7 @@ import { Connection } from './wsserver.js';
 import { SessionRegistry } from './sessions.js';
 import { encodeServerMessage, decodeClientMessage } from './protocol.js';
 import { createGatewayTransfer } from './transferGateway.js';
+import { applyPick, geometryChoices } from './geometryChoices.js';
 
 /**
  * The gateway: an HTTP(S) server, a WebSocket per client, and one 3270 Session each.
@@ -38,6 +39,11 @@ export function buildServer(args: WebArgs) {
   // The atlas cell, which `-oversize auto` divides each browser's viewport by (scale 1).
   const cell = { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight };
   const secure = args.tls !== undefined;
+  // THE `-oversize <cols>x<rows>` GIVEN AT STARTUP, if that is what was given: the only fixed size
+  // the `Alt-M` picker can offer, because its choices are picked, never typed (the spec). It is
+  // what `setGeometry {oversize:'startup'}` maps to, and the GUI reads its own argv the same way.
+  const startupFixed = args.oversize?.kind === 'fixed'
+    ? { rows: args.oversize.rows, cols: args.oversize.cols } : undefined;
 
   // `parseWebArgs` yields RAW `TlsFlags`; `defaultSession` needs resolved `TlsOptions`, exactly as
   // the CLI and TUI do it (`main.ts:81` and `:143`). Resolved ONCE, here, and deliberately not
@@ -154,6 +160,8 @@ export function buildServer(args: WebArgs) {
     // Set on `hello`: replaces the viewport of THE SESSION THIS SOCKET ATTACHED TO, for the
     // `viewport` message. Bound by the registry to that entry, so it cannot reach another one.
     let setViewport: ((v: { width: number; height: number }) => void) | undefined;
+    // Set on `hello`: this socket's `geometryChoices` sender, for the `setGeometry` reply.
+    let sendGeometryChoices: ((notice?: string) => void) | undefined;
     /**
      * File transfer's staging and its live run -- PER CONNECTION, and that is the whole reason it
      * is built here rather than once per process.
@@ -218,6 +226,19 @@ export function buildServer(args: WebArgs) {
         conn.sendBinary(encodeServerMessage({
           kind: 'atlas', geometry: atlas.geometry, coverage: atlas.coverage, blank,
         }));
+        /*
+          THE PICKER'S CHOICES, AFTER `atlas` AND BEFORE THE FIRST FRAME, and again on every event
+          that can change what they say: 'geometry' (a connect has started, so `isConnecting()` is
+          already true), 'connect', 'connectSettled' (a failed attempt, which emits nothing else)
+          and 'disconnect'. The GUI's Model menu refreshes on the same four. `notice` is passed
+          only by the `setGeometry` reply below. A session with no geometry setting sends none.
+        */
+        const sendChoices = (notice?: string): void => {
+          const c = geometryChoices(mine, startupFixed, notice);
+          if (c !== undefined) conn.sendBinary(encodeServerMessage({ kind: 'geometryChoices', ...c }));
+        };
+        const refreshChoices = (): void => { sendChoices(); };
+        sendChoices();
         const send = (): void => {
           const snapshot = mine.screen.snapshot();
           const oia = mine.oia.toText();
@@ -233,14 +254,18 @@ export function buildServer(args: WebArgs) {
         mine.on('screen', send);
         mine.on('connect', send);
         mine.on('disconnect', send);
-        // Paired with the three lines above, in one place, so a fourth event cannot be added to one
+        const choiceEvents = ['geometry', 'connect', 'connectSettled', 'disconnect'] as const;
+        for (const ev of choiceEvents) mine.on(ev, refreshChoices);
+        // Paired with the lines above, in one place, so another event cannot be added to one
         // list and forgotten in the other.
         stopListening = () => {
           mine.off('screen', send);
           mine.off('connect', send);
           mine.off('disconnect', send);
+          for (const ev of choiceEvents) mine.off(ev, refreshChoices);
         };
         repaint = send;
+        sendGeometryChoices = sendChoices;
         send();                                     // repaint immediately, which is what makes
         return;                                     // a reattach show the CURRENT screen
       }
@@ -334,6 +359,36 @@ export function buildServer(args: WebArgs) {
       */
       if (msg.kind === 'viewport') {
         setViewport?.({ width: msg.width, height: msg.height });
+        return;
+      }
+      /*
+        THE PICKER'S CHOICE, 2026-11-04, ABOVE THE GUARD BELOW for the `selection` arm's reason --
+        and it is not an `Action`, so it never comes near `applyAction`. Before `hello` it never
+        gets here (`if (session === undefined) return;` above), like every other kind.
+
+        `applyPick` NEVER THROWS: it runs `applyGeometryChoice` -- the GUI's rule, unchanged --
+        inside a try, and turns every refusal (`disconnect first`, `wait for the connection
+        attempt`, a `startup` this gateway was not given) into a notice. A throw here would end the
+        process and every other operator's session, which is the whole of `protocol.ts`'s rule.
+
+        ALWAYS ANSWERED WITH FRESH CHOICES, accepted or not: the browser checks a clicked radio
+        itself before this reply, so a refused or reset choice would otherwise be left looking
+        chosen -- the GUI's "refresh after every click" for the same reason. The notice rides on
+        that reply, shown in the picker, NOT as an `error`: `error` paints the canvas underneath
+        the open picker and stays until a frame, which an idle session never sends. See
+        `protocol.ts`'s `geometryChoices`.
+
+        A RESET OR A REFUSAL ALSO GOES TO STDERR, prefixed with the session id's first 8
+        characters like `printGeometryNotices`' lines, because the operator who started the gateway
+        is the one who chose its `-oversize`, and one gateway serves many sessions.
+      */
+      if (msg.kind === 'setGeometry') {
+        const outcome = applyPick(session, startupFixed,
+          'model' in msg ? { model: msg.model } : { oversize: msg.oversize });
+        if (outcome.notice !== undefined && id !== undefined) {
+          process.stderr.write(`${id.slice(0, 8)}: ${outcome.notice}\n`);
+        }
+        sendGeometryChoices?.(outcome.notice);
         return;
       }
       if (msg.kind === 'selection') {

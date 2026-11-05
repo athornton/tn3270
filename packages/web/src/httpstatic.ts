@@ -127,6 +127,11 @@ function table(): Map<string, Asset> {
     // AND THE SAME WARNING AS ITS NEIGHBOURS: nothing in this loop is covered automatically, so
     // this module is named in the `/bridge.js` case too.
     'transferBoot.js',
+    // `geometryOverlay.js` joins 2026-11-04 with the `Alt-M` picker, WITH the file: `bridge.js`
+    // imports it, so a missing entry here is the misdirected `reading 'onAtlas'` failure the notes
+    // above describe. ZERO RUNTIME IMPORTS (it imports nothing at all), so it closes the graph at
+    // itself. Named in the `/bridge.js` case of `httpstatic.test.ts` too, for the reason above.
+    'geometryOverlay.js',
   ]) {
     built.set(`/${module}`, { file: join(here, module), type: JS });
   }

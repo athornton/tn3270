@@ -351,6 +351,18 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
  * header -- so a later reader can redo the proof rather than trust the word "covered".
  */
 const TRANSFER_CHECKS = [
+  /*
+    THE `Alt-M` PICKER, 2026-11-04 -- in this table because this is the phase with CDP and the
+    socket probe, and FIRST because it must run before `progress` leaves an unsaved receive in the
+    transfer form: opening the picker hides that form, and an unsaved one would raise a `confirm`.
+  */
+  {
+    name: 'picker',
+    kind: 'live',
+    what: 'Alt+M opens the picker over a closed keypad; clicking 3278-4-E sends setGeometry and the '
+      + "gateway's reply checks it -- a replay gateway is disconnected, so the choice is accepted",
+    mutant: 'bridge.ts  onGeometryChoices: () => {} (no radios ever drawn), or toggleGeometry dropped',
+  },
   {
     name: 'overlay',
     kind: 'live',
@@ -1098,6 +1110,75 @@ async function runTransferPhase(url) {
       }
       return last;
     };
+
+    // ===== picker: Alt+M, a click, and the gateway's answer ====================================
+    //
+    // THE KEYPAD FIRST, so "opening the picker closes the others" is observed rather than assumed:
+    // Ctrl+K opens it, Alt+M must hide it. `CDP_ALT` is CDP's own Alt bit (Alt 1, Ctrl 2, Meta 4,
+    // Shift 8). The WITNESS for the round trip is the PAGE'S OWN STATE AFTER THE REPLY -- the
+    // radio is checked and no longer by the browser alone, since `sent` must hold the frame and
+    // the gateway's `geometryChoices` is what writes `checked` back. An unwired `onGeometryChoices`
+    // draws NO radios at all, so the click cannot even be attempted.
+    {
+      const CDP_ALT = 1;
+      await press('k', 'KeyK', 75, CDP_CTRL);
+      await new Promise((r) => { setTimeout(r, 400); });
+      const pickerUp = () => cdp.eval('document.getElementById("geometry-overlay").hidden === false');
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 600); });
+      const pickerShown = await pickerUp();
+      const keypadHidden = await cdp.eval('document.getElementById("keypad-overlay").hidden === true');
+      // Alt+M TOGGLES: closed by the chord, then opened again for the click.
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 300); });
+      const toggledShut = !(await pickerUp());
+      await press('m', 'KeyM', 77, CDP_ALT);
+      await new Promise((r) => { setTimeout(r, 300); });
+      const radios = await cdp.eval('document.querySelectorAll("#geometry-choices input[type=radio]").length');
+      const before = await cdp.eval(
+        'document.querySelector("#geometry-choices input[value=\'3278-2-E\']")?.checked ?? null');
+      const sentBefore = await sentCount();
+      let after = null;
+      let frame = [];
+      if (radios > 0) {
+        await clickCenter('#geometry-choices input[value="3278-4-E"]');
+        for (let waited = 0; waited < 4000; waited += 100) {
+          frame = await cdp.eval(
+            `window.__tn3270Probe.sent.slice(${sentBefore}).filter((t) => t.includes('setGeometry'))`);
+          after = await cdp.eval('(() => { const c = document.querySelector('
+            + '"#geometry-choices input:checked[name=geometry-model]"); return c === null ? null : c.value; })()');
+          if (frame.length > 0 && after === '3278-4-E') break;
+          await new Promise((r) => { setTimeout(r, 100); });
+        }
+      }
+      // AND THE STATUS LINE IS EMPTY: a refusal or reset would have put its notice there.
+      const status = await cdp.eval('document.getElementById("geometry-status").textContent');
+      /*
+        CLOSED BY ITS BUTTON, NOT BY Alt+M, AND THAT IS A MEASURED LIMIT, NOT A PREFERENCE. After
+        the click, focus is ON THE RADIO, and `renderer.ts` ignores every keydown aimed at an INPUT
+        (`isEditableTarget`, the fix for typed letters reaching the host from the transfer form) --
+        so a second Alt+M here does nothing (measured 2026-11-04: `closed again: false`). Close, or
+        a click elsewhere first, is the way out.
+      */
+      await clickCenter('#geometry-close');
+      await new Promise((r) => { setTimeout(r, 300); });
+      const closed = !(await pickerUp());
+      const want = '{"kind":"setGeometry","model":"3278-4-E"}';
+      // TEN RADIOS: eight models, None and Auto -- this gateway has no `-oversize`, so no startup.
+      if (pickerShown && keypadHidden && toggledShut && radios === 10 && before === true
+        && frame.length === 1 && frame[0] === want && after === '3278-4-E' && status === '' && closed) {
+        ok(check('picker'), `Alt+M showed ${radios} radios with 3278-2-E checked and closed the keypad, `
+          + `and Alt+M shut it; the click sent ${frame[0]}, the gateway's reply checked 3278-4-E with `
+          + 'no notice, and Close shut it');
+      } else {
+        no(check('picker'), 'the picker did not open, send, or reflect the gateway\'s answer',
+          `shown: ${pickerShown}, keypad hidden: ${keypadHidden}, Alt+M shut it: ${toggledShut}, `
+          + `radios: ${radios} (want 10), `
+          + `3278-2-E checked first: ${before}, sent: ${JSON.stringify(frame)} (want [${want}]), `
+          + `checked after: ${JSON.stringify(after)}, status: ${JSON.stringify(status)}, `
+          + `closed again: ${closed}`);
+      }
+    }
 
     // ===== overlay: the Xfer BUTTON opens the form ============================================
     //

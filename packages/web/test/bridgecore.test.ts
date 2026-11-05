@@ -202,6 +202,53 @@ describe('createBridge', () => {
     expect(socket.sent.slice(before)).toHaveLength(0);
   });
 
+  it('hands geometryChoices to onGeometryChoices, and to no renderer handler', async () => {
+    // The picker's inbound half, 2026-11-04. NOT through `dispatch`, for `onTransfer`'s reason: the
+    // handler is injected at construction by `bridge.ts`, so it cannot be late, and a dispatched
+    // kind no renderer registers for would sit in the queue forever.
+    const socket = fakeSocket();
+    const got: Array<Record<string, unknown>> = [];
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGeometryChoices: (m) => { got.push(m); },
+    });
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    api.onFrame((f) => frames.push(f));
+    api.onError((m) => errors.push(m));
+    const msg = { kind: 'geometryChoices', models: [], oversizes: [], current: { model: 'x', oversize: 'none' }, connected: true };
+    deliver(socket, msg);
+    await settle();
+    expect(got).toEqual([msg]);
+    expect(frames).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('DROPS geometryChoices when no handler is given, rather than throwing or queueing it', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'geometryChoices', connected: false });
+    await settle();
+    expect(errors).toEqual([]);
+  });
+
+  it('PAINTS a geometryChoices its handler cannot read, through the chain\'s catch', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      onGeometryChoices: () => { throw new Error('geometryChoices models must be an array'); },
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'geometryChoices' });
+    await settle();
+    expect(errors).toEqual(['gateway message could not be read: geometryChoices models must be an array']);
+  });
+
   it('INTERCEPTS transferForm: shows the local overlay, never sends it', () => {
     /**
      * THE TRANSFER FORM IS A DOM OVERLAY IN THIS FRONT END TOO (2026-10-07), so opening it is a

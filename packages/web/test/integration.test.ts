@@ -382,13 +382,13 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const messages = collect(ws, 3);
+    const messages = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     const got = await messages;
-    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     expect(typeof got[0]!['id']).toBe('string');
     expect(typeof got[1]!['coverage']).toBe('string');       // base64
-    const list = got[2]!['list'] as { cells: unknown[] };
+    const list = got[3]!['list'] as { cells: unknown[] };
     expect(list.cells.length).toBeGreaterThan(100);          // the trace paints a real screen
     ws.close();
   });
@@ -397,7 +397,7 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
     const next = collect(ws, 1);
@@ -421,7 +421,7 @@ describe('the gateway end to end', () => {
     const { url } = await start(['--max-sessions', '1']);
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
 
@@ -438,18 +438,18 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const a = new WebSocket(url);
     await new Promise((r) => a.addEventListener('open', r, { once: true }));
-    const firstBatch = collect(a, 3);
+    const firstBatch = collect(a, 4);
     a.send(JSON.stringify({ kind: 'hello' }));
     const id = (await firstBatch)[0]!['id'] as string;
     a.close();
 
     const b = new WebSocket(url);
     await new Promise((r) => b.addEventListener('open', r, { once: true }));
-    const second = collect(b, 2);
+    const second = collect(b, 3);
     b.send(JSON.stringify({ kind: 'hello', sessionId: id }));
     const got = await second;
     // No fresh `session` message, because nothing was created: atlas then frame.
-    expect(got.map((m) => m['kind'])).toEqual(['atlas', 'frame']);
+    expect(got.map((m) => m['kind'])).toEqual(['atlas', 'geometryChoices', 'frame']);
     b.close();
   });
 
@@ -481,9 +481,9 @@ describe('the gateway end to end', () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);       // no ?t= at all
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const messages = collect(ws, 3);
+    const messages = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
-    expect((await messages).map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    expect((await messages).map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     ws.close();
   });
 
@@ -508,7 +508,7 @@ describe('the gateway end to end', () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const ws = new WebSocket(url);
       await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-      const want = collect(ws, id === undefined ? 3 : 2);
+      const want = collect(ws, id === undefined ? 4 : 3);
       ws.send(JSON.stringify(id === undefined ? { kind: 'hello' } : { kind: 'hello', sessionId: id }));
       const got = await want;
       id ??= got.find((m) => m['kind'] === 'session')?.['id'] as string;
@@ -523,8 +523,12 @@ describe('the gateway end to end', () => {
       }
       const session = registry.peek(id);
       expect(session, `session ${id} should still exist inside the grace window`).toBeDefined();
-      for (const event of ['screen', 'connect', 'disconnect'] as const) {
-        expect(session!.listenerCount(event), `${event} after close ${attempt + 1}`).toBe(0);
+      // 'geometry' and 'connectSettled' since 2026-11-04: the picker's `geometryChoices` refresh.
+      // 'geometry' keeps ONE: the factory's `printGeometryNotices`, registered once per SESSION
+      // for stderr, not per socket -- so it stays at one however often the session reattaches.
+      for (const event of ['screen', 'connect', 'disconnect', 'geometry', 'connectSettled'] as const) {
+        expect(session!.listenerCount(event), `${event} after close ${attempt + 1}`)
+          .toBe(event === 'geometry' ? 1 : 0);
       }
     }
   });
@@ -558,7 +562,7 @@ describe('the gateway end to end', () => {
     const raw = await response;
     expect(raw.toString('latin1')).toMatch(/^HTTP\/1\.1 101 /);
     const messages = serverMessagesFrom(raw);
-    expect(messages.map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    expect(messages.map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     socket.destroy();
   });
 
@@ -577,7 +581,7 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
     const next = collect(ws, 1);
@@ -609,7 +613,7 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
 
@@ -664,7 +668,7 @@ describe('the gateway end to end', () => {
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
     const io = reader(ws);
     ws.send(JSON.stringify({ kind: 'hello' }));
-    for (const want of ['session', 'atlas', 'frame']) {
+    for (const want of ['session', 'atlas', 'geometryChoices', 'frame']) {
       expect((await io.next('hello'))['kind']).toBe(want);
     }
     await io.settle();
@@ -732,7 +736,7 @@ describe('the gateway end to end', () => {
     const { url } = await start();
     const a = new WebSocket(url);
     await new Promise((r) => a.addEventListener('open', r, { once: true }));
-    const first = collect(a, 3);
+    const first = collect(a, 4);
     a.send(JSON.stringify({ kind: 'hello' }));
     const id = (await first)[0]!['id'] as string;
 
@@ -746,13 +750,13 @@ describe('the gateway end to end', () => {
 
     const b = new WebSocket(url);
     await new Promise((r) => b.addEventListener('open', r, { once: true }));
-    const second = collect(b, 2);
+    const second = collect(b, 3);
     b.send(JSON.stringify({ kind: 'hello', sessionId: id }));
     const got = await second;
     // NO `session` MESSAGE: the same session came back, which is what makes this a reattach rather
     // than a fresh connection -- and a fresh connection would satisfy everything below for a much
     // less interesting reason.
-    expect(got.map((m) => m['kind'])).toEqual(['atlas', 'frame']);
+    expect(got.map((m) => m['kind'])).toEqual(['atlas', 'geometryChoices', 'frame']);
     const frame = got.find((m) => m['kind'] === 'frame')!['list'] as FrameList;
     // AND THE FRAME CARRIES NO KEYPAD REGION, which is now a statement about the SHAPE of what the
     // server sends rather than about a toggle: `DrawList` has no such member any more, so this
@@ -794,7 +798,7 @@ describe('the gateway end to end', () => {
       const { url } = await start(['--log-actions']);
       const ws = new WebSocket(url);
       await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-      const first = collect(ws, 3);
+      const first = collect(ws, 4);
       ws.send(JSON.stringify({ kind: 'hello' }));
       await first;
       ws.send(JSON.stringify({ kind: 'action', action: { kind: 'toggleKeypad' } }));
@@ -827,7 +831,7 @@ describe('the selection prefetch', () => {
     const { url } = await start();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello' }));
     await first;
     const after: Array<Record<string, unknown>> = [];
@@ -1397,7 +1401,7 @@ describe('-oversize auto, from the browser viewport', () => {
   async function tab(url: string, hello: Record<string, unknown>) {
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 'sessionId' in hello ? 2 : 3);
+    const first = collect(ws, 'sessionId' in hello ? 3 : 4);
     ws.send(JSON.stringify({ kind: 'hello', ...hello }));
     const got = await first;
     return { ws, got };
@@ -1431,7 +1435,7 @@ describe('-oversize auto, from the browser viewport', () => {
 
     const b = await tab(url, { sessionId: id, viewport: { width: 900, height: 700 } });
     // The SAME session, reattached -- no fresh `session` message.
-    expect(b.got.map((m) => m['kind'])).toEqual(['atlas', 'frame']);
+    expect(b.got.map((m) => m['kind'])).toEqual(['atlas', 'geometryChoices', 'frame']);
     expect(registry.peek(id)).toBe(session);
     session.disconnect();
     await session.reconnect();
@@ -1487,15 +1491,53 @@ describe('-oversize auto, from the browser viewport', () => {
     }
   });
 
+  it('the picker\'s choices follow the connection: connected while up, a pick refused, free after', async () => {
+    // THE CASE A REPLAY GATEWAY CANNOT REACH: only a real connect fires 'geometry', 'connect' and
+    // 'disconnect', so only here can the refresh -- and `setGeometry`'s connected refusal arriving
+    // as a notice rather than a dead handler -- be seen. The silent listener is the host.
+    const { url, registry } = await gateway();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } }));
+    const seen: Array<Record<string, unknown>> = [];
+    let id = '';
+    for (let i = 0; i < 40 && !seen.some((m) => m['connected'] === true); i += 1) {
+      const m = await io.next('the connect');
+      if (m['kind'] === 'session') id = String(m['id']);
+      if (m['kind'] === 'geometryChoices') seen.push(m);
+    }
+    expect(seen.some((m) => m['connected'] === true), 'a connect must refresh the choices').toBe(true);
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
+    const refused = await io.next('the setGeometry while connected');
+    expect(refused['kind']).toBe('geometryChoices');
+    expect(String(refused['notice'])).toMatch(/^disconnect first; /);
+    expect(refused['current']).toEqual({ model: '3278-2-E', oversize: 'auto' });
+    await io.settle();
+    registry.peek(id)!.disconnect();
+    let freed: Record<string, unknown> | undefined;
+    for (let i = 0; i < 10 && freed === undefined; i += 1) {
+      const m = await io.next('the disconnect');
+      if (m['kind'] === 'geometryChoices' && m['connected'] === false) freed = m;
+    }
+    expect(freed, 'a disconnect must re-enable the choices').toBeDefined();
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
+    expect((await io.next('the setGeometry after disconnect'))['current'])
+      .toEqual({ model: '3278-4-E', oversize: 'auto' });
+    ws.close();
+  });
+
   it('a viewport message BEFORE hello is swallowed, and changes nothing', async () => {
     const { url, registry } = await gateway();
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'viewport', width: 1350, height: 980 }));
     ws.send(JSON.stringify({ kind: 'hello' }));
     const got = await first;
-    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    expect(got.map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     const session = registry.peek(got[0]!['id'] as string)!;
     await until(() => session.resolvedGeometry !== undefined);
     expect(session.resolvedGeometry?.alternate).toEqual({ rows: 24, cols: 80 });
@@ -1509,13 +1551,167 @@ describe('-oversize auto, from the browser viewport', () => {
     const { url } = await start(['-oversize', 'auto']);
     const ws = new WebSocket(url);
     await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-    const first = collect(ws, 3);
+    const first = collect(ws, 4);
     ws.send(JSON.stringify({ kind: 'hello', viewport: { width: 1350, height: 980 } }));
-    expect((await first).map((m) => m['kind'])).toEqual(['session', 'atlas', 'frame']);
+    expect((await first).map((m) => m['kind'])).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     const next = collect(ws, 1);
     ws.send(JSON.stringify({ kind: 'viewport', width: 900, height: 700 }));
     ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
     expect((await next)[0]!['kind']).toBe('frame');      // not an error: the viewport was accepted
+    ws.close();
+  });
+});
+
+/**
+ * THE `Alt-M` PICKER'S GATEWAY HALF, 2026-11-04: `geometryChoices` out, `setGeometry` in.
+ *
+ * A `--replay` gateway NEVER CONNECTS, so every session here is disconnected and every choice
+ * must be ACCEPTED -- which is the case a refused-while-connected test could not reach anyway
+ * without a host. The connected refusal is `Session.setGeometry`'s own and is unit-tested in core.
+ */
+describe('the model/oversize picker', () => {
+  /** Hello, then a reader positioned after the handshake, plus the handshake's geometryChoices. */
+  async function picker(extra: string[] = []) {
+    const { url } = await start(extra);
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const kinds: string[] = [];
+    let choices: Record<string, unknown> | undefined;
+    let id = '';
+    for (let i = 0; i < 4; i += 1) {
+      const m = await io.next('hello');
+      kinds.push(String(m['kind']));
+      if (m['kind'] === 'geometryChoices') choices = m;
+      if (m['kind'] === 'session') id = String(m['id']);
+    }
+    await io.settle();
+    return { ws, io, kinds, choices: choices!, id };
+  }
+
+  /** stderr, captured and passed through, as the `-oversize auto` cases capture it. */
+  function captureStderr(): { written: string[]; restore: () => void } {
+    const written: string[] = [];
+    const through = process.stderr.write.bind(process.stderr);
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+        written.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return (through as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stderr.write);
+    return { written, restore: () => { spy.mockRestore(); } };
+  }
+
+  const MODELS = ['3278-2', '3278-2-E', '3278-3', '3278-3-E', '3278-4', '3278-4-E', '3278-5', '3278-5-E'];
+
+  it('sends geometryChoices after atlas on hello: eight models, disconnected, the current setting', async () => {
+    const { ws, kinds, choices } = await picker();
+    expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
+    const models = choices['models'] as Array<{ name: string; label: string }>;
+    expect(models.map((m) => m.name)).toEqual(MODELS);
+    expect(models[4]!.label).toBe('3278-4 (43 rows by 80 columns)');
+    expect(choices['oversizes']).toEqual([{ name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' }]);
+    expect(choices['connected']).toBe(false);
+    // The product default, as a connect would advertise it: `TERMINAL_TYPE` with `IBM-` stripped.
+    expect(choices['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+    expect('notice' in choices).toBe(false);
+    ws.close();
+  });
+
+  it('applies a model choice and answers with fresh choices naming it', async () => {
+    const { ws, io } = await picker();
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
+    const reply = await io.next('the setGeometry');
+    expect(reply['kind']).toBe('geometryChoices');
+    expect(reply['current']).toEqual({ model: '3278-4-E', oversize: 'none' });
+    expect('notice' in reply).toBe(false);
+    await io.settle();
+    // AND THE SESSION SURVIVED, the property every case in this file pins.
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await io.next('a tab after setGeometry'))['kind']).toBe('frame');
+    ws.close();
+  });
+
+  it('refuses an unknown model AT DECODE, with an error, and keeps serving', async () => {
+    const { ws, io } = await picker();
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-9' }));
+    const reply = await io.next('the bad setGeometry');
+    expect(reply['kind']).toBe('error');
+    expect(String(reply['message'])).toMatch(/setGeometry model must be one of 3278-2/);
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
+    expect((await io.next('a tab after a bad setGeometry'))['kind']).toBe('frame');
+    ws.close();
+  });
+
+  it('refuses oversize startup on a gateway given no -oversize, remedy first, and changes nothing', async () => {
+    const err = captureStderr();
+    try {
+      const { ws, io } = await picker();
+      ws.send(JSON.stringify({ kind: 'setGeometry', oversize: 'startup' }));
+      const reply = await io.next('the startup setGeometry');
+      expect(reply['kind']).toBe('geometryChoices');
+      expect(reply['notice']).toBe(
+        'no startup size to return to; this gateway was started without -oversize <cols>x<rows>');
+      expect(reply['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+      ws.close();
+    } finally {
+      err.restore();
+    }
+  });
+
+  it('with -oversize 160x62, offers the startup size and returns to it', async () => {
+    const { ws, io, choices } = await picker(['-oversize', '160x62']);
+    expect(choices['oversizes']).toEqual([
+      { name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' },
+      { name: 'startup', label: '160x62 (62 rows by 160 columns)' },
+    ]);
+    expect(choices['current']).toEqual({ model: '3278-2-E', oversize: 'startup' });
+    ws.send(JSON.stringify({ kind: 'setGeometry', oversize: 'none' }));
+    expect((await io.next('none'))['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+    await io.settle();
+    ws.send(JSON.stringify({ kind: 'setGeometry', oversize: 'startup' }));
+    const back = await io.next('startup');
+    expect(back['current']).toEqual({ model: '3278-2-E', oversize: 'startup' });
+    expect('notice' in back).toBe(false);
+    ws.close();
+  });
+
+  it('a model that resets the oversize says so to the client AND on stderr with the session id', async () => {
+    const err = captureStderr();
+    try {
+      const { ws, io, id } = await picker(['-oversize', '160x62']);
+      ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4' }));
+      const reply = await io.next('the resetting setGeometry');
+      expect(reply['kind']).toBe('geometryChoices');
+      expect(reply['current']).toEqual({ model: '3278-4', oversize: 'none' });
+      expect(reply['notice']).toBe('oversize is now None: model 3278-4 has no extended data stream; '
+        + 'pick 3278-4-E for an oversize');
+      const line = err.written.find((w) => w.includes('oversize is now None'));
+      expect(line, 'the reset must be reported on stderr').toBeDefined();
+      expect(line!.startsWith(`${id.slice(0, 8)}: oversize is now None: model 3278-4 `)).toBe(true);
+      ws.close();
+    } finally {
+      err.restore();
+    }
+  });
+
+  it('a setGeometry BEFORE hello is swallowed, and the handshake that follows is unchanged', async () => {
+    const { url } = await start();
+    const ws = new WebSocket(url);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const io = reader(ws);
+    ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-4-E' }));
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const kinds: string[] = [];
+    let current: unknown;
+    for (let i = 0; i < 4; i += 1) {
+      const m = await io.next('hello');
+      kinds.push(String(m['kind']));
+      if (m['kind'] === 'geometryChoices') current = m['current'];
+    }
+    expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
+    expect(current).toEqual({ model: '3278-2-E', oversize: 'none' });
     ws.close();
   });
 });

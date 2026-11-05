@@ -190,6 +190,26 @@
   <input type="file" id="transfer-file" hidden>
 </div>
 <!--
+  THE MODEL/OVERSIZE PICKER, Alt-M, 2026-11-04 -- the browser's counterpart of the GUI's Model menu.
+  Same rules as the overlays above: opaque and `position: fixed` in `ui.css`, `hidden` here AND in
+  `createGeometryOverlay`, ids prefixed `geometry-` because it shares this document with the others.
+
+  EMPTY OF RADIOS: `geometryOverlay.ts` builds them from the gateway's `geometryChoices` the first
+  time the picker is shown, so this document never spells the model list -- the gateway sends it
+  from core's `KNOWN_MODELS`, which is the one a connect reads. `#geometry-status` carries the
+  "Disconnect first" line while connected, and a reset or refusal notice after a pick.
+
+  LAST BEFORE THE SCRIPTS, so when an unsaved transfer keeps its form open under it, the picker is
+  the one on top.
+-->
+<div id="geometry-overlay" hidden>
+  <button type="button" class="geometry-close" id="geometry-close">Close</button>
+  <h1>Model and oversize</h1>
+  <p class="geometry-help">Applied at the next connect.</p>
+  <div id="geometry-choices"></div>
+  <p id="geometry-status"></p>
+</div>
+<!--
   ORDER MATTERS. Module scripts execute in document order, and `renderer.js` reads
   `window.tn3270` in its module body, so the bridge must install it first. `bridge.js` ALSO
   queues messages that arrive before the renderer registers its handlers -- see bridgecore.ts;

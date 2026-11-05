@@ -1,7 +1,8 @@
 import { deflateSync } from 'node:zlib';
-import { PA_AIDS, PF_AIDS } from '@tn3270/core';
+import { KNOWN_MODELS, PA_AIDS, PF_AIDS } from '@tn3270/core';
 import type { AtlasGeometry, DrawList } from '@tn3270/canvas';
 import type { Action } from '@tn3270/frontend';
+import type { GeometryChoices, OversizeName } from './geometryOverlay.js';
 
 /**
  * What crosses the socket, in both directions.
@@ -74,7 +75,30 @@ export type ServerMessage =
   | { kind: 'transferDone'; ok: true; bytes?: number }
   | { kind: 'transferDone'; ok: false; error: string }
   // A receive's bytes, chunked the same way an upload's are, then terminated by `transferDone`.
-  | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array };
+  | { kind: 'transferData'; seq: number; total: number; bytes: Uint8Array }
+  /*
+    THE PICKER'S CHOICES, 2026-11-04 -- what the `Alt-M` overlay draws. Sent after `atlas` on
+    `hello`, on the session's 'geometry', 'connect', 'connectSettled' and 'disconnect', and as the
+    reply to every `setGeometry`. The shape is `GeometryChoices` in `geometryOverlay.ts`, the
+    browser module that consumes it, so the two halves share one declaration.
+
+    LABELS TRAVEL WITH THE NAMES, where a bare `models: string[]` would have been smaller: the
+    overlay is served unbundled and cannot import `@tn3270/core`, so `KNOWN_MODELS`' sizes and
+    `describeSize`'s wording would otherwise be a second copy in the browser. The gateway builds
+    them exactly as the GUI's Model menu does (`geometryChoices.ts`).
+
+    `current.oversize` IS `null` FOR A FIXED SIZE OTHER THAN THE STARTUP ONE, and that is
+    unreachable from the web: the setting starts as `-oversize`, and the only fixed size any
+    `setGeometry` can name is `startup`. So `null` checks nothing rather than inventing an item.
+
+    `notice` RIDES ONLY ON THE REPLY TO A `setGeometry`: `applyGeometryChoice`'s reset text, or the
+    refusal. HERE AND NOT AS AN `error`, because `error` paints the CANVAS -- underneath the open
+    picker -- and stays there until the next frame, which a replayed or idle session never sends.
+    The picker is where the operator clicked, and the reply has to come anyway to put the radios
+    back where the session is. A MALFORMED `setGeometry` is still an `error`: it is refused at
+    decode, below, like every other bad frame.
+  */
+  | ({ kind: 'geometryChoices' } & GeometryChoices);
 
 /** A browser viewport in CSS pixels, for `-oversize auto`. See `checkViewport`. */
 export interface Viewport { readonly width: number; readonly height: number }
@@ -102,7 +126,24 @@ export type ClientMessage =
     not an `Action`: the operator did nothing to the session. `main.ts` intercepts it ABOVE the
     action guard and never replies -- a resize changes no screen until the next connect.
   */
-  | { kind: 'viewport'; width: number; height: number };
+  | { kind: 'viewport'; width: number; height: number }
+  /*
+    THE PICKER'S CHOICE, 2026-11-04: EXACTLY ONE FIELD, a model or an oversize, never both.
+
+    ONE FIELD BECAUSE ONE CLICK CHANGES ONE THING, and because the rule for applying one is already
+    written and shared: `applyGeometryChoice` (`@tn3270/frontend`) takes `{model}` OR `{oversize}`,
+    and a model the current oversize refuses is applied with oversize None and a notice. The GUI's
+    Model menu goes through it unchanged; so does this. A two-field message (the spec's first
+    wording, "naming a model and one of none, auto or startup") would need a SECOND rule for which
+    field wins when the pair is refused, and the web would then answer a click differently from
+    the GUI -- the drift the shared rule exists to stop.
+
+    `oversize` IS A NAME, NEVER A SIZE: picked from lists, nothing typed (the spec). `startup` is
+    the gateway's `-oversize <cols>x<rows>`, mapped in `main.ts`, which alone knows whether there
+    is one. `model` is case-folded to its `KNOWN_MODELS` key here.
+  */
+  | { kind: 'setGeometry'; model: string }
+  | { kind: 'setGeometry'; oversize: OversizeName };
 
 /** Encode one server message as the payload of a binary WebSocket frame. */
 export function encodeServerMessage(msg: ServerMessage): Buffer {
@@ -638,6 +679,40 @@ export function decodeClientMessage(text: string): ClientMessage {
   if (kind === 'viewport') {
     const { width, height } = checkViewport(raw);
     return { kind: 'viewport', width, height };
+  }
+
+  /*
+    THE PICKER'S CHOICE, 2026-11-04. Above the catch-all for the reason the transfer kinds' note
+    gives. NOT AN `Action`, so outside the two-branch rule's subject -- but the field rule applies in
+    full: `main.ts` hands `model` to `Session.setGeometry`, and a bad one there would be a refusal
+    at best and, for a value `resolveTerminalType` cannot even fold (a number), a TypeError in the
+    socket handler. So the shape is closed here: exactly one field; a model that is a
+    `KNOWN_MODELS` key under case-folding (`Object.hasOwn`, so `constructor` is not a model, the
+    lookup rule `termtype.ts` records); an oversize that is one of the three names. `IBM-3278-4-E`
+    is refused even though core would accept it: the picker sends keys, and anything else is a
+    hand-built frame.
+  */
+  if (kind === 'setGeometry') {
+    const r = raw as Record<string, unknown>;
+    const hasModel = Object.hasOwn(r, 'model');
+    const hasOversize = Object.hasOwn(r, 'oversize');
+    if (hasModel === hasOversize) {
+      throw new Error('setGeometry needs exactly one of model or oversize');
+    }
+    if (hasModel) {
+      const model = r['model'];
+      if (typeof model !== 'string') throw new Error('setGeometry model must be a string');
+      const key = model.toUpperCase();
+      if (!Object.hasOwn(KNOWN_MODELS, key)) {
+        throw new Error(`setGeometry model must be one of ${Object.keys(KNOWN_MODELS).join(', ')}`);
+      }
+      return { kind: 'setGeometry', model: key };
+    }
+    const oversize = r['oversize'];
+    if (oversize !== 'none' && oversize !== 'auto' && oversize !== 'startup') {
+      throw new Error('setGeometry oversize must be none, auto or startup');
+    }
+    return { kind: 'setGeometry', oversize };
   }
 
   throw new Error(`unknown client message kind ${String(kind)}`);

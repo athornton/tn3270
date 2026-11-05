@@ -420,6 +420,57 @@ describe('decodeClientMessage', () => {
   });
 });
 
+/**
+ * THE PICKER'S CHOICE, 2026-11-04: ONE FIELD, because one click changes one thing and
+ * `applyGeometryChoice` (`@tn3270/frontend`) is the rule that applies one field -- shared with the
+ * GUI's Model menu, so a two-field message would need a combination rule of its own.
+ */
+describe('setGeometry', () => {
+  it('accepts a model, case-folded to its KNOWN_MODELS key, and each oversize name', () => {
+    expect(decodeClientMessage('{"kind":"setGeometry","model":"3278-4-E"}'))
+      .toEqual({ kind: 'setGeometry', model: '3278-4-E' });
+    expect(decodeClientMessage('{"kind":"setGeometry","model":"3278-5-e"}'))
+      .toEqual({ kind: 'setGeometry', model: '3278-5-E' });
+    for (const o of ['none', 'auto', 'startup']) {
+      expect(decodeClientMessage(JSON.stringify({ kind: 'setGeometry', oversize: o })))
+        .toEqual({ kind: 'setGeometry', oversize: o });
+    }
+  });
+
+  it('REFUSES every malformed form at decode, so none reaches the socket handler', () => {
+    const bad: Array<[Record<string, unknown>, RegExp]> = [
+      [{ model: '3278-4-E', oversize: 'none' }, /exactly one of model or oversize/],
+      [{}, /exactly one of model or oversize/],
+      [{ choice: { model: '3278-4-E' } }, /exactly one of model or oversize/],   // extra nesting
+      [{ model: { name: '3278-4-E' } }, /model must be a string/],               // extra nesting
+      [{ model: null }, /model must be a string/],
+      [{ model: 42 }, /model must be a string/],
+      [{ model: '3278-9' }, /model must be one of 3278-2, /],
+      [{ model: 'IBM-3278-4-E' }, /model must be one of /],
+      [{ model: 'constructor' }, /model must be one of /],
+      [{ oversize: '160x62' }, /oversize must be none, auto or startup/],
+      [{ oversize: 160 }, /oversize must be none, auto or startup/],
+      [{ oversize: { kind: 'auto' } }, /oversize must be none, auto or startup/],
+      [{ oversize: 'AUTO' }, /oversize must be none, auto or startup/],
+    ];
+    for (const [fields, want] of bad) {
+      expect(() => decodeClientMessage(JSON.stringify({ kind: 'setGeometry', ...fields })),
+        JSON.stringify(fields)).toThrow(want);
+    }
+  });
+
+  it('encodes geometryChoices as plain JSON', () => {
+    const msg: ServerMessage = {
+      kind: 'geometryChoices',
+      models: [{ name: '3278-2-E', label: '3278-2-E (24 rows by 80 columns)' }],
+      oversizes: [{ name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' }],
+      current: { model: '3278-2-E', oversize: 'none' },
+      connected: false,
+    };
+    expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
+  });
+});
+
 describe('transfer messages', () => {
   it('accepts a transferChunk with its sequence, declared total and base64 bytes', () => {
     const msg = decodeClientMessage(JSON.stringify({
