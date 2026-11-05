@@ -1,0 +1,29 @@
+# BASELINE (packaging plan, Task 0): build, typecheck and the unchanged vitest suite on every
+# runner, to MEASURE what fails off Linux before anything is changed. Task 14 replaces this body
+# with the full pack / install-smoke / package pipeline.
+name: package
+on:
+  push:
+    branches: [main, packaging]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-26-intel: GitHub still offers a native x64 macOS runner (checked 2026-11-05), so the
+        # universal app's x64 slice is tested natively rather than only under Rosetta.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npx vitest run --reporter=default --reporter=junit --outputFile=vitest-junit.xml
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: vitest-${{ matrix.os }}, path: vitest-junit.xml, if-no-files-found: warn }

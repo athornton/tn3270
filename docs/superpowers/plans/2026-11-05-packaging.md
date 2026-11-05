@@ -111,7 +111,7 @@ Check before trusting it: the `build` script for canvas runs `node scripts/build
 which must work on Windows (path joins only, by inspection); `npm ci` needs the lockfile in sync
 (`npm ci` locally first).
 
-Also check: whether GitHub still offers an Intel macOS runner (`macos-15-intel` or similar) as of
+**ANSWERED 2026-11-05: `macos-26-intel` exists; added to the matrix, so CI has five runners and the x64 slice runs natively there.** Also check: whether GitHub still offers an Intel macOS runner (`macos-15-intel` or similar) as of
 today — read <https://github.com/actions/runner-images>. If yes, add it to the matrix here; the
 spec says a native x64 run replaces the Rosetta one.
 
@@ -1276,6 +1276,7 @@ jobs:
           - { os: ubuntu-latest,     parity: true }
           - { os: ubuntu-24.04-arm,  parity: false }
           - { os: macos-latest,      parity: false }
+          - { os: macos-26-intel,    parity: false }
           - { os: windows-latest,    parity: false }
     runs-on: ${{ matrix.os }}
     env:
