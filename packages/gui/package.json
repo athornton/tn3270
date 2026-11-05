@@ -23,7 +23,7 @@
     "@tn3270/core": "0.1.0",
     "@tn3270/frontend": "0.1.0",
     "@tn3270/node-files": "0.1.0",
-    "electron": "44.3.0"
+    "electron": "44.10.2"
   },
   "scripts": {
     "build": "tsc --build"
