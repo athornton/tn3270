@@ -93,9 +93,9 @@ the concerns below.
   to end: the bottom rows of a 62x160 screen are reachable only by 14-bit addresses. 80x50 (4000
   cells, 12-bit) is also correct, so both sides of the 4096-cell boundary are witnessed live.
 - **Owed from step 1:** TK5 TSO; a modern z/VM or z/OS host
-  (BIND size code 0x03); the web `auto` resize-then-reconnect check. (A FIXED 160x62 through the gateway works in Firefox
+  (BIND size code 0x03); (all web oversize checks are done: a FIXED 160x62 through the gateway works in Firefox
   and Safari on a Mac, and `-oversize auto` through the gateway brought EE up about 180 columns
-  wide under VM -- the viewport measure works live; user, 2026-11-05.)
+  wide under VM, and a resize applies at the next reconnect; user, 2026-11-05.)
 - **Owed from step 2 (items 5-7 there, none run):** the GUI Model menu on a real desktop, on Linux
   and on macOS (radio rendering, disabled items while connected, where the `Alt-M` popup appears
   and whether `Escape` dismisses it, a model choice then a reconnect actually renegotiating); the
@@ -224,7 +224,7 @@ the fake host accepts once (Session's unit tests cover re-measuring).
 3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
 4. **Firefox and Safari:** a FIXED `-oversize 160x62` through the gateway WORKS in both on a Mac
    (user, 2026-11-05), and `-oversize auto` sized the session from the browser window (EE about
-   180 columns wide under VM). Still owed: that a resize applies at the next reconnect.
+   180 columns wide under VM), and a resize applies at the next reconnect, as designed. DONE.
 
 ## SUPERSEDED BY THE ABOVE — FETCH-AHEAD COPY IS MERGED AND PUSHED; NEXT WAS ROADMAP (a), OVERSIZE + `IBM-DYNAMIC`
 

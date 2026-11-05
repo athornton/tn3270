@@ -5071,8 +5071,9 @@ Items 2-7 still need the user's systems or browsers. Build from branch `oversize
    end to end, which no harness can drive (the browser harnesses run `--replay` gateways). ~180
    columns is the 9-pixel cell into a viewport of roughly 1620-1700 CSS px, so the measure is
    plausible. The browser was not named and is recorded as the user's Mac browser from the run
-   above. NOT reported, so not claimed: the exact rows and columns, a stderr fallback line, and the
-   resize-then-reconnect half below.
+   above. **And the resize-then-reconnect half "runs as expected" (user, 2026-11-05):** a
+   browser resize changes the size at the next reconnect, not at once. Not reported, so not
+   claimed: the exact rows and columns, and a stderr fallback line.
 
    **Firefox and Safari, web gateway with `-oversize auto`:** the session is sized to the browser
    window (stderr names any fallback, prefixed with 8 characters of the session id), and resizing
