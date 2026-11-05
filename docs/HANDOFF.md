@@ -46,6 +46,19 @@ Measured: two registry entries, the first keeping every listener after the socke
 second `hello` gets an `error` and changes nothing. It is older than the picker; the picker's
 review is what found it.
 
+**A SECOND PRE-EXISTING LEAK, FOUND AND FIXED IN THE FINAL REVIEW: `reconnect()` DURING A FIRST
+CONNECT STILL IN FLIGHT.** `reconnect()`'s guard was `this.conn !== undefined || this.reconnecting`,
+which missed a FIRST `connect()` that had not yet resolved: `connectNow` records `this.target`
+before its own first await, so a session still dialling already looked, from `reconnect()`, like
+one with somewhere to go back to. Pressing Enter/Clear (`frontend/src/actions.ts`
+`reconnectInstead`) while that first connect hung (a plaintext host against TLS-by-default hangs
+rather than refusing) opened a SECOND socket without closing the first — measured: two sockets
+dialled, both eventually resolved, `close()` called zero times, an LU leaked on the host per
+impatient keypress. Fixed by routing the guard through `isConnecting()` (`session.ts`
+`reconnect()`), which already covers both halves (`connecting` for a first connect, `reconnecting`
+for a second), and by giving the in-flight refusal its own truthful message, `Reconnect(): a
+connection attempt is already in progress`, instead of reusing `Already connected`.
+
 ### THE FINAL GATE, MEASURED 2026-11-05 ON `eabe45b`
 
 | check | result | Electron after |

@@ -968,6 +968,11 @@ connect, and the setting is left unchanged. `Set(...)` is refused while connecte
 (`disconnect first; ...`), while a connection attempt is still in flight (`wait for the
 connection attempt to finish; ...`), and on a
 session started with `--terminal-type`, which has no model or oversize to change.
+**Unlike the GUI's Model menu and the web picker, `Set(model,...)` alone never resets the
+oversize** to make the pair fit: those two front ends apply `applyGeometryChoice`'s reset rule
+for a one-field pick, but `Set()`'s own model-and-oversize validation (above) means a model given
+without its oversize is checked against whatever oversize is already set and refused outright if
+the pair does not fit — give both in one call instead, e.g. `Set(model,3278-5-E,oversize,none)`.
 
 **`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route
 to that: **`Enter()` here does NOT reconnect**, unlike the interactive front ends' Enter key,

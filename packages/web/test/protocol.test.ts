@@ -468,6 +468,7 @@ describe('setGeometry', () => {
       oversizes: [{ name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' }],
       current: { model: '3278-2-E', oversize: 'none' },
       connected: false,
+      connecting: false,
     };
     expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
   });

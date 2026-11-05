@@ -204,10 +204,14 @@ export class Runner {
        * silently open a socket to a mainframe. This is the deliberate spelling.
        *
        * `check_argc(AnReconnect, argc, 0, 0)` is s3270's own rule, with check_argc's wording
-       * as `Connect` above uses it. Both REFUSALS come from `Session.reconnect()` and are
+       * as `Connect` above uses it. All THREE refusals come from `Session.reconnect()` and are
        * passed straight through: "Reconnect(): Already connected" and "Reconnect(): No
-       * previous host to connect to" are x3270's messages verbatim, which is why core spells
-       * them with the action's capital R.
+       * previous host to connect to" are x3270's two messages verbatim, which is why core spells
+       * them with the action's capital R; "Reconnect(): a connection attempt is already in
+       * progress" is core's own third one, for a connect (first or reconnect) still in flight --
+       * x3270's `PCONNECTED` covers that case under the SAME message as a live connection, but
+       * nothing here is actually connected yet, so it earns its own wording instead of borrowing
+       * x3270's inaccurate one.
        *
        * `this.host` is restored for the status line's field 4 -- `C(<host>)`, hostname only,
        * as `Connect` sets it. Set AFTER the await, so a failed reconnect reports the

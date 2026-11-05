@@ -197,6 +197,26 @@ describe('Reconnect()', () => {
     expect(live).toContain('data: Reconnect(): Already connected');
   });
 
+  it('reports the THIRD refusal, a connection attempt already in flight, distinctly', async () => {
+    // Core's third `reconnect()` refusal (session.ts), for a connect -- first or reconnect -- still
+    // dialling: NOT `Already connected`, since nothing is, and this runner passes it through
+    // exactly as it does the other two. A script issuing `Connect()` then `Reconnect()` back to back
+    // without awaiting the first (the CLI itself always awaits, but the message still has to be
+    // right if a future caller does not) must see why it was refused, not a generic one.
+    let release: ((c: Connection) => void) | undefined;
+    const conn = new FakeConnection();
+    const session = new Session({
+      connect: () => new Promise<Connection>((r) => { release = r; }),
+    });
+    const runner = new Runner(session, { clock: () => 0 });
+    const connecting = runner.run('Connect(vm.example:3270)');
+    const reply = await runner.run('Reconnect()');
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(reply).toContain('data: Reconnect(): a connection attempt is already in progress');
+    release!(conn);
+    await connecting;
+  });
+
   it('takes no arguments', async () => {
     const { runner } = newRunner();
     const reply = await runner.run('Reconnect(vm.example:3270)');

@@ -80,11 +80,29 @@ export interface GeometryChoices {
   readonly current: { readonly model: string; readonly oversize: OversizeName | null };
   /** Connected OR connecting: every choice is disabled while true. */
   readonly connected: boolean;
+  /**
+   * CONNECTING, NOT YET CONNECTED -- `Session.isConnecting()`. `connected` alone cannot tell the
+   * two apart, since it is `isConnected() || isConnecting()` (`geometryChoices.ts`), and the two
+   * states have DIFFERENT remedies in core: `Session.setGeometry` throws `disconnect first` once
+   * `conn` is live, and `wait for the connection attempt to finish` while only `reconnecting` or
+   * `connecting` is (session.ts ~:502-510, pinned by core/test/oversize-session.test.ts ~:314 and
+   * its first-connect sibling). `CONNECTED_LINE` gave the `disconnect first` remedy in BOTH cases
+   * until review found it: an operator watching a connect attempt was told to disconnect something
+   * that does not exist yet. This field is what lets the picker tell them apart.
+   */
+  readonly connecting: boolean;
   readonly notice?: string;
 }
 
-/** The status line while every choice is disabled. */
+/** The status line while every choice is disabled AND the session is actually connected. */
 export const CONNECTED_LINE = 'Disconnect first; the choice applies at the next connect.';
+/**
+ * The status line while every choice is disabled but the session is only CONNECTING -- see
+ * `GeometryChoices.connecting`. There is nothing to disconnect yet; the attempt itself has to
+ * finish (or fail) before a choice can be made, exactly as `Session.setGeometry` says.
+ */
+export const CONNECTING_LINE = 'Wait for the connection attempt to finish; '
+  + 'the choice applies at the next connect.';
 
 const OVERSIZE_NAMES: readonly string[] = ['none', 'auto', 'startup'];
 
@@ -120,12 +138,14 @@ export function parseGeometryChoices(msg: Record<string, unknown>): GeometryChoi
     fail('current.oversize must be none, auto, startup or null');
   }
   if (typeof msg['connected'] !== 'boolean') fail('connected must be a boolean');
+  if (typeof msg['connecting'] !== 'boolean') fail('connecting must be a boolean');
   const notice = msg['notice'];
   if (notice !== undefined && typeof notice !== 'string') fail('notice must be a string');
   return {
     models, oversizes,
     current: { model: c['model'] as string, oversize: o as OversizeName | null },
     connected: msg['connected'] as boolean,
+    connecting: msg['connecting'] as boolean,
     ...(notice !== undefined ? { notice: notice as string } : {}),
   };
 }
@@ -250,7 +270,8 @@ export function createGeometryOverlay<E, V extends OverlayEvent = OverlayEvent>(
 
   const render = (): void => {
     if (latest === undefined) return;
-    deps.setText(deps.status, latest.notice ?? (latest.connected ? CONNECTED_LINE : ''));
+    deps.setText(deps.status, latest.notice
+      ?? (latest.connecting ? CONNECTING_LINE : latest.connected ? CONNECTED_LINE : ''));
     ensureBuilt();
     for (const r of radios ?? []) {
       const on = r.group === 'model' ? latest.current.model : latest.current.oversize;

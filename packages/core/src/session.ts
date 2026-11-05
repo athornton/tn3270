@@ -940,11 +940,23 @@ export class Session {
    * `Connect()`, so a script written for s3270 reads the same text from us.
    *
    * `PCONNECTED` in x3270 is "connected OR half-connected", which is why the first check also
-   * covers a reconnect ALREADY IN FLIGHT and not just `this.conn`. Our `isConnected()` sees only
-   * the completed case, and this method is reachable from a KEY: two quick presses would
-   * otherwise start two connects, both of which passed `connect()`'s teardown check while
-   * `this.conn` was still undefined, so the first socket would be replaced without being closed
-   * and left open on the mainframe forever — an LU leaked per impatient keypress.
+   * covers a connect attempt ALREADY IN FLIGHT and not just `this.conn` -- a RECONNECT's (via
+   * `reconnecting`) AND A FIRST `connect()`'s (via `isConnecting()`, which also covers
+   * `connecting`). Our `isConnected()` sees only the completed case, and this method is reachable
+   * from a KEY: two quick presses would otherwise start two connects, both of which passed
+   * `connect()`'s teardown check while `this.conn` was still undefined, so the first socket would
+   * be replaced without being closed and left open on the mainframe forever — an LU leaked per
+   * impatient keypress. A FIRST connect counts too, and not only a second `reconnect()`:
+   * `connectNow` records `this.target` and sets `oia.reconnectable` BEFORE its own first await, so
+   * a first connect still dialling (TLS setup against a plaintext host hangs rather than refusing)
+   * already looks, from here, like a session with somewhere to go back to. Checking only
+   * `this.conn !== undefined || this.reconnecting` missed exactly that case: `this.conn` is still
+   * undefined and `reconnecting` is the reconnect flag, not the first-connect one, so the guard let
+   * `reconnect()` through, which tore down `this.conn` (a no-op, since it was undefined) and opened
+   * a SECOND socket while the first was still outstanding -- never closed, because nothing but the
+   * now-overwritten `this.conn` could reach it. `isConnecting()` is the one check that already
+   * covers both halves (`connecting > 0` for a first connect, `reconnecting` for a reconnect), so
+   * the guard here uses it instead of naming `reconnecting` on its own.
    *
    * ## `async`, BECAUSE `connect` IS
    *
@@ -957,8 +969,17 @@ export class Session {
    * end that can only swallow it still leaves the reason somewhere findable.
    */
   async reconnect(): Promise<void> {
-    if (this.conn !== undefined || this.reconnecting) {
+    if (this.conn !== undefined) {
       throw new Error('Reconnect(): Already connected');
+    }
+    // COVERS A RECONNECT ALREADY IN FLIGHT (`reconnecting`) AND A FIRST CONNECT STILL DIALLING
+    // (`connecting`), both of `isConnecting()`'s halves -- see the doc comment above for why a
+    // first connect counts too. A DIFFERENT MESSAGE from the one above: `this.conn !== undefined`
+    // is a genuinely live connection, which is what x3270's wording describes; this is a connection
+    // attempt still in the air, which is not "already connected" by any honest reading, and a
+    // script or an operator reading the refusal deserves the true one.
+    if (this.isConnecting()) {
+      throw new Error('Reconnect(): a connection attempt is already in progress');
     }
     const target = this.target;
     if (target === undefined) throw new Error('Reconnect(): No previous host to connect to');

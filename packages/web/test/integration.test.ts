@@ -1551,6 +1551,10 @@ describe('-oversize auto, from the browser viewport', () => {
     }
     expect(seen.length, 'a connect must refresh the choices AFTER the hello\'s').toBeGreaterThanOrEqual(2);
     expect(seen[1]!['connected']).toBe(true);
+    // CONNECTED, NOT CONNECTING: the 'connect' event fires once the socket is actually up, so by
+    // the time this refresh is sent the attempt has already settled -- `disconnect first` is the
+    // true remedy here, not the in-flight one.
+    expect(seen[1]!['connecting'], 'a settled connect is connected, not connecting').toBe(false);
     await io.settle();
     const written: string[] = [];
     const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(((c: string | Uint8Array) => {
@@ -1603,8 +1607,13 @@ describe('-oversize auto, from the browser viewport', () => {
         if (m['kind'] === 'geometryChoices') choices.push(m);
       }
       expect(choices[0]!['connected'], 'the hello\'s choices are sent mid-attempt').toBe(true);
+      // CONNECTING, NOT CONNECTED: the attempt never reaches a live socket (the port is dead), so
+      // the picker's wording must be the in-flight one and not `disconnect first` -- see
+      // `geometryOverlay.ts`'s `CONNECTING_LINE`.
+      expect(choices[0]!['connecting'], 'mid-attempt is CONNECTING, not merely connected').toBe(true);
       expect(choices.length).toBeGreaterThanOrEqual(2);
       expect(choices.at(-1)!['connected'], 'the settled attempt must re-enable the picker').toBe(false);
+      expect(choices.at(-1)!['connecting'], 'settled means not connecting either').toBe(false);
       ws.close();
     } finally {
       err.mockRestore();

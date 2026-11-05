@@ -5071,6 +5071,12 @@ menu is open**. And no harness renegotiates against a host after a choice.
      during a connect attempt, and comes back after a disconnect and after a failed connect. On
      macOS, check that the top-level Model menu still OPENS while connected (only the items are
      disabled, on purpose).
+   - **A hung connect attempt cannot be cancelled from here:** `Session.disconnect()` only calls
+     `conn?.close()` (pre-existing), and during a first connect still dialling there is no `conn`
+     yet to close — so the GUI's menu and the web picker both stay disabled, with no button that
+     stops the attempt, until the TCP or TLS handshake itself times out. Worth observing on a real
+     host: start a connect against one that will hang (e.g. a plaintext host under TLS-by-default)
+     and confirm nothing in either front end shortens the wait.
    - **`Alt-M`:** where the popup appears (it should be over the main window, even when pressed
      in the keypad or keyboard window); whether `Escape` dismisses it; and whether a real arrow
      key or `Enter` goes to the menu and not to the 3270 screen. On macOS, `Option-M` is the chord

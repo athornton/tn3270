@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createGeometryOverlay, parseGeometryChoices, CONNECTED_LINE, type GeometryChoices,
+  createGeometryOverlay, parseGeometryChoices, CONNECTED_LINE, CONNECTING_LINE,
+  type GeometryChoices,
 } from '../src/geometryOverlay.js';
 
 /**
@@ -83,6 +84,7 @@ const choices = (over: Partial<GeometryChoices> = {}): GeometryChoices => ({
   ],
   current: { model: '3278-2-E', oversize: 'none' },
   connected: false,
+  connecting: false,
   ...over,
 });
 
@@ -162,6 +164,29 @@ describe('createGeometryOverlay', () => {
     expect(r.status.text).toBe('Disconnect first; the choice applies at the next connect.');
     // And back again on the disconnect.
     r.o.update(choices({ connected: false }));
+    expect(r.inputs().some((i) => i.disabled)).toBe(false);
+  });
+
+  it('with connected:true AND connecting:true, disables everything but gives the IN-FLIGHT remedy', () => {
+    // `connected` is `isConnected() || isConnecting()` (session.ts), so it is true in BOTH states,
+    // and `Session.setGeometry` refuses both -- but with DIFFERENT text (session.ts ~:502-510):
+    // `disconnect first` while actually connected, `wait for the connection attempt to finish`
+    // while only connecting. `CONNECTED_LINE` gave the first remedy in both cases, which told an
+    // operator watching a connect attempt to disconnect something that does not exist yet. Pinned
+    // by core/test/oversize-session.test.ts's `setGeometry is refused while a reconnect() is in
+    // flight` and its FIRST-connect sibling, both asserting the in-flight wording distinctly.
+    const r = rig();
+    r.o.update(choices());
+    r.o.toggle();
+    r.o.update(choices({ connected: true, connecting: true }));
+    expect(r.inputs().every((i) => i.disabled)).toBe(true);
+    expect(r.status.text).toBe(CONNECTING_LINE);
+    expect(r.status.text).not.toBe(CONNECTED_LINE);
+    // Settles into the ordinary connected remedy once the attempt lands.
+    r.o.update(choices({ connected: true, connecting: false }));
+    expect(r.status.text).toBe(CONNECTED_LINE);
+    // And fully free once disconnected.
+    r.o.update(choices({ connected: false, connecting: false }));
     expect(r.inputs().some((i) => i.disabled)).toBe(false);
   });
 
@@ -279,6 +304,7 @@ describe('parseGeometryChoices', () => {
       { oversizes: [{ name: 'huge', label: 'a' }] },
       { current: { model: '3278-2-E' } },
       { connected: 'no' },
+      { connecting: 'no' },
       { notice: 5 },
     ]) {
       expect(() => parseGeometryChoices({ kind: 'geometryChoices', ...choices(), ...bad }),

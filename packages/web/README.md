@@ -135,7 +135,9 @@ not exercise `auto` end to end. Its unit tests and the integration `hello` test 
 eight models (each with its size in words), then oversize None, Auto, and the `-oversize` size the
 gateway was started with, if any. Nothing is typed; a new size is a new `-oversize`. **The choice
 applies at the next connect** (for example, `Enter` on a disconnected session). While the session is
-connected or connecting every choice is disabled and the picker says `Disconnect first`. The
+connected or connecting every choice is disabled, and the picker says which: `Disconnect first`
+once the session is actually connected, or `Wait for the connection attempt to finish` while a
+connect -- first or reconnect -- is still in flight and there is nothing yet to disconnect. The
 gateway owns the session, so the list comes from it and a click goes back to it as a `setGeometry`
 message. **A model choice can reset the oversize to None** when the oversize cannot go with that
 model (a non-`-E` model, or a fixed size smaller than the model), by the same rule as the GUI; the

@@ -54,7 +54,21 @@ export function geometryChoices(
         : []),
     ],
     current: { model, oversize },
+    // DISABLES EVERY CHOICE, as before: `Session.setGeometry` refuses both. `connecting` carries
+    // which half it is, so the overlay can give the remedy core actually uses for each (session.ts
+    // ~:497-512): `disconnect first` once `this.conn` is set, `wait for the connection attempt to
+    // finish` while only `connecting`/`reconnecting` is -- AND THAT CHECK ORDER IS WHY THIS IS NOT
+    // JUST `isConnecting()`. `connectNow` SETS `this.conn` AND ONLY THEN EMITS 'connect'
+    // (session.ts ~:841-899), but `connect()`'s own `connecting` counter is not decremented until
+    // its wrapping `finally`, which runs AFTER `connectNow` returns -- so `isConnecting()` is STILL
+    // true for the length of the 'connect' event this refresh runs on, even though `setGeometry`
+    // would by then throw `disconnect first`, not the in-flight message (`this.conn !== undefined`
+    // is checked FIRST). Measured in review, 2026-11-05: a bare `session.isConnecting()` here sent
+    // `connecting: true` on 'connect' itself, which would have shown the in-flight wording to an
+    // operator who is, at that exact moment, actually connected. `isConnected()` is what settles
+    // it: once `this.conn` is set, `connecting` must read false regardless of the counter.
     connected: session.isConnected() || session.isConnecting(),
+    connecting: session.isConnecting() && !session.isConnected(),
     ...(notice !== undefined ? { notice } : {}),
   };
 }
