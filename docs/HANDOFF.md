@@ -89,9 +89,10 @@ the concerns below.
 
 - **VM/370 (VM/CE) honours 160x62, 2026-11-04, by the user:** with `-oversize 160x62`, MECAFF's
   `EE` switches the screen to 160x62, and leaving it returns to 80x24. VM takes the size from our
-  Query Reply. Not yet reported: the 80x50 run, and whether EE's bottom lines sat on rows 61-62
-  (the 14-bit check).
-- **Owed from step 1:** VM 80x50 and the bottom-row check; TK5 TSO; a modern z/VM or z/OS host
+  Query Reply. **EE's status line is correct (user, 2026-11-05)**, so 14-bit addressing works end
+  to end: the bottom rows of a 62x160 screen are reachable only by 14-bit addresses. The 80x50
+  run is no longer needed.
+- **Owed from step 1:** TK5 TSO; a modern z/VM or z/OS host
   (BIND size code 0x03); Firefox and Safari with `-oversize auto`.
 - **Owed from step 2 (items 5-7 there, none run):** the GUI Model menu on a real desktop, on Linux
   and on macOS (radio rendering, disabled items while connected, where the `Alt-M` popup appears
@@ -206,17 +207,15 @@ the fake host accepts once (Session's unit tests cover re-measuring).
   harnesses all run `--replay` gateways, and a replay never connects, so it never measures.
 - **ONE LIVE HOST HAS: VM/370 (VM/CE), 2026-11-04, by the user.** With `-oversize 160x62`, `EE`
   switches the screen to 160x62 and leaving it returns to 80x24: VM takes the size from our Query
-  Reply. Not yet reported: the 80x50 run, and whether EE's bottom lines sat on rows 61-62 (the
-  14-bit check). Details: `docs/live-testing.md`, *OWED: oversize live pass*. TK5, a modern host
+  Reply, and EE's status line is correct (2026-11-05), so 14-bit addressing works end to end.
+  Details: `docs/live-testing.md`, *OWED: oversize live pass*. TK5, a modern host
   and the web viewport in Firefox/Safari have not been run.
 
 ### THE OWED LIVE PASS (also in `docs/live-testing.md`, *OWED: oversize live pass*)
 
-1. **VM/370, `-oversize 80x50` then `-oversize 160x62`, in MECAFF's `EE`:** EE fills the
-   screen and keeps its status and command lines at the bottom, so 160x62 tests 14-bit
-   addressing; 80x50 (4000 cells, 12-bit) first separates "VM ignores our size" from "VM
-   cannot address past 4095". Steps and a results table: `docs/live-testing.md`, *OWED:
-   oversize live pass*. (Not FLIST: unconfirmed on VM/370, like XEDIT.)
+1. ~~**VM/370 in MECAFF's `EE`**~~ **DONE (user, 2026-11-04/05):** at `-oversize 160x62` EE
+   draws 160x62, returns to 80x24 on exit, and its bottom status line is correct, so the size
+   AND 14-bit addressing both work live. The planned 80x50 run is not needed.
 2. **TK5 TSO:** does its Read Partition get our oversize, and does ISPF draw at it?
 3. **A modern z/VM or z/OS host,** when the user has one: the TN3270E BIND path, size code 0x03.
 4. **Firefox and Safari:** the web viewport, i.e. that `-oversize auto` sizes the session to the

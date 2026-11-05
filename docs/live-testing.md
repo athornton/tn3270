@@ -5000,7 +5000,7 @@ Partition (Query) the way a modern VTAM host would. The live witness for that re
 the design doc's Testing section: a real z/VM or z/OS host, expected within a couple of weeks of
 2026-11-04 per the user.
 
-## OWED: oversize live pass — steps 1 and 2 of branch `oversize`, 2026-11-04/05 (VM/370 160x62 witnessed; step-2 items 5-7 not run)
+## OWED: oversize live pass — steps 1 and 2 of branch `oversize`, 2026-11-04/05 (VM/370 160x62 witnessed, 14-bit included; step-2 items 5-7 not run)
 
 **Item 1 has a first live result (below); items 2-4 have not been run.** The conformance record
 above shows our Query Reply matches s3270's against a scripted host. These items show what a REAL
@@ -5012,11 +5012,18 @@ returns it to 80x24.** That is VM honouring the size from our Query Reply: EE's 
 is an Erase/Write Alternate at 62 rows by 160 columns, and the CMS screen after it is a plain
 Erase/Write at the model's default 24x80, exactly the default/alternate split the design specifies.
 It is the first live host to act on a geometry we reported, and it rules out the bottom row of the
-table below ("DMKRIO wins") for 160x62. NOT reported, so not claimed: the 80x50 run; whether EE's
-bottom status and command lines sat on rows 61-62 (the 14-bit symptom to watch for); the OIA
-during EE; the trace. "Jumps to 160x62" says the screen took the size; the bottom-row check is
-what says the addresses past 4095 landed where they belong. Each needs the
-user's systems or browsers. Build from branch `oversize`, and run `npm run build` first.
+table below ("DMKRIO wins") for 160x62.
+
+**AND 14-BIT ADDRESSING WORKS END TO END (user, 2026-11-05): EE's status line is correct at
+160x62.** EE keeps its status line at the bottom of the screen, and at 62 rows by 160 columns
+every cell past 4095 (from row 26 on) is reachable ONLY by a 14-bit address. So VM/MECAFF wrote
+14-bit addresses, our client decoded them, and the line landed where it belongs. That is the top
+row of the table below: VM honours the oversize, 14-bit included. **The 80x50 run is therefore no
+longer needed**: it existed only to tell the two failure rows apart. Not reported, so not claimed:
+the OIA during EE, and a trace.
+
+Items 2-7 still need the user's systems or browsers. Build from branch `oversize`, and run
+`npm run build` first.
 
 1. **VM/370, two runs, smaller first** (TUI or GUI, `-insecure -model 3278-2-E -oversize ...`).
    Log on and open a file in MECAFF's **`EE`**, then (optionally) `FSLIST`. EE is the right probe:
