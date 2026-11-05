@@ -1,0 +1,7 @@
+# @tn3270/core
+
+Internal to the tn3270 client: the protocol core (telnet negotiation, the 3270 data
+stream, screen buffer, `IND$FILE` transfer). It has no stable public API and is not meant
+to be depended on directly — use one of the front ends instead: `@tn3270/cli`,
+`@tn3270/tui`, `@tn3270/gui`, or `@tn3270/web`. See
+https://github.com/athornton/tn3270#readme.

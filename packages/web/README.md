@@ -3,8 +3,11 @@
 The same 3270 screen the Electron app draws, served to a browser over a WebSocket.
 
 ```bash
-npm run build
-node packages/web/dist/main.js -insecure -model 3278-4-E 127.0.0.1:3270
+npm install -g @tn3270/web
+```
+
+```bash
+tn3270-web -insecure -model 3278-4-E 127.0.0.1:3270
 ```
 
 It prints the URL to open. By default there is no token, so that is just the address:
