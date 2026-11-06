@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-06 (branch `packaging`, 35 commits ahead of `main` at `6492c10`; npm packages, native installers and CI all built and smoke-tested; UNMERGED, UNPUBLISHED, UNSIGNED)
+# Handoff — state as of 2026-11-06 (branch `packaging`; npm packages and native installers built and smoke-tested on five CI runners, all green in run 6 at `b279d89`; UNMERGED, UNPUBLISHED, UNSIGNED)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,7 +7,7 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/superpowers/plans/2026-11-05-packaging.md` (15 tasks, all 15 done as code; Task 15 was this
 documentation pass).
 
-## START HERE — PACKAGING (TASKS 1-15) IS DONE ON BRANCH `packaging`, UNMERGED; CI RUN 2 IS IN PROGRESS
+## START HERE — PACKAGING (TASKS 1-15) IS DONE ON BRANCH `packaging`, UNMERGED; CI GREEN ON ALL FIVE RUNNERS (RUN 6)
 
 **Branch `packaging`, 35 commits on top of `main` at `6492c10` (HEAD `6492c10` is this branch's own
 tip as of this entry).** It branches from `main` at the commit the previous entry below calls
@@ -59,7 +59,32 @@ tip as of this entry).** It branches from `main` at the commit the previous entr
 **CI run 1** found only test/checkout problems (CRLF line endings, timing assumptions, path
 separators) — fixed in the commits leading up to this one (`a9a37b0`, `84e5d3d`, `59c3261`).
 
-**CI run 2: <PENDING — filled by controller>**
+**CI runs 2-5** each failed only on things the runners newly exposed, all fixed: `macos-26-intel`'s
+display is Retina with a colour profile (capture 1440x700, greens shifted), and Chromium on macOS
+ignores `--force-device-scale-factor` (run 4: byte-identical capture with it), so the smokes accept
+the golden at an exact integer scale with a one-to-one colour remap (`scaledMatch` in
+`scripts/smoke-lib.mjs`); `pack:npm` packed a complete bundle of old code (now `bundleStaleness`);
+the bundle-staleness file list lacked `connect.html`; one CPU-bound test sweep hit vitest's 5 s
+default on the slow Intel runner (now 30 s).
+
+**CI run 6 (42283731516, commit `b279d89`): ALL FIVE RUNNERS GREEN, 2026-11-06.** Every runner:
+build, typecheck, 3110 tests, install smoke 5/5, package smoke. Per runner:
+
+| runner | install smoke | package smoke |
+|---|---|---|
+| ubuntu-latest (x64) | 5/5, exact golden hash | AppImage + `.deb`, 4/4, exact hash; plus all six GUI harnesses on `dist/` and the bundle |
+| ubuntu-24.04-arm | 5/5, exact hash | AppImage + `.deb`, 4/4, exact hash |
+| macos-latest (arm64) | 5/5, exact hash | universal app, arm64 slice, 2/2, exact hash (x64 slice left to the Intel job: `TN3270_PACKAGE_SMOKE_X64=native`) |
+| macos-26-intel | 5/5, golden at exactly 2x | universal app, x86_64 slice run natively, 2/2, golden at exactly 2x |
+| windows-latest | 5/5, exact hash | NSIS silent install, 2/2, exact hash |
+
+The CI-built universal `TN3270.app` has `LSMinimumSystemVersion` **13.0** (measured from the
+`gui-macos-latest` artifact's `Info.plist`), matching Electron 44's stated "Ventura and up".
+
+**OPEN, found while measuring:** Linux at a forced scale factor 2 (`--force-device-scale-factor=2`
+on the dev box) draws blended glyph edges (green at exactly 75%: bilinear filtering), where Retina
+macOS draws a clean pixel-doubled upscale. CI does not see it (Linux runs at scale 1, exact
+hash). A HiDPI Linux user may get slightly soft text; not yet investigated.
 
 ### MEASURED LOCALLY ON LINUX x64, 2026-11-06
 

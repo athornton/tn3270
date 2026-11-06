@@ -67,8 +67,10 @@ Windows shows SmartScreen; *More info → Run anyway* gets past it.
 
 **Minimum OS**, from Electron 44.10.2's own stated platform support
 (`node_modules/electron/README.md`, "Platform support"): macOS Ventura (13) and up; Windows 10 and
-up; Linux distributions still supported by both Chromium and the distro maker. That is Electron's
-claim, not a measurement made against this app's own build.
+up; Linux distributions still supported by both Chromium and the distro maker. The macOS figure is
+also what the built app declares: `LSMinimumSystemVersion` 13.0 in the CI-built universal
+`TN3270.app` (measured 2026-11-06). Windows 10 and the Linux statement are Electron's claim, not
+measured against this build.
 
 **Starting `tn3270-gui` with no host opens a Connect dialog** — host (the same
 `[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
@@ -1480,9 +1482,8 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    lockstep version, Node ≥22), and native installers via electron-builder: macOS universal
    `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
    this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
-   ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest); the first run found only
-   test/checkout problems (CRLF, timing, path separators), and the second run is in progress — see
-   `docs/HANDOFF.md`. **Nothing is merged into `main`, published to npm, or signed.** See
+   ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
+   2026-11-06 (run 6) — see `docs/HANDOFF.md`. **Nothing is merged into `main`, published to npm, or signed.** See
    *Installing* and `docs/releasing.md` for what that leaves: a macOS pass by hand (including
    whether a fully unsigned `arm64` build launches at all), the Windows installer on a real Windows
    machine, the Linux arm64 AppImage/`.deb` on real arm64 hardware, and the Connect dialog by an
