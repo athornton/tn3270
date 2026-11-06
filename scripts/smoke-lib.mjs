@@ -4,8 +4,11 @@
  * failure reporting, the display an Electron needs, and the throwaway telnet server whose reply
  * is the oracle for "the client connected in plaintext".
  *
- * Moved here, not copied, so the kill and display rules cannot drift between the copies. Nothing
- * in this module resolves Electron at load time (see `displayEnv`).
+ * Moved here, not copied, so the two smoke scripts share one copy of the kill and display rules.
+ * NOT YET connect.mjs: it imports `descendants`, `sleep`, `startServer` and `until` from here but
+ * keeps its own `alive`/`launch`/`kill` (repo Electron via `guiEnv`, no Windows path), so those
+ * can still drift from `gone`/`launch`/`killTree` below. Nothing in this module resolves Electron
+ * at load time (see `displayEnv`).
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';

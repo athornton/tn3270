@@ -54,6 +54,13 @@ describe('package manifests', () => {
     expect(VERSION).toBe(root.version);
   });
 
+  // electron-builder.cjs reads `electronVersion` from this field; a range there would hand the
+  // builder a range, and the packaged Electron could differ from the one the harnesses test.
+  it("gui's electron dependency is an exact version", () => {
+    const gui = manifests.find(({ m }) => m.name === '@tn3270/gui')!.m;
+    expect(gui.dependencies?.['electron']).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
   it('no published package depends on @tn3270/fixtures', () => {
     for (const { m } of published) expect(m.dependencies?.['@tn3270/fixtures'], m.name).toBeUndefined();
   });

@@ -30,12 +30,13 @@
  * `lipo -archs` must list both `x86_64` and `arm64`. Then each slice is a route:
  *   - Apple silicon: the arm64 slice as `arch -arm64 <exe>`, and the x86_64 slice as
  *     `arch -x86_64 <exe>` under Rosetta. No Rosetta (`arch -x86_64 /usr/bin/true` fails) is a
- *     FAIL, `x64 slice NOT tested: no Rosetta on this runner` -- never a silent skip -- UNLESS
- *     `TN3270_PACKAGE_SMOKE_X64=native` says an Intel job witnesses the x64 slice natively, and
- *     then it is a SKIP line that says so.
+ *     FAIL, `x64 slice NOT tested: no Rosetta on this runner` -- never a silent skip.
  *   - Intel: the x86_64 slice, natively. The arm64 slice cannot run here; the arm64 job is its
- *     witness. `TN3270_PACKAGE_SMOKE_X64=native` is how that Intel job declares it is the x64
- *     witness (it changes nothing here but the label; it is the arm64 job it lets off Rosetta).
+ *     witness.
+ *   `TN3270_PACKAGE_SMOKE_X64=native`: set it on the arm64 macOS job ONLY when the matrix also has
+ *   an Intel macOS job running this script natively. Then the arm64 job skips its Rosetta route
+ *   (a printed SKIP line, not counted), and the Intel job is the x64 witness. On an Intel runner
+ *   it changes nothing but the route's label; leave it unset there.
  * `arch` execs the binary in place, so the spawned PID is the app's own. QUARANTINE: an unsigned
  * app downloaded from the internet carries `com.apple.quarantine` and Gatekeeper refuses it; one
  * built (or downloaded as a workflow artifact by `gh`/actions) on the runner does not, so no
@@ -52,6 +53,10 @@
  * `TN3270.exe` (`win` has no `executableName`, so productName); the install directory is listed
  * and the check FAILs naming what IS there if that is not it. Afterwards `Uninstall TN3270.exe /S`
  * (common.nsh `UNINSTALL_FILENAME`), best effort.
+ *
+ * Every launch on every OS gets `--user-data-dir=<fresh dir>` (Electron's userData; main.ts
+ * strips it before parsing, electronSwitches.ts), so a run never reads or writes the real
+ * `TN3270` app-data directory -- XDG_CONFIG_HOME alone would cover only Linux.
  *
  * ## THE GOLDEN IS LINUX'S
  *
@@ -139,8 +144,11 @@ const NO_SEAMS = {
   TN3270_GUI_SELECT: '', TN3270_GUI_TRANSFER: '', TN3270_GUI_URL: '', TN3270_GUI_CONNECT: '',
 };
 
-/** The Chromium switches every launch gets; `ELECTRON_SWITCHES` in main.ts strips them. */
-const SWITCHES = ['--disable-gpu', ...(linux ? ['--no-sandbox'] : [])];
+/**
+ * The Chromium switches every launch gets; main.ts strips them (electronSwitches.ts). `dir` is
+ * the launch's fresh directory: its `user-data` is the app's userData, on every OS.
+ */
+const switches = (dir) => ['--disable-gpu', ...(linux ? ['--no-sandbox'] : []), `--user-data-dir=${join(dir, 'user-data')}`];
 
 /** Starts the route's app with `args` and `extraEnv`; see `launch` in smoke-lib.mjs. */
 async function start(r, args, extraEnv, cwd) {
@@ -236,7 +244,7 @@ async function drawsGolden(r, work) {
   // A fresh directory each run, so a capture left by an earlier run cannot be what passes.
   const dir = mkdtempSync(join(work, 'shot-'));
   const shot = join(dir, 'shot.png');
-  const p = await start(r, [...SWITCHES, '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
+  const p = await start(r, [...switches(dir), '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
     { TN3270_GUI_REPLAY: TRACE, TN3270_GUI_SHOT: shot, TN3270_GUI_SHOT_MS: '2500' }, dir);
   p.child.stdin.end();
   const exited = await exitedWithin(p, LAUNCH_MS);
@@ -277,9 +285,9 @@ async function drawsGolden(r, work) {
 async function dialogConnects(r, work) {
   const srv = await startServer();
   const dir = mkdtempSync(join(work, 'connect-'));
-  const p = await start(r, SWITCHES, {
+  const p = await start(r, switches(dir), {
     TN3270_GUI_CONNECT: JSON.stringify({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }),
-    // Linux: a fresh config directory, so nothing a desktop session saved changes the run.
+    // Linux: a fresh config directory as well, for anything that reads XDG rather than userData.
     ...(linux ? { XDG_CONFIG_HOME: join(dir, 'config') } : {}),
   }, dir);
   p.child.stdin.end();
@@ -476,8 +484,17 @@ async function main() {
   } finally {
     process.stdout.write(`${passed}/${passed + failed}${skipped > 0 ? ` (${skipped} SKIPPED, not counted)` : ''}\n`);
     if (keep) process.stdout.write(`kept ${work}\n`);
-    else rmSync(work, { recursive: true, force: true, maxRetries: 5 });
     process.exitCode = failed > 0 || passed === 0 ? 1 : 0;
+    // Best effort, and AFTER the result is set: on Windows the NSIS uninstaller copies itself to
+    // %TEMP% and returns at once, so the install directory can still be busy (EBUSY) here. A
+    // passing run must not fail on cleanup, nor a throw from here escape the summary.
+    if (!keep) {
+      try {
+        rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      } catch (e) {
+        process.stdout.write(`note: could not remove ${work}: ${e?.message ?? e}\n`);
+      }
+    }
   }
 }
 

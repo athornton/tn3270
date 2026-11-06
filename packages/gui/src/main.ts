@@ -22,6 +22,7 @@ import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
+import { stripElectronSwitches } from './electronSwitches.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -60,20 +61,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  */
 const layout = layoutFor(here);
 
-/**
- * Chromium switches this app is launched with, stripped before OUR parser sees argv.
- *
- * Listed explicitly rather than filtered by a `--` prefix rule, because our own
- * `--terminal-type` takes a VALUE: a prefix rule either eats that value or needs to know
- * about it, and both readings were wrong in the first draft of this file. Anything not
- * named here still reaches `parseGuiArgs`, so an unrecognized flag is still an error --
- * silently swallowing one is what produces a session that negotiates something nobody
- * asked for.
- */
-const ELECTRON_SWITCHES: ReadonlySet<string> = new Set([
-  '--no-sandbox', '--disable-gpu', '--disable-software-rasterizer',
-  '--disable-dev-shm-usage', '--enable-logging', '--in-process-gpu',
-]);
+// `ELECTRON_SWITCHES` and the `--user-data-dir=` rule: electronSwitches.ts.
 
 /**
  * The test seams, read ONCE for the whole process.
@@ -471,7 +459,7 @@ app.whenReady().then(async () => {
     if (!win.isDestroyed()) win.webContents.send('error-message', message);
   };
 
-  const argv = process.argv.slice(2).filter((a) => !ELECTRON_SWITCHES.has(a));
+  const argv = stripElectronSwitches(process.argv.slice(2));
   const plan = planStartup(argv, SEAM);
   if (plan.kind === 'fail') {
     fail(explain(plan.err));

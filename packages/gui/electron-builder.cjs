@@ -31,8 +31,10 @@ module.exports = {
   },
 
   // Must be explicit: electron is not in app/package.json, and the default reads only
-  // node_modules/electron under the project directory or the manifests' dependencies.
-  electronVersion: '44.10.2',
+  // node_modules/electron under the project directory or the manifests' dependencies. READ from
+  // this package's manifest, never retyped, so the packaged Electron is the one the harnesses
+  // test; packages/core/test/manifests.test.ts asserts that dependency is an exact version.
+  electronVersion: require('./package.json').dependencies.electron,
 
   /*
     NO node_modules IN THE APP. The bundle needs none, and app/package.json declares no

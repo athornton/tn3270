@@ -20,7 +20,7 @@
     "smoke": "node scripts/install-smoke.mjs",
     "package:gui": "npm run bundle:gui && electron-builder --projectDir packages/gui --publish never",
     "smoke:package": "node scripts/package-smoke.mjs",
-    "package": "npm run build && npm run bundle:gui && npm run pack:npm && npm run smoke && npm run package:gui && npm run smoke:package"
+    "package": "npm run build && npm run package:gui && npm run pack:npm && npm run smoke && npm run smoke:package"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
