@@ -9,7 +9,7 @@ import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { distStaleness, newest } from './freshness.mjs';
+import { distStaleness, newest } from '../../../scripts/freshness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 

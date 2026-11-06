@@ -17,6 +17,11 @@
  *    2026-11-06 on the dev box: `web/dist/__t8sim.js`, `tui/dist/colours.js`,
  *    `tui/dist/transferRun.js` and `cli/dist/transfer.js` were all in the tarballs.
  *
+ *  - A `dist/` OLDER THAN ITS OWN `src/`, in any published workspace: `distStaleness()` from
+ *    `freshness.mjs`, the same check `bundle:gui` and the GUI harnesses use. FOUND BY REVIEW: edit
+ *    a source file, skip `npm run build`, and npm packs yesterday's compiled code without a word.
+ *    gui is checked too although it ships `app/`, because `app/` is built from `gui/dist`.
+ *
  * `artifacts/npm` IS DELETED FIRST, so a tarball from an earlier run can never be installed as if
  * it were this one's.
  */
@@ -24,6 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { distStaleness } from './freshness.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const packagesDir = join(root, 'packages');
@@ -84,11 +90,9 @@ function main() {
     die(`compiled output with no source would be shipped (delete it, or rm -rf the dist and rebuild):\n  `
       + stale.join('\n  '));
   }
-  for (const { dir } of pkgs) {
-    if (!existsSync(join(packagesDir, dir, 'dist')) && dir !== gui?.dir) {
-      die(`packages/${dir}/dist is missing: run npm run build first`);
-    }
-  }
+  // Every published workspace has a `src`, and `distStaleness` also reports a MISSING `dist`.
+  const stalePkg = distStaleness(packagesDir, pkgs.map(({ dir }) => dir));
+  if (stalePkg !== undefined) die(`${stalePkg.why}: run npm run build${stalePkg.forceHint}`);
 
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });

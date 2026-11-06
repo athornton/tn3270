@@ -67,7 +67,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetDir, ATLAS_FILES } from '@tn3270/canvas';
-import { distStaleness } from './freshness.mjs';
+import { distStaleness } from '../../../scripts/freshness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');

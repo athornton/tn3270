@@ -5,6 +5,10 @@
  * drifted once across `keys.mjs`, `clicks.mjs` and `transfer.mjs` before it was centralised into
  * `xvfb.mjs` -- and bundling is exactly the same question asked at a different moment (build
  * time instead of run time), so it gets the same answer rather than a fourth copy.
+ *
+ * AT THE REPO ROOT, NOT IN `packages/gui/scripts`, since `scripts/pack.mjs` became its third
+ * caller (packaging, 2026-11-06): pack asks the same question of every published workspace before
+ * `npm pack` ships their `dist/`, and a helper the whole repo uses does not belong to one package.
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
