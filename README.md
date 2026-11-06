@@ -23,9 +23,9 @@ deliberately: see *What is not implemented*.)
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
-**Packaging exists, but not yet in anyone's hands.** It lives on the unmerged `packaging`
-branch: npm packages for all four front ends, and native installers (macOS, Linux, Windows) built
-and smoke-tested in CI. None of it is published or signed yet — see *Installing* below and
+**Packaging exists, but not yet in anyone's hands.** It is merged into `main` (2026-11-06): npm
+packages for all four front ends, and native installers (macOS, Linux, Windows) built and
+smoke-tested in CI on five runners. None of it is published or signed yet — see *Installing* below and
 `docs/releasing.md` for exactly what is missing before it is. Started with no arguments, the GUI
 now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
 takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
@@ -1328,8 +1328,7 @@ Done:
    hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
    then by `packages/gui/scripts/keys.mjs`, which drives 19 real Chromium chords and asserts 17
    ordered actions plus two required absences. The packaged app is now smoke-tested too
-   (`npm run smoke:package`, and in CI on five OS/arch runners) on the unmerged `packaging`
-   branch — see *Installing* and `docs/releasing.md` for what is still owed before a release.
+   (`npm run smoke:package`, and in CI on five OS/arch runners), merged 2026-11-06 — see *Installing* and `docs/releasing.md` for what is still owed before a release.
 
 8. **A webserver serving the same front end** over HTTP — done, and verified against both
    live hosts. `packages/web` serves the GUI's own canvas renderer to a browser over a
@@ -1477,26 +1476,91 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    **Neither is well testable against any host reachable from this project** — `IBM-DYNAMIC` has one
    live path (TK5's TSO issues a Read Partition to any `-E` client) and a client-initiated switch has
    none, so expect unit tests, the playback oracle and by-hand GUI runs rather than a live witness.
-13. **Packaging, for macOS, Linux AND WINDOWS — DONE, on the unmerged `packaging` branch.** npm
+13. **Packaging, for macOS, Linux AND WINDOWS — DONE, merged into `main` 2026-11-06 (`5669a3a`).** npm
    packages for all four front ends (`@tn3270/cli`, `@tn3270/tui`, `@tn3270/web`, `@tn3270/gui`,
    lockstep version, Node ≥22), and native installers via electron-builder: macOS universal
    `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
    this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
    ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
-   2026-11-06 (run 6) — see `docs/HANDOFF.md`. **Nothing is merged into `main`, published to npm, or signed.** See
+   2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Nothing is published
+   to npm or signed yet.** See
    *Installing* and `docs/releasing.md` for what that leaves: a macOS pass by hand (including
    whether a fully unsigned `arm64` build launches at all), the Windows installer on a real Windows
    machine, the Linux arm64 AppImage/`.deb` on real arm64 hardware, and the Connect dialog by an
-   actual double-click on each. Merging the branch is the user's call, not a step in this plan.
+   actual double-click on each.
    The Windows target was a deliberate addition rather than a stretch goal: there are **zero
    native dependencies** (every package depends only on other workspace packages, with Electron
    the single external), and there is not one `process.platform` branch anywhere in
    `packages/*/src`.
-14. **PS + VMGIF** — item 10 above holds its detail and dependency; this is only its position in
-   the reordered list — then **vector graphics** (GOCA).
-15. **Printer sessions**, last, and deliberately so: they are probably cheap in themselves, but
-   likely entangled with the graphics work above. Needs a host that will drive one; see *What is not
-   implemented*.
+**ROADMAP FROM HERE, AGREED WITH THE USER 2026-11-06, after packaging merged.** It supersedes the
+old items 14 (PS + VMGIF, then GOCA) and 15 (printer sessions last). Two corrections came with it,
+both below: **VMGIF cannot run without GDDM** (measured from its module), so our own GIF-to-PS
+converter is the test vehicle; and **the printer splits in two**, so "printer last" no longer
+holds as one item.
+
+14. **Close out packaging.** The live checks by hand (unsigned `arm64` launch and Gatekeeper on a
+   real Mac, the Windows installer, the Linux arm64 AppImage/`.deb` on a Raspberry Pi, the Connect
+   dialog by real double-click on each); the first `npm publish` (`docs/releasing.md`); a
+   3279-styled icon. **Signing and store distribution wait on the user's Apple Developer ID (and
+   perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
+   ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
+   App Store (which needs App Sandbox and its own certificate) or the Microsoft Store (MSIX);
+   choose when the IDs exist. Tag-triggered publishing waits on npm trusted publishing.
+15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means
+   hoisting the startup block's once-only IPC handlers and quit hook), recent hosts, a config file
+   and preferences, light and dark modes, font choice. Moved up from the "super-terminal" stretch
+   goal because it is what a person who has just installed the app meets first.
+16. **Code pages.** Only `cp037` exists (`packages/core/src/codepage.ts`), which is wrong for any
+   host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500 (international), 1047
+   (z/OS Unix), the 1140-family euro pages, and so on. Self-contained, and a correctness gap rather
+   than a feature. **DBCS** (Japanese, Chinese and Korean hosts) is a separate, larger item and is
+   not scheduled.
+17. **Click-to-place-cursor, then the light pen.** Own spec, as already recorded above: the light
+   pen (`lightpen_select()`) sends an AID and sets MDT, so it must not be built on text selection.
+18. **Text printing.** A 3270 printer session is a separate telnet session to a printer LU; the host
+   sends SCS (LU type 1) or the 3270 data stream addressed to a printer (LU type 3). Output to a
+   text file, a PDF or the OS print dialog. Reference: x3270's `pr3287`. The LU3 side reuses the
+   existing data-stream parser; SCS is the new decoder. Cheap, and placeable anywhere; here because
+   it does not depend on graphics.
+19. **Programmed Symbols — the 3279's all-points-addressable graphics — tested with our own
+   `gif2ps`.** On a 3279, APA graphics WAS PS: the host loads pixel patterns into loadable symbol
+   sets and then writes characters from them. The emulator needs the Load PS structured field,
+   the symbol-set selection attribute, and drawing host-supplied cell bitmaps (the blitter was built
+   for this; see item 10). **The test vehicle is a converter in this repo, `gif2ps`**: decode a GIF,
+   map it onto the 3279 palette, cut it into cells, reuse identical cells, and emit the PS loads and
+   screen writes as a trace, replayed through the existing seams and screenshot goldens, or served
+   by a fake host. No mainframe needed. **Before planning, read the 3279's PS capacity from the 3270
+   Data Stream Reference (GA23-0059), not memory**: the number of loadable sets and symbols per set,
+   cell size per model, and the colour-plane format; together they cap how many unique cells an
+   image can use. A later, separate step for authenticity: a small CMS program on VM/CE that writes
+   the same generated stream to the terminal (what VM/370's CMS offers for full-screen output needs
+   checking; MECAFF shows it can be done). **Truly native APA terminals (3179G, 3192G, 3472G), which
+   took graphics data directly rather than through PS, would be a separate later item if wanted.**
+20. **Printer graphics through PS, IF it is real.** As understood (to verify against GDDM's device
+   documentation before relying on it), GDDM printed graphics on 3270-family printers that had the
+   PS feature (some 3287 and 3268 models) with the same PS mechanism as the screen. If so, this
+   follows item 19 almost for free. GOCA/IPDS page-printer output (MO:DCA, channel- or SNA-attached
+   printers) is out of scope unless a need appears.
+21. **GOCA vector graphics.** Unverifiable until the user finds a host with GDDM that this client
+   can reach; that same host is also the only way to run VMGIF itself. `docs/goca-reference-notes.md`
+   holds the research.
+22. **Stretch goals.** (a) The "3270 super-terminal": antialiased fonts, any font rather than only a
+   3270 face, GOCA rendered directly as SVG. (b) **5250 support**: the terminal hardware is close to a 3279 and
+   the protocol not far off; RFC 1205 (TN5250) is the spec to work from, and the user's System/36
+   emulator is the host to validate against. The front ends already separate protocol from
+   rendering, which is where a second protocol would plug in. Emulator support for 5250 is far
+   thinner than for 3270, so expect less to compare against.
+
+**Also open, not scheduled above** (see *What is not implemented*): MF orders are parsed and not
+applied; `Attn` sends `IAC BREAK` on TN3270E where x3270 sends `IAC IP`; NEW-ENVIRON carries only
+a device name; no TLS client certificates; the web gateway has no connect dialog and takes fewer
+flags; `forwardKeys` forwards action kinds from the GUI's child windows unfiltered; the keypad's
+appearance has no visual test; on Linux at a forced scale factor 2 glyph edges are blended where
+Retina macOS doubles cleanly (found 2026-11-06, not investigated); accessibility (screen readers,
+keyboard-only use of the dialog and menus) and auto-update have never been looked at. Live
+witnesses still owed: TK5 against oversize, a modern z/OS or z/VM host (real TN3270E,
+`IBM-DYNAMIC`, BIND size 0x03), the GUI Model menu on a real desktop, CLI `Set()`+reconnect against
+VM, Sys Req over TN3270E, keypad buttons against a host.
 
 Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
 ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped
@@ -1526,7 +1590,14 @@ CMS Gopher 2.4.2 are in `$HOME/cmsgopher`; the `.tar.gz` pair yields only
 **VMGIF HAS SINCE BEEN FOUND — BUT AS OBJECT MODULES ONLY.** It is on disk at
 `$HOME/vmgif`, dated April 1993: `VMGIF.MODULE.T1` at 84600 bytes, the wrapper execs,
 `HELPCMS`, and `TONETABL` — its palette/dither table, which is the most directly useful
-piece. **There is no source.** Disassembling it is probably unnecessary: decoding GIF
+piece. **There is no source.** **AND IT CANNOT RUN WITHOUT GDDM — MEASURED 2026-11-06 from the
+module itself:** GDDM's application interface stub is linked in with its build tag beside it
+(`ADMASLV 91067 V2R3.0 PL77871`, GDDM V2R3, linked March 1991); the loader table resolves `FSINN`,
+`GSWIN`, `GSSEG` and twenty-odd `ADM*` entry points to that stub, which passes them to GDDM's
+resident code; and its own messages assume GDDM (`Sorry, GDDM could not open the device`, `This is
+not a graphics device`, saving to `ADMGDF`). The wrapper EXEC loads nothing because sites provided
+GDDM as a shared segment. So running VMGIF needs the same GDDM host as GOCA, and **our own
+`gif2ps` (roadmap item 19) is how PS gets tested.** Disassembling it is probably unnecessary: decoding GIF
 from the published spec is no harder than reverse-engineering a 1993 implementation once
 PS can push pixels, so VMGIF is best treated as a *behavioral* reference — evidence of
 what a 3279 could be made to do, and a palette to compare against.
@@ -1715,7 +1786,7 @@ worse than one that says which quarter is missing.
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
   `File` → `Connect…` for a session already running — a launch given a host still takes it, and
   every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*)
-  but is unmerged, unpublished and unsigned.
+  but is unpublished and unsigned.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
   **no connect dialog, no menus and no preferences**. It also does **not**

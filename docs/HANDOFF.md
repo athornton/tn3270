@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-06 (branch `packaging`; npm packages and native installers built and smoke-tested on five CI runners, all green in run 6 at `b279d89`; UNMERGED, UNPUBLISHED, UNSIGNED)
+# Handoff — state as of 2026-11-06 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge; UNPUBLISHED, UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,11 +7,38 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/superpowers/plans/2026-11-05-packaging.md` (15 tasks, all 15 done as code; Task 15 was this
 documentation pass).
 
-## START HERE — PACKAGING (TASKS 1-15) IS DONE ON BRANCH `packaging`, UNMERGED; CI GREEN ON ALL FIVE RUNNERS (RUN 6)
+## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
-**Branch `packaging`, 35 commits on top of `main` at `6492c10` (HEAD `6492c10` is this branch's own
-tip as of this entry).** It branches from `main` at the commit the previous entry below calls
-`17129ce` (oversize and model switching, merged). Nothing from this branch has been merged back.
+**2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
+deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,
+build, typecheck exit 0, 3113 tests in 132 files; CI run 42289622138 on `main` passed on all five
+runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
+
+### NEXT: THE ROADMAP, AGREED 2026-11-06
+
+Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
+checks owed by the user on a Mac, a Windows machine and a Raspberry Pi; first `npm publish`; a
+3279 icon; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
+`Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
+click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
+`pr3287`); (19) Programmed Symbols, tested with our own `gif2ps` converter; (20) printer graphics
+through PS, if GDDM's device docs confirm it; (21) GOCA, unverifiable until a GDDM host exists;
+(22) stretch goals: the super-terminal and 5250.
+
+**Two findings that shaped it:**
+- **VMGIF needs GDDM at run time** (measured from `~/vmgif/VMGIF.MODULE.T1`: GDDM's application
+  stub `ADMASLV 91067 V2R3.0` is linked in, the loader table resolves `FSINN`/`GSWIN`/`GSSEG` and
+  `ADM*` entries to it, and its messages assume GDDM). Without a GDDM host it is a behavioural
+  reference and a palette (`TONETABL`), not something to run. Hence `gif2ps`: PS support is tested
+  from generated data streams with no mainframe at all.
+- **The PS capacity of a 3279 must be read from GA23-0059 before item 19 is planned** (number of
+  loadable sets, symbols per set, cell size per model, colour-plane format), since it caps how many
+  unique cells an image can use.
+
+The rest of this section is the branch's state as of the merge, kept for its detail.
+
+**(Historical) Branch `packaging`, on top of `main` at the commit the previous entry below calls
+`17129ce` (oversize and model switching, merged).**
 
 ### WHAT IS DONE
 
