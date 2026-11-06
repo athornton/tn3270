@@ -10,8 +10,8 @@ import {
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  applyAction, applyGeometryChoice, applyPaste, describeTlsError, resolveScheme, startTransfer,
-  transferCommand, type Action, type TlsRemedy,
+  applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
+  startTransfer, transferCommand, DEFAULT_TLS, type Action, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
@@ -348,17 +348,34 @@ let transferScenarioRunning = false;
  */
 let shuttingDown = false;
 
-/** Turn any startup failure into something a person can act on. */
-function explain(err: unknown, host?: string, port?: number, remedy: TlsRemedy = 'flag'): string {
+/** The connect a failure came from, when it came from one. */
+interface ConnectTarget {
+  readonly host: string;
+  readonly port: number;
+  /** Whether the session dialled TLS. A plaintext failure is NOT described as a TLS one. */
+  readonly tls: boolean;
+  readonly remedy: TlsRemedy;
+}
+
+/**
+ * Turn any startup failure into something a person can act on.
+ *
+ * ONLY A TLS SESSION'S FAILURE IS DESCRIBED AS TLS. Node attaches a `code` to socket failures as
+ * well as TLS ones, and this once sent every coded error through `describeTlsError` -- so with TLS
+ * off, a host that was merely down read "TLS connection to 127.0.0.1:1 failed (ECONNREFUSED)", and a
+ * double-clicker went looking for a TLS setting that was not on. `describeConnectError` says what
+ * happened instead.
+ */
+function explain(err: unknown, target?: ConnectTarget): string {
   if (err instanceof UsageError) return err.message;
   if (err instanceof TerminalTypeError) return err.message;
   if (err instanceof OversizeError) return err.message;
   if (err instanceof Error) {
-    // Node attaches a `code` to socket and TLS failures; describeTlsError maps the ones
-    // worth explaining and names the flag that fixes each.
     const code = (err as { code?: string }).code;
-    if (code !== undefined && host !== undefined) {
-      return describeTlsError(code, host, port ?? 23, remedy);
+    if (code !== undefined && target !== undefined) {
+      return target.tls
+        ? describeTlsError(code, target.host, target.port, target.remedy)
+        : describeConnectError(code, target.host, target.port, err.message);
     }
     return err.message;
   }
@@ -449,7 +466,9 @@ app.whenReady().then(async () => {
 
   const fail = (message: string): void => {
     process.stderr.write(`${message}\n`);
-    win.webContents.send('error-message', message);
+    // A window closed while a connect was in flight has no renderer to tell; sending to it THROWS,
+    // and from a promise's catch that is an unhandled rejection. stderr above still has it.
+    if (!win.isDestroyed()) win.webContents.send('error-message', message);
   };
 
   const argv = process.argv.slice(2).filter((a) => !ELECTRON_SWITCHES.has(a));
@@ -540,6 +559,8 @@ async function openConnectDialog(
     // leave its promise to a destroyed renderer. `setImmediate` lets the reply go out first.
     setImmediate(() => {
       if (!cw.isDestroyed()) cw.close();
+      // The terminal window can be gone by now (closed in the gap): nothing to start a session in.
+      if (win.isDestroyed()) return;
       startSession(win, fail, r.args, 'dialog').catch((err: unknown) => {
         fail(explain(err));
       });
@@ -1725,7 +1746,10 @@ async function startSession(
     // Host and port passed in, so a TLS or socket failure names the actual target rather
     // than a placeholder -- 'vm:3270 accepted the connection but never completed a TLS
     // handshake ... use -insecure' is the message that matters against Hercules.
-    fail(explain(err, args.host, args.port, remedy));
+    fail(explain(err, {
+      host: args.host!, port: args.port ?? 23,
+      tls: (args.tls ?? DEFAULT_TLS).kind !== 'plaintext', remedy,
+    }));
   }
 
   // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a

@@ -35,15 +35,8 @@ const OWNED_BARE = new Set(['-insecure']);
  * itself reads argv, so this can never mistake an unrelated token for one flag's value or vice
  * versa.
  *
- * The one case that needs care is a `-model` with nothing after it at all -- e.g. the real
- * command line ends in a dangling `-model`. Naively consuming "the next token" would either eat
- * nothing (there is no next token) or, worse, silently swallow a token that in fact belongs to
- * something else. Here there IS no next token to eat, so the dangling flag is left in `kept`
- * rather than silently dropped: the form's own `-model <value>` is appended after it regardless,
- * and the combination reaches `parseGuiArgs` as two `-model` flags in a row, which it reports in
- * its own words (the first's bogus "value" becomes the form's model string, which only pushes
- * the mistake into a "more than one host given" error -- still a visible `UsageError`, never a
- * silently wrong session).
+ * A `-model` with no value cannot reach here: `parseGuiArgs` throws "-model needs a value" before
+ * it looks for a host, so that command line fails at startup and the dialog never opens.
  */
 function dropOwned(commandLine: readonly string[]): string[] {
   const kept: string[] = [];
@@ -51,12 +44,8 @@ function dropOwned(commandLine: readonly string[]): string[] {
     const flag = commandLine[i]!;
     if (OWNED_BARE.has(flag)) continue;
     if (OWNED_WITH_VALUE.has(flag)) {
-      if (i + 1 < commandLine.length) {
-        i++; // also drop the value that goes with it
-        continue;
-      }
-      // Dangling: no value follows, so there is nothing of the form's to collide with. Keep it
-      // and let parseGuiArgs see it.
+      i++; // also drop the value that goes with it
+      continue;
     }
     kept.push(flag);
   }

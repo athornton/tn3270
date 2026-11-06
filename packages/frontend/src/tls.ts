@@ -192,6 +192,32 @@ export function describeTlsError(
   }
 }
 
+/** Socket codes worth saying in words; anything else keeps Node's own message. */
+const CONNECT_WORDS: Readonly<Record<string, string>> = {
+  ECONNREFUSED: 'connection refused',
+  ENOTFOUND: 'no such host',
+  ETIMEDOUT: 'timed out',
+  EHOSTUNREACH: 'host unreachable',
+};
+
+/**
+ * Explains a PLAINTEXT connect failure -- one where TLS was never involved, so `describeTlsError`'s
+ * "TLS connection to ... failed" would send the reader to a setting that was not on.
+ *
+ * The action and the target come first (`cannot connect to host:port`), for the same truncation
+ * reason the dialog's TLS wording leads with its remedy. A code this does not know keeps the
+ * underlying message when there is one, rather than inventing words for it.
+ */
+export function describeConnectError(
+  code: string | undefined, host: string, port: number, message?: string,
+): string {
+  const target = `cannot connect to ${host}:${port}`;
+  const words = code !== undefined ? CONNECT_WORDS[code] : undefined;
+  if (words !== undefined) return `${target}: ${words} (${code})`;
+  if (message !== undefined && message !== '') return `${target}: ${message}`;
+  return code !== undefined ? `${target} (${code})` : target;
+}
+
 /** Wraps a socket as the `Connection` the core session consumes. */
 function adapt(sock: import('node:net').Socket): Connection {
   const conn: Connection = {

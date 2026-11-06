@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import net from 'node:net';
-import { resolveTls, describeTlsError, tcpConnect, type TlsFlags } from '../src/tls.js';
+import {
+  resolveTls, describeTlsError, describeConnectError, tcpConnect, type TlsFlags,
+} from '../src/tls.js';
 import { resolveHostSpec } from '../src/hostspec.js';
 
 /**
@@ -142,6 +144,39 @@ describe('TLS error messages name the flag that fixes them', () => {
       expect(describeTlsError('ERR_SSL_WRONG_VERSION_NUMBER', 'vm', 3270, 'dialog'))
         .toMatch(/not TLS/);
     });
+  });
+});
+
+/**
+ * A PLAINTEXT CONNECT THAT FAILS IS NOT A TLS FAILURE. Before this existed, the GUI sent every coded
+ * error through `describeTlsError`, so with TLS off a host that was simply down read "TLS connection
+ * to 127.0.0.1:1 failed (ECONNREFUSED)" -- pointing a double-clicker at a setting that was not on.
+ */
+describe('plaintext connect failures say what happened, not TLS', () => {
+  it.each([
+    ['ECONNREFUSED', 'connection refused'],
+    ['ENOTFOUND', 'no such host'],
+    ['ETIMEDOUT', 'timed out'],
+    ['EHOSTUNREACH', 'host unreachable'],
+  ])('%s is named in plain words with the host, port and code', (code, words) => {
+    expect(describeConnectError(code, '127.0.0.1', 1))
+      .toBe(`cannot connect to 127.0.0.1:1: ${words} (${code})`);
+  });
+
+  it('never mentions TLS, for a known code or an unknown one', () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH']) {
+      expect(describeConnectError(code, 'vm', 3270)).not.toMatch(/TLS/);
+    }
+  });
+
+  it('keeps an unknown code and the underlying message rather than inventing words', () => {
+    expect(describeConnectError('ENETUNREACH', 'vm', 3270, 'connect ENETUNREACH 10.0.0.1:3270'))
+      .toBe('cannot connect to vm:3270: connect ENETUNREACH 10.0.0.1:3270');
+    expect(describeConnectError('ENETUNREACH', 'vm', 3270)).toBe('cannot connect to vm:3270 (ENETUNREACH)');
+  });
+
+  it('puts the action -- cannot connect -- and the target first, where truncation cannot eat it', () => {
+    expect(describeConnectError('ECONNREFUSED', 'vm', 3270)).toMatch(/^cannot connect to vm:3270/);
   });
 });
 

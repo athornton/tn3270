@@ -24,7 +24,7 @@ export type { HostSpec, ResolvedHost } from './hostspec.js';
 // rules -- they were already shared between two front ends for exactly this reason.
 // `tcpConnect` comes too: it is the one transport all of them need.
 export {
-  takeTlsFlag, resolveTls, tcpConnect, describeTlsError,
+  takeTlsFlag, resolveTls, tcpConnect, describeTlsError, describeConnectError,
   DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';

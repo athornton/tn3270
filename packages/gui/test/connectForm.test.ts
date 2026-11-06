@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { dialogToArgv } from '../src/connectForm.js';
+import { planStartup } from '../src/connectDialog.js';
 import { buildSession, parseGuiArgs, UsageError } from '../src/args.js';
 
 /**
@@ -68,16 +69,11 @@ describe('dialogToArgv', () => {
       .toEqual(['-scheme', 'green', '-ddm', 'on', '-model', '3278-2-E', 'h']);
   });
 
-  it('a trailing bare -model with no value is kept, so parseGuiArgs reports the real mistake', () => {
-    // Naively skipping "the value after -model" would eat whatever token follows a -model
-    // that in fact has no value -- here, nothing follows it on the real command line at all,
-    // so the right answer is to leave the stray flag in place rather than silently drop it.
-    const argv = dialogToArgv({ host: 'h', model: '3278-2-E', tls: true }, ['-model']);
-    expect(argv).toEqual(['-model', '-model', '3278-2-E', 'h']);
-    // The form's own `-model 3278-2-E` makes the stray flag swallow it as a (bogus) value,
-    // which pushes '3278-2-E' into the host slot and 'h' becomes a second host -- a visible
-    // UsageError either way, never a silently wrong session.
-    expect(() => parseGuiArgs(argv)).toThrow(/more than one host given/);
+  it('a command line ending in a bare -model fails at parse time, so the dialog never sees it', () => {
+    // Why dropOwned has no "dangling -model" case: parseGuiArgs refuses the flag before it looks
+    // for a host, so planStartup fails the launch outright instead of opening the dialog.
+    expect(() => parseGuiArgs(['-model'])).toThrow(/-model needs a value/);
+    expect(planStartup(['-model'], { replay: '', shot: '', connect: '' }).kind).toBe('fail');
   });
 
   it('a host already on the command line is kept, so parseGuiArgs reports two hosts rather than picking one', () => {
