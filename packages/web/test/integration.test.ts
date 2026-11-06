@@ -315,6 +315,8 @@ function collect(ws: WebSocket, want: number): Promise<Array<Record<string, unkn
  */
 function rawUpgrade(opts: {
   port: number; token: string; origin?: string; body?: Buffer;
+  /** With a body: how many server messages make the response complete. */
+  expect?: number;
 }): { socket: Socket; response: Promise<Buffer> } {
   const socket = connect(opts.port, '127.0.0.1');
   const chunks: Buffer[] = [];
@@ -325,8 +327,16 @@ function rawUpgrade(opts: {
       // WHEN IS THE RESPONSE COMPLETE? It depends on whether a body was sent, and getting this
       // wrong hangs rather than fails: with no body the server answers only the ~130-byte 101 and
       // then waits for a `hello` that never comes, so a fixed byte threshold never trips.
+      //
+      // WITH a body, complete means the server's reply to it has ARRIVED, which is a count of
+      // parsed messages and never a byte count. A `> 2000` threshold stood here, and it passed on
+      // Linux for months because loopback delivered the whole burst in one or two chunks; the first
+      // macOS CI run (2026-11-06) resolved after `geometryChoices` and lost the `frame`, since the
+      // atlas message alone is past 2000 bytes. `serverMessagesFrom` stops at a partial frame, so a
+      // short read simply waits for the next chunk.
       const headerDone = all.includes('\r\n\r\n');
-      if (headerDone && (opts.body === undefined || all.length > 2000)) resolveP(all);
+      if (!headerDone) return;
+      if (opts.body === undefined || serverMessagesFrom(all).length >= (opts.expect ?? 1)) resolveP(all);
     });
     socket.on('close', () => resolveP(Buffer.concat(chunks)));
     socket.on('error', () => resolveP(Buffer.concat(chunks)));
@@ -595,7 +605,7 @@ describe('the gateway end to end', () => {
     // before this test, because no browser and no Node client writes before the 101.
     const { port, token } = await start();
     const { socket, response } = rawUpgrade({
-      port, token, body: maskedTextFrame(JSON.stringify({ kind: 'hello' })),
+      port, token, body: maskedTextFrame(JSON.stringify({ kind: 'hello' })), expect: 4,
     });
     const raw = await response;
     expect(raw.toString('latin1')).toMatch(/^HTTP\/1\.1 101 /);
@@ -1102,6 +1112,13 @@ describe('socket-carried file transfer', () => {
     await new Promise((res) => { ws.addEventListener('open', res, { once: true }); });
     const r = reader(ws);
     ws.send(JSON.stringify({ kind: 'hello' }));
+    // WAIT FOR THE HANDSHAKE BY COUNT, then settle. `settle()` alone measures quiet from the last
+    // message OR from when the reader was made, so on a slow runner -- the first macOS CI run,
+    // 2026-11-06 -- it returned before `session` had even arrived, and the test then read
+    // `session` as the reply to its transfer. On Linux the reply always beat the 25 ms window.
+    const kinds = [];
+    for (let i = 0; i < 4; i++) kinds.push((await r.next(`handshake message ${i + 1}`))['kind']);
+    expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     await r.settle();
     return { ws, r };
   }
