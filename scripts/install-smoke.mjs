@@ -67,6 +67,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publishedPackages, tarballName } from './pack.mjs';
+import { CheckFailed, displayEnv, fail, gone, killTree, run as runIn, said } from './smoke-lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const artifacts = join(root, 'artifacts', 'npm');
@@ -96,52 +97,13 @@ function envWithPath(binDir, extra = {}) {
   return env;
 }
 
-/** Children started as their own process-group leader (`run(..., { group: true })`, POSIX). */
-const GROUPED = new WeakSet();
-
-function killTree(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-  else if (GROUPED.has(child)) {
-    // A detached child leads its own process group: SIGKILL the GROUP, which takes Electron and
-    // its zygote/GPU/renderer children along with the launcher. SIGKILL to the launcher alone
-    // could not be forwarded, and would orphan Electron -- the very leak the launcher exists for.
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
-  } else child.kill('SIGKILL');
-}
-
 /**
- * Runs `cmd` by NAME with `env`, feeding `input`; resolves `{ code, signal, stdout, stderr }`.
- * Killed after `timeoutMs`, and then `timedOut` is set: a hung bin fails its check, never the run.
+ * Runs `cmd` by NAME with `env` (see `run` in smoke-lib.mjs), through `commandLine` so a Windows
+ * `.cmd` shim gets its shell.
  */
-function run(cmd, args, env, { input = '', timeoutMs = 30_000, group = false } = {}) {
-  return new Promise((resolve) => {
-    const [c, a, opts] = commandLine(cmd, args);
-    // `group`: its own process group (POSIX), so a timeout can kill the whole tree.
-    const detached = group && !win;
-    const child = spawn(c, a, { ...opts, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached });
-    if (detached) GROUPED.add(child);
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    const timer = setTimeout(() => { timedOut = true; killTree(child); }, timeoutMs);
-    child.on('error', (err) => { clearTimeout(timer); resolve({ code: null, signal: null, stdout, stderr: `${stderr}${err.message}`, timedOut }); });
-    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr, timedOut }); });
-    child.stdin.on('error', () => {}); // a bin that exits before reading stdin is its check's business
-    child.stdin.end(input);
-  });
-}
-
-class CheckFailed extends Error {}
-const fail = (why) => { throw new CheckFailed(why); };
-
-/** `result` summarised for a failure message, so a FAIL line says what actually came back. */
-function said(r) {
-  const clip = (s) => JSON.stringify(s.length > 300 ? `${s.slice(0, 300)}...` : s);
-  return `exit ${r.code}${r.signal ? ` signal ${r.signal}` : ''}${r.timedOut ? ' (TIMED OUT)' : ''}, `
-    + `stdout ${clip(r.stdout)}, stderr ${clip(r.stderr)}`;
+function run(cmd, args, env, opts = {}) {
+  const [c, a, spawnOptions] = commandLine(cmd, args);
+  return runIn(c, a, env, { ...opts, spawnOptions });
 }
 
 async function usageError(bin, env) {
@@ -149,11 +111,6 @@ async function usageError(bin, env) {
   if (r.code !== 2 || !r.stderr.includes('unrecognized argument')) {
     fail(`expected exit 2 and "unrecognized argument" on stderr; got ${said(r)}`);
   }
-}
-
-/** True once `pid` no longer exists. `process.kill(pid, 0)` throws ESRCH for a dead process. */
-function gone(pid) {
-  try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; }
 }
 
 /**
@@ -211,21 +168,6 @@ async function webServes(env) {
     await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
   }
   if (!gone(child.pid)) fail(`killed PID ${child.pid}, but it is still running`);
-}
-
-/**
- * The display an installed Electron needs. `DISPLAY` set (a desktop, or CI under `xvfb-run`) is
- * used as it is. On Linux without one, this dev box's userspace Xvfb from `xvfb.mjs` -- and with it
- * the micromamba GUI libraries and fontconfig, which the INSTALLED Electron needs exactly as the
- * repo's does. Imported lazily: `xvfb.mjs` resolves the repo's own Electron at load time, which a
- * cli/tui/web run has no business touching.
- */
-async function displayEnv(env) {
-  if (process.platform !== 'linux' || process.env.DISPLAY) return env;
-  const { guiEnv } = await import('../packages/gui/scripts/xvfb.mjs');
-  const g = guiEnv();
-  const pick = ['DISPLAY', 'LD_LIBRARY_PATH', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE'];
-  return { ...env, ...Object.fromEntries(pick.map((k) => [k, g[k]])) };
 }
 
 /**

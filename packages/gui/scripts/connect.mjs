@@ -28,8 +28,7 @@
  *     TN3270_GUI_MAIN=app node packages/gui/scripts/connect.mjs     # against the bundle
  */
 import { spawn } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
-import net from 'node:net';
+import { descendants, sleep, startServer, until } from '../../../scripts/smoke-lib.mjs';
 import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const main = guiMain();
@@ -54,35 +53,6 @@ const ARGV = ['--no-sandbox', '--disable-gpu'];
 /** `HANDSHAKE_TIMEOUT_MS` in packages/frontend/src/tls.ts is 10 s; the TLS case waits past it. */
 const HANDSHAKE_BOUND_MS = 20_000;
 
-const IAC = 255, DO = 253, WILL = 251, TTYPE = 24;
-
-/** A throwaway server on port 0 that records connections and what each client sent first. */
-function startServer({ silent = false } = {}) {
-  return new Promise((resolve) => {
-    const seen = { connections: 0, bytes: Buffer.alloc(0) };
-    const sockets = new Set();
-    const server = net.createServer((sock) => {
-      seen.connections++;
-      sockets.add(sock);
-      sock.on('data', (b) => { seen.bytes = Buffer.concat([seen.bytes, b]); });
-      sock.on('error', () => {});
-      sock.on('close', () => { sockets.delete(sock); });
-      if (!silent) sock.write(Buffer.from([IAC, DO, TTYPE]));
-    });
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        port: server.address().port,
-        seen,
-        willTtype: () => seen.bytes.includes(Buffer.from([IAC, WILL, TTYPE])),
-        close: () => new Promise((r) => {
-          for (const s of sockets) s.destroy();
-          server.close(() => r());
-        }),
-      });
-    });
-  });
-}
-
 /** A port with nothing listening: bound, read, released. */
 async function deadPort() {
   const s = await startServer();
@@ -90,39 +60,7 @@ async function deadPort() {
   return s.port;
 }
 
-/** Every descendant of `pid`, from /proc -- read before the kill, checked after it. */
-function descendants(pid) {
-  const parent = new Map();
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const stat = readFileSync(`/proc/${name}/stat`, 'utf8');
-      // Field 4 (ppid) comes after the parenthesised comm, which may itself contain spaces.
-      const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-      parent.set(Number(name), ppid);
-    } catch { /* gone already */ }
-  }
-  const out = [];
-  const queue = [pid];
-  while (queue.length > 0) {
-    const p = queue.shift();
-    for (const [child, pp] of parent) if (pp === p) { out.push(child); queue.push(child); }
-  }
-  return out;
-}
-
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** Polls `cond` until true or `ms` elapse; true when it held. */
-async function until(cond, ms) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    if (cond()) return true;
-    await sleep(100);
-  }
-  return cond();
-}
 
 /** One client launch. `form` goes to TN3270_GUI_CONNECT; `extra` is appended to argv. */
 function launch(form, extra = []) {

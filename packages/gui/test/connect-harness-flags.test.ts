@@ -15,6 +15,9 @@ const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const harness = readFileSync(join(guiDir, 'scripts', 'connect.mjs'), 'utf8');
 /** Comments stripped, for the absences -- the harness's prose names what it must not do. */
 const code = harness.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+/** The shared smoke helpers the harness imports its server from, comments stripped likewise. */
+const libCode = readFileSync(join(guiDir, '..', '..', 'scripts', 'smoke-lib.mjs'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 describe('the connect harness', () => {
   it('runs guiMain() and prints which entry it tested', () => {
@@ -43,7 +46,12 @@ describe('the connect harness', () => {
   });
 
   it('proves PLAINTEXT, not merely a connection -- the check the always-TLS mutant fails', () => {
-    expect(code).toContain('IAC, WILL, TTYPE');
+    // The server moved to scripts/smoke-lib.mjs (shared with package-smoke.mjs), so this pins both
+    // halves: the harness imports it and checks its reply, and the reply it checks is WILL TTYPE.
+    expect(code).toMatch(/import \{[^}]*\bstartServer\b[^}]*\} from '\.\.\/\.\.\/\.\.\/scripts\/smoke-lib\.mjs'/);
+    expect(code).toMatch(/\[[^\]]*PLAINTEXT[^\]]*, srv\.willTtype\(\)\]/);
+    expect(libCode).toMatch(/willTtype: \(\) => seen\.bytes\.includes\(Buffer\.from\(\[IAC, WILL, TTYPE\]\)\)/);
+    expect(libCode).toMatch(/const IAC = 255, DO = 253, WILL = 251, TTYPE = 24;/);
   });
 
   it('kills by PID and asserts no survivors, never by name', () => {
