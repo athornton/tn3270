@@ -17,12 +17,15 @@
     "version:set": "node scripts/set-version.mjs",
     "bundle:gui": "node packages/gui/scripts/bundle.mjs",
     "pack:npm": "node scripts/pack.mjs",
-    "smoke": "node scripts/install-smoke.mjs"
+    "smoke": "node scripts/install-smoke.mjs",
+    "package:gui": "npm run bundle:gui && electron-builder --projectDir packages/gui --publish never",
+    "package": "npm run build && npm run bundle:gui && npm run pack:npm && npm run smoke && npm run package:gui"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
-    "vitest": "^3.2.4",
     "@types/node": "^22.10.0",
-    "esbuild": "^0.28.2"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.4"
   }
 }
