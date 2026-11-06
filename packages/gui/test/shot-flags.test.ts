@@ -16,6 +16,16 @@ const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const shot = readFileSync(join(guiDir, 'scripts', 'shot.mjs'), 'utf8');
 
 describe('the screenshot harness', () => {
+  it('runs guiMain() and prints which entry it tested, and refuses a stale dist/ or app/', () => {
+    // Without the print, a run against the bundle and a run against dist would look identical
+    // in the log, and a typo in TN3270_GUI_MAIN that silently fell back to dist would report the
+    // bundle as proven. `xvfb.mjs`'s `staleness()` is the shared check `keys.mjs`, `clicks.mjs`
+    // and `transfer.mjs` also use; `xvfbStaleness.test.ts` pins its own mechanics.
+    expect(shot).toMatch(/const main = guiMain\(\)/);
+    expect(shot).toContain('console.log(`entry: ${guiMainLabel()}`)');
+    expect(shot).toContain("staleness(main, ['gui', 'canvas'])");
+  });
+
   it('keeps -insecure in the argv it runs the client with', () => {
     // Mandatory even though these runs replay a trace and open no socket: the moment anyone
     // points this at a real host, default-on TLS against plaintext Hercules does not fail,

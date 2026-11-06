@@ -31,14 +31,14 @@
  *     node packages/gui/scripts/keys.mjs
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electron, guiEnv } from './xvfb.mjs';
+import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
-const main = join(here, '..', 'dist', 'main.js');
+const main = guiMain();
+console.log(`entry: ${guiMainLabel()}`);
 const trace = join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
 
 /**
@@ -319,38 +319,19 @@ if (expected.length === 0) {
  * sit above `canvas`'s newer source. Each package is its own `tsc --build` project with its own
  * outputs and its own `.tsbuildinfo`, so each is compared against its own sources -- and the
  * refusal names WHICH package to rebuild, since `--force` on the wrong one clears nothing.
- */
-// RECURSIVE, because tsconfig's `include` is (`src/**/*.ts`): a file at `src/foo/bar.ts`
-// compiles to `dist/foo/bar.js` and would otherwise be invisible to BOTH sides of the
-// comparison -- the same false-GREEN class as the `.cts` bug below. `src/` is flat today.
-const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir, { recursive: true })
-  .filter((f) => suffixes.some((s) => f.endsWith(s)))
-  .map((f) => statSync(join(dir, f)).mtimeMs));
-/**
- * EVERY REMEDY HERE NAMES THE WHOLE-WORKSPACE BUILD, not `-w @tn3270/gui`.
  *
- * It used to say `-w @tn3270/gui`, and that command is now the one that PRODUCES a broken
- * tree: MEASURED, a scoped gui build exits 0, compiles `canvas` through the project reference
- * and never runs `canvas`'s second build step, so `atlas.json` is missing and the client dies
- * at startup. `readAtlas` in `packages/canvas/src/assets.ts` carries the full measurement.
- * A refusal that names its own fix is worthless if the fix is the cause, so these say
- * `npm run build`, which runs every workspace's own build script and bakes the atlas.
+ * ## MOVED INTO `xvfb.mjs`'s `staleness()`, EVERY WORD OF THE ARGUMENT ABOVE STILL TRUE
+ *
+ * `clicks.mjs` and `transfer.mjs` each carried their own copy of this exact check with their own
+ * package list, and the three had already begun to drift. The mechanics -- newest-output against
+ * newest-source, per package, `.cts`/`.cjs` named explicitly on both sides, the whole-workspace
+ * `REBUILD` remedy -- now live once in `xvfb.mjs`, extended there to ALSO refuse a bundle
+ * `app/BUNDLED` predates when `TN3270_GUI_MAIN=app` (see that function's own doc for the app-mode
+ * half, which is new in this task and has no history to repeat).
  */
-const REBUILD = 'run: npm run build';
-if (!existsSync(main)) {
-  refuse(`there is no ${main} to run`, REBUILD);
-}
-for (const pkg of ['gui', 'canvas']) {
-  const root = join(here, '..', '..', pkg);
-  if (!existsSync(join(root, 'dist'))) {
-    refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`, REBUILD);
-  }
-  if (newest(join(root, 'dist'), '.js', '.cjs') < newest(join(root, 'src'), '.ts', '.cts')) {
-    refuse(`packages/${pkg}/dist is OLDER than packages/${pkg}/src, so this run would test ` +
-      'stale code',
-      `${REBUILD}  (if that reports everything up to date, only a timestamp moved: ` +
-      `npx tsc --build --force packages/${pkg})`);
-  }
+{
+  const problem = staleness(main, ['gui', 'canvas']);
+  if (problem !== undefined) refuse(problem.why, problem.fix);
 }
 
 const result = spawnSync(electron, [main, ...ARGV, '127.0.0.1:1'], {

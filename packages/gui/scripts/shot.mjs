@@ -27,12 +27,28 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, copyFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electron, guiEnv } from './xvfb.mjs';
+import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
 const goldenDir = join(here, '..', 'test', 'golden');
-const main = join(here, '..', 'dist', 'main.js');
+const main = guiMain();
+console.log(`entry: ${guiMainLabel()}`);
+
+/**
+ * `dist/` OR `app/` IS WHAT RUNS, and nothing in this harness builds either. See `keys.mjs` for
+ * the whole argument (newest output against newest source, per package, and why `tsc --build
+ * --dry` is not an oracle); `xvfb.mjs`'s `staleness()` is that same check, shared so the five
+ * harnesses cannot drift from each other, now extended to refuse a bundle `app/BUNDLED` predates.
+ */
+{
+  const problem = staleness(main, ['gui', 'canvas']);
+  if (problem !== undefined) {
+    console.log(`FAIL ${problem.why}`);
+    console.log(`     ${problem.fix}`);
+    process.exit(1);
+  }
+}
 
 /**
  * The client's argv, as one constant so the guard test has a single thing to pin.
