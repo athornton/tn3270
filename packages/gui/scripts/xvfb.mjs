@@ -5,11 +5,12 @@
  * below each cost a run to find and would be re-learned independently otherwise.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { distStaleness, newest } from '../../../scripts/freshness.mjs';
+import { distStaleness } from '../../../scripts/freshness.mjs';
+import { bundleStaleness } from './bundleVerify.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -106,15 +107,6 @@ export function guiMainLabel() {
   return `${which()} (${guiMain()})`;
 }
 
-/**
- * EVERY PACKAGE AND FILE `app/`'s BUNDLE DEPENDS ON, so the app-mode staleness check below can
- * refuse a bundle that predates ANY of them -- not just the dist/ packages a given harness
- * happens to exercise. `scripts/bundle.mjs` inlines core, frontend, canvas and node-files into
- * `app/main.js` and copies gui's own documents and `ui.css` flat; a stale bundle over any of
- * those seven things is stale over something every harness would otherwise trust silently.
- */
-const BUNDLE_PACKAGES = ['core', 'frontend', 'canvas', 'node-files', 'gui'];
-const BUNDLE_GUI_FILES = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'ui.css'];
 
 const REBUILD = 'run: npm run build';
 const REBUNDLE = 'run: npm run build && npm run bundle:gui';
@@ -135,7 +127,7 @@ const REBUNDLE = 'run: npm run build && npm run bundle:gui';
  * of which packages' staleness it can detect (`clicks.mjs`'s comment explains why `canvas`
  * matters more to it than `gui` does). In APP MODE the check is NOT scoped to `pkgs`: `app/` is
  * one bundle of everything, so every harness run against it must be checked against the SAME
- * full dependency set (`BUNDLE_PACKAGES`/`BUNDLE_GUI_FILES`) regardless of which packages that
+ * full dependency set (`BUNDLE_PACKAGES`/`BUNDLE_GUI_FILES`, in bundleVerify.mjs) regardless of which packages that
  * harness's own dist-mode coverage happens to name.
  *
  * ## THE CHAIN IS src -> dist -> app, AND APP MODE USED TO CHECK ONLY THE LAST HOP
@@ -167,43 +159,10 @@ export function staleness(main, pkgs, packagesRoot = join(gui, '..')) {
   const guiRoot = join(packagesRoot, 'gui');
   if (main === join(guiRoot, 'app', 'main.js')) {
     if (!existsSync(main)) return { why: `there is no ${main} to run`, fix: REBUNDLE };
-    const marker = join(guiRoot, 'app', 'BUNDLED');
-    if (!existsSync(marker)) {
-      return {
-        why: `there is no ${marker}, so packages/gui/app is an incomplete bundle`,
-        fix: REBUNDLE,
-      };
-    }
-
-    // HOP 1 of 2: src -> dist, for every package the bundle inlines or copies from, not just
-    // whichever `pkgs` this harness's own dist-mode coverage names.
-    const distProblem = distStaleness(packagesRoot, BUNDLE_PACKAGES);
-    if (distProblem !== undefined) {
-      return { why: distProblem.why, fix: `${REBUNDLE}${distProblem.forceHint}` };
-    }
-
-    // HOP 2 of 2: dist -> app. `BUNDLED` is written LAST, after `bundle.mjs`'s own self-check
-    // passes, so its mtime is "when the bundle was actually produced" -- compared against each
-    // package's OWN newest dist file, not `app/main.js`, which a PARTIAL bundle could still have
-    // touched before failing.
-    const bundledAt = statSync(marker).mtimeMs;
-    for (const pkg of BUNDLE_PACKAGES) {
-      const pkgDist = join(packagesRoot, pkg, 'dist');
-      if (newest(pkgDist, '.js', '.cjs') > bundledAt) {
-        return {
-          why: `packages/${pkg}/dist is NEWER than app/BUNDLED, so this run would test a stale bundle`,
-          fix: REBUNDLE,
-        };
-      }
-    }
-    for (const f of BUNDLE_GUI_FILES) {
-      if (statSync(join(guiRoot, f)).mtimeMs > bundledAt) {
-        return {
-          why: `packages/gui/${f} is NEWER than app/BUNDLED, so this run would test a stale bundle`,
-          fix: REBUNDLE,
-        };
-      }
-    }
+    // Both hops (src -> dist, dist -> app) and the marker: one implementation, shared with
+    // scripts/pack.mjs, in bundleVerify.mjs.
+    const problem = bundleStaleness(packagesRoot);
+    if (problem !== undefined) return { why: problem.why, fix: `${REBUNDLE}${problem.forceHint}` };
     return undefined;
   }
 

@@ -9,10 +9,11 @@
  * already finished -- packed fine. `BUNDLED` says a bundle finished, not that `app/` still matches
  * what finished.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ATLAS_FILES } from '@tn3270/canvas';
+import { distStaleness, newest } from '../../../scripts/freshness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
@@ -76,4 +77,47 @@ export function verify(outDir) {
     }
   }
   if (problems.length > 0) throw new BundleError(`app/ is not self-contained:\n  ${problems.join('\n  ')}`);
+}
+
+/** Every package whose `dist` the bundle inlines (core, frontend, canvas, node-files) or reads (gui). */
+export const BUNDLE_PACKAGES = Object.freeze(['core', 'frontend', 'canvas', 'node-files', 'gui']);
+
+/**
+ * `packages/gui`'s own files the bundle copies flat: every document, plus the stylesheet.
+ * DERIVED FROM `DOCUMENTS`. A retyped list lived in `xvfb.mjs` and did not grow when the Connect
+ * dialog added `connect.html` (found 2026-11-06), so editing that page left the bundle "fresh".
+ */
+export const BUNDLE_GUI_FILES = Object.freeze([...DOCUMENTS, 'ui.css']);
+
+/**
+ * Whether `packagesRoot/gui/app` is a bundle of the CURRENT code: `{ why, forceHint }`, or
+ * `undefined`. Both hops of src -> dist -> app (see `xvfb.mjs`'s `staleness()` for how each one
+ * was found missing): every bundled package's `dist` is at least as new as its `src`, and
+ * `app/BUNDLED` -- written last, after the self-check -- is newer than every bundled `dist` file
+ * and every copied gui file.
+ *
+ * CALLED BY THE HARNESSES (`xvfb.mjs`) AND BY `scripts/pack.mjs`. Pack learned it on 2026-11-06:
+ * `npm run build && npm run pack:npm` with no `bundle:gui` between them packed a bundle from
+ * before the build, which then rejected a Chromium switch the newer source strips.
+ */
+export function bundleStaleness(packagesRoot) {
+  const marker = join(packagesRoot, 'gui', 'app', 'BUNDLED');
+  if (!existsSync(marker)) {
+    return { why: `there is no ${marker}, so packages/gui/app is an incomplete bundle`, forceHint: '' };
+  }
+  const distProblem = distStaleness(packagesRoot, BUNDLE_PACKAGES);
+  if (distProblem !== undefined) return distProblem;
+  const bundledAt = statSync(marker).mtimeMs;
+  for (const pkg of BUNDLE_PACKAGES) {
+    if (newest(join(packagesRoot, pkg, 'dist'), '.js', '.cjs') > bundledAt) {
+      return { why: `packages/${pkg}/dist is NEWER than app/BUNDLED, so the bundle is stale`, forceHint: '' };
+    }
+  }
+  for (const f of BUNDLE_GUI_FILES) {
+    const p = join(packagesRoot, 'gui', f);
+    if (existsSync(p) && statSync(p).mtimeMs > bundledAt) {
+      return { why: `packages/gui/${f} is NEWER than app/BUNDLED, so the bundle is stale`, forceHint: '' };
+    }
+  }
+  return undefined;
 }

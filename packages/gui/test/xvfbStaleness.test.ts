@@ -5,6 +5,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staleness } from '../scripts/xvfb.mjs';
+import { BUNDLE_GUI_FILES, BUNDLE_PACKAGES, bundleStaleness } from '../scripts/bundleVerify.mjs';
 
 /**
  * Guards `xvfb.mjs`'s `staleness()` BEHAVIOURALLY, against a temp `packages/` tree with mtimes
@@ -35,11 +36,6 @@ import { staleness } from '../scripts/xvfb.mjs';
  */
 const root = () => mkdtempSync(join(tmpdir(), 'staleness-'));
 
-/** `BUNDLE_PACKAGES` in `xvfb.mjs`, copied here because the constant is not exported. The two
- *  lists are independently load-bearing -- `bundle.mjs` has its own copy, by the same reasoning
- *  given there -- so this one is a third, deliberately, rather than reaching into the module's
- *  internals to avoid writing it down. */
-const BUNDLE_PACKAGES = ['core', 'frontend', 'canvas', 'node-files', 'gui'];
 
 /** One package: a `src/*.ts` and a `dist/*.js`, with the given mtimes. `pkg === 'gui'` writes
  *  `dist/main.js`, matching the real layout (`guiMain()` resolves to exactly that path); every
@@ -60,7 +56,7 @@ function makePackage(pkgRoot: string, pkg: string, srcAt: number, distAt: number
 
 /** `packages/gui`'s own HTML/CSS files that `BUNDLE_GUI_FILES` checks, all set to one mtime. */
 function makeGuiFiles(pkgRoot: string, at: number): void {
-  for (const f of ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'ui.css']) {
+  for (const f of BUNDLE_GUI_FILES) {
     const p = join(pkgRoot, 'gui', f);
     writeFileSync(p, '');
     utimesSync(p, at, at);
@@ -164,6 +160,29 @@ describe('staleness() -- app mode', () => {
     const main = makeApp(tmp, { mainAt: 2000, markerAt: 3000 });
     const problem = staleness(main, ['gui'], tmp);
     expect(problem?.why).toMatch(/packages\/gui\/.*\.(html|css) is NEWER than app\/BUNDLED/);
+  });
+
+  it('refuses when connect.html alone is newer than app/BUNDLED', () => {
+    // A retyped file list in xvfb.mjs never grew when the Connect dialog added connect.html
+    // (2026-11-06), so editing that page left the bundle "fresh". The list now derives from
+    // bundleVerify's DOCUMENTS; this pins that the newest document is in it.
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) makePackage(tmp, pkg, 1000, 2000);
+    makeGuiFiles(tmp, 1000);
+    const main = makeApp(tmp, { mainAt: 3000, markerAt: 3000 });
+    const page = join(tmp, 'gui', 'connect.html');
+    utimesSync(page, 5000, 5000);
+    expect(staleness(main, ['gui'], tmp)?.why).toContain('packages/gui/connect.html is NEWER than app/BUNDLED');
+  });
+
+  it('bundleStaleness (what pack.mjs calls) refuses a bundle older than a dist, and passes an ordered tree', () => {
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) makePackage(tmp, pkg, 1000, 2000);
+    makeGuiFiles(tmp, 1000);
+    makeApp(tmp, { mainAt: 3000, markerAt: 3000 });
+    expect(bundleStaleness(tmp)).toBeUndefined();
+    makePackage(tmp, 'gui', 1000, 4000); // rebuilt after bundling, never re-bundled
+    expect(bundleStaleness(tmp)?.why).toContain('packages/gui/dist is NEWER than app/BUNDLED');
   });
 
   it('passes when every hop is correctly ordered: src -> dist -> BUNDLED', () => {

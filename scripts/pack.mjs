@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { distStaleness } from './freshness.mjs';
-import { BundleError, verify } from '../packages/gui/scripts/bundleVerify.mjs';
+import { BundleError, bundleStaleness, verify } from '../packages/gui/scripts/bundleVerify.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const packagesDir = join(root, 'packages');
@@ -97,6 +97,11 @@ function main() {
       if (err instanceof BundleError) die(`${err.message}: run npm run build && npm run bundle:gui`);
       throw err;
     }
+    // A COMPLETE bundle of OLD code passes verify(). MEASURED 2026-11-06: `npm run build && npm
+    // run pack:npm` with no `bundle:gui` between them packed a bundle older than gui/dist, and the
+    // installed tn3270-gui then rejected a Chromium switch the current source strips.
+    const bundleStale = bundleStaleness(join(root, 'packages'));
+    if (bundleStale !== undefined) die(`${bundleStale.why}: run npm run build && npm run bundle:gui${bundleStale.forceHint}`);
   }
   // Only where `dist` is shipped: gui ships `app/`, which bundle.mjs builds from named entry points.
   const stale = pkgs.filter(({ m }) => m.files?.includes('dist')).flatMap(({ dir }) => orphans(dir));
