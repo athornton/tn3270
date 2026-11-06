@@ -17,8 +17,8 @@ import { ATLAS_FILES } from '@tn3270/canvas';
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
 
-/** The documents main.ts loads. The connect dialog's lands here when it exists. */
-export const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html'];
+/** The documents main.ts loads. */
+export const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'connect.html'];
 
 /** A failure that names its fix. */
 export class BundleError extends Error {}

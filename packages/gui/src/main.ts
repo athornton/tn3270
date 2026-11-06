@@ -11,13 +11,12 @@ import {
 } from '@tn3270/core';
 import {
   applyAction, applyGeometryChoice, applyPaste, describeTlsError, resolveScheme, startTransfer,
-  transferCommand, type Action,
+  transferCommand, type Action, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
-import {
-  buildSession, parseGuiArgs, printGeometryNotices, UsageError, type GuiArgs,
-} from './args.js';
+import { buildSession, printGeometryNotices, UsageError, type GuiArgs } from './args.js';
+import { connectModels, parseConnectSeam, planStartup, submitConnect } from './connectDialog.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
@@ -256,6 +255,23 @@ const SEAM = Object.freeze({
    * kind belongs on this process's stdout.
    */
   waitMs: Number(process.env['TN3270_GUI_WAIT_MS'] ?? '40000'),
+  /**
+   * A NINTH TEST SEAM: `TN3270_GUI_CONNECT='{"host":"127.0.0.1:3270","model":"3278-2-E","tls":false}'`
+   * fills the startup Connect dialog and presses Connect.
+   *
+   * THROUGH THE DOM, not through `submitConnect`: main sets the page's own input values and clicks
+   * its own Connect button with `executeJavaScript`, so the boot file's real submit listener, the
+   * preload and the `connect:submit` handler all run -- a seam that called the handler directly
+   * would skip exactly the plumbing that has never run. Read only when the dialog opens, i.e. a
+   * launch with no host; with a host it is ignored, which is itself a fact the harness can check.
+   *
+   * It prints `connect: dialog shown`, `connect: submitted`, and `connect: error <text>` if the
+   * dialog's error line has text once the submit has settled. The text is the PARSER'S message
+   * about the host the harness chose, never anything an operator typed, so it is safe to print.
+   *
+   * EMPTY MEANS ABSENT. Malformed JSON is refused by name (`parseConnectSeam`).
+   */
+  connect: process.env['TN3270_GUI_CONNECT'] ?? '',
 });
 
 /** The `wait:` prefix on a `TN3270_GUI_KEYS` step. Exported for the test that pins the seam. */
@@ -333,7 +349,7 @@ let transferScenarioRunning = false;
 let shuttingDown = false;
 
 /** Turn any startup failure into something a person can act on. */
-function explain(err: unknown, host?: string, port?: number): string {
+function explain(err: unknown, host?: string, port?: number, remedy: TlsRemedy = 'flag'): string {
   if (err instanceof UsageError) return err.message;
   if (err instanceof TerminalTypeError) return err.message;
   if (err instanceof OversizeError) return err.message;
@@ -342,7 +358,7 @@ function explain(err: unknown, host?: string, port?: number): string {
     // worth explaining and names the flag that fixes each.
     const code = (err as { code?: string }).code;
     if (code !== undefined && host !== undefined) {
-      return describeTlsError(code, host, port ?? 23);
+      return describeTlsError(code, host, port ?? 23, remedy);
     }
     return err.message;
   }
@@ -436,18 +452,153 @@ app.whenReady().then(async () => {
     win.webContents.send('error-message', message);
   };
 
-  let args;
+  const argv = process.argv.slice(2).filter((a) => !ELECTRON_SWITCHES.has(a));
+  const plan = planStartup(argv, SEAM);
+  if (plan.kind === 'fail') {
+    fail(explain(plan.err));
+    await maybeCapture(win, 1);
+    return;
+  }
+  if (plan.kind === 'session') {
+    await startSession(win, fail, plan.args, 'flag');
+    return;
+  }
+  // No host: ask for one. The session, if any, starts from the dialog's submit handler.
+  await openConnectDialog(win, fail, argv);
+});
+
+/**
+ * THE STARTUP CONNECT DIALOG, for a launch with no host -- a double-clicked app, typically. Spec
+ * docs/superpowers/specs/2026-11-05-packaging-design.md section 2.
+ *
+ * MODAL OVER THE TERMINAL WINDOW, which stays up behind it: the window is where a failed connect is
+ * shown afterwards, exactly as for a command-line launch, and the dialog does NOT reopen (File >
+ * Connect... is milestone B).
+ *
+ * ## REGISTERED ONCE, ON THIS PATH ONLY
+ *
+ * The two `connect:` handlers are registered here and nowhere else, and this function runs at most
+ * once per process -- from `app.whenReady()`, which nothing re-enters. `ipcMain.handle` THROWS on a
+ * second registration, which is the rule `startSession`'s own handlers live under too.
+ *
+ * `started` IS THE ONE-SESSION GUARD. `startSession` registers handlers and must run once; the page
+ * disables Connect while a submit is in flight, but a page is not where a once-only rule should
+ * live, so main refuses a second start itself.
+ *
+ * ## QUIT, ESCAPE, CLOSE ALL QUIT THE APP -- BUT ONLY BEFORE A SUBMIT SUCCEEDED
+ *
+ * Closing the dialog leaves the terminal window open with nothing in it and nothing to connect it
+ * to, so `closed` quits. A SUCCESSFUL submit closes the dialog too, and that close must NOT quit:
+ * `started` is set before `close()` and the `closed` handler checks it.
+ */
+async function openConnectDialog(
+  win: BrowserWindow, fail: (message: string) => void, commandLine: readonly string[],
+): Promise<void> {
+  let seamForm;
   try {
-    const argv = process.argv.slice(2).filter((a) => !ELECTRON_SWITCHES.has(a));
-    args = parseGuiArgs(argv);
+    seamForm = parseConnectSeam(SEAM.connect);
   } catch (err) {
     fail(explain(err));
     await maybeCapture(win, 1);
     return;
   }
 
-  await startSession(win, fail, args);
-});
+  let started = false;
+  const cw = new BrowserWindow({
+    width: 420,
+    height: 240,
+    useContentSize: true,
+    title: 'Connect',
+    parent: win,
+    modal: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      // `.cjs`, compiled from connectPreload.cts: an ESM preload cannot load.
+      preload: layout.preload('connectPreload.cjs'),
+    },
+  });
+  // The deprecated five-argument form, matching the other windows -- see the keypad's note.
+  cw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    process.stdout.write(`connect[${level}] ${sourceId}:${line} ${message}\n`);
+  });
+  cw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    process.stdout.write(`connect window failed to load ${url}: ${code} ${desc}\n`);
+  });
+  cw.on('closed', () => { if (!started) app.quit(); });
+
+  ipcMain.handle('connect:models', () => connectModels());
+  ipcMain.handle('connect:submit', async (_e, form: unknown) => {
+    if (started) return { error: 'already connecting' };
+    const r = submitConnect(form, commandLine);
+    if (!r.ok) return { error: r.error };
+    started = true;
+    // AFTER the reply, not before it: closing the window that is awaiting this `invoke` would
+    // leave its promise to a destroyed renderer. `setImmediate` lets the reply go out first.
+    setImmediate(() => {
+      if (!cw.isDestroyed()) cw.close();
+      startSession(win, fail, r.args, 'dialog').catch((err: unknown) => {
+        fail(explain(err));
+      });
+    });
+    return { ok: true };
+  });
+  ipcMain.on('connect:quit', () => { app.quit(); });
+
+  await cw.loadFile(layout.document('connect.html'));
+  process.stdout.write('connect: dialog shown\n');
+  if (seamForm !== undefined) await driveConnectDialog(cw, seamForm);
+}
+
+/**
+ * `TN3270_GUI_CONNECT`'s driver: type the form into the dialog's own controls and press its own
+ * Connect, then report what the dialog's error line says. See `SEAM.connect`.
+ *
+ * WAITS FOR CONNECT TO BE ENABLED first, because the page disables it until the model list has
+ * arrived -- clicking a disabled button does nothing at all, which would read as a broken dialog.
+ * And then for the submit to settle: either the window closes (accepted) or Connect is enabled
+ * again (refused, with the reason in the error line).
+ *
+ * A THROW HERE WOULD BE A HANG, so it is caught: this runs inside `app.whenReady()`'s promise.
+ */
+async function driveConnectDialog(
+  cw: BrowserWindow, form: { host: string; model: string; tls: boolean },
+): Promise<void> {
+  const until = async (expr: string): Promise<boolean> => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (cw.isDestroyed()) return false;
+      if (await cw.webContents.executeJavaScript(expr) === true) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+  try {
+    if (!await until("document.querySelector('#connect').disabled === false")) {
+      process.stdout.write('connect: Connect never became enabled\n');
+      return;
+    }
+    await cw.webContents.executeJavaScript(`(() => {
+      const f = ${JSON.stringify(form)};
+      document.querySelector('#host').value = f.host;
+      document.querySelector('#model').value = f.model;
+      document.querySelector('#tls').checked = f.tls;
+      document.querySelector('#connect').click();
+    })()`);
+    process.stdout.write('connect: submitted\n');
+    // Settled = the window closed (accepted) or Connect came back (refused).
+    await until("document.querySelector('#connect').disabled === false");
+    if (cw.isDestroyed()) return;
+    const text = await cw.webContents.executeJavaScript(
+      "document.querySelector('#connect-error').textContent") as string;
+    if (text !== '') process.stdout.write(`connect: error ${text}\n`);
+  } catch (err) {
+    if (!cw.isDestroyed()) process.stdout.write(`connect: DRIVE FAILED ${explain(err)}\n`);
+  }
+}
 
 /**
  * Everything after the arguments are known: the session, the atlas, the windows, the menus, the IPC
@@ -460,7 +611,7 @@ app.whenReady().then(async () => {
  * `transferWin`). Moved out of `app.whenReady()` verbatim; the module-level indentation is the same.
  */
 async function startSession(
-  win: BrowserWindow, fail: (message: string) => void, args: GuiArgs,
+  win: BrowserWindow, fail: (message: string) => void, args: GuiArgs, remedy: TlsRemedy,
 ): Promise<void> {
   // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
   // string lookup in the paint path.
@@ -1574,7 +1725,7 @@ async function startSession(
     // Host and port passed in, so a TLS or socket failure names the actual target rather
     // than a placeholder -- 'vm:3270 accepted the connection but never completed a TLS
     // handshake ... use -insecure' is the message that matters against Hercules.
-    fail(explain(err, args.host, args.port));
+    fail(explain(err, args.host, args.port, remedy));
   }
 
   // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a

@@ -23,7 +23,7 @@ describe.skipIf(!bundled)('the bundled app/ (skipped: no packages/gui/app/BUNDLE
   const docs = bundled ? readdirSync(app).filter((f) => f.endsWith('.html')) : [];
 
   it('has every document main.ts loads', () => {
-    expect(docs.sort()).toEqual(['index.html', 'keyboard.html', 'keypad.html', 'transfer.html']);
+    expect(docs.sort()).toEqual(['connect.html', 'index.html', 'keyboard.html', 'keypad.html', 'transfer.html']);
   });
 
   it('carries no import map and references nothing outside app/', () => {

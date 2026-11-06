@@ -27,7 +27,7 @@ export {
   takeTlsFlag, resolveTls, tcpConnect, describeTlsError,
   DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
-export type { TlsFlags, TlsOptions } from './tls.js';
+export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';
 
 // `-oversize`, the same way: one parser so the front ends cannot drift on it either.
 export { takeOversizeFlag, OVERSIZE_USAGE } from './oversizeFlag.js';

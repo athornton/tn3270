@@ -94,6 +94,22 @@ body.ui-surface {
 */
 #status { margin: 10px 0 12px; min-height: 2.4em; white-space: pre-wrap; color: GrayText; }
 
+/*
+  THE CONNECT DIALOG'S ERROR LINE, and unlike `#status` above it IS only ever an error: the boot
+  file writes nothing else to it, so a colour here cannot lie. WRAPPED, never clipped -- a usage
+  line is long, and the remedy in a TLS message must not be cut off. `min-height` reserves two lines
+  so the buttons do not jump when an error appears; a longer message grows the box and scrolls.
+*/
+#connect-error {
+  /* Whole lines, so the box never cuts one in half: two reserved, five before it scrolls. */
+  line-height: 1.3; min-height: calc(2 * 1.3em); max-height: calc(5 * 1.3em);
+  margin: 8px 0 10px; overflow-y: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: #c62828;
+}
+/* A checkbox in the row's wide middle column would otherwise sit centred, away from its label. */
+#connect-form input[type="checkbox"] { justify-self: start; margin-left: 0; }
+@media (prefers-color-scheme: dark) { #connect-error { color: #ff6e6e; } }
+
 #buttons { display: flex; gap: 8px; justify-content: flex-end; }
 .ui-surface button, #keypad-overlay button, #transfer-overlay button {
   font: inherit;
