@@ -1,88 +1,176 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { staleness } from '../scripts/xvfb.mjs';
 
 /**
- * Guards `xvfb.mjs`'s `staleness()`, the staleness check shared by `shot.mjs`, `keys.mjs`,
- * `clicks.mjs`, `select.mjs` and `transfer.mjs` since the bundle-parity task. Each harness used
- * to carry its own copy of the dist-mode half (`keys.mjs` found `dist/keys.js` a day older than
- * `src/keys.ts` in this very tree, which is why that half exists at all), and the per-harness
- * `*-harness-flags.test.ts` files used to pin their own copy's text. They now pin only that their
- * harness CALLS `staleness()` with the right package list; this file pins the shared mechanics
- * those calls rely on, so the behaviour is not left unguarded by the move.
+ * Guards `xvfb.mjs`'s `staleness()` BEHAVIOURALLY, against a temp `packages/` tree with mtimes
+ * this file sets itself -- not against this repo's own `dist`/`app`, which this suite's own
+ * build state makes a moving target.
  *
- * TEXT, not a behavioral test against real timestamps: `staleness()` reads the real
- * `packages/*\/src` and `packages/gui/{dist,app}` trees, which this repo's own build/bundle state
- * makes a moving target -- a behavioral test would be flaky depending on whether `dist/` or
- * `app/` happen to be fresh when the suite runs. `xvfbMain.test.ts` covers `guiMain()` itself
- * behaviorally because that one only touches an env var, no filesystem timestamps.
+ * ## WHY BEHAVIOURAL, WHERE THE FIRST VERSION OF THIS FILE WAS TEXT
+ *
+ * The first version of this file read `xvfb.mjs` as TEXT and pinned regexes against its source
+ * -- `/newest\(join\(root, 'dist'\).../` and the like. REVIEW FOUND A REAL GAP those regexes could
+ * not see: in app mode, `staleness()` compared `app/BUNDLED`'s mtime against each package's `src`
+ * only, never against that package's `dist`. REPRODUCED: edit a file under `packages/gui/src`, run
+ * `npm run bundle:gui` WITHOUT `npm run build` first -- `BUNDLED`'s mtime is written after the
+ * edit, so the src-vs-BUNDLED comparison saw nothing wrong, but `bundle.mjs` had read its input
+ * from a `dist/` the edit never reached, so `app/` was quietly built from yesterday's compiled
+ * code. A text pin on the comparison that existed would have stayed green through that whole
+ * scenario, because the code it was pinning was the wrong half of the chain. `staleness()` now
+ * takes `packagesRoot` as a parameter (default: the real `packages/`) precisely so this file can
+ * drive it against a tree it controls and ask it the actual question: given these exact mtimes,
+ * does it refuse or not.
+ *
+ * ## WHAT STAYS TEXT
+ *
+ * The `*-harness-flags.test.ts` files still pin, as text, that each harness calls `staleness(main,
+ * [the right package list])` -- that is a WIRING fact (does this harness ask for the right
+ * packages at all), not a behavioural one, and reading five Electron processes under Xvfb just to
+ * observe which `pkgs` array reached a function call would be the wrong tool for it.
  */
-const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const xvfb = readFileSync(join(guiDir, 'scripts', 'xvfb.mjs'), 'utf8');
-/** The measured history of WHY `staleness()`'s dist-mode half is shaped as it is still lives in
- *  `keys.mjs`'s doc comment, unmoved -- it is the harness that found the original bug, and the
- *  reasoning belongs beside the code it explains. `keys-harness-flags.test.ts` does not re-pin
- *  it now that the CODE moved to `xvfb.mjs`, so it is pinned here instead. */
-const keys = readFileSync(join(guiDir, 'scripts', 'keys.mjs'), 'utf8');
+const root = () => mkdtempSync(join(tmpdir(), 'staleness-'));
 
-describe('xvfb.mjs staleness()', () => {
-  it('compares newest dist output against newest src, per package, in dist mode', () => {
-    // `.cts`/`.cjs` on the source/output side is load-bearing: `'preload.cts'.endsWith('.ts')`
-    // is FALSE, which once exempted the preload -- an IPC hop every harness depends on -- from
-    // the check entirely. That was a false GREEN.
-    expect(xvfb).toMatch(
-      /newest\(join\(root, 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(root, 'src'\),\s*'\.ts',\s*'\.cts'\)/,
-    );
-    // PER PACKAGE, not one max across all of them passed in: a fresh `gui` build would otherwise
-    // mask a stale `canvas` one in `for (const pkg of pkgs)`.
-    expect(xvfb).toMatch(/for \(const pkg of pkgs\)/);
+/** `BUNDLE_PACKAGES` in `xvfb.mjs`, copied here because the constant is not exported. The two
+ *  lists are independently load-bearing -- `bundle.mjs` has its own copy, by the same reasoning
+ *  given there -- so this one is a third, deliberately, rather than reaching into the module's
+ *  internals to avoid writing it down. */
+const BUNDLE_PACKAGES = ['core', 'frontend', 'canvas', 'node-files', 'gui'];
+
+/** One package: a `src/*.ts` and a `dist/*.js`, with the given mtimes. `pkg === 'gui'` writes
+ *  `dist/main.js`, matching the real layout (`guiMain()` resolves to exactly that path); every
+ *  other package's dist filename is arbitrary, since nothing names it specifically. */
+function makePackage(pkgRoot: string, pkg: string, srcAt: number, distAt: number): string {
+  const srcDir = join(pkgRoot, pkg, 'src');
+  const distDir = join(pkgRoot, pkg, 'dist');
+  mkdirSync(srcDir, { recursive: true });
+  mkdirSync(distDir, { recursive: true });
+  const srcFile = join(srcDir, 'index.ts');
+  const distFile = join(distDir, pkg === 'gui' ? 'main.js' : 'index.js');
+  writeFileSync(srcFile, '// src');
+  writeFileSync(distFile, '// dist');
+  utimesSync(srcFile, srcAt, srcAt);
+  utimesSync(distFile, distAt, distAt);
+  return distFile;
+}
+
+/** `packages/gui`'s own HTML/CSS files that `BUNDLE_GUI_FILES` checks, all set to one mtime. */
+function makeGuiFiles(pkgRoot: string, at: number): void {
+  for (const f of ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'ui.css']) {
+    const p = join(pkgRoot, 'gui', f);
+    writeFileSync(p, '');
+    utimesSync(p, at, at);
+  }
+}
+
+/** `app/main.js` and, unless `omitMarker`, `app/BUNDLED`, each at the given mtime. */
+function makeApp(
+  pkgRoot: string,
+  { mainAt, markerAt, omitMarker = false }: { mainAt: number; markerAt: number; omitMarker?: boolean },
+): string {
+  const appDir = join(pkgRoot, 'gui', 'app');
+  mkdirSync(appDir, { recursive: true });
+  const mainFile = join(appDir, 'main.js');
+  writeFileSync(mainFile, '');
+  utimesSync(mainFile, mainAt, mainAt);
+  if (!omitMarker) {
+    const marker = join(appDir, 'BUNDLED');
+    writeFileSync(marker, '');
+    utimesSync(marker, markerAt, markerAt);
+  }
+  return mainFile;
+}
+
+describe('staleness() -- dist mode', () => {
+  let tmp: string | undefined;
+  afterEach(() => { if (tmp !== undefined) rmSync(tmp, { recursive: true, force: true }); });
+
+  it('refuses when src is newer than dist', () => {
+    tmp = root();
+    const main = makePackage(tmp, 'gui', 2000, 1000); // src at 2000, dist at 1000: dist is older
+    const problem = staleness(main, ['gui'], tmp);
+    expect(problem).not.toBeUndefined();
+    expect(problem?.why).toContain('packages/gui/dist is OLDER than packages/gui/src');
+    expect(problem?.fix).toContain('npm run build');
   });
 
-  it('recorded why tsc --build --dry is not an oracle, so nobody "simplifies" into it', () => {
-    // MEASURED: it reported "up to date" with an output file deleted, because --build trusts its
-    // .tsbuildinfo rather than looking at the outputs on disk. The comment recording this stayed
-    // in `keys.mjs` -- the harness that found the original bug -- when the CODE moved to
-    // `xvfb.mjs`'s `staleness()`.
-    expect(keys).toContain('is not an oracle');
+  it('passes when dist is at least as new as src, across every named package', () => {
+    tmp = root();
+    const main = makePackage(tmp, 'gui', 1000, 2000); // dist newer than src: fresh
+    makePackage(tmp, 'canvas', 1000, 2000);
+    expect(staleness(main, ['gui', 'canvas'], tmp)).toBeUndefined();
   });
 
-  it('names the whole-workspace build as the dist-mode remedy, never a scoped workspace build', () => {
-    // MEASURED: a scoped `-w @tn3270/gui` build exits 0, compiles `canvas` through the project
-    // reference and never runs canvas's second build step, so atlas.json is missing and the
-    // client dies at startup. A refusal that names its own fix is worthless if the fix is the
-    // cause.
-    expect(xvfb).toContain("const REBUILD = 'run: npm run build'");
+  it('refuses when main.js itself does not exist', () => {
+    tmp = root();
+    const missing = join(tmp, 'gui', 'dist', 'main.js');
+    expect(staleness(missing, ['gui'], tmp)?.why).toContain(`there is no ${missing} to run`);
+  });
+});
+
+describe('staleness() -- app mode', () => {
+  let tmp: string | undefined;
+  afterEach(() => { if (tmp !== undefined) rmSync(tmp, { recursive: true, force: true }); });
+
+  it('refuses when app/BUNDLED is missing', () => {
+    tmp = root();
+    const main = makeApp(tmp, { mainAt: 1000, markerAt: 1000, omitMarker: true });
+    const problem = staleness(main, ['gui'], tmp);
+    expect(problem?.why).toContain('incomplete bundle');
   });
 
-  it('checks app/BUNDLED exists before trusting its mtime', () => {
-    // An incomplete bundle (the marker missing) must be refused by name, not read as "infinitely
-    // stale" or, worse, let a missing-marker crash into a confusing stack trace.
-    expect(xvfb).toMatch(/if \(!existsSync\(marker\)\)/);
+  it("refuses when a bundled package's src is newer than its OWN dist (hop 1: src -> dist)", () => {
+    // THE EXACT GAP REVIEW FOUND: edit gui/src, bundle without rebuilding. BUNDLED is written
+    // AFTER the edit, so a check that compared only src-vs-BUNDLED would see nothing wrong --
+    // this is hop 1, which compares src against the package's OWN dist instead, and must fire
+    // regardless of what BUNDLED's mtime says.
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) {
+      if (pkg === 'gui') continue;
+      makePackage(tmp, pkg, 1000, 2000); // every other package fresh
+    }
+    makePackage(tmp, 'gui', 4000, 3000); // gui: src edited AFTER its own dist was built
+    const main = makeApp(tmp, { mainAt: 2000, markerAt: 5000 }); // BUNDLED written well after
+    const problem = staleness(main, ['gui'], tmp);
+    expect(problem?.why).toContain('packages/gui/dist is OLDER than packages/gui/src');
+    expect(problem?.fix).toContain('npm run build && npm run bundle:gui');
   });
 
-  it('refuses an app/ bundle older than ANY dependency it was built from, not just gui', () => {
-    // `scripts/bundle.mjs` inlines core, frontend, canvas and node-files into app/main.js and
-    // copies gui's own documents and ui.css flat -- so a harness whose own dist-mode coverage
-    // names only `['gui', 'canvas']` must still have its app-mode run checked against ALL of
-    // them, or a stale `frontend` or `node-files` bundle would pass under TN3270_GUI_MAIN=app
-    // while every dist-mode harness correctly refused it.
-    expect(xvfb).toMatch(
-      /BUNDLE_PACKAGES = \[('core',\s*'frontend',\s*'canvas',\s*'node-files',\s*'gui'|[^\]]*'core'[^\]]*'frontend'[^\]]*'canvas'[^\]]*'node-files'[^\]]*'gui'[^\]]*)\]/,
-    );
-    // The HTML/CSS half of the bundle too -- a stale index.html or ui.css is not caught by any
-    // package's src/ check at all.
-    expect(xvfb).toMatch(/BUNDLE_GUI_FILES = \[[^\]]*'index\.html'[^\]]*\]/);
-    expect(xvfb).toMatch(/BUNDLE_GUI_FILES = \[[^\]]*'ui\.css'[^\]]*\]/);
-    // Compared against the MARKER's own mtime, written last by bundle.mjs after its self-check --
-    // not against app/main.js, which a partial bundle could still have touched.
-    expect(xvfb).toMatch(/newest\(src, '\.ts', '\.cts'\)\s*>\s*bundledAt/);
-    expect(xvfb).toMatch(/statSync\(join\(gui, f\)\)\.mtimeMs\s*>\s*bundledAt/);
+  it('refuses when a bundled package\'s dist is newer than app/BUNDLED (hop 2: dist -> app)', () => {
+    // Every package individually fresh (src -> dist holds for each), but the BUNDLE was taken
+    // before the last rebuild: `dist` moved on, `app/` did not follow. `distStaleness()` alone
+    // cannot see this, because it never looks at `app/` at all -- hop 2 is what does.
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) {
+      if (pkg === 'gui') continue;
+      makePackage(tmp, pkg, 1000, 2000);
+    }
+    makePackage(tmp, 'gui', 1000, 4000); // gui rebuilt AFTER the bundle below was taken
+    makeGuiFiles(tmp, 1000);
+    const main = makeApp(tmp, { mainAt: 2000, markerAt: 3000 }); // BUNDLED older than gui's dist
+    const problem = staleness(main, ['gui'], tmp);
+    expect(problem?.why).toContain('packages/gui/dist is NEWER than app/BUNDLED');
+    expect(problem?.fix).toContain('npm run build && npm run bundle:gui');
   });
 
-  it('names npm run bundle:gui in every app-mode remedy, not just npm run build', () => {
-    // A refusal under TN3270_GUI_MAIN=app whose fix forgot the bundle step would send someone
-    // back to a dist/ that was already fresh, fixing nothing.
-    expect(xvfb).toContain("const REBUNDLE = 'run: npm run build && npm run bundle:gui'");
+  it('refuses when a gui HTML/CSS file is newer than app/BUNDLED', () => {
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) makePackage(tmp, pkg, 1000, 2000);
+    makeGuiFiles(tmp, 5000); // index.html etc. edited after the bundle
+    const main = makeApp(tmp, { mainAt: 2000, markerAt: 3000 });
+    const problem = staleness(main, ['gui'], tmp);
+    expect(problem?.why).toMatch(/packages\/gui\/.*\.(html|css) is NEWER than app\/BUNDLED/);
+  });
+
+  it('passes when every hop is correctly ordered: src -> dist -> BUNDLED', () => {
+    tmp = root();
+    for (const pkg of BUNDLE_PACKAGES) makePackage(tmp, pkg, 1000, 2000);
+    makeGuiFiles(tmp, 1000);
+    const main = makeApp(tmp, { mainAt: 2000, markerAt: 3000 });
+    expect(staleness(main, ['gui'], tmp)).toBeUndefined();
   });
 });

@@ -5,10 +5,11 @@
  * below each cost a run to find and would be re-learned independently otherwise.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { distStaleness, newest } from './freshness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -104,13 +105,6 @@ export function guiMainLabel() {
   return `${which()} (${guiMain()})`;
 }
 
-/** Newest mtime among files under `dir` (recursive) whose name ends with one of `suffixes`. */
-function newest(dir, ...suffixes) {
-  return Math.max(...readdirSync(dir, { recursive: true })
-    .filter((f) => suffixes.some((s) => f.endsWith(s)))
-    .map((f) => statSync(join(dir, f)).mtimeMs));
-}
-
 /**
  * EVERY PACKAGE AND FILE `app/`'s BUNDLE DEPENDS ON, so the app-mode staleness check below can
  * refuse a bundle that predates ANY of them -- not just the dist/ packages a given harness
@@ -126,7 +120,10 @@ const REBUNDLE = 'run: npm run build && npm run bundle:gui';
 
 /**
  * Whether `main` (whatever `guiMain()` returned) is fresh enough to run, and if not, why and
- * how to fix it -- `undefined` when it is fresh.
+ * how to fix it -- `undefined` when it is fresh. `packagesRoot` defaults to the real
+ * `packages/` and exists as a parameter only so `xvfbStaleness.test.ts` can point this at a
+ * temp directory and assert BEHAVIOUR against mtimes it set itself, rather than against
+ * whatever this tree's own `dist`/`app` happen to be when the suite runs.
  *
  * SHARED, rather than one copy per harness, because `keys.mjs`, `clicks.mjs` and `transfer.mjs`
  * each carried their own `newest`-plus-per-package-loop and the three had already begun to
@@ -139,29 +136,67 @@ const REBUNDLE = 'run: npm run build && npm run bundle:gui';
  * one bundle of everything, so every harness run against it must be checked against the SAME
  * full dependency set (`BUNDLE_PACKAGES`/`BUNDLE_GUI_FILES`) regardless of which packages that
  * harness's own dist-mode coverage happens to name.
+ *
+ * ## THE CHAIN IS src -> dist -> app, AND APP MODE USED TO CHECK ONLY THE LAST HOP
+ *
+ * REPRODUCED AND FOUND BY REVIEW: edit a `packages/gui/src` file, then run `npm run bundle:gui`
+ * WITHOUT `npm run build` first. `BUNDLED`'s mtime is written after the edit, so the
+ * src-vs-BUNDLED comparison below sees nothing wrong -- but `bundle.mjs` read its input from
+ * `dist/`, which the edit never reached, so `app/` was built from yesterday's compiled code. The
+ * harness-side guard passed over exactly the staleness it exists to catch.
+ *
+ * The fix is BOTH hops, checked separately, because each catches a different ordering mistake:
+ *  - `distStaleness()` over `BUNDLE_PACKAGES`: did every package's `dist` get rebuilt from its
+ *    OWN current `src`? This is the hop the reviewer's scenario breaks -- `gui/src` edited,
+ *    `gui/dist` never rebuilt -- and it is the same question `distStaleness()` already answers
+ *    for the plain dist-mode harnesses, asked here of five packages instead of whichever
+ *    `pkgs` names.
+ *  - `bundledAt` against the newest file in each package's OWN `dist`: did `bundle.mjs` run
+ *    AFTER the last rebuild, not before it? A `dist` that is individually fresh against its own
+ *    `src` can still predate `BUNDLED` if someone bundled, then rebuilt, then never re-bundled --
+ *    `distStaleness()` alone cannot see that, because it never looks at `app/` at all.
+ * Either hop failing is stale by itself; both must hold for app/ to be trustworthy.
  */
-export function staleness(main, pkgs) {
-  if (main === join(gui, 'app', 'main.js')) {
+export function staleness(main, pkgs, packagesRoot = join(gui, '..')) {
+  // EVERYTHING BELOW IS DERIVED FROM `packagesRoot`, never from the module-level `gui`
+  // constant, so a test can point `packagesRoot` at a temp tree and have the app-mode branch
+  // (including WHICH `main` counts as "app mode") follow it there. `packagesRoot` defaults to
+  // the real `packages/`, under which this resolves to the same `gui/app/main.js` the real
+  // `guiMain()` returns.
+  const guiRoot = join(packagesRoot, 'gui');
+  if (main === join(guiRoot, 'app', 'main.js')) {
     if (!existsSync(main)) return { why: `there is no ${main} to run`, fix: REBUNDLE };
-    const marker = join(gui, 'app', 'BUNDLED');
+    const marker = join(guiRoot, 'app', 'BUNDLED');
     if (!existsSync(marker)) {
       return {
         why: `there is no ${marker}, so packages/gui/app is an incomplete bundle`,
         fix: REBUNDLE,
       };
     }
+
+    // HOP 1 of 2: src -> dist, for every package the bundle inlines or copies from, not just
+    // whichever `pkgs` this harness's own dist-mode coverage names.
+    const distProblem = distStaleness(packagesRoot, BUNDLE_PACKAGES);
+    if (distProblem !== undefined) {
+      return { why: distProblem.why, fix: `${REBUNDLE}${distProblem.forceHint}` };
+    }
+
+    // HOP 2 of 2: dist -> app. `BUNDLED` is written LAST, after `bundle.mjs`'s own self-check
+    // passes, so its mtime is "when the bundle was actually produced" -- compared against each
+    // package's OWN newest dist file, not `app/main.js`, which a PARTIAL bundle could still have
+    // touched before failing.
     const bundledAt = statSync(marker).mtimeMs;
     for (const pkg of BUNDLE_PACKAGES) {
-      const src = join(gui, '..', pkg, 'src');
-      if (newest(src, '.ts', '.cts') > bundledAt) {
+      const pkgDist = join(packagesRoot, pkg, 'dist');
+      if (newest(pkgDist, '.js', '.cjs') > bundledAt) {
         return {
-          why: `packages/${pkg}/src is NEWER than app/BUNDLED, so this run would test a stale bundle`,
+          why: `packages/${pkg}/dist is NEWER than app/BUNDLED, so this run would test a stale bundle`,
           fix: REBUNDLE,
         };
       }
     }
     for (const f of BUNDLE_GUI_FILES) {
-      if (statSync(join(gui, f)).mtimeMs > bundledAt) {
+      if (statSync(join(guiRoot, f)).mtimeMs > bundledAt) {
         return {
           why: `packages/gui/${f} is NEWER than app/BUNDLED, so this run would test a stale bundle`,
           fix: REBUNDLE,
@@ -172,18 +207,7 @@ export function staleness(main, pkgs) {
   }
 
   if (!existsSync(main)) return { why: `there is no ${main} to run`, fix: REBUILD };
-  for (const pkg of pkgs) {
-    const root = join(gui, '..', pkg);
-    if (!existsSync(join(root, 'dist'))) {
-      return { why: `there is no packages/${pkg}/dist, so there is nothing built to run`, fix: REBUILD };
-    }
-    if (newest(join(root, 'dist'), '.js', '.cjs') < newest(join(root, 'src'), '.ts', '.cts')) {
-      return {
-        why: `packages/${pkg}/dist is OLDER than packages/${pkg}/src, so this run would test stale code`,
-        fix: `${REBUILD}  (if that reports everything up to date, only a timestamp moved: ` +
-          `npx tsc --build --force packages/${pkg})`,
-      };
-    }
-  }
-  return undefined;
+  const problem = distStaleness(packagesRoot, pkgs);
+  if (problem === undefined) return undefined;
+  return { why: problem.why, fix: `${REBUILD}${problem.forceHint}` };
 }

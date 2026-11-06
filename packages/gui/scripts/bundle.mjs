@@ -67,14 +67,26 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetDir, ATLAS_FILES } from '@tn3270/canvas';
+import { distStaleness } from './freshness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
 const dist = join(gui, 'dist');
 const out = join(gui, 'app');
+const packagesRoot = join(gui, '..');
 
 /** The documents main.ts loads. The connect dialog's lands here when it exists. */
 const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html'];
+
+/**
+ * EVERY PACKAGE THIS BUNDLE READS FROM `dist/` -- inlined into `app/main.js` (core, frontend,
+ * canvas, node-files) or compiled directly (gui itself). Kept identical to `xvfb.mjs`'s
+ * `BUNDLE_PACKAGES` list on purpose: the two are answering the same question (is every package
+ * this bundle depends on built from its OWN current source?) at two different moments, bundle
+ * time here and harness-run time there, and a list that drifted between them would let one
+ * half trust what the other refuses.
+ */
+const BUNDLE_PACKAGES = ['core', 'frontend', 'canvas', 'node-files', 'gui'];
 
 /**
  * esbuild targets, MEASURED from the pinned Electron 44.10.2 (`ELECTRON_RUN_AS_NODE=1 electron -e
@@ -149,6 +161,21 @@ const stripComments = (html) => html.replace(/<!--[\s\S]*?-->\s*/g, '');
 
 async function main() {
   need(join(dist, 'main.js'), 'packages/gui/dist/main.js');
+
+  /*
+    REFUSE A STALE dist/ BEFORE WRITING ANYTHING, not just a MISSING one. `need()` above only
+    catches `dist/main.js` being absent; it says nothing about whether that file -- or any other
+    package's `dist` this bundle reads from -- is OLDER than its own `src`. FOUND BY REVIEW: edit
+    a file under `packages/gui/src` and run `npm run bundle:gui` alone, skipping `npm run build`.
+    Nothing here failed, and `app/` was quietly built from yesterday's compiled code; the
+    HARNESS side only compared `BUNDLED`'s mtime against `src`, which this exact edit also left
+    looking fine (BUNDLED is written after the edit). `distStaleness()` is the same per-package
+    "dist at least as new as its own src" check the dist-mode harnesses already use, run here over
+    `BUNDLE_PACKAGES` -- so an edit in ANY package this bundle pulls from is refused, not just gui.
+  */
+  const problem = distStaleness(packagesRoot, BUNDLE_PACKAGES);
+  if (problem !== undefined) throw new BundleError(`${problem.why}: run npm run build${problem.forceHint}`);
+
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
 

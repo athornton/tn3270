@@ -8,4 +8,8 @@ export interface StalenessProblem {
   why: string;
   fix: string;
 }
-export function staleness(main: string, pkgs: readonly string[]): StalenessProblem | undefined;
+export function staleness(
+  main: string,
+  pkgs: readonly string[],
+  packagesRoot?: string,
+): StalenessProblem | undefined;
