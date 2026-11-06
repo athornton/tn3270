@@ -30,6 +30,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { distStaleness } from './freshness.mjs';
+import { BundleError, verify } from '../packages/gui/scripts/bundleVerify.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const packagesDir = join(root, 'packages');
@@ -80,9 +81,22 @@ function main() {
   if (pkgs.length === 0) die('no published workspaces found under packages/');
 
   const gui = pkgs.find(({ m }) => m.name === '@tn3270/gui');
-  if (gui !== undefined && !existsSync(join(packagesDir, gui.dir, 'app', 'BUNDLED'))) {
-    die('packages/gui/app/BUNDLED is missing, so @tn3270/gui would pack with no app: '
-      + 'run npm run build && npm run bundle:gui first');
+  if (gui !== undefined) {
+    const appDir = join(packagesDir, gui.dir, 'app');
+    if (!existsSync(join(appDir, 'BUNDLED'))) {
+      die('packages/gui/app/BUNDLED is missing, so @tn3270/gui would pack with no app: '
+        + 'run npm run build && npm run bundle:gui first');
+    }
+    // `BUNDLED` says a bundle finished, not that `app/` still matches what finished -- e.g. a file
+    // deleted by hand afterwards. Re-run the same self-check `bundle.mjs` ran at bundle time, now,
+    // right before packing, so a bundle that has since lost a file is refused here instead of
+    // packed fine.
+    try {
+      verify(appDir);
+    } catch (err) {
+      if (err instanceof BundleError) die(`${err.message}: run npm run build && npm run bundle:gui`);
+      throw err;
+    }
   }
   // Only where `dist` is shipped: gui ships `app/`, which bundle.mjs builds from named entry points.
   const stale = pkgs.filter(({ m }) => m.files?.includes('dist')).flatMap(({ dir }) => orphans(dir));

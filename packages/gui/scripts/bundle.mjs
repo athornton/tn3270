@@ -68,15 +68,13 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import { assetDir, ATLAS_FILES } from '@tn3270/canvas';
 import { distStaleness } from '../../../scripts/freshness.mjs';
+import { BundleError, DOCUMENTS, verify } from './bundleVerify.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
 const dist = join(gui, 'dist');
 const out = join(gui, 'app');
 const packagesRoot = join(gui, '..');
-
-/** The documents main.ts loads. The connect dialog's lands here when it exists. */
-const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html'];
 
 /**
  * EVERY PACKAGE THIS BUNDLE READS FROM `dist/` -- inlined into `app/main.js` (core, frontend,
@@ -96,9 +94,6 @@ const BUNDLE_PACKAGES = ['core', 'frontend', 'canvas', 'node-files', 'gui'];
  */
 const BROWSER_TARGET = 'chrome152';
 const NODE_TARGET = 'node24';
-
-/** A failure that names its fix. Every refusal below goes through here and exits non-zero. */
-class BundleError extends Error {}
 
 function need(path, what) {
   if (!existsSync(path)) throw new BundleError(`${what} is missing (${path}): run npm run build first`);
@@ -147,9 +142,6 @@ function importMapPlugin(doc, map) {
     },
   };
 }
-
-/** Every `src`/`href` attribute value in a document, from any tag. */
-const refsOf = (html) => [...html.matchAll(/\s(?:src|href)\s*=\s*"([^"]*)"/g)].map((m) => m[1]);
 
 /**
  * Strips HTML comments, FIRST, before anything is extracted. Two reasons: the source documents'
@@ -284,44 +276,9 @@ async function main() {
     `app/` look finished to both. The catch below also removes `app/` on any failure, so a
     refused run leaves nothing behind that could be launched or packaged by mistake.
   */
-  verify();
+  verify(out);
   writeFileSync(join(out, 'BUNDLED'),
     'Marker read by src/appRoot.ts: this directory is the flat esbuild layout. Contents unused.\n');
-}
-
-/** The always-run check described at the top. Collects every problem before refusing. */
-function verify() {
-  const problems = [];
-  for (const doc of DOCUMENTS) {
-    const html = readFileSync(join(out, doc), 'utf8');
-    if (/type\s*=\s*"importmap"/.test(html)) problems.push(`${doc}: an import map survived`);
-    const refs = refsOf(html);
-    if (refs.length === 0) problems.push(`${doc}: references nothing, which cannot be right`);
-    for (const ref of refs) {
-      if (ref.includes('../')) problems.push(`${doc}: ${ref} climbs out of app/`);
-      else if (/^[a-z]+:|^\/\//i.test(ref) || isAbsolute(ref)) problems.push(`${doc}: ${ref} is not app-relative`);
-      else if (!existsSync(resolve(out, ref))) problems.push(`${doc}: ${ref} is not in app/`);
-    }
-  }
-  // Every file main.ts hands Electron, read from its source so a new window cannot be missed.
-  const mainSrc = readFileSync(join(gui, 'src', 'main.ts'), 'utf8');
-  const asked = [...mainSrc.matchAll(/layout\.(?:document|preload)\('([^']+)'\)/g)].map((m) => m[1]);
-  if (asked.length === 0) problems.push('found no layout.document/preload calls in src/main.ts; the pattern drifted');
-  for (const f of asked) if (!existsSync(join(out, f))) problems.push(`main.ts loads ${f}, which is not in app/`);
-  // The atlas: main reads it with `readAtlas(layout.atlasDir)`, i.e. from app/, by these names. A
-  // bundle missing one starts, opens a window and then shows only the incomplete-install error.
-  for (const f of Object.values(ATLAS_FILES)) {
-    if (!existsSync(join(out, f))) problems.push(`readAtlas reads ${f}, which is not in app/`);
-  }
-  // The main bundle must not have kept a runtime `require` esbuild could not resolve (an ESM
-  // bundle turns one into a shim that throws at startup) or any import other than node: builtins
-  // and electron.
-  const mainJs = readFileSync(join(out, 'main.js'), 'utf8');
-  if (/\b__require\(/.test(mainJs)) problems.push('app/main.js contains a __require shim that throws under ESM');
-  for (const m of mainJs.matchAll(/^import\s[^'"]*['"]([^'"]+)['"]/gm)) {
-    if (!m[1].startsWith('node:') && m[1] !== 'electron') problems.push(`app/main.js still imports ${m[1]}`);
-  }
-  if (problems.length > 0) throw new BundleError(`app/ is not self-contained:\n  ${problems.join('\n  ')}`);
 }
 
 try {
