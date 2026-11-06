@@ -101,6 +101,16 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * The two files `readAtlas` reads, by name. EXPORTED so the GUI bundle (`gui/scripts/bundle.mjs`)
+ * copies and verifies exactly these rather than a retyped list: a third atlas file added here
+ * would otherwise be read by the app and missing from the bundle, which the bundle's self-check
+ * then could not notice -- a reviewer reproduced a bundle without `atlas.bin` exiting 0 before
+ * this constant existed. `build-atlas.mjs` writes them; it is a build-time script and does not
+ * import this compiled module, so it keeps its own spelling.
+ */
+export const ATLAS_FILES = Object.freeze({ geometry: 'atlas.json', coverage: 'atlas.bin' } as const);
+
+/**
  * Read the baked atlas. Throws NAMING THE BUILD when the package was not built.
  *
  * ## A SCOPED BUILD OF A CONSUMER LEAVES THE ATLAS UNBUILT
@@ -127,20 +137,25 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
  * package. The GUI's esbuild bundle (`packages/gui/app/`) is not one: there `assets.ts` is
  * inlined into `app/main.js`, so `here` becomes `app/` -- which COINCIDES with where the bundle
  * copies the atlas, and a coincidence is not a mechanism. The GUI passes its layout's atlas
- * directory explicitly (`gui/src/appRoot.ts` has the full reasoning). The ENOENT message below
- * still names the canvas build, which is the right remedy for the unbundled case and points a
- * bundle user at the step that copies the atlas (`bundle.mjs` reads it from `canvas/dist`).
+ * directory explicitly (`gui/src/appRoot.ts` has the full reasoning).
+ *
+ * THE MESSAGE NAMES THE DIRECTORY IT READ, and suggests rebuilding canvas ONLY when that directory
+ * is canvas's own `dist`. In a bundled or installed app the atlas lives in the app's directory and
+ * there is no canvas package to rebuild, so that hint would send the user after a command that
+ * cannot exist on their machine; there the truthful message is "this install is incomplete".
  */
 export function readAtlas(dir: string = here): { geometry: AtlasGeometry; coverage: Uint8Array } {
   try {
-    const geometry = JSON.parse(readFileSync(join(dir, 'atlas.json'), 'utf8')) as AtlasGeometry;
-    const coverage = new Uint8Array(readFileSync(join(dir, 'atlas.bin')));
+    const geometry = JSON.parse(
+      readFileSync(join(dir, ATLAS_FILES.geometry), 'utf8')) as AtlasGeometry;
+    const coverage = new Uint8Array(readFileSync(join(dir, ATLAS_FILES.coverage)));
     return { geometry, coverage };
   } catch (err) {
     if ((err as { code?: string }).code === 'ENOENT') {
-      throw new Error(
-        '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas',
-        { cause: err });
+      throw new Error(dir === here
+        ? '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas'
+        : `the glyph atlas is missing from ${dir}: this install is incomplete`,
+      { cause: err });
     }
     throw err;
   }

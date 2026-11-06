@@ -25,7 +25,7 @@ export { blit, blankColumns, bestScale, center, rgbCss, tintKey } from './blit.j
 export type { Surface, Ctx2D, BlitOptions } from './blit.js';
 export { actionForKey } from './keys.js';
 export type { KeyLike } from './keys.js';
-export { assetDir, readAtlas, BROWSER_MODULES } from './assets.js';
+export { assetDir, readAtlas, ATLAS_FILES, BROWSER_MODULES } from './assets.js';
 export { ebcdicToCg, CG_BOXSOLID } from './cg.js';
 export { parseBdf } from './bdf.js';
 // THE CANVAS-DRAWN KEYPAD WAS HERE AND IS GONE, 2026-10-06: `keypadRegion`,
