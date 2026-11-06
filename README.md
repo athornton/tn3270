@@ -72,8 +72,8 @@ claim, not a measurement made against this app's own build.
 
 **Starting `tn3270-gui` with no host opens a Connect dialog** — host (the same
 `[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
-checkbox (on by default; untick it for a plaintext host such as Hercules — the dialog says so if a
-TLS handshake never completes). Once a session starts, a failed connection is shown in the
+checkbox (on by default; untick it for a plaintext host such as Hercules — if a TLS handshake
+never completes, the error shown in the terminal window says to untick it). Once a session starts, a failed connection is shown in the
 terminal window itself, exactly as it would be from the command line, and **the dialog does not
 reopen** — quit and relaunch to try a different host (`File` → `Connect…` is a later milestone).
 
