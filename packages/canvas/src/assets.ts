@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AtlasGeometry } from './geometry.js';
 
 /**
@@ -140,10 +140,34 @@ export const ATLAS_FILES = Object.freeze({ geometry: 'atlas.json', coverage: 'at
  * directory explicitly (`gui/src/appRoot.ts` has the full reasoning).
  *
  * THE MESSAGE NAMES THE DIRECTORY IT READ, and suggests rebuilding canvas ONLY when that directory
- * is canvas's own `dist`. In a bundled or installed app the atlas lives in the app's directory and
+ * is canvas's own `dist` IN A SOURCE TREE (`isCanvasSourceDist`). In a bundled or installed app
  * there is no canvas package to rebuild, so that hint would send the user after a command that
  * cannot exist on their machine; there the truthful message is "this install is incomplete".
  */
+/**
+ * Whether `dir` is `@tn3270/canvas`'s own `dist` in a SOURCE CHECKOUT, the one place where
+ * "rebuild canvas" is a command that exists: named `dist`, beside a `src/`, under a `package.json`
+ * named `@tn3270/canvas`.
+ *
+ * DECIDED BY THE DIRECTORY, NOT BY `dir === here`, which is how this used to read and is wrong in
+ * the bundle: esbuild inlines this file into `gui/app/main.js`, so `here` IS `app/`, the GUI passes
+ * `app/` as `dir`, and an installed user with a missing atlas was told to rebuild a package they do
+ * not have -- reproduced by review. The `src/` test is what tells a checkout from an INSTALLED
+ * canvas (`node_modules/@tn3270/canvas/dist`, as the web gateway's install has), which ships `dist`
+ * alone and has nothing to rebuild either.
+ */
+export function isCanvasSourceDist(dir: string): boolean {
+  if (basename(dir) !== 'dist') return false;
+  const pkg = dirname(dir);
+  if (!existsSync(join(pkg, 'src'))) return false;
+  try {
+    return (JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as { name?: unknown }).name
+      === '@tn3270/canvas';
+  } catch {
+    return false;
+  }
+}
+
 export function readAtlas(dir: string = here): { geometry: AtlasGeometry; coverage: Uint8Array } {
   try {
     const geometry = JSON.parse(
@@ -152,7 +176,7 @@ export function readAtlas(dir: string = here): { geometry: AtlasGeometry; covera
     return { geometry, coverage };
   } catch (err) {
     if ((err as { code?: string }).code === 'ENOENT') {
-      throw new Error(dir === here
+      throw new Error(isCanvasSourceDist(dir)
         ? '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas'
         : `the glyph atlas is missing from ${dir}: this install is incomplete`,
       { cause: err });
