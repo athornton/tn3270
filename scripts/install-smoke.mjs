@@ -67,7 +67,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publishedPackages, tarballName } from './pack.mjs';
-import { CheckFailed, displayEnv, fail, gone, killTree, run as runIn, said } from './smoke-lib.mjs';
+import { CheckFailed, displayEnv, fail, gone, judgeShot, killTree, run as runIn, said } from './smoke-lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const artifacts = join(root, 'artifacts', 'npm');
@@ -75,6 +75,7 @@ const win = process.platform === 'win32';
 const TRACE = join(root, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
 /** The golden `shot.mjs` case 1 compares against; read at check time, never copied here. */
 const GOLDEN = join(root, 'packages', 'gui', 'test', 'golden', 'synthetic-ispf.sha256');
+const GOLDEN_PNG = join(root, 'packages', 'gui', 'test', 'golden', 'synthetic-ispf.png');
 
 // ---------------------------------------------------------------------------------------------
 // Process helpers
@@ -208,7 +209,7 @@ async function guiDrawsGolden(env) {
     if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
     if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(r)}`);
     const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
-    if (got !== want) fail(`pixels differ from the synthetic-ispf golden: got ${got.slice(0, 16)}, want ${want.slice(0, 16)} (kept ${shot})`);
+    return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG, exact: process.platform === 'linux' });
   } catch (e) {
     if (process.argv.includes('--keep')) process.stdout.write(`kept ${dir}\n`);
     throw e;
@@ -354,8 +355,8 @@ async function main() {
         if (!existsSync(binPath(binDir, check.bin))) {
           fail(`${binPath(binDir, check.bin)} is not in the fresh prefix, so running ${check.bin} by name would find whatever else PATH has`);
         }
-        await check.fn(env);
-        process.stdout.write(`ok ${check.name}\n`);
+        const note = (await check.fn(env)) ?? '';
+        process.stdout.write(`ok ${check.name}${note}\n`);
       } catch (e) {
         failed += 1;
         process.stdout.write(`FAIL ${check.name}: ${e instanceof CheckFailed ? e.message : e?.stack ?? e}\n`);

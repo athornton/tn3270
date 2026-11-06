@@ -81,9 +81,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inflateSync } from 'node:zlib';
 import {
-  CheckFailed, descendants, displayEnv, fail, gone, groupEmpty, killTree, launch, said, sleep,
+  CheckFailed, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch, said, sleep,
   startServer, until,
 } from './smoke-lib.mjs';
 
@@ -191,51 +190,6 @@ async function stop(r, p) {
 /** Waits for the launch to exit by itself, up to `ms`; true when it did. */
 const exitedWithin = (p, ms) => Promise.race([p.closed.then(() => true), sleep(ms).then(() => false)]);
 
-/** `{ width, height, distinct }` of a PNG: its IHDR size and how many distinct pixels it decodes to. */
-function pngFacts(path) {
-  const b = readFileSync(path);
-  if (b.readUInt32BE(12) !== 0x49484452) fail(`${path} is not a PNG (no IHDR)`);
-  const width = b.readUInt32BE(16);
-  const height = b.readUInt32BE(20);
-  const depth = b[24];
-  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[b[25]];
-  if (depth !== 8 || bpp === undefined || b[28] !== 0) {
-    fail(`${path}: PNG bit depth ${depth}, colour type ${b[25]}, interlace ${b[28]} -- this decoder only reads 8-bit non-interlaced, non-palette`);
-  }
-  const idat = [];
-  for (let o = 8; o < b.length;) {
-    const len = b.readUInt32BE(o);
-    if (b.toString('latin1', o + 4, o + 8) === 'IDAT') idat.push(b.subarray(o + 8, o + 8 + len));
-    o += 12 + len;
-  }
-  const raw = inflateSync(Buffer.concat(idat));
-  const stride = width * bpp;
-  let prev = Buffer.alloc(stride);
-  const seen = new Set();
-  for (let y = 0; y < height; y++) {
-    const f = raw[y * (stride + 1)];
-    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
-    for (let i = 0; i < stride; i++) {
-      const a = i >= bpp ? line[i - bpp] : 0;
-      const up = prev[i];
-      const c = i >= bpp ? prev[i - bpp] : 0;
-      let add = 0;
-      if (f === 1) add = a;
-      else if (f === 2) add = up;
-      else if (f === 3) add = (a + up) >> 1;
-      else if (f === 4) {
-        const p = a + up - c;
-        const pa = Math.abs(p - a), pb = Math.abs(p - up), pc = Math.abs(p - c);
-        add = pa <= pb && pa <= pc ? a : pb <= pc ? up : c;
-      } else if (f !== 0) fail(`${path}: PNG row ${y} has filter type ${f}`);
-      line[i] = (line[i] + add) & 0xff;
-    }
-    for (let x = 0; x < stride && seen.size < 2; x += bpp) seen.add(line.toString('hex', x, x + bpp));
-    prev = line;
-  }
-  return { width, height, distinct: seen.size };
-}
-
 /** Check 1: shot.mjs case 1's argv and env, and the synthetic-ispf golden. */
 async function drawsGolden(r, work) {
   if (!existsSync(TRACE)) fail(`the input trace ${TRACE} is missing from the repository`);
@@ -267,18 +221,7 @@ async function drawsGolden(r, work) {
   if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
   if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(res)}`);
   const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
-  if (got === want) return '';
-  const wxh = `${size[1]}x${size[2]}`;
-  if (linux) fail(`pixels differ from the synthetic-ispf golden: got ${got}, want ${want} (${wxh}, capture ${shot})`);
-  // See "THE GOLDEN IS LINUX'S".
-  const g = pngFacts(GOLDEN_PNG);
-  const m = pngFacts(shot);
-  process.stdout.write(`  measured ${m.width}x${m.height} hash ${got}; golden ${g.width}x${g.height} hash ${want}\n`);
-  if (m.width !== g.width || m.height !== g.height) {
-    fail(`hash differs and so does the size: ${m.width}x${m.height}, golden ${g.width}x${g.height} (capture ${shot})`);
-  }
-  if (m.distinct < 2) fail(`the ${m.width}x${m.height} capture is one flat colour: nothing was drawn (capture ${shot})`);
-  return ` (size match; golden hash is Linux-only: ${got})`;
+  return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG, exact: linux });
 }
 
 /** Check 2: no host, so the Connect dialog; its submit must reach a plaintext telnet server. */

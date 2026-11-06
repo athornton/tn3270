@@ -11,7 +11,10 @@
  * at load time (see `displayEnv`).
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import net from 'node:net';
 
 const win = process.platform === 'win32';
@@ -181,4 +184,84 @@ export function startServer({ silent = false } = {}) {
       });
     });
   });
+}
+
+/** `{ width, height, distinct }` of a PNG: its IHDR size and how many distinct pixels it decodes to. */
+export function pngFacts(path) {
+  const b = readFileSync(path);
+  if (b.readUInt32BE(12) !== 0x49484452) fail(`${path} is not a PNG (no IHDR)`);
+  const width = b.readUInt32BE(16);
+  const height = b.readUInt32BE(20);
+  const depth = b[24];
+  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[b[25]];
+  if (depth !== 8 || bpp === undefined || b[28] !== 0) {
+    fail(`${path}: PNG bit depth ${depth}, colour type ${b[25]}, interlace ${b[28]} -- this decoder only reads 8-bit non-interlaced, non-palette`);
+  }
+  const idat = [];
+  for (let o = 8; o < b.length;) {
+    const len = b.readUInt32BE(o);
+    if (b.toString('latin1', o + 4, o + 8) === 'IDAT') idat.push(b.subarray(o + 8, o + 8 + len));
+    o += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * bpp;
+  let prev = Buffer.alloc(stride);
+  const seen = new Set();
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0;
+      const up = prev[i];
+      const c = i >= bpp ? prev[i - bpp] : 0;
+      let add = 0;
+      if (f === 1) add = a;
+      else if (f === 2) add = up;
+      else if (f === 3) add = (a + up) >> 1;
+      else if (f === 4) {
+        const p = a + up - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - up), pc = Math.abs(p - c);
+        add = pa <= pb && pa <= pc ? a : pb <= pc ? up : c;
+      } else if (f !== 0) fail(`${path}: PNG row ${y} has filter type ${f}`);
+      line[i] = (line[i] + add) & 0xff;
+    }
+    for (let x = 0; x < stride && seen.size < 2; x += bpp) seen.add(line.toString('hex', x, x + bpp));
+    prev = line;
+  }
+  return { width, height, distinct: seen.size };
+}
+
+/**
+ * Judges a capture against the synthetic-ispf golden; returns a note for the `ok` line or fails.
+ *
+ * ONE RULE FOR BOTH SMOKES (install-smoke's gui check and package-smoke's check 1). `exact` (Linux,
+ * where the golden was recorded under Xvfb at scale factor 1) requires the bitmap hash. Elsewhere
+ * a scale factor or colour handling can change the bytes, so the hash may differ but the size must
+ * match and the capture must not be one flat colour. MEASURED on the second CI run (2026-11-06):
+ * macos-26-intel's installed tn3270-gui drew a different hash; install-smoke then demanded the
+ * exact hash while package-smoke already applied this rule, so the two disagreed.
+ *
+ * On a failure under CI the capture is copied into `artifacts/smoke-shots/` for upload, so a
+ * mismatch can be LOOKED AT rather than argued about.
+ */
+export function judgeShot({ got, want, shot, goldenPng, exact }) {
+  const keep = () => {
+    if (process.env.CI !== 'true') return '';
+    const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'artifacts', 'smoke-shots');
+    mkdirSync(out, { recursive: true });
+    const name = `${process.platform}-${process.arch}-${Date.now()}-${basename(shot)}`;
+    copyFileSync(shot, join(out, name));
+    return `; copied to artifacts/smoke-shots/${name}`;
+  };
+  if (got === want) return '';
+  if (exact) fail(`pixels differ from the synthetic-ispf golden: got ${got}, want ${want} (capture ${shot}${keep()})`);
+  const g = pngFacts(goldenPng);
+  const m = pngFacts(shot);
+  process.stdout.write(`  measured ${m.width}x${m.height} hash ${got}; golden ${g.width}x${g.height} hash ${want}\n`);
+  if (m.width !== g.width || m.height !== g.height) {
+    fail(`hash differs and so does the size: ${m.width}x${m.height}, golden ${g.width}x${g.height} (capture ${shot}${keep()})`);
+  }
+  if (m.distinct < 2) fail(`the ${m.width}x${m.height} capture is one flat colour: nothing was drawn (capture ${shot}${keep()})`);
+  keep();
+  return ` (size match; golden hash is Linux-only: ${got})`;
 }

@@ -101,6 +101,15 @@ jobs:
       - run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
         env:
           TN3270_PACKAGE_SMOKE_X64: ${{ matrix.x64witness }}
+      # A capture that missed the golden is copied here by smoke-lib's judgeShot, so it can be
+      # looked at. On Linux any miss fails; elsewhere a size-matching, non-blank capture also lands
+      # here as the record of what that OS draws.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-shots-${{ matrix.os }}
+          path: artifacts/smoke-shots/
+          if-no-files-found: ignore
       - if: always()
         uses: actions/upload-artifact@v7
         with:
