@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +41,20 @@ describe('setVersion', () => {
 
   function readJson(root: string, ...parts: string[]): Record<string, unknown> {
     return JSON.parse(readFileSync(join(root, ...parts), 'utf8'));
+  }
+
+  /** Every regular file under `root`, as path (relative to root) -> raw content. */
+  function snapshot(root: string): Map<string, string> {
+    const files = new Map<string, string>();
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else files.set(p.slice(root.length), readFileSync(p, 'utf8'));
+      }
+    };
+    walk(root);
+    return files;
   }
 
   it('sets root, cli and gui versions, and bumps cli\'s internal dep but not gui\'s electron pin', () => {
@@ -95,5 +109,25 @@ describe('setVersion', () => {
     const root = fixture();
     writeFileSync(join(root, 'packages', 'cli', 'package.json'), JSON.stringify({ name: '@tn3270/cli' }));
     expect(() => setVersion(root, '0.2.0')).toThrow(/version/);
+  });
+
+  // Regression: a first implementation wrote each file as it validated it, so an error partway
+  // through the loop (root and some packages already rewritten, a later one malformed) left the
+  // tree half-bumped -- exactly the state the exact-pin internal deps cannot tolerate. Reproduced
+  // by breaking the LAST manifest the function would reach (gui, written after cli and core in
+  // `manifestPaths`) and confirming every file on disk, not just the broken one, is untouched:
+  // every rewrite must be computed and validated before any file is written.
+  it('leaves every file byte-identical when one manifest (even the last one visited) is bad', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'packages', 'gui', 'package.json'), JSON.stringify({ name: '@tn3270/gui' }));
+    const before = snapshot(root);
+
+    expect(() => setVersion(root, '0.2.0')).toThrow(/version/);
+
+    const after = snapshot(root);
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [path, content] of before) {
+      expect(after.get(path), path).toBe(content);
+    }
   });
 });

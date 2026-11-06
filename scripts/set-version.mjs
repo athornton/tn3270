@@ -29,7 +29,8 @@ const INTERNAL_DEP = /"(@tn3270\/[A-Za-z0-9_-]+)":\s*"[^"]*"/g;
 /** The exact literal `packages/core/src/index.ts` exports for the manifest test. */
 const VERSION_LITERAL = /^export const VERSION = '[^']*';$/gm;
 
-function rewriteManifest(path, version) {
+/** Computes a manifest's new contents. Throws, does not write. */
+function computeManifestRewrite(path, version) {
   const raw = readFileSync(path, 'utf8');
   const versionMatches = raw.match(VERSION_FIELD) ?? [];
   if (versionMatches.length !== 1) {
@@ -39,10 +40,11 @@ function rewriteManifest(path, version) {
   }
   let out = raw.replace(VERSION_FIELD, `"version": "${version}"`);
   out = out.replace(INTERNAL_DEP, (_m, name) => `"${name}": "${version}"`);
-  writeFileSync(path, out);
+  return out;
 }
 
-function rewriteCoreVersion(path, version) {
+/** Computes core's `src/index.ts` new contents. Throws, does not write. */
+function computeCoreVersionRewrite(path, version) {
   const raw = readFileSync(path, 'utf8');
   const matches = raw.match(VERSION_LITERAL) ?? [];
   if (matches.length !== 1) {
@@ -50,7 +52,7 @@ function rewriteCoreVersion(path, version) {
       `set-version: expected exactly one VERSION literal in ${path}, found ${matches.length}`,
     );
   }
-  writeFileSync(path, raw.replace(VERSION_LITERAL, `export const VERSION = '${version}';`));
+  return raw.replace(VERSION_LITERAL, `export const VERSION = '${version}';`);
 }
 
 /**
@@ -58,6 +60,15 @@ function rewriteCoreVersion(path, version) {
  * files written: the root manifest, every `packages/*\/package.json`
  * (including private ones, which share the lockstep version too), and
  * `packages/core/src/index.ts`.
+ *
+ * Every file's new contents are computed and validated FIRST, into memory,
+ * before any file is written. A manifest discovered to be malformed (say,
+ * missing its "version" field) partway through must not leave the tree with
+ * some packages bumped and others not -- an error after a few writes is
+ * exactly the half-bumped state the lockstep-exact dependency pins cannot
+ * tolerate. Computing everything before writing anything makes the function
+ * all-or-nothing: either every check passes and every file is written, or an
+ * error is thrown and the tree on disk is untouched.
  */
 export function setVersion(rootDir, version) {
   if (!SEMVER.test(version)) {
@@ -73,16 +84,14 @@ export function setVersion(rootDir, version) {
     }
   }
 
-  let written = 0;
-  for (const p of manifestPaths) {
-    rewriteManifest(p, version);
-    written++;
-  }
+  const pending = manifestPaths.map((p) => ({ path: p, content: computeManifestRewrite(p, version) }));
 
-  rewriteCoreVersion(join(rootDir, 'packages', 'core', 'src', 'index.ts'), version);
-  written++;
+  const corePath = join(rootDir, 'packages', 'core', 'src', 'index.ts');
+  pending.push({ path: corePath, content: computeCoreVersionRewrite(corePath, version) });
 
-  return written;
+  for (const { path, content } of pending) writeFileSync(path, content);
+
+  return pending.length;
 }
 
 /**
