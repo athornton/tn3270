@@ -4,7 +4,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import {
   resolve, OversizeError, TerminalTypeError, KNOWN_MODELS,
   type GeometrySetting, type Session, type Size,
@@ -20,6 +20,7 @@ import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController } from './transferWindow.js';
+import { layoutFor } from './appRoot.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -50,6 +51,13 @@ import { createTransferController } from './transferWindow.js';
  * pointing at `-insecure` is the difference between a diagnosis and a mystery.
  */
 const here = dirname(fileURLToPath(import.meta.url));
+/**
+ * Where this run's documents, preloads and atlas are. EVERY file this process hands to Electron
+ * goes through `layout`, never through `join(here, ...)` -- the unbundled `dist/` and the esbuild
+ * bundle `app/` disagree about where the HTML lives, and one call site left on `join` would be a
+ * window that loads in the monorepo and is blank in the shipped app. `appRoot.ts` has the rule.
+ */
+const layout = layoutFor(here);
 
 /**
  * Chromium switches this app is launched with, stripped before OUR parser sees argv.
@@ -362,7 +370,7 @@ app.whenReady().then(async () => {
        * this asymmetry belongs to the test shell and not to the served page.
        */
       // `.cjs`, compiled from preload.cts: an ESM preload cannot load. See that file.
-      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: join(here, 'preload.cjs') }),
+      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: layout.preload('preload.cjs') }),
     },
   });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
@@ -375,10 +383,14 @@ app.whenReady().then(async () => {
     process.stdout.write(`renderer failed to load ${url}: ${code} ${desc}\n`);
   });
 
-  // That HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui` and
-  // `canvas` stay siblings on disk. True in the workspace and false in an asar bundle, so
-  // packaging -- explicitly out of scope in the stage-3 spec -- has to copy or rewrite that
-  // path. The failure would be a blank window with a `did-fail-load` line above it.
+  // UNBUNDLED, that HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui`
+  // and `canvas` stay siblings on disk: true in the workspace, false in an asar. This comment once
+  // predicted that packaging would have to copy or rewrite that path, and 2026-11-06 it did:
+  // `scripts/bundle.mjs` builds each page's module self-contained into `app/`, rewrites every
+  // `<script src>` to `./<name>.js`, strips the import maps, and REFUSES to write a document that
+  // still references `../` or a file `app/` lacks. `layout.document` picks whichever copy this run
+  // has. The failure, if either side drifts, is still a blank window with a `did-fail-load` line
+  // above it -- which is why the bundle checks and does not leave it to a harness.
   // The URL seam branches HERE, before anything reads argv or builds a Session -- see SEAM.url.
   if (SEAM.url !== '') {
     if (SEAM.size !== '') {
@@ -414,7 +426,7 @@ app.whenReady().then(async () => {
     return;
   }
 
-  await win.loadFile(join(here, '..', 'index.html'));
+  await win.loadFile(layout.document('index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
 
   const fail = (message: string): void => {
@@ -487,7 +499,9 @@ app.whenReady().then(async () => {
    * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
    */
   try {
-    atlas = readAtlas();
+    // `layout.atlasDir` is undefined unbundled (canvas's own `assetDir()`), and `app/` in the bundle
+    // -- stated, not left to `assetDir()` landing there by coincidence. See `appRoot.ts`.
+    atlas = readAtlas(layout.atlasDir);
   } catch (err) {
     fail(explain(err));
     return;
@@ -550,7 +564,7 @@ app.whenReady().then(async () => {
         nodeIntegration: false,
         // `.cjs`, compiled from keypadPreload.cts: an ESM preload cannot load, and when it fails
         // the bridge silently never appears -- a window whose 48 buttons all do nothing.
-        preload: join(here, 'keypadPreload.cjs'),
+        preload: layout.preload('keypadPreload.cjs'),
       },
     });
     keypadWin = kw;
@@ -570,7 +584,7 @@ app.whenReady().then(async () => {
     // destroyed object. The transfer window learned this the hard way -- see the recorded
     // closing-a-parent-skips-the-child-close finding.
     kw.on('closed', () => { keypadWin = undefined; });
-    await kw.loadFile(join(here, '..', 'keypad.html'));
+    await kw.loadFile(layout.document('keypad.html'));
     /**
      * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
      *
@@ -669,7 +683,7 @@ app.whenReady().then(async () => {
         nodeIntegration: false,
         // `.cjs`, compiled from keyboardPreload.cts: an ESM preload cannot load, and when it fails
         // the bridge silently never appears -- a window whose 118 caps all do nothing.
-        preload: join(here, 'keyboardPreload.cjs'),
+        preload: layout.preload('keyboardPreload.cjs'),
       },
     });
     keyboardWin = kbw;
@@ -683,7 +697,7 @@ app.whenReady().then(async () => {
       process.stdout.write(`keyboard window failed to load ${url}: ${code} ${desc}\n`);
     });
     kbw.on('closed', () => { keyboardWin = undefined; });
-    await kbw.loadFile(join(here, '..', 'keyboard.html'));
+    await kbw.loadFile(layout.document('keyboard.html'));
     /**
      * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
      *
@@ -756,7 +770,7 @@ app.whenReady().then(async () => {
         contextIsolation: true,
         nodeIntegration: false,
         // `.cjs`, compiled from transferPreload.cts: an ESM preload cannot load.
-        preload: join(here, 'transferPreload.cjs'),
+        preload: layout.preload('transferPreload.cjs'),
       },
     });
     transferWin = tw;
@@ -866,7 +880,7 @@ app.whenReady().then(async () => {
       transfer = undefined;
     });
 
-    await tw.loadFile(join(here, '..', 'transfer.html'));
+    await tw.loadFile(layout.document('transfer.html'));
     await driveTransferWindow(tw, win, session);
   };
 

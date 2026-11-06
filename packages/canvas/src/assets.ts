@@ -120,11 +120,21 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
  * writing comments to prevent.
  *
  * The original error is kept as `cause` so a developer can still see which file was missing.
+ *
+ * ## `dir`, AND WHY THE DEFAULT IS NOT ENOUGH FOR A BUNDLE
+ *
+ * Defaults to `assetDir()`, which is right for every consumer that imports this package as a
+ * package. The GUI's esbuild bundle (`packages/gui/app/`) is not one: there `assets.ts` is
+ * inlined into `app/main.js`, so `here` becomes `app/` -- which COINCIDES with where the bundle
+ * copies the atlas, and a coincidence is not a mechanism. The GUI passes its layout's atlas
+ * directory explicitly (`gui/src/appRoot.ts` has the full reasoning). The ENOENT message below
+ * still names the canvas build, which is the right remedy for the unbundled case and points a
+ * bundle user at the step that copies the atlas (`bundle.mjs` reads it from `canvas/dist`).
  */
-export function readAtlas(): { geometry: AtlasGeometry; coverage: Uint8Array } {
+export function readAtlas(dir: string = here): { geometry: AtlasGeometry; coverage: Uint8Array } {
   try {
-    const geometry = JSON.parse(readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
-    const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+    const geometry = JSON.parse(readFileSync(join(dir, 'atlas.json'), 'utf8')) as AtlasGeometry;
+    const coverage = new Uint8Array(readFileSync(join(dir, 'atlas.bin')));
     return { geometry, coverage };
   } catch (err) {
     if ((err as { code?: string }).code === 'ENOENT') {
