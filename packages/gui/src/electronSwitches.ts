@@ -24,7 +24,17 @@ export const ELECTRON_SWITCHES: ReadonlySet<string> = new Set([
  * `--user-data-dir=<dir>`: Electron's userData (and Chromium's profile) directory -- the smoke
  * scripts give every launch a fresh one so a test run never writes the user's real app data.
  */
-export const ELECTRON_VALUE_SWITCHES: readonly string[] = ['--user-data-dir='];
+/**
+ * Chromium switches that take an `=value`, stripped only in that form with a non-empty value.
+ *
+ * `--force-device-scale-factor=` and `--force-color-profile=` make a screenshot reproducible across
+ * displays: CI run 3 (2026-11-06) captured the golden on macos-26-intel at 1440x700 (scale 2) with
+ * every green shifted by the display profile, while macOS arm64, Windows and Linux matched it
+ * byte for byte. The smokes pass `=1` and `=srgb`, which is what the golden was recorded under.
+ */
+export const ELECTRON_VALUE_SWITCHES: readonly string[] = [
+  '--user-data-dir=', '--force-device-scale-factor=', '--force-color-profile=',
+];
 
 /** `argv` without the Electron/Chromium switches above; an empty `=` value is NOT stripped. */
 export function stripElectronSwitches(argv: readonly string[]): string[] {

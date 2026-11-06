@@ -5,7 +5,7 @@
  * same two checks:
  *
  *   1. it replays `synthetic-ispf-like.trace` with shot.mjs case 1's argv and draws the
- *      synthetic-ispf golden (see "THE GOLDEN IS LINUX'S" below);
+ *      synthetic-ispf golden (see "THE GOLDEN, ON EVERY OS" below);
  *   2. launched with NO host -- the double-click route -- it opens the Connect dialog, and the
  *      dialog's submit reaches a throwaway telnet server in plaintext (`IAC WILL TERMINAL-TYPE`
  *      comes back to the server's `IAC DO TERMINAL-TYPE`).
@@ -58,15 +58,13 @@
  * strips it before parsing, electronSwitches.ts), so a run never reads or writes the real
  * `TN3270` app-data directory -- XDG_CONFIG_HOME alone would cover only Linux.
  *
- * ## THE GOLDEN IS LINUX'S
+ * ## THE GOLDEN, ON EVERY OS
  *
- * `synthetic-ispf.sha256` was recorded on Linux under Xvfb at scale factor 1, and the hash is of
- * the raw bitmap. On Linux the hash must match exactly. Elsewhere a HiDPI display, a scale
- * factor or a different font stack could change it, and nobody has measured whether it does; so
- * there, on a differing hash, the check prints the measured size and hash and passes only when
- * the capture is the golden PNG's size (from its IHDR) AND is not one flat colour (decoded here:
- * more than one distinct pixel value) -- `ok (size match; golden hash is Linux-only: <hash>)`.
- * That is weaker than the hash, and says so in its own ok line.
+ * `synthetic-ispf.sha256` was recorded on Linux under Xvfb at scale factor 1 in sRGB, and the hash
+ * is of the raw bitmap. Every launch passes `CAPTURE_SWITCHES` (smoke-lib.mjs) to ask Chromium for
+ * exactly that, and the hash must then match on every OS. Measured before that rule (CI runs 2 and
+ * 3, 2026-11-06): macOS arm64, Windows and both Linux runners matched byte for byte; macos-26-intel
+ * captured 1440x700 (scale 2) with greens shifted by the display profile, and the same geometry.
  *
  * ## EVERY LAUNCH IS BOUNDED AND KILLED BY PID
  *
@@ -82,7 +80,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CheckFailed, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch, said, sleep,
+  CAPTURE_SWITCHES, CheckFailed, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch,
+  said, sleep,
   startServer, until,
 } from './smoke-lib.mjs';
 
@@ -147,7 +146,7 @@ const NO_SEAMS = {
  * The Chromium switches every launch gets; main.ts strips them (electronSwitches.ts). `dir` is
  * the launch's fresh directory: its `user-data` is the app's userData, on every OS.
  */
-const switches = (dir) => ['--disable-gpu', ...(linux ? ['--no-sandbox'] : []), `--user-data-dir=${join(dir, 'user-data')}`];
+const switches = (dir) => ['--disable-gpu', ...CAPTURE_SWITCHES, ...(linux ? ['--no-sandbox'] : []), `--user-data-dir=${join(dir, 'user-data')}`];
 
 /** Starts the route's app with `args` and `extraEnv`; see `launch` in smoke-lib.mjs. */
 async function start(r, args, extraEnv, cwd) {
@@ -221,7 +220,7 @@ async function drawsGolden(r, work) {
   if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
   if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(res)}`);
   const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
-  return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG, exact: linux });
+  return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG });
 }
 
 /** Check 2: no host, so the Connect dialog; its submit must reach a plaintext telnet server. */

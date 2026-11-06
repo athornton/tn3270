@@ -24,6 +24,16 @@ describe('stripElectronSwitches', () => {
     }
   });
 
+  it('removes the capture-determinism switches the smokes pass (scale factor 1, sRGB)', () => {
+    // MEASURED, CI run 3 (2026-11-06): macos-26-intel's display is scale 2 with a colour profile, so
+    // its capture was the golden at 1440x700 with greens shifted (36,216,48 -> 43,215,51). These
+    // pin the capture to what the golden was recorded under; they must reach Chromium, not us.
+    const argv = stripElectronSwitches([
+      '--force-device-scale-factor=1', '--force-color-profile=srgb', '-insecure', 'vm:3270']);
+    expect(argv).toEqual(['-insecure', 'vm:3270']);
+    expect(parseGuiArgs(argv).host).toBe('vm');
+  });
+
   it('never strips our own --terminal-type or its value', () => {
     expect(stripElectronSwitches(['--terminal-type', 'IBM-3278-2', 'vm']))
       .toEqual(['--terminal-type', 'IBM-3278-2', 'vm']);

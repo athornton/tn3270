@@ -67,7 +67,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publishedPackages, tarballName } from './pack.mjs';
-import { CheckFailed, displayEnv, fail, gone, judgeShot, killTree, run as runIn, said } from './smoke-lib.mjs';
+import { CAPTURE_SWITCHES, CheckFailed, displayEnv, fail, gone, judgeShot, killTree, run as runIn, said } from './smoke-lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const artifacts = join(root, 'artifacts', 'npm');
@@ -191,7 +191,7 @@ async function guiDrawsGolden(env) {
   const shot = join(dir, 'shot.png');
   try {
     const r = await run('tn3270-gui',
-      ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
+      ['--no-sandbox', '--disable-gpu', ...CAPTURE_SWITCHES, '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
       await displayEnv({
         ...env,
         TN3270_GUI_REPLAY: TRACE,
@@ -209,7 +209,7 @@ async function guiDrawsGolden(env) {
     if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
     if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(r)}`);
     const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
-    return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG, exact: process.platform === 'linux' });
+    return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG });
   } catch (e) {
     if (process.argv.includes('--keep')) process.stdout.write(`kept ${dir}\n`);
     throw e;
