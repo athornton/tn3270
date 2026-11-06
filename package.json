@@ -14,11 +14,13 @@
     "test:watch": "vitest",
     "typecheck": "tsc --build packages/core packages/frontend packages/node-files packages/canvas packages/cli packages/tui packages/gui packages/web && npm run typecheck:tests",
     "typecheck:tests": "tsc -p packages/core/tsconfig.test.json && tsc -p packages/frontend/tsconfig.test.json && tsc -p packages/node-files/tsconfig.test.json && tsc -p packages/canvas/tsconfig.test.json && tsc -p packages/cli/tsconfig.test.json && tsc -p packages/tui/tsconfig.test.json && tsc -p packages/gui/tsconfig.test.json && tsc -p packages/web/tsconfig.test.json",
-    "version:set": "node scripts/set-version.mjs"
+    "version:set": "node scripts/set-version.mjs",
+    "bundle:gui": "node packages/gui/scripts/bundle.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
     "vitest": "^3.2.4",
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2"
   }
 }
