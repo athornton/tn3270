@@ -14,6 +14,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import net from 'node:net';
 
 const win = process.platform === 'win32';
@@ -188,14 +189,112 @@ export function startServer({ silent = false } = {}) {
 /**
  * Chromium switches every smoke GUI launch passes, so a capture is comparable on any display.
  *
- * MEASURED, CI run 3 (2026-11-06): macos-26-intel captured the synthetic-ispf golden at 1440x700
- * -- its display is scale factor 2 -- and with every green shifted by the display's colour profile
- * (36,216,48 -> 43,215,51); downsampled 2x, the glyph geometry was identical. macOS arm64, Windows
- * and Linux had already matched the golden byte for byte. The golden was recorded at scale 1 in
- * sRGB, so these ask for exactly that, and the hash can be required everywhere. `main.ts` strips
- * them (electronSwitches.ts) before its own argument parser sees them.
+ * KEPT, BUT NOT SUFFICIENT ON macOS. They make Linux and Windows captures independent of the
+ * display. MEASURED, CI run 4 (2026-11-06): on macos-26-intel neither had any effect -- the
+ * capture was byte-identical to run 3's without them (1440x700, greens shifted). Chromium on macOS
+ * takes the backing scale factor from the screen. So `judgeShot` also accepts an exact integer
+ * upscale of the golden with a consistent colour remap; see there.
  */
 export const CAPTURE_SWITCHES = Object.freeze(['--force-device-scale-factor=1', '--force-color-profile=srgb']);
+
+/** A PNG decoded to `{ width, height, px }`, `px[y][x]` an `r,g,b` string. 8-bit RGB/RGBA only. */
+export function decodePng(path) {
+  const b = readFileSync(path);
+  if (b.length < 29 || b.readUInt32BE(12) !== 0x49484452) fail(`${path} is not a PNG (no IHDR)`);
+  const width = b.readUInt32BE(16);
+  const height = b.readUInt32BE(20);
+  const bpp = { 2: 3, 6: 4 }[b[25]];
+  if (b[24] !== 8 || bpp === undefined || b[28] !== 0) {
+    fail(`${path}: PNG depth ${b[24]}, colour type ${b[25]}, interlace ${b[28]} -- only 8-bit RGB/RGBA, not interlaced`);
+  }
+  const idat = [];
+  for (let o = 8; o < b.length;) {
+    const len = b.readUInt32BE(o);
+    if (b.toString('latin1', o + 4, o + 8) === 'IDAT') idat.push(b.subarray(o + 8, o + 8 + len));
+    o += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * bpp;
+  let prev = Buffer.alloc(stride);
+  const px = [];
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0;
+      const up = prev[i];
+      const c = i >= bpp ? prev[i - bpp] : 0;
+      let add = 0;
+      if (f === 1) add = a;
+      else if (f === 2) add = up;
+      else if (f === 3) add = (a + up) >> 1;
+      else if (f === 4) {
+        const q = a + up - c;
+        const pa = Math.abs(q - a), pb = Math.abs(q - up), pc = Math.abs(q - c);
+        add = pa <= pb && pa <= pc ? a : pb <= pc ? up : c;
+      } else if (f !== 0) fail(`${path}: PNG row ${y} has filter type ${f}`);
+      line[i] = (line[i] + add) & 0xff;
+    }
+    const row = [];
+    for (let x = 0; x < width; x++) row.push(`${line[x * bpp]},${line[x * bpp + 1]},${line[x * bpp + 2]}`);
+    px.push(row);
+    prev = line;
+  }
+  return { width, height, px };
+}
+
+/** Largest per-channel difference between two `r,g,b` strings. */
+const channelGap = (p, q) => {
+  const a = p.split(',').map(Number), b = q.split(',').map(Number);
+  return Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+};
+
+/**
+ * Whether `shot` is the golden drawn at an integer scale `k` through a colour remap: returns a
+ * description, or fails naming the first rule broken.
+ *
+ * THE RULES, each derived from what the macos-26-intel capture actually was (CI runs 3 and 4):
+ *  - size is exactly k times the golden's on both axes, k an integer >= 2;
+ *  - at least 99.9% of k-by-k blocks are a single colour (9 of 252000 were not: a few edge pixels);
+ *  - every golden colour maps to ONE capture colour across all its uniform blocks, the mapping is
+ *    one-to-one, and no channel moves more than 16 (measured: at most 7, 36,216,48 -> 43,215,51).
+ * Together these say every glyph pixel landed exactly where the golden has it, and only the
+ * display's colour profile touched the values. A wrong screen, a missing glyph or a blurred
+ * (filtered) upscale each break one of them.
+ */
+export function scaledMatch(shot, goldenPng) {
+  const g = decodePng(goldenPng);
+  const m = decodePng(shot);
+  const k = m.width / g.width;
+  if (!Number.isInteger(k) || k < 2 || m.height !== g.height * k) {
+    fail(`capture ${m.width}x${m.height} is not an integer upscale of the golden's ${g.width}x${g.height}`);
+  }
+  const map = new Map();
+  let mixed = 0;
+  for (let y = 0; y < g.height; y++) {
+    for (let x = 0; x < g.width; x++) {
+      const first = m.px[y * k][x * k];
+      let uniform = true;
+      for (let dy = 0; dy < k && uniform; dy++) {
+        for (let dx = 0; dx < k; dx++) if (m.px[y * k + dy][x * k + dx] !== first) { uniform = false; break; }
+      }
+      if (!uniform) { mixed += 1; continue; }
+      const want = g.px[y][x];
+      const seen = map.get(want);
+      if (seen === undefined) map.set(want, first);
+      else if (seen !== first) fail(`golden colour ${want} became both ${seen} and ${first} (block ${x},${y})`);
+    }
+  }
+  const blocks = g.width * g.height;
+  if (mixed > blocks / 1000) fail(`${mixed} of ${blocks} ${k}x${k} blocks are not one colour: not a clean upscale`);
+  const targets = [...map.values()];
+  if (new Set(targets).size !== targets.length) fail(`two golden colours map to one capture colour: ${[...map].join(' ')}`);
+  for (const [from, to] of map) {
+    if (channelGap(from, to) > 16) fail(`golden colour ${from} became ${to}: more than a colour-profile shift`);
+  }
+  const shifts = [...map].filter(([a, b]) => a !== b).map(([a, b]) => `${a}->${b}`);
+  return `golden at ${k}x (${mixed} mixed blocks of ${blocks}${shifts.length > 0 ? `; colour profile ${shifts.join(' ')}` : ''})`;
+}
 
 /** A PNG's IHDR size, for failure messages. */
 function pngSize(path) {
@@ -204,14 +303,14 @@ function pngSize(path) {
 }
 
 /**
- * Judges a capture against the synthetic-ispf golden: returns '' or fails.
+ * Judges a capture against the synthetic-ispf golden: returns '' or a note, or fails.
  *
- * ONE RULE FOR BOTH SMOKES (install-smoke's gui check and package-smoke's check 1), and on every OS
- * the bitmap hash must match, because CAPTURE_SWITCHES pin the scale factor and colour profile the
- * golden was recorded under. (An earlier non-Linux rule accepted "same size, not blank"; it let a
- * colour-shifted capture through as long as the display was scale 1, which is weaker than the
- * evidence the other runners were already producing.) Under CI a miss is copied into
- * `artifacts/smoke-shots/` for upload, so it can be LOOKED AT rather than argued about.
+ * ONE RULE FOR BOTH SMOKES (install-smoke's gui check and package-smoke's check 1). The hash must
+ * match -- which it did on Linux x64 and arm64, macOS arm64 and Windows (CI runs 2-4) -- unless
+ * the capture passes `scaledMatch`: the golden at an exact integer scale with a consistent colour
+ * remap, which is what a Retina display with a colour profile produces (macos-26-intel) and which
+ * CAPTURE_SWITCHES cannot prevent there. That note says so in the ok line. Under CI any
+ * non-identical capture is copied into `artifacts/smoke-shots/` for upload.
  */
 export function judgeShot({ got, want, shot, goldenPng }) {
   if (got === want) return '';
@@ -223,5 +322,10 @@ export function judgeShot({ got, want, shot, goldenPng }) {
     copyFileSync(shot, join(out, name));
     copied = `; copied to artifacts/smoke-shots/${name}`;
   }
-  return fail(`pixels differ from the synthetic-ispf golden: got ${got} (${pngSize(shot)}), want ${want} (${pngSize(goldenPng)}) -- capture ${shot}${copied}`);
+  try {
+    return ` (${scaledMatch(shot, goldenPng)}${copied})`;
+  } catch (e) {
+    if (!(e instanceof CheckFailed)) throw e;
+    return fail(`pixels differ from the synthetic-ispf golden: got ${got} (${pngSize(shot)}), want ${want} (${pngSize(goldenPng)}); not a scaled match either: ${e.message} -- capture ${shot}${copied}`);
+  }
 }
