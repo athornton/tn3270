@@ -440,6 +440,7 @@ app.whenReady().then(async () => {
     args = parseGuiArgs(argv);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
 
@@ -475,6 +476,7 @@ app.whenReady().then(async () => {
     session = buildSession(args, measure);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
   // Before any connect, so the first connect's notice is printed too -- see the function.
@@ -504,6 +506,7 @@ app.whenReady().then(async () => {
     atlas = readAtlas(layout.atlasDir);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
   const { geometry, coverage } = atlas;
@@ -2705,8 +2708,19 @@ async function quitIfKeysOnly(): Promise<void> {
  * `maybeSendKeys` ALSO applies this value as a floor on its own wait, so making the keys seam
  * independent did not shorten the settle a screenshot run used to get; the reasoning is
  * there rather than here, next to the `Math.max` that does it.
+ *
+ * `failExitCode`, WHEN GIVEN, MEANS THIS CAPTURE IS A STARTUP FAILURE'S, not a normal run's:
+ * every `fail(...)` call site on the startup path (argv, session, atlas) passes one after
+ * painting the error, so a harness running under the shot seam sees the failure as a FAST
+ * non-zero exit with the error visible in the PNG, rather than the window sitting open for a
+ * real user -- which is correct there -- until the harness's own ~120s timeout expires and
+ * reports "no capture produced" with no clue why. `app.exit(code)` is used instead of this
+ * function's normal `app.quit()` for exactly that reason: `quit()` is graceful and exits 0,
+ * which would make a harness that only checks the exit code call a painted-error golden a
+ * pass. Never set outside the startup failure paths, so the ordinary success exit (0, via
+ * `quit()`) is completely unchanged.
  */
-async function maybeCapture(win: BrowserWindow): Promise<void> {
+async function maybeCapture(win: BrowserWindow, failExitCode?: number): Promise<void> {
   const path = SEAM.shot;
   if (path === '') return;
   await new Promise((r) => setTimeout(r, SEAM.shotMs));
@@ -2727,6 +2741,10 @@ async function maybeCapture(win: BrowserWindow): Promise<void> {
   writeFileSync(`${path}.sha256`, createHash('sha256').update(image.toBitmap()).digest('hex'));
   const { width, height } = image.getSize();
   process.stdout.write(`shot: ${path} ${width}x${height}\n`);
+  if (failExitCode !== undefined) {
+    app.exit(failExitCode);
+    return;
+  }
   app.quit();
 }
 
