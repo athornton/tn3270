@@ -4,7 +4,7 @@
  * through PATH -- never by file path -- so npm's symlinks (POSIX) and .cmd shims (Windows) are
  * what is tested. Each check must SEE its executable run; none passes because a file exists.
  *
- *   node scripts/pack.mjs && node scripts/install-smoke.mjs [--only cli,tui,web] [--keep]
+ *   node scripts/pack.mjs && node scripts/install-smoke.mjs [--only cli,tui,web,gui] [--keep]
  *
  * `--keep` leaves the temporary prefix behind and prints where, for debugging.
  * `--remove-bin NAME` (repeatable) deletes that bin from the prefix after installing, and exists
@@ -36,8 +36,16 @@
  * cli/tui/web run slow and network-bound for nothing. When no selected check needs it, the gui
  * tarball is left out of the install entirely (nothing else depends on it); and
  * `ELECTRON_SKIP_BINARY_DOWNLOAD=1` is set besides, unless a selected check says it needs the
- * binary. A check is data (`CHECKS` below), so the gui check (packaging Task 8) is one entry with
+ * binary. A check is data (`CHECKS` below), so the gui check is one entry with
  * `needsElectron: true`.
+ *
+ * MEASURED 2026-11-06: ELECTRON 44.10.2 HAS NO POSTINSTALL. Its `index.js` downloads the binary
+ * the first time anything `require`s it, which for a user is their first `tn3270-gui`; nothing in
+ * electron or `@electron/get` reads `ELECTRON_SKIP_BINARY_DOWNLOAD` any more, so that variable is
+ * kept only for an Electron that has one again. So when the gui check is selected, the install
+ * is followed by a separately timed warm-up `require('electron')` from the installed gui -- the
+ * same call the launcher makes -- so the download is reported as such and does not eat the gui
+ * check's own timeout. From `~/.cache/electron` it takes seconds; CI should cache that directory.
  *
  * ## DEVIATION FROM THE SPEC: THE CLI USES `Replay`, NOT A FAKE HOST
  *
@@ -64,6 +72,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const artifacts = join(root, 'artifacts', 'npm');
 const win = process.platform === 'win32';
 const TRACE = join(root, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
+/** The golden `shot.mjs` case 1 compares against; read at check time, never copied here. */
+const GOLDEN = join(root, 'packages', 'gui', 'test', 'golden', 'synthetic-ispf.sha256');
 
 // ---------------------------------------------------------------------------------------------
 // Process helpers
@@ -86,20 +96,31 @@ function envWithPath(binDir, extra = {}) {
   return env;
 }
 
+/** Children started as their own process-group leader (`run(..., { group: true })`, POSIX). */
+const GROUPED = new WeakSet();
+
 function killTree(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-  else child.kill('SIGKILL');
+  else if (GROUPED.has(child)) {
+    // A detached child leads its own process group: SIGKILL the GROUP, which takes Electron and
+    // its zygote/GPU/renderer children along with the launcher. SIGKILL to the launcher alone
+    // could not be forwarded, and would orphan Electron -- the very leak the launcher exists for.
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+  } else child.kill('SIGKILL');
 }
 
 /**
  * Runs `cmd` by NAME with `env`, feeding `input`; resolves `{ code, signal, stdout, stderr }`.
  * Killed after `timeoutMs`, and then `timedOut` is set: a hung bin fails its check, never the run.
  */
-function run(cmd, args, env, { input = '', timeoutMs = 30_000 } = {}) {
+function run(cmd, args, env, { input = '', timeoutMs = 30_000, group = false } = {}) {
   return new Promise((resolve) => {
     const [c, a, opts] = commandLine(cmd, args);
-    const child = spawn(c, a, { ...opts, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // `group`: its own process group (POSIX), so a timeout can kill the whole tree.
+    const detached = group && !win;
+    const child = spawn(c, a, { ...opts, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached });
+    if (detached) GROUPED.add(child);
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -192,8 +213,71 @@ async function webServes(env) {
   if (!gone(child.pid)) fail(`killed PID ${child.pid}, but it is still running`);
 }
 
+/**
+ * The display an installed Electron needs. `DISPLAY` set (a desktop, or CI under `xvfb-run`) is
+ * used as it is. On Linux without one, this dev box's userspace Xvfb from `xvfb.mjs` -- and with it
+ * the micromamba GUI libraries and fontconfig, which the INSTALLED Electron needs exactly as the
+ * repo's does. Imported lazily: `xvfb.mjs` resolves the repo's own Electron at load time, which a
+ * cli/tui/web run has no business touching.
+ */
+async function displayEnv(env) {
+  if (process.platform !== 'linux' || process.env.DISPLAY) return env;
+  const { guiEnv } = await import('../packages/gui/scripts/xvfb.mjs');
+  const g = guiEnv();
+  const pick = ['DISPLAY', 'LD_LIBRARY_PATH', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE'];
+  return { ...env, ...Object.fromEntries(pick.map((k) => [k, g[k]])) };
+}
+
+/**
+ * `tn3270-gui` from the prefix replays the trace `shot.mjs` case 1 replays, with its argv and env,
+ * and must draw THAT golden's pixels: exit 0, a `shot: <this run's path> WxH` line, and a bitmap
+ * hash equal to `packages/gui/test/golden/synthetic-ispf.sha256`. The shot path is a fresh mkdtemp
+ * each run, so a capture left by an earlier run cannot be what passes.
+ *
+ * `--no-sandbox` IS PASSED HERE although the launcher does not add it and this dev box runs fine
+ * without it (measured; see the launcher's header): Ubuntu 23.10+ -- GitHub's ubuntu-latest --
+ * blocks the unprivileged user namespaces Chromium's sandbox needs, and npm cannot install
+ * `chrome-sandbox` setuid, so CI would abort there. It is also shot.mjs's argv, and it proves the
+ * switch passes through the launcher to Chromium without reaching our own parser.
+ */
+async function guiDrawsGolden(env) {
+  if (!existsSync(TRACE)) fail(`the input trace ${TRACE} is missing from the repository`);
+  if (!existsSync(GOLDEN)) fail(`the golden ${GOLDEN} is missing from the repository`);
+  const want = readFileSync(GOLDEN, 'utf8').trim();
+  const dir = mkdtempSync(join(tmpdir(), 'tn3270-smoke-shot-'));
+  const shot = join(dir, 'shot.png');
+  try {
+    const r = await run('tn3270-gui',
+      ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
+      await displayEnv({
+        ...env,
+        TN3270_GUI_REPLAY: TRACE,
+        TN3270_GUI_SHOT: shot,
+        TN3270_GUI_SHOT_MS: '2500',
+        TN3270_GUI_KEYS: '', // as shot.mjs: a stray one in the caller's env would type into the capture
+      }),
+      { timeoutMs: 120_000, group: true });
+    const escaped = shot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (r.code !== 0 || !new RegExp(`^shot: ${escaped} \\d+x\\d+$`, 'm').test(r.stdout)) {
+      fail(`expected exit 0 and "shot: ${shot} WxH" on stdout; got ${said(r)}`);
+    }
+    // A renderer exception draws a blank window and still captures it (see shot.mjs).
+    const thrown = r.stdout.split('\n').filter((l) => l.startsWith('renderer[3]'));
+    if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
+    if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(r)}`);
+    const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
+    if (got !== want) fail(`pixels differ from the synthetic-ispf golden: got ${got.slice(0, 16)}, want ${want.slice(0, 16)} (kept ${shot})`);
+  } catch (e) {
+    if (process.argv.includes('--keep')) process.stdout.write(`kept ${dir}\n`);
+    throw e;
+  } finally {
+    if (!process.argv.includes('--keep')) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
-// The checks. DATA: `group` is what `--only` selects; Task 8 adds the gui entry here.
+// The checks. DATA: `group` is what `--only` selects; `needsElectron` keeps the gui tarball and
+// Electron's binary download in the install.
 
 const CHECKS = [
   { group: 'cli', bin: 'tn3270-cli', name: 'tn3270-cli --bogus is a usage error', fn: (env) => usageError('tn3270-cli', env) },
@@ -212,6 +296,10 @@ const CHECKS = [
   },
   { group: 'tui', bin: 'tn3270', name: 'tn3270 --bogus is a usage error', fn: (env) => usageError('tn3270', env) },
   { group: 'web', bin: 'tn3270-web', name: 'tn3270-web serves its page, stylesheet and modules', fn: webServes },
+  {
+    group: 'gui', bin: 'tn3270-gui', needsElectron: true,
+    name: 'tn3270-gui replays a trace and draws the synthetic-ispf golden', fn: guiDrawsGolden,
+  },
 ];
 const GROUPS = ['cli', 'tui', 'web', 'gui'];
 const IMPLEMENTED = [...new Set(CHECKS.map((c) => c.group))];
@@ -224,7 +312,7 @@ const binPath = (binDir, bin) => join(binDir, win ? `${bin}.cmd` : bin);
 
 function usage(message) {
   process.stderr.write(`install-smoke: ${message}\n`
-    + 'usage: node scripts/install-smoke.mjs [--only cli,tui,web] [--keep] [--remove-bin NAME]\n');
+    + 'usage: node scripts/install-smoke.mjs [--only cli,tui,web,gui] [--keep] [--remove-bin NAME]\n');
   process.exit(2);
 }
 
@@ -246,7 +334,7 @@ function parseArgs(argv) {
       only = v.split(',');
       for (const g of only) {
         if (!GROUPS.includes(g)) usage(`unknown group ${JSON.stringify(g)}; groups are ${GROUPS.join(', ')}`);
-        if (!IMPLEMENTED.includes(g)) usage(`the ${g} check is not implemented yet (packaging Task 8)`);
+        if (!IMPLEMENTED.includes(g)) usage(`the ${g} check is not implemented yet`);
       }
     } else usage(`unrecognized argument ${JSON.stringify(a)}`);
   }
@@ -292,6 +380,22 @@ async function main() {
       process.stderr.write(`install-smoke: installed version ${installed} is not the repo's ${version}\n`);
       failed = checks.length;
       return;
+    }
+
+    if (needsElectron) {
+      // See "ELECTRON 44.10.2 HAS NO POSTINSTALL". `-e` resolves from `cwd`, the installed gui,
+      // so this is the Electron the launcher will find.
+      const t0 = Date.now();
+      const warm = spawnSync(process.execPath, ['-e', "process.stdout.write(require('electron'))"],
+        { cwd: join(libDir, '@tn3270', 'gui'), encoding: 'utf8', timeout: 600_000, windowsHide: true });
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      if (warm.error !== undefined || warm.status !== 0) {
+        process.stderr.write(`install-smoke: fetching the Electron binary failed after ${secs} s:\n${warm.stdout}${warm.stderr}\n`);
+        failed = checks.length;
+        return;
+      }
+      const path = warm.stdout.trim().split('\n').at(-1);
+      process.stdout.write(`electron binary ready in ${secs} s: ${path}\n`);
     }
 
     // ONLY the prefix's bin directory is added: the rest of PATH is the caller's, so `node` (which
