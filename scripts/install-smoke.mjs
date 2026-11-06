@@ -7,6 +7,17 @@
  *   node scripts/pack.mjs && node scripts/install-smoke.mjs [--only cli,tui,web] [--keep]
  *
  * `--keep` leaves the temporary prefix behind and prints where, for debugging.
+ * `--remove-bin NAME` (repeatable) deletes that bin from the prefix after installing, and exists
+ * only to prove the from-the-prefix rule below: its check must then FAIL even with a same-named
+ * program elsewhere on PATH.
+ *
+ * ## A BIN MUST COME FROM THE FRESH PREFIX, NOT FROM PATH
+ *
+ * The prefix's bin directory is PREPENDED to the caller's PATH (which must stay, for `node`), so a
+ * bin missing from the prefix would fall through to any same-named program on the ambient PATH --
+ * an older global install, say -- and its check would test that instead. FOUND BY REVIEW, with a
+ * planted fake. So each check names its `bin`, and before it runs, that bin must exist in the
+ * prefix's bin directory (`<name>` on POSIX, `<name>.cmd` on Windows) or the check FAILs naming it.
  *
  * ## THE INSTALL MECHANISM, AND WHY NO LOCAL REGISTRY -- MEASURED 2026-11-06, npm 11.20, Node 26
  *
@@ -185,9 +196,9 @@ async function webServes(env) {
 // The checks. DATA: `group` is what `--only` selects; Task 8 adds the gui entry here.
 
 const CHECKS = [
-  { group: 'cli', name: 'tn3270-cli --bogus is a usage error', fn: (env) => usageError('tn3270-cli', env) },
+  { group: 'cli', bin: 'tn3270-cli', name: 'tn3270-cli --bogus is a usage error', fn: (env) => usageError('tn3270-cli', env) },
   {
-    group: 'cli', name: 'tn3270-cli replays a trace and prints its screen',
+    group: 'cli', bin: 'tn3270-cli', name: 'tn3270-cli replays a trace and prints its screen',
     fn: async (env) => {
       if (!existsSync(TRACE)) fail(`the input trace ${TRACE} is missing from the repository`);
       // The path is QUOTED: `Replay` splits its arguments on spaces and commas, and a checkout
@@ -199,26 +210,36 @@ const CHECKS = [
       }
     },
   },
-  { group: 'tui', name: 'tn3270 --bogus is a usage error', fn: (env) => usageError('tn3270', env) },
-  { group: 'web', name: 'tn3270-web serves its page, stylesheet and modules', fn: webServes },
+  { group: 'tui', bin: 'tn3270', name: 'tn3270 --bogus is a usage error', fn: (env) => usageError('tn3270', env) },
+  { group: 'web', bin: 'tn3270-web', name: 'tn3270-web serves its page, stylesheet and modules', fn: webServes },
 ];
 const GROUPS = ['cli', 'tui', 'web', 'gui'];
 const IMPLEMENTED = [...new Set(CHECKS.map((c) => c.group))];
+const BINS = [...new Set(CHECKS.map((c) => c.bin))];
+
+/** Where npm put `bin` in this prefix: a symlink on POSIX, a `.cmd` shim on Windows. */
+const binPath = (binDir, bin) => join(binDir, win ? `${bin}.cmd` : bin);
 
 // ---------------------------------------------------------------------------------------------
 
 function usage(message) {
   process.stderr.write(`install-smoke: ${message}\n`
-    + 'usage: node scripts/install-smoke.mjs [--only cli,tui,web] [--keep]\n');
+    + 'usage: node scripts/install-smoke.mjs [--only cli,tui,web] [--keep] [--remove-bin NAME]\n');
   process.exit(2);
 }
 
 function parseArgs(argv) {
   let only = IMPLEMENTED;
   let keep = false;
+  const removeBins = [];
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--keep') keep = true;
+    else if (a === '--remove-bin') {
+      const v = argv[++i];
+      if (!BINS.includes(v)) usage(`--remove-bin takes one of ${BINS.join(', ')}`);
+      removeBins.push(v);
+    }
     else if (a === '--only') {
       const v = argv[++i];
       if (v === undefined || v === '') usage('--only needs a comma-separated list');
@@ -229,11 +250,11 @@ function parseArgs(argv) {
       }
     } else usage(`unrecognized argument ${JSON.stringify(a)}`);
   }
-  return { only, keep };
+  return { only, keep, removeBins };
 }
 
 async function main() {
-  const { only, keep } = parseArgs(process.argv.slice(2));
+  const { only, keep, removeBins } = parseArgs(process.argv.slice(2));
   const checks = CHECKS.filter((c) => only.includes(c.group));
   const needsElectron = checks.some((c) => c.needsElectron === true);
   const pkgs = publishedPackages();
@@ -275,9 +296,18 @@ async function main() {
 
     // ONLY the prefix's bin directory is added: the rest of PATH is the caller's, so `node` (which
     // the shims and shebangs need) is found the same way a user's shell would find it.
+    for (const bin of removeBins) {
+      rmSync(binPath(binDir, bin), { force: true });
+      process.stdout.write(`removed ${binPath(binDir, bin)} (--remove-bin)\n`);
+    }
     const env = envWithPath(binDir);
     for (const check of checks) {
       try {
+        // See "A BIN MUST COME FROM THE FRESH PREFIX": PATH alone would fall through to an
+        // ambient program of the same name.
+        if (!existsSync(binPath(binDir, check.bin))) {
+          fail(`${binPath(binDir, check.bin)} is not in the fresh prefix, so running ${check.bin} by name would find whatever else PATH has`);
+        }
         await check.fn(env);
         process.stdout.write(`ok ${check.name}\n`);
       } catch (e) {
