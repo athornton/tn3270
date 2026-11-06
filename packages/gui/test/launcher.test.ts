@@ -1,3 +1,4 @@
+import { constants } from 'node:os';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,8 +24,15 @@ describe('tn3270-gui exitPlan', () => {
   });
 
   it('turns a crash signal into 128+n rather than re-raising it (which would dump core)', () => {
-    expect(exitPlan(null, 'SIGTRAP', 'linux')).toEqual({ exit: 133 });
-    expect(exitPlan(null, 'SIGSEGV', 'linux')).toEqual({ exit: 139 });
+    // Expected from THIS host's signal table, not Linux's numbers: on Windows `os.constants.signals`
+    // has no SIGTRAP (first Windows CI run, 2026-11-06: got 128). The rule is 128 + n; n is local.
+    const n = (sig: 'SIGTRAP' | 'SIGSEGV') => (constants.signals as Record<string, number>)[sig] ?? 0;
+    expect(exitPlan(null, 'SIGTRAP', 'linux')).toEqual({ exit: 128 + n('SIGTRAP') });
+    expect(exitPlan(null, 'SIGSEGV', 'linux')).toEqual({ exit: 128 + n('SIGSEGV') });
+    if (process.platform !== 'win32') {
+      expect(exitPlan(null, 'SIGTRAP', 'linux')).toEqual({ exit: 133 });
+      expect(exitPlan(null, 'SIGSEGV', 'linux')).toEqual({ exit: 139 });
+    }
   });
 
   it('never re-raises on Windows', () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_MODULES } from '@tn3270/canvas';
 import { resolveAsset, assetPaths, tokenCookie, parseCookies } from '../src/httpstatic.js';
@@ -355,7 +355,8 @@ describe('no asset path depends on the monorepo layout', () => {
     const offenders: string[] = [];
     for (const path of assetPaths()) {
       const file = resolveAsset(path)!.file;
-      if (!allowedRoots.some((root) => file.startsWith(root + '/') || file === root)) {
+      // `sep`, not '/': on Windows every resolved path uses `\\` (first Windows CI run, 2026-11-06).
+      if (!allowedRoots.some((root) => file.startsWith(root + sep) || file === root)) {
         offenders.push(`${path} -> ${file}`);
       }
     }

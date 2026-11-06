@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { dirname, join, relative, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -213,7 +213,8 @@ describe('the renderer bundle', () => {
       and that it fails as a RED TEST rather than as a blank window.
     */
     const graph = graphFrom(join(distDir, 'selection.js'));
-    expect(graph.map((f) => f.replace(`${distDir}/`, ''))).toEqual(['selection.js']);
+    // `relative`, not a `${distDir}/` prefix: on Windows the separator is `\\` (first Windows CI run).
+    expect(graph.map((f) => relative(distDir, f))).toEqual(['selection.js']);
     // MATCHED ON THE IMPORT FORM, not on the bare string `@tn3270/`, and that is a correction the
     // switch of subject forced: `selection.js`'s own docstring EXPLAINS the hazard and so contains
     // `@tn3270/core` as prose. The old `hittest.js` happened not to mention it, so a substring
