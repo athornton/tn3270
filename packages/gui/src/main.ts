@@ -15,7 +15,9 @@ import {
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
-import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
+import {
+  buildSession, parseGuiArgs, printGeometryNotices, UsageError, type GuiArgs,
+} from './args.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
@@ -444,6 +446,22 @@ app.whenReady().then(async () => {
     return;
   }
 
+  await startSession(win, fail, args);
+});
+
+/**
+ * Everything after the arguments are known: the session, the atlas, the windows, the menus, the IPC
+ * handlers, and the connect (or the replay). ONE PATH for a host given on the command line and, from
+ * the next commit, one typed into the startup Connect dialog -- so the dialog cannot build a session
+ * the command line would not.
+ *
+ * CALLED AT MOST ONCE PER PROCESS, and that is load-bearing: it registers `ipcMain.handle` channels
+ * and an `app.on('before-quit')` hook, and the first would THROW on a second call (see the note at
+ * `transferWin`). Moved out of `app.whenReady()` verbatim; the module-level indentation is the same.
+ */
+async function startSession(
+  win: BrowserWindow, fail: (message: string) => void, args: GuiArgs,
+): Promise<void> {
   // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
   // string lookup in the paint path.
   const scheme = args.scheme ?? resolveScheme();
@@ -1567,7 +1585,7 @@ app.whenReady().then(async () => {
   await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
-});
+}
 
 /**
  * A THIRD TEST SEAM: `TN3270_GUI_KEYS='Alt+1,Ctrl+A,Enter'` delivers REAL key events.
