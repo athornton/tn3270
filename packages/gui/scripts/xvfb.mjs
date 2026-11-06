@@ -62,14 +62,15 @@ export function ensureDisplay() {
  * hasn't been hit; if that stops being true, the fix is a lockfile around ensureDisplay().
  */
 export function guiEnv(extra = {}) {
-  return {
-    ...process.env,
-    DISPLAY: ensureDisplay(),
+  // The micromamba libraries and fontconfig only where that env EXISTS. A CI runner (system
+  // libraries, `xvfb-run` for DISPLAY) has none, and a FONTCONFIG_FILE naming a missing file
+  // leaves fontconfig with no configuration at all -- the HTML dialogs would draw with no fonts.
+  const mamba = existsSync(GUI_ENV) ? {
     LD_LIBRARY_PATH: join(GUI_ENV, 'lib'),
     FONTCONFIG_PATH: join(GUI_ENV, 'etc', 'fonts'),
     FONTCONFIG_FILE: join(GUI_ENV, 'etc', 'fonts', 'fonts.conf'),
-    ...extra,
-  };
+  } : {};
+  return { ...process.env, DISPLAY: ensureDisplay(), ...mamba, ...extra };
 }
 
 /** `packages/gui` itself, the directory every path below is relative to. */

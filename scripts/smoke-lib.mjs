@@ -143,7 +143,7 @@ export async function displayEnv(env) {
   const { guiEnv } = await import('../packages/gui/scripts/xvfb.mjs');
   const g = guiEnv();
   const pick = ['DISPLAY', 'LD_LIBRARY_PATH', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE'];
-  return { ...env, ...Object.fromEntries(pick.map((k) => [k, g[k]])) };
+  return { ...env, ...Object.fromEntries(pick.filter((k) => g[k] !== undefined).map((k) => [k, g[k]])) };
 }
 
 // ---------------------------------------------------------------------------------------------
