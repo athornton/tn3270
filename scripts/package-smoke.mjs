@@ -294,13 +294,20 @@ async function dialogConnects(r, work) {
   let survivors = [];
   let checks;
   try {
+    // THE SERVER IS THE WITNESS, NOT STDOUT. The first CI run (2026-11-06, ubuntu-latest) had the
+    // AppImage's `connect: submitted` line never reach this pipe -- the AppImage runtime holds the
+    // app's stdout -- while the server HAD received WILL TERMINAL-TYPE: the submit worked and the
+    // check waited out LAUNCH_MS for a line, then killed a working app. So wait for either, and
+    // decide on the bytes. With NO host argument, a telnet reply can only come from the dialog's
+    // submit; one `connect:` line is still required, so a launch that dialled by some other route
+    // cannot pass.
     // From launch to submit: cold start, and on the AppImage its extraction too.
-    await until(() => p.stdout.includes('connect: submitted') || p.exited, LAUNCH_MS);
+    await until(() => p.stdout.includes('connect: submitted') || srv.willTtype() || p.exited, LAUNCH_MS);
     // ~10 s from the SUBMIT for the handshake reply.
     await until(() => srv.willTtype(), 10_000);
     checks = [
-      ['connect: dialog shown', p.stdout.includes('connect: dialog shown')],
-      ['connect: submitted', p.stdout.includes('connect: submitted')],
+      ['a connect: line (dialog shown or submitted)',
+        p.stdout.includes('connect: dialog shown') || p.stdout.includes('connect: submitted')],
       ['IAC WILL TERMINAL-TYPE within 10 s of the submit', srv.willTtype()],
     ];
   } finally {
