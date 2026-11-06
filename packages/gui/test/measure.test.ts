@@ -111,7 +111,10 @@ describe('measureDisplay', () => {
     }
     expect(checked).toBeGreaterThan(1000);
     expect(clamped).toBeGreaterThan(0);
-  });
+  // 30 s, not vitest's 5 s default: a sweep of ~13,000 display sizes per model. 585 ms on the dev
+  // box; it timed out on GitHub's macos-26-intel runner (CI run 5, 2026-11-06), which ran that
+  // whole suite about ten times slower. The sweep is the point, so the budget grows, not the step.
+  }, 30_000);
 });
 
 describe('measureAuto', () => {
