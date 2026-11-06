@@ -884,13 +884,48 @@ describe('served assets are revalidated, never reused stale', () => {
 
   // THE PAGE ONLY, AND NOT THE MODULES, because under vitest `buildServer` comes from `src/`, and
   // `resolveAsset` finds the browser modules beside itself -- in `src/`, where no `.js` exists --
-  // so fetching one here hangs on a failed read. Every asset goes through the one `writeHead` in
+  // so fetching one here is a 500 (see 'an asset whose file is missing' below). Every asset goes through the one `writeHead` in
   // `main.ts`, so the page's header is the modules' header; the built gateway's `bridge.js` was
   // checked by hand with curl on 2026-11-05.
   it('sends Cache-Control: no-cache on the page', async () => {
     const { port, token } = await start();
     for (const path of ['/', '/index.html']) {
       expect((await headersOf(port, token, path)).get('cache-control'), path).toBe('no-cache');
+    }
+  });
+});
+
+/*
+  A TABLE ENTRY WHOSE FILE IS MISSING. Before this, `main.ts` wrote a 200 and piped a
+  `createReadStream` with no 'error' listener, so the ENOENT was an unhandled 'error' event that
+  killed the GATEWAY PROCESS, and every browser's session with it. MEASURED 2026-11-06 by the
+  install smoke, with `static/` left out of the tarball: `GET /` crashed the gateway, and every
+  later request was ECONNREFUSED.
+
+  The missing file here is a REAL one, not a mock: under vitest `resolveAsset` places web's own
+  browser modules beside `src/main.ts`, where no `bridge.js` exists -- the same gap the note above
+  `headersOf` describes.
+
+  500, NOT 404: the path is in the table, so the gateway was supposed to have it. A 404 would say
+  the browser asked for something that does not exist, and send whoever reads the console looking
+  for a typo in an import map. A 500 says the installation is broken, which is the truth.
+*/
+describe('an asset whose file is missing', () => {
+  it('is a 500 for that request, and the gateway still serves the next one', async () => {
+    const { port, token } = await start();
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const missing = await fetch(`http://127.0.0.1:${port}/bridge.js?t=${token}`,
+        { headers: { connection: 'close' } });
+      expect(missing.status).toBe(500);
+      await missing.arrayBuffer();
+      const page = await fetch(`http://127.0.0.1:${port}/?t=${token}`, { headers: { connection: 'close' } });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toMatch(/<html/i);
+      // The operator is told which file, since the browser only sees a status.
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toMatch(/bridge\.js/);
+    } finally {
+      err.mockRestore();
     }
   });
 });

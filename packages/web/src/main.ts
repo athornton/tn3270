@@ -108,8 +108,27 @@ export function buildServer(args: WebArgs) {
     // `no-cache`: a browser may store these, but must revalidate before every use. Without any
     // header it reused its cached bridge after a rebuild, and a stale page was reported as a picker
     // defect (2026-11-05; see the integration test). The files are small and local.
-    res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-cache' });
-    createReadStream(asset.file).pipe(res);
+    //
+    // A MISSING OR UNREADABLE FILE IS ONE FAILED REQUEST, NOT A DEAD GATEWAY. This used to write the
+    // 200 first and pipe a stream with no 'error' listener, so an ENOENT was an unhandled 'error'
+    // event that killed the process and every session in it (measured 2026-11-06, by the install
+    // smoke, on a tarball missing `static/`). The 200 now waits for the file to OPEN, so a file that
+    // is not there gets a real 500. 500, not 404, because the path is in the table: the gateway was
+    // supposed to have this file, and the fault is the installation, not the browser's request. An
+    // error AFTER the headers went out cannot change the status, so the response is destroyed, and
+    // the browser sees a truncated body rather than a complete-looking wrong one.
+    const stream = createReadStream(asset.file);
+    stream.on('open', () => {
+      res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-cache' });
+      stream.pipe(res);
+    });
+    stream.on('error', (err) => {
+      process.stderr.write(`cannot serve ${url.pathname} from ${asset.file}: ${err.message}\n`);
+      if (res.headersSent) res.destroy(err);
+      else res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end('internal error');
+    });
+    // A browser that goes away mid-read must not leave the file descriptor open.
+    res.on('close', () => { stream.destroy(); });
   };
 
   const server = args.tls !== undefined
