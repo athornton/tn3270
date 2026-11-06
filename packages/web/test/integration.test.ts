@@ -315,6 +315,8 @@ function collect(ws: WebSocket, want: number): Promise<Array<Record<string, unkn
  */
 function rawUpgrade(opts: {
   port: number; token: string; origin?: string; body?: Buffer;
+  /** With a body: how many server messages make the response complete. */
+  expect?: number;
 }): { socket: Socket; response: Promise<Buffer> } {
   const socket = connect(opts.port, '127.0.0.1');
   const chunks: Buffer[] = [];
@@ -325,8 +327,16 @@ function rawUpgrade(opts: {
       // WHEN IS THE RESPONSE COMPLETE? It depends on whether a body was sent, and getting this
       // wrong hangs rather than fails: with no body the server answers only the ~130-byte 101 and
       // then waits for a `hello` that never comes, so a fixed byte threshold never trips.
+      //
+      // WITH a body, complete means the server's reply to it has ARRIVED, which is a count of
+      // parsed messages and never a byte count. A `> 2000` threshold stood here, and it passed on
+      // Linux for months because loopback delivered the whole burst in one or two chunks; the first
+      // macOS CI run (2026-11-06) resolved after `geometryChoices` and lost the `frame`, since the
+      // atlas message alone is past 2000 bytes. `serverMessagesFrom` stops at a partial frame, so a
+      // short read simply waits for the next chunk.
       const headerDone = all.includes('\r\n\r\n');
-      if (headerDone && (opts.body === undefined || all.length > 2000)) resolveP(all);
+      if (!headerDone) return;
+      if (opts.body === undefined || serverMessagesFrom(all).length >= (opts.expect ?? 1)) resolveP(all);
     });
     socket.on('close', () => resolveP(Buffer.concat(chunks)));
     socket.on('error', () => resolveP(Buffer.concat(chunks)));
@@ -595,7 +605,7 @@ describe('the gateway end to end', () => {
     // before this test, because no browser and no Node client writes before the 101.
     const { port, token } = await start();
     const { socket, response } = rawUpgrade({
-      port, token, body: maskedTextFrame(JSON.stringify({ kind: 'hello' })),
+      port, token, body: maskedTextFrame(JSON.stringify({ kind: 'hello' })), expect: 4,
     });
     const raw = await response;
     expect(raw.toString('latin1')).toMatch(/^HTTP\/1\.1 101 /);
@@ -884,13 +894,48 @@ describe('served assets are revalidated, never reused stale', () => {
 
   // THE PAGE ONLY, AND NOT THE MODULES, because under vitest `buildServer` comes from `src/`, and
   // `resolveAsset` finds the browser modules beside itself -- in `src/`, where no `.js` exists --
-  // so fetching one here hangs on a failed read. Every asset goes through the one `writeHead` in
+  // so fetching one here is a 500 (see 'an asset whose file is missing' below). Every asset goes through the one `writeHead` in
   // `main.ts`, so the page's header is the modules' header; the built gateway's `bridge.js` was
   // checked by hand with curl on 2026-11-05.
   it('sends Cache-Control: no-cache on the page', async () => {
     const { port, token } = await start();
     for (const path of ['/', '/index.html']) {
       expect((await headersOf(port, token, path)).get('cache-control'), path).toBe('no-cache');
+    }
+  });
+});
+
+/*
+  A TABLE ENTRY WHOSE FILE IS MISSING. Before this, `main.ts` wrote a 200 and piped a
+  `createReadStream` with no 'error' listener, so the ENOENT was an unhandled 'error' event that
+  killed the GATEWAY PROCESS, and every browser's session with it. MEASURED 2026-11-06 by the
+  install smoke, with `static/` left out of the tarball: `GET /` crashed the gateway, and every
+  later request was ECONNREFUSED.
+
+  The missing file here is a REAL one, not a mock: under vitest `resolveAsset` places web's own
+  browser modules beside `src/main.ts`, where no `bridge.js` exists -- the same gap the note above
+  `headersOf` describes.
+
+  500, NOT 404: the path is in the table, so the gateway was supposed to have it. A 404 would say
+  the browser asked for something that does not exist, and send whoever reads the console looking
+  for a typo in an import map. A 500 says the installation is broken, which is the truth.
+*/
+describe('an asset whose file is missing', () => {
+  it('is a 500 for that request, and the gateway still serves the next one', async () => {
+    const { port, token } = await start();
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const missing = await fetch(`http://127.0.0.1:${port}/bridge.js?t=${token}`,
+        { headers: { connection: 'close' } });
+      expect(missing.status).toBe(500);
+      await missing.arrayBuffer();
+      const page = await fetch(`http://127.0.0.1:${port}/?t=${token}`, { headers: { connection: 'close' } });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toMatch(/<html/i);
+      // The operator is told which file, since the browser only sees a status.
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toMatch(/bridge\.js/);
+    } finally {
+      err.mockRestore();
     }
   });
 });
@@ -1067,6 +1112,13 @@ describe('socket-carried file transfer', () => {
     await new Promise((res) => { ws.addEventListener('open', res, { once: true }); });
     const r = reader(ws);
     ws.send(JSON.stringify({ kind: 'hello' }));
+    // WAIT FOR THE HANDSHAKE BY COUNT, then settle. `settle()` alone measures quiet from the last
+    // message OR from when the reader was made, so on a slow runner -- the first macOS CI run,
+    // 2026-11-06 -- it returned before `session` had even arrived, and the test then read
+    // `session` as the reply to its transfer. On Linux the reply always beat the 25 ms window.
+    const kinds = [];
+    for (let i = 0; i < 4; i++) kinds.push((await r.next(`handshake message ${i + 1}`))['kind']);
+    expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     await r.settle();
     return { ws, r };
   }

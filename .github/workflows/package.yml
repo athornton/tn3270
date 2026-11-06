@@ -1,0 +1,135 @@
+# Build, test, pack, install-smoke, package and package-smoke on each OS/arch, natively
+# (packaging plan, Task 14). Every job runs the same steps; what differs per runner lives in the
+# matrix entry, not in `if:` expressions:
+#   builder     electron-builder's OS/arch flags for `npm run package:gui --`
+#   xvfb        the display wrapper for anything that starts Electron (Linux: xvfb-run at the
+#               1280x1024x24 screen the synthetic-ispf golden was recorded on; elsewhere empty)
+#   apt         Linux packages to install (empty: none)
+#   parity      run the six GUI harnesses on dist/ AND on the bundle (TN3270_GUI_MAIN=app)
+#   x64witness  TN3270_PACKAGE_SMOKE_X64 for package-smoke.mjs (see its "macOS" notes)
+#   npm         upload the npm tarballs (one job, so they are not uploaded five times)
+#   gui         upload this job's native artifacts
+#
+# Node 22 everywhere: it is the `engines.node` floor of every package, so CI tests the oldest
+# Node a user may run. Action majors checked 2026-11-06 against each repo's releases/latest
+# (checkout v7.0.1, setup-node v7.1.0, cache v6.1.0, upload-artifact v7.0.2).
+name: package
+on:
+  push:
+    branches: [main, packaging]
+  pull_request:
+  workflow_dispatch:
+env:
+  # Unsigned this milestone: never sign with whatever certificate a runner's keychain holds.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+defaults:
+  run:
+    shell: bash
+jobs:
+  package:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            builder: --linux --x64
+            xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
+            apt: xvfb libfuse2t64
+            parity: true
+            npm: true
+            gui: true
+          - os: ubuntu-24.04-arm
+            builder: --linux --arm64
+            xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
+            # The arm64 image ships no Chrome, so unlike the x64 image nothing has pulled in
+            # Electron's runtime libraries; on x64 these are already present.
+            apt: xvfb libfuse2t64 libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+            gui: true
+          - os: macos-latest
+            # Apple silicon. Universal comes from electron-builder.cjs `mac.target`.
+            builder: --mac
+            # The Intel job below runs the x64 slice natively, so this one skips Rosetta.
+            x64witness: native
+            gui: true
+          - os: macos-26-intel
+            # Builds the universal app too, so its package smoke runs the x86_64 slice natively.
+            # Not uploaded: it would duplicate macos-latest's universal artifacts.
+            builder: --mac
+          - os: windows-latest
+            builder: --win --x64
+            gui: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      # Before `npm ci`: electron's postinstall downloads into the electron cache.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npx vitest run --reporter=default --reporter=junit --outputFile=vitest-junit.xml
+      - run: npm run bundle:gui
+      - run: npm run pack:npm
+      - run: ${{ matrix.xvfb }} node scripts/install-smoke.mjs
+      # The harnesses have never run in CI before. Under xvfb-run DISPLAY is set, so
+      # xvfb.mjs ensureDisplay() returns it and starts no Xvfb of its own.
+      - if: matrix.parity
+        name: GUI harnesses on dist/ and on the bundle
+        run: |
+          for h in shot keys clicks select transfer connect; do
+            echo "::group::$h on dist"
+            ${{ matrix.xvfb }} node "packages/gui/scripts/$h.mjs"
+            echo "::endgroup::"
+            echo "::group::$h on app (TN3270_GUI_MAIN=app)"
+            TN3270_GUI_MAIN=app ${{ matrix.xvfb }} node "packages/gui/scripts/$h.mjs"
+            echo "::endgroup::"
+          done
+      - run: npm run package:gui -- ${{ matrix.builder }}
+      - run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
+        env:
+          TN3270_PACKAGE_SMOKE_X64: ${{ matrix.x64witness }}
+      # A capture that missed the golden is copied here by smoke-lib's judgeShot, so it can be
+      # looked at. On Linux any miss fails; elsewhere a size-matching, non-blank capture also lands
+      # here as the record of what that OS draws.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-shots-${{ matrix.os }}
+          path: artifacts/smoke-shots/
+          if-no-files-found: ignore
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-${{ matrix.os }}
+          path: vitest-junit.xml
+          if-no-files-found: warn
+      - if: matrix.npm
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarballs
+          path: artifacts/npm/*.tgz
+          if-no-files-found: error
+      - if: matrix.gui
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-${{ matrix.os }}
+          path: |
+            artifacts/gui/*.AppImage
+            artifacts/gui/*.deb
+            artifacts/gui/*.dmg
+            artifacts/gui/*.zip
+            artifacts/gui/*.exe
+          if-no-files-found: error

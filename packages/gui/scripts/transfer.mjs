@@ -46,14 +46,14 @@
  *     node packages/gui/scripts/transfer.mjs
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electron, guiEnv } from './xvfb.mjs';
+import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
-const main = join(here, '..', 'dist', 'main.js');
+const main = guiMain();
+console.log(`entry: ${guiMainLabel()}`);
 
 /**
  * THE SYNTHETIC TRACE, and NOT `x3270/tso-query-reply.txt`, which the plan for this task named.
@@ -204,30 +204,15 @@ const refuse = (why, fix) => {
  * `.cts`/`.cjs` are named explicitly on BOTH sides because `'transferPreload.cts'.endsWith('.ts')`
  * is FALSE, which once exempted the preload -- the IPC hop this harness depends on -- from the
  * check entirely. That was a false GREEN, and it is why the suffix lists are spelled out.
+ *
+ * MOVED INTO `xvfb.mjs`'s `staleness()`, shared with `keys.mjs` and `clicks.mjs` so the three
+ * copies of this check -- which had already begun to drift in their package lists -- cannot drift
+ * further, and extended there to ALSO refuse a bundle `app/BUNDLED` predates under
+ * `TN3270_GUI_MAIN=app`.
  */
-const newest = (dir, ...suffixes) => Math.max(...readdirSync(dir, { recursive: true })
-  .filter((f) => suffixes.some((s) => f.endsWith(s)))
-  .map((f) => statSync(join(dir, f)).mtimeMs));
-/**
- * The remedy names the WHOLE-WORKSPACE build, never `-w @tn3270/gui`: MEASURED, a scoped gui build
- * exits 0, compiles `canvas` through the project reference and never runs `canvas`'s second build
- * step, so `atlas.json` is missing and the client dies at startup. A refusal that names its own fix
- * is worthless if the fix is the cause.
- */
-const REBUILD = 'run: npm run build';
-if (!existsSync(main)) {
-  refuse(`there is no ${main} to run`, REBUILD);
-}
-for (const pkg of ['gui', 'frontend', 'canvas']) {
-  const root = join(here, '..', '..', pkg);
-  if (!existsSync(join(root, 'dist'))) {
-    refuse(`there is no packages/${pkg}/dist, so there is nothing built to run`, REBUILD);
-  }
-  if (newest(join(root, 'dist'), '.js', '.cjs') < newest(join(root, 'src'), '.ts', '.cts')) {
-    refuse(`packages/${pkg}/dist is OLDER than packages/${pkg}/src, so this run would test stale code`,
-      `${REBUILD}  (if that reports everything up to date, only a timestamp moved: `
-      + `npx tsc --build --force packages/${pkg})`);
-  }
+{
+  const problem = staleness(main, ['gui', 'frontend', 'canvas']);
+  if (problem !== undefined) refuse(problem.why, problem.fix);
 }
 
 /**

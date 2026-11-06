@@ -1,10 +1,20 @@
 {
   "name": "@tn3270/canvas",
   "version": "0.1.0",
+  "description": "Canvas renderer, glyph atlas, hit-testing and the keypad/keyboard/transfer UI, shared byte-for-byte by the GUI and the web gateway.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
   "main": "./dist/index.js",
+  "files": ["dist", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athornton/tn3270.git",
+    "directory": "packages/canvas"
+  },
+  "homepage": "https://github.com/athornton/tn3270#readme",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@tn3270/core": "0.1.0",
     "@tn3270/frontend": "0.1.0"

@@ -1,11 +1,21 @@
 {
   "name": "@tn3270/core",
   "version": "0.1.0",
+  "description": "TN3270 protocol core: telnet negotiation, the 3270 data stream, screen buffer, and IND$FILE transfer, with no runtime dependencies.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": "./dist/index.js" },
+  "files": ["dist", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athornton/tn3270.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/athornton/tn3270#readme",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "scripts": { "build": "tsc --build" }
 }

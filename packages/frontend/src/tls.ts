@@ -136,21 +136,45 @@ export function resolveTls(flags: TlsFlags, usageError: (message: string) => Err
 }
 
 /**
+ * How the session was started, which decides how a TLS remedy is worded. `'flag'` is a command
+ * line, where `-insecure` is the fix; `'dialog'` is the GUI's Connect dialog, where there is no
+ * command line to add a flag to and the fix is its TLS checkbox (spec
+ * 2026-11-05-packaging-design.md section 2, "TLS hang").
+ */
+export type TlsRemedy = 'flag' | 'dialog';
+
+/**
  * Explains a TLS failure in terms of the flag that would change it.
  *
  * This mapping is most of the feature's usability. A TLS failure against a
  * plaintext host is otherwise indistinguishable from a host being down, and the
  * fix — one flag — is not guessable from `ECONNRESET`.
+ *
+ * `remedy: 'dialog'` rewords only the two plaintext-host cases, the only ones whose fix the Connect
+ * dialog has a control for; the certificate cases name flags the dialog cannot set, which is still
+ * the truth about how to fix them. THE DIALOG WORDING PUTS THE REMEDY FIRST, because a message is
+ * read by someone who may see only its start (memory note *fixed-width-messages-lose-their-point*).
+ * The `'flag'` wording is left exactly as it shipped.
  */
-export function describeTlsError(code: string | undefined, host: string, port: number): string {
+export function describeTlsError(
+  code: string | undefined, host: string, port: number, remedy: TlsRemedy = 'flag',
+): string {
+  const dialog = remedy === 'dialog';
   switch (code) {
     case 'HANDSHAKE_TIMEOUT':
-      return `${host}:${port} accepted the connection but never completed a TLS handshake. `
-        + 'If it does not speak TLS — a Hercules or other vintage system — use -insecure.';
+      return dialog
+        ? `Untick TLS in the Connect dialog: ${host}:${port} accepted the connection but never `
+          + 'completed a TLS handshake, so it probably does not speak TLS — a Hercules or other '
+          + 'vintage system.'
+        : `${host}:${port} accepted the connection but never completed a TLS handshake. `
+          + 'If it does not speak TLS — a Hercules or other vintage system — use -insecure.';
     case 'ERR_SSL_WRONG_VERSION_NUMBER':
     case 'ERR_SSL_PACKET_LENGTH_TOO_LONG':
-      return `${host}:${port} answered with something that is not TLS. `
-        + 'It is almost certainly a plaintext host: use -insecure.';
+      return dialog
+        ? `Untick TLS in the Connect dialog: ${host}:${port} answered with something that is not `
+          + 'TLS, so it is almost certainly a plaintext host.'
+        : `${host}:${port} answered with something that is not TLS. `
+          + 'It is almost certainly a plaintext host: use -insecure.';
     case 'DEPTH_ZERO_SELF_SIGNED_CERT':
     case 'SELF_SIGNED_CERT_IN_CHAIN':
     case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
@@ -166,6 +190,32 @@ export function describeTlsError(code: string | undefined, host: string, port: n
     default:
       return `TLS connection to ${host}:${port} failed${code !== undefined ? ` (${code})` : ''}.`;
   }
+}
+
+/** Socket codes worth saying in words; anything else keeps Node's own message. */
+const CONNECT_WORDS: Readonly<Record<string, string>> = {
+  ECONNREFUSED: 'connection refused',
+  ENOTFOUND: 'no such host',
+  ETIMEDOUT: 'timed out',
+  EHOSTUNREACH: 'host unreachable',
+};
+
+/**
+ * Explains a PLAINTEXT connect failure -- one where TLS was never involved, so `describeTlsError`'s
+ * "TLS connection to ... failed" would send the reader to a setting that was not on.
+ *
+ * The action and the target come first (`cannot connect to host:port`), for the same truncation
+ * reason the dialog's TLS wording leads with its remedy. A code this does not know keeps the
+ * underlying message when there is one, rather than inventing words for it.
+ */
+export function describeConnectError(
+  code: string | undefined, host: string, port: number, message?: string,
+): string {
+  const target = `cannot connect to ${host}:${port}`;
+  const words = code !== undefined ? CONNECT_WORDS[code] : undefined;
+  if (words !== undefined) return `${target}: ${words} (${code})`;
+  if (message !== undefined && message !== '') return `${target}: ${message}`;
+  return code !== undefined ? `${target} (${code})` : target;
 }
 
 /** Wraps a socket as the `Connection` the core session consumes. */
@@ -229,7 +279,14 @@ export function tcpConnect(
     const fail = (code: string | undefined, err?: Error) => {
       if (settled) return;
       settled = true;
-      const e = new Error(describeTlsError(code, host, port), { cause: err });
+      const e: Error & { code?: string } = new Error(describeTlsError(code, host, port), { cause: err });
+      // THE CODE RIDES ALONG so a front end can re-word the remedy for how the session was started
+      // (`describeTlsError`'s `remedy`); the message above is the command-line wording. Our own
+      // HANDSHAKE_TIMEOUT has no underlying error, so `code` itself is it; otherwise only a real
+      // library code is copied -- `fail` is also handed a bare message when there is none, and that
+      // is not a code.
+      const realCode = err !== undefined ? (err as NodeJS.ErrnoException).code : code;
+      if (realCode !== undefined) e.code = realCode;
       conn.onError?.(e);
       sock.destroy();
       reject(e);

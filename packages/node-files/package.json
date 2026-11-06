@@ -1,6 +1,7 @@
 {
   "name": "@tn3270/node-files",
   "version": "0.1.0",
+  "description": "Node-specific file and process helpers (isMain, file I/O for IND$FILE) shared by the CLI, TUI, GUI and web front ends.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
@@ -9,6 +10,15 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "files": ["dist", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athornton/tn3270.git",
+    "directory": "packages/node-files"
+  },
+  "homepage": "https://github.com/athornton/tn3270#readme",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@tn3270/frontend": "0.1.0"
   },

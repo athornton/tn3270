@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AtlasGeometry } from './geometry.js';
 
 /**
@@ -101,6 +101,16 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * The two files `readAtlas` reads, by name. EXPORTED so the GUI bundle (`gui/scripts/bundle.mjs`)
+ * copies and verifies exactly these rather than a retyped list: a third atlas file added here
+ * would otherwise be read by the app and missing from the bundle, which the bundle's self-check
+ * then could not notice -- a reviewer reproduced a bundle without `atlas.bin` exiting 0 before
+ * this constant existed. `build-atlas.mjs` writes them; it is a build-time script and does not
+ * import this compiled module, so it keeps its own spelling.
+ */
+export const ATLAS_FILES = Object.freeze({ geometry: 'atlas.json', coverage: 'atlas.bin' } as const);
+
+/**
  * Read the baked atlas. Throws NAMING THE BUILD when the package was not built.
  *
  * ## A SCOPED BUILD OF A CONSUMER LEAVES THE ATLAS UNBUILT
@@ -120,17 +130,56 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
  * writing comments to prevent.
  *
  * The original error is kept as `cause` so a developer can still see which file was missing.
+ *
+ * ## `dir`, AND WHY THE DEFAULT IS NOT ENOUGH FOR A BUNDLE
+ *
+ * Defaults to `assetDir()`, which is right for every consumer that imports this package as a
+ * package. The GUI's esbuild bundle (`packages/gui/app/`) is not one: there `assets.ts` is
+ * inlined into `app/main.js`, so `here` becomes `app/` -- which COINCIDES with where the bundle
+ * copies the atlas, and a coincidence is not a mechanism. The GUI passes its layout's atlas
+ * directory explicitly (`gui/src/appRoot.ts` has the full reasoning).
+ *
+ * THE MESSAGE NAMES THE DIRECTORY IT READ, and suggests rebuilding canvas ONLY when that directory
+ * is canvas's own `dist` IN A SOURCE TREE (`isCanvasSourceDist`). In a bundled or installed app
+ * there is no canvas package to rebuild, so that hint would send the user after a command that
+ * cannot exist on their machine; there the truthful message is "this install is incomplete".
  */
-export function readAtlas(): { geometry: AtlasGeometry; coverage: Uint8Array } {
+/**
+ * Whether `dir` is `@tn3270/canvas`'s own `dist` in a SOURCE CHECKOUT, the one place where
+ * "rebuild canvas" is a command that exists: named `dist`, beside a `src/`, under a `package.json`
+ * named `@tn3270/canvas`.
+ *
+ * DECIDED BY THE DIRECTORY, NOT BY `dir === here`, which is how this used to read and is wrong in
+ * the bundle: esbuild inlines this file into `gui/app/main.js`, so `here` IS `app/`, the GUI passes
+ * `app/` as `dir`, and an installed user with a missing atlas was told to rebuild a package they do
+ * not have -- reproduced by review. The `src/` test is what tells a checkout from an INSTALLED
+ * canvas (`node_modules/@tn3270/canvas/dist`, as the web gateway's install has), which ships `dist`
+ * alone and has nothing to rebuild either.
+ */
+export function isCanvasSourceDist(dir: string): boolean {
+  if (basename(dir) !== 'dist') return false;
+  const pkg = dirname(dir);
+  if (!existsSync(join(pkg, 'src'))) return false;
   try {
-    const geometry = JSON.parse(readFileSync(join(here, 'atlas.json'), 'utf8')) as AtlasGeometry;
-    const coverage = new Uint8Array(readFileSync(join(here, 'atlas.bin')));
+    return (JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as { name?: unknown }).name
+      === '@tn3270/canvas';
+  } catch {
+    return false;
+  }
+}
+
+export function readAtlas(dir: string = here): { geometry: AtlasGeometry; coverage: Uint8Array } {
+  try {
+    const geometry = JSON.parse(
+      readFileSync(join(dir, ATLAS_FILES.geometry), 'utf8')) as AtlasGeometry;
+    const coverage = new Uint8Array(readFileSync(join(dir, ATLAS_FILES.coverage)));
     return { geometry, coverage };
   } catch (err) {
     if ((err as { code?: string }).code === 'ENOENT') {
-      throw new Error(
-        '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas',
-        { cause: err });
+      throw new Error(isCanvasSourceDist(dir)
+        ? '@tn3270/canvas has not been built: run npm run build -w @tn3270/canvas'
+        : `the glyph atlas is missing from ${dir}: this install is incomplete`,
+      { cause: err });
     }
     throw err;
   }

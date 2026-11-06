@@ -1,0 +1,12 @@
+# LF EVERYWHERE, ON EVERY OS. Measured on the first Windows CI run (2026-11-06): with git's
+# default core.autocrlf=true on the runner, checkouts got CRLF, and that broke four things at once
+# -- vitest failed to parse shebang .mjs scripts it imports, the golden screens compared unequal,
+# the trace fixtures changed their bytes, and a regex that finds the Action union stopped
+# matching. Nothing in this project wants CRLF, and the published tarballs must not carry it.
+* text=auto eol=lf
+
+*.png binary
+*.bin binary
+*.sha256 -text
+*.trace -text
+*.bdf -text

@@ -1,12 +1,22 @@
 {
   "name": "@tn3270/tui",
   "version": "0.1.0",
+  "description": "A c3270-style terminal front end for TN3270 hosts, with a keypad overlay and an IND$FILE transfer form.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
   "bin": {
     "tn3270": "./dist/main.js"
   },
+  "files": ["dist", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athornton/tn3270.git",
+    "directory": "packages/tui"
+  },
+  "homepage": "https://github.com/athornton/tn3270#readme",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@tn3270/core": "0.1.0",
     "@tn3270/frontend": "0.1.0",

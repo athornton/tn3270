@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Connect</title>
+<!--
+  The startup Connect dialog, shown when the GUI starts with no host argument (spec
+  docs/superpowers/specs/2026-11-05-packaging-design.md section 2). Built like `transfer.html`:
+  its own page, its own `.cjs` preload (`connectPreload.cts`), a thin boot file, the shared
+  `ui.css`.
+
+  NO IMPORT MAP: `connectBoot.ts` imports nothing. The model list comes from main through the
+  preload, so this page never names a package and the bundle has no graph to resolve for it.
+
+  A REAL <form>: Connect is its submit button, so Enter in any field submits through the one
+  listener a click uses. Escape and Quit go to `bridge.quit()` in the boot file.
+
+  NO `autofocus` ATTRIBUTE, though Host is focused on open: `connectBoot.ts` focuses it, and does
+  so again after every refusal. With both, Chromium logs "Autofocus processing was blocked because
+  a document already has a focused element" -- measured -- which lands in the harness's stdout.
+-->
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body class="ui-surface">
+  <form id="connect-form" autocomplete="off">
+    <div class="row">
+      <label for="host">Host</label>
+      <input id="host" type="text" placeholder="host:port" spellcheck="false">
+    </div>
+    <div class="row">
+      <label for="model">Model</label>
+      <select id="model"></select>
+    </div>
+    <div class="row">
+      <label for="tls">TLS</label>
+      <input id="tls" type="checkbox" checked>
+    </div>
+    <div id="connect-error" role="alert"></div>
+    <div id="buttons">
+      <button id="quit" type="button">Quit</button>
+      <button id="connect" type="submit" disabled>Connect</button>
+    </div>
+  </form>
+  <script type="module" src="./dist/connectBoot.js"></script>
+</body></html>

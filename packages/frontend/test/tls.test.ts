@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resolveTls, describeTlsError, type TlsFlags } from '../src/tls.js';
+import net from 'node:net';
+import {
+  resolveTls, describeTlsError, describeConnectError, tcpConnect, type TlsFlags,
+} from '../src/tls.js';
 import { resolveHostSpec } from '../src/hostspec.js';
 
 /**
@@ -106,5 +109,117 @@ describe('TLS error messages name the flag that fixes them', () => {
 
   it('names the host and port even for a code it does not know', () => {
     expect(describeTlsError('ENETUNREACH', 'vm', 992)).toMatch(/vm:992/);
+  });
+
+  /**
+   * A DIALOG LAUNCH HAS NO COMMAND LINE TO ADD `-insecure` TO, so the remedy names the checkbox.
+   * Spec 2026-11-05-packaging-design.md section 2, "TLS hang".
+   */
+  describe('the Connect dialog remedy', () => {
+    const plaintextCodes = [
+      'HANDSHAKE_TIMEOUT', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ERR_SSL_PACKET_LENGTH_TOO_LONG',
+    ] as const;
+
+    it.each(plaintextCodes)('%s names the TLS checkbox and not -insecure', (code) => {
+      const msg = describeTlsError(code, 'vm', 3270, 'dialog');
+      expect(msg).toMatch(/untick TLS in the Connect dialog/i);
+      expect(msg).not.toMatch(/-insecure/);
+      expect(msg).toMatch(/vm:3270/);
+    });
+
+    it.each(plaintextCodes)('%s puts the remedy FIRST, where truncation cannot eat it', (code) => {
+      expect(describeTlsError(code, 'vm', 3270, 'dialog')).toMatch(/^Untick TLS in the Connect dialog/);
+    });
+
+    it.each(plaintextCodes)('%s is unchanged with the default and with an explicit flag', (code) => {
+      const byDefault = describeTlsError(code, 'vm', 3270);
+      expect(byDefault).toMatch(/use -insecure\.$/);
+      expect(byDefault).not.toMatch(/Connect dialog/);
+      expect(describeTlsError(code, 'vm', 3270, 'flag')).toBe(byDefault);
+    });
+
+    it('keeps the two causes distinct in the dialog wording too', () => {
+      expect(describeTlsError('HANDSHAKE_TIMEOUT', 'vm', 3270, 'dialog'))
+        .toMatch(/never completed a TLS handshake/);
+      expect(describeTlsError('ERR_SSL_WRONG_VERSION_NUMBER', 'vm', 3270, 'dialog'))
+        .toMatch(/not TLS/);
+    });
+  });
+});
+
+/**
+ * A PLAINTEXT CONNECT THAT FAILS IS NOT A TLS FAILURE. Before this existed, the GUI sent every coded
+ * error through `describeTlsError`, so with TLS off a host that was simply down read "TLS connection
+ * to 127.0.0.1:1 failed (ECONNREFUSED)" -- pointing a double-clicker at a setting that was not on.
+ */
+describe('plaintext connect failures say what happened, not TLS', () => {
+  it.each([
+    ['ECONNREFUSED', 'connection refused'],
+    ['ENOTFOUND', 'no such host'],
+    ['ETIMEDOUT', 'timed out'],
+    ['EHOSTUNREACH', 'host unreachable'],
+  ])('%s is named in plain words with the host, port and code', (code, words) => {
+    expect(describeConnectError(code, '127.0.0.1', 1))
+      .toBe(`cannot connect to 127.0.0.1:1: ${words} (${code})`);
+  });
+
+  it('never mentions TLS, for a known code or an unknown one', () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH']) {
+      expect(describeConnectError(code, 'vm', 3270)).not.toMatch(/TLS/);
+    }
+  });
+
+  it('keeps an unknown code and the underlying message rather than inventing words', () => {
+    expect(describeConnectError('ENETUNREACH', 'vm', 3270, 'connect ENETUNREACH 10.0.0.1:3270'))
+      .toBe('cannot connect to vm:3270: connect ENETUNREACH 10.0.0.1:3270');
+    expect(describeConnectError('ENETUNREACH', 'vm', 3270)).toBe('cannot connect to vm:3270 (ENETUNREACH)');
+  });
+
+  it('puts the action -- cannot connect -- and the target first, where truncation cannot eat it', () => {
+    expect(describeConnectError('ECONNREFUSED', 'vm', 3270)).toMatch(/^cannot connect to vm:3270/);
+  });
+});
+
+/**
+ * THE CODE TRAVELS WITH THE ERROR, which is what lets a front end re-word the remedy.
+ *
+ * `tcpConnect` rejects with `describeTlsError`'s FLAG wording already in the message, so without the
+ * code a caller that knows the session came from the GUI's Connect dialog has nothing to re-describe
+ * from: main.ts's `explain()` read `err.code`, found it undefined for every TLS failure, and returned
+ * the `-insecure` text -- measured 2026-11-06 against a silent stub, before this was added.
+ */
+describe('tcpConnect TLS failures carry their code', () => {
+  it('a stalled handshake rejects with code HANDSHAKE_TIMEOUT and the flag wording', async () => {
+    const stub = net.createServer((s) => { s.on('data', () => {}); });
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', () => r()));
+    const port = (stub.address() as net.AddressInfo).port;
+    try {
+      const err = await tcpConnect('127.0.0.1', port, { kind: 'tls', verify: false }, 200)
+        .then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe('HANDSHAKE_TIMEOUT');
+      expect((err as Error).message).toBe(describeTlsError('HANDSHAKE_TIMEOUT', '127.0.0.1', port));
+    } finally {
+      await new Promise<void>((r) => stub.close(() => r()));
+    }
+  });
+
+  it('a plaintext answer rejects with the TLS library code', async () => {
+    // A 3270 host speaks first with telnet negotiation, which is not a TLS record.
+    const stub = net.createServer((s) => {
+      s.on('data', () => {});
+      s.write(Buffer.from('HTTP/1.0 400 not tls at all\r\n\r\n'));
+    });
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', () => r()));
+    const port = (stub.address() as net.AddressInfo).port;
+    try {
+      const err = await tcpConnect('127.0.0.1', port, { kind: 'tls', verify: false }, 2000)
+        .then(() => undefined, (e: unknown) => e);
+      const code = (err as { code?: string }).code;
+      expect(code).toMatch(/^ERR_SSL_/);
+      expect((err as Error).message).toBe(describeTlsError(code, '127.0.0.1', port));
+    } finally {
+      await new Promise<void>((r) => stub.close(() => r()));
+    }
   });
 });

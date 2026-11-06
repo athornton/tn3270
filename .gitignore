@@ -9,3 +9,8 @@ out/
 # Python bytecode, from the pty/live harnesses in packages/tui/scripts
 __pycache__/
 *.pyc
+
+# The esbuild bundle of the GUI (npm run bundle:gui) and packaging output. Both are regenerated
+# from tracked sources; packages/gui/scripts/bundle.mjs and the packaging spec say how.
+packages/gui/app/
+artifacts/

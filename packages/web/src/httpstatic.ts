@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { assetDir, BROWSER_MODULES } from '@tn3270/canvas';
 
 /**
@@ -143,39 +144,58 @@ function table(): Map<string, Asset> {
     built.set(`/${module}`, { file: join(assetDir(), module), type: JS });
   }
   /**
-   * `ui.css`, THE SHARED STYLESHEET, WHICH LIVES IN `packages/gui`.
+   * `ui.css`, THE SHARED STYLESHEET, WHOSE SOURCE LIVES IN `packages/gui` AND WHOSE SERVED COPY
+   * IS THIS PACKAGE'S OWN `dist`.
    *
-   * ## WHY A THIRD ASSET ROOT, RELUCTANTLY
+   * ## WHY THE FILE IS SHARED AT ALL
    *
-   * The two above are this package's own `dist` and `canvas`'s, the latter through `assetDir()`
-   * precisely so no relative path into a sibling is guessed. This is the first asset served from
-   * a package the web gateway does not depend on -- and that asymmetry is the point: the file is
-   * in `gui` because the GUI's two windows were its first consumers, and the user's requirement
-   * that the keypad and the transfer window look alike is what made it shared at all.
+   * The file is in `gui` because the GUI's two windows were its first consumers, and the user's
+   * requirement that the keypad and the transfer window look alike is what made it shared in the
+   * first place. That history still explains why one stylesheet, not two, is the right shape.
+   *
+   * ## WHY NOT A RELATIVE PATH INTO `gui`, THE WAY THIS USED TO WORK
+   *
+   * `web` does not and must not depend on `@tn3270/gui` -- that package pulls in Electron as a
+   * dependency, which a Node HTTP gateway has no business shipping. A `join(here, '..', '..',
+   * 'gui', 'ui.css')` string happened to resolve inside this monorepo's checkout, but an
+   * `npm install -g @tn3270/web` has no `gui` sibling beside it at all: npm puts packages wherever
+   * it pleases (hoisted or nested), and there is no monorepo layout to climb back out of.
    *
    * ## THE ALTERNATIVES, AND WHY THIS ONE
    *
    * Moving `ui.css` into `canvas` beside the atlas was the obvious tidy, and it is wrong for a
    * reason worth recording: `canvas` is the package whose whole job is pixels blitted from a font
    * atlas, and `ui.css` is the stylesheet for the surfaces that are deliberately NOT that. Putting
-   * HTML chrome there would blur the one boundary this split exists to draw. Copying the file into
-   * `web/static` was the other option and is the thing `assets.ts` exists to prevent -- two copies
-   * of a stylesheet diverge the first time one is touched, which is the exact failure that made
-   * this file shared in the first place.
+   * HTML chrome there would blur the one boundary this split exists to draw. COMMITTING a second
+   * copy into `web/static` was the other option and is the thing `assets.ts` exists to prevent --
+   * two copies of a stylesheet diverge the first time one is touched, which is the exact failure
+   * that made this file shared in the first place.
    *
-   * So: one path, named once, with a comment. `uiAssets.test.ts` in `gui` checks the file exists
-   * for that package's documents; `httpstatic.test.ts` checks this entry resolves.
+   * ## THE MECHANISM: A BUILD-TIME COPY, NOT A SECOND SOURCE
+   *
+   * `scripts/copy-ui-css.mjs` copies `gui/ui.css` into THIS package's `dist/ui.css` as a build
+   * step (`package.json`'s `build` script runs it after `tsc --build`). That is not the same
+   * mistake as a committed `web/static/ui.css`: `dist/` is gitignored and regenerated on every
+   * build, so there is still exactly one SOURCE -- `gui/ui.css` -- and the copy can never drift
+   * from it by being hand-edited, only by a stale build, which `npm run build` fixes by running
+   * again. It is also the only way an INSTALLED `@tn3270/web` can have the file at all, since it
+   * cannot depend on `@tn3270/gui`. Root build order does not matter here even though `gui` and
+   * `web` build in some workspace order: `gui/ui.css` is a checked-in source file, not something
+   * `gui`'s own build step produces, so it already exists before any workspace's `build` runs.
+   *
+   * `uiAssets.test.ts` in `gui` checks the file exists for that package's documents;
+   * `httpstatic.test.ts` checks this entry resolves to this package's own `dist`, not to `gui`.
    *
    * NOT DERIVED FROM A LIST, because there is exactly one such asset. A `GUI_ASSETS` array of one
    * element would be ceremony that implies a pattern nobody has.
    */
   built.set('/ui.css', {
-    file: join(here, '..', '..', 'gui', 'ui.css'),
+    file: join(here, 'ui.css'),
     type: 'text/css; charset=utf-8',
   });
   /**
-   * THE THREE `frontend` MODULES THE KEYPAD OVERLAY NEEDS, and this is where the web gateway
-   * differs from the Electron GUI in a way that is easy to miss.
+   * THE `frontend` MODULES THE KEYPAD AND TRANSFER OVERLAYS NEED, and this is where the web
+   * gateway differs from the Electron GUI in a way that is easy to miss.
    *
    * ## THE GUI GETS THESE FOR FREE AND THE GATEWAY DOES NOT
    *
@@ -190,6 +210,30 @@ function table(): Map<string, Asset> {
    * which value-imports `./keypad.js` and `./bindings.js`. Three files, and all three have to be
    * reachable by URL or the chain breaks at the first missing link.
    *
+   * ## WHERE `frontendDist` COMES FROM: NODE'S RESOLVER, NOT A RELATIVE GUESS
+   *
+   * This used to be `join(here, '..', '..', 'frontend', 'dist')`, a path that happened to be
+   * right only because the monorepo lays `web` and `frontend` out as siblings under `packages/`.
+   * An `npm install -g @tn3270/web` has no such sibling: `@tn3270/frontend` is a DEPENDENCY, and
+   * npm is free to hoist it anywhere in `node_modules`, so the only correct way to find it is to
+   * ask Node's own module resolver, the same algorithm `import '@tn3270/frontend'` itself uses.
+   *
+   * `createRequire(import.meta.url).resolve(...)` does exactly that under the `require`
+   * condition, which is what matters here: `@tn3270/frontend`'s `package.json` `exports` map
+   * names plain file paths (`"."` -> `./dist/index.js`, `./dist/transferForm.js` ->
+   * `./dist/transferForm.js`, etc.) with no `import`/`require` conditional split, so the
+   * `require`-flavoured resolver returns the same file an `import` would. MEASURED directly
+   * under both plain Node and vitest (`import.meta.resolve`, Node 22's synchronous browser-spec
+   * resolver, throws `__vite_ssr_import_meta__.resolve is not a function` under vitest's SSR
+   * transform -- so `createRequire(...).resolve` is the one that works in both places, which is
+   * why it is the one used here). It resolves to the package's `"."` export
+   * (`frontend/dist/index.js`) in both the monorepo checkout and a real install, and `dirname()`
+   * of that is this package's `dist/` either way.
+   *
+   * Called inside `table()`, which is already lazy (see the comment on that function) -- so a
+   * test that never serves anything never resolves `@tn3270/frontend` either, and a build that
+   * genuinely lacks it fails at serve time with Node's own `ERR_MODULE_NOT_FOUND`, not here.
+   *
    * ## SERVED AT THE ROOT, FLAT, LIKE EVERY OTHER MODULE HERE
    *
    * Not under a `/frontend/` prefix: the two already-served packages are flat at `/`, and a
@@ -198,11 +242,11 @@ function table(): Map<string, Asset> {
    * `./bindings.js` resolve against the same flat root and need no map entries of their own.
    *
    * THEY ARE SAFE TO SERVE, which is not true of every module in that package: each of these
-   * three has zero `node:` imports and no reach into `tls.js`, pinned by
+   * has zero `node:` imports and no reach into `tls.js`, pinned by
    * `frontend/test/keypadModule.test.ts`. Serving the package BARREL would be the mistake -- it
    * reaches `tls.js` and its `node:net`/`node:tls`/`node:fs`.
    */
-  const frontendDist = join(here, '..', '..', 'frontend', 'dist');
+  const frontendDist = dirname(createRequire(import.meta.url).resolve('@tn3270/frontend'));
   // `transferForm.js` joined 2026-10-06 for the transfer overlay. It is SAFE by the same test
   // as its neighbours: zero imports at all (`gui/test/transferModule.test.ts` asserts exactly
   // that, and it was re-measured on the built file this day), which is why BOTH front ends'
@@ -233,6 +277,16 @@ function table(): Map<string, Asset> {
 
 export function resolveAsset(path: string): Asset | undefined {
   return table().get(path);
+}
+
+/**
+ * Every path this gateway will serve, for tests that need to audit the whole table rather than
+ * one entry at a time -- e.g. asserting that no resolved file lies outside the packages this
+ * gateway actually depends on. Not used by `main.ts`: a real request resolves one path through
+ * `resolveAsset`, same as always.
+ */
+export function assetPaths(): readonly string[] {
+  return [...table().keys()];
 }
 
 /**

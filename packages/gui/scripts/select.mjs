@@ -33,11 +33,26 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electron, ensureDisplay, guiEnv } from './xvfb.mjs';
+import { electron, ensureDisplay, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
-const main = join(here, '..', 'dist', 'main.js');
+const main = guiMain();
+console.log(`entry: ${guiMainLabel()}`);
+
+/**
+ * `dist/` OR `app/` IS WHAT RUNS, and nothing in this harness builds either. See `keys.mjs` for
+ * the whole argument; `xvfb.mjs`'s `staleness()` is that same check, shared across the five
+ * harnesses, extended to refuse a bundle `app/BUNDLED` predates.
+ */
+{
+  const problem = staleness(main, ['gui', 'canvas']);
+  if (problem !== undefined) {
+    console.log(`FAIL ${problem.why}`);
+    console.log(`     ${problem.fix}`);
+    process.exit(1);
+  }
+}
 const trace = join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
 
 /**

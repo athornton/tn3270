@@ -1,6 +1,7 @@
 {
   "name": "@tn3270/web",
   "version": "0.1.0",
+  "description": "A browser gateway for TN3270 hosts: serves the GUI's own canvas renderer over a WebSocket, with no protocol changes to add it.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
   "type": "module",
@@ -8,12 +9,22 @@
   "bin": {
     "tn3270-web": "./dist/main.js"
   },
+  "files": ["dist", "static", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athornton/tn3270.git",
+    "directory": "packages/web"
+  },
+  "homepage": "https://github.com/athornton/tn3270#readme",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@tn3270/canvas": "0.1.0",
     "@tn3270/core": "0.1.0",
-    "@tn3270/frontend": "0.1.0"
+    "@tn3270/frontend": "0.1.0",
+    "@tn3270/node-files": "0.1.0"
   },
   "scripts": {
-    "build": "tsc --build"
+    "build": "tsc --build && node scripts/copy-ui-css.mjs"
   }
 }

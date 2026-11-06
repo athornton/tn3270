@@ -49,6 +49,14 @@ const code = harness
   .replace(/^\s*\/\/.*$/gm, '');
 
 describe('the transfer harness', () => {
+  it('runs guiMain() and prints which entry it tested', () => {
+    // Without this, a run against the bundle and a run against dist would look identical in the
+    // log, and a typo in TN3270_GUI_MAIN that silently fell back to dist would report the bundle
+    // as proven.
+    expect(harness).toMatch(/const main = guiMain\(\)/);
+    expect(harness).toContain('console.log(`entry: ${guiMainLabel()}`)');
+  });
+
   it('keeps the three flags without which it hangs or lies', () => {
     // Without `-insecure` a run pointed at a real host does not fail, it HANGS -- default-on TLS
     // against plaintext Hercules. Without `--no-sandbox` and `--disable-gpu` there is no window at
@@ -209,25 +217,19 @@ describe('the transfer harness', () => {
     expect(harness).toMatch(/submit -> ok=false status=\$\{REFUSAL\}/);
   });
 
-  it('refuses a stale dist/, in all THREE packages this window spans', () => {
-    // dist/ is what actually RUNS and nothing here builds it; `keys.mjs` found `dist/keys.js` a day
-    // older than `src/keys.ts` in this very tree. `frontend` is the one that matters most: the import
-    // map in `transfer.html` points straight at `packages/frontend/dist/transferForm.js`, bypassing
-    // the barrel, so a stale copy is a window running yesterday's form logic -- and a MISSING one is
-    // a blank window with nothing in any console.
-    //
-    // PER PACKAGE rather than one max across all three, for `clicks.mjs`'s measured reason: a fresh
-    // `gui` build would MASK a stale `frontend` one, since gui's newer output would win the max.
-    //
-    // `.cts`/`.cjs` on both sides is load-bearing: `'transferPreload.cts'.endsWith('.ts')` is FALSE,
-    // which once exempted the preload -- the IPC hop every check here depends on -- from the check
-    // entirely. That was a false GREEN.
-    expect(harness).toMatch(
-      /newest\(join\(root, 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(root, 'src'\),\s*'\.ts',\s*'\.cts'\)/,
-    );
-    expect(harness).toMatch(/for \(const pkg of \[[^\]]*'frontend'[^\]]*\]\)/);
-    expect(harness).toMatch(/for \(const pkg of \[[^\]]*'gui'[^\]]*\]\)/);
-    expect(harness).toMatch(/for \(const pkg of \[[^\]]*'canvas'[^\]]*\]\)/);
+  it('refuses a stale dist/ or app/, in all THREE packages this window spans', () => {
+    // dist/ (or app/, under TN3270_GUI_MAIN=app) is what actually RUNS and nothing here builds
+    // either; `keys.mjs` found `dist/keys.js` a day older than `src/keys.ts` in this very tree.
+    // The mechanics moved into `xvfb.mjs`'s `staleness()` in the bundle-parity task, shared with
+    // `keys.mjs` and `clicks.mjs` so the three copies (which had already begun to drift in their
+    // package lists) cannot drift further -- `xvfbStaleness.test.ts` pins the shared mechanics;
+    // this test pins only that THIS harness calls through with the right package list. `frontend`
+    // is the one that matters most here: the import map in `transfer.html` points straight at
+    // `packages/frontend/dist/transferForm.js`, bypassing the barrel, so a stale copy is a window
+    // running yesterday's form logic -- and a MISSING one is a blank window with nothing in any
+    // console.
+    expect(harness).toMatch(/const main = guiMain\(\)/);
+    expect(harness).toContain("staleness(main, ['gui', 'frontend', 'canvas'])");
   });
 
   it('clears the inherited input seams, so a stray shell variable cannot change the run', () => {

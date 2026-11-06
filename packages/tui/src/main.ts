@@ -14,7 +14,7 @@ import {
   defaultSession, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, takeOversizeFlag,
   resolveTls, OVERSIZE_USAGE, TLS_USAGE, type Scheme, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
-import { nodeTransferFiles } from '@tn3270/node-files';
+import { nodeTransferFiles, isMain } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout, measureTerminal, type Geometry } from './render.js';
 import type { Depth } from './colors.js';
@@ -389,7 +389,11 @@ const realHost: HostProcess = {
   stderr: process.stderr,
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// `isMain`, not `import.meta.url === \`file://${process.argv[1]}\``: npm installs this bin as a
+// POSIX symlink (or a Windows `.cmd` shim), so `argv[1]` names the link, not this file, and the
+// old string comparison was FALSE for every installed copy -- the program exited 0 having done
+// nothing. Measured 2026-11-05 through a symlink. `isMain` compares real paths instead.
+if (isMain(import.meta.url)) {
   run(process.argv.slice(2), realHost).catch((err: unknown) => {
     // A bad command line is the operator's mistake, not a crash: print the
     // message alone. Exit 2 is the conventional usage-error status, matching the

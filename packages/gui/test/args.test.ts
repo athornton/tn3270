@@ -2,7 +2,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { SCHEMES } from '@tn3270/frontend';
 import type { GeometrySetting } from '@tn3270/core';
-import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from '../src/args.js';
+import {
+  buildSession, MissingHostError, parseGuiArgs, printGeometryNotices, USAGE, UsageError,
+} from '../src/args.js';
 
 /**
  * The flags must be the TUI's, and the way that is guaranteed is by parsing with the same
@@ -79,6 +81,46 @@ describe('parseGuiArgs', () => {
     // A usage message that says `tn3270` when the user typed `tn3270-gui` sends them to
     // the wrong manual page.
     expect(() => parseGuiArgs([])).toThrow(/tn3270-gui/);
+  });
+});
+
+/**
+ * The connect dialog opens ONLY when the host is missing, so main has to tell that one usage error
+ * from every other. A subclass rather than a message match: the usage text changes whenever a flag
+ * is added, and a dialog that silently stopped opening would be the result.
+ */
+describe('MissingHostError', () => {
+  it('is what no arguments at all throws', () => {
+    expect(() => parseGuiArgs([])).toThrow(MissingHostError);
+  });
+
+  it('is what flags without a host throw', () => {
+    expect(() => parseGuiArgs(['-insecure'])).toThrow(MissingHostError);
+  });
+
+  it('is still a UsageError carrying the usage line, so every existing catch is unchanged', () => {
+    let caught: unknown;
+    try { parseGuiArgs([]); } catch (err) { caught = err; }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toBe(USAGE);
+    expect((caught as Error).name).toBe('MissingHostError');
+  });
+
+  it('is NOT what a bad flag throws, even with no host', () => {
+    let caught: unknown;
+    try { parseGuiArgs(['--bogus']); } catch (err) { caught = err; }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect(caught).not.toBeInstanceOf(MissingHostError);
+  });
+
+  it('is NOT what a TLS contradiction throws, which is checked before the host', () => {
+    expect(() => parseGuiArgs(['-insecure', '-cafile', 'x.pem'])).not.toThrow(MissingHostError);
+    expect(() => parseGuiArgs(['-insecure', '-cafile', 'x.pem'])).toThrow(UsageError);
+  });
+
+  it('is NOT what a host with a bad port throws', () => {
+    expect(() => parseGuiArgs(['vm:99999'])).not.toThrow(MissingHostError);
+    expect(() => parseGuiArgs(['vm:99999'])).toThrow(UsageError);
   });
 });
 

@@ -16,6 +16,14 @@ const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const clicks = readFileSync(join(guiDir, 'scripts', 'clicks.mjs'), 'utf8');
 
 describe('the click harness', () => {
+  it('runs guiMain() and prints which entry it tested', () => {
+    // Without this, a run against the bundle and a run against dist would look identical in the
+    // log, and a typo in TN3270_GUI_MAIN that silently fell back to dist would report the bundle
+    // as proven.
+    expect(clicks).toMatch(/const main = guiMain\(\)/);
+    expect(clicks).toContain('console.log(`entry: ${guiMainLabel()}`)');
+  });
+
   it('keeps the three flags without which it hangs or lies', () => {
     // Without `-insecure` a run pointed at a real host does not fail, it HANGS -- default-on TLS
     // against plaintext Hercules. Without `--no-sandbox` and `--disable-gpu` there is no window at
@@ -162,22 +170,16 @@ describe('the click harness', () => {
     expect(clicks).toMatch(/renderer\[3\]/);
   });
 
-  it('refuses a stale dist/, in BOTH packages', () => {
-    // dist/ is what actually RUNS and nothing here builds it; the chord harness found `dist/keys.js`
-    // a day older than `src/keys.ts` in this very tree. `canvas` is the more important of the two for
-    // this harness -- `renderer.ts`, the probe and `hittest.ts` all live there -- and per package
-    // rather than one max across both, or a fresh `gui` build would MASK a stale `canvas` one and
-    // the run would click yesterday's layout and report ok.
-    //
-    // `.cts`/`.cjs` on both sides is load-bearing: `'preload.cts'.endsWith('.ts')` is FALSE, which
-    // once exempted the preload -- the IPC hop this harness covers -- from the check entirely.
-    expect(clicks).toMatch(
-      /newest\(join\(root, 'dist'\),\s*'\.js',\s*'\.cjs'\)\s*<\s*newest\(join\(root, 'src'\),\s*'\.ts',\s*'\.cts'\)/,
-    );
-    expect(clicks).toMatch(/for \(const pkg of \[('gui',\s*'canvas'|'canvas',\s*'gui')\]\)/);
-    expect(clicks).toMatch(/const root = join\(here, '\.\.', '\.\.', pkg\)/);
-    // Recorded so nobody "simplifies" this into `tsc --build --dry`, which was MEASURED to report
-    // "up to date" with an output file deleted.
-    expect(clicks).toContain('is not an oracle');
+  it('refuses a stale dist/ or app/, in BOTH packages', () => {
+    // dist/ (or app/, under TN3270_GUI_MAIN=app) is what actually RUNS and nothing here builds
+    // either; the chord harness found `dist/keys.js` a day older than `src/keys.ts` in this very
+    // tree. The mechanics moved into `xvfb.mjs`'s `staleness()` in the bundle-parity task, shared
+    // with `keys.mjs` and `transfer.mjs` so the three copies (which had already begun to drift in
+    // their package lists) cannot drift further -- `xvfbStaleness.test.ts` pins the shared
+    // mechanics; this test pins only that THIS harness calls through with the right package list.
+    // `canvas` is the more important of the two for this harness -- `renderer.ts`, the probe and
+    // `hittest.ts` all live there.
+    expect(clicks).toMatch(/const main = guiMain\(\)/);
+    expect(clicks).toContain("staleness(main, ['gui', 'canvas'])");
   });
 });

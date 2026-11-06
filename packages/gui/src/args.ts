@@ -26,6 +26,23 @@ export class UsageError extends Error {
   }
 }
 
+/**
+ * The ONE usage error that means "no host was given": the GUI was started bare, e.g.
+ * double-clicked, and main opens the connect dialog instead of failing. A SUBCLASS, so every
+ * existing `instanceof UsageError` still catches it and its message is still the usage line --
+ * and so main tells it from every other usage error by type, never by matching text that changes
+ * whenever a flag is added.
+ *
+ * Thrown only AFTER the flag checks above it in `parseGuiArgs` (oversize, TLS): a bad flag with no
+ * host is that flag's error, not this one, and fails as it always has.
+ */
+export class MissingHostError extends UsageError {
+  constructor() {
+    super(USAGE);
+    this.name = 'MissingHostError';
+  }
+}
+
 export interface GuiArgs {
   model?: string;
   terminalType?: string;
@@ -186,7 +203,7 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
   }
   args.tls = resolveTls(tlsFlags, (m) => new UsageError(m));
 
-  if (args.host === undefined) throw new UsageError(USAGE);
+  if (args.host === undefined) throw new MissingHostError();
 
   const raw = args.host;
   const spec = resolveHostSpec(raw, (m) => new UsageError(m));

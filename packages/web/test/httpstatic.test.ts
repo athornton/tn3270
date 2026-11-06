@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_MODULES } from '@tn3270/canvas';
-import { resolveAsset, tokenCookie, parseCookies } from '../src/httpstatic.js';
+import { resolveAsset, assetPaths, tokenCookie, parseCookies } from '../src/httpstatic.js';
 
 /**
  * A FIXED TABLE, not a path mapping. There is no traversal to defend against because there is no
@@ -97,15 +98,21 @@ describe('resolveAsset', () => {
     // `/bridge.js` IS NOT IN THIS LOOP, and the reason is a trap rather than an omission -- see the
     // separate test below. Adding it here fails, because the two kinds of path in the table resolve
     // differently under vitest.
-    // `/ui.css` IS IN THIS LOOP AND IS THE FIRST NON-JS, NON-OWN-PACKAGE ASSET -- it is served
-    // from `packages/gui`, where the shared stylesheet lives because the GUI's two windows were
-    // its first consumers. A path into a third package is exactly the kind of thing that resolves
-    // in the table and 404s at runtime, which is what this loop exists to catch.
+    // `/ui.css` IS NOT IN THIS LOOP ANYMORE, and the reason changed along with its mechanism:
+    // it USED to reach into `packages/gui` by a monorepo-relative path, making it "the first
+    // non-JS, non-own-package asset" and exactly the kind of entry this loop existed to catch.
+    // It is now `join(here, 'ui.css')`, an OWN-PACKAGE path copied into this package's `dist` by
+    // `scripts/copy-ui-css.mjs` at build time -- which puts it in the SAME trap as `/bridge.js`
+    // below rather than this loop's: under vitest `import.meta.url` is the SOURCE file, so the
+    // entry resolves to `packages/web/src/ui.css`, which never exists (src/ never gets the copy,
+    // only dist/ does). Checked instead in the `/bridge.js` case, where this table's other
+    // own-package, vitest-trapped paths are checked against the built tree directly.
     //
-    // `/transferUi.js` and `/transferForm.js` JOINED 2026-10-06 and they belong here for the same
-    // reason `/ui.css` does -- both reach into another package's `dist` (canvas's through
-    // `assetDir()`, frontend's through a relative path), so both are exactly the kind of entry
-    // that resolves in the table and 404s in a browser.
+    // `/transferUi.js` and `/transferForm.js` JOINED 2026-10-06 and belong here because both
+    // reach into another package's `dist` through that package's own resolver (canvas's through
+    // `assetDir()`, frontend's through `createRequire(...).resolve('@tn3270/frontend')`), which
+    // resolves to a real built file under vitest too -- exactly the kind of entry that resolves
+    // in the table and 404s in a browser if that target package were ever left unbuilt.
     //
     // `/transferChunk.js` IS DELIBERATELY NOT HERE, by the same trap as `/bridge.js` and MEASURED
     // the same way: it is `join(here, ...)` in this package, and under vitest `import.meta.url` is
@@ -113,7 +120,7 @@ describe('resolveAsset', () => {
     // exists, because the source is `.ts`. Its built file is asserted in the `/bridge.js` case
     // below instead, which is where this table's own-package paths are checked.
     for (const p of ['/', '/index.html', '/renderer.js', '/blit.js', '/keys.js',
-      '/selection.js', '/keypadUi.js', '/transferUi.js', '/transferForm.js', '/ui.css']) {
+      '/selection.js', '/keypadUi.js', '/transferUi.js', '/transferForm.js']) {
       const asset = resolveAsset(p)!;
       expect(existsSync(asset.file), `${p} -> ${asset.file}`).toBe(true);
     }
@@ -258,6 +265,12 @@ describe('resolveAsset', () => {
     // `geometryOverlay.js`, 2026-11-04, the `Alt-M` picker `bridge.js` imports: same two lines.
     expect(resolveAsset('/geometryOverlay.js')!.file).toMatch(/[/\\]geometryOverlay\.js$/);
     expect(existsSync(join(pkgDir, 'dist', 'geometryOverlay.js'))).toBe(true);
+    // `/ui.css` joined this group 2026-11-05 when its mechanism changed from a monorepo-relative
+    // path into `packages/gui` to `join(here, 'ui.css')` plus a build-time copy
+    // (`scripts/copy-ui-css.mjs`) -- the exact same vitest trap as `/bridge.js` above, since
+    // `here` is this file's SOURCE directory under vitest and the copy only ever lands in `dist`.
+    expect(resolveAsset('/ui.css')!.file).toMatch(/[/\\]ui\.css$/);
+    expect(existsSync(join(pkgDir, 'dist', 'ui.css'))).toBe(true);
   });
 });
 
@@ -304,6 +317,63 @@ describe('tokenCookie', () => {
     // entirely -- so this flag cannot simply be set unconditionally "to be safe".
     expect(tokenCookie('abc', false)).not.toContain('Secure');
     expect(tokenCookie('abc', true)).toContain('Secure');
+  });
+});
+
+describe('no asset path depends on the monorepo layout', () => {
+  it('httpstatic.ts names no path that climbs out of its own package', () => {
+    const src = readFileSync(fileURLToPath(new URL('../src/httpstatic.ts', import.meta.url)), 'utf8');
+    // Code lines only: the comments legitimately describe the old paths and the history of why
+    // they were wrong, which this file's house style keeps rather than deletes.
+    const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n');
+    // Two forms of "climb out twice", which is what a monorepo-relative path into a SIBLING
+    // package's dist looks like from this package's src/: `join(here, '..', '..', 'x')` (two
+    // separate string arguments) and a single `'../..'` specifier. One level up (`join(here,
+    // '..', 'static')`, this package's own dist-relative path) is fine and must still match.
+    expect(code).not.toMatch(/'\.\.'\s*,\s*'\.\.'/);
+    expect(code).not.toMatch(/'\.\.\/\.\.'/);
+  });
+
+  it('resolves every table entry inside a package web actually depends on', () => {
+    // A SOURCE SCAN (the test above) is a PROXY: it catches a `'..'`-shaped path, but it would
+    // not catch a future regression spelled a different way -- say, a path built from
+    // `process.cwd()` or a hardcoded absolute string. The STRONGER check is this one: resolve
+    // every package `web` depends on THROUGH NODE's OWN RESOLVER (never by `..`, which is the
+    // thing under test), then assert every file this table names is actually inside one of those
+    // directories, or inside this package's own. This is also what makes the check
+    // install-shaped: npm is free to hoist or nest `node_modules/@tn3270/*` however it likes, and
+    // resolving through `createRequire(...).resolve` finds each package wherever that happens to
+    // be, exactly as the gateway's own code does at runtime.
+    const req = createRequire(import.meta.url);
+    // `dirname` twice: each dependency's resolved entry point is `./dist/<file>.js` (`main` in
+    // every one of these packages' `package.json`), so one `dirname` reaches `dist/` and a second
+    // reaches the package root.
+    const webRoot = dirname(dirname(req.resolve('@tn3270/web')));
+    const canvasRoot = dirname(dirname(req.resolve('@tn3270/canvas')));
+    const frontendRoot = dirname(dirname(req.resolve('@tn3270/frontend')));
+    const allowedRoots = [webRoot, canvasRoot, frontendRoot];
+    const offenders: string[] = [];
+    for (const path of assetPaths()) {
+      const file = resolveAsset(path)!.file;
+      // `sep`, not '/': on Windows every resolved path uses `\\` (first Windows CI run, 2026-11-06).
+      if (!allowedRoots.some((root) => file.startsWith(root + sep) || file === root)) {
+        offenders.push(`${path} -> ${file}`);
+      }
+    }
+    expect(offenders, `escaped the allowed package roots: ${offenders.join(', ')}`).toEqual([]);
+    // Not vacuous: the table has more than a couple of entries, or this would pass by iterating
+    // nothing.
+    expect(assetPaths().length).toBeGreaterThan(5);
+  });
+
+  it('serves ui.css from this package\'s own directory, not from `gui`', () => {
+    // NOT literally `web/dist/ui.css` here: under vitest `import.meta.url` is the SOURCE file
+    // (the same trap every own-package path in this table hits, documented at length on
+    // `/bridge.js` below), so this resolves to `web/src/ui.css` rather than `web/dist/ui.css`.
+    // What matters for THIS test is the package -- `web`, not `gui` -- and the filename; that the
+    // built file is really in `dist` is asserted separately, against the built tree, in the
+    // `/bridge.js` case below where this table's other vitest-trapped own-package paths are.
+    expect(resolveAsset('/ui.css')!.file).toMatch(/[\\/]web[\\/](?:src|dist)[\\/]ui\.css$/);
   });
 });
 

@@ -6,7 +6,7 @@
 
 **Architecture:** Plain-Node front ends (cli, tui, web) ship their `tsc` output and rely on normal npm resolution, after removing every runtime path that assumes the monorepo layout. The GUI is bundled by esbuild into a self-contained `packages/gui/app/`, which is the single input to both the npm package (via a small launcher) and electron-builder. A GitHub Actions matrix (four runners) builds, tests, packs, installs from tarballs and smoke-runs every executable.
 
-**Tech Stack:** TypeScript 7 (`tsc --build`), vitest 3, Node ≥22, Electron 44.3.0, esbuild 0.28, electron-builder 26, GitHub Actions.
+**Tech Stack:** TypeScript 7 (`tsc --build`), vitest 3, Node ≥22, Electron 44.10.2, esbuild 0.28, electron-builder 26, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-11-05-packaging-design.md`.
 
@@ -111,7 +111,7 @@ Check before trusting it: the `build` script for canvas runs `node scripts/build
 which must work on Windows (path joins only, by inspection); `npm ci` needs the lockfile in sync
 (`npm ci` locally first).
 
-Also check: whether GitHub still offers an Intel macOS runner (`macos-15-intel` or similar) as of
+**ANSWERED 2026-11-05: `macos-26-intel` exists; added to the matrix, so CI has five runners and the x64 slice runs natively there.** Also check: whether GitHub still offers an Intel macOS runner (`macos-15-intel` or similar) as of
 today — read <https://github.com/actions/runner-images>. If yes, add it to the matrix here; the
 spec says a native x64 run replaces the Rosetta one.
 
@@ -477,7 +477,7 @@ Common fields for each published package (fill `description` per package):
 `files`: core, frontend, node-files, cli, tui → `["dist", "README.md"]`; canvas →
 `["dist", "README.md"]` (the atlas is in `dist`); web → `["dist", "static", "README.md"]`; gui →
 `["app", "bin", "README.md"]`. **gui:** add `"bin": { "tn3270-gui": "./bin/tn3270-gui.mjs" }`,
-move `electron` from `devDependencies` to `dependencies` pinned `"44.3.0"` (exact; the bundle is
+move `electron` from `devDependencies` to `dependencies` pinned `"44.10.2"` (exact; the bundle is
 tested against one Electron), and move the `@tn3270/*` runtime deps to `devDependencies` — the
 bundle inlines them, so an npm install must not fetch them. **Re-check** that last claim against
 Task 5's bundle before relying on it; until Task 8 creates `bin/tn3270-gui.mjs`, create it as a
@@ -537,7 +537,7 @@ describe('set-version', () => {
       const cli = read('packages/cli/package.json');
       expect(cli.version).toBe('0.2.0');
       expect(cli.dependencies['@tn3270/core']).toBe('0.2.0');
-      expect(read('packages/gui/package.json').dependencies.electron).toBe('44.3.0');
+      expect(read('packages/gui/package.json').dependencies.electron).toBe('44.10.2');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
@@ -1179,7 +1179,7 @@ directories:
   app: app            # the esbuild bundle: NO node_modules is collected
   output: ../../artifacts/gui
   buildResources: build
-electronVersion: 44.3.0
+electronVersion: 44.10.2
 asar: true
 files: ["**/*"]
 mac:
@@ -1276,6 +1276,7 @@ jobs:
           - { os: ubuntu-latest,     parity: true }
           - { os: ubuntu-24.04-arm,  parity: false }
           - { os: macos-latest,      parity: false }
+          - { os: macos-26-intel,    parity: false }
           - { os: windows-latest,    parity: false }
     runs-on: ${{ matrix.os }}
     env:

@@ -7,6 +7,6 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../core" }, { "path": "../frontend" }, { "path": "../canvas" }
+    { "path": "../core" }, { "path": "../frontend" }, { "path": "../canvas" }, { "path": "../node-files" }
   ]
 }

@@ -23,15 +23,70 @@ deliberately: see *What is not implemented*.)
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
-**It is not yet something you can hand to someone else.** There is no packaging, so no
-`.app` to download; the GUI has no connect dialog and no preferences, and takes its host on the
-command line like the other front ends. It does now have a menu bar — Edit for copy and paste,
-View for the keypad and keyboard, and Model for the model and oversize (picked while
+**Packaging exists, but not yet in anyone's hands.** It lives on the unmerged `packaging`
+branch: npm packages for all four front ends, and native installers (macOS, Linux, Windows) built
+and smoke-tested in CI. None of it is published or signed yet — see *Installing* below and
+`docs/releasing.md` for exactly what is missing before it is. Started with no arguments, the GUI
+now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
+takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
+copy and paste, View for the keypad and keyboard, and Model for the model and oversize (picked while
 disconnected, applied at the next connect; `Alt-M` pops it up; its first item, Disconnect,
 drops the host session so the choices free up). The mouse presses keypad
 buttons and selects text for copying, and nothing else: no click-to-place-cursor and no light
 pen. See *What is not implemented* below, which is
 the honest part of this file.
+
+## Installing
+
+**Nothing here is published to npm yet, and the native installers are unsigned.** Until a first
+release, get the npm tarballs and the native installers from a green run of
+`.github/workflows/package.yml` (see `docs/releasing.md`); afterwards these will be ordinary
+registry installs:
+
+```sh
+npm install -g @tn3270/cli    # tn3270-cli -- the s3270-style scripting client
+npm install -g @tn3270/tui    # tn3270     -- the c3270-style terminal client
+npm install -g @tn3270/web    # tn3270-web -- the browser gateway
+npm install -g @tn3270/gui    # tn3270-gui -- the Electron GUI
+```
+
+Each package declares `"engines": {"node": ">=22"}`. `@tn3270/gui` additionally needs Electron's
+own ~100 MB binary, which Electron 44 downloads on first use rather than during `npm install` — the
+first `tn3270-gui` prints `Downloading Electron binary...` and takes a while; that is the download,
+not a hang. See `packages/gui/README.md`.
+
+**Native installers** (macOS universal `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a
+Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder, and are **unsigned
+this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
+downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
+after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
+Whether Apple Silicon will run a fully unsigned `arm64` app at all is **unverified** —
+electron-builder's `identity: null` means no signature was applied, not that one was applied
+ad-hoc, and ad-hoc signing is the fallback under consideration if Gatekeeper refuses outright.
+Windows shows SmartScreen; *More info → Run anyway* gets past it.
+
+**Minimum OS**, from Electron 44.10.2's own stated platform support
+(`node_modules/electron/README.md`, "Platform support"): macOS Ventura (13) and up; Windows 10 and
+up; Linux distributions still supported by both Chromium and the distro maker. The macOS figure is
+also what the built app declares: `LSMinimumSystemVersion` 13.0 in the CI-built universal
+`TN3270.app` (measured 2026-11-06). Windows 10 and the Linux statement are Electron's claim, not
+measured against this build.
+
+**Starting `tn3270-gui` with no host opens a Connect dialog** — host (the same
+`[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
+checkbox (on by default; untick it for a plaintext host such as Hercules — if a TLS handshake
+never completes, the error shown in the terminal window says to untick it). Once a session starts, a failed connection is shown in the
+terminal window itself, exactly as it would be from the command line, and **the dialog does not
+reopen** — quit and relaunch to try a different host (`File` → `Connect…` is a later milestone).
+
+**On Linux, `tn3270-gui` leaves Chromium's sandbox on.** npm cannot install `chrome-sandbox` setuid
+root, which only matters on systems that block unprivileged user namespaces (Ubuntu 23.10+ under
+AppArmor, some hardened kernels); there, Electron aborts and `tn3270-gui` prints two fixes: `chown
+root:root` and `chmod 4755` on the `chrome-sandbox` binary the message names, or add `--no-sandbox`
+to the command line. See `packages/gui/README.md`.
+
+The packaged app ships Electron's default icon; a 3279-styled icon is a planned follow-up, not
+part of this milestone.
 
 ## What works today
 
@@ -420,8 +475,9 @@ The glyphs come from x3270's own 3270 bitmap font, baked into a sprite atlas by
 than a terminal in a window, and it is also why screenshots of it can be compared byte for
 byte (`packages/gui/scripts/shot.mjs`).
 
-**What it does not have yet:** no connect dialog, no preferences, and no packaging — so the host
-goes on the command line and there is no `.app` to double-click. It does have a menu bar (Edit for
+**What it does not have yet:** a preferences store, and `File` → `Connect…` for a session already
+running. A launch with no host opens a Connect dialog instead of refusing to run (see *Installing*);
+a launch given a host still takes it on the command line. It does have a menu bar (Edit for
 copy and paste, View for the keypad and keyboard, Model for the model and oversize -- disabled while
 connected or connecting, applied at the next connect, and popped up by `Alt-M`). The Model menu
 starts with **Disconnect**, enabled only while connected, which drops the host session so a choice
@@ -1271,8 +1327,9 @@ Done:
    gap are now closed**: the protocol half by those host reactions, and the local half first by
    hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
    then by `packages/gui/scripts/keys.mjs`, which drives 19 real Chromium chords and asserts 17
-   ordered actions plus two required absences. What remains untested is only the *packaged* app,
-   because there is no packaging yet.
+   ordered actions plus two required absences. The packaged app is now smoke-tested too
+   (`npm run smoke:package`, and in CI on five OS/arch runners) on the unmerged `packaging`
+   branch — see *Installing* and `docs/releasing.md` for what is still owed before a release.
 
 8. **A webserver serving the same front end** over HTTP — done, and verified against both
    live hosts. `packages/web` serves the GUI's own canvas renderer to a browser over a
@@ -1420,16 +1477,21 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    **Neither is well testable against any host reachable from this project** — `IBM-DYNAMIC` has one
    live path (TK5's TSO issues a Read Partition to any `-E` client) and a client-initiated switch has
    none, so expect unit tests, the playback oracle and by-hand GUI runs rather than a live witness.
-13. **Packaging, for macOS, Linux AND WINDOWS.** The Windows target is new and is a deliberate
-   addition rather than a stretch goal: nothing in this codebase is POSIX-specific. There are **zero
-   native dependencies** (every package depends only on other workspace packages, with Electron the
-   single external), and the `node:` builtins used are `crypto`, `fs`, `http`, `https`, `net`, `path`,
-   `readline`, `stream`, `tls`, `url`, `zlib` — all cross-platform. There is not one
-   `process.platform` branch anywhere in `packages/*/src`.
-   **That is a claim about the CODE, not a test result: nothing here has ever run on Windows.** A
-   Windows machine is available to test a packaged build on, which is all that testing an installer
-   needs — so the target is unblocked, but treat "works on Windows" as unverified until an installer
-   has actually been run there.
+13. **Packaging, for macOS, Linux AND WINDOWS — DONE, on the unmerged `packaging` branch.** npm
+   packages for all four front ends (`@tn3270/cli`, `@tn3270/tui`, `@tn3270/web`, `@tn3270/gui`,
+   lockstep version, Node ≥22), and native installers via electron-builder: macOS universal
+   `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
+   this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
+   ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
+   2026-11-06 (run 6) — see `docs/HANDOFF.md`. **Nothing is merged into `main`, published to npm, or signed.** See
+   *Installing* and `docs/releasing.md` for what that leaves: a macOS pass by hand (including
+   whether a fully unsigned `arm64` build launches at all), the Windows installer on a real Windows
+   machine, the Linux arm64 AppImage/`.deb` on real arm64 hardware, and the Connect dialog by an
+   actual double-click on each. Merging the branch is the user's call, not a step in this plan.
+   The Windows target was a deliberate addition rather than a stretch goal: there are **zero
+   native dependencies** (every package depends only on other workspace packages, with Electron
+   the single external), and there is not one `process.platform` branch anywhere in
+   `packages/*/src`.
 14. **PS + VMGIF** — item 10 above holds its detail and dependency; this is only its position in
    the reordered list — then **vector graphics** (GOCA).
 15. **Printer sessions**, last, and deliberately so: they are probably cheap in themselves, but
@@ -1649,10 +1711,11 @@ worse than one that says which quarter is missing.
   **The transfer protocol itself is live-verified on BOTH hosts in both directions** — see
   *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
-  screens from both Hercules systems and takes typed input (see *Verification*), but there
-  is **no connect dialog, no menus and no preferences** — the host and
-  every flag come from the command line, exactly as the TUI takes them. Packaging is also
-  still to come, so there is no `.app` to download yet.
+  screens from both Hercules systems and takes typed input (see *Verification*). It has a menu
+  bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
+  `File` → `Connect…` for a session already running — a launch given a host still takes it, and
+  every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*)
+  but is unmerged, unpublished and unsigned.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
   **no connect dialog, no menus and no preferences**. It also does **not**

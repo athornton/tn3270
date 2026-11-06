@@ -49,7 +49,7 @@ function assetRefs(html: string): string[] {
  * `keypadModule.test.ts` walks it. Two tests because they catch two unrelated failures, both of
  * which look identical from outside: a window with nothing in it.
  */
-const DOCUMENTS = ['index.html', 'transfer.html', 'keypad.html', 'keyboard.html'];
+const DOCUMENTS = ['index.html', 'transfer.html', 'keypad.html', 'keyboard.html', 'connect.html'];
 
 describe('the GUI s HTML surfaces', () => {
   it('reference only assets that EXIST, resolved as a browser would', () => {

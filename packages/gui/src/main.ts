@@ -4,22 +4,25 @@ import {
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import {
   resolve, OversizeError, TerminalTypeError, KNOWN_MODELS,
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  applyAction, applyGeometryChoice, applyPaste, describeTlsError, resolveScheme, startTransfer,
-  transferCommand, type Action,
+  applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
+  startTransfer, transferCommand, DEFAULT_TLS, type Action, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
-import { buildSession, parseGuiArgs, printGeometryNotices, UsageError } from './args.js';
+import { buildSession, printGeometryNotices, UsageError, type GuiArgs } from './args.js';
+import { connectModels, parseConnectSeam, planStartup, submitConnect } from './connectDialog.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController } from './transferWindow.js';
+import { layoutFor } from './appRoot.js';
+import { stripElectronSwitches } from './electronSwitches.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -50,21 +53,15 @@ import { createTransferController } from './transferWindow.js';
  * pointing at `-insecure` is the difference between a diagnosis and a mystery.
  */
 const here = dirname(fileURLToPath(import.meta.url));
-
 /**
- * Chromium switches this app is launched with, stripped before OUR parser sees argv.
- *
- * Listed explicitly rather than filtered by a `--` prefix rule, because our own
- * `--terminal-type` takes a VALUE: a prefix rule either eats that value or needs to know
- * about it, and both readings were wrong in the first draft of this file. Anything not
- * named here still reaches `parseGuiArgs`, so an unrecognized flag is still an error --
- * silently swallowing one is what produces a session that negotiates something nobody
- * asked for.
+ * Where this run's documents, preloads and atlas are. EVERY file this process hands to Electron
+ * goes through `layout`, never through `join(here, ...)` -- the unbundled `dist/` and the esbuild
+ * bundle `app/` disagree about where the HTML lives, and one call site left on `join` would be a
+ * window that loads in the monorepo and is blank in the shipped app. `appRoot.ts` has the rule.
  */
-const ELECTRON_SWITCHES: ReadonlySet<string> = new Set([
-  '--no-sandbox', '--disable-gpu', '--disable-software-rasterizer',
-  '--disable-dev-shm-usage', '--enable-logging', '--in-process-gpu',
-]);
+const layout = layoutFor(here);
+
+// `ELECTRON_SWITCHES` and the `--user-data-dir=` rule: electronSwitches.ts.
 
 /**
  * The test seams, read ONCE for the whole process.
@@ -246,6 +243,23 @@ const SEAM = Object.freeze({
    * kind belongs on this process's stdout.
    */
   waitMs: Number(process.env['TN3270_GUI_WAIT_MS'] ?? '40000'),
+  /**
+   * A NINTH TEST SEAM: `TN3270_GUI_CONNECT='{"host":"127.0.0.1:3270","model":"3278-2-E","tls":false}'`
+   * fills the startup Connect dialog and presses Connect.
+   *
+   * THROUGH THE DOM, not through `submitConnect`: main sets the page's own input values and clicks
+   * its own Connect button with `executeJavaScript`, so the boot file's real submit listener, the
+   * preload and the `connect:submit` handler all run -- a seam that called the handler directly
+   * would skip exactly the plumbing that has never run. Read only when the dialog opens, i.e. a
+   * launch with no host; with a host it is ignored, which is itself a fact the harness can check.
+   *
+   * It prints `connect: dialog shown`, `connect: submitted`, and `connect: error <text>` if the
+   * dialog's error line has text once the submit has settled. The text is the PARSER'S message
+   * about the host the harness chose, never anything an operator typed, so it is safe to print.
+   *
+   * EMPTY MEANS ABSENT. Malformed JSON is refused by name (`parseConnectSeam`).
+   */
+  connect: process.env['TN3270_GUI_CONNECT'] ?? '',
 });
 
 /** The `wait:` prefix on a `TN3270_GUI_KEYS` step. Exported for the test that pins the seam. */
@@ -322,17 +336,34 @@ let transferScenarioRunning = false;
  */
 let shuttingDown = false;
 
-/** Turn any startup failure into something a person can act on. */
-function explain(err: unknown, host?: string, port?: number): string {
+/** The connect a failure came from, when it came from one. */
+interface ConnectTarget {
+  readonly host: string;
+  readonly port: number;
+  /** Whether the session dialled TLS. A plaintext failure is NOT described as a TLS one. */
+  readonly tls: boolean;
+  readonly remedy: TlsRemedy;
+}
+
+/**
+ * Turn any startup failure into something a person can act on.
+ *
+ * ONLY A TLS SESSION'S FAILURE IS DESCRIBED AS TLS. Node attaches a `code` to socket failures as
+ * well as TLS ones, and this once sent every coded error through `describeTlsError` -- so with TLS
+ * off, a host that was merely down read "TLS connection to 127.0.0.1:1 failed (ECONNREFUSED)", and a
+ * double-clicker went looking for a TLS setting that was not on. `describeConnectError` says what
+ * happened instead.
+ */
+function explain(err: unknown, target?: ConnectTarget): string {
   if (err instanceof UsageError) return err.message;
   if (err instanceof TerminalTypeError) return err.message;
   if (err instanceof OversizeError) return err.message;
   if (err instanceof Error) {
-    // Node attaches a `code` to socket and TLS failures; describeTlsError maps the ones
-    // worth explaining and names the flag that fixes each.
     const code = (err as { code?: string }).code;
-    if (code !== undefined && host !== undefined) {
-      return describeTlsError(code, host, port ?? 23);
+    if (code !== undefined && target !== undefined) {
+      return target.tls
+        ? describeTlsError(code, target.host, target.port, target.remedy)
+        : describeConnectError(code, target.host, target.port, err.message);
     }
     return err.message;
   }
@@ -362,7 +393,7 @@ app.whenReady().then(async () => {
        * this asymmetry belongs to the test shell and not to the served page.
        */
       // `.cjs`, compiled from preload.cts: an ESM preload cannot load. See that file.
-      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: join(here, 'preload.cjs') }),
+      ...(process.env['TN3270_GUI_URL'] ? {} : { preload: layout.preload('preload.cjs') }),
     },
   });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
@@ -375,10 +406,14 @@ app.whenReady().then(async () => {
     process.stdout.write(`renderer failed to load ${url}: ${code} ${desc}\n`);
   });
 
-  // That HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui` and
-  // `canvas` stay siblings on disk. True in the workspace and false in an asar bundle, so
-  // packaging -- explicitly out of scope in the stage-3 spec -- has to copy or rewrite that
-  // path. The failure would be a blank window with a `did-fail-load` line above it.
+  // UNBUNDLED, that HTML pulls its renderer from `../canvas/dist/renderer.js`, which ASSUMES `gui`
+  // and `canvas` stay siblings on disk: true in the workspace, false in an asar. This comment once
+  // predicted that packaging would have to copy or rewrite that path, and 2026-11-06 it did:
+  // `scripts/bundle.mjs` builds each page's module self-contained into `app/`, rewrites every
+  // `<script src>` to `./<name>.js`, strips the import maps, and REFUSES to write a document that
+  // still references `../` or a file `app/` lacks. `layout.document` picks whichever copy this run
+  // has. The failure, if either side drifts, is still a blank window with a `did-fail-load` line
+  // above it -- which is why the bundle checks and does not leave it to a harness.
   // The URL seam branches HERE, before anything reads argv or builds a Session -- see SEAM.url.
   if (SEAM.url !== '') {
     if (SEAM.size !== '') {
@@ -414,23 +449,179 @@ app.whenReady().then(async () => {
     return;
   }
 
-  await win.loadFile(join(here, '..', 'index.html'));
+  await win.loadFile(layout.document('index.html'));
   globalShortcut.register('Control+]', () => { app.quit(); });
 
   const fail = (message: string): void => {
     process.stderr.write(`${message}\n`);
-    win.webContents.send('error-message', message);
+    // A window closed while a connect was in flight has no renderer to tell; sending to it THROWS,
+    // and from a promise's catch that is an unhandled rejection. stderr above still has it.
+    if (!win.isDestroyed()) win.webContents.send('error-message', message);
   };
 
-  let args;
+  const argv = stripElectronSwitches(process.argv.slice(2));
+  const plan = planStartup(argv, SEAM);
+  if (plan.kind === 'fail') {
+    fail(explain(plan.err));
+    await maybeCapture(win, 1);
+    return;
+  }
+  if (plan.kind === 'session') {
+    await startSession(win, fail, plan.args, 'flag');
+    return;
+  }
+  // No host: ask for one. The session, if any, starts from the dialog's submit handler.
+  await openConnectDialog(win, fail, argv);
+});
+
+/**
+ * THE STARTUP CONNECT DIALOG, for a launch with no host -- a double-clicked app, typically. Spec
+ * docs/superpowers/specs/2026-11-05-packaging-design.md section 2.
+ *
+ * MODAL OVER THE TERMINAL WINDOW, which stays up behind it: the window is where a failed connect is
+ * shown afterwards, exactly as for a command-line launch, and the dialog does NOT reopen (File >
+ * Connect... is milestone B).
+ *
+ * ## REGISTERED ONCE, ON THIS PATH ONLY
+ *
+ * The two `connect:` handlers are registered here and nowhere else, and this function runs at most
+ * once per process -- from `app.whenReady()`, which nothing re-enters. `ipcMain.handle` THROWS on a
+ * second registration, which is the rule `startSession`'s own handlers live under too.
+ *
+ * `started` IS THE ONE-SESSION GUARD. `startSession` registers handlers and must run once; the page
+ * disables Connect while a submit is in flight, but a page is not where a once-only rule should
+ * live, so main refuses a second start itself.
+ *
+ * ## QUIT, ESCAPE, CLOSE ALL QUIT THE APP -- BUT ONLY BEFORE A SUBMIT SUCCEEDED
+ *
+ * Closing the dialog leaves the terminal window open with nothing in it and nothing to connect it
+ * to, so `closed` quits. A SUCCESSFUL submit closes the dialog too, and that close must NOT quit:
+ * `started` is set before `close()` and the `closed` handler checks it.
+ */
+async function openConnectDialog(
+  win: BrowserWindow, fail: (message: string) => void, commandLine: readonly string[],
+): Promise<void> {
+  let seamForm;
   try {
-    const argv = process.argv.slice(2).filter((a) => !ELECTRON_SWITCHES.has(a));
-    args = parseGuiArgs(argv);
+    seamForm = parseConnectSeam(SEAM.connect);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
 
+  let started = false;
+  const cw = new BrowserWindow({
+    width: 420,
+    height: 240,
+    useContentSize: true,
+    title: 'Connect',
+    parent: win,
+    modal: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      // `.cjs`, compiled from connectPreload.cts: an ESM preload cannot load.
+      preload: layout.preload('connectPreload.cjs'),
+    },
+  });
+  // The deprecated five-argument form, matching the other windows -- see the keypad's note.
+  cw.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    process.stdout.write(`connect[${level}] ${sourceId}:${line} ${message}\n`);
+  });
+  cw.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    process.stdout.write(`connect window failed to load ${url}: ${code} ${desc}\n`);
+  });
+  cw.on('closed', () => { if (!started) app.quit(); });
+
+  ipcMain.handle('connect:models', () => connectModels());
+  ipcMain.handle('connect:submit', async (_e, form: unknown) => {
+    if (started) return { error: 'already connecting' };
+    const r = submitConnect(form, commandLine);
+    if (!r.ok) return { error: r.error };
+    started = true;
+    // AFTER the reply, not before it: closing the window that is awaiting this `invoke` would
+    // leave its promise to a destroyed renderer. `setImmediate` lets the reply go out first.
+    setImmediate(() => {
+      if (!cw.isDestroyed()) cw.close();
+      // The terminal window can be gone by now (closed in the gap): nothing to start a session in.
+      if (win.isDestroyed()) return;
+      startSession(win, fail, r.args, 'dialog').catch((err: unknown) => {
+        fail(explain(err));
+      });
+    });
+    return { ok: true };
+  });
+  ipcMain.on('connect:quit', () => { app.quit(); });
+
+  await cw.loadFile(layout.document('connect.html'));
+  process.stdout.write('connect: dialog shown\n');
+  if (seamForm !== undefined) await driveConnectDialog(cw, seamForm);
+}
+
+/**
+ * `TN3270_GUI_CONNECT`'s driver: type the form into the dialog's own controls and press its own
+ * Connect, then report what the dialog's error line says. See `SEAM.connect`.
+ *
+ * WAITS FOR CONNECT TO BE ENABLED first, because the page disables it until the model list has
+ * arrived -- clicking a disabled button does nothing at all, which would read as a broken dialog.
+ * And then for the submit to settle: either the window closes (accepted) or Connect is enabled
+ * again (refused, with the reason in the error line).
+ *
+ * A THROW HERE WOULD BE A HANG, so it is caught: this runs inside `app.whenReady()`'s promise.
+ */
+async function driveConnectDialog(
+  cw: BrowserWindow, form: { host: string; model: string; tls: boolean },
+): Promise<void> {
+  const until = async (expr: string): Promise<boolean> => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (cw.isDestroyed()) return false;
+      if (await cw.webContents.executeJavaScript(expr) === true) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+  try {
+    if (!await until("document.querySelector('#connect').disabled === false")) {
+      process.stdout.write('connect: Connect never became enabled\n');
+      return;
+    }
+    await cw.webContents.executeJavaScript(`(() => {
+      const f = ${JSON.stringify(form)};
+      document.querySelector('#host').value = f.host;
+      document.querySelector('#model').value = f.model;
+      document.querySelector('#tls').checked = f.tls;
+      document.querySelector('#connect').click();
+    })()`);
+    process.stdout.write('connect: submitted\n');
+    // Settled = the window closed (accepted) or Connect came back (refused).
+    await until("document.querySelector('#connect').disabled === false");
+    if (cw.isDestroyed()) return;
+    const text = await cw.webContents.executeJavaScript(
+      "document.querySelector('#connect-error').textContent") as string;
+    if (text !== '') process.stdout.write(`connect: error ${text}\n`);
+  } catch (err) {
+    if (!cw.isDestroyed()) process.stdout.write(`connect: DRIVE FAILED ${explain(err)}\n`);
+  }
+}
+
+/**
+ * Everything after the arguments are known: the session, the atlas, the windows, the menus, the IPC
+ * handlers, and the connect (or the replay). ONE PATH for a host given on the command line and, from
+ * the next commit, one typed into the startup Connect dialog -- so the dialog cannot build a session
+ * the command line would not.
+ *
+ * CALLED AT MOST ONCE PER PROCESS, and that is load-bearing: it registers `ipcMain.handle` channels
+ * and an `app.on('before-quit')` hook, and the first would THROW on a second call (see the note at
+ * `transferWin`). Moved out of `app.whenReady()` verbatim; the module-level indentation is the same.
+ */
+async function startSession(
+  win: BrowserWindow, fail: (message: string) => void, args: GuiArgs, remedy: TlsRemedy,
+): Promise<void> {
   // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
   // string lookup in the paint path.
   const scheme = args.scheme ?? resolveScheme();
@@ -463,6 +654,7 @@ app.whenReady().then(async () => {
     session = buildSession(args, measure);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
   // Before any connect, so the first connect's notice is printed too -- see the function.
@@ -487,9 +679,12 @@ app.whenReady().then(async () => {
    * `npm run build -w @tn3270/gui` is enough to reach it; `assets.ts` records why.
    */
   try {
-    atlas = readAtlas();
+    // `layout.atlasDir` is undefined unbundled (canvas's own `assetDir()`), and `app/` in the bundle
+    // -- stated, not left to `assetDir()` landing there by coincidence. See `appRoot.ts`.
+    atlas = readAtlas(layout.atlasDir);
   } catch (err) {
     fail(explain(err));
+    await maybeCapture(win, 1);
     return;
   }
   const { geometry, coverage } = atlas;
@@ -550,7 +745,7 @@ app.whenReady().then(async () => {
         nodeIntegration: false,
         // `.cjs`, compiled from keypadPreload.cts: an ESM preload cannot load, and when it fails
         // the bridge silently never appears -- a window whose 48 buttons all do nothing.
-        preload: join(here, 'keypadPreload.cjs'),
+        preload: layout.preload('keypadPreload.cjs'),
       },
     });
     keypadWin = kw;
@@ -570,7 +765,7 @@ app.whenReady().then(async () => {
     // destroyed object. The transfer window learned this the hard way -- see the recorded
     // closing-a-parent-skips-the-child-close finding.
     kw.on('closed', () => { keypadWin = undefined; });
-    await kw.loadFile(join(here, '..', 'keypad.html'));
+    await kw.loadFile(layout.document('keypad.html'));
     /**
      * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
      *
@@ -669,7 +864,7 @@ app.whenReady().then(async () => {
         nodeIntegration: false,
         // `.cjs`, compiled from keyboardPreload.cts: an ESM preload cannot load, and when it fails
         // the bridge silently never appears -- a window whose 118 caps all do nothing.
-        preload: join(here, 'keyboardPreload.cjs'),
+        preload: layout.preload('keyboardPreload.cjs'),
       },
     });
     keyboardWin = kbw;
@@ -683,7 +878,7 @@ app.whenReady().then(async () => {
       process.stdout.write(`keyboard window failed to load ${url}: ${code} ${desc}\n`);
     });
     kbw.on('closed', () => { keyboardWin = undefined; });
-    await kbw.loadFile(join(here, '..', 'keyboard.html'));
+    await kbw.loadFile(layout.document('keyboard.html'));
     /**
      * REPORT WHAT THE WINDOW ACTUALLY CONTAINS, once, after the load resolves.
      *
@@ -756,7 +951,7 @@ app.whenReady().then(async () => {
         contextIsolation: true,
         nodeIntegration: false,
         // `.cjs`, compiled from transferPreload.cts: an ESM preload cannot load.
-        preload: join(here, 'transferPreload.cjs'),
+        preload: layout.preload('transferPreload.cjs'),
       },
     });
     transferWin = tw;
@@ -866,7 +1061,7 @@ app.whenReady().then(async () => {
       transfer = undefined;
     });
 
-    await tw.loadFile(join(here, '..', 'transfer.html'));
+    await tw.loadFile(layout.document('transfer.html'));
     await driveTransferWindow(tw, win, session);
   };
 
@@ -1539,7 +1734,10 @@ app.whenReady().then(async () => {
     // Host and port passed in, so a TLS or socket failure names the actual target rather
     // than a placeholder -- 'vm:3270 accepted the connection but never completed a TLS
     // handshake ... use -insecure' is the message that matters against Hercules.
-    fail(explain(err, args.host, args.port));
+    fail(explain(err, {
+      host: args.host!, port: args.port ?? 23,
+      tls: (args.tls ?? DEFAULT_TLS).kind !== 'plaintext', remedy,
+    }));
   }
 
   // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
@@ -1550,7 +1748,7 @@ app.whenReady().then(async () => {
   await maybeOpenTransferWindow();
   await maybeCapture(win);
   await quitIfKeysOnly();
-});
+}
 
 /**
  * A THIRD TEST SEAM: `TN3270_GUI_KEYS='Alt+1,Ctrl+A,Enter'` delivers REAL key events.
@@ -2691,8 +2889,19 @@ async function quitIfKeysOnly(): Promise<void> {
  * `maybeSendKeys` ALSO applies this value as a floor on its own wait, so making the keys seam
  * independent did not shorten the settle a screenshot run used to get; the reasoning is
  * there rather than here, next to the `Math.max` that does it.
+ *
+ * `failExitCode`, WHEN GIVEN, MEANS THIS CAPTURE IS A STARTUP FAILURE'S, not a normal run's:
+ * every `fail(...)` call site on the startup path (argv, session, atlas) passes one after
+ * painting the error, so a harness running under the shot seam sees the failure as a FAST
+ * non-zero exit with the error visible in the PNG, rather than the window sitting open for a
+ * real user -- which is correct there -- until the harness's own ~120s timeout expires and
+ * reports "no capture produced" with no clue why. `app.exit(code)` is used instead of this
+ * function's normal `app.quit()` for exactly that reason: `quit()` is graceful and exits 0,
+ * which would make a harness that only checks the exit code call a painted-error golden a
+ * pass. Never set outside the startup failure paths, so the ordinary success exit (0, via
+ * `quit()`) is completely unchanged.
  */
-async function maybeCapture(win: BrowserWindow): Promise<void> {
+async function maybeCapture(win: BrowserWindow, failExitCode?: number): Promise<void> {
   const path = SEAM.shot;
   if (path === '') return;
   await new Promise((r) => setTimeout(r, SEAM.shotMs));
@@ -2713,6 +2922,10 @@ async function maybeCapture(win: BrowserWindow): Promise<void> {
   writeFileSync(`${path}.sha256`, createHash('sha256').update(image.toBitmap()).digest('hex'));
   const { width, height } = image.getSize();
   process.stdout.write(`shot: ${path} ${width}x${height}\n`);
+  if (failExitCode !== undefined) {
+    app.exit(failExitCode);
+    return;
+  }
   app.quit();
 }
 

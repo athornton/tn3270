@@ -1,10 +1,148 @@
-# Handoff — state as of 2026-11-05 (oversize and model switching MERGED to `main` as `17129ce`, 2960 tests; VM/370 and the web gateway live-verified; next is roadmap (c), packaging)
+# Handoff — state as of 2026-11-06 (branch `packaging`; npm packages and native installers built and smoke-tested on five CI runners, all green in run 6 at `b279d89`; UNMERGED, UNPUBLISHED, UNSIGNED)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
-`docs/live-testing.md` (the live-host runbook and log).
+`docs/live-testing.md` (the live-host runbook and log). For this branch specifically, read
+`docs/superpowers/specs/2026-11-05-packaging-design.md` and
+`docs/superpowers/plans/2026-11-05-packaging.md` (15 tasks, all 15 done as code; Task 15 was this
+documentation pass).
 
-## START HERE — OVERSIZE AND MODEL SWITCHING ARE MERGED (`17129ce`), 2960 TESTS GREEN; LIVE ON VM/370 AND THE WEB GATEWAY; NEXT IS PACKAGING
+## START HERE — PACKAGING (TASKS 1-15) IS DONE ON BRANCH `packaging`, UNMERGED; CI GREEN ON ALL FIVE RUNNERS (RUN 6)
+
+**Branch `packaging`, 35 commits on top of `main` at `6492c10` (HEAD `6492c10` is this branch's own
+tip as of this entry).** It branches from `main` at the commit the previous entry below calls
+`17129ce` (oversize and model switching, merged). Nothing from this branch has been merged back.
+
+### WHAT IS DONE
+
+- **npm packages**, lockstep version `0.1.0`, under the `@tn3270` org, **not yet published**:
+  `@tn3270/cli` (bin `tn3270-cli`), `@tn3270/tui` (bin `tn3270`), `@tn3270/web` (bin `tn3270-web`),
+  `@tn3270/gui` (bin `tn3270-gui`), plus the library packages `core`, `frontend`, `canvas`,
+  `node-files` (internal, no stable API, published only because the front ends depend on them).
+  Every manifest has `"engines": {"node": ">=22"}` and `publishConfig.access: public`, checked by
+  `packages/core/test/manifests.test.ts`.
+- **`tn3270-gui`** (`packages/gui/bin/tn3270-gui.mjs`) runs the esbuild bundle
+  (`packages/gui/app/`, built by `npm run bundle:gui`) under the Electron npm installed beside it
+  (pinned `44.10.2`). It forwards SIGINT/SIGTERM/SIGHUP to Electron and kills Electron if it exits
+  first — the point being Electron's own `electron/cli.js` does neither, which is what orphaned
+  the real binary to PID 1 under a harness's SIGKILL before (`scripts/xvfb.mjs`; memory note
+  *Electron harness leaks look like regressions*). It does **not** add `--no-sandbox`: on this dev
+  box (Rocky 9) the sandbox runs fine without it, and forcing it on would weaken every system that
+  does not need the workaround. Where Chromium's sandbox cannot start, it prints both remedies
+  (`chown`/`chmod` on `chrome-sandbox`, or `--no-sandbox`).
+- **Native artifacts** via electron-builder (`packages/gui/electron-builder.cjs`), **unsigned this
+  milestone** (`identity: null`, `CSC_IDENTITY_AUTO_DISCOVERY: false` in CI): macOS universal
+  `.dmg` + `.zip`; Linux x64 and arm64 AppImage + `.deb` (package `tn3270-gui`, executable
+  `tn3270-gui`, under `/opt/TN3270`); Windows x64 NSIS installer (per-user, chosen directory).
+  Artifact names `TN3270-<version>-<os>-<arch>.<ext>`. Default Electron icon; a 3279-styled icon
+  is a planned follow-up.
+- **The Connect dialog**: a double-click or no-host launch opens it (host, model — default
+  `3278-2-E` — and a TLS checkbox, on by default). After a session starts, a failed connect shows
+  its error in the terminal window and the dialog does **not** reopen (`File` → `Connect…` is a
+  later milestone). Command-line launches are unchanged.
+- **Build/verify scripts** (root `package.json`): `build`, `typecheck`, `bundle:gui`, `pack:npm`
+  (refuses a stale `dist`, an orphaned compiled file with no source, or an unverified gui bundle —
+  `scripts/pack.mjs`), `smoke` (`scripts/install-smoke.mjs`: installs the tarballs into a fresh
+  `-g --prefix` and runs each executable **by name through PATH**, 5 checks), `package:gui`
+  (electron-builder for the host OS, e.g. `-- --linux --x64`), `smoke:package`
+  (`scripts/package-smoke.mjs`: launches the packaged app on its own OS — a golden-screenshot
+  replay and a no-host dialog connect to a throwaway telnet server — per native route, e.g. 2
+  routes × 2 checks = 4 on Linux), `package` (build + package:gui + pack:npm + smoke + smoke:package),
+  `version:set` (`scripts/set-version.mjs`, lockstep bump, all-or-nothing).
+- **CI**: `.github/workflows/package.yml`, five runners — `ubuntu-latest`, `ubuntu-24.04-arm`,
+  `macos-latest`, `macos-26-intel`, `windows-latest` — each running build, typecheck, test, the six
+  GUI harnesses on both `dist/` and the bundle (`ubuntu-latest` only), `pack:npm`, `smoke`,
+  `package:gui`, `smoke:package`, uploading `npm-tarballs` (from `ubuntu-latest` only) and
+  `gui-<os>` (from every runner but `macos-26-intel`, which builds the same universal mac app
+  `macos-latest` already uploads).
+
+**CI run 1** found only test/checkout problems (CRLF line endings, timing assumptions, path
+separators) — fixed in the commits leading up to this one (`a9a37b0`, `84e5d3d`, `59c3261`).
+
+**CI runs 2-5** each failed only on things the runners newly exposed, all fixed: `macos-26-intel`'s
+display is Retina with a colour profile (capture 1440x700, greens shifted), and Chromium on macOS
+ignores `--force-device-scale-factor` (run 4: byte-identical capture with it), so the smokes accept
+the golden at an exact integer scale with a one-to-one colour remap (`scaledMatch` in
+`scripts/smoke-lib.mjs`); `pack:npm` packed a complete bundle of old code (now `bundleStaleness`);
+the bundle-staleness file list lacked `connect.html`; one CPU-bound test sweep hit vitest's 5 s
+default on the slow Intel runner (now 30 s).
+
+**CI run 6 (42283731516, commit `b279d89`): ALL FIVE RUNNERS GREEN, 2026-11-06.** Every runner:
+build, typecheck, 3110 tests, install smoke 5/5, package smoke. Per runner:
+
+| runner | install smoke | package smoke |
+|---|---|---|
+| ubuntu-latest (x64) | 5/5, exact golden hash | AppImage + `.deb`, 4/4, exact hash; plus all six GUI harnesses on `dist/` and the bundle |
+| ubuntu-24.04-arm | 5/5, exact hash | AppImage + `.deb`, 4/4, exact hash |
+| macos-latest (arm64) | 5/5, exact hash | universal app, arm64 slice, 2/2, exact hash (x64 slice left to the Intel job: `TN3270_PACKAGE_SMOKE_X64=native`) |
+| macos-26-intel | 5/5, golden at exactly 2x | universal app, x86_64 slice run natively, 2/2, golden at exactly 2x |
+| windows-latest | 5/5, exact hash | NSIS silent install, 2/2, exact hash |
+
+The CI-built universal `TN3270.app` has `LSMinimumSystemVersion` **13.0** (measured from the
+`gui-macos-latest` artifact's `Info.plist`), matching Electron 44's stated "Ventura and up".
+
+**OPEN, found while measuring:** Linux at a forced scale factor 2 (`--force-device-scale-factor=2`
+on the dev box) draws blended glyph edges (green at exactly 75%: bilinear filtering), where Retina
+macOS draws a clean pixel-doubled upscale. CI does not see it (Linux runs at scale 1, exact
+hash). A HiDPI Linux user may get slightly soft text; not yet investigated.
+
+### MEASURED LOCALLY ON LINUX x64, 2026-11-06
+
+| check | result |
+|---|---|
+| `npm run smoke` (install-smoke) | 5/5 |
+| GUI harnesses, `dist/` and the bundle (`TN3270_GUI_MAIN=app`) | identical on both: `shot` 2/2, `keys` 25 chords/23 actions/2 popups, `clicks` 9 buttons, `select` 4/4, `transfer` 10/10, `connect` 5/5 |
+| `npm run smoke:package` (AppImage + `.deb`) | 4/4 (golden screenshot + dialog connect, each route) |
+| First CI run | `ubuntu-24.04-arm` fully green |
+
+### FIXED ON THIS BRANCH, WORTH CARRYING FORWARD
+
+- Electron `44.3.0` → `44.10.2`, clearing four Electron and eight `undici` advisories.
+- electron-builder was collecting `node_modules` into the app (291 MB of it, measured) because the
+  bundle has none but the collector walks up to the project and workspace root; fixed with
+  `beforeBuild: async () => false`.
+- A missing static asset crashed the whole web gateway process; it is now a 500 for that one
+  request (`7c3171f`).
+- A refused plaintext connect used to be described as a TLS failure; `describeConnectError` now
+  tells them apart (`main.ts`).
+- An installed app missing its glyph atlas told users to rebuild `canvas`, which is wrong for an
+    npm install; it now says reinstall.
+- A startup failure under the shot seam used to hang the harness instead of exiting.
+- `tui`/`web` used to exit 0 silently through npm's bin symlinks, because the entry point never
+  checked whether it was the one invoked (`isMain`, `node-files`).
+- `web` had no shebang on its bin.
+- `web` served files by monorepo-relative paths, which breaks once installed standalone.
+- `.gitattributes` was added, forcing LF on every OS, after a Windows checkout's CRLF broke tests.
+
+### STILL OWED — NONE OF THIS CAN BE DONE FROM THIS SANDBOX
+
+- **macOS by hand**: launch the `.dmg`/`.zip` on a real Mac. Gatekeeper's path (System Settings →
+  Privacy & Security → *Open Anyway*, or `xattr -dr com.apple.quarantine`) is written up in
+  `docs/releasing.md` and the README but untested here. Whether a fully unsigned `arm64` build
+  launches on Apple Silicon **at all** is open — `identity: null` means no signature was applied,
+  not that one was applied ad-hoc, and nobody has tried the launch yet.
+- **The Windows NSIS installer**, on the user's own Windows machine — CI's `windows-latest` job
+  exercises the silent install (`/S /D=`) and launch, but a real interactive install/launch is a
+  different thing and has not been done.
+- **The Linux arm64 AppImage and `.deb`**, on real arm64 hardware (a Raspberry Pi) — CI's
+  `ubuntu-24.04-arm` runner is a cloud VM, not the hardware a user would actually run this on.
+- **The Connect dialog, by an actual double-click**, on each OS above — every automated check
+  drives it through a seam (`TN3270_GUI_CONNECT`, Chromium `sendInputEvent`) or a replay, never a
+  real click on a real double-clicked icon.
+- **`npm install -g @tn3270/<pkg>` from the real registry** — nothing is published yet, so every
+  install so far has been from a local tarball or a CI artifact. See `docs/releasing.md`.
+
+**Merging `packaging` into `main` is the user's call, not a step in this plan.**
+
+### NEXT
+
+The live items above, run by the user on real hardware; then, when the user is ready, either
+merge or defer `packaging` and move to whatever roadmap item follows it.
+
+## OVERSIZE AND MODEL SWITCHING — MERGED TO `main` AS `17129ce`, KEPT FOR ITS DETAIL
+
+This section is history: it describes the branch `packaging` branched from, before packaging
+existed. For where the tree stands today, see *START HERE* at the top of this file.
 
 **2026-11-05: MERGED.** The user approved after their live passes, and `oversize` was merged
 `--no-ff` into `main` as `17129ce` (48 commits; gate re-run on the merge commit: build and

@@ -21,6 +21,16 @@ const select = readFileSync(join(guiDir, 'scripts', 'select.mjs'), 'utf8');
 const main = readFileSync(join(guiDir, 'src', 'main.ts'), 'utf8');
 
 describe('the selection harness', () => {
+  it('runs guiMain() and prints which entry it tested, and refuses a stale dist/ or app/', () => {
+    // Without the print, a run against the bundle and a run against dist would look identical
+    // in the log, and a typo in TN3270_GUI_MAIN that silently fell back to dist would report the
+    // bundle as proven. `xvfb.mjs`'s `staleness()` is the shared check `keys.mjs`, `clicks.mjs`
+    // and `transfer.mjs` also use; `xvfbStaleness.test.ts` pins its own mechanics.
+    expect(select).toMatch(/const main = guiMain\(\)/);
+    expect(select).toContain('console.log(`entry: ${guiMainLabel()}`)');
+    expect(select).toContain("staleness(main, ['gui', 'canvas'])");
+  });
+
   it('keeps the three flags without which it hangs or lies', () => {
     // Without `-insecure` a run pointed at a real host does not fail, it HANGS -- default-on TLS
     // against plaintext Hercules. Without `--no-sandbox` and `--disable-gpu` there is no window at
