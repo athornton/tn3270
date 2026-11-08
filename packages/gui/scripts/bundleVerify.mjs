@@ -10,7 +10,7 @@
  * what finished.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ATLAS_FILES } from '@tn3270/canvas';
 import { distStaleness, newest } from '../../../scripts/freshness.mjs';
@@ -20,6 +20,18 @@ const gui = join(here, '..');
 
 /** The documents main.ts loads. */
 export const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'connect.html'];
+
+/**
+ * The window icon, relative to `packages/gui`. The bundle copies it flat (`app/icon.png`, where
+ * `src/appRoot.ts`'s `layout.icon` looks), and electron-builder converts the same file into every
+ * platform's icon format (`icon` in `electron-builder.cjs`). `resources/icon.svg` is its source;
+ * `scripts/render-icon.mjs` regenerates it.
+ */
+export const ICON_SOURCE = 'resources/icon.png';
+
+/** The Linux icon set, `resources/icons/NxN.png` (`linux.icon`); see `scripts/render-icon.mjs`. */
+export const LINUX_ICON_DIR = 'resources/icons';
+export const LINUX_ICON_SIZES = Object.freeze([16, 32, 48, 64, 128, 256, 512]);
 
 /** A failure that names its fix. */
 export class BundleError extends Error {}
@@ -63,6 +75,10 @@ export function verify(outDir) {
   for (const f of Object.values(ATLAS_FILES)) {
     if (!existsSync(join(outDir, f))) problems.push(`readAtlas reads ${f}, which is not in app/`);
   }
+  // Without it every window still opens, with Electron's default icon -- nothing would notice.
+  if (!existsSync(join(outDir, basename(ICON_SOURCE)))) {
+    problems.push(`layout.icon reads ${basename(ICON_SOURCE)}, which is not in app/`);
+  }
   // The main bundle must not have kept a runtime `require` esbuild could not resolve (an ESM
   // bundle turns one into a shim that throws at startup) or any import other than node: builtins
   // and electron.
@@ -83,11 +99,11 @@ export function verify(outDir) {
 export const BUNDLE_PACKAGES = Object.freeze(['core', 'frontend', 'canvas', 'node-files', 'gui']);
 
 /**
- * `packages/gui`'s own files the bundle copies flat: every document, plus the stylesheet.
+ * `packages/gui`'s own files the bundle copies flat: every document, the stylesheet and the icon.
  * DERIVED FROM `DOCUMENTS`. A retyped list lived in `xvfb.mjs` and did not grow when the Connect
  * dialog added `connect.html` (found 2026-11-06), so editing that page left the bundle "fresh".
  */
-export const BUNDLE_GUI_FILES = Object.freeze([...DOCUMENTS, 'ui.css']);
+export const BUNDLE_GUI_FILES = Object.freeze([...DOCUMENTS, 'ui.css', ICON_SOURCE]);
 
 /**
  * Whether `packagesRoot/gui/app` is a bundle of the CURRENT code: `{ why, forceHint }`, or

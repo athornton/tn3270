@@ -3,7 +3,7 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { staleness } from '../scripts/xvfb.mjs';
 import { BUNDLE_GUI_FILES, BUNDLE_PACKAGES, bundleStaleness } from '../scripts/bundleVerify.mjs';
 
@@ -58,6 +58,7 @@ function makePackage(pkgRoot: string, pkg: string, srcAt: number, distAt: number
 function makeGuiFiles(pkgRoot: string, at: number): void {
   for (const f of BUNDLE_GUI_FILES) {
     const p = join(pkgRoot, 'gui', f);
+    mkdirSync(dirname(p), { recursive: true }); // resources/icon.png is one level down
     writeFileSync(p, '');
     utimesSync(p, at, at);
   }

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a4fa8"/><stop offset="1" stop-color="#0e1f52"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.45" cy="0.4" r="0.75">
+      <stop offset="0" stop-color="#16281f"/><stop offset="1" stop-color="#060b09"/>
+    </radialGradient>
+    <linearGradient id="undershadow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0.55"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-10%" y="-50%" width="120%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- tile -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <g transform="translate(512 530) scale(0.88) translate(-510 -493)">
+  <!-- ground shadow -->
+  <ellipse cx="520" cy="842" rx="330" ry="38" fill="#000" opacity="0.28"/>
+
+  <g stroke-linejoin="round" stroke-width="16">
+    <!-- base: set back from the hood -->
+    <polygon points="700,606 849,498 849,604 700,712" fill="#a99f86" stroke="#a99f86"/>
+    <polygon points="254,606 700,606 700,712 254,712" fill="#d4cab0" stroke="#d4cab0"/>
+    <rect x="254" y="650" width="446" height="62" fill="url(#undershadow)"/>
+
+    <!-- CRT hood, jutting forward over the base -->
+    <polygon points="682,274 869,138 869,480 660,650" fill="#c6bca3" stroke="#c6bca3"/>
+    <polygon points="222,274 682,274 869,138 409,138" fill="#f7f2e4" stroke="#f7f2e4"/>
+    <polygon points="222,274 682,274 660,650 200,650" fill="#e8e0ca" stroke="#e8e0ca"/>
+  </g>
+  <!-- vent slots on the hood top -->
+  <g stroke="#d8cfb6" stroke-width="9" stroke-linecap="round">
+    <line x1="560" y1="200" x2="700" y2="200"/><line x1="585" y1="182" x2="725" y2="182"/>
+    <line x1="610" y1="164" x2="750" y2="164"/>
+  </g>
+
+  <g transform="translate(0 650) skewX(-3.35) translate(0 -650)">
+  <!-- bezel and screen -->
+  <rect x="234" y="322" width="392" height="296" rx="40" fill="#bdb399"/>
+  <rect x="250" y="336" width="360" height="268" rx="30" fill="url(#glass)"/>
+  <g filter="url(#glow)" stroke-linecap="round" stroke-width="15">
+    <line x1="285" y1="380" x2="395" y2="380" stroke="#ffffff"/>
+    <line x1="420" y1="380" x2="470" y2="380" stroke="#40d0d8"/>
+    <line x1="285" y1="420" x2="345" y2="420" stroke="#5d8cff"/>
+    <line x1="370" y1="420" x2="540" y2="420" stroke="#3ee35a"/>
+    <line x1="285" y1="460" x2="440" y2="460" stroke="#3ee35a"/>
+    <line x1="465" y1="460" x2="500" y2="460" stroke="#ff4f6a"/>
+    <line x1="285" y1="500" x2="320" y2="500" stroke="#ff7ad9"/>
+    <line x1="345" y1="500" x2="505" y2="500" stroke="#3ee35a"/>
+    <line x1="285" y1="540" x2="375" y2="540" stroke="#ffe24a"/>
+  </g>
+  <rect x="395" y="530" width="22" height="22" fill="#3ee35a" filter="url(#glow)"/>
+  <line x1="272" y1="572" x2="588" y2="572" stroke="#5d8cff" stroke-width="3" opacity="0.8"/>
+  <line x1="285" y1="586" x2="320" y2="586" stroke="#5d8cff" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+
+  </g>
+  <!-- keyboard, in front -->
+  <g stroke-linejoin="round" stroke-width="12">
+    <polygon points="620,816 735,732 735,760 620,850" fill="#b5ab92" stroke="#b5ab92"/>
+    <polygon points="150,816 620,816 735,732 265,732" fill="#efe8d6" stroke="#efe8d6"/>
+    <polygon points="150,816 620,816 620,850 150,850" fill="#d9d0b8" stroke="#d9d0b8"/>
+  </g>
+  <g stroke="#8f8670" stroke-width="13" stroke-dasharray="30 9">
+    <line x1="190" y1="799" x2="598" y2="799"/>
+    <line x1="214" y1="782" x2="622" y2="782"/>
+    <line x1="237" y1="765" x2="645" y2="765"/>
+    <line x1="260" y1="748" x2="668" y2="748"/>
+  </g>
+  </g>
+</svg>

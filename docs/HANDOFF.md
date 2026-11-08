@@ -12,7 +12,7 @@ documentation pass).
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
 `pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
-`docs/live-testing.md`, the 2026-11-08 section. Item 14 now leaves only `npm publish` and an icon.**
+`docs/live-testing.md`, the 2026-11-08 section. Item 14 now leaves only `npm publish`: the icon is done too (branch `icon`, 2026-11-08).**
 
 **2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
 deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,
@@ -22,8 +22,7 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 ### NEXT: THE ROADMAP, AGREED 2026-11-06
 
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
-checks DONE 2026-11-08; left: first `npm publish`; a
-3279 icon; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
+checks and icon DONE 2026-11-08; left: first `npm publish`; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
 `pr3287`); (19) Programmed Symbols, tested with our own `gif2ps` converter; (20) printer graphics
@@ -66,8 +65,8 @@ The rest of this section is the branch's state as of the merge, kept for its det
   milestone** (`identity: null`, `CSC_IDENTITY_AUTO_DISCOVERY: false` in CI): macOS universal
   `.dmg` + `.zip`; Linux x64 and arm64 AppImage + `.deb` (package `tn3270-gui`, executable
   `tn3270-gui`, under `/opt/TN3270`); Windows x64 NSIS installer (per-user, chosen directory).
-  Artifact names `TN3270-<version>-<os>-<arch>.<ext>`. Default Electron icon; a 3279-styled icon
-  is a planned follow-up.
+  Artifact names `TN3270-<version>-<os>-<arch>.<ext>`. Our own icon since 2026-11-08
+  (`packages/gui/resources/`; see the README's *Installing*).
 - **The Connect dialog**: a double-click or no-host launch opens it (host, model — default
   `3278-2-E` — and a TLS checkbox, on by default). After a session starts, a failed connect shows
   its error in the terminal window and the dialog does **not** reopen (`File` → `Connect…` is a

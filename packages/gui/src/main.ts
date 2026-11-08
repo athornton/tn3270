@@ -371,7 +371,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
 }
 
 app.whenReady().then(async () => {
+  /*
+    macOS ignores a window's `icon`: the Dock shows the .app bundle's icon, which electron-builder
+    makes from the same PNG. An UNPACKAGED run (`tn3270-gui` from npm, or `electron dist/main.js`)
+    has no bundle of ours, so it would show Electron's icon -- set it explicitly there. `app.dock`
+    exists only on macOS, which keeps this free of a `process.platform` branch.
+  */
+  if (!app.isPackaged) app.dock?.setIcon(layout.icon);
   const win = new BrowserWindow({
+    icon: layout.icon,
     width: 800,
     height: 600,
     // See the note above: this is what makes capturePage() match the window we asked for.
@@ -512,6 +520,7 @@ async function openConnectDialog(
 
   let started = false;
   const cw = new BrowserWindow({
+    icon: layout.icon,
     width: 420,
     height: 240,
     useContentSize: true,
@@ -731,6 +740,7 @@ async function startSession(
       return;
     }
     const kw = new BrowserWindow({
+      icon: layout.icon,
       width: 560,
       height: 480,
       // As the terminal window does, so the content area is the size asked for.
@@ -853,6 +863,7 @@ async function startSession(
       return;
     }
     const kbw = new BrowserWindow({
+      icon: layout.icon,
       width: 820,
       height: 280,
       useContentSize: true,
@@ -938,6 +949,7 @@ async function startSession(
       return;
     }
     const tw = new BrowserWindow({
+      icon: layout.icon,
       width: 460,
       height: 420,
       useContentSize: true,

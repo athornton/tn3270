@@ -86,8 +86,12 @@ AppArmor, some hardened kernels); there, Electron aborts and `tn3270-gui` prints
 root:root` and `chmod 4755` on the `chrome-sandbox` binary the message names, or add `--no-sandbox`
 to the command line. See `packages/gui/README.md`.
 
-The packaged app ships Electron's default icon; a 3279-styled icon is a planned follow-up, not
-part of this milestone.
+**The icon** is our own drawing of a 3270-family terminal: the CRT hood jutting forward over a
+set-back base, a separate keyboard, and the screen in the 3279's seven colors, with no text.
+`packages/gui/resources/icon.svg` is the source; `node packages/gui/scripts/render-icon.mjs`
+re-renders the 1024x1024 `icon.png` (window icon; electron-builder makes the `.icns` and `.ico`
+from it) and the Linux set `icons/16x16.png` ... `512x512.png`, each drawn from the SVG at its own
+size. Commit the PNGs with any change to the SVG.
 
 ## What works today
 
@@ -1504,7 +1508,8 @@ holds as one item.
 14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: Apple Silicon
    macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
    Connect dialog used on each). Left: the
-   first `npm publish` (`docs/releasing.md`); a 3279-styled icon. **Signing and store
+   first `npm publish` (`docs/releasing.md`). The icon is done (2026-11-08, see *Installing*).
+   **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
