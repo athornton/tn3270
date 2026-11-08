@@ -240,9 +240,13 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
  * handed the setting the session holds at that moment -- so a model changed between connects is
  * the one measured against. It is required, not defaulted: a GUI session without the display's
  * measure would make `auto` fall back silently, which is exactly the bug it would hide.
+ *
+ * `tls`, when given, replaces `args.tls` and is read at each connect -- the Connect dialog's
+ * retry (see `connectAttempt.ts`).
  */
 export function buildSession(
   args: GuiArgs, measure: (setting: GeometrySetting | undefined) => Size | undefined,
+  tls?: () => TlsOptions,
 ): Session {
   if (args.terminalType !== undefined) {
     // Built once and passed to both resolvers, so the terminal-type string and the geometry
@@ -252,13 +256,13 @@ export function buildSession(
       terminalType: args.terminalType,
     };
     return defaultSession(
-      resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
+      resolveTerminalType(typeOpts), tls ?? args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
       args.bindImage, args.bindLimit, args.devname, args.ddm,
     );
   }
   // `session` is read only when connect() calls the measure, by which time it is assigned.
   const session: Session = defaultSession(
-    undefined, args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
+    undefined, tls ?? args.tls, undefined, args.tn3270e, args.bindImage, args.bindLimit,
     args.devname, args.ddm,
     {
       setting: {

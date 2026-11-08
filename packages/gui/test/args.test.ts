@@ -1,10 +1,52 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
-import { SCHEMES } from '@tn3270/frontend';
+import { SCHEMES, type TlsOptions } from '@tn3270/frontend';
 import type { GeometrySetting } from '@tn3270/core';
 import {
   buildSession, MissingHostError, parseGuiArgs, printGeometryNotices, USAGE, UsageError,
 } from '../src/args.js';
+
+/**
+ * A throwaway server that opens with IAC DO TERMINAL-TYPE and records the FIRST byte each client
+ * sends, then hangs up -- copied from `packages/frontend/test/session.test.ts`'s `firstByteServer`
+ * (packages do not import each other's tests). A plaintext client answers IAC WILL TERMINAL-TYPE
+ * (ff fb 18); a TLS client sends a ClientHello, whose first byte is the handshake record type
+ * 0x16. `close()` destroys every socket it has ever accepted before closing the server, because
+ * `srv.close()`'s callback fires only once every connection has ended -- a client that connected
+ * but never sent (a bug this exists to catch) would otherwise hang the test's `finally` forever
+ * instead of failing it.
+ */
+async function firstByteServer(): Promise<{ port: number; firsts: number[]; close(): Promise<void> }> {
+  const firsts: number[] = [];
+  const socks: Socket[] = [];
+  const srv = createServer((sock) => {
+    socks.push(sock);
+    sock.write(Buffer.from([0xff, 0xfd, 0x18]));
+    sock.once('data', (b: Buffer) => { firsts.push(b[0]!); sock.destroy(); });
+    sock.on('error', () => { /* the client may reset first */ });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return {
+    port: (srv.address() as AddressInfo).port,
+    firsts,
+    close: () => {
+      for (const sock of socks) sock.destroy();
+      return new Promise((r) => srv.close(() => r()));
+    },
+  };
+}
+
+/**
+ * Polls `cond` instead of hanging on it -- copied from the same source as `firstByteServer`.
+ * THROWS, naming what it waited for, rather than letting a regression surface as vitest's own
+ * "Test timed out", which would not say which `until` call was the one still waiting. 2000 ms is
+ * comfortably under vitest's default 5000 ms test timeout, so a hang is this error, not that one.
+ */
+const until = async (what: string, cond: () => boolean, ms = 2000): Promise<void> => {
+  const end = Date.now() + ms;
+  while (!cond() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  if (!cond()) throw new Error(`timed out waiting for ${what}`);
+};
 
 /**
  * The flags must be the TUI's, and the way that is guaranteed is by parsing with the same
@@ -223,6 +265,26 @@ describe('buildSession', () => {
 
   it('no flags: geometry mode with no model and oversize none', () => {
     expect(buildSession(parseGuiArgs(['vm']), none).geometrySetting).toEqual({ oversize: { kind: 'none' } });
+  });
+
+  it('with a TLS getter, each connect dials the getter\'s current choice', async () => {
+    const srv = await firstByteServer();
+    let session: ReturnType<typeof buildSession> | undefined;
+    try {
+      let choice: TlsOptions = { kind: 'plaintext' };
+      session = buildSession(parseGuiArgs(['vm']), none, () => choice);
+      await session.connect('127.0.0.1', srv.port);
+      await until('the plaintext connect\'s first byte', () => srv.firsts.length === 1);
+      choice = { kind: 'tls', verify: false };
+      // The server destroys the socket the instant it sees the ClientHello, mid-handshake, so
+      // this TLS connect reliably rejects -- there is no path where it instead completes or hangs.
+      await expect(session.connect('127.0.0.1', srv.port)).rejects.toThrow();
+      await until('the TLS connect\'s first byte', () => srv.firsts.length === 2);
+      expect(srv.firsts).toEqual([0xff, 0x16]);
+    } finally {
+      session?.disconnect();
+      await srv.close();
+    }
   });
 
   describe('against a local socket', () => {
