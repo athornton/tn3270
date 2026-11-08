@@ -28,8 +28,7 @@
  *     TN3270_GUI_MAIN=app node packages/gui/scripts/connect.mjs     # against the bundle
  */
 import { spawn } from 'node:child_process';
-import net from 'node:net';
-import { descendants, sleep, startServer, until } from '../../../scripts/smoke-lib.mjs';
+import { descendants, sleep, startHost, startServer, until } from '../../../scripts/smoke-lib.mjs';
 import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const main = guiMain();
@@ -51,7 +50,10 @@ console.log(`entry: ${guiMainLabel()}`);
  */
 const ARGV = ['--no-sandbox', '--disable-gpu'];
 
-/** `HANDSHAKE_TIMEOUT_MS` in packages/frontend/src/tls.ts is 10 s; the TLS case waits past it. */
+/**
+ * `HANDSHAKE_TIMEOUT_MS` in packages/frontend/src/tls.ts is 10 s, and TWO cases wait past it: the
+ * TLS remedy case, and the retry case's first (TLS) attempt.
+ */
 const HANDSHAKE_BOUND_MS = 20_000;
 
 /** A port with nothing listening: bound, read, released. */
@@ -61,98 +63,8 @@ async function deadPort() {
   return s.port;
 }
 
-/**
- * A fake host that goes all the way into 3270 mode, for the case that has to TYPE: `startServer`
- * stops at `IAC DO TERMINAL-TYPE`, so a client connected to it has no screen and a locked keyboard.
- *
- * PORTED FROM `packages/tui/scripts/pty-smoke.py`'s `FakeHost`, the repo's one existing fake host
- * that reaches 3270 mode, with the same negotiation: TERMINAL-TYPE SEND on WILL, then EOR and
- * BINARY both ways, then one Erase/Write -- its screen less the red field: a protected
- * `HELLO TN3270` and an unprotected field on row 3 with the cursor in it (the IC -- without it the
- * cursor sits in the protected field and every keystroke is refused). Its `records()` are the client's inbound 3270 records after the
- * screen went out, split on `IAC EOR`.
- */
-const IAC = 255, SB = 250, SE = 240, WILL = 251, DO = 253, EOR = 239;
-const BINARY = 0, TTYPE = 24, OPT_EOR = 25;
-/** cp037 for `HELLO TN3270`: the letter runs are NOT contiguous (A-I C1, J-R D1, S-Z E2). */
-const EBCDIC = { H: 0xC8, E: 0xC5, L: 0xD3, O: 0xD6, ' ': 0x40, T: 0xE3, N: 0xD5, 2: 0xF2, 3: 0xF3, 7: 0xF7, 0: 0xF0 };
-const ebcdic = (text) => [...text].map((c) => EBCDIC[c]);
-/** The 12-bit buffer address, the 3270 manual's 64-entry table. */
-const ADDR = [
-  0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
-  0x50, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
-  0x60, 0x61, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
-  0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
-];
-const addr12 = (a) => [ADDR[(a >> 6) & 0x3F], ADDR[a & 0x3F]];
-const SCREEN = Buffer.from([
-  0xF5, 0xC3,                              // Erase/Write, WCC = reset + restore keyboard
-  0x11, ...addr12(0), 0x1D, 0xF0, ...ebcdic('HELLO TN3270'),   // SBA row 1, SF protected
-  0x11, ...addr12(160), 0x1D, 0x40, 0x13,  // SBA row 3, SF unprotected, IC
-  IAC, EOR,
-]);
-
-function startHost() {
-  return new Promise((resolve) => {
-    const seen = { connections: 0, inbound: Buffer.alloc(0), screenAt: -1 };
-    const sockets = new Set();
-    const server = net.createServer((sock) => {
-      seen.connections++;
-      sockets.add(sock);
-      sock.on('error', () => {});
-      sock.on('close', () => { sockets.delete(sock); });
-      sock.on('data', (b) => {
-        seen.inbound = Buffer.concat([seen.inbound, b]);
-        if (b.includes(Buffer.from([IAC, WILL, TTYPE]))) sock.write(Buffer.from([IAC, SB, TTYPE, 1, IAC, SE]));
-        if (seen.screenAt < 0 && seen.inbound.includes(Buffer.from([IAC, SB, TTYPE, 0]))) {
-          seen.screenAt = seen.inbound.length;
-          sock.write(Buffer.from([IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR, IAC, DO, BINARY, IAC, WILL, BINARY]));
-          setTimeout(() => { if (!sock.destroyed) sock.write(SCREEN); }, 300);
-        }
-      });
-      sock.write(Buffer.from([IAC, DO, TTYPE]));
-    });
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        port: server.address().port,
-        seen,
-        /**
-         * The client's 3270 records after the screen went out, telnet commands stripped:
-         * `IAC WILL/WONT/DO/DONT x` and `IAC SB ... IAC SE` dropped, `IAC IAC` is 0xFF data,
-         * `IAC EOR` ends a record.
-         */
-        records: () => {
-          if (seen.screenAt < 0) return [];
-          const b = seen.inbound.subarray(seen.screenAt);
-          const out = [];
-          let rec = [];
-          for (let i = 0; i < b.length; i++) {
-            if (b[i] !== IAC) { rec.push(b[i]); continue; }
-            const cmd = b[i + 1];
-            if (cmd === IAC) {
-              rec.push(IAC);
-              i++;
-            } else if (cmd === EOR) {
-              out.push(Buffer.from(rec));
-              rec = [];
-              i++;
-            } else if (cmd === SB) {
-              while (i < b.length && !(b[i] === IAC && b[i + 1] === SE)) i++;
-              i++;
-            } else {
-              i += cmd >= WILL ? 2 : 1;   // WILL/WONT/DO/DONT carry an option byte
-            }
-          }
-          return out;
-        },
-        close: () => new Promise((r) => {
-          for (const s of sockets) s.destroy();
-          server.close(() => r());
-        }),
-      });
-    });
-  });
-}
+/** Every run the current case launched, so the loop below kills them even if the case throws. */
+let launched = [];
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
@@ -177,7 +89,10 @@ function launch(form, extra = [], seams = {}) {
   const run = { child, stdout: '', stderr: '', exited: false };
   child.stdout.on('data', (b) => { run.stdout += b; });
   child.stderr.on('data', (b) => { run.stderr += b; });
-  child.on('exit', () => { run.exited = true; });
+  // On `close`, not `exit`: `exit` can fire before the last stdout chunk is read, and a wait that
+  // ends on `|| r.exited` must not end before the line it is waiting for has arrived.
+  child.on('close', () => { run.exited = true; });
+  launched.push(run);
   return run;
 }
 
@@ -243,7 +158,7 @@ const CASES = [
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: true });
       const want = 'Untick TLS in the Connect dialog';
       await until(() => r.stderr.includes(want), HANDSHAKE_BOUND_MS);
-      await until(() => /connect: dialog (still open|closed)/.test(r.stdout), 2_000);
+      await until(() => /connect: dialog (still open|closed)/.test(r.stdout) || r.exited, 2_000);
       const checks = [
         ['the server saw a connection', srv.seen.connections > 0],
         [`stderr says "${want}"`, r.stderr.includes(want)],
@@ -255,16 +170,18 @@ const CASES = [
   {
     name: 'retry with TLS unticked connects, on the same run',
     async run() {
-      // NOT silent: it opens with IAC DO TERMINAL-TYPE, which the first (TLS) attempt reads as a
-      // TLS record and refuses -- and which the second (plaintext) attempt answers.
+      // NOT silent: it opens with IAC DO TERMINAL-TYPE, which the second (plaintext) attempt
+      // answers. The first (TLS) attempt does not refuse those three bytes -- they are shorter than
+      // a TLS record header, so it waits for more and fails by the handshake TIMEOUT (measured:
+      // "never completed a TLS handshake"), which is why this case waits past HANDSHAKE_BOUND_MS.
       const srv = await startServer();
       const host = `127.0.0.1:${srv.port}`;
       const r = launch([
         { host, model: '3278-2-E', tls: true },
         { host, model: '3278-2-E', tls: false },
       ]);
-      await until(() => r.stdout.includes('connect: dialog closed') || r.stdout.includes('connect: dialog still open')
-        || r.stdout.includes('connect: submit never settled') || r.exited, HANDSHAKE_BOUND_MS + 15_000);
+      const ended = /connect: (dialog closed|dialog still open|submit never settled)/;
+      await until(() => ended.test(r.stdout) || r.exited, HANDSHAKE_BOUND_MS + 15_000);
       await until(() => srv.willTtype(), 5_000);
       const lines = r.stdout.split('\n');
       const checks = [
@@ -273,6 +190,7 @@ const CASES = [
           lines.some((l) => l.startsWith('connect: error Untick TLS in the Connect dialog'))],
         ['the dialog closed after the second', r.stdout.includes('connect: dialog closed')],
         ['the second was PLAINTEXT telnet (IAC WILL TERMINAL-TYPE came back)', srv.willTtype()],
+        ['two connections at the server, one per press', srv.seen.connections === 2],
       ];
       return { r, srv, checks };
     },
@@ -284,7 +202,7 @@ const CASES = [
       const r = launch({ host: `127.0.0.1:${port}`, model: '3278-2-E', tls: false });
       const want = `cannot connect to 127.0.0.1:${port}: connection refused (ECONNREFUSED)`;
       await until(() => r.stderr.includes(want), 15_000);
-      await until(() => /connect: dialog (still open|closed)/.test(r.stdout), 2_000);
+      await until(() => /connect: dialog (still open|closed)/.test(r.stdout) || r.exited, 2_000);
       const checks = [
         [`stderr says "${want}"`, r.stderr.includes(want)],
         ['stderr does not say TLS', r.stderr !== '' && !r.stderr.includes('TLS')],
@@ -307,23 +225,33 @@ const CASES = [
      *     with no `model` item -- and reports as `menu: popup model`, the line `keys.mjs` counts.
      *     `Alt+M` is intercepted in main past the same gate, so it is sent after Enter has locked
      *     the keyboard without being refused.
+     *
+     * THE SECOND `Alt+M` IS A THROWAWAY. A keys-only run quits as soon as `keys: sent` is out
+     * (`quitIfKeysOnly`), and on a slow runner that quit could beat the last chord's IPC; the
+     * extra chord puts 150 ms between the counted one and the quit, and the wait below gives the
+     * line itself time to arrive.
      */
     name: 'a dialog connect goes live: keys reach the host, the menu is installed',
     async run() {
       const srv = await startHost();
-      const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }, [],
-        { TN3270_GUI_KEYS: 'wait:HELLO TN3270,h,i,Enter,Alt+M', TN3270_GUI_WAIT_MS: '10000' });
+      const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }, [], {
+        TN3270_GUI_KEYS: 'wait:HELLO TN3270,h,i,Enter,Alt+M,Alt+M',
+        TN3270_GUI_WAIT_MS: '10000',
+      });
       const enter = () => srv.records().find((rec) => rec[0] === 0x7D);
+      const popped = () => r.stdout.split('\n').includes('menu: popup model');
       await until(() => r.stdout.includes('keys: sent ') || r.exited, 30_000);
-      await until(() => enter() !== undefined, 2_000);
+      await until(() => enter() !== undefined || r.exited, 2_000);
+      await until(() => popped() || r.exited, 2_000);
       const rec = enter();
       const checks = [
         ['connect: dialog closed', r.stdout.includes('connect: dialog closed')],
         ['the keys seam waited for the screen and sent every key',
           r.stdout.includes('keys: saw "HELLO TN3270"') && r.stdout.includes('keys: sent ')],
         ['the host got an AID Enter (0x7D) record', rec !== undefined],
-        ['carrying the typed "hi" (0x88 0x89)', rec !== undefined && rec.includes(Buffer.from([0x88, 0x89]))],
-        ['the Model menu popped up (menu: popup model)', r.stdout.split('\n').includes('menu: popup model')],
+        ['carrying the typed "hi" (0x88 0x89)',
+          rec !== undefined && rec.includes(Buffer.from([0x88, 0x89]))],
+        ['the Model menu popped up (menu: popup model)', popped()],
       ];
       return { r, srv, checks };
     },
@@ -347,9 +275,21 @@ const CASES = [
 
 let passed = 0;
 for (const kase of CASES) {
-  const { r, srv, checks } = await kase.run();
-  const survivors = await kill(r);
-  await srv?.close();
+  launched = [];
+  let r = { stdout: '', stderr: '' };
+  let srv;
+  let checks;
+  const survivors = [];
+  // A throw after `launch()` must still kill by PID: `finally`, over every run the case launched.
+  try {
+    ({ r, srv, checks } = await kase.run());
+  } catch (err) {
+    checks = [[`the case threw: ${err?.stack ?? err}`, false]];
+    if (launched.length > 0) r = launched[launched.length - 1];
+  } finally {
+    for (const run of launched) survivors.push(...await kill(run));
+    await srv?.close();
+  }
   checks.push(['no process survived the kill', survivors.length === 0]);
   const failed = checks.filter(([, ok]) => !ok);
   if (failed.length === 0) {

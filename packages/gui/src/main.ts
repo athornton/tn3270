@@ -1679,13 +1679,15 @@ async function startSession(
       const model = Menu.getApplicationMenu()?.getMenuItemById('model')?.submenu;
       if (model !== undefined && !win.isDestroyed()) {
         model.popup({ window: win });
-        // FOR `keys.mjs`: the logged kind above proves the chord ARRIVED, not that a menu opened,
-        // and without this line deleting the popup passes every gate. `popup` returns at once on
-        // Linux (measured: the next chord's action is logged while the menu is still up), so this
-        // line is not a promise that it was dismissed. GATED ON THE KEYS SEAM ALONE, not on
-        // `logActions`: that gate's replay half exists because a `type` action carries typed
-        // text, and this line carries none -- so `connect.mjs` can count it against a host, where
-        // it is the evidence that a dialog connect installed the app menu.
+        // FOR `keys.mjs` AND `connect.mjs`. In a replay run (`keys.mjs`) the logged kind above
+        // proves the chord ARRIVED, not that a menu opened, and without this line deleting the
+        // popup passes every gate. In a run against a host (`connect.mjs`) nothing is logged
+        // above -- `logActions` needs replay -- so this line is the ONLY evidence that the chord
+        // arrived at all, and that a dialog connect installed the app menu. `popup` returns at
+        // once on Linux (measured: the next chord's action is logged while the menu is still
+        // up), so this line is not a promise that it was dismissed. GATED ON THE KEYS SEAM ALONE,
+        // not on `logActions`: that gate's replay half exists because a `type` action carries
+        // typed text, and this line carries none.
         if (SEAM.keys !== '') process.stdout.write('menu: popup model\n');
       }
       return;
