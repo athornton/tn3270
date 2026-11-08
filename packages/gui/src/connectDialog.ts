@@ -78,8 +78,8 @@ function isConnectForm(form: unknown): form is ConnectForm {
  * THE MODEL IS CHECKED HERE TOO, by core's own `resolveTerminalType`, because `parseGuiArgs` takes
  * any string for `-model` and leaves it to `buildSession` -- whose failure is a SETUP failure, shown
  * in the terminal window after the dialog has gone, with no dialog left to fix it in (main.ts,
- * `openConnectDialog`). The dropdown
- * offers only known models, so this is reached only by a page that sent something it never listed.
+ * `openConnectDialog`). The dropdown offers only known models, so this is reached only by a page
+ * that sent something it never listed.
  */
 export function submitConnect(
   form: unknown,
