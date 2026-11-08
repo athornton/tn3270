@@ -38,10 +38,8 @@ the honest part of this file.
 
 ## Installing
 
-**Nothing here is published to npm yet, and the native installers are unsigned.** Until a first
-release, get the npm tarballs and the native installers from a green run of
-`.github/workflows/package.yml` (see `docs/releasing.md`); afterwards these will be ordinary
-registry installs:
+**On npm since 0.1.0 (2026-11-08); the native installers are unsigned** and come from a green run
+of `.github/workflows/package.yml` (see `docs/releasing.md`).
 
 ```sh
 npm install -g @tn3270/cli    # tn3270-cli -- the s3270-style scripting client
@@ -50,7 +48,15 @@ npm install -g @tn3270/web    # tn3270-web -- the browser gateway
 npm install -g @tn3270/gui    # tn3270-gui -- the Electron GUI
 ```
 
-Each package declares `"engines": {"node": ">=22"}`. `@tn3270/gui` additionally needs Electron's
+**Not root?** `-g` writes to npm's global prefix, which is a system directory for a packaged Node.
+Either point the prefix at your home directory once (`npm config set prefix ~/.npm-global`, then
+put `~/.npm-global/bin` on `PATH`), or install without `-g` and run the commands from that
+directory with `npx` (`npx tn3270 host`, `npx tn3270-gui`) or as `./node_modules/.bin/tn3270`. A
+plain `npm install` does not touch `PATH`. Without root the GUI on Linux may also need
+`--no-sandbox` (see the sandbox note below).
+
+Each package declares `"engines": {"node": ">=20.19"}` (Node 20.19 is what Debian 13 packages; CI
+tests it, and Node 22 on every packaging runner). `@tn3270/gui` additionally needs Electron's
 own ~100 MB binary, which Electron 44 downloads on first use rather than during `npm install` — the
 first `tn3270-gui` prints `Downloading Electron binary...` and takes a while; that is the download,
 not a hang. See `packages/gui/README.md`.
@@ -1486,12 +1492,13 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    none, so expect unit tests, the playback oracle and by-hand GUI runs rather than a live witness.
 13. **Packaging, for macOS, Linux AND WINDOWS — DONE, merged into `main` 2026-11-06 (`5669a3a`).** npm
    packages for all four front ends (`@tn3270/cli`, `@tn3270/tui`, `@tn3270/web`, `@tn3270/gui`,
-   lockstep version, Node ≥22), and native installers via electron-builder: macOS universal
+   lockstep version, Node ≥20.19 since 0.1.1), and native installers via electron-builder: macOS universal
    `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
    this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
    ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
-   2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Nothing is published
-   to npm or signed yet.** The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
+   2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Published to npm as
+   0.1.0 on 2026-11-08** (the registry's tarballs are byte-identical to CI run 42504570737's, on tag
+   `v0.1.0`); nothing is signed. The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
    runs once permitted (*Open Anyway*), and the Linux arm64 `.deb`, Linux x64 AppImage and
    Windows 11 all just run, each through the Connect dialog (on Linux launched from a shell, as
    neither box has a desktop environment).
@@ -1507,14 +1514,17 @@ holds as one item.
 
 14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: Apple Silicon
    macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
-   Connect dialog used on each). Left: the
-   first `npm publish` (`docs/releasing.md`). The icon is done (2026-11-08, see *Installing*).
-   **Signing and store
+   Connect dialog used on each). The first
+   `npm publish` is **done** (0.1.0, 2026-11-08), and so is the icon (see *Installing*). **Next,
+   near-term: npm trusted publishing from GitHub Actions** — register the `package` workflow as each
+   `@tn3270/*` package's trusted publisher on npmjs.com, so a pushed `vX.Y.Z` tag publishes the
+   CI-built tarballs over OIDC, with provenance and no long-lived npm token anywhere; the manual
+   steps in `docs/releasing.md` become the fallback. **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
    App Store (which needs App Sandbox and its own certificate) or the Microsoft Store (MSIX);
-   choose when the IDs exist. Tag-triggered publishing waits on npm trusted publishing.
+   choose when the IDs exist.
 15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means
    hoisting the startup block's once-only IPC handlers and quit hook), recent hosts, a config file
    and preferences, light and dark modes, font choice. Moved up from the "super-terminal" stretch
@@ -1795,8 +1805,8 @@ worse than one that says which quarter is missing.
   screens from both Hercules systems and takes typed input (see *Verification*). It has a menu
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
   `File` → `Connect…` for a session already running — a launch given a host still takes it, and
-  every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*)
-  but is unpublished and unsigned.
+  every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*):
+  on npm since 0.1.0, the native installers unsigned.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
   **no connect dialog, no menus and no preferences**. It also does **not**

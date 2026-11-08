@@ -15,7 +15,7 @@
     "directory": "packages/tui"
   },
   "homepage": "https://github.com/athornton/tn3270#readme",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "dependencies": {
     "@tn3270/core": "0.1.0",
