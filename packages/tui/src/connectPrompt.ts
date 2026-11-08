@@ -120,10 +120,11 @@ export async function promptConnect(
       if (h !== '') host = h;
       if (host === '') continue;
       // Refused HERE, before Model or TLS are asked: no host-spec form starts with `-`, and there
-      // is no reason to ask two more questions about an answer already known to be wrong. The
-      // post-parse check below (on `host`, after `dialogToArgv`/`parseArgs`) is kept as a second
-      // layer — belt and suspenders against the same mistake, in case a later change to this loop
-      // ever lets a dash-led `host` reach that far.
+      // is no reason to ask two more questions about an answer already known to be wrong. This is
+      // the ONLY dash check now -- `host` is never reassigned between here and `dialogToArgv`
+      // below, so a second copy there would be unreachable dead code, not a second layer; the
+      // `args.host === undefined` check further down guards a DIFFERENT case (parseArgs yielding
+      // no host at all) and stays for that reason.
       if (host.startsWith('-')) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
       // Re-asked IN PLACE, like TLS below: restarting the round would read the next answer as a host.
       for (;;) {
@@ -142,9 +143,6 @@ export async function promptConnect(
       }
       if (t !== '') tls = /^y/i.test(t);
 
-      // The answer goes last on the argv, where a leading `-` would make it a FLAG (`-insecure`),
-      // or the missing value of one: no host-spec form starts with `-`, so refuse it as a host.
-      if (host.startsWith('-')) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
       let args: TuiArgs;
       try {
         args = parseArgs(dialogToArgv({ host, model, tls }, commandLine));

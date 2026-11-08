@@ -61,6 +61,7 @@ import os
 import pty
 import re
 import select
+import signal
 import socket
 import struct
 import sys
@@ -117,6 +118,60 @@ def screen_record(alternate=False):
     return bytes(out)
 
 
+def _negotiate_connection(conn, host, deadline_s=10, alternate=False):
+    """One connection's TN3270 negotiation: send IAC DO TERMINAL-TYPE, answer the client's WILL
+    with a SEND, read the IS reply into `host.ttype`, then negotiate EOR+BINARY and send the one
+    Erase/Write screen (`screen_record`). Shared by `FakeHost` (exactly one connection) and
+    `PromptFakeHost` (several, one after another) so their serving logic cannot drift the way two
+    independent copies once did (one polled with `select`, the other with `settimeout`; one kept
+    a 10 s deadline, the other 11 s, for no stated reason).
+
+    Always polls with `select`, never `settimeout` -- one mechanism, used everywhere in this
+    file. Returns the bytes received on THIS connection (also appended to `host.inbound`, which
+    main()'s own byte-count print reads); a round that never speaks TELNET back (a TLS
+    ClientHello this plaintext host cannot parse) simply sits here until the deadline or the
+    CLIENT closes -- seen as `recv` returning no data -- and control returns to the caller."""
+    local = bytearray()
+    try:
+        conn.sendall(bytes([IAC, DO, OPT_TTYPE]))
+    except OSError:
+        return bytes(local)
+    deadline = time.time() + deadline_s
+    sent_screen = False
+    while time.time() < deadline:
+        r, _, _ = select.select([conn], [], [], 0.3)
+        if not r:
+            continue
+        try:
+            data = conn.recv(4096)
+        except OSError:
+            break
+        if not data:
+            break
+        local += data
+        host.inbound += data
+        # TERMINAL-TYPE: once the client says WILL, ask for the string.
+        if bytes([IAC, WILL, OPT_TTYPE]) in data:
+            conn.sendall(bytes([IAC, SB, OPT_TTYPE, TT_SEND, IAC, SE]))
+        if bytes([IAC, SB, OPT_TTYPE, TT_IS]) in bytes(local):
+            blob = bytes(local)
+            i = blob.index(bytes([IAC, SB, OPT_TTYPE, TT_IS])) + 4
+            j = blob.index(bytes([IAC, SE]), i)
+            host.ttype = blob[i:j].decode("ascii", "replace")
+            if not sent_screen:
+                # Now negotiate the 3270 data stream both ways.
+                conn.sendall(bytes([IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR,
+                                    IAC, DO, OPT_BINARY, IAC, WILL, OPT_BINARY]))
+                time.sleep(0.3)
+                conn.sendall(screen_record(alternate) + bytes([IAC, EOR_CMD]))
+                sent_screen = True
+    try:
+        conn.close()
+    except OSError:
+        pass
+    return bytes(local)
+
+
 class FakeHost(threading.Thread):
     daemon = True
 
@@ -133,35 +188,7 @@ class FakeHost(threading.Thread):
 
     def run(self):
         conn, _ = self.sock.accept()
-        conn.sendall(bytes([IAC, DO, OPT_TTYPE]))
-        deadline = time.time() + 10
-        sent_screen = False
-        while time.time() < deadline:
-            r, _, _ = select.select([conn], [], [], 0.3)
-            if r:
-                data = conn.recv(4096)
-                if not data:
-                    break
-                self.inbound += data
-                # TERMINAL-TYPE: once the client says WILL, ask for the string.
-                if bytes([IAC, WILL, OPT_TTYPE]) in data:
-                    conn.sendall(bytes([IAC, SB, OPT_TTYPE, TT_SEND, IAC, SE]))
-                if bytes([IAC, SB, OPT_TTYPE, TT_IS]) in bytes(self.inbound):
-                    blob = bytes(self.inbound)
-                    i = blob.index(bytes([IAC, SB, OPT_TTYPE, TT_IS])) + 4
-                    j = blob.index(bytes([IAC, SE]), i)
-                    self.ttype = blob[i:j].decode("ascii", "replace")
-                    if not sent_screen:
-                        # Now negotiate the 3270 data stream both ways.
-                        conn.sendall(bytes([IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR,
-                                            IAC, DO, OPT_BINARY, IAC, WILL, OPT_BINARY]))
-                        time.sleep(0.3)
-                        conn.sendall(screen_record(self.alternate) + bytes([IAC, EOR_CMD]))
-                        sent_screen = True
-        try:
-            conn.close()
-        except OSError:
-            pass
+        _negotiate_connection(conn, self, deadline_s=10, alternate=self.alternate)
 
 
 class PromptFakeHost(threading.Thread):
@@ -171,7 +198,9 @@ class PromptFakeHost(threading.Thread):
     so the two connect attempts (round 1's TLS probe, which stalls against this plaintext host
     and never gets past the first bytes; round 2's real negotiation once TLS is declined) must
     land on one port. `FakeHost.run` accepts exactly once; this loops, serving each connection
-    with the same TERMINAL-TYPE-then-EOR-then-BINARY shape as `FakeHost.run`."""
+    through the shared `_negotiate_connection`, and keeps every connection's own bytes in
+    `self.connections` so a caller can tell how many connections arrived and what each one's
+    first bytes were (sub-run 1 uses this to confirm round 1 really attempted TLS)."""
 
     daemon = True
 
@@ -182,60 +211,24 @@ class PromptFakeHost(threading.Thread):
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(1)
         self.port = self.sock.getsockname()[1]
+        self.inbound = bytearray()
         self.ttype = None
+        self.connections = []        # each connection's own bytes, in the order they arrived
         self._stop = False
 
     def run(self):
-        self.sock.settimeout(1.0)
         while not self._stop:
+            r, _, _ = select.select([self.sock], [], [], 0.3)
+            if not r:
+                continue
             try:
                 conn, _ = self.sock.accept()
-            except socket.timeout:
-                continue
             except OSError:
                 return
-            self._serve(conn)
-
-    def _serve(self, conn):
-        """One connection's negotiation. A round that never speaks TELNET back (round 1's TLS
-        ClientHello, which this plaintext host cannot parse) simply sits here until the CLIENT
-        gives up and closes -- seen here as `recv` returning no data -- and control returns to
-        `run`'s accept loop for the next round."""
-        inbound = bytearray()
-        try:
-            conn.sendall(bytes([IAC, DO, OPT_TTYPE]))
-        except OSError:
-            return
-        conn.settimeout(0.3)
-        deadline = time.time() + 11
-        sent_screen = False
-        while time.time() < deadline and not self._stop:
-            try:
-                data = conn.recv(4096)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            if not data:
-                break
-            inbound += data
-            if bytes([IAC, WILL, OPT_TTYPE]) in data:
-                conn.sendall(bytes([IAC, SB, OPT_TTYPE, TT_SEND, IAC, SE]))
-            if bytes([IAC, SB, OPT_TTYPE, TT_IS]) in bytes(inbound):
-                blob = bytes(inbound)
-                i = blob.index(bytes([IAC, SB, OPT_TTYPE, TT_IS])) + 4
-                j = blob.index(bytes([IAC, SE]), i)
-                self.ttype = blob[i:j].decode("ascii", "replace")
-                if not sent_screen:
-                    conn.sendall(bytes([IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR,
-                                        IAC, DO, OPT_BINARY, IAC, WILL, OPT_BINARY]))
-                    time.sleep(0.3)
-                    conn.sendall(screen_record() + bytes([IAC, EOR_CMD]))
-                    sent_screen = True
-        try:
-            conn.close()
-        except OSError:
-            pass
+            # 11 s: ONE SECOND MORE than the client's own HANDSHAKE_TIMEOUT_MS (10 s,
+            # frontend/src/tls.ts), so a round that stalls (round 1's TLS probe) ends because the
+            # CLIENT gave up and closed, not because this deadline raced it and guessed wrong.
+            self.connections.append(_negotiate_connection(conn, self, deadline_s=11))
 
     def stop(self):
         self._stop = True
@@ -578,10 +571,53 @@ def _drain_until_exit(main_fd, pid, seconds, captured):
     return code
 
 
+def _cleanup(main_fd, pid, code, *stoppables):
+    """Guaranteed teardown for one --prompt sub-run, called from a `finally` so it runs whether
+    the sub-run's checks passed, failed, or raised.
+
+    If the child never exited (`code is None`, i.e. `_drain_until_exit` never saw it -- exactly
+    what happened under the TLS-ignoring mutation, where Ctrl-] arrived mid-handshake and the
+    client kept running into the NEXT sub-run), SIGKILL it and reap it HERE, rather than leaving
+    it to be blamed on whatever the next sub-run happens to check. Then the pty master is closed,
+    and each of `stoppables` (a `PromptFakeHost`/`FakeHost`, a plain listening `socket.socket`,
+    ...) is told to stop, by whichever method it has."""
+    if code is None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+    try:
+        os.close(main_fd)
+    except OSError:
+        pass
+    for s in stoppables:
+        stop = getattr(s, "stop", None) or getattr(s, "close", None)
+        if stop is not None:
+            try:
+                stop()
+            except OSError:
+                pass
+
+
 def prompt_mode():
     """--prompt: the TUI run with NO ARGUMENTS at a real tty, which is what makes it ask for a
     host instead of the usage error (`connectPrompt.ts`). Three independent sub-runs, each its
-    own fork and pty; see the module docstring's `--prompt` section for the shape of each."""
+    own fork and pty, each wrapped in try/finally so `_cleanup` always kills the child and closes
+    the pty even if an earlier check already failed; see the module docstring's `--prompt`
+    section for the shape of each.
+
+    EVERY SUB-RUN RECORDS `raw_seen` -- ECHO off -- THE MOMENT `Host: ` FIRST APPEARS, the same
+    precondition main()'s own `raw_seen` is for its checks. Without it, moving dist/main.js aside
+    makes node exit 1 before ever opening a prompt, and "exited with status 1" (sub-runs 2 and 3
+    expect exactly that) and "ECHO is restored" (a FRESH pty already has ECHO on) both read as
+    PASS for a client that never ran at all. The exit-status and ECHO checks below are therefore
+    gated on `raw_seen`, and a `the client exited` check (status not None) is recorded in its own
+    right, before any of them, so a child that is still running -- the mutation's failure mode --
+    is reported as exactly that rather than as a confusing tty-only failure."""
 
     def send(main_fd, s):
         os.write(main_fd, s.encode() if isinstance(s, str) else s)
@@ -598,59 +634,90 @@ def prompt_mode():
     main_fd, child_fd = _open_pty()
     pid = _spawn_tui_no_args(main_fd, child_fd)
     captured = bytearray()
+    code1 = None
+    try:
+        check("showed the Host prompt", _wait_count(main_fd, captured, b"Host: ", 1, 5))
+        raw_seen = not (termios.tcgetattr(main_fd)[3] & termios.ECHO)
+        check("raw mode was in effect (ECHO off) once Host: appeared", raw_seen)
+        send(main_fd, f"127.0.0.1:{host.port}\r")
+        check("showed the Model prompt", _wait_count(main_fd, captured, b"Model [3278-2-E]: ", 1, 5))
+        send(main_fd, "\r")
+        check("showed the TLS prompt", _wait_count(main_fd, captured, b"TLS [Y/n]: ", 1, 5))
+        send(main_fd, "\r")                  # TLS on (default): stalls against a plaintext host
 
-    check("showed the Host prompt", _wait_count(main_fd, captured, b"Host: ", 1, 5))
-    send(main_fd, f"127.0.0.1:{host.port}\r")
-    check("showed the Model prompt", _wait_count(main_fd, captured, b"Model [3278-2-E]: ", 1, 5))
-    send(main_fd, "\r")
-    check("showed the TLS prompt", _wait_count(main_fd, captured, b"TLS [Y/n]: ", 1, 5))
-    send(main_fd, "\r")                      # TLS on (default): stalls against a plaintext host
+        tls_fail = f"Answer n to TLS: 127.0.0.1:{host.port}".encode()
+        check("round 1's stalled TLS handshake failed with the prompt's own wording",
+              _wait_count(main_fd, captured, tls_fail, 1, 15))
+        host2 = f"Host [127.0.0.1:{host.port}]: ".encode()
+        check("started round 2 with round 1's host as the default",
+              _wait_count(main_fd, captured, host2, 1, 3))
+        send(main_fd, "\r")
+        check("round 2's Model prompt", _wait_count(main_fd, captured, b"Model [3278-2-E]: ", 2, 3))
+        send(main_fd, "\r")
+        check("round 2's TLS prompt", _wait_count(main_fd, captured, b"TLS [Y/n]: ", 2, 3))
+        send(main_fd, "n\r")                  # TLS off: round 2 negotiates in plaintext
 
-    tls_fail = f"Answer n to TLS: 127.0.0.1:{host.port}".encode()
-    check("round 1's stalled TLS handshake failed with the prompt's own wording",
-          _wait_count(main_fd, captured, tls_fail, 1, 15))
-    host2 = f"Host [127.0.0.1:{host.port}]: ".encode()
-    check("started round 2 with round 1's host as the default",
-          _wait_count(main_fd, captured, host2, 1, 3))
-    send(main_fd, "\r")
-    check("round 2's Model prompt", _wait_count(main_fd, captured, b"Model [3278-2-E]: ", 2, 3))
-    send(main_fd, "\r")
-    check("round 2's TLS prompt", _wait_count(main_fd, captured, b"TLS [Y/n]: ", 2, 3))
-    send(main_fd, "n\r")                      # TLS off: round 2 negotiates in plaintext
-
-    # The default run's own drawn-screen assertion: FakeHost's plain-text field, drawn.
-    drew = _wait_count(main_fd, captured, b"HELLO TN3270", 1, 12)
-    check("round 2 negotiated and the screen drew the host's plain text", drew)
-    check("drew the host's second field", _wait_count(main_fd, captured, b"RED FIELD", 1, 2))
-    check("drew a status line", _wait_count(main_fd, captured, b"\x1b[25;1H", 1, 2))
-    check("entered the alternate screen buffer", b"\x1b[?1049h" in bytes(captured))
-    check("negotiated a terminal type", host.ttype is not None)
-    raw_seen = not (termios.tcgetattr(main_fd)[3] & termios.ECHO)
-    check("raw mode was actually in effect (ECHO off) while connected", raw_seen)
-
-    send(main_fd, b"\x1d")                    # Ctrl-] quits, exactly as the default run checks
-    _drain_until_exit(main_fd, pid, 3, captured)
-    time.sleep(0.3)
-    after = termios.tcgetattr(main_fd)
-    check("left the alternate screen buffer on quit", b"\x1b[?1049l" in bytes(captured))
-    check("ECHO is restored after exit (the tty is sane)", bool(after[3] & termios.ECHO))
-    host.stop()
+        # The default run's own drawn-screen assertion: FakeHost's plain-text field, drawn.
+        drew = _wait_count(main_fd, captured, b"HELLO TN3270", 1, 12)
+        check("round 2 negotiated and the screen drew the host's plain text", drew)
+        check("drew the host's second field", _wait_count(main_fd, captured, b"RED FIELD", 1, 2))
+        check("drew a status line", _wait_count(main_fd, captured, b"\x1b[25;1H", 1, 2))
+        check("entered the alternate screen buffer", b"\x1b[?1049h" in bytes(captured))
+        check("negotiated a terminal type", host.ttype is not None)
+        # The SERVER's own proof that round 1 really attempted TLS (not merely that the CLIENT
+        # said so): exactly two connections landed here, and the first one's first bytes are a
+        # real TLS record header -- 0x16 (Handshake), 0x03 (the record layer's major version) --
+        # which only a TLS ClientHello sends; plaintext telnet's first bytes are never this.
+        #
+        # NOT CHECKED YET: round 2's `_negotiate_connection` call is still BLOCKED here, inside
+        # its own select/recv loop, because that function keeps serving a connection until it
+        # closes or its OWN deadline passes -- the same as FakeHost's always did. The connected
+        # session stays open until Ctrl-], so `host.connections` gets its second entry only once
+        # the client disconnects below; checked there, not here.
+        send(main_fd, b"\x1d")                # Ctrl-] quits, exactly as the default run checks
+        code1 = _drain_until_exit(main_fd, pid, 3, captured)
+        check("the client exited", code1 is not None)
+        time.sleep(0.3)
+        after = termios.tcgetattr(main_fd)
+        check("left the alternate screen buffer on quit", b"\x1b[?1049l" in bytes(captured))
+        check("ECHO is restored after exit (the tty is sane, after raw mode was seen)",
+              raw_seen and code1 is not None and bool(after[3] & termios.ECHO))
+        # The SERVER's own proof that round 1 really attempted TLS (not merely that the CLIENT
+        # said so): exactly two connections landed here, and the first one's first bytes are a
+        # real TLS record header -- 0x16 (Handshake), 0x03 (the record layer's major version) --
+        # which only a TLS ClientHello sends; plaintext telnet's first bytes are never this.
+        # Checked HERE, after the quit, once round 2's connection has actually closed.
+        check("the host saw exactly 2 connections (round 1's TLS probe, round 2's plaintext)",
+              len(host.connections) == 2)
+        check("round 1's connection began with a real TLS ClientHello (0x16 0x03)",
+              len(host.connections) >= 1 and host.connections[0][:2] == b"\x16\x03")
+    finally:
+        _cleanup(main_fd, pid, code1, host)
     report.append(("sub-run 1 (TLS round fails, retry connects)", host.ttype, len(captured)))
 
     # --- sub-run 2: Ctrl-C at the very first question quits, exit 1, tty sane -------------------
     main_fd2, child_fd2 = _open_pty()
     pid2 = _spawn_tui_no_args(main_fd2, child_fd2)
     captured2 = bytearray()
-    check("sub-run 2: showed the Host prompt", _wait_count(main_fd2, captured2, b"Host: ", 1, 5))
-    before_ctrlc = len(captured2)
-    send(main_fd2, b"\x03")                   # Ctrl-C at Host:
-    code2 = _drain_until_exit(main_fd2, pid2, 5, captured2)
-    time.sleep(0.2)
-    after2 = termios.tcgetattr(main_fd2)
-    check("sub-run 2: exited with status 1", code2 == 1)
-    check("sub-run 2: wrote a newline so the shell prompt starts clean",
-          b"\n" in bytes(captured2)[before_ctrlc:])
-    check("sub-run 2: ECHO is restored after exit (the tty is sane)", bool(after2[3] & termios.ECHO))
+    code2 = None
+    try:
+        check("sub-run 2: showed the Host prompt", _wait_count(main_fd2, captured2, b"Host: ", 1, 5))
+        raw_seen2 = not (termios.tcgetattr(main_fd2)[3] & termios.ECHO)
+        check("sub-run 2: raw mode was in effect (ECHO off) once Host: appeared", raw_seen2)
+        before_ctrlc = len(captured2)
+        send(main_fd2, b"\x03")               # Ctrl-C at Host:
+        code2 = _drain_until_exit(main_fd2, pid2, 5, captured2)
+        check("sub-run 2: the client exited", code2 is not None)
+        time.sleep(0.2)
+        after2 = termios.tcgetattr(main_fd2)
+        check("sub-run 2: exited with status 1 (after raw mode was seen)",
+              raw_seen2 and code2 == 1)
+        check("sub-run 2: wrote a newline so the shell prompt starts clean",
+              b"\n" in bytes(captured2)[before_ctrlc:])
+        check("sub-run 2: ECHO is restored after exit (the tty is sane, after raw mode was seen)",
+              raw_seen2 and code2 is not None and bool(after2[3] & termios.ECHO))
+    finally:
+        _cleanup(main_fd2, pid2, code2)
     report.append(("sub-run 2 (Ctrl-C at Host:)", code2, len(captured2)))
 
     # --- sub-run 3: Ctrl-C while connecting (a TLS handshake that waits) -------------------------
@@ -680,24 +747,33 @@ def prompt_mode():
     main_fd3, child_fd3 = _open_pty()
     pid3 = _spawn_tui_no_args(main_fd3, child_fd3)
     captured3 = bytearray()
-    check("sub-run 3: showed the Host prompt", _wait_count(main_fd3, captured3, b"Host: ", 1, 5))
-    send(main_fd3, f"127.0.0.1:{listen_port}\r")
-    check("sub-run 3: showed the Model prompt",
-          _wait_count(main_fd3, captured3, b"Model [3278-2-E]: ", 1, 5))
-    send(main_fd3, "\r")
-    check("sub-run 3: showed the TLS prompt", _wait_count(main_fd3, captured3, b"TLS [Y/n]: ", 1, 5))
-    send(main_fd3, "\r")                      # TLS on: the handshake against the silent listener waits
-    connecting = f"Connecting to 127.0.0.1:{listen_port}...".encode()
-    check("sub-run 3: said Connecting to the listener", _wait_count(main_fd3, captured3, connecting, 1, 5))
-    send(main_fd3, b"\x03")                   # Ctrl-C while the handshake is in flight
-    check("sub-run 3: said cancelled; waiting for the connection attempt to end",
-          _wait_count(main_fd3, captured3, b"cancelled; waiting for the connection attempt to end", 1, 3))
-    code3 = _drain_until_exit(main_fd3, pid3, 12, captured3)
-    time.sleep(0.2)
-    after3 = termios.tcgetattr(main_fd3)
-    check("sub-run 3: exited with status 1 once the handshake timed out", code3 == 1)
-    check("sub-run 3: ECHO is restored after exit (the tty is sane)", bool(after3[3] & termios.ECHO))
-    listener.close()
+    code3 = None
+    try:
+        check("sub-run 3: showed the Host prompt", _wait_count(main_fd3, captured3, b"Host: ", 1, 5))
+        raw_seen3 = not (termios.tcgetattr(main_fd3)[3] & termios.ECHO)
+        check("sub-run 3: raw mode was in effect (ECHO off) once Host: appeared", raw_seen3)
+        send(main_fd3, f"127.0.0.1:{listen_port}\r")
+        check("sub-run 3: showed the Model prompt",
+              _wait_count(main_fd3, captured3, b"Model [3278-2-E]: ", 1, 5))
+        send(main_fd3, "\r")
+        check("sub-run 3: showed the TLS prompt", _wait_count(main_fd3, captured3, b"TLS [Y/n]: ", 1, 5))
+        send(main_fd3, "\r")                  # TLS on: the handshake against the silent listener waits
+        connecting = f"Connecting to 127.0.0.1:{listen_port}...".encode()
+        check("sub-run 3: said Connecting to the listener",
+              _wait_count(main_fd3, captured3, connecting, 1, 5))
+        send(main_fd3, b"\x03")               # Ctrl-C while the handshake is in flight
+        check("sub-run 3: said cancelled; waiting for the connection attempt to end",
+              _wait_count(main_fd3, captured3, b"cancelled; waiting for the connection attempt to end", 1, 3))
+        code3 = _drain_until_exit(main_fd3, pid3, 12, captured3)
+        check("sub-run 3: the client exited", code3 is not None)
+        time.sleep(0.2)
+        after3 = termios.tcgetattr(main_fd3)
+        check("sub-run 3: exited with status 1 once the handshake timed out (after raw mode was seen)",
+              raw_seen3 and code3 == 1)
+        check("sub-run 3: ECHO is restored after exit (the tty is sane, after raw mode was seen)",
+              raw_seen3 and code3 is not None and bool(after3[3] & termios.ECHO))
+    finally:
+        _cleanup(main_fd3, pid3, code3, listener)
     report.append(("sub-run 3 (Ctrl-C while connecting)", code3, len(captured3)))
 
     for name, extra, nbytes in report:

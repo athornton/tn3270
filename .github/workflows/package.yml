@@ -9,6 +9,10 @@
 #   x64witness  TN3270_PACKAGE_SMOKE_X64 for package-smoke.mjs (see its "macOS" notes)
 #   npm         upload the npm tarballs (one job, so they are not uploaded five times)
 #   gui         upload this job's native artifacts
+#   pty         run packages/tui/scripts/pty-smoke.py (default, --oversize-auto, --prompt) after
+#               the build -- a real pty and a fork, which only Linux runners here give it cheaply;
+#               the two ubuntu jobs (the parity runner and the Node floor) carry it, so both the
+#               newest and the oldest supported Node run it, not every OS/arch.
 #
 #   node        the Node major/minor this job runs (setup-node)
 #   nodeopts    NODE_OPTIONS for the test step only (empty: none)
@@ -43,6 +47,7 @@ jobs:
             xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
             apt: xvfb libfuse2t64
             parity: true
+            pty: true
             node: '22'
             npm: true
             gui: true
@@ -74,6 +79,7 @@ jobs:
             os: ubuntu-latest
             xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
             apt: xvfb
+            pty: true
             node: '20.19'
             # Node 20 has the WebSocket client web/test/integration.test.ts drives the gateway with,
             # but only behind this flag (global from 22). The gateway itself does not use it.
@@ -98,6 +104,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
       - run: npm ci
       - run: npm run build
+      - if: matrix.pty
+        name: TUI pty harness (real pty + fork; needs no X)
+        run: |
+          python3 packages/tui/scripts/pty-smoke.py
+          python3 packages/tui/scripts/pty-smoke.py --oversize-auto
+          python3 packages/tui/scripts/pty-smoke.py --prompt
       - run: npm run typecheck
       - run: npx vitest run --reporter=default --reporter=junit --outputFile=vitest-junit.xml
         env:

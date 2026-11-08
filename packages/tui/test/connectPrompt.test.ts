@@ -233,14 +233,16 @@ describe('promptConnect', () => {
   });
 });
 
+/** Thrown by `until` below on its own timeout, named so a hang reads as itself and not as a bare
+ * failed `expect`. */
+class UntilTimeout extends Error {
+  override name = 'UntilTimeout';
+}
+
 /**
  * Terminal mode, as at a real TTY: readline decodes keypresses, echoes, and turns Ctrl-C into
  * 'SIGINT' on the interface. A PassThrough has no setRawMode, which readline skips.
  */
-/** Thrown by `until` below on its own timeout, named so a hang reads as itself and not as a bare
- * failed `expect`. */
-class UntilTimeout extends Error {}
-
 describe('promptConnect in terminal mode', () => {
   const plain = (t: string): string => t.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 
