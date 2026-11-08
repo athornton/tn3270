@@ -81,10 +81,23 @@ measured against this build.
 
 **Starting `tn3270-gui` with no host opens a Connect dialog** — host (the same
 `[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
-checkbox (on by default; untick it for a plaintext host such as Hercules — if a TLS handshake
-never completes, the error shown in the terminal window says to untick it). Once a session starts, a failed connection is shown in the
-terminal window itself, exactly as it would be from the command line, and **the dialog does not
-reopen** — quit and relaunch to try a different host (`File` → `Connect…` is a later milestone).
+checkbox (on by default; untick it for a plaintext host such as Hercules). **The dialog stays open
+until a connect succeeds** (2026-11-08; it used to close on the first press and have no way back —
+see *Connecting over TLS*). Pressing Connect shows `Connecting to HOST:PORT...`, the host exactly
+as typed, on the dialog's own error line while the attempt is in flight — up to the 10-second TLS
+handshake deadline; a **plaintext** attempt has no deadline of ours, so a host that merely drops
+packets is only given up on by the OS's own TCP connect timeout (around two minutes on Linux),
+and Quit still works throughout. A failure is shown on that same line, never in the terminal
+window — the TLS-against-a-plaintext-host case reads `Untick TLS in the Connect dialog: ...`,
+naming the checkbox right beside it — and the host, model and TLS fields keep what you typed, so
+fixing the one thing that was wrong and pressing Connect again **retries the SAME session** with
+whatever you changed. **Quit, Escape and closing the dialog all quit the app until a connect has
+succeeded**, including mid-attempt: the in-flight connect dies with the process. Once connected,
+the dialog closes and is never used again this run — a dropped connection goes through the
+ordinary reconnect path, and switching host mid-session is `File` → `Connect…` (roadmap item 15,
+not built). **`--terminal-type` on the command line** fixes the terminal type for the session's
+life, so after the first attempt the dialog's Model control is disabled (its title says why)
+rather than offer a choice a retry would ignore.
 
 **On Linux, `tn3270-gui` leaves Chromium's sandbox on.** npm cannot install `chrome-sandbox` setuid
 root, which only matters on systems that block unprivileged user namespaces (Ubuntu 23.10+ under
@@ -634,6 +647,40 @@ defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen mod
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a color terminal.
 
+**`tn3270` with no host, run AT A TERMINAL, prompts for one instead of the usage error**
+(2026-11-08), the TUI's counterpart of the GUI's Connect dialog:
+
+```
+$ tn3270
+Host: hercules:3270
+Model [3278-2-E]:
+TLS [Y/n]:
+Connecting to hercules:3270...
+Answer n to TLS: hercules:3270 accepted the connection but never completed a TLS handshake, ...
+Host [hercules:3270]:
+Model [3278-2-E]:
+TLS [Y/n]: n
+Connecting to hercules:3270...
+```
+
+and then the full-screen terminal starts exactly as `tn3270 host` would. **Defaults are the last
+answers** — round 1's come from the command line's `-model` and TLS flags (or the product
+defaults), and every later round's are what was typed the round before, so a retry is Enter until
+the field that needs changing. Host has no default on round 1, and an empty answer re-asks. An
+unknown model is answered with the list of known names and re-asked; TLS takes `y`/`yes`/`n`/`no`
+in any case, or Enter for the default. **A host starting with `-` is refused** before Model or TLS
+are even asked. A failed connect prints the failure and starts a new round, with the last round's
+answers as this round's defaults — the TLS-plaintext-host cases read `Answer n to TLS: ...` here,
+a third wording alongside `-insecure` on the command line and `Untick TLS in the Connect dialog` in
+the GUI. **`Ctrl-D` (EOF) or `Ctrl-C` at any prompt quits**, exit status 1 — nothing was
+connected — and `Ctrl-C` while a connect is already in flight (the attempt cannot be aborted)
+prints `cancelled; waiting for the connection attempt to end` and waits for it rather than
+appearing to ignore the keystroke. Other flags still apply: `tn3270 -scheme green --colors 16`
+prompts too, and both are used once the session starts. **This only happens at a real terminal** —
+stdin and stdout must both be TTYs. A script or a pipe on either end still gets the usage error,
+exit 2, with no host, exactly as before; a script never meets a prompt. An unknown `-model` given
+on the command line is still a usage error regardless of a terminal being present.
+
 **`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
 constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
 it is drawn dim above the screen and **stays there**; in a shorter window it is printed
@@ -859,7 +906,23 @@ flag that would fix it:
 does not speak TLS — a Hercules or other vintage system — use -insecure.
 ```
 
-Design and measurements: `docs/superpowers/specs/2026-08-25-tls-support-design.md`.
+That same failure is worded for the GUI's Connect dialog (`Untick TLS in the Connect dialog: ...`,
+naming the checkbox beside it) and the TUI's no-host prompt (`Answer n to TLS: ...`) — see
+*Installing* and *Using the TUI*.
+
+**Reconnect always replays the LAST EXPLICIT TLS choice, never a keystroke, menu or host
+frame.** On the command line that choice is fixed for the run — there is nothing else to replay.
+In the GUI, it is the Connect dialog's latest press of Connect: a dropped session's `Enter` or
+`Clear` reconnects with whatever TLS the dialog last used, including a retry that changed it. In
+the TUI, each round of the no-host prompt builds a fresh session, so the choice in force for
+*that* session is simply the round that connected it; `Ctrl-C`/`Enter` to reconnect once running
+replay that same choice, not whatever a later round might have asked. `Session.reconnect()`'s own
+comment (`packages/core/src/session.ts`, "THE TLS TRAP") is the one place this is pinned precisely
+— read it before changing anything that touches TLS or reconnect.
+
+Design and measurements: `docs/superpowers/specs/2026-08-25-tls-support-design.md`,
+`docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md` and
+`docs/superpowers/specs/2026-11-08-tui-connect-prompt-design.md`.
 
 ## TN3270E
 

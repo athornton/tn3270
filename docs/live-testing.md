@@ -1977,6 +1977,38 @@ offered `DO TN3270E`. The "modern z/OS or z/VM" witness for TN3270E, `IBM-DYNAMI
 still owed. What `pubvm.org` does give us is a newer VM to check the query reply, alternate
 models and `IND$FILE` against.
 
+## Connect dialog retry and the TUI prompt — OWED, branch `connect-retry`, 2026-11-08
+
+Everything below is offline-tested (`packages/gui/scripts/connect.mjs`, 7 cases;
+`packages/tui/scripts/pty-smoke.py --prompt`) but none of it has been driven against a real host
+yet. Specs: `docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md` and
+`docs/superpowers/specs/2026-11-08-tui-connect-prompt-design.md`, each with its own "Live, by the
+user" line; `docs/HANDOFF.md`'s START HERE has the fuller account.
+
+**Still owed, live, by the user:**
+
+- **The Hercules host, TLS ticked then unticked, in ONE run, in BOTH front ends.** GUI: launch
+  `tn3270-gui` with no host, leave TLS ticked, press Connect against a Hercules host — the dialog
+  should stay open and its error line should read `Untick TLS in the Connect dialog: ...`; untick
+  the box and press Connect again — it should connect, in the SAME dialog, without relaunching.
+  TUI: `tn3270` with no arguments against the same host, TLS answered `Y` first — the prompt
+  should print `Answer n to TLS: ...` and start a new round with the host and model carried over;
+  answer `n` and it should connect.
+- **`pubvm.org` port 623, TLS ticked, through the retry path in both front ends** — a real TLS
+  handshake completing on the first press, this time reached via the Connect dialog and the
+  no-host prompt rather than a bare command-line launch (the command-line case is already
+  checked above, *Packaging and TLS against a real TLS host*).
+- **On macOS, that `Cmd-V` pastes into the Connect dialog's Host field on a retry.** Before this
+  branch, focus inside the dialog did not stop the terminal window's menu accelerators from
+  firing, and `Cmd-V` in the Host field was observed reaching the session instead of the field
+  (`main.ts`'s `live` flag, gated until the first successful connect, is the fix) — confirm a
+  paste into Host after a failed first attempt lands in the field, not in a session that does not
+  exist yet.
+
+None of the three needs a specific host beyond what `docs/live-testing.md`'s *Step 1* already
+names; the first two reuse hosts this document already has credentials and reachability notes
+for, and the macOS item needs only the native app and a system clipboard.
+
 ## TLS against both hosts — verified 2026-08-25
 
 Neither Hercules system can speak TLS, so TLS is tested by putting a terminating proxy in

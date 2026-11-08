@@ -9,6 +9,28 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
+**2026-11-08: branch `connect-retry` (not yet merged) fixes the defect the user hit on the first
+npm release (0.1.0): with TLS left ticked against a Hercules host, the GUI said `Untick TLS in
+the Connect dialog: ...` after the dialog had already closed, with no way back to it short of
+quitting.** Specs: `docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md` (the GUI's
+Connect dialog) and `docs/superpowers/specs/2026-11-08-tui-connect-prompt-design.md` (the TUI's
+counterpart, a no-host prompt instead of a usage error); plan:
+`docs/superpowers/plans/2026-11-08-connect-retry-and-tui-prompt.md` (14 tasks, all done as code;
+Task 14 was this documentation pass). New coverage: `packages/gui/scripts/connect.mjs` (7 cases,
+including the retry and going live), `packages/tui/scripts/pty-smoke.py --prompt`, and CI now
+runs all three `pty-smoke.py` modes (default, `--oversize-auto`, `--prompt`) on both
+`ubuntu-latest` and the Node-floor `ubuntu-latest-node20.19` job
+(`.github/workflows/package.yml`). See the README's *Installing*, *Using the TUI* and *Connecting
+over TLS* sections, and `packages/gui/README.md` / `packages/tui/README.md`.
+
+**STILL OWED, LIVE, BY THE USER:**
+- the Hercules host with TLS ticked and then unticked, in one run, in BOTH the GUI's Connect
+  dialog and the TUI's no-host prompt (the spec's own "Live, by the user" line for each);
+- `pubvm.org` port 623 with TLS ticked, through the retry path in both front ends;
+- on macOS, that `Cmd-V` pastes into the Connect dialog's Host field on a retry — not into the
+  session behind it, which is the bug `live` (gui/src/main.ts) exists to close, and which no
+  harness here can drive a real macOS paste event to prove.
+
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
 `pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
@@ -68,9 +90,13 @@ The rest of this section is the branch's state as of the merge, kept for its det
   Artifact names `TN3270-<version>-<os>-<arch>.<ext>`. Our own icon since 2026-11-08
   (`packages/gui/resources/`; see the README's *Installing*).
 - **The Connect dialog**: a double-click or no-host launch opens it (host, model — default
-  `3278-2-E` — and a TLS checkbox, on by default). After a session starts, a failed connect shows
-  its error in the terminal window and the dialog does **not** reopen (`File` → `Connect…` is a
-  later milestone). Command-line launches are unchanged.
+  `3278-2-E` — and a TLS checkbox, on by default). **As of branch `connect-retry` (2026-11-08,
+  see START HERE above) the dialog stays open until a connect succeeds**: a failure is shown on
+  the dialog's own error line, never the terminal window, and the next press of Connect retries
+  the SAME session with whatever changed. Quit, Escape and closing the dialog quit the app until
+  a connect has succeeded. Once connected the dialog closes and is not used again this run —
+  `File` → `Connect…` for a session already running is still a later milestone (item 15).
+  Command-line launches are unchanged.
 - **Build/verify scripts** (root `package.json`): `build`, `typecheck`, `bundle:gui`, `pack:npm`
   (refuses a stale `dist`, an orphaned compiled file with no source, or an unverified gui bundle —
   `scripts/pack.mjs`), `smoke` (`scripts/install-smoke.mjs`: installs the tarballs into a fresh
