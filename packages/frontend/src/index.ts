@@ -21,7 +21,7 @@ export { parseHostSpec, resolveHostSpec } from './hostspec.js';
 export type { HostSpec, ResolvedHost } from './hostspec.js';
 
 // The connect dialog's form, turned into the argv the user would have typed -- shared by the
-// GUI's Connect dialog and (later) the TUI's no-host prompt.
+// GUI's Connect dialog and the TUI's no-host prompt.
 export { dialogToArgv } from './connectForm.js';
 export type { ConnectForm } from './connectForm.js';
 

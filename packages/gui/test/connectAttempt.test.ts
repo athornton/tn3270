@@ -20,7 +20,9 @@ function fakeSession(geometry: GeometrySetting | undefined, outcomes: Array<Erro
     get geometrySetting() { return this.setting; },
     setGeometry(next) { log.push(`setGeometry ${next.model}`); this.setting = next; },
     async connect(host, port, per) {
-      log.push(`connect ${host}:${port} ${tls.current.kind} lus=${(per?.lus ?? []).join(',')}`);
+      log.push(
+        `connect ${host}:${port} ${tls.current.kind} tn3270e=${per?.tn3270e} lus=${(per?.lus ?? []).join(',')}`,
+      );
       const o = outcomes.shift();
       if (o === undefined) throw new Error('unexpected connect');
       if (o === 'hang') { await new Promise<void>((r) => { pending = r; }); return; }
@@ -42,8 +44,10 @@ describe('makeConnector', () => {
     expect(await c.attempt(parseGuiArgs(['-model', '3278-2-E', 'herc:3270']))).toEqual(
       { ok: false, error: 'TLS herc:3270 no', modelLocked: false });
     expect(await c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'herc:3270']))).toEqual({ ok: true });
-    expect(f.log.filter((l) => l.startsWith('connect'))).toEqual(
-      ['connect herc:3270 tls lus=', 'connect herc:3270 plaintext lus=']);
+    expect(f.log.filter((l) => l.startsWith('connect'))).toEqual([
+      'connect herc:3270 tls tn3270e=true lus=',
+      'connect herc:3270 plaintext tn3270e=true lus=',
+    ]);
   });
 
   it('applies the model in geometry mode, keeping the rest of the setting', async () => {
@@ -66,7 +70,45 @@ describe('makeConnector', () => {
     const f = fakeSession(geo, ['ok']);
     await makeConnector(f.session, f.tls, describeAs)
       .attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'LU1,LU2@vm:3270']));
-    expect(f.log.at(-1)).toBe('connect vm:3270 plaintext lus=LU1,LU2');
+    expect(f.log.at(-1)).toBe('connect vm:3270 plaintext tn3270e=true lus=LU1,LU2');
+  });
+
+  // The session is built ONCE, from the first press's args (main.ts), so its CONSTRUCTOR-level
+  // `tn3270e` is frozen at that first choice. `tn3270e` is a core `ConnectOptions` override --
+  // per-CONNECTION, not per-session -- so every attempt, including a later `reconnect()`, must
+  // pass its OWN `tn3270e` rather than relying on the session's constructor value.
+  it('passes tn3270e: false for an N: host prefix', async () => {
+    const f = fakeSession(geo, ['ok']);
+    await makeConnector(f.session, f.tls, describeAs)
+      .attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'N:vm']));
+    expect(f.log.at(-1)).toBe('connect vm:23 plaintext tn3270e=false lus=');
+  });
+
+  it('passes tn3270e: true for a plain host with no flag', async () => {
+    const f = fakeSession(geo, ['ok']);
+    await makeConnector(f.session, f.tls, describeAs)
+      .attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'vm']));
+    expect(f.log.at(-1)).toBe('connect vm:23 plaintext tn3270e=true lus=');
+  });
+
+  it('passes tn3270e: false for -tn3270e off on a plain host', async () => {
+    const f = fakeSession(geo, ['ok']);
+    await makeConnector(f.session, f.tls, describeAs)
+      .attempt(parseGuiArgs(['-insecure', '-tn3270e', 'off', '-model', '3278-2-E', 'vm']));
+    expect(f.log.at(-1)).toBe('connect vm:23 plaintext tn3270e=false lus=');
+  });
+
+  it('a later attempt\'s tn3270e does not inherit an earlier attempt\'s N: prefix', async () => {
+    const f = fakeSession(geo, [new Error('no'), 'ok']);
+    const c = makeConnector(f.session, f.tls, describeAs);
+    expect(await c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'N:host1'])))
+      .toEqual({ ok: false, error: 'plain host1:23 no', modelLocked: false });
+    expect(await c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'host2'])))
+      .toEqual({ ok: true });
+    expect(f.log.filter((l) => l.startsWith('connect'))).toEqual([
+      'connect host1:23 plaintext tn3270e=false lus=',
+      'connect host2:23 plaintext tn3270e=true lus=',
+    ]);
   });
 
   it('refuses a second attempt while one is in flight', async () => {

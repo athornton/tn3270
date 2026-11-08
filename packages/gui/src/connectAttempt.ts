@@ -24,7 +24,7 @@ import type { GuiArgs } from './args.js';
 export interface AttemptSession {
   readonly geometrySetting: GeometrySetting | undefined;
   setGeometry(next: GeometrySetting): void;
-  connect(host: string, port: number, per?: { lus?: readonly string[] }): Promise<void>;
+  connect(host: string, port: number, per?: { tn3270e?: boolean; lus?: readonly string[] }): Promise<void>;
 }
 
 export type AttemptResult =
@@ -78,7 +78,18 @@ export function makeConnector(
         // target through whichever choice is in force. `setGeometry` is the one thing above that
         // can throw, so the write happens here, after it.
         tls.current = chosenTls;
-        await session.connect(host, port, args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
+        // `tn3270e` is a CONNECTION override (core `ConnectOptions`), not a session-wide one: the
+        // session is built ONCE, from the first press's args, so its constructor-level
+        // `tn3270e` is that first press's choice. Without passing it here too, every later
+        // attempt -- and every `reconnect()` after -- would fall through to that stale
+        // constructor value instead of THIS attempt's own (`args.tn3270e` from `-tn3270e` or an
+        // `N:` host prefix; `?? true` is the product default, matching `defaultSession`'s "absent
+        // means ON" and `cli/src/runner.ts`'s `Connect()` handler, which overrides the
+        // process-wide flag with the host spec's `tn3270e` the same way).
+        await session.connect(host, port, {
+          tn3270e: args.tn3270e ?? true,
+          ...(args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {}),
+        });
         return { ok: true };
       } catch (err) {
         return {

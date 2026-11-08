@@ -173,9 +173,20 @@ describe('promptConnect', () => {
   });
 
   it('...but not when --terminal-type wins, as buildSession would not look the model up', async () => {
-    const h = harness(['vm', '3278-2-E', ''], ['ok']);
+    const h = harness(['vm', ''], ['ok']);
     await promptConnect(['--terminal-type', 'IBM-DYNAMIC', '-model', '9999'], h, h.attempt);
     expect(h.tried).toHaveLength(1);
+  });
+
+  // `--terminal-type` fixes the terminal type for the session's life (the GUI's own Model
+  // control is disabled for the same reason). Asking would accept a model answer that
+  // `resolveTerminalType` never looks at -- the question itself, not just its answer, is the bug.
+  it('skips the Model question entirely when --terminal-type is on the command line', async () => {
+    const h = harness(['vm', ''], ['ok']);          // Host, then TLS -- no Model prompt to answer
+    await promptConnect(['--terminal-type', 'IBM-DYNAMIC'], h, h.attempt);
+    expect(h.transcript()).not.toContain('Model');
+    expect(h.tried).toHaveLength(1);
+    expect(h.tried[0]!.terminalType).toBe('IBM-DYNAMIC');
   });
 
   it('hands off a closed interface: no readline listener left on the input', async () => {

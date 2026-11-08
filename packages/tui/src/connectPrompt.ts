@@ -126,13 +126,21 @@ export async function promptConnect(
       // `args.host === undefined` check further down guards a DIFFERENT case (parseArgs yielding
       // no host at all) and stays for that reason.
       if (host.startsWith('-')) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
-      // Re-asked IN PLACE, like TLS below: restarting the round would read the next answer as a host.
-      for (;;) {
-        const m = await ask(`Model [${model}]: `);
-        if (m === undefined) return quit();
-        if (m === '') break;
-        if (knownModel(m)) { model = m; break; }
-        say(`unknown model ${JSON.stringify(m)}: one of ${Object.keys(KNOWN_MODELS).join(', ')}`);
+      // `--terminal-type` on the command line fixes the terminal type for the session's life:
+      // `dialogToArgv` still appends `-model model` below, but `resolveTerminalType` sends
+      // `seed.terminalType` verbatim and never looks at it (args.ts's check just above this
+      // function, and the GUI's own Model control is disabled for the same reason, spec's
+      // "Scope -- what does not change"). Asking would accept an answer that changes nothing.
+      if (seed.terminalType === undefined) {
+        // Re-asked IN PLACE, like TLS below: restarting the round would read the next answer as
+        // a host.
+        for (;;) {
+          const m = await ask(`Model [${model}]: `);
+          if (m === undefined) return quit();
+          if (m === '') break;
+          if (knownModel(m)) { model = m; break; }
+          say(`unknown model ${JSON.stringify(m)}: one of ${Object.keys(KNOWN_MODELS).join(', ')}`);
+        }
       }
       let t: string | undefined;
       for (;;) {
