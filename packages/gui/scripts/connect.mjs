@@ -66,6 +66,23 @@ async function deadPort() {
 /** Every run the current case launched, so the loop below kills them even if the case throws. */
 let launched = [];
 
+/**
+ * Every fake-host/server the current case opened, so the loop below closes them even if the case
+ * throws AFTER opening one but before returning it as `srv` -- otherwise that server is never
+ * closed: the old code only closed the `srv` a case's `run()` RETURNED, and a throw in between
+ * means no `srv` ever reaches the loop at all. `deadPort()` is exempt: it closes its own server
+ * before returning, so there is nothing left open to track.
+ */
+let servers = [];
+
+/** Wraps a `startServer()`/`startHost()` call so its result is tracked for cleanup immediately,
+ * not only once (and if) `run()` returns successfully. */
+async function tracked(opening) {
+  const srv = await opening;
+  servers.push(srv);
+  return srv;
+}
+
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /**
@@ -120,7 +137,7 @@ const CASES = [
   {
     name: 'connects',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false });
       // 5 s from the SUBMIT, not from the launch: Electron's cold start is not the dialog's latency.
       await until(() => r.stdout.includes('connect: submitted\n') || r.exited, 15_000);
@@ -138,7 +155,7 @@ const CASES = [
   {
     name: 'bad host stays open',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: '', model: '3278-2-E', tls: false });
       await until(() => r.stdout.includes('connect: error') || r.exited, 15_000);
       await sleep(1000);
@@ -154,7 +171,7 @@ const CASES = [
   {
     name: 'TLS remedy names the checkbox',
     async run() {
-      const srv = await startServer({ silent: true });
+      const srv = await tracked(startServer({ silent: true }));
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: true });
       const want = 'Untick TLS in the Connect dialog';
       await until(() => r.stderr.includes(want), HANDSHAKE_BOUND_MS);
@@ -174,7 +191,7 @@ const CASES = [
       // answers. The first (TLS) attempt does not refuse those three bytes -- they are shorter than
       // a TLS record header, so it waits for more and fails by the handshake TIMEOUT (measured:
       // "never completed a TLS handshake"), which is why this case waits past HANDSHAKE_BOUND_MS.
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const host = `127.0.0.1:${srv.port}`;
       const r = launch([
         { host, model: '3278-2-E', tls: true },
@@ -228,12 +245,13 @@ const CASES = [
      *
      * THE SECOND `Alt+M` IS A THROWAWAY. A keys-only run quits as soon as `keys: sent` is out
      * (`quitIfKeysOnly`), and on a slow runner that quit could beat the last chord's IPC; the
-     * extra chord puts 150 ms between the counted one and the quit, and the wait below gives the
-     * line itself time to arrive.
+     * extra chord puts ~300 ms between the counted one and the quit -- `maybeSendKeys` sleeps
+     * 150 ms after EACH chord it sends, so the throwaway adds a second 150 ms gap, not one -- and
+     * the wait below gives the line itself time to arrive.
      */
     name: 'a dialog connect goes live: keys reach the host, the menu is installed',
     async run() {
-      const srv = await startHost();
+      const srv = await tracked(startHost());
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }, [], {
         TN3270_GUI_KEYS: 'wait:HELLO TN3270,h,i,Enter,Alt+M,Alt+M',
         TN3270_GUI_WAIT_MS: '10000',
@@ -259,7 +277,7 @@ const CASES = [
   {
     name: 'a host on the command line skips the dialog',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: '127.0.0.1:1', model: '3278-2-E', tls: false },
         ['-insecure', `127.0.0.1:${srv.port}`]);
       await until(() => srv.willTtype(), 15_000);
@@ -276,19 +294,22 @@ const CASES = [
 let passed = 0;
 for (const kase of CASES) {
   launched = [];
+  servers = [];
   let r = { stdout: '', stderr: '' };
-  let srv;
   let checks;
   const survivors = [];
-  // A throw after `launch()` must still kill by PID: `finally`, over every run the case launched.
+  // A throw after `launch()` -- or after `startServer()`/`startHost()` -- must still kill the
+  // client and close the server: `finally`, over everything the case opened, not over the `srv`
+  // its `run()` happened to return. A throw between opening a server and returning never reaches
+  // that return, which is exactly the leak this is for.
   try {
-    ({ r, srv, checks } = await kase.run());
+    ({ r, checks } = await kase.run());
   } catch (err) {
     checks = [[`the case threw: ${err?.stack ?? err}`, false]];
     if (launched.length > 0) r = launched[launched.length - 1];
   } finally {
     for (const run of launched) survivors.push(...await kill(run));
-    await srv?.close();
+    for (const srv of servers) await srv.close();
   }
   checks.push(['no process survived the kill', survivors.length === 0]);
   const failed = checks.filter(([, ok]) => !ok);

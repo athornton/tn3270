@@ -67,8 +67,9 @@ export async function promptConnect(
   });
   // Ctrl-C at a prompt quits, as EOF does. readline emits 'SIGINT' on the interface only in
   // terminal mode (it has put a TTY in raw mode, so the kernel raises no signal). Explicit, though
-  // Node 26's readline also closes on Ctrl-C when nothing listens -- removing this line was
-  // measured to change nothing; it says what is meant rather than relying on that default.
+  // readline also closes on Ctrl-C when nothing listens -- removing this line was measured to
+  // change nothing; it says what is meant rather than relying on that default. Covered end to end
+  // in a real pty by pty-smoke.py --prompt.
   rl.on('SIGINT', () => { rl.close(); });
   const quit = (): undefined => { io.output.write('\n'); return undefined; };
   /**
@@ -118,6 +119,12 @@ export async function promptConnect(
       if (h === undefined) return quit();
       if (h !== '') host = h;
       if (host === '') continue;
+      // Refused HERE, before Model or TLS are asked: no host-spec form starts with `-`, and there
+      // is no reason to ask two more questions about an answer already known to be wrong. The
+      // post-parse check below (on `host`, after `dialogToArgv`/`parseArgs`) is kept as a second
+      // layer — belt and suspenders against the same mistake, in case a later change to this loop
+      // ever lets a dash-led `host` reach that far.
+      if (host.startsWith('-')) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
       // Re-asked IN PLACE, like TLS below: restarting the round would read the next answer as a host.
       for (;;) {
         const m = await ask(`Model [${model}]: `);

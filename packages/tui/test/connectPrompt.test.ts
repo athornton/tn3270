@@ -131,6 +131,19 @@ describe('promptConnect', () => {
     expect(h.tried[0]!.host).toBe('vm');
   });
 
+  it('refuses a dash-led host right after the Host question, before Model or TLS are asked', async () => {
+    const h = harness(['-insecure', 'vm', '', ''], ['ok']);
+    await promptConnect([], h, h.attempt);
+    const t = h.transcript();
+    const refused = t.indexOf('not a host: "-insecure"');
+    expect(refused).toBeGreaterThan(-1);
+    // Nothing between the refusal and the next Host prompt: Model/TLS were never reached for the
+    // refused round, which is the whole point of refusing this early.
+    expect(t.slice(refused, t.indexOf('Host: ', refused))).not.toMatch(/Model|TLS/);
+    expect(h.tried).toHaveLength(1);
+    expect(h.tried[0]!.host).toBe('vm');
+  });
+
   it('a parse failure not about the host keeps the host as the default', async () => {
     // -noverifycert on the command line, TLS answered n: resolveTls's contradiction.
     const h = harness(['vm', '', 'n', '', '', 'y'], ['ok']);
@@ -224,6 +237,10 @@ describe('promptConnect', () => {
  * Terminal mode, as at a real TTY: readline decodes keypresses, echoes, and turns Ctrl-C into
  * 'SIGINT' on the interface. A PassThrough has no setRawMode, which readline skips.
  */
+/** Thrown by `until` below on its own timeout, named so a hang reads as itself and not as a bare
+ * failed `expect`. */
+class UntilTimeout extends Error {}
+
 describe('promptConnect in terminal mode', () => {
   const plain = (t: string): string => t.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 
@@ -232,10 +249,14 @@ describe('promptConnect in terminal mode', () => {
     const output = new PassThrough();
     let raw = '';
     output.on('data', (b: Buffer) => { raw += b.toString(); });
-    /** Resolves once the transcript, escapes stripped, ends with `text`. */
+    /** Resolves once the transcript, escapes stripped, ends with `text`; ~2 s, not ~400 ms, since
+     * a loaded CI runner's event loop can starve this poll for well over 400 ms without the
+     * promise chain under test having actually stalled. */
     const until = async (text: string): Promise<void> => {
-      for (let i = 0; i < 200 && !plain(raw).endsWith(text); i++) await new Promise((r) => setTimeout(r, 2));
-      expect(plain(raw).endsWith(text)).toBe(true);
+      for (let i = 0; i < 1000 && !plain(raw).endsWith(text); i++) await new Promise((r) => setTimeout(r, 2));
+      if (!plain(raw).endsWith(text)) {
+        throw new UntilTimeout(`timed out waiting for ${JSON.stringify(text)}; got ${JSON.stringify(plain(raw))}`);
+      }
     };
     return { input, output, terminal: true, until, transcript: () => plain(raw) };
   }
