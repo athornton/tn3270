@@ -51,6 +51,11 @@ missing, if any `dist/` holds a compiled file whose source is gone, or if any pu
 `dist/` is older than its own `src/` — so a tarball that exists is a tarball built from the source
 it claims to be.
 
+It also refuses, after packing, any tarball without `package/LICENSE`. npm packs a LICENSE only
+from the package's own directory, so each `packages/*/LICENSE` is a tracked copy of the root one
+(`packages/core/test/manifests.test.ts` fails if a copy differs). Edit the root `LICENSE` and
+copy it into every package in the same commit.
+
 If `artifacts/npm/` exists, check the names it actually produced:
 
 ```sh
@@ -61,6 +66,17 @@ Otherwise, the naming is `npm pack`'s own: `@tn3270/<name>@<version>` becomes
 `tn3270-<name>-<version>.tgz` (the `@` dropped, the `/` replaced with `-`).
 
 ## 3. Publish, in dependency order
+
+First a dry run of each, which publishes nothing and lists what would go up — check that
+`LICENSE` is in every list:
+
+```sh
+for t in core frontend node-files canvas cli tui web gui; do
+  npm publish --dry-run artifacts/npm/tn3270-$t-X.Y.Z.tgz
+done
+```
+
+Then for real:
 
 The four library packages have no stable API and exist only because the front ends depend on
 them, but npm still needs their tarball published before anything that names them as a

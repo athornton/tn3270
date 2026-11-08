@@ -78,6 +78,19 @@ describe('package manifests', () => {
     }
   });
 
+  it('every published package carries the root LICENSE, byte for byte', () => {
+    // npm packs a LICENSE only from the package's own directory -- the root one reached no tarball
+    // (found 2026-11-08, before the first publish) -- and MIT requires the notice with every copy.
+    // Tracked copies rather than a pack-time copy, so `npm publish` from a package directory gets
+    // one too; this keeps them from drifting. pack.mjs separately checks each finished tarball.
+    const licence = readFileSync(join(packagesDir, '..', 'LICENSE'));
+    for (const { dir } of published) {
+      const p = join(packagesDir, dir, 'LICENSE');
+      expect(existsSync(p), `packages/${dir}/LICENSE`).toBe(true);
+      expect(readFileSync(p).equals(licence), `packages/${dir}/LICENSE differs from the root LICENSE`).toBe(true);
+    }
+  });
+
   it('names the four executables', () => {
     const bins = Object.assign({}, ...published.map(({ m }) => m.bin ?? {}));
     expect(Object.keys(bins).sort()).toEqual(['tn3270', 'tn3270-cli', 'tn3270-gui', 'tn3270-web']);
