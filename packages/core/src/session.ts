@@ -919,10 +919,14 @@ export class Session {
    * it, the owner may instead be the GUI's Connect dialog, writing a new choice as part of its
    * submit — that wiring does not exist yet.) Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
    * FRAME CAN WRITE IT, only whoever owns the function — and THE RULE AN OWNER MUST KEEP is to
-   * write the choice only as part of a `connect()` to the target the choice belongs to. That is
-   * what will make it safe for the dialog to own one at all: `reconnect()` is unreachable until a
-   * connect attempt has already succeeded (see "THE TWO REFUSALS" below), so it can only ever
-   * replay the target whose own successful connect last paired a choice with it.
+   * write the choice only as part of a `connect()` to the target the choice belongs to.
+   * `connect()` records the target before it dials, even when the dial then fails (see
+   * `connectNow`'s "REMEMBERED BEFORE THE AWAIT" comment), so `reconnect()` replays the LATEST
+   * ATTEMPT's target with the choice in force -- not only a successful one's. An owner must
+   * therefore write a new choice only IMMEDIATELY BEFORE a `connect()` to that choice's target,
+   * and after anything that can throw first (`setGeometry`; and `connect()`'s own geometry
+   * resolution runs before the target is recorded), or a new choice ends up paired with the old
+   * target.
    *
    * That is not a stylistic preference. A PLAINTEXT HOST DOES NOT REJECT A TLS HANDSHAKE, IT
    * HANGS: Hercules writes `IAC DO TERMINAL-TYPE` and waits, and OpenSSL reads that leading 0xff
