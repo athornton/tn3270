@@ -132,12 +132,27 @@ describe('parseConnectSeam', () => {
 
   it('reads the three fields', () => {
     expect(parseConnectSeam('{"host":"127.0.0.1:3270","model":"3278-2-E","tls":false}'))
-      .toEqual({ host: '127.0.0.1:3270', model: '3278-2-E', tls: false });
+      .toEqual([{ host: '127.0.0.1:3270', model: '3278-2-E', tls: false }]);
   });
 
   it('keeps an empty host, which is a scenario: the usage error in the dialog', () => {
     expect(parseConnectSeam('{"host":"","model":"3278-2-E","tls":true}'))
-      .toEqual({ host: '', model: '3278-2-E', tls: true });
+      .toEqual([{ host: '', model: '3278-2-E', tls: true }]);
+  });
+
+  it('reads a LIST of forms, one per Connect press', () => {
+    expect(parseConnectSeam('[{"host":"a","model":"3278-2-E","tls":true},{"host":"a","model":"3278-2-E","tls":false}]'))
+      .toEqual([{ host: 'a', model: '3278-2-E', tls: true }, { host: 'a', model: '3278-2-E', tls: false }]);
+  });
+
+  it('a single form is a list of one', () => {
+    expect(parseConnectSeam('{"host":"a","model":"3278-2-E","tls":true}'))
+      .toEqual([{ host: 'a', model: '3278-2-E', tls: true }]);
+  });
+
+  it('keeps only the three fields', () => {
+    expect(parseConnectSeam('[{"host":"a","model":"3278-2-E","tls":true,"extra":1}]'))
+      .toEqual([{ host: 'a', model: '3278-2-E', tls: true }]);
   });
 
   it.each([
@@ -145,6 +160,8 @@ describe('parseConnectSeam', () => {
     ['[]'],
     ['{"host":"h","model":"3278-2-E"}'],
     ['{"host":"h","model":"3278-2-E","tls":"no"}'],
+    ['[{"host":"a"}]'],
+    ['[{"host":"a","model":"3278-2-E","tls":true},"x"]'],
   ])('refuses %s by name rather than driving a half-filled form', (raw) => {
     expect(() => parseConnectSeam(raw)).toThrow(/TN3270_GUI_CONNECT/);
   });

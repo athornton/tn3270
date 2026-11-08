@@ -76,8 +76,9 @@ function isConnectForm(form: unknown): form is ConnectForm {
  * into a rejected `invoke` is the visible failure it deserves.
  *
  * THE MODEL IS CHECKED HERE TOO, by core's own `resolveTerminalType`, because `parseGuiArgs` takes
- * any string for `-model` and leaves it to `buildSession` -- which runs AFTER the dialog has closed,
- * so a bad model would land in the terminal window with no dialog left to fix it in. The dropdown
+ * any string for `-model` and leaves it to `buildSession` -- whose failure is a SETUP failure, shown
+ * in the terminal window after the dialog has gone, with no dialog left to fix it in (main.ts,
+ * `openConnectDialog`). The dropdown
  * offers only known models, so this is reached only by a page that sent something it never listed.
  */
 export function submitConnect(
@@ -98,13 +99,16 @@ export function submitConnect(
 }
 
 /**
- * `TN3270_GUI_CONNECT`, the dialog's test seam: `{"host": ..., "model": ..., "tls": ...}`, which
- * main types into the dialog's own controls. EMPTY MEANS ABSENT, as for every seam in main.ts.
+ * `TN3270_GUI_CONNECT`, the dialog's test seam: a LIST of `{"host": ..., "model": ..., "tls": ...}`
+ * forms, one per press of Connect, which main types into the dialog's own controls in turn -- a
+ * failed attempt leaves the dialog open for the next (spec 2026-11-08-connect-dialog-retry-design).
+ * A single form is a list of one. EMPTY MEANS ABSENT, as for every seam in main.ts.
  *
  * Refused by name when malformed, rather than driving a half-filled form: a typo would otherwise
- * read as a dialog that ignores its input.
+ * read as a dialog that ignores its input. An empty list is malformed too: it would open a dialog
+ * nobody answers, which under a harness is a hang.
  */
-export function parseConnectSeam(raw: string): ConnectForm | undefined {
+export function parseConnectSeam(raw: string): readonly ConnectForm[] | undefined {
   if (raw === '') return undefined;
   let value: unknown;
   try {
@@ -112,9 +116,11 @@ export function parseConnectSeam(raw: string): ConnectForm | undefined {
   } catch {
     value = undefined;
   }
-  if (!isConnectForm(value)) {
-    throw new Error(`TN3270_GUI_CONNECT must be JSON {"host": string, "model": string, "tls": boolean}, `
-      + `not ${JSON.stringify(raw)}`);
+  const forms: readonly unknown[] | undefined = isConnectForm(value) ? [value]
+    : Array.isArray(value) && value.length > 0 ? value : undefined;
+  if (forms === undefined || !forms.every(isConnectForm)) {
+    throw new Error('TN3270_GUI_CONNECT must be JSON {"host": string, "model": string, "tls": boolean} '
+      + `or a non-empty list of them, not ${JSON.stringify(raw)}`);
   }
-  return { host: value.host, model: value.model, tls: value.tls };
+  return forms.map((f) => ({ host: f.host, model: f.model, tls: f.tls }));
 }

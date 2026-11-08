@@ -10,7 +10,8 @@ declare global {
   interface Window {
     tn3270connect?: {
       models(): Promise<{ models: readonly string[]; default: string }>;
-      submit(form: { host: string; model: string; tls: boolean }): Promise<{ ok?: true; error?: string }>;
+      submit(form: { host: string; model: string; tls: boolean }):
+        Promise<{ ok?: true; error?: string; modelLocked?: boolean }>;
       quit(): void;
     };
   }

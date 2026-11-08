@@ -32,6 +32,10 @@ export type AttemptResult =
   | { readonly ok: false; readonly error: string; readonly modelLocked: boolean };
 
 export interface DialogConnector {
+  /**
+   * One attempt with these args. RESOLVES with the answer for the dialog, connect failure or not;
+   * it REJECTS only for our own bug -- args without a host, which `parseGuiArgs` never returns.
+   */
   attempt(args: GuiArgs): Promise<AttemptResult>;
 }
 
@@ -49,6 +53,15 @@ export function makeConnector(
   return {
     async attempt(args) {
       if (inFlight) return { ok: false, error: 'already connecting', modelLocked };
+      // `parseGuiArgs` guarantees a host: it throws `MissingHostError` otherwise (args.ts, the
+      // host check just before the host spec is resolved). This is that contract's enforcement
+      // point -- if it is ever broken, fail loudly rather than quietly dialling localhost:23.
+      // OUTSIDE the `try`, and before `inFlight` is set: a broken contract is OUR bug, not an
+      // answer for the dialog's error line, so it THROWS -- main's handler turns that into a
+      // rejected `invoke` (spec, "Error handling") -- and it leaves no flag behind to refuse the
+      // next attempt as `already connecting`.
+      if (args.host === undefined) throw new Error('attempt: args without a host');
+      const host = args.host;
       inFlight = true;
       const port = args.port ?? 23;
       // This attempt's own choice, read once -- used below both to describe a failure (so the
@@ -56,12 +69,6 @@ export function makeConnector(
       // write `tls.current`.
       const chosenTls = args.tls ?? DEFAULT_TLS;
       try {
-        // `parseGuiArgs` guarantees a host: it throws `MissingHostError` otherwise (args.ts,
-        // the host check just before the host spec is resolved). This is that contract's
-        // enforcement point -- if it is ever broken, fail loudly here rather than quietly
-        // dialling localhost:23.
-        if (args.host === undefined) throw new Error('attempt: args without a host');
-        const host = args.host;
         const now = session.geometrySetting;
         if (now !== undefined && args.model !== undefined) session.setGeometry({ ...now, model: args.model });
         // THE RULE (core `session.ts`'s `reconnect()`, "THE TLS TRAP"): write a new TLS choice
@@ -76,7 +83,7 @@ export function makeConnector(
       } catch (err) {
         return {
           ok: false,
-          error: describe(err, { host: args.host ?? '', port, tls: chosenTls.kind !== 'plaintext' }),
+          error: describe(err, { host, port, tls: chosenTls.kind !== 'plaintext' }),
           modelLocked,
         };
       } finally {

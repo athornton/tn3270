@@ -106,4 +106,14 @@ describe('makeConnector', () => {
     expect(f.tls.current).toEqual({ kind: 'plaintext' });
     expect(f.log.some((l) => l.startsWith('connect'))).toBe(false);
   });
+
+  it('REJECTS for args without a host -- our bug, not an answer -- and leaves no in-flight flag', async () => {
+    const f = fakeSession(geo, ['ok']);
+    const c = makeConnector(f.session, f.tls, describeAs);
+    const { host: _dropped, ...hostless } = parseGuiArgs(['-insecure', '-model', '3278-2-E', 'vm']);
+    await expect(c.attempt(hostless)).rejects.toThrow(/args without a host/);
+    expect(f.log).toEqual([]);
+    // The next, valid attempt is NOT refused as `already connecting`.
+    expect(await c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'vm']))).toEqual({ ok: true });
+  });
 });
