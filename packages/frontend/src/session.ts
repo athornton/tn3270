@@ -9,10 +9,11 @@ import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
  * that forgot the parameter silently insecure. `-insecure` passes
  * `{ kind: 'plaintext' }` explicitly.
  *
- * `tls` may also be a FUNCTION, called at every connect. The GUI's Connect dialog uses this: it
- * passes `() => tlsChoice.current` and writes `tlsChoice.current` itself, once per press of
- * Connect, immediately before the `connect()` that choice belongs to
- * (`gui/src/connectAttempt.ts`'s `makeConnector`, spec 2026-11-08-connect-dialog-retry-design.md).
+ * `tls` may also be a FUNCTION, called at every connect. The GUI's Connect dialog uses this: its
+ * session is built with `() => tlsChoice.current` (`gui/src/main.ts`, `startSession`), and
+ * `gui/src/connectAttempt.ts`'s `makeConnector` writes `tlsChoice.current` once per press of
+ * Connect, immediately before the `connect()` that choice belongs to (spec
+ * 2026-11-08-connect-dialog-retry-design.md).
  * `reconnect()` dials through this same function, so it replays whichever choice is IN FORCE
  * when it runs, which only the function's OWNER can write -- no keypress, menu or host frame
  * can. THE RULE AN OWNER MUST KEEP: write the choice only as part of a `connect()` to the target

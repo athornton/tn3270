@@ -916,10 +916,10 @@ export class Session {
    * at construction. A plain `TlsOptions` never changes, so for the command line "in force" and
    * "chosen once at startup" are the same thing; a function's result is whatever its OWNER last
    * wrote there. **There are two owners today:** the command line, which passes a plain
-   * `TlsOptions` and so never changes it; and the GUI's Connect dialog (`gui/src/connectAttempt.ts`,
-   * `makeConnector`'s `attempt`), which passes `() => tlsChoice.current` and writes
-   * `tlsChoice.current` itself, once per press of Connect, immediately before the `connect()` that
-   * choice belongs to. Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
+   * `TlsOptions` and so never changes it; and the GUI's Connect dialog, whose session is built with
+   * `() => tlsChoice.current` (`gui/src/main.ts`, `startSession`) and whose `attempt`
+   * (`gui/src/connectAttempt.ts`, `makeConnector`) writes `tlsChoice.current` once per press of
+   * Connect, immediately before the `connect()` that choice belongs to. Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
    * FRAME CAN WRITE IT, only whoever owns the function — and THE RULE AN OWNER MUST KEEP is to
    * write the choice only as part of a `connect()` to the target the choice belongs to.
    * `connect()` records the target before it dials, even when the dial then fails (see
