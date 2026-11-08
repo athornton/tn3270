@@ -6,6 +6,7 @@
  * docs/superpowers/specs/2026-08-19-tui-and-color-design.md.
  */
 
+import type { Readable, Writable } from 'node:stream';
 import {
   resolveTerminalType, resolveAlternateSize, TerminalTypeError, type Session,
 } from '@tn3270/core';
@@ -14,6 +15,7 @@ import { nodeTransferFiles, isMain } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout, measureTerminal, type Geometry } from './render.js';
 import { parseArgs, UsageError, type TuiArgs } from './args.js';
+import { promptConnect } from './connectPrompt.js';
 
 // The command line lives in args.ts (so the no-host prompt can parse without a cycle through this
 // file); re-exported so callers that import it from here keep working.
@@ -101,17 +103,37 @@ export async function connectFirst(
   return session;
 }
 
-export async function run(argv: readonly string[], host: HostProcess): Promise<number> {
+/**
+ * `interactive` is the terminal to prompt on when no host was given -- passed only when stdin and
+ * stdout are BOTH terminals (the `isMain` block), so a script or a pipe with no host still gets the
+ * usage error and exit 2, and never meets a prompt. It is a parameter of `run`, not a field of
+ * `HostProcess`: the App never needs it. Spec 2026-11-08-tui-connect-prompt-design.md.
+ *
+ * Resolves 1 (after `host.exit(1)`) when the user quits the prompt: nothing was connected.
+ */
+export async function run(
+  argv: readonly string[], host: HostProcess, interactive?: { input: Readable; output: Writable },
+): Promise<number> {
   const args = parseArgs(argv);
+  let session: Session;
   if (args.host === undefined) {
-    throw new UsageError(
-      `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
-      + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-      + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
-    );
+    if (interactive === undefined) {
+      throw new UsageError(
+        `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
+        + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
+        + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
+      );
+    }
+    // The prompt closes its readline before resolving, which pauses stdin and takes it out of raw
+    // mode; `App.start()` below sets raw mode and resumes stdin itself, so nothing is needed here.
+    const prompted = await promptConnect(argv, interactive, (a) => connectFirst(a, host.stderr));
+    if (prompted === undefined) { host.exit(1); return 1; }
+    session = prompted;
+  } else {
+    session = await connectFirst(args, host.stderr);
   }
-
-  const session = await connectFirst(args, host.stderr);
+  // `args` (not the prompt's) still supplies `colors` and `scheme` below: those come only from the
+  // command line, which the prompt's argv kept unchanged.
 
   // Printed here ONLY when the persistent hint has nowhere to go. The transient
   // line exists because the message used to vanish the instant the alternate
@@ -156,7 +178,10 @@ const realHost: HostProcess = {
 // old string comparison was FALSE for every installed copy -- the program exited 0 having done
 // nothing. Measured 2026-11-05 through a symlink. `isMain` compares real paths instead.
 if (isMain(import.meta.url)) {
-  run(process.argv.slice(2), realHost).catch((err: unknown) => {
+  // Prompt for a host only at a terminal, BOTH ends: a pipe on either side is a script.
+  const interactive = process.stdin.isTTY && process.stdout.isTTY
+    ? { input: process.stdin, output: process.stdout } : undefined;
+  run(process.argv.slice(2), realHost, interactive).catch((err: unknown) => {
     // A bad command line is the operator's mistake, not a crash: print the
     // message alone. Exit 2 is the conventional usage-error status, matching the
     // CLI, and keeps it distinguishable from a real failure's 1.

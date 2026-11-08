@@ -1,4 +1,5 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SCHEMES } from '@tn3270/frontend';
 import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
@@ -338,5 +339,54 @@ describe('buildSession: what run() actually constructs', () => {
       expect(errors).toEqual([]);
       session.disconnect();
     });
+  });
+});
+
+describe('run() with no host', () => {
+  /** A HostProcess that records exit codes and stderr. */
+  function fakeHost() {
+    const exits: number[] = [];
+    const errors: string[] = [];
+    const host = {
+      on: () => {}, exit: (c: number) => { exits.push(c); }, stderr: { write: (t: string) => { errors.push(t); return true; } },
+    };
+    return { host: host as HostProcess, exits, errors };
+  }
+
+  it('without a terminal, is the usage error it always was (scripts never meet a prompt)', async () => {
+    const { host } = fakeHost();
+    await expect(run([], host)).rejects.toThrow(/usage: tn3270/);
+  });
+
+  it('at a terminal, prompts instead; EOF at the first question quits with status 1', async () => {
+    const { host, exits } = fakeHost();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let transcript = '';
+    output.on('data', (b: Buffer) => { transcript += b.toString(); if (transcript.endsWith('Host: ')) input.end(); });
+    expect(await run([], host, { input, output })).toBe(1);
+    expect(exits).toEqual([1]);
+    expect(transcript).toBe('Host: \n');
+  });
+
+  it('at a terminal, the prompt connects through connectFirst: a refused port is reported, then EOF', async () => {
+    const closed = createServer();
+    await new Promise<void>((r) => closed.listen(0, '127.0.0.1', () => r()));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise<void>((r) => closed.close(() => r()));   // nothing listens there now
+    const { host, exits } = fakeHost();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const answers = [`127.0.0.1:${port}`, '', 'n'];
+    let transcript = '';
+    output.on('data', (b: Buffer) => {
+      transcript += b.toString();
+      if (!/: $/.test(transcript)) return;
+      if (answers.length > 0) input.write(`${answers.shift()!}\n`); else input.end();
+    });
+    expect(await run([], host, { input, output })).toBe(1);
+    expect(exits).toEqual([1]);
+    expect(transcript).toContain(`cannot connect to 127.0.0.1:${port}: connection refused (ECONNREFUSED)`);
+    expect(transcript).toContain(`Host [127.0.0.1:${port}]: `);
   });
 });
