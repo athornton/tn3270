@@ -35,7 +35,8 @@ if (bridge === undefined) {
 
 /**
  * DISABLED UNTIL THE MODELS ARRIVE, and while a submit is in flight. An empty dropdown would submit
- * `model: ''`, and two submits in flight would race main's one-time session start.
+ * `model: ''`, and two submits in flight would race main's one-time session start and its one
+ * connect attempt at a time.
  */
 let busy = true;
 const setBusy = (b: boolean): void => {
@@ -66,10 +67,19 @@ form.addEventListener('submit', (e) => {
   // ONE SUBMIT IN FLIGHT. Main refuses a second start too; this keeps the page from asking.
   if (busy) return;
   setBusy(true);
-  error.textContent = '';
+  // The submit now resolves only once main's connect attempt has -- up to the 10-second TLS
+  // handshake deadline -- so say what is happening rather than sit silent (spec
+  // 2026-11-08-connect-dialog-retry-design, "The behaviour" 1).
+  error.textContent = `Connecting to ${host.value.trim()}...`;
   bridge.submit({ host: host.value, model: model.value, tls: tls.checked }).then((r) => {
-    if (r.ok === true) return;          // main closes this window and starts the session
+    if (r.ok === true) return;          // main closes this window once the connect has succeeded
     error.textContent = r.error ?? 'refused, with no reason given';
+    // `--terminal-type` on the command line fixes the model for the session's life: a retry
+    // would ignore this control, so it stops offering a choice.
+    if (r.modelLocked === true) {
+      model.disabled = true;
+      model.title = 'fixed by --terminal-type on the command line';
+    }
     setBusy(false);
     host.focus();
     host.select();
