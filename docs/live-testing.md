@@ -1952,6 +1952,26 @@ Once it stopped disturbing that final screen, the post-logoff VTAM panel showed 
 foreground colors** of its own — blue 332, white 124, red 113, neutral-white 93,
 yellow 32 — a second live screen exceeding the four-color default map.
 
+## Packaging and TLS against a real TLS host — reported by the user 2026-11-08
+
+**Packaging.** The user ran the native artifacts by hand. macOS runs once the user permits it
+(Gatekeeper, as expected for an unsigned app; cumbersome but not refused). Linux arm64 (the
+`.deb`), Linux x64 (the AppImage) and Windows 11 all just run.
+
+**TLS.** Works against `pubvm.org`, a public VM/SP 5 or VM/ESA 2.4 system: port 23 is
+plaintext, port 623 is TLS. Guest credentials are printed in its logon banner; keep them out of
+the repo. Checked from this box the same day with `openssl s_client`: TLS 1.3, `CN=pubvm.org`
+issued by Let's Encrypt `YE2`, `Verify return code: 0` — so a run with no flags exercises the
+default **chain-verified** path, which until now had only been tested against our own proxy and a
+generated CA via `-cafile`. The leaf expires 2027-01-10 and will be renewed.
+
+**It is not a TN3270E witness.** A raw probe of port 623 (answering `WILL TTYPE`, sending
+`IBM-3278-2-E`) got `DO TTYPE`, `SB TTYPE SEND`, `DO`/`WILL EOR`, `DO`/`WILL BINARY` and then a
+Read Partition Query (`f3 00 05 01 ff ff 02`) followed by the logon screen — the host never
+offered `DO TN3270E`. The "modern z/OS or z/VM" witness for TN3270E, `IBM-DYNAMIC` and BIND is
+still owed. What `pubvm.org` does give us is a newer VM to check the query reply, alternate
+models and `IND$FILE` against.
+
 ## TLS against both hosts — verified 2026-08-25
 
 Neither Hercules system can speak TLS, so TLS is tested by putting a terminating proxy in

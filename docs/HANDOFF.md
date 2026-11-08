@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-06 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge; UNPUBLISHED, UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
+# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; UNPUBLISHED, UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -9,6 +9,11 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
+**2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
+arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
+`pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
+`docs/live-testing.md`, the 2026-11-08 section. Item 14 now leaves only `npm publish` and an icon.**
+
 **2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
 deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,
 build, typecheck exit 0, 3113 tests in 132 files; CI run 42289622138 on `main` passed on all five
@@ -17,7 +22,7 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 ### NEXT: THE ROADMAP, AGREED 2026-11-06
 
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
-checks owed by the user on a Mac, a Windows machine and a Raspberry Pi; first `npm publish`; a
+checks DONE 2026-11-08; left: first `npm publish`; a
 3279 icon; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
@@ -142,6 +147,11 @@ hash). A HiDPI Linux user may get slightly soft text; not yet investigated.
 - `.gitattributes` was added, forcing LF on every OS, after a Windows checkout's CRLF broke tests.
 
 ### STILL OWED — NONE OF THIS CAN BE DONE FROM THIS SANDBOX
+
+**2026-11-08: the first four items below are answered by the user** — macOS runs once permitted
+(Gatekeeper, not a refusal); the Linux arm64 `.deb`, the Linux x64 AppImage and Windows 11 all just
+run. Whether each launch went through the Connect dialog from a double-clicked icon was not
+stated item by item. Only the registry install remains open. The list is kept as written.
 
 - **macOS by hand**: launch the `.dmg`/`.zip` on a real Mac. Gatekeeper's path (System Settings →
   Privacy & Security → *Open Anyway*, or `xattr -dr com.apple.quarantine`) is written up in

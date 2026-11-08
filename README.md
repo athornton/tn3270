@@ -60,10 +60,11 @@ Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder
 this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
 downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
 after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
-Whether Apple Silicon will run a fully unsigned `arm64` app at all is **unverified** —
-electron-builder's `identity: null` means no signature was applied, not that one was applied
-ad-hoc, and ad-hoc signing is the fallback under consideration if Gatekeeper refuses outright.
-Windows shows SmartScreen; *More info → Run anyway* gets past it.
+**Checked by hand by the user on 2026-11-08:** the macOS build runs once you permit it (a
+cumbersome step, but not a refusal), and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11
+installer all just run. electron-builder's `identity: null` means no signature was applied, not an
+ad-hoc one; signing waits on an Apple Developer ID. Windows can show SmartScreen; *More info →
+Run anyway* gets past it.
 
 **Minimum OS**, from Electron 44.10.2's own stated platform support
 (`node_modules/electron/README.md`, "Platform support"): macOS Ventura (13) and up; Windows 10 and
@@ -1299,7 +1300,10 @@ Done:
    predicted: a 3270 client that cannot do TLS is unusable against anything modern.
    **On by default**, with `-cafile`, `-noverifycert` and `-insecure`; s3270's option
    spellings with its default inverted. Verified against both hosts through an in-repo
-   TLS proxy, since neither Hercules system can speak it. Client certificates,
+   TLS proxy, since neither Hercules system can speak it — and, since 2026-11-08, by the user
+   against a real TLS host (`pubvm.org` port 623, a public VM/SP 5 or VM/ESA 2.4 system whose
+   Let's Encrypt certificate verifies against the system store, so the default verified path is
+   the one exercised; see `docs/live-testing.md`). Client certificates,
    `-accepthostname` and negotiated `START_TLS` are **not** done — see *What is not
    implemented*.
 
@@ -1483,11 +1487,8 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
    ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
    2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Nothing is published
-   to npm or signed yet.** See
-   *Installing* and `docs/releasing.md` for what that leaves: a macOS pass by hand (including
-   whether a fully unsigned `arm64` build launches at all), the Windows installer on a real Windows
-   machine, the Linux arm64 AppImage/`.deb` on real arm64 hardware, and the Connect dialog by an
-   actual double-click on each.
+   to npm or signed yet.** The hand checks were done by the user on 2026-11-08: macOS runs once
+   permitted, and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 all just run.
    The Windows target was a deliberate addition rather than a stretch goal: there are **zero
    native dependencies** (every package depends only on other workspace packages, with Electron
    the single external), and there is not one `process.platform` branch anywhere in
@@ -1498,10 +1499,10 @@ both below: **VMGIF cannot run without GDDM** (measured from its module), so our
 converter is the test vehicle; and **the printer splits in two**, so "printer last" no longer
 holds as one item.
 
-14. **Close out packaging.** The live checks by hand (unsigned `arm64` launch and Gatekeeper on a
-   real Mac, the Windows installer, the Linux arm64 AppImage/`.deb` on a Raspberry Pi, the Connect
-   dialog by real double-click on each); the first `npm publish` (`docs/releasing.md`); a
-   3279-styled icon. **Signing and store distribution wait on the user's Apple Developer ID (and
+14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: macOS runs
+   once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run). Left: the
+   first `npm publish` (`docs/releasing.md`); a 3279-styled icon. **Signing and store
+   distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
    App Store (which needs App Sandbox and its own certificate) or the Microsoft Store (MSIX);
@@ -1559,8 +1560,9 @@ appearance has no visual test; on Linux at a forced scale factor 2 glyph edges a
 Retina macOS doubles cleanly (found 2026-11-06, not investigated); accessibility (screen readers,
 keyboard-only use of the dialog and menus) and auto-update have never been looked at. Live
 witnesses still owed: TK5 against oversize, a modern z/OS or z/VM host (real TN3270E,
-`IBM-DYNAMIC`, BIND size 0x03), the GUI Model menu on a real desktop, CLI `Set()`+reconnect against
-VM, Sys Req over TN3270E, keypad buttons against a host.
+`IBM-DYNAMIC`, BIND size 0x03 — `pubvm.org` does not fill this: probed 2026-11-08, it negotiates
+TTYPE, EOR and BINARY only and never offers TN3270E), the GUI Model menu on a real desktop, CLI
+`Set()`+reconnect against VM, Sys Req over TN3270E, keypad buttons against a host.
 
 Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
 ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped
