@@ -911,9 +911,11 @@ export class Session {
    *
    * `SessionOptions.connect` is INJECTED, and the injected function is where the TLS decision
    * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` (`tcpConnect(h, p, tls)`),
-   * chosen once from the command line. Replaying the remembered host and port THROUGH THAT SAME
-   * FUNCTION therefore reuses the original decision by construction, and there is nothing here
-   * that could re-derive it.
+   * chosen once from the command line — or, in the GUI, a function the Connect dialog's latest
+   * press set (`defaultSession` accepts one); either way reconnect replays the last EXPLICIT
+   * choice, and nothing reachable from a keypress can change it. Replaying the remembered host
+   * and port THROUGH THAT SAME FUNCTION therefore reuses the original decision by construction,
+   * and there is nothing here that could re-derive it.
    *
    * That is not a stylistic preference. A PLAINTEXT HOST DOES NOT REJECT A TLS HANDSHAKE, IT
    * HANGS: Hercules writes `IAC DO TERMINAL-TYPE` and waits, and OpenSSL reads that leading 0xff
