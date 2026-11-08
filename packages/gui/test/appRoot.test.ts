@@ -22,6 +22,7 @@ describe('layoutFor', () => {
       expect(l.document('index.html')).toBe(join(d, 'index.html'));
       expect(l.preload('preload.cjs')).toBe(join(d, 'dist', 'preload.cjs'));
       expect(l.atlasDir).toBeUndefined();
+      expect(l.icon).toBe(join(d, 'resources', 'icon.png'));
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 
@@ -34,6 +35,7 @@ describe('layoutFor', () => {
       expect(l.document('index.html')).toBe(join(d, 'index.html'));
       expect(l.preload('preload.cjs')).toBe(join(d, 'preload.cjs'));
       expect(l.atlasDir).toBe(d);
+      expect(l.icon).toBe(join(d, 'icon.png'));
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 

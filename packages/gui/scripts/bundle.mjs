@@ -13,6 +13,7 @@
  *    (`src/preload.cts` has the measurement).
  *  - each document's `<script src>` module -> `app/<basename>`: ESM, platform browser,
  *    SELF-CONTAINED, so the shipped HTML needs no import map and reaches nothing outside `app/`.
+ *  - the window icon (`resources/icon.png` -> `app/icon.png`).
  *  - the documents themselves, `ui.css`, and the atlas (`atlas.{json,bin}`, from canvas's own
  *    `assetDir()` -- the package that owns them answers where they are).
  *  - `package.json` (Electron reads `main`, `type` and `name`) and the `BUNDLED` marker that
@@ -68,7 +69,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import { assetDir, ATLAS_FILES } from '@tn3270/canvas';
 import { distStaleness } from '../../../scripts/freshness.mjs';
-import { BundleError, DOCUMENTS, verify } from './bundleVerify.mjs';
+import { BundleError, DOCUMENTS, ICON_SOURCE, verify } from './bundleVerify.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
@@ -253,6 +254,10 @@ async function main() {
     need(join(assetDir(), f), `@tn3270/canvas ${f}`);
     copyFileSync(join(assetDir(), f), join(out, f));
   }
+
+  // --- the window icon, flat beside main.js where `layout.icon` looks for it in a bundle
+  need(join(gui, ICON_SOURCE), `packages/gui/${ICON_SOURCE}`);
+  copyFileSync(join(gui, ICON_SOURCE), join(out, basename(ICON_SOURCE)));
 
   /*
     `name` IS THE GUI MANIFEST'S, AND THAT DECIDES `app.getName()` AND THE userData DIRECTORY.

@@ -44,7 +44,7 @@ describe.skipIf(!bundled)('the bundled app/ (skipped: no packages/gui/app/BUNDLE
     const pkg = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8')) as Record<string, unknown>;
     expect(pkg['type']).toBe('module');
     expect(existsSync(join(app, String(pkg['main'])))).toBe(true);
-    for (const f of ['atlas.json', 'atlas.bin', 'preload.cjs', 'ui.css']) {
+    for (const f of ['atlas.json', 'atlas.bin', 'preload.cjs', 'ui.css', 'icon.png']) {
       expect(existsSync(join(app, f)), f).toBe(true);
     }
   });

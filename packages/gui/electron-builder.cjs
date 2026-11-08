@@ -27,8 +27,17 @@ module.exports = {
     // metadata, which is where the .deb's required homepage comes from (appInfo.computePackageUrl).
     app: 'app',
     output: '../../artifacts/gui',
-    buildResources: 'build',
+    // NOT the default `build/`: the repository's .gitignore ignores every `build/` directory, so an
+    // icon there would never be committed. Tracked, and holding icon.svg (source) and icon.png.
+    buildResources: 'resources',
   },
+
+  // One 1024x1024 PNG for every platform. resolveIcon (platformPackager.js) looks for it in
+  // buildResources, then the project directory, and converts it: to .icns for mac (which needs at
+  // least 512x512), .ico for the NSIS installer, and a size set for Linux (LinuxTargetHelper.js
+  // computeDesktopIcons; `linux.icon` below overrides it with a size set). Named, not left to the
+  // fallback search, so a missing file fails the build rather than shipping Electron's icon.
+  icon: 'icon.png',
 
   // Must be explicit: electron is not in app/package.json, and the default reads only
   // node_modules/electron under the project directory or the manifests' dependencies. READ from
@@ -76,6 +85,10 @@ module.exports = {
     // --x64/--arm64 (targets/targetFactory.js computeArchToTargetNamesMap), and CI builds each arch
     // on its own native runner with `--linux --x64` / `--linux --arm64`. With no flag: the host's.
     target: ['AppImage', 'deb'],
+    // A DIRECTORY of NxN.png (iconConverter.js collectIconsFromDir), not the top-level 1024: the
+    // .deb installs each into hicolor/NxN/apps (FpmTarget.js), and hicolor's index.theme has no
+    // 1024x1024 directory, so a lone 1024 is an icon no spec-following desktop looks up.
+    icon: 'icons',
     category: 'Network',
     maintainer: 'Adam Thornton <athornton@gmail.com>',
     // The .deb control file's one-line synopsis. Without it fpm writes `Description: ` with an

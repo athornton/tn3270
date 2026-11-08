@@ -43,10 +43,18 @@ export interface Layout {
   preload(name: string): string;
   /** The atlas directory, or undefined to use `@tn3270/canvas`'s own `assetDir()`. */
   readonly atlasDir: string | undefined;
+  /**
+   * The window icon PNG. Unbundled it is the tracked `resources/icon.png`, which is also what
+   * electron-builder converts into the `.icns`/`.ico`/Linux icon set; the bundle copies it flat.
+   */
+  readonly icon: string;
 }
 
 /** The marker `scripts/bundle.mjs` writes into `app/`. Its contents are irrelevant. */
 export const BUNDLE_MARKER = 'BUNDLED';
+
+/** The icon's file name, in `resources/` unbundled and flat in `app/` bundled. */
+export const ICON_FILE = 'icon.png';
 
 export function layoutFor(mainDir: string): Layout {
   if (existsSync(join(mainDir, BUNDLE_MARKER))) {
@@ -55,6 +63,7 @@ export function layoutFor(mainDir: string): Layout {
       document: (name) => join(mainDir, name),
       preload: (name) => join(mainDir, name),
       atlasDir: mainDir,
+      icon: join(mainDir, ICON_FILE),
     };
   }
   return {
@@ -62,5 +71,6 @@ export function layoutFor(mainDir: string): Layout {
     document: (name) => join(mainDir, '..', name),
     preload: (name) => join(mainDir, name),
     atlasDir: undefined,
+    icon: join(mainDir, '..', 'resources', ICON_FILE),
   };
 }
