@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; UNPUBLISHED, UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
+# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; PUBLISHED to npm as 0.1.0 (tag `v0.1.0`), native installers UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -12,7 +12,7 @@ documentation pass).
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
 `pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
-`docs/live-testing.md`, the 2026-11-08 section. Item 14 now leaves only `npm publish`: the icon is done too (branch `icon`, 2026-11-08).**
+`docs/live-testing.md`, the 2026-11-08 section. Item 14: the icon and the first `npm publish` (0.1.0, from CI run 42504570737) are done too; left is npm trusted publishing from GitHub Actions.**
 
 **2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
 deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,
@@ -22,7 +22,7 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 ### NEXT: THE ROADMAP, AGREED 2026-11-06
 
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
-checks and icon DONE 2026-11-08; left: first `npm publish`; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
+checks, icon and 0.1.0 publish DONE 2026-11-08; next: npm trusted publishing from GitHub Actions; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
 `pr3287`); (19) Programmed Symbols, tested with our own `gif2ps` converter; (20) printer graphics
@@ -50,7 +50,7 @@ The rest of this section is the branch's state as of the merge, kept for its det
   `@tn3270/cli` (bin `tn3270-cli`), `@tn3270/tui` (bin `tn3270`), `@tn3270/web` (bin `tn3270-web`),
   `@tn3270/gui` (bin `tn3270-gui`), plus the library packages `core`, `frontend`, `canvas`,
   `node-files` (internal, no stable API, published only because the front ends depend on them).
-  Every manifest has `"engines": {"node": ">=22"}` and `publishConfig.access: public`, checked by
+  Every manifest has `"engines": {"node": ">=20.19"}` (">=22" in 0.1.0) and `publishConfig.access: public`, checked by
   `packages/core/test/manifests.test.ts`.
 - **`tn3270-gui`** (`packages/gui/bin/tn3270-gui.mjs`) runs the esbuild bundle
   (`packages/gui/app/`, built by `npm run bundle:gui`) under the Electron npm installed beside it
@@ -166,8 +166,9 @@ double-click is the only launch path not exercised. Only the registry install re
 - **The Connect dialog, by an actual double-click**, on each OS above — every automated check
   drives it through a seam (`TN3270_GUI_CONNECT`, Chromium `sendInputEvent`) or a replay, never a
   real click on a real double-clicked icon.
-- **`npm install -g @tn3270/<pkg>` from the real registry** — nothing is published yet, so every
-  install so far has been from a local tarball or a CI artifact. See `docs/releasing.md`.
+- ~~**`npm install -g @tn3270/<pkg>` from the real registry**~~ — DONE 2026-11-08: 0.1.0 is
+  published, and the user installed `@tn3270/tui` and `@tn3270/gui` from the registry (locally, with
+  `npx`) on Node 20.19.2; both ran.
 
 **Merging `packaging` into `main` is the user's call, not a step in this plan.**
 

@@ -15,7 +15,7 @@
     "directory": "packages/core"
   },
   "homepage": "https://github.com/athornton/tn3270#readme",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "scripts": { "build": "tsc --build" }
 }

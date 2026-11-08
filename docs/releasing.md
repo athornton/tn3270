@@ -141,5 +141,13 @@ ID; ad-hoc signing is the fallback under consideration before then.
 
 ## Tag-triggered publishing
 
-Not set up. A push of a `vX.Y.Z` tag does not publish anything by itself; everything above is run
-by hand until npm trusted publishing (OIDC, no long-lived token in CI) is configured for this org.
+Not set up yet; it is the next packaging item on the roadmap (README *Remaining* item 14). A push
+of a `vX.Y.Z` tag does not publish anything by itself, and everything above is run by hand, until
+each `@tn3270/*` package names `.github/workflows/package.yml` as its trusted publisher on
+npmjs.com (OIDC from GitHub Actions: no long-lived npm token in CI, and provenance on each
+version). Then this document's manual steps become the fallback.
+
+## Release history
+
+- **0.1.0**, 2026-11-08: tag `v0.1.0` (`c30ad98`), published by hand from CI run 42504570737's
+  `npm-tarballs`. Every registry `dist.shasum` matches that artifact's tarball.

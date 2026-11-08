@@ -17,7 +17,24 @@ const manifests = readdirSync(packagesDir)
 const published = manifests.filter(({ m }) => m.private !== true);
 const root = JSON.parse(readFileSync(join(packagesDir, '..', 'package.json'), 'utf8')) as Manifest;
 
+/**
+ * The Node floor every manifest claims. Lowered from 22 on 2026-11-08 after 0.1.0 measured fine on
+ * 20.19.2 (Debian 13's packaged Node): see the test below, which holds CI to testing it.
+ */
+const NODE_FLOOR = '20.19';
+
 describe('package manifests', () => {
+  it('CI tests the floor the manifests claim, and nothing older', () => {
+    // A floor nobody runs is a guess. Every `node: 'X'` in the matrix of package.yml is a Node a
+    // job really uses, so the oldest of them must BE the claimed floor.
+    const wf = readFileSync(join(packagesDir, '..', '.github', 'workflows', 'package.yml'), 'utf8');
+    const versions = [...wf.matchAll(/^\s+node: '([0-9.]+)'\s*$/gm)].map((v) => v[1]!);
+    expect(versions.length, 'no `node:` entries in the package.yml matrix').toBeGreaterThan(1);
+    const key = (v: string) => v.split('.').map(Number);
+    const oldest = versions.sort((a, b) => { const [x, y] = [key(a), key(b)]; return x[0]! - y[0]! || (x[1] ?? 0) - (y[1] ?? 0); })[0];
+    expect(oldest).toBe(NODE_FLOOR);
+  });
+
   it('finds the eight published packages and the private fixtures', () => {
     expect(published.map(({ m }) => m.name).sort()).toEqual([
       '@tn3270/canvas', '@tn3270/cli', '@tn3270/core', '@tn3270/frontend',
@@ -30,7 +47,7 @@ describe('package manifests', () => {
     '%s has files, engines, publishConfig, repository and description', (_n, _d, m) => {
       expect(m.files?.length).toBeGreaterThan(0);
       expect(m.files).not.toContain('src');
-      expect(m.engines?.node).toBe('>=22');
+      expect(m.engines?.node).toBe(`>=${NODE_FLOOR}`);
       expect(m.publishConfig?.access).toBe('public');
       expect(m.repository).toBeDefined();
       expect(m.description).toBeTruthy();
