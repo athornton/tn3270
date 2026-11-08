@@ -22,12 +22,17 @@
  *    a source file, skip `npm run build`, and npm packs yesterday's compiled code without a word.
  *    gui is checked too although it ships `app/`, because `app/` is built from `gui/dist`.
  *
+ * AND AFTER PACKING, each tarball must contain `package/LICENSE`: npm takes a LICENSE only from the
+ * package directory, so before the tracked copies (2026-11-08) all eight packed without one and
+ * `npm pack` said nothing. Read from the tarball itself, the thing that gets published.
+ *
  * `artifacts/npm` IS DELETED FIRST, so a tarball from an earlier run can never be installed as if
  * it were this one's.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { distStaleness } from './freshness.mjs';
 import { BundleError, bundleStaleness, verify } from '../packages/gui/scripts/bundleVerify.mjs';
@@ -53,6 +58,21 @@ export function publishedPackages() {
 /** The file name `npm pack` gives a manifest: `@tn3270/node-files@0.1.0` -> `tn3270-node-files-0.1.0.tgz`. */
 export function tarballName(m) {
   return `${m.name.replace(/^@/, '').replace('/', '-')}-${m.version}.tgz`;
+}
+
+/** Every entry path in a .tgz (ustar: name at 0, size in octal at 124, prefix at 345). */
+export function tarEntries(tgz) {
+  const tar = gunzipSync(readFileSync(tgz));
+  const names = [];
+  for (let o = 0; o + 512 <= tar.length;) {
+    const h = tar.subarray(o, o + 512);
+    if (h.every((b) => b === 0)) break;
+    const field = (a, b) => h.subarray(a, b).toString('utf8').replace(/\0.*$/s, '');
+    const prefix = field(345, 500);
+    names.push(prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+    o += 512 + Math.ceil(parseInt(field(124, 136).trim() || '0', 8) / 512) * 512;
+  }
+  return names;
 }
 
 /** Compiled suffix -> the source suffixes it can come from. LONGEST FIRST: `.d.ts` before `.ts`. */
@@ -127,6 +147,9 @@ function main() {
     }
     const name = tarballName(m);
     if (!existsSync(join(out, name))) die(`npm pack in packages/${dir} succeeded but wrote no ${name}`);
+    if (!tarEntries(join(out, name)).includes('package/LICENSE')) {
+      die(`${name} has no package/LICENSE: copy the root LICENSE into packages/${dir}/`);
+    }
     process.stdout.write(`${name}\n`);
   }
 }
