@@ -166,6 +166,6 @@ describe('the chord harness', () => {
     expect(keys).toContain("l === 'menu: popup model'");
     expect(keys).toMatch(/if \(popups !== popupsWanted\)/);
     const main = readFileSync(join(guiDir, 'src', 'main.ts'), 'utf8');
-    expect(main).toContain("if (logActions) process.stdout.write('menu: popup model\\n');");
+    expect(main).toContain("if (SEAM.keys !== '') process.stdout.write('menu: popup model\\n');");
   });
 });

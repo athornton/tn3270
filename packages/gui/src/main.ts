@@ -258,9 +258,9 @@ const SEAM = Object.freeze({
    *
    * It prints `connect: dialog shown`; per form `connect: submitted`, and `connect: error <text>` if
    * the dialog's error line has text once the submit has settled; and at the end `connect: dialog
-   * closed` or `connect: dialog still open` (or `connect: submit never settled`, which ends it). The text is the parser's or the connect failure's
-   * message about the host the harness chose, never anything an operator typed, so it is safe to
-   * print.
+   * closed` or `connect: dialog still open` (or `connect: submit never settled`, which ends it).
+   * The text is the parser's or the connect failure's message about the host the harness chose,
+   * never anything an operator typed, so it is safe to print.
    *
    * EMPTY MEANS ABSENT. Malformed JSON is refused by name (`parseConnectSeam`).
    */
@@ -1679,11 +1679,14 @@ async function startSession(
       const model = Menu.getApplicationMenu()?.getMenuItemById('model')?.submenu;
       if (model !== undefined && !win.isDestroyed()) {
         model.popup({ window: win });
-        // FOR `keys.mjs`, under the action log's own gate: the logged kind above proves the chord
-        // ARRIVED, not that a menu opened, and without this line deleting the popup passes every
-        // gate. `popup` returns at once on Linux (measured: the next chord's action is logged
-        // while the menu is still up), so this line is not a promise that it was dismissed.
-        if (logActions) process.stdout.write('menu: popup model\n');
+        // FOR `keys.mjs`: the logged kind above proves the chord ARRIVED, not that a menu opened,
+        // and without this line deleting the popup passes every gate. `popup` returns at once on
+        // Linux (measured: the next chord's action is logged while the menu is still up), so this
+        // line is not a promise that it was dismissed. GATED ON THE KEYS SEAM ALONE, not on
+        // `logActions`: that gate's replay half exists because a `type` action carries typed
+        // text, and this line carries none -- so `connect.mjs` can count it against a host, where
+        // it is the evidence that a dialog connect installed the app menu.
+        if (SEAM.keys !== '') process.stdout.write('menu: popup model\n');
       }
       return;
     }
