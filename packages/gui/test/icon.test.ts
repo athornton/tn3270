@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { layoutFor } from '../src/appRoot.js';
 import { ICON_SOURCE, LINUX_ICON_DIR, LINUX_ICON_SIZES } from '../scripts/bundleVerify.mjs';
@@ -40,9 +40,11 @@ describe('the application icon', () => {
     const cfg = createRequire(import.meta.url)(join(gui, 'electron-builder.cjs')) as {
       icon?: string; directories?: { buildResources?: string }; linux?: { icon?: string };
     };
+    // POSIX joins: the config and the constants are both written with `/`, and path.join on
+    // Windows would turn the left side into `resources\icon.png` (CI, 2026-11-08).
     const res = cfg.directories?.buildResources ?? '';
-    expect(join(res, cfg.icon ?? '')).toBe(ICON_SOURCE);
-    expect(join(res, cfg.linux?.icon ?? '')).toBe(LINUX_ICON_DIR);
+    expect(posix.join(res, cfg.icon ?? '')).toBe(ICON_SOURCE);
+    expect(posix.join(res, cfg.linux?.icon ?? '')).toBe(LINUX_ICON_DIR);
   });
 
   it('is what the unbundled layout hands the windows', () => {
