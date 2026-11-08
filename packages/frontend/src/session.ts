@@ -9,10 +9,14 @@ import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
  * that forgot the parameter silently insecure. `-insecure` passes
  * `{ kind: 'plaintext' }` explicitly.
  *
- * `tls` may also be a FUNCTION, called at every connect -- the GUI's Connect dialog passes one so
- * a retry can change TLS (spec 2026-11-08-connect-dialog-retry-design.md). `reconnect()` dials
- * through this same function, so it replays the LAST EXPLICIT choice: no keypress or host frame
- * can change it, only whoever owns the function.
+ * `tls` may also be a FUNCTION, called at every connect -- once a later task wires it, the GUI's
+ * Connect dialog can pass one so a retry changes TLS (spec
+ * 2026-11-08-connect-dialog-retry-design.md); that wiring does not exist yet. `reconnect()` dials
+ * through this same function, so it replays whichever choice is IN FORCE when it runs, which only
+ * the function's OWNER can write -- no keypress, menu or host frame can. THE RULE AN OWNER MUST
+ * KEEP: write the choice only as part of a `connect()` to the target it belongs to (see
+ * `reconnect()`'s own comment in `@tn3270/core`'s `session.ts` for why that is what keeps it
+ * safe).
  */
 export function defaultSession(
   terminalType?: string,

@@ -145,24 +145,34 @@ export function resolveTls(flags: TlsFlags, usageError: (message: string) => Err
 export type TlsRemedy = 'flag' | 'dialog' | 'prompt';
 
 /**
+ * The remedy-first lead for the two plaintext-host cases in `describeTlsError`, keyed by
+ * `TlsRemedy` so a fourth remedy that forgot an entry here is a compile error rather than a
+ * silently `undefined` one. `'flag'`'s `undefined` keeps the plain command-line wording.
+ */
+const REMEDY_LEAD: Readonly<Record<TlsRemedy, string | undefined>> = {
+  flag: undefined,
+  dialog: 'Untick TLS in the Connect dialog',
+  prompt: 'Answer n to TLS',
+};
+
+/**
  * Explains a TLS failure in terms of the flag that would change it.
  *
  * This mapping is most of the feature's usability. A TLS failure against a
  * plaintext host is otherwise indistinguishable from a host being down, and the
  * fix — one flag — is not guessable from `ECONNRESET`.
  *
- * `remedy: 'dialog'` rewords only the two plaintext-host cases, the only ones whose fix the Connect
- * dialog has a control for; the certificate cases name flags the dialog cannot set, which is still
- * the truth about how to fix them. THE DIALOG WORDING PUTS THE REMEDY FIRST, because a message is
- * read by someone who may see only its start (memory note *fixed-width-messages-lose-their-point*).
+ * `remedy: 'dialog'` and `remedy: 'prompt'` reword only the two plaintext-host cases, the only
+ * ones whose fix each has a control for -- the GUI's Connect dialog a TLS checkbox, the TUI's
+ * prompt a yes/no question; the certificate cases name flags neither can set, which is still the
+ * truth about how to fix them. BOTH REWORDINGS PUT THE REMEDY FIRST, because a message is read by
+ * someone who may see only its start (memory note *fixed-width-messages-lose-their-point*).
  * The `'flag'` wording is left exactly as it shipped.
  */
 export function describeTlsError(
   code: string | undefined, host: string, port: number, remedy: TlsRemedy = 'flag',
 ): string {
-  // The remedy-first lead for the two plaintext-host cases; undefined keeps the command-line wording.
-  const lead = remedy === 'dialog' ? 'Untick TLS in the Connect dialog'
-    : remedy === 'prompt' ? 'Answer n to TLS' : undefined;
+  const lead = REMEDY_LEAD[remedy];
   switch (code) {
     case 'HANDSHAKE_TIMEOUT':
       return lead !== undefined
@@ -208,8 +218,8 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
  * "TLS connection to ... failed" would send the reader to a setting that was not on.
  *
  * The action and the target come first (`cannot connect to host:port`), for the same truncation
- * reason the dialog's TLS wording leads with its remedy. A code this does not know keeps the
- * underlying message when there is one, rather than inventing words for it.
+ * reason the dialog's and the prompt's TLS wording lead with their remedy. A code this does not
+ * know keeps the underlying message when there is one, rather than inventing words for it.
  */
 export function describeConnectError(
   code: string | undefined, host: string, port: number, message?: string,

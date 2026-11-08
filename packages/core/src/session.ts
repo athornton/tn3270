@@ -910,12 +910,19 @@ export class Session {
    * ## WHY IT REUSES `this.opts.connect` AND TAKES NO ARGUMENTS — THE TLS TRAP
    *
    * `SessionOptions.connect` is INJECTED, and the injected function is where the TLS decision
-   * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` (`tcpConnect(h, p, tls)`),
-   * chosen once from the command line — or, in the GUI, a function the Connect dialog's latest
-   * press set (`defaultSession` accepts one); either way reconnect replays the last EXPLICIT
-   * choice, and nothing reachable from a keypress can change it. Replaying the remembered host
-   * and port THROUGH THAT SAME FUNCTION therefore reuses the original decision by construction,
-   * and there is nothing here that could re-derive it.
+   * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` or a `() => TlsOptions`
+   * (`tcpConnect(h, p, tls)`). Replaying the remembered host and port THROUGH THAT SAME FUNCTION
+   * means `reconnect()` reuses whichever choice is IN FORCE when it runs — not a decision frozen
+   * at construction. A plain `TlsOptions` never changes, so for the command line "in force" and
+   * "chosen once at startup" are the same thing; a function's result is whatever its OWNER last
+   * wrote there, and today that owner is still only the command line. (Once a later task wires
+   * it, the owner may instead be the GUI's Connect dialog, writing a new choice as part of its
+   * submit — that wiring does not exist yet.) Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
+   * FRAME CAN WRITE IT, only whoever owns the function — and THE RULE AN OWNER MUST KEEP is to
+   * write the choice only as part of a `connect()` to the target the choice belongs to. That is
+   * what will make it safe for the dialog to own one at all: `reconnect()` is unreachable until a
+   * connect attempt has already succeeded (see "THE TWO REFUSALS" below), so it can only ever
+   * replay the target whose own successful connect last paired a choice with it.
    *
    * That is not a stylistic preference. A PLAINTEXT HOST DOES NOT REJECT A TLS HANDSHAKE, IT
    * HANGS: Hercules writes `IAC DO TERMINAL-TYPE` and waits, and OpenSSL reads that leading 0xff
