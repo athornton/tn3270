@@ -139,9 +139,10 @@ export function resolveTls(flags: TlsFlags, usageError: (message: string) => Err
  * How the session was started, which decides how a TLS remedy is worded. `'flag'` is a command
  * line, where `-insecure` is the fix; `'dialog'` is the GUI's Connect dialog, where there is no
  * command line to add a flag to and the fix is its TLS checkbox (spec
- * 2026-11-05-packaging-design.md section 2, "TLS hang").
+ * 2026-11-05-packaging-design.md section 2, "TLS hang"). `'prompt'` is the TUI's no-host prompt,
+ * whose fix is answering `n` to its TLS question.
  */
-export type TlsRemedy = 'flag' | 'dialog';
+export type TlsRemedy = 'flag' | 'dialog' | 'prompt';
 
 /**
  * Explains a TLS failure in terms of the flag that would change it.
@@ -159,19 +160,21 @@ export type TlsRemedy = 'flag' | 'dialog';
 export function describeTlsError(
   code: string | undefined, host: string, port: number, remedy: TlsRemedy = 'flag',
 ): string {
-  const dialog = remedy === 'dialog';
+  // The remedy-first lead for the two plaintext-host cases; undefined keeps the command-line wording.
+  const lead = remedy === 'dialog' ? 'Untick TLS in the Connect dialog'
+    : remedy === 'prompt' ? 'Answer n to TLS' : undefined;
   switch (code) {
     case 'HANDSHAKE_TIMEOUT':
-      return dialog
-        ? `Untick TLS in the Connect dialog: ${host}:${port} accepted the connection but never `
+      return lead !== undefined
+        ? `${lead}: ${host}:${port} accepted the connection but never `
           + 'completed a TLS handshake, so it probably does not speak TLS — a Hercules or other '
           + 'vintage system.'
         : `${host}:${port} accepted the connection but never completed a TLS handshake. `
           + 'If it does not speak TLS — a Hercules or other vintage system — use -insecure.';
     case 'ERR_SSL_WRONG_VERSION_NUMBER':
     case 'ERR_SSL_PACKET_LENGTH_TOO_LONG':
-      return dialog
-        ? `Untick TLS in the Connect dialog: ${host}:${port} answered with something that is not `
+      return lead !== undefined
+        ? `${lead}: ${host}:${port} answered with something that is not `
           + 'TLS, so it is almost certainly a plaintext host.'
         : `${host}:${port} answered with something that is not TLS. `
           + 'It is almost certainly a plaintext host: use -insecure.';

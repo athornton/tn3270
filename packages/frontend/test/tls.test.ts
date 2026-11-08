@@ -147,6 +147,22 @@ describe('TLS error messages name the flag that fixes them', () => {
   });
 });
 
+describe("describeTlsError 'prompt'", () => {
+  it('words both plaintext-host cases for the TUI prompt, remedy first', () => {
+    for (const code of ['HANDSHAKE_TIMEOUT', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ERR_SSL_PACKET_LENGTH_TOO_LONG']) {
+      const m = describeTlsError(code, 'herc', 3270, 'prompt');
+      expect(m.startsWith('Answer n to TLS: herc:3270 ')).toBe(true);
+      expect(m).not.toContain('-insecure');
+      expect(m).not.toContain('Connect dialog');
+    }
+  });
+
+  it('leaves the certificate cases naming their flags', () => {
+    expect(describeTlsError('CERT_HAS_EXPIRED', 'h', 992, 'prompt'))
+      .toBe(describeTlsError('CERT_HAS_EXPIRED', 'h', 992, 'flag'));
+  });
+});
+
 /**
  * A PLAINTEXT CONNECT THAT FAILS IS NOT A TLS FAILURE. Before this existed, the GUI sent every coded
  * error through `describeTlsError`, so with TLS off a host that was simply down read "TLS connection
