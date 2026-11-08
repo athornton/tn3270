@@ -4,8 +4,14 @@ import { DEFAULT_TLS, type TlsOptions } from '@tn3270/frontend';
 import { makeConnector, type AttemptSession } from '../src/connectAttempt.js';
 import { parseGuiArgs } from '../src/args.js';
 
-/** A session double recording what the connector did to it, in order. */
-function fakeSession(geometry: GeometrySetting | undefined, outcomes: Array<Error | 'ok'>) {
+/**
+ * A session double recording what the connector did to it, in order. Each attempt consumes one
+ * outcome: `'ok'` resolves, an `Error` rejects, and `'hang'` is the one DELIBERATE wait -- used
+ * only by the in-flight test, which releases it with `release()`. Running OUT of outcomes is a
+ * test bug, not a hang to wait out: it throws, so a mutant that calls `connect()` an extra time
+ * (e.g. the in-flight guard removed) fails on a clean assertion instead of timing out.
+ */
+function fakeSession(geometry: GeometrySetting | undefined, outcomes: Array<Error | 'ok' | 'hang'>) {
   const log: string[] = [];
   const tls = { current: DEFAULT_TLS as TlsOptions };
   let pending: (() => void) | undefined;
@@ -16,8 +22,9 @@ function fakeSession(geometry: GeometrySetting | undefined, outcomes: Array<Erro
     async connect(host, port, per) {
       log.push(`connect ${host}:${port} ${tls.current.kind} lus=${(per?.lus ?? []).join(',')}`);
       const o = outcomes.shift();
-      if (o === undefined) await new Promise<void>((r) => { pending = r; });   // never settles unless released
-      else if (o !== 'ok') throw o;
+      if (o === undefined) throw new Error('unexpected connect');
+      if (o === 'hang') { await new Promise<void>((r) => { pending = r; }); return; }
+      if (o !== 'ok') throw o;
     },
   };
   return { session, tls, log, release: () => pending?.() };
@@ -63,29 +70,31 @@ describe('makeConnector', () => {
   });
 
   it('refuses a second attempt while one is in flight', async () => {
-    const f = fakeSession(geo, []);
+    const f = fakeSession(geo, ['hang']);
     const c = makeConnector(f.session, f.tls, describeAs);
     const first = c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'vm']));
     expect(await c.attempt(parseGuiArgs(['-insecure', '-model', '3278-2-E', 'vm'])))
       .toEqual({ ok: false, error: 'already connecting', modelLocked: false });
+    // The refusal never touched the session: only the first attempt's connect() ran.
+    expect(f.log.filter((l) => l.startsWith('connect'))).toHaveLength(1);
     f.release();
     expect(await first).toEqual({ ok: true });
   });
 
-  it('turns a setGeometry refusal into an answer, not a throw', async () => {
+  it('turns a setGeometry refusal into an answer, not a throw, worded for THIS attempt\'s TLS', async () => {
     const f = fakeSession(geo, ['ok']);
     f.session.setGeometry = () => { throw new Error('auto needs an -E model'); };
     const r = await makeConnector(f.session, f.tls, describeAs)
       .attempt(parseGuiArgs(['-insecure', '-model', '3278-2', 'vm']));
-    expect(r.ok).toBe(false);
-    expect(r.ok === false && r.error).toContain('auto needs an -E model');
+    // `-insecure` makes THIS attempt's choice plaintext, while `f.tls.current` is still the
+    // fake's initial TLS default (the write never ran: setGeometry threw first) -- so "plain"
+    // here can only come from this attempt's own args, not from `tls.current`.
+    expect(r).toEqual({ ok: false, error: 'plain vm:23 auto needs an -E model', modelLocked: false });
   });
 
-  // DELIBERATE DEPARTURE FROM THE PLAN (see commit message / report): the plan's `makeConnector`
-  // writes `tls.current` BEFORE `setGeometry`, so a thrown `setGeometry` leaves a NEW TLS choice
-  // paired with the OLD target -- exactly what core `Session.reconnect()`'s comment (THE TLS TRAP)
-  // says an owner must never do. Here the write happens only immediately before `connect()`,
-  // after `setGeometry` -- so when `setGeometry` throws, `tls.current` is UNCHANGED.
+  // THE TLS TRAP (core `session.ts`'s `reconnect()`): a new TLS choice may be written only
+  // immediately before a `connect()` to the target it belongs to, after anything that can throw
+  // first -- so when `setGeometry` throws, `tls.current` must be left UNCHANGED.
   it('leaves the previous TLS choice in force when setGeometry throws before the write', async () => {
     const f = fakeSession(geo, []);
     f.tls.current = { kind: 'plaintext' };

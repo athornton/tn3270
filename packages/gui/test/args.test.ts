@@ -267,12 +267,18 @@ describe('buildSession', () => {
     expect(buildSession(parseGuiArgs(['vm']), none).geometrySetting).toEqual({ oversize: { kind: 'none' } });
   });
 
-  it('with a TLS getter, each connect dials the getter\'s current choice', async () => {
+  // Both of `buildSession`'s branches -- geometry mode (no flag) and terminal-type mode
+  // (`--terminal-type`, args.ts's actual flag spelling) -- must pass `tls ?? args.tls` through to
+  // `defaultSession`; the getter test originally covered only the geometry branch.
+  it.each([
+    { label: 'geometry mode', argv: ['vm'] },
+    { label: 'terminal-type mode', argv: ['--terminal-type', 'IBM-3278-2', 'vm'] },
+  ])('with a TLS getter, each connect dials the getter\'s current choice ($label)', async ({ argv }) => {
     const srv = await firstByteServer();
     let session: ReturnType<typeof buildSession> | undefined;
     try {
       let choice: TlsOptions = { kind: 'plaintext' };
-      session = buildSession(parseGuiArgs(['vm']), none, () => choice);
+      session = buildSession(parseGuiArgs(argv), none, () => choice);
       await session.connect('127.0.0.1', srv.port);
       await until('the plaintext connect\'s first byte', () => srv.firsts.length === 1);
       choice = { kind: 'tls', verify: false };

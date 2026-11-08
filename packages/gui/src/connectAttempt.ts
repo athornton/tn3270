@@ -9,6 +9,17 @@ import type { GuiArgs } from './args.js';
  * ONE SESSION, ALREADY WIRED. Each attempt changes only what the dialog owns -- the TLS choice the
  * session's socket factory reads at connect time, the model (geometry mode only), and the target --
  * and connects. Every attempt RESOLVES: a failure is an answer for the dialog's error line.
+ *
+ * A host that accepts the TCP connection and then just hangs up still reports `{ ok: true }` here:
+ * a plaintext `connect()` resolves on the TCP connect, before any 3270 negotiation, and a drop
+ * right after is the terminal window's ordinary reconnect path (spec, behaviour rule 2) -- not
+ * this module's problem, deliberately.
+ *
+ * Nothing else can start a connect while `attempt` is running: the Connect dialog is modal over
+ * the terminal window (`main.ts`), so the dialog's own Connect button is the only thing that could
+ * call `attempt` again, and it is disabled while one is in flight. That is what makes the
+ * `inFlight` flag below sufficient -- it is not guarding against real concurrency, only against
+ * a second press racing the first's answer back from the page.
  */
 export interface AttemptSession {
   readonly geometrySetting: GeometrySetting | undefined;
@@ -39,29 +50,35 @@ export function makeConnector(
     async attempt(args) {
       if (inFlight) return { ok: false, error: 'already connecting', modelLocked };
       inFlight = true;
-      // `args.host!` is safe: `submitConnect` only returns args whose parse found a host.
-      const host = args.host!;
       const port = args.port ?? 23;
       // This attempt's own choice, read once -- used below both to describe a failure (so the
-      // wording is right even if the write below never happens) and, if we get that far, to write
-      // `tls.current`.
+      // wording is right even if the write below never happens) and, if we get that far, to
+      // write `tls.current`.
       const chosenTls = args.tls ?? DEFAULT_TLS;
       try {
+        // `parseGuiArgs` guarantees a host: it throws `MissingHostError` otherwise (args.ts,
+        // the host check just before the host spec is resolved). This is that contract's
+        // enforcement point -- if it is ever broken, fail loudly here rather than quietly
+        // dialling localhost:23.
+        if (args.host === undefined) throw new Error('attempt: args without a host');
+        const host = args.host;
         const now = session.geometrySetting;
         if (now !== undefined && args.model !== undefined) session.setGeometry({ ...now, model: args.model });
-        // DELIBERATE DEPARTURE FROM THE PLAN'S CODE: write `tls.current` HERE, immediately before
-        // `connect()`, and only after `setGeometry` -- the one thing above that can throw. THE
-        // RULE: an owner of a TLS-choice function must write a new choice only immediately before
-        // a `connect()` to the target that choice belongs to, after anything that can throw first,
-        // or a new choice ends up paired with the OLD target. See `reconnect()`'s comment ("THE
-        // TLS TRAP") in `@tn3270/core`'s `session.ts` (~L905-930) for why: `connect()` records its
-        // target before dialling, so a later `reconnect()` would otherwise replay the OLD target
-        // with THIS attempt's new TLS choice.
+        // THE RULE (core `session.ts`'s `reconnect()`, "THE TLS TRAP"): write a new TLS choice
+        // only immediately before a `connect()` to the target that choice belongs to, after
+        // anything that can throw first, or a new choice ends up paired with the OLD target --
+        // `connect()` records its target before dialling, and `reconnect()` later replays that
+        // target through whichever choice is in force. `setGeometry` is the one thing above that
+        // can throw, so the write happens here, after it.
         tls.current = chosenTls;
         await session.connect(host, port, args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
         return { ok: true };
       } catch (err) {
-        return { ok: false, error: describe(err, { host, port, tls: chosenTls.kind !== 'plaintext' }), modelLocked };
+        return {
+          ok: false,
+          error: describe(err, { host: args.host ?? '', port, tls: chosenTls.kind !== 'plaintext' }),
+          modelLocked,
+        };
       } finally {
         inFlight = false;
       }
