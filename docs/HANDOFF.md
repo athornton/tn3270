@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; PUBLISHED to npm as 0.1.0 (tag `v0.1.0`), native installers UNSIGNED; roadmap recorded in README *Remaining* items 14-22)
+# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; PUBLISHED to npm as 0.1.0 (tag `v0.1.0`), native installers UNSIGNED; roadmap recorded in README *Remaining* items 14-22; branch `connect-retry` -- the GUI Connect-dialog retry and the TUI no-host prompt, for 0.1.1 -- is BUILT and AWAITING MERGE)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -15,8 +15,9 @@ the Connect dialog: ...` after the dialog had already closed, with no way back t
 quitting.** Specs: `docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md` (the GUI's
 Connect dialog) and `docs/superpowers/specs/2026-11-08-tui-connect-prompt-design.md` (the TUI's
 counterpart, a no-host prompt instead of a usage error); plan:
-`docs/superpowers/plans/2026-11-08-connect-retry-and-tui-prompt.md` (14 tasks, all done as code;
-Task 14 was this documentation pass). New coverage: `packages/gui/scripts/connect.mjs` (7 cases,
+`docs/superpowers/plans/2026-11-08-connect-retry-and-tui-prompt.md` (15 tasks; Task 14 was this
+documentation pass, now done; Task 15, the whole-branch gate, then pushing the branch and letting
+CI run on it, is the remaining step). New coverage: `packages/gui/scripts/connect.mjs` (7 cases,
 including the retry and going live), `packages/tui/scripts/pty-smoke.py --prompt`, and CI now
 runs all three `pty-smoke.py` modes (default, `--oversize-auto`, `--prompt`) on both
 `ubuntu-latest` and the Node-floor `ubuntu-latest-node20.19` job

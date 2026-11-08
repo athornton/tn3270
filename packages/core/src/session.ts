@@ -915,9 +915,11 @@ export class Session {
    * means `reconnect()` reuses whichever choice is IN FORCE when it runs — not a decision frozen
    * at construction. A plain `TlsOptions` never changes, so for the command line "in force" and
    * "chosen once at startup" are the same thing; a function's result is whatever its OWNER last
-   * wrote there, and today that owner is still only the command line. (Once a later task wires
-   * it, the owner may instead be the GUI's Connect dialog, writing a new choice as part of its
-   * submit — that wiring does not exist yet.) Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
+   * wrote there. **There are two owners today:** the command line, which passes a plain
+   * `TlsOptions` and so never changes it; and the GUI's Connect dialog (`gui/src/connectAttempt.ts`,
+   * `makeConnector`'s `attempt`), which passes `() => tlsChoice.current` and writes
+   * `tlsChoice.current` itself, once per press of Connect, immediately before the `connect()` that
+   * choice belongs to. Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
    * FRAME CAN WRITE IT, only whoever owns the function — and THE RULE AN OWNER MUST KEEP is to
    * write the choice only as part of a `connect()` to the target the choice belongs to.
    * `connect()` records the target before it dials, even when the dial then fails (see
