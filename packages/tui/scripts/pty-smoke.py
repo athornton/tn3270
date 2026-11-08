@@ -549,6 +549,18 @@ def _wait_count(main_fd, captured, pattern, min_count, seconds):
     return bytes(captured).count(pattern) >= min_count
 
 
+def _wait_len(seq, min_len, seconds, poll=0.05):
+    """Polls `len(seq)` until it reaches `min_len` or `seconds` elapses, then returns whether it
+    got there. For `host.connections`: that list is appended to by `PromptFakeHost`'s OWN
+    thread, not by anything this function reads from a socket itself, so there is no `select`
+    to wait on here -- just the other thread catching up. A fixed sleep before reading it would
+    be a race with that thread; this bounds the wait instead of guessing a duration."""
+    end = time.time() + seconds
+    while time.time() < end and len(seq) < min_len:
+        time.sleep(poll)
+    return len(seq) >= min_len
+
+
 def _drain_until_exit(main_fd, pid, seconds, captured):
     """Reads from `main_fd` into `captured` while waiting (WNOHANG) for `pid` to exit. Returns
     the exit status, or None if it did not exit within `seconds` or did not exit normally."""
@@ -636,7 +648,9 @@ def prompt_mode():
     captured = bytearray()
     code1 = None
     try:
-        check("showed the Host prompt", _wait_count(main_fd, captured, b"Host: ", 1, 5))
+        # 15 s, not 5: this one includes node's own cold start, same as the other sub-runs' first
+        # wait -- a 5 s bound was measured to fail under heavy load, before node had even started.
+        check("showed the Host prompt", _wait_count(main_fd, captured, b"Host: ", 1, 15))
         raw_seen = not (termios.tcgetattr(main_fd)[3] & termios.ECHO)
         check("raw mode was in effect (ECHO off) once Host: appeared", raw_seen)
         send(main_fd, f"127.0.0.1:{host.port}\r")
@@ -664,16 +678,11 @@ def prompt_mode():
         check("drew a status line", _wait_count(main_fd, captured, b"\x1b[25;1H", 1, 2))
         check("entered the alternate screen buffer", b"\x1b[?1049h" in bytes(captured))
         check("negotiated a terminal type", host.ttype is not None)
-        # The SERVER's own proof that round 1 really attempted TLS (not merely that the CLIENT
-        # said so): exactly two connections landed here, and the first one's first bytes are a
-        # real TLS record header -- 0x16 (Handshake), 0x03 (the record layer's major version) --
-        # which only a TLS ClientHello sends; plaintext telnet's first bytes are never this.
-        #
-        # NOT CHECKED YET: round 2's `_negotiate_connection` call is still BLOCKED here, inside
-        # its own select/recv loop, because that function keeps serving a connection until it
-        # closes or its OWN deadline passes -- the same as FakeHost's always did. The connected
-        # session stays open until Ctrl-], so `host.connections` gets its second entry only once
-        # the client disconnects below; checked there, not here.
+        # The server-side connection proof (below) is NOT checked yet here: round 2's
+        # `_negotiate_connection` call is still BLOCKED inside its own select/recv loop, because
+        # that function keeps serving a connection until it closes or its OWN deadline passes --
+        # the same as FakeHost's always did. The connected session stays open until Ctrl-], so
+        # `host.connections` gets its second entry only once the client disconnects below.
         send(main_fd, b"\x1d")                # Ctrl-] quits, exactly as the default run checks
         code1 = _drain_until_exit(main_fd, pid, 3, captured)
         check("the client exited", code1 is not None)
@@ -682,15 +691,20 @@ def prompt_mode():
         check("left the alternate screen buffer on quit", b"\x1b[?1049l" in bytes(captured))
         check("ECHO is restored after exit (the tty is sane, after raw mode was seen)",
               raw_seen and code1 is not None and bool(after[3] & termios.ECHO))
-        # The SERVER's own proof that round 1 really attempted TLS (not merely that the CLIENT
-        # said so): exactly two connections landed here, and the first one's first bytes are a
-        # real TLS record header -- 0x16 (Handshake), 0x03 (the record layer's major version) --
-        # which only a TLS ClientHello sends; plaintext telnet's first bytes are never this.
-        # Checked HERE, after the quit, once round 2's connection has actually closed.
+
+        # The SERVER's own proof of what each round actually spoke (not merely what the CLIENT
+        # said it would): a TLS ClientHello's first bytes are always 0x16 (Handshake), 0x03 (the
+        # record layer's major version); plaintext telnet's never are. Waited for, bounded,
+        # rather than assumed ready after the fixed sleep above -- `host.connections` is written
+        # by PromptFakeHost's own thread, and round 2's entry lands only once ITS connection
+        # closes, which the quit above triggers but does not block on.
+        got_both = _wait_len(host.connections, 2, 3)
         check("the host saw exactly 2 connections (round 1's TLS probe, round 2's plaintext)",
-              len(host.connections) == 2)
+              got_both and len(host.connections) == 2)
         check("round 1's connection began with a real TLS ClientHello (0x16 0x03)",
               len(host.connections) >= 1 and host.connections[0][:2] == b"\x16\x03")
+        check("round 2's connection did NOT begin with TLS (0x16): the n answer was honoured",
+              len(host.connections) >= 2 and host.connections[1][:1] != b"\x16")
     finally:
         _cleanup(main_fd, pid, code1, host)
     report.append(("sub-run 1 (TLS round fails, retry connects)", host.ttype, len(captured)))
@@ -701,7 +715,7 @@ def prompt_mode():
     captured2 = bytearray()
     code2 = None
     try:
-        check("sub-run 2: showed the Host prompt", _wait_count(main_fd2, captured2, b"Host: ", 1, 5))
+        check("sub-run 2: showed the Host prompt", _wait_count(main_fd2, captured2, b"Host: ", 1, 15))
         raw_seen2 = not (termios.tcgetattr(main_fd2)[3] & termios.ECHO)
         check("sub-run 2: raw mode was in effect (ECHO off) once Host: appeared", raw_seen2)
         before_ctrlc = len(captured2)
@@ -749,7 +763,7 @@ def prompt_mode():
     captured3 = bytearray()
     code3 = None
     try:
-        check("sub-run 3: showed the Host prompt", _wait_count(main_fd3, captured3, b"Host: ", 1, 5))
+        check("sub-run 3: showed the Host prompt", _wait_count(main_fd3, captured3, b"Host: ", 1, 15))
         raw_seen3 = not (termios.tcgetattr(main_fd3)[3] & termios.ECHO)
         check("sub-run 3: raw mode was in effect (ECHO off) once Host: appeared", raw_seen3)
         send(main_fd3, f"127.0.0.1:{listen_port}\r")
