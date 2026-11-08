@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dialogToArgv } from '../src/connectForm.js';
+import { dialogToArgv } from '@tn3270/frontend';
 import { planStartup } from '../src/connectDialog.js';
 import { buildSession, parseGuiArgs, UsageError } from '../src/args.js';
 

@@ -1,6 +1,6 @@
 import { KNOWN_MODELS, resolveTerminalType, TerminalTypeError } from '@tn3270/core';
 import { MissingHostError, parseGuiArgs, UsageError, type GuiArgs } from './args.js';
-import { dialogToArgv, type ConnectForm } from './connectForm.js';
+import { dialogToArgv, type ConnectForm } from '@tn3270/frontend';
 
 /**
  * The decidable half of the startup Connect dialog: when it opens, what a submit means, and what
