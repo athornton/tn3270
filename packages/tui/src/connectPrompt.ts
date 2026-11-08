@@ -1,8 +1,15 @@
 import { createInterface } from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
 import { resolveTerminalType, TerminalTypeError, KNOWN_MODELS, TERMINAL_TYPE, type Session } from '@tn3270/core';
-import { describeConnectError, describeTlsError, dialogToArgv } from '@tn3270/frontend';
+import { describeConnectError, describeTlsError, dialogToArgv, resolveHostSpec } from '@tn3270/frontend';
 import { parseArgs, UsageError, type TuiArgs } from './args.js';
+
+/** The terminal the prompt runs on. `terminal` overrides readline's `output.isTTY` test (tests only). */
+export interface PromptIo {
+  input: Readable;
+  output: Writable;
+  terminal?: boolean;
+}
 
 /**
  * `tn3270` with no host, at a terminal: ask for one, connect, and on failure ask again with the
@@ -13,27 +20,56 @@ import { parseArgs, UsageError, type TuiArgs } from './args.js';
  * line refuses. A failed round's session is discarded: nothing in the TUI is wired before its
  * first connect, so the next round simply builds a new one.
  *
+ * Only a CONNECT failure -- an error carrying a `.code`, i.e. socket, DNS or TLS -- is reported and
+ * retried. Anything else `attempt` throws (a bug, a `TerminalTypeError`) is rethrown, so it ends
+ * the program exactly as it would have with the host on the command line.
+ *
  * Resolves the connected session, or `undefined` when the user quit (EOF or Ctrl-C) -- after
- * writing a newline, so the shell prompt that follows does not start after `Host: `.
+ * writing a newline, so the shell prompt that follows does not start after `Host: `. A quit while
+ * a connect is in flight waits for it to end (there is no way to abort one), says so, and
+ * disconnects the session if it succeeded anyway.
+ *
+ * Throws `TerminalTypeError` before asking anything if the command line's `-model` is unknown:
+ * the error it would have been with a host, rather than a default no answer can get past.
  */
 export async function promptConnect(
   commandLine: readonly string[],
-  io: { input: Readable; output: Writable },
+  io: PromptIo,
   attempt: (args: TuiArgs) => Promise<Session>,
 ): Promise<Session | undefined> {
   const seed = parseArgs(commandLine);              // flags only: run() found no host in them
+  // The check `buildSession` makes with a host: a model is looked up unless --terminal-type wins.
+  if (seed.model !== undefined && seed.terminalType === undefined) resolveTerminalType({ model: seed.model });
   let host = '';
   // The product default is core's TERMINAL_TYPE ('IBM-3278-2-E'); the model is the part after IBM-.
   let model = seed.model ?? TERMINAL_TYPE.replace(/^IBM-/, '');
   let tls = seed.tls?.kind !== 'plaintext';
-  const rl = createInterface({ input: io.input, output: io.output });
+  const rl = createInterface({
+    input: io.input, output: io.output, ...(io.terminal !== undefined ? { terminal: io.terminal } : {}),
+  });
   let closed = false;
-  rl.on('close', () => { closed = true; });
-  // Ctrl-C at a prompt quits, as EOF does. readline emits 'SIGINT' on the interface only when the
-  // input is a TTY (it has put it in raw mode, so no real signal is raised), which is why the
-  // in-memory tests cannot reach this line; the pty harness (pty-smoke.py) is what exercises it.
-  rl.on('SIGINT', () => { rl.close(); });
+  let connecting = false;
+  /** Quit asked for while connecting: honoured when the attempt ends. */
+  let cancelled = false;
   const say = (text: string): void => { io.output.write(`${text}\n`); };
+  /**
+   * The attempt cannot be aborted, and a TLS handshake can take its full timeout to give up: say
+   * why nothing happens yet, rather than appear to ignore the Ctrl-C.
+   */
+  const cancel = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    say('cancelled; waiting for the connection attempt to end');
+  };
+  rl.on('close', () => {
+    closed = true;
+    if (connecting) cancel();
+  });
+  // Ctrl-C at a prompt quits, as EOF does. readline emits 'SIGINT' on the interface only in
+  // terminal mode (it has put a TTY in raw mode, so the kernel raises no signal). Explicit, though
+  // Node 26's readline also closes on Ctrl-C when nothing listens -- removing this line was
+  // measured to change nothing; it says what is meant rather than relying on that default.
+  rl.on('SIGINT', () => { rl.close(); });
   const quit = (): undefined => { io.output.write('\n'); return undefined; };
   /**
    * One question, trimmed; undefined once the interface has closed. The close listener is removed
@@ -48,6 +84,34 @@ export async function promptConnect(
         () => { rl.off('close', onClose); resolve(undefined); },
       );
     });
+  /**
+   * Runs `attempt` with readline DEAF. In terminal mode readline would echo keys typed while
+   * connecting into the messages that follow, and keep them as the start of the next answer; so
+   * its keypress listeners are taken off the input for the duration, and only Ctrl-C and Ctrl-D
+   * are heard -- as a quit. (Pausing the input instead only delays the same keys to the next
+   * question.) The interface stays OPEN until the attempt ends, even after a quit: closing it
+   * would take the TTY out of raw mode, and the kernel would echo whatever is typed next into the
+   * failure message. Outside terminal mode there are no keypress listeners, and a line typed with
+   * no question pending is dropped by readline itself; EOF still closes the interface.
+   */
+  const connect = async (args: TuiArgs): Promise<Session> => {
+    const held = io.input.listeners('keypress') as Array<(...a: unknown[]) => void>;
+    for (const l of held) io.input.off('keypress', l);
+    const onKey = (_s: unknown, key?: { ctrl?: boolean; name?: string }): void => {
+      if (key?.ctrl === true && (key.name === 'c' || key.name === 'd')) cancel();
+    };
+    io.input.on('keypress', onKey);
+    connecting = true;
+    try {
+      return await attempt(args);
+    } finally {
+      connecting = false;
+      io.input.off('keypress', onKey);
+      // A closed interface has removed its own listener already; re-adding it would leave a dead
+      // one on stdin for the App to inherit.
+      if (!closed) for (const l of held) io.input.on('keypress', l);
+    }
+  };
   try {
     for (;;) {
       const h = await ask(host === '' ? 'Host: ' : `Host [${host}]: `);
@@ -71,21 +135,39 @@ export async function promptConnect(
       }
       if (t !== '') tls = /^y/i.test(t);
 
+      // The answer goes last on the argv, where a leading `-` would make it a FLAG (`-insecure`),
+      // or the missing value of one: no host-spec form starts with `-`, so refuse it as a host.
+      if (host.startsWith('-')) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
       let args: TuiArgs;
       try {
         args = parseArgs(dialogToArgv({ host, model, tls }, commandLine));
       } catch (err) {
-        // The parser's own words; the refused host is not offered back as the next default.
-        if (err instanceof UsageError) { say(err.message); host = ''; continue; }
-        throw err;
+        if (!(err instanceof UsageError)) throw err;
+        say(err.message);
+        // Forget the host only when it is what was refused (a bad port, say). Otherwise -- e.g.
+        // TLS answered n against a -noverifycert on the command line -- every answer stays the
+        // default, and the message names what has to change.
+        if (!hostParses(host)) host = '';
+        continue;
       }
+      if (args.host === undefined) { say(`not a host: ${JSON.stringify(host)}`); host = ''; continue; }
       const port = args.port ?? 23;
-      say(`Connecting to ${args.host!}:${port}...`);
+      // Only now: every check that can refuse the answers has passed.
+      say(`Connecting to ${args.host}:${port}...`);
+      let session: Session;
       try {
-        return await attempt(args);
+        session = await connect(args);
       } catch (err) {
-        say(describeFailure(err, args.host!, port, args.tls?.kind === 'tls'));
+        const code = err instanceof Error ? (err as { code?: unknown }).code : undefined;
+        if (typeof code !== 'string') throw err;   // not a connect failure: a bug, or fatal anyway
+        say(args.tls?.kind === 'tls'
+          ? describeTlsError(code, args.host, port, 'prompt')
+          : describeConnectError(code, args.host, port, (err as Error).message));
+        if (cancelled) return quit();
+        continue;
       }
+      if (cancelled) { session.disconnect(); return quit(); }   // quit while it was connecting
+      return session;
     }
   } finally {
     rl.close();   // before raw mode and the alternate screen take stdin
@@ -106,14 +188,13 @@ function knownModel(m: string): boolean {
   }
 }
 
-/**
- * The failure in the prompt's words, from the error's `.code` -- `tcpConnect`'s MESSAGE is the
- * command-line wording (`use -insecure`), so it is re-worded here, as the GUI's `explain()` does:
- * `describeTlsError`'s `'prompt'` remedy for a TLS attempt, `describeConnectError` for plaintext.
- */
-function describeFailure(err: unknown, host: string, port: number, tls: boolean): string {
-  if (!(err instanceof Error)) return String(err);
-  const code = (err as { code?: string }).code;
-  if (code === undefined) return err.message;
-  return tls ? describeTlsError(code, host, port, 'prompt') : describeConnectError(code, host, port, err.message);
+/** Whether the host answer is a host spec the parser accepts on its own (`resolveHostSpec`'s rules). */
+function hostParses(host: string): boolean {
+  try {
+    resolveHostSpec(host, (m) => new UsageError(m));
+    return true;
+  } catch (err) {
+    if (err instanceof UsageError) return false;
+    throw err;
+  }
 }

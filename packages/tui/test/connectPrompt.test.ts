@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PassThrough } from 'node:stream';
+import { TerminalTypeError } from '@tn3270/core';
+import { resolveScheme } from '@tn3270/frontend';
 import { promptConnect } from '../src/connectPrompt.js';
 import type { TuiArgs } from '../src/args.js';
 
@@ -99,7 +101,7 @@ describe('promptConnect', () => {
     expect(h.transcript()).toContain('TLS [y/N]: ');
     expect(h.tried[0]!.model).toBe('3278-4-E');
     expect(h.tried[0]!.tls).toEqual({ kind: 'plaintext' });
-    expect(h.tried[0]!.scheme).toBeDefined();
+    expect(h.tried[0]!.scheme).toEqual(resolveScheme('green'));
   });
 
   it('a host the parser refuses is its own words, and the round restarts', async () => {
@@ -109,5 +111,208 @@ describe('promptConnect', () => {
     expect(h.transcript()).toContain('\nHost: ');   // no default: the refused host is not offered
     expect(h.tried).toHaveLength(1);
     expect(h.tried[0]!.host).toBe('vm');
+  });
+
+  it('round 2 defaults to round 1 answers: model and TLS carried, not reset', async () => {
+    const h = harness(['vm', '3278-4-E', 'n', '', '', ''], [tlsError('ECONNREFUSED'), 'ok']);
+    await promptConnect([], h, h.attempt);
+    expect(h.transcript()).toContain('Model [3278-4-E]: ');
+    expect(h.transcript()).toContain('TLS [y/N]: ');
+    expect(h.tried[1]!.model).toBe('3278-4-E');
+    expect(h.tried[1]!.tls).toEqual({ kind: 'plaintext' });
+  });
+
+  it('a host that starts with - is refused as a host, not parsed as a flag, and never attempted', async () => {
+    const h = harness(['-insecure', '', '', 'vm', '', ''], ['ok']);
+    await promptConnect([], h, h.attempt);
+    expect(h.transcript()).toContain('not a host: "-insecure"');
+    expect(h.transcript()).not.toContain('Connecting to undefined');
+    expect(h.tried).toHaveLength(1);
+    expect(h.tried[0]!.host).toBe('vm');
+  });
+
+  it('a parse failure not about the host keeps the host as the default', async () => {
+    // -noverifycert on the command line, TLS answered n: resolveTls's contradiction.
+    const h = harness(['vm', '', 'n', '', '', 'y'], ['ok']);
+    await promptConnect(['-noverifycert'], h, h.attempt);
+    expect(h.transcript()).toMatch(/-insecure disables TLS/);
+    expect(h.transcript()).toContain('Host [vm]: ');
+    expect(h.tried).toHaveLength(1);
+    expect(h.tried[0]!.tls).toEqual({ kind: 'tls', verify: false });
+  });
+
+  it('an error with no .code is not a connect failure: rethrown, not retried', async () => {
+    const h = harness(['vm', '', ''], [new TypeError('a bug')]);
+    await expect(promptConnect([], h, h.attempt)).rejects.toThrow(TypeError);
+    expect(h.transcript()).not.toContain('a bug');
+  });
+
+  it('a TerminalTypeError from the attempt is rethrown too (exit 2, as with a host)', async () => {
+    const h = harness(['vm', '', ''], [new TerminalTypeError('terminal type must not be empty')]);
+    await expect(promptConnect([], h, h.attempt)).rejects.toThrow(TerminalTypeError);
+  });
+
+  it('an unknown -model on the command line is refused before anything is asked', async () => {
+    const h = harness(['vm', '', ''], ['ok']);
+    await expect(promptConnect(['-model', '9999'], h, h.attempt)).rejects.toThrow(TerminalTypeError);
+    expect(h.transcript()).toBe('');
+    expect(h.tried).toHaveLength(0);
+  });
+
+  it('...but not when --terminal-type wins, as buildSession would not look the model up', async () => {
+    const h = harness(['vm', '3278-2-E', ''], ['ok']);
+    await promptConnect(['--terminal-type', 'IBM-DYNAMIC', '-model', '9999'], h, h.attempt);
+    expect(h.tried).toHaveLength(1);
+  });
+
+  it('hands off a closed interface: no readline listener left on the input', async () => {
+    const h = harness(['vm', '', ''], ['ok']);
+    await promptConnect([], h, h.attempt);
+    expect(h.input.listenerCount('data')).toBe(0);
+    expect(h.input.listenerCount('end')).toBe(0);
+    expect(h.input.listenerCount('keypress')).toBe(0);
+  });
+
+  it('EOF while connecting: a later success is disconnected and the prompt quits', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let transcript = '';
+    const answers = ['vm', '', ''];
+    let release!: () => void;
+    let disconnected = 0;
+    output.on('data', (b: Buffer) => {
+      transcript += b.toString();
+      if (/: $/.test(transcript) && answers.length > 0) input.write(`${answers.shift()!}\n`);
+    });
+    const attempt = () => new Promise<never>((resolve) => {
+      input.end();                                  // the user quits while it is in flight
+      release = () => resolve({ disconnect: () => { disconnected++; } } as never);
+    });
+    const p = promptConnect([], { input, output }, attempt);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(transcript).toContain('cancelled; waiting for the connection attempt to end');
+    release();
+    expect(await p).toBeUndefined();
+    expect(disconnected).toBe(1);
+    expect(transcript.endsWith('\n')).toBe(true);
+  });
+
+  it('EOF while connecting: a later failure is reported, then the prompt quits', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let transcript = '';
+    const answers = ['vm', '', 'n'];
+    output.on('data', (b: Buffer) => {
+      transcript += b.toString();
+      if (/: $/.test(transcript) && answers.length > 0) input.write(`${answers.shift()!}\n`);
+    });
+    let tries = 0;
+    const attempt = async () => {
+      tries++;
+      input.end();
+      await new Promise((r) => setTimeout(r, 10));
+      throw tlsError('ECONNREFUSED');
+    };
+    expect(await promptConnect([], { input, output }, attempt)).toBeUndefined();
+    expect(tries).toBe(1);
+    expect(transcript).toContain('cannot connect to vm:23: connection refused');
+    expect(transcript).not.toContain('Host [vm]');
+  });
+});
+
+/**
+ * Terminal mode, as at a real TTY: readline decodes keypresses, echoes, and turns Ctrl-C into
+ * 'SIGINT' on the interface. A PassThrough has no setRawMode, which readline skips.
+ */
+describe('promptConnect in terminal mode', () => {
+  const plain = (t: string): string => t.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+  function tty() {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let raw = '';
+    output.on('data', (b: Buffer) => { raw += b.toString(); });
+    /** Resolves once the transcript, escapes stripped, ends with `text`. */
+    const until = async (text: string): Promise<void> => {
+      for (let i = 0; i < 200 && !plain(raw).endsWith(text); i++) await new Promise((r) => setTimeout(r, 2));
+      expect(plain(raw).endsWith(text)).toBe(true);
+    };
+    return { input, output, terminal: true, until, transcript: () => plain(raw) };
+  }
+
+  it('Ctrl-C at a prompt quits (readline\'s SIGINT)', async () => {
+    const t = tty();
+    const p = promptConnect([], t, async () => { throw new Error('not reached'); });
+    await t.until('Host: ');
+    t.input.write('\x03');
+    expect(await p).toBeUndefined();
+  });
+
+  it('keys typed while connecting are neither echoed nor the next answer', async () => {
+    const t = tty();
+    const tried: TuiArgs[] = [];
+    let fail!: () => void;
+    const attempt = (a: TuiArgs) => new Promise<never>((resolve, reject) => {
+      tried.push(a);
+      if (tried.length === 1) fail = () => reject(tlsError('HANDSHAKE_TIMEOUT'));
+      else resolve({} as never);
+    });
+    const p = promptConnect([], t, attempt);
+    await t.until('Host: '); t.input.write('vm\r');
+    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('TLS [Y/n]: '); t.input.write('\r');
+    await t.until('Connecting to vm:23...\n');
+    t.input.write('xyz');
+    await new Promise((r) => setTimeout(r, 10));
+    fail();
+    await t.until('Host [vm]: ');
+    t.input.write('\r');
+    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('TLS [Y/n]: '); t.input.write('n\r');
+    expect(await p).toBeDefined();
+    expect(t.transcript()).not.toContain('xyz');
+    expect(tried[1]!.host).toBe('vm');
+    expect(t.input.listenerCount('keypress')).toBe(0);
+  });
+
+  it('Ctrl-C while connecting says so, swallows later keys, and disconnects a late success', async () => {
+    const t = tty();
+    let release!: () => void;
+    let disconnected = 0;
+    const attempt = () => new Promise<never>((resolve) => {
+      release = () => resolve({ disconnect: () => { disconnected++; } } as never);
+    });
+    const p = promptConnect([], t, attempt);
+    await t.until('Host: '); t.input.write('vm\r');
+    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('TLS [Y/n]: '); t.input.write('\r');
+    await t.until('Connecting to vm:23...\n');
+    t.input.write('\x03');
+    await t.until('cancelled; waiting for the connection attempt to end\n');
+    t.input.write('abc');
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+    expect(await p).toBeUndefined();
+    expect(disconnected).toBe(1);
+    expect(t.transcript()).not.toContain('abc');
+  });
+
+  it('Ctrl-C while connecting, then a failure: the failure is said, and nothing is asked again', async () => {
+    const t = tty();
+    let fail!: () => void;
+    const attempt = () => new Promise<never>((_resolve, reject) => {
+      fail = () => reject(tlsError('HANDSHAKE_TIMEOUT'));
+    });
+    const p = promptConnect([], t, attempt);
+    await t.until('Host: '); t.input.write('vm\r');
+    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('TLS [Y/n]: '); t.input.write('\r');
+    await t.until('Connecting to vm:23...\n');
+    t.input.write('\x03');
+    await t.until('cancelled; waiting for the connection attempt to end\n');
+    fail();
+    expect(await p).toBeUndefined();
+    expect(t.transcript()).toContain('Answer n to TLS: vm:23');
+    expect(t.transcript()).not.toContain('Host [vm]');
   });
 });
