@@ -118,8 +118,9 @@ ID; ad-hoc signing is the fallback under consideration before then.
 
 - **macOS**: Gatekeeper blocks a downloaded unsigned app. The route on current macOS is System
   Settings → Privacy & Security → *Open Anyway* after the first blocked launch, or
-  `xattr -dr com.apple.quarantine /Applications/TN3270.app`. Checked by the user on 2026-11-08:
-  the unsigned build runs once permitted — cumbersome, but not refused.
+  `xattr -dr com.apple.quarantine /Applications/TN3270.app`. Checked by the user on 2026-11-08 on
+  Apple Silicon: the fully unsigned build runs once permitted via *Open Anyway* — cumbersome, but
+  not refused, so ad-hoc signing is not needed as a fallback.
 - **Windows**: SmartScreen flags the installer; *More info → Run anyway* gets past it.
 
 ## Tag-triggered publishing

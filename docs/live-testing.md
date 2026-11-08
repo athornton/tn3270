@@ -1954,9 +1954,14 @@ yellow 32 — a second live screen exceeding the four-color default map.
 
 ## Packaging and TLS against a real TLS host — reported by the user 2026-11-08
 
-**Packaging.** The user ran the native artifacts by hand. macOS runs once the user permits it
-(Gatekeeper, as expected for an unsigned app; cumbersome but not refused). Linux arm64 (the
-`.deb`), Linux x64 (the AppImage) and Windows 11 all just run.
+**Packaging.** The user ran the native artifacts by hand. On an **Apple Silicon** Mac the fully
+unsigned build runs once permitted through System Settings → Privacy & Security → *Open Anyway*
+(Gatekeeper, as expected; cumbersome but not refused — which answers the open question of whether
+an unsigned `arm64` app launches at all). Linux arm64 (the `.deb`), Linux x64 (the AppImage) and
+Windows 11 all just run. **Every launch went through the Connect dialog.** The Mac and Windows
+launches were from the icon; the two Linux boxes have the X libraries but no desktop environment,
+so those were a direct invocation of `tn3270-gui` and of the AppImage from a shell — a
+double-click from a Linux desktop file manager is the one launch path still unexercised.
 
 **TLS.** Works against `pubvm.org`, a public VM/SP 5 or VM/ESA 2.4 system: port 23 is
 plaintext, port 623 is TLS. Guest credentials are printed in its logon banner; keep them out of

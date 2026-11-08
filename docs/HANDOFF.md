@@ -150,8 +150,9 @@ hash). A HiDPI Linux user may get slightly soft text; not yet investigated.
 
 **2026-11-08: the first four items below are answered by the user** — macOS runs once permitted
 (Gatekeeper, not a refusal); the Linux arm64 `.deb`, the Linux x64 AppImage and Windows 11 all just
-run. Whether each launch went through the Connect dialog from a double-clicked icon was not
-stated item by item. Only the registry install remains open. The list is kept as written.
+run. The Mac is Apple Silicon (via *Open Anyway*). Every launch used the Connect dialog; the
+Linux ones were started from a shell (no desktop environment on either box), so a Linux desktop
+double-click is the only launch path not exercised. Only the registry install remains open. The list is kept as written.
 
 - **macOS by hand**: launch the `.dmg`/`.zip` on a real Mac. Gatekeeper's path (System Settings →
   Privacy & Security → *Open Anyway*, or `xattr -dr com.apple.quarantine`) is written up in

@@ -60,9 +60,9 @@ Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder
 this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
 downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
 after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
-**Checked by hand by the user on 2026-11-08:** the macOS build runs once you permit it (a
-cumbersome step, but not a refusal), and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11
-installer all just run. electron-builder's `identity: null` means no signature was applied, not an
+**Checked by hand by the user on 2026-11-08:** on Apple Silicon the fully unsigned build runs
+once permitted through *Open Anyway* (a cumbersome step, but not a refusal), and the Linux arm64
+`.deb`, Linux x64 AppImage and Windows 11 installer all just run, each through the Connect dialog. electron-builder's `identity: null` means no signature was applied, not an
 ad-hoc one; signing waits on an Apple Developer ID. Windows can show SmartScreen; *More info →
 Run anyway* gets past it.
 
@@ -1487,8 +1487,10 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
    ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
    2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Nothing is published
-   to npm or signed yet.** The hand checks were done by the user on 2026-11-08: macOS runs once
-   permitted, and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 all just run.
+   to npm or signed yet.** The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
+   runs once permitted (*Open Anyway*), and the Linux arm64 `.deb`, Linux x64 AppImage and
+   Windows 11 all just run, each through the Connect dialog (on Linux launched from a shell, as
+   neither box has a desktop environment).
    The Windows target was a deliberate addition rather than a stretch goal: there are **zero
    native dependencies** (every package depends only on other workspace packages, with Electron
    the single external), and there is not one `process.platform` branch anywhere in
@@ -1499,8 +1501,9 @@ both below: **VMGIF cannot run without GDDM** (measured from its module), so our
 converter is the test vehicle; and **the printer splits in two**, so "printer last" no longer
 holds as one item.
 
-14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: macOS runs
-   once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run). Left: the
+14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: Apple Silicon
+   macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
+   Connect dialog used on each). Left: the
    first `npm publish` (`docs/releasing.md`); a 3279-styled icon. **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
