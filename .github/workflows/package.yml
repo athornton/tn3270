@@ -22,11 +22,33 @@
 # packages/core/test/manifests.test.ts fails if the oldest `node:` here is not the manifests' floor.
 # The floor job stops after install-smoke: it tests the npm packages, and the native artifacts are
 # the packaging runners' job. Action majors checked 2026-11-06 against each repo's releases/latest
-# (checkout v7.0.1, setup-node v7.1.0, cache v6.1.0, upload-artifact v7.0.2).
+# (checkout v7.0.1, setup-node v7.1.0, cache v6.1.0, upload-artifact v7.0.2), except
+# download-artifact below: v8.0.2, not v7, checked 2026-11-09. upload-artifact and download-artifact
+# release in lockstep on the same @actions/artifact backend (both latest releases -- upload v7.0.2,
+# download v8.0.2 -- bumped to @actions/artifact 6.3.1 together for the same fix); nothing in either
+# changelog back to the v4 artifact-service rewrite says a download major requires the matching
+# upload major, so v8 reads what upload-artifact@v7 (used throughout this file) writes.
+#
+# TRUSTED PUBLISHING (npm trusted publishing plan, Tasks 4-6; design:
+# docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md). A `vX.Y.Z` tag push runs the
+# six matrix jobs above as any push does, then two more:
+#   release-check   no `environment:`, so a bad tag or mismatched tarball set fails before anyone
+#                   is asked to approve anything.
+#   publish         `environment: npm`, which GATES on that GitHub environment's required reviewer
+#                   approval, then publishes over OIDC (no npm token anywhere) and reads the
+#                   registry back.
+# Both are `if: startsWith(github.ref, 'refs/tags/v')`, so a push to main/packaging or a pull
+# request runs neither -- only `--dry-run`, in the `npm` leg of the matrix job below, every time.
+#
+# NAMES THAT MUST NOT CHANGE: on npmjs.com, each of the eight `@tn3270/*` packages' trusted
+# publisher names THIS FILE by its name, `package.yml`, and environment `npm`. Renaming this
+# workflow file, or renaming/removing the `npm` GitHub environment referenced by the `publish` job
+# below, breaks publishing with no warning until the next tag push.
 name: package
 on:
   push:
     branches: [main, packaging]
+    tags: ['v*.*.*']
   pull_request:
   workflow_dispatch:
 env:
@@ -116,6 +138,9 @@ jobs:
           NODE_OPTIONS: ${{ matrix.nodeopts }}
       - run: npm run bundle:gui
       - run: npm run pack:npm
+      - if: matrix.npm
+        name: publish dry run (every push -- exercises scripts/publish.mjs continuously)
+        run: node scripts/publish.mjs --dry-run artifacts/npm
       - run: ${{ matrix.xvfb }} node scripts/install-smoke.mjs
       # The harnesses have never run in CI before. Under xvfb-run DISPLAY is set, so
       # xvfb.mjs ensureDisplay() returns it and starts no Xvfb of its own.
@@ -168,3 +193,49 @@ jobs:
             artifacts/gui/*.zip
             artifacts/gui/*.exe
           if-no-files-found: error
+
+  release-check:
+    # A tag push only. Outside the npm environment, so a bad tag fails before anyone is asked.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    # Generous for a job that only reads a small artifact and runs one dependency-free script.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '22' }
+      - uses: actions/download-artifact@v8
+        with: { name: npm-tarballs, path: tarballs }
+      - run: node scripts/publish.mjs --check tarballs
+
+  publish:
+    # Waits for the npm environment's required reviewer. OIDC: no token anywhere.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-check
+    runs-on: ubuntu-latest
+    # A GitHub Actions job's timeout-minutes clock does not start until the job leaves "waiting"
+    # for its environment's required reviewer -- i.e. the approval wait above is free. What DOES
+    # count: checkout, setup-node, the npm self-upgrade, downloading the artifact, and
+    # `publish.mjs --publish` itself (up to eight `npm publish`s plus its own ~2-minute read-back
+    # deadline). 20 minutes covers that with room for a slow runner or a slow registry.
+    timeout-minutes: 20
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    # Two tag pushes could otherwise both pass release-check and race to publish; this serializes
+    # them (the second waits, it does not run alongside the first) so neither half-publishes.
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
+      # Trusted publishing needs npm >= 11.5.1 (and Node >= 22.14, satisfied by node-version above).
+      - run: npm install -g npm@^11.5.1
+      - run: node --version && npm --version
+      - uses: actions/download-artifact@v8
+        with: { name: npm-tarballs, path: tarballs }
+      - run: node scripts/publish.mjs --publish tarballs
