@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-09 (0.1.1 PUBLISHED to npm, tag `v0.1.1` on `e95b932`: the GUI Connect-dialog retry and the TUI no-host prompt, merged from `connect-retry` as `cadf824` and verified live; native installers UNSIGNED; npm trusted publishing BUILT on branch `trusted-publish`, proof owed via release 0.1.2; roadmap in README *Remaining* items 14-22, next is item 15)
+# Handoff — state as of 2026-11-09 (0.1.3 PUBLISHED by the tag workflow over OIDC with provenance, tag `v0.1.3` on `ebd2100`; 0.1.2 skipped; native installers UNSIGNED; next: a GitHub release with the installers, then README *Remaining* item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -8,6 +8,13 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
+
+**2026-11-09, LATER: 0.1.3 IS PUBLISHED BY THE TAG WORKFLOW** -- trusted publishing proven: OIDC,
+provenance attested, registry read back (`docs/releasing.md`, *Release history*; 0.1.2 was skipped,
+also recorded there). Owed by the user: "Require two-factor authentication and disallow tokens" on
+each package, once they decide whether to keep the manual Fallback. Next: the publish workflow
+also cutting a GitHub release with the native installers (to be designed), then README *Remaining*
+item 15.
 
 **2026-11-09: npm trusted publishing is BUILT, on branch `trusted-publish`, not yet merged.**
 Spec and plan: `docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md`,

@@ -176,8 +176,15 @@ satisfies every one of those edges before any front end needs it.
   be fixed in place; the fix (absolute paths, and the every-push dry run moved to the release jobs'
   `tarballs/` directory) went to `main` and the `v0.1.2` tag was deleted. The run also met a GitHub
   Actions outage (incident from 18:12 UTC): attempt 1 created only three of the six matrix jobs.
-- **0.1.3**, 2026-11-09: the first release published by the tag workflow. Same contents as 0.1.2
-  would have had (no user-facing change from 0.1.1 beyond the release machinery).
+- **0.1.3**, 2026-11-09: **the first release published by the tag workflow**, and the proof of it.
+  Tag `v0.1.3` (`ebd2100`), run 42691997098: six jobs and `release-check` green, approved by the
+  user, then `published 0.1.3: 8 new, 0 already there, registry verified`. Checked independently
+  afterwards: every registry `dist.shasum` equals that run's tarball; the publisher is "GitHub
+  Actions", not a user; each version carries an SLSA v1 provenance attestation naming
+  `athornton/tn3270`, `.github/workflows/package.yml` at `refs/tags/v0.1.3`, commit `ebd2100`, a
+  GitHub-hosted runner and run 42691997098; and `npm audit signatures` on a fresh install of
+  `@tn3270/tui@0.1.3` reports verified registry signatures and verified attestations for all four
+  packages it pulls in. No user-facing change from 0.1.1 beyond the release machinery.
 
 **A first 0.1.1 attempt published nothing, quietly.** The publishing machine was not logged in
 (`npm whoami`: E401), so every `npm publish` in the loop failed, and an `npm unpublish` there
