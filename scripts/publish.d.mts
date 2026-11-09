@@ -26,7 +26,8 @@ export const ALREADY_PUBLISHED: RegExp;
 export function main(argv: string[], io: {
   env: Record<string, string | undefined>;
   fetchFn: FetchFn;
-  run: (args: string[]) => { status: number; output: string };
+  /** `output` is collected only with `capture` (the dry runs); otherwise npm's stdio is inherited. */
+  run: (args: string[], opts: { capture: boolean }) => { status: number; output: string };
   sleep: (ms: number) => Promise<void>;
   log: (line: string) => void;
 }): Promise<number>;

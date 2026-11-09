@@ -411,6 +411,7 @@ describe('publish.mjs', () => {
     } = {}) {
       const registry: Record<string, string> = { ...Object.fromEntries(ORDER.map((n) => [`${n}@0.1.1`, '0'.repeat(40)])), ...opts.registry };
       const runs: string[][] = [];
+      const captures: boolean[] = [];
       const logs: string[] = [];
       const sleeps: number[] = [];
       let calls = 0;
@@ -426,8 +427,9 @@ describe('publish.mjs', () => {
         const r = await opts.fetchFail!();
         return { ok: false, status: r, json: async () => ({}) };
       };
-      const run = (args: string[]) => {
+      const run = (args: string[], { capture }: { capture: boolean }) => {
         runs.push(args);
+        captures.push(capture);
         if (opts.runAlways !== undefined) return opts.runAlways;
         const path = args.at(-1)!;
         if (opts.failRun !== undefined && path.includes(opts.failRun)) return { status: 1, output: 'npm error code E403' };
@@ -443,7 +445,7 @@ describe('publish.mjs', () => {
       if (opts.tag !== undefined) { env.GITHUB_REF_NAME = opts.tag; env.GITHUB_REF_TYPE = opts.refType ?? 'tag'; }
       if (opts.actions) env.GITHUB_ACTIONS = 'true';
       return {
-        runs, logs, sleeps, registry,
+        runs, captures, logs, sleeps, registry,
         args: { env, fetchFn, run, sleep: async (ms: number) => { sleeps.push(ms); }, log: (l: string) => { logs.push(l); } },
       };
     }
@@ -460,6 +462,7 @@ describe('publish.mjs', () => {
         expect(await main(['--dry-run', dir!], x.args)).toBe(0);
         expect(x.runs.map((a) => a.slice(0, 2))).toEqual(Array(8).fill(['publish', '--dry-run']));
         expect(x.runs.map(nameOf)).toEqual(ORDER);
+        expect(x.captures).toEqual(Array(8).fill(true));
         expect(x.logs.at(-1)).toBe('publish: dry run of 0.1.2 passed for all 8');
       });
 
@@ -594,6 +597,8 @@ describe('publish.mjs', () => {
         '@tn3270/core@0.1.2': shaOf(set, '@tn3270/core'), '@tn3270/canvas@0.1.2': shaOf(set, '@tn3270/canvas') } });
       expect(await main(['--publish', dir!], x.args)).toBe(0);
       expect(x.runs.every((a) => a[0] === 'publish' && a.length === 2)).toBe(true);
+      // Not captured: a real publish streams, and a login/OTP prompt is visible.
+      expect(x.captures).toEqual(Array(6).fill(false));
       expect(x.runs.map(nameOf)).toEqual(ORDER.filter((n) => n !== '@tn3270/core' && n !== '@tn3270/canvas'));
       expect(x.logs.at(-1)).toBe('published 0.1.2: 6 new, 2 already there, registry verified');
     });

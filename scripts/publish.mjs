@@ -224,8 +224,8 @@ async function plan(order, version, fetchFn) {
 
 /**
  * The three modes, with everything outside the process injected: `env` (`GITHUB_REF_NAME`,
- * `GITHUB_REF_TYPE`, `GITHUB_ACTIONS`), `fetchFn`, `run(args) -> { status, output }` (an `npm`
- * invocation), `sleep`, `log`. Returns the exit status: 0, or 1 with every problem logged.
+ * `GITHUB_REF_TYPE`, `GITHUB_ACTIONS`), `fetchFn`, `run(args, { capture }) -> { status, output }`
+ * (an `npm` invocation; `output` is only collected with `capture`), `sleep`, `log`. Returns the exit status: 0, or 1 with every problem logged.
  */
 export async function main(argv, { env, fetchFn, run, sleep, log }) {
   const [mode, dir, ...rest] = argv;
@@ -252,7 +252,7 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
           log(`publish: WARNING: ${warning}`);
           if (env.GITHUB_ACTIONS === 'true') log(`::warning::${warning}`);
         }
-        const { status, output } = run(['publish', '--dry-run', t.path]);
+        const { status, output } = run(['publish', '--dry-run', t.path], { capture: true });
         if (status === 0) continue;
         if (sha !== undefined && ALREADY_PUBLISHED.test(output)) {
           log(`publish: ${t.name}@${version} is already on the registry, which this npm refuses even dry: accepted`);
@@ -284,7 +284,8 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
     let fresh = 0;
     for (const [i, { t, decision }] of decided.entries()) {
       if (decision === 'skip') continue;
-      const { status } = run(['publish', t.path]);
+      // NOT CAPTURED: a real publish's output streams, and any prompt (web login, OTP) shows.
+      const { status } = run(['publish', t.path], { capture: false });
       if (status !== 0) {
         const notTried = decided.slice(i + 1).filter((d) => d.decision !== 'skip').map((d) => d.t.name);
         throw new Refusal(`npm publish ${basename(t.path)} exited ${status}; not attempted: `
@@ -307,10 +308,18 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
 }
 
 /**
- * `npm args...`: its output captured (the dry run reads it) and then passed through. `npm` is
- * `npm.cmd` on Windows, which only a shell runs.
+ * `npm args...`. With `capture` (the dry runs, whose output is read) its output is collected and
+ * then passed through. Without it, `stdio: 'inherit'`: a real `npm publish` streams as it runs,
+ * and a web-login or OTP prompt is visible instead of looking like a hang. `npm` is `npm.cmd` on
+ * Windows, which only a shell runs.
  */
-function runNpm(args) {
+function runNpm(args, { capture }) {
+  if (!capture) {
+    const r = process.platform === 'win32'
+      ? spawnSync(`npm ${args.map((a) => `"${a}"`).join(' ')}`, { stdio: 'inherit', shell: true })
+      : spawnSync('npm', args, { stdio: 'inherit' });
+    return { status: r.error !== undefined ? 1 : (r.status ?? 1), output: r.error?.message ?? '' };
+  }
   const opts = { stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 };
   const r = process.platform === 'win32'
     ? spawnSync(`npm ${args.map((a) => `"${a}"`).join(' ')}`, { ...opts, shell: true })
