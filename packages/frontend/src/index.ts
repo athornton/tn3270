@@ -20,12 +20,17 @@
 export { parseHostSpec, resolveHostSpec } from './hostspec.js';
 export type { HostSpec, ResolvedHost } from './hostspec.js';
 
+// The connect dialog's form, turned into the argv the user would have typed -- shared by the
+// GUI's Connect dialog and the TUI's no-host prompt.
+export { dialogToArgv } from './connectForm.js';
+export type { ConnectForm } from './connectForm.js';
+
 // The TLS flags. Every front end parses the same ones and must resolve them by the same
 // rules -- they were already shared between two front ends for exactly this reason.
 // `tcpConnect` comes too: it is the one transport all of them need.
 export {
   takeTlsFlag, resolveTls, tcpConnect, describeTlsError, describeConnectError,
-  DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
+  DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, CONNECT_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';
 

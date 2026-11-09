@@ -28,7 +28,7 @@
  *     TN3270_GUI_MAIN=app node packages/gui/scripts/connect.mjs     # against the bundle
  */
 import { spawn } from 'node:child_process';
-import { descendants, sleep, startServer, until } from '../../../scripts/smoke-lib.mjs';
+import { descendants, sleep, startHost, startServer, until } from '../../../scripts/smoke-lib.mjs';
 import { electron, guiEnv, guiMain, guiMainLabel, staleness } from './xvfb.mjs';
 
 const main = guiMain();
@@ -50,7 +50,10 @@ console.log(`entry: ${guiMainLabel()}`);
  */
 const ARGV = ['--no-sandbox', '--disable-gpu'];
 
-/** `HANDSHAKE_TIMEOUT_MS` in packages/frontend/src/tls.ts is 10 s; the TLS case waits past it. */
+/**
+ * `HANDSHAKE_TIMEOUT_MS` in packages/frontend/src/tls.ts is 10 s, and TWO cases wait past it: the
+ * TLS remedy case, and the retry case's first (TLS) attempt.
+ */
 const HANDSHAKE_BOUND_MS = 20_000;
 
 /** A port with nothing listening: bound, read, released. */
@@ -60,10 +63,34 @@ async function deadPort() {
   return s.port;
 }
 
+/** Every run the current case launched, so the loop below kills them even if the case throws. */
+let launched = [];
+
+/**
+ * Every fake-host/server the current case opened, so the loop below closes them even if the case
+ * throws AFTER opening one but before returning it as `srv` -- otherwise that server is never
+ * closed: the old code only closed the `srv` a case's `run()` RETURNED, and a throw in between
+ * means no `srv` ever reaches the loop at all. `deadPort()` is exempt: it closes its own server
+ * before returning, so there is nothing left open to track.
+ */
+let servers = [];
+
+/** Wraps a `startServer()`/`startHost()` call so its result is tracked for cleanup immediately,
+ * not only once (and if) `run()` returns successfully. */
+async function tracked(opening) {
+  const srv = await opening;
+  servers.push(srv);
+  return srv;
+}
+
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-/** One client launch. `form` goes to TN3270_GUI_CONNECT; `extra` is appended to argv. */
-function launch(form, extra = []) {
+/**
+ * One client launch. `form` -- one form or a list of them -- goes to TN3270_GUI_CONNECT; `extra` is
+ * appended to argv; `seams` overrides the cleared seams below, one at a time, for the case that
+ * needs one.
+ */
+function launch(form, extra = [], seams = {}) {
   const child = spawn(electron, [main, ...ARGV, ...extra], {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,12 +100,16 @@ function launch(form, extra = []) {
       // shell would replay, type, click or photograph instead of connecting (shot.mjs's trap).
       TN3270_GUI_REPLAY: '', TN3270_GUI_SHOT: '', TN3270_GUI_KEYS: '', TN3270_GUI_CLICKS: '',
       TN3270_GUI_SELECT: '', TN3270_GUI_TRANSFER: '', TN3270_GUI_URL: '',
+      ...seams,
     }),
   });
   const run = { child, stdout: '', stderr: '', exited: false };
   child.stdout.on('data', (b) => { run.stdout += b; });
   child.stderr.on('data', (b) => { run.stderr += b; });
-  child.on('exit', () => { run.exited = true; });
+  // On `close`, not `exit`: `exit` can fire before the last stdout chunk is read, and a wait that
+  // ends on `|| r.exited` must not end before the line it is waiting for has arrived.
+  child.on('close', () => { run.exited = true; });
+  launched.push(run);
   return run;
 }
 
@@ -91,11 +122,22 @@ async function kill(run) {
   return tree.filter(alive);
 }
 
+/**
+ * A failed press's two dialog checks: the dialog is STILL OPEN (the driver's last line), and its
+ * error line -- as `driveConnectDialog` reads it from the DOM -- carries the stderr text. stderr
+ * alone was written before the retry too, so it proves nothing about the dialog.
+ */
+const dialogKept = (r, want) => [
+  ['the dialog is STILL OPEN', r.stdout.includes('connect: dialog still open')],
+  [`the dialog's error line says "${want}"`,
+    r.stdout.split('\n').some((l) => l.startsWith('connect: error') && l.includes(want))],
+];
+
 const CASES = [
   {
     name: 'connects',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false });
       // 5 s from the SUBMIT, not from the launch: Electron's cold start is not the dialog's latency.
       await until(() => r.stdout.includes('connect: submitted\n') || r.exited, 15_000);
@@ -113,7 +155,7 @@ const CASES = [
   {
     name: 'bad host stays open',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: '', model: '3278-2-E', tls: false });
       await until(() => r.stdout.includes('connect: error') || r.exited, 15_000);
       await sleep(1000);
@@ -129,13 +171,43 @@ const CASES = [
   {
     name: 'TLS remedy names the checkbox',
     async run() {
-      const srv = await startServer({ silent: true });
+      const srv = await tracked(startServer({ silent: true }));
       const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: true });
       const want = 'Untick TLS in the Connect dialog';
       await until(() => r.stderr.includes(want), HANDSHAKE_BOUND_MS);
+      await until(() => /connect: dialog (still open|closed)/.test(r.stdout) || r.exited, 2_000);
       const checks = [
         ['the server saw a connection', srv.seen.connections > 0],
         [`stderr says "${want}"`, r.stderr.includes(want)],
+        ...dialogKept(r, want),
+      ];
+      return { r, srv, checks };
+    },
+  },
+  {
+    name: 'retry with TLS unticked connects, on the same run',
+    async run() {
+      // NOT silent: it opens with IAC DO TERMINAL-TYPE, which the second (plaintext) attempt
+      // answers. The first (TLS) attempt does not refuse those three bytes -- they are shorter than
+      // a TLS record header, so it waits for more and fails by the handshake TIMEOUT (measured:
+      // "never completed a TLS handshake"), which is why this case waits past HANDSHAKE_BOUND_MS.
+      const srv = await tracked(startServer());
+      const host = `127.0.0.1:${srv.port}`;
+      const r = launch([
+        { host, model: '3278-2-E', tls: true },
+        { host, model: '3278-2-E', tls: false },
+      ]);
+      const ended = /connect: (dialog closed|dialog still open|submit never settled)/;
+      await until(() => ended.test(r.stdout) || r.exited, HANDSHAKE_BOUND_MS + 15_000);
+      await until(() => srv.willTtype(), 5_000);
+      const lines = r.stdout.split('\n');
+      const checks = [
+        ['two presses', lines.filter((l) => l === 'connect: submitted').length === 2],
+        ['the first said to untick TLS',
+          lines.some((l) => l.startsWith('connect: error Untick TLS in the Connect dialog'))],
+        ['the dialog closed after the second', r.stdout.includes('connect: dialog closed')],
+        ['the second was PLAINTEXT telnet (IAC WILL TERMINAL-TYPE came back)', srv.willTtype()],
+        ['two connections at the server, one per press', srv.seen.connections === 2],
       ];
       return { r, srv, checks };
     },
@@ -147,17 +219,65 @@ const CASES = [
       const r = launch({ host: `127.0.0.1:${port}`, model: '3278-2-E', tls: false });
       const want = `cannot connect to 127.0.0.1:${port}: connection refused (ECONNREFUSED)`;
       await until(() => r.stderr.includes(want), 15_000);
+      await until(() => /connect: dialog (still open|closed)/.test(r.stdout) || r.exited, 2_000);
       const checks = [
         [`stderr says "${want}"`, r.stderr.includes(want)],
         ['stderr does not say TLS', r.stderr !== '' && !r.stderr.includes('TLS')],
+        ...dialogKept(r, want),
       ];
       return { r, checks };
     },
   },
   {
+    /**
+     * AFTER A DIALOG CONNECT THE SESSION IS LIVE -- both halves of `goLive`, which in dialog mode
+     * runs at the start of `afterConnect` and nowhere else. Without it every key is dropped at the
+     * `action` gate and the app menu is never installed, and no other case here would notice: they
+     * all stop at the connect.
+     *
+     * (a) THE GATE: `TN3270_GUI_KEYS` types `hi` and Enter into the fake host's unprotected field,
+     *     and the HOST is the oracle -- an inbound record with AID Enter (0x7D) carrying `hi`
+     *     (cp037 0x88 0x89). (b) THE MENU: `Alt+M` pops the Model submenu, which `main.ts` finds
+     *     through `Menu.getApplicationMenu()` -- before `goLive` that is Electron's default menu,
+     *     with no `model` item -- and reports as `menu: popup model`, the line `keys.mjs` counts.
+     *     `Alt+M` is intercepted in main past the same gate, so it is sent after Enter has locked
+     *     the keyboard without being refused.
+     *
+     * THE SECOND `Alt+M` IS A THROWAWAY. A keys-only run quits as soon as `keys: sent` is out
+     * (`quitIfKeysOnly`), and on a slow runner that quit could beat the last chord's IPC; the
+     * extra chord puts ~300 ms between the counted one and the quit -- `maybeSendKeys` sleeps
+     * 150 ms after EACH chord it sends, so the throwaway adds a second 150 ms gap, not one -- and
+     * the wait below gives the line itself time to arrive.
+     */
+    name: 'a dialog connect goes live: keys reach the host, the menu is installed',
+    async run() {
+      const srv = await tracked(startHost());
+      const r = launch({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }, [], {
+        TN3270_GUI_KEYS: 'wait:HELLO TN3270,h,i,Enter,Alt+M,Alt+M',
+        TN3270_GUI_WAIT_MS: '10000',
+      });
+      const enter = () => srv.records().find((rec) => rec[0] === 0x7D);
+      const popped = () => r.stdout.split('\n').includes('menu: popup model');
+      await until(() => r.stdout.includes('keys: sent ') || r.exited, 30_000);
+      await until(() => enter() !== undefined || r.exited, 2_000);
+      await until(() => popped() || r.exited, 2_000);
+      const rec = enter();
+      const checks = [
+        ['connect: dialog closed', r.stdout.includes('connect: dialog closed')],
+        ['the keys seam waited for the screen and sent every key',
+          r.stdout.includes('keys: saw "HELLO TN3270"') && r.stdout.includes('keys: sent ')],
+        ['the host got an AID Enter (0x7D) record', rec !== undefined],
+        ['carrying the typed "hi" (0x88 0x89)',
+          rec !== undefined && rec.includes(Buffer.from([0x88, 0x89]))],
+        ['the Model menu popped up (menu: popup model)', popped()],
+      ];
+      return { r, srv, checks };
+    },
+  },
+  {
     name: 'a host on the command line skips the dialog',
     async run() {
-      const srv = await startServer();
+      const srv = await tracked(startServer());
       const r = launch({ host: '127.0.0.1:1', model: '3278-2-E', tls: false },
         ['-insecure', `127.0.0.1:${srv.port}`]);
       await until(() => srv.willTtype(), 15_000);
@@ -173,9 +293,24 @@ const CASES = [
 
 let passed = 0;
 for (const kase of CASES) {
-  const { r, srv, checks } = await kase.run();
-  const survivors = await kill(r);
-  await srv?.close();
+  launched = [];
+  servers = [];
+  let r = { stdout: '', stderr: '' };
+  let checks;
+  const survivors = [];
+  // A throw after `launch()` -- or after `startServer()`/`startHost()` -- must still kill the
+  // client and close the server: `finally`, over everything the case opened, not over the `srv`
+  // its `run()` happened to return. A throw between opening a server and returning never reaches
+  // that return, which is exactly the leak this is for.
+  try {
+    ({ r, checks } = await kase.run());
+  } catch (err) {
+    checks = [[`the case threw: ${err?.stack ?? err}`, false]];
+    if (launched.length > 0) r = launched[launched.length - 1];
+  } finally {
+    for (const run of launched) survivors.push(...await kill(run));
+    for (const srv of servers) await srv.close();
+  }
   checks.push(['no process survived the kill', survivors.length === 0]);
   const failed = checks.filter(([, ok]) => !ok);
   if (failed.length === 0) {

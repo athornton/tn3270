@@ -147,6 +147,22 @@ describe('TLS error messages name the flag that fixes them', () => {
   });
 });
 
+describe("describeTlsError 'prompt'", () => {
+  it('words both plaintext-host cases for the TUI prompt, remedy first', () => {
+    for (const code of ['HANDSHAKE_TIMEOUT', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ERR_SSL_PACKET_LENGTH_TOO_LONG']) {
+      const m = describeTlsError(code, 'herc', 3270, 'prompt');
+      expect(m.startsWith('Answer n to TLS: herc:3270 ')).toBe(true);
+      expect(m).not.toContain('-insecure');
+      expect(m).not.toContain('Connect dialog');
+    }
+  });
+
+  it('leaves the certificate cases naming their flags', () => {
+    expect(describeTlsError('CERT_HAS_EXPIRED', 'h', 992, 'prompt'))
+      .toBe(describeTlsError('CERT_HAS_EXPIRED', 'h', 992, 'flag'));
+  });
+});
+
 /**
  * A PLAINTEXT CONNECT THAT FAILS IS NOT A TLS FAILURE. Before this existed, the GUI sent every coded
  * error through `describeTlsError`, so with TLS off a host that was simply down read "TLS connection
@@ -170,9 +186,11 @@ describe('plaintext connect failures say what happened, not TLS', () => {
   });
 
   it('keeps an unknown code and the underlying message rather than inventing words', () => {
-    expect(describeConnectError('ENETUNREACH', 'vm', 3270, 'connect ENETUNREACH 10.0.0.1:3270'))
-      .toBe('cannot connect to vm:3270: connect ENETUNREACH 10.0.0.1:3270');
-    expect(describeConnectError('ENETUNREACH', 'vm', 3270)).toBe('cannot connect to vm:3270 (ENETUNREACH)');
+    // EADDRNOTAVAIL: a real socket code with no words of ours (ENETUNREACH was the example until
+    // it got words, 2026-11-09).
+    expect(describeConnectError('EADDRNOTAVAIL', 'vm', 3270, 'connect EADDRNOTAVAIL 10.0.0.1:3270'))
+      .toBe('cannot connect to vm:3270: connect EADDRNOTAVAIL 10.0.0.1:3270');
+    expect(describeConnectError('EADDRNOTAVAIL', 'vm', 3270)).toBe('cannot connect to vm:3270 (EADDRNOTAVAIL)');
   });
 
   it('puts the action -- cannot connect -- and the target first, where truncation cannot eat it', () => {
@@ -221,5 +239,46 @@ describe('tcpConnect TLS failures carry their code', () => {
     } finally {
       await new Promise<void>((r) => stub.close(() => r()));
     }
+  });
+});
+
+/**
+ * A failure BEFORE the TCP connection exists -- refused, no such host, unreachable -- is not a TLS
+ * failure even when TLS was on, and saying "TLS connection to typo:23 failed (ENOTFOUND)" sends
+ * the reader to the TLS setting for a typo. Since the Connect dialog and the TUI prompt retry, it
+ * is also the message people see most (found in review, 2026-11-09).
+ */
+describe('a socket-level failure with TLS on is worded as a connect failure', () => {
+  const SOCKET = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH'];
+
+  it('for every remedy, the words are describeConnectError s, never TLS', () => {
+    for (const code of SOCKET) {
+      for (const remedy of ['flag', 'dialog', 'prompt'] as const) {
+        const m = describeTlsError(code, 'typo', 23, remedy);
+        expect(m, `${code} ${remedy}`).toBe(describeConnectError(code, 'typo', 23));
+        expect(m, `${code} ${remedy}`).not.toContain('TLS');
+      }
+    }
+  });
+
+  it('gives the new codes words', () => {
+    expect(describeConnectError('ENETUNREACH', 'h', 23)).toBe('cannot connect to h:23: network unreachable (ENETUNREACH)');
+    expect(describeConnectError('EAI_AGAIN', 'h', 23)).toBe('cannot connect to h:23: name lookup failed, try again (EAI_AGAIN)');
+  });
+
+  it('leaves the TLS failures TLS: a reset mid-handshake and an unknown code still say TLS', () => {
+    expect(describeTlsError('ECONNRESET', 'h', 992)).toBe('TLS connection to h:992 failed (ECONNRESET).');
+    expect(describeTlsError('HANDSHAKE_TIMEOUT', 'h', 992)).toContain('TLS handshake');
+  });
+
+  it('tcpConnect with TLS on, to a port nobody listens on, rejects in connect words with the code kept', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()));
+    const port = (probe.address() as net.AddressInfo).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+    const err = await tcpConnect('127.0.0.1', port, { kind: 'tls', verify: true }, 2000)
+      .then(() => undefined, (e: unknown) => e);
+    expect((err as { code?: string }).code).toBe('ECONNREFUSED');
+    expect((err as Error).message).toBe(`cannot connect to 127.0.0.1:${port}: connection refused (ECONNREFUSED)`);
   });
 });

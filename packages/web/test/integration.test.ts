@@ -1574,7 +1574,21 @@ describe('-oversize auto, from the browser viewport', () => {
     const after: unknown[] = [];
     ws.addEventListener('message', (e) => { after.push(e.data); });
     ws.send(JSON.stringify({ kind: 'viewport', width: 900, height: 700 }));
-    await new Promise((r) => { setTimeout(r, 100); });
+    // A BARRIER, NOT A SLEEP. The viewport message has no reply by design, so nothing says when
+    // the gateway has applied it -- and a fixed 100 ms was not enough on CI's macos-26-intel runner
+    // (2026-11-09: the reconnect measured the OLD 1350x980 viewport, 69x150). The gateway handles
+    // each message to completion in arrival order (main.ts's `viewport` arm is synchronous), so
+    // the answer to a `selection` request sent right after it proves the viewport was applied.
+    // Server messages are DEFLATED binary frames (see `collect`), so the reply is inflated before
+    // it is looked at; and `until` gives up silently, so the barrier is ASSERTED, or a missed reply
+    // would quietly turn it back into a 2-second sleep.
+    const barrier = (d: unknown): boolean => {
+      const m = JSON.parse(inflateSync(Buffer.from(d as ArrayBuffer)).toString()) as Record<string, unknown>;
+      return m['kind'] === 'selectionText' && m['seq'] === 7;
+    };
+    ws.send(JSON.stringify({ kind: 'selection', seq: 7, rect: { top: 0, left: 0, bottom: 0, right: 0 } }));
+    await until(() => after.some(barrier));
+    expect(after.some(barrier), 'the selection reply that proves the viewport was applied').toBe(true);
     session.disconnect();
     await session.reconnect();
     expect(session.resolvedGeometry?.alternate).toEqual({ rows: 49, cols: 100 });

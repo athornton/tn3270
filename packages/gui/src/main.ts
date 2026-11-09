@@ -11,12 +11,14 @@ import {
 } from '@tn3270/core';
 import {
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
-  startTransfer, transferCommand, DEFAULT_TLS, type Action, type TlsRemedy,
+  startTransfer, transferCommand, DEFAULT_TLS,
+  type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
 import { buildSession, printGeometryNotices, UsageError, type GuiArgs } from './args.js';
 import { connectModels, parseConnectSeam, planStartup, submitConnect } from './connectDialog.js';
+import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
@@ -245,7 +247,8 @@ const SEAM = Object.freeze({
   waitMs: Number(process.env['TN3270_GUI_WAIT_MS'] ?? '40000'),
   /**
    * A NINTH TEST SEAM: `TN3270_GUI_CONNECT='{"host":"127.0.0.1:3270","model":"3278-2-E","tls":false}'`
-   * fills the startup Connect dialog and presses Connect.
+   * fills the startup Connect dialog and presses Connect. A JSON LIST of such forms is one press
+   * each, in order -- a failed connect leaves the dialog open, so the second form is the retry.
    *
    * THROUGH THE DOM, not through `submitConnect`: main sets the page's own input values and clicks
    * its own Connect button with `executeJavaScript`, so the boot file's real submit listener, the
@@ -253,9 +256,11 @@ const SEAM = Object.freeze({
    * would skip exactly the plumbing that has never run. Read only when the dialog opens, i.e. a
    * launch with no host; with a host it is ignored, which is itself a fact the harness can check.
    *
-   * It prints `connect: dialog shown`, `connect: submitted`, and `connect: error <text>` if the
-   * dialog's error line has text once the submit has settled. The text is the PARSER'S message
-   * about the host the harness chose, never anything an operator typed, so it is safe to print.
+   * It prints `connect: dialog shown`; per form `connect: submitted`, and `connect: error <text>` if
+   * the dialog's error line has text once the submit has settled; and at the end `connect: dialog
+   * closed` or `connect: dialog still open` (or `connect: submit never settled`, which ends it).
+   * The text is the parser's or the connect failure's message about the host the harness chose,
+   * never anything an operator typed, so it is safe to print.
    *
    * EMPTY MEANS ABSENT. Malformed JSON is refused by name (`parseConnectSeam`).
    */
@@ -352,7 +357,9 @@ interface ConnectTarget {
  * well as TLS ones, and this once sent every coded error through `describeTlsError` -- so with TLS
  * off, a host that was merely down read "TLS connection to 127.0.0.1:1 failed (ECONNREFUSED)", and a
  * double-clicker went looking for a TLS setting that was not on. `describeConnectError` says what
- * happened instead.
+ * happened instead. And WITH TLS on, a failure before the TCP connection exists (refused, no such
+ * host, unreachable) is not TLS's either: `describeTlsError` itself hands those codes to
+ * `describeConnectError` (2026-11-09), so this branch needs no list of its own.
  */
 function explain(err: unknown, target?: ConnectTarget): string {
   if (err instanceof UsageError) return err.message;
@@ -483,12 +490,18 @@ app.whenReady().then(async () => {
 });
 
 /**
- * THE STARTUP CONNECT DIALOG, for a launch with no host -- a double-clicked app, typically. Spec
- * docs/superpowers/specs/2026-11-05-packaging-design.md section 2.
+ * THE STARTUP CONNECT DIALOG, for a launch with no host -- a double-clicked app, typically. Specs
+ * docs/superpowers/specs/2026-11-05-packaging-design.md section 2, and
+ * docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md for the retry.
  *
- * MODAL OVER THE TERMINAL WINDOW, which stays up behind it: the window is where a failed connect is
- * shown afterwards, exactly as for a command-line launch, and the dialog does NOT reopen (File >
- * Connect... is milestone B).
+ * MODAL OVER THE TERMINAL WINDOW, which stays up behind it. THE DIALOG STAYS OPEN UNTIL A CONNECT
+ * SUCCEEDS: each press of Connect is one attempt, a failure is shown on the dialog's own error
+ * line (beside the TLS checkbox that `Untick TLS in the Connect dialog` names) and on stderr, NOT
+ * on the window's status line, and the next press retries the SAME session with whatever the user
+ * changed. Once connected the dialog closes and is never used again: drops go through the
+ * ordinary reconnect path, and switching host mid-session is File > Connect... (roadmap item 15).
+ * A SETUP failure (no atlas, args the session cannot be built from) is the exception: there is
+ * nothing to retry, so it goes to the window, as for a command-line launch, and the dialog closes.
  *
  * ## REGISTERED ONCE, ON THIS PATH ONLY
  *
@@ -496,29 +509,52 @@ app.whenReady().then(async () => {
  * once per process -- from `app.whenReady()`, which nothing re-enters. `ipcMain.handle` THROWS on a
  * second registration, which is the rule `startSession`'s own handlers live under too.
  *
- * `started` IS THE ONE-SESSION GUARD. `startSession` registers handlers and must run once; the page
- * disables Connect while a submit is in flight, but a page is not where a once-only rule should
- * live, so main refuses a second start itself.
+ * `start` IS THE ONE-SESSION GUARD. `startSession` registers handlers and an `app.on('before-quit')`
+ * hook and must run once, however many presses it takes to connect: the first press that parses
+ * starts it, and every press after reuses what it returned. The page disables Connect while a
+ * submit is in flight, but a page is not where a once-only rule should live, so main refuses a
+ * second start itself -- and `makeConnector` refuses a second attempt in flight the same way.
  *
- * ## QUIT, ESCAPE, CLOSE ALL QUIT THE APP -- BUT ONLY BEFORE A SUBMIT SUCCEEDED
+ * ## QUIT, ESCAPE, CLOSE ALL QUIT THE APP -- UNTIL A CONNECT HAS SUCCEEDED
  *
  * Closing the dialog leaves the terminal window open with nothing in it and nothing to connect it
- * to, so `closed` quits. A SUCCESSFUL submit closes the dialog too, and that close must NOT quit:
- * `started` is set before `close()` and the `closed` handler checks it.
+ * to, so `closed` quits -- during an attempt too: the in-flight connect dies with the process. A
+ * SUCCESSFUL connect closes the dialog as well, and that close must NOT quit: `handedOver` is set
+ * before `close()` and the `closed` handler checks it. A quitting close sets `quitting`, so an
+ * attempt that succeeds after it does not go live and run the post-connect seams on the way out.
+ *
+ * ## THE DIALOG HAS NO MENU, AND THE SESSION'S CONTROLS ARE OFF WHILE IT IS UP
+ *
+ * The session exists from the first press, but the dialog stays up for retries, so nothing may
+ * route user input into it until a connect has succeeded: `startSession` defers the application
+ * menu and gates its `action` channel until `afterConnect` (see `live` there). `cw.setMenu(null)`
+ * keeps the dialog from inheriting a menu bar on Linux and Windows.
  */
 async function openConnectDialog(
   win: BrowserWindow, fail: (message: string) => void, commandLine: readonly string[],
 ): Promise<void> {
-  let seamForm;
+  let seamForms;
   try {
-    seamForm = parseConnectSeam(SEAM.connect);
+    seamForms = parseConnectSeam(SEAM.connect);
   } catch (err) {
     fail(explain(err));
     await maybeCapture(win, 1);
     return;
   }
 
-  let started = false;
+  // Set when the terminal window takes over -- a connect succeeded, or setup failed and the window
+  // shows why. Until then, closing the dialog quits.
+  let handedOver = false;
+  // Set when closing the dialog quit the app: an attempt that succeeds afterwards must not go live.
+  let quitting = false;
+  // Set when `startSession` REJECTED (our bug): nothing can be retried, and starting it again would
+  // re-register its handlers, which throws.
+  let startFailed = false;
+  // The ONE `startSession`, begun by the first press that parses and never again: a second call
+  // would re-register its `ipcMain.handle` channels, which throws. While it is pending, a press is
+  // `already connecting`; if it rejects, `startFailed` answers every later press.
+  let start: Promise<{ connector: DialogConnector; afterConnect: () => Promise<void> } | undefined> | undefined;
+  let started: { connector: DialogConnector; afterConnect: () => Promise<void> } | undefined;
   const cw = new BrowserWindow({
     icon: layout.icon,
     width: 420,
@@ -544,23 +580,59 @@ async function openConnectDialog(
   cw.webContents.on('did-fail-load', (_e, code, desc, url) => {
     process.stdout.write(`connect window failed to load ${url}: ${code} ${desc}\n`);
   });
-  cw.on('closed', () => { if (!started) app.quit(); });
+  cw.setMenu(null);
+  cw.on('closed', () => {
+    if (handedOver) return;
+    quitting = true;
+    app.quit();
+  });
 
   ipcMain.handle('connect:models', () => connectModels());
   ipcMain.handle('connect:submit', async (_e, form: unknown) => {
-    if (started) return { error: 'already connecting' };
+    if (handedOver) return { error: 'already connected' };
+    if (startFailed) return { error: 'the session could not start; see stderr -- quit and relaunch' };
     const r = submitConnect(form, commandLine);
     if (!r.ok) return { error: r.error };
-    started = true;
+    if (started === undefined) {
+      if (start !== undefined) return { error: 'already connecting' };
+      // The terminal window can be gone by now: nothing to start a session in, and the app is
+      // quitting (closing it closes this modal child, whose `closed` quits).
+      if (win.isDestroyed()) return { error: 'the terminal window has closed' };
+      // `remedy: 'dialog'`: a plaintext host reached with TLS ticked reads `Untick TLS in the
+      // Connect dialog: ...`, shown in this dialog beside the checkbox it names.
+      start = startSession(win, fail, r.args, 'dialog', 'dialog');
+      try {
+        started = await start;
+      } catch (err) {
+        startFailed = true;
+        process.stderr.write(`the session could not start: ${explain(err)}\n`);
+        throw err;   // a rejected `invoke`: the page shows it
+      }
+      if (started === undefined) {
+        // A setup failure (no atlas, a session the args cannot build): fail() put it in the
+        // window, as for a command-line launch; there is nothing to retry, so the dialog goes.
+        handedOver = true;   // so this close does not quit
+        setImmediate(() => { if (!cw.isDestroyed()) cw.close(); });
+        return { ok: true };
+      }
+    }
+    const result = await started.connector.attempt(r.args);
+    if (!result.ok) {
+      // stderr, as for every failure; the dialog's error line, NOT the window's status line, is
+      // where the user sees it -- `fail()` is not called (spec, "The behaviour").
+      process.stderr.write(`${result.error}\n`);
+      return { error: result.error, modelLocked: result.modelLocked };
+    }
+    if (quitting) return { ok: true };   // the dialog was closed mid-attempt: the app is going
+    handedOver = true;
     // AFTER the reply, not before it: closing the window that is awaiting this `invoke` would
     // leave its promise to a destroyed renderer. `setImmediate` lets the reply go out first.
+    // Then the session goes live and the post-connect seams run, once -- unless the terminal
+    // window closed in the gap.
+    const { afterConnect } = started;
     setImmediate(() => {
       if (!cw.isDestroyed()) cw.close();
-      // The terminal window can be gone by now (closed in the gap): nothing to start a session in.
-      if (win.isDestroyed()) return;
-      startSession(win, fail, r.args, 'dialog').catch((err: unknown) => {
-        fail(explain(err));
-      });
+      if (!quitting && !win.isDestroyed()) afterConnect().catch((err: unknown) => { fail(explain(err)); });
     });
     return { ok: true };
   });
@@ -568,25 +640,33 @@ async function openConnectDialog(
 
   await cw.loadFile(layout.document('connect.html'));
   process.stdout.write('connect: dialog shown\n');
-  if (seamForm !== undefined) await driveConnectDialog(cw, seamForm);
+  if (seamForms !== undefined) await driveConnectDialog(cw, seamForms);
 }
 
 /**
- * `TN3270_GUI_CONNECT`'s driver: type the form into the dialog's own controls and press its own
- * Connect, then report what the dialog's error line says. See `SEAM.connect`.
+ * `TN3270_GUI_CONNECT`'s driver: for each form in turn, type it into the dialog's own controls and
+ * press its own Connect, then report what the dialog's error line says. See `SEAM.connect`. One
+ * form per attempt: a failed attempt leaves the dialog open, and the next form is the user's retry.
  *
  * WAITS FOR CONNECT TO BE ENABLED first, because the page disables it until the model list has
  * arrived -- clicking a disabled button does nothing at all, which would read as a broken dialog.
- * And then for the submit to settle: either the window closes (accepted) or Connect is enabled
- * again (refused, with the reason in the error line).
+ * And then for the submit to settle: either the window closes (connected) or Connect is enabled
+ * again (refused or failed, with the reason in the error line). The settle wait allows 35 s: a
+ * submit now resolves only after its connect attempt, which can take the whole 10-second TLS
+ * handshake deadline (`HANDSHAKE_TIMEOUT_MS`) or the 30-second plaintext connect deadline
+ * (`CONNECT_TIMEOUT_MS`). A submit that has not settled past both prints
+ * `connect: submit never settled` and ends the drive, rather than reporting the in-flight
+ * `Connecting to ...` as an error.
+ *
+ * ENDS BY SAYING WHERE THE DIALOG IS -- `connect: dialog closed` or `connect: dialog still open` --
+ * because the harness asserts on it: a failure that closed the dialog is the defect this retry
+ * fixes.
  *
  * A THROW HERE WOULD BE A HANG, so it is caught: this runs inside `app.whenReady()`'s promise.
  */
-async function driveConnectDialog(
-  cw: BrowserWindow, form: { host: string; model: string; tls: boolean },
-): Promise<void> {
-  const until = async (expr: string): Promise<boolean> => {
-    const deadline = Date.now() + 10_000;
+async function driveConnectDialog(cw: BrowserWindow, forms: readonly ConnectForm[]): Promise<void> {
+  const until = async (expr: string, ms: number): Promise<boolean> => {
+    const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
       if (cw.isDestroyed()) return false;
       if (await cw.webContents.executeJavaScript(expr) === true) return true;
@@ -595,24 +675,33 @@ async function driveConnectDialog(
     return false;
   };
   try {
-    if (!await until("document.querySelector('#connect').disabled === false")) {
-      process.stdout.write('connect: Connect never became enabled\n');
-      return;
+    for (const form of forms) {
+      if (cw.isDestroyed()) break;
+      if (!await until("document.querySelector('#connect').disabled === false", 10_000)) {
+        if (cw.isDestroyed()) break;
+        process.stdout.write('connect: Connect never became enabled\n');
+        return;
+      }
+      await cw.webContents.executeJavaScript(`(() => {
+        const f = ${JSON.stringify(form)};
+        document.querySelector('#host').value = f.host;
+        document.querySelector('#model').value = f.model;
+        document.querySelector('#tls').checked = f.tls;
+        document.querySelector('#connect').click();
+      })()`);
+      process.stdout.write('connect: submitted\n');
+      // Settled = the window closed (connected) or Connect came back (refused or failed).
+      const settled = await until("document.querySelector('#connect').disabled === false", 35_000);
+      if (cw.isDestroyed()) break;
+      if (!settled) {
+        process.stdout.write('connect: submit never settled\n');
+        return;
+      }
+      const text = await cw.webContents.executeJavaScript(
+        "document.querySelector('#connect-error').textContent") as string;
+      if (text !== '') process.stdout.write(`connect: error ${text}\n`);
     }
-    await cw.webContents.executeJavaScript(`(() => {
-      const f = ${JSON.stringify(form)};
-      document.querySelector('#host').value = f.host;
-      document.querySelector('#model').value = f.model;
-      document.querySelector('#tls').checked = f.tls;
-      document.querySelector('#connect').click();
-    })()`);
-    process.stdout.write('connect: submitted\n');
-    // Settled = the window closed (accepted) or Connect came back (refused).
-    await until("document.querySelector('#connect').disabled === false");
-    if (cw.isDestroyed()) return;
-    const text = await cw.webContents.executeJavaScript(
-      "document.querySelector('#connect-error').textContent") as string;
-    if (text !== '') process.stdout.write(`connect: error ${text}\n`);
+    process.stdout.write(cw.isDestroyed() ? 'connect: dialog closed\n' : 'connect: dialog still open\n');
   } catch (err) {
     if (!cw.isDestroyed()) process.stdout.write(`connect: DRIVE FAILED ${explain(err)}\n`);
   }
@@ -620,9 +709,19 @@ async function driveConnectDialog(
 
 /**
  * Everything after the arguments are known: the session, the atlas, the windows, the menus, the IPC
- * handlers, and the connect (or the replay). ONE PATH for a host given on the command line and, from
- * the next commit, one typed into the startup Connect dialog -- so the dialog cannot build a session
- * the command line would not.
+ * handlers, and the connect (or the replay). ONE PATH for a host given on the command line and one
+ * typed into the startup Connect dialog -- so the dialog cannot build a session the command line
+ * would not.
+ *
+ * ## `mode`: WHO CONNECTS
+ *
+ * `'connect'` (the command line) connects here, as its last step, and a failure goes to the
+ * window's status line via `fail()`. `'dialog'` does everything EXCEPT that connect and the
+ * post-connect seams, and returns them instead: a `connector` the Connect dialog calls once per
+ * press, retrying the SAME session with each press's choices, and `afterConnect`, the seams, for
+ * the dialog to run once its connect has succeeded (spec 2026-11-08-connect-dialog-retry-design,
+ * "Design" 2). `undefined` means setup failed and `fail()` has already said why -- or, in
+ * `'connect'` mode, that there is nothing more for the caller to do.
  *
  * CALLED AT MOST ONCE PER PROCESS, and that is load-bearing: it registers `ipcMain.handle` channels
  * and an `app.on('before-quit')` hook, and the first would THROW on a second call (see the note at
@@ -630,7 +729,8 @@ async function driveConnectDialog(
  */
 async function startSession(
   win: BrowserWindow, fail: (message: string) => void, args: GuiArgs, remedy: TlsRemedy,
-): Promise<void> {
+  mode: 'connect' | 'dialog' = 'connect',
+): Promise<{ connector: DialogConnector; afterConnect: () => Promise<void> } | undefined> {
   // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
   // string lookup in the paint path.
   const scheme = args.scheme ?? resolveScheme();
@@ -658,9 +758,25 @@ async function startSession(
       : { width: atlas.geometry.cellWidth, height: atlas.geometry.cellHeight });
   };
 
+  // The TLS choice the session's socket factory reads at each connect. Only the Connect dialog's
+  // retry writes it (connectAttempt.ts); reconnect replays whatever it last held -- the LAST
+  // EXPLICIT choice, which is the TLS trap's rule (core `session.ts`, `reconnect()`).
+  const tlsChoice = { current: args.tls ?? DEFAULT_TLS };
+  /**
+   * WHETHER USER INPUT MAY REACH THE SESSION. True from the start for a command-line launch; in
+   * 'dialog' mode false until the first successful connect (`goLive`), because the Connect dialog
+   * stays up for retries AFTER this function has built the session. Without it the app menu's
+   * accelerators were live behind the dialog: Ctrl+K opened a keypad whose Enter went through
+   * `reconnectInstead` to the FAILED host with the old TLS choice, connecting behind an open
+   * dialog with `afterConnect` never run; the Model menu changed geometry mid-dialog; and on macOS
+   * Cmd+V in the Host field pasted into the session instead. So the menu is not installed until
+   * then, and the `action` channel and every menu handler check this as a backstop.
+   */
+  let live = mode === 'connect';
+  const ifLive = <A extends unknown[]>(f: (...a: A) => void) => (...a: A): void => { if (live) f(...a); };
   let session;
   try {
-    session = buildSession(args, measure);
+    session = buildSession(args, measure, () => tlsChoice.current);
   } catch (err) {
     fail(explain(err));
     await maybeCapture(win, 1);
@@ -1190,8 +1306,9 @@ async function startSession(
 
   /**
    * THE APPLICATION MENU, and the app's first -- `setApplicationMenu` was never called before
-   * copy/paste needed somewhere to live. Installed HERE, after `send` exists, because Paste needs
-   * it to repaint.
+   * copy/paste needed somewhere to live. Built HERE, after `send` exists, because Paste needs it
+   * to repaint -- and installed here too on the command line, but only once connected when the
+   * Connect dialog is up (`live`, `goLive`).
    *
    * ## ITS ITEMS ARE INERT WHILE THE TRANSFER WINDOW HAS FOCUS
    *
@@ -1276,7 +1393,11 @@ async function startSession(
   for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
     session.on(ev, refreshModelMenu);
   }
-  Menu.setApplicationMenu(Menu.buildFromTemplate(
+  // BUILT HERE, INSTALLED BY `goLive` -- at once in 'connect' mode, so the command line's order is
+  // unchanged; after the first successful connect in 'dialog' mode. Building a menu has no effect
+  // until it is installed: its accelerators are registered by `setApplicationMenu`. Every handler
+  // is also `ifLive`-gated, as a backstop -- see `live`.
+  const appMenu = Menu.buildFromTemplate(
     [...buildMenuTemplate(process.platform, {
       /**
        * ONE MODEL-MENU CHOICE, applied at the next connect. NOT gated on focus: it changes a
@@ -1294,7 +1415,7 @@ async function startSession(
        * Adding a notice channel is a preload, renderer and bridge change for one line of text;
        * the red painter at least shows it, and the next frame wipes it like any message.
        */
-      onGeometry: (choice) => {
+      onGeometry: ifLive((choice: GeometryChoice) => {
         const current = session.geometrySetting;
         if (current === undefined) return;
         try {
@@ -1304,7 +1425,7 @@ async function startSession(
           fail(explain(err));
         }
         refreshModelMenu();
-      },
+      }),
       /**
        * THE MODEL MENU'S DISCONNECT, 2026-11-05: drop the host session so the choices free up,
        * rather than waiting for the host to drop the line. Enabled only while connected (menu.ts);
@@ -1313,7 +1434,7 @@ async function startSession(
        * `--terminal-type` session has no Model menu and so no Disconnect item: accepted, since it
        * has no choices to free.
        */
-      onDisconnect: () => { session.disconnect(); },
+      onDisconnect: ifLive(() => { session.disconnect(); }),
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *
@@ -1327,11 +1448,11 @@ async function startSession(
        * forward rather than stacking one. Rejection CAUGHT for the measured reason given at the
        * `toggleKeypad` intercept: `void` on a rejecting promise is what creates an unhandled one.
        */
-      onKeypad: () => {
+      onKeypad: ifLive(() => {
         openKeypadWindow().catch((err: unknown) => {
           process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
         });
-      },
+      }),
       /**
        * OPEN THE FULL KEYBOARD, and ungated on focus for the reason given just above: opening a
        * window is the same harmless request from anywhere, unlike Copy and Paste which act on the
@@ -1340,18 +1461,18 @@ async function startSession(
        * Rejection CAUGHT, not voided -- `void` on a rejecting promise is what creates an unhandled
        * one, measured on the transfer window.
        */
-      onKeyboard: () => {
+      onKeyboard: ifLive(() => {
         openKeyboardWindow().catch((err: unknown) => {
           process.stdout.write(`keyboard window failed to open: ${explain(err)}\n`);
         });
-      },
-      onCopy: () => {
+      }),
+      onCopy: ifLive(() => {
         if (transferHasFocus()) return;
         // THROUGH THE RENDERER, because the SELECTION lives there -- main knows the screen but not
         // what is selected on it. The global returns false when nothing is selected, which is not
         // an error worth reporting: the operator pressed Copy with no selection.
         void win.webContents.executeJavaScript('window.__tn3270Copy && window.__tn3270Copy()');
-      },
+      }),
       /**
        * ASYNC, BECAUSE ELECTRON 44's CLIPBOARD IS PROMISE-BASED AND THERE IS NO SYNC ALTERNATIVE.
        * `clipboard.readText(): Promise<string>` and `writeText(): Promise<void>`, modeled on the
@@ -1365,7 +1486,7 @@ async function startSession(
        * one. A clipboard the OS refuses (no X selection owner, a locked Wayland portal) must
        * report and leave the session alone.
        */
-      onPaste: () => {
+      onPaste: ifLive(() => {
         if (transferHasFocus()) return;
         void (async (): Promise<void> => {
           const text = await clipboard.readText();
@@ -1390,9 +1511,20 @@ async function startSession(
           // ungated run -- the same rule the transfer window's load failure follows.
           process.stdout.write(`paste failed: ${String(err)}\n`);
         });
-      },
+      }),
     }, geometryMenu())],
-  ));
+  );
+  /**
+   * THE SESSION'S CONTROLS GO LIVE: the application menu (and its accelerators) installed, and the
+   * `action` channel opened. Once, idempotent.
+   */
+  const goLive = (): void => {
+    if (live) return;
+    live = true;
+    Menu.setApplicationMenu(appMenu);
+    refreshModelMenu();   // the template's states were read at build time; the connect changed them
+  };
+  if (mode === 'connect') Menu.setApplicationMenu(appMenu);
   /**
    * THE SESSION GOING AWAY UNDERNEATH, which is the fourth of the paths `transferWindow.ts`'s
    * docstring names and the one nothing handled.
@@ -1454,6 +1586,8 @@ async function startSession(
   const logActions = SEAM.keys !== '' && SEAM.replay !== '';
 
   ipcMain.on('action', (_e, action: Action) => {
+    // Nothing reaches the session before it is live (see `live`); `quit` still quits.
+    if (!live && action.kind !== 'quit') return;
     if (logActions) process.stdout.write(`action: ${JSON.stringify(action)}\n`);
     // `quit` is THIS front end's business: applyAction throws on it rather than ignoring
     // it, so a front end that forgot this check fails loudly instead of being unquittable.
@@ -1547,11 +1681,16 @@ async function startSession(
       const model = Menu.getApplicationMenu()?.getMenuItemById('model')?.submenu;
       if (model !== undefined && !win.isDestroyed()) {
         model.popup({ window: win });
-        // FOR `keys.mjs`, under the action log's own gate: the logged kind above proves the chord
-        // ARRIVED, not that a menu opened, and without this line deleting the popup passes every
-        // gate. `popup` returns at once on Linux (measured: the next chord's action is logged
-        // while the menu is still up), so this line is not a promise that it was dismissed.
-        if (logActions) process.stdout.write('menu: popup model\n');
+        // FOR `keys.mjs` AND `connect.mjs`. In a replay run (`keys.mjs`) the logged kind above
+        // proves the chord ARRIVED, not that a menu opened, and without this line deleting the
+        // popup passes every gate. In a run against a host (`connect.mjs`) nothing is logged
+        // above -- `logActions` needs replay -- so this line is the ONLY evidence that the chord
+        // arrived at all, and that a dialog connect installed the app menu. `popup` returns at
+        // once on Linux (measured: the next chord's action is logged while the menu is still
+        // up), so this line is not a promise that it was dismissed. GATED ON THE KEYS SEAM ALONE,
+        // not on `logActions`: that gate's replay half exists because a `type` action carries
+        // typed text, and this line carries none.
+        if (SEAM.keys !== '') process.stdout.write('menu: popup model\n');
       }
       return;
     }
@@ -1716,6 +1855,9 @@ async function startSession(
    * the trace CHOSEN matters as much as the mechanism.
    */
   if (SEAM.replay !== '') {
+    // `planStartup` never opens the dialog under the replay seam; a replay reached from it would
+    // return `undefined`, which the submit handler would take for a setup failure.
+    if (mode === 'dialog') throw new Error('startSession: replay is not reachable from the Connect dialog');
     // NO GEOMETRY IS RESOLVED HERE: only `connect()` resolves it, so `-oversize` (and `auto`'s
     // measure) does not apply under TN3270_GUI_REPLAY -- the session keeps the model's sizes.
     session.replay(readFileSync(SEAM.replay, 'utf8'));
@@ -1739,6 +1881,27 @@ async function startSession(
     return;
   }
 
+  // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
+  // real host is on, and the one `live-transfer.py` drives. Run ONCE, after the first connect --
+  // here for the command line, from the dialog's submit handler once a press has connected.
+  const afterConnect = async (): Promise<void> => {
+    goLive();   // a no-op on the command line, which went live at the menu install
+    await maybeSendKeys(win, session, () => keyboardWin);
+    await maybeSendClicks(win, () => keypadWin);  // after the keys, for the reason the replay branch gives
+    await maybeSelect(win);                // and after both, for the reason given there too
+    await maybeOpenTransferWindow();
+    await maybeCapture(win);
+    await quitIfKeysOnly();
+  };
+
+  if (mode === 'dialog') {
+    // The Connect dialog connects, as often as it takes (spec 2026-11-08-connect-dialog-retry).
+    // Every listener above is already registered, so the first attempt's `geometry` event and
+    // first frames are seen exactly as a command-line connect's are.
+    const connector = makeConnector(session, tlsChoice, (err, target) => explain(err, { ...target, remedy }));
+    return { connector, afterConnect };
+  }
+
   try {
     await session.connect(args.host!, args.port ?? 23,
       args.lus !== undefined && args.lus.length > 0 ? { lus: args.lus } : {});
@@ -1748,18 +1911,11 @@ async function startSession(
     // handshake ... use -insecure' is the message that matters against Hercules.
     fail(explain(err, {
       host: args.host!, port: args.port ?? 23,
-      tls: (args.tls ?? DEFAULT_TLS).kind !== 'plaintext', remedy,
+      tls: tlsChoice.current.kind !== 'plaintext', remedy,
     }));
   }
-
-  // THE LIVE PATH, and the only one where a `wait:` step earns its keep: this is the branch a
-  // real host is on, and the one `live-transfer.py` drives.
-  await maybeSendKeys(win, session, () => keyboardWin);
-  await maybeSendClicks(win, () => keypadWin);  // after the keys, for the reason the replay branch gives
-  await maybeSelect(win);                // and after both, for the reason given there too
-  await maybeOpenTransferWindow();
-  await maybeCapture(win);
-  await quitIfKeysOnly();
+  await afterConnect();
+  return undefined;
 }
 
 /**

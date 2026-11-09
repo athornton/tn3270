@@ -231,6 +231,31 @@ describe('reconnect() replays the remembered target', () => {
     expect(session.isConnected()).toBe(true);
   });
 
+  it('a REJECTED connect leaves the session connectable, and reconnect dials the later target', async () => {
+    // The GUI's Connect dialog retries on the same session (spec 2026-11-08-connect-dialog-retry):
+    // a first connect that fails must not wedge it.
+    let fail = true;
+    const dialled: string[] = [];
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: async (host, port) => {
+        dialled.push(`${host}:${port}`);
+        if (fail) throw Object.assign(new Error('refused'), { code: 'ECONNREFUSED' });
+        const conn = new FakeConnection();
+        conns.push(conn);
+        return conn;
+      },
+    });
+    await expect(session.connect('wrong.example', 3270)).rejects.toThrow('refused');
+    expect(session.isConnecting()).toBe(false);
+    fail = false;
+    await session.connect('right.example', 3271);
+    expect(session.isConnected()).toBe(true);
+    conns[0]!.close();
+    await session.reconnect();
+    expect(dialled).toEqual(['wrong.example:3270', 'right.example:3271', 'right.example:3271']);
+  });
+
   it('REFUSES a second reconnect while the first is still in flight', async () => {
     // x3270's `PCONNECTED` is "connected OR HALF-connected"; `isConnected()` only sees the completed
     // case. Without the pending half, two presses of the reconnect key both pass `connect()`'s

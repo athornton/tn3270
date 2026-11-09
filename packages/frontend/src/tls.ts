@@ -52,6 +52,23 @@ export const DEFAULT_TLS: TlsOptions = Object.freeze({ kind: 'tls', verify: true
  */
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
 
+/**
+ * How long a PLAINTEXT connect may take before we give up and say so.
+ *
+ * Without it, a host that silently drops packets (a firewall, a powered-off LPAR behind a router)
+ * leaves the connect to the OS's own SYN retries: measured 2026-11-09 on this Linux box, a connect
+ * to TEST-NET 192.0.2.1 was still pending after 3 s and the kernel's `tcp_syn_retries=6` gives up
+ * only after ~127 s. Through the GUI's Connect dialog or the TUI's prompt that was two minutes of
+ * "Connecting to ..." with only Quit to press. (The TLS path is bounded by the handshake deadline
+ * above, which its socket arms before the TCP connect.)
+ *
+ * 30 s, longer than the TLS deadline, because there is no handshake to blame: a slow first route
+ * to a distant host is a real case, and a wrong refusal is worse than a slow one. It is a CONNECT
+ * deadline only -- disarmed the moment the socket connects (see `tcpConnect`), never an idle
+ * timer, for the same reason the TLS path clears its timeout after the handshake.
+ */
+export const CONNECT_TIMEOUT_MS = 30_000;
+
 /** Raw flag state, before conflicts are resolved. */
 export interface TlsFlags {
   insecure?: boolean;
@@ -139,9 +156,21 @@ export function resolveTls(flags: TlsFlags, usageError: (message: string) => Err
  * How the session was started, which decides how a TLS remedy is worded. `'flag'` is a command
  * line, where `-insecure` is the fix; `'dialog'` is the GUI's Connect dialog, where there is no
  * command line to add a flag to and the fix is its TLS checkbox (spec
- * 2026-11-05-packaging-design.md section 2, "TLS hang").
+ * 2026-11-05-packaging-design.md section 2, "TLS hang"). `'prompt'` is the TUI's no-host prompt,
+ * whose fix is answering `n` to its TLS question.
  */
-export type TlsRemedy = 'flag' | 'dialog';
+export type TlsRemedy = 'flag' | 'dialog' | 'prompt';
+
+/**
+ * The remedy-first lead for the two plaintext-host cases in `describeTlsError`, keyed by
+ * `TlsRemedy` so a fourth remedy that forgot an entry here is a compile error rather than a
+ * silently `undefined` one. `'flag'`'s `undefined` keeps the plain command-line wording.
+ */
+const REMEDY_LEAD: Readonly<Record<TlsRemedy, string | undefined>> = {
+  flag: undefined,
+  dialog: 'Untick TLS in the Connect dialog',
+  prompt: 'Answer n to TLS',
+};
 
 /**
  * Explains a TLS failure in terms of the flag that would change it.
@@ -150,28 +179,36 @@ export type TlsRemedy = 'flag' | 'dialog';
  * plaintext host is otherwise indistinguishable from a host being down, and the
  * fix — one flag — is not guessable from `ECONNRESET`.
  *
- * `remedy: 'dialog'` rewords only the two plaintext-host cases, the only ones whose fix the Connect
- * dialog has a control for; the certificate cases name flags the dialog cannot set, which is still
- * the truth about how to fix them. THE DIALOG WORDING PUTS THE REMEDY FIRST, because a message is
- * read by someone who may see only its start (memory note *fixed-width-messages-lose-their-point*).
+ * `remedy: 'dialog'` and `remedy: 'prompt'` reword only the two plaintext-host cases, the only
+ * ones whose fix each has a control for -- the GUI's Connect dialog a TLS checkbox, the TUI's
+ * prompt a yes/no question; the certificate cases name flags neither can set, which is still the
+ * truth about how to fix them. BOTH REWORDINGS PUT THE REMEDY FIRST, because a message is read by
+ * someone who may see only its start (memory note *fixed-width-messages-lose-their-point*).
  * The `'flag'` wording is left exactly as it shipped.
  */
 export function describeTlsError(
   code: string | undefined, host: string, port: number, remedy: TlsRemedy = 'flag',
 ): string {
-  const dialog = remedy === 'dialog';
+  // A failure BEFORE the TCP connection exists is not TLS's, even with TLS on: "TLS connection to
+  // typo:23 failed (ENOTFOUND)" sends the reader to the TLS setting for a typo, and the Connect
+  // dialog's and the TUI prompt's retry loops made it the message people see most (2026-11-09).
+  // ECONNRESET is NOT in this set: it arrives after the connect, mid-handshake, and is TLS's.
+  if (code !== undefined && Object.prototype.hasOwnProperty.call(CONNECT_WORDS, code)) {
+    return describeConnectError(code, host, port);
+  }
+  const lead = REMEDY_LEAD[remedy];
   switch (code) {
     case 'HANDSHAKE_TIMEOUT':
-      return dialog
-        ? `Untick TLS in the Connect dialog: ${host}:${port} accepted the connection but never `
+      return lead !== undefined
+        ? `${lead}: ${host}:${port} accepted the connection but never `
           + 'completed a TLS handshake, so it probably does not speak TLS — a Hercules or other '
           + 'vintage system.'
         : `${host}:${port} accepted the connection but never completed a TLS handshake. `
           + 'If it does not speak TLS — a Hercules or other vintage system — use -insecure.';
     case 'ERR_SSL_WRONG_VERSION_NUMBER':
     case 'ERR_SSL_PACKET_LENGTH_TOO_LONG':
-      return dialog
-        ? `Untick TLS in the Connect dialog: ${host}:${port} answered with something that is not `
+      return lead !== undefined
+        ? `${lead}: ${host}:${port} answered with something that is not `
           + 'TLS, so it is almost certainly a plaintext host.'
         : `${host}:${port} answered with something that is not TLS. `
           + 'It is almost certainly a plaintext host: use -insecure.';
@@ -197,6 +234,10 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
   ECONNREFUSED: 'connection refused',
   ENOTFOUND: 'no such host',
   ETIMEDOUT: 'timed out',
+  ENETUNREACH: 'network unreachable',
+  EAI_AGAIN: 'name lookup failed, try again',
+  // Our own code, from `tcpConnect`'s plaintext deadline; Node has none for a plaintext connect.
+  CONNECT_TIMEOUT: `no answer within ${CONNECT_TIMEOUT_MS / 1000} s`,
   EHOSTUNREACH: 'host unreachable',
 };
 
@@ -205,8 +246,8 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
  * "TLS connection to ... failed" would send the reader to a setting that was not on.
  *
  * The action and the target come first (`cannot connect to host:port`), for the same truncation
- * reason the dialog's TLS wording leads with its remedy. A code this does not know keeps the
- * underlying message when there is one, rather than inventing words for it.
+ * reason the dialog's and the prompt's TLS wording lead with their remedy. A code this does not
+ * know keeps the underlying message when there is one, rather than inventing words for it.
  */
 export function describeConnectError(
   code: string | undefined, host: string, port: number, message?: string,
@@ -244,13 +285,24 @@ export function tcpConnect(
   port: number,
   options: TlsOptions = DEFAULT_TLS,
   handshakeMs: number = HANDSHAKE_TIMEOUT_MS,
+  connectMs: number = CONNECT_TIMEOUT_MS,
 ): Promise<Connection> {
   if (options.kind === 'plaintext') {
     return new Promise((resolve, reject) => {
       const sock = createConnection({ host, port });
       const conn = adapt(sock);
-      sock.on('error', (e: Error) => { conn.onError?.(e); reject(e); });
-      sock.on('connect', () => resolve(conn));
+      // AN EXPLICIT TIMER, NOT the socket's `timeout` option: that one is an INACTIVITY timer and
+      // would have to be cleared on connect by hand (the TLS path below does exactly that). This
+      // timer is cleared on connect and on error, so it can never fire on a live, idle session.
+      const deadline = setTimeout(() => {
+        const e: Error & { code?: string } =
+          new Error(describeConnectError('CONNECT_TIMEOUT', host, port));
+        e.code = 'CONNECT_TIMEOUT';
+        sock.destroy();
+        reject(e);
+      }, connectMs);
+      sock.on('error', (e: Error) => { clearTimeout(deadline); conn.onError?.(e); reject(e); });
+      sock.on('connect', () => { clearTimeout(deadline); resolve(conn); });
     });
   }
 

@@ -1,14 +1,14 @@
 /**
  * Helpers shared by the smoke scripts (`install-smoke.mjs`, `package-smoke.mjs`) and the GUI
  * harness `packages/gui/scripts/connect.mjs`: bounded spawns that kill their whole process tree,
- * failure reporting, the display an Electron needs, and the throwaway telnet server whose reply
- * is the oracle for "the client connected in plaintext".
+ * failure reporting, the display an Electron needs, the throwaway telnet server whose reply is the
+ * oracle for "the client connected in plaintext", and a fake host that reaches 3270 mode.
  *
  * Moved here, not copied, so the two smoke scripts share one copy of the kill and display rules.
- * NOT YET connect.mjs: it imports `descendants`, `sleep`, `startServer` and `until` from here but
- * keeps its own `alive`/`launch`/`kill` (repo Electron via `guiEnv`, no Windows path), so those
- * can still drift from `gone`/`launch`/`killTree` below. Nothing in this module resolves Electron
- * at load time (see `displayEnv`).
+ * NOT YET connect.mjs: it imports `descendants`, `sleep`, `startHost`, `startServer` and `until`
+ * from here but keeps its own `alive`/`launch`/`kill` (repo Electron via `guiEnv`, no Windows
+ * path), so those can still drift from `gone`/`launch`/`killTree` below. Nothing in this module
+ * resolves Electron at load time (see `displayEnv`).
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -150,33 +150,35 @@ export async function displayEnv(env) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The throwaway telnet server
+// The throwaway telnet servers
 
 const IAC = 255, DO = 253, WILL = 251, TTYPE = 24;
+const SB = 250, SE = 240, EOR = 239, BINARY = 0, OPT_EOR = 25;
 
 /**
- * A throwaway server on port 0 that records connections and what each client sent first. Unless
- * `silent`, it opens with `IAC DO TERMINAL-TYPE`, so `willTtype()` -- `IAC WILL TERMINAL-TYPE`
- * came back -- proves a PLAINTEXT telnet client, which a TLS client (sending a ClientHello)
- * cannot fake.
+ * The core both servers share: listen on 127.0.0.1 port 0, count connections, append every byte
+ * any client sends to `seen.bytes`, and close by destroying every open socket. `onConnect(sock)`
+ * runs once per connection and may return a per-chunk handler, called AFTER the chunk is appended.
  */
-export function startServer({ silent = false } = {}) {
+function listen(onConnect) {
   return new Promise((resolve) => {
     const seen = { connections: 0, bytes: Buffer.alloc(0) };
     const sockets = new Set();
     const server = net.createServer((sock) => {
       seen.connections++;
       sockets.add(sock);
-      sock.on('data', (b) => { seen.bytes = Buffer.concat([seen.bytes, b]); });
+      const onData = onConnect(sock);
+      sock.on('data', (b) => {
+        seen.bytes = Buffer.concat([seen.bytes, b]);
+        onData?.(b);
+      });
       sock.on('error', () => {});
       sock.on('close', () => { sockets.delete(sock); });
-      if (!silent) sock.write(Buffer.from([IAC, DO, TTYPE]));
     });
     server.listen(0, '127.0.0.1', () => {
       resolve({
         port: server.address().port,
         seen,
-        willTtype: () => seen.bytes.includes(Buffer.from([IAC, WILL, TTYPE])),
         close: () => new Promise((r) => {
           for (const s of sockets) s.destroy();
           server.close(() => r());
@@ -184,6 +186,118 @@ export function startServer({ silent = false } = {}) {
       });
     });
   });
+}
+
+/**
+ * A throwaway server on port 0 that records connections and what each client sent first. Unless
+ * `silent`, it opens with `IAC DO TERMINAL-TYPE`, so `willTtype()` -- `IAC WILL TERMINAL-TYPE`
+ * came back -- proves a PLAINTEXT telnet client, which a TLS client (sending a ClientHello)
+ * cannot fake.
+ */
+export async function startServer({ silent = false } = {}) {
+  const srv = await listen((sock) => {
+    if (!silent) sock.write(Buffer.from([IAC, DO, TTYPE]));
+  });
+  const { seen } = srv;
+  return { ...srv, willTtype: () => seen.bytes.includes(Buffer.from([IAC, WILL, TTYPE])) };
+}
+
+/**
+ * A fake host that goes all the way into 3270 mode, for a harness that has to TYPE: `startServer`
+ * stops at `IAC DO TERMINAL-TYPE`, so a client connected to it has no screen and a locked keyboard.
+ *
+ * PORTED FROM `packages/tui/scripts/pty-smoke.py`'s `FakeHost`, the repo's one existing fake host
+ * that reaches 3270 mode, with the same negotiation: `IAC DO TERMINAL-TYPE`; TERMINAL-TYPE SEND
+ * once the client says WILL; once its `IS` arrives, EOR and BINARY both ways and, 300 ms later --
+ * pty-smoke.py's `time.sleep(0.3)`, kept so the two hosts behave alike: it lets the client's
+ * replies to that negotiation land before the screen does -- one Erase/Write, its screen less the
+ * red field: a protected `HELLO TN3270` and an unprotected field on row 3 with the cursor in it
+ * (the IC -- without it the cursor sits in the protected field and every keystroke is refused).
+ *
+ * Both triggers are matched on the connection's ACCUMULATED inbound bytes and fire once each, so
+ * a reply split across TCP chunks is still seen and a repeated one is not answered twice.
+ *
+ * `records()` is the ORACLE: the most recent connection's inbound 3270 records after its screen
+ * went out (see `inboundRecords`). One client per host is the intended use.
+ */
+export async function startHost() {
+  let last;
+  const srv = await listen((sock) => {
+    const conn = { bytes: Buffer.alloc(0), ttypeSent: false, screenAt: -1 };
+    last = conn;
+    sock.write(Buffer.from([IAC, DO, TTYPE]));
+    return (b) => {
+      conn.bytes = Buffer.concat([conn.bytes, b]);
+      if (!conn.ttypeSent && conn.bytes.includes(Buffer.from([IAC, WILL, TTYPE]))) {
+        conn.ttypeSent = true;
+        sock.write(Buffer.from([IAC, SB, TTYPE, 1, IAC, SE]));   // SEND
+      }
+      if (conn.screenAt < 0 && conn.bytes.includes(Buffer.from([IAC, SB, TTYPE, 0]))) {   // IS
+        conn.screenAt = conn.bytes.length;
+        sock.write(Buffer.from([
+          IAC, DO, OPT_EOR, IAC, WILL, OPT_EOR, IAC, DO, BINARY, IAC, WILL, BINARY,
+        ]));
+        setTimeout(() => { if (!sock.destroyed) sock.write(HOST_SCREEN); }, 300);
+      }
+    };
+  });
+  return {
+    ...srv,
+    records: () => (last === undefined || last.screenAt < 0
+      ? []
+      : inboundRecords(last.bytes.subarray(last.screenAt))),
+  };
+}
+
+/** cp037 for `HELLO TN3270`: the letter runs are NOT contiguous (A-I C1, J-R D1, S-Z E2). */
+const HELLO_EBCDIC = {
+  H: 0xC8, E: 0xC5, L: 0xD3, O: 0xD6, ' ': 0x40, T: 0xE3, N: 0xD5, 2: 0xF2, 3: 0xF3, 7: 0xF7, 0: 0xF0,
+};
+/** The 12-bit buffer address, the 3270 manual's 64-entry table. */
+const ADDR = [
+  0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+  0x50, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+  0x60, 0x61, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+  0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+];
+const addr12 = (a) => [ADDR[(a >> 6) & 0x3F], ADDR[a & 0x3F]];
+const HOST_SCREEN = Buffer.from([
+  // Erase/Write; WCC 0xC3 = reset + restore keyboard + reset MDT (0xC0 is the graphic encoding).
+  0xF5, 0xC3,
+  // SBA row 1, SF protected, the text.
+  0x11, ...addr12(0), 0x1D, 0xF0, ...[...'HELLO TN3270'].map((c) => HELLO_EBCDIC[c]),
+  // SBA row 3, SF unprotected, IC.
+  0x11, ...addr12(160), 0x1D, 0x40, 0x13,
+  IAC, EOR,
+]);
+
+/**
+ * The 3270 records in a client's inbound bytes, telnet stripped: `IAC WILL/WONT/DO/DONT x` and
+ * `IAC SB ... IAC SE` dropped, `IAC IAC` is one 0xFF data byte, `IAC EOR` ends a record. Written
+ * here from RFC 854/885, NOT shared with the client's telnet code, because it is what judges that
+ * code: a parser imported from the client would agree with the client's bugs.
+ */
+function inboundRecords(b) {
+  const out = [];
+  let rec = [];
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] !== IAC) { rec.push(b[i]); continue; }
+    const cmd = b[i + 1];
+    if (cmd === IAC) {
+      rec.push(IAC);
+      i++;
+    } else if (cmd === EOR) {
+      out.push(Buffer.from(rec));
+      rec = [];
+      i++;
+    } else if (cmd === SB) {
+      while (i < b.length && !(b[i] === IAC && b[i + 1] === SE)) i++;
+      i++;
+    } else {
+      i += cmd >= WILL ? 2 : 1;   // WILL/WONT/DO/DONT carry an option byte
+    }
+  }
+  return out;
 }
 
 /**

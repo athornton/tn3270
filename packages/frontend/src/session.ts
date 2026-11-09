@@ -8,10 +8,21 @@ import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
  * default, and a default argument that meant plaintext would make every caller
  * that forgot the parameter silently insecure. `-insecure` passes
  * `{ kind: 'plaintext' }` explicitly.
+ *
+ * `tls` may also be a FUNCTION, called at every connect. The GUI's Connect dialog uses this: its
+ * session is built with `() => tlsChoice.current` (`gui/src/main.ts`, `startSession`), and
+ * `gui/src/connectAttempt.ts`'s `makeConnector` writes `tlsChoice.current` once per press of
+ * Connect, immediately before the `connect()` that choice belongs to (spec
+ * 2026-11-08-connect-dialog-retry-design.md).
+ * `reconnect()` dials through this same function, so it replays whichever choice is IN FORCE
+ * when it runs, which only the function's OWNER can write -- no keypress, menu or host frame
+ * can. THE RULE AN OWNER MUST KEEP: write the choice only as part of a `connect()` to the target
+ * it belongs to (see `reconnect()`'s own comment in `@tn3270/core`'s `session.ts` for why that is
+ * what keeps it safe).
  */
 export function defaultSession(
   terminalType?: string,
-  tls: TlsOptions = DEFAULT_TLS,
+  tls: TlsOptions | (() => TlsOptions) = DEFAULT_TLS,
   /**
    * The model's ALTERNATE screen size, from `resolveAlternateSize`. Absent leaves
    * the session a model 2, where the alternate size equals the default 24x80.
@@ -64,7 +75,7 @@ export function defaultSession(
   geometry?: { readonly setting: GeometrySetting; readonly measure?: () => Size | undefined },
 ): Session {
   return new Session({
-    connect: (h, p) => tcpConnect(h, p, tls),
+    connect: (h, p) => tcpConnect(h, p, typeof tls === 'function' ? tls() : tls),
     ...(terminalType ? { terminalType } : {}),
     ...(tn3270e === undefined ? {} : { tn3270e }),
     ...(alternate !== undefined

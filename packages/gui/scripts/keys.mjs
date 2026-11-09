@@ -154,7 +154,7 @@ const CASES = [
    * the same way and proves the same log-then-intercept order.
    *
    * THE MODEL MENU POPS UP NOW (Task 13), and the run asserts it: `main.ts` prints
-   * `menu: popup model` under the action log's gate, and the count check below wants one per
+   * `menu: popup model` whenever the keys seam is set, and the count check below wants one per
    * `Alt+M` case. The popup does NOT eat the next chord: these chords arrive through
    * `sendInputEvent` into the page, not through X, so the menu's keyboard grab never sees them --
    * measured, the following positions all arrive in order with the menu still open. A REAL

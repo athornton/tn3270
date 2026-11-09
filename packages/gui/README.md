@@ -23,6 +23,17 @@ code. See the root README's *Using the GUI* section
 (https://github.com/athornton/tn3270#readme) for keys, the keypad, the keyboard window
 and copy/paste.
 
+### Starting with no host
+
+`tn3270-gui` with no host on the command line opens a Connect dialog (host, model, a TLS
+checkbox) instead of refusing to run. **The dialog stays open until a connect succeeds**: a
+failure is shown on its own error line — `Untick TLS in the Connect dialog: ...` for a
+plaintext host reached with TLS still ticked — the fields keep what you typed, and pressing
+Connect again retries the SAME session with whatever you changed. Quit, Escape and closing the
+dialog all quit the app until a connect has succeeded, including mid-attempt. Once connected the
+dialog closes and is not used again this run. See the root README's *Installing* and *Connecting
+over TLS* sections for the retry rule and the TLS trap it has to respect on reconnect.
+
 Electron's own switches (`--no-sandbox`, `--disable-gpu`, ...) can be given on the same
 command line; they go to Chromium, not to the TN3270 flag parser.
 

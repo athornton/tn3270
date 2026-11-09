@@ -1977,6 +1977,52 @@ offered `DO TN3270E`. The "modern z/OS or z/VM" witness for TN3270E, `IBM-DYNAMI
 still owed. What `pubvm.org` does give us is a newer VM to check the query reply, alternate
 models and `IND$FILE` against.
 
+## Connect dialog retry and the TUI prompt — verified live 2026-11-09, branch `connect-retry`
+
+Specs: `docs/superpowers/specs/2026-11-08-connect-dialog-retry-design.md` and
+`docs/superpowers/specs/2026-11-08-tui-connect-prompt-design.md`. Offline coverage:
+`packages/gui/scripts/connect.mjs` (7 cases) and `packages/tui/scripts/pty-smoke.py --prompt`.
+Driven here against the user's Hercules hosts (VM/370 CE on 127.0.0.1:3270, TK5 MVS on
+127.0.0.1:3271; both open with `IAC DO TERMINAL-TYPE`) and against `pubvm.org`. Nobody logged
+on; every run stops at the host's first screen.
+
+**TUI, in a real pty, `node packages/tui/dist/main.js` with NO arguments** (driver: a Python
+`pty.fork` script answering each prompt only once its Nth occurrence has appeared — a first
+version matched round 1's still-buffered prompts in round 2 and typed ahead of the questions,
+which readline then dropped; that was the script, not the client):
+
+| Host | Round 1: TLS `Y` | Round 2: `n` | Exit (Ctrl-]) |
+|---|---|---|---|
+| VM, :3270 | `Answer n to TLS: 127.0.0.1:3270 accepted the connection but never completed a TLS handshake...` at 10.6 s | full screen, `VM/370` drawn | 0 |
+| MVS, :3271 | the same wording, at 10.5 s | full screen, the TK5 logon panel | 0 |
+| `pubvm.org:623` | (TLS default, one round) connected; `Connecting to pubvm.org:623...`, the VM logon screen drawn | — | 0 |
+
+**GUI, the Connect dialog driven through `TN3270_GUI_CONNECT` under Xvfb** (two presses, TLS
+ticked then unticked; screenshot via `TN3270_GUI_SHOT` once live):
+
+| Host | Press 1 (TLS) | Press 2 (no TLS) | Screen |
+|---|---|---|---|
+| VM, :3270 | error line `Untick TLS in the Connect dialog: 127.0.0.1:3270 accepted the connection but never completed a TLS handshake...` at +10.0 s; dialog stayed open | connected; `connect: dialog closed` 0.1 s later | VM/370 CE V1 R1.2 logo, `RUNNING VM370CE` |
+| MVS, :3271 | the same, at +10.0 s | connected, dialog closed | TK5 logon panel (`Terminal CUU0C0`, `Logon ===>`) |
+| `pubvm.org:623` | one press, TLS ticked: connected in 0.1 s, dialog closed | — | the PUBNET System Menu |
+
+The PUBNET menu is worth recording: `pubvm.org` is a front end offering two systems, `1 PUBVM,
+VM/IS 5 (VM/SP 5)` and `2 DANVM1, VM/ESA 2.4.0` — which is why the user described it as "VM/SP 5
+or VM/ESA 2.4".
+
+**Not reachable against these hosts: the `N:` (no-TN3270E) prefix through a retry.** Neither
+Hercules system ever offers TN3270E (measured 2026-08-27, above), and `pubvm.org` does not
+either (2026-11-08), so whether the client offers it cannot be seen on any wire available here.
+It is covered at unit level (`packages/gui/test/connectAttempt.test.ts`: `N:host1` failing, then
+`host2`) and is owed against a host that really negotiates TN3270E.
+
+**Still owed, by the user:** on macOS, that `Cmd-V` pastes into the Connect dialog's Host field on
+a retry. The risk was found by CODE REVIEW, not observed: before the fix, the session's app menu
+was installed on the first press, while the dialog stayed open for retries, so its paste
+accelerator would have sent `Cmd-V` into the session. `main.ts` now installs the menu only after
+the first successful connect (`goLive`), and gates everything else on `live`; no harness here can
+deliver a real macOS paste event to prove it.
+
 ## TLS against both hosts — verified 2026-08-25
 
 Neither Hercules system can speak TLS, so TLS is tested by putting a terminating proxy in

@@ -910,10 +910,25 @@ export class Session {
    * ## WHY IT REUSES `this.opts.connect` AND TAKES NO ARGUMENTS — THE TLS TRAP
    *
    * `SessionOptions.connect` is INJECTED, and the injected function is where the TLS decision
-   * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` (`tcpConnect(h, p, tls)`),
-   * chosen once from the command line. Replaying the remembered host and port THROUGH THAT SAME
-   * FUNCTION therefore reuses the original decision by construction, and there is nothing here
-   * that could re-derive it.
+   * lives: `frontend`'s `defaultSession` closes over a `TlsOptions` or a `() => TlsOptions`
+   * (`tcpConnect(h, p, tls)`). Replaying the remembered host and port THROUGH THAT SAME FUNCTION
+   * means `reconnect()` reuses whichever choice is IN FORCE when it runs — not a decision frozen
+   * at construction. A plain `TlsOptions` never changes, so for the command line "in force" and
+   * "chosen once at startup" are the same thing; a function's result is whatever its OWNER last
+   * wrote there. **There are two owners today:** the command line, which passes a plain
+   * `TlsOptions` and so never changes it; and the GUI's Connect dialog, whose session is built with
+   * `() => tlsChoice.current` (`gui/src/main.ts`, `startSession`) and whose `attempt`
+   * (`gui/src/connectAttempt.ts`, `makeConnector`) writes `tlsChoice.current` once per press of
+   * Connect, immediately before the `connect()` that choice belongs to. Either way, NO TERMINAL KEYSTROKE, MENU OR HOST
+   * FRAME CAN WRITE IT, only whoever owns the function — and THE RULE AN OWNER MUST KEEP is to
+   * write the choice only as part of a `connect()` to the target the choice belongs to.
+   * `connect()` records the target before it dials, even when the dial then fails (see
+   * `connectNow`'s "REMEMBERED BEFORE THE AWAIT" comment), so `reconnect()` replays the LATEST
+   * ATTEMPT's target with the choice in force -- not only a successful one's. An owner must
+   * therefore write a new choice only IMMEDIATELY BEFORE a `connect()` to that choice's target,
+   * and after anything that can throw first (`setGeometry`; and `connect()`'s own geometry
+   * resolution runs before the target is recorded), or a new choice ends up paired with the old
+   * target.
    *
    * That is not a stylistic preference. A PLAINTEXT HOST DOES NOT REJECT A TLS HANDSHAKE, IT
    * HANGS: Hercules writes `IAC DO TERMINAL-TYPE` and waits, and OpenSSL reads that leading 0xff
