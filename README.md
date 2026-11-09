@@ -1593,13 +1593,14 @@ holds as one item.
    macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
    Connect dialog used on each). The first
    `npm publish` is **done** (0.1.0, 2026-11-08), and so is the icon (see *Installing*). **npm
-   trusted publishing from GitHub Actions is built** (2026-11-09, `trusted-publish`): a pushed
+   trusted publishing from GitHub Actions is built and proven** (2026-11-09): a pushed
    `vX.Y.Z` tag runs `.github/workflows/package.yml`'s `release-check` and `publish` jobs, which
    publish the CI-built tarballs over OIDC after one approval in the `npm` GitHub environment, with
    provenance and no long-lived npm token anywhere, then read the registry back to prove it landed.
-   **Proof owed: release 0.1.2**, tagged and approved by the user, with the registry checked against
-   that run's tarballs (`docs/releasing.md`). Until then the manual steps there remain the only
-   exercised path. **Signing and store
+   **Proven by release 0.1.3** (0.1.2 was skipped, a path bug in the publish job): published by
+   "GitHub Actions", every shasum equal to the run's tarballs, an SLSA provenance attestation per
+   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **Next,
+   near-term: the same tag run also cuts a GitHub release carrying the native installers.** **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
