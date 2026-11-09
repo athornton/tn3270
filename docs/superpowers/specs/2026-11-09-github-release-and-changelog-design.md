@@ -26,8 +26,20 @@ whose functional summary comes from scriv changelog fragments written with each 
 - `scriv print --version X.Y.Z` prints just that section on STDOUT (its "Extracting entry..." chatter
   goes to stderr) and exits 2 for a version with no section.
 - `gh release create` documents that `--notes` are PREPENDED to `--generate-notes` output. Rather
-  than depend on that flag interplay, the job asks the `generate-notes` REST API for the commit
-  list itself and composes ONE notes file, so the result is predictable and testable.
+  than depend on that flag interplay, the job composes ONE notes file itself, so the result is
+  predictable and testable.
+- **`releases/generate-notes` lists merged PULL REQUESTS, not commits** (measured during
+  implementation): for v0.1.1...v0.1.3 its `body` was only `**Full Changelog**: <compare URL>`,
+  because this repository merges by push and has no pull requests. So the commit list is
+  `git log --first-parent --format=%s%x00%h vPREV..vX.Y.Z` (5 lines for v0.1.1..v0.1.3 -- the
+  `Merge X -- ...` subjects, the release commits, one direct commit -- where a plain `git log` gives
+  17, every branch's plans and specs included), each subject markdown-escaped: GitHub's renderer
+  swallowed `<userid>` in 2d0041c's subject as an HTML tag, a leading `#` makes a heading, and a
+  bare `@login` would notify that user. GitHub's list is still asked for, and shown only when it
+  lists something.
+- The release REST API (`repos/{repo}/releases/tags/{tag}`) gives each asset a `digest`,
+  `sha256:<hex>`, on assets uploaded since GitHub began computing it; older assets have `null`
+  (measured on cli/cli: v2.103.3 has digests, v2.46.0 has none).
 
 ## Changelog files
 
@@ -68,12 +80,17 @@ whose functional summary comes from scriv changelog fragments written with each 
 It installs scriv pinned (`pipx run scriv==1.8.1`, or `pip install scriv==1.8.1`; the runner has
 both) and refuses unless:
 
-1. `scriv print --version X.Y.Z` exits 0 with non-blank output — the changelog has this version;
+1. `scriv print --version X.Y.Z` exits 0 with output holding at least one `- item` line — the
+   changelog has this version, and not just an untouched template's headings and bare `-`s;
 2. `changelog.d/` contains no fragments other than `scriv.ini` and `_template.md.jinja` — nothing
    was written and then left uncollected.
 
 Both are checked by a new mode of a small dependency-free script (below), so they are unit-tested
 and run on every push in a WARNING form (see "Every push").
+
+It also runs `release-notes.mjs --check-installers DIR X.Y.Z` over the run's downloaded `gui-*`
+artifacts (no network): the installer-set rule below, BEFORE the approval and `npm publish`, which
+cannot be undone -- so a missing or extra installer stops the release before anything is public.
 
 ## New job `github-release` (after `publish`)
 
@@ -89,18 +106,22 @@ one approval on `publish` already covers it). Steps:
      with version X.Y.Z), and writes `SHA256SUMS` (`sha256  filename`, sorted, `sha256sum -c`
      compatible);
    - finds the PREVIOUS release tag: the highest `vA.B.C` tag that is an ancestor of this tag and
-     lower than it (`git tag --merged`), so the commit list is X.Y.Z's own — and the generated notes
-     never fall back to the whole history;
-   - composes `release-notes.md` from: the fixed header; `scriv print --version X.Y.Z`'s output
-     under a `## What changed` heading; the commit list from
-     `gh api repos/{repo}/releases/generate-notes -f tag_name=vX.Y.Z -f previous_tag_name=vPREV`
-     (its `body`) under `## Commits`; and `**Full changelog**: https://github.com/{repo}/compare/vPREV...vX.Y.Z`.
+     lower than it (`git tag --merged`), so the commit list is X.Y.Z's own and never falls back
+     to the whole history (no previous tag: refuse);
+   - composes `release-notes.md`, in the repository root (the job's working directory), from: the
+     fixed header; `scriv print --version X.Y.Z`'s output under `## What changed`; under
+     `## Commits`, `git log --first-parent` vPREV..vX.Y.Z, one escaped `- subject (hash)` per line
+     (see "Measured"); under `## Pull requests`, only when it lists any,
+     `gh api repos/{repo}/releases/generate-notes -f tag_name=vX.Y.Z -f previous_tag_name=vPREV`'s
+     `body` minus its own compare line and HTML comments; and ONE
+     `**Full changelog**: https://github.com/{repo}/compare/vPREV...vX.Y.Z`.
 4. Create or update the release: if `gh release view vX.Y.Z` fails, `gh release create vX.Y.Z
    --verify-tag --title "vX.Y.Z" --notes-file release-notes.md <files> SHA256SUMS`; otherwise (a
    re-run) `gh release edit vX.Y.Z --notes-file release-notes.md` and `gh release upload vX.Y.Z
    <files> SHA256SUMS --clobber`.
-5. Read back: `gh release view vX.Y.Z --json assets` lists exactly the expected files plus
-   `SHA256SUMS`, each with a non-zero size; fail otherwise.
+5. Read back (`release-notes.mjs --verify-release`): `gh api repos/{repo}/releases/tags/vX.Y.Z`
+   lists exactly the expected files plus `SHA256SUMS`, each uploaded, non-empty, at the local size,
+   and -- where GitHub gives a `digest` -- with the local file's sha256; fail otherwise.
 
 ### The fixed header
 
@@ -131,9 +152,11 @@ before its artifact is uploaded; this job then picks up signed files unchanged. 
 - `release-notes.mjs` unit tests: the expected-file-set rule (missing, extra, wrong version); the
   `SHA256SUMS` format (round-trips through `sha256sum -c` in a test); previous-tag selection
   (ancestor, highest lower, none → refuse); notes composition (sections in order, the scriv text
-  verbatim, the compare URL); the two release-check refusals (no section; leftover fragment).
+  verbatim, the compare URL, escaped commit subjects, `--first-parent` against a real temporary git
+  repository); the release-check refusals (no section, a section with no item, a leftover fragment;
+  the installer set); the read-back (size, digest, `null` digest falling back to size).
 - `workflow.test.ts`: `github-release` needs `publish`, has `contents: write` and no other write
-  permission, fetch-depth 0; `release-check` runs the changelog check.
+  permission, fetch-depth 0; `release-check` runs the changelog and installer checks.
 - The `CHANGELOG.md` seed: `scriv print --version 0.1.3` extracts it (a test runs scriv if
   available, else is skipped with a reason; CI has it).
 - **Proof**: release 0.1.4, with at least one real fragment: the GitHub release exists, its assets
