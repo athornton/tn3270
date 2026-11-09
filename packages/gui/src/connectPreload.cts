@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld('tn3270connect', {
   /**
    * `invoke`, not `send`: a refusal or a failed connect is the ANSWER, shown in the dialog, which
    * stays open. It resolves only once main's connect attempt has: up to the 10-second handshake
-   * deadline for TLS, and for plaintext as long as the OS's SYN timeout (around two minutes; there
-   * is no deadline of ours). On `{ ok: true }` the session is connected and main closes this window.
+   * deadline for TLS, the 30-second connect deadline for plaintext (both in frontend's tls.ts).
+   * On `{ ok: true }` the session is connected and main closes this window.
    * `modelLocked`: `--terminal-type` on the command line fixed the model, so the page disables it.
    */
   submit: (form: { host: string; model: string; tls: boolean }): Promise<SubmitAnswer> =>

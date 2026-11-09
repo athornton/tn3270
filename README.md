@@ -85,9 +85,9 @@ checkbox (on by default; untick it for a plaintext host such as Hercules). **The
 until a connect succeeds** (2026-11-08; it used to close on the first press and have no way back —
 see *Connecting over TLS*). Pressing Connect shows `Connecting to HOST:PORT...`, the host exactly
 as typed, on the dialog's own error line while the attempt is in flight — up to the 10-second TLS
-handshake deadline; a **plaintext** attempt has no deadline of ours, so a host that merely drops
-packets is only given up on by the OS's own TCP connect timeout (around two minutes on Linux),
-and Quit still works throughout. A failure is shown on that same line, never in the terminal
+handshake deadline, or the 30-second connect deadline for a **plaintext** attempt (added
+2026-11-09: before it, a host that merely drops packets was given up on only by the OS's own TCP
+timeout, around two minutes on Linux) — and Quit still works throughout. A failure is shown on that same line, never in the terminal
 window — the TLS-against-a-plaintext-host case reads `Untick TLS in the Connect dialog: ...`,
 naming the checkbox right beside it — and the host, model and TLS fields keep what you typed, so
 fixing the one thing that was wrong and pressing Connect again **retries the SAME session** with
@@ -909,6 +909,13 @@ does not speak TLS — a Hercules or other vintage system — use -insecure.
 That same failure is worded for the GUI's Connect dialog (`Untick TLS in the Connect dialog: ...`,
 naming the checkbox beside it) and the TUI's no-host prompt (`Answer n to TLS: ...`) — see
 *Installing* and *Using the TUI*.
+
+**A plaintext connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`, since 2026-11-09).
+A host that silently drops packets used to be given up on only by the OS's TCP retries, around
+two minutes on Linux. Now it is `cannot connect to HOST:PORT: no answer within 30 s
+(CONNECT_TIMEOUT)` — measured against the blackholed TEST-NET address 192.0.2.1: exit 1 after
+31 s. It is a connect deadline only, disarmed the moment the socket connects, so an idle session
+is never dropped by it.
 
 **Reconnect always replays the LAST EXPLICIT TLS choice, never a keystroke, menu or host
 frame.** On the command line that choice is fixed for the run — there is nothing else to replay.

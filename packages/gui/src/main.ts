@@ -649,12 +649,12 @@ async function openConnectDialog(
  * WAITS FOR CONNECT TO BE ENABLED first, because the page disables it until the model list has
  * arrived -- clicking a disabled button does nothing at all, which would read as a broken dialog.
  * And then for the submit to settle: either the window closes (connected) or Connect is enabled
- * again (refused or failed, with the reason in the error line). The settle wait allows 15 s: a
- * submit now resolves only after its connect attempt, which for TLS can take the whole 10-second
- * handshake deadline (`HANDSHAKE_TIMEOUT_MS`). A PLAINTEXT connect has no deadline of ours -- one
- * to a host that drops SYNs waits out the OS's SYN timeout, around two minutes -- so a submit that
- * has not settled in 15 s prints `connect: submit never settled` and ends the drive, rather than
- * reporting the in-flight `Connecting to ...` as an error.
+ * again (refused or failed, with the reason in the error line). The settle wait allows 35 s: a
+ * submit now resolves only after its connect attempt, which can take the whole 10-second TLS
+ * handshake deadline (`HANDSHAKE_TIMEOUT_MS`) or the 30-second plaintext connect deadline
+ * (`CONNECT_TIMEOUT_MS`). A submit that has not settled past both prints
+ * `connect: submit never settled` and ends the drive, rather than reporting the in-flight
+ * `Connecting to ...` as an error.
  *
  * ENDS BY SAYING WHERE THE DIALOG IS -- `connect: dialog closed` or `connect: dialog still open` --
  * because the harness asserts on it: a failure that closed the dialog is the defect this retry
@@ -689,7 +689,7 @@ async function driveConnectDialog(cw: BrowserWindow, forms: readonly ConnectForm
       })()`);
       process.stdout.write('connect: submitted\n');
       // Settled = the window closed (connected) or Connect came back (refused or failed).
-      const settled = await until("document.querySelector('#connect').disabled === false", 15_000);
+      const settled = await until("document.querySelector('#connect').disabled === false", 35_000);
       if (cw.isDestroyed()) break;
       if (!settled) {
         process.stdout.write('connect: submit never settled\n');

@@ -68,9 +68,8 @@ form.addEventListener('submit', (e) => {
   if (busy) return;
   setBusy(true);
   // The submit now resolves only once main's connect attempt has -- up to the 10-second handshake
-  // deadline for TLS, and for plaintext as long as the OS takes to give up on a host that drops
-  // SYNs (around two minutes; there is no deadline of ours) -- so say what is happening rather
-  // than sit silent (spec 2026-11-08-connect-dialog-retry-design, "The behaviour" 1). Not for an
+  // deadline for TLS (`HANDSHAKE_TIMEOUT_MS`), the 30-second connect deadline for plaintext
+  // (`CONNECT_TIMEOUT_MS`) -- so say what is happening rather than sit silent (spec 2026-11-08-connect-dialog-retry-design, "The behaviour" 1). Not for an
   // empty host, which main refuses at once with the usage: there is nothing to connect to.
   const target = host.value.trim();
   error.textContent = target === '' ? '' : `Connecting to ${target}...`;

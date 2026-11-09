@@ -52,6 +52,23 @@ export const DEFAULT_TLS: TlsOptions = Object.freeze({ kind: 'tls', verify: true
  */
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
 
+/**
+ * How long a PLAINTEXT connect may take before we give up and say so.
+ *
+ * Without it, a host that silently drops packets (a firewall, a powered-off LPAR behind a router)
+ * leaves the connect to the OS's own SYN retries: measured 2026-11-09 on this Linux box, a connect
+ * to TEST-NET 192.0.2.1 was still pending after 3 s and the kernel's `tcp_syn_retries=6` gives up
+ * only after ~127 s. Through the GUI's Connect dialog or the TUI's prompt that was two minutes of
+ * "Connecting to ..." with only Quit to press. (The TLS path is bounded by the handshake deadline
+ * above, which its socket arms before the TCP connect.)
+ *
+ * 30 s, longer than the TLS deadline, because there is no handshake to blame: a slow first route
+ * to a distant host is a real case, and a wrong refusal is worse than a slow one. It is a CONNECT
+ * deadline only -- disarmed the moment the socket connects (see `tcpConnect`), never an idle
+ * timer, for the same reason the TLS path clears its timeout after the handshake.
+ */
+export const CONNECT_TIMEOUT_MS = 30_000;
+
 /** Raw flag state, before conflicts are resolved. */
 export interface TlsFlags {
   insecure?: boolean;
@@ -210,6 +227,8 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
   ECONNREFUSED: 'connection refused',
   ENOTFOUND: 'no such host',
   ETIMEDOUT: 'timed out',
+  // Our own code, from `tcpConnect`'s plaintext deadline; Node has none for a plaintext connect.
+  CONNECT_TIMEOUT: `no answer within ${CONNECT_TIMEOUT_MS / 1000} s`,
   EHOSTUNREACH: 'host unreachable',
 };
 
@@ -257,13 +276,24 @@ export function tcpConnect(
   port: number,
   options: TlsOptions = DEFAULT_TLS,
   handshakeMs: number = HANDSHAKE_TIMEOUT_MS,
+  connectMs: number = CONNECT_TIMEOUT_MS,
 ): Promise<Connection> {
   if (options.kind === 'plaintext') {
     return new Promise((resolve, reject) => {
       const sock = createConnection({ host, port });
       const conn = adapt(sock);
-      sock.on('error', (e: Error) => { conn.onError?.(e); reject(e); });
-      sock.on('connect', () => resolve(conn));
+      // AN EXPLICIT TIMER, NOT the socket's `timeout` option: that one is an INACTIVITY timer and
+      // would have to be cleared on connect by hand (the TLS path below does exactly that). This
+      // timer is cleared on connect and on error, so it can never fire on a live, idle session.
+      const deadline = setTimeout(() => {
+        const e: Error & { code?: string } =
+          new Error(describeConnectError('CONNECT_TIMEOUT', host, port));
+        e.code = 'CONNECT_TIMEOUT';
+        sock.destroy();
+        reject(e);
+      }, connectMs);
+      sock.on('error', (e: Error) => { clearTimeout(deadline); conn.onError?.(e); reject(e); });
+      sock.on('connect', () => { clearTimeout(deadline); resolve(conn); });
     });
   }
 

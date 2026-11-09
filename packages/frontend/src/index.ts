@@ -30,7 +30,7 @@ export type { ConnectForm } from './connectForm.js';
 // `tcpConnect` comes too: it is the one transport all of them need.
 export {
   takeTlsFlag, resolveTls, tcpConnect, describeTlsError, describeConnectError,
-  DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, TLS_USAGE,
+  DEFAULT_TLS, HANDSHAKE_TIMEOUT_MS, CONNECT_TIMEOUT_MS, TLS_USAGE,
 } from './tls.js';
 export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';
 
