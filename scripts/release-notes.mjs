@@ -4,8 +4,27 @@
  * release tag, the notes, and whether the changelog is ready
  * (`docs/superpowers/specs/2026-11-09-github-release-and-changelog-design.md`).
  *
+ *   node scripts/release-notes.mjs --check-changelog X.Y.Z   release-check: refuse a version with no
+ *                                                            CHANGELOG.md entry, or uncollected fragments
+ *   node scripts/release-notes.mjs --compose DIR             github-release: check DIR's installers, write
+ *                                                            DIR/SHA256SUMS and release-notes.md
+ *   node scripts/release-notes.mjs --verify-release DIR      github-release, last: the release's assets are
+ *                                                            exactly DIR's files, at their sizes
+ *   node scripts/release-notes.mjs --dry-run DIR             every push: the same, for this runner's own
+ *                                                            installers, no tag and no network; changelog
+ *                                                            problems are WARNINGS (normal between releases)
+ *
+ * `scriv` is env SCRIV (split on spaces: `SCRIV="uvx scriv"` works), default `scriv`; `gh` is env
+ * GH, default `gh`. Both, and `git`, run in the repository root, where scriv finds
+ * `changelog.d/scriv.ini`.
+ *
  * DEPENDENCY-FREE: the release jobs run it with no `npm ci`, so it imports `node:` modules only.
  */
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Each packaging runner's installers, by the `process.platform`/`process.arch` that builds them,
@@ -201,4 +220,209 @@ export function changelogProblems({ version, scrivExit, scrivText, fragmentDir, 
     problems.push(`uncollected fragments in ${fragmentDir}: ${fragments.join(', ')}: run uvx scriv collect --version ${version} (or delete them) and commit`);
   }
   return problems;
+}
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const SUMS = 'SHA256SUMS';
+const NOTES = 'release-notes.md';
+/** The upload patterns of the `package` job's `gui-*` artifacts (`.github/workflows/package.yml`). */
+const INSTALLER_EXT = ['.AppImage', '.deb', '.dmg', '.zip', '.exe'];
+
+const USAGE = 'usage: node scripts/release-notes.mjs --check-changelog X.Y.Z | --compose DIR | --verify-release DIR | --dry-run DIR';
+
+class Refusal extends Error {}
+
+/** `env[name]` as a command and its leading arguments, `fallback` if unset or blank. */
+function command(env, name, fallback) {
+  const words = (env[name] ?? '').trim().split(/\s+/).filter((w) => w !== '');
+  return words.length > 0 ? words : [fallback];
+}
+
+/** The regular files in `dir`, sorted. Refuses an unreadable directory. */
+function filesIn(dir) {
+  try {
+    return readdirSync(dir).filter((f) => statSync(join(dir, f)).isFile()).sort();
+  } catch (err) {
+    throw new Refusal(`cannot read ${dir}: ${err.message}`);
+  }
+}
+
+function sha256Of(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+/** `scriv print --version v`, and changelog.d's entries: the inputs of `changelogProblems`. */
+function changelogState(v, { env, run, root }) {
+  const [cmd, ...pre] = command(env, 'SCRIV', 'scriv');
+  const r = run(cmd, [...pre, 'print', '--version', v], { cwd: root });
+  let entries;
+  try { entries = readdirSync(join(root, 'changelog.d')); } catch (err) {
+    throw new Refusal(`cannot read changelog.d: ${err.message}`);
+  }
+  return { version: v, scrivExit: r.status, scrivText: r.stdout, fragmentDir: 'changelog.d', entries };
+}
+
+/** The tag this run is for, as `{ tag, version }`: a tag push only. */
+function tagOf(env, mode) {
+  const tag = env.GITHUB_REF_NAME;
+  if (tag === undefined || tag === '') {
+    throw new Refusal(`GITHUB_REF_NAME is not set: ${mode} runs on a tag push, which sets it to the tag`);
+  }
+  // A BRANCH named v0.1.4 has that GITHUB_REF_NAME too.
+  if (env.GITHUB_REF_TYPE !== 'tag') {
+    throw new Refusal(`GITHUB_REF_TYPE is ${JSON.stringify(env.GITHUB_REF_TYPE ?? '')}, not "tag": ${mode} runs on a tag push only`);
+  }
+  const m = /^v(\d+\.\d+\.\d+)$/.exec(tag);
+  if (m === null) throw new Refusal(`tag ${JSON.stringify(tag)} is not v + a version X.Y.Z: tag a release as e.g. v0.1.4`);
+  return { tag, version: m[1] };
+}
+
+/** `run`, refusing a non-zero exit with what was run. */
+function must(run, cmd, args, root, why) {
+  const r = run(cmd, args, { cwd: root });
+  if (r.status !== 0) throw new Refusal(`${[cmd, ...args].join(' ')} exited ${r.status}: ${why}`);
+  return r.stdout;
+}
+
+/** The installers' `SHA256SUMS` text, for `files` in `dir`. */
+function sumsOver(dir, files) {
+  return sha256sums(files.map((name) => ({ name, sha256: sha256Of(join(dir, name)) })));
+}
+
+/**
+ * The four modes, with everything outside the process injected: `env` (`GITHUB_REF_NAME`,
+ * `GITHUB_REF_TYPE`, `GITHUB_REPOSITORY`, `GITHUB_ACTIONS`, `SCRIV`, `GH`), `run(cmd, args, { cwd })
+ * -> { status, stdout }` (scriv, git, gh; stderr is the caller's), `log`, and optionally `root`
+ * (the repository: changelog.d, package.json, where release-notes.md is written) and the
+ * `platform`/`arch` whose installers a dry run expects. Returns the exit status: 0, or 1 with
+ * every problem logged.
+ */
+export function main(argv, { env, run, log, root = ROOT, platform = process.platform, arch = process.arch }) {
+  const [mode, arg, ...rest] = argv;
+  try {
+    if (!['--check-changelog', '--compose', '--verify-release', '--dry-run'].includes(mode) || arg === undefined || rest.length > 0) {
+      throw new Refusal(USAGE);
+    }
+
+    if (mode === '--check-changelog') {
+      if (!SEMVER.test(arg)) throw new Refusal(`${JSON.stringify(arg)} is not a version X.Y.Z (no v): pass e.g. "\${GITHUB_REF_NAME#v}"`);
+      const problems = changelogProblems(changelogState(arg, { env, run, root }));
+      if (problems.length > 0) throw new Refusal(problems.join('\n'));
+      log(`release-notes: CHANGELOG.md has an entry for ${arg}, and no fragment is left uncollected`);
+      return 0;
+    }
+
+    if (mode === '--dry-run') {
+      let version;
+      try { version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version; } catch (err) {
+        throw new Refusal(`cannot read the root package.json's version: ${err.message}`);
+      }
+      const mine = installersFor(version, platform, arch);
+      if (mine.length === 0) throw new Refusal(`no installers are built on ${platform}-${arch}: run the dry run on a packaging runner`);
+      // Only the installers: electron-builder leaves blockmaps, unpacked trees and its debug yml here too.
+      const files = filesIn(arg).filter((f) => INSTALLER_EXT.some((e) => f.endsWith(e)));
+      const bad = checkInstallers(files, version, mine);
+      if (bad.length > 0) throw new Refusal(bad.join('\n'));
+      const state = changelogState(version, { env, run, root });
+      // A missing entry is normal between releases; a scriv that does not run is a broken step.
+      if (state.scrivExit !== 0 && state.scrivExit !== 2) throw new Refusal(changelogProblems(state)[0]);
+      for (const p of changelogProblems(state)) {
+        log(`release-notes: WARNING: ${p}`);
+        if (env.GITHUB_ACTIONS === 'true') log(`::warning::${p}`);
+      }
+      const scriv = state.scrivExit === 0 && state.scrivText.trim() !== ''
+        ? state.scrivText
+        : `(no CHANGELOG.md entry for ${version} yet: \`uvx scriv collect --version ${version}\` writes it at release)`;
+      const notes = composeNotes({
+        version, repo: env.GITHUB_REPOSITORY || 'athornton/tn3270', previous: 'vPREVIOUS', scriv,
+        commits: '(a tag run lists the commits since the previous release tag here)',
+      });
+      log(`release-notes: dry run of ${version}, ${platform}-${arch}: ${SUMS} would be`);
+      for (const l of sumsOver(arg, files).trimEnd().split('\n')) log(`  ${l}`);
+      log(`release-notes: and ${NOTES}:`);
+      for (const l of notes.trimEnd().split('\n')) log(`  ${l}`);
+      log(`release-notes: dry run of ${version} passed`);
+      return 0;
+    }
+
+    const { tag, version } = tagOf(env, mode);
+    const gh = command(env, 'GH', 'gh');
+    const repo = env.GITHUB_REPOSITORY;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Refusal(`GITHUB_REPOSITORY is ${JSON.stringify(repo ?? '')}, not owner/name: Actions sets it`);
+
+    if (mode === '--compose') {
+      // A re-run's own SHA256SUMS is rewritten, not checked as an installer.
+      const files = filesIn(arg).filter((f) => f !== SUMS);
+      const bad = checkInstallers(files, version);
+      if (bad.length > 0) throw new Refusal(bad.join('\n'));
+      const state = changelogState(version, { env, run, root });
+      const problems = changelogProblems(state);
+      if (problems.length > 0) throw new Refusal(problems.join('\n'));
+      const tags = must(run, 'git', ['tag', '--merged', tag, '--list', 'v*.*.*'], root,
+        'check out with fetch-depth: 0, so the tags and history are there').split('\n').map((t) => t.trim()).filter((t) => t !== '');
+      const previous = previousTag(tags, version);
+      if (previous === undefined) {
+        throw new Refusal(`no release tag below ${tag} is an ancestor of it (tags merged: ${tags.join(', ') || 'none'}): check out with fetch-depth: 0`);
+      }
+      const scriv = state.scrivText;
+      const commits = must(run, 'git', ['log', '--format=- %s (%h)', `${previous}..${tag}`], root, 'cannot list the commits');
+      const [ghCmd, ...ghPre] = gh;
+      const answer = must(run, ghCmd, [...ghPre, 'api', `repos/${repo}/releases/generate-notes`,
+        '-f', `tag_name=${tag}`, '-f', `previous_tag_name=${previous}`], root, 'set GH_TOKEN, and give the job contents: write');
+      let pulls;
+      try { pulls = JSON.parse(answer).body; } catch (err) { throw new Refusal(`generate-notes did not answer JSON: ${err.message}`); }
+      if (typeof pulls !== 'string') throw new Refusal('generate-notes answered no string body');
+      writeFileSync(join(arg, SUMS), sumsOver(arg, files));
+      const notesPath = join(root, NOTES);
+      writeFileSync(notesPath, composeNotes({ version, repo, previous, scriv, commits, pulls }));
+      log(`release-notes: ${tag} over ${previous}: ${files.length} installers, wrote ${join(arg, SUMS)} and ${notesPath}`);
+      return 0;
+    }
+
+    // --verify-release: what the release holds, read back, against what was handed to it.
+    const local = filesIn(arg);
+    if (!local.includes(SUMS)) throw new Refusal(`${arg} has no ${SUMS}: run --compose first`);
+    const [ghCmd, ...ghPre] = gh;
+    const answer = must(run, ghCmd, [...ghPre, 'release', 'view', tag, '--repo', repo, '--json', 'assets'], root, 'is the release there, and GH_TOKEN set?');
+    let assets;
+    try { assets = JSON.parse(answer).assets; } catch (err) { throw new Refusal(`gh release view did not answer JSON: ${err.message}`); }
+    if (!Array.isArray(assets)) throw new Refusal('gh release view answered no assets list');
+    const problems = [];
+    const remote = new Map(assets.map((a) => [a?.name, a]));
+    for (const f of local) {
+      const a = remote.get(f);
+      const size = statSync(join(arg, f)).size;
+      if (a === undefined) problems.push(`the release has no ${f}: re-run the github-release job`);
+      else if (a.state !== 'uploaded') problems.push(`the release's ${f} is ${JSON.stringify(a.state)}, not uploaded: re-run the github-release job`);
+      else if (a.size !== size) problems.push(`the release's ${f} is ${a.size} bytes, not ${size}: re-run the github-release job (it uploads with --clobber)`);
+      if (size === 0) problems.push(`${f} is empty here: re-run the packaging job that made it`);
+    }
+    for (const name of remote.keys()) {
+      if (!local.includes(name)) problems.push(`the release has ${name}, which this run did not make: delete it (gh release delete-asset ${tag} ${name})`);
+    }
+    if (problems.length > 0) throw new Refusal(problems.join('\n'));
+    log(`release-notes: ${tag} holds exactly the ${local.length} files of ${arg}, each at its size`);
+    return 0;
+  } catch (err) {
+    if (!(err instanceof Refusal)) throw err;
+    for (const line of err.message.split('\n')) log(`release-notes: refused: ${line}`);
+    return 1;
+  }
+}
+
+/**
+ * `cmd args...` in `cwd`, stdout captured, stderr passed through (scriv's "Extracting entry..."
+ * chatter, git's and gh's errors). A command that cannot start is status 127, its error on stderr.
+ */
+export function runCommand(cmd, args, { cwd }) {
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 64 * 1024 * 1024 });
+  if (r.error !== undefined) {
+    process.stderr.write(`release-notes: cannot run ${cmd}: ${r.error.message}\n`);
+    return { status: 127, stdout: '' };
+  }
+  return { status: r.status ?? 1, stdout: r.stdout ?? '' };
+}
+
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  process.exitCode = main(process.argv.slice(2), { env: process.env, run: runCommand, log: console.log });
 }
