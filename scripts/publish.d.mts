@@ -1,0 +1,23 @@
+/** Types for `publish.mjs`, so the tests that import it are typechecked too. */
+export interface Tarball {
+  path: string;
+  name: string;
+  version: string;
+  /** `@tn3270/*` dependencies only, name -> range, from every field npm installs from. */
+  deps: Record<string, string>;
+  /** sha1 of the whole .tgz, hex: what the registry records as `dist.shasum`. */
+  sha1: string;
+}
+/** The slice of `fetch` this script uses, so tests can fake it. */
+export type FetchFn = (url: string, init?: { headers?: Record<string, string> }) =>
+  Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+export type Decision = 'publish' | 'skip' | 'conflict';
+
+export function readTarball(path: string): Tarball;
+export function publishOrder(tarballs: Tarball[]): Tarball[];
+export function checkRelease(args: { tag: string | undefined; tarballs: Tarball[]; expectedNames: string[] }):
+  { version: string | undefined; problems: string[] };
+export function registryShasum(fetchFn: FetchFn, name: string, version: string): Promise<string | undefined>;
+export function decide(localSha1: string, registrySha1: string | undefined): Decision;
+export function verifyReadBack(fetchFn: FetchFn, tarballs: Tarball[], version: string,
+  opts?: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> }): Promise<string[]>;
