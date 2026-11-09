@@ -1,6 +1,6 @@
 {
   "name": "@tn3270/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An s3270-compatible scripting client for TN3270 hosts: reads commands on stdin, writes a status line and ok/error after each.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
@@ -23,9 +23,9 @@
   "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "dependencies": {
-    "@tn3270/core": "0.1.0",
-    "@tn3270/frontend": "0.1.0",
-    "@tn3270/node-files": "0.1.0"
+    "@tn3270/core": "0.1.1",
+    "@tn3270/frontend": "0.1.1",
+    "@tn3270/node-files": "0.1.1"
   },
   "scripts": {
     "build": "tsc --build"
