@@ -34,13 +34,14 @@ them into a new entry at the top of this file. See `docs/releasing.md`.
 
 - The GUI's Connect dialog stays open when a connection fails, so you can correct the host and
   retry instead of starting over.
-- A plaintext connection now gives up after 30 seconds instead of waiting indefinitely.
+- Connecting to a plaintext host that doesn't answer now gives up after 30 seconds, instead of
+  after the system's TCP timeout (about two minutes on Linux).
 - A host that is down or misspelled is reported as a failure to connect, even with TLS on, rather
   than as a TLS problem.
 
 ### Other changes
 
-- The minimum Node version is 20.19 (what Debian 13 packages).
+- The minimum Node version is lowered from 22 to 20.19 (what Debian 13 packages).
 
 <a id='changelog-0.1.0'></a>
 ## 0.1.0 (2026-11-08)
@@ -50,6 +51,6 @@ them into a new entry at the top of this file. See `docs/releasing.md`.
 - First release on npm: `@tn3270/cli` (an s3270-style scripting client), `@tn3270/tui` (a
   c3270-style terminal client), `@tn3270/web` (a browser gateway) and `@tn3270/gui` (an Electron
   GUI), with the libraries they share.
-- Native installers for the GUI: macOS universal `.dmg`/`.zip`, Linux x64 and arm64 AppImage and
-  `.deb`, and a Windows x64 installer. They are unsigned: macOS needs *Open Anyway* in System
-  Settings, Privacy & Security, and Windows SmartScreen needs *More info*, *Run anyway*.
+- Native installers for the GUI, built by CI: macOS universal `.dmg`/`.zip`, Linux x64 and arm64
+  AppImage and `.deb`, and a Windows x64 installer. They are unsigned: macOS needs *Open Anyway*
+  in System Settings, Privacy & Security, and Windows SmartScreen needs *More info*, *Run anyway*.
