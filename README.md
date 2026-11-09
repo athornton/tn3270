@@ -62,7 +62,12 @@ first `tn3270-gui` prints `Downloading Electron binary...` and takes a while; th
 not a hang. See `packages/gui/README.md`.
 
 **Native installers** (macOS universal `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a
-Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder, and are **unsigned
+Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder. **From 0.1.4 on,
+each version's GitHub release** (the repository's *Releases* page, tag `vX.Y.Z`) carries all seven,
+built and tested by that tag's CI run, with a `SHA256SUMS` beside them (`sha256sum -c SHA256SUMS`
+on Linux, `shasum -a 256 -c SHA256SUMS` on macOS; `--ignore-missing` to check only the ones you
+downloaded) and notes quoting that version's `CHANGELOG.md` entry. Earlier versions' installers
+were CI artifacts only. They are **unsigned
 this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
 downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
 after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
@@ -1599,8 +1604,12 @@ holds as one item.
    provenance and no long-lived npm token anywhere, then read the registry back to prove it landed.
    **Proven by release 0.1.3** (0.1.2 was skipped, a path bug in the publish job): published by
    "GitHub Actions", every shasum equal to the run's tarballs, an SLSA provenance attestation per
-   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **Next,
-   near-term: the same tag run also cuts a GitHub release carrying the native installers.** **Signing and store
+   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **The same tag
+   run now also cuts the GitHub release** (built 2026-11-09, branch `gh-release`; proof owed:
+   release 0.1.4): a `github-release` job after `publish` attaches the run's seven native
+   installers and a `SHA256SUMS`, with notes from the version's `CHANGELOG.md` entry, which scriv
+   collects from a fragment written with each functional change (`docs/releasing.md`).
+   **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac

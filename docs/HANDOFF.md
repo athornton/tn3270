@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-09 (0.1.3 PUBLISHED by the tag workflow over OIDC with provenance, tag `v0.1.3` on `ebd2100`; 0.1.2 skipped; native installers UNSIGNED; next: a GitHub release with the installers, then README *Remaining* item 15)
+# Handoff — state as of 2026-11-09 (0.1.3 PUBLISHED by the tag workflow over OIDC with provenance, tag `v0.1.3` on `ebd2100`; 0.1.2 skipped; native installers UNSIGNED; the GitHub release with the installers and a scriv CHANGELOG built on branch `gh-release`, proof owed by release 0.1.4; then README *Remaining* item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -9,11 +9,24 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
+**2026-11-09, LATEST: THE GITHUB RELEASE AND THE CHANGELOG ARE BUILT, on branch `gh-release`, not
+yet merged.** Spec `docs/superpowers/specs/2026-11-09-github-release-and-changelog-design.md`, plan
+`docs/superpowers/plans/2026-11-09-github-release-and-changelog.md` (6 tasks). A tag run's new
+`github-release` job, after `publish` and covered by its approval, creates the GitHub release with
+the seven native installers, `SHA256SUMS` and notes (`scripts/release-notes.mjs`, unit-tested in
+`packages/core/test/releaseNotes.test.ts`); `release-check` now also refuses a wrong installer set
+and a version with no `CHANGELOG.md` entry or uncollected fragments. **The habit from now on**: a
+scriv fragment (`uvx scriv create`, in `changelog.d/`) with each functional change, collected at
+release (`uvx scriv collect --version X.Y.Z`); `docs/releasing.md` has the procedure. **Proof
+owed: release 0.1.4** -- the release exists, its assets match the run's artifacts byte for byte,
+`SHA256SUMS` verifies, and its notes hold the scriv entry and the commits since v0.1.3. Merging
+and cutting 0.1.4 are the user's calls; then README *Remaining* item 15.
+
 **2026-11-09, LATER: 0.1.3 IS PUBLISHED BY THE TAG WORKFLOW** -- trusted publishing proven: OIDC,
 provenance attested, registry read back (`docs/releasing.md`, *Release history*; 0.1.2 was skipped,
 also recorded there). Owed by the user: "Require two-factor authentication and disallow tokens" on
 each package, once they decide whether to keep the manual Fallback. Next: the publish workflow
-also cutting a GitHub release with the native installers (to be designed), then README *Remaining*
+also cutting a GitHub release with the native installers (since built: see above), then README *Remaining*
 item 15.
 
 **2026-11-09: npm trusted publishing is BUILT, on branch `trusted-publish`, not yet merged.**
