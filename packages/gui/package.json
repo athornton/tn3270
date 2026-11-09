@@ -1,6 +1,6 @@
 {
   "name": "@tn3270/gui",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An Electron TN3270 emulator with a canvas renderer that blits glyphs from an atlas baked out of x3270's own 3270 bitmap font.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
@@ -19,10 +19,10 @@
   "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "dependencies": {
-    "@tn3270/canvas": "0.1.1",
-    "@tn3270/core": "0.1.1",
-    "@tn3270/frontend": "0.1.1",
-    "@tn3270/node-files": "0.1.1",
+    "@tn3270/canvas": "0.1.2",
+    "@tn3270/core": "0.1.2",
+    "@tn3270/frontend": "0.1.2",
+    "@tn3270/node-files": "0.1.2",
     "electron": "44.10.2"
   },
   "scripts": {

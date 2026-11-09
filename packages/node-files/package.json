@@ -1,6 +1,6 @@
 {
   "name": "@tn3270/node-files",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Node-specific file and process helpers (isMain, file I/O for IND$FILE) shared by the CLI, TUI, GUI and web front ends.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
@@ -20,7 +20,7 @@
   "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "dependencies": {
-    "@tn3270/frontend": "0.1.1"
+    "@tn3270/frontend": "0.1.2"
   },
   "scripts": {
     "build": "tsc --build"

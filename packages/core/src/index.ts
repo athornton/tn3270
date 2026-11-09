@@ -1,4 +1,4 @@
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 
 export * from './constants.js';
 export * from './devname.js';
