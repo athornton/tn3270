@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-09 (0.1.1 PUBLISHED to npm, tag `v0.1.1` on `e95b932`: the GUI Connect-dialog retry and the TUI no-host prompt, merged from `connect-retry` as `cadf824` and verified live; native installers UNSIGNED; roadmap in README *Remaining* items 14-22, next is npm trusted publishing, then item 15)
+# Handoff — state as of 2026-11-09 (0.1.1 PUBLISHED to npm, tag `v0.1.1` on `e95b932`: the GUI Connect-dialog retry and the TUI no-host prompt, merged from `connect-retry` as `cadf824` and verified live; native installers UNSIGNED; npm trusted publishing BUILT on branch `trusted-publish`, proof owed via release 0.1.2; roadmap in README *Remaining* items 14-22, next is item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -9,10 +9,20 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
+**2026-11-09: npm trusted publishing is BUILT, on branch `trusted-publish`, not yet merged.**
+Spec and plan: `docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md`,
+`docs/superpowers/plans/2026-11-09-npm-trusted-publishing.md` (6 tasks, all 6 done as code).
+`.github/workflows/package.yml` now publishes all eight `@tn3270/*` tarballs on a pushed
+`vX.Y.Z` tag, over OIDC, after one approval in the GitHub environment `npm` — see
+`docs/releasing.md` for the new procedure, the *Fallback*, and why a dev-box-packed tarball can
+never substitute for CI's own artifact in recovery. **Proof owed before this is done: release
+0.1.2**, tagged and approved by the user, with the registry read back against that tag's CI
+tarballs. Merging `trusted-publish` and cutting 0.1.2 are the user's calls. Then item 15, the
+rest of the GUI.
+
 **2026-11-09: 0.1.1 IS PUBLISHED** (all eight packages, from CI run 42563103808, byte-identical;
 `0.0.0-stage` deprecated). See `docs/releasing.md` *Release history*, including why the first
-attempt published nothing. Next: npm trusted publishing from GitHub Actions (README *Remaining*
-item 14), then item 15, the rest of the GUI.
+attempt published nothing.
 
 **2026-11-08: branch `connect-retry` (not yet merged) fixes the defect the user hit on the first
 npm release (0.1.0): with TLS left ticked against a Hercules host, the GUI said `Untick TLS in
@@ -43,7 +53,7 @@ available, an `N:` host through a dialog retry (unit-tested only: no host here o
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
 `pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
-`docs/live-testing.md`, the 2026-11-08 section. Item 14: the icon and the first `npm publish` (0.1.0, from CI run 42504570737) are done too; left is npm trusted publishing from GitHub Actions.**
+`docs/live-testing.md`, the 2026-11-08 section. Item 14: the icon and the first `npm publish` (0.1.0, from CI run 42504570737) are done too; left is npm trusted publishing from GitHub Actions (built 2026-11-09 on branch `trusted-publish`).**
 
 **2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
 deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,
@@ -53,7 +63,9 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 ### NEXT: THE ROADMAP, AGREED 2026-11-06
 
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
-checks, icon and 0.1.0 publish DONE 2026-11-08; next: npm trusted publishing from GitHub Actions; signing when the user has an Apple Developer ID); (15) the rest of the GUI (`File` →
+checks, icon and 0.1.0 publish DONE 2026-11-08; npm trusted publishing from GitHub Actions BUILT
+2026-11-09 on branch `trusted-publish`, proof owed via release 0.1.2; signing when the user has an
+Apple Developer ID); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
 `pr3287`); (19) Programmed Symbols, tested with our own `gif2ps` converter; (20) printer graphics

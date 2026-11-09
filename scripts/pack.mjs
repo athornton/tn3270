@@ -30,11 +30,13 @@
  * it were this one's.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { distStaleness } from './freshness.mjs';
+import { readTar } from './tarball.mjs';
+// MOVED to `workspaces.mjs`, dependency-free for `publish.mjs`; re-exported for `install-smoke.mjs`.
+import { publishedPackages, tarballName } from './workspaces.mjs';
 import { BundleError, bundleStaleness, verify } from '../packages/gui/scripts/bundleVerify.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -42,37 +44,16 @@ const packagesDir = join(root, 'packages');
 const out = join(root, 'artifacts', 'npm');
 const win = process.platform === 'win32';
 
+export { publishedPackages, tarballName };
+
 function die(message) {
   process.stderr.write(`pack: ${message}\n`);
   process.exit(1);
 }
 
-/** Every non-private workspace, the same discovery as `packages/core/test/manifests.test.ts`. */
-export function publishedPackages() {
-  return readdirSync(packagesDir)
-    .filter((d) => existsSync(join(packagesDir, d, 'package.json')))
-    .map((dir) => ({ dir, m: JSON.parse(readFileSync(join(packagesDir, dir, 'package.json'), 'utf8')) }))
-    .filter(({ m }) => m.private !== true);
-}
-
-/** The file name `npm pack` gives a manifest: `@tn3270/node-files@0.1.0` -> `tn3270-node-files-0.1.0.tgz`. */
-export function tarballName(m) {
-  return `${m.name.replace(/^@/, '').replace('/', '-')}-${m.version}.tgz`;
-}
-
-/** Every entry path in a .tgz (ustar: name at 0, size in octal at 124, prefix at 345). */
+/** Every entry path in a .tgz: `readTar`'s keys, in archive order. */
 export function tarEntries(tgz) {
-  const tar = gunzipSync(readFileSync(tgz));
-  const names = [];
-  for (let o = 0; o + 512 <= tar.length;) {
-    const h = tar.subarray(o, o + 512);
-    if (h.every((b) => b === 0)) break;
-    const field = (a, b) => h.subarray(a, b).toString('utf8').replace(/\0.*$/s, '');
-    const prefix = field(345, 500);
-    names.push(prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
-    o += 512 + Math.ceil(parseInt(field(124, 136).trim() || '0', 8) / 512) * 512;
-  }
-  return names;
+  return [...readTar(tgz).keys()];
 }
 
 /** Compiled suffix -> the source suffixes it can come from. LONGEST FIRST: `.d.ts` before `.ts`. */
