@@ -140,7 +140,10 @@ jobs:
       - run: npm run pack:npm
       - if: matrix.npm
         name: publish dry run (every push -- exercises scripts/publish.mjs continuously)
-        run: node scripts/publish.mjs --dry-run artifacts/npm
+        # In a one-segment `tarballs/` directory, EXACTLY as release-check and publish download it: the
+        # 0.1.2 tag run failed on a path form (`tarballs/x.tgz`, GitHub shorthand to npm) that this
+        # step, run on `artifacts/npm/x.tgz`, could never show.
+        run: rm -rf tarballs && cp -r artifacts/npm tarballs && node scripts/publish.mjs --dry-run tarballs
       - run: ${{ matrix.xvfb }} node scripts/install-smoke.mjs
       # The harnesses have never run in CI before. Under xvfb-run DISPLAY is set, so
       # xvfb.mjs ensureDisplay() returns it and starts no Xvfb of its own.

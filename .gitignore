@@ -14,3 +14,6 @@ __pycache__/
 # from tracked sources; packages/gui/scripts/bundle.mjs and the packaging spec say how.
 packages/gui/app/
 artifacts/
+
+# The release jobs download npm-tarballs here, and the every-push dry run stages it here.
+tarballs/
