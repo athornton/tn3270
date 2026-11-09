@@ -189,6 +189,13 @@ const REMEDY_LEAD: Readonly<Record<TlsRemedy, string | undefined>> = {
 export function describeTlsError(
   code: string | undefined, host: string, port: number, remedy: TlsRemedy = 'flag',
 ): string {
+  // A failure BEFORE the TCP connection exists is not TLS's, even with TLS on: "TLS connection to
+  // typo:23 failed (ENOTFOUND)" sends the reader to the TLS setting for a typo, and the Connect
+  // dialog's and the TUI prompt's retry loops made it the message people see most (2026-11-09).
+  // ECONNRESET is NOT in this set: it arrives after the connect, mid-handshake, and is TLS's.
+  if (code !== undefined && Object.prototype.hasOwnProperty.call(CONNECT_WORDS, code)) {
+    return describeConnectError(code, host, port);
+  }
   const lead = REMEDY_LEAD[remedy];
   switch (code) {
     case 'HANDSHAKE_TIMEOUT':
@@ -227,6 +234,8 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
   ECONNREFUSED: 'connection refused',
   ENOTFOUND: 'no such host',
   ETIMEDOUT: 'timed out',
+  ENETUNREACH: 'network unreachable',
+  EAI_AGAIN: 'name lookup failed, try again',
   // Our own code, from `tcpConnect`'s plaintext deadline; Node has none for a plaintext connect.
   CONNECT_TIMEOUT: `no answer within ${CONNECT_TIMEOUT_MS / 1000} s`,
   EHOSTUNREACH: 'host unreachable',

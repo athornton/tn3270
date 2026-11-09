@@ -357,7 +357,9 @@ interface ConnectTarget {
  * well as TLS ones, and this once sent every coded error through `describeTlsError` -- so with TLS
  * off, a host that was merely down read "TLS connection to 127.0.0.1:1 failed (ECONNREFUSED)", and a
  * double-clicker went looking for a TLS setting that was not on. `describeConnectError` says what
- * happened instead.
+ * happened instead. And WITH TLS on, a failure before the TCP connection exists (refused, no such
+ * host, unreachable) is not TLS's either: `describeTlsError` itself hands those codes to
+ * `describeConnectError` (2026-11-09), so this branch needs no list of its own.
  */
 function explain(err: unknown, target?: ConnectTarget): string {
   if (err instanceof UsageError) return err.message;

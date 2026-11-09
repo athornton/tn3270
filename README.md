@@ -917,6 +917,13 @@ two minutes on Linux. Now it is `cannot connect to HOST:PORT: no answer within 3
 31 s. It is a connect deadline only, disarmed the moment the socket connects, so an idle session
 is never dropped by it.
 
+**A host that is down or misspelled is not a TLS problem, even with TLS on.** Refused, no such
+host, unreachable and timed-out connects happen before any TLS byte is exchanged, so every front
+end words them as `cannot connect to HOST:PORT: connection refused (ECONNREFUSED)` or `no such
+host (ENOTFOUND)`, never `TLS connection to ... failed` (since 2026-11-09; before, only a
+plaintext attempt was worded that way). A reset or a stall during the handshake is still a TLS
+failure, and says so.
+
 **Reconnect always replays the LAST EXPLICIT TLS choice, never a keystroke, menu or host
 frame.** On the command line that choice is fixed for the run — there is nothing else to replay.
 In the GUI, it is the Connect dialog's latest press of Connect: a dropped session's `Enter` or
