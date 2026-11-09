@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -463,16 +463,24 @@ describe('publish.mjs', () => {
         run used `artifacts/npm/x.tgz` -- two slashes, a path to npm -- so it never showed. The
         directory is given RELATIVE here, as both CI jobs give it.
       */
-      it('is absolute for --dry-run and --publish, whatever directory form main is given', async () => {
+      it('is absolute for --dry-run and --publish, given a one-segment relative directory', async () => {
         const set = realSet('0.1.2');
-        const rel = relative(process.cwd(), dir!);
-        expect(isAbsolute(rel)).toBe(false);
-        const d = io();
-        expect(await main(['--dry-run', rel], d.args)).toBe(0);
-        const p = io({ tag: 'v0.1.2' });
-        expect(await main(['--publish', rel], p.args)).toBe(0);
-        for (const a of [...d.runs, ...p.runs]) expect(isAbsolute(a.at(-1)!), a.at(-1)).toBe(true);
-        expect(p.runs).toHaveLength(set.length);
+        // UNDER the working directory, named by ONE segment -- the shape CI's `tarballs` has. Not
+        // `relative(cwd, tmpdir)`: on the Windows runner the temp dir is on C: and the checkout on
+        // D:, and a relative path across drives does not exist (it came back absolute, 2026-11-09).
+        const local = mkdtempSync(join(process.cwd(), '.publish-rel-'));
+        try {
+          for (const f of readdirSync(dir!)) copyFileSync(join(dir!, f), join(local, f));
+          const rel = relative(process.cwd(), local);
+          expect(isAbsolute(rel)).toBe(false);
+          expect(rel.split(/[\\/]/)).toHaveLength(1);
+          const d = io();
+          expect(await main(['--dry-run', rel], d.args)).toBe(0);
+          const p = io({ tag: 'v0.1.2' });
+          expect(await main(['--publish', rel], p.args)).toBe(0);
+          for (const a of [...d.runs, ...p.runs]) expect(isAbsolute(a.at(-1)!), a.at(-1)).toBe(true);
+          expect(p.runs).toHaveLength(set.length);
+        } finally { rmSync(local, { recursive: true, force: true }); }
       });
     });
 
