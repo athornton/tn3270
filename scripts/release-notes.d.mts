@@ -2,6 +2,9 @@
 export function expectedInstallers(v: string): string[];
 export function installersFor(v: string, platform: string, arch: string): string[];
 export function checkInstallers(files: string[], v: string, expected?: string[]): string[];
+export function escapeMarkdown(text: string): string;
+/** `git log --format=%s%x00%h` output -> `- subject (hash)` markdown lines. */
+export function commitList(gitLog: string): string;
 export function sha256sums(entries: { name: string; sha256: string }[]): string;
 export function previousTag(tags: string[], version: string): string | undefined;
 export function composeNotes(args: {

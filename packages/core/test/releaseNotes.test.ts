@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  changelogProblems, checkInstallers, composeNotes, expectedInstallers, installersFor, main, previousTag, runCommand, sha256sums,
+  changelogProblems, checkInstallers, commitList, composeNotes, escapeMarkdown, expectedInstallers, installersFor, main, previousTag, runCommand, sha256sums,
   type RunResult,
 } from '../../../scripts/release-notes.mjs';
 
@@ -181,6 +181,21 @@ describe('release-notes.mjs', () => {
       expect(n.match(/Full [Cc]hangelog/g)).toHaveLength(1);
     });
 
+    it("omits the pull-request section when only GitHub's generator comment and compare link are left", () => {
+      const n = composeNotes({
+        version: '0.1.4', repo: 'athornton/tn3270', previous: 'v0.1.3', scriv: SCRIV, commits: COMMITS,
+        pulls: '<!-- Release notes generated using configuration in .github/release.yml at v0.1.4 -->\n\n'
+          + '**Full Changelog**: https://github.com/athornton/tn3270/compare/v0.1.3...v0.1.4',
+      });
+      expect(n).toBe(notes);
+    });
+
+    it('links the README of the repository it is given', () => {
+      const n = composeNotes({ version: '0.1.4', repo: 'someone/fork', previous: 'v0.1.3', scriv: SCRIV, commits: COMMITS });
+      expect(n).toContain('(https://github.com/someone/fork#installing)');
+      expect(n).not.toContain('athornton');
+    });
+
     it("omits the pull-request section when GitHub's list is only its compare link (no pull requests: this repo, measured)", () => {
       const n = composeNotes({
         version: '0.1.4', repo: 'athornton/tn3270', previous: 'v0.1.3', scriv: SCRIV, commits: COMMITS,
@@ -208,6 +223,14 @@ describe('release-notes.mjs', () => {
       expect(p).toEqual([expect.stringMatching(/exited 127.*installed/)]);
     });
 
+    it('refuses a section with no item: an untouched template collects to headings and bare dashes', () => {
+      const untouched = '### Backwards-incompatible changes\n\n-\n\n### New features\n\n-\n\n### Bug fixes\n\n-\n\n### Other changes\n\n-\n';
+      expect(changelogProblems({ ...ok, scrivText: untouched })).toEqual([expect.stringMatching(/entry for 0\.1\.4 has no item/)]);
+      expect(changelogProblems({ ...ok, scrivText: '### Bug fixes\n\nSome prose, no list.\n' })).toHaveLength(1);
+      expect(changelogProblems({ ...ok, scrivText: '### Bug fixes\n\n* starred\n' })).toEqual([]);
+      expect(changelogProblems({ ...ok, scrivText: '### Bug fixes\n\n-\n- a real one\n' })).toEqual([]);
+    });
+
     it('refuses a blank section', () => {
       expect(changelogProblems({ ...ok, scrivText: ' \n\n' })).toEqual([expect.stringMatching(/entry for 0\.1\.4 is empty/)]);
     });
@@ -219,6 +242,41 @@ describe('release-notes.mjs', () => {
 
     it('reports both problems at once', () => {
       expect(changelogProblems({ ...ok, scrivExit: 2, scrivText: '', entries: [...ok.entries, 'a.md'] })).toHaveLength(2);
+    });
+  });
+
+  describe('escapeMarkdown and commitList', () => {
+    it('neutralises HTML, headings, emphasis, links, tables, strikes and mentions', () => {
+      expect(escapeMarkdown('#x <y> @z *w*')).toBe('\\#x &lt;y&gt; \\@z \\*w\\*');
+      expect(escapeMarkdown('a & b [l](u) `c` _u_ |t| ~s~ \\')).toBe('a &amp; b \\[l\\](u) \\`c\\` \\_u\\_ \\|t\\| \\~s\\~ \\\\');
+    });
+
+    it('keeps a real subject whose <userid> GitHub would swallow as a tag (2d0041c)', () => {
+      expect(commitList('docs: /c u=<userid> frees a held TSO userid on TK5, and HERC01 is free again\x002d0041c\n'))
+        .toBe('- docs: /c u=&lt;userid&gt; frees a held TSO userid on TK5, and HERC01 is free again (2d0041c)\n');
+    });
+
+    it('makes one bullet per line, hash last, and a leading # cannot become a heading', () => {
+      expect(commitList('#x <y> @z *w*\x00abc1234\nrelease: 0.1.4\x00def5678\n\n'))
+        .toBe('- \\#x &lt;y&gt; \\@z \\*w\\* (abc1234)\n- release: 0.1.4 (def5678)\n');
+      expect(commitList('')).toBe('');
+    });
+  });
+
+  describe('runCommand', () => {
+    it('returns the exit status and stdout, running in cwd', () => {
+      const d = mkdtempSync(join(tmpdir(), 'runcmd-'));
+      try {
+        const r = runCommand(process.execPath, ['-e', 'process.stdout.write(process.cwd()); process.exit(3)'], { cwd: d });
+        expect(r.status).toBe(3);
+        expect(realpathSync(r.stdout)).toBe(realpathSync(d));
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    });
+
+    it('is 127, with empty stdout, for a command that cannot start', () => {
+      expect(runCommand('no-such-command-for-release-notes', [], { cwd: tmpdir() })).toEqual({ status: 127, stdout: '' });
     });
   });
 
@@ -235,7 +293,7 @@ describe('release-notes.mjs', () => {
      */
     function io(opts: {
       version?: string; installers?: string[]; fragments?: string[]; sections?: Record<string, string>;
-      tags?: string[]; pulls?: string; assets?: unknown; tag?: string; refType?: string; actions?: boolean;
+      tags?: string[]; pulls?: string; assets?: unknown[] | ((dir: string) => unknown[]); tag?: string; refType?: string; actions?: boolean;
       env?: Record<string, string>; fail?: string; platform?: string; arch?: string;
     } = {}) {
       const root = mkdtempSync(join(tmpdir(), 'relnotes-'));
@@ -259,11 +317,14 @@ describe('release-notes.mjs', () => {
           return text === undefined ? { status: 2, stdout: '' } : { status: 0, stdout: text };
         }
         if (cmd === 'git' && args[0] === 'tag') return { status: 0, stdout: (opts.tags ?? ['v0.1.0', 'v0.1.1', 'v0.1.3', 'v0.1.4']).join('\n') + '\n' };
-        if (cmd === 'git' && args[0] === 'log') return { status: 0, stdout: '- release: 0.1.4 (abc1234)\n- the fix (def5678)\n' };
+        if (cmd === 'git' && args[0] === 'log') return { status: 0, stdout: 'release: 0.1.4\0abc1234\nthe fix\0def5678\n' };
         if (args.includes('releases/generate-notes') || args.some((a) => a.endsWith('/releases/generate-notes'))) {
           return { status: 0, stdout: JSON.stringify({ name: 'v0.1.4', body: opts.pulls ?? '**Full Changelog**: https://github.com/athornton/tn3270/compare/v0.1.3...v0.1.4' }) };
         }
-        if (args[0] === 'release' && args[1] === 'view') return { status: 0, stdout: JSON.stringify({ assets: opts.assets ?? [] }) };
+        if (args[0] === 'api' && args[1] === `repos/athornton/tn3270/releases/tags/${opts.tag}`) {
+          const assets = typeof opts.assets === 'function' ? opts.assets(dir) : opts.assets ?? [];
+          return { status: 0, stdout: JSON.stringify({ tag_name: opts.tag, assets }) };
+        }
         throw new Error(`unexpected command: ${line}`);
       };
       const env: Record<string, string> = { GITHUB_REPOSITORY: 'athornton/tn3270', ...opts.env };
@@ -276,7 +337,7 @@ describe('release-notes.mjs', () => {
     }
 
     it('refuses a bad mode, a missing argument or an extra one, with the usage', () => {
-      for (const argv of [[], ['--publish', 'x'], ['--compose'], ['--compose', 'a', 'b']]) {
+      for (const argv of [[], ['--publish', 'x'], ['--compose'], ['--compose', 'a', 'b'], ['--check-installers', 'd'], ['--check-installers', 'd', '0.1.4', 'x']]) {
         const x = io();
         expect(main(argv, x.args)).toBe(1);
         expect(x.logs).toEqual([expect.stringMatching(/^release-notes: refused: usage: /)]);
@@ -330,7 +391,7 @@ describe('release-notes.mjs', () => {
         expect(x.calls.map((c) => [c.cmd, ...c.args].join(' '))).toEqual([
           'scriv print --version 0.1.4',
           'git tag --merged v0.1.4 --list v*.*.*',
-          'git log --format=- %s (%h) v0.1.3..v0.1.4',
+          'git log --first-parent --format=%s%x00%h v0.1.3..v0.1.4',
           'gh api repos/athornton/tn3270/releases/generate-notes -f tag_name=v0.1.4 -f previous_tag_name=v0.1.3',
         ]);
         expect(x.calls.every((c) => c.cwd === x.root)).toBe(true);
@@ -391,6 +452,39 @@ describe('release-notes.mjs', () => {
       });
     });
 
+    it('--compose lists the first-parent history of a REAL git repo: merges and direct commits, not branch commits', (ctx) => {
+      if (spawnSync('git', ['--version']).status !== 0) ctx.skip('no git on this machine');
+      const x = io({ tag: 'v0.1.4' });
+      const git = (...a: string[]) => {
+        const r = spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...a],
+          { cwd: x.root, encoding: 'utf8' });
+        if (r.status !== 0) throw new Error(`git ${a.join(' ')}: ${r.stderr}`);
+        return r.stdout.trim();
+      };
+      git('init', '-q', '-b', 'main');
+      git('commit', '-q', '--allow-empty', '-m', 'first');
+      git('tag', 'v0.1.3');
+      git('checkout', '-q', '-b', 'feature');
+      git('commit', '-q', '--allow-empty', '-m', 'plan: a branch commit');
+      git('commit', '-q', '--allow-empty', '-m', 'spec: another branch commit');
+      git('checkout', '-q', 'main');
+      git('commit', '-q', '--allow-empty', '-m', 'docs: /c u=<userid> on main');
+      git('merge', '-q', '--no-ff', 'feature', '-m', 'Merge feature -- the thing users get');
+      git('commit', '-q', '--allow-empty', '-m', 'release: 0.1.4');
+      git('tag', 'v0.1.4');
+      const h = (rev: string) => git('rev-parse', '--short', rev);
+      // git is real; scriv and gh stay fake.
+      const fake = x.args.run;
+      const run = (cmd: string, args: string[], o: { cwd: string }) => (cmd === 'git' ? runCommand(cmd, args, o) : fake(cmd, args, o));
+      expect(main(['--compose', x.dir], { ...x.args, run })).toBe(0);
+      const notes = readFileSync(join(x.root, 'release-notes.md'), 'utf8');
+      expect(notes).toContain(`## Commits\n\n- release: 0.1.4 (${h('HEAD')})\n- Merge feature -- the thing users get (${h('HEAD~1')})\n`
+        + `- docs: /c u=&lt;userid&gt; on main (${h('HEAD~2')})\n\n`);
+      expect(notes).not.toContain('branch commit');
+      expect(notes).not.toMatch(/- first/);
+      expect(notes).toContain('compare/v0.1.3...v0.1.4');
+    });
+
     it('--compose and --verify-release refuse without GITHUB_REPOSITORY, before running anything', () => {
       for (const mode of ['--compose', '--verify-release']) {
         const x = io({ tag: 'v0.1.4', env: { GITHUB_REPOSITORY: '' } });
@@ -401,34 +495,57 @@ describe('release-notes.mjs', () => {
     });
 
     describe('--verify-release', () => {
-      /** The release's assets as gh reports them, for what is in `dir`. */
-      const assetsOf = (dir: string, files: string[]) => files.map((name) => ({ name, size: readFileSync(join(dir, name)).length, state: 'uploaded' }));
+      const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+      /** The API's assets for what is in `dir`: uploaded, at its size, with GitHub's digest (or null, as older assets have). */
+      const assetsOf = (dir: string, { digest = true } = {}) => [...expectedInstallers('0.1.4'), 'SHA256SUMS'].map((name) => ({
+        name, size: readFileSync(join(dir, name)).length, state: 'uploaded', digest: digest ? `sha256:${sha(join(dir, name))}` : null,
+      }));
+      const withSums = <T extends { dir: string }>(x: T): T => { writeFileSync(join(x.dir, 'SHA256SUMS'), 'sums\n'); return x; };
 
-      it('passes when the release holds exactly the files, at their sizes', () => {
-        const x = io({ tag: 'v0.1.4' });
-        writeFileSync(join(x.dir, 'SHA256SUMS'), 'sums\n');
-        const files = [...expectedInstallers('0.1.4'), 'SHA256SUMS'];
-        const y = io({ tag: 'v0.1.4', assets: assetsOf(x.dir, files) });
-        writeFileSync(join(y.dir, 'SHA256SUMS'), 'sums\n');
-        expect(main(['--verify-release', y.dir], y.args)).toBe(0);
-        expect(y.calls.map((c) => [c.cmd, ...c.args].join(' '))).toEqual(['gh release view v0.1.4 --repo athornton/tn3270 --json assets']);
-        expect(y.logs.at(-1)).toMatch(/v0\.1\.4 holds exactly the 8 files/);
+      it('passes when the release holds exactly the files, at their sizes and digests, asking the REST API', () => {
+        const x = withSums(io({ tag: 'v0.1.4', assets: (d) => assetsOf(d) }));
+        expect(main(['--verify-release', x.dir], x.args)).toBe(0);
+        expect(x.calls.map((c) => [c.cmd, ...c.args].join(' '))).toEqual(['gh api repos/athornton/tn3270/releases/tags/v0.1.4']);
+        expect(x.logs.at(-1)).toMatch(/v0\.1\.4 holds exactly the 8 files/);
+      });
+
+      it('refuses an asset of the right size whose digest differs', () => {
+        const x = withSums(io({ tag: 'v0.1.4', assets: (d) => assetsOf(d).map((a) => (a.name.endsWith('.exe') ? { ...a, digest: `sha256:${'0'.repeat(64)}` } : a)) }));
+        expect(main(['--verify-release', x.dir], x.args)).toBe(1);
+        expect(x.logs).toEqual([expect.stringMatching(/the release's TN3270-0\.1\.4-win-x64\.exe has digest sha256:0{64}, not sha256:[0-9a-f]{64}: /)]);
+      });
+
+      it('falls back to the size where GitHub gives no digest (null), and still refuses a wrong size there', () => {
+        const ok = withSums(io({ tag: 'v0.1.4', assets: (d) => assetsOf(d, { digest: false }) }));
+        expect(main(['--verify-release', ok.dir], ok.args)).toBe(0);
+        const bad = withSums(io({ tag: 'v0.1.4', assets: (d) => assetsOf(d, { digest: false }).map((a) => (a.name.endsWith('.exe') ? { ...a, size: 1 } : a)) }));
+        expect(main(['--verify-release', bad.dir], bad.args)).toBe(1);
+        expect(bad.logs).toEqual([expect.stringMatching(/the release's TN3270-0\.1\.4-win-x64\.exe is 1 bytes, not \d+: /)]);
       });
 
       it('refuses a missing asset, a wrong size, one not uploaded, and an extra one, each named', () => {
-        const x = io({ tag: 'v0.1.4' });
-        writeFileSync(join(x.dir, 'SHA256SUMS'), 'sums\n');
-        const [dmg, zip, app, ...others] = assetsOf(x.dir, [...expectedInstallers('0.1.4'), 'SHA256SUMS']);
-        const y = io({ tag: 'v0.1.4', assets: [{ ...zip!, size: 1 }, { ...app!, state: 'starter' }, ...others, { name: 'old.txt', size: 3, state: 'uploaded' }] });
-        writeFileSync(join(y.dir, 'SHA256SUMS'), 'sums\n');
-        expect(main(['--verify-release', y.dir], y.args)).toBe(1);
+        const x = withSums(io({
+          tag: 'v0.1.4',
+          assets: (d) => {
+            const [, zip, app, ...others] = assetsOf(d);
+            return [{ ...zip!, size: 1 }, { ...app!, state: 'starter' }, ...others, { name: 'old.txt', size: 3, state: 'uploaded', digest: null }];
+          },
+        }));
+        expect(main(['--verify-release', x.dir], x.args)).toBe(1);
         // In the local files' sorted order, then the extras.
-        expect(y.logs).toEqual([
+        expect(x.logs).toEqual([
           expect.stringMatching(/the release's TN3270-0\.1\.4-linux-x86_64\.AppImage is "starter", not uploaded: /),
-          `release-notes: refused: the release has no ${dmg!.name}: re-run the github-release job`,
-          expect.stringMatching(new RegExp(`^release-notes: refused: the release's ${zip!.name.replace(/\./g, '\\.')} is 1 bytes, not ${zip!.size}: `)),
+          'release-notes: refused: the release has no TN3270-0.1.4-mac-universal.dmg: re-run the github-release job',
+          expect.stringMatching(/^release-notes: refused: the release's TN3270-0\.1\.4-mac-universal\.zip is 1 bytes, not 30: /),
           expect.stringMatching(/the release has old\.txt, which this run did not make: delete it/),
         ]);
+      });
+
+      it('refuses an empty local file even when the release matches it', () => {
+        const x = withSums(io({ tag: 'v0.1.4', assets: (d) => assetsOf(d) }));
+        writeFileSync(join(x.dir, 'TN3270-0.1.4-win-x64.exe'), '');
+        expect(main(['--verify-release', x.dir], x.args)).toBe(1);
+        expect(x.logs).toEqual(['release-notes: refused: TN3270-0.1.4-win-x64.exe is empty here: re-run the packaging job that made it']);
       });
 
       it('refuses a directory without SHA256SUMS, before asking GitHub', () => {
@@ -436,6 +553,34 @@ describe('release-notes.mjs', () => {
         expect(main(['--verify-release', x.dir], x.args)).toBe(1);
         expect(x.logs[0]).toMatch(/has no SHA256SUMS: run --compose first/);
         expect(x.calls).toEqual([]);
+      });
+    });
+
+    describe('--check-installers', () => {
+      it('passes the seven (and a SHA256SUMS beside them), with no tag and no command run', () => {
+        const x = io();
+        writeFileSync(join(x.dir, 'SHA256SUMS'), 'x\n');
+        expect(main(['--check-installers', x.dir, '0.1.4'], x.args)).toBe(0);
+        expect(x.calls).toEqual([]);
+        expect(x.logs).toEqual([`release-notes: ${x.dir} holds exactly the 7 installers of 0.1.4`]);
+      });
+
+      it('refuses a missing installer and an extra file, each named', () => {
+        const x = io({ installers: [...expectedInstallers('0.1.4').slice(1), 'stray.txt'] });
+        expect(main(['--check-installers', x.dir, '0.1.4'], x.args)).toBe(1);
+        expect(x.logs).toEqual([
+          expect.stringMatching(/^release-notes: refused: missing TN3270-0\.1\.4-mac-universal\.dmg: /),
+          expect.stringMatching(/^release-notes: refused: unexpected file stray\.txt: /),
+        ]);
+      });
+
+      it('refuses installers of another version, and a tag-shaped version', () => {
+        const x = io();
+        expect(main(['--check-installers', x.dir, '0.1.5'], x.args)).toBe(1);
+        expect(x.logs.filter((l) => /is for version 0\.1\.4, not 0\.1\.5/.test(l))).toHaveLength(7);
+        const y = io();
+        expect(main(['--check-installers', y.dir, 'v0.1.4'], y.args)).toBe(1);
+        expect(y.logs[0]).toContain('GITHUB_REF_NAME#v');
       });
     });
 
@@ -514,14 +659,29 @@ describe('release-notes.mjs', () => {
   describe('with the real scriv', () => {
     const REPO = resolve(import.meta.dirname, '../../..');
     const HOME = process.env.HOME ?? '';
-    const found = [process.env.SCRIV, 'scriv', `${HOME}/.local/bin/uvx scriv`, 'uvx scriv']
-      .filter((c): c is string => c !== undefined && c.trim() !== '')
-      .map((c) => c.trim().split(/\s+/))
-      .find(([cmd, ...pre]) => spawnSync(cmd!, [...pre, '--version'], { stdio: 'ignore', timeout: 60_000 }).status === 0);
-    const scriv = (...args: string[]) => spawnSync(found![0]!, [...found!.slice(1), ...args], { cwd: REPO, encoding: 'utf8', timeout: 60_000 });
+    /*
+      PROBED ONCE, LAZILY, AND BOUNDED: in the first test that needs it, not at collection, each
+      candidate given 20 s (an offline uvx without scriv cached fails fast or times out there, never
+      stalling the suite). Pinned as CI pins it.
+    */
+    let probed: string[] | undefined | null = null;
+    const found = () => {
+      if (probed === null) {
+        probed = [process.env.SCRIV, 'scriv', `${HOME}/.local/bin/uvx scriv==1.8.1`, 'uvx scriv==1.8.1']
+          .filter((c): c is string => c !== undefined && c.trim() !== '')
+          .map((c) => c.trim().split(/\s+/))
+          .find(([cmd, ...pre]) => {
+            const r = spawnSync(cmd!, [...pre, '--version'], { encoding: 'utf8', timeout: 20_000 });
+            return r.status === 0 && /version 1\.8\.1\b/.test(r.stdout);
+          });
+      }
+      return probed;
+    };
+    const NONE = 'no scriv 1.8.1 here (tried $SCRIV, scriv, ~/.local/bin/uvx scriv==1.8.1, uvx scriv==1.8.1): CI installs it in the release jobs only';
+    const scriv = (...args: string[]) => spawnSync(found()![0]!, [...found()!.slice(1), ...args], { cwd: REPO, encoding: 'utf8', timeout: 60_000 });
 
     it('extracts each seeded entry, and exits 2 for a version not there', (ctx) => {
-      if (found === undefined) ctx.skip('no scriv here (tried $SCRIV, scriv, ~/.local/bin/uvx scriv, uvx scriv): CI installs it in the release jobs only');
+      if (found() === undefined) ctx.skip(NONE);
       const r = scriv('print', '--version', '0.1.3');
       expect(r.status).toBe(0);
       expect(r.stdout).toMatch(/^### Other changes\n\n- The first release published to npm by the project's own tag workflow/);
@@ -531,7 +691,7 @@ describe('release-notes.mjs', () => {
     }, 120_000);
 
     it('drives --check-changelog end to end with runCommand, in a copy of the changelog', (ctx) => {
-      if (found === undefined) ctx.skip('no scriv here (tried $SCRIV, scriv, ~/.local/bin/uvx scriv, uvx scriv): CI installs it in the release jobs only');
+      if (found() === undefined) ctx.skip(NONE);
       const root = mkdtempSync(join(tmpdir(), 'relnotes-real-'));
       try {
         cpSync(join(REPO, 'CHANGELOG.md'), join(root, 'CHANGELOG.md'));
@@ -539,7 +699,7 @@ describe('release-notes.mjs', () => {
         // Only the configuration: this branch's own uncollected fragments must not decide the test.
         for (const f of ['scriv.ini', '_template.md.jinja']) cpSync(join(REPO, 'changelog.d', f), join(root, 'changelog.d', f));
         const logs: string[] = [];
-        const args = { env: { SCRIV: found!.join(' ') }, run: runCommand, log: (l: string) => { logs.push(l); }, root };
+        const args = { env: { SCRIV: found()!.join(' ') }, run: runCommand, log: (l: string) => { logs.push(l); }, root };
         expect(main(['--check-changelog', '0.1.3'], args)).toBe(0);
         expect(main(['--check-changelog', '0.1.4'], args)).toBe(1);
         expect(logs.at(-1)).toBe('release-notes: refused: CHANGELOG.md has no entry for 0.1.4: run uvx scriv collect --version 0.1.4 and commit it');

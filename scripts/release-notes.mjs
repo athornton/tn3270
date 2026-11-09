@@ -6,10 +6,14 @@
  *
  *   node scripts/release-notes.mjs --check-changelog X.Y.Z   release-check: refuse a version with no
  *                                                            CHANGELOG.md entry, or uncollected fragments
+ *   node scripts/release-notes.mjs --check-installers DIR X.Y.Z
+ *                                                            release-check, before npm publish: DIR holds
+ *                                                            exactly the seven installers of X.Y.Z
  *   node scripts/release-notes.mjs --compose DIR             github-release: check DIR's installers, write
- *                                                            DIR/SHA256SUMS and release-notes.md
+ *                                                            DIR/SHA256SUMS, and release-notes.md in the
+ *                                                            REPOSITORY ROOT (not the cwd; the same in CI)
  *   node scripts/release-notes.mjs --verify-release DIR      github-release, last: the release's assets are
- *                                                            exactly DIR's files, at their sizes
+ *                                                            exactly DIR's files, by size and digest
  *   node scripts/release-notes.mjs --dry-run DIR             every push: the same, for this runner's own
  *                                                            installers, no tag and no network; changelog
  *                                                            problems are WARNINGS (normal between releases)
@@ -128,8 +132,8 @@ export function previousTag(tags, version) {
   return best?.t;
 }
 
-/** The fixed part of every release's notes. */
-function header(version) {
+/** The fixed part of every release's notes, for `repo` (owner/name). */
+function header(version, repo) {
   const [dmg, zip, appX64, debX64, appArm, debArm, exe] = expectedInstallers(version);
   return [
     '## Installing',
@@ -143,7 +147,7 @@ function header(version) {
     `npm install -g @tn3270/gui@${version}    # tn3270-gui -- the Electron GUI`,
     '```',
     '',
-    'Not root? See *Installing* in the [README](https://github.com/athornton/tn3270#installing) for a',
+    `Not root? See *Installing* in the [README](https://github.com/${repo}#installing) for a`,
     'per-user npm prefix, or `npx`.',
     '',
     'Or the GUI as a native installer, attached below:',
@@ -165,9 +169,14 @@ function header(version) {
   ].join('\n');
 }
 
-/** GitHub's generated notes minus their own `**Full Changelog**` line; '' when nothing else is left. */
+/**
+ * GitHub's generated notes minus their own `**Full Changelog**` line, `## What's Changed` heading
+ * and HTML comments (`<!-- Release notes generated using configuration ... -->`, which renders as
+ * nothing); '' when nothing else is left.
+ */
 function pullList(body) {
   return (body ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
     .split('\n')
     .filter((l) => !/^\*\*Full Changelog\*\*:/.test(l))
     .join('\n')
@@ -176,18 +185,39 @@ function pullList(body) {
 }
 
 /**
+ * `text` safe as markdown prose: `&`, `<`, `>` as entities (a `<userid>` would be an HTML tag and
+ * vanish), and `\ ` * _ [ ] # | ~ @` backslash-escaped (no emphasis, link, heading, table, strike
+ * or `@login` mention -- a mention would NOTIFY that user).
+ */
+export function escapeMarkdown(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/[\\`*_[\]#|~@]/g, (c) => `\\${c}`);
+}
+
+/** `git log --format=%s%x00%h` -> `- subject (hash)` lines, each subject escaped. */
+export function commitList(gitLog) {
+  return gitLog.split('\n').filter((l) => l !== '').map((l) => {
+    const nul = l.lastIndexOf('\0');
+    const [subject, hash] = nul < 0 ? [l, ''] : [l.slice(0, nul), l.slice(nul + 1)];
+    return `- ${escapeMarkdown(subject)}${hash !== '' ? ` (${hash})` : ''}\n`;
+  }).join('');
+}
+
+/**
  * The release notes, in markdown: the fixed header; `## What changed` with `scriv print`'s text
- * verbatim; `## Commits` with the commit list; `## Pull requests` with GitHub's generated list,
+ * verbatim; `## Commits` with the commit list (markdown already: `commitList`'s); `## Pull requests` with GitHub's generated list,
  * only when it holds one; and ONE compare link.
  *
  * WHY BOTH LISTS. The design took the commit list from GitHub's `releases/generate-notes`. MEASURED
  * 2026-11-09 for v0.1.1...v0.1.3: its `body` was the compare link alone -- it lists merged PULL
- * REQUESTS, and this repository merges by push -- so the commit list is `git log`'s, and GitHub's
- * appears beside it whenever there are pull requests to list.
+ * REQUESTS, and this repository merges by push -- so the commit list is `git log --first-parent`'s
+ * (the merges' own descriptive subjects, not every branch commit), and GitHub's appears beside it
+ * whenever there are pull requests to list.
  */
 export function composeNotes({ version, repo, previous, scriv, commits, pulls }) {
   const parts = [
-    header(version),
+    header(version, repo),
     `## What changed\n\n${scriv.replace(/\s+$/, '')}\n`,
     `## Commits\n\n${commits.replace(/\s+$/, '')}\n`,
   ];
@@ -214,6 +244,10 @@ export function changelogProblems({ version, scrivExit, scrivText, fragmentDir, 
     problems.push(`scriv print --version ${version} exited ${scrivExit}: is scriv installed (pipx install scriv==1.8.1), and is this the repository root?`);
   } else if (scrivText.trim() === '') {
     problems.push(`CHANGELOG.md's entry for ${version} is empty: fill it in, or write fragments and collect them`);
+  } else if (!/^[ \t]*[-*][ \t]+\S/m.test(scrivText)) {
+    // An untouched template collects to its headings and bare `-` lines. `[ \t]`, not `\s`: across
+    // lines, `\s+` would read a bare `-`, a blank line and the next `### heading` as an item.
+    problems.push(`CHANGELOG.md's entry for ${version} has no item (no "- something" line): write one under the category it belongs to`);
   }
   const fragments = entries.filter((e) => !NOT_FRAGMENTS.includes(e)).sort();
   if (fragments.length > 0) {
@@ -228,7 +262,7 @@ const NOTES = 'release-notes.md';
 /** The upload patterns of the `package` job's `gui-*` artifacts (`.github/workflows/package.yml`). */
 const INSTALLER_EXT = ['.AppImage', '.deb', '.dmg', '.zip', '.exe'];
 
-const USAGE = 'usage: node scripts/release-notes.mjs --check-changelog X.Y.Z | --compose DIR | --verify-release DIR | --dry-run DIR';
+const USAGE = 'usage: node scripts/release-notes.mjs --check-changelog X.Y.Z | --check-installers DIR X.Y.Z | --compose DIR | --verify-release DIR | --dry-run DIR';
 
 class Refusal extends Error {}
 
@@ -290,18 +324,28 @@ function sumsOver(dir, files) {
 }
 
 /**
- * The four modes, with everything outside the process injected: `env` (`GITHUB_REF_NAME`,
+ * The five modes, with everything outside the process injected: `env` (`GITHUB_REF_NAME`,
  * `GITHUB_REF_TYPE`, `GITHUB_REPOSITORY`, `GITHUB_ACTIONS`, `SCRIV`, `GH`), `run(cmd, args, { cwd })
  * -> { status, stdout }` (scriv, git, gh; stderr is the caller's), `log`, and optionally `root`
- * (the repository: changelog.d, package.json, where release-notes.md is written) and the
+ * (the repository: changelog.d, package.json, and where --compose writes release-notes.md) and the
  * `platform`/`arch` whose installers a dry run expects. Returns the exit status: 0, or 1 with
  * every problem logged.
  */
 export function main(argv, { env, run, log, root = ROOT, platform = process.platform, arch = process.arch }) {
   const [mode, arg, ...rest] = argv;
   try {
-    if (!['--check-changelog', '--compose', '--verify-release', '--dry-run'].includes(mode) || arg === undefined || rest.length > 0) {
-      throw new Refusal(USAGE);
+    const arity = { '--check-changelog': 1, '--check-installers': 2, '--compose': 1, '--verify-release': 1, '--dry-run': 1 }[mode];
+    if (arity === undefined || argv.length !== 1 + arity) throw new Refusal(USAGE);
+
+    if (mode === '--check-installers') {
+      // release-check, BEFORE npm publish (which cannot be undone): the run made all seven.
+      const v = rest[0];
+      if (!SEMVER.test(v)) throw new Refusal(`${JSON.stringify(v)} is not a version X.Y.Z (no v): pass e.g. "\${GITHUB_REF_NAME#v}"`);
+      const files = filesIn(arg).filter((f) => f !== SUMS);
+      const bad = checkInstallers(files, v);
+      if (bad.length > 0) throw new Refusal(bad.join('\n'));
+      log(`release-notes: ${arg} holds exactly the ${files.length} installers of ${v}`);
+      return 0;
     }
 
     if (mode === '--check-changelog') {
@@ -365,7 +409,10 @@ export function main(argv, { env, run, log, root = ROOT, platform = process.plat
         throw new Refusal(`no release tag below ${tag} is an ancestor of it (tags merged: ${tags.join(', ') || 'none'}): check out with fetch-depth: 0`);
       }
       const scriv = state.scrivText;
-      const commits = must(run, 'git', ['log', '--format=- %s (%h)', `${previous}..${tag}`], root, 'cannot list the commits');
+      // --first-parent: the mainline -- merges (whose subjects describe the branch), release
+      // commits, direct commits -- not every commit of every merged branch, plans and specs included.
+      // NUL-separated, so no subject can be mistaken for the hash.
+      const commits = commitList(must(run, 'git', ['log', '--first-parent', '--format=%s%x00%h', `${previous}..${tag}`], root, 'cannot list the commits'));
       const [ghCmd, ...ghPre] = gh;
       const answer = must(run, ghCmd, [...ghPre, 'api', `repos/${repo}/releases/generate-notes`,
         '-f', `tag_name=${tag}`, '-f', `previous_tag_name=${previous}`], root, 'set GH_TOKEN, and give the job contents: write');
@@ -379,14 +426,15 @@ export function main(argv, { env, run, log, root = ROOT, platform = process.plat
       return 0;
     }
 
-    // --verify-release: what the release holds, read back, against what was handed to it.
+    // --verify-release: what the release holds, read back (the REST API, for `digest`), against
+    // what was handed to it.
     const local = filesIn(arg);
     if (!local.includes(SUMS)) throw new Refusal(`${arg} has no ${SUMS}: run --compose first`);
     const [ghCmd, ...ghPre] = gh;
-    const answer = must(run, ghCmd, [...ghPre, 'release', 'view', tag, '--repo', repo, '--json', 'assets'], root, 'is the release there, and GH_TOKEN set?');
+    const answer = must(run, ghCmd, [...ghPre, 'api', `repos/${repo}/releases/tags/${tag}`], root, 'is the release there, and GH_TOKEN set?');
     let assets;
-    try { assets = JSON.parse(answer).assets; } catch (err) { throw new Refusal(`gh release view did not answer JSON: ${err.message}`); }
-    if (!Array.isArray(assets)) throw new Refusal('gh release view answered no assets list');
+    try { assets = JSON.parse(answer).assets; } catch (err) { throw new Refusal(`the release API did not answer JSON: ${err.message}`); }
+    if (!Array.isArray(assets)) throw new Refusal('the release API answered no assets list');
     const problems = [];
     const remote = new Map(assets.map((a) => [a?.name, a]));
     for (const f of local) {
@@ -395,13 +443,18 @@ export function main(argv, { env, run, log, root = ROOT, platform = process.plat
       if (a === undefined) problems.push(`the release has no ${f}: re-run the github-release job`);
       else if (a.state !== 'uploaded') problems.push(`the release's ${f} is ${JSON.stringify(a.state)}, not uploaded: re-run the github-release job`);
       else if (a.size !== size) problems.push(`the release's ${f} is ${a.size} bytes, not ${size}: re-run the github-release job (it uploads with --clobber)`);
+      // `digest` ("sha256:<hex>") is GitHub's own hash of the stored asset; null on assets uploaded
+      // before GitHub computed one (measured: cli/cli v2.46.0's), where the size has to do.
+      else if (typeof a.digest === 'string' && a.digest !== `sha256:${sha256Of(join(arg, f))}`) {
+        problems.push(`the release's ${f} has digest ${a.digest}, not sha256:${sha256Of(join(arg, f))}: re-run the github-release job (it uploads with --clobber)`);
+      }
       if (size === 0) problems.push(`${f} is empty here: re-run the packaging job that made it`);
     }
     for (const name of remote.keys()) {
       if (!local.includes(name)) problems.push(`the release has ${name}, which this run did not make: delete it (gh release delete-asset ${tag} ${name})`);
     }
     if (problems.length > 0) throw new Refusal(problems.join('\n'));
-    log(`release-notes: ${tag} holds exactly the ${local.length} files of ${arg}, each at its size`);
+    log(`release-notes: ${tag} holds exactly the ${local.length} files of ${arg}, each at its size and (where GitHub gives one) digest`);
     return 0;
   } catch (err) {
     if (!(err instanceof Refusal)) throw err;
