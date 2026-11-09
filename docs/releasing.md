@@ -150,4 +150,24 @@ version). Then this document's manual steps become the fallback.
 ## Release history
 
 - **0.1.0**, 2026-11-08: tag `v0.1.0` (`c30ad98`), published by hand from CI run 42504570737's
-  `npm-tarballs`. Every registry `dist.shasum` matches that artifact's tarball.
+  `npm-tarballs`. Every registry `dist.shasum` matches that artifact's tarball. (A `0.0.0-stage`
+  version of each package had gone up 76 s earlier; it was deprecated "not a release" on
+  2026-11-09.)
+- **0.1.1**, 2026-11-09: tag `v0.1.1` (`e95b932`), published by hand from CI run 42563103808's
+  `npm-tarballs`; every registry `dist.shasum` matches. In it: the GUI Connect dialog stays open
+  and retries on failure; the TUI prompts for a host when given none at a terminal; a 30 s
+  plaintext connect deadline; a down or misspelled host is worded as a connect failure even with
+  TLS on; the Node floor is 20.19. Verified from the registry: `@tn3270/tui@0.1.1` installed on
+  Node 20.19.2 with no engine warning, and its prompt reached the Hercules VM after a TLS round.
+
+**A first 0.1.1 attempt published nothing, quietly.** The publishing machine was not logged in
+(`npm whoami`: E401), so every `npm publish` in the loop failed, and an `npm unpublish` there
+appeared to succeed while the registry did not change; it was noticed only because the registry
+was checked afterwards. So: run `npm whoami` before the loop, end each loop body with
+`|| break` so the first failure stops it, and check the registry (not the client's output)
+afterwards:
+
+```sh
+npm whoami        # must print the publishing account
+for t in core frontend node-files canvas cli tui web gui; do npm publish tn3270-$t-X.Y.Z.tgz || break; done
+```

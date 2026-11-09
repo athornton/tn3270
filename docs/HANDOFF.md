@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-08 (packaging MERGED into `main` as `5669a3a`, CI green on five runners on the merge, live-checked by the user on macOS, Linux arm64/x64 and Windows 11; PUBLISHED to npm as 0.1.0 (tag `v0.1.0`), native installers UNSIGNED; roadmap recorded in README *Remaining* items 14-22; branch `connect-retry` -- the GUI Connect-dialog retry and the TUI no-host prompt, for 0.1.1 -- is BUILT and AWAITING MERGE)
+# Handoff — state as of 2026-11-09 (0.1.1 PUBLISHED to npm, tag `v0.1.1` on `e95b932`: the GUI Connect-dialog retry and the TUI no-host prompt, merged from `connect-retry` as `cadf824` and verified live; native installers UNSIGNED; roadmap in README *Remaining* items 14-22, next is npm trusted publishing, then item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -8,6 +8,11 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
+
+**2026-11-09: 0.1.1 IS PUBLISHED** (all eight packages, from CI run 42563103808, byte-identical;
+`0.0.0-stage` deprecated). See `docs/releasing.md` *Release history*, including why the first
+attempt published nothing. Next: npm trusted publishing from GitHub Actions (README *Remaining*
+item 14), then item 15, the rest of the GUI.
 
 **2026-11-08: branch `connect-retry` (not yet merged) fixes the defect the user hit on the first
 npm release (0.1.0): with TLS left ticked against a Hercules host, the GUI said `Untick TLS in

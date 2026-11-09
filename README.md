@@ -38,7 +38,7 @@ the honest part of this file.
 
 ## Installing
 
-**On npm since 0.1.0 (2026-11-08); the native installers are unsigned** and come from a green run
+**On npm since 0.1.0 (2026-11-08), currently 0.1.1 (2026-11-09); the native installers are unsigned** and come from a green run
 of `.github/workflows/package.yml` (see `docs/releasing.md`).
 
 ```sh
