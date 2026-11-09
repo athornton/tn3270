@@ -21,3 +21,10 @@ export function registryShasum(fetchFn: FetchFn, name: string, version: string):
 export function decide(localSha1: string, registrySha1: string | undefined): Decision;
 export function verifyReadBack(fetchFn: FetchFn, tarballs: Tarball[], version: string,
   opts?: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> }): Promise<string[]>;
+export function main(argv: string[], io: {
+  env: Record<string, string | undefined>;
+  fetchFn: FetchFn;
+  run: (args: string[]) => number;
+  sleep: (ms: number) => Promise<void>;
+  log: (line: string) => void;
+}): Promise<number>;

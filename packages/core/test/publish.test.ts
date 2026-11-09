@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib';
 import { readTar } from '../../../scripts/tarball.mjs';
 import { publishedPackages, tarballName } from '../../../scripts/workspaces.mjs';
 import {
-  checkRelease, decide, publishOrder, readTarball, registryShasum, verifyReadBack,
+  checkRelease, decide, main, publishOrder, readTarball, registryShasum, verifyReadBack,
   type FetchFn, type Tarball,
 } from '../../../scripts/publish.mjs';
 
@@ -289,6 +289,136 @@ describe('publish.mjs', () => {
       let n = 0;
       const f = fakeFetch(() => (++n === 1 ? 503 : { versions: { '0.1.2': { dist: { shasum: set[0]!.sha1 } } } }));
       expect(await verifyReadBack(f, set, '0.1.2', { attempts: 2, delayMs: 1, sleep: async () => {} })).toEqual([]);
+    });
+  });
+
+  describe('main', () => {
+    const ORDER = ['core', 'frontend', 'canvas', 'node-files', 'cli', 'gui', 'tui', 'web'].map((n) => `@tn3270/${n}`);
+
+    /** Fakes for every outside effect. `registry` maps a name to the shasum the registry holds at 0.1.2. */
+    function io(opts: { tag?: string; registry?: Record<string, string>; failRun?: string; neverReadBack?: boolean } = {}) {
+      const registry = { ...opts.registry };
+      const runs: string[][] = [];
+      const logs: string[] = [];
+      const sleeps: number[] = [];
+      const fetchFn = fakeFetch((url) => {
+        const name = decodeURIComponent(url.replace('https://registry.npmjs.org/', '').replace('?write=true', ''));
+        const sha = registry[name];
+        return sha === undefined ? 404 : { versions: { '0.1.2': { dist: { shasum: sha } } } };
+      });
+      const run = (args: string[]) => {
+        runs.push(args);
+        const path = args.at(-1)!;
+        if (opts.failRun !== undefined && path.includes(opts.failRun)) return 1;
+        // A real publish makes the version appear, unless the test says the registry never shows it.
+        if (args[1] !== '--dry-run' && !opts.neverReadBack) {
+          const t = readTarball(path);
+          registry[t.name] = t.sha1;
+        }
+        return 0;
+      };
+      return {
+        runs, logs, sleeps, registry,
+        args: {
+          env: opts.tag === undefined ? {} : { GITHUB_REF_NAME: opts.tag },
+          fetchFn, run, sleep: async (ms: number) => { sleeps.push(ms); }, log: (l: string) => { logs.push(l); },
+        },
+      };
+    }
+
+    const nameOf = (args: string[]) => readTarball(args.at(-1)!).name;
+
+    it('--dry-run runs npm publish --dry-run for all eight, in dependency order', async () => {
+      realSet('0.1.2');
+      const x = io();
+      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+      expect(x.runs.map((a) => a.slice(0, 2))).toEqual(Array(8).fill(['publish', '--dry-run']));
+      expect(x.runs.map(nameOf)).toEqual(ORDER);
+    });
+
+    it('--dry-run does not dry-run a version already on the registry, which npm 11 refuses', async () => {
+      const set = realSet('0.1.2');
+      const x = io({ registry: { '@tn3270/core': set.find((t) => t.name === '@tn3270/core')!.sha1, '@tn3270/web': 'f'.repeat(40) } });
+      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+      expect(x.runs.map(nameOf)).toEqual(ORDER.filter((n) => n !== '@tn3270/core' && n !== '@tn3270/web'));
+      expect(x.logs).toContain('publish: @tn3270/core@0.1.2 is already on the registry (identical): not dry-run');
+      expect(x.logs).toContain('publish: @tn3270/web@0.1.2 is already on the registry (other contents): not dry-run');
+      expect(x.logs.at(-1)).toBe('publish: dry run of 0.1.2 passed: 6 dry-run, 2 already on the registry');
+    });
+
+    it('--dry-run still dry-runs when the registry cannot be read', async () => {
+      realSet('0.1.2');
+      const x = io();
+      x.args.fetchFn = fakeFetch(() => 503);
+      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+      expect(x.runs).toHaveLength(8);
+    });
+
+    it('--dry-run refuses a failing npm publish --dry-run', async () => {
+      realSet('0.1.2');
+      const x = io({ failRun: 'tn3270-canvas' });
+      expect(await main(['--dry-run', dir!], x.args)).toBe(1);
+      expect(x.logs.join('\n')).toMatch(/refused: npm publish --dry-run tn3270-canvas-0\.1\.2\.tgz exited 1/);
+    });
+
+    it('refuses a bad mode or a missing directory with the usage', async () => {
+      const x = io();
+      expect(await main(['--frobnicate', '/nowhere'], x.args)).toBe(1);
+      expect(await main(['--check'], x.args)).toBe(1);
+      expect(x.logs.every((l) => /usage/.test(l))).toBe(true);
+    });
+
+    it('--check refuses without GITHUB_REF_NAME', async () => {
+      realSet('0.1.2');
+      const x = io();
+      expect(await main(['--check', dir!], x.args)).toBe(1);
+      expect(x.logs.join('\n')).toMatch(/GITHUB_REF_NAME/);
+    });
+
+    it('--check prints the plan, publishing nothing', async () => {
+      const set = realSet('0.1.2');
+      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core': set.find((t) => t.name === '@tn3270/core')!.sha1 } });
+      expect(await main(['--check', dir!], x.args)).toBe(0);
+      expect(x.runs).toEqual([]);
+      expect(x.logs).toContain('  skip    @tn3270/core');
+      expect(x.logs).toContain('  publish @tn3270/web');
+    });
+
+    it('--check and --publish refuse a conflict before running anything', async () => {
+      realSet('0.1.2');
+      for (const mode of ['--check', '--publish']) {
+        const x = io({ tag: 'v0.1.2', registry: { '@tn3270/tui': 'f'.repeat(40) } });
+        expect(await main([mode, dir!], x.args)).toBe(1);
+        expect(x.runs).toEqual([]);
+        expect(x.logs.join('\n')).toMatch(/@tn3270\/tui@0\.1\.2 is already on the registry with other contents/);
+      }
+    });
+
+    it('--publish skips what is identical, publishes the rest in order, and verifies', async () => {
+      const set = realSet('0.1.2');
+      const sha = (n: string) => set.find((t) => t.name === n)!.sha1;
+      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core': sha('@tn3270/core'), '@tn3270/canvas': sha('@tn3270/canvas') } });
+      expect(await main(['--publish', dir!], x.args)).toBe(0);
+      expect(x.runs.every((a) => a[0] === 'publish' && a.length === 2)).toBe(true);
+      expect(x.runs.map(nameOf)).toEqual(ORDER.filter((n) => n !== '@tn3270/core' && n !== '@tn3270/canvas'));
+      expect(x.logs.at(-1)).toBe('published 0.1.2: 6 new, 2 already there, registry verified');
+    });
+
+    it('--publish stops at the first failing npm publish, and names what was not attempted', async () => {
+      realSet('0.1.2');
+      const x = io({ tag: 'v0.1.2', failRun: 'tn3270-node-files' });
+      expect(await main(['--publish', dir!], x.args)).toBe(1);
+      expect(x.runs.map(nameOf)).toEqual(ORDER.slice(0, 4));
+      expect(x.logs.join('\n')).toMatch(/tn3270-node-files-0\.1\.2\.tgz exited 1; not attempted: @tn3270\/cli, @tn3270\/gui, @tn3270\/tui, @tn3270\/web/);
+    });
+
+    it('--publish fails when the registry never shows what was published', async () => {
+      realSet('0.1.2');
+      const x = io({ tag: 'v0.1.2', neverReadBack: true });
+      expect(await main(['--publish', dir!], x.args)).toBe(1);
+      expect(x.runs).toHaveLength(8);
+      expect(x.sleeps).toHaveLength(23);
+      expect(x.logs.at(-1)).toMatch(/registry does not hold 0\.1\.2 .*@tn3270\/core, @tn3270\/frontend/);
     });
   });
 });

@@ -4,6 +4,7 @@
  * (`docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md`).
  *
  *   node scripts/publish.mjs --dry-run DIR    every push: the checks minus the tag, `npm publish --dry-run`
+ *                                             of each version not already on the registry
  *   node scripts/publish.mjs --check DIR      tag push, before the approval: would this release go?
  *   node scripts/publish.mjs --publish DIR    tag push, after it: publish, then read the registry back
  *
@@ -16,11 +17,13 @@
  * *Release history*). `--publish` is not done until every package's `dist.shasum` on the registry
  * equals the sha1 of the file it was handed.
  */
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readTar } from './tarball.mjs';
-import { tarballName } from './workspaces.mjs';
+import { publishedPackages, tarballName } from './workspaces.mjs';
 
 const SCOPE = '@tn3270/';
 
@@ -157,4 +160,130 @@ export async function verifyReadBack(fetchFn, tarballs, version, { attempts = 24
     if (i < attempts) await sleep(delayMs);
   }
   return pending.map((t) => t.name);
+}
+
+const USAGE = 'usage: node scripts/publish.mjs --dry-run|--check|--publish DIR';
+
+class Refusal extends Error {}
+
+/** Every `.tgz` in `dir`, read; checked, ordered. Throws a Refusal listing every problem. */
+function loadRelease(dir, tag) {
+  let files;
+  try { files = readdirSync(dir).filter((f) => f.endsWith('.tgz')).sort(); } catch (err) {
+    throw new Refusal(`cannot read ${dir}: ${err.message}`);
+  }
+  const tarballs = [];
+  const unreadable = [];
+  for (const f of files) {
+    try { tarballs.push(readTarball(join(dir, f))); } catch (err) { unreadable.push(`${f}: ${err.message}`); }
+  }
+  if (unreadable.length > 0) throw new Refusal(unreadable.join('\n'));
+  const { version, problems } = checkRelease({ tag, tarballs, expectedNames: publishedPackages().map(({ m }) => m.name) });
+  if (problems.length > 0) throw new Refusal(problems.join('\n'));
+  let order;
+  try { order = publishOrder(tarballs); } catch (err) { throw new Refusal(err.message); }
+  return { version, order };
+}
+
+/** `--check`'s answer: each tarball in order with its decision. Throws a Refusal on any conflict. */
+async function plan(order, version, fetchFn) {
+  const decided = [];
+  for (const t of order) {
+    let sha;
+    try { sha = await registryShasum(fetchFn, t.name, version); } catch (err) {
+      throw new Refusal(`cannot read ${t.name} from the registry: ${err.message}`);
+    }
+    decided.push({ t, decision: decide(t.sha1, sha), sha });
+  }
+  const conflicts = decided.filter((d) => d.decision === 'conflict');
+  if (conflicts.length > 0) {
+    throw new Refusal(conflicts.map(({ t, sha }) =>
+      `${t.name}@${version} is already on the registry with other contents (shasum ${sha}, this tarball ${t.sha1}): `
+      + 'a published version cannot be replaced, so release a new version').join('\n'));
+  }
+  return decided;
+}
+
+/**
+ * The three modes, with everything outside the process injected: `env` (for `GITHUB_REF_NAME`),
+ * `fetchFn`, `run(args) -> exit status` (an `npm` invocation), `sleep`, `log`. Returns the exit
+ * status: 0, or 1 with every problem logged.
+ */
+export async function main(argv, { env, fetchFn, run, sleep, log }) {
+  const [mode, dir, ...rest] = argv;
+  try {
+    if (!['--dry-run', '--check', '--publish'].includes(mode) || dir === undefined || rest.length > 0) {
+      throw new Refusal(USAGE);
+    }
+    if (mode === '--dry-run') {
+      const { version, order } = loadRelease(dir, undefined);
+      log(`publish: dry run of ${version}, in order: ${order.map((t) => t.name).join(' ')}`);
+      // A VERSION ALREADY ON THE REGISTRY IS NOT DRY-RUN. MEASURED 2026-11-09: npm 11.20's
+      // `publish --dry-run` exits 1 with "You cannot publish over the previously published
+      // versions" (npm 10.9's exits 0), so every push between a release and the next version bump
+      // would fail. `--publish` would skip it too. A registry error is no reason to skip: run npm.
+      let ran = 0;
+      for (const t of order) {
+        let sha;
+        try { sha = await registryShasum(fetchFn, t.name, version); } catch (err) {
+          log(`publish: cannot read ${t.name} from the registry (${err.message}); dry-running it anyway`);
+        }
+        if (sha !== undefined) {
+          log(`publish: ${t.name}@${version} is already on the registry (${sha === t.sha1 ? 'identical' : 'other contents'}): not dry-run`);
+          continue;
+        }
+        const status = run(['publish', '--dry-run', t.path]);
+        if (status !== 0) throw new Refusal(`npm publish --dry-run ${basename(t.path)} exited ${status}`);
+        ran++;
+      }
+      log(`publish: dry run of ${version} passed: ${ran} dry-run, ${order.length - ran} already on the registry`);
+      return 0;
+    }
+
+    const tag = env.GITHUB_REF_NAME;
+    if (tag === undefined || tag === '') {
+      throw new Refusal('GITHUB_REF_NAME is not set: --check and --publish run on a tag push, which sets it to the tag');
+    }
+    const { version, order } = loadRelease(dir, tag);
+    const decided = await plan(order, version, fetchFn);
+    log(`publish: ${version}, in order:`);
+    for (const { t, decision } of decided) log(`  ${decision.padEnd(7)} ${t.name}`);
+    if (mode === '--check') return 0;
+
+    let fresh = 0;
+    for (const [i, { t, decision }] of decided.entries()) {
+      if (decision === 'skip') continue;
+      const status = run(['publish', t.path]);
+      if (status !== 0) {
+        const notTried = decided.slice(i + 1).filter((d) => d.decision !== 'skip').map((d) => d.t.name);
+        throw new Refusal(`npm publish ${basename(t.path)} exited ${status}; not attempted: `
+          + `${notTried.length > 0 ? notTried.join(', ') : 'nothing (it was the last)'}. Re-running is safe: what did publish is skipped`);
+      }
+      fresh++;
+    }
+    const wrong = await verifyReadBack(fetchFn, order, version, { sleep });
+    if (wrong.length > 0) {
+      throw new Refusal(`the registry does not hold ${version} with these tarballs' shasum for: ${wrong.join(', ')}`);
+    }
+    log(`published ${version}: ${fresh} new, ${order.length - fresh} already there, registry verified`);
+    return 0;
+  } catch (err) {
+    if (!(err instanceof Refusal)) throw err;
+    for (const line of err.message.split('\n')) log(`publish: refused: ${line}`);
+    return 1;
+  }
+}
+
+/** `npm args...`, its output passed through. `npm` is `npm.cmd` on Windows, which only a shell runs. */
+function runNpm(args) {
+  const r = process.platform === 'win32'
+    ? spawnSync(`npm ${args.map((a) => `"${a}"`).join(' ')}`, { stdio: 'inherit', shell: true })
+    : spawnSync('npm', args, { stdio: 'inherit' });
+  return r.error !== undefined ? 1 : (r.status ?? 1);
+}
+
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  process.exitCode = await main(process.argv.slice(2), {
+    env: process.env, fetchFn: fetch, run: runNpm, sleep: realSleep, log: console.log,
+  });
 }
