@@ -24,13 +24,16 @@ runs all three `pty-smoke.py` modes (default, `--oversize-auto`, `--prompt`) on 
 (`.github/workflows/package.yml`). See the README's *Installing*, *Using the TUI* and *Connecting
 over TLS* sections, and `packages/gui/README.md` / `packages/tui/README.md`.
 
-**STILL OWED, LIVE, BY THE USER:**
-- the Hercules host with TLS ticked and then unticked, in one run, in BOTH the GUI's Connect
-  dialog and the TUI's no-host prompt (the spec's own "Live, by the user" line for each);
-- `pubvm.org` port 623 with TLS ticked, through the retry path in both front ends;
-- on macOS, that `Cmd-V` pastes into the Connect dialog's Host field on a retry — not into the
-  session behind it, which is the bug `live` (gui/src/main.ts) exists to close, and which no
-  harness here can drive a real macOS paste event to prove.
+**LIVE-VERIFIED 2026-11-09** against VM (:3270), MVS (:3271) and `pubvm.org:623`, in both front ends:
+TLS failure worded for the dialog / the prompt at 10 s, the plaintext retry connecting in the SAME
+dialog or prompt run, each host's first screen drawn (`docs/live-testing.md`, *Connect dialog retry
+and the TUI prompt*). Also on the branch since: a 30 s plaintext connect deadline
+(`CONNECT_TIMEOUT_MS`), and socket-level failures with TLS on worded as connect failures.
+
+**STILL OWED, LIVE, BY THE USER:** on macOS, that `Cmd-V` pastes into the Connect dialog's Host
+field on a retry (a risk found by code review, fixed by `goLive`/`live` in gui/src/main.ts; no
+harness here can drive a real macOS paste). And, whenever a host that really negotiates TN3270E is
+available, an `N:` host through a dialog retry (unit-tested only: no host here offers TN3270E).
 
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
