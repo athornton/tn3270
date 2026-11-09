@@ -60,8 +60,18 @@ describe('package.yml release wiring', () => {
   });
 
   it('the trusted-publisher binding names this file and the npm environment in a comment', () => {
-    expect(wf).toMatch(/package\.yml/);
-    // The environment name appears both as the literal binding (publish job) and named in prose.
-    expect(wf.match(/\bnpm\b environment|environment `npm`|environment\s+npm\b/)).not.toBeNull();
+    // Pinned on the comment's own heading: `environment: npm` in the job body would satisfy a
+    // looser match even after the comment were deleted (review, 2026-11-09).
+    const at = wf.indexOf('# NAMES THAT MUST NOT CHANGE');
+    expect(at, 'the NAMES THAT MUST NOT CHANGE comment').toBeGreaterThanOrEqual(0);
+    const comment = wf.slice(at, wf.indexOf('\n\n', at));
+    expect(comment).toMatch(/package\.yml/);
+    expect(comment).toMatch(/\bnpm\b/);
+  });
+
+  it('publish asserts Node and npm versions rather than reinstalling npm over itself', () => {
+    const block = jobBlock('publish');
+    expect(block).not.toMatch(/npm install -g npm/);
+    expect(block).toMatch(/npm >= 11\.5\.1/);
   });
 });

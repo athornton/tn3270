@@ -53,7 +53,7 @@ available, an `N:` host through a dialog retry (unit-tested only: no host here o
 **2026-11-08: the packaging live checks are DONE (the user): macOS runs once permitted; Linux
 arm64 `.deb`, Linux x64 AppImage and Windows 11 just run. TLS verified by the user against
 `pubvm.org:623` (real Let's Encrypt chain; plaintext on 23); it does NOT offer TN3270E. See
-`docs/live-testing.md`, the 2026-11-08 section. Item 14: the icon and the first `npm publish` (0.1.0, from CI run 42504570737) are done too; left is npm trusted publishing from GitHub Actions.**
+`docs/live-testing.md`, the 2026-11-08 section. Item 14: the icon and the first `npm publish` (0.1.0, from CI run 42504570737) are done too; left is npm trusted publishing from GitHub Actions (built 2026-11-09 on branch `trusted-publish`).**
 
 **2026-11-06: the user merged `packaging` into `main` (`--no-ff`, `5669a3a`), pushed; the branch is
 deleted locally and on GitHub; `main` is the only branch.** Gate on the merge commit: `npm ci`,

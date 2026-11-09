@@ -1,7 +1,6 @@
 # Releasing
 
-**Tag-triggered, as of 2026-11-09** (branch `trusted-publish`;
-`docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md`,
+**Tag-triggered, as of 2026-11-09** (`docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md`,
 `docs/superpowers/plans/2026-11-09-npm-trusted-publishing.md`). Pushing a `vX.Y.Z` tag runs
 `.github/workflows/package.yml`'s six matrix jobs on the tagged commit, then `release-check`
 (fails a bad tag or a mismatched tarball set before anyone is asked to approve anything) and
@@ -85,7 +84,12 @@ packed tarball need not be byte-identical to the one `release-check` and `publis
 validated (see below), so re-running everything can hand `publish` a *different* tarball than the
 one the tag's original CI run tested, defeating the entire point of this design: that the
 published bytes are exactly the ones CI built and tested. "Re-run failed jobs" keeps the original
-run's `npm-tarballs` artifact and only re-runs `release-check`/`publish` against it.
+run's `npm-tarballs` artifact and re-runs only the failed job (and anything after it) against it;
+the re-run `publish` waits for approval again.
+
+**A defect in the workflow file itself cannot be fixed by re-running:** a re-run replays the YAML
+at the tagged commit. Fix it on `main` and release a new patch version, or publish the original
+run's artifact by hand (*Fallback* below).
 
 ## Why a tarball packed on a dev box can't match CI's byte-for-byte
 
