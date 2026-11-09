@@ -12,11 +12,11 @@ import {
 } from '../../../scripts/publish.mjs';
 
 /** One 512-byte ustar header for `name` of `size` bytes, of tar `type` ('0' regular, 'x' pax). */
-function header(name: string, size: number, type = '0'): Buffer {
+function header(name: string, size: number, type = '0', sizeField?: string): Buffer {
   const h = Buffer.alloc(512);
   h.write(name, 0, 100, 'utf8');
   h.write('0000644\0', 100); h.write('0000000\0', 108); h.write('0000000\0', 116);
-  h.write(size.toString(8).padStart(11, '0') + '\0', 124);
+  h.write(sizeField ?? size.toString(8).padStart(11, '0') + '\0', 124);
   h.write('00000000000\0', 136);
   h.write('        ', 148);       // checksum field as spaces while summing
   h.write(type, 156);
@@ -60,7 +60,16 @@ export function makeTgz(entries: Record<string, string>): Buffer {
   return gzipSync(Buffer.concat(blocks));
 }
 
+/** `blocks` and the end-of-archive marker, gzipped. */
+function tgzOf(blocks: Buffer[]): Buffer {
+  return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
+}
+
 describe('readTar', () => {
+  let d: string | undefined;
+  afterEach(() => { if (d) rmSync(d, { recursive: true, force: true }); d = undefined; });
+  const write = (bytes: Buffer) => { d ??= mkdtempSync(join(tmpdir(), 'tar-')); const p = join(d, 'x.tgz'); writeFileSync(p, bytes); return p; };
+
   it("returns each entry's bytes by path", () => {
     const d = mkdtempSync(join(tmpdir(), 'tar-'));
     try {
@@ -83,6 +92,46 @@ describe('readTar', () => {
       expect(t.get(long)!.toString()).toBe('x'.repeat(600));
       expect(t.get('package/LICENSE')!.toString()).toBe('MIT');
     } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+
+  it('applies a global pax header to every later entry, and lists it as none', () => {
+    const g = Buffer.from(paxRecord('path', 'package/global.txt'));
+    const p = write(tgzOf([header('pax_global_header', g.length, 'g'), ...padded(g),
+      header('package/x', 2), ...padded(Buffer.from('hi'))]));
+    expect([...readTar(p).keys()]).toEqual(['package/global.txt']);
+  });
+
+  it('takes a GNU L long name for the next entry', () => {
+    const long = `package/${'b'.repeat(130)}`;
+    const l = Buffer.from(`${long}\0`);
+    const p = write(tgzOf([header('././@LongLink', l.length, 'L'), ...padded(l),
+      header(long.slice(0, 100), 3), ...padded(Buffer.from('abc')), header('package/LICENSE', 3), ...padded(Buffer.from('MIT'))]));
+    const t = readTar(p);
+    expect([...t.keys()]).toEqual([long, 'package/LICENSE']);
+    expect(t.get(long)!.toString()).toBe('abc');
+  });
+
+  it('refuses a negative size field rather than looping on it', () => {
+    const p = write(tgzOf([header('package/x', 0, '0', '-0001000\0')]));
+    expect(() => readTar(p)).toThrow(/bad size "-0001000"/);
+  });
+
+  it('refuses a negative pax size rather than looping on it', () => {
+    const x = Buffer.from(paxRecord('size', '-512'));
+    const p = write(tgzOf([header('PaxHeader/x', x.length, 'x'), ...padded(x), header('package/x', 0)]));
+    expect(() => readTar(p)).toThrow(/bad size "-512"/);
+  });
+
+  it('refuses an entry whose data runs past the end', () => {
+    // No end-of-archive marker and no data: the header claims 4096 bytes that are not there.
+    const p = write(gzipSync(header('package/x', 4096)));
+    expect(() => readTar(p)).toThrow(/truncated/);
+  });
+
+  it('refuses a truncated gzip', () => {
+    const whole = makeTgz({ 'package/package.json': '{}', 'package/LICENSE': 'x'.repeat(5000) });
+    const p = write(whole.subarray(0, whole.length - 20));
+    expect(() => readTar(p)).toThrow(/not a complete gzip file/);
   });
 });
 
@@ -137,6 +186,27 @@ describe('publish.mjs', () => {
       expect(t!.deps).toEqual({ '@tn3270/core': '1.2.3' });
       expect(t!.sha1).toBe(createHash('sha1').update(readFileSync(t!.path)).digest('hex'));
     });
+
+    it('takes @tn3270 dependencies from optionalDependencies and peerDependencies too', () => {
+      dir ??= mkdtempSync(join(tmpdir(), 'publish-'));
+      const p = join(dir, 'tn3270-web-0.1.2.tgz');
+      writeFileSync(p, makeTgz({ 'package/package.json': JSON.stringify({
+        name: '@tn3270/web', version: '0.1.2', optionalDependencies: { '@tn3270/core': '0.1.2' },
+        peerDependencies: { '@tn3270/canvas': '^0.1.2', react: '*' }, devDependencies: { '@tn3270/fixtures': '*' },
+      }) }));
+      const t = readTarball(p);
+      expect(t.deps).toEqual({ '@tn3270/core': '0.1.2', '@tn3270/canvas': '^0.1.2' });
+      const r = checkRelease({ tag: 'v0.1.2', tarballs: [t], expectedNames: ['@tn3270/web'] });
+      expect(r.problems).toEqual([expect.stringMatching(/@tn3270\/canvas as "\^0\.1\.2", not exactly 0\.1\.2/)]);
+    });
+
+    it.each([['no name', { version: '1.0.0' }], ['a numeric version', { name: '@tn3270/x', version: 1 }]])(
+      'refuses a manifest with %s, by message', (_what, m) => {
+        dir ??= mkdtempSync(join(tmpdir(), 'publish-'));
+        const p = join(dir, 'bad.tgz');
+        writeFileSync(p, makeTgz({ 'package/package.json': JSON.stringify(m) }));
+        expect(() => readTarball(p)).toThrow(/bad\.tgz's package\/package\.json has no string name and version/);
+      });
   });
 
   describe('publishOrder', () => {
@@ -253,6 +323,22 @@ describe('publish.mjs', () => {
         .toBeUndefined();
     });
 
+    it('gives every request a timeout, which aborts a stalled one', async () => {
+      const seen: Array<AbortSignal | undefined> = [];
+      const stall: FetchFn = (_url, init) => {
+        seen.push(init?.signal);
+        return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
+      };
+      const t0 = Date.now();
+      await expect(registryShasum(stall, '@tn3270/core', '0.1.2', { timeoutMs: 50 })).rejects.toThrow(/timeout|abort/i);
+      expect(Date.now() - t0).toBeLessThan(5000);
+      expect(seen[0]).toBeInstanceOf(AbortSignal);
+      const f = fakeFetch(() => 404);
+      const calls: Array<AbortSignal | undefined> = [];
+      await registryShasum((u, i) => { calls.push(i?.signal); return f(u); }, '@tn3270/core', '0.1.2');
+      expect(calls[0]).toBeInstanceOf(AbortSignal);
+    });
+
     it('throws on any other failure, which must not read as "absent"', async () => {
       await expect(registryShasum(fakeFetch(() => 503), '@tn3270/core', '0.1.2')).rejects.toThrow(/503/);
     });
@@ -284,6 +370,21 @@ describe('publish.mjs', () => {
       expect(sleeps).toHaveLength(2);
     });
 
+    it('stops at the wall-clock deadline even with attempts left', async () => {
+      const set = tarballs([['core', '0.1.2', {}]]);
+      let clock = 0;
+      const sleeps: number[] = [];
+      // Each fetch takes 50 s of fake time, as a slow registry's would.
+      const slow = fakeFetch(() => { clock += 50_000; return 404; });
+      const left = await verifyReadBack(slow, set, '0.1.2', {
+        attempts: 24, delayMs: 5000, deadlineMs: 120_000, now: () => clock,
+        sleep: async (ms) => { sleeps.push(ms); clock += ms; },
+      });
+      expect(left).toEqual(['@tn3270/core']);
+      expect(slow.urls.length).toBeLessThanOrEqual(3);
+      expect(clock).toBeLessThan(120_000 + 50_000);
+    });
+
     it('counts a failing fetch as not yet there, not as a crash', async () => {
       const set = tarballs([['core', '0.1.2', {}]]);
       let n = 0;
@@ -294,71 +395,132 @@ describe('publish.mjs', () => {
 
   describe('main', () => {
     const ORDER = ['core', 'frontend', 'canvas', 'node-files', 'cli', 'gui', 'tui', 'web'].map((n) => `@tn3270/${n}`);
+    const NPM11 = 'npm error You cannot publish over the previously published versions: 0.1.2.';
 
-    /** Fakes for every outside effect. `registry` maps a name to the shasum the registry holds at 0.1.2. */
-    function io(opts: { tag?: string; registry?: Record<string, string>; failRun?: string; neverReadBack?: boolean } = {}) {
-      const registry = { ...opts.registry };
+    /**
+     * Fakes for every outside effect. The registry is PER VERSION, `name@version` -> shasum, and
+     * holds every package at 0.1.1 with other bytes, so a lookup of the wrong version shows.
+     * `run` acts as npm: a publish adds the version (unless `neverReadBack`), and with `npm11` a
+     * dry run of a version already there exits 1 with npm 11's message.
+     */
+    function io(opts: {
+      tag?: string; refType?: string; actions?: boolean; registry?: Record<string, string>;
+      failRun?: string; neverReadBack?: boolean; npm11?: boolean;
+      runAlways?: { status: number; output: string };
+      fetchFail?: () => Promise<never> | number; tamper?: (registry: Record<string, string>, call: number) => void;
+    } = {}) {
+      const registry: Record<string, string> = { ...Object.fromEntries(ORDER.map((n) => [`${n}@0.1.1`, '0'.repeat(40)])), ...opts.registry };
       const runs: string[][] = [];
       const logs: string[] = [];
       const sleeps: number[] = [];
-      const fetchFn = fakeFetch((url) => {
+      let calls = 0;
+      const answer = fakeFetch((url) => {
+        calls++;
+        opts.tamper?.(registry, calls);
         const name = decodeURIComponent(url.replace('https://registry.npmjs.org/', '').replace('?write=true', ''));
-        const sha = registry[name];
-        return sha === undefined ? 404 : { versions: { '0.1.2': { dist: { shasum: sha } } } };
+        const versions = Object.fromEntries(Object.entries(registry)
+          .filter(([k]) => k.startsWith(`${name}@`)).map(([k, sha]) => [k.slice(name.length + 1), { dist: { shasum: sha } }]));
+        return Object.keys(versions).length === 0 ? 404 : { versions };
       });
+      const fetchFn: FetchFn = opts.fetchFail === undefined ? answer : async () => {
+        const r = await opts.fetchFail!();
+        return { ok: false, status: r, json: async () => ({}) };
+      };
       const run = (args: string[]) => {
         runs.push(args);
+        if (opts.runAlways !== undefined) return opts.runAlways;
         const path = args.at(-1)!;
-        if (opts.failRun !== undefined && path.includes(opts.failRun)) return 1;
-        // A real publish makes the version appear, unless the test says the registry never shows it.
-        if (args[1] !== '--dry-run' && !opts.neverReadBack) {
-          const t = readTarball(path);
-          registry[t.name] = t.sha1;
+        if (opts.failRun !== undefined && path.includes(opts.failRun)) return { status: 1, output: 'npm error code E403' };
+        const t = readTarball(path);
+        const key = `${t.name}@${t.version}`;
+        if (args[1] === '--dry-run') {
+          return opts.npm11 && registry[key] !== undefined ? { status: 1, output: `npm notice ...\n${NPM11}\n` } : { status: 0, output: '' };
         }
-        return 0;
+        if (!opts.neverReadBack) registry[key] = t.sha1;
+        return { status: 0, output: '' };
       };
+      const env: Record<string, string> = {};
+      if (opts.tag !== undefined) { env.GITHUB_REF_NAME = opts.tag; env.GITHUB_REF_TYPE = opts.refType ?? 'tag'; }
+      if (opts.actions) env.GITHUB_ACTIONS = 'true';
       return {
         runs, logs, sleeps, registry,
-        args: {
-          env: opts.tag === undefined ? {} : { GITHUB_REF_NAME: opts.tag },
-          fetchFn, run, sleep: async (ms: number) => { sleeps.push(ms); }, log: (l: string) => { logs.push(l); },
-        },
+        args: { env, fetchFn, run, sleep: async (ms: number) => { sleeps.push(ms); }, log: (l: string) => { logs.push(l); } },
       };
     }
 
     const nameOf = (args: string[]) => readTarball(args.at(-1)!).name;
+    const shaOf = (set: Tarball[], n: string) => set.find((t) => t.name === n)!.sha1;
+    /** Every package of `set` on the registry at its version with its own bytes. */
+    const published = (set: Tarball[]) => Object.fromEntries(set.map((t) => [`${t.name}@${t.version}`, t.sha1]));
 
-    it('--dry-run runs npm publish --dry-run for all eight, in dependency order', async () => {
-      realSet('0.1.2');
-      const x = io();
-      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
-      expect(x.runs.map((a) => a.slice(0, 2))).toEqual(Array(8).fill(['publish', '--dry-run']));
-      expect(x.runs.map(nameOf)).toEqual(ORDER);
-    });
+    describe('--dry-run', () => {
+      it('runs npm publish --dry-run for all eight, in dependency order', async () => {
+        realSet('0.1.2');
+        const x = io();
+        expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+        expect(x.runs.map((a) => a.slice(0, 2))).toEqual(Array(8).fill(['publish', '--dry-run']));
+        expect(x.runs.map(nameOf)).toEqual(ORDER);
+        expect(x.logs.at(-1)).toBe('publish: dry run of 0.1.2 passed for all 8');
+      });
 
-    it('--dry-run does not dry-run a version already on the registry, which npm 11 refuses', async () => {
-      const set = realSet('0.1.2');
-      const x = io({ registry: { '@tn3270/core': set.find((t) => t.name === '@tn3270/core')!.sha1, '@tn3270/web': 'f'.repeat(40) } });
-      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
-      expect(x.runs.map(nameOf)).toEqual(ORDER.filter((n) => n !== '@tn3270/core' && n !== '@tn3270/web'));
-      expect(x.logs).toContain('publish: @tn3270/core@0.1.2 is already on the registry (identical): not dry-run');
-      expect(x.logs).toContain('publish: @tn3270/web@0.1.2 is already on the registry (other contents): not dry-run');
-      expect(x.logs.at(-1)).toBe('publish: dry run of 0.1.2 passed: 6 dry-run, 2 already on the registry');
-    });
+      it('still runs npm for a version already published, and accepts npm 11 refusing it', async () => {
+        const set = realSet('0.1.2');
+        const x = io({ npm11: true, registry: published(set) });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+        expect(x.runs).toHaveLength(8);
+        expect(x.logs.filter((l) => /already on the registry, which this npm refuses even dry: accepted/.test(l))).toHaveLength(8);
+        expect(x.logs.at(-1)).toBe('publish: dry run of 0.1.2 passed for all 8, 8 refused by npm as already published');
+      });
 
-    it('--dry-run still dry-runs when the registry cannot be read', async () => {
-      realSet('0.1.2');
-      const x = io();
-      x.args.fetchFn = fakeFetch(() => 503);
-      expect(await main(['--dry-run', dir!], x.args)).toBe(0);
-      expect(x.runs).toHaveLength(8);
-    });
+      it("refuses npm 11's message when the registry does not have that version", async () => {
+        realSet('0.1.2');
+        const x = io({ runAlways: { status: 1, output: NPM11 } });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(1);
+        expect(x.runs).toHaveLength(1);
+        expect(x.logs.join('\n')).toMatch(/refused: npm publish --dry-run tn3270-core-0\.1\.2\.tgz exited 1/);
+      });
 
-    it('--dry-run refuses a failing npm publish --dry-run', async () => {
-      realSet('0.1.2');
-      const x = io({ failRun: 'tn3270-canvas' });
-      expect(await main(['--dry-run', dir!], x.args)).toBe(1);
-      expect(x.logs.join('\n')).toMatch(/refused: npm publish --dry-run tn3270-canvas-0\.1\.2\.tgz exited 1/);
+      it('refuses any other npm failure, even for a version already published', async () => {
+        const set = realSet('0.1.2');
+        const x = io({ registry: published(set), runAlways: { status: 1, output: 'npm error code E500' } });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(1);
+        expect(x.runs).toHaveLength(1);
+      });
+
+      it("refuses npm 11's message when the registry cannot be read", async () => {
+        realSet('0.1.2');
+        const x = io({ fetchFail: () => 503, runAlways: { status: 1, output: NPM11 } });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(1);
+        expect(x.logs.join('\n')).toMatch(/exited 1 \(and the registry could not be read: registry answered 503/);
+      });
+
+      it('passes when the registry cannot be read but npm accepts every dry run', async () => {
+        realSet('0.1.2');
+        const x = io({ fetchFail: () => 503 });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(0);
+        expect(x.runs).toHaveLength(8);
+      });
+
+      it('warns, and on Actions annotates, a version published with OTHER contents', async () => {
+        const set = realSet('0.1.2');
+        const registry = { ...published(set), '@tn3270/web@0.1.2': 'f'.repeat(40) };
+        const msg = '@tn3270/web@0.1.2 is already on the registry with OTHER contents: bump the version (npm run version:set) before tagging, or the release will be refused';
+        const local = io({ npm11: true, registry });
+        expect(await main(['--dry-run', dir!], local.args)).toBe(0);
+        expect(local.logs).toContain(`publish: WARNING: ${msg}`);
+        expect(local.logs.some((l) => l.startsWith('::warning::'))).toBe(false);
+        const ci = io({ npm11: true, registry, actions: true });
+        expect(await main(['--dry-run', dir!], ci.args)).toBe(0);
+        expect(ci.logs).toContain(`::warning::${msg}`);
+        expect(ci.logs.filter((l) => l.startsWith('::warning::'))).toHaveLength(1);
+      });
+
+      it('refuses a failing npm publish --dry-run', async () => {
+        realSet('0.1.2');
+        const x = io({ failRun: 'tn3270-canvas' });
+        expect(await main(['--dry-run', dir!], x.args)).toBe(1);
+        expect(x.logs.join('\n')).toMatch(/refused: npm publish --dry-run tn3270-canvas-0\.1\.2\.tgz exited 1/);
+      });
     });
 
     it('refuses a bad mode or a missing directory with the usage', async () => {
@@ -368,6 +530,14 @@ describe('publish.mjs', () => {
       expect(x.logs.every((l) => /usage/.test(l))).toBe(true);
     });
 
+    it('--check refuses a manifest without a name, by message', async () => {
+      realSet('0.1.2');
+      writeFileSync(join(dir!, 'zz.tgz'), makeTgz({ 'package/package.json': '{"version":"0.1.2"}' }));
+      const x = io({ tag: 'v0.1.2' });
+      expect(await main(['--check', dir!], x.args)).toBe(1);
+      expect(x.logs).toEqual(["publish: refused: zz.tgz: zz.tgz's package/package.json has no string name and version: repack it"]);
+    });
+
     it('--check refuses without GITHUB_REF_NAME', async () => {
       realSet('0.1.2');
       const x = io();
@@ -375,9 +545,20 @@ describe('publish.mjs', () => {
       expect(x.logs.join('\n')).toMatch(/GITHUB_REF_NAME/);
     });
 
+    it.each([['branch'], [undefined]])('--check and --publish refuse GITHUB_REF_TYPE %s', async (refType) => {
+      realSet('0.1.2');
+      for (const mode of ['--check', '--publish']) {
+        const x = io({ tag: 'v0.1.2' });
+        if (refType === undefined) delete x.args.env.GITHUB_REF_TYPE; else x.args.env.GITHUB_REF_TYPE = refType;
+        expect(await main([mode, dir!], x.args)).toBe(1);
+        expect(x.runs).toEqual([]);
+        expect(x.logs.join('\n')).toMatch(/GITHUB_REF_TYPE is .*not "tag"/);
+      }
+    });
+
     it('--check prints the plan, publishing nothing', async () => {
       const set = realSet('0.1.2');
-      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core': set.find((t) => t.name === '@tn3270/core')!.sha1 } });
+      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core@0.1.2': shaOf(set, '@tn3270/core') } });
       expect(await main(['--check', dir!], x.args)).toBe(0);
       expect(x.runs).toEqual([]);
       expect(x.logs).toContain('  skip    @tn3270/core');
@@ -387,21 +568,44 @@ describe('publish.mjs', () => {
     it('--check and --publish refuse a conflict before running anything', async () => {
       realSet('0.1.2');
       for (const mode of ['--check', '--publish']) {
-        const x = io({ tag: 'v0.1.2', registry: { '@tn3270/tui': 'f'.repeat(40) } });
+        const x = io({ tag: 'v0.1.2', registry: { '@tn3270/tui@0.1.2': 'f'.repeat(40) } });
         expect(await main([mode, dir!], x.args)).toBe(1);
         expect(x.runs).toEqual([]);
         expect(x.logs.join('\n')).toMatch(/@tn3270\/tui@0\.1\.2 is already on the registry with other contents/);
       }
     });
 
+    it.each([
+      ['answers 503', () => 503],
+      ['throws', () => Promise.reject(new Error('ECONNRESET'))],
+    ])('--check and --publish refuse when the registry %s, running nothing', async (_what, fail) => {
+      realSet('0.1.2');
+      for (const mode of ['--check', '--publish']) {
+        const x = io({ tag: 'v0.1.2', fetchFail: fail });
+        expect(await main([mode, dir!], x.args)).toBe(1);
+        expect(x.runs).toEqual([]);
+        expect(x.logs.join('\n')).toMatch(/refused: cannot read @tn3270\/core from the registry: (registry answered 503|ECONNRESET)/);
+      }
+    });
+
     it('--publish skips what is identical, publishes the rest in order, and verifies', async () => {
       const set = realSet('0.1.2');
-      const sha = (n: string) => set.find((t) => t.name === n)!.sha1;
-      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core': sha('@tn3270/core'), '@tn3270/canvas': sha('@tn3270/canvas') } });
+      const x = io({ tag: 'v0.1.2', registry: {
+        '@tn3270/core@0.1.2': shaOf(set, '@tn3270/core'), '@tn3270/canvas@0.1.2': shaOf(set, '@tn3270/canvas') } });
       expect(await main(['--publish', dir!], x.args)).toBe(0);
       expect(x.runs.every((a) => a[0] === 'publish' && a.length === 2)).toBe(true);
       expect(x.runs.map(nameOf)).toEqual(ORDER.filter((n) => n !== '@tn3270/core' && n !== '@tn3270/canvas'));
       expect(x.logs.at(-1)).toBe('published 0.1.2: 6 new, 2 already there, registry verified');
+    });
+
+    it('--publish reads back the SKIPPED packages too', async () => {
+      const set = realSet('0.1.2');
+      // Identical at plan time (the first eight reads); other bytes by the read-back.
+      const x = io({ tag: 'v0.1.2', registry: { '@tn3270/core@0.1.2': shaOf(set, '@tn3270/core') },
+        tamper: (reg, call) => { if (call > 8) reg['@tn3270/core@0.1.2'] = 'e'.repeat(40); } });
+      expect(await main(['--publish', dir!], x.args)).toBe(1);
+      expect(x.runs).toHaveLength(7);
+      expect(x.logs.at(-1)).toMatch(/registry does not hold 0\.1\.2 .*: @tn3270\/core$/);
     });
 
     it('--publish stops at the first failing npm publish, and names what was not attempted', async () => {
@@ -409,7 +613,9 @@ describe('publish.mjs', () => {
       const x = io({ tag: 'v0.1.2', failRun: 'tn3270-node-files' });
       expect(await main(['--publish', dir!], x.args)).toBe(1);
       expect(x.runs.map(nameOf)).toEqual(ORDER.slice(0, 4));
-      expect(x.logs.join('\n')).toMatch(/tn3270-node-files-0\.1\.2\.tgz exited 1; not attempted: @tn3270\/cli, @tn3270\/gui, @tn3270\/tui, @tn3270\/web/);
+      const out = x.logs.join('\n');
+      expect(out).toMatch(/tn3270-node-files-0\.1\.2\.tgz exited 1; not attempted: @tn3270\/cli, @tn3270\/gui, @tn3270\/tui, @tn3270\/web/);
+      expect(out).toMatch(/Re-run the failed publish job \(not all jobs, which rebuilds the tarballs\)/);
     });
 
     it('--publish fails when the registry never shows what was published', async () => {

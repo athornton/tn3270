@@ -36,7 +36,13 @@ export function readTarball(path) {
   const bytes = readFileSync(path);
   const json = readTar(path).get('package/package.json');
   if (json === undefined) throw new Error(`${basename(path)} has no package/package.json: is it an npm pack tarball?`);
-  const m = JSON.parse(json.toString('utf8'));
+  let m;
+  try { m = JSON.parse(json.toString('utf8')); } catch (err) {
+    throw new Error(`${basename(path)}'s package/package.json is not JSON: ${err.message}`);
+  }
+  if (typeof m?.name !== 'string' || typeof m?.version !== 'string') {
+    throw new Error(`${basename(path)}'s package/package.json has no string name and version: repack it`);
+  }
   // Every field npm installs from. devDependencies are not installed by a consumer.
   const deps = {};
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
@@ -123,10 +129,13 @@ export function checkRelease({ tag, tarballs, expectedNames }) {
  * The registry's `dist.shasum` for `name@version`, or undefined if the package or that version is
  * absent. UNCACHED: `?write=true` makes the registry skip its CDN copy, which can lag a publish by
  * minutes. Any failure other than a 404 THROWS: an outage must never read as "not published yet".
+ *
+ * TIMED OUT, headers and body both (the signal covers `json()` too): undici's own defaults are
+ * ~300 s each, so one stalled request would outlast the whole read-back budget many times over.
  */
-export async function registryShasum(fetchFn, name, version) {
+export async function registryShasum(fetchFn, name, version, { timeoutMs = 15_000 } = {}) {
   const url = `https://registry.npmjs.org/${name.replace('/', '%2F')}?write=true`;
-  const r = await fetchFn(url, { headers: { accept: 'application/json' } });
+  const r = await fetchFn(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
   if (r.status === 404) return undefined;
   if (!r.ok) throw new Error(`registry answered ${r.status} for ${url}`);
   const doc = await r.json();
@@ -143,24 +152,33 @@ const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Polls until every tarball's `version` is on the registry with its sha1, for up to `attempts`
- * rounds `delayMs` apart (default: two minutes), and returns the names still wrong (`[]`: all
- * there). A failed fetch counts as "not there yet" for that round, not as a crash.
+ * rounds `delayMs` apart AND no longer than `deadlineMs` of wall clock (default: two minutes
+ * either way; the clock bounds it when fetches are slow, each up to `timeoutMs`), and returns
+ * the names still wrong (`[]`: all there). A failed fetch counts as "not there yet" for that
+ * round, not as a crash. Once the deadline passes, nothing more is fetched.
  */
-export async function verifyReadBack(fetchFn, tarballs, version, { attempts = 24, delayMs = 5000, sleep = realSleep } = {}) {
+export async function verifyReadBack(fetchFn, tarballs, version,
+  { attempts = 24, delayMs = 5000, deadlineMs = 120_000, timeoutMs = 15_000, sleep = realSleep, now = Date.now } = {}) {
+  const end = now() + deadlineMs;
   let pending = [...tarballs];
   for (let i = 1; i <= attempts; i++) {
     const still = [];
     for (const t of pending) {
+      if (now() >= end) { still.push(t); continue; }
       let sha;
-      try { sha = await registryShasum(fetchFn, t.name, version); } catch { sha = undefined; }
+      try { sha = await registryShasum(fetchFn, t.name, version, { timeoutMs }); } catch { sha = undefined; }
       if (sha !== t.sha1) still.push(t);
     }
     pending = still;
     if (pending.length === 0) return [];
-    if (i < attempts) await sleep(delayMs);
+    if (i === attempts || now() + delayMs >= end) break;
+    await sleep(delayMs);
   }
   return pending.map((t) => t.name);
 }
+
+/** npm 11's refusal of a version already on the registry, as measured 2026-11-09 (npm 11.20). */
+export const ALREADY_PUBLISHED = /cannot publish over the previously published version/i;
 
 const USAGE = 'usage: node scripts/publish.mjs --dry-run|--check|--publish DIR';
 
@@ -205,9 +223,9 @@ async function plan(order, version, fetchFn) {
 }
 
 /**
- * The three modes, with everything outside the process injected: `env` (for `GITHUB_REF_NAME`),
- * `fetchFn`, `run(args) -> exit status` (an `npm` invocation), `sleep`, `log`. Returns the exit
- * status: 0, or 1 with every problem logged.
+ * The three modes, with everything outside the process injected: `env` (`GITHUB_REF_NAME`,
+ * `GITHUB_REF_TYPE`, `GITHUB_ACTIONS`), `fetchFn`, `run(args) -> { status, output }` (an `npm`
+ * invocation), `sleep`, `log`. Returns the exit status: 0, or 1 with every problem logged.
  */
 export async function main(argv, { env, fetchFn, run, sleep, log }) {
   const [mode, dir, ...rest] = argv;
@@ -218,31 +236,44 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
     if (mode === '--dry-run') {
       const { version, order } = loadRelease(dir, undefined);
       log(`publish: dry run of ${version}, in order: ${order.map((t) => t.name).join(' ')}`);
-      // A VERSION ALREADY ON THE REGISTRY IS NOT DRY-RUN. MEASURED 2026-11-09: npm 11.20's
-      // `publish --dry-run` exits 1 with "You cannot publish over the previously published
-      // versions" (npm 10.9's exits 0), so every push between a release and the next version bump
-      // would fail. `--publish` would skip it too. A registry error is no reason to skip: run npm.
-      let ran = 0;
+      // `npm publish --dry-run` RUNS FOR EVERY TARBALL, so every push really exercises it. MEASURED
+      // 2026-11-09: npm 11.20 exits 1 on a version already on the registry ("You cannot publish
+      // over the previously published versions: 0.1.1."), npm 10.9 exits 0. That one refusal is
+      // accepted, and only when the registry says this exact version is there too: every push
+      // between a release and the next version bump would fail otherwise.
+      let accepted = 0;
       for (const t of order) {
         let sha;
-        try { sha = await registryShasum(fetchFn, t.name, version); } catch (err) {
-          log(`publish: cannot read ${t.name} from the registry (${err.message}); dry-running it anyway`);
+        let registryError;
+        try { sha = await registryShasum(fetchFn, t.name, version); } catch (err) { registryError = err.message; }
+        if (sha !== undefined && sha !== t.sha1) {
+          const warning = `${t.name}@${version} is already on the registry with OTHER contents: `
+            + `bump the version (npm run version:set) before tagging, or the release will be refused`;
+          log(`publish: WARNING: ${warning}`);
+          if (env.GITHUB_ACTIONS === 'true') log(`::warning::${warning}`);
         }
-        if (sha !== undefined) {
-          log(`publish: ${t.name}@${version} is already on the registry (${sha === t.sha1 ? 'identical' : 'other contents'}): not dry-run`);
+        const { status, output } = run(['publish', '--dry-run', t.path]);
+        if (status === 0) continue;
+        if (sha !== undefined && ALREADY_PUBLISHED.test(output)) {
+          log(`publish: ${t.name}@${version} is already on the registry, which this npm refuses even dry: accepted`);
+          accepted++;
           continue;
         }
-        const status = run(['publish', '--dry-run', t.path]);
-        if (status !== 0) throw new Refusal(`npm publish --dry-run ${basename(t.path)} exited ${status}`);
-        ran++;
+        throw new Refusal(`npm publish --dry-run ${basename(t.path)} exited ${status}`
+          + (registryError !== undefined ? ` (and the registry could not be read: ${registryError})` : ''));
       }
-      log(`publish: dry run of ${version} passed: ${ran} dry-run, ${order.length - ran} already on the registry`);
+      log(`publish: dry run of ${version} passed for all ${order.length}`
+        + (accepted > 0 ? `, ${accepted} refused by npm as already published` : ''));
       return 0;
     }
 
     const tag = env.GITHUB_REF_NAME;
     if (tag === undefined || tag === '') {
       throw new Refusal('GITHUB_REF_NAME is not set: --check and --publish run on a tag push, which sets it to the tag');
+    }
+    // A BRANCH named v0.1.2 has that GITHUB_REF_NAME too.
+    if (env.GITHUB_REF_TYPE !== 'tag') {
+      throw new Refusal(`GITHUB_REF_TYPE is ${JSON.stringify(env.GITHUB_REF_TYPE ?? '')}, not "tag": --check and --publish run on a tag push only`);
     }
     const { version, order } = loadRelease(dir, tag);
     const decided = await plan(order, version, fetchFn);
@@ -253,11 +284,12 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
     let fresh = 0;
     for (const [i, { t, decision }] of decided.entries()) {
       if (decision === 'skip') continue;
-      const status = run(['publish', t.path]);
+      const { status } = run(['publish', t.path]);
       if (status !== 0) {
         const notTried = decided.slice(i + 1).filter((d) => d.decision !== 'skip').map((d) => d.t.name);
         throw new Refusal(`npm publish ${basename(t.path)} exited ${status}; not attempted: `
-          + `${notTried.length > 0 ? notTried.join(', ') : 'nothing (it was the last)'}. Re-running is safe: what did publish is skipped`);
+          + `${notTried.length > 0 ? notTried.join(', ') : 'nothing (it was the last)'}. Re-run the failed publish job (not all jobs, which rebuilds `
+          + 'the tarballs): what did publish is skipped');
       }
       fresh++;
     }
@@ -274,12 +306,19 @@ export async function main(argv, { env, fetchFn, run, sleep, log }) {
   }
 }
 
-/** `npm args...`, its output passed through. `npm` is `npm.cmd` on Windows, which only a shell runs. */
+/**
+ * `npm args...`: its output captured (the dry run reads it) and then passed through. `npm` is
+ * `npm.cmd` on Windows, which only a shell runs.
+ */
 function runNpm(args) {
+  const opts = { stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 };
   const r = process.platform === 'win32'
-    ? spawnSync(`npm ${args.map((a) => `"${a}"`).join(' ')}`, { stdio: 'inherit', shell: true })
-    : spawnSync('npm', args, { stdio: 'inherit' });
-  return r.error !== undefined ? 1 : (r.status ?? 1);
+    ? spawnSync(`npm ${args.map((a) => `"${a}"`).join(' ')}`, { ...opts, shell: true })
+    : spawnSync('npm', args, opts);
+  process.stdout.write(r.stdout ?? '');
+  process.stderr.write(r.stderr ?? '');
+  const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  return { status: r.error !== undefined ? 1 : (r.status ?? 1), output: r.error !== undefined ? `${output}${r.error.message}` : output };
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -29,9 +29,17 @@ function paxRecords(buf) {
   return out;
 }
 
-/** Every entry in a .tgz, path -> its bytes, in archive order. Metadata entries are not listed. */
+/**
+ * Every entry in a .tgz, path -> its bytes, in archive order. Metadata entries are not listed.
+ * THROWS on a damaged archive -- a truncated gzip, a size that is negative or not a number, data
+ * running past the end -- rather than looping: a negative size once meant `o += 0` forever.
+ */
 export function readTar(tgz) {
-  const tar = gunzipSync(readFileSync(tgz));
+  let tar;
+  try { tar = gunzipSync(readFileSync(tgz)); } catch (err) {
+    if (err.code === 'ENOENT') throw err;
+    throw new Error(`${tgz} is not a complete gzip file: ${err.message}`);
+  }
   const entries = new Map();
   let global = {};
   let next = {};
@@ -43,7 +51,11 @@ export function readTar(tgz) {
     const meta = 'xgLK'.includes(type);
     // A pax `size` describes the next FILE's data, never a metadata entry's own.
     const pax = meta ? {} : { ...global, ...next };
-    const size = pax.size !== undefined ? Number(pax.size) : parseInt(field(124, 136).trim() || '0', 8);
+    const raw = pax.size !== undefined ? pax.size : field(124, 136).trim() || '0';
+    const size = pax.size !== undefined ? (/^\d+$/.test(raw) ? Number(raw) : NaN)
+      : (/^[0-7]+$/.test(raw) ? parseInt(raw, 8) : NaN);
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error(`${tgz}: entry at byte ${o} has a bad size ${JSON.stringify(raw)}`);
+    if (o + 512 + size > tar.length) throw new Error(`${tgz}: entry at byte ${o} runs past the end of the archive (truncated)`);
     const data = tar.subarray(o + 512, o + 512 + size);
     o += 512 + Math.ceil(size / 512) * 512;
     if (type === 'x') { next = { ...next, ...paxRecords(data) }; continue; }
