@@ -69,6 +69,17 @@ describe('package.yml release wiring', () => {
     expect(comment).toMatch(/\bnpm\b/);
   });
 
+  it('the every-push dry run uses the SAME directory the release jobs download into', () => {
+    // npm reads `dir/x.tgz` differently by its slashes (one slash is GitHub shorthand): the 0.1.2
+    // tag run failed on `tarballs/x.tgz` while the dry run, on `artifacts/npm/x.tgz`, passed.
+    const dry = /publish\.mjs --dry-run (\S+)/.exec(jobBlock('package'))?.[1];
+    for (const job of ['release-check', 'publish']) {
+      const block = jobBlock(job);
+      expect(block, job).toMatch(new RegExp(`path: ${dry}\\b`));
+      expect(block, job).toMatch(new RegExp(`publish\\.mjs --(check|publish) ${dry}\\b`));
+    }
+  });
+
   it('publish asserts Node and npm versions rather than reinstalling npm over itself', () => {
     const block = jobBlock('publish');
     expect(block).not.toMatch(/npm install -g npm/);

@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { readTar } from '../../../scripts/tarball.mjs';
 import { publishedPackages, tarballName } from '../../../scripts/workspaces.mjs';
@@ -454,6 +454,35 @@ describe('publish.mjs', () => {
     const shaOf = (set: Tarball[], n: string) => set.find((t) => t.name === n)!.sha1;
     /** Every package of `set` on the registry at its version with its own bytes. */
     const published = (set: Tarball[]) => Object.fromEntries(set.map((t) => [`${t.name}@${t.version}`, t.sha1]));
+
+    describe('the tarball path handed to npm', () => {
+      /*
+        ALWAYS ABSOLUTE. A relative `tarballs/x.tgz` -- one slash -- is GitHub SHORTHAND to npm
+        (owner/repo): the 0.1.2 tag run's publish did `git ls-remote ssh://git@github.com/tarballs/
+        tn3270-core-0.1.2.tgz.git` and failed (2026-11-09; nothing was published). The every-push dry
+        run used `artifacts/npm/x.tgz` -- two slashes, a path to npm -- so it never showed. The
+        directory is given RELATIVE here, as both CI jobs give it.
+      */
+      it('is absolute for --dry-run and --publish, given a one-segment relative directory', async () => {
+        const set = realSet('0.1.2');
+        // UNDER the working directory, named by ONE segment -- the shape CI's `tarballs` has. Not
+        // `relative(cwd, tmpdir)`: on the Windows runner the temp dir is on C: and the checkout on
+        // D:, and a relative path across drives does not exist (it came back absolute, 2026-11-09).
+        const local = mkdtempSync(join(process.cwd(), '.publish-rel-'));
+        try {
+          for (const f of readdirSync(dir!)) copyFileSync(join(dir!, f), join(local, f));
+          const rel = relative(process.cwd(), local);
+          expect(isAbsolute(rel)).toBe(false);
+          expect(rel.split(/[\\/]/)).toHaveLength(1);
+          const d = io();
+          expect(await main(['--dry-run', rel], d.args)).toBe(0);
+          const p = io({ tag: 'v0.1.2' });
+          expect(await main(['--publish', rel], p.args)).toBe(0);
+          for (const a of [...d.runs, ...p.runs]) expect(isAbsolute(a.at(-1)!), a.at(-1)).toBe(true);
+          expect(p.runs).toHaveLength(set.length);
+        } finally { rmSync(local, { recursive: true, force: true }); }
+      });
+    });
 
     describe('--dry-run', () => {
       it('runs npm publish --dry-run for all eight, in dependency order', async () => {

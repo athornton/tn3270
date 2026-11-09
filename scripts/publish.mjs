@@ -20,7 +20,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTar } from './tarball.mjs';
 import { publishedPackages, tarballName } from './workspaces.mjs';
@@ -193,7 +193,10 @@ function loadRelease(dir, tag) {
   const tarballs = [];
   const unreadable = [];
   for (const f of files) {
-    try { tarballs.push(readTarball(join(dir, f))); } catch (err) { unreadable.push(`${f}: ${err.message}`); }
+    // ABSOLUTE, because the path goes to `npm publish`: a relative `tarballs/x.tgz` (one slash) is
+    // GitHub shorthand to npm, which then tries `git ls-remote` on github.com/tarballs/x.tgz.git.
+    // That is how the 0.1.2 tag run's publish failed (2026-11-09; nothing was published).
+    try { tarballs.push(readTarball(resolve(dir, f))); } catch (err) { unreadable.push(`${f}: ${err.message}`); }
   }
   if (unreadable.length > 0) throw new Refusal(unreadable.join('\n'));
   const { version, problems } = checkRelease({ tag, tarballs, expectedNames: publishedPackages().map(({ m }) => m.name) });
